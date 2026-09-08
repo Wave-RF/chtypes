@@ -1,0 +1,156 @@
+"""chtypes — ClickHouse's own type system, per version, from Python.
+
+One question, exactly: *if this row were inserted into this ClickHouse table on
+this ClickHouse version, what would happen?* The answer comes from ClickHouse's
+real C++ machinery (`DataTypeFactory`, `ISerialization`, `ReadHelpers`,
+`evaluateMissingDefaults`, the TTL algorithms, `MergeTreeDataWriter::mergeBlock`)
+vendored per release into a shared library behind the frozen `chs_*` C ABI.
+Nothing here reimplements a coercion rule, which is why the answers are exact by
+construction rather than approximately right.
+
+    from chtypes import Format, Registry
+
+    registry = Registry(default_registry_dir())   # or Registry() with $CHTYPES_REGISTRY set
+    library = registry.for_version("25.8")   # a minor line or an exact patch
+    with library.compile_ddl("ts DateTime, seq UInt8") as schema:
+        batch = schema.rows(Format.JSON_EACH_ROW, b'{"ts":"2026-01-15 10:30:00","seq":256}\\n')
+
+    batch.outcome                 # Outcome.ACCEPTED — the insert would succeed
+    batch.rows[0].value("seq")    # Value(text='0', ...) — and store 0
+    batch.transformed             # Transform(column='seq', input='256', stored='0',
+                                  #           reason='overflow_wrap', row=0)
+
+Three things a caller must not skip, each of which cost this repository
+something to learn:
+
+* **`transformed` is the product.** ClickHouse returns success for every one of
+  those changes. Reading `outcome` alone tells a tenant their row was accepted
+  and nothing about the value the table will hold.
+* **A row accepted per row may not be stored per batch.** `BatchResult.transformed`
+  folds in the storage layer's verdicts (`ttl_expired`, `ttl_column_expired`),
+  and `engine_rows` — when present — is the stored truth, not `rows`.
+* **`Outcome.UNSUPPORTED` is not a rejection.** It means a real server might well
+  have accepted this and this build declines to guess. Treating it as either a
+  rejection or an acceptance manufactures a wrong answer the product never gave.
+
+The specification in `spec/` is normative; `go/chtypes` (Go) is the reference
+implementation. Where this binding and that package disagree, the package is
+right.
+"""
+
+from __future__ import annotations
+
+from ._native import ABI_REVISION
+from ._rawjson import RawNumber, quote_bare_denormals
+from .discover import (
+    QUERY_CHANGED_SETTINGS,
+    QUERY_SERVER_VERSION,
+    QUERY_TABLE_COLUMNS,
+    DiscoveredColumn,
+    ServerProfile,
+    parse_changed_settings_result,
+    parse_columns_result,
+    parse_version_result,
+    reconstruct_ddl,
+)
+from .errors import (
+    CODE_UNSUPPORTED,
+    ChtypesError,
+    RegistryError,
+    SchemaError,
+    UnsupportedError,
+)
+from .registry import (
+    ENV_REGISTRY,
+    Block,
+    Filter,
+    Library,
+    Manifest,
+    Registry,
+    Schema,
+    default_registry_dir,
+    minor_of,
+    read_manifest,
+    verify_library,
+)
+from .results import (
+    COMPILE_DECLARED,
+    DOC_ALL,
+    DOC_DEFAULTS,
+    DOC_TRANSFORMS,
+    DOC_VALUES,
+    EXPORT_NONE,
+    LOSSLESS_REASONS,
+    BatchResult,
+    Column,
+    Computed,
+    DefaultKind,
+    FilterOutcome,
+    FilterResult,
+    FilterRowError,
+    Format,
+    Outcome,
+    Reason,
+    RowResult,
+    Span,
+    Substitution,
+    Transform,
+    Value,
+    Verdict,
+)
+
+__all__ = [
+    "ABI_REVISION",
+    "CODE_UNSUPPORTED",
+    "COMPILE_DECLARED",
+    "DOC_ALL",
+    "DOC_DEFAULTS",
+    "DOC_TRANSFORMS",
+    "DOC_VALUES",
+    "ENV_REGISTRY",
+    "default_registry_dir",
+    "EXPORT_NONE",
+    "LOSSLESS_REASONS",
+    "QUERY_CHANGED_SETTINGS",
+    "QUERY_SERVER_VERSION",
+    "QUERY_TABLE_COLUMNS",
+    "BatchResult",
+    "Block",
+    "ChtypesError",
+    "Column",
+    "Computed",
+    "DefaultKind",
+    "DiscoveredColumn",
+    "Filter",
+    "FilterOutcome",
+    "FilterResult",
+    "FilterRowError",
+    "Format",
+    "Library",
+    "Manifest",
+    "Outcome",
+    "RawNumber",
+    "Reason",
+    "Registry",
+    "RegistryError",
+    "RowResult",
+    "Schema",
+    "SchemaError",
+    "ServerProfile",
+    "Span",
+    "Substitution",
+    "Transform",
+    "UnsupportedError",
+    "Value",
+    "Verdict",
+    "minor_of",
+    "parse_changed_settings_result",
+    "parse_columns_result",
+    "parse_version_result",
+    "quote_bare_denormals",
+    "read_manifest",
+    "reconstruct_ddl",
+    "verify_library",
+]
+
+__version__ = "0.1.0"

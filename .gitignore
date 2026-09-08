@@ -1,0 +1,29 @@
+# chtypes SDK — the four bindings, the header, the spec, the playgrounds.
+# Artifacts are never here: they live in the per-user cache
+# (~/.cache/chtypes/artifacts/<os>-<arch>) or wherever CHTYPES_REGISTRY says.
+
+# Go
+**/*.test
+playground/go/playground
+playground/go/ingest-demo/ingest-demo
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+
+# TypeScript
+node_modules/
+ts/dist/
+
+# Rust
+target/
+
+# Incidental
+.DS_Store
+*.log
+scratch/

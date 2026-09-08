@@ -1,0 +1,34 @@
+[package]
+name = "chtypes"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/wave-rf/chtypes"
+description = "ClickHouse's own type system, schema validation, DEFAULT/TTL semantics and coercion, per ClickHouse version, over the frozen chs_* C ABI"
+publish = false
+
+[dependencies]
+libloading = "0.8"
+serde = { version = "1", features = ["derive"] }
+# serde_json reads `manifest.json` and writes the settings object that crosses the
+# C boundary — both of which are this crate's own well-formed UTF-8.
+#
+# It deliberately does NOT read result documents. `raw_value` was the analogue of
+# Go's json.RawMessage here, but serde_json cannot parse a document at all when a
+# String column's bytes are not valid UTF-8 — which is how this crate came to
+# retry through `String::from_utf8_lossy` and destroy the bytes `spec/c-abi.md`
+# calls authoritative. `crate::doc` reads those documents over `&[u8]`, and
+# `crate::json` compares leaf text exactly; `arbitrary_precision` is not enabled
+# for the same reason it never was (see those modules' docs).
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+# The integration tests read manifest.json themselves, to prove the loader took
+# the library file name from it rather than constructing one.
+serde_json = "1"
+
+[[example]]
+name = "demo"
+path = "examples/demo.rs"

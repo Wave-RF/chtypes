@@ -1,0 +1,8 @@
+[project]
+name = "chtypes-playground"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = ["chtypes"]
+
+[tool.uv.sources]
+chtypes = { path = "../../python", editable = true }

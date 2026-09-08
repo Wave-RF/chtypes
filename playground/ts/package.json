@@ -1,0 +1,11 @@
+{
+  "name": "chtypes-playground",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "node demo.mjs"
+  },
+  "dependencies": {
+    "@wave-rf/chtypes": "file:../../ts"
+  }
+}

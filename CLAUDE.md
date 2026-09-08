@@ -1,0 +1,47 @@
+# chtypes (SDK repository) — orientation for Claude sessions
+
+This is the **SDK half** of chtypes, Apache 2.0, public: `go/ python/ ts/ rust/`
+over the frozen `chs_*` C ABI (`include/chtypes.h`, ABI revision 4, 28
+functions), the normative `spec/`, four side-by-side `playground/` tours, and
+`goldens/` — the public golden set every binding runs. The bindings contain no
+ClickHouse code; they `dlopen` per-version artifacts and speak the ABI.
+
+The other half is the sibling repository `../chtypes-core` (wrapper, build,
+artifacts, rigs, corpus, runs of record; licence pending). Its `CLAUDE.md`
+carries the rules that were paid for; the ones that bind here:
+
+- **Never rebuild a ClickHouse rule in an SDK.** A binding is a thin passthrough
+  to the artifact; scalar, comparison, coercion and timestamp logic never live
+  in Go/Python/TS/Rust. The one derived result is `Transformed`, per spec.
+- **The four bindings give one answer.** A behaviour change lands in all four
+  in one cycle (`spec/bindings.md` is the shape), and the golden set must stay
+  green in all four. `goldens/cases.json` is generated in the core repository
+  (`tests/conformance/go/cmd/goldens-gen`), never hand-edited.
+- **The header is owned here.** An ABI change: `include/chtypes.h` + the four
+  bindings' pinned constants (`ABIRevision` / `ABI_REVISION`) in one commit;
+  the core repository then pulls the header (`ci/steps/header-sync.sh --pull`)
+  and relinks every artifact. CI asserts the header and the bindings agree.
+- **Never trust exit codes or self-reports.** Every test here skips LOUDLY
+  without a registry and refuses a zero-run; `scripts/check-standalone.sh`
+  reads its verdict off a `go test -json` census.
+- **The Go package is dlopen-only by default.** The linked path (package-level
+  `CompileDDL`, `BuiltVersion`) is behind `-tags chtypes_linked` and needs a
+  core build tree via `CGO_LDFLAGS`; `undefined: chtypes.CompileDDL` means the
+  tag is missing. `go/chtypes/linked_abi_check.go` pins the hardcoded ABI
+  numbers to the header at compile time (tagged build only).
+- **Artifacts live in the per-user cache**, `~/.cache/chtypes/artifacts/<os>-<arch>/`
+  (`$CHTYPES_REGISTRY` overrides): `scripts/fetch.sh` installs there, a core
+  build lands there, every SDK's registry default resolves there.
+- macOS artifacts are a dev floor, not an oracle (float parses diverge).
+  Float expectations come from Linux or a live server.
+
+Gates: `scripts/check-standalone.sh` (Go, from a bare copy); per language
+`go test ./...`, `uv run pytest -q`, `pnpm test`, `cargo test` — all need a
+registry; `.github/workflows/ci.yml` is the same set. The server-truth suites
+for these SDKs live in `../chtypes-core/tests/sdk/` and run from there
+(`just test` in the core) against this tree as a sibling.
+
+Pre-1.0 and pre-publish: `github.com/wave-rf/chtypes/go` is the module path
+(lowercase, the Go norm) and freezes at the first tag together with the
+function signatures. Publish guards are in place until then (python's
+`Private :: Do Not Upload`, ts `private`, rust `publish = false`).

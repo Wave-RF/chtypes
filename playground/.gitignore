@@ -1,0 +1,3 @@
+# A stale .chplay/ may exist from the old server-helper version of chplay.sh
+# (it wrote a docker compose file here). Never commit it.
+.chplay/

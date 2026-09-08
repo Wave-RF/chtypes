@@ -1,0 +1,47 @@
+[project]
+name = "chtypes"
+version = "0.1.0"
+description = "Python binding for the chtypes artifacts: ClickHouse's own type system, per version, behind the frozen chs_* C ABI"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+classifiers = ["Private :: Do Not Upload"]
+# Zero runtime dependencies, on purpose. The binding is stdlib `ctypes` over the
+# artifact's C ABI, so installing it needs no compiler, no cffi build step and
+# no wheel per Python version — the native code already exists as a prebuilt
+# artifact and is dlopen'd at runtime. See README "Why ctypes".
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/wave-rf/chtypes"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.14",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chtypes"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+# A deliberately small, high-signal rule set rather than "everything": these are
+# the classes that have actually cost time here — unused imports and names (F),
+# style errors that hide real ones (E), import order drift across 20 files (I),
+# syntax this project's floor already allows (UP), and the mutable-default /
+# loop-variable-capture family (B). `just lint` and ci/steps/static-checks.sh
+# both run this, so a finding is a gate failure, not advice.
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
