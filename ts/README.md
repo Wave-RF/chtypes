@@ -1,6 +1,6 @@
 # chtypes — TypeScript SDK
 
-`@wave-rf/chtypes`: ClickHouse's own type system, schema validation,
+`@wavehouse/chtypes`: ClickHouse's own type system, schema validation,
 DEFAULT/TTL logic and coercion, per ClickHouse version, behind the
 `chs_*` C ABI (pre-1.0 only the names and the format integers are frozen —
 signatures can still change by deliberate cycle, which is why the loader
@@ -21,7 +21,7 @@ package manager):
 
 ```jsonc
 // your app's package.json
-{ "dependencies": { "@wave-rf/chtypes": "file:../chtypes/ts" } }
+{ "dependencies": { "@wavehouse/chtypes": "file:../chtypes/ts" } }
 ```
 
 or `pnpm link <repo>/ts`. Either way, build the package's `dist/`
@@ -65,7 +65,7 @@ predates the probe and individual missing symbols degrade to
 ## Quickstart
 
 ```ts
-import { Format, Registry, UnsupportedError } from '@wave-rf/chtypes';
+import { Format, Registry, UnsupportedError } from '@wavehouse/chtypes';
 
 const registry = new Registry();      // $CHTYPES_REGISTRY, else the per-user cache
 const lib = registry.for('25.8');     // minor line or exact patch both resolve

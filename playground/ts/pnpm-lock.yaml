@@ -8,13 +8,13 @@ importers:
 
   .:
     dependencies:
-      '@wave-rf/chtypes':
+      '@wavehouse/chtypes':
         specifier: file:../../ts
         version: file:../../ts
 
 packages:
 
-  '@wave-rf/chtypes@file:../../ts':
+  '@wavehouse/chtypes@file:../../ts':
     resolution: {directory: ../../ts, type: directory}
     engines: {node: '>=22'}
 
@@ -93,7 +93,7 @@ packages:
 
 snapshots:
 
-  '@wave-rf/chtypes@file:../../ts':
+  '@wavehouse/chtypes@file:../../ts':
     dependencies:
       ffi-rs: 1.3.7
 

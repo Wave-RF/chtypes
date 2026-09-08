@@ -16,7 +16,7 @@ are fixed; fields are added, never changed.
 
 | | |
 |---|---|
-| **channel** | GitHub Releases, one release per tag of the publishing repository |
+| **channel** | `https://artifacts.wavehouse.dev/<tag>/`, one directory per release tag, plus the rolling `artifacts` release; the same files as the publishing repository's GitHub Releases |
 | **unit** | one tarball per (ClickHouse version, platform) |
 | **listing** | `index.json` (schema 1) as a release asset |
 | **integrity** | `SHA256SUMS` as a release asset, plus each artifact's own `manifest.json` |
@@ -195,11 +195,16 @@ per-user cache, `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<platform>`,
 which is what every SDK's registry default resolves to; a `--dest` elsewhere is
 reachable by pointing `CHTYPES_REGISTRY` at it.
 
-**Sources.** `gh release download` when `gh` exists, plain `curl` against
-`https://github.com/<repo>/releases/{download/<tag>,latest/download}/<asset>`
-when it does not, and `--url <base>` for anything else — including a local
-directory or a `file://` path, which is how the offline test drives it against a
-`--dry-run` stage.
+**Sources.** By default the public artifacts host,
+`https://artifacts.wavehouse.dev/<tag>/<asset>` (`CHTYPES_ARTIFACTS_URL`
+overrides the host; `--tag` picks a release, the rolling `artifacts` release
+otherwise). `--repo owner/name` (or `CHTYPES_RELEASE_REPO`) switches to that
+repository's GitHub Releases — `gh release download` when `gh` exists, plain
+`curl` against `https://github.com/<repo>/releases/{download/<tag>,latest/download}/<asset>`
+when it does not. `--url <base>` is anything else — a mirror, a local directory
+or a `file://` path, which is how the offline test drives it against a
+`--dry-run` stage. A download token, when the host requires one, travels as
+`Authorization: Bearer` from `CHTYPES_DOWNLOAD_TOKEN`.
 
 **Idempotent.** If `<dest>/<minor>/` already holds a library that hashes what
 `index.json` says, the fetch says "already installed and verified" and downloads

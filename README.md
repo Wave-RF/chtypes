@@ -20,7 +20,7 @@ This repository is the **SDK half** of chtypes, Apache 2.0:
 |---|---|
 | [`go/`](go/README.md) | `github.com/wave-rf/chtypes/go` — package `chtypes`, cgo `dlopen`, dlopen-only by default |
 | [`python/`](python/README.md) | `chtypes` — stdlib `ctypes`, zero dependencies |
-| [`ts/`](ts/README.md) | `@wave-rf/chtypes` — `ffi-rs`, Node ≥ 22 |
+| [`ts/`](ts/README.md) | `@wavehouse/chtypes` — `ffi-rs`, Node ≥ 22 |
 | [`rust/`](rust/README.md) | `chtypes` — `libloading` |
 | [`include/chtypes.h`](include/chtypes.h) | the C ABI every binding is written against — 28 `chs_*` functions, ABI revision 4 |
 | [`spec/`](spec/README.md) | the normative contract: [`c-abi.md`](spec/c-abi.md), [`bindings.md`](spec/bindings.md) (the shape every SDK implements), [`artifact.md`](spec/artifact.md) (what ships, how a registry is laid out) |

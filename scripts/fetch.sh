@@ -5,8 +5,10 @@
 #   scripts/fetch.sh 25.8.28.1-lts --platform linux-amd64
 #   scripts/fetch.sh 25.8 --dest ./chtypes-artifacts   an explicit registry dir
 #   scripts/fetch.sh --all --platform linux-amd64 --dest /opt/chtypes/artifacts   every line, for a container
-#   scripts/fetch.sh 25.8 --tag chtypes-v1.2.0         a specific release
+#   scripts/fetch.sh 25.8 --tag v1.2.0                 a specific release (default: the
+#                                                      rolling `artifacts` release)
 #   scripts/fetch.sh 25.8 --url https://…/download/x   any base URL (or a local dir)
+#   scripts/fetch.sh 25.8 --repo owner/name            a GitHub Releases source instead
 #
 # (--out is an alias for --dest, and --all takes every line the release
 # publishes for the platform; both are the spellings .github/workflows use.)
@@ -33,8 +35,16 @@
 # ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>/<minor>/ — which is
 # also where a core-repository build lands, so one directory serves both.
 #
+# Where it fetches from, by default: https://artifacts.wavehouse.dev/<tag>/ —
+# the public artifacts host, where <tag> is a release tag or the rolling
+# `artifacts` release. `--url` names any other base (a mirror, a local
+# directory, a file:// path); `--repo owner/name` (or CHTYPES_RELEASE_REPO)
+# switches to that repository's GitHub Releases, which is how the core
+# repository's own CI fetches what it just published.
+#
 # Environment:
-#   CHTYPES_RELEASE_REPO   owner/name to fetch from (default: gh's inference)
+#   CHTYPES_ARTIFACTS_URL  the artifacts host (default https://artifacts.wavehouse.dev)
+#   CHTYPES_RELEASE_REPO   owner/name: fetch from GitHub Releases instead
 #   CHTYPES_TARGET         platform key (default: this host's own <os>-<arch>)
 #   XDG_CACHE_HOME         cache root (default ~/.cache)
 set -euo pipefail
@@ -74,7 +84,7 @@ if [ "$ALL" = 1 ]; then
   SPELLING="--all"
 fi
 [ -n "$SPELLING" ] || { echo "fetch.sh: a ClickHouse version spelling is required (or --all)" >&2; usage; }
-[ -n "$BASE_URL" ] && [ -n "$TAG" ] && die "--url and --tag name two different sources; pass one"
+[ -n "$BASE_URL" ] && [ -n "$TAG" ] && die "--url names a full base; --tag selects a release on the artifacts host (or in --repo) — pass one"
 
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
@@ -159,6 +169,13 @@ fi
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/chtypes-fetch-XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
+# No --url and no repository named: the public artifacts host, under the
+# requested tag or the rolling release. A repository (--repo / the env) means
+# GitHub Releases; an explicit --url is taken as given.
+ARTIFACTS_URL="${CHTYPES_ARTIFACTS_URL:-https://artifacts.wavehouse.dev}"
+if [ -z "$BASE_URL" ] && [ -z "$REPO" ]; then
+  BASE_URL="${ARTIFACTS_URL%/}/${TAG:-artifacts}"
+fi
 SOURCE_KIND=""
 if [ -n "$BASE_URL" ]; then
   SOURCE_KIND=url
@@ -181,7 +198,9 @@ get_file() { # get_file <asset-name> <destination>
                   [ -f "$src" ] || return 1
                   cp "$src" "$out" ;;
         http://*|https://*)
-                  curl -fsSL --retry 3 --retry-delay 1 -o "$out" "$BASE_URL/$name" ;;
+                  curl -fsSL --retry 3 --retry-delay 1 -o "$out" \
+                    ${CHTYPES_DOWNLOAD_TOKEN:+-H "Authorization: Bearer $CHTYPES_DOWNLOAD_TOKEN"} \
+                    "$BASE_URL/$name" ;;
         *)        src="$BASE_URL/$name"
                   [ -f "$src" ] || return 1
                   cp "$src" "$out" ;;

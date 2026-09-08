@@ -51,7 +51,7 @@ import {
   parseVersionResult,
   reconstructDdl,
   defaultRegistryDir,
-} from '@wave-rf/chtypes';
+} from '@wavehouse/chtypes';
 
 // ------------------------------------------------------------- the fixture
 //

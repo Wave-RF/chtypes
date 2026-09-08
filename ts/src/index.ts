@@ -1,5 +1,5 @@
 /**
- * `@wave-rf/chtypes` — ClickHouse's own type system, per version.
+ * `@wavehouse/chtypes` — ClickHouse's own type system, per version.
  *
  *   Registry --for(version)--> Library --compileDdl(ddl)--> Schema --rows(...)--> BatchResult
  *                                 |                            |

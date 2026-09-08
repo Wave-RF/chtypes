@@ -9,7 +9,7 @@ others follow it so every release is addressed the same way.
 |---|---|---|---|---|
 | `github.com/wave-rf/chtypes/go` | proxy.golang.org (by tag) | `go/v*` | `release-go.yml` (build + vet only) | nothing |
 | `chtypes` | PyPI | `python/v*` | `release-python.yml` | a Trusted Publisher on PyPI: repo `Wave-RF/chtypes`, workflow `release-python.yml`, environment `pypi` |
-| `@wave-rf/chtypes` | npm | `ts/v*` | `release-ts.yml` | the `@wave-rf` scope; `NPM_TOKEN` in the `npm` environment until npm Trusted Publishing is enabled for the package |
+| `@wavehouse/chtypes` | npm | `ts/v*` | `release-ts.yml` | the `@wavehouse` scope; `NPM_TOKEN` in the `npm` environment until npm Trusted Publishing is enabled for the package |
 | `chtypes` | crates.io | `rust/v*` | `release-rust.yml` | a Trusted Publisher on crates.io for the crate |
 
 Each workflow refuses a tag whose version does not equal the manifest's,

@@ -1,5 +1,5 @@
 {
-  "name": "@wave-rf/chtypes",
+  "name": "@wavehouse/chtypes",
   "version": "0.1.0",
   "description": "ClickHouse's own type system, per version, over the frozen chs_* C ABI",
   "license": "Apache-2.0",
