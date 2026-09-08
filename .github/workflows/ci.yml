@@ -6,12 +6,15 @@
 #           the Go package proves it builds from a bare copy with nothing beside
 #           it (scripts/check-standalone.sh, up to its registry step); the
 #           header's ABI revision matches what each binding declares.
-#   test    needs artifacts, fetched from the release named by the repository
-#           variable CHTYPES_ARTIFACTS (owner/repo@tag). Until that variable is
-#           set — i.e. until the first artifact release exists — this job is
-#           SKIPPED BY NAME with the reason printed, never silently green: the
-#           golden set and the registry tests are the SDK's proof, and a run
-#           that could not load a library must not read as a pass.
+#   test    needs artifacts, fetched from https://artifacts.wavehouse.dev by
+#           scripts/fetch.sh with the download token in the CHTYPES_DOWNLOAD_TOKEN
+#           secret. Artifacts exist for linux-arm64, so the job runs on the arm64
+#           runner named by the repository variable CHTYPES_TEST_RUNNER
+#           (ubuntu-24.04-arm — free for public repositories). Until that
+#           variable is set this job is SKIPPED BY NAME with the reason in the
+#           name, never silently green: the golden set and the registry tests
+#           are the SDK's proof, and a run that could not load a library must
+#           not read as a pass.
 #
 # Nothing here computes a verdict: every step runs a script or a test runner
 # whose own exit status and output are the answer.
@@ -82,25 +85,24 @@ jobs:
         run: cd rust && cargo build --locked && cargo clippy --locked -- -D warnings && cargo fmt --check
 
   test:
-    name: "test (goldens + registry, ${{ vars.CHTYPES_ARTIFACTS || 'no CHTYPES_ARTIFACTS set — skipped' }})"
-    runs-on: ubuntu-latest
+    name: "test (goldens + registry, ${{ vars.CHTYPES_TEST_RUNNER || 'no CHTYPES_TEST_RUNNER set — skipped' }})"
+    runs-on: ${{ vars.CHTYPES_TEST_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     needs: build
     # The reason a skipped run is visible: the job is named with the variable's
     # value, and its absence is spelled out in the name itself.
-    if: vars.CHTYPES_ARTIFACTS != ''
+    if: vars.CHTYPES_TEST_RUNNER != ''
     env:
       CHTYPES_REGISTRY: ${{ github.workspace }}/.artifacts
     steps:
       - uses: actions/checkout@v4
       - name: fetch every published line for this runner's platform
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHTYPES_DOWNLOAD_TOKEN: ${{ secrets.CHTYPES_DOWNLOAD_TOKEN }}
+          CHTYPES_ARTIFACTS_URL: ${{ vars.CHTYPES_ARTIFACTS_URL || 'https://artifacts.wavehouse.dev' }}
         run: |
-          repo="${CHTYPES_ARTIFACTS%@*}"; tag="${CHTYPES_ARTIFACTS#*@}"
-          scripts/fetch.sh --all --repo "$repo" --tag "$tag" --dest "$CHTYPES_REGISTRY"
+          scripts/fetch.sh --all --dest "$CHTYPES_REGISTRY"
           ls -la "$CHTYPES_REGISTRY"
-        # CHTYPES_ARTIFACTS is owner/repo@tag, e.g. wave-rf/chtypes-artifacts@v0.1.0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod

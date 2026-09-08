@@ -43,5 +43,16 @@
   "publishConfig": {
     "access": "public",
     "provenance": true
+  },
+  "keywords": [
+    "clickhouse",
+    "types",
+    "schema",
+    "validation",
+    "ffi"
+  ],
+  "homepage": "https://github.com/wave-rf/chtypes/tree/main/ts#readme",
+  "bugs": {
+    "url": "https://github.com/wave-rf/chtypes/issues"
   }
 }
