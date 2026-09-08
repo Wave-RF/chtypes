@@ -1,0 +1,22 @@
+# release-go — a Go module publishes by being tagged; this only proves the
+# tag names a module that builds, and that the tag is the subdirectory form
+# `go/v*` the module path (github.com/wave-rf/chtypes/go) requires. pkg.go.dev
+# and proxy.golang.org pick the tag up on first fetch.
+name: release-go
+on:
+  push:
+    tags: ["go/v*"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go/go.mod }
+      - run: cd go && go build ./... && go vet ./...
+      - name: the module resolves at this tag through the proxy path
+        run: |
+          echo "tag ${GITHUB_REF_NAME}: module github.com/wave-rf/chtypes/go@${GITHUB_REF_NAME#go/}"
+          echo "consumers: go get github.com/wave-rf/chtypes/go@${GITHUB_REF_NAME#go/}"

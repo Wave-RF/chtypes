@@ -1,0 +1,30 @@
+# release-rust — publish rust/ to crates.io on a `rust/v*` tag, via crates.io
+# Trusted Publishing (OIDC): configure the publisher once on crates.io for the
+# `chtypes` crate (repo Wave-RF/chtypes, workflow release-rust.yml).
+name: release-rust
+on:
+  push:
+    tags: ["rust/v*"]
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: the tag and the crate agree on the version
+        run: |
+          tag="${GITHUB_REF_NAME#rust/v}"
+          ver="$(cd rust && cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(json.load(sys.stdin)["packages"][0]["version"])')"
+          [ "$tag" = "$ver" ] || { echo "::error::tag rust/v$tag but Cargo.toml says $ver"; exit 1; }
+      - run: cd rust && cargo build --locked && cargo test --locked --lib
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cd rust && cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

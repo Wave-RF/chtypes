@@ -1,0 +1,35 @@
+# release-python — publish python/ to PyPI on a `python/v*` tag, via PyPI
+# Trusted Publishing (OIDC): no token is stored anywhere. Configure the
+# publisher once on PyPI (project `chtypes`, owner Wave-RF, repo chtypes,
+# workflow release-python.yml, environment pypi).
+name: release-python
+on:
+  push:
+    tags: ["python/v*"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: the tag and the package agree on the version
+        run: |
+          tag="${GITHUB_REF_NAME#python/v}"
+          ver="$(cd python && uv run --no-project python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          [ "$tag" = "$ver" ] || { echo "::error::tag python/v$tag but pyproject says $ver"; exit 1; }
+      - name: build sdist + wheel
+        run: cd python && uv build
+      - uses: actions/upload-artifact@v4
+        with: { name: python-dist, path: python/dist/ }
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: python-dist, path: dist/ }
+      - uses: pypa/gh-action-pypi-publish@release/v1

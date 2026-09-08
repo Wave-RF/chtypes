@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "description": "ClickHouse's own type system, per version, over the frozen chs_* C ABI",
   "license": "Apache-2.0",
-  "private": true,
   "type": "module",
   "exports": {
     ".": {
@@ -40,5 +39,9 @@
     "type": "git",
     "url": "https://github.com/wave-rf/chtypes",
     "directory": "ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

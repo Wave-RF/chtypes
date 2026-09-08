@@ -6,7 +6,6 @@ rust-version = "1.85"
 license = "Apache-2.0"
 repository = "https://github.com/wave-rf/chtypes"
 description = "ClickHouse's own type system, schema validation, DEFAULT/TTL semantics and coercion, per ClickHouse version, over the frozen chs_* C ABI"
-publish = false
 
 [dependencies]
 libloading = "0.8"

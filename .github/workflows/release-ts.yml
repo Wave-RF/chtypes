@@ -1,0 +1,31 @@
+# release-ts — publish ts/ to npm on a `ts/v*` tag, with provenance. Uses npm
+# Trusted Publishing (OIDC) when the package is configured for it on npmjs.com;
+# until then NPM_TOKEN in the `npm` environment is the fallback.
+name: release-ts
+on:
+  push:
+    tags: ["ts/v*"]
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, registry-url: "https://registry.npmjs.org" }
+      - name: the tag and the package agree on the version
+        run: |
+          tag="${GITHUB_REF_NAME#ts/v}"; ver="$(node -p "require('./ts/package.json').version")"
+          [ "$tag" = "$ver" ] || { echo "::error::tag ts/v$tag but package.json says $ver"; exit 1; }
+      - run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
+      - name: publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: cd ts && pnpm publish --provenance --access public --no-git-checks
