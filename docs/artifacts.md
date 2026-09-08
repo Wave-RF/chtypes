@@ -17,6 +17,7 @@ are fixed; fields are added, never changed.
 | | |
 |---|---|
 | **channel** | `https://artifacts.wavehouse.dev/<tag>/`, one directory per release tag, plus the rolling `artifacts` release; the same files as the publishing repository's GitHub Releases |
+| **licence** | Elastic License 2.0 — `LICENSE` and `NOTICE` ship in every release and `index.json` names it (`license`, `license_url`). The SDKs are Apache 2.0; the artifacts they load are not |
 | **unit** | one tarball per (ClickHouse version, platform) |
 | **listing** | `index.json` (schema 1) as a release asset |
 | **integrity** | `SHA256SUMS` as a release asset, plus each artifact's own `manifest.json` |
@@ -203,8 +204,8 @@ repository's GitHub Releases — `gh release download` when `gh` exists, plain
 `curl` against `https://github.com/<repo>/releases/{download/<tag>,latest/download}/<asset>`
 when it does not. `--url <base>` is anything else — a mirror, a local directory
 or a `file://` path, which is how the offline test drives it against a
-`--dry-run` stage. A download token, when the host requires one, travels as
-`Authorization: Bearer` from `CHTYPES_DOWNLOAD_TOKEN`.
+`--dry-run` stage. Downloads are anonymous; `CHTYPES_DOWNLOAD_TOKEN`, if set,
+travels as `Authorization: Bearer` for a host that wants attribution.
 
 **Idempotent.** If `<dest>/<minor>/` already holds a library that hashes what
 `index.json` says, the fetch says "already installed and verified" and downloads

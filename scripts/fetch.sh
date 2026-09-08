@@ -231,6 +231,10 @@ say "source $SOURCE_DESC"
 
 # --------------------------------------------------------------- pick the asset
 get_file index.json "$WORK/index.json" || die "no index.json at $SOURCE_DESC"
+# The listing names the artifacts' licence (Elastic License 2.0); say so once,
+# before a byte of library moves — the SDK is Apache 2.0, the artifact is not.
+LIC="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("license","") + " " + d.get("license_url",""))' "$WORK/index.json" 2>/dev/null || true)"
+[ -n "${LIC% }" ] && echo "fetch.sh: artifacts are licensed under ${LIC% } — LICENSE and NOTICE ship beside them" >&2
 # The selection runs in its own assignment rather than inside the here-doc that
 # feeds `read`: a here-doc nested inside a command substitution inside a
 # here-doc parses, but it hides python's own error message, and that message is

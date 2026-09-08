@@ -6,9 +6,8 @@
 #           the Go package proves it builds from a bare copy with nothing beside
 #           it (scripts/check-standalone.sh, up to its registry step); the
 #           header's ABI revision matches what each binding declares.
-#   test    needs artifacts, fetched from https://artifacts.wavehouse.dev by
-#           scripts/fetch.sh with the download token in the CHTYPES_DOWNLOAD_TOKEN
-#           secret. Artifacts exist for linux-arm64, so the job runs on the arm64
+#   test    needs artifacts, fetched anonymously from https://artifacts.wavehouse.dev
+#           by scripts/fetch.sh. Artifacts exist for linux-arm64, so the job runs on the arm64
 #           runner named by the repository variable CHTYPES_TEST_RUNNER
 #           (ubuntu-24.04-arm — free for public repositories). Until that
 #           variable is set this job is SKIPPED BY NAME with the reason in the
@@ -98,7 +97,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: fetch every published line for this runner's platform
         env:
-          CHTYPES_DOWNLOAD_TOKEN: ${{ secrets.CHTYPES_DOWNLOAD_TOKEN }}
           CHTYPES_ARTIFACTS_URL: ${{ vars.CHTYPES_ARTIFACTS_URL || 'https://artifacts.wavehouse.dev' }}
         run: |
           scripts/fetch.sh --all --dest "$CHTYPES_REGISTRY"
