@@ -9,7 +9,7 @@ others follow it so every release is addressed the same way.
 |---|---|---|---|---|
 | `github.com/wave-rf/chtypes/go` | proxy.golang.org (by tag) | `go/v*` | `release-go.yml` (build + vet only) | nothing |
 | `chtypes` | PyPI | `python/v*` | `release-python.yml` | a Trusted Publisher on PyPI: repo `Wave-RF/chtypes`, workflow `release-python.yml`, environment `pypi` |
-| `@wavehouse/chtypes` | npm | `ts/v*` | `release-ts.yml` | the `@wavehouse` scope; `NPM_TOKEN` in the `npm` environment until npm Trusted Publishing is enabled for the package |
+| `@wavehouse/chtypes` | npm | `ts/v*` | `release-ts.yml` | OIDC trusted publishing, no token. The first publish is by hand (`cd ts && pnpm build && pnpm publish --access public`) from a laptop logged in to the `wavehouse` scope, because npm only lets a trusted publisher be configured on a package that exists; then npmjs.com → package settings → Trusted Publisher → `Wave-RF/chtypes`, `release-ts.yml` |
 | `chtypes` | crates.io | `rust/v*` | `release-rust.yml` | a Trusted Publisher on crates.io for the crate |
 
 Each workflow refuses a tag whose version does not equal the manifest's,

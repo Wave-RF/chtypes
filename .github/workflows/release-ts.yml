@@ -1,6 +1,9 @@
-# release-ts — publish ts/ to npm on a `ts/v*` tag, with provenance. Uses npm
-# Trusted Publishing (OIDC) when the package is configured for it on npmjs.com;
-# until then NPM_TOKEN in the `npm` environment is the fallback.
+# release-ts — publish ts/ to npm on a `ts/v*` tag, with provenance.
+# Auth: OIDC trusted publishing — no NPM_TOKEN anywhere. npm allows ONE trusted
+# publisher (repo + workflow file) per package, configured on npmjs.com under the
+# package's settings → Wave-RF/chtypes, release-ts.yml. That page exists only
+# once the package does, so the FIRST publish is by hand from a logged-in
+# laptop (RELEASING.md); every one after that is this workflow.
 name: release-ts
 on:
   push:
@@ -26,6 +29,4 @@ jobs:
           [ "$tag" = "$ver" ] || { echo "::error::tag ts/v$tag but package.json says $ver"; exit 1; }
       - run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
       - name: publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: cd ts && pnpm publish --provenance --access public --no-git-checks
