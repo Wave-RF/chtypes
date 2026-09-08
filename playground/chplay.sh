@@ -70,7 +70,7 @@ have_go() { command -v go >/dev/null 2>&1 && return 0
 # both are set here, otherwise the tour runs dlopen-only and those sections
 # say so.
 run_go() {
-  local core="${CHTYPES_CORE_DIR:-$HERE/../../chtypes-core}"
+  local core="${CHTYPES_CORE_DIR:-$HERE/../../core}"
   if [ -n "${CHTYPES_LIB_BUILD:-}" ] || [ -d "$core/lib/build" ]; then
     local build="${CHTYPES_LIB_BUILD:-$core/lib/build}"
     (cd "$HERE/go" && CGO_LDFLAGS="-L$build -Wl,-rpath,$build" CHTYPES_LIB_BUILD="$build" go run -tags chtypes_linked .)
