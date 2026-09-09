@@ -85,6 +85,8 @@ mod compile;
 mod discover;
 mod doc;
 mod error;
+#[cfg(feature = "fetch")]
+pub mod fetch;
 mod ffi;
 mod json;
 mod library;
@@ -100,10 +102,20 @@ pub use discover::{
     ServerProfile, parse_changed_settings_result, parse_columns_result, parse_version_result,
     reconstruct_ddl,
 };
-pub use error::{ABI_REVISION, CODE_UNSUPPORTED, Error, Result};
+pub use error::{
+    ABI_REVISION, CODE_ARTIFACT_CORRUPT, CODE_ARTIFACT_MISSING, CODE_ARTIFACT_PINNED,
+    CODE_ARTIFACT_UNPUBLISHED, CODE_ARTIFACT_UNTRUSTED, CODE_SOURCE_UNREACHABLE, CODE_UNSUPPORTED,
+    Error, FETCH_COMMAND, Result,
+};
+#[cfg(feature = "fetch")]
+pub use fetch::{Action, EnsureOptions, Installed, ensure};
 pub use library::{Column, DEFAULT_TIMEZONE, DefaultKind, Library};
 pub use raw::RawText;
-pub use registry::{Manifest, REGISTRY_ENV, Registry, default_registry_dir};
+pub use registry::{
+    AUTOFETCH_ENV, Manifest, REGISTRY_ENV, Registry, RegistryOptions, SYSTEM_ARTIFACT_ROOTS,
+    cache_dir_for, default_registry_dir, host_platform, install_dir, install_dir_for,
+    installed_lines, locate, locate_in, registry_search_path, search_path_for,
+};
 pub use result::{
     BatchResult, Computed, DocFlags, FilterOutcome, FilterResult, FilterRowError, Format, Outcome,
     RowResult, Span, Substitution, Transform, Value, Verdict,

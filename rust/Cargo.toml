@@ -27,6 +27,42 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 
+# --- the `fetch` feature: chtypes::ensure and the `chtypes` binary (docs/fetch.md).
+# Every crate below is optional and behind `fetch`, so `--no-default-features`
+# builds with exactly the dependency set above.
+#
+# ed25519-dalek verifies SHA256SUMS.sig (spec §4); verification only, so the
+# precomputed tables and zeroize are off. sha2 is the digest the whole chain
+# hashes with, pinned to the series dalek itself uses so there is one copy.
+ed25519-dalek = { version = "3", optional = true, default-features = false }
+sha2 = { version = "0.11", optional = true, default-features = false }
+# ureq fetches over HTTPS (rustls + webpki roots, no OpenSSL). Its gzip feature
+# is OFF on purpose: a transparently un-gzipped body would hash differently
+# from the bytes SHA256SUMS records. base64 (for the signature file) is pinned
+# to the series ureq uses so there is one copy.
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
+base64 = { version = "0.23", optional = true }
+# tar + flate2 unpack the artifact tarball; xattr support is not wanted.
+tar = { version = "0.4", optional = true, default-features = false }
+flate2 = { version = "1", optional = true }
+
+[features]
+default = ["fetch"]
+# `chtypes::ensure`, the registry's autofetch option and the `chtypes` binary.
+fetch = [
+  "dep:ed25519-dalek",
+  "dep:sha2",
+  "dep:ureq",
+  "dep:base64",
+  "dep:tar",
+  "dep:flate2",
+]
+
+[[bin]]
+name = "chtypes"
+path = "src/main.rs"
+required-features = ["fetch"]
+
 [dev-dependencies]
 # The integration tests read manifest.json themselves, to prove the loader took
 # the library file name from it rather than constructing one.

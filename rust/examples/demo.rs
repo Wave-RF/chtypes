@@ -5,8 +5,6 @@
 //! CHTYPES_REGISTRY=/path/to/registry cargo run --example demo
 //! ```
 
-use std::path::PathBuf;
-
 use chtypes::{Format, NO_SETTINGS, Outcome, Registry, SETTING_NOW_EPOCH_NANOS};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
