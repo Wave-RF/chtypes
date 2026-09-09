@@ -26,7 +26,7 @@ This repository is the **SDK half** of chtypes, Apache 2.0:
 | [`spec/`](spec/README.md) | the normative contract: [`c-abi.md`](spec/c-abi.md), [`bindings.md`](spec/bindings.md) (the shape every SDK implements), [`artifact.md`](spec/artifact.md) (what ships, how a registry is laid out) |
 | [`goldens/`](goldens/README.md) | the public golden set — 31 cases, one answer in four languages |
 | [`playground/`](playground/README.md) | four side-by-side runnable tours, same sections in every language |
-| [`docs/artifacts.md`](docs/artifacts.md) | how a consumer obtains and verifies artifacts |
+| [`docs/artifacts.md`](docs/artifacts.md) | how a consumer obtains and verifies artifacts ([`docs/fetch.md`](docs/fetch.md): the fetch/verify/signing contract every SDK implements) |
 | [`scripts/fetch.sh`](scripts/fetch.sh) | the verified download into the per-user cache |
 
 The other half — the C++ wrapper, the per-version vendoring and build

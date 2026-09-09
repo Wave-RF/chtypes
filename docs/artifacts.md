@@ -21,7 +21,7 @@ are fixed; fields are added, never changed.
 | **unit** | one tarball per (ClickHouse version, platform) |
 | **listing** | `index.json` (schema 1) as a release asset |
 | **integrity** | `SHA256SUMS` as a release asset, plus each artifact's own `manifest.json` |
-| **consumer** | [`scripts/fetch.sh`](../scripts/fetch.sh) |
+| **consumer** | [`scripts/fetch.sh`](../scripts/fetch.sh), and each SDK's own `fetch` command / `ensure()` — [`docs/fetch.md`](fetch.md) is the contract they share |
 | **where it lands** | `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>/<minor>/` — the registry every SDK here defaults to |
 
 ---
