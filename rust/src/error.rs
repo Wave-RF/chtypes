@@ -31,6 +31,29 @@ pub const CODE_UNSUPPORTED: i32 = -2;
 /// is undefined behaviour, which is exactly what this gate exists to refuse.
 pub const ABI_REVISION: i32 = 4;
 
+/// `CHTYPES_ARTIFACT_MISSING` — no installed artifact answers for the line
+/// (`docs/fetch.md` §7). The code every SDK shares for [`Error::ArtifactMissing`].
+pub const CODE_ARTIFACT_MISSING: &str = "CHTYPES_ARTIFACT_MISSING";
+/// `CHTYPES_ARTIFACT_UNTRUSTED` — the release's `SHA256SUMS` is unsigned or
+/// mis-signed (§3 step 0); nothing was downloaded around it.
+pub const CODE_ARTIFACT_UNTRUSTED: &str = "CHTYPES_ARTIFACT_UNTRUSTED";
+/// `CHTYPES_ARTIFACT_CORRUPT` — any hash mismatch anywhere in the chain (§3).
+pub const CODE_ARTIFACT_CORRUPT: &str = "CHTYPES_ARTIFACT_CORRUPT";
+/// `CHTYPES_ARTIFACT_PINNED` — the release offers something other than what
+/// the lock file pins (§5).
+pub const CODE_ARTIFACT_PINNED: &str = "CHTYPES_ARTIFACT_PINNED";
+/// `CHTYPES_ARTIFACT_UNPUBLISHED` — the release publishes nothing for the
+/// requested line or exact patch on this platform (§2).
+pub const CODE_ARTIFACT_UNPUBLISHED: &str = "CHTYPES_ARTIFACT_UNPUBLISHED";
+/// `CHTYPES_SOURCE_UNREACHABLE` — the source could not be reached, or was not
+/// consulted because the fetch was offline.
+pub const CODE_SOURCE_UNREACHABLE: &str = "CHTYPES_SOURCE_UNREACHABLE";
+
+/// This SDK's fetch command, as the "Install it:" line of
+/// [`Error::ArtifactMissing`] spells it (`docs/fetch.md` §6: the crate's
+/// `[[bin]]`, reached through `cargo install chtypes`).
+pub const FETCH_COMMAND: &str = "cargo install chtypes && chtypes fetch";
+
 /// `Result` with this crate's [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -271,6 +294,96 @@ pub enum Error {
         /// The block's library, by its own reported version.
         block_version: String,
     },
+
+    /// No installed artifact answers for the requested ClickHouse line on this
+    /// platform: the §1 search path was walked and none of its directories
+    /// holds `<line>/manifest.json` (`docs/fetch.md` §7). The message is the
+    /// one every SDK renders, verbatim apart from the bracketed parts, and
+    /// [`Error::artifact_code`] answers [`CODE_ARTIFACT_MISSING`].
+    ///
+    /// Raised by the search-path registry ([`crate::Registry::from_search_path`])
+    /// with autofetch off; a registry over one explicit directory keeps
+    /// answering [`Error::NoSuchVersion`], which names what IS loaded.
+    #[error("{}", artifact_missing_display(line, platform, looked_in))]
+    ArtifactMissing {
+        /// The minor line that was asked for (`25.8`).
+        line: String,
+        /// `<os>-<arch>`, the artifact spelling (`linux-arm64`).
+        platform: String,
+        /// Every directory that was tried, in search order.
+        looked_in: Vec<PathBuf>,
+    },
+
+    /// The release's `SHA256SUMS` did not verify (`docs/fetch.md` §3 step 0):
+    /// no `SHA256SUMS.sig`, a malformed one, or a signature under no trusted
+    /// key. Nothing was downloaded around it. Code [`CODE_ARTIFACT_UNTRUSTED`].
+    #[error("chtypes: {origin}: SHA256SUMS is not trusted: {reason}")]
+    ArtifactUntrusted {
+        /// The source the release was read from.
+        origin: String,
+        /// Why, in the verifier's own words.
+        reason: String,
+    },
+
+    /// A hash disagreed somewhere in the chain (`docs/fetch.md` §3): the index
+    /// and `SHA256SUMS`, the downloaded tarball, the library inside it, or the
+    /// installed library re-hashed in place. Reported, never repaired. Code
+    /// [`CODE_ARTIFACT_CORRUPT`].
+    #[error("chtypes: {subject}: sha256 is {actual}, expected {expected}")]
+    ArtifactCorrupt {
+        /// What was hashed, or which two records disagree.
+        subject: String,
+        /// The sha256 the chain said it should be.
+        expected: String,
+        /// The sha256 that was found.
+        actual: String,
+    },
+
+    /// The release offers something other than what the lock file pins for
+    /// this `<os>-<arch>/<minor>` (`docs/fetch.md` §5, `--frozen`). Code
+    /// [`CODE_ARTIFACT_PINNED`].
+    #[error("chtypes: {key}: {message}")]
+    ArtifactPinned {
+        /// The lock key, `<os>-<arch>/<minor>`.
+        key: String,
+        /// What was pinned and what was offered.
+        message: String,
+    },
+
+    /// The release publishes nothing for the requested line (or exact patch —
+    /// a hard requirement) on this platform (`docs/fetch.md` §2). Code
+    /// [`CODE_ARTIFACT_UNPUBLISHED`].
+    #[error(
+        "chtypes: {origin} publishes no artifact for ClickHouse {requested} on {platform} (it has: {offered})"
+    )]
+    ArtifactUnpublished {
+        /// The line or exact patch that was asked for.
+        requested: String,
+        /// `<os>-<arch>`.
+        platform: String,
+        /// The source that was consulted.
+        origin: String,
+        /// What the release does publish, for the message.
+        offered: String,
+    },
+
+    /// The source could not be reached — or was not consulted at all because
+    /// the fetch was offline. Code [`CODE_SOURCE_UNREACHABLE`].
+    #[error("chtypes: {origin}: {message}")]
+    SourceUnreachable {
+        /// The source that was (or would have been) contacted.
+        origin: String,
+        /// The transport's own words, or `offline`.
+        message: String,
+    },
+
+    /// Fetch machinery that reached no verdict: an unreadable release listing,
+    /// an unwritable install directory, an unusable option. No artifact code.
+    #[error("chtypes: fetch: {message}")]
+    Fetch {
+        /// What went wrong.
+        message: String,
+    },
 }
 
 impl Error {
@@ -288,6 +401,23 @@ impl Error {
     /// ClickHouse rejection.
     pub fn is_unsupported(&self) -> bool {
         self.code() == Some(CODE_UNSUPPORTED)
+    }
+
+    /// The shared artifact code (`docs/fetch.md` §7) — `CHTYPES_ARTIFACT_MISSING`,
+    /// `…_UNTRUSTED`, `…_CORRUPT`, `…_PINNED`, `…_UNPUBLISHED` or
+    /// `CHTYPES_SOURCE_UNREACHABLE` — for the fetch and lookup failures, `None`
+    /// for everything else. Distinct from [`Error::code`], which is the
+    /// ClickHouse error code of a rejection.
+    pub fn artifact_code(&self) -> Option<&'static str> {
+        match self {
+            Error::ArtifactMissing { .. } => Some(CODE_ARTIFACT_MISSING),
+            Error::ArtifactUntrusted { .. } => Some(CODE_ARTIFACT_UNTRUSTED),
+            Error::ArtifactCorrupt { .. } => Some(CODE_ARTIFACT_CORRUPT),
+            Error::ArtifactPinned { .. } => Some(CODE_ARTIFACT_PINNED),
+            Error::ArtifactUnpublished { .. } => Some(CODE_ARTIFACT_UNPUBLISHED),
+            Error::SourceUnreachable { .. } => Some(CODE_SOURCE_UNREACHABLE),
+            _ => None,
+        }
     }
 
     /// Build the right variant from a C code. The SIGN decides
@@ -321,6 +451,19 @@ fn schema_display(code: i32, message: &str, column: Option<&str>) -> String {
         Some(c) => format!("chtypes: column {c:?}: [{code}] {message}"),
         None => format!("chtypes: [{code}] {message}"),
     }
+}
+
+/// The §7 message, verbatim apart from the bracketed parts: the line, the
+/// platform, the directories that were looked in, and this SDK's own fetch
+/// command ([`FETCH_COMMAND`]).
+fn artifact_missing_display(line: &str, platform: &str, looked_in: &[PathBuf]) -> String {
+    let dirs: Vec<String> = looked_in.iter().map(|d| d.display().to_string()).collect();
+    format!(
+        "chtypes: no artifact for ClickHouse {line} ({platform}). Looked in: {}.\n\
+         Install it:  {FETCH_COMMAND} {line}\n\
+         or set CHTYPES_AUTOFETCH=1 to fetch on first use.",
+        dirs.join(", ")
+    )
 }
 
 #[cfg(test)]
@@ -387,6 +530,92 @@ mod tests {
         assert_eq!(
             attributed.to_string(),
             "chtypes: column \"e\": [469] constraint"
+        );
+    }
+
+    #[test]
+    fn the_artifact_missing_message_is_the_spec_s_verbatim() {
+        // docs/fetch.md §7: one message in every SDK, verbatim apart from the
+        // bracketed parts; the "Install it:" line names THIS SDK's command.
+        let err = Error::ArtifactMissing {
+            line: "25.8".into(),
+            platform: "linux-arm64".into(),
+            looked_in: vec![
+                PathBuf::from("/home/u/.cache/chtypes/artifacts/linux-arm64"),
+                PathBuf::from("/usr/local/share/chtypes/artifacts/linux-arm64"),
+                PathBuf::from("/opt/chtypes/artifacts/linux-arm64"),
+            ],
+        };
+        assert_eq!(
+            err.to_string(),
+            "chtypes: no artifact for ClickHouse 25.8 (linux-arm64). Looked in: \
+             /home/u/.cache/chtypes/artifacts/linux-arm64, \
+             /usr/local/share/chtypes/artifacts/linux-arm64, \
+             /opt/chtypes/artifacts/linux-arm64.\n\
+             Install it:  cargo install chtypes && chtypes fetch 25.8\n\
+             or set CHTYPES_AUTOFETCH=1 to fetch on first use."
+        );
+        assert_eq!(err.artifact_code(), Some("CHTYPES_ARTIFACT_MISSING"));
+        // The ClickHouse-code accessor stays what it was: no verdict here.
+        assert_eq!(err.code(), None);
+    }
+
+    #[test]
+    fn every_artifact_code_is_the_shared_spelling() {
+        let cases: Vec<(Error, &str)> = vec![
+            (
+                Error::ArtifactUntrusted {
+                    origin: "s".into(),
+                    reason: "r".into(),
+                },
+                "CHTYPES_ARTIFACT_UNTRUSTED",
+            ),
+            (
+                Error::ArtifactCorrupt {
+                    subject: "x".into(),
+                    expected: "aa".into(),
+                    actual: "bb".into(),
+                },
+                "CHTYPES_ARTIFACT_CORRUPT",
+            ),
+            (
+                Error::ArtifactPinned {
+                    key: "linux-arm64/25.8".into(),
+                    message: "m".into(),
+                },
+                "CHTYPES_ARTIFACT_PINNED",
+            ),
+            (
+                Error::ArtifactUnpublished {
+                    requested: "25.8".into(),
+                    platform: "linux-arm64".into(),
+                    origin: "s".into(),
+                    offered: "nothing".into(),
+                },
+                "CHTYPES_ARTIFACT_UNPUBLISHED",
+            ),
+            (
+                Error::SourceUnreachable {
+                    origin: "s".into(),
+                    message: "offline".into(),
+                },
+                "CHTYPES_SOURCE_UNREACHABLE",
+            ),
+        ];
+        for (err, code) in cases {
+            assert_eq!(err.artifact_code(), Some(code), "{err}");
+            assert_eq!(err.code(), None, "{err}");
+        }
+        let plain = Error::Fetch {
+            message: "m".into(),
+        };
+        assert_eq!(plain.artifact_code(), None);
+        assert_eq!(
+            Error::Unsupported {
+                message: "m".into()
+            }
+            .artifact_code(),
+            None
         );
     }
 }

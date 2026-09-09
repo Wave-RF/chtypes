@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use chtypes::{Error, FilterOutcome, Format, NO_SETTINGS, Outcome, Registry, Verdict};
+use chtypes::{Error, FilterOutcome, Format, NO_SETTINGS, Registry, Verdict};
 use serde_json::Value as Json;
 
 fn goldens() -> Json {

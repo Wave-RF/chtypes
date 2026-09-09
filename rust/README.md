@@ -24,13 +24,16 @@ chtypes = { path = "../chtypes/rust" }
 
 **Artifact prerequisite.** The crate answers nothing by itself: it `dlopen`s
 one artifact per ClickHouse release (166–302 MB each — real ClickHouse,
-compiled). Get them with either
+compiled). Get them with the crate's own command (see
+[Fetching artifacts](#fetching-artifacts) below),
 
 ```sh
-scripts/fetch.sh 25.8           # prebuilt, verified (see docs/artifacts.md)
+cargo install chtypes           # the `chtypes` binary
+chtypes fetch 25.8              # verified, into the per-user cache
 ```
 
-or build one in the core repository; both land under
+with `scripts/fetch.sh 25.8` (the reference implementation, same result), or
+build one in the core repository; all land under
 `~/.cache/chtypes/artifacts/<os>-<arch>/<minor>/` — the per-user cache
 `Registry::from_env_or_default()` resolves to — so a registry looks like:
 
@@ -60,8 +63,8 @@ time, never at load).
 ```rust
 use chtypes::{Format, Registry, NO_SETTINGS};
 
-let registry = Registry::from_env_or_default()?;        // $CHTYPES_REGISTRY, else the per-user cache
-let lib = registry.for_version("25.8")?;                // minor line or exact patch
+let registry = Registry::from_search_path();             // docs/fetch.md §1: $CHTYPES_REGISTRY, the per-user cache, the system locations
+let lib = registry.for_version("25.8")?;                // minor line or exact patch; Error::ArtifactMissing if nowhere
 let schema = lib.compile("ts DateTime, seq UInt8")
     .settings([("flatten_nested", "1")])                // the deployment's profile
     .compile()?;
@@ -88,6 +91,102 @@ marshalling, an unreadable document). Three outcomes must never be conflated:
 possibly with coercions reported in `transformed` and volatile DEFAULTs in
 `substituted` (send those columns explicitly in the INSERT).
 
+## Fetching artifacts
+
+`docs/fetch.md` is the contract, identical in the four SDKs; this crate
+implements it behind the Cargo feature **`fetch`** (on by default —
+`default-features = false` drops the command, `ensure`, autofetch and every
+dependency they bring, leaving the loader alone).
+
+**The command.** `cargo install chtypes` puts a `chtypes` binary on the path:
+
+```
+chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
+                        [--tag <t> | --url <base>] [--lock <file>] [--frozen]
+                        [--force] [--offline]
+chtypes verify [--dest <dir>]        re-hash every installed line against its manifest
+chtypes list   [--dest <dir>]        what is installed, and what the release offers
+chtypes where                        the registry directory fetch would write to
+```
+
+Progress prints on stderr; `fetch` prints each installed directory alone on
+stdout. Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source
+unreachable · 4 not published for this platform/line.
+
+**The function.** `chtypes::ensure(line, &opts)` is the same operation from
+Rust — idempotent, and never a network round trip once the line is installed
+and its library hashes what its manifest says:
+
+```rust
+use chtypes::{EnsureOptions, Registry};
+
+let installed = chtypes::ensure("25.8", &EnsureOptions::default())?;   // AlreadyInstalled | Installed | Replaced
+let registry = Registry::new(installed.dir.parent().unwrap())?;
+```
+
+`EnsureOptions` carries the flags (`dest`, `platform`, `url`/`tag`, `lock`,
+`frozen`, `force`, `offline`, `progress`) and the trust policy
+(`trusted_keys`, `allow_unsigned`; `None` reads the environment).
+
+**Where.** Lookup walks `docs/fetch.md` §1 in order — an explicit directory,
+`$CHTYPES_REGISTRY`, `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>`,
+then `/usr/local/share/chtypes/artifacts/<os>-<arch>` and
+`/opt/chtypes/artifacts/<os>-<arch>` — and takes the first directory holding
+the line (`registry_search_path`, `locate`). Fetch writes to the first of the
+first three that is set (`install_dir`), never to a system location. With an
+explicit `--dest`, "already installed" means installed *in that directory*:
+a container build's `--dest /opt/chtypes/artifacts` is never satisfied by
+the builder's own cache.
+
+**Verification, in order — nothing else is a verdict.** `SHA256SUMS.sig` must
+verify (ed25519) over the exact bytes of `SHA256SUMS` under a trusted key;
+`index.json` must agree with the signed sums about the asset; the tarball is
+hashed as it streams and never unpacked on a mismatch; it is unpacked flat
+(plain top-level files only — no paths, links or traversal) into a temporary
+sibling, renamed into `<registry>/<minor>/`, and the installed library is
+re-hashed in place. The release key is embedded (`fetch::RELEASE_PUBLIC_KEY`,
+id `deb275922dbff76e`); `CHTYPES_TRUSTED_KEYS=<hex>[,<hex>…]` replaces it for
+a mirror; `CHTYPES_ALLOW_UNSIGNED=1` skips the signature with one loud
+warning naming the source — never the default, never silent.
+
+**Pinning.** `--lock chtypes.lock` records, per `<os>-<arch>/<minor>`, the
+asset and sha256 that were installed; `--frozen` (or
+`EnsureOptions { frozen: true, .. }`) refuses anything else with
+`CHTYPES_ARTIFACT_PINNED`.
+
+**Lazy fetch on first open** is opt-in: `RegistryOptions { autofetch:
+Some(true), .. }` or `CHTYPES_AUTOFETCH=1` makes
+`Registry::from_search_path_with(opts).for_version(line)` run `ensure` first
+for a line found nowhere — once per process per line, under one process-wide
+lock, so concurrent opens fetch once. Off by default: a production process
+must not begin a 250 MB download inside a request.
+
+**The error.** A line found nowhere on the search path is
+`Error::ArtifactMissing { line, platform, looked_in }`, whose message is the
+one every SDK renders:
+
+```
+chtypes: no artifact for ClickHouse 25.8 (linux-arm64). Looked in: /home/u/.cache/chtypes/artifacts/linux-arm64, /usr/local/share/chtypes/artifacts/linux-arm64, /opt/chtypes/artifacts/linux-arm64.
+Install it:  cargo install chtypes && chtypes fetch 25.8
+or set CHTYPES_AUTOFETCH=1 to fetch on first use.
+```
+
+`Error::artifact_code()` answers the shared code string —
+`CHTYPES_ARTIFACT_MISSING`, `…_UNTRUSTED` (`Error::ArtifactUntrusted`),
+`…_CORRUPT` (`ArtifactCorrupt`, any hash mismatch), `…_PINNED`
+(`ArtifactPinned`), `…_UNPUBLISHED` (`ArtifactUnpublished`) and
+`CHTYPES_SOURCE_UNREACHABLE` (`SourceUnreachable`) — and `None` for
+everything else. It is distinct from `Error::code()`, which stays the
+ClickHouse error code of a rejection. A registry over one explicit
+directory (`Registry::new`) keeps answering `Error::NoSuchVersion`, naming
+what is loaded.
+
+**Tests.** `cargo test --test fetch` runs every fixture in
+`spec/fixtures/fetch/` (signed, bad signature, unsigned, tampered tarball,
+sums/index mismatch, the lock) through both the library and the binary,
+offline, reading the verdicts from the fixtures' own `expected.json`; it
+skips loudly when the fixtures are absent.
+
 ## API reference
 
 Every public item, with the `chs_*` entry point underneath it. "derived" means
@@ -95,9 +194,15 @@ the crate computes it with no C call.
 
 | Item | C function | Takes | Returns | Errors |
 |---|---|---|---|---|
-| `Registry::new(dir)` / `from_env()` / `from_env_or(dir)` / `with_timezone(dir, tz)` | `chs_clickhouse_version` + `chs_abi_revision` + `chs_init` per artifact | registry directory; optional timezone (default `UTC`) | `Registry` | `Registry`, `Load`, `NotAnArtifact`, `CorruptArtifact`, `VersionMismatch`, `Init`, `InitConflict`, `EmptyRegistry`; `NoRegistryEnv` (`from_env`) |
-| `Registry::for_version(v)` | derived | minor line or exact patch | `Arc<Library>` | `NoSuchVersion` (names what IS loaded; no nearest fallback) |
-| `Registry::versions()` / `libraries()` / `dir()` | derived | — | minor lines, numeric order / loaded libraries, release order / path | — |
+| `Registry::new(dir)` / `from_env()` / `from_env_or(dir)` / `with_timezone(dir, tz)` | `chs_clickhouse_version` + `chs_abi_revision` + `chs_init` per artifact | registry directory; optional timezone (default `UTC`) | `Registry` (eager: every artifact in the directory) | `Registry`, `Load`, `NotAnArtifact`, `CorruptArtifact`, `VersionMismatch`, `Init`, `InitConflict`, `EmptyRegistry`; `NoRegistryEnv` (`from_env`) |
+| `Registry::from_search_path()` / `from_search_path_with(RegistryOptions)` | — (loads nothing until asked) | optional explicit dir, timezone, `autofetch` (+ `fetch: EnsureOptions`) | `Registry` (lazy: the `docs/fetch.md` §1 search path, one line per open) | — |
+| `Registry::for_version(v)` | derived; lazy: the per-artifact load above, on first open | minor line or exact patch | `Arc<Library>` | eager: `NoSuchVersion` (names what IS loaded; no nearest fallback); lazy: `ArtifactMissing` (§7), or the fetch's own error under autofetch |
+| `Registry::versions()` / `libraries()` / `dir()` / `search_path()` / `autofetch()` | derived | — | minor lines, numeric order (lazy: what is installed) / loaded libraries, release order (`Vec<Arc<Library>>`) / path / the directories looked in / the setting | — |
+| `ensure(line, &EnsureOptions)` (feature `fetch`) | — | line or exact patch; the flags of `chtypes fetch` | `Installed { dir, line, version, library, library_sha256, platform, action, asset }` | `ArtifactUntrusted`, `ArtifactCorrupt`, `ArtifactPinned`, `ArtifactUnpublished`, `SourceUnreachable`, `Fetch` |
+| `fetch::ensure_all` / `verify_installed(dir)` / `release_info(&opts)` / `install_dir(&opts)` / `search_path(&opts)` / `parse_line` (feature `fetch`) | — | as `chtypes fetch --all` / `verify` / `list` / `where` | `Vec<Installed>` / `Vec<Verification>` / `ReleaseInfo` / path / paths / minor | as `ensure` |
+| `fetch::TrustPolicy`, `LockFile`, `IndexRow`, `verify_signature`, `sha256_file`, `RELEASE_PUBLIC_KEY[_HEX]`, `RELEASE_KEY_ID` (feature `fetch`) | — | the pieces of the chain, for a host that wants them separately | — | `Fetch` (a malformed key list) |
+| `registry_search_path(explicit)` / `search_path_for(platform, explicit)` / `install_dir[_for]` / `locate[_in]` / `installed_lines` / `host_platform` / `cache_dir_for` / `default_registry_dir` | derived | — | the §1 search path, where fetch writes, `<dir>/<minor>` of the first hit, what is installed, `<os>-<arch>` | — |
+| `Error::artifact_code()` | derived | — | the shared `CHTYPES_ARTIFACT_*` / `CHTYPES_SOURCE_UNREACHABLE` code, `None` otherwise | — |
 | `Registry::shutdown()` | `chs_shutdown` per library | — | — | — |
 | `Library::load(path, tz)` | `dlopen` + the four mandatory symbols | artifact path, timezone | `Library` | `Load`, `NotAnArtifact`, `Init`, `InitConflict`, `Nul` |
 | `Library::version()` / `minor()` / `path()` | `chs_clickhouse_version` (cached) | — | `"25.8.28.1-lts"` / `"25.8"` / path | — |
@@ -128,7 +233,7 @@ the crate computes it with no C call.
 | `reconstruct_ddl(&cols)` | derived | discovered columns | column-declaration list for `compile` | `Discovery` |
 | `RowResult` / `BatchResult` / `Value` / `Transform` (+ `lossy()`) / `Substitution` / `Computed` / `Outcome` | derived from the result document | — | see rustdoc; `BatchResult::engine_rows_bytes()` is the byte-exact stored truth | — |
 | `RawText` | — | — | byte-exact stored rendering; `as_str()` is fallible, `to_lossy()` explicit | — |
-| Constants: `Format` (codes 0–9), `CompileMode::Declared`=0, `CODE_UNSUPPORTED`=−2, `ABI_REVISION` (4), `DEFAULT_TIMEZONE`, `NO_SETTINGS`, `NO_PARAMS`, `REGISTRY_ENV`, `SETTING_*` (the chtypes keys), `reason::*` (24 stable spellings) | — | — | — | — |
+| Constants: `Format` (codes 0–9), `CompileMode::Declared`=0, `CODE_UNSUPPORTED`=−2, `ABI_REVISION` (4), `DEFAULT_TIMEZONE`, `NO_SETTINGS`, `NO_PARAMS`, `REGISTRY_ENV`, `AUTOFETCH_ENV`, `SYSTEM_ARTIFACT_ROOTS`, `CODE_ARTIFACT_*` / `CODE_SOURCE_UNREACHABLE`, `FETCH_COMMAND`, `SETTING_*` (the chtypes keys), `reason::*` (24 stable spellings) | — | — | — | — |
 
 ## Filters, query parameters and the block twin (ABI revisions 3–4)
 
@@ -317,4 +422,8 @@ shape-faithful exactly when the discovered profile is declared at compile.
 - [`playground/rust/`](../../playground/rust/) — a nine-section runnable tour;
   the go/, python/ and ts/ tours beside it print the same nine sections.
 - `cargo test` — integration tests and the golden set skip without a registry;
-  `CHTYPES_REGISTRY=/path/to/registry cargo test` runs them.
+  `CHTYPES_REGISTRY=/path/to/registry cargo test` runs them. The fetch suite
+  (`tests/fetch.rs`) needs only `spec/fixtures/fetch/` and runs offline.
+- `cargo build --no-default-features` — the loader without the `fetch`
+  feature: no binary, no `ensure`, and none of the fetch dependencies
+  (`ed25519-dalek`, `sha2`, `ureq`, `base64`, `tar`, `flate2`).

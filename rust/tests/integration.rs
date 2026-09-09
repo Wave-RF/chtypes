@@ -96,7 +96,8 @@ fn the_registry_loads_and_libraries_name_themselves() {
     // Release order, not directory order (spec/bindings.md §Version selection,
     // rule 2 — every ordered surface): the lexical scan put 25.10 before 25.8
     // until 2026-08-26. versions() and libraries() must agree.
-    let minors: Vec<&str> = reg.libraries().iter().map(|l| l.minor()).collect();
+    let libraries = reg.libraries();
+    let minors: Vec<&str> = libraries.iter().map(|l| l.minor()).collect();
     let numeric = |m: &str| -> (u64, u64) {
         let mut it = m.split('.');
         (
@@ -218,7 +219,8 @@ fn several_versions_answer_in_one_process_with_their_own_semantics() {
 
     // Distinct builds, all live at once, each loaded RTLD_LOCAL so their
     // ClickHouse symbols stay private.
-    let mut versions: Vec<&str> = reg.libraries().iter().map(|l| l.version()).collect();
+    let libraries = reg.libraries();
+    let mut versions: Vec<&str> = libraries.iter().map(|l| l.version()).collect();
     versions.sort_unstable();
     let count = versions.len();
     versions.dedup();
@@ -1177,7 +1179,7 @@ fn set_engine_tells_a_server_refusal_from_a_decline() {
 #[test]
 fn every_artifact_reports_a_compatible_abi_revision() {
     let reg = registry!();
-    assert!(chtypes::ABI_REVISION > 0, "ABI_REVISION must be positive");
+    const { assert!(chtypes::ABI_REVISION > 0, "ABI_REVISION must be positive") };
     let mut seen = 0usize;
     let mut predates = Vec::new();
     for lib in reg.libraries() {
