@@ -1,0 +1,29 @@
+{
+ "artifacts": {
+  "darwin-arm64/25.8": {
+   "file": "chtypes-25.8.28.1-lts-darwin-arm64.tar.gz",
+   "sha256": "ecedc535b6410e42a47af1ab950198cfa8906e5bbed7a9c76b85863fe5b8ac20"
+  },
+  "darwin-arm64/26.7": {
+   "file": "chtypes-26.7.3.19-stable-darwin-arm64.tar.gz",
+   "sha256": "335d432978c7d5ae35191ea256251d76b4e2e943df5b5d4c9c52a9cb2a25e4ad"
+  },
+  "linux-amd64/25.8": {
+   "file": "chtypes-25.8.28.1-lts-linux-amd64.tar.gz",
+   "sha256": "822941ce58620366882d1e0bbe284336ece7ad385eeeb1fdec388aef127f62f3"
+  },
+  "linux-amd64/26.7": {
+   "file": "chtypes-26.7.3.19-stable-linux-amd64.tar.gz",
+   "sha256": "6d02eafc22bf1bdc5f3ec9b2ec6702fe502905c6e56e37ec9e340b86882c251d"
+  },
+  "linux-arm64/25.8": {
+   "file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz",
+   "sha256": "8b1d56f1a09df2b47f7bf65a792216108efcaecedc4bea84616157d03185c555"
+  },
+  "linux-arm64/26.7": {
+   "file": "chtypes-26.7.3.19-stable-linux-arm64.tar.gz",
+   "sha256": "f9776dab2ff973640616c85697d9629449ec4d40e6c09f0b2d0c58fcdab87518"
+  }
+ },
+ "schema": 1
+}

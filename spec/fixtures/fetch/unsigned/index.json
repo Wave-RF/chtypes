@@ -1,0 +1,75 @@
+{
+ "artifacts": [
+  {
+   "arch": "arm64",
+   "bytes": 465,
+   "clickhouse_minor": "25.8",
+   "clickhouse_version": "25.8.28.1-lts",
+   "file": "chtypes-25.8.28.1-lts-darwin-arm64.tar.gz",
+   "library": "libchtypes.dylib",
+   "library_sha256": "d6ea1048c42b91f40c62bef79fc7bc1686d9e4b6a780d599d5fba6f52a420ccc",
+   "os": "darwin",
+   "sha256": "ecedc535b6410e42a47af1ab950198cfa8906e5bbed7a9c76b85863fe5b8ac20"
+  },
+  {
+   "arch": "arm64",
+   "bytes": 466,
+   "clickhouse_minor": "26.7",
+   "clickhouse_version": "26.7.3.19-stable",
+   "file": "chtypes-26.7.3.19-stable-darwin-arm64.tar.gz",
+   "library": "libchtypes.dylib",
+   "library_sha256": "600af8fe8d14ed1942164795066b40fb6951e8c2801b5d8350662d5b2d963ea8",
+   "os": "darwin",
+   "sha256": "335d432978c7d5ae35191ea256251d76b4e2e943df5b5d4c9c52a9cb2a25e4ad"
+  },
+  {
+   "arch": "amd64",
+   "bytes": 461,
+   "clickhouse_minor": "25.8",
+   "clickhouse_version": "25.8.28.1-lts",
+   "file": "chtypes-25.8.28.1-lts-linux-amd64.tar.gz",
+   "library": "libchtypes.so",
+   "library_sha256": "bacc23d5e886c7b2c007479e731474e1f6a723c9304c0eeab829aa2b88376a49",
+   "os": "linux",
+   "sha256": "822941ce58620366882d1e0bbe284336ece7ad385eeeb1fdec388aef127f62f3"
+  },
+  {
+   "arch": "amd64",
+   "bytes": 462,
+   "clickhouse_minor": "26.7",
+   "clickhouse_version": "26.7.3.19-stable",
+   "file": "chtypes-26.7.3.19-stable-linux-amd64.tar.gz",
+   "library": "libchtypes.so",
+   "library_sha256": "e52e911f681ebb6ce69c2046578afd18a727e7b28b170bcd981e6fe18f394ae0",
+   "os": "linux",
+   "sha256": "6d02eafc22bf1bdc5f3ec9b2ec6702fe502905c6e56e37ec9e340b86882c251d"
+  },
+  {
+   "arch": "arm64",
+   "bytes": 460,
+   "clickhouse_minor": "25.8",
+   "clickhouse_version": "25.8.28.1-lts",
+   "file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz",
+   "library": "libchtypes.so",
+   "library_sha256": "829d44597c8252ff9f28323cedf1af3bdb512bdca6c7b54d6b76eddb783428d8",
+   "os": "linux",
+   "sha256": "8b1d56f1a09df2b47f7bf65a792216108efcaecedc4bea84616157d03185c555"
+  },
+  {
+   "arch": "arm64",
+   "bytes": 463,
+   "clickhouse_minor": "26.7",
+   "clickhouse_version": "26.7.3.19-stable",
+   "file": "chtypes-26.7.3.19-stable-linux-arm64.tar.gz",
+   "library": "libchtypes.so",
+   "library_sha256": "bb9f9e21e0a01f424630ec082e9eba2b7aff551b93b5a4d0d96737bf282718e8",
+   "os": "linux",
+   "sha256": "f9776dab2ff973640616c85697d9629449ec4d40e6c09f0b2d0c58fcdab87518"
+  }
+ ],
+ "generated_at": "2026-09-09T00:00:00Z",
+ "license": "Elastic-2.0",
+ "license_url": "https://www.elastic.co/licensing/elastic-license",
+ "release_tag": "fixtures",
+ "schema": 1
+}

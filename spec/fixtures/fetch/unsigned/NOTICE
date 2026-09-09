@@ -1,0 +1,17 @@
+chtypes native artifacts
+Copyright (c) 2026 Wave RF, Inc.
+
+The files in this release — libchtypes (one build per ClickHouse version and
+platform), manifest.json, index.json, SHA256SUMS — are licensed under the
+Elastic License 2.0 (LICENSE, https://www.elastic.co/licensing/elastic-license).
+In short: use, copy, distribute and embed them freely, including commercially;
+do not provide them to third parties as a hosted or managed service, and do
+not remove or circumvent any licence key functionality (there is none today).
+
+Each artifact contains an unmodified build of ClickHouse (Apache License 2.0,
+Copyright 2016-2026 ClickHouse, Inc.) compiled behind the chs_* C ABI; the
+ClickHouse licence and NOTICE apply to that code and are preserved in the
+vendored source this artifact was built from.
+
+The SDKs that load these artifacts — https://github.com/wave-rf/chtypes — are
+Apache License 2.0 and are not covered by this notice.
