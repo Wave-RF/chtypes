@@ -1,0 +1,100 @@
+{
+ "generated_by": "chtypes-core tests/sdk/fetch-fixtures/gen.py \u2014 never edit by hand",
+ "index_row_fields": [
+  "arch",
+  "bytes",
+  "clickhouse_minor",
+  "clickhouse_version",
+  "file",
+  "library",
+  "library_sha256",
+  "os",
+  "sha256"
+ ],
+ "key_id": "d1251e468f9156ef",
+ "lines": {
+  "25.8": "25.8.28.1-lts",
+  "26.7": "26.7.3.19-stable"
+ },
+ "lock": {
+  "file": "chtypes.lock",
+  "note": "--frozen with it installs signed/; a lock whose sha256 differs -> CHTYPES_ARTIFACT_PINNED (exit 1)",
+  "pins": "signed"
+ },
+ "platforms": [
+  "linux-arm64",
+  "linux-amd64",
+  "darwin-arm64"
+ ],
+ "release_tag": "fixtures",
+ "schema": 1,
+ "source_date_epoch": 1788912000,
+ "trusted_keys": [
+  "78da216574a56c57f6bef3054c2d234dc36936e6b8edbc2e340cc81ffb7d173d"
+ ],
+ "unpublished": {
+  "code": "CHTYPES_ARTIFACT_UNPUBLISHED",
+  "exit": 4,
+  "line": "24.8",
+  "patch": "25.8.99.1-lts",
+  "platform": "darwin-amd64"
+ },
+ "verdicts": [
+  {
+   "allow_unsigned": false,
+   "code": null,
+   "exit": 0,
+   "fixture": "signed",
+   "trusted_keys": "test",
+   "why": "nothing is wrong: installs every row"
+  },
+  {
+   "allow_unsigned": false,
+   "code": "CHTYPES_ARTIFACT_UNTRUSTED",
+   "exit": 1,
+   "fixture": "signed",
+   "trusted_keys": "release",
+   "why": "the embedded release key does not sign fixtures \u2014 only CHTYPES_TRUSTED_KEYS=<test key> accepts them"
+  },
+  {
+   "allow_unsigned": false,
+   "code": "CHTYPES_ARTIFACT_UNTRUSTED",
+   "exit": 1,
+   "fixture": "bad-signature",
+   "trusted_keys": "test",
+   "why": "SHA256SUMS.sig's signature was made by ANOTHER key; its header line still names the test key"
+  },
+  {
+   "allow_unsigned": false,
+   "code": "CHTYPES_ARTIFACT_UNTRUSTED",
+   "exit": 1,
+   "fixture": "unsigned",
+   "trusted_keys": "test",
+   "why": "there is no SHA256SUMS.sig"
+  },
+  {
+   "allow_unsigned": true,
+   "code": null,
+   "exit": 0,
+   "fixture": "unsigned",
+   "trusted_keys": "test",
+   "why": "CHTYPES_ALLOW_UNSIGNED=1 skips step 0 with one loud warning naming the source"
+  },
+  {
+   "allow_unsigned": false,
+   "code": "CHTYPES_ARTIFACT_CORRUPT",
+   "exit": 1,
+   "fixture": "tampered-tarball",
+   "trusted_keys": "test",
+   "why": "one byte of every tarball is flipped (same length); index.json, SHA256SUMS and the signature are signed/'s"
+  },
+  {
+   "allow_unsigned": false,
+   "code": "CHTYPES_ARTIFACT_CORRUPT",
+   "exit": 1,
+   "fixture": "sums-index-mismatch",
+   "trusted_keys": "test",
+   "why": "index.json's sha256 differs from the authentically signed SHA256SUMS for every row; the tarballs match SHA256SUMS"
+  }
+ ]
+}

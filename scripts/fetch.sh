@@ -21,11 +21,20 @@
 # The verification chain, in order, because a fetch that installs a corrupted
 # 300 MB library and reports success is the worst outcome available here:
 #
+#   0. SHA256SUMS.sig  an ed25519 signature over the exact bytes of SHA256SUMS,
+#                      verified under a trusted key BEFORE anything else is read
+#                      (docs/fetch.md §4): an unsigned or mis-signed release is
+#                      CHTYPES_ARTIFACT_UNTRUSTED, never downloaded around
 #   1. index.json   names the asset and records its sha256
-#   2. SHA256SUMS   independently records the same sha256 — the two must agree
+#   2. SHA256SUMS   — now known authentic — records the same sha256; the two must agree
 #   3. the tarball  is hashed BEFORE it is unpacked; a mismatch aborts
 #   4. manifest.json inside it names the library and its sha256; the installed
 #      library is re-hashed after the move, in place
+#
+# Exit codes (docs/fetch.md §6), and the §7 code every failure message names:
+#   0 ok · 1 verification failed (CHTYPES_ARTIFACT_UNTRUSTED, _CORRUPT) · 2 usage ·
+#   3 source unreachable (CHTYPES_SOURCE_UNREACHABLE) · 4 not published for this
+#   platform/line (CHTYPES_ARTIFACT_UNPUBLISHED).
 #
 # This script is the SDK's, and stands alone: no cache directories need to
 # exist, nothing else in this repository is required, `gh` is optional (plain
@@ -47,6 +56,12 @@
 #   CHTYPES_RELEASE_REPO   owner/name: fetch from GitHub Releases instead
 #   CHTYPES_TARGET         platform key (default: this host's own <os>-<arch>)
 #   XDG_CACHE_HOME         cache root (default ~/.cache)
+#   CHTYPES_TRUSTED_KEYS   hex ed25519 public key(s), comma-separated. REPLACES the
+#                          embedded release key — for a mirror signed by someone
+#                          else, or spec/fixtures/fetch's test key
+#   CHTYPES_ALLOW_UNSIGNED 1 skips step 0 with one loud warning naming the source.
+#                          Never the default; never silent
+#   CHTYPES_DOWNLOAD_TOKEN sent as a bearer token to the artifacts host (optional)
 set -euo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -55,6 +70,19 @@ CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/chtypes"
 
 usage() { sed -n '2,12p' "$0"; exit 2; }
 die()   { echo "fetch.sh: $*" >&2; exit 1; }
+bad_usage() { echo "fetch.sh: $*" >&2; exit 2; }
+# fail <CHTYPES_…> <message> — every failure names its §7 code and exits with
+# its §6 number, so a caller can tell "the host is down" from "the release is
+# forged" from "nothing for this platform" without parsing prose.
+fail() {
+  local code="$1"; shift
+  echo "fetch.sh: $code: $*" >&2
+  case "$code" in
+    CHTYPES_SOURCE_UNREACHABLE)   exit 3 ;;
+    CHTYPES_ARTIFACT_UNPUBLISHED) exit 4 ;;
+    *)                            exit 1 ;;
+  esac
+}
 say()   { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
 
 # ------------------------------------------------------------------ arguments
@@ -62,29 +90,29 @@ SPELLING=""; PLATFORM=""; DEST=""; TAG=""; BASE_URL=""
 REPO="${CHTYPES_RELEASE_REPO:-}"; FORCE=0; ALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --platform) [ $# -ge 2 ] || die "--platform needs a value"; PLATFORM="$2"; shift ;;
+    --platform) [ $# -ge 2 ] || bad_usage "--platform needs a value"; PLATFORM="$2"; shift ;;
     # --out is the spelling the CI workflows use (.github/workflows/rigs.yml,
     # verify.yml); --dest is this script's own. They are the same flag.
-    --dest|--out) [ $# -ge 2 ] || die "$1 needs a value";       DEST="$2"; shift ;;
-    --tag)      [ $# -ge 2 ] || die "--tag needs a value";      TAG="$2"; shift ;;
-    --url)      [ $# -ge 2 ] || die "--url needs a value";      BASE_URL="$2"; shift ;;
-    --repo)     [ $# -ge 2 ] || die "--repo needs a value";     REPO="$2"; shift ;;
+    --dest|--out) [ $# -ge 2 ] || bad_usage "$1 needs a value";       DEST="$2"; shift ;;
+    --tag)      [ $# -ge 2 ] || bad_usage "--tag needs a value";      TAG="$2"; shift ;;
+    --url)      [ $# -ge 2 ] || bad_usage "--url needs a value";      BASE_URL="$2"; shift ;;
+    --repo)     [ $# -ge 2 ] || bad_usage "--repo needs a value";     REPO="$2"; shift ;;
     --all)      ALL=1 ;;
     --force)    FORCE=1 ;;
     -h|--help)  usage ;;
-    -*)         die "unknown flag: $1" ;;
-    *)          [ -z "$SPELLING" ] || die "more than one version given ($SPELLING, $1)"; SPELLING="$1" ;;
+    -*)         bad_usage "unknown flag: $1" ;;
+    *)          [ -z "$SPELLING" ] || bad_usage "more than one version given ($SPELLING, $1)"; SPELLING="$1" ;;
   esac
   shift
 done
 if [ "$ALL" = 1 ]; then
   # --all takes every line the release publishes for the platform. Which lines
   # exist is a question index.json answers, so a caller never restates the list.
-  [ -z "$SPELLING" ] || die "--all installs every published line; drop the version argument ($SPELLING)"
+  [ -z "$SPELLING" ] || bad_usage "--all installs every published line; drop the version argument ($SPELLING)"
   SPELLING="--all"
 fi
 [ -n "$SPELLING" ] || { echo "fetch.sh: a ClickHouse version spelling is required (or --all)" >&2; usage; }
-[ -n "$BASE_URL" ] && [ -n "$TAG" ] && die "--url names a full base; --tag selects a release on the artifacts host (or in --repo) — pass one"
+[ -n "$BASE_URL" ] && [ -n "$TAG" ] && bad_usage "--url names a full base; --tag selects a release on the artifacts host (or in --repo) — pass one"
 
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
@@ -103,7 +131,7 @@ if [ -z "$PLATFORM" ]; then
 fi
 case "$PLATFORM" in
   linux-arm64|linux-amd64|darwin-arm64|darwin-amd64) ;;
-  *) die "not a known platform key: $PLATFORM (linux|darwin)-(arm64|amd64)" ;;
+  *) bad_usage "not a known platform key: $PLATFORM (linux|darwin)-(arm64|amd64)" ;;
 esac
 if [ "${PLATFORM%%-*}" != "$HOST_OS" ]; then
   echo "fetch.sh: note — fetching $PLATFORM artifacts on a $HOST_OS host." >&2
@@ -161,7 +189,7 @@ if [ -z "$WANT_LINE" ]; then
     *)       WANT_EXACT="" ;;
   esac
   WANT_LINE="$(printf '%s' "$BARE" | cut -d. -f1,2)"
-  [ -n "$WANT_LINE" ] || die "cannot make a ClickHouse version out of '$SPELLING'"
+  [ -n "$WANT_LINE" ] || bad_usage "cannot make a ClickHouse version out of '$SPELLING'"
   echo "fetch.sh: resolve-version.py unavailable; taking '$SPELLING' as line $WANT_LINE" >&2
 fi
 
@@ -186,40 +214,48 @@ else
 fi
 if [ "$SOURCE_KIND" != url ] && [ -z "$REPO" ]; then
   REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
-  [ -n "$REPO" ] || die "cannot tell which GitHub repo to fetch from — pass --repo owner/name, set CHTYPES_RELEASE_REPO, or use --url"
+  [ -n "$REPO" ] || bad_usage "cannot tell which GitHub repo to fetch from — pass --repo owner/name, set CHTYPES_RELEASE_REPO, or use --url"
 fi
 
-get_file() { # get_file <asset-name> <destination>
-  local name="$1" out="$2" src
+get_file() { # get_file <asset-name> <destination>  ->  0 fetched · 1 absent (404, no such file) · 2 unreachable
+  # "Absent" and "unreachable" are different verdicts: a release with no
+  # SHA256SUMS.sig is UNTRUSTED, a host that cannot be reached is not.
+  local name="$1" out="$2" src code
+  rm -f "$out"
   case "$SOURCE_KIND" in
     url)
       case "$BASE_URL" in
-        file://*) src="${BASE_URL#file://}/$name"
-                  [ -f "$src" ] || return 1
-                  cp "$src" "$out" ;;
         http://*|https://*)
-                  curl -fsSL --retry 3 --retry-delay 1 -o "$out" \
+          code="$(curl -sSL --retry 3 --retry-delay 1 -o "$out" -w '%{http_code}' \
                     ${CHTYPES_DOWNLOAD_TOKEN:+-H "Authorization: Bearer $CHTYPES_DOWNLOAD_TOKEN"} \
-                    "$BASE_URL/$name" ;;
-        *)        src="$BASE_URL/$name"
-                  [ -f "$src" ] || return 1
-                  cp "$src" "$out" ;;
+                    "$BASE_URL/$name" 2>"$WORK/.curl.err")" || code="000"
+          case "$code" in
+            200) return 0 ;;
+            404) rm -f "$out"; return 1 ;;
+            *)   rm -f "$out"; echo "fetch.sh: $BASE_URL/$name -> HTTP $code $(tr -d '\n' < "$WORK/.curl.err")" >&2; return 2 ;;
+          esac ;;
+        *)
+          src="${BASE_URL#file://}"
+          [ -d "$src" ] || return 2
+          [ -f "$src/$name" ] || return 1
+          cp "$src/$name" "$out" ;;
       esac ;;
     gh)
       # No --tag means the latest release, which is gh's own default here.
       local args=(--repo "$REPO" --pattern "$name" --dir "$(dirname "$out")" --clobber)
-      if [ -n "$TAG" ]; then gh release download "$TAG" "${args[@]}" >/dev/null
-      else gh release download "${args[@]}" >/dev/null; fi
+      if [ -n "$TAG" ]; then gh release download "$TAG" "${args[@]}" >/dev/null 2>&1 || true
+      else gh release download "${args[@]}" >/dev/null 2>&1 || true; fi
       [ -f "$(dirname "$out")/$name" ] || return 1
       [ "$(dirname "$out")/$name" = "$out" ] || mv "$(dirname "$out")/$name" "$out" ;;
     http)
-      if [ -n "$TAG" ]; then
-        curl -fsSL --retry 3 --retry-delay 1 -o "$out" \
-          "https://github.com/$REPO/releases/download/$TAG/$name"
-      else
-        curl -fsSL --retry 3 --retry-delay 1 -o "$out" \
-          "https://github.com/$REPO/releases/latest/download/$name"
-      fi ;;
+      if [ -n "$TAG" ]; then src="https://github.com/$REPO/releases/download/$TAG/$name"
+      else src="https://github.com/$REPO/releases/latest/download/$name"; fi
+      code="$(curl -sSL --retry 3 --retry-delay 1 -o "$out" -w '%{http_code}' "$src" 2>"$WORK/.curl.err")" || code="000"
+      case "$code" in
+        200) return 0 ;;
+        404) rm -f "$out"; return 1 ;;
+        *)   rm -f "$out"; echo "fetch.sh: $src -> HTTP $code $(tr -d '\n' < "$WORK/.curl.err")" >&2; return 2 ;;
+      esac ;;
   esac
 }
 
@@ -229,8 +265,129 @@ if [ "$ALL" = 1 ]; then say "every published ClickHouse line, $PLATFORM -> $DEST
 else say "ClickHouse $SPELLING -> line $WANT_LINE${WANT_EXACT:+ (exact $WANT_EXACT)}, $PLATFORM"; fi
 say "source $SOURCE_DESC"
 
+# --------------------------------------------------------- step 0: the signature
+# docs/fetch.md §3 step 0 and §4. SHA256SUMS is fetched first and NOTHING — not
+# index.json — is read until its ed25519 signature verifies under a trusted
+# key: the embedded release key, or exactly the keys CHTYPES_TRUSTED_KEYS
+# names. The verifier is RFC 8032 in stdlib Python, because this script stands
+# alone and python3 ships no ed25519. CHTYPES_ALLOW_UNSIGNED=1 skips the step
+# with one loud warning naming the source, and is never the default.
+RELEASE_PUBLIC_KEY="fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc"   # key id deb275922dbff76e
+verify_signature() { # verify_signature <SHA256SUMS> <SHA256SUMS.sig> -> prints the verdict; exit 0 iff a trusted key verifies
+  python3 - "$1" "$2" "${CHTYPES_TRUSTED_KEYS:-$RELEASE_PUBLIC_KEY}" "${CHTYPES_TRUSTED_KEYS:+CHTYPES_TRUSTED_KEYS}" <<'PY'
+import base64, hashlib, sys
+sums_path, sig_path, keys, keysrc = sys.argv[1:]
+def refuse(why): print(why); sys.exit(1)
+# ---- ed25519 verification, RFC 8032 over Python integers (the reference
+# vector in docs/fetch.md §4 and RFC 8032's test 1 are checked at every run).
+p = 2**255 - 19
+q = 2**252 + 27742317777372353535851937790883648493
+d = (-121665 * pow(121666, p - 2, p)) % p
+def sha512(s): return hashlib.sha512(s).digest()
+def inv(x): return pow(x, p - 2, p)
+def add(P, Q):
+    X1, Y1, Z1, T1 = P; X2, Y2, Z2, T2 = Q
+    A = (Y1 - X1) * (Y2 - X2) % p; B = (Y1 + X1) * (Y2 + X2) % p
+    C = 2 * T1 * T2 * d % p; D = 2 * Z1 * Z2 % p
+    E, F, G, H = B - A, D - C, D + C, B + A
+    return (E * F % p, G * H % p, F * G % p, E * H % p)
+def mul(s, P):
+    Q = (0, 1, 1, 0)
+    while s:
+        if s & 1: Q = add(Q, P)
+        P = add(P, P); s >>= 1
+    return Q
+def recover_x(y, sign):
+    x2 = (y * y - 1) * inv(d * y * y + 1) % p
+    if x2 == 0: return None if sign else 0
+    x = pow(x2, (p + 3) // 8, p)
+    if (x * x - x2) % p: x = x * pow(2, (p - 1) // 4, p) % p
+    if (x * x - x2) % p: return None
+    if (x & 1) != sign: x = p - x
+    return x
+By = 4 * inv(5) % p; Bx = recover_x(By, 0); B = (Bx, By, 1, Bx * By % p)
+def decode(s):
+    if len(s) != 32: return None
+    y = int.from_bytes(s, "little"); sign = y >> 255; y &= (1 << 255) - 1
+    if y >= p: return None
+    x = recover_x(y, sign)
+    return None if x is None else (x, y, 1, x * y % p)
+def verify(pub, msg, sig):
+    if len(sig) != 64 or len(pub) != 32: return False
+    A = decode(pub); R = decode(sig[:32])
+    if A is None or R is None: return False
+    s = int.from_bytes(sig[32:], "little")
+    if s >= q: return False
+    h = int.from_bytes(sha512(sig[:32] + pub + msg), "little") % q
+    P1 = mul(s, B); P2 = add(R, mul(h, A))
+    return (P1[0] * P2[2] - P2[0] * P1[2]) % p == 0 and (P1[1] * P2[2] - P2[1] * P1[2]) % p == 0
+def keyid(pub): return hashlib.sha256(pub).hexdigest()[:16]
+RELEASE = bytes.fromhex("fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc")
+REF_SIG = bytes.fromhex("0fee686f7ed7c64b86a7dce0ffd66b15d1504178153c3b0cc118e2c9456afa6d3e2e55019eca8f75e44ab507d65b0714523e92c7f92452821930691212e76c04")
+RFC_PUB = bytes.fromhex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+RFC_SIG = bytes.fromhex("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+if not (keyid(RELEASE) == "deb275922dbff76e" and verify(RELEASE, b"hello\n", REF_SIG)
+        and not verify(RELEASE, b"hellp\n", REF_SIG) and verify(RFC_PUB, b"", RFC_SIG)):
+    refuse("the embedded ed25519 verifier failed its self-test — refusing to trust any verdict from it")
+# ---- the trusted set: the embedded release key, or exactly what the override names
+trusted = []
+for k in keys.replace(";", ",").split(","):
+    k = k.strip().lower()
+    if not k: continue
+    try: raw = bytes.fromhex(k)
+    except ValueError: raw = b""
+    if len(raw) != 32: refuse("CHTYPES_TRUSTED_KEYS entry %r is not a 64-hex ed25519 public key" % k)
+    trusted.append(raw)
+if not trusted: refuse("CHTYPES_TRUSTED_KEYS is set but names no key")
+# ---- the signature file: exactly the two lines of §4
+msg = open(sums_path, "rb").read()
+lines = open(sig_path, "rb").read().decode("utf-8", "replace").split("\n")
+if len(lines) < 2 or not lines[0].startswith("untrusted comment:"):
+    refuse("SHA256SUMS.sig is not the two-line format (an 'untrusted comment:' line, then base64)")
+try: sig = base64.b64decode(lines[1].strip(), validate=True)
+except Exception: refuse("SHA256SUMS.sig's second line is not base64")
+if len(sig) != 64: refuse("SHA256SUMS.sig carries %d signature bytes, not 64" % len(sig))
+# The comment's key id is UNTRUSTED — a hint for which key to try first, never a verdict.
+hint = lines[0].rsplit(" ", 1)[-1].strip()
+for pub in sorted(trusted, key=lambda k: keyid(k) != hint):
+    if verify(pub, msg, sig):
+        print("ed25519 key %s (%s)" % (keyid(pub), "from " + keysrc if keysrc else "the release key"))
+        sys.exit(0)
+refuse("the signature (header names key %s) verifies under none of the %d trusted key(s): %s"
+       % (hint, len(trusted), ", ".join(keyid(k) for k in trusted)))
+PY
+}
+fetch_release_file() { # fetch_release_file <name>: a release-level file the source MUST have
+  local rc=0
+  get_file "$1" "$WORK/$1" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) fail CHTYPES_SOURCE_UNREACHABLE "no $1 at $SOURCE_DESC — not a chtypes release" ;;
+    *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $1 from $SOURCE_DESC" ;;
+  esac
+}
+fetch_release_file SHA256SUMS
+SIG_STATUS=""
+if [ "${CHTYPES_ALLOW_UNSIGNED:-}" = 1 ]; then
+  echo "fetch.sh: WARNING signature verification is OFF (CHTYPES_ALLOW_UNSIGNED=1)." >&2
+  echo "          Nothing proves $SOURCE_DESC is what Wave RF published: every hash" >&2
+  echo "          below only shows the download matched what THAT source claims." >&2
+  echo "          Unset CHTYPES_ALLOW_UNSIGNED for anything but a test." >&2
+  SIG_STATUS="NOT VERIFIED (CHTYPES_ALLOW_UNSIGNED=1)"
+else
+  rc=0; get_file SHA256SUMS.sig "$WORK/SHA256SUMS.sig" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) fail CHTYPES_ARTIFACT_UNTRUSTED "$SOURCE_DESC has no SHA256SUMS.sig — an unsigned release is never installed (CHTYPES_ALLOW_UNSIGNED=1 overrides, for a test)" ;;
+    *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch SHA256SUMS.sig from $SOURCE_DESC" ;;
+  esac
+  SIG_STATUS="$(verify_signature "$WORK/SHA256SUMS" "$WORK/SHA256SUMS.sig")" \
+    || fail CHTYPES_ARTIFACT_UNTRUSTED "$SOURCE_DESC: $SIG_STATUS — NOT reading the release"
+  say "SHA256SUMS.sig verified: $SIG_STATUS"
+fi
+
 # --------------------------------------------------------------- pick the asset
-get_file index.json "$WORK/index.json" || die "no index.json at $SOURCE_DESC"
+fetch_release_file index.json
 # The listing names the artifacts' licence (Elastic License 2.0); say so once,
 # before a byte of library moves — the SDK is Apache 2.0, the artifact is not.
 LIC="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("license","") + " " + d.get("license_url",""))' "$WORK/index.json" 2>/dev/null || true)"
@@ -239,16 +396,16 @@ LIC="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("l
 # feeds `read`: a here-doc nested inside a command substitution inside a
 # here-doc parses, but it hides python's own error message, and that message is
 # the useful half when a release simply has no artifact for what was asked.
-SELECTED="$(python3 - "$WORK/index.json" "${PLATFORM%%-*}" "${PLATFORM##*-}" "$WANT_LINE" "$WANT_EXACT" "$STRICT_EXACT" "$ALL" <<'PY'
+SELECTED="$(python3 - "$WORK/index.json" "${PLATFORM%%-*}" "${PLATFORM##*-}" "$WANT_LINE" "$WANT_EXACT" "$STRICT_EXACT" "$ALL" 2>"$WORK/.select.err" <<'PY'
 import json, sys
 path, os_, arch, line, exact, strict, want_all = sys.argv[1:]
 strict, want_all = strict == "1", want_all == "1"
 doc = json.load(open(path))
 if doc.get("schema") != 1:
-    sys.exit("index.json schema %r is not 1 — this fetch.sh cannot read it" % doc.get("schema"))
+    sys.exit("corrupt: index.json schema %r is not 1 — this fetch.sh cannot read it" % doc.get("schema"))
 arts = [a for a in doc["artifacts"] if a["os"] == os_ and a["arch"] == arch]
 if not arts:
-    sys.exit("the release has nothing for %s-%s (it has: %s)"
+    sys.exit("unpublished: the release has nothing for %s-%s (it has: %s)"
              % (os_, arch, ", ".join(sorted({"%s-%s" % (a["os"], a["arch"])
                                              for a in doc["artifacts"]})) or "nothing"))
 
@@ -267,14 +424,14 @@ if want_all:
 else:
     hit = [a for a in arts if exact and a["clickhouse_version"] == exact]
     if strict and not hit:
-        sys.exit("you asked for exactly ClickHouse %s on %s-%s and this release does "
+        sys.exit("unpublished: you asked for exactly ClickHouse %s on %s-%s and this release does "
                  "not publish it (it has: %s).\n"
                  "          Ask for the line (%s) to take what was published."
                  % (exact, os_, arch, ", ".join(a["clickhouse_version"] for a in arts), line))
     if not hit:
         hit = [a for a in arts if a["clickhouse_minor"] == line]
     if not hit:
-        sys.exit("no artifact for ClickHouse line %s on %s-%s (it has: %s)"
+        sys.exit("unpublished: no artifact for ClickHouse line %s on %s-%s (it has: %s)"
                  % (line, os_, arch, ", ".join(a["clickhouse_version"] for a in arts)))
     # More than one patch on a line can only happen if a release shipped two;
     # take the newest by version number rather than by list order.
@@ -283,16 +440,19 @@ else:
 for a in hit:
     for k in ("file", "sha256", "bytes", "clickhouse_version", "clickhouse_minor", "library", "library_sha256"):
         if not a.get(k):
-            sys.exit("index.json entry for %s is missing %s" % (a.get("file"), k))
+            sys.exit("corrupt: index.json entry for %s is missing %s" % (a.get("file"), k))
     print("|".join([a["file"], a["sha256"], str(a["bytes"]), a["clickhouse_version"],
                     a["clickhouse_minor"], a["library"], a["library_sha256"]]))
 PY
-)" || die "index.json has nothing to install for this request"
-[ -n "$SELECTED" ] || die "could not select anything from index.json (see the message above)"
-
-# SHA256SUMS is release-level: fetched once, whether one version is being
-# installed or all of them.
-get_file SHA256SUMS "$WORK/SHA256SUMS" || die "no SHA256SUMS at $SOURCE_DESC"
+)" || {
+  # The selector's own message is the useful half; its first word is the code.
+  case "$(head -1 "$WORK/.select.err")" in
+    "unpublished: "*) fail CHTYPES_ARTIFACT_UNPUBLISHED "$(sed '1s/^unpublished: //' "$WORK/.select.err")" ;;
+    "corrupt: "*)     fail CHTYPES_ARTIFACT_CORRUPT     "$(sed '1s/^corrupt: //' "$WORK/.select.err")" ;;
+    *)                cat "$WORK/.select.err" >&2; fail CHTYPES_ARTIFACT_CORRUPT "index.json at $SOURCE_DESC could not be used for this request" ;;
+  esac
+}
+[ -n "$SELECTED" ] || fail CHTYPES_ARTIFACT_UNPUBLISHED "index.json selected nothing for this request"
 
 # install_one <row> — one index.json row, from the release to <dest>/<minor>/.
 install_one() {
@@ -301,7 +461,7 @@ install_one() {
 $1
 EOF
   [ -n "$ASSET" ] && [ -n "$ASSET_SHA" ] && [ -n "$A_LIBSHA" ] \
-    || die "malformed index row: $1"
+    || fail CHTYPES_ARTIFACT_CORRUPT "malformed index row: $1"
   say "$ASSET  ($ASSET_BYTES bytes, ClickHouse $A_VER, library $A_LIB)"
   if [ "$ALL" = 0 ] && [ -n "$WANT_EXACT" ] && [ "$A_VER" != "$WANT_EXACT" ]; then
     echo "fetch.sh: note — line $WANT_LINE points at $WANT_EXACT upstream today;" >&2
@@ -327,26 +487,26 @@ EOF
   # ---------------------------------------- the tarball, hashed before unpacking
   local SUMS_SHA
   SUMS_SHA="$(awk -v f="$ASSET" '$2 == f || $2 == "*" f {print $1}' "$WORK/SHA256SUMS" | head -1)"
-  [ -n "$SUMS_SHA" ] || die "SHA256SUMS has no line for $ASSET"
+  [ -n "$SUMS_SHA" ] || fail CHTYPES_ARTIFACT_CORRUPT "SHA256SUMS has no line for $ASSET"
   [ "$SUMS_SHA" = "$ASSET_SHA" ] \
-    || die "index.json says $ASSET is $ASSET_SHA but SHA256SUMS says $SUMS_SHA — the release disagrees with itself; do not install it"
+    || fail CHTYPES_ARTIFACT_CORRUPT "index.json says $ASSET is $ASSET_SHA but SHA256SUMS says $SUMS_SHA — the release disagrees with itself; not installing it"
 
   say "downloading $ASSET"
   rm -f "$WORK/$ASSET"
-  get_file "$ASSET" "$WORK/$ASSET" || die "could not download $ASSET from $SOURCE_DESC"
+  get_file "$ASSET" "$WORK/$ASSET" || fail CHTYPES_SOURCE_UNREACHABLE "could not download $ASSET from $SOURCE_DESC"
   local GOT_BYTES GOT_SHA
   GOT_BYTES="$(wc -c < "$WORK/$ASSET" | tr -d ' ')"
   GOT_SHA="$(sha256_of "$WORK/$ASSET")"
-  [ "$GOT_BYTES" = "$ASSET_BYTES" ] || die "$ASSET is $GOT_BYTES bytes, index.json says $ASSET_BYTES"
+  [ "$GOT_BYTES" = "$ASSET_BYTES" ] || fail CHTYPES_ARTIFACT_CORRUPT "$ASSET is $GOT_BYTES bytes, index.json says $ASSET_BYTES"
   [ "$GOT_SHA" = "$ASSET_SHA" ] \
-    || die "$ASSET FAILED its sha256: got $GOT_SHA, want $ASSET_SHA — NOT unpacking it"
+    || fail CHTYPES_ARTIFACT_CORRUPT "$ASSET FAILED its sha256: got $GOT_SHA, want $ASSET_SHA — NOT unpacking it"
   say "sha256 verified before unpacking: $GOT_SHA"
 
   # ----------------------------------------------------------------- install
   local UNPACK="$WORK/unpack.$A_MINOR"
   rm -rf "$UNPACK"; mkdir -p "$UNPACK"
   tar -xzf "$WORK/$ASSET" -C "$UNPACK"
-  [ -f "$UNPACK/manifest.json" ] || die "$ASSET contains no manifest.json at its root"
+  [ -f "$UNPACK/manifest.json" ] || fail CHTYPES_ARTIFACT_CORRUPT "$ASSET contains no manifest.json at its root"
   local MANIFEST M_LIB M_VER M_MINOR M_SHA
   # clickhouse_minor is absent from the first Linux artifacts (they predate the
   # field); deriving it from clickhouse_version is what minorOf() in
@@ -361,16 +521,16 @@ for k in ("library", "library_sha256"):
         sys.exit("manifest.json inside the tarball is missing %s" % k)
 print("|".join([m["library"], ver, minor, m["library_sha256"]]))
 PY
-)" || die "manifest.json inside $ASSET is not usable"
+)" || fail CHTYPES_ARTIFACT_CORRUPT "manifest.json inside $ASSET is not usable"
   IFS='|' read -r M_LIB M_VER M_MINOR M_SHA <<EOF
 $MANIFEST
 EOF
-  [ -n "$M_LIB" ] || die "manifest.json inside $ASSET did not yield a library name"
+  [ -n "$M_LIB" ] || fail CHTYPES_ARTIFACT_CORRUPT "manifest.json inside $ASSET did not yield a library name"
   # The index is a convenience; the manifest is the artifact's own claim about
   # itself. They must agree, or the index was built from a different artifact.
   [ "$M_LIB" = "$A_LIB" ] && [ "$M_VER" = "$A_VER" ] && [ "$M_MINOR" = "$A_MINOR" ] && [ "$M_SHA" = "$A_LIBSHA" ] \
-    || die "manifest.json inside $ASSET disagrees with index.json ($M_LIB/$M_VER/$M_MINOR vs $A_LIB/$A_VER/$A_MINOR)"
-  [ -f "$UNPACK/$M_LIB" ] || die "$ASSET names library $M_LIB but does not contain it"
+    || fail CHTYPES_ARTIFACT_CORRUPT "manifest.json inside $ASSET disagrees with index.json ($M_LIB/$M_VER/$M_MINOR vs $A_LIB/$A_VER/$A_MINOR)"
+  [ -f "$UNPACK/$M_LIB" ] || fail CHTYPES_ARTIFACT_CORRUPT "$ASSET names library $M_LIB but does not contain it"
 
   # Move into place through a sibling temp directory: an interrupted install must
   # never leave a half-populated <minor>/ for NewRegistry to dlopen.
@@ -389,12 +549,13 @@ EOF
   local FINAL_SHA
   FINAL_SHA="$(sha256_of "$INSTALL/$M_LIB")"
   if [ "$FINAL_SHA" != "$M_SHA" ]; then
-    die "installed $INSTALL/$M_LIB hashes $FINAL_SHA, manifest says $M_SHA — the install is bad"
+    fail CHTYPES_ARTIFACT_CORRUPT "installed $INSTALL/$M_LIB hashes $FINAL_SHA, manifest says $M_SHA — the install is bad"
   fi
   say "installed and verified"
   printf '    %s\n' "$INSTALL/" >&2
   ( cd "$INSTALL" && ls -l ) >&2
   printf '    %s sha256 %s\n' "$M_LIB" "$FINAL_SHA" >&2
+  printf '    release signature: %s\n' "$SIG_STATUS" >&2
   echo "    ClickHouse $M_VER — chtypes.NewRegistry(\"$DEST\") will now serve $M_MINOR" >&2
   echo "$INSTALL"
 }
