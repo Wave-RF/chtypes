@@ -36,13 +36,17 @@ pnpm install && pnpm build
 remove `node_modules` and reinstall.)
 
 **Artifact prerequisite.** The SDK loads per-version native artifacts; it does
-nothing without them. Fetch a published one (verified, into the per-user cache
-every SDK here defaults to), or build one in the core repository, which lands
-it in the same place:
+nothing without them. Fetch a published one — verified, into the per-user cache
+every SDK here defaults to — with the package's own command, or build one in
+the core repository, which lands it in the same place:
 
 ```sh
-scripts/fetch.sh 25.8      # -> ~/.cache/chtypes/artifacts/<os>-<arch>/25.8/  (docs/artifacts.md)
+npx @wavehouse/chtypes fetch 25.8      # -> ~/.cache/chtypes/artifacts/<os>-<arch>/25.8/
 ```
+
+(`scripts/fetch.sh` at the repository root is the reference implementation of
+the same contract, `docs/fetch.md`; the command, the function and the lazy
+fetch are in [Artifacts: fetch, verify, autofetch](#artifacts-fetch-verify-autofetch).)
 
 A registry holds one subdirectory per version:
 
@@ -52,8 +56,15 @@ A registry holds one subdirectory per version:
       CH_VERSION
       unsafe_families.txt   # the build's own refuse-list; empty is a valid list
 
-`new Registry(dir)` scans such a directory: the explicit `dir` argument, else
-`$CHTYPES_REGISTRY`, else the per-user cache (`defaultRegistryDir()`). For each artifact the
+`new Registry(dir?)` scans such a directory. Where it looks is the search path
+of `docs/fetch.md` §1, in order: the explicit `dir`, `$CHTYPES_REGISTRY`, the
+per-user cache (`defaultRegistryDir()`), then the reserved system locations
+`/usr/local/share/chtypes/artifacts/<os>-<arch>` and `/opt/chtypes/artifacts/<os>-<arch>`.
+The first directory holding artifacts is loaded at construction; a line it
+lacks is loaded from the first later directory that has it when first asked
+for (`registry.searchPath` lists every candidate; a named directory — the
+argument or the variable — that does not exist is an error naming it, never a
+silent fallback). For each artifact the
 loader dlopens the file `manifest.json#library` names, asks the library to name
 itself (`chs_clickhouse_version()` — nothing is inferred from paths), and
 checks the ABI revision: `chs_abi_revision()` must equal this binding's
@@ -61,6 +72,99 @@ checks the ABI revision: `chs_abi_revision()` must equal this binding's
 calling through mismatched declarations is undefined; `0` means the artifact
 predates the probe and individual missing symbols degrade to
 `UnsupportedError` at call time, never to a load failure.
+
+## Artifacts: fetch, verify, autofetch
+
+The fetch/verify contract every SDK implements identically is
+[`docs/fetch.md`](../docs/fetch.md); this package carries it as a `bin` and
+as a function.
+
+```sh
+npx @wavehouse/chtypes fetch 25.8                  # one line, verified, into the per-user cache
+npx @wavehouse/chtypes fetch --all                 # every line the release publishes for this host
+npx @wavehouse/chtypes fetch 25.8 --platform linux-arm64 --dest /opt/chtypes/artifacts/linux-arm64
+npx @wavehouse/chtypes fetch 25.8 --lock chtypes.lock   # record what was installed (file + sha256)
+npx @wavehouse/chtypes fetch 25.8 --frozen              # refuse anything chtypes.lock does not pin
+npx @wavehouse/chtypes verify                      # re-hash every installed line against its manifest
+npx @wavehouse/chtypes list                        # what is installed, and what the release offers
+npx @wavehouse/chtypes where                       # the registry directory fetch writes to
+```
+
+`fetch` prints the installed directory alone on stdout (progress on stderr),
+so `dir="$(npx @wavehouse/chtypes fetch 25.8)"` composes. Exit codes: 0 ok ·
+1 verification failed · 2 usage · 3 source unreachable · 4 not published for
+this platform/line. A line (`25.8`) resolves to the one patch the release
+publishes for it; an exact patch (`25.8.28.1-lts`) is a hard requirement.
+Sources: `--tag v1.2.0` picks a frozen release on `CHTYPES_ARTIFACTS_URL`
+(default `https://artifacts.wavehouse.dev`; the rolling `artifacts` release
+otherwise); `--url <base>` is any other base — a mirror, a `file://` path or
+a plain directory. `--offline` never touches the source: installed and
+verified is fine, anything else is `CHTYPES_SOURCE_UNREACHABLE`. Fetch writes
+to the first of `--dest`, `$CHTYPES_REGISTRY`, the per-user cache; never to a
+system location.
+
+**The verification chain**, in order — nothing else is a verdict, not an exit
+code, not a `Content-Length`: (0) `SHA256SUMS.sig`, an ed25519 signature over
+the bytes of `SHA256SUMS`, verified with the embedded release key
+(`RELEASE_PUBLIC_KEYS`, key id `deb275922dbff76e`) or with the keys in
+`CHTYPES_TRUSTED_KEYS=<hex>[,<hex>…]`, which *replace* it — an unsigned or
+mis-signed release is `CHTYPES_ARTIFACT_UNTRUSTED` and nothing is downloaded
+around it (`CHTYPES_ALLOW_UNSIGNED=1` skips this step with one loud warning
+naming the source, never silently); (1) `index.json` names the asset and its
+sha256; (2) the now-authentic `SHA256SUMS` must agree; (3) the tarball is
+hashed before it is unpacked; (4) `manifest.json` inside must agree with the
+index, and the installed library is re-hashed in place after the atomic
+rename. Any mismatch is `CHTYPES_ARTIFACT_CORRUPT` and nothing is installed.
+Installed-and-verified is a no-op (`--force` re-downloads). Once files are in
+a registry directory the loader trusts the directory, as a runtime trusts
+`node_modules` — pass `verifyChecksums: true` to re-hash at load.
+
+The same thing as a function:
+
+```ts
+import { ensure } from '@wavehouse/chtypes';
+
+const r = await ensure('25.8');            // idempotent; r.dir is <registry>/25.8, r.installed says whether bytes moved
+await ensure('25.8', { lock: 'chtypes.lock', frozen: true });          // CHTYPES_ARTIFACT_PINNED on drift
+await ensure('25.8', { url: 'file:///srv/mirror', trustedKeys: [hex] }); // a mirror signed by someone else
+```
+
+Every flag is a property of `EnsureOptions` (`dest`, `platform`, `tag`, `url`,
+`lock`, `frozen`, `force`, `offline`, `trustedKeys`, `allowUnsigned`,
+`onProgress`, `signal`); `ensureAll`, `verifyInstalled` and `listArtifacts`
+are `--all`, `verify` and `list`. Concurrent `ensure`s of one line in one
+process share one fetch.
+
+**Lazy fetch on first open is opt-in** — `new Registry(dir, { autofetch: true })`
+or `CHTYPES_AUTOFETCH=1` — because a production process must not begin a
+250 MB download inside a request. `Registry#for()` is synchronous and never
+fetches; `Registry#open()` is its async twin: with autofetch on, a line no
+directory on the search path holds is fetched through `ensure` first (into the
+directory fetch writes to, once per process per line even under concurrent
+opens), then loaded.
+
+```ts
+const registry = new Registry(undefined, { autofetch: true, fetch: { tag: 'v1.2.0' } });
+const lib = await registry.open('25.8');   // fetched on first use, loaded from then on
+```
+
+**The one error.** A line no directory on the search path holds is an
+`ArtifactMissingError` — a `RegistryError` with `code === 'CHTYPES_ARTIFACT_MISSING'`
+and this message, verbatim apart from the bracketed parts:
+
+```
+chtypes: no artifact for ClickHouse <line> (<os>-<arch>). Looked in: <dir1>, <dir2>, ….
+Install it:  npx @wavehouse/chtypes fetch <line>
+or set CHTYPES_AUTOFETCH=1 to fetch on first use.
+```
+
+The fetch verdicts are `FetchError` subclasses carrying the shared codes:
+`ArtifactUntrustedError` (`CHTYPES_ARTIFACT_UNTRUSTED`), `ArtifactCorruptError`
+(`CHTYPES_ARTIFACT_CORRUPT`), `ArtifactPinnedError` (`CHTYPES_ARTIFACT_PINNED`),
+`ArtifactUnpublishedError` (`CHTYPES_ARTIFACT_UNPUBLISHED`) and
+`SourceUnreachableError` (`CHTYPES_SOURCE_UNREACHABLE`). Artifacts are Elastic
+License 2.0, separate from this package's Apache 2.0; `LICENSE` and `NOTICE`
+ship in every release and `fetch` says so once.
 
 ## Quickstart
 
@@ -100,10 +204,11 @@ cross-SDK shape):
 
 | Symbol | C function | Params | Returns | Errors |
 |---|---|---|---|---|
-| `new Registry(dir?, options?)` | per artifact: dlopen, `chs_clickhouse_version`, `chs_abi_revision`, `chs_init` | registry dir (else `$CHTYPES_REGISTRY`, else the per-user cache); `{timezone='UTC', verifyChecksums}` | `Registry` | `RegistryError` (missing/broken registry, checksum, manifest mismatch); `ChtypesError` (ABI-revision mismatch, `chs_init` failure) |
+| `new Registry(dir?, options?)` | per artifact: dlopen, `chs_clickhouse_version`, `chs_abi_revision`, `chs_init` | registry dir — the head of the search path (it, `$CHTYPES_REGISTRY`, the per-user cache, the system locations); `{timezone='UTC', verifyChecksums, autofetch, fetch}` | `Registry` | `RegistryError` (a named directory that does not exist, no artifacts anywhere, unreadable directory, checksum, manifest mismatch, load failure); `ChtypesError` (ABI-revision mismatch, `chs_init` failure) |
 | `Registry#versions()` | — derived | — | minor lines, oldest first | never throws |
 | `Registry#libraries()` | — derived | — | every loaded `Library`, in release order | never throws |
-| `Registry#for(version)` | — derived (lookup) | minor line or exact patch | `Library` | `RegistryError` naming what IS loaded; never a nearest-version fallback |
+| `Registry#for(version)` | — derived (lookup; loads a line from a later search-path directory on demand) | minor line or exact patch | `Library` | `ArtifactMissingError` (a `RegistryError`, `code` `CHTYPES_ARTIFACT_MISSING`, names every directory looked in); `RegistryError` (a directory holds the line but it does not load); never a nearest-version fallback, never a fetch |
+| `Registry#open(version)` | — `for()` behind a promise; with `autofetch`, `ensure` first | minor line or exact patch | `Promise<Library>` | `ArtifactMissingError` (autofetch off); the `FetchError` verdicts; `RegistryError` (fetched, does not load) |
 | `Registry#has(version)` | — derived | version string | `boolean` | never throws |
 | `Registry#close()` / `Symbol.dispose` | `chs_shutdown` per library | — | — | see `Library#shutdown` |
 | `Library#validateType(expr)` | `chs_validate_type` | type expression | canonical spelling (use verbatim) | `SchemaError` (server refusal, e.g. 50); `UnsupportedError` (unsafe family / missing symbol) |
@@ -127,6 +232,9 @@ cross-SDK shape):
 | `Schema#close()` / `Symbol.dispose` | `chs_schema_free` | — | — | never throws; idempotent |
 | `minorOf(version)` | — derived | version string | minor line | never throws |
 | `compareMinor(a, b)` | — derived | two minor lines | numeric order (25.10 > 25.8) | never throws |
+| `ensure(line, opts?)` / `ensureAll(opts?)` | — no C call (the `docs/fetch.md` chain) | line or exact patch; `EnsureOptions` | `Promise<EnsureResult>` / `Promise<EnsureResult[]>` | `ArtifactUntrustedError`, `ArtifactCorruptError`, `ArtifactPinnedError`, `ArtifactUnpublishedError`, `SourceUnreachableError` (each with its `code`); `ChtypesError` (bad spelling, platform key, conflicting options) |
+| `verifyInstalled(dest?, platform?)` / `listArtifacts(opts?)` | — no C call | registry dir / `EnsureOptions` | `Promise<InstalledArtifact[]>` / `Promise<ListResult>` | `verifyInstalled` never throws; `listArtifacts` the `FetchError` verdicts unless `offline` |
+| `registrySearchPath(explicit?, platform?)` / `fetchDestination(explicit?, platform?)` / `hostPlatform()` | — derived (`docs/fetch.md` §1) | path/env probing | `string[]` / `string` / `string` | never throw |
 | `resolveRegistryDir(explicit?)` / `defaultRegistryDir()` / `looksLikeRegistry(dir)` | — derived | path/env probing | resolved dir / `string` / `boolean` | never throw |
 | `formatName(f)` | — derived | format code | constant name | never throws |
 | `encodeSettings(settings?)` | — derived | settings map | `settings_json` text | `ChtypesError` (a JS `number` value) |
@@ -142,9 +250,13 @@ Types and constants: `Format` (the `chs_format` integers 0–9, frozen),
 `Verdict`, `Value`, `Transform`, `Substitution`, `Computed`, `ColumnDoc`,
 `ColumnInfo`, `EngineOptions`, `CompileOptions`, `CompileFilterOptions`,
 `Settings`, `SettingValue`, `Reason`, `ServerProfile`, `DiscoveredColumn`,
-`Manifest`, `RegistryOptions`, `Json`, `JsonKind`, and the error classes
-`ChtypesError` (base), `RegistryError`, `SchemaError`, `UnsupportedError` (a
-**peer** of `SchemaError`, deliberately not a subclass).
+`Manifest`, `RegistryOptions`, `EnsureOptions`, `EnsureResult`, `FetchEvent`,
+`InstalledArtifact`, `ListResult`, `LockFile`, `ArtifactErrorCode`,
+`RELEASE_PUBLIC_KEYS`, `Json`, `JsonKind`, and the error classes
+`ChtypesError` (base), `RegistryError`, `ArtifactMissingError` (a
+`RegistryError` with `code`), `FetchError` and its five verdict subclasses,
+`SchemaError`, `UnsupportedError` (a **peer** of `SchemaError`, deliberately
+not a subclass).
 
 ## Filters, query parameters and the block twin (ABI revisions 3–4)
 
@@ -288,9 +400,9 @@ declare time, not swallowed.
   loaded version.
 - `for()` resolves a minor line (`"25.8"`) or an exact patch
   (`"25.8.28.1-lts"`); an unknown patch inside a loaded minor resolves to the
-  line. Failure names what IS loaded — never a fallback to the nearest
-  version. Version behaviour is non-monotonic; never infer one version's
-  answer from another's.
+  line. Failure is `ArtifactMissingError`, naming every directory looked in
+  — never a fallback to the nearest version. Version behaviour is
+  non-monotonic; never infer one version's answer from another's.
 - Every call is **synchronous on the JS thread**; ordinary single-threaded
   Node code needs no locking. `setDefaultSettings` and `shutdown` carry a
   reentrancy tripwire (the `NativeLibrary#inCall` counter) and refuse loudly

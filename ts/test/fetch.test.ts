@@ -132,10 +132,10 @@ function paxEntry(records: Record<string, string>): Buffer {
 interface FakeArtifact {
   minor: string;
   version: string;
-  os?: string;
-  arch?: string;
-  library?: string;
-  bytes?: number;
+  os?: string | undefined;
+  arch?: string | undefined;
+  library?: string | undefined;
+  bytes?: number | undefined;
 }
 
 interface ReleaseSpec {
@@ -309,14 +309,10 @@ function cliIo(): CliIo & { out: string[]; err: string[] } {
   return { out, err, stdout: (s) => out.push(s), stderr: (s) => err.push(s), tty: false };
 }
 
-const stderrLines = (): string[] => {
+/** Everything written to stderr from now until the spy is restored (afterEach), as lines. */
+const stderrLines = (): (() => string[]) => {
   const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-  return new Proxy([] as string[], {
-    get(_t, prop) {
-      const lines = spy.mock.calls.map((c) => String(c[0]));
-      return Reflect.get(lines, prop);
-    },
-  });
+  return () => spy.mock.calls.map((c) => String(c[0]));
 };
 
 // ---------------------------------------------------------- signature
@@ -513,7 +509,7 @@ describe('the verification chain against a synthetic release (docs/fetch.md §3)
     expect(r.installed).toBe(true);
     expect(r.signed).toBe(false);
     expect(r.keyId).toBeNull();
-    expect(lines.filter((l) => /WARNING/.test(l) && l.includes(unsigned.dir) && /NOT being verified/.test(l))).toHaveLength(1);
+    expect(lines().filter((l) => /WARNING/.test(l) && l.includes(unsigned.dir) && /NOT being verified/.test(l))).toHaveLength(1);
   });
 
   it('the allowUnsigned option skips step 0 with the same warning, and a mis-signed release installs under it', async () => {
@@ -522,7 +518,7 @@ describe('the verification chain against a synthetic release (docs/fetch.md §3)
     const lines = stderrLines();
     const r = await ensure('25.8', opts(bad, dest, { allowUnsigned: true }));
     expect(r.installed).toBe(true);
-    expect(lines.some((l) => /WARNING/.test(l) && /NOT being verified/.test(l))).toBe(true);
+    expect(lines().some((l) => /WARNING/.test(l) && /NOT being verified/.test(l))).toBe(true);
   });
 
   it('CHTYPES_ARTIFACT_CORRUPT: index.json and SHA256SUMS disagreeing is a broken release, not repaired', async () => {
@@ -569,7 +565,7 @@ describe('the verification chain against a synthetic release (docs/fetch.md §3)
     expect(err).toBeInstanceOf(ArtifactUnpublishedError);
     expect((err as FetchError).code).toBe('CHTYPES_ARTIFACT_UNPUBLISHED');
     expect((err as Error).message).toContain(`nothing for ${foreign}`);
-    expect(lines.some((l) => /note — fetching/.test(l))).toBe(true);
+    expect(lines().some((l) => /note — fetching/.test(l))).toBe(true);
 
     expect(await codeOf(ensure('19.1', opts(good, dest)))).toBe('CHTYPES_ARTIFACT_UNPUBLISHED');
     // An exact patch is a hard requirement; the release publishes another one.
@@ -994,7 +990,7 @@ describe('the CLI (docs/fetch.md §6)', () => {
     expect(listed.code).toBe(0);
     expect(listed.out).toMatch(/installed in .*:\n  25\.8 /);
     expect(listed.out).toMatch(/offers for .*:\n  25\.8 .*\(installed\)/);
-    expect(listed.out).toMatch(/26\.7 .*tar\.gz .*bytes\n/);
+    expect(listed.out).toMatch(/26\.7 .*tar\.gz {2}\d+ bytes/);
     const offline = await run(['list', '--dest', dest, '--offline']);
     expect(offline.out).not.toMatch(/offers/);
   });
@@ -1077,10 +1073,47 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under spec/fixtures/fetch (d
     expect(r.keyId).toBe(keyId(key));
     expect(await sha256File(path.join(r.dir, r.library))).toBe(r.librarySha256);
     expect((await ensure(fixtureLine, fixture('signed', dest))).installed).toBe(false);
-    expect(lines.filter((l) => /WARNING/.test(l))).toHaveLength(0);
+    expect(lines().filter((l) => /WARNING/.test(l))).toHaveLength(0);
     // The embedded release key must NOT verify a test-key fixture.
     delete process.env['CHTYPES_TRUSTED_KEYS'];
     expect(await codeOf(ensure(fixtureLine, fixture('signed', scratch('fixture-dest2'))))).toBe('CHTYPES_ARTIFACT_UNTRUSTED');
+  });
+
+  it('expected.json: the unpublished platform, line and patch are CHTYPES_ARTIFACT_UNPUBLISHED against signed/', async () => {
+    process.env['CHTYPES_TRUSTED_KEYS'] = key;
+    const expected = JSON.parse(readFileSync(path.join(SPEC_FIXTURES, 'expected.json'), 'utf8')) as {
+      key_id: string;
+      trusted_keys: string[];
+      lines: Record<string, string>;
+      unpublished: { code: string; exit: number; line: string; patch: string; platform: string };
+    };
+    expect(expected.trusted_keys).toContain(key);
+    expect(keyId(key)).toBe(expected.key_id);
+    const dest = scratch('fixture-dest');
+    stderrLines(); // the foreign-platform note is expected here; keep it out of the test log
+    const { line, patch, platform, code } = expected.unpublished;
+    expect(await codeOf(ensure(line, fixture('signed', dest)))).toBe(code);
+    expect(await codeOf(ensure(patch, fixture('signed', dest)))).toBe(code);
+    expect(await codeOf(ensure(fixtureLine, fixture('signed', dest, { platform })))).toBe(code);
+    expect(readdirSync(dest)).toEqual([]);
+    // And the published rows resolve to exactly the patches expected.json names.
+    for (const [minor, version] of Object.entries(expected.lines)) {
+      expect((await ensure(minor, fixture('signed', dest))).version).toBe(version);
+    }
+    expect(readdirSync(dest).sort()).toEqual(Object.keys(expected.lines).sort());
+  });
+
+  it('unsigned/ installs under CHTYPES_ALLOW_UNSIGNED=1, with one loud warning naming the source', async () => {
+    process.env['CHTYPES_TRUSTED_KEYS'] = key;
+    process.env['CHTYPES_ALLOW_UNSIGNED'] = '1';
+    const dest = scratch('fixture-dest');
+    const lines = stderrLines();
+    const r = await ensure(fixtureLine, fixture('unsigned', dest));
+    expect(r.installed).toBe(true);
+    expect(r.signed).toBe(false);
+    const warnings = lines().filter((l) => /WARNING/.test(l));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(path.join(SPEC_FIXTURES, 'unsigned'));
   });
 
   it.each([

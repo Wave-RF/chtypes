@@ -620,7 +620,7 @@ const inFlight = new Map<string, Promise<EnsureResult>>();
  * @throws {SourceUnreachableError} `CHTYPES_SOURCE_UNREACHABLE` — the source cannot be reached, or `offline` and not installed.
  * @throws {ChtypesError} for a spelling that is not a version, a bad platform key, or conflicting options.
  */
-export function ensure(spelling: string, options: EnsureOptions = {}): Promise<EnsureResult> {
+export async function ensure(spelling: string, options: EnsureOptions = {}): Promise<EnsureResult> {
   const req = parseVersionSpelling(spelling);
   const platform = resolvePlatform(options.platform);
   const dest = fetchDestination(options.dest, platform);
