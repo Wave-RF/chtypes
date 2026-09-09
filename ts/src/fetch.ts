@@ -62,6 +62,8 @@ export const RELEASE_PUBLIC_KEYS: readonly string[] = [
 ];
 /** The lock-file schema this SDK writes and reads (docs/fetch.md §5). */
 export const LOCK_SCHEMA = 1;
+/** The lock file `frozen` reads when no `lock` names one (docs/fetch.md, Decisions); relative, so the working directory's. */
+export const DEFAULT_LOCK_FILE = 'chtypes.lock';
 const INDEX_SCHEMA = 1;
 
 // ------------------------------------------------------------------ types
@@ -662,8 +664,9 @@ interface InstallContext {
 
 function installContext(platform: string, dest: string, options: EnsureOptions): InstallContext {
   const frozen = options.frozen ?? false;
-  const lockPath = options.lock !== undefined && options.lock !== '' ? path.resolve(options.lock) : undefined;
-  if (frozen && lockPath === undefined) throw new ChtypesError('chtypes: frozen needs a lock file (lock: <file>)');
+  // frozen without a lock path reads ./chtypes.lock (docs/fetch.md, Decisions).
+  const lockPath =
+    options.lock !== undefined && options.lock !== '' ? path.resolve(options.lock) : frozen ? path.resolve(DEFAULT_LOCK_FILE) : undefined;
   const lock = lockPath !== undefined ? readLock(lockPath) : null;
   if (frozen && lock === null) {
     throw new ArtifactPinnedError(`chtypes: ${lockPath} does not exist, and frozen refuses anything it does not pin`);

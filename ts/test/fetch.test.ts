@@ -660,7 +660,11 @@ describe('the verification chain against a synthetic release (docs/fetch.md §3)
     // No lock file at all under --frozen: nothing is pinned, so everything is refused.
     const missing = await ensure('25.8', opts(good, dest, { lock: path.join(dest, 'absent.lock'), frozen: true })).catch((e: unknown) => e);
     expect(missing).toBeInstanceOf(ArtifactPinnedError);
-    await expect(ensure('25.8', opts(good, dest, { frozen: true }))).rejects.toThrow(/frozen needs a lock file/);
+    // frozen without a lock path reads ./chtypes.lock; none here pins nothing.
+    expect(existsSync(path.resolve('chtypes.lock'))).toBe(false);
+    const defaulted = await ensure('25.8', opts(good, dest, { frozen: true })).catch((e: unknown) => e);
+    expect(defaulted).toBeInstanceOf(ArtifactPinnedError);
+    expect((defaulted as Error).message).toMatch(/chtypes\.lock does not exist/);
   });
 
   it('url and tag are exclusive; a bad platform key and a bad spelling are usage errors, not verdicts', async () => {

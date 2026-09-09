@@ -288,7 +288,9 @@ def test_fetch_all_installs_every_published_line(dest: Path) -> None:
 # -------------------------------------------------------------------- §5 lock
 
 
-def test_lock_records_then_enforces(dest: Path, tmp_path: Path) -> None:
+def test_lock_records_then_enforces(
+    dest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     kw = dict(platform=PLATFORM, url=_url("signed"), dest=dest, trusted_keys=_test_keys())
     lock = tmp_path / "chtypes.lock"
     ensure("25.8", lock=lock, **kw)
@@ -319,11 +321,17 @@ def test_lock_records_then_enforces(dest: Path, tmp_path: Path) -> None:
             ensure("25.8", lock=drifted, frozen=frozen, **kw)
     assert not (tmp_path / "never").exists()
 
-    # --frozen refuses a line the lock does not pin; --frozen needs --lock.
+    # --frozen refuses a line the lock does not pin. Without a lock path it
+    # reads ./chtypes.lock, and none there pins nothing — refused, PINNED.
     with pytest.raises(chtypes.ArtifactPinnedError, match="no pin"):
         ensure("26.7", lock=lock, frozen=True, **kw)
-    with pytest.raises(ValueError, match="--frozen"):
+    nolock = tmp_path / "nolock"
+    nolock.mkdir()
+    monkeypatch.chdir(nolock)
+    with pytest.raises(chtypes.ArtifactPinnedError, match="no lock file at chtypes.lock"):
         ensure("26.7", frozen=True, **kw)
+    (nolock / "chtypes.lock").write_bytes((FIXTURES / "chtypes.lock").read_bytes())
+    assert ensure("25.8", frozen=True, **kw) == dest / "25.8"  # ./chtypes.lock pins signed/
     # A malformed lock is a usage error, loudly, not a silent "no pins".
     bad = tmp_path / "bad.lock"
     bad.write_text('{"schema": 2, "artifacts": {}}')

@@ -16,6 +16,7 @@ import pytest
 import chtypes
 from chtypes import Format, Outcome
 from chtypes._native import NativeLibrary
+from chtypes.fetch import cache_registry_dir
 
 
 def test_library_file_name_comes_from_the_manifest(registry: chtypes.Registry) -> None:
@@ -132,6 +133,12 @@ def test_registry_walks_the_search_path(
         Path("/usr/local/share/chtypes/artifacts") / chtypes.host_platform(),
     )
     assert chtypes.fetch_destination() == env_dir  # never a system location
+    # Another platform's artifacts never go into $CHTYPES_REGISTRY — this host
+    # dlopens from it — but to that platform's own cache directory.
+    foreign = "linux-amd64" if chtypes.host_platform() != "linux-amd64" else "linux-arm64"
+    assert chtypes.fetch_destination(platform=foreign) == Path(cache_registry_dir(foreign))
+    assert env_dir not in chtypes.registry_search_path(platform=foreign)
+    assert chtypes.fetch_destination(tmp_path / "x", platform=foreign) == tmp_path / "x"
 
 
 def test_registry_reads_the_environment(

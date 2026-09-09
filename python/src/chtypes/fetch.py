@@ -105,6 +105,9 @@ SYSTEM_REGISTRY_ROOTS: Final = ("/usr/local/share/chtypes/artifacts", "/opt/chty
 
 PLATFORMS: Final = ("linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64")
 LOCK_SCHEMA: Final = 1
+#: The lock file ``--frozen`` reads when no ``--lock`` names one (docs/fetch.md,
+#: Decisions): relative, so it resolves against the working directory.
+DEFAULT_LOCK_FILE: Final = "chtypes.lock"
 
 _USER_AGENT = "chtypes-python (+https://github.com/wave-rf/chtypes)"
 _HTTP_ATTEMPTS = 3
@@ -129,13 +132,18 @@ def registry_search_path(
     """The registry search path (docs/fetch.md §1), in order: the explicit
     path, ``$CHTYPES_REGISTRY``, the per-user cache, then the system
     locations. Directories need not exist; a lookup takes the first one that
-    holds the requested line. De-duplicated, order preserved."""
+    holds the requested line. De-duplicated, order preserved.
+
+    ``$CHTYPES_REGISTRY`` is a directory this host dlopens from, so it is on
+    the path for the host's platform only: another platform's artifacts
+    (``fetch --platform``) go to that platform's own cache directory
+    (docs/fetch.md, Decisions)."""
     plat = platform or host_platform()
     candidates: list[str] = []
     if explicit is not None:
         candidates.append(os.fspath(explicit))
     env = os.environ.get(ENV_REGISTRY)
-    if env:
+    if env and plat == host_platform():
         candidates.append(env)
     candidates.append(cache_registry_dir(plat))
     candidates.extend(os.path.join(root, plat) for root in SYSTEM_REGISTRY_ROOTS)
@@ -658,7 +666,8 @@ class Fetcher:
                 " — pass one"
             )
         if frozen and lock is None:
-            raise ValueError("chtypes: --frozen needs a lock file (--lock <file>)")
+            # --frozen alone reads ./chtypes.lock (docs/fetch.md, Decisions).
+            lock = DEFAULT_LOCK_FILE
         self.dest = fetch_destination(dest, platform=self.platform)
         self.tag = tag or DEFAULT_TAG
         host = (os.environ.get(ENV_ARTIFACTS_URL) or DEFAULT_ARTIFACTS_URL).rstrip("/")
@@ -684,7 +693,15 @@ class Fetcher:
 
     def _lock_pins(self) -> dict[str, dict[str, str]]:
         if self._pins is None:
-            self._pins = read_lock(self.lock) if self.lock is not None else {}
+            if self.lock is None:
+                self._pins = {}
+            else:
+                if self.frozen and not self.lock.is_file():
+                    raise ArtifactPinnedError(
+                        f"chtypes: --frozen, but there is no lock file at {self.lock}; "
+                        f"nothing is pinned, so nothing is installed"
+                    )
+                self._pins = read_lock(self.lock)
         return self._pins
 
     # ------------------------------------------------------------ the release

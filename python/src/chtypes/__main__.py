@@ -109,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument(
         "--frozen",
         action="store_true",
-        help="refuse anything the lock file does not pin (needs --lock)",
+        help="refuse anything the lock file does not pin (default lock: chtypes.lock)",
     )
     fetch.add_argument("--force", action="store_true", help="re-download an installed line")
     fetch.add_argument(
@@ -136,11 +136,12 @@ def build_parser() -> argparse.ArgumentParser:
     lfrom.add_argument("--tag", metavar="<t>")
     lfrom.add_argument("--url", metavar="<base>")
 
-    sub.add_parser(
+    where = sub.add_parser(
         "where",
         help="the registry directory fetch would write to",
         description="Print the registry directory fetch would write to (docs/fetch.md §1).",
     )
+    where.add_argument("--platform", metavar="<os-arch>", choices=PLATFORMS)
     return parser
 
 
@@ -227,7 +228,7 @@ def _installed(have: dict[str, tuple[object, Manifest]], entry: ReleaseEntry) ->
 def _cmd_where(args: argparse.Namespace) -> int:
     from .fetch import fetch_destination
 
-    sys.stdout.write(f"{fetch_destination()}\n")
+    sys.stdout.write(f"{fetch_destination(platform=args.platform)}\n")
     return EXIT_OK
 
 

@@ -215,45 +215,56 @@ fn every_fixture_verdict_matches_expected_json_through_ensure() {
 /// §6: `ensure` is idempotent, and installed-and-verified never touches the
 /// network — proven with a source at a closed port.
 #[test]
-fn installed_and_verified_is_a_no_op_without_the_network() {
+fn installed_and_verified_downloads_nothing_and_offline_reads_no_source() {
     let fx = fixtures!();
     let dest = tmp("idempotent");
     let first = fetch::ensure("25.8", &opts(&fx, "signed", &dest)).unwrap();
     assert_eq!(first.action, Action::Installed);
 
+    // §3: installed and hashing what the signed release says — the three
+    // small files are read, the tarball is not (docs/fetch.md, Decisions).
+    let again = fetch::ensure("25.8", &opts(&fx, "signed", &dest)).unwrap();
+    assert_eq!(again.action, Action::AlreadyInstalled);
+    assert_eq!(again.dir, first.dir);
+    assert_eq!(again.library_sha256, first.library_sha256);
+    assert!(again.asset.is_some(), "the release was consulted");
+
+    // Without a reachable source there is no signed listing to check an
+    // install against: SOURCE_UNREACHABLE, never a silent local pass.
     let dead = EnsureOptions {
         url: Some("http://127.0.0.1:1/never".into()),
         ..opts(&fx, "signed", &dest)
     };
-    let again = fetch::ensure("25.8", &dead).expect("installed and verified needs no source");
-    assert_eq!(again.action, Action::AlreadyInstalled);
-    assert_eq!(again.dir, first.dir);
-    assert_eq!(again.library_sha256, first.library_sha256);
-    assert_eq!(again.asset, None, "no release was consulted");
-
-    // An exact patch that IS installed is satisfied the same way; one that is
-    // not is a hard requirement and reaches the (dead) source.
+    let err = fetch::ensure("25.8", &dead).unwrap_err();
     assert_eq!(
-        fetch::ensure("25.8.28.1-lts", &dead).unwrap().action,
+        err.artifact_code(),
+        Some("CHTYPES_SOURCE_UNREACHABLE"),
+        "{err}"
+    );
+
+    // --offline is the one no-source path: an installed line verified against
+    // its own manifest is the answer.
+    let offline = EnsureOptions {
+        offline: true,
+        ..dead.clone()
+    };
+    let local = fetch::ensure("25.8", &offline).unwrap();
+    assert_eq!(local.action, Action::AlreadyInstalled);
+    assert_eq!(local.asset, None, "no release was consulted");
+    // An exact patch that IS installed is satisfied the same way; one that is
+    // not is a hard requirement and would need the source.
+    assert_eq!(
+        fetch::ensure("25.8.28.1-lts", &offline).unwrap().action,
         Action::AlreadyInstalled
     );
-    let other = fetch::ensure("25.8.30.16-lts", &dead).unwrap_err();
+    let other = fetch::ensure("25.8.30.16-lts", &offline).unwrap_err();
     assert_eq!(
         other.artifact_code(),
         Some("CHTYPES_SOURCE_UNREACHABLE"),
         "{other}"
     );
 
-    // --offline keeps working for an installed line...
-    let offline = EnsureOptions {
-        offline: true,
-        ..dead.clone()
-    };
-    assert_eq!(
-        fetch::ensure("25.8", &offline).unwrap().action,
-        Action::AlreadyInstalled
-    );
-    // ...and --force re-downloads, which the dead source cannot serve.
+    // --force re-downloads, which the dead source cannot serve.
     let forced = EnsureOptions {
         force: true,
         ..dead.clone()
@@ -471,7 +482,11 @@ fn the_lock_file_records_and_frozen_refuses_drift() {
         },
     )
     .unwrap_err();
-    assert!(matches!(err, Error::Fetch { .. }), "{err:?}");
+    assert_eq!(
+        err.artifact_code(),
+        Some("CHTYPES_ARTIFACT_PINNED"),
+        "no lock file pins nothing: {err}"
+    );
 
     for d in [dest, fresh, scratch] {
         std::fs::remove_dir_all(&d).ok();
@@ -855,7 +870,8 @@ fn the_binary_s_other_exit_codes_and_commands() {
     assert!(in_cache.join("manifest.json").is_file());
     let mut c = bin();
     c.args(["fetch", "26.7", "--platform", platform, "--url"])
-        .arg("http://127.0.0.1:1/never")
+        .arg(&signed)
+        .env("CHTYPES_TRUSTED_KEYS", &key)
         .env("XDG_CACHE_HOME", &cache);
     let r = run(c);
     assert_eq!(
@@ -863,6 +879,22 @@ fn the_binary_s_other_exit_codes_and_commands() {
         "installed in the cache satisfies a plain fetch: {}",
         r.stderr
     );
+    assert!(r.stderr.contains("already installed"), "{}", r.stderr);
+    // --offline is the no-source path: the cached line answers with no URL
+    // reachable at all (docs/fetch.md, Decisions).
+    let mut c = bin();
+    c.args([
+        "fetch",
+        "26.7",
+        "--platform",
+        platform,
+        "--offline",
+        "--url",
+    ])
+    .arg("http://127.0.0.1:1/never")
+    .env("XDG_CACHE_HOME", &cache);
+    let r = run(c);
+    assert_eq!(r.code, 0, "offline, installed in the cache: {}", r.stderr);
     assert!(r.stderr.contains("already installed"), "{}", r.stderr);
     let elsewhere = tmp("bin2-elsewhere");
     let mut c = bin();

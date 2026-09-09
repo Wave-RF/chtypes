@@ -335,6 +335,20 @@ func parseSpelling(s string) (line, exact string, err error) {
 	return line, exact, nil
 }
 
+// exactMatches says whether a published version satisfies an exact-patch
+// spelling. A spelling that names its channel ("25.8.28.1-lts") matches only
+// itself; one that omits it ("25.8.28.1") matches that patch on any channel —
+// the same rule in all four SDKs (docs/fetch.md, Decisions).
+func exactMatches(version, exact string) bool {
+	if version == exact {
+		return true
+	}
+	if channelSuffix.MatchString(exact) {
+		return false
+	}
+	return channelSuffix.ReplaceAllString(version, "") == exact
+}
+
 // versionKey orders exact versions numerically ("25.8.28.1-lts" → 25,8,28,1).
 func versionKey(v string) []int {
 	v = strings.SplitN(v, "-", 2)[0]
@@ -505,7 +519,7 @@ func (f *fetcher) ensureOffline(spelling, line, exact string) (*Installed, error
 	}
 	dir := filepath.Join(f.dest, line)
 	m, err := readManifest(filepath.Join(dir, "manifest.json"))
-	if err == nil && (exact == "" || m.ClickHouseVersion == exact) {
+	if err == nil && (exact == "" || exactMatches(m.ClickHouseVersion, exact)) {
 		got, herr := fileSHA256(filepath.Join(dir, m.Library))
 		if herr == nil && got == strings.ToLower(m.LibrarySHA256) {
 			f.say("already installed and verified against its manifest (offline): %s", filepath.Join(dir, m.Library))
@@ -662,7 +676,7 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 	var hits []ReleaseArtifact
 	if exact != "" {
 		for _, a := range rows {
-			if a.ClickHouseVersion == exact {
+			if exactMatches(a.ClickHouseVersion, exact) {
 				hits = append(hits, a)
 			}
 		}

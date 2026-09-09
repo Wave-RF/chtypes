@@ -145,16 +145,18 @@ pub struct ReleaseInfo {
 /// installed and verified for this host, fetching it through the
 /// `docs/fetch.md` §3 chain when it is not.
 ///
-/// Idempotent: a line already installed whose library hashes what its
-/// manifest says is [`Action::AlreadyInstalled`] and nothing is downloaded —
-/// no network at all, so a process may call this at startup offline.
-/// "Installed" means anywhere on the §1 search path when no
-/// [`EnsureOptions::dest`] is given (what a registry would find), and in
-/// `dest` itself when one is (the caller named where the line must be). Otherwise the signed release is consulted, the asset for the
-/// line is downloaded, hashed, unpacked into a temporary sibling, renamed
-/// into `<dest>/<minor>/` and re-hashed in place. With a lock file
-/// ([`EnsureOptions::lock`]) the release is always consulted, so the pin can
-/// be recorded or, under `frozen`, enforced.
+/// Idempotent: a line already installed whose library hashes what the signed
+/// release lists is [`Action::AlreadyInstalled`] and nothing is downloaded —
+/// the release's three small files are read, the tarball is not. Only
+/// [`EnsureOptions::offline`] reads no source: then an installed line that
+/// hashes what its own manifest says is the answer, and nothing else is
+/// (`docs/fetch.md`, Decisions). "Installed" means anywhere on the §1 search
+/// path when no [`EnsureOptions::dest`] is given (what a registry would
+/// find), and in `dest` itself when one is (the caller named where the line
+/// must be). Otherwise the asset for the line is downloaded, hashed, unpacked
+/// into a temporary sibling, renamed into `<dest>/<minor>/` and re-hashed in
+/// place. With a lock file ([`EnsureOptions::lock`]) the pin is recorded or,
+/// under `frozen`, enforced.
 ///
 /// The directory it returns is what [`crate::Registry::new`] loads.
 ///
@@ -175,31 +177,24 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
     let dest = install_dir_for(&platform, opts.dest.as_deref());
     let search = installed_search(opts, &platform, &dest);
 
-    // Installed and verified is a no-op — and never a network round trip —
-    // unless a lock is in play (the release's record is what a lock pins) or
-    // the caller forces a re-download.
+    // `--offline` is the no-source path (§6): an installed line whose library
+    // hashes what its own manifest says is the answer, and nothing else is.
+    // Otherwise the signed release is read first — SHA256SUMS, its signature,
+    // index.json; never the tarball — and "installed" means hashing what that
+    // listing says (§3), the same in all four SDKs (docs/fetch.md, Decisions).
     let found = locate_in(&search, &request.minor).and_then(|dir| InstalledDir::read(&dir).ok());
-    if !opts.force && opts.lock.is_none() && !opts.frozen {
+    if opts.offline && !opts.force {
         if let Some(inst) = &found {
             if request.accepts(&inst.manifest.clickhouse_version) {
-                match inst.verify() {
-                    Ok(sha) => {
-                        say(
-                            opts,
-                            &format!(
-                                "already installed and verified: {}",
-                                inst.library().display()
-                            ),
-                        );
-                        return Ok(inst.installed(&platform, sha, None));
-                    }
-                    Err(corrupt) => {
-                        if opts.offline {
-                            return Err(corrupt);
-                        }
-                        say(opts, &format!("{corrupt} — replacing"));
-                    }
-                }
+                let sha = inst.verify()?;
+                say(
+                    opts,
+                    &format!(
+                        "already installed and verified: {}",
+                        inst.library().display()
+                    ),
+                );
+                return Ok(inst.installed(&platform, sha, None));
             }
         }
     }

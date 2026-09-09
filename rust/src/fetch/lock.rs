@@ -66,6 +66,13 @@ impl LockFile {
                 artifacts: BTreeMap::new(),
                 path: path.to_path_buf(),
             }),
+            // `--frozen` with no lock file: nothing is pinned, so nothing is
+            // installed — PINNED, like every other refusal under `--frozen`
+            // (docs/fetch.md, Decisions).
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::ArtifactPinned {
+                key: path.display().to_string(),
+                message: "--frozen, but there is no such lock file; nothing is pinned, so nothing is installed".into(),
+            }),
             Err(e) => Err(Error::Fetch {
                 message: format!("lock file {}: {e}", path.display()),
             }),
@@ -167,9 +174,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("chtypes.lock");
 
-        assert!(
-            LockFile::load(&path, true).is_err(),
-            "--frozen needs a file"
+        let absent = LockFile::load(&path, true).unwrap_err();
+        assert_eq!(
+            absent.artifact_code(),
+            Some("CHTYPES_ARTIFACT_PINNED"),
+            "--frozen needs a file: {absent}"
         );
         let mut lock = LockFile::load(&path, false).unwrap();
         let key = lock_key("linux-arm64", "25.8");

@@ -48,7 +48,6 @@ def test_usage_errors_exit_2(env: Path, capsys: pytest.CaptureFixture[str]) -> N
         [],
         ["fetch"],
         ["fetch", "25.8", "--all"],
-        ["fetch", "25.8", "--frozen"],
         ["fetch", "25.8", "--url", "x", "--tag", "y"],
         ["fetch", "25.8", "--platform", "windows-x64"],
         ["fetch", "not-a-version", "--url", str(FIXTURES / "signed")],
@@ -172,7 +171,7 @@ def test_verify_and_list(env: Path, tmp_path: Path, capsys: pytest.CaptureFixtur
 
 @needs_fixtures
 def test_lock_and_frozen_through_the_cli(
-    env: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    env: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     signed = str(FIXTURES / "signed")
     lock = tmp_path / "chtypes.lock"
@@ -182,6 +181,15 @@ def test_lock_and_frozen_through_the_cli(
     assert json.loads(lock.read_text())["artifacts"].keys() == {f"{PLATFORM}/25.8"}
     assert main([*base, "26.7", "--lock", str(lock), "--frozen"]) == 1
     assert "CHTYPES_ARTIFACT_PINNED" in capsys.readouterr().err
+    # --frozen alone reads ./chtypes.lock: none here is PINNED (exit 1), not usage.
+    nolock = tmp_path / "nolock"
+    nolock.mkdir()
+    monkeypatch.chdir(nolock)
+    assert main([*base, "25.8", "--frozen"]) == 1
+    err = capsys.readouterr().err
+    assert "CHTYPES_ARTIFACT_PINNED" in err and "no lock file at chtypes.lock" in err
+    monkeypatch.chdir(tmp_path)  # ./chtypes.lock is the one written above
+    assert main([*base, "25.8", "--frozen"]) == 0
     assert (
         main([*base, "25.8", "--lock", str(FIXTURES / "chtypes.lock"), "--frozen", "--force"]) == 0
     )

@@ -114,8 +114,10 @@ stdout. Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source
 unreachable · 4 not published for this platform/line.
 
 **The function.** `chtypes::ensure(line, &opts)` is the same operation from
-Rust — idempotent, and never a network round trip once the line is installed
-and its library hashes what its manifest says:
+Rust — idempotent: once the line is installed and its library hashes what the
+signed release lists, nothing is downloaded (the release's three small files
+are read, never the tarball; `offline: true` reads no source and trusts the
+installed manifest):
 
 ```rust
 use chtypes::{EnsureOptions, Registry};

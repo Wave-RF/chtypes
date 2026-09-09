@@ -585,6 +585,13 @@ func TestFetchUnpublished(t *testing.T) {
 	if _, err := Ensure(context.Background(), "v25.8.28.1-lts", base); err != nil {
 		t.Fatalf("exact: %v", err)
 	}
+	// The channel may be left off — "25.8.28.1" is the "-lts" patch — but a
+	// spelled channel must match (docs/fetch.md, Decisions).
+	if _, err := Ensure(context.Background(), "25.8.28.1", base); err != nil {
+		t.Fatalf("exact without channel: %v", err)
+	}
+	_, err = Ensure(context.Background(), "25.8.28.1-stable", base)
+	wantCode(t, err, CodeArtifactUnpublished)
 	// A platform it does not carry.
 	other := "linux-amd64"
 	if HostPlatform() == other {
