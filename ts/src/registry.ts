@@ -17,16 +17,24 @@
  *    `DB::DataTypeFactory` live in one process. ffi-rs loads through libloading,
  *    which uses `RTLD_LAZY | RTLD_LOCAL`; `assertLocalSymbolScope()` in the test
  *    suite proves it from outside rather than trusting the claim.
+ *
+ * Where a registry IS follows the search path of docs/fetch.md §1 (`paths.ts`):
+ * the explicit directory, `CHTYPES_REGISTRY`, the per-user cache, then the
+ * reserved system locations. The first directory holding artifacts is scanned
+ * and loaded at construction; a line it lacks is taken, on request, from the
+ * first later directory that has it. A line no directory has is the one §7
+ * error, `ArtifactMissingError` — or, with `autofetch`, a fetch on first
+ * `open()`.
  */
 
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { RegistryError } from './errors.js';
+import { ArtifactMissingError, FETCH_COMMAND, RegistryError } from './errors.js';
+import { ensure, type EnsureOptions } from './fetch.js';
 import { NativeLibrary } from './ffi.js';
 import { Library, minorOf } from './library.js';
+import { cacheRegistryDir, fetchDestination, hostPlatform, registrySearchPath, systemRegistryDirs } from './paths.js';
 
 /** The nine fields `lib/build.sh` writes. Unknown fields are ignored. */
 export interface Manifest {
@@ -55,6 +63,17 @@ export interface RegistryOptions {
    * build, and MUST be on for one that came over a network.
    */
   verifyChecksums?: boolean;
+  /**
+   * Lazy fetch on first open (docs/fetch.md §6): `open()` of a line no
+   * directory on the search path holds runs `ensure()` first, into the
+   * directory a fetch writes to (§1), once per process per line. Off by
+   * default — a production process must not begin a 250 MB download inside
+   * a request — and `CHTYPES_AUTOFETCH=1` turns it on from the environment.
+   * `for()` stays synchronous and never fetches.
+   */
+  autofetch?: boolean | undefined;
+  /** Options handed to `ensure()` by autofetch: source (`url`/`tag`), lock, keys, progress. */
+  fetch?: EnsureOptions | undefined;
 }
 
 /**
@@ -72,35 +91,76 @@ export interface RegistryOptions {
  * loaded image, so `chs_init` still runs exactly once per artifact.
  */
 export class Registry {
-  /** The resolved registry directory that was scanned. */
+  /**
+   * The primary registry directory: the first on the search path that held
+   * artifacts, scanned and loaded at construction — or, with `autofetch` and
+   * nothing installed anywhere, the directory the first fetch will create.
+   */
   readonly dir: string;
+  /** The §1 search path, in order, every candidate whether or not it exists. */
+  readonly searchPath: readonly string[];
+  /** This host's platform key, e.g. `darwin-arm64` — the only artifacts a process can dlopen. */
+  readonly platform: string;
+
   private readonly byId = new Map<string, Library>();
+  private readonly byPath = new Map<string, Library>();
   private readonly loaded: Library[] = [];
+  private readonly timezone: string;
+  private readonly verifyChecksums: boolean;
+  private readonly autofetch: boolean;
+  private readonly fetchOptions: EnsureOptions;
+  private readonly explicit: string | undefined;
 
   /**
-   * Scan and load a registry directory.
+   * Scan and load a registry.
    *
-   * @param dir - the registry root; defaults to `CHTYPES_REGISTRY`, then the
-   *   per-user artifact cache (see `resolveRegistryDir` / `defaultRegistryDir`).
-   * @param options - timezone and checksum verification — see `RegistryOptions`.
-   * @throws {RegistryError} when no registry can be found, the directory
-   *   cannot be read, holds no loadable artifact, an artifact fails its
-   *   checksum, fails to load, or reports a ClickHouse version different from
-   *   its manifest's.
+   * @param dir - the registry root; the head of the search path. Absent, the
+   *   path is `CHTYPES_REGISTRY`, the per-user artifact cache, then the system
+   *   locations (see `registrySearchPath` / `defaultRegistryDir`).
+   * @param options - timezone, checksum verification, autofetch — see `RegistryOptions`.
+   * @throws {RegistryError} when a directory named explicitly (the argument or
+   *   `CHTYPES_REGISTRY`) does not exist and autofetch is off, when no
+   *   directory on the search path holds an artifact (and autofetch is off),
+   *   the primary directory cannot be read, an artifact fails its checksum,
+   *   fails to load, or reports a ClickHouse version different from its
+   *   manifest's.
    * @throws {ChtypesError} when an artifact reports a different nonzero ABI
    *   revision than this binding speaks, or `chs_init` fails (e.g. an unknown
    *   timezone — the message names it).
    */
   constructor(dir?: string, options: RegistryOptions = {}) {
-    const resolved = resolveRegistryDir(dir);
-    if (resolved === null) {
-      throw new RegistryError(
-        'chtypes: no artifact registry found. Pass one to new Registry(dir), set ' +
-          'CHTYPES_REGISTRY, or fetch artifacts with scripts/fetch.sh (see docs/artifacts.md).',
-      );
+    this.platform = hostPlatform();
+    this.timezone = options.timezone ?? 'UTC';
+    this.verifyChecksums = options.verifyChecksums ?? false;
+    this.autofetch = options.autofetch ?? envFlag('CHTYPES_AUTOFETCH');
+    this.fetchOptions = options.fetch ?? {};
+    this.explicit = dir !== undefined && dir !== '' ? path.resolve(dir) : undefined;
+    this.searchPath = registrySearchPath(dir, this.platform);
+
+    // A directory somebody NAMED and that does not exist is a configuration
+    // mistake and must be an error naming it, never a silent fallback — unless
+    // autofetch is on, in which case it is the destination the first fetch creates.
+    const fromEnv = process.env['CHTYPES_REGISTRY'];
+    const named = [this.explicit, fromEnv !== undefined && fromEnv !== '' ? path.resolve(fromEnv) : undefined];
+    for (const d of named) {
+      if (d !== undefined && !isDirectory(d) && !this.autofetch) {
+        throw new RegistryError(`chtypes: cannot read registry ${d}: not a directory`);
+      }
     }
-    this.dir = resolved;
-    const timezone = options.timezone ?? 'UTC';
+
+    const primary = this.searchPath.find((d) => looksLikeRegistry(d));
+    if (primary === undefined) {
+      if (!this.autofetch) {
+        throw new RegistryError(
+          `chtypes: no artifacts in any registry directory. Looked in: ${this.searchPath.join(', ')}.\n` +
+            `Install one:  ${FETCH_COMMAND} <line>\n` +
+            'or set CHTYPES_AUTOFETCH=1 to fetch on first use.',
+        );
+      }
+      this.dir = fetchDestination(this.explicit, this.platform);
+      return;
+    }
+    this.dir = primary;
 
     let entries: string[];
     try {
@@ -108,58 +168,81 @@ export class Registry {
     } catch (err) {
       throw new RegistryError(`chtypes: cannot read registry ${this.dir}: ${String(err)}`, { cause: err });
     }
-
     for (const entry of entries.sort()) {
+      // A dot-directory is never a version: fetch stages its downloads and
+      // unpacks in hidden siblings, and a .DS_Store is not a version either.
+      if (entry.startsWith('.')) continue;
       const sub = path.join(this.dir, entry);
       if (!isDirectory(sub)) continue;
-
-      // A registry may legitimately hold scratch directories, and a .DS_Store is
-      // not a version: a missing or unparseable manifest is skipped in silence.
+      // A registry may legitimately hold scratch directories: a missing or
+      // unparseable manifest is skipped in silence.
       const manifest = readManifest(sub);
       if (manifest === null) continue;
-
-      const libPath = path.join(sub, manifest.library);
-      if (options.verifyChecksums) verifyChecksum(libPath, manifest);
-
-      // A directory that has a manifest and does not load is broken, not absent.
-      let native: NativeLibrary;
-      try {
-        native = NativeLibrary.open(libPath);
-      } catch (err) {
-        throw new RegistryError(`chtypes: cannot load ${libPath}: ${String(err)}`, { cause: err });
-      }
-
-      // The right bytes in the wrong directory is the one corruption a hash
-      // cannot catch, so cross-check what the library says about itself.
-      const declared = manifest.clickhouse_version;
-      if (declared !== undefined && declared !== '' && declared !== native.version) {
-        throw new RegistryError(
-          `chtypes: ${libPath} reports ClickHouse ${native.version} but its manifest says ${declared}`,
-        );
-      }
-
-      // Each library keeps its own DateLUT and its own refuse-list. An absent or
-      // empty unsafe_families.txt is a valid empty list, not a missing file.
-      native.init(timezone, readUnsafeFamilies(sub, manifest));
-
-      const library = new Library(native);
-      this.loaded.push(library);
-      // Indexed under both spellings: docker tags drift, and an exact-match-only
-      // lookup silently loses a whole version column.
-      this.byId.set(library.version, library);
-      this.byId.set(library.minor, library);
+      this.load(sub, manifest);
     }
-
     if (this.loaded.length === 0) {
       throw new RegistryError(`chtypes: no version artifacts under ${this.dir}`);
     }
+  }
+
+  /** dlopen one artifact directory, cross-check it, `chs_init` it, index it. */
+  private load(sub: string, manifest: Manifest): Library {
+    const already = this.byPath.get(sub);
+    if (already !== undefined) return already;
+
+    const libPath = path.join(sub, manifest.library);
+    if (this.verifyChecksums) verifyChecksum(libPath, manifest);
+
+    // A directory that has a manifest and does not load is broken, not absent.
+    let native: NativeLibrary;
+    try {
+      native = NativeLibrary.open(libPath);
+    } catch (err) {
+      throw new RegistryError(`chtypes: cannot load ${libPath}: ${String(err)}`, { cause: err });
+    }
+
+    // The right bytes in the wrong directory is the one corruption a hash
+    // cannot catch, so cross-check what the library says about itself.
+    const declared = manifest.clickhouse_version;
+    if (declared !== undefined && declared !== '' && declared !== native.version) {
+      throw new RegistryError(
+        `chtypes: ${libPath} reports ClickHouse ${native.version} but its manifest says ${declared}`,
+      );
+    }
+
+    // Each library keeps its own DateLUT and its own refuse-list. An absent or
+    // empty unsafe_families.txt is a valid empty list, not a missing file.
+    native.init(this.timezone, readUnsafeFamilies(sub, manifest));
+
+    const library = new Library(native);
+    this.loaded.push(library);
     // Release order, not scan order: the directory listing is lexical, which
     // put 25.10 before 25.8 (spec/bindings.md §Version selection, rule 2 —
     // every ordered surface uses numeric release order; fixed 2026-08-26).
     this.loaded.sort((a, b) => compareMinor(a.minor, b.minor));
+    this.byPath.set(sub, library);
+    // Indexed under both spellings: docker tags drift, and an exact-match-only
+    // lookup silently loses a whole version column. First directory wins: a
+    // line already loaded from earlier on the search path is not displaced.
+    if (!this.byId.has(library.version)) this.byId.set(library.version, library);
+    if (!this.byId.has(library.minor)) this.byId.set(library.minor, library);
+    return library;
   }
 
-  /** The ClickHouse minor lines this registry can answer for, oldest first. */
+  /** Load `<dir>/<minor>/` if it is an artifact directory; null when it is not. */
+  private loadLine(dir: string, minor: string): Library | null {
+    const sub = path.join(dir, minor);
+    if (!isDirectory(sub)) return null;
+    const manifest = readManifest(sub);
+    if (manifest === null) return null;
+    return this.load(sub, manifest);
+  }
+
+  private lookup(version: string): Library | undefined {
+    return this.byId.get(version) ?? this.byId.get(minorOf(version));
+  }
+
+  /** The ClickHouse minor lines this registry has loaded, oldest first. */
   versions(): string[] {
     return [...new Set(this.loaded.map((l) => l.minor))].sort(compareMinor);
   }
@@ -174,29 +257,75 @@ export class Registry {
    * ("25.8.28.1-lts") both work, and an unknown patch inside a loaded minor line
    * resolves to that line — asking for "25.8.30.16" finds the loaded 25.8.
    *
-   * Failure is an error naming what *is* loaded, never a fallback to the nearest
-   * version: answering 26.7 semantics from a 25.8 artifact is a lie, and silent
+   * A line the primary directory lacks is loaded from the first later
+   * directory on the search path that holds it (docs/fetch.md §1), and joins
+   * `versions()` / `libraries()` from then on. Never a fetch: this call is
+   * synchronous; `open()` is the one that may fetch.
+   *
+   * Failure is the one §7 error, never a fallback to the nearest version:
+   * answering 26.7 semantics from a 25.8 artifact is a lie, and silent
    * wrongness is what the rigs score hardest.
    *
    * @param version - a minor line (`"25.8"`) or an exact patch
    *   (`"25.8.28.1-lts"`), e.g. what `parseVersionResult` discovered.
    * @returns the loaded `Library` for that version.
-   * @throws {RegistryError} when no loaded artifact matches; the message names
-   *   the versions that ARE loaded.
+   * @throws {ArtifactMissingError} (`code` `CHTYPES_ARTIFACT_MISSING`, a
+   *   `RegistryError`) when no directory on the search path holds the line;
+   *   the message names every directory looked in and the fetch command.
+   * @throws {RegistryError} when a directory holds the line but it does not load.
    */
   for(version: string): Library {
-    const exact = this.byId.get(version);
-    if (exact !== undefined) return exact;
-    const line = this.byId.get(minorOf(version));
-    if (line !== undefined) return line;
-    throw new RegistryError(
-      `chtypes: no vendored build for ClickHouse ${version} (have ${this.versions().join(', ')})`,
-    );
+    const hit = this.lookup(version);
+    if (hit !== undefined) return hit;
+    const minor = minorOf(version);
+    for (const dir of this.searchPath) {
+      if (this.loadLine(dir, minor) !== null) {
+        const found = this.lookup(version);
+        if (found !== undefined) return found;
+      }
+    }
+    throw new ArtifactMissingError(minor, this.platform, this.searchPath);
   }
 
-  /** True when this registry can answer for a version. */
+  /**
+   * `for()`, with the lazy fetch of docs/fetch.md §6 in front of it: a line no
+   * directory on the search path holds is fetched through `ensure()` — into
+   * the directory a fetch writes to (§1), verified, once per process per line
+   * even under concurrent opens — and then loaded. With `autofetch` off (the
+   * default) this is `for()` behind a promise, and a missing line rejects
+   * with the same `ArtifactMissingError`.
+   *
+   * @throws {ArtifactMissingError} when the line is missing and autofetch is off.
+   * @throws {FetchError} the §7 fetch verdicts (`CHTYPES_ARTIFACT_UNTRUSTED`,
+   *   `…_CORRUPT`, `…_PINNED`, `…_UNPUBLISHED`, `CHTYPES_SOURCE_UNREACHABLE`).
+   * @throws {RegistryError} when the fetched artifact does not load.
+   */
+  async open(version: string): Promise<Library> {
+    try {
+      return this.for(version);
+    } catch (err) {
+      if (!(err instanceof ArtifactMissingError) || !this.autofetch) throw err;
+    }
+    const minor = minorOf(version);
+    const dest = this.fetchOptions.dest ?? fetchDestination(this.explicit, this.platform);
+    const result = await ensure(minor, { ...this.fetchOptions, dest, platform: this.platform });
+    this.loadLine(result.registry, result.line);
+    return this.for(version);
+  }
+
+  /**
+   * True when this registry can answer for a version: loaded already, or held
+   * by a directory on the search path (which `for()` would load). Never a
+   * fetch, and never a load.
+   */
   has(version: string): boolean {
-    return this.byId.has(version) || this.byId.has(minorOf(version));
+    if (this.lookup(version) !== undefined) return true;
+    const minor = minorOf(version);
+    return this.searchPath.some((dir) => {
+      const sub = path.join(dir, minor);
+      const manifest = readManifest(sub);
+      return manifest !== null && existsSync(path.join(sub, manifest.library));
+    });
   }
 
   /**
@@ -229,34 +358,34 @@ export function compareMinor(a: string, b: string): number {
 
 /**
  * Where the registry is: the explicit argument, else `CHTYPES_REGISTRY`, else
- * the per-user artifact cache (`defaultRegistryDir`). An explicit path and the
- * environment variable are returned as given — a wrong one must produce an error
- * naming it, not a silent fallback — while the package-relative guess only counts
- * if it actually holds artifacts.
+ * the first of the per-user artifact cache and the system locations that
+ * holds artifacts (docs/fetch.md §1). An explicit path and the environment
+ * variable are returned as given — a wrong one must produce an error naming
+ * it, not a silent fallback — while the unnamed candidates only count if they
+ * actually hold artifacts.
  */
 export function resolveRegistryDir(explicit?: string): string | null {
   if (explicit !== undefined && explicit !== '') return path.resolve(explicit);
   const fromEnv = process.env['CHTYPES_REGISTRY'];
   if (fromEnv !== undefined && fromEnv !== '') return path.resolve(fromEnv);
-  const fallback = defaultRegistryDir();
-  return looksLikeRegistry(fallback) ? fallback : null;
+  const platform = hostPlatform();
+  for (const candidate of [cacheRegistryDir(platform), ...systemRegistryDirs(platform)]) {
+    if (looksLikeRegistry(candidate)) return candidate;
+  }
+  return null;
 }
 
 /**
  * The per-user artifact cache for this host —
  * `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>`, `<arch>` spelled
- * the artifact way (`amd64`, `arm64`). Where `scripts/fetch.sh` installs, where a
- * core-repository build lands, and what every SDK's tests and playgrounds fall
- * back to when `CHTYPES_REGISTRY` is unset — one directory the four SDKs agree
- * on. A path, not a promise: `Registry` still throws if nothing is there.
+ * the artifact way (`amd64`, `arm64`). Where `chtypes fetch` and
+ * `scripts/fetch.sh` install, where a core-repository build lands, and what
+ * every SDK's tests and playgrounds fall back to when `CHTYPES_REGISTRY` is
+ * unset — one directory the four SDKs agree on. A path, not a promise:
+ * `Registry` still throws if nothing is there.
  */
 export function defaultRegistryDir(): string {
-  const base =
-    process.env['XDG_CACHE_HOME'] !== undefined && process.env['XDG_CACHE_HOME'] !== ''
-      ? process.env['XDG_CACHE_HOME']
-      : path.join(os.homedir(), '.cache');
-  const arch = ({ x64: 'amd64', arm64: 'arm64' } as Record<string, string>)[os.arch()] ?? os.arch();
-  return path.join(base, 'chtypes', 'artifacts', `${os.platform()}-${arch}`);
+  return cacheRegistryDir(hostPlatform());
 }
 
 /** Does this directory hold at least one artifact with a usable manifest? */
@@ -264,6 +393,7 @@ export function looksLikeRegistry(dir: string): boolean {
   if (!isDirectory(dir)) return false;
   try {
     return readdirSync(dir).some((entry) => {
+      if (entry.startsWith('.')) return false;
       const sub = path.join(dir, entry);
       if (!isDirectory(sub)) return false;
       const manifest = readManifest(sub);
@@ -272,6 +402,11 @@ export function looksLikeRegistry(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+function envFlag(name: string): boolean {
+  const v = process.env[name];
+  return v !== undefined && ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
 }
 
 function isDirectory(p: string): boolean {

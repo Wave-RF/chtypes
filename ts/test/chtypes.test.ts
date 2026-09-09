@@ -18,9 +18,11 @@ import path from 'node:path';
 import { DataType, define, isNullPointer, open as openLibrary, type JsExternal } from 'ffi-rs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  ArtifactMissingError,
   CODE_UNSUPPORTED,
   Format,
   Registry,
+  RegistryError,
   SchemaError,
   UnsupportedError,
   encodeSettings,
@@ -305,7 +307,16 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
     }
     // An unknown patch inside a loaded minor line resolves to that line.
     expect(registry.for(`${preferred}.999.999`).minor).toBe(preferred);
-    expect(() => registry.for('19.1')).toThrow(/no vendored build for ClickHouse 19\.1 \(have /);
+    // A line no directory on the search path holds is the one §7 error
+    // (docs/fetch.md), a RegistryError carrying the shared code.
+    expect(() => registry.for('19.1')).toThrow(/^chtypes: no artifact for ClickHouse 19\.1 \(/);
+    expect(() => registry.for('19.1')).toThrow(RegistryError);
+    try {
+      registry.for('19.1');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ArtifactMissingError);
+      expect((err as ArtifactMissingError).code).toBe('CHTYPES_ARTIFACT_MISSING');
+    }
   });
 
   describe('the process-state mutators are serialized against everything else', () => {
