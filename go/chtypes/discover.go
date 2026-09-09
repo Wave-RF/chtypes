@@ -28,9 +28,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -285,19 +282,13 @@ func ReconstructDDL(cols []DiscoveredColumn) (string, error) {
 
 // DefaultRegistryDir is the per-user artifact cache for this host:
 // ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>, with <arch>
-// spelled the artifact way (amd64, arm64). It is where scripts/fetch.sh
-// installs, where a core-repository build lands, and what every SDK's tests
-// and playgrounds fall back to when CHTYPES_REGISTRY is unset — one directory
-// the four SDKs agree on, so a machine set up once serves all of them.
+// spelled the artifact way (amd64, arm64). It is where scripts/fetch.sh and
+// the in-package fetch (Ensure, `chtypes fetch`) install, where a
+// core-repository build lands, and what every SDK's tests and playgrounds
+// fall back to when CHTYPES_REGISTRY is unset — one directory the four SDKs
+// agree on, so a machine set up once serves all of them. It is item 3 of the
+// docs/fetch.md §1 search path (RegistrySearchPath is the whole list).
 // It is a PATH, not a promise: NewRegistry still errors if nothing is there.
 func DefaultRegistryDir() string {
-	base := os.Getenv("XDG_CACHE_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		base = filepath.Join(home, ".cache")
-	}
-	return filepath.Join(base, "chtypes", "artifacts", runtime.GOOS+"-"+runtime.GOARCH)
+	return DefaultRegistryDirFor(HostPlatform())
 }
