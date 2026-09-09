@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -110,8 +111,14 @@ func (s *source) open(ctx context.Context, name string) (io.ReadCloser, error) {
 		req.Header.Set("User-Agent", "chtypes-go-fetch")
 		resp, err := s.client.Do(req)
 		if err != nil {
+			// Retried on transient transport failures, as fetch.sh's
+			// `curl --retry 3` is — which does not retry a refused
+			// connection or a cancelled context.
+			if errors.Is(err, syscall.ECONNREFUSED) || ctx.Err() != nil {
+				return nil, err
+			}
 			last = err
-			continue // a transport failure is retried
+			continue
 		}
 		switch {
 		case resp.StatusCode == http.StatusOK:

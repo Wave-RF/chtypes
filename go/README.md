@@ -42,16 +42,22 @@ builds with the tag — catches any drift before a consumer could.
 
 **Getting artifacts.** The native code is a per-version prebuilt artifact this
 package `dlopen`s at runtime; nothing here builds one. Either fetch a published
-one — verified, into the per-user cache every SDK in this repository defaults
-to — or build one in the core repository, which lands it in the same place:
+one — signed, verified, into the per-user cache every SDK in this repository
+defaults to — or build one in the core repository, which lands it in the same
+place:
 
 ```sh
-scripts/fetch.sh 25.8            # -> ~/.cache/chtypes/artifacts/<os>-<arch>/25.8/  (docs/artifacts.md)
+go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8   # -> ~/.cache/chtypes/artifacts/<os>-<arch>/25.8/
+scripts/fetch.sh 25.8                                                # the same, from a checkout (docs/artifacts.md)
 ```
 
 A registry directory holds one subdirectory per minor line — `25.8/manifest.json`,
-the shared library it names, `CH_VERSION`, `unsafe_families.txt` — and
-`$CHTYPES_REGISTRY` points at one anywhere else.
+the shared library it names, `CH_VERSION`, `unsafe_families.txt`. Lookup walks
+the search path in [`docs/fetch.md`](../docs/fetch.md) §1 — the directory given
+to `NewRegistry`, `$CHTYPES_REGISTRY`, the per-user cache, then the system
+locations — and takes the first one holding the line; see [Fetching
+artifacts](#fetching-artifacts) below for the command, `Ensure`, lazy fetch and
+the one error.
 
 - **Registry path** (`NewRegistry`, the default build): dlopens per-version
   artifacts, one directory per version:
@@ -95,6 +101,99 @@ bad, _ := cs.Row(chtypes.JSONEachRow, []byte(`{"x":"abc"}`))
 fmt.Println(bad.Outcome, bad.ErrCode)   // rejected 27 — the server's own code
 ```
 
+## Fetching artifacts
+
+The fetch/verify/install contract every chtypes SDK implements is
+[`docs/fetch.md`](../docs/fetch.md); this package implements it in pure
+Go (stdlib only: `crypto/ed25519`, `crypto/sha256`, `archive/tar`,
+`net/http`), as one command and one function.
+
+**The command** — `go/cmd/chtypes`, runnable without installing anything:
+
+```
+go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8
+chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
+                        [--tag <t> | --url <base>] [--lock <file>] [--frozen]
+                        [--force] [--offline]
+chtypes verify [--dest <dir>]        re-hash every installed line against its manifest
+chtypes list   [--dest <dir>]        what is installed, and what the release offers
+chtypes where                        the registry directory fetch would write to
+```
+
+Progress goes to stderr; `fetch` prints the installed directory alone on
+stdout, so `dir="$(chtypes fetch 25.8)"` composes. Exit codes: 0 ok · 1
+verification failed · 2 usage · 3 source unreachable · 4 not published for
+this platform/line.
+
+**The function** — idempotent: installed-and-verified is a no-op, otherwise
+it walks the chain:
+
+```go
+inst, err := chtypes.Ensure(ctx, "25.8", chtypes.FetchOptions{Progress: os.Stderr})
+// inst.Dir is <registry>/25.8; inst.AlreadyInstalled says whether anything was downloaded
+```
+
+`FetchOptions` is the flag set: `Dest`, `Platform`, `URL` (an http(s) mirror,
+a `file://` path or a plain directory), `Tag`, `LockFile`, `Frozen`, `Force`,
+`Offline`, `AllowUnsigned`, `TrustedKeys`, `Progress`, `HTTPClient`. The
+zero value is the default fetch. `FetchAll` installs every line the release
+publishes for the platform; `ListRelease`, `ListInstalled` and
+`VerifyInstalled` are the `list` and `verify` commands.
+
+**What is verified, in order** (§3): `SHA256SUMS.sig` is an ed25519
+signature over the exact bytes of `SHA256SUMS`, checked against the embedded
+release key (`ReleasePublicKeyHex`, key id `deb275922dbff76e`) — an unsigned
+or mis-signed release is `CHTYPES_ARTIFACT_UNTRUSTED` and nothing is
+downloaded around it; `index.json` names the asset and its sha256;
+`SHA256SUMS` must agree; the tarball is hashed before it is unpacked; the
+installed library is re-hashed in place against the `manifest.json` that
+came inside. The install is atomic (temp sibling, rename).
+`CHTYPES_TRUSTED_KEYS=<hex>[,<hex>…]` replaces the embedded key (a mirror,
+a custom registry); `CHTYPES_ALLOW_UNSIGNED=1` skips the signature with one
+loud warning naming the source — never the default, never silent. Once files
+are in a registry directory the loader trusts the directory: verification is
+a fetch-time policy, not a load-time gate.
+
+**Pinning** (§5): `fetch --lock chtypes.lock` records, per
+`<os>-<arch>/<minor>`, the asset file and sha256 installed; `fetch --frozen`
+refuses anything else with `CHTYPES_ARTIFACT_PINNED`. `ReadLockFile` /
+`LockFile.Write` read and write the same schema-1 JSON.
+
+**Lazy fetch on first open** is opt-in — `NewRegistry(dir,
+chtypes.WithAutoFetch(true), chtypes.WithFetchOptions(opts))`, or
+`CHTYPES_AUTOFETCH=1` for every registry — because a production process must
+not begin a 250 MB download inside a request. On, opening a missing line runs
+`Ensure` first, once per process per line (concurrent opens wait for the one
+in flight and share its result); `ForContext` bounds that fetch with a
+context. `NewRegistry("")` opens the §1 search path alone and dlopens nothing
+until asked.
+
+**The one error** (§7): a missing line is `ErrArtifactMissing`, with the
+message every SDK prints:
+
+```go
+lib, err := reg.For("25.8")
+if errors.Is(err, chtypes.ErrArtifactMissing) {
+    // chtypes: no artifact for ClickHouse 25.8 (darwin-arm64). Looked in: <dir1>, <dir2>, ….
+    // Install it:  go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8
+    // or set CHTYPES_AUTOFETCH=1 to fetch on first use.
+}
+var ae *chtypes.ArtifactError
+if errors.As(err, &ae) { ae.Code /* CHTYPES_ARTIFACT_MISSING, …_UNTRUSTED, …_CORRUPT, …_PINNED, …_UNPUBLISHED, CHTYPES_SOURCE_UNREACHABLE */ }
+```
+
+Every fetch-time failure is an `*ArtifactError` too, with `Code` from that
+shared vocabulary, a sentinel per code for `errors.Is`
+(`ErrArtifactUntrusted`, `ErrArtifactCorrupt`, `ErrArtifactPinned`,
+`ErrArtifactUnpublished`, `ErrSourceUnreachable`), and `ExitCode(err)` for
+the §6 status.
+
+Tested offline against the shared fixtures in `spec/fixtures/fetch/`
+(signed, bad-signature, tampered-tarball, sums-index-mismatch, unsigned, the
+lock, the TEST key) — every fixture produces the spec's verdict and code —
+plus self-built releases for every link of the chain and one real artifact
+fetched, installed and dlopen'd through `AutoFetch`.
+
 ## API reference
 
 Errors column: **S** = `*SchemaError` (the server refused; `Code` is a real
@@ -127,10 +226,18 @@ they are `Outcome` in the result.
 | `Filter.Eval(block)` | `chs_filter_eval` | the same `FilterResult` `Filter.Rows` answers, over an already-parsed `Block` — `Eval(ParseBlock(body))` ≡ `Rows(body)`; a cross-schema (filter, block) pair answers `FilterRejected`/1002, loudly | E only (closed handles, cross-library pair) |
 | `Filter.Close` / `Block.Close` | `chs_filter_free` / `chs_block_free` | releases the handle; the schema's `Close` frees its open filters AND blocks FIRST (the C-required order), finalizer backup | — |
 | `CompiledSchema.Close` | `chs_schema_free` | releases the handle (finalizer backup; open filters and blocks closed first) | — |
-| `NewRegistry(dir)` | dlopen + `manifest.json` scan | artifact dir → `*Registry` | E |
+| `NewRegistry(dir, opts...)` | dlopen + `manifest.json` scan | artifact dir (loaded now) or `""` (the §1 search path, loaded on demand) → `*Registry`; `WithAutoFetch`, `WithFetchOptions` | E |
 | `Registry.Load(path)` | dlopen, `chs_abi_revision`, `chs_init` | one artifact → registered | E (ABI mismatch, missing core symbols) |
-| `Registry.For(v)` | — | minor line or exact patch → `*Library` | E naming loaded versions; never nearest-match |
-| `Registry.Versions()` | — | minor lines, numerically sorted | — |
+| `Registry.For(v)` / `ForContext(ctx, v)` | — | minor line or exact patch → `*Library`, from the loaded set, then the first search-path directory holding the line, then (AutoFetch) a fetch | `ErrArtifactMissing` (§7, `errors.Is`); a fetch's `*ArtifactError`; never nearest-match |
+| `Registry.Versions()` | — | minor lines, numerically sorted (loaded, plus discovered on the search path) | — |
+| `Ensure(ctx, line, opts)` | derived — no C call | fetch/verify/install one line (docs/fetch.md §2–§5) → `*Installed` | `*ArtifactError` with a §7 `Code` |
+| `FetchAll(ctx, opts)` / `ListRelease(ctx, opts)` / `ListInstalled(dir)` / `VerifyInstalled(dir)` | derived | every published line; the verified `*ReleaseIndex`; the `[]Installed` under a registry; each re-hashed → `[]VerifyResult` | `*ArtifactError`, E |
+| `FetchOptions`, `Installed`, `ReleaseIndex`, `ReleaseArtifact`, `VerifyResult` | — | the fetch's inputs and results | — |
+| `ErrArtifactMissing` (+ `ErrArtifactUntrusted`, `ErrArtifactCorrupt`, `ErrArtifactPinned`, `ErrArtifactUnpublished`, `ErrSourceUnreachable`), `ArtifactError`, `ErrorCode`, `ExitCode(err)` | — | the §7 error, the shared codes, the §6 exit status | — |
+| `RegistrySearchPath(explicit)` / `FetchRegistryDir(explicit)` / `DefaultRegistryDir()` / `DefaultRegistryDirFor(platform)` / `SystemRegistryDirs(platform)` / `HostPlatform()` / `ValidPlatform(p)` | — | the §1 search path, where a fetch writes, the platform key | — |
+| `ReleasePublicKeyHex`, `ReleaseKeyID`, `ReleasePublicKey()`, `KeyID(pub)`, `ParseTrustedKeys(spec)`, `VerifySignature(msg, sig, keys)`, `ParseSignatureFile(b)` | — | the §4 signature: the embedded key and the checks | E |
+| `LockFile`, `LockEntry`, `ReadLockFile(path)`, `LockFile.Write(path)`, `LockKey(platform, minor)`, `NewLockFile()` | — | the §5 pin file, schema 1 | E |
+| `GoFetchCommand`, `DefaultArtifactsURL`, `DefaultReleaseTag`, `DefaultLockFile`, `LockSchema` | — | the spellings the contract fixes | — |
 | `Library.CompileDDL / ValidateType` | as static twins | same contract, this version's answers | S, U, E |
 | `Library.RegisteredFamilies / FunctionFlags / ReferenceType` | the introspection trio, per library | same answers as the static twins, from THIS artifact | U (artifact predates the symbol) |
 | `Library.HasCompileSettings()` | dlsym probe | artifact exports settings-aware compile? | — |
