@@ -19,6 +19,10 @@ classifiers = [
 # artifact and is dlopen'd at runtime. See README "Why ctypes".
 dependencies = []
 
+# `chtypes fetch 25.8` — the same surface as `python -m chtypes` (docs/fetch.md §6).
+[project.scripts]
+chtypes = "chtypes.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/wave-rf/chtypes"
 Repository = "https://github.com/wave-rf/chtypes"

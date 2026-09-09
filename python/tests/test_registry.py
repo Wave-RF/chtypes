@@ -63,12 +63,27 @@ def test_version_lookup_accepts_a_minor_line_and_an_exact_patch(
         assert drifted in registry
 
 
-def test_unresolvable_version_names_what_is_loaded(registry: chtypes.Registry) -> None:
-    with pytest.raises(chtypes.RegistryError) as caught:
+def test_unresolvable_version_is_the_one_missing_artifact_error(
+    registry: chtypes.Registry,
+) -> None:
+    """docs/fetch.md §7: one identifiable error, one message, verbatim."""
+    with pytest.raises(chtypes.ArtifactMissingError) as caught:
         registry.for_version("99.1")
-    message = str(caught.value)
-    for minor in registry.versions():
-        assert minor in message
+    err = caught.value
+    assert isinstance(err, chtypes.RegistryError)  # `except RegistryError` still works
+    assert err.code == chtypes.CODE_ARTIFACT_MISSING == "CHTYPES_ARTIFACT_MISSING"
+    assert err.line == "99.1"
+    assert err.platform == chtypes.host_platform()
+    assert err.looked_in == tuple(str(p) for p in registry.search_path)
+    assert str(err) == (
+        f"chtypes: no artifact for ClickHouse 99.1 ({chtypes.host_platform()}). "
+        f"Looked in: {', '.join(err.looked_in)}.\n"
+        f"Install it:  python -m chtypes fetch 99.1\n"
+        f"or set CHTYPES_AUTOFETCH=1 to fetch on first use."
+    )
+    # A drifted patch of a missing line names the LINE, which is what fetch takes.
+    with pytest.raises(chtypes.ArtifactMissingError, match="fetch 99.1\n"):
+        registry.for_version("99.1.2.3")
     # An empty version never means "pick one" on the registry path.
     with pytest.raises(chtypes.RegistryError):
         registry.for_version("")
@@ -82,10 +97,41 @@ def test_versions_are_ordered_by_release_not_by_string(registry: chtypes.Registr
         assert versions.index("25.8") < versions.index("25.10")
 
 
-def test_registry_needs_a_directory(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(chtypes.ENV_REGISTRY, raising=False)
-    with pytest.raises(chtypes.RegistryError, match=chtypes.ENV_REGISTRY):
-        chtypes.Registry()
+def test_registry_walks_the_search_path(
+    monkeypatch: pytest.MonkeyPatch, isolated_search_path: Path, tmp_path: Path
+) -> None:
+    """docs/fetch.md §1: explicit path, $CHTYPES_REGISTRY, the cache, the
+    system locations — in that order; fetch writes to the first of the
+    first three. `Registry()` no longer needs anything set (pre-1.0 change)."""
+    cache = isolated_search_path
+    reg = chtypes.Registry()
+    assert reg.search_path == (cache,)  # system roots are patched out here
+    assert reg.directory == cache
+    assert reg.versions() == ()
+
+    env_dir = tmp_path / "env-registry"
+    monkeypatch.setenv(chtypes.ENV_REGISTRY, str(env_dir))
+    reg = chtypes.Registry()
+    assert reg.search_path == (env_dir, cache)
+    assert reg.directory == env_dir
+
+    explicit = tmp_path / "explicit"
+    reg = chtypes.Registry(explicit)
+    assert reg.search_path == (explicit, env_dir, cache)
+    assert reg.directory == explicit
+    # Explicit == env: de-duplicated, order kept.
+    assert chtypes.Registry(env_dir).search_path == (env_dir, cache)
+    # The public helper is the same walk, with the reserved system slots.
+    monkeypatch.setattr(
+        "chtypes.fetch.SYSTEM_REGISTRY_ROOTS", ("/usr/local/share/chtypes/artifacts",)
+    )
+    assert chtypes.registry_search_path(explicit) == (
+        explicit,
+        env_dir,
+        cache,
+        Path("/usr/local/share/chtypes/artifacts") / chtypes.host_platform(),
+    )
+    assert chtypes.fetch_destination() == env_dir  # never a system location
 
 
 def test_registry_reads_the_environment(
@@ -95,14 +141,25 @@ def test_registry_reads_the_environment(
     assert chtypes.Registry().versions() == registry.versions()
 
 
-def test_a_directory_without_a_manifest_is_not_a_version(tmp_path: Path) -> None:
+def test_a_directory_without_a_manifest_is_not_a_version(
+    tmp_path: Path, isolated_search_path: Path
+) -> None:
     assert chtypes.read_manifest(tmp_path) is None
     (tmp_path / "manifest.json").write_text("not json at all")
     assert chtypes.read_manifest(tmp_path) is None
     (tmp_path / "manifest.json").write_text('{"clickhouse_version": "25.8.1"}')
     assert chtypes.read_manifest(tmp_path) is None  # no `library` field
-    with pytest.raises(chtypes.RegistryError, match="no version artifacts"):
-        chtypes.Registry(tmp_path)
+    scratch = tmp_path / "25.8"
+    scratch.mkdir()
+    (scratch / "manifest.json").write_text('{"clickhouse_version": "25.8.1"}')
+    # An empty registry is not an error at construction any more — the §7
+    # error comes at open time, naming every directory searched.
+    reg = chtypes.Registry(tmp_path)
+    assert reg.versions() == ()
+    assert "25.8" not in reg
+    with pytest.raises(chtypes.ArtifactMissingError) as caught:
+        reg.for_version("25.8")
+    assert caught.value.looked_in == (str(tmp_path), str(isolated_search_path))
 
 
 def test_manifest_ignores_unknown_fields(tmp_path: Path) -> None:
@@ -457,12 +514,18 @@ def test_library_close_is_refcounted_per_image(tmp_path: Path) -> None:
         print("REFCOUNT-OK", calls["n"])
         """
     )
+    # Isolated: the staged directory is the ONLY registry on the subprocess's
+    # search path, or `libraries()` would load every line of this machine's
+    # cache beside the one staged version and the count would be off.
+    env = {k: v for k, v in os.environ.items() if k != chtypes.ENV_REGISTRY}
+    env["XDG_CACHE_HOME"] = str(tmp_path / "xdg-cache")
     proc = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path)],
         capture_output=True,
         text=True,
         timeout=300,
         check=False,
+        env=env,
     )
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "REFCOUNT-OK 1" in proc.stdout, proc.stdout

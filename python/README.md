@@ -35,38 +35,91 @@ uv add --editable /path/to/chtypes/python   # in a uv project
 uv pip install -e /path/to/chtypes/python   # in a bare venv
 ```
 
-**Getting artifacts.** The native code is a per-version prebuilt artifact this
-package `dlopen`s at runtime; nothing here builds one. Either fetch a published
-one — verified, into the per-user cache every SDK in this repository defaults
-to — or build one in the core repository, which lands it in the same place:
+## Getting artifacts
+
+The native code is a per-version prebuilt artifact this package `dlopen`s at
+runtime; nothing here builds one. The package carries the fetch command every
+SDK spells the same way ([`docs/fetch.md`](../docs/fetch.md)), so nothing else
+from this repository is needed:
 
 ```sh
-scripts/fetch.sh 25.8            # -> ~/.cache/chtypes/artifacts/<os>-<arch>/25.8/  (docs/artifacts.md)
+python -m chtypes fetch 25.8         # or `chtypes fetch 25.8` (console script), or --all
+python -m chtypes verify             # re-hash every installed line against its manifest
+python -m chtypes list               # what is installed, what the release offers
+python -m chtypes where              # the registry directory fetch writes to
 ```
 
-A registry directory holds one subdirectory per minor line — `25.8/manifest.json`,
-the shared library it names, `CH_VERSION`, `unsafe_families.txt` — and
-`$CHTYPES_REGISTRY` points at one anywhere else.
+```python
+import chtypes
+chtypes.ensure("25.8")               # the same, from code: idempotent, returns the directory
+```
+
+A fetch is a **verification chain, not a download** — nothing is a verdict but
+the chain: the release's `SHA256SUMS` must carry a valid ed25519 signature by
+the embedded release key (pure-stdlib verifier; `CHTYPES_TRUSTED_KEYS=<hex>,…`
+replaces the key list for a mirror, `CHTYPES_ALLOW_UNSIGNED=1` skips the check
+with one loud warning); `index.json` must agree with the signed sums; the
+tarball is hashed **before** it is unpacked; the manifest inside must agree
+with the index; the installed library is hashed again in place. The install is
+atomic (a verified temporary sibling renamed into place), an already-installed
+line that hashes right is a no-op (`--force` re-downloads), `--offline` never
+touches the network, and `--lock chtypes.lock` / `--frozen` pin what was
+installed the way a package manager's lock file does. Exit codes: 0 ok · 1
+verification failed · 2 usage · 3 source unreachable · 4 not published for
+this platform/line. A refused release installs nothing:
+`CHTYPES_ARTIFACT_UNTRUSTED`, `CHTYPES_ARTIFACT_CORRUPT`,
+`CHTYPES_ARTIFACT_PINNED`, `CHTYPES_ARTIFACT_UNPUBLISHED`,
+`CHTYPES_SOURCE_UNREACHABLE` — each a typed `ArtifactError` with that `.code`.
+Sources: `CHTYPES_ARTIFACTS_URL` (default `https://artifacts.wavehouse.dev`) plus
+`--tag` (default the rolling `artifacts`), or `--url <base>` for any host, a
+`file://` URL or a plain directory.
+
+**Where artifacts are looked for** — the registry search path, in order: the
+path given to `Registry(...)`, `$CHTYPES_REGISTRY`, the per-user cache
+`${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>/`, then the reserved
+system locations `/usr/local/share/chtypes/artifacts/<os>-<arch>` and
+`/opt/chtypes/artifacts/<os>-<arch>`. A line is served from the **first**
+directory that holds it; fetch writes to the first of the first three
+(`chtypes.registry_search_path()`, `chtypes.fetch_destination()`). A line no
+directory holds is **one** error, `ArtifactMissingError` (a `RegistryError`,
+`.code == "CHTYPES_ARTIFACT_MISSING"`), with the message every SDK prints:
+
+```
+chtypes: no artifact for ClickHouse 25.8 (darwin-arm64). Looked in: /Users/me/.cache/chtypes/artifacts/darwin-arm64, /usr/local/share/chtypes/artifacts/darwin-arm64, /opt/chtypes/artifacts/darwin-arm64.
+Install it:  python -m chtypes fetch 25.8
+or set CHTYPES_AUTOFETCH=1 to fetch on first use.
+```
+
+**Lazy fetch on first open** is opt-in — `Registry(autofetch=True)` or
+`CHTYPES_AUTOFETCH=1` — and runs `ensure` for a missing line before opening it,
+once per process per line under one lock, so concurrent opens fetch once. Off
+by default: a production process must not begin a 250 MB download inside a
+request.
 
 - **Layout**: a registry directory holds one directory per minor line
   — `25.8/manifest.json`, the shared library it names, `CH_VERSION`,
   `unsafe_families.txt`. `manifest.json`'s `library` field is the loader's only
   source of truth for the file name (Linux artifacts still ship the historical
   `libchtypes_s1.so`; nothing is inferred from file or directory names).
+- **Loading is lazy, per line**: `Registry(...)` reads manifests and `dlopen`s
+  nothing; `for_version` loads the one line asked for, once (`libraries()`
+  loads every line). Once files are in a registry directory the loader trusts
+  the directory — verification is a fetch-time policy, exactly as a runtime
+  trusts `node_modules`; pass `Registry(..., verify_hashes=True)` to re-hash
+  each line against its manifest at load.
 - **Loader checks, in order**: dlopen `RTLD_NOW | RTLD_LOCAL` → mandatory
   symbols present → `chs_abi_revision()` equals `chtypes.ABI_REVISION` (a
   different nonzero revision is refused with `RegistryError`; `0` means the
   artifact predates the probe and per-symbol degradation applies) → the
   library's self-reported version matches the manifest → `chs_init(timezone,
-  unsafe_families)` once per image. Pass `Registry(..., verify_hashes=True)`
-  for artifacts that arrived over a network.
+  unsafe_families)` once per image.
 
 ## Quickstart
 
 ```python
 from chtypes import Format, Outcome, Registry
 
-registry = Registry(chtypes.default_registry_dir())  # the per-user cache; Registry() reads $CHTYPES_REGISTRY
+registry = Registry()  # the search path: $CHTYPES_REGISTRY, the per-user cache, the system dirs
 library = registry.for_version("25.8")  # minor line, or exact patch "25.8.28.1-lts"
 
 # Compile under the deployment's declared settings profile (see Discovery).
@@ -95,11 +148,16 @@ Row-level verdicts are **returned**, never raised: a rejected row is a
 
 | Symbol | C function | Returns | Raises |
 |---|---|---|---|
-| `Registry(dir=None, *, timezone="UTC", verify_hashes=False)` | per artifact: `chs_clickhouse_version`, `chs_abi_revision`, `chs_init` | `Registry` | `RegistryError` (unloadable dir, bad manifest, hash mismatch, ABI-revision mismatch, failed init) |
-| `Registry.versions()` | — derived | `tuple[str, ...]` minor lines, release order | — |
-| `Registry.libraries()` | — derived | `tuple[Library, ...]` | — |
-| `Registry.for_version(v)` / `registry[v]` | — derived | `Library` (exact patch or minor line; no nearest fallback) | `RegistryError` naming the loaded versions; `ChtypesError` if closed |
-| `v in registry`, `iter`, `len` | — derived | membership / libraries / count | — |
+| `Registry(dir=None, *, timezone="UTC", verify_hashes=False, autofetch=None)` | at load, per line: `chs_clickhouse_version`, `chs_abi_revision`, `chs_init` | `Registry` — walks the search path (`.search_path`, `.directory` = where fetch writes), loads nothing yet | `RegistryError` (an explicit directory that exists but cannot be read) |
+| `Registry.versions()` | — derived | `tuple[str, ...]` minor lines on the search path, release order | — |
+| `Registry.libraries()` | loads every line | `tuple[Library, ...]` | `RegistryError` (a line that has a manifest and does not load) |
+| `Registry.for_version(v)` / `registry[v]` | loads the line on first use | `Library` (exact patch or minor line; no nearest fallback) | `ArtifactMissingError` (the §7 message, every directory searched; with `autofetch` on, `ensure` runs first and ITS error is raised instead); `RegistryError` (broken artifact, hash mismatch, ABI-revision mismatch, failed init); `ChtypesError` if closed |
+| `v in registry`, `iter`, `len` | — derived | whether `for_version` would resolve without fetching / libraries / count | — |
+| `ensure(line, *, dest=None, platform=None, url=None, tag=None, lock=None, frozen=False, force=False, offline=False, trusted_keys=None, allow_unsigned=None, progress=None)` | — fetch, no C call | `Path` of `<registry>/<minor>`, installed and verified (idempotent) | `ArtifactUntrustedError`, `ArtifactCorruptError`, `ArtifactPinnedError`, `ArtifactUnpublishedError`, `SourceUnreachableError` (each `.code`); `ValueError` bad option |
+| `fetch_lines(lines, *, all_lines=False, …same)` | — fetch | `list[Path]`, the release read once | same |
+| `registry_search_path(explicit=None)`, `fetch_destination(explicit=None)`, `host_platform()`, `default_registry_dir()` | — paths | the §1 search path / where fetch writes / `<os>-<arch>` / the per-user cache | — |
+| `ArtifactError` and its six subclasses, `CODE_ARTIFACT_*`, `CODE_SOURCE_UNREACHABLE`, `UnsignedArtifactWarning` | error surface | `RegistryError` subclasses carrying `.code` | — |
+| `RELEASE_PUBLIC_KEY`, `RELEASE_KEY_ID`, `ENV_AUTOFETCH` | — constants | the embedded release signing key (hex) and its id; `"CHTYPES_AUTOFETCH"` | — |
 | `Registry.close()` | `chs_shutdown` per library, refcounted per image | `None` | — |
 | `Library.version` / `.minor` / `.path` / `.manifest` / `.abi_revision` | `chs_clickhouse_version`, `chs_abi_revision` at load | `str` / `str` / `str` / `Manifest` / `int` | — |
 | `Library.validate_type(expr)` | `chs_validate_type` | canonical `str` | `SchemaError` (e.g. 50 unknown family); `UnsupportedError` (a decline — e.g. an unsafe family this build refuses to construct) |
@@ -347,6 +405,25 @@ the uncontended one, no exceptions, no deadlock.
   (`cd playground/python && uv run demo.py`); the go/, ts/ and rust/ tours
   beside it print the same nine sections, so a diff shows only spelling.
 - `uv run pytest -q` — the unit suite and the golden set; needs a real registry
-  (`$CHTYPES_REGISTRY`, else the per-user cache), and skips loudly without one.
+  on the search path (`$CHTYPES_REGISTRY`, else the per-user cache), and skips
+  loudly without one. The fetch suite (`tests/test_fetch.py`, `tests/test_cli.py`)
+  runs offline against the miniature releases in `spec/fixtures/fetch/` through
+  `file://` sources and the test key, and skips loudly if they are absent.
+
+## Pre-1.0 changes
+
+- **2026-09-09 — `Registry()` walks the search path** (docs/fetch.md §1, §7;
+  breaking). `Registry()` with nothing set no longer raises for a missing
+  `$CHTYPES_REGISTRY`: it searches the explicit path, the environment, the
+  per-user cache and the system locations, in that order. An empty registry
+  is no longer an error at construction; opening a line no directory holds is
+  `ArtifactMissingError` (a `RegistryError`) with the shared message, in place
+  of the old `RegistryError` that listed the loaded versions. Loading is lazy
+  per line (`libraries()` loads all); `Registry.directory` is the directory
+  fetch writes to and `Registry.search_path` every directory consulted;
+  `verify_hashes=True` applies at load. New: `python -m chtypes` / `chtypes`
+  (fetch, verify, list, where), `chtypes.ensure`, `chtypes.fetch_lines`,
+  `Registry(autofetch=)` / `CHTYPES_AUTOFETCH`, the `ArtifactError` family,
+  the embedded release key and a pure-Python ed25519 verifier.
 - `spec/bindings.md` — the shape every SDK implements; `spec/c-abi.md` — the
   `chs_*` contract underneath.

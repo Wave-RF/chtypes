@@ -2,13 +2,29 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from os import PathLike
 from typing import Final
 
 __all__ = [
+    "CODE_ARTIFACT_CORRUPT",
+    "CODE_ARTIFACT_MISSING",
+    "CODE_ARTIFACT_PINNED",
+    "CODE_ARTIFACT_UNPUBLISHED",
+    "CODE_ARTIFACT_UNTRUSTED",
+    "CODE_SOURCE_UNREACHABLE",
     "CODE_UNSUPPORTED",
+    "ArtifactCorruptError",
+    "ArtifactError",
+    "ArtifactMissingError",
+    "ArtifactPinnedError",
+    "ArtifactUnpublishedError",
+    "ArtifactUntrustedError",
     "ChtypesError",
     "RegistryError",
     "SchemaError",
+    "SourceUnreachableError",
+    "UnsignedArtifactWarning",
     "UnsupportedError",
 ]
 
@@ -42,6 +58,121 @@ class RegistryError(ChtypesError):
     `Registry.for_version` cannot resolve (the message names the versions that
     ARE loaded — there is deliberately no nearest-version fallback).
     """
+
+
+# The fetch/verify codes every SDK shares (docs/fetch.md §7). A string code
+# rather than a subclass test is what a CLI, a log line or a metric keys on,
+# so it is carried on the exception as `.code` and never spelled twice.
+CODE_ARTIFACT_MISSING: Final = "CHTYPES_ARTIFACT_MISSING"
+CODE_ARTIFACT_UNTRUSTED: Final = "CHTYPES_ARTIFACT_UNTRUSTED"
+CODE_ARTIFACT_CORRUPT: Final = "CHTYPES_ARTIFACT_CORRUPT"
+CODE_ARTIFACT_PINNED: Final = "CHTYPES_ARTIFACT_PINNED"
+CODE_ARTIFACT_UNPUBLISHED: Final = "CHTYPES_ARTIFACT_UNPUBLISHED"
+CODE_SOURCE_UNREACHABLE: Final = "CHTYPES_SOURCE_UNREACHABLE"
+
+
+class ArtifactError(RegistryError):
+    """An artifact is missing, could not be obtained, or failed verification.
+
+    The base of the fetch-side family (docs/fetch.md §3, §5, §7). Every
+    subclass fixes `code` to one of the six codes the four SDKs share, so a
+    caller can key on either the type or the string:
+
+    - `ArtifactMissingError` — `CHTYPES_ARTIFACT_MISSING`: no installed
+      artifact for the line anywhere on the search path;
+    - `ArtifactUntrustedError` — `CHTYPES_ARTIFACT_UNTRUSTED`: the release is
+      unsigned or mis-signed;
+    - `ArtifactCorruptError` — `CHTYPES_ARTIFACT_CORRUPT`: any hash
+      disagreement, in the release or on disk;
+    - `ArtifactPinnedError` — `CHTYPES_ARTIFACT_PINNED`: the release differs
+      from what the lock file pins;
+    - `ArtifactUnpublishedError` — `CHTYPES_ARTIFACT_UNPUBLISHED`: the
+      release has nothing for this platform/line;
+    - `SourceUnreachableError` — `CHTYPES_SOURCE_UNREACHABLE`: the source
+      could not be read (network, or offline with nothing installed).
+
+    A `RegistryError`, because every one of them is a reason the loader
+    cannot serve a version; ``except RegistryError`` still catches them all.
+    """
+
+    code: str = ""
+
+
+class ArtifactMissingError(ArtifactError):
+    """No artifact for the requested line anywhere on the registry search path.
+
+    The one error every SDK raises for a missing artifact (docs/fetch.md §7),
+    with the shared message, verbatim apart from the bracketed parts: the
+    line, the platform, every directory that was looked in, and this SDK's
+    own fetch command. Raised by `Registry.for_version` when lazy fetch is
+    off; with `autofetch` on, the fetch runs first and its own failure is
+    raised instead.
+
+    Attributes:
+        line: the ClickHouse minor line that was asked for.
+        platform: ``<os>-<arch>`` of the running host.
+        looked_in: the directories searched, in search-path order.
+    """
+
+    code = CODE_ARTIFACT_MISSING
+
+    def __init__(self, line: str, platform: str, looked_in: Sequence[str | PathLike[str]]) -> None:
+        self.line = line
+        self.platform = platform
+        self.looked_in = tuple(str(d) for d in looked_in)
+        super().__init__(
+            f"chtypes: no artifact for ClickHouse {line} ({platform}). "
+            f"Looked in: {', '.join(self.looked_in)}.\n"
+            f"Install it:  python -m chtypes fetch {line}\n"
+            f"or set CHTYPES_AUTOFETCH=1 to fetch on first use."
+        )
+
+
+class ArtifactUntrustedError(ArtifactError):
+    """The release's ``SHA256SUMS`` is unsigned, or signed by no trusted key.
+
+    Verification stops here, before a byte of library moves; nothing is ever
+    downloaded around it. `CHTYPES_ALLOW_UNSIGNED=1` is the one, loud escape
+    (docs/fetch.md §4).
+    """
+
+    code = CODE_ARTIFACT_UNTRUSTED
+
+
+class ArtifactCorruptError(ArtifactError):
+    """A hash disagreed somewhere in the chain (docs/fetch.md §3).
+
+    `index.json` against the signed `SHA256SUMS`, the downloaded tarball
+    against both, the manifest inside against the index, or the installed
+    library against its manifest. A broken release is reported, never
+    repaired.
+    """
+
+    code = CODE_ARTIFACT_CORRUPT
+
+
+class ArtifactPinnedError(ArtifactError):
+    """The release offers something other than what the lock file pins."""
+
+    code = CODE_ARTIFACT_PINNED
+
+
+class ArtifactUnpublishedError(ArtifactError):
+    """The release has no artifact for this platform, line or exact patch."""
+
+    code = CODE_ARTIFACT_UNPUBLISHED
+
+
+class SourceUnreachableError(ArtifactError):
+    """The source could not be read: a network failure, a missing release
+    index, or `offline=True` with nothing installed."""
+
+    code = CODE_SOURCE_UNREACHABLE
+
+
+class UnsignedArtifactWarning(UserWarning):
+    """Emitted, once per fetch, when `CHTYPES_ALLOW_UNSIGNED=1` skips the
+    signature check — the one loud warning docs/fetch.md §4 requires."""
 
 
 class SchemaError(ChtypesError):
