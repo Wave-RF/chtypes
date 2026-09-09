@@ -78,8 +78,10 @@ say "go test ./... (untagged, CHTYPES_REGISTRY=$REG, -json into $LOG)"
 rc=0
 # The golden set lives in this repository (goldens/), not in the Go module, so
 # the bare copy is told where it is; without that the golden test skips by
-# name, which the census would print — but here it must RUN.
-( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_GOLDENS="$ROOT/goldens/cases.json" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
+# name, which the census would print — but here it must RUN. The same goes
+# for the fetch fixtures (spec/fixtures/fetch, docs/fetch.md §9): the fetch
+# suite reaches them through CHTYPES_FETCH_FIXTURES and skips loudly without.
+( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_GOLDENS="$ROOT/goldens/cases.json" CHTYPES_FETCH_FIXTURES="$ROOT/spec/fixtures/fetch" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
 [ -s "$LOG" ] || die "go test produced no -json output (rc=$rc)"
 set +e
 python3 - "$LOG" "$rc" <<'PY'
