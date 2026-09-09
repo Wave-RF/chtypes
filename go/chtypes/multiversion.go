@@ -247,6 +247,7 @@ static int          chs_lib_col_is_literal(chs_lib *l, const void *s, int i)   {
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -378,21 +379,88 @@ var (
 
 // Registry holds one Library per ClickHouse version and dispatches by
 // version — the multi-version product path. Safe for concurrent use.
+//
+// Lookup follows the docs/fetch.md §1 search path: the directory given to
+// NewRegistry (loaded eagerly, as it always was), then $CHTYPES_REGISTRY,
+// the per-user cache and the system locations, each consulted lazily by
+// For for a line the loaded set lacks. With AutoFetch (WithAutoFetch, or
+// CHTYPES_AUTOFETCH=1) a line found nowhere is fetched first (Ensure),
+// once per process per line; without it, the miss is ErrArtifactMissing.
 type Registry struct {
 	mu   sync.RWMutex
 	byID map[string]*Library
+	// known maps a minor line to the artifact directory discovered for it
+	// on the search path at construction (a lazy registry), whether or not
+	// it has been dlopen'd yet. Guarded by mu.
+	known map[string]string
+
+	explicit  string   // the constructor's directory, "" for the search path alone
+	search    []string // the §1 search path, in order
+	autoFetch bool
+	fetch     FetchOptions
 }
 
-// NewRegistry loads every artifact under dir. The expected layout is one
-// directory per version, each holding the manifest.json build.sh writes:
+// RegistryOption configures NewRegistry.
+type RegistryOption func(*Registry)
+
+// WithAutoFetch turns lazy fetch on first open on or off for this registry
+// (CHTYPES_AUTOFETCH=1 turns it on for every registry). Off by default: a
+// production process must not begin a 250 MB download inside a request.
+func WithAutoFetch(on bool) RegistryOption { return func(r *Registry) { r.autoFetch = on } }
+
+// WithFetchOptions sets the options a lazy fetch runs with — the source,
+// the trust list, a lock file, progress output. Dest defaults to the
+// registry's own write directory (§1) and Platform is always this host's:
+// a registry only ever dlopens artifacts it can run.
+func WithFetchOptions(o FetchOptions) RegistryOption { return func(r *Registry) { r.fetch = o } }
+
+// NewRegistry opens a registry. With a directory, every artifact under it
+// is loaded now — one directory per version, each holding the manifest.json
+// the build writes:
 //
 //	dir/25.8/{manifest.json,libchtypes.so}
 //	dir/26.6/{manifest.json,libchtypes.so}
-func NewRegistry(dir string) (*Registry, error) {
-	r := &Registry{byID: map[string]*Library{}}
+//
+// — and it is an error for that directory to hold nothing (unless
+// AutoFetch is on, in which case a fetch will populate it). With "" the
+// registry is the §1 search path alone: nothing is dlopen'd until For asks
+// for a line, and it is an error for the whole path to hold nothing
+// (again unless AutoFetch is on).
+func NewRegistry(dir string, opts ...RegistryOption) (*Registry, error) {
+	r := &Registry{byID: map[string]*Library{}, known: map[string]string{}, explicit: dir}
+	for _, o := range opts {
+		o(r)
+	}
+	if os.Getenv(envAutoFetch) == "1" {
+		r.autoFetch = true
+	}
+	r.search = RegistrySearchPath(dir)
+	if dir == "" {
+		r.discover()
+		if len(r.known) == 0 && !r.autoFetch {
+			return nil, fmt.Errorf("chtypes: no version artifacts on the registry search path (looked in: %s)", strings.Join(r.search, ", "))
+		}
+		return r, nil
+	}
+	loaded, err := r.loadDir(dir)
+	if err != nil {
+		if !(r.autoFetch && os.IsNotExist(err)) {
+			return nil, err
+		}
+	}
+	if loaded == 0 && !r.autoFetch {
+		return nil, fmt.Errorf("chtypes: no version artifacts under %s", dir)
+	}
+	return r, nil
+}
+
+// loadDir dlopens every artifact directory under dir and returns how many
+// it loaded. A directory without a readable manifest.json is skipped; one
+// whose library fails to load is an error naming it.
+func (r *Registry) loadDir(dir string) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	var loaded int
 	for _, e := range entries {
@@ -400,27 +468,33 @@ func NewRegistry(dir string) (*Registry, error) {
 			continue
 		}
 		sub := filepath.Join(dir, e.Name())
-		mf, err := os.ReadFile(filepath.Join(sub, "manifest.json"))
-		if err != nil {
-			continue
-		}
-		var m struct {
-			Library string `json:"library"`
-			Version string `json:"clickhouse_version"`
-			Minor   string `json:"clickhouse_minor"`
-		}
-		if err := json.Unmarshal(mf, &m); err != nil {
+		m, ok := readArtifactDir(sub)
+		if !ok {
 			continue
 		}
 		if err := r.Load(filepath.Join(sub, m.Library)); err != nil {
-			return nil, fmt.Errorf("%s: %w", sub, err)
+			return loaded, fmt.Errorf("%s: %w", sub, err)
 		}
 		loaded++
 	}
-	if loaded == 0 {
-		return nil, fmt.Errorf("chtypes: no version artifacts under %s", dir)
+	return loaded, nil
+}
+
+// readArtifactDir reads one <minor>/manifest.json; ok is false when the
+// directory is not an artifact directory.
+func readArtifactDir(sub string) (m struct {
+	Library string `json:"library"`
+	Version string `json:"clickhouse_version"`
+	Minor   string `json:"clickhouse_minor"`
+}, ok bool) {
+	mf, err := os.ReadFile(filepath.Join(sub, "manifest.json"))
+	if err != nil {
+		return m, false
 	}
-	return r, nil
+	if err := json.Unmarshal(mf, &m); err != nil || m.Library == "" {
+		return m, false
+	}
+	return m, true
 }
 
 // Load dlopens one library and registers it under its own reported version.
@@ -525,39 +599,42 @@ func openLibrary(path string) (*Library, error) {
 	return lib, nil
 }
 
-// Versions lists the ClickHouse minor lines this registry can answer for.
+// Versions lists the ClickHouse minor lines this registry can answer for:
+// every loaded library's line, plus — for a registry opened on the search
+// path alone — every line discovered there at construction.
 func (r *Registry) Versions() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	seen := map[string]bool{}
-	var out []string
-	for _, l := range r.byID {
-		if !seen[l.Minor] {
-			seen[l.Minor] = true
-			out = append(out, l.Minor)
-		}
-	}
-	sortMinorLines(out)
-	return out
+	return r.versionsLocked()
 }
 
 // For resolves a version to its library. A minor line ("25.8") or an exact
 // patch ("25.8.28.1-lts") both work: lookup tries the given string first,
 // then its minor line, so a drifted docker patch tag still finds its line.
-// Resolution failure is an error naming the versions that ARE loaded — never
-// a fallback to the nearest one, because answering 26.7 semantics from a
-// 25.8 artifact would be silently wrong.
+// Resolution never falls back to the nearest version, because answering
+// 26.7 semantics from a 25.8 artifact would be silently wrong.
+//
+// A line the loaded set lacks is looked for along the §1 search path and
+// loaded from the first directory that holds it; a line found nowhere is
+// fetched first when AutoFetch is on, and is otherwise ErrArtifactMissing
+// (errors.Is), with the §7 message naming every directory looked in.
+// ForContext is the same with a context for the fetch.
 func (r *Registry) For(v Version) (*Library, error) {
+	return r.ForContext(context.Background(), v)
+}
+
+// lookup answers from what is loaded: the exact spelling first, then the
+// minor line.
+func (r *Registry) lookup(v Version) *Library {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if l, ok := r.byID[string(v)]; ok {
-		return l, nil
+		return l
 	}
 	if l, ok := r.byID[minorOf(string(v))]; ok {
-		return l, nil
+		return l
 	}
-	return nil, fmt.Errorf("chtypes: no vendored build for ClickHouse %s (have %v)",
-		v, r.versionsLocked())
+	return nil
 }
 
 func (r *Registry) versionsLocked() []string {
@@ -567,6 +644,12 @@ func (r *Registry) versionsLocked() []string {
 		if !seen[l.Minor] {
 			seen[l.Minor] = true
 			out = append(out, l.Minor)
+		}
+	}
+	for minor := range r.known {
+		if !seen[minor] {
+			seen[minor] = true
+			out = append(out, minor)
 		}
 	}
 	sortMinorLines(out)
