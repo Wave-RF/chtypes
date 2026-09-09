@@ -152,6 +152,28 @@ There is no signature and no provenance attestation yet; see
 the core repository's page (`docs/distribution.md` §9).
 
 
+## 4a. Linux: several versions in one process
+
+glibc reserves a small fixed surplus of static thread-local storage for
+libraries loaded with `dlopen`, and each artifact consumes some of it. On
+Linux, the **third** artifact opened in one process fails with
+
+```
+cannot allocate memory in static TLS block
+```
+
+Until the artifact is built to need none (in progress on the producer
+side), a process that holds more than two versions must start with
+
+```
+GLIBC_TUNABLES=glibc.rtld.optional_static_tls=131072
+```
+
+in its environment — the dynamic loader reads it at process start, so
+nothing an SDK does at runtime can substitute. Set it on the service, in the
+container image, or in the CI job; the SDK's own test scripts set it for
+themselves. macOS has no such limit.
+
 ## 4. Fetching
 
 ```bash
