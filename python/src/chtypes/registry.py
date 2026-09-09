@@ -8,27 +8,35 @@ Registry(dir) -> for_version(v) -> Library -> compile_ddl(ddl) -> Schema
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import threading
 import weakref
 from collections.abc import Iterator, Mapping
 from contextlib import ExitStack
-from dataclasses import dataclass, fields
 from pathlib import Path
 from types import TracebackType
 from typing import Final
 
 from ._document import parse_batch_document, parse_filter_document, parse_row_document
+from ._manifest import (
+    Manifest,
+    cache_registry_dir,
+    host_platform,
+    minor_of,
+    read_manifest,
+    verify_library,
+)
 from ._native import NativeLibrary
 from .errors import (
+    ArtifactMissingError,
     ChtypesError,
     RegistryError,
     SchemaError,
     UnsupportedError,
     _error_for,
 )
+from .fetch import ENV_AUTOFETCH, Fetcher, fetch_destination, registry_search_path
 from .results import (
     COMPILE_DECLARED,
     DOC_ALL,
@@ -52,6 +60,7 @@ __all__ = [
     "Schema",
     "Settings",
     "encode_settings",
+    "host_platform",
     "minor_of",
     "read_manifest",
     "verify_library",
@@ -64,17 +73,10 @@ ENV_REGISTRY: Final = "CHTYPES_REGISTRY"
 def default_registry_dir() -> str:
     """The per-user artifact cache for this host — ``${XDG_CACHE_HOME:-~/.cache}/
     chtypes/artifacts/<os>-<arch>`` with ``<arch>`` spelled the artifact way
-    (``amd64``/``arm64``). Where ``scripts/fetch.sh`` installs, where a core-repo
-    build lands, and what every SDK's tests and playgrounds fall back to when
-    ``$CHTYPES_REGISTRY`` is unset. A path, not a promise: ``Registry`` still
-    raises if nothing is there."""
-    import platform as _platform
-
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
-    arch = {"x86_64": "amd64", "AMD64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(
-        _platform.machine(), _platform.machine()
-    )
-    return os.path.join(base, "chtypes", "artifacts", f"{_platform.system().lower()}-{arch}")
+    (``amd64``/``arm64``). Where ``chtypes fetch`` installs, where a core-repo
+    build lands, and slot 3 of the registry search path every SDK walks
+    (docs/fetch.md §1). A path, not a promise: it need not exist yet."""
+    return cache_registry_dir()
 
 
 # The server timezone assumed for bare DateTime / DateTime64 columns. "UTC" is
@@ -101,86 +103,6 @@ _INITIALIZED_IMAGES: dict[str, str] = {}
 # paths only, never a row call.)
 _IMAGE_REFS: dict[str, int] = {}
 _IMAGES_MU = threading.Lock()
-
-
-@dataclass(frozen=True, slots=True)
-class Manifest:
-    """`manifest.json`, of which only `library` is load-bearing for the loader.
-
-    Unknown fields are ignored rather than rejected, and no field is required
-    beyond `library`: the file is allowed to grow.
-    """
-
-    library: str
-    clickhouse_version: str = ""
-    clickhouse_minor: str = ""
-    clickhouse_commit: str = ""
-    os: str = ""
-    arch: str = ""
-    library_bytes: int = 0
-    library_sha256: str = ""
-    unsafe_families: str = ""
-
-
-def read_manifest(version_dir: str | os.PathLike[str]) -> Manifest | None:
-    """Read one version directory's manifest, or None if there is not a usable one.
-
-    A registry may legitimately contain scratch directories, and a `.DS_Store` is
-    not a version: an unreadable or unparseable manifest means "skip this
-    directory", never an error.
-    """
-    path = Path(version_dir) / "manifest.json"
-    try:
-        doc = json.loads(path.read_bytes())
-    except (OSError, ValueError):
-        return None
-    if not isinstance(doc, dict) or not isinstance(doc.get("library"), str):
-        return None
-    known = {f.name for f in fields(Manifest)}
-    try:
-        return Manifest(**{k: v for k, v in doc.items() if k in known})
-    except TypeError:  # pragma: no cover - a field of the wrong type
-        return None
-
-
-def verify_library(version_dir: str | os.PathLike[str]) -> None:
-    """Re-hash the shared library and compare it against the manifest.
-
-    The artifact carries its own checksum, so this is neither optional nor
-    expensive for anything that arrived over a network: a move that reported
-    success and truncated a 232 MB library looks identical to one that worked.
-    """
-    directory = Path(version_dir)
-    manifest = read_manifest(directory)
-    if manifest is None:
-        raise RegistryError(f"chtypes: no usable manifest.json in {directory}")
-    path = directory / manifest.library
-    try:
-        size = path.stat().st_size
-    except OSError as exc:
-        raise RegistryError(f"chtypes: {path}: {exc}") from exc
-    if manifest.library_bytes and size != manifest.library_bytes:
-        raise RegistryError(
-            f"chtypes: {path} is {size} bytes, manifest says {manifest.library_bytes}"
-        )
-    if not manifest.library_sha256:
-        return
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    if digest.hexdigest() != manifest.library_sha256:
-        raise RegistryError(
-            f"chtypes: {path} sha256 {digest.hexdigest()} != manifest {manifest.library_sha256}"
-        )
-
-
-def minor_of(version: str) -> str:
-    """The first two dot-separated components: "25.8.28.1-lts" -> "25.8"."""
-    parts = version.split(".", 2)
-    if len(parts) < 2:
-        return version
-    return f"{parts[0]}.{parts[1]}"
 
 
 def _minor_sort_key(minor: str) -> tuple[int, int, str]:
@@ -1040,16 +962,43 @@ class Library:
 
 
 class Registry:
-    """Every artifact under one directory, dispatched by ClickHouse version.
+    """Every artifact on the search path, dispatched by ClickHouse version.
 
-    The layout is one directory per ClickHouse minor line, each holding a
-    `manifest.json` whose `library` field names the shared object. That field is
-    the loader's only source of truth for the file name: the Linux artifacts in
-    this very tree still ship the historical `libchtypes_s1.so`, so a loader that
-    hard-codes `libchtypes.so` finds nothing on the shipping platform.
+    The search path (docs/fetch.md §1) is walked in order — the explicit
+    ``directory``, ``$CHTYPES_REGISTRY``, the per-user cache, the system
+    locations — and a line is served from the **first** directory that holds
+    it, so a stale directory can never shadow a good one and an empty one
+    is simply skipped. Each directory's layout is one subdirectory per
+    ClickHouse minor line holding a `manifest.json` whose `library` field
+    names the shared object; that field is the loader's only source of truth
+    for the file name (the Linux artifacts in this very tree still ship the
+    historical `libchtypes_s1.so`).
+
+    Loading is lazy and per line: constructing a `Registry` reads manifests
+    (cheap) and `dlopen`s nothing; `for_version` loads the one line asked
+    for, once. A line missing from every directory is `ArtifactMissingError`
+    (§7) — unless lazy fetch is on (``autofetch=True`` or
+    ``CHTYPES_AUTOFETCH=1``), in which case `ensure` runs first, under one
+    process-wide lock per line so concurrent opens fetch once. Off by
+    default: a production process must not begin a 250 MB download inside a
+    request.
+
+    `directory` is where fetch writes — the first of the explicit path,
+    ``$CHTYPES_REGISTRY`` and the cache; `search_path` is every directory
+    consulted, in order.
     """
 
-    __slots__ = ("_by_id", "_closed", "directory")
+    __slots__ = (
+        "_autofetch",
+        "_by_id",
+        "_closed",
+        "_index",
+        "_mu",
+        "_timezone",
+        "_verify_hashes",
+        "directory",
+        "search_path",
+    )
 
     def __init__(
         self,
@@ -1057,90 +1006,156 @@ class Registry:
         *,
         timezone: str = DEFAULT_TIMEZONE,
         verify_hashes: bool = False,
+        autofetch: bool | None = None,
     ) -> None:
-        resolved = directory if directory is not None else os.environ.get(ENV_REGISTRY)
-        if not resolved:
-            raise RegistryError(f"chtypes: no artifact registry given and ${ENV_REGISTRY} is unset")
-        self.directory = Path(resolved)
+        self.search_path: tuple[Path, ...] = registry_search_path(directory)
+        self.directory: Path = fetch_destination(directory)
+        self._timezone = timezone
+        self._verify_hashes = verify_hashes
+        self._autofetch = (
+            autofetch
+            if autofetch is not None
+            else os.environ.get(ENV_AUTOFETCH, "").strip().lower() in ("1", "true", "yes", "on")
+        )
         self._by_id: dict[str, Library] = {}
+        self._index: dict[str, Path] = {}
         self._closed = False
-
-        try:
-            entries = sorted(self.directory.iterdir())
-        except OSError as exc:
-            raise RegistryError(f"chtypes: cannot read registry {self.directory}: {exc}") from exc
-
-        for entry in entries:
-            if not entry.is_dir():
-                continue
-            manifest = read_manifest(entry)
-            if manifest is None:
-                continue  # not a version directory; scratch dirs are allowed
-            if verify_hashes:
-                verify_library(entry)
-            # A directory that has a manifest and does not load is broken, not
-            # absent: this is an error, naming the path.
-            library = Library(str(entry / manifest.library), manifest, timezone)
-            # Indexed under BOTH its exact version and its minor line: docker
-            # tags drift, and an exact-match-only lookup silently loses a whole
-            # version column.
-            self._by_id[library.version] = library
-            self._by_id[library.minor] = library
-
-        if not self._by_id:
-            raise RegistryError(f"chtypes: no version artifacts under {self.directory}")
+        self._mu = threading.RLock()
+        if directory is not None:
+            # An explicit directory that exists but cannot be read is a
+            # configuration mistake, named now. One that does not exist yet
+            # is fine: fetch creates it.
+            try:
+                Path(directory).iterdir()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise RegistryError(f"chtypes: cannot read registry {directory}: {exc}") from exc
+        self._scan()
 
     def __repr__(self) -> str:
         return f"<chtypes.Registry {self.directory} versions={self.versions()}>"
 
+    # ----------------------------------------------------------- discovery
+
+    def _scan(self) -> None:
+        """Index every line on the search path: minor -> the FIRST directory
+        holding it. Reads manifests only; loads nothing."""
+        index: dict[str, Path] = {}
+        for root in self.search_path:
+            try:
+                entries = sorted(root.iterdir())
+            except OSError:
+                continue  # absent, or unreadable: not a registry
+            for entry in entries:
+                if entry.name.startswith(".") or not entry.is_dir():
+                    continue
+                manifest = read_manifest(entry)
+                if manifest is None:
+                    continue  # not a version directory; scratch dirs are allowed
+                # The manifest's own claim, verified against the library at
+                # load; the directory name is only the last resort.
+                minor = manifest.clickhouse_minor or minor_of(manifest.clickhouse_version)
+                index.setdefault(minor or entry.name, entry)
+        self._index = index
+
+    def _load(self, minor: str, entry: Path) -> Library:
+        manifest = read_manifest(entry)
+        if manifest is None:
+            raise RegistryError(f"chtypes: {entry} no longer holds a usable manifest.json")
+        if self._verify_hashes:
+            verify_library(entry)
+        # A directory that has a manifest and does not load is broken, not
+        # absent: this is an error, naming the path.
+        library = Library(str(entry / manifest.library), manifest, self._timezone)
+        if library.minor != minor:
+            library.close()
+            raise RegistryError(
+                f"chtypes: {entry} is indexed as ClickHouse {minor} but its library reports "
+                f"{library.version}"
+            )
+        # Indexed under BOTH its exact version and its minor line: docker
+        # tags drift, and an exact-match-only lookup silently loses a whole
+        # version column.
+        self._by_id[library.version] = library
+        self._by_id[library.minor] = library
+        return library
+
+    def _autofetch_line(self, version: str) -> None:
+        key = (str(self.directory), minor_of(version))
+        with _autofetch_lock(key):
+            if key in _AUTOFETCHED:
+                return
+            Fetcher(dest=self.directory).ensure(version)
+            _AUTOFETCHED.add(key)
+
+    # ----------------------------------------------------------- resolution
+
     def versions(self) -> tuple[str, ...]:
         """The ClickHouse minor lines this registry can answer for, in release order."""
-        return tuple(sorted({lib.minor for lib in self._by_id.values()}, key=_minor_sort_key))
+        minors = {lib.minor for lib in self._by_id.values()} | set(self._index)
+        return tuple(sorted(minors, key=_minor_sort_key))
 
     def libraries(self) -> tuple[Library, ...]:
-        """One entry per loaded library, in release order."""
+        """One entry per line, loaded, in release order."""
+        with self._mu:
+            for minor in list(self._index):
+                if minor not in self._by_id:
+                    self._load(minor, self._index[minor])
         unique = {id(lib): lib for lib in self._by_id.values()}
         return tuple(sorted(unique.values(), key=lambda lib: _minor_sort_key(lib.minor)))
 
     def for_version(self, version: str) -> Library:
         """Resolve a minor line ("25.8") or an exact patch ("25.8.28.1-lts").
 
-        A drifted patch resolves to its minor line, deliberately. Failure is an
-        error naming the versions that ARE loaded, never a fallback to the
-        nearest one: answering 26.7 semantics from a 25.8 artifact is a lie, and
-        the rigs score silent wrongness hardest.
+        A drifted patch resolves to its minor line, deliberately. Failure is
+        `ArtifactMissingError` naming every directory searched, never a
+        fallback to the nearest line: answering 26.7 semantics from a 25.8
+        artifact is a lie, and the rigs score silent wrongness hardest.
         """
         if self._closed:
             raise ChtypesError("chtypes: registry is closed")
         if not version:
             raise RegistryError("chtypes: an empty version does not mean 'pick one'")
-        library = self._by_id.get(version) or self._by_id.get(minor_of(version))
-        if library is None:
-            raise RegistryError(
-                f"chtypes: no vendored build for ClickHouse {version} "
-                f"(have {list(self.versions())})"
-            )
-        return library
+        minor = minor_of(version)
+        with self._mu:
+            library = self._by_id.get(version) or self._by_id.get(minor)
+            if library is not None:
+                return library
+            if minor not in self._index:
+                self._scan()  # installed since construction, by fetch or by hand
+            if minor not in self._index and self._autofetch:
+                self._autofetch_line(version)
+                self._scan()
+            if minor not in self._index:
+                raise ArtifactMissingError(minor, host_platform(), self.search_path)
+            return self._load(minor, self._index[minor])
 
     def __getitem__(self, version: str) -> Library:
         """`registry["25.8"]` — sugar for `for_version`, same resolution rules."""
         return self.for_version(version)
 
     def __contains__(self, version: str) -> bool:
-        """Whether `for_version(version)` would resolve (exact or minor line)."""
-        return version in self._by_id or minor_of(version) in self._by_id
+        """Whether `for_version(version)` would resolve without fetching."""
+        return (
+            version in self._by_id
+            or minor_of(version) in self._by_id
+            or (minor_of(version) in self._index)
+        )
 
     def __iter__(self) -> Iterator[Library]:
         return iter(self.libraries())
 
     def __len__(self) -> int:
-        return len(self.libraries())
+        return len(self.versions())
 
     def close(self) -> None:
         """`chs_shutdown` every loaded library. Close every `Schema` first."""
-        for library in self.libraries():
-            library.close()
-        self._closed = True
+        with self._mu:
+            unique = {id(lib): lib for lib in self._by_id.values()}
+            for library in unique.values():
+                library.close()
+            self._closed = True
 
     def __enter__(self) -> Registry:
         return self
@@ -1152,3 +1167,18 @@ class Registry:
         tb: TracebackType | None,
     ) -> None:
         self.close()
+
+
+# Lazy fetch runs ONCE per process per (destination, line), whatever the
+# number of Registry instances or threads that open it concurrently
+# (docs/fetch.md §6): the lock serializes the opens, the memo keeps a line
+# whose fetch succeeded but whose load then failed from being re-downloaded
+# on every open.
+_AUTOFETCHED: set[tuple[str, str]] = set()
+_AUTOFETCH_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_AUTOFETCH_MU = threading.Lock()
+
+
+def _autofetch_lock(key: tuple[str, str]) -> threading.Lock:
+    with _AUTOFETCH_MU:
+        return _AUTOFETCH_LOCKS.setdefault(key, threading.Lock())

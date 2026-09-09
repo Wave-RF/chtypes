@@ -1,10 +1,11 @@
 """Fixtures. Every test here runs against real artifacts or does not run at all.
 
-The registry comes from `$CHTYPES_REGISTRY`, else the per-user artifact cache
-for this host (`chtypes.default_registry_dir()`: `~/.cache/chtypes/artifacts/
-<os>-<arch>`, where `scripts/fetch.sh` installs and a core-repo build lands).
-Without one the suite skips with that message: a green run that never touched a
-ClickHouse build would be worse than no run.
+The registry comes from the search path (docs/fetch.md §1): `$CHTYPES_REGISTRY`,
+else the per-user artifact cache for this host (`chtypes.default_registry_dir()`:
+`~/.cache/chtypes/artifacts/<os>-<arch>`, where `chtypes fetch` installs and a
+core-repo build lands), else the system locations. Without a single line on it
+the suite skips with that message: a green run that never touched a ClickHouse
+build would be worse than no run.
 """
 
 from __future__ import annotations
@@ -31,13 +32,39 @@ def _candidate() -> tuple[Path, str]:
 def registry() -> chtypes.Registry:
     path, source = _candidate()
     try:
-        return chtypes.Registry(path)
+        registry = chtypes.Registry(path)
     except chtypes.RegistryError as exc:
+        pytest.skip(f"chtypes artifact registry at {path} (from {source}) is unusable: {exc}")
+    if not registry.versions():
         pytest.skip(
-            f"no chtypes artifact registry at {path} (from {source}): {exc}. "
-            f"Fetch one with scripts/fetch.sh (docs/artifacts.md) or build one in the core repo, "
-            f"or point ${chtypes.ENV_REGISTRY} at an existing registry."
+            f"no chtypes artifacts on the search path {[str(p) for p in registry.search_path]} "
+            f"(from {source}). Fetch one with `uv run python -m chtypes fetch 25.8` "
+            f"(docs/fetch.md) or build one in the core repo, or point ${chtypes.ENV_REGISTRY} "
+            f"at an existing registry."
         )
+    return registry
+
+
+@pytest.fixture
+def isolated_search_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """A registry search path that holds NOTHING of this machine's: no
+    `$CHTYPES_REGISTRY`, the cache under a fresh `XDG_CACHE_HOME`, no system
+    roots, and none of the fetch-policy variables. Returns the cache directory
+    fetch would write to. For tests about missing artifacts, fetch and the
+    search path — never for tests that need a real artifact."""
+    from chtypes import fetch as fetch_module
+
+    for name in (
+        chtypes.ENV_REGISTRY,
+        chtypes.ENV_AUTOFETCH,
+        fetch_module.ENV_TRUSTED_KEYS,
+        fetch_module.ENV_ALLOW_UNSIGNED,
+        fetch_module.ENV_ARTIFACTS_URL,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+    monkeypatch.setattr(fetch_module, "SYSTEM_REGISTRY_ROOTS", ())
+    return Path(chtypes.default_registry_dir())
 
 
 @pytest.fixture(scope="session")

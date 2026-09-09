@@ -10,7 +10,7 @@ construction rather than approximately right.
 
     from chtypes import Format, Registry
 
-    registry = Registry(default_registry_dir())   # or Registry() with $CHTYPES_REGISTRY set
+    registry = Registry()                    # the search path: $CHTYPES_REGISTRY, the cache, …
     library = registry.for_version("25.8")   # a minor line or an exact patch
     with library.compile_ddl("ts DateTime, seq UInt8") as schema:
         batch = schema.rows(Format.JSON_EACH_ROW, b'{"ts":"2026-01-15 10:30:00","seq":256}\\n')
@@ -54,11 +54,34 @@ from .discover import (
     reconstruct_ddl,
 )
 from .errors import (
+    CODE_ARTIFACT_CORRUPT,
+    CODE_ARTIFACT_MISSING,
+    CODE_ARTIFACT_PINNED,
+    CODE_ARTIFACT_UNPUBLISHED,
+    CODE_ARTIFACT_UNTRUSTED,
+    CODE_SOURCE_UNREACHABLE,
     CODE_UNSUPPORTED,
+    ArtifactCorruptError,
+    ArtifactError,
+    ArtifactMissingError,
+    ArtifactPinnedError,
+    ArtifactUnpublishedError,
+    ArtifactUntrustedError,
     ChtypesError,
     RegistryError,
     SchemaError,
+    SourceUnreachableError,
+    UnsignedArtifactWarning,
     UnsupportedError,
+)
+from .fetch import (
+    ENV_AUTOFETCH,
+    RELEASE_KEY_ID,
+    RELEASE_PUBLIC_KEY,
+    ensure,
+    fetch_destination,
+    fetch_lines,
+    registry_search_path,
 )
 from .registry import (
     ENV_REGISTRY,
@@ -69,6 +92,7 @@ from .registry import (
     Registry,
     Schema,
     default_registry_dir,
+    host_platform,
     minor_of,
     read_manifest,
     verify_library,
@@ -101,19 +125,34 @@ from .results import (
 
 __all__ = [
     "ABI_REVISION",
+    "CODE_ARTIFACT_CORRUPT",
+    "CODE_ARTIFACT_MISSING",
+    "CODE_ARTIFACT_PINNED",
+    "CODE_ARTIFACT_UNPUBLISHED",
+    "CODE_ARTIFACT_UNTRUSTED",
+    "CODE_SOURCE_UNREACHABLE",
     "CODE_UNSUPPORTED",
     "COMPILE_DECLARED",
     "DOC_ALL",
     "DOC_DEFAULTS",
     "DOC_TRANSFORMS",
     "DOC_VALUES",
+    "ENV_AUTOFETCH",
     "ENV_REGISTRY",
     "default_registry_dir",
     "EXPORT_NONE",
+    "RELEASE_KEY_ID",
+    "RELEASE_PUBLIC_KEY",
     "LOSSLESS_REASONS",
     "QUERY_CHANGED_SETTINGS",
     "QUERY_SERVER_VERSION",
     "QUERY_TABLE_COLUMNS",
+    "ArtifactCorruptError",
+    "ArtifactError",
+    "ArtifactMissingError",
+    "ArtifactPinnedError",
+    "ArtifactUnpublishedError",
+    "ArtifactUntrustedError",
     "BatchResult",
     "Block",
     "ChtypesError",
@@ -137,12 +176,18 @@ __all__ = [
     "Schema",
     "SchemaError",
     "ServerProfile",
+    "SourceUnreachableError",
     "Span",
     "Substitution",
     "Transform",
+    "UnsignedArtifactWarning",
     "UnsupportedError",
     "Value",
     "Verdict",
+    "ensure",
+    "fetch_destination",
+    "fetch_lines",
+    "host_platform",
     "minor_of",
     "parse_changed_settings_result",
     "parse_columns_result",
@@ -150,6 +195,7 @@ __all__ = [
     "quote_bare_denormals",
     "read_manifest",
     "reconstruct_ddl",
+    "registry_search_path",
     "verify_library",
 ]
 
