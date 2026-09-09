@@ -106,6 +106,13 @@ jobs:
           go-version-file: go/go.mod
       - name: go — standalone check (build + registry suite + goldens)
         run: scripts/check-standalone.sh --registry "$CHTYPES_REGISTRY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-standalone-json
+          path: scratch/check-standalone.json
+          if-no-files-found: ignore
+          retention-days: 14
       - uses: astral-sh/setup-uv@v5
       - name: python — suite + goldens
         run: cd python && uv sync --group dev && uv run pytest -q -rs tests

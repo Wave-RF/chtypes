@@ -87,7 +87,7 @@ set +e
 python3 - "$LOG" "$rc" <<'PY'
 import json, sys
 log, rc = sys.argv[1], int(sys.argv[2])
-ran = skip = fail = 0; skips = []; noise = []
+ran = skip = fail = 0; skips = []; noise = []; failed = []; output = {}
 for line in open(log, encoding="utf-8", errors="replace"):
     line = line.strip()
     if not line.startswith("{"):
@@ -97,11 +97,18 @@ for line in open(log, encoding="utf-8", errors="replace"):
     except ValueError: noise.append(line); continue
     t, a = ev.get("Test"), ev.get("Action")
     if not t: continue
+    if a == "output": output.setdefault(t, []).append(ev.get("Output", "").rstrip("\n")); continue
     if a == "pass": ran += 1
-    elif a == "fail": ran += 1; fail += 1
+    elif a == "fail": ran += 1; fail += 1; failed.append(t)
     elif a == "skip": skip += 1; skips.append(t)
 print("  standalone census — %d ran, %d skipped, %d failed" % (ran, skip, fail))
 for t in skips: print("    SKIPPED", t)
+# A failure is named, and its own last words are quoted — a count alone sends
+# whoever reads the log to fetch the -json file, which CI does not keep.
+for t in failed:
+    print("    FAILED", t)
+    tail = [l for l in output.get(t, []) if l.strip() and not l.startswith("=== RUN") and not l.startswith("--- FAIL")][-12:]
+    for l in tail: print("      | " + l[:200])
 for n in noise[:20]: print("    " + n[:160])
 problems = []
 if fail: problems.append("%d test(s) failed" % fail)
