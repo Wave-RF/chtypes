@@ -146,3 +146,132 @@ export function schemaErrorFor(
 ): SchemaError | UnsupportedError {
   return code < 0 ? new UnsupportedError(detail, column) : new SchemaError(code, detail, column);
 }
+
+// ---------------------------------------------------------------- artifacts
+//
+// The fetch/verify contract (docs/fetch.md §7) shares six codes across the
+// four SDKs. Five of them are verdicts of the verification chain or of the
+// source and are raised by `ensure` / the CLI; the sixth,
+// `CHTYPES_ARTIFACT_MISSING`, is the loader's — raised when a registry is
+// asked for a line no directory on the search path holds.
+
+/** The codes docs/fetch.md §7 shares across every SDK. */
+export type ArtifactErrorCode =
+  | 'CHTYPES_ARTIFACT_MISSING'
+  | 'CHTYPES_ARTIFACT_UNTRUSTED'
+  | 'CHTYPES_ARTIFACT_CORRUPT'
+  | 'CHTYPES_ARTIFACT_PINNED'
+  | 'CHTYPES_ARTIFACT_UNPUBLISHED'
+  | 'CHTYPES_SOURCE_UNREACHABLE';
+
+/** The command this SDK's §7 message tells a user to run. */
+export const FETCH_COMMAND = 'npx @wavehouse/chtypes fetch';
+
+/**
+ * The §7 message, verbatim apart from the bracketed parts:
+ *
+ *     chtypes: no artifact for ClickHouse <line> (<os>-<arch>). Looked in: <dir1>, <dir2>, ….
+ *     Install it:  npx @wavehouse/chtypes fetch <line>
+ *     or set CHTYPES_AUTOFETCH=1 to fetch on first use.
+ */
+export function artifactMissingMessage(line: string, platform: string, lookedIn: readonly string[]): string {
+  return (
+    `chtypes: no artifact for ClickHouse ${line} (${platform}). Looked in: ${lookedIn.join(', ')}.\n` +
+    `Install it:  ${FETCH_COMMAND} ${line}\n` +
+    'or set CHTYPES_AUTOFETCH=1 to fetch on first use.'
+  );
+}
+
+/**
+ * The one identifiable error for a missing artifact (docs/fetch.md §7):
+ * a `Registry` was asked for a line that no directory on its search path
+ * holds. `code` is `'CHTYPES_ARTIFACT_MISSING'`; the message is the
+ * contract's, and names every directory that was looked in and the command
+ * that installs the line.
+ *
+ * A subclass of `RegistryError`, so a `catch` written against `for()`'s
+ * documented error keeps working; the `code` is what a caller matches on.
+ */
+export class ArtifactMissingError extends RegistryError {
+  readonly code = 'CHTYPES_ARTIFACT_MISSING' as const;
+  /** The minor line that was asked for, e.g. `25.8`. */
+  readonly line: string;
+  /** The platform key the registry serves, e.g. `darwin-arm64`. */
+  readonly platform: string;
+  /** Every directory of the search path, in order. */
+  readonly lookedIn: readonly string[];
+
+  constructor(line: string, platform: string, lookedIn: readonly string[]) {
+    super(artifactMissingMessage(line, platform, lookedIn));
+    this.line = line;
+    this.platform = platform;
+    this.lookedIn = [...lookedIn];
+  }
+}
+
+/**
+ * Base of the fetch-time verdicts (docs/fetch.md §3–§7). `code` is one of the
+ * shared codes; the subclasses exist so `instanceof` reads as well as `code`.
+ */
+export class FetchError extends ChtypesError {
+  readonly code: Exclude<ArtifactErrorCode, 'CHTYPES_ARTIFACT_MISSING'>;
+
+  constructor(
+    code: Exclude<ArtifactErrorCode, 'CHTYPES_ARTIFACT_MISSING'>,
+    message: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.code = code;
+  }
+}
+
+/**
+ * `CHTYPES_ARTIFACT_UNTRUSTED`: the release's `SHA256SUMS.sig` is absent,
+ * malformed, or does not verify with any trusted key. Nothing is downloaded
+ * around it (§3 step 0).
+ */
+export class ArtifactUntrustedError extends FetchError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super('CHTYPES_ARTIFACT_UNTRUSTED', message, options);
+  }
+}
+
+/**
+ * `CHTYPES_ARTIFACT_CORRUPT`: any hash mismatch along the chain, a release
+ * that disagrees with itself (`index.json` vs `SHA256SUMS`, manifest vs
+ * index), or an archive that cannot be read safely.
+ */
+export class ArtifactCorruptError extends FetchError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super('CHTYPES_ARTIFACT_CORRUPT', message, options);
+  }
+}
+
+/**
+ * `CHTYPES_ARTIFACT_PINNED`: a `--frozen` lock file names a different asset
+ * or sha256 for this line — or none at all — and the fetch refused it (§5).
+ */
+export class ArtifactPinnedError extends FetchError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super('CHTYPES_ARTIFACT_PINNED', message, options);
+  }
+}
+
+/** `CHTYPES_ARTIFACT_UNPUBLISHED`: the release has nothing for this platform, line or exact patch. */
+export class ArtifactUnpublishedError extends FetchError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super('CHTYPES_ARTIFACT_UNPUBLISHED', message, options);
+  }
+}
+
+/**
+ * `CHTYPES_SOURCE_UNREACHABLE`: the source could not be reached or does not
+ * serve the release files — or `offline` forbade reaching it and the line is
+ * not installed and verified.
+ */
+export class SourceUnreachableError extends FetchError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super('CHTYPES_SOURCE_UNREACHABLE', message, options);
+  }
+}
