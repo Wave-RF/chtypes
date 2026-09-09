@@ -63,6 +63,12 @@ name = "chtypes"
 path = "src/main.rs"
 required-features = ["fetch"]
 
+# The fetch suite runs the binary and the fixtures; it does not exist without
+# the feature.
+[[test]]
+name = "fetch"
+required-features = ["fetch"]
+
 [dev-dependencies]
 # The integration tests read manifest.json themselves, to prove the loader took
 # the library file name from it rather than constructing one.

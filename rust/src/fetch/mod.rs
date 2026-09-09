@@ -145,10 +145,12 @@ pub struct ReleaseInfo {
 /// installed and verified for this host, fetching it through the
 /// `docs/fetch.md` §3 chain when it is not.
 ///
-/// Idempotent: a line found on the §1 search path whose library hashes what
-/// its manifest says is [`Action::AlreadyInstalled`] and nothing is
-/// downloaded — no network at all, so a process may call this at startup
-/// offline. Otherwise the signed release is consulted, the asset for the
+/// Idempotent: a line already installed whose library hashes what its
+/// manifest says is [`Action::AlreadyInstalled`] and nothing is downloaded —
+/// no network at all, so a process may call this at startup offline.
+/// "Installed" means anywhere on the §1 search path when no
+/// [`EnsureOptions::dest`] is given (what a registry would find), and in
+/// `dest` itself when one is (the caller named where the line must be). Otherwise the signed release is consulted, the asset for the
 /// line is downloaded, hashed, unpacked into a temporary sibling, renamed
 /// into `<dest>/<minor>/` and re-hashed in place. With a lock file
 /// ([`EnsureOptions::lock`]) the release is always consulted, so the pin can
@@ -171,7 +173,7 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
     let request = Request::parse(line)?;
     let platform = platform_of(opts)?;
     let dest = install_dir_for(&platform, opts.dest.as_deref());
-    let search = search_path_for(&platform, opts.dest.as_deref());
+    let search = installed_search(opts, &platform, &dest);
 
     // Installed and verified is a no-op — and never a network round trip —
     // unless a lock is in play (the release's record is what a lock pins) or
@@ -261,7 +263,7 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
 pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
     let platform = platform_of(opts)?;
     let dest = install_dir_for(&platform, opts.dest.as_deref());
-    let search = search_path_for(&platform, opts.dest.as_deref());
+    let search = installed_search(opts, &platform, &dest);
     let source = Source::resolve(opts.url.as_deref(), opts.tag.as_deref(), opts.offline)?;
     let policy = policy_of(opts)?;
     let release = Release::load(&source, &policy, opts.progress)?;
@@ -395,6 +397,20 @@ pub fn install_dir(opts: &EnsureOptions) -> Result<PathBuf> {
 pub fn search_path(opts: &EnsureOptions) -> Result<Vec<PathBuf>> {
     let platform = platform_of(opts)?;
     Ok(search_path_for(&platform, opts.dest.as_deref()))
+}
+
+/// Where "already installed" is looked for. Without an explicit `dest`, the
+/// whole §1 search path: a line a registry would find — in the per-user
+/// cache, or pre-seeded in a system location — is installed, and fetching a
+/// second copy into the cache would only spend 250 MB. With an explicit
+/// `dest` the caller named where the line must be, so only `dest` counts: a
+/// container build's `--dest /opt/chtypes/artifacts` must not be satisfied
+/// by the builder's own cache.
+fn installed_search(opts: &EnsureOptions, platform: &str, dest: &Path) -> Vec<PathBuf> {
+    match opts.dest {
+        Some(_) => vec![dest.to_path_buf()],
+        None => search_path_for(platform, None),
+    }
 }
 
 fn platform_of(opts: &EnsureOptions) -> Result<String> {

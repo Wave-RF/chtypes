@@ -215,7 +215,11 @@ fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
     // argument must not cost the first two downloads.
     for line in &args.lines {
         if let Err(e) = fetch::parse_line(line) {
-            return Err(Usage(e.to_string().trim_start_matches("chtypes: fetch: ").to_string()));
+            return Err(Usage(
+                e.to_string()
+                    .trim_start_matches("chtypes: fetch: ")
+                    .to_string(),
+            ));
         }
     }
     for line in &args.lines {
@@ -227,9 +231,18 @@ fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
     Ok(0)
 }
 
+/// `--dest` names the one directory to look in; without it, the §1 search
+/// path — the same rule `fetch` applies to "already installed".
+fn dirs_of(args: &Args, opts: &EnsureOptions) -> Result<Vec<PathBuf>, Error> {
+    match &args.dest {
+        Some(d) => Ok(vec![d.clone()]),
+        None => fetch::search_path(opts),
+    }
+}
+
 fn cmd_verify(args: &Args) -> Result<u8, Usage> {
     let opts = options(args);
-    let dirs = match fetch::search_path(&opts) {
+    let dirs = match dirs_of(args, &opts) {
         Ok(d) => d,
         Err(e) => return Ok(report(&e)),
     };
@@ -246,7 +259,10 @@ fn cmd_verify(args: &Args) -> Result<u8, Usage> {
                     "ok       {}  ClickHouse {}  {}  sha256 {sha}",
                     v.dir.display(),
                     v.version,
-                    v.library.file_name().and_then(|n| n.to_str()).unwrap_or("?")
+                    v.library
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("?")
                 ),
                 Err(e) => {
                     bad += 1;
@@ -271,7 +287,7 @@ fn cmd_verify(args: &Args) -> Result<u8, Usage> {
 
 fn cmd_list(args: &Args) -> Result<u8, Usage> {
     let opts = options(args);
-    let dirs = match fetch::search_path(&opts) {
+    let dirs = match dirs_of(args, &opts) {
         Ok(d) => d,
         Err(e) => return Ok(report(&e)),
     };
@@ -306,9 +322,7 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
             let mut any = false;
             for row in info.artifacts.iter().filter(|r| r.platform() == platform) {
                 any = true;
-                let have = installed
-                    .iter()
-                    .any(|(l, _)| l == &row.clickhouse_minor);
+                let have = installed.iter().any(|(l, _)| l == &row.clickhouse_minor);
                 println!(
                     "  {:<8} {:<20} {}  {} bytes{}",
                     row.clickhouse_minor,

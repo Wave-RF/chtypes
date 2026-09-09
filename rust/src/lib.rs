@@ -62,10 +62,15 @@
 //! # Getting artifacts
 //!
 //! An artifact is one ClickHouse release compiled behind the C ABI — 166–302 MB
-//! each, hours of C++ compute. Fetch prebuilt ones with `scripts/fetch.sh` (see
-//! `docs/artifacts.md`); a local build lands in `~/.cache/chtypes/artifacts/`
-//! there too (`~/.cache/chtypes/artifacts/<os>-<arch>`). Point [`Registry`] at that directory, or set
-//! `$CHTYPES_REGISTRY`.
+//! each, hours of C++ compute. Fetch prebuilt, signed ones with the crate's own
+//! command (`cargo install chtypes` → `chtypes fetch 25.8`) or from Rust with
+//! [`ensure`] — the `docs/fetch.md` contract, behind the default-on `fetch`
+//! feature; `scripts/fetch.sh` is the reference implementation of the same
+//! chain. A local build lands in the same per-user cache
+//! (`~/.cache/chtypes/artifacts/<os>-<arch>`). [`Registry::from_search_path`]
+//! looks there, in `$CHTYPES_REGISTRY` and in the system locations, and names
+//! every place it looked when a line is missing ([`Error::ArtifactMissing`]);
+//! [`Registry::new`] loads one explicit directory.
 //!
 //! # Platform
 //!
