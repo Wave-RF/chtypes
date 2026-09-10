@@ -846,19 +846,21 @@ fn the_binary_s_other_exit_codes_and_commands() {
     );
 
     // where: the explicit dir, else $CHTYPES_REGISTRY, else the cache; never a
-    // system location.
+    // system location. The directory is alone on the FIRST line — the
+    // scriptable contract — and the served golden set follows it.
+    let first = |s: String| s.lines().next().unwrap_or_default().to_string();
     let mut c = bin();
     c.args(["where", "--dest"]).arg(&dest);
-    assert_eq!(run(c).stdout.trim_end(), dest.display().to_string());
+    assert_eq!(first(run(c).stdout), dest.display().to_string());
     let mut c = bin();
     c.arg("where")
         .env("CHTYPES_REGISTRY", "/some/registry")
         .env("XDG_CACHE_HOME", &cache);
-    assert_eq!(run(c).stdout.trim_end(), "/some/registry");
+    assert_eq!(first(run(c).stdout), "/some/registry");
     let mut c = bin();
     c.arg("where").env("XDG_CACHE_HOME", &cache);
     assert_eq!(
-        run(c).stdout.trim_end(),
+        first(run(c).stdout),
         cache
             .join("chtypes/artifacts")
             .join(chtypes::host_platform())

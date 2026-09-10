@@ -40,7 +40,14 @@ def env(isolated_search_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_where_prints_the_write_directory(env: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["where"]) == 0
-    assert capsys.readouterr().out == f"{env}\n"
+    out = capsys.readouterr().out
+    # The directory first, on its own line, so `cd "$(chtypes where | head -1)"`
+    # keeps working; then the served golden set, which is the other half of
+    # "what is in my registry" and the reason golden tests skip when absent.
+    first, second = out.splitlines()
+    assert first == str(env)
+    assert second.startswith(str(env / "sdk-goldens.json"))
+    assert "not fetched" in second  # an isolated search path has none
 
 
 def test_usage_errors_exit_2(env: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -153,7 +160,11 @@ def test_verify_and_list(env: Path, tmp_path: Path, capsys: pytest.CaptureFixtur
 
     assert main(["verify", "--dest", str(dest)]) == 0
     out, err = capsys.readouterr()
-    assert [ln.split()[:2] for ln in out.splitlines()] == [["25.8", "ok"], ["26.7", "ok"]]
+    # The per-line rows, then the served golden set's own line — this fixture
+    # release publishes none, so it reports absent rather than being silent.
+    rows, goldens = out.splitlines()[:-1], out.splitlines()[-1]
+    assert [ln.split()[:2] for ln in rows] == [["25.8", "ok"], ["26.7", "ok"]]
+    assert goldens.startswith(str(dest / "sdk-goldens.json")) and "not fetched" in goldens
     assert "2 installed line(s) verified" in err
 
     assert main(["list", "--platform", PLATFORM, "--url", signed, "--dest", str(dest)]) == 0
@@ -165,7 +176,7 @@ def test_verify_and_list(env: Path, tmp_path: Path, capsys: pytest.CaptureFixtur
     (dest / "26.7" / "libchtypes.so").write_bytes(b"corrupt")
     assert main(["verify", "--dest", str(dest)]) == 1
     out, err = capsys.readouterr()
-    assert [ln.split()[:2] for ln in out.splitlines()] == [["25.8", "ok"], ["26.7", "FAILED"]]
+    assert [ln.split()[:2] for ln in out.splitlines()[:-1]] == [["25.8", "ok"], ["26.7", "FAILED"]]
     assert ("bytes" in err or "sha256" in err) and "1 of 2" in err
 
 
@@ -199,9 +210,9 @@ def test_the_entry_points_exist(env: Path) -> None:
     module = subprocess.run(
         [sys.executable, "-m", "chtypes", "where"], capture_output=True, text=True, check=False
     )
-    assert module.returncode == 0 and module.stdout.strip() == str(env)
+    assert module.returncode == 0 and module.stdout.splitlines()[0] == str(env)
     script = Path(sys.executable).with_name("chtypes")
     assert script.exists(), f"console script {script} missing: pyproject [project.scripts]"
     console = subprocess.run([str(script), "where"], capture_output=True, text=True, check=False)
-    assert console.returncode == 0 and console.stdout.strip() == str(env)
+    assert console.returncode == 0 and console.stdout.splitlines()[0] == str(env)
     assert chtypes.ensure.__doc__ and "idempotent" in chtypes.ensure.__doc__.lower()

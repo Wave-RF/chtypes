@@ -18,6 +18,7 @@ import argparse
 import sys
 import warnings
 from collections.abc import Sequence
+from pathlib import Path
 
 from ._manifest import Manifest
 from .errors import (
@@ -183,6 +184,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             failed += 1
             sys.stdout.write(f"{minor:<8} FAILED   {directory}\n")
             _say(f"  {error}")
+    _goldens_line(Path(registry))
     sys.stdout.flush()
     if failed:
         _say(f"chtypes: {failed} of {len(report)} installed line(s) FAILED verification")
@@ -214,7 +216,8 @@ def _cmd_list(args: argparse.Namespace) -> int:
     for entry in offered:
         state = "installed" if _installed(have, entry) else "not installed"
         sys.stdout.write(
-            f"  {entry.minor:<8} {entry.clickhouse_version:<18} {entry.file}  [{state}]\n"
+            f"  {entry.minor:<8} {entry.clickhouse_version:<18} b{entry.build_number:<3} "
+            f"{entry.file}  [{state}]\n"
         )
     sys.stdout.flush()
     return EXIT_OK
@@ -225,10 +228,27 @@ def _installed(have: dict[str, tuple[object, Manifest]], entry: ReleaseEntry) ->
     return got is not None and got[1].clickhouse_version == entry.clickhouse_version
 
 
+def _goldens_line(registry: Path) -> None:
+    """The served golden set sits beside the artifacts, so "where is my registry"
+    and "is my registry sound" are both moments someone wants to know whether it
+    is there — a missing one is why the golden tests skip."""
+    from .fetch import GOLDENS_ASSET
+
+    path = Path(registry) / GOLDENS_ASSET
+    try:
+        size = path.stat().st_size
+    except OSError:
+        sys.stdout.write(f"{path}  (golden set: not fetched — the golden tests will skip)\n")
+    else:
+        sys.stdout.write(f"{path}  (golden set, {size} bytes)\n")
+
+
 def _cmd_where(args: argparse.Namespace) -> int:
     from .fetch import fetch_destination
 
-    sys.stdout.write(f"{fetch_destination(platform=args.platform)}\n")
+    dest = fetch_destination(platform=args.platform)
+    sys.stdout.write(f"{dest}\n")
+    _goldens_line(Path(dest))
     return EXIT_OK
 
 

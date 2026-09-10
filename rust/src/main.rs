@@ -281,6 +281,9 @@ fn cmd_verify(args: &Args) -> Result<u8, Usage> {
         );
         return Ok(0);
     }
+    if let Ok(dir) = fetch::install_dir(&options(args)) {
+        print_goldens_line(&dir);
+    }
     eprintln!("chtypes: {checked} installed line(s) re-hashed, {bad} corrupt");
     Ok(if bad == 0 { 0 } else { 1 })
 }
@@ -324,9 +327,10 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
                 any = true;
                 let have = installed.iter().any(|(l, _)| l == &row.clickhouse_minor);
                 println!(
-                    "  {:<8} {:<20} {}  {} bytes{}",
+                    "  {:<8} {:<20} b{:<3} {}  {} bytes{}",
                     row.clickhouse_minor,
                     row.clickhouse_version,
+                    row.build_number(),
                     row.file,
                     row.bytes,
                     if have { "  (installed)" } else { "" }
@@ -341,10 +345,25 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
     }
 }
 
+/// The served golden set sits beside the artifacts, so "where is my registry"
+/// and "is my registry sound" are both moments someone wants to know whether it
+/// is there — a missing one is why the golden tests skip.
+fn print_goldens_line(dir: &std::path::Path) {
+    let path = dir.join("sdk-goldens.json");
+    match std::fs::metadata(&path) {
+        Ok(m) => println!("{}  (golden set, {} bytes)", path.display(), m.len()),
+        Err(_) => println!(
+            "{}  (golden set: not fetched — the golden tests will skip)",
+            path.display()
+        ),
+    }
+}
+
 fn cmd_where(args: &Args) -> Result<u8, Usage> {
     match fetch::install_dir(&options(args)) {
         Ok(dir) => {
             println!("{}", dir.display());
+            print_goldens_line(&dir);
             Ok(0)
         }
         Err(e) => Ok(report(&e)),

@@ -31,6 +31,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 
 	"github.com/wave-rf/chtypes/go/chtypes"
@@ -232,6 +233,11 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintf(stdout, "MISMATCH %-6s %-20s %s/%s hashes %s, manifest says %s\n", r.Line, r.Version, r.Dir, r.Library, r.Got, r.LibrarySHA256)
 		}
 	}
+	if g := filepath.Join(dir, "sdk-goldens.json"); fileExists(g) {
+		fmt.Fprintf(stdout, "ok       %-6s %s\n", "golden", g)
+	} else {
+		fmt.Fprintf(stdout, "absent   %-6s %s (fetch installs it; the golden tests skip without it)\n", "golden", g)
+	}
 	fmt.Fprintf(stdout, "%d installed, %d verified, %d bad (%s)\n", len(results), len(results)-bad, bad, dir)
 	if bad > 0 {
 		return &chtypes.ArtifactError{Code: chtypes.CodeArtifactCorrupt, Platform: platform,
@@ -304,7 +310,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 				state = "  (installed: " + inst.Version + ")"
 			}
 		}
-		fmt.Fprintf(stdout, "  %-6s %-20s %s  %d bytes%s\n", a.ClickHouseMinor, a.ClickHouseVersion, a.File, a.Bytes, state)
+		fmt.Fprintf(stdout, "  %-6s %-20s b%-3d %s  %d bytes%s\n", a.ClickHouseMinor, a.ClickHouseVersion, a.BuildNumber(), a.File, a.Bytes, state)
 	}
 	if n == 0 {
 		fmt.Fprintf(stdout, "  (nothing for %s)\n", platform)
@@ -326,6 +332,14 @@ func cmdWhere(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	fmt.Fprintln(stdout, dir)
+	// The served golden set lives beside the artifacts, and "where is my
+	// registry" is exactly when someone wants to know whether it is there.
+	g := filepath.Join(dir, "sdk-goldens.json")
+	if st, err := os.Stat(g); err == nil {
+		fmt.Fprintf(stdout, "%s  (golden set, %d bytes)\n", g, st.Size())
+	} else {
+		fmt.Fprintf(stdout, "%s  (golden set: not fetched — the golden tests will skip)\n", g)
+	}
 	return nil
 }
 
@@ -355,4 +369,11 @@ func registryDir(dest, platform string) (string, error) {
 		return "", errors.New("chtypes: cannot determine a registry directory (no home directory); pass --dest or set CHTYPES_REGISTRY")
 	}
 	return dir, nil
+}
+
+// fileExists is the one question `verify` and `where` ask about the served
+// golden set: is it beside the artifacts, or will the golden tests skip?
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

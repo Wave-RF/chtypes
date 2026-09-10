@@ -1155,7 +1155,7 @@ func TestBuildNumberOrdering(t *testing.T) {
 		{row("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64-b3.tar.gz", 7), 7},
 		{row("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64-b12.tar.gz", 0), 12},
 	} {
-		if got := tc.a.buildOf(); got != tc.want {
+		if got := tc.a.BuildNumber(); got != tc.want {
 			t.Fatalf("buildOf(%s, Build=%d) = %d, want %d", tc.a.File, tc.a.Build, got, tc.want)
 		}
 	}
@@ -1187,7 +1187,7 @@ func TestBuildNumberOrdering(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != 1 || got[0].buildOf() != 2 {
+		if len(got) != 1 || got[0].BuildNumber() != 2 {
 			t.Fatalf("selectAll picked %+v, want the build-2 row", got)
 		}
 	}

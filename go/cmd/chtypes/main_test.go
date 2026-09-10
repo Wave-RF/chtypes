@@ -62,12 +62,19 @@ func TestUsageAndWhere(t *testing.T) {
 		t.Fatalf("help: rc=%d %q", rc, out)
 	}
 	host := chtypes.HostPlatform()
+	// `where` prints the directory on its own FIRST line — that is the
+	// scriptable contract, `cd "$(chtypes where | head -1)"` — and then the
+	// served golden set, which is the other half of "what is in my registry".
+	firstLine := func(s string) string { return strings.SplitN(strings.TrimSpace(s), "\n", 2)[0] }
 	rc, out, _ = exec(t, "where")
-	if rc != 0 || strings.TrimSpace(out) != filepath.Join(cache, "chtypes", "artifacts", host) {
+	if rc != 0 || firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", host) {
 		t.Fatalf("where: rc=%d %q", rc, out)
 	}
+	if !strings.Contains(out, "sdk-goldens.json") {
+		t.Fatalf("where does not name the golden set: %q", out)
+	}
 	t.Setenv("CHTYPES_REGISTRY", "/env/reg")
-	if _, out, _ = exec(t, "where"); strings.TrimSpace(out) != "/env/reg" {
+	if _, out, _ = exec(t, "where"); firstLine(out) != "/env/reg" {
 		t.Fatalf("where with CHTYPES_REGISTRY: %q", out)
 	}
 	// Another platform's default is its own cache, never CHTYPES_REGISTRY.
@@ -75,7 +82,7 @@ func TestUsageAndWhere(t *testing.T) {
 	if host == other {
 		other = "linux-arm64"
 	}
-	if _, out, _ = exec(t, "where", "--platform", other); strings.TrimSpace(out) != filepath.Join(cache, "chtypes", "artifacts", other) {
+	if _, out, _ = exec(t, "where", "--platform", other); firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", other) {
 		t.Fatalf("where --platform: %q", out)
 	}
 	// verify/list on an empty registry: honest, exit 0.

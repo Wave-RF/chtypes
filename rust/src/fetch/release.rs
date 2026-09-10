@@ -54,7 +54,10 @@ impl IndexRow {
     /// The wrapper build: this row's own `build` when it has one, else the
     /// `-b<N>` the file name ends with, else 0 — an old row, which is build 0 by
     /// definition.
-    pub(crate) fn build_number(&self) -> u32 {
+    ///
+    /// Public because it is the rule a consumer needs to answer "which of these
+    /// two rows is the newer build", not just an internal detail.
+    pub fn build_number(&self) -> u32 {
         if self.build > 0 {
             return self.build;
         }

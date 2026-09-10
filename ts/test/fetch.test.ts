@@ -900,13 +900,21 @@ describe('the CLI (docs/fetch.md §6)', () => {
     return runCli(args, io).then((code) => ({ code, out: io.out.join(''), err: io.err.join('') }));
   };
 
-  it('where prints the directory fetch would write to', async () => {
+  it('where prints the directory fetch would write to, then the served golden set', async () => {
+    // The directory is alone on the FIRST line — the scriptable contract,
+    // `cd "$(chtypes where | head -1)"` — and the golden set follows, because
+    // "what is in my registry" includes the file the golden tests need.
+    const first = (s: string): string => s.split('\n', 1)[0]!;
     process.env['XDG_CACHE_HOME'] = '/tmp/xdg';
     delete process.env['CHTYPES_REGISTRY'];
-    expect(await run(['where'])).toEqual({ code: 0, out: `/tmp/xdg/chtypes/artifacts/${PLATFORM}\n`, err: '' });
-    expect((await run(['where', '--dest', '/somewhere'])).out).toBe('/somewhere\n');
+    const r = await run(['where']);
+    expect(r.code).toBe(0);
+    expect(r.err).toBe('');
+    expect(first(r.out)).toBe(`/tmp/xdg/chtypes/artifacts/${PLATFORM}`);
+    expect(r.out).toContain('sdk-goldens.json');
+    expect(first((await run(['where', '--dest', '/somewhere'])).out)).toBe('/somewhere');
     process.env['CHTYPES_REGISTRY'] = '/tmp/env-reg';
-    expect((await run(['where'])).out).toBe('/tmp/env-reg\n');
+    expect(first((await run(['where'])).out)).toBe('/tmp/env-reg');
   });
 
   it('fetch prints the installed directory alone on stdout, progress on stderr, exit 0', async () => {
@@ -1013,7 +1021,9 @@ describe('the CLI (docs/fetch.md §6)', () => {
         resolve({ code: error === null ? 0 : (error as { code?: number }).code ?? 1, stdout });
       });
     });
-    expect(result).toEqual({ code: 0, stdout: '/somewhere\n' });
+    expect(result.code).toBe(0);
+    expect(result.stdout.split('\n', 1)[0]).toBe('/somewhere');
+    expect(result.stdout).toContain('sdk-goldens.json');
     const usage = await new Promise<number | null>((resolve) => {
       execFile(process.execPath, [bin], (error) => resolve(error === null ? 0 : ((error as { code?: number }).code ?? null)));
     });

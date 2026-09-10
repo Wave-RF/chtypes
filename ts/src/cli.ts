@@ -20,8 +20,9 @@
  * file runs `main` only when it is the process's entry point (the `bin`).
  */
 
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { ArtifactUnpublishedError, ChtypesError, FetchError, SourceUnreachableError } from './errors.js';
@@ -204,6 +205,7 @@ async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Pr
       io.stdout(`BAD  ${r.line.padEnd(6)} ${r.version.padEnd(18)} ${r.library}  ${r.problem}\n`);
     }
   }
+  goldensLine(dir, io);
   say(io, bad === 0 ? `${results.length} line(s) verified in ${dir}` : `${bad} of ${results.length} line(s) FAILED verification in ${dir}`);
   return bad === 0 ? EXIT.ok : EXIT.verificationFailed;
 }
@@ -222,15 +224,33 @@ async function cmdList(rest: readonly string[], values: Values, io: CliIo): Prom
     io.stdout(`release ${listing.source} offers for ${listing.platform}:\n`);
     if (listing.offered.length === 0) io.stdout('  (nothing)\n');
     for (const a of listing.offered) {
-      io.stdout(`  ${a.clickhouse_minor.padEnd(6)} ${a.clickhouse_version.padEnd(18)} ${a.file}  ${a.bytes} bytes${have.has(a.clickhouse_version) ? '  (installed)' : ''}\n`);
+      io.stdout(`  ${a.clickhouse_minor.padEnd(6)} ${a.clickhouse_version.padEnd(18)} b${String(a.build).padEnd(3)} ${a.file}  ${a.bytes} bytes${have.has(a.clickhouse_version) ? '  (installed)' : ''}\n`);
     }
   }
   return EXIT.ok;
 }
 
+/**
+ * The served golden set sits beside the artifacts, so "where is my registry" and
+ * "is my registry sound" are both moments someone wants to know whether it is
+ * there — a missing one is why the golden tests skip.
+ */
+function goldensLine(dir: string, io: CliIo): void {
+  const g = path.join(dir, 'sdk-goldens.json');
+  let size: number | null = null;
+  try {
+    size = statSync(g).size;
+  } catch {
+    size = null;
+  }
+  io.stdout(size === null ? `${g}  (golden set: not fetched — the golden tests will skip)\n` : `${g}  (golden set, ${size} bytes)\n`);
+}
+
 function cmdWhere(rest: readonly string[], values: Values, io: CliIo): number {
   if (rest.length > 0) throw new ChtypesError(`chtypes: where takes no positional arguments (${rest.join(', ')})`);
-  io.stdout(`${fetchDestination(values.dest, resolvePlatform(values.platform))}\n`);
+  const dir = fetchDestination(values.dest, resolvePlatform(values.platform));
+  io.stdout(`${dir}\n`);
+  goldensLine(dir, io);
   return EXIT.ok;
 }
 

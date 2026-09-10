@@ -129,9 +129,10 @@ type ReleaseArtifact struct {
 // without one is an old row, which is build 0 by definition.
 var buildSuffix = regexp.MustCompile(`-b([0-9]+)\.tar\.gz$`)
 
-// buildOf is the row's own build when it has one, else the file name's -b<N>,
-// else 0.
-func (a ReleaseArtifact) buildOf() int {
+// BuildNumber is the row's own Build when it has one, else the file name's
+// -b<N>, else 0. Exported because it is the rule a consumer needs to answer
+// "which of these two rows is the newer build", not just an internal detail.
+func (a ReleaseArtifact) BuildNumber() int {
 	if a.Build > 0 {
 		return a.Build
 	}
@@ -156,7 +157,7 @@ func newerRow(a, b ReleaseArtifact) bool {
 	if lessVersionKey(kb, ka) {
 		return true
 	}
-	return a.buildOf() > b.buildOf()
+	return a.BuildNumber() > b.BuildNumber()
 }
 
 // Platform is the row's "<os>-<arch>" key.
