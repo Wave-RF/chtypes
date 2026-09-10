@@ -630,12 +630,12 @@ fn the_search_path_is_the_spec_s_order() {
     assert_eq!(chtypes::install_dir(Some(&explicit)), explicit);
     // A foreign platform never sees $CHTYPES_REGISTRY, and installs in its own cache.
     let fpath = chtypes::search_path_for(foreign(), None);
-    assert_eq!(foreign[0], chtypes::cache_dir_for(foreign()));
+    assert_eq!(fpath[0], chtypes::cache_dir_for(foreign()));
     assert_eq!(
         chtypes::install_dir_for(foreign(), None),
         chtypes::cache_dir_for(foreign())
     );
-    assert!(foreign.iter().all(|p| p.ends_with(foreign())));
+    assert!(fpath.iter().all(|p| p.ends_with(foreign())));
 }
 
 // ------------------------------------------------------------ the binary
