@@ -154,25 +154,16 @@ the core repository's page (`docs/distribution.md` §9).
 
 ## 4a. Linux: several versions in one process
 
-glibc reserves a small fixed surplus of static thread-local storage for
-libraries loaded with `dlopen`, and each artifact consumes some of it. On
-Linux, the **third** artifact opened in one process fails with
-
-```
-cannot allocate memory in static TLS block
-```
-
-Until the artifact is built to need none (in progress on the producer
-side), a process that holds more than two versions must start with
-
-```
-GLIBC_TUNABLES=glibc.rtld.optional_static_tls=131072
-```
-
-in its environment — the dynamic loader reads it at process start, so
-nothing an SDK does at runtime can substitute. Set it on the service, in the
-container image, or in the CI job; the SDK's own test scripts set it for
-themselves. macOS has no such limit.
+An artifact needs **no static thread-local storage**, so a process may
+`dlopen` as many versions as it likes on glibc without any tunable. The
+producer proves that per build: every ELF artifact must show zero
+initial-exec TLS relocations and load eight copies into one process with
+`GLIBC_TUNABLES` unset before it is published (`lib/tools/static-tls-check.sh`
+in the core repository). History, for anyone holding old files: the 24.8 and
+25.3 artifacts published before 2026-09-10 carried one initial-exec access
+(GWP-ASan's sampling counter) and failed on the third load with `cannot
+allocate memory in static TLS block`; re-fetch them. macOS never had the
+limit.
 
 ## 4. Fetching
 

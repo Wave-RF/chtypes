@@ -74,14 +74,6 @@ note "CompileDDL is undefined without the tag (as it must be)"
 LOG_DIR="$ROOT/scratch"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/check-standalone.json"
 [ -d "$REG" ] || die "no artifact registry at $REG — run scripts/fetch.sh, or pass --registry / set CHTYPES_REGISTRY"
-# glibc keeps a fixed surplus of static TLS for dlopen'd libraries; on Linux
-# a process that opens a third artifact (the registry tests open several) dies
-# with "cannot allocate memory in static TLS block". docs/artifacts.md §5
-# records it for consumers; exported only where unset, so a caller's own
-# tunables win. Remove once the artifact needs no static TLS.
-if [ "$(uname -s)" = Linux ] && [ -z "${GLIBC_TUNABLES:-}" ]; then
-  export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=131072
-fi
 say "go test ./... (untagged, CHTYPES_REGISTRY=$REG, -json into $LOG)"
 rc=0
 # The golden set lives in this repository (goldens/), not in the Go module, so

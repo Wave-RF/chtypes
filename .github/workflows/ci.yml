@@ -93,8 +93,6 @@ jobs:
     if: vars.CHTYPES_TEST_RUNNER != ''
     env:
       CHTYPES_REGISTRY: ${{ github.workspace }}/.artifacts
-      # docs/artifacts.md §4a: glibc's static-TLS surplus for several artifacts in one process
-      GLIBC_TUNABLES: glibc.rtld.optional_static_tls=131072
     steps:
       - uses: actions/checkout@v4
       - name: fetch every published line for this runner's platform
