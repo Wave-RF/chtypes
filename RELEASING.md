@@ -9,7 +9,7 @@ others follow it so every release is addressed the same way.
 |---|---|---|---|---|
 | `github.com/wave-rf/chtypes/go` | proxy.golang.org (by tag) | `go/v*` | `release-go.yml` (build + vet only) | nothing |
 | `chtypes` | PyPI | `python/v*` | `release-python.yml` | a Trusted Publisher on PyPI — can be added BEFORE the project exists (a *pending* publisher), so the first release is the tag like every other |
-| `@wavehouse/chtypes` | npm | `ts/v*` | `release-ts.yml` | OIDC trusted publishing, no token. The first publish is by hand (`cd ts && pnpm build && pnpm publish --access public`) from a laptop logged in to the `wavehouse` scope, because npm only lets a trusted publisher be configured on a package that exists; then npmjs.com → package settings → Trusted Publisher → `Wave-RF/chtypes`, `release-ts.yml` |
+| `@wavehouse/chtypes` | npm | `ts/v*` | `release-ts.yml` | OIDC trusted publishing, no token. The first publish is by hand (`cd ts && pnpm build && pnpm publish --access public`) from a laptop logged in to the `wavehouse` scope, because npm only lets a trusted publisher be configured on a package that exists; then npmjs.com → package settings → Trusted Publisher → `Wave-RF/chtypes`, `release-ts.yml`, environment `npm` |
 | `chtypes` | crates.io | `rust/v*` | `release-rust.yml` | the first publish by hand (crates.io lets a Trusted Publisher be configured only on an existing crate), then the publisher: repo `Wave-RF/chtypes`, workflow `release-rust.yml`, environment `crates-io` |
 
 Each workflow refuses a tag whose version does not equal the manifest's,
@@ -30,11 +30,13 @@ The first tag freezes the `chs_*` signatures and the Go module path.
 
 ## Registry setup, once each (the owner's console; nothing is stored here)
 
-The repository already has the environments `pypi` and `crates-io`, and no
-registry token exists anywhere: every publish authenticates by OIDC, with the
-one exception per registry noted below. Do these only once the repository is
-public — provenance links point at the source, and a package on a public
-registry whose source 404s is worse than no package.
+The repository has the deployment environments `pypi`, `npm` and `crates-io`
+— one per publishing workflow, named to match what each registry's trusted
+publisher is configured with — and no registry token exists anywhere: every
+publish authenticates by OIDC, with the one exception per registry noted
+below. Do these only once the repository is public — provenance links point
+at the source, and a package on a public registry whose source 404s is worse
+than no package.
 
 **PyPI** — no manual publish needed. pypi.org → your account → *Publishing* →
 *Add a new pending publisher*: PyPI project name `chtypes`, owner `Wave-RF`,
@@ -52,7 +54,8 @@ that is the workflow. Add a co-owner (`cargo owner --add github:wave-rf:<team>`)
 for the same reason as above.
 
 **npm** — one manual publish, as the table says; then the trusted publisher on
-the package's settings page. `@wavehouse` is an org scope we own, so
+the package's settings page: repository `Wave-RF/chtypes`, workflow
+`release-ts.yml`, environment `npm`. `@wavehouse` is an org scope we own, so
 `--access public` is required on that first publish.
 
 **Go** — nothing to configure. proxy.golang.org fetches a tag the first time
