@@ -30,7 +30,13 @@ use serde_json::Value as Json;
 
 /// A platform this Mac (or any dev host) has no real artifacts for, so the
 /// §1 search path beyond `--dest` cannot shadow a fixture install.
-const FOREIGN: &str = "linux-amd64";
+/// A platform that is never this host's: the test asserts that a foreign
+/// platform's search path skips `$CHTYPES_REGISTRY`, which is only true when
+/// the platform really is foreign — a fixed "linux-amd64" was the host itself
+/// on the amd64 CI runner and the assertion contradicted itself there.
+fn foreign() -> &'static str {
+    if chtypes::host_platform() == "linux-amd64" { "darwin-arm64" } else { "linux-amd64" }
+}
 
 fn announce(message: &str) {
     use std::io::Write;
@@ -53,13 +59,13 @@ fn fixtures_dir() -> Option<PathBuf> {
         ));
         return None;
     }
-    if chtypes::cache_dir_for(FOREIGN).is_dir()
+    if chtypes::cache_dir_for(foreign()).is_dir()
         || chtypes::SYSTEM_ARTIFACT_ROOTS
             .iter()
-            .any(|r| Path::new(r).join(FOREIGN).is_dir())
+            .any(|r| Path::new(r).join(foreign()).is_dir())
     {
         announce(&format!(
-            "\nSKIP: this host has a {FOREIGN} artifact directory on the §1 search path, which \
+            "\nSKIP: this host has a {foreign()} artifact directory on the §1 search path, which \
              would shadow the fixture installs. This test is skipped.\n"
         ));
         return None;
@@ -104,7 +110,7 @@ fn tmp(name: &str) -> PathBuf {
 fn opts(fx: &Path, fixture: &str, dest: &Path) -> EnsureOptions {
     EnsureOptions {
         dest: Some(dest.to_path_buf()),
-        platform: Some(FOREIGN.into()),
+        platform: Some(foreign().into()),
         url: Some(file_url(fx, fixture)),
         trusted_keys: Some(vec![test_key(fx)]),
         allow_unsigned: Some(false),
@@ -153,7 +159,7 @@ fn every_fixture_verdict_matches_expected_json_through_ensure() {
                 assert_eq!(installed.action, Action::Installed, "{ctx}");
                 assert_eq!(installed.line, "25.8", "{ctx}");
                 assert_eq!(installed.dir, dest.join("25.8"), "{ctx}");
-                let row = index_row(&signed_index(&fx), FOREIGN, "25.8");
+                let row = index_row(&signed_index(&fx), foreign(), "25.8");
                 assert_eq!(installed.version, row["clickhouse_version"], "{ctx}");
                 assert_eq!(
                     installed.library,
@@ -373,7 +379,7 @@ fn unpublished_lines_platforms_and_patches_are_refused() {
     }
     // The exact patch that IS published installs; spelled without its
     // channel it still does; `v` is tolerated.
-    let row = index_row(&signed_index(&fx), FOREIGN, "25.8");
+    let row = index_row(&signed_index(&fx), foreign(), "25.8");
     let exact = row["clickhouse_version"].as_str().unwrap();
     assert_eq!(fetch::ensure(exact, &base).unwrap().version, exact);
     let bare = exact.rsplit_once('-').map(|(b, _)| b).unwrap_or(exact);
@@ -401,7 +407,7 @@ fn the_lock_file_records_and_frozen_refuses_drift() {
     };
     let installed = fetch::ensure("25.8", &o).unwrap();
     let lock = LockFile::load(&lock_path, true).unwrap();
-    let key = lock_key(FOREIGN, "25.8");
+    let key = lock_key(foreign(), "25.8");
     let (file, sha) = installed.asset.clone().unwrap();
     assert_eq!(lock.artifacts[&key].file, file);
     assert_eq!(lock.artifacts[&key].sha256, sha);
@@ -503,7 +509,7 @@ fn offline_is_source_unreachable_without_touching_the_network() {
             "25.8",
             &EnsureOptions {
                 dest: Some(dest.clone()),
-                platform: Some(FOREIGN.into()),
+                platform: Some(foreign().into()),
                 url,
                 offline: true,
                 ..Default::default()
@@ -618,13 +624,13 @@ fn the_search_path_is_the_spec_s_order() {
     assert!(path.contains(&chtypes::default_registry_dir()));
     assert_eq!(chtypes::install_dir(Some(&explicit)), explicit);
     // A foreign platform never sees $CHTYPES_REGISTRY, and installs in its own cache.
-    let foreign = chtypes::search_path_for(FOREIGN, None);
-    assert_eq!(foreign[0], chtypes::cache_dir_for(FOREIGN));
+    let foreign = chtypes::search_path_for(foreign(), None);
+    assert_eq!(foreign[0], chtypes::cache_dir_for(foreign()));
     assert_eq!(
-        chtypes::install_dir_for(FOREIGN, None),
-        chtypes::cache_dir_for(FOREIGN)
+        chtypes::install_dir_for(foreign(), None),
+        chtypes::cache_dir_for(foreign())
     );
-    assert!(foreign.iter().all(|p| p.ends_with(FOREIGN)));
+    assert!(foreign.iter().all(|p| p.ends_with(foreign())));
 }
 
 // ------------------------------------------------------------ the binary

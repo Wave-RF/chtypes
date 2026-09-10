@@ -851,7 +851,7 @@ describe('the registry: the search path, the §7 error and autofetch', () => {
       try {
         await expect(off.open('19.1')).rejects.toBeInstanceOf(ArtifactMissingError);
         expect(server.hits.size).toBe(0);
-        expect(off.open(off.versions()[0]!)).resolves.toBe(off.for(off.versions()[0]!));
+        await expect(off.open(off.versions()[0]!)).resolves.toBe(off.for(off.versions()[0]!));
       } finally {
         off.close();
       }
