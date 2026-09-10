@@ -28,6 +28,7 @@ import http.client
 import json
 import logging
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -98,6 +99,10 @@ ENV_REGISTRY: Final = "CHTYPES_REGISTRY"
 #: comfortably outlasts a one-object publish window.
 RELEASE_LOAD_ATTEMPTS: Final = 3
 RELEASE_RETRY_DELAY: Final = 4
+
+#: The ``-b<N>`` a current artifact file name ends with. A name without one is
+#: an old row, which is build 0 by definition.
+_BUILD_SUFFIX: Final = re.compile(r"-b([0-9]+)\.tar\.gz$")
 
 #: The release signing key (docs/fetch.md §4): the raw 32-byte ed25519 public
 #: key, hex, and its id — the first 16 hex characters of sha256 over the raw
@@ -350,10 +355,32 @@ class ReleaseEntry:
     library_sha256: str
     os: str
     arch: str
+    #: The wrapper build for this ClickHouse version. A rebuild of the same
+    #: version is a NEW row beside the old one, never a swap, so this is what
+    #: separates them. 0 on a row published before builds existed.
+    build: int = 0
+    #: The core commit the wrapper was built from; ``""`` on an old row.
+    core_commit: str = ""
 
     @property
     def platform(self) -> str:
         return f"{self.os}-{self.arch}"
+
+    @property
+    def build_number(self) -> int:
+        """The row's own ``build`` when it has one, else the ``-b<N>`` suffix of
+        the file name, else 0 — an old row, which is build 0 by definition."""
+        if self.build > 0:
+            return self.build
+        m = _BUILD_SUFFIX.search(self.file)
+        return int(m.group(1)) if m else 0
+
+    @property
+    def rank(self) -> tuple[tuple[int, ...], int]:
+        """Sort key for "which row wins": newest ClickHouse version, then the
+        highest wrapper build. Without the build half a rebuild's older sibling
+        could win on nothing but its position in the index."""
+        return (_version_key(self.clickhouse_version), self.build_number)
 
     @property
     def minor(self) -> str:
@@ -379,9 +406,7 @@ class Release:
             if e.platform != platform:
                 continue
             cur = best.get(e.minor)
-            if cur is None or _version_key(e.clickhouse_version) > _version_key(
-                cur.clickhouse_version
-            ):
+            if cur is None or e.rank > cur.rank:
                 best[e.minor] = e
         return [best[m] for m in sorted(best, key=_minor_key)]
 
@@ -400,12 +425,20 @@ class Release:
             )
         if exact is not None:
             bare = exact.split("-", 1)[0]
-            for e in self.entries:
-                if e.platform == platform and (
+            # A rebuild publishes the same clickhouse_version twice, so an exact
+            # request can match more than one row: take the highest build, never
+            # whichever the index happens to list first.
+            hits = [
+                e
+                for e in self.entries
+                if e.platform == platform
+                and (
                     e.clickhouse_version == exact
                     or ("-" not in exact and e.clickhouse_version.split("-", 1)[0] == bare)
-                ):
-                    return e
+                )
+            ]
+            if hits:
+                return max(hits, key=lambda e: e.rank)
             raise ArtifactUnpublishedError(
                 f"chtypes: you asked for exactly ClickHouse {exact} on {platform} and "
                 f"{self.source} does not publish it (it has: "
@@ -463,6 +496,8 @@ def _parse_index(raw: bytes, source: str) -> tuple[list[ReleaseEntry], str, str,
                     library_sha256=str(row["library_sha256"]).lower(),
                     os=str(row["os"]),
                     arch=str(row["arch"]),
+                    build=int(row.get("build") or 0),
+                    core_commit=str(row.get("core_commit") or ""),
                 )
             )
         except (KeyError, TypeError, ValueError) as exc:

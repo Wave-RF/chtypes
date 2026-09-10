@@ -116,6 +116,47 @@ type ReleaseArtifact struct {
 	ClickHouseMinor   string `json:"clickhouse_minor"`
 	Library           string `json:"library"`
 	LibrarySHA256     string `json:"library_sha256"`
+	// Build is the wrapper build for this ClickHouse version. A rebuild of the
+	// same version is a NEW row beside the old one, never a swap, so Build is
+	// what separates them. Absent from an old row, and from a file name with no
+	// -b<N> suffix: both mean build 0.
+	Build int `json:"build,omitempty"`
+	// CoreCommit is the core commit the wrapper was built from; "" on an old row.
+	CoreCommit string `json:"core_commit,omitempty"`
+}
+
+// buildSuffix reads the -b<N> a current artifact file name ends with. A name
+// without one is an old row, which is build 0 by definition.
+var buildSuffix = regexp.MustCompile(`-b([0-9]+)\.tar\.gz$`)
+
+// buildOf is the row's own build when it has one, else the file name's -b<N>,
+// else 0.
+func (a ReleaseArtifact) buildOf() int {
+	if a.Build > 0 {
+		return a.Build
+	}
+	if m := buildSuffix.FindStringSubmatch(a.File); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err == nil && n >= 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// newerRow reports whether a should be preferred over b: newest ClickHouse
+// version first, and among rows of the SAME version the highest wrapper build.
+// Without the build tie-break a rebuild's older sibling could win on nothing
+// but its position in the index.
+func newerRow(a, b ReleaseArtifact) bool {
+	ka, kb := versionKey(a.ClickHouseVersion), versionKey(b.ClickHouseVersion)
+	if lessVersionKey(ka, kb) {
+		return false
+	}
+	if lessVersionKey(kb, ka) {
+		return true
+	}
+	return a.buildOf() > b.buildOf()
 }
 
 // Platform is the row's "<os>-<arch>" key.
@@ -765,10 +806,11 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 				"no artifact for ClickHouse line %s on %s at %s (it has: %s)", line, f.platform, f.src, versionsOf(rows))
 		}
 	}
-	// More than one patch on a line can only happen if a release shipped
-	// two; take the newest by version number rather than by list order.
+	// A line can carry more than one row: two patches, or the same patch built
+	// twice (core keeps the two highest builds per version). Take the newest by
+	// version and then by build, never by list order.
 	sort.SliceStable(hits, func(i, j int) bool {
-		return lessVersionKey(versionKey(hits[i].ClickHouseVersion), versionKey(hits[j].ClickHouseVersion))
+		return newerRow(hits[j], hits[i]) // ascending: the last is the one to take
 	})
 	a := hits[len(hits)-1]
 	if err := checkRow(&a); err != nil {
@@ -788,7 +830,7 @@ func (f *fetcher) selectAll() ([]ReleaseArtifact, error) {
 	best := map[string]ReleaseArtifact{}
 	for _, a := range rows {
 		cur, ok := best[a.ClickHouseMinor]
-		if !ok || lessVersionKey(versionKey(cur.ClickHouseVersion), versionKey(a.ClickHouseVersion)) {
+		if !ok || newerRow(a, cur) {
 			best[a.ClickHouseMinor] = a
 		}
 	}

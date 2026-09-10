@@ -476,7 +476,7 @@ LIC="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("l
 # here-doc parses, but it hides python's own error message, and that message is
 # the useful half when a release simply has no artifact for what was asked.
 SELECTED="$(python3 - "$WORK/index.json" "${PLATFORM%%-*}" "${PLATFORM##*-}" "$WANT_LINE" "$WANT_EXACT" "$STRICT_EXACT" "$ALL" 2>"$WORK/.select.err" <<'PY'
-import json, sys
+import json, re, sys
 path, os_, arch, line, exact, strict, want_all = sys.argv[1:]
 strict, want_all = strict == "1", want_all == "1"
 doc = json.load(open(path))
@@ -491,13 +491,28 @@ if not arts:
 def vkey(a):
     return [int(p) for p in a["clickhouse_version"].split("-")[0].split(".")]
 
+def build_of(a):
+    # The row's own build when it has one, else the -b<N> the file name ends
+    # with, else 0 — a row published before builds existed.
+    b = a.get("build")
+    if isinstance(b, int) and b > 0:
+        return b
+    m = re.search(r"-b([0-9]+)\.tar\.gz$", a.get("file", ""))
+    return int(m.group(1)) if m else 0
+
+def rank(a):
+    # Which row wins: newest ClickHouse version, then the highest wrapper build.
+    # A rebuild is a NEW row beside the old one, so without the build half the
+    # older sibling could win on nothing but its position in the index.
+    return (vkey(a), build_of(a))
+
 if want_all:
     # One per minor line — a release should not carry two patches of a line, but
     # if it does, the newer one is the one to install.
     best = {}
     for a in arts:
         cur = best.get(a["clickhouse_minor"])
-        if cur is None or vkey(a) > vkey(cur):
+        if cur is None or rank(a) > rank(cur):
             best[a["clickhouse_minor"]] = a
     hit = sorted(best.values(), key=lambda a: [int(p) for p in a["clickhouse_minor"].split(".")])
 else:
@@ -512,9 +527,10 @@ else:
     if not hit:
         sys.exit("unpublished: no artifact for ClickHouse line %s on %s-%s (it has: %s)"
                  % (line, os_, arch, ", ".join(a["clickhouse_version"] for a in arts)))
-    # More than one patch on a line can only happen if a release shipped two;
-    # take the newest by version number rather than by list order.
-    hit = [sorted(hit, key=vkey)[-1]]
+    # A line can carry more than one row: two patches, or the same patch built
+    # twice (core keeps the two highest builds per version). Take the newest by
+    # version and then by build, never by list order.
+    hit = [sorted(hit, key=rank)[-1]]
 
 for a in hit:
     for k in ("file", "sha256", "bytes", "clickhouse_version", "clickhouse_minor", "library", "library_sha256"):

@@ -40,6 +40,45 @@ pub struct IndexRow {
     /// sha256 of that library — what the installed file must hash to.
     #[serde(default)]
     pub library_sha256: String,
+    /// The wrapper build for this ClickHouse version. A rebuild of the same
+    /// version is a NEW row beside the old one, never a swap, so this is what
+    /// separates them. Absent on a row published before builds existed.
+    #[serde(default)]
+    pub build: u32,
+    /// The core commit the wrapper was built from; empty on an old row.
+    #[serde(default)]
+    pub core_commit: String,
+}
+
+impl IndexRow {
+    /// The wrapper build: this row's own `build` when it has one, else the
+    /// `-b<N>` the file name ends with, else 0 — an old row, which is build 0 by
+    /// definition.
+    pub(crate) fn build_number(&self) -> u32 {
+        if self.build > 0 {
+            return self.build;
+        }
+        // No regex crate here, and none is wanted for this: strip the extension,
+        // then read the digits after the last `-b`.
+        let stem = match self.file.strip_suffix(".tar.gz") {
+            Some(stem) => stem,
+            None => return 0,
+        };
+        let Some((_, digits)) = stem.rsplit_once("-b") else {
+            return 0;
+        };
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return 0;
+        }
+        digits.parse().unwrap_or(0)
+    }
+
+    /// "Which row wins": newest ClickHouse version, then the highest wrapper
+    /// build. Without the build half a rebuild's older sibling could win on
+    /// nothing but its position in the index.
+    pub(crate) fn rank(&self) -> (Vec<u64>, u32) {
+        (version_key(&self.clickhouse_version), self.build_number())
+    }
 }
 
 impl IndexRow {
@@ -337,9 +376,7 @@ impl Release {
         {
             let key = minor_key(&row.clickhouse_minor);
             match best.get(&key) {
-                Some(cur)
-                    if version_key(&cur.clickhouse_version)
-                        >= version_key(&row.clickhouse_version) => {}
+                Some(cur) if cur.rank() >= row.rank() => {}
                 _ => {
                     best.insert(key, row);
                 }
@@ -401,7 +438,7 @@ impl Release {
             .collect();
         let row = hits
             .into_iter()
-            .max_by_key(|r| version_key(&r.clickhouse_version))
+            .max_by_key(|r| r.rank())
             .ok_or_else(|| unpublished(versions()))?;
         row.check_complete()?;
         self.cross_check(row)?;
@@ -500,5 +537,47 @@ mod tests {
         assert!(version_key("25.8.30.16-lts") > version_key("25.8.28.1-lts"));
         assert_eq!(strip_channel("25.8.28.1-lts"), "25.8.28.1");
         assert_eq!(strip_channel("25.8.28.1"), "25.8.28.1");
+    }
+}
+
+#[cfg(test)]
+mod build_tests {
+    use super::*;
+
+    fn row(version: &str, file: &str, build: u32) -> IndexRow {
+        IndexRow {
+            file: file.into(),
+            sha256: "aa".into(),
+            bytes: 1,
+            clickhouse_version: version.into(),
+            clickhouse_minor: String::new(),
+            os: "linux".into(),
+            arch: "amd64".into(),
+            library: "libchtypes.so".into(),
+            library_sha256: "bb".into(),
+            build,
+            core_commit: String::new(),
+        }
+    }
+
+    #[test]
+    fn build_comes_from_the_field_then_the_name_then_zero() {
+        assert_eq!(row("25.8.28.1-lts", "x.tar.gz", 0).build_number(), 0);
+        assert_eq!(row("25.8.28.1-lts", "x-b3.tar.gz", 0).build_number(), 3);
+        assert_eq!(row("25.8.28.1-lts", "x-b3.tar.gz", 7).build_number(), 7);
+        assert_eq!(row("25.8.28.1-lts", "x-b12.tar.gz", 0).build_number(), 12);
+        // Not a build suffix: no digits, or not the archive shape at all.
+        assert_eq!(row("25.8.28.1-lts", "x-b.tar.gz", 0).build_number(), 0);
+        assert_eq!(row("25.8.28.1-lts", "x-bfoo.tar.gz", 0).build_number(), 0);
+        assert_eq!(row("25.8.28.1-lts", "x-b3.zip", 0).build_number(), 0);
+    }
+
+    #[test]
+    fn a_newer_version_beats_a_higher_build_and_a_higher_build_beats_its_sibling() {
+        let older = row("25.8.28.1-lts", "a-b1.tar.gz", 1);
+        let newer_build = row("25.8.28.1-lts", "a-b2.tar.gz", 2);
+        let newer_version = row("25.8.33.6-lts", "b.tar.gz", 0);
+        assert!(newer_build.rank() > older.rank());
+        assert!(newer_version.rank() > newer_build.rank());
     }
 }

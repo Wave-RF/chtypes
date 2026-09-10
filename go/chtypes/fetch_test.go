@@ -1131,3 +1131,64 @@ func mangleSignature(b []byte) []byte {
 	raw[0] ^= 0xff
 	return []byte(string(lines[0]) + "\n" + base64.StdEncoding.EncodeToString(raw) + "\n")
 }
+
+// TestBuildNumberOrdering pins the consumer rule for rebuilds: resolve a line to
+// its newest ClickHouse version, and among rows of that version take the highest
+// wrapper build. Getting the sort backwards would silently install an older
+// build, so the ordering is asserted directly and through selection.
+func TestBuildNumberOrdering(t *testing.T) {
+	row := func(version, file string, build int) ReleaseArtifact {
+		return ReleaseArtifact{
+			OS: "linux", Arch: "amd64", File: file, SHA256: strings.Repeat("a", 64),
+			Bytes: 1, ClickHouseVersion: version, ClickHouseMinor: minorOf(version),
+			Library: "libchtypes.so", LibrarySHA256: strings.Repeat("b", 64), Build: build,
+		}
+	}
+
+	// build comes from the field when present, else the -b<N> suffix, else 0
+	for _, tc := range []struct {
+		a    ReleaseArtifact
+		want int
+	}{
+		{row("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64.tar.gz", 0), 0},
+		{row("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64-b3.tar.gz", 0), 3},
+		{row("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64-b3.tar.gz", 7), 7},
+		{row("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64-b12.tar.gz", 0), 12},
+	} {
+		if got := tc.a.buildOf(); got != tc.want {
+			t.Fatalf("buildOf(%s, Build=%d) = %d, want %d", tc.a.File, tc.a.Build, got, tc.want)
+		}
+	}
+
+	// a higher build of the same version wins; a newer version wins regardless
+	older := row("25.8.28.1-lts", "a-b1.tar.gz", 1)
+	newerBuild := row("25.8.28.1-lts", "a-b2.tar.gz", 2)
+	newerVersion := row("25.8.33.6-lts", "b-b0.tar.gz", 0)
+	if !newerRow(newerBuild, older) {
+		t.Fatal("build 2 must beat build 1 of the same version")
+	}
+	if newerRow(older, newerBuild) {
+		t.Fatal("build 1 must not beat build 2")
+	}
+	if !newerRow(newerVersion, newerBuild) {
+		t.Fatal("a newer ClickHouse version must beat a higher build of an older one")
+	}
+	if newerRow(newerBuild, newerVersion) {
+		t.Fatal("a higher build must not beat a newer ClickHouse version")
+	}
+
+	// and selectAll takes the highest build, whatever order the index lists them
+	for _, order := range [][]ReleaseArtifact{
+		{older, newerBuild},
+		{newerBuild, older},
+	} {
+		f := &fetcher{platform: "linux-amd64", index: &ReleaseIndex{Schema: 1, Artifacts: order}}
+		got, err := f.selectAll()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].buildOf() != 2 {
+			t.Fatalf("selectAll picked %+v, want the build-2 row", got)
+		}
+	}
+}

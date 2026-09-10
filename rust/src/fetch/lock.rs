@@ -165,6 +165,8 @@ mod tests {
             arch: "arm64".into(),
             library: "libchtypes.so".into(),
             library_sha256: "ff".into(),
+            build: 0,
+            core_commit: String::new(),
         }
     }
 

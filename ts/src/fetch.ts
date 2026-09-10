@@ -81,6 +81,15 @@ export interface IndexArtifact {
   readonly clickhouse_minor: string;
   readonly library: string;
   readonly library_sha256: string;
+  /**
+   * The wrapper build for this ClickHouse version. A rebuild of the same
+   * version is a NEW row beside the old one, never a swap, so `build` is what
+   * separates them. Absent from an old row, and from a file name with no
+   * `-b<N>` suffix: both mean build 0.
+   */
+  readonly build: number;
+  /** The core commit the wrapper was built from; `''` on an old row. */
+  readonly core_commit: string;
 }
 
 /** A release's `index.json`, schema 1. */
@@ -577,19 +586,33 @@ function indexArtifact(row: unknown, i: number): IndexArtifact {
   if (typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes <= 0) {
     throw new ArtifactCorruptError(`chtypes: index.json entry for ${String(r['file'] ?? i)} is missing bytes`);
   }
+  const file = str('file');
   const version = str('clickhouse_version');
   const minor = typeof r['clickhouse_minor'] === 'string' && r['clickhouse_minor'] !== '' ? r['clickhouse_minor'] : minorOfVersion(version);
   return {
     os: str('os'),
     arch: str('arch'),
-    file: str('file'),
+    file,
     sha256: str('sha256').toLowerCase(),
     bytes,
     clickhouse_version: version,
     clickhouse_minor: minor,
     library: str('library'),
     library_sha256: str('library_sha256').toLowerCase(),
+    build: buildOf(r['build'], file),
+    core_commit: typeof r['core_commit'] === 'string' ? r['core_commit'] : '',
   };
+}
+
+/**
+ * The wrapper build number: the row's own `build` when it has one, else the
+ * `-b<N>` suffix of the file name, else 0 — an old row, published before builds
+ * existed, which is build 0 by definition.
+ */
+function buildOf(field: unknown, file: string): number {
+  if (typeof field === 'number' && Number.isSafeInteger(field) && field >= 0) return field;
+  const m = /-b(\d+)\.tar\.gz$/.exec(file);
+  return m ? Number(m[1]) : 0;
 }
 
 /** `sha256sum` format: `<hex>  <file>` (or `<hex> *<file>`), one per line. */
@@ -634,12 +657,23 @@ export function selectArtifact(index: ReleaseIndex, platform: string, req: Versi
   return hit.sort((a, b) => compareVersions(a.clickhouse_version, b.clickhouse_version))[hit.length - 1]!;
 }
 
+/**
+ * Is `a` the row to prefer over `b`? Newest ClickHouse version first, and among
+ * rows of the SAME version the highest wrapper build — a rebuild is a new row
+ * beside the old one, so without the build tie-break the older build could win
+ * on nothing but its position in the index.
+ */
+function newerRow(a: IndexArtifact, b: IndexArtifact): boolean {
+  const byVersion = compareVersions(a.clickhouse_version, b.clickhouse_version);
+  return byVersion !== 0 ? byVersion > 0 : a.build > b.build;
+}
+
 /** Every line the release publishes for the platform, newest patch per line, oldest line first. */
 export function selectAll(index: ReleaseIndex, platform: string): IndexArtifact[] {
   const best = new Map<string, IndexArtifact>();
   for (const a of forPlatform(index, platform)) {
     const cur = best.get(a.clickhouse_minor);
-    if (cur === undefined || compareVersions(a.clickhouse_version, cur.clickhouse_version) > 0) best.set(a.clickhouse_minor, a);
+    if (cur === undefined || newerRow(a, cur)) best.set(a.clickhouse_minor, a);
   }
   return [...best.values()].sort((a, b) => compareVersions(a.clickhouse_minor, b.clickhouse_minor));
 }
