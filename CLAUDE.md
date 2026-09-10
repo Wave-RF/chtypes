@@ -15,13 +15,15 @@ carries the rules that were paid for; the ones that bind here:
   in Go/Python/TS/Rust. The one derived result is `Transformed`, per spec.
 - **The four bindings give one answer.** A behaviour change lands in all four
   in one cycle (`spec/bindings.md` is the shape), and the golden set must stay
-  green in all four. `goldens/cases.json` is **delivered by core**, never
-  hand-edited and never regenerated here: core's `certify` workflow diffs it
-  against every published line, uploads the replacement as the run artifact
-  `sdk-goldens-cases`, and opens an ops issue (key `sdk-goldens`) when it
-  differs — drop the artifact in and land it (`goldens/README.md`). The set
-  shrinks as lines are added, because a case that stops being version-agnostic
-  is dropped rather than recorded twice.
+  green in all four. The golden set is **served, not tracked**: core publishes
+  `sdk-goldens.json` in the rolling release as a row in the signed
+  `SHA256SUMS`, `scripts/fetch.sh` installs it at `<registry>/sdk-goldens.json`,
+  and each binding's golden test reads it offline from there
+  (`CHTYPES_GOLDENS` overrides). There is no cases file in this repository. A
+  case runs only against the EXACT ClickHouse version `generated.exact` names
+  for its line and skips loudly otherwise, and the set shrinks as lines are
+  added, because a case that stops being version-agnostic is dropped rather
+  than recorded twice.
 - **The header is owned here.** An ABI change: `include/chtypes.h` + the four
   bindings' pinned constants (`ABIRevision` / `ABI_REVISION`) in one commit;
   the core repository then pulls the header (`ci/steps/header-sync.sh --pull`)

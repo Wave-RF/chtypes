@@ -15,8 +15,10 @@ behaviour in Go, Python, TypeScript or Rust will be declined however good it is.
   lines. The artifact-backed proof beyond that lives in the core repository.
 - **Every binding follows the same contract** (`spec/`). A change to what a
   call means belongs in the spec and in all four bindings, not one.
-- **Goldens are generated, not hand-edited.** `goldens/cases.json` comes from
-  the core repository's generator; open an issue for a missing case.
+- **Goldens are served, not tracked.** The golden set is published in the
+  rolling release as `sdk-goldens.json` and installed beside the artifacts by
+  `scripts/fetch.sh`; there is no cases file in this repository to edit. Open an
+  issue against the core repository for a missing case (`goldens/README.md`).
 - **Report security issues privately**: see `SECURITY.md`.
 
 By contributing you agree your work is licensed under the Apache License 2.0

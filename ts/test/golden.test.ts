@@ -1,5 +1,5 @@
 /**
- * The public golden set — `goldens/cases.json` at the repository root.
+ * The public golden set — SERVED beside the artifacts as `sdk-goldens.json`.
  *
  * A few dozen cases whose expectations were produced by the library itself
  * and agreed on by every ClickHouse version in the generating registry
@@ -14,8 +14,12 @@ import { describe, expect, it } from 'vitest';
 
 import { Format, Registry, SchemaError, looksLikeRegistry, resolveRegistryDir } from '../src/index.js';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const GOLDENS = process.env['CHTYPES_GOLDENS'] ?? path.resolve(HERE, '..', '..', 'goldens', 'cases.json');
+// The set is SERVED, not tracked: core publishes sdk-goldens.json in the rolling
+// release as a row in the signed SHA256SUMS, so a fetch installs it beside the
+// artifacts and this test reads it offline. CHTYPES_GOLDENS overrides the path.
+const REGISTRY = resolveRegistryDir();
+const GOLDENS =
+  process.env['CHTYPES_GOLDENS'] ?? (REGISTRY === null ? null : path.join(REGISTRY, 'sdk-goldens.json'));
 
 interface GoldenRow {
   outcome: string;
@@ -43,6 +47,8 @@ interface GoldenCase {
 }
 interface GoldenFile {
   schema: number;
+  /** What the set says about itself; `exact` maps a line to the EXACT ClickHouse version it was generated on. */
+  generated: { exact?: Record<string, string>; versions?: string[]; core_commit?: string };
   cases: GoldenCase[];
 }
 
@@ -54,15 +60,30 @@ const FORMATS: Record<string, number> = {
   JSONCompactEachRow: Format.JSONCompactEachRow,
 };
 
-const doc = JSON.parse(readFileSync(GOLDENS, 'utf8')) as GoldenFile;
-if (doc.schema !== 1) throw new Error(`golden set schema ${doc.schema}; this test reads schema 1`);
-if (doc.cases.length === 0) throw new Error('golden set holds no cases');
+// A registry fetched before core started serving the set has no file. That is a
+// loud skip, not an exception that takes the whole module down.
+let doc: GoldenFile | null = null;
+if (GOLDENS !== null) {
+  try {
+    doc = JSON.parse(readFileSync(GOLDENS, 'utf8')) as GoldenFile;
+  } catch {
+    doc = null;
+  }
+}
+if (doc !== null) {
+  if (doc.schema !== 1) throw new Error(`golden set schema ${doc.schema}; this test reads schema 1`);
+  if (doc.cases.length === 0) throw new Error('golden set holds no cases');
+} else {
+  console.warn(
+    `[chtypes] golden tests SKIPPED: no golden set at ${GOLDENS ?? '(no registry on the search path)'}` +
+      ' — it is served beside the artifacts now; scripts/fetch.sh 25.8 installs it, and CHTYPES_GOLDENS overrides the path',
+  );
+}
 
 // "Have a registry" is "have at least one artifact in it": the search path
 // (docs/fetch.md §1) resolves CHTYPES_REGISTRY without looking inside, so a
 // directory that holds nothing must skip exactly as no directory does.
-const REGISTRY = resolveRegistryDir();
-const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
+const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY) && doc !== null;
 if (!HAVE_REGISTRY) {
   console.warn(
     '[chtypes] golden tests SKIPPED: no artifact registry on the search path' +
@@ -79,8 +100,21 @@ describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
   it('has at least one artifact to run against', () => {
     expect(libraries.length).toBeGreaterThan(0);
   });
+  const exact = doc?.generated?.exact ?? {};
   for (const lib of libraries) {
-    for (const c of doc.cases) {
+    // A case is only a golden for the EXACT build it was generated against. The
+    // rolling index keeps older patch rows, so a machine can hold a patch the
+    // generator never saw; that is a loud skip, never a failure.
+    const want = exact[lib.minor];
+    if (want === undefined) {
+      it.skip(`${lib.version}/(the set was not generated on line ${lib.minor})`, () => {});
+      continue;
+    }
+    if (want !== lib.version) {
+      it.skip(`${lib.version}/(generated on ClickHouse ${want} for line ${lib.minor}; fetch ${lib.minor} to run these cases)`, () => {});
+      continue;
+    }
+    for (const c of doc!.cases) {
       it(`${lib.version}/${c.id}`, () => {
         const format = FORMATS[c.format];
         if (format === undefined) throw new Error(`${c.id}: unknown format ${c.format}`);

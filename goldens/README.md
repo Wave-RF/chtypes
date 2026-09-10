@@ -1,58 +1,54 @@
-# goldens — the SDK's public smoke proof
+# goldens — the SDK's public smoke proof, served rather than tracked
 
-`cases.json` is a few dozen cases every SDK in this repository runs against
-whatever artifacts a machine has — `go/chtypes/golden_test.go`,
-`python/tests/test_golden.py`, `ts/test/golden.test.ts`, `rust/tests/golden.rs`
-— so that four bindings are held to one answer, and so that a fresh clone with
-a fetched artifact can prove the SDK works before reading anything else.
+There is no cases file in this directory any more, and there will not be one.
+Core publishes the golden set in the rolling release beside the artifacts:
+
+    https://artifacts.wavehouse.dev/artifacts/sdk-goldens.json
+
+It is a row in the signed `SHA256SUMS`, exactly like a tarball, so it verifies
+through the same chain — the ed25519 signature covers the sums, the sums name
+its sha256, and the bytes on disk must hash to it (`docs/fetch.md` §3).
+`scripts/fetch.sh` installs it as `<registry>/sdk-goldens.json`, so every
+binding's golden test reads it **offline** after a fetch, exactly as it reads an
+artifact.
+
+    scripts/fetch.sh 25.8          # installs the artifact AND the golden set
+
+`CHTYPES_GOLDENS` overrides the path, for local generation.
+
+## What a case promises
+
+Every expectation was **produced by the library**, never typed in, and was
+**identical on every ClickHouse line in `generated.versions`**. A case any line
+answered differently is refused by the generator and listed under
+`generated.refused`, because a golden that is true on one line and false on
+another is not a golden.
+
+That is why the set **shrinks** as lines are added, and why a shrinking set is
+not lost coverage: a case that stops being version-agnostic moves to core's
+per-line behaviour goldens, where the answer is recorded per version instead of
+pretended to be universal.
 
 It is **not** the corpus. The differential proof — tens of thousands of cases
 scored against real ClickHouse servers on every supported version — lives with
 the library that produces the artifacts, and stays there.
 
-## What a case promises
+## The version gate
 
-Every expectation in this file was **produced by the library**, never typed
-in, and was **identical on every ClickHouse version** in the generating
-registry (listed under `generated.versions`). A case any version answered
-differently is refused by the generator and listed under `generated.refused`,
-because a golden that is true on one line and false on another is not a golden.
-The set is deliberately broad rather than deep: one case per text format, per
-type family, per verdict class, one filter, two schema refusals. No case reads
-a clock, and no case parses a float with a fractional part (the artifacts'
-float parsing matches real servers on Linux only; macOS is a development floor
-whose `long double` diverges).
+`generated.exact` maps a line to the **exact** ClickHouse version the
+expectations were generated against (`"25.8": "25.8.33.6-lts"`). A golden test
+runs a case against an artifact only when that artifact's exact version equals
+it, and **skips loudly by name** otherwise, naming the version it wanted and the
+one it found.
 
-`schema` is `1`. A reader must refuse a schema it does not know.
+This matters because the rolling index keeps every patch row ever published, so
+a machine can be holding an older patch than the set was generated on. That is a
+skip, never a failure: an expectation produced on one build says nothing about
+another.
 
-## Running it
+## Reading it
 
-Each SDK's own test suite includes its golden test; point `CHTYPES_REGISTRY`
-at a registry directory, or fetch artifacts into the per-user cache with
-`scripts/fetch.sh` and the tests find them there. `CHTYPES_GOLDENS` overrides
-the file's location.
-
-## Where it comes from
-
-**This file is delivered, not regenerated here, and never hand-edited.**
-
-Core's `certify` workflow regenerates the set against every line the artifacts
-host serves, compares it case by case with the copy in this repository, and when
-the two differ it uploads the new file as the run artifact `sdk-goldens-cases`
-and opens an ops issue on `Wave-RF/chtypes-core` under the key `sdk-goldens`.
-The whole job here is:
-
-1. Open the issue, follow it to the linked run.
-2. Download the `sdk-goldens-cases` artifact.
-3. Drop it in as `goldens/cases.json` and land it.
-
-Expect the set to **shrink** as lines are added, not grow. The generator keeps
-only cases every line answers identically, so a case that becomes
-version-dependent is dropped rather than recorded twice — which is the point of
-a golden, and why a shrinking set is not a loss of coverage. The behaviour a
-dropped case used to pin lives on in core's per-line behaviour goldens, and in
-whichever binding suite gates it on the artifact's version.
-
-Inputs live in core (`tests/sdk/goldens/cases.in.json`): a missing case is an
-issue against core, not an edit here. A delivery that changes an existing
-expectation is a library change and needs the same scrutiny as one.
+`schema` is `1`. A reader must refuse a schema it does not know. Beyond
+`cases`, the `generated` header carries `at`, `by`, `note`, `platform`,
+`versions`, `exact`, `refused` and `core_commit` — and `builds` (line ->
+wrapper build) once core's next publish lands.

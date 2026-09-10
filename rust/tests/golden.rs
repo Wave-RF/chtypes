@@ -1,4 +1,4 @@
-//! The public golden set — `goldens/cases.json` at the repository root.
+//! The public golden set — SERVED beside the artifacts as `sdk-goldens.json`.
 //!
 //! A few dozen cases whose expectations were produced by the library itself
 //! and agreed on by every ClickHouse version in the generating registry
@@ -12,19 +12,35 @@ use std::path::PathBuf;
 use chtypes::{Error, FilterOutcome, Format, NO_SETTINGS, Registry, Verdict};
 use serde_json::Value as Json;
 
-fn goldens() -> Json {
+/// The SERVED set: core publishes `sdk-goldens.json` in the rolling release as a
+/// row in the signed `SHA256SUMS`, so a fetch installs it beside the artifacts
+/// and this test reads it offline. `CHTYPES_GOLDENS` overrides the path.
+///
+/// `None` when this machine has not fetched one — a loud skip, never a panic
+/// that reads as a failure.
+fn goldens(registry_dir: &std::path::Path) -> Option<Json> {
     let path = std::env::var_os("CHTYPES_GOLDENS")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../goldens/cases.json"));
-    let blob =
-        std::fs::read(&path).unwrap_or_else(|e| panic!("golden set {}: {e}", path.display()));
+        .unwrap_or_else(|| registry_dir.join("sdk-goldens.json"));
+    let blob = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            announce(&format!(
+                "\nSKIP goldens_hold_on_every_artifact: no golden set at {} ({e}) — it is served \
+                 beside the artifacts now; scripts/fetch.sh 25.8 installs it, and \
+                 $CHTYPES_GOLDENS overrides the path\n",
+                path.display()
+            ));
+            return None;
+        }
+    };
     let doc: Json = serde_json::from_slice(&blob).expect("golden set parses");
     assert_eq!(doc["schema"], 1, "this test reads schema 1");
     assert!(
         !doc["cases"].as_array().unwrap().is_empty(),
         "golden set holds no cases"
     );
-    doc
+    Some(doc)
 }
 
 fn format_of(name: &str) -> Format {
@@ -91,10 +107,39 @@ fn goldens_hold_on_every_artifact() {
             return;
         }
     };
-    let doc = goldens();
+    let Some(doc) = goldens(registry.dir()) else {
+        return;
+    };
     let cases = doc["cases"].as_array().unwrap();
+    let exact = &doc["generated"]["exact"];
     let mut checked = 0usize;
+    let mut ran_on = 0usize;
     for lib in registry.libraries() {
+        // A case is only a golden for the EXACT build it was generated against.
+        // The rolling index keeps older patch rows, so a machine can hold a
+        // patch the generator never saw; that is a loud skip, never a failure.
+        match exact[lib.minor()].as_str() {
+            None => {
+                announce(&format!(
+                    "\nSKIP goldens {}: the set was not generated on line {}\n",
+                    lib.version(),
+                    lib.minor()
+                ));
+                continue;
+            }
+            Some(want) if want != lib.version() => {
+                announce(&format!(
+                    "\nSKIP goldens {}: generated on ClickHouse {want} for line {} — fetch {} to \
+                     run these cases\n",
+                    lib.version(),
+                    lib.minor(),
+                    lib.minor()
+                ));
+                continue;
+            }
+            Some(_) => {}
+        }
+        ran_on += 1;
         for c in cases {
             let id = c["id"].as_str().unwrap();
             let ctx = format!("{}/{id}", lib.version());
@@ -224,10 +269,13 @@ fn goldens_hold_on_every_artifact() {
             checked += 1;
         }
     }
-    assert_eq!(checked, cases.len() * registry.libraries().len());
-    assert!(checked > 0, "no golden was checked");
-    eprintln!(
-        "\n{checked} golden checks across {} artifact(s)\n",
-        registry.libraries().len()
-    );
+    assert_eq!(checked, cases.len() * ran_on);
+    if ran_on == 0 {
+        announce(
+            "\nSKIP goldens_hold_on_every_artifact: no installed artifact is at the exact version \
+             the golden set was generated on — fetch the lines named above\n",
+        );
+        return;
+    }
+    eprintln!("\n{checked} golden checks across {ran_on} artifact(s)\n");
 }

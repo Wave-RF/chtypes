@@ -4,21 +4,36 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
+	"strings"
 	"testing"
 )
 
-// The public golden set — goldens/cases.json at the repository root — is the
-// SDK's smoke proof: a few dozen cases whose expectations were produced by the
-// library itself and agreed on by every ClickHouse version in the generating
-// registry (chtypes-core: tests/conformance/go/cmd/goldens-gen). Every SDK
-// runs the same file, so the four bindings are held to one answer. It is not
-// the corpus; that lives with the rigs.
+// The public golden set — SERVED, not tracked. Core publishes sdk-goldens.json
+// in the rolling release beside the artifacts, as a row in the signed
+// SHA256SUMS, so a fetch installs it at <registry>/sdk-goldens.json and this
+// test reads it offline exactly as it reads an artifact. Its expectations were
+// produced by the library itself and agreed on by every ClickHouse version in
+// the generating registry; a case any version answered differently is refused
+// by the generator rather than recorded twice. Every SDK runs the same file, so
+// the four bindings are held to one answer. It is not the corpus; that lives
+// with the rigs.
 
 type goldenFile struct {
-	Schema int          `json:"schema"`
-	Cases  []goldenCase `json:"cases"`
+	Schema    int          `json:"schema"`
+	Generated goldenHeader `json:"generated"`
+	Cases     []goldenCase `json:"cases"`
+}
+
+// goldenHeader is what the set says about itself. Exact is the half this test
+// acts on: line -> the EXACT ClickHouse version the expectations were generated
+// against.
+type goldenHeader struct {
+	At         string            `json:"at"`
+	CoreCommit string            `json:"core_commit"`
+	Versions   []string          `json:"versions"`
+	Exact      map[string]string `json:"exact"`
+	Refused    []string          `json:"refused"`
 }
 
 type goldenCase struct {
@@ -49,23 +64,18 @@ var goldenFormats = map[string]Format{
 	"JSONEachRow": JSONEachRow, "CSV": CSV, "TSV": TSV, "Values": Values, "JSONCompactEachRow": JSONCompactEachRow,
 }
 
-func loadGoldens(t *testing.T) goldenFile {
+func loadGoldens(t *testing.T, registryDir string) goldenFile {
 	t.Helper()
 	path := os.Getenv("CHTYPES_GOLDENS")
 	if path == "" {
-		_, self, _, ok := runtime.Caller(0)
-		if !ok {
-			t.Fatal("cannot resolve the source path")
-		}
-		path = filepath.Join(filepath.Dir(self), "..", "..", "goldens", "cases.json")
+		path = filepath.Join(registryDir, "sdk-goldens.json")
 	}
 	blob, err := os.ReadFile(path)
 	if err != nil {
-		// The golden set ships with the repository, two levels above this
-		// package, not inside the Go module: a copy of go/ alone (a module
-		// cache, the standalone check without CHTYPES_GOLDENS) has no file to
-		// read. That is a loud skip, not a failure — and never a silent pass.
-		t.Skipf("golden set not found: %v (set CHTYPES_GOLDENS to goldens/cases.json)", err)
+		// The set is served, not tracked: a registry that has not been fetched
+		// since core started publishing it has no file to read. That is a loud
+		// skip, not a failure — and never a silent pass.
+		t.Skipf("golden set not found at %s: %v (scripts/fetch.sh installs it beside the artifacts; CHTYPES_GOLDENS overrides the path)", path, err)
 	}
 	var g goldenFile
 	if err := json.Unmarshal(blob, &g); err != nil {
@@ -94,13 +104,30 @@ func verdictName(v Verdict) string {
 }
 
 func TestGoldens(t *testing.T) {
-	g := loadGoldens(t)
+	dir := testRegistryDir(t)
+	g := loadGoldens(t, dir)
 	r := testRegistry(t)
 	checked := 0
 	for _, v := range r.Versions() {
 		lib, err := r.For(Version(v))
 		if err != nil {
 			t.Fatal(err)
+		}
+		// A case is only a golden for the EXACT build it was generated against.
+		// The rolling index keeps older patch rows, so a machine can hold a
+		// patch the generator never saw; that is a loud skip, never a failure.
+		want, known := g.Generated.Exact[v]
+		if !known {
+			t.Run(v, func(t *testing.T) {
+				t.Skipf("the golden set was not generated on line %s (it has: %s)", v, strings.Join(g.Generated.Versions, ", "))
+			})
+			continue
+		}
+		if got := string(lib.Version); got != want {
+			t.Run(v, func(t *testing.T) {
+				t.Skipf("golden set was generated on ClickHouse %s for line %s, this registry holds %s — fetch %s to run these cases", want, v, got, v)
+			})
+			continue
 		}
 		for _, c := range g.Cases {
 			f, ok := goldenFormats[c.Format]

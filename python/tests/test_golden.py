@@ -1,4 +1,4 @@
-"""The public golden set — `goldens/cases.json` at the repository root.
+"""The public golden set — SERVED beside the artifacts as `sdk-goldens.json`.
 
 A few dozen cases whose expectations were produced by the library itself and
 agreed on by every ClickHouse version in the generating registry (chtypes-core:
@@ -34,26 +34,66 @@ VERDICTS = {
 }
 
 
-def _goldens() -> dict:
-    default = Path(__file__).resolve().parents[2] / "goldens" / "cases.json"
-    path = os.environ.get("CHTYPES_GOLDENS") or str(default)
-    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+def _goldens_path() -> Path:
+    """``$CHTYPES_GOLDENS``, else the served set beside the artifacts."""
+    override = os.environ.get("CHTYPES_GOLDENS")
+    if override:
+        return Path(override)
+    reg = os.environ.get(chtypes.ENV_REGISTRY) or chtypes.default_registry_dir()
+    return Path(reg) / "sdk-goldens.json"
+
+
+def _goldens() -> dict | None:
+    """The served set, or None when this machine has not fetched one.
+
+    Returns rather than raises: the set is SERVED now, so a registry fetched
+    before core started publishing it simply has no file — and a missing golden
+    set is a loud skip at collection, never an import error that takes the whole
+    module down with it."""
+    try:
+        doc = json.loads(_goldens_path().read_text(encoding="utf-8"))
+    except OSError:
+        return None
     assert doc["schema"] == 1, f"golden set schema {doc['schema']}; this test reads schema 1"
     assert doc["cases"], "golden set holds no cases"
     return doc
 
 
 GOLDENS = _goldens()
+_CASES = GOLDENS["cases"] if GOLDENS else []
 
 
-@pytest.mark.parametrize("case", GOLDENS["cases"], ids=[c["id"] for c in GOLDENS["cases"]])
+@pytest.mark.skipif(
+    GOLDENS is None,
+    reason=(
+        f"golden set not found at {_goldens_path()} — it is served beside the artifacts now; "
+        f"`scripts/fetch.sh 25.8` installs it, and $CHTYPES_GOLDENS overrides the path"
+    ),
+)
+@pytest.mark.parametrize("case", _CASES, ids=[c["id"] for c in _CASES])
 def test_golden(registry: chtypes.Registry, case: dict) -> None:
     fmt = FORMATS[case["format"]]
     body = case["body"].encode("utf-8")
     settings = case.get("settings") or None
     expect = case["expect"]
+    assert GOLDENS is not None  # the skipif above guarantees it
+    exact = GOLDENS["generated"].get("exact") or {}
     checked = 0
+    skipped: list[str] = []
     for lib in registry.libraries():
+        # A case is only a golden for the EXACT build it was generated against.
+        # The rolling index keeps older patch rows, so a machine can hold a patch
+        # the generator never saw; that is a loud skip, never a failure.
+        want = exact.get(lib.minor)
+        if want is None:
+            skipped.append(f"{lib.minor}: the set was not generated on that line")
+            continue
+        if lib.version != want:
+            skipped.append(
+                f"{lib.minor}: generated on ClickHouse {want}, this registry holds "
+                f"{lib.version} — fetch {lib.minor} to run these cases"
+            )
+            continue
         if expect.get("compile_error_code"):
             with pytest.raises(SchemaError) as ei:
                 lib.compile_ddl(case["ddl"])
@@ -97,4 +137,10 @@ def test_golden(registry: chtypes.Registry, case: dict) -> None:
             checked += 1
         finally:
             schema.close()
-    assert checked == len(registry.libraries()) > 0
+    # Every library either ran the case or was skipped by name, and a run that
+    # checked nothing is a skip rather than a silent pass.
+    assert checked + len(skipped) == len(registry.libraries()) > 0
+    if checked == 0:
+        pytest.skip(
+            "no artifact matches the golden set's generated versions — " + "; ".join(skipped)
+        )
