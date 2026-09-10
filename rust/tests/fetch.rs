@@ -35,7 +35,11 @@ use serde_json::Value as Json;
 /// the platform really is foreign — a fixed "linux-amd64" was the host itself
 /// on the amd64 CI runner and the assertion contradicted itself there.
 fn foreign() -> &'static str {
-    if chtypes::host_platform() == "linux-amd64" { "darwin-arm64" } else { "linux-amd64" }
+    if chtypes::host_platform() == "linux-amd64" {
+        "darwin-arm64"
+    } else {
+        "linux-amd64"
+    }
 }
 
 fn announce(message: &str) {
@@ -59,13 +63,14 @@ fn fixtures_dir() -> Option<PathBuf> {
         ));
         return None;
     }
-    if chtypes::cache_dir_for(foreign()).is_dir()
+    let fp = foreign();
+    if chtypes::cache_dir_for(fp).is_dir()
         || chtypes::SYSTEM_ARTIFACT_ROOTS
             .iter()
-            .any(|r| Path::new(r).join(foreign()).is_dir())
+            .any(|r| Path::new(r).join(fp).is_dir())
     {
         announce(&format!(
-            "\nSKIP: this host has a {foreign()} artifact directory on the §1 search path, which \
+            "\nSKIP: this host has a {fp} artifact directory on the §1 search path, which \
              would shadow the fixture installs. This test is skipped.\n"
         ));
         return None;
