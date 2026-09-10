@@ -50,5 +50,7 @@ artifact-backed proof is the core repository's `certify` workflow.
 
 Pre-1.0 and pre-publish: `github.com/wave-rf/chtypes/go` is the module path
 (lowercase, the Go norm) and freezes at the first tag together with the
-function signatures. Publish guards are in place until then (python's
-`Private :: Do Not Upload`, ts `private`, rust `publish = false`).
+function signatures. Nothing publishes without a `<dir>/v*` tag, and each
+release workflow refuses a tag whose version differs from the manifest's;
+the registry setup, the order and the one manual first publish per
+registry are in `RELEASING.md`.
