@@ -100,6 +100,10 @@ ENV_REGISTRY: Final = "CHTYPES_REGISTRY"
 RELEASE_LOAD_ATTEMPTS: Final = 3
 RELEASE_RETRY_DELAY: Final = 4
 
+#: The served golden set: a release-level file, and a row in the signed
+#: SHA256SUMS, installed beside the artifacts as ``<registry>/sdk-goldens.json``.
+GOLDENS_ASSET: Final = "sdk-goldens.json"
+
 #: The ``-b<N>`` a current artifact file name ends with. A name without one is
 #: an old row, which is build 0 by definition.
 _BUILD_SUFFIX: Final = re.compile(r"-b([0-9]+)\.tar\.gz$")
@@ -855,7 +859,9 @@ class Fetcher:
         if self.offline:
             return self._ensure_offline(line, exact)
         entry = self.release().select(spelling, self.platform)
-        return self.install(entry)
+        installed = self.install(entry)
+        self.install_goldens()
+        return installed
 
     def ensure_all(self) -> list[Path]:
         """Every line the release publishes for the platform."""
@@ -864,7 +870,58 @@ class Fetcher:
             raise ArtifactUnpublishedError(
                 f"chtypes: {self.release().source} publishes nothing for {self.platform}"
             )
-        return [self.install(entry) for entry in offered]
+        out = [self.install(entry) for entry in offered]
+        self.install_goldens()
+        return out
+
+    def install_goldens(self) -> Path | None:
+        """Install the served golden set, if this release publishes one.
+
+        ``sdk-goldens.json`` is a release-level file like ``index.json`` and a
+        row in the signed ``SHA256SUMS`` like a tarball, so it verifies through
+        the same chain and lands beside the artifacts, where every binding's
+        golden test reads it offline.
+
+        Never raises: a release with no such row simply predates the served set,
+        and a set that cannot be written leaves the golden tests skipping
+        loudly, which is their job when there is nothing to read. What it will
+        not do is install bytes the signed ``SHA256SUMS`` does not describe.
+        """
+        release = self.release()
+        want = release.sums.get(GOLDENS_ASSET)
+        if want is None:
+            self._say(
+                f"this release does not publish {GOLDENS_ASSET} "
+                f"(the SDKs' golden tests will skip until it does)"
+            )
+            return None
+        try:
+            blob = self.source.read(GOLDENS_ASSET)
+        except OSError as exc:
+            self._say(f"could not read {GOLDENS_ASSET}: {exc} — the golden tests will skip")
+            return None
+        if blob is None:
+            self._say(
+                f"SHA256SUMS lists {GOLDENS_ASSET} but {self.source} does not serve it "
+                f"— NOT installing it"
+            )
+            return None
+        got = hashlib.sha256(blob).hexdigest()
+        if got != want:
+            self._say(
+                f"NOT installing {GOLDENS_ASSET}: it hashes to {got} but the signed "
+                f"SHA256SUMS says {want}"
+            )
+            return None
+        try:
+            self.dest.mkdir(parents=True, exist_ok=True)
+            path = self.dest / GOLDENS_ASSET
+            path.write_bytes(blob)
+        except OSError as exc:
+            self._say(f"could not write {GOLDENS_ASSET}: {exc} — the golden tests will skip")
+            return None
+        self._say(f"golden set verified and installed: {path}")
+        return path
 
     def _ensure_offline(self, line: str, exact: str | None) -> Path:
         install = self.dest / line

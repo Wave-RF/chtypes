@@ -228,7 +228,51 @@ func Ensure(ctx context.Context, spelling string, opts FetchOptions) (*Installed
 	if err != nil {
 		return nil, err
 	}
-	return f.installOne(ctx, spelling, a)
+	inst, err := f.installOne(ctx, spelling, a)
+	if err != nil {
+		return nil, err
+	}
+	f.installGoldens(ctx)
+	return inst, nil
+}
+
+// goldensAsset is the served golden set: a release-level file like index.json,
+// and a row in the signed SHA256SUMS like a tarball, so it verifies through the
+// same chain. It installs beside the artifacts as <registry>/sdk-goldens.json,
+// where every binding's golden test reads it offline.
+const goldensAsset = "sdk-goldens.json"
+
+// installGoldens fetches the served golden set, if this release publishes one.
+//
+// It never fails a fetch. A release with no such row simply predates the served
+// set, and a golden set that cannot be written leaves the golden tests skipping
+// loudly — which is their job when there is nothing to read. What it will not do
+// is install bytes the signed SHA256SUMS does not describe.
+func (f *fetcher) installGoldens(ctx context.Context) {
+	want, listed := f.sums[goldensAsset]
+	if !listed {
+		f.say("this release does not publish %s (the SDKs' golden tests will skip until it does)", goldensAsset)
+		return
+	}
+	blob, err := f.src.readAll(ctx, goldensAsset, 8<<20)
+	if err != nil {
+		f.say("could not read %s from %s: %v — the golden tests will skip", goldensAsset, f.src, err)
+		return
+	}
+	sum := sha256.Sum256(blob)
+	if got := hex.EncodeToString(sum[:]); got != want {
+		f.say("NOT installing %s: it hashes to %s but the signed SHA256SUMS says %s", goldensAsset, got, want)
+		return
+	}
+	if err := os.MkdirAll(f.opts.Dest, 0o755); err != nil {
+		f.say("could not create %s: %v — the golden tests will skip", f.opts.Dest, err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(f.opts.Dest, goldensAsset), blob, 0o644); err != nil {
+		f.say("could not write %s: %v — the golden tests will skip", goldensAsset, err)
+		return
+	}
+	f.say("golden set verified and installed: %s", filepath.Join(f.opts.Dest, goldensAsset))
 }
 
 // FetchAll installs every line the release publishes for the platform —
@@ -264,6 +308,7 @@ func FetchAll(ctx context.Context, opts FetchOptions) ([]*Installed, error) {
 		}
 		out = append(out, inst)
 	}
+	f.installGoldens(ctx)
 	f.say("%d version(s) installed into %s", len(out), f.dest)
 	return out, nil
 }

@@ -445,6 +445,12 @@ impl Release {
         Ok(row)
     }
 
+    /// The signed `SHA256SUMS` entry for a release-level file, if it has one.
+    /// Used for `sdk-goldens.json`, which is a row like any tarball.
+    pub(crate) fn sum_for(&self, name: &str) -> Option<&str> {
+        self.sums.get(name).map(String::as_str)
+    }
+
     /// Step 2: the signed `SHA256SUMS` must list the asset with the index's
     /// sha256. A disagreement is a broken release, reported, not repaired.
     pub(crate) fn cross_check(&self, row: &IndexRow) -> Result<()> {

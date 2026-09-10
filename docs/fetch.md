@@ -31,6 +31,30 @@ local directory or a `file://` path. A line (`25.8`) resolves to the one
 patch the release publishes for it; an exact patch (`25.8.28.1-lts`) is a
 hard requirement and fails if absent.
 
+A release holds four kinds of file:
+
+| file | what it is |
+|---|---|
+| `SHA256SUMS`, `SHA256SUMS.sig` | the signed manifest of every other file (§3, §4) |
+| `index.json` | the listing: one row per artifact, per platform (schema 1) |
+| `chtypes-<version>-<os>-<arch>[-b<N>].tar.gz` | the artifacts. `-b<N>` is the wrapper build; a name without one is build 0 |
+| `sdk-goldens.json` | the **served golden set** the SDK suites run |
+
+`sdk-goldens.json` is a row in `SHA256SUMS` like any tarball, so it verifies
+through the same chain, and a fetch installs it at `<registry>/sdk-goldens.json`
+— beside the artifacts, where every binding's golden test reads it offline
+(`goldens/README.md`; `CHTYPES_GOLDENS` overrides the path). A release that does
+not publish one predates the served set: that is a note, not a failure, and the
+golden tests skip loudly until it does.
+
+**Rebuilds are new rows, never swaps.** The same ClickHouse version can be
+published more than once, each with a higher `build`, and the release keeps the
+two highest per version and platform. A line therefore resolves to its newest
+ClickHouse version and then to the **highest build** of that version — the row's
+`build` field when it has one, else the `-b<N>` in the name, else 0. A lock file
+pins a file name and sha256, which is exactly what keeps a pin valid across a
+rebuild.
+
 ## 3. The verification chain, in order
 
 Nothing is a verdict but the chain; no exit code, no `Content-Length`, no

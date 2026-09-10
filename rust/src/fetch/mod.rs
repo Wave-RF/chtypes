@@ -248,7 +248,70 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
 
     let installed = install::fetch_and_install(&source, row, &dest, &platform, opts.progress)?;
     record(lock.as_mut(), opts, &key, row)?;
+    install_goldens(&source, &release, &dest, opts.progress);
     Ok(installed)
+}
+
+/// The served golden set: a release-level file like `index.json`, and a row in
+/// the signed `SHA256SUMS` like a tarball, so it verifies through the same chain
+/// and installs beside the artifacts as `<registry>/sdk-goldens.json` — where
+/// every binding's golden test reads it offline.
+const GOLDENS_ASSET: &str = "sdk-goldens.json";
+
+/// Install the served golden set, if this release publishes one.
+///
+/// Never fails a fetch. A release with no such row simply predates the served
+/// set, and a set that cannot be written leaves the golden tests skipping
+/// loudly, which is their job when there is nothing to read. What it will not do
+/// is install bytes the signed `SHA256SUMS` does not describe.
+fn install_goldens(source: &Source, release: &Release, dest: &std::path::Path, progress: bool) {
+    let note = |msg: String| {
+        if progress {
+            eprintln!("chtypes: {msg}");
+        }
+    };
+    let Some(want) = release.sum_for(GOLDENS_ASSET) else {
+        note(format!(
+            "this release does not publish {GOLDENS_ASSET} (the SDKs' golden tests will skip \
+             until it does)"
+        ));
+        return;
+    };
+    let blob = match source.read(GOLDENS_ASSET) {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            note(format!(
+                "SHA256SUMS lists {GOLDENS_ASSET} but {} does not serve it — NOT installing it",
+                source.describe()
+            ));
+            return;
+        }
+        Err(e) => {
+            note(format!(
+                "could not read {GOLDENS_ASSET}: {e} — the golden tests will skip"
+            ));
+            return;
+        }
+    };
+    let got = super::fetch::trust::sha256_hex(&blob);
+    if got != want {
+        note(format!(
+            "NOT installing {GOLDENS_ASSET}: it hashes to {got} but the signed SHA256SUMS says \
+             {want}"
+        ));
+        return;
+    }
+    let out = dest.join(GOLDENS_ASSET);
+    if let Err(e) = std::fs::create_dir_all(dest).and_then(|()| std::fs::write(&out, &blob)) {
+        note(format!(
+            "could not write {GOLDENS_ASSET}: {e} — the golden tests will skip"
+        ));
+        return;
+    }
+    note(format!(
+        "golden set verified and installed: {}",
+        out.display()
+    ));
 }
 
 /// [`ensure`] for every line the release publishes for the platform
@@ -321,6 +384,7 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
         record(lock.as_mut(), opts, &key, row)?;
         out.push(installed);
     }
+    install_goldens(&source, &release, &dest, opts.progress);
     Ok(out)
 }
 

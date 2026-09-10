@@ -28,7 +28,7 @@
 
 import { createHash, createPublicKey, randomBytes, verify as verifyRaw } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -737,7 +737,51 @@ export async function ensureAll(options: EnsureOptions = {}): Promise<EnsureResu
   const release = await loadRelease(source, options, emit);
   const out: EnsureResult[] = [];
   for (const art of selectAll(release.index, platform)) out.push(await installOne(release, art, ctx));
+  await installGoldens(release, ctx);
   return out;
+}
+
+/**
+ * The served golden set: a release-level file like `index.json`, and a row in
+ * the signed `SHA256SUMS` like a tarball, so it verifies through the same chain
+ * and installs beside the artifacts as `<registry>/sdk-goldens.json` — where
+ * every binding's golden test reads it offline.
+ */
+const GOLDENS_ASSET = 'sdk-goldens.json';
+
+/**
+ * Install the served golden set, if this release publishes one.
+ *
+ * Never throws. A release with no such row simply predates the served set, and a
+ * set that cannot be written leaves the golden tests skipping loudly, which is
+ * their job when there is nothing to read. What it will not do is install bytes
+ * the signed `SHA256SUMS` does not describe.
+ */
+async function installGoldens(release: Release, ctx: InstallContext): Promise<void> {
+  const want = release.sums.get(GOLDENS_ASSET);
+  if (want === undefined) {
+    ctx.emit({ type: 'status', message: `this release does not publish ${GOLDENS_ASSET} (the SDKs' golden tests will skip until it does)` });
+    return;
+  }
+  const blob = await release.source.get(GOLDENS_ASSET);
+  if (blob === null) {
+    ctx.emit({ type: 'status', message: `SHA256SUMS lists ${GOLDENS_ASSET} but ${release.source.description} does not serve it — NOT installing it` });
+    return;
+  }
+  const got = createHash('sha256').update(blob).digest('hex');
+  if (got !== want) {
+    ctx.emit({ type: 'status', message: `NOT installing ${GOLDENS_ASSET}: it hashes to ${got} but the signed SHA256SUMS says ${want}` });
+    return;
+  }
+  const out = path.join(ctx.dest, GOLDENS_ASSET);
+  try {
+    await mkdir(ctx.dest, { recursive: true });
+    await writeFile(out, blob);
+  } catch (err) {
+    ctx.emit({ type: 'status', message: `could not write ${GOLDENS_ASSET}: ${String(err)} — the golden tests will skip` });
+    return;
+  }
+  ctx.emit({ type: 'status', message: `golden set verified and installed: ${out}` });
 }
 
 interface InstallContext {
@@ -812,7 +856,9 @@ async function ensureUncached(req: VersionRequest, platform: string, dest: strin
   ctx.emit({ type: 'status', message: `source ${source.description}` });
   const release = await loadRelease(source, options, ctx.emit);
   const art = selectArtifact(release.index, platform, req);
-  return installOne(release, art, ctx);
+  const installed = await installOne(release, art, ctx);
+  await installGoldens(release, ctx);
+  return installed;
 }
 
 /** One index row, from the release into `<dest>/<minor>/` — steps 2 through 4. */
