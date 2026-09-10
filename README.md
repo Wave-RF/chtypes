@@ -42,9 +42,9 @@ release — a self-contained shared library, 160–300 MB, that names itself
 (`chs_clickhouse_version()`) and carries its own `manifest.json` — and can hold
 several versions in one process, each with its own ClickHouse. The supported
 lines are those with a committed run of record in the core repository; today
-that is 24.8, 25.3, 25.8, 25.10, 26.5, 26.6 and 26.7, on `linux-arm64` and
-`darwin-arm64` (macOS is a development floor, not an oracle: its `long double`
-makes float parses diverge from a real server).
+that is 24.8, 25.3, 25.8, 25.10, 26.5, 26.6 and 26.7, on `linux-amd64`,
+`linux-arm64` and `darwin-arm64` (macOS is a development floor, not an oracle:
+its `long double` makes float parses diverge from a real server).
 
 ```sh
 scripts/fetch.sh 25.8                 # one line, verified, into the per-user cache

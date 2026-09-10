@@ -136,8 +136,8 @@ The tours print these differences rather than hiding them:
 
 ## Also here
 
-- `go/ingest-demo/` — the **optional, online** demo: a miniature of
-  WaveHouse's ingest worker running the same discovery-to-publish flow
+- `go/ingest-demo/` — the **optional, online** demo: a miniature of an
+  ingest worker running the same discovery-to-publish flow
   against a **real ClickHouse**. `chplay.sh` never runs it; see its README
   for what it needs. The offline tours' section 11 is the same flow with
   canned bytes.
