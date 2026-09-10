@@ -144,7 +144,7 @@ jobs:
       - name: the newest -lts and -stable lines the release publishes (live index.json)
         id: lines
         run: scripts/published-lines.sh --platform linux-amd64 | tee -a "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: .artifacts
           key: chtypes-artifacts-linux-amd64-${{ steps.lines.outputs.key }}
