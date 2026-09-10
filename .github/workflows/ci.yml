@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: the header and every binding agree on the ABI revision
         run: |
           rev="$(sed -n 's/^#define CHS_ABI_REVISION \([0-9][0-9]*\)$/\1/p' include/chtypes.h)"
@@ -69,8 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
@@ -78,7 +78,7 @@ jobs:
         run: cd go && go build ./... && go vet ./...
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
         run: scripts/check-standalone.sh --no-artifacts
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: check-standalone-json-no-artifacts
@@ -91,8 +91,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: ruff, and the package imports
         run: |
           cd python && uv sync --group dev && uv run ruff check src tests && uv run ruff format --check src tests
@@ -105,11 +105,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -124,8 +124,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
         with:
           components: clippy, rustfmt
       - name: build, clippy, fmt
@@ -141,11 +141,11 @@ jobs:
     env:
       CHTYPES_REGISTRY: ${{ github.workspace }}/.artifacts
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: the newest -lts and -stable lines the release publishes (live index.json)
         id: lines
         run: scripts/published-lines.sh --platform linux-amd64 | tee -a "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .artifacts
           key: chtypes-artifacts-linux-amd64-${{ steps.lines.outputs.key }}
@@ -157,13 +157,13 @@ jobs:
           ls -la "$CHTYPES_REGISTRY"
           cat "$CHTYPES_REGISTRY"/*/manifest.json
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: go — standalone check with the registry; TestGoldens must run
         run: scripts/check-standalone.sh --registry "$CHTYPES_REGISTRY" --require-artifacts
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: check-standalone-json-artifacts
@@ -171,14 +171,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: python — suite with the registry; the golden set must run
         run: cd python && uv sync --group dev && cd .. && scripts/check-suite.sh --require-artifacts python
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -186,6 +186,6 @@ jobs:
       - name: ts — suite with the registry; the golden set must run
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && cd .. && scripts/check-suite.sh --require-artifacts ts
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: rust — suite with the registry; the golden test must run
         run: scripts/check-suite.sh --require-artifacts rust

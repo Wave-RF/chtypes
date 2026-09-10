@@ -1,17 +1,74 @@
 version: 2
+
+# Four bindings, one repository, so four language ecosystems plus the actions.
+# Every job below is grouped into ONE pull request per Monday: the actions are
+# SHA-pinned (a 40-hex ref with the version in a trailing comment), and an
+# ungrouped run means a separate PR per action, each needing the same review —
+# check the SHA, check the version comment, merge. Grouping makes that one
+# review instead of five.
+#
+# There are no composite actions here. `directory: /` reaches
+# .github/workflows/ but does NOT descend into .github/actions/*/action.yml,
+# so adding one means adding its directory to the github-actions job below.
+
 updates:
+  # Go — the module is stdlib-only (no require block), so this tracks the
+  # `go` directive and nothing else. It stays because that directive is a
+  # dependency like any other, and go/go.mod is what CI reads its version from.
   - package-ecosystem: gomod
     directory: /go
-    schedule: { interval: weekly }
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      go-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+
   - package-ecosystem: uv
     directory: /python
-    schedule: { interval: weekly }
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+
   - package-ecosystem: npm
     directory: /ts
-    schedule: { interval: weekly }
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      ts-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+
   - package-ecosystem: cargo
     directory: /rust
-    schedule: { interval: weekly }
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      rust-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+
+  # GitHub Actions. These run the release workflows that publish to four public
+  # registries over OIDC, so an action bump here is a supply-chain change and
+  # is reviewed as one.
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly }
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
