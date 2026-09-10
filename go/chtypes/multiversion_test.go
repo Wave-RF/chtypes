@@ -57,18 +57,40 @@ func TestRegistryLoadsAndDispatches(t *testing.T) {
 // load: $CHTYPES_REGISTRY when set, else the per-user artifact cache for this
 // host — ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>, where
 // scripts/fetch.sh installs and where a core-repo build lands (that is the
-// one directory every SDK, playground and test here agrees on). It skips,
-// loudly, when neither holds anything.
+// one directory every SDK, playground and test here agrees on). When that
+// directory holds no installed line — absent, empty, or pointed somewhere
+// wrong — the test skips through skipNoArtifacts: loudly, by name, saying
+// where it looked and how to fill it. Only the directory it was pointed at
+// counts; a test that fell through to some other directory on the search
+// path would be asserting against artifacts nobody asked for.
 func testRegistryDir(t *testing.T) string {
 	t.Helper()
-	if dir := os.Getenv("CHTYPES_REGISTRY"); dir != "" {
-		return dir
+	dir, source := os.Getenv("CHTYPES_REGISTRY"), "$CHTYPES_REGISTRY"
+	if dir == "" {
+		dir, source = DefaultRegistryDir(), "the per-user cache; $CHTYPES_REGISTRY is unset"
 	}
-	dir := DefaultRegistryDir()
-	if _, err := os.Stat(dir); err != nil {
-		t.Skipf("no artifact registry at %s and $CHTYPES_REGISTRY is unset", dir)
+	installed, err := ListInstalled(dir)
+	switch {
+	case err != nil:
+		skipNoArtifacts(t, dir, err.Error()+" ("+source+")")
+	case len(installed) == 0:
+		if _, statErr := os.Stat(dir); statErr != nil {
+			skipNoArtifacts(t, dir, "no such directory ("+source+")")
+		}
+		skipNoArtifacts(t, dir, "no <line>/manifest.json naming an installed library ("+source+")")
 	}
 	return dir
+}
+
+// skipNoArtifacts is the one skip every registry test lands on when the
+// registry it was pointed at holds nothing. It is the right verdict — a
+// hosted CI runner has no artifacts, and the artifact-backed proof runs in
+// the core repository's certify workflow against this same tree — but never a
+// quiet one: the message names the directory, what was wrong with it, and the
+// one command that fills it.
+func skipNoArtifacts(t *testing.T, dir, detail string) {
+	t.Helper()
+	t.Skipf("no chtypes artifacts under %s: %s — fetch one with scripts/fetch.sh 25.8 (docs/fetch.md), or point $CHTYPES_REGISTRY at a registry", dir, detail)
 }
 
 // testRegistryLibrary returns one artifact's shared-library path from the

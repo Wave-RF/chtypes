@@ -30,7 +30,11 @@ func smallestInstalled(t *testing.T) Installed {
 	root := testRegistryDir(t)
 	installed, err := ListInstalled(root)
 	if err != nil || len(installed) == 0 {
-		t.Skipf("no artifacts installed under %s (%v)", root, err)
+		detail := "nothing installed"
+		if err != nil {
+			detail += ": " + err.Error()
+		}
+		skipNoArtifacts(t, root, detail)
 	}
 	best, bestSize := installed[0], int64(-1)
 	for _, inst := range installed {

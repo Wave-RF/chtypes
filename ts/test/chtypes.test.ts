@@ -47,9 +47,9 @@ if (!HAVE_REGISTRY) {
   console.warn(
     [
       '',
-      '[chtypes] Native tests SKIPPED: no artifact registry found.',
-      '  Point CHTYPES_REGISTRY at a registry directory, or build artifacts into',
-      '  the per-user cache with scripts/fetch.sh. See docs/artifacts.md.',
+      '[chtypes] Native tests SKIPPED: no artifact registry on the search path.',
+      '  Fetch one into the per-user cache with scripts/fetch.sh 25.8 (docs/fetch.md),',
+      '  or point CHTYPES_REGISTRY at a registry directory.',
       '',
     ].join('\n'),
   );

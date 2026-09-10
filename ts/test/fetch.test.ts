@@ -75,7 +75,9 @@ const [HOST_OS, HOST_ARCH] = PLATFORM.split('-') as [string, string];
 const REAL_REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REAL_REGISTRY !== null && looksLikeRegistry(REAL_REGISTRY);
 if (!HAVE_REGISTRY) {
-  console.warn('\n[chtypes] fetch tests that need a real artifact registry are SKIPPED: none found (CHTYPES_REGISTRY / the per-user cache).\n');
+  console.warn(
+    '\n[chtypes] fetch tests that need a real artifact registry are SKIPPED: none on the search path (CHTYPES_REGISTRY / the per-user cache) — scripts/fetch.sh 25.8 installs one (docs/fetch.md).\n',
+  );
 }
 
 // ------------------------------------------------------------ helpers

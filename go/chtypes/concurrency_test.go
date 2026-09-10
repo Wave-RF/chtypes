@@ -88,10 +88,10 @@ func testRegistry(t *testing.T) *Registry {
 	dir := testRegistryDir(t)
 	r, err := NewRegistry(dir)
 	if err != nil {
-		t.Skipf("registry did not load: %v", err)
+		skipNoArtifacts(t, dir, "the registry did not load: "+err.Error())
 	}
 	if len(r.Versions()) == 0 {
-		t.Skip("registry loaded no versions")
+		skipNoArtifacts(t, dir, "the registry loaded no versions")
 	}
 	return r
 }

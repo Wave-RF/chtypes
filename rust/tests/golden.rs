@@ -62,14 +62,32 @@ fn str_list(v: &Json) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Announce a skip on the *real* stderr: `eprintln!` is captured by libtest
+/// for a passing test, so a skip printed with it is invisible — the one way a
+/// suite that tested nothing looks exactly like one that passed.
+fn announce(message: &str) {
+    use std::io::Write;
+    let _ = std::io::stderr().write_all(message.as_bytes());
+    let _ = std::io::stderr().flush();
+}
+
 #[test]
 fn goldens_hold_on_every_artifact() {
     let registry = match Registry::from_env_or_default() {
-        Ok(r) => r,
+        Ok(r) if !r.libraries().is_empty() => r,
+        Ok(r) => {
+            announce(&format!(
+                "\nSKIP goldens_hold_on_every_artifact: registry {} holds no artifact — fetch one \
+                 with scripts/fetch.sh 25.8 (docs/fetch.md)\n",
+                r.dir().display()
+            ));
+            return;
+        }
         Err(e) => {
-            eprintln!(
-                "\nSKIP: no artifact registry ({e}); set CHTYPES_REGISTRY or run scripts/fetch.sh\n"
-            );
+            announce(&format!(
+                "\nSKIP goldens_hold_on_every_artifact: no artifact registry ({e}) — fetch one \
+                 with scripts/fetch.sh 25.8 (docs/fetch.md), or set $CHTYPES_REGISTRY\n"
+            ));
             return;
         }
     };

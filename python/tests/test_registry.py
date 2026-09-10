@@ -458,15 +458,30 @@ def test_closing_one_registry_leaves_another_answering(registry: chtypes.Registr
     b.close()  # refs on the session registry keep every image alive
 
 
-def test_library_close_is_refcounted_per_image(tmp_path: Path) -> None:
+def test_library_close_is_refcounted_per_image(tmp_path: Path, registry: chtypes.Registry) -> None:
     """The exact counting contract, in a subprocess so the LAST close is
     reachable without tearing down this suite's own session registry: close #1
     of 2 calls nothing, close #2 calls chs_shutdown once, close #3 is a no-op.
     """
-    candidates = os.environ.get(chtypes.ENV_REGISTRY) or str(Path(chtypes.default_registry_dir()))
-    versions = sorted(d for d in Path(candidates).iterdir() if (d / "manifest.json").is_file())
+    # The session `registry` fixture has already skipped, loudly, when the
+    # search path holds nothing. What is wanted here is a version DIRECTORY
+    # to stage into an isolated registry, so walk the same search path and
+    # take the first directory that holds one — never `iterdir()` a path
+    # that may not exist (a hosted CI runner has no cache at all).
+    versions: list[Path] = []
+    candidates = ""
+    for root in registry.search_path:
+        if not root.is_dir():
+            continue
+        versions = sorted(d for d in root.iterdir() if (d / "manifest.json").is_file())
+        if versions:
+            candidates = str(root)
+            break
     if not versions:
-        pytest.skip(f"no artifacts under {candidates}")
+        pytest.skip(
+            f"no artifacts under any of {[str(p) for p in registry.search_path]} — "
+            "fetch one with `scripts/fetch.sh 25.8` (docs/fetch.md)"
+        )
     # A one-version registry keeps the subprocess cheap: symlink one version
     # in — one this binding can LOAD. Mid-relink a registry legitimately
     # holds artifacts at an older ABI revision, which the loader refuses BY

@@ -41,15 +41,24 @@ fn registry() -> Option<&'static Arc<Registry>> {
             let dir = registry_dir();
             if !dir.is_dir() {
                 announce(&format!(
-                    "\nSKIP: no chtypes artifact registry at {} — set ${} or fetch artifacts \
-                     (scripts/fetch.sh, see docs/artifacts.md). Every test in this file is \
-                     skipped.\n",
+                    "\nSKIP: no chtypes artifact registry at {} — fetch one with scripts/fetch.sh \
+                     25.8 (docs/fetch.md), or point ${} at a registry. Every test in this file \
+                     is skipped, each by name below.\n",
                     dir.display(),
                     chtypes::REGISTRY_ENV
                 ));
                 return None;
             }
             match Registry::new(&dir) {
+                Ok(r) if r.libraries().is_empty() => {
+                    announce(&format!(
+                        "\nSKIP: registry {} holds no artifact — fetch one with scripts/fetch.sh \
+                         25.8 (docs/fetch.md). Every test in this file is skipped, each by name \
+                         below.\n",
+                        dir.display()
+                    ));
+                    None
+                }
                 Ok(r) => Some(Arc::new(r)),
                 Err(e) => {
                     announce(&format!(
@@ -64,12 +73,31 @@ fn registry() -> Option<&'static Arc<Registry>> {
         .as_ref()
 }
 
-/// Bind the shared registry, or skip the test with a message.
+/// The calling test's name, for the per-test skip line.
+macro_rules! test_name {
+    () => {{
+        fn here() {}
+        let full = std::any::type_name_of_val(&here);
+        full.strip_suffix("::here").unwrap_or(full)
+    }};
+}
+
+/// Bind the shared registry, or skip the test — by name, on the real stderr,
+/// after the one message above that says why.
 macro_rules! registry {
     () => {
         match registry() {
             Some(r) => r,
-            None => return,
+            None => {
+                // Leading newline: libtest writes "test name ... ok" in
+                // pieces, and a line landing between them would not START a
+                // line — the one place a census looks for it.
+                announce(&format!(
+                    "\nSKIP {}: needs an artifact registry\n",
+                    test_name!()
+                ));
+                return;
+            }
         }
     };
 }
@@ -287,7 +315,22 @@ fn several_versions_answer_in_one_process_with_their_own_semantics() {
 
     // The point of the exercise: at least one probe answered two different ways
     // in this one process. With RTLD_GLOBAL one build's DataTypeFactory would
-    // serve them all and this would collapse to a single answer.
+    // serve them all and this would collapse to a single answer. That is only
+    // decidable when the loaded lines are KNOWN to answer differently — 24.8
+    // beside any later line (the JSON probe), or 25.10 beside any other (the
+    // DEFAULT probe). A registry with neither, such as CI's two newest lines,
+    // skips this half by name rather than fail a proof it could not have run;
+    // the per-version answers above were asserted regardless.
+    let minors: Vec<&str> = json_answers.iter().map(|(m, _)| m.as_str()).collect();
+    if !(minors.contains(&"24.8") || minors.contains(&"25.10")) {
+        announce(&format!(
+            "\nSKIP several_versions_answer_in_one_process_with_their_own_semantics (isolation \
+             half): the loaded lines {minors:?} are known to agree on both probes, so no \
+             divergence can be observed; the proof needs 24.8 or 25.10 beside another line \
+             — scripts/fetch.sh 24.8 (docs/fetch.md). The per-version answers were asserted.\n"
+        ));
+        return;
+    }
     let json_distinct = distinct(&json_answers);
     let default_distinct = distinct(&default_answers);
     assert!(
@@ -1222,7 +1265,7 @@ fn every_artifact_reports_a_compatible_abi_revision() {
 /// uncontended one, that nothing panics and that both sides really ran.
 #[test]
 fn one_image_means_one_lock_across_registries() {
-    let Some(shared) = registry() else { return };
+    let shared = registry!();
     let second = match Registry::new(registry_dir()) {
         Ok(r) => Arc::new(r),
         Err(err) => {

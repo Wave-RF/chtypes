@@ -1220,7 +1220,8 @@ fn a_search_path_registry_opens_one_line_lazily() {
     let lines = chtypes::installed_lines(std::slice::from_ref(&dir));
     let Some((line, _)) = lines.first() else {
         announce(&format!(
-            "\nSKIP: no installed artifact under {} — the lazy-open test is skipped.\n",
+            "\nSKIP a_search_path_registry_opens_one_line_lazily: no installed artifact under {} \
+             — fetch one with scripts/fetch.sh 25.8 (docs/fetch.md)\n",
             dir.display()
         ));
         return;

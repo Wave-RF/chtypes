@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { Format, Registry, SchemaError, resolveRegistryDir } from '../src/index.js';
+import { Format, Registry, SchemaError, looksLikeRegistry, resolveRegistryDir } from '../src/index.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const GOLDENS = process.env['CHTYPES_GOLDENS'] ?? path.resolve(HERE, '..', '..', 'goldens', 'cases.json');
@@ -58,14 +58,24 @@ const doc = JSON.parse(readFileSync(GOLDENS, 'utf8')) as GoldenFile;
 if (doc.schema !== 1) throw new Error(`golden set schema ${doc.schema}; this test reads schema 1`);
 if (doc.cases.length === 0) throw new Error('golden set holds no cases');
 
+// "Have a registry" is "have at least one artifact in it": the search path
+// (docs/fetch.md §1) resolves CHTYPES_REGISTRY without looking inside, so a
+// directory that holds nothing must skip exactly as no directory does.
 const REGISTRY = resolveRegistryDir();
-if (REGISTRY === null) {
-  console.warn('[chtypes] golden tests SKIPPED: no artifact registry (set CHTYPES_REGISTRY or run scripts/fetch.sh)');
+const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
+if (!HAVE_REGISTRY) {
+  console.warn(
+    '[chtypes] golden tests SKIPPED: no artifact registry on the search path' +
+      (REGISTRY === null ? '' : ` (${REGISTRY} holds no artifact)`) +
+      ' — fetch one with scripts/fetch.sh 25.8 (docs/fetch.md), or point CHTYPES_REGISTRY at a registry',
+  );
 }
 
-describe.skipIf(REGISTRY === null)('goldens', () => {
-  const registry = new Registry(REGISTRY ?? undefined);
-  const libraries = registry.libraries();
+describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
+  // A skipped describe still evaluates its body, so the registry is opened
+  // only when there is one. Without it no per-case test is generated and the
+  // sentinel below is what the census shows as skipped, by name.
+  const libraries = REGISTRY !== null && HAVE_REGISTRY ? new Registry(REGISTRY).libraries() : [];
   it('has at least one artifact to run against', () => {
     expect(libraries.length).toBeGreaterThan(0);
   });

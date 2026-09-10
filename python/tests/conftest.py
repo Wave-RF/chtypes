@@ -1,4 +1,8 @@
-"""Fixtures. Every test here runs against real artifacts or does not run at all.
+"""Fixtures. Every test that needs an artifact runs against a real one or does
+not run at all — it skips, loudly, by name. The fetch, CLI and pure-Python
+tests need none and always run; that is what this repository's CI proves on
+hosted runners, and the artifact-backed proof is the core repository's
+`certify` workflow against this same tree.
 
 The registry comes from the search path (docs/fetch.md §1): `$CHTYPES_REGISTRY`,
 else the per-user artifact cache for this host (`chtypes.default_registry_dir()`:
@@ -38,9 +42,9 @@ def registry() -> chtypes.Registry:
     if not registry.versions():
         pytest.skip(
             f"no chtypes artifacts on the search path {[str(p) for p in registry.search_path]} "
-            f"(from {source}). Fetch one with `uv run python -m chtypes fetch 25.8` "
-            f"(docs/fetch.md) or build one in the core repo, or point ${chtypes.ENV_REGISTRY} "
-            f"at an existing registry."
+            f"(from {source}). Fetch one with `scripts/fetch.sh 25.8` or "
+            f"`uv run python -m chtypes fetch 25.8` (docs/fetch.md), build one in the core "
+            f"repo, or point ${chtypes.ENV_REGISTRY} at an existing registry."
         )
     return registry
 
@@ -73,7 +77,10 @@ def library(registry: chtypes.Registry) -> Callable[[str], chtypes.Library]:
 
     def resolve(version: str) -> chtypes.Library:
         if version not in registry:
-            pytest.skip(f"{registry.directory} has no ClickHouse {version} artifact")
+            pytest.skip(
+                f"{registry.directory} has no ClickHouse {version} artifact — "
+                f"`scripts/fetch.sh {version}` installs one"
+            )
         return registry.for_version(version)
 
     return resolve

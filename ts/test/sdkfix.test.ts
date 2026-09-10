@@ -18,6 +18,11 @@ import { rowResultOf } from '../src/results.js';
 
 const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
+if (!HAVE_REGISTRY) {
+  console.warn(
+    '[chtypes] sdkfix tests against a real registry are SKIPPED: no artifact on the search path — scripts/fetch.sh 25.8 installs one (docs/fetch.md)',
+  );
+}
 
 const buf = (s: string): Buffer => Buffer.from(s, 'utf8');
 
