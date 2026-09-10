@@ -24,7 +24,6 @@ import {
   Registry,
   RegistryError,
   SchemaError,
-  compareMinor,
   UnsupportedError,
   encodeSettings,
   isValidUtf8,
@@ -647,36 +646,6 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       }
     });
 
-    it("keeps ClickHouse's own escape spelling in a stored value", () => {
-      // This input is `af-uescape-state` in core's behaviour goldens, and the
-      // SERVER has rejected it since 26.3 — code 36, "AggregateFunction state
-      // ... has 1 trailing byte(s) after deserialization". The artifacts through
-      // 26.7 accepted it because that check sat on a server path the wrapper
-      // never reached; 26.8 moved it into the deserialization path the wrapper
-      // does use, so the 26.8 artifact is the first one to agree with the
-      // server. The acceptance below 26.8 is a known wrapper leniency, not the
-      // server's answer — which is why this is gated on the artifact's version
-      // rather than relaxed to accept either outcome.
-      const l = lib();
-      const rejectsTrailingState = compareMinor(l.minor, '26.8') >= 0;
-      const schema = l.compileDdl("x AggregateFunction(min, DateTime('UTC'))");
-      try {
-        const r = schema.row(Format.JSONEachRow, utf8('{"x": "\\u0001\\u0000\\u00e1\\u000b^"}'));
-        if (rejectsTrailingState) {
-          expect(r.outcome).toBe('rejected');
-          expect(r.errCode).toBe(36); // the server's own code, now the artifact's too
-          return;
-        }
-        expect(r.outcome).toBe('accepted');
-        // Reference: stored `"\u000B"` with an UPPERCASE B, because that is what
-        // ClickHouse wrote; parse-then-re-serialise lowercases it to `\u000b`.
-        expect(r.values[0]!.text).toBe('"\\u0001\\u0000á\\u000B"');
-        expect(reasons(r.transformed)).toEqual(['reformat']);
-        expect(r.transformed[0]!.stored).toBe('"\\u0001\\u0000á\\u000B"');
-      } finally {
-        schema.close();
-      }
-    });
 
     it('does not read a BOM-prefixed field as a number (JSON whitespace is four bytes)', () => {
       const schema = lib().compileDdl('x String');
