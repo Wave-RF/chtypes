@@ -106,7 +106,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
       - uses: actions/setup-node@v7
@@ -175,7 +175,7 @@ jobs:
       - name: python — suite with the registry; the golden set must run
         run: cd python && uv sync --group dev && cd .. && scripts/check-suite.sh --require-artifacts python
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
       - uses: actions/setup-node@v7
