@@ -70,7 +70,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
@@ -157,7 +157,7 @@ jobs:
           ls -la "$CHTYPES_REGISTRY"
           cat "$CHTYPES_REGISTRY"/*/manifest.json
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
