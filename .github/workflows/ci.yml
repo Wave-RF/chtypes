@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: the header and every binding agree on the ABI revision
         run: |
           rev="$(sed -n 's/^#define CHS_ABI_REVISION \([0-9][0-9]*\)$/\1/p' include/chtypes.h)"
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
@@ -77,7 +77,7 @@ jobs:
         run: cd go && go build ./... && go vet ./...
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
         run: scripts/check-standalone.sh --no-artifacts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: check-standalone-json-no-artifacts
@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - name: ruff, and the package imports
         run: |
@@ -104,11 +104,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 11
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -123,7 +123,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -140,7 +140,7 @@ jobs:
     env:
       CHTYPES_REGISTRY: ${{ github.workspace }}/.artifacts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: the newest -lts and -stable lines the release publishes (live index.json)
         id: lines
         run: scripts/published-lines.sh --platform linux-amd64 | tee -a "$GITHUB_OUTPUT"
@@ -161,7 +161,7 @@ jobs:
           go-version-file: go/go.mod
       - name: go — standalone check with the registry; TestGoldens must run
         run: scripts/check-standalone.sh --registry "$CHTYPES_REGISTRY" --require-artifacts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: check-standalone-json-artifacts
@@ -176,7 +176,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 11
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm

@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - name: the tag and the package agree on the version
         run: |
@@ -21,7 +21,7 @@ jobs:
           [ "$tag" = "$ver" ] || { echo "::error::tag python/v$tag but pyproject says $ver"; exit 1; }
       - name: build sdist + wheel
         run: cd python && uv build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: python-dist, path: python/dist/ }
   publish:
     needs: build
@@ -30,6 +30,6 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: python-dist, path: dist/ }
       - uses: pypa/gh-action-pypi-publish@release/v1
