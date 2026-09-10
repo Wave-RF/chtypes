@@ -73,6 +73,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
+          cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: build and vet, dlopen-only
         run: cd go && go build ./... && go vet ./...
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
@@ -83,7 +84,7 @@ jobs:
           name: check-standalone-json-no-artifacts
           path: scratch/check-standalone.json
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7
 
   python:
     name: "python — ruff, import, suite (no artifacts)"
@@ -159,6 +160,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
+          cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: go — standalone check with the registry; TestGoldens must run
         run: scripts/check-standalone.sh --registry "$CHTYPES_REGISTRY" --require-artifacts
       - uses: actions/upload-artifact@v7
@@ -167,7 +169,7 @@ jobs:
           name: check-standalone-json-artifacts
           path: scratch/check-standalone.json
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7
 
       - uses: astral-sh/setup-uv@v7
       - name: python — suite with the registry; the golden set must run
