@@ -31,6 +31,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // isolateEnv points every environment knob the fetch reads at nothing (or
@@ -1050,4 +1051,83 @@ func TestAutoFetchFailureIsTheFetchError(t *testing.T) {
 	if _, err := reg.ForContext(ctx, "25.8"); err == nil {
 		t.Fatal("a cancelled fetch succeeded")
 	}
+}
+
+// TestLoadReleaseRetriesThroughAPublishWindow is the mid-publish window, made
+// real: SHA256SUMS.sig is briefly the wrong signature for the SHA256SUMS beside
+// it, exactly as it is while the three objects of a rolling release are being
+// replaced one at a time. The first read must refuse it, and the fetch must
+// still succeed once the publish lands.
+func TestLoadReleaseRetriesThroughAPublishWindow(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = 150 * time.Millisecond
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	sigPath := filepath.Join(rel, "SHA256SUMS.sig")
+	good, err := os.ReadFile(sigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The window: a signature that does not cover these sums.
+	rewrite(t, sigPath, mangleSignature)
+
+	srv := serveRelease(t, rel)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	// The publish completes while the first retry is sleeping.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = os.WriteFile(sigPath, good, 0o644)
+	}()
+
+	inst, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	if err != nil {
+		t.Fatalf("a healing publish window must install, got %v", err)
+	}
+	if inst.Version != "25.8.28.1-lts" {
+		t.Fatalf("Version = %s", inst.Version)
+	}
+	// It really did read the release twice: once refused, once trusted.
+	if n := srv.count("SHA256SUMS.sig"); n < 2 {
+		t.Fatalf("SHA256SUMS.sig read %d time(s), want >= 2 (the retry did not happen)", n)
+	}
+}
+
+// TestLoadReleaseStopsRetryingAndRefuses is the same window that never closes:
+// the attempts run out and the original code surfaces, unchanged.
+func TestLoadReleaseStopsRetryingAndRefuses(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = 10 * time.Millisecond
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	rewrite(t, filepath.Join(rel, "SHA256SUMS.sig"), mangleSignature)
+	srv := serveRelease(t, rel)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	_, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	wantCode(t, err, CodeArtifactUntrusted)
+	noArtifactDirs(t, dest)
+	if n := srv.count("SHA256SUMS.sig"); n != releaseLoadAttempts {
+		t.Fatalf("SHA256SUMS.sig read %d time(s), want exactly %d", n, releaseLoadAttempts)
+	}
+}
+
+// mangleSignature flips one byte of the base64 signature, leaving the two-line
+// shape intact. It must not touch the "untrusted comment:" line: that line is
+// not covered by the signature — which is the whole point of its name — so
+// editing it changes nothing a verifier looks at.
+func mangleSignature(b []byte) []byte {
+	lines := bytes.SplitN(b, []byte("\n"), 2)
+	if len(lines) != 2 {
+		panic("SHA256SUMS.sig is not the two-line format")
+	}
+	sig := bytes.TrimRight(lines[1], "\n")
+	raw, err := base64.StdEncoding.DecodeString(string(sig))
+	if err != nil {
+		panic("SHA256SUMS.sig line 2 is not base64: " + err.Error())
+	}
+	raw[0] ^= 0xff
+	return []byte(string(lines[0]) + "\n" + base64.StdEncoding.EncodeToString(raw) + "\n")
 }

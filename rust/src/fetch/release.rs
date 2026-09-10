@@ -164,6 +164,21 @@ pub(crate) struct Release {
     pub(crate) origin: String,
 }
 
+/// How many times [`Release::load`] reads an HTTP release before giving up.
+const RELEASE_LOAD_ATTEMPTS: u32 = 3;
+/// The wait between those reads: three attempts span about ten seconds, which
+/// comfortably outlasts a one-object publish window.
+const RELEASE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// Is this error a symptom of reading a release mid-publish, and therefore
+/// worth reading again? Exactly two are.
+fn is_publish_window(err: &Error) -> bool {
+    matches!(
+        err,
+        Error::ArtifactUntrusted { .. } | Error::ArtifactCorrupt { .. }
+    )
+}
+
 impl Release {
     /// Step 0 (signature), then step 1 (the index).
     ///
@@ -174,7 +189,7 @@ impl Release {
     /// * [`Error::ArtifactUntrusted`] — no `SHA256SUMS`, no `SHA256SUMS.sig`
     ///   (unless allowed), or a signature under no trusted key.
     /// * [`Error::Fetch`] — no `index.json`, or one this reader cannot use.
-    pub(crate) fn load(source: &Source, policy: &TrustPolicy, progress: bool) -> Result<Release> {
+    fn load_once(source: &Source, policy: &TrustPolicy, progress: bool) -> Result<Release> {
         let origin = source.describe().to_string();
         let untrusted = |reason: String| Error::ArtifactUntrusted {
             origin: origin.clone(),
@@ -240,12 +255,70 @@ impl Release {
             );
         }
 
-        Ok(Release {
+        let release = Release {
             index,
             sums: parse_sums(&sums),
             signed_by,
             origin,
-        })
+        };
+        release.cross_check_all()?;
+        Ok(release)
+    }
+
+    /// [`Release::cross_check`] over every row the sums also name, run once for
+    /// the whole release rather than only for the asset being installed.
+    ///
+    /// The per-asset check still stands on its own; this one exists so that a
+    /// disagreement is seen while [`Release::load`] can still fix it by reading
+    /// all three objects again. A row `SHA256SUMS` does not mention is skipped,
+    /// not a disagreement: only the asset actually being installed has to be
+    /// listed, and that is the per-asset check's business.
+    fn cross_check_all(&self) -> Result<()> {
+        for row in &self.index.artifacts {
+            if self.sums.contains_key(&row.file) {
+                self.cross_check(row)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// [`Release::load_once`], retried through a publish window.
+    ///
+    /// A publish into the rolling release is three objects — `SHA256SUMS`,
+    /// `SHA256SUMS.sig`, `index.json` — and object storage cannot swap them
+    /// atomically. They go up in that order, so an old index read against new
+    /// sums still cross-checks; the unsafe window is between the sums and the
+    /// signature that covers them, one small object wide and seconds long.
+    ///
+    /// The two symptoms of reading inside it — a signature that does not verify,
+    /// and an index that disagrees with the sums — are retried. Nothing else is,
+    /// and neither are these once the attempts run out: the same error surfaces,
+    /// with the same exit code, as it did before. A tarball whose hash is wrong
+    /// is never retried; that is the release lying about a byte.
+    ///
+    /// Only an HTTP source can be mid-publish, so a `file://` or directory
+    /// source is read exactly once.
+    pub(crate) fn load(source: &Source, policy: &TrustPolicy, progress: bool) -> Result<Release> {
+        let attempts = if matches!(source, Source::Http { .. }) {
+            RELEASE_LOAD_ATTEMPTS
+        } else {
+            1
+        };
+        let mut attempt = 1;
+        loop {
+            match Release::load_once(source, policy, progress) {
+                Err(err) if attempt < attempts && is_publish_window(&err) => {
+                    eprintln!(
+                        "chtypes: {err} (attempt {attempt}/{attempts}) — this is what a release \
+                         being published looks like from outside; retrying in {}s",
+                        RELEASE_RETRY_DELAY.as_secs()
+                    );
+                    std::thread::sleep(RELEASE_RETRY_DELAY);
+                    attempt += 1;
+                }
+                other => return other,
+            }
+        }
     }
 
     /// The artifacts' licence, as the listing names it (`Elastic-2.0`).

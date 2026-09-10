@@ -40,6 +40,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // FetchOptions configures Ensure, FetchAll and ListRelease. The zero value
@@ -541,9 +542,9 @@ func (f *fetcher) ensureOffline(spelling, line, exact string) (*Installed, error
 		"offline: ClickHouse %s is not installed in %s, and --offline forbids reading %s", spelling, f.dest, f.src)
 }
 
-// loadRelease reads the release's three small files once and runs steps 0
+// loadReleaseOnce reads the release's three small files once and runs steps 0
 // and 1: the signature over SHA256SUMS, then the index.
-func (f *fetcher) loadRelease(ctx context.Context, line string) error {
+func (f *fetcher) loadReleaseOnce(ctx context.Context, line string) error {
 	if f.loaded {
 		return nil
 	}
@@ -596,7 +597,75 @@ func (f *fetcher) loadRelease(ctx context.Context, line string) error {
 	f.sums = parseSums(sums)
 	f.index = &index
 	f.loaded = true
+	// Step 2 for the whole release, not just the asset being installed: every
+	// row SHA256SUMS also names must agree with the index. installOne still
+	// checks its own asset — this one exists so a disagreement is seen while
+	// loadRelease can still fix it by reading all three files again.
+	for i := range f.index.Artifacts {
+		a := &f.index.Artifacts[i]
+		sumsSHA, listed := f.sums[a.File]
+		if listed && sumsSHA != strings.ToLower(a.SHA256) {
+			f.loaded = false
+			return f.fail(CodeArtifactCorrupt, line, nil,
+				"index.json says %s is %s but SHA256SUMS says %s — the release disagrees with itself; not installing it", a.File, a.SHA256, sumsSHA)
+		}
+	}
 	return nil
+}
+
+// How many times loadRelease reads a remote release before giving up, and the
+// wait between reads: three attempts span about ten seconds. A var, not a
+// const, so the retry test can exercise a real window without a real wait.
+var (
+	releaseLoadAttempts = 3
+	releaseRetryDelay   = 4 * time.Second
+)
+
+// loadRelease is loadReleaseOnce, retried through a publish window.
+//
+// A publish into the rolling release is three objects — SHA256SUMS,
+// SHA256SUMS.sig, index.json — and object storage cannot swap them atomically.
+// They go up in that order, so an old index read against new sums still
+// cross-checks; the unsafe window is between the sums and the signature that
+// covers them, one small object wide and seconds long.
+//
+// The two symptoms of reading inside it — a signature that verifies under no
+// trusted key, and an index that disagrees with the sums — are retried. Nothing
+// else is, and neither are these once the attempts run out: the same error
+// surfaces with the same code and exit status as before. A tarball whose hash is
+// wrong is never retried; that is the release lying about a byte, not a
+// half-finished upload.
+//
+// Only a remote source can be mid-publish, so a directory or file:// source is
+// read exactly once and refuses on the first look.
+func (f *fetcher) loadRelease(ctx context.Context, line string) error {
+	attempts := 1
+	if f.src.remote {
+		attempts = releaseLoadAttempts
+	}
+	for attempt := 1; ; attempt++ {
+		err := f.loadReleaseOnce(ctx, line)
+		if err == nil || attempt >= attempts || !isPublishWindow(err) {
+			return err
+		}
+		f.say("%v (attempt %d/%d) — this is what a release being published looks like from outside; retrying in %s",
+			err, attempt, attempts, releaseRetryDelay)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(releaseRetryDelay):
+		}
+	}
+}
+
+// isPublishWindow reports whether err is one of the two symptoms of reading a
+// release mid-publish, and so worth reading again.
+func isPublishWindow(err error) bool {
+	var ae *ArtifactError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	return ae.Code == CodeArtifactUntrusted || ae.Code == CodeArtifactCorrupt
 }
 
 // parseSums reads the `<sha256>  <file>` (or `<sha256> *<file>`) lines.

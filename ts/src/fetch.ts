@@ -437,7 +437,7 @@ interface Release {
 }
 
 /** Steps 0–2's inputs, verified in that order: the signature over SHA256SUMS, then the index. */
-async function loadRelease(source: Source, options: EnsureOptions, emit: (e: FetchEvent) => void): Promise<Release> {
+async function loadReleaseOnce(source: Source, options: EnsureOptions, emit: (e: FetchEvent) => void): Promise<Release> {
   const sumsBytes = await source.get('SHA256SUMS');
   if (sumsBytes === null) throw new SourceUnreachableError(`chtypes: no SHA256SUMS at ${source.description}`);
 
@@ -484,7 +484,61 @@ async function loadRelease(source: Source, options: EnsureOptions, emit: (e: Fet
       message: `artifacts are licensed under ${index.license}${index.license_url ? ` (${index.license_url})` : ''} — LICENSE and NOTICE ship beside them`,
     });
   }
-  return { source, index, sums: parseSums(sumsBytes), signed, keyId: signer };
+  const release: Release = { source, index, sums: parseSums(sumsBytes), signed, keyId: signer };
+  // Step 2 for the whole release, not just the asset being installed. installOne
+  // still checks its own asset; this runs here so a disagreement is seen while
+  // loadRelease can still fix it by reading all three files again.
+  for (const art of index.artifacts) {
+    const listed = release.sums.get(art.file);
+    if (listed !== undefined && listed !== art.sha256) {
+      throw new ArtifactCorruptError(
+        `chtypes: index.json says ${art.file} is ${art.sha256} but SHA256SUMS says ${listed} — the release disagrees with itself; not installing it`,
+      );
+    }
+  }
+  return release;
+}
+
+/** How many times {@link loadRelease} reads an HTTP release before giving up. */
+const RELEASE_LOAD_ATTEMPTS = 3;
+/** The wait between those reads: three attempts span about ten seconds. */
+const RELEASE_RETRY_DELAY_MS = 4_000;
+
+/**
+ * {@link loadReleaseOnce}, retried through a publish window.
+ *
+ * A publish into the rolling release is three objects — `SHA256SUMS`,
+ * `SHA256SUMS.sig`, `index.json` — and object storage cannot swap them
+ * atomically. They go up in that order, so an old index read against new sums
+ * still cross-checks; the unsafe window is between the sums and the signature
+ * that covers them, one small object wide and seconds long.
+ *
+ * The two symptoms of reading inside it — a signature under no trusted key and
+ * an index that disagrees with the sums — are retried. Nothing else is, and
+ * neither are these once the attempts run out: the same error surfaces, with the
+ * same code, as it did before. A tarball whose hash is wrong is never retried;
+ * that is the release lying about a byte, not a half-finished upload.
+ *
+ * Only an HTTP source can be mid-publish, so a `file://` or directory source is
+ * read exactly once and refuses on the first look.
+ */
+async function loadRelease(source: Source, options: EnsureOptions, emit: (e: FetchEvent) => void): Promise<Release> {
+  const attempts = source instanceof HttpSource ? RELEASE_LOAD_ATTEMPTS : 1;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await loadReleaseOnce(source, options, emit);
+    } catch (err) {
+      const retryable = err instanceof ArtifactUntrustedError || err instanceof ArtifactCorruptError;
+      if (!retryable || attempt >= attempts) throw err;
+      emit({
+        type: 'status',
+        message:
+          `${String(err)} (attempt ${attempt}/${attempts}) — this is what a release being ` +
+          `published looks like from outside; retrying in ${RELEASE_RETRY_DELAY_MS / 1000}s`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, RELEASE_RETRY_DELAY_MS));
+    }
+  }
 }
 
 function parseIndex(bytes: Buffer, where: string): ReleaseIndex {

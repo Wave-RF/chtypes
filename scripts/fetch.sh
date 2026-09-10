@@ -366,28 +366,107 @@ fetch_release_file() { # fetch_release_file <name>: a release-level file the sou
     *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $1 from $SOURCE_DESC" ;;
   esac
 }
-fetch_release_file SHA256SUMS
-SIG_STATUS=""
-if [ "${CHTYPES_ALLOW_UNSIGNED:-}" = 1 ]; then
-  echo "fetch.sh: WARNING signature verification is OFF (CHTYPES_ALLOW_UNSIGNED=1)." >&2
-  echo "          Nothing proves $SOURCE_DESC is what Wave RF published: every hash" >&2
-  echo "          below only shows the download matched what THAT source claims." >&2
-  echo "          Unset CHTYPES_ALLOW_UNSIGNED for anything but a test." >&2
-  SIG_STATUS="NOT VERIFIED (CHTYPES_ALLOW_UNSIGNED=1)"
-else
-  rc=0; get_file SHA256SUMS.sig "$WORK/SHA256SUMS.sig" || rc=$?
-  case "$rc" in
-    0) ;;
-    1) fail CHTYPES_ARTIFACT_UNTRUSTED "$SOURCE_DESC has no SHA256SUMS.sig — an unsigned release is never installed (CHTYPES_ALLOW_UNSIGNED=1 overrides, for a test)" ;;
-    *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch SHA256SUMS.sig from $SOURCE_DESC" ;;
-  esac
-  SIG_STATUS="$(verify_signature "$WORK/SHA256SUMS" "$WORK/SHA256SUMS.sig")" \
-    || fail CHTYPES_ARTIFACT_UNTRUSTED "$SOURCE_DESC: $SIG_STATUS — NOT reading the release"
-  say "SHA256SUMS.sig verified: $SIG_STATUS"
-fi
+# ------------------------------------- the release metadata, and the one retry
+#
+# A publish into the rolling release is THREE objects — SHA256SUMS,
+# SHA256SUMS.sig, index.json — and object storage gives no way to swap them
+# atomically. They are uploaded in that order, so an old index read against new
+# sums still cross-checks; the only genuinely unsafe window is between the sums
+# and the signature that covers them, one small object wide and seconds long.
+#
+# Exactly two symptoms fall in that window: the signature does not verify, and
+# index.json disagrees with SHA256SUMS. Both are retried, because a moment later
+# the publish has landed and the three agree. Nothing else is: a tarball whose
+# hash is wrong (below) is the release lying about a byte, not a half-finished
+# upload, and it refuses at once. When the attempts run out these refuse exactly
+# as loudly as they did before, with the same code — a retry buys ten seconds,
+# it never converts a refusal into an install.
+# Only a real HTTP source can be mid-publish. A file:// fixture or a directory
+# is whatever it is, so it refuses on the first look, exactly as it always has —
+# which is also why the spec/fixtures/fetch suites stay instant.
+METADATA_ATTEMPTS="${CHTYPES_METADATA_ATTEMPTS:-3}"
+METADATA_RETRY_DELAY="${CHTYPES_METADATA_RETRY_DELAY:-4}"
+case "$BASE_URL" in
+  http://*|https://*) ;;
+  *) METADATA_ATTEMPTS=1 ;;
+esac
+
+# Prints nothing and returns 0 when the three objects agree; on a window
+# symptom, sets WINDOW_CODE/WINDOW_MSG and returns 1. A non-window failure
+# still calls fail() and exits from inside here.
+try_metadata() {
+  WINDOW_CODE=""; WINDOW_MSG=""
+  fetch_release_file SHA256SUMS
+  SIG_STATUS=""
+  if [ "${CHTYPES_ALLOW_UNSIGNED:-}" = 1 ]; then
+    echo "fetch.sh: WARNING signature verification is OFF (CHTYPES_ALLOW_UNSIGNED=1)." >&2
+    echo "          Nothing proves $SOURCE_DESC is what Wave RF published: every hash" >&2
+    echo "          below only shows the download matched what THAT source claims." >&2
+    echo "          Unset CHTYPES_ALLOW_UNSIGNED for anything but a test." >&2
+    SIG_STATUS="NOT VERIFIED (CHTYPES_ALLOW_UNSIGNED=1)"
+  else
+    local rc=0
+    get_file SHA256SUMS.sig "$WORK/SHA256SUMS.sig" || rc=$?
+    case "$rc" in
+      0) ;;
+      1) fail CHTYPES_ARTIFACT_UNTRUSTED "$SOURCE_DESC has no SHA256SUMS.sig — an unsigned release is never installed (CHTYPES_ALLOW_UNSIGNED=1 overrides, for a test)" ;;
+      *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch SHA256SUMS.sig from $SOURCE_DESC" ;;
+    esac
+    if ! SIG_STATUS="$(verify_signature "$WORK/SHA256SUMS" "$WORK/SHA256SUMS.sig")"; then
+      WINDOW_CODE=CHTYPES_ARTIFACT_UNTRUSTED
+      WINDOW_MSG="$SOURCE_DESC: $SIG_STATUS — NOT reading the release"
+      return 1
+    fi
+    say "SHA256SUMS.sig verified: $SIG_STATUS"
+  fi
+
+  fetch_release_file index.json
+
+  # The whole-release cross-check, hoisted here from the per-asset one below so
+  # that a disagreement is caught while re-fetching all three still fixes it.
+  local disagreement
+  disagreement="$(python3 - "$WORK/index.json" "$WORK/SHA256SUMS" <<'PY_XCHECK'
+import json, sys
+index_path, sums_path = sys.argv[1:3]
+sums = {}
+for line in open(sums_path, encoding="utf-8", errors="replace"):
+    parts = line.split()
+    if len(parts) >= 2:
+        sums[parts[1].lstrip("*")] = parts[0]
+try:
+    rows = json.load(open(index_path)).get("artifacts", [])
+except Exception as exc:
+    print("index.json is not readable JSON: %s" % exc)
+    raise SystemExit(0)
+for r in rows:
+    name, want = r.get("file"), r.get("sha256")
+    if not name or not want or name not in sums:
+        continue                      # a row the sums do not mention is not a disagreement
+    if sums[name] != want:
+        print("index.json says %s is %s but SHA256SUMS says %s" % (name, want, sums[name]))
+        raise SystemExit(0)
+PY_XCHECK
+)" || disagreement="could not cross-check index.json against SHA256SUMS"
+  if [ -n "$disagreement" ]; then
+    WINDOW_CODE=CHTYPES_ARTIFACT_CORRUPT
+    WINDOW_MSG="$disagreement — the release disagrees with itself; not installing it"
+    return 1
+  fi
+}
+
+attempt=1
+while :; do
+  try_metadata && break
+  if [ "$attempt" -ge "$METADATA_ATTEMPTS" ]; then
+    fail "$WINDOW_CODE" "$WINDOW_MSG"
+  fi
+  echo "fetch.sh: $WINDOW_CODE on attempt $attempt/$METADATA_ATTEMPTS — this is what a release" >&2
+  echo "          being published looks like from outside; retrying in ${METADATA_RETRY_DELAY}s" >&2
+  sleep "$METADATA_RETRY_DELAY"
+  attempt=$((attempt + 1))
+done
 
 # --------------------------------------------------------------- pick the asset
-fetch_release_file index.json
 # The listing names the artifacts' licence (Elastic License 2.0); say so once,
 # before a byte of library moves — the SDK is Apache 2.0, the artifact is not.
 LIC="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("license","") + " " + d.get("license_url",""))' "$WORK/index.json" 2>/dev/null || true)"

@@ -93,6 +93,12 @@ ENV_ALLOW_UNSIGNED: Final = "CHTYPES_ALLOW_UNSIGNED"
 ENV_AUTOFETCH: Final = "CHTYPES_AUTOFETCH"
 ENV_REGISTRY: Final = "CHTYPES_REGISTRY"
 
+#: How many times `Fetcher.release` reads an ``http(s)`` release before giving
+#: up, and the wait between reads: three attempts span about ten seconds, which
+#: comfortably outlasts a one-object publish window.
+RELEASE_LOAD_ATTEMPTS: Final = 3
+RELEASE_RETRY_DELAY: Final = 4
+
 #: The release signing key (docs/fetch.md §4): the raw 32-byte ed25519 public
 #: key, hex, and its id — the first 16 hex characters of sha256 over the raw
 #: key. Every SDK embeds this constant; `CHTYPES_TRUSTED_KEYS` replaces it.
@@ -707,12 +713,44 @@ class Fetcher:
     # ------------------------------------------------------------ the release
 
     def release(self) -> Release:
-        """Steps 0–1: ``SHA256SUMS`` and its signature, verified, then ``index.json``.
+        """Steps 0–1, retried through a publish window.
 
-        Read once per `Fetcher`. In `offline` mode this raises
-        `SourceUnreachableError` without touching the source."""
+        A publish into the rolling release is three objects — ``SHA256SUMS``,
+        ``SHA256SUMS.sig``, ``index.json`` — and object storage cannot swap them
+        atomically. They go up in that order, so an old index read against new
+        sums still cross-checks; the unsafe window is between the sums and the
+        signature that covers them, one small object wide and seconds long.
+
+        The two symptoms of reading inside it — a signature under no trusted key
+        (`ArtifactUntrustedError`) and an index that disagrees with the sums
+        (`ArtifactCorruptError`) — are retried. Nothing else is, and neither are
+        these once the attempts run out: the same exception surfaces, with the
+        same exit code, as it did before. A tarball whose hash is wrong is never
+        retried; that is the release lying about a byte, not a half-finished
+        upload.
+
+        Only an ``http(s)`` source can be mid-publish, so a ``file://`` or
+        directory source is read exactly once. Read once per `Fetcher`."""
         if self._release is not None:
             return self._release
+        attempts = RELEASE_LOAD_ATTEMPTS if self.source.kind == "http" else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                self._release = self._load_release()
+                return self._release
+            except (ArtifactUntrustedError, ArtifactCorruptError) as exc:
+                if attempt >= attempts:
+                    raise
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
+                    f"published looks like from outside; retrying in {RELEASE_RETRY_DELAY}s"
+                )
+                time.sleep(RELEASE_RETRY_DELAY)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _load_release(self) -> Release:
+        """One read of the release's three small files. Never memoizes: the
+        caller does that, and only on success."""
         if self.offline:
             raise SourceUnreachableError(
                 f"chtypes: offline — not reading the release at {self.source}"
@@ -748,7 +786,7 @@ class Fetcher:
         if index_raw is None:
             raise SourceUnreachableError(f"chtypes: no index.json at {src} — not a chtypes release")
         entries, tag, license_, license_url = _parse_index(index_raw, src)
-        self._release = Release(
+        release = Release(
             source=src,
             tag=tag or self.tag,
             entries=tuple(entries),
@@ -757,12 +795,22 @@ class Fetcher:
             license=license_,
             license_url=license_url,
         )
+        # §3 step 2 for the whole release, not just the asset being installed.
+        # `install` still checks its own asset; this runs here so a disagreement
+        # is seen while `release` can still fix it by reading all three again.
+        for entry in release.entries:
+            listed = release.sums.get(entry.file)
+            if listed is not None and listed != entry.sha256:
+                raise ArtifactCorruptError(
+                    f"chtypes: index.json says {entry.file} is {entry.sha256} but SHA256SUMS "
+                    f"says {listed} — the release disagrees with itself; not installing it"
+                )
         if license_:
             self._say(
                 f"artifacts are licensed under {license_}{' ' + license_url if license_url else ''}"
                 f" — LICENSE and NOTICE ship beside them"
             )
-        return self._release
+        return release
 
     # --------------------------------------------------------------- ensure
 

@@ -32,14 +32,27 @@ at a registry directory, or fetch artifacts into the per-user cache with
 `scripts/fetch.sh` and the tests find them there. `CHTYPES_GOLDENS` overrides
 the file's location.
 
-## Regenerating it
+## Where it comes from
 
-The generator lives with the proof, in the core repository:
+**This file is delivered, not regenerated here, and never hand-edited.**
 
-    CHTYPES_REGISTRY=<registry> \
-      go run ./cmd/goldens-gen --in ../../sdk/goldens/cases.in.json --out <this repo>/goldens/cases.json
+Core's `certify` workflow regenerates the set against every line the artifacts
+host serves, compares it case by case with the copy in this repository, and when
+the two differ it uploads the new file as the run artifact `sdk-goldens-cases`
+and opens an ops issue on `Wave-RF/chtypes-core` under the key `sdk-goldens`.
+The whole job here is:
 
-(run from `chtypes-core/tests/conformance/go`). Inputs are in
-`chtypes-core/tests/sdk/goldens/cases.in.json`; add a case there, regenerate,
-and commit the result here. A regeneration that changes an existing
+1. Open the issue, follow it to the linked run.
+2. Download the `sdk-goldens-cases` artifact.
+3. Drop it in as `goldens/cases.json` and land it.
+
+Expect the set to **shrink** as lines are added, not grow. The generator keeps
+only cases every line answers identically, so a case that becomes
+version-dependent is dropped rather than recorded twice — which is the point of
+a golden, and why a shrinking set is not a loss of coverage. The behaviour a
+dropped case used to pin lives on in core's per-line behaviour goldens, and in
+whichever binding suite gates it on the artifact's version.
+
+Inputs live in core (`tests/sdk/goldens/cases.in.json`): a missing case is an
+issue against core, not an edit here. A delivery that changes an existing
 expectation is a library change and needs the same scrutiny as one.

@@ -52,6 +52,38 @@ The install is atomic: unpack into a temporary sibling, rename into place.
 An already-installed line that hashes what `SHA256SUMS` says is reported as
 installed and nothing is downloaded (`--force` re-downloads).
 
+### 3a. The publish window, and the only thing that retries
+
+A publish into the rolling release is **three objects** — `SHA256SUMS`,
+`SHA256SUMS.sig`, `index.json` — and object storage cannot swap them
+atomically. They are uploaded in that order, so an old `index.json` read against
+new sums still cross-checks at step 2; the only genuinely unsafe window is
+between the sums and the signature that covers them. One small object wide,
+seconds long.
+
+Exactly **two** of the failures above are symptoms of reading inside that
+window, and both are retried — three attempts about four seconds apart, roughly
+ten seconds in all:
+
+| symptom | code |
+|---|---|
+| step 0: the signature verifies under no trusted key | `CHTYPES_ARTIFACT_UNTRUSTED` |
+| step 2: `index.json` and `SHA256SUMS` disagree | `CHTYPES_ARTIFACT_CORRUPT` |
+
+Nothing else retries. A tarball whose hash is wrong (step 3) is the release
+lying about a byte, not a half-finished upload, and refuses at once — as do the
+two above once the attempts run out, with the same code and the same exit
+status they have always had. **A retry buys ten seconds; it never converts a
+refusal into an install.**
+
+Step 2 is therefore checked twice: once for the whole release as soon as the
+three objects are read — so a disagreement is seen while re-reading can still
+fix it — and again for the asset actually being installed.
+
+Only an `http(s)` source can be mid-publish. A `file://` URL or a plain
+directory is read exactly once and refuses on the first look, which is also why
+the `spec/fixtures/fetch` suites stay instant.
+
 **Not covered, by design, and said out loud:** freshness. A host serving an
 older *signed* release is accepted; §5 pins are how a consumer refuses that.
 Build provenance (which workflow built which commit) is a later, separate
