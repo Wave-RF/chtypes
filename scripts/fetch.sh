@@ -665,3 +665,42 @@ $SELECTED
 EOF
 [ "$INSTALLED" -gt 0 ] || die "index.json selected nothing to install"
 if [ "$ALL" = 1 ]; then say "$INSTALLED version(s) installed into $DEST"; fi
+
+# ------------------------------------------------- the served golden set (§3b)
+#
+# sdk-goldens.json is a release-level file like index.json, and a row in the
+# signed SHA256SUMS like a tarball, so it verifies through the same chain: the
+# signature covers the sums, the sums name its sha256, and the bytes on disk
+# must hash to it. It lands beside the artifacts as <registry>/sdk-goldens.json
+# so the SDK suites read it offline after a fetch, exactly as they read an
+# artifact.
+#
+# A release that does not publish it yet is not an error: the set is served from
+# the pipeline that builds the artifacts, and an older release simply predates
+# it. Say so once and carry on — a missing golden set makes the golden tests
+# skip, which they already do loudly.
+install_goldens() {
+  local name=sdk-goldens.json
+  local want
+  want="$(awk -v f="$name" '$2 == f || $2 == "*" f {print $1}' "$WORK/SHA256SUMS" | head -1)"
+  if [ -z "$want" ]; then
+    echo "fetch.sh: this release does not publish $name (an older release predates the served" >&2
+    echo "          golden set); the SDKs' golden tests will skip until it does" >&2
+    return 0
+  fi
+  local rc=0
+  get_file "$name" "$WORK/$name" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) fail CHTYPES_ARTIFACT_CORRUPT "SHA256SUMS lists $name but $SOURCE_DESC does not serve it — the release disagrees with itself; not installing it" ;;
+    *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $name from $SOURCE_DESC" ;;
+  esac
+  local got
+  got="$(sha256_of "$WORK/$name")"
+  [ "$got" = "$want" ] \
+    || fail CHTYPES_ARTIFACT_CORRUPT "$name hashes to $got but the signed SHA256SUMS says $want — not installing it"
+  mkdir -p "$DEST"
+  mv -f "$WORK/$name" "$DEST/$name"
+  say "golden set verified and installed: $DEST/$name"
+}
+install_goldens
