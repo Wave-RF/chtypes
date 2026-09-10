@@ -1,22 +1,37 @@
-# ci — the SDK repository's own gate.
+# ci — the SDK repository's own gate, on GitHub's hosted runners only.
 #
-# Two tiers, split on the one thing that decides what a job can prove:
+# This repository is public and its CI is deliberately small — the bindings,
+# and how to use them — with no repository variable, no secret, and no
+# runner of our own. It runs every suite twice, on ubuntu-latest:
 #
-#   build   needs NO artifact. Every binding compiles, lints and type-checks;
-#           the Go package proves it builds from a bare copy with nothing beside
-#           it (scripts/check-standalone.sh, up to its registry step); the
-#           header's ABI revision matches what each binding declares.
-#   test    needs artifacts, fetched anonymously from https://artifacts.wavehouse.dev
-#           by scripts/fetch.sh. Artifacts exist for linux-arm64, so the job runs on the arm64
-#           runner named by the repository variable CHTYPES_TEST_RUNNER
-#           (ubuntu-24.04-arm — free for public repositories). Until that
-#           variable is set this job is SKIPPED BY NAME with the reason in the
-#           name, never silently green: the golden set and the registry tests
-#           are the SDK's proof, and a run that could not load a library must
-#           not read as a pass.
+#   1. WITHOUT artifacts (the go / python / ts / rust jobs). Every binding
+#      builds, lints and type-checks; the header and the four bindings agree
+#      on the ABI revision; each suite runs with nothing on the artifact
+#      search path — the fetch/verify/install contract against
+#      spec/fixtures/fetch, the CLIs and the pure units all RUN, and every
+#      test that needs an artifact SKIPS, loudly, by name, naming the one
+#      command that would fill the gap. This is what a contributor with no
+#      network and no artifacts gets, and it must be an honest result.
 #
-# Nothing here computes a verdict: every step runs a script or a test runner
-# whose own exit status and output are the answer.
+#   2. WITH two published artifacts (the artifacts job, after 1 is green).
+#      The newest -lts and the newest -stable line the public release
+#      publishes for linux-amd64 — read from the live index.json, never
+#      hard-coded — are fetched by scripts/fetch.sh exactly as a consumer
+#      fetches them (anonymous, signed, every hash checked), cached on a key
+#      derived from those two index rows so nothing downloads until the
+#      release changes, and the same suites then RUN the golden set and the
+#      registry tests against them. This is "does the published SDK work
+#      with the published artifacts", kept small on purpose: two lines, the
+#      SDK's own tests. The bulk proof — the server-truth suites, the oracle,
+#      the rigs, every supported line — is the core repository's certify
+#      workflow, against this same tree.
+#
+# A suite that skipped everything is not a pass, in either run:
+# scripts/check-suite.sh and scripts/check-standalone.sh read each runner's
+# own summary line (colour stripped) and refuse zero tests passed; with
+# --require-artifacts they also refuse a golden set that did not run. Nothing
+# in this file computes a verdict; every step runs a script or a test runner
+# whose own output is the answer.
 name: ci
 
 on:
@@ -33,23 +48,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: "build (no artifacts)"
+  abi:
+    name: "abi — the header and every binding agree"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go/go.mod
-      - name: go — dlopen-only build, vet, and the linked API's absence
-        run: |
-          cd go && go build ./... && go vet ./...
-          # the standalone check's build half; its test half needs a registry
-          # and runs in the test job below
-          cd .. && CHTYPES_REGISTRY=/nonexistent scripts/check-standalone.sh || true
-          cd go && ! grep -rl 'chtypes_linked' --include='*.go' . >/dev/null 2>&1 || echo "linked path present behind its tag (expected)"
       - name: the header and every binding agree on the ABI revision
         run: |
           rev="$(sed -n 's/^#define CHS_ABI_REVISION \([0-9][0-9]*\)$/\1/p' include/chtypes.h)"
@@ -60,11 +64,114 @@ jobs:
           grep -qE "ABI_REVISION: i32 = $rev" rust/src/*.rs
           echo "ABI revision $rev agreed by the header and four bindings"
 
+  go:
+    name: "go — build, vet, standalone check (no artifacts)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+      - name: build and vet, dlopen-only
+        run: cd go && go build ./... && go vet ./...
+      - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
+        run: scripts/check-standalone.sh --no-artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-standalone-json-no-artifacts
+          path: scratch/check-standalone.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  python:
+    name: "python — ruff, import, suite (no artifacts)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: python — ruff, and the package imports
+      - name: ruff, and the package imports
         run: |
           cd python && uv sync --group dev && uv run ruff check src tests && uv run ruff format --check src tests
           uv run python -c 'import chtypes; print("chtypes", chtypes.ABI_REVISION)'
+      - name: suite — the artifact tests skip by name, the rest runs
+        run: scripts/check-suite.sh --no-artifacts python
+
+  ts:
+    name: "ts — build, typecheck, suite (no artifacts)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - name: build and typecheck
+        run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
+      - name: suite — the artifact tests skip by name, the rest runs
+        run: scripts/check-suite.sh --no-artifacts ts
+
+  rust:
+    name: "rust — build, clippy, fmt, suite (no artifacts)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: build, clippy, fmt
+        run: cd rust && cargo build --locked && cargo clippy --locked --all-targets -- -D warnings && cargo fmt --check
+      - name: suite — the artifact tests skip by name, the rest runs
+        run: scripts/check-suite.sh --no-artifacts rust
+
+  artifacts:
+    name: "artifacts — two published lines, linux-amd64, every suite runs its goldens"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [abi, go, python, ts, rust]
+    env:
+      CHTYPES_REGISTRY: ${{ github.workspace }}/.artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - name: the newest -lts and -stable lines the release publishes (live index.json)
+        id: lines
+        run: scripts/published-lines.sh --platform linux-amd64 | tee -a "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: .artifacts
+          key: chtypes-artifacts-linux-amd64-${{ steps.lines.outputs.key }}
+      - name: fetch, verified — an already-installed line is re-hashed and not downloaded
+        run: |
+          for line in ${{ steps.lines.outputs.lines }}; do
+            scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY"
+          done
+          ls -la "$CHTYPES_REGISTRY"
+          cat "$CHTYPES_REGISTRY"/*/manifest.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+      - name: go — standalone check with the registry; TestGoldens must run
+        run: scripts/check-standalone.sh --registry "$CHTYPES_REGISTRY" --require-artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-standalone-json-artifacts
+          path: scratch/check-standalone.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - uses: astral-sh/setup-uv@v5
+      - name: python — suite with the registry; the golden set must run
+        run: cd python && uv sync --group dev && cd .. && scripts/check-suite.sh --require-artifacts python
 
       - uses: pnpm/action-setup@v4
         with:
@@ -74,56 +181,9 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
-      - name: ts — build and typecheck
-        run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
+      - name: ts — suite with the registry; the golden set must run
+        run: cd ts && pnpm install --frozen-lockfile && pnpm build && cd .. && scripts/check-suite.sh --require-artifacts ts
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - name: rust — build, clippy, fmt
-        run: cd rust && cargo build --locked && cargo clippy --locked -- -D warnings && cargo fmt --check
-
-  test:
-    name: "test (goldens + registry, ${{ vars.CHTYPES_TEST_RUNNER || 'no CHTYPES_TEST_RUNNER set — skipped' }})"
-    runs-on: ${{ vars.CHTYPES_TEST_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 30
-    needs: build
-    # The reason a skipped run is visible: the job is named with the variable's
-    # value, and its absence is spelled out in the name itself.
-    if: vars.CHTYPES_TEST_RUNNER != ''
-    env:
-      CHTYPES_REGISTRY: ${{ github.workspace }}/.artifacts
-    steps:
-      - uses: actions/checkout@v4
-      - name: fetch every published line for this runner's platform
-        env:
-          CHTYPES_ARTIFACTS_URL: ${{ vars.CHTYPES_ARTIFACTS_URL || 'https://artifacts.wavehouse.dev' }}
-        run: |
-          scripts/fetch.sh --all --dest "$CHTYPES_REGISTRY"
-          ls -la "$CHTYPES_REGISTRY"
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go/go.mod
-      - name: go — standalone check (build + registry suite + goldens)
-        run: scripts/check-standalone.sh --registry "$CHTYPES_REGISTRY"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: check-standalone-json
-          path: scratch/check-standalone.json
-          if-no-files-found: ignore
-          retention-days: 14
-      - uses: astral-sh/setup-uv@v5
-      - name: python — suite + goldens
-        run: cd python && uv sync --group dev && uv run pytest -q -rs tests
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: ts — suite + goldens
-        run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm test
-      - uses: dtolnay/rust-toolchain@stable
-      - name: rust — suite + goldens
-        run: cd rust && cargo test --locked
+      - name: rust — suite with the registry; the golden test must run
+        run: scripts/check-suite.sh --require-artifacts rust

@@ -104,6 +104,24 @@ version-specific behaviour) live with the proof in the core repository and run
 against this one as a sibling checkout; a change to an SDK is finished when
 both are green.
 
+**Testing, with and without artifacts.** CI here runs on GitHub's hosted
+runners with no repository variable and no secret, and runs every suite
+twice. First with *no* artifact on the search path: the fetch/verify/install
+contract against `spec/fixtures/fetch`, the CLIs and the pure units (result
+documents, transform classification, error shaping, the search path) run in
+full, and every test that needs an artifact is *skipped by name* with the one
+command that would fill the gap — a suite that skipped everything fails,
+because `scripts/check-suite.sh` and `scripts/check-standalone.sh` read the
+runners' own summary lines. Then once more with two published lines (the
+newest `-lts` and `-stable` for `linux-amd64`, fetched by `scripts/fetch.sh`
+exactly as a consumer would and cached until the release changes), where the
+golden set and the registry tests must run. The bulk proof — the server-truth
+suites, the oracle, every supported line — is the core repository's `certify`
+workflow against this same tree. Locally, `scripts/fetch.sh 25.8` fills the
+per-user cache and the plain commands then run everything;
+`scripts/check-suite.sh --no-artifacts <lang>` reproduces the artifact-free
+runner.
+
 The C header is owned here. An ABI change lands in `include/chtypes.h` and the
 four bindings together (the frozen numbers — `enum chs_format`, `CHS_DOC_*`,
 `CHS_ABI_REVISION` — are pinned in each binding and cross-checked by CI), and the

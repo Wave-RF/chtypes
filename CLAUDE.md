@@ -23,7 +23,8 @@ carries the rules that were paid for; the ones that bind here:
   and relinks every artifact. CI asserts the header and the bindings agree.
 - **Never trust exit codes or self-reports.** Every test here skips LOUDLY
   without a registry and refuses a zero-run; `scripts/check-standalone.sh`
-  reads its verdict off a `go test -json` census.
+  reads its verdict off a `go test -json` census and `scripts/check-suite.sh`
+  off each runner's own summary line, colour stripped.
 - **The Go package is dlopen-only by default.** The linked path (package-level
   `CompileDDL`, `BuiltVersion`) is behind `-tags chtypes_linked` and needs a
   core build tree via `CGO_LDFLAGS`; `undefined: chtypes.CompileDDL` means the
@@ -35,11 +36,17 @@ carries the rules that were paid for; the ones that bind here:
 - macOS artifacts are a dev floor, not an oracle (float parses diverge).
   Float expectations come from Linux or a live server.
 
-Gates: `scripts/check-standalone.sh` (Go, from a bare copy); per language
-`go test ./...`, `uv run pytest -q`, `pnpm test`, `cargo test` — all need a
-registry; `.github/workflows/ci.yml` is the same set. The server-truth suites
-for these SDKs live in `../chtypes-core/tests/sdk/` and run from there
-(`just test` in the core) against this tree as a sibling.
+Gates: `scripts/check-standalone.sh` (Go, from a bare copy) and
+`scripts/check-suite.sh python|ts|rust`; per language `go test ./...`,
+`uv run pytest -q`, `pnpm test`, `cargo test`. With a registry they run
+everything; without one every artifact test skips by name and the rest still
+runs, and a suite that ran nothing fails. `.github/workflows/ci.yml` runs on
+hosted runners with no variable and no secret: once with no artifact
+(`--no-artifacts`), once with two published lines fetched by
+`scripts/fetch.sh` (`--require-artifacts`: the goldens must run). The
+server-truth suites for these SDKs live in `../chtypes-core/tests/sdk/` and
+run from there (`just test` in the core) against this tree as a sibling; the
+artifact-backed proof is the core repository's `certify` workflow.
 
 Pre-1.0 and pre-publish: `github.com/wave-rf/chtypes/go` is the module path
 (lowercase, the Go norm) and freezes at the first tag together with the

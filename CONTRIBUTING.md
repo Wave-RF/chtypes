@@ -8,8 +8,11 @@ behaviour in Go, Python, TypeScript or Rust will be declined however good it is.
 
 - **Build and test locally.** `scripts/fetch.sh <clickhouse-line>` installs an
   artifact for this machine into the per-user cache; each binding's README says
-  how to run its suite against it. `scripts/check-standalone.sh` is the gate CI
-  runs for Go.
+  how to run its suite against it. Without one, every test that needs an
+  artifact skips by name and the rest still runs — `scripts/check-suite.sh
+  --no-artifacts <lang>` and `scripts/check-standalone.sh --no-artifacts` are
+  exactly what CI runs first; it then runs the same suites with two published
+  lines. The artifact-backed proof beyond that lives in the core repository.
 - **Every binding follows the same contract** (`spec/`). A change to what a
   call means belongs in the spec and in all four bindings, not one.
 - **Goldens are generated, not hand-edited.** `goldens/cases.json` comes from
