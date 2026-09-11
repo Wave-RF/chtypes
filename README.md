@@ -14,26 +14,145 @@ row + schema + ClickHouse version  ─▶  accepted / rejected / poisoned
                                        every silent change, named
 ```
 
-This repository is the **SDK half** of chtypes, Apache 2.0:
-
-| | |
-|---|---|
-| [`go/`](go/README.md) | `github.com/wave-rf/chtypes/go` — package `chtypes`, cgo `dlopen`, dlopen-only by default |
-| [`python/`](python/README.md) | `chtypes` — stdlib `ctypes`, zero dependencies |
-| [`ts/`](ts/README.md) | `@wavehouse/chtypes` — `ffi-rs`, Node ≥ 22 |
-| [`rust/`](rust/README.md) | `chtypes` — `libloading` |
-| [`include/chtypes.h`](include/chtypes.h) | the C ABI every binding is written against — 28 `chs_*` functions, ABI revision 4 |
-| [`spec/`](spec/README.md) | the normative contract: [`c-abi.md`](spec/c-abi.md), [`bindings.md`](spec/bindings.md) (the shape every SDK implements), [`artifact.md`](spec/artifact.md) (what ships, how a registry is laid out) |
-| [`goldens/`](goldens/README.md) | the public golden set — served by core, not tracked here; one answer in four languages |
-| [`playground/`](playground/README.md) | four side-by-side runnable tours, same sections in every language |
-| [`docs/artifacts.md`](docs/artifacts.md) | how a consumer obtains and verifies artifacts ([`docs/fetch.md`](docs/fetch.md): the fetch/verify/signing contract every SDK implements) |
-| [`scripts/fetch.sh`](scripts/fetch.sh) | the verified download into the per-user cache |
-
-The other half — the C++ wrapper, the per-version vendoring and build
+This repository is the **SDK half** of chtypes, Apache 2.0 — four bindings, the
+C ABI they share, and the normative spec. The other half — the C++ wrapper, the per-version vendoring and build
 pipeline, the artifacts themselves, and the differential proof (tens of
 thousands of cases scored against real ClickHouse servers on every supported
 version) — is the core repository, `chtypes-core`, under its own licence. The
 SDKs here contain no ClickHouse code: they load an artifact and speak the ABI.
+
+## Install
+
+Two things, always: the **binding** for your language, and at least one
+**artifact** — the per-version native library it loads. The binding is small;
+the artifact is real ClickHouse, compiled.
+
+**1. The binding.**
+
+```sh
+go get github.com/wave-rf/chtypes/go     # Go
+uv add chtypes                           # Python  (or: pip install chtypes)
+pnpm add @wavehouse/chtypes              # TypeScript
+cargo add chtypes                        # Rust
+```
+
+**2. An artifact**, verified into the per-user cache every binding reads by
+default. Each binding ships the same command, so you need nothing from this
+repository:
+
+```sh
+go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8
+python -m chtypes fetch 25.8
+npx @wavehouse/chtypes fetch 25.8
+cargo install chtypes && chtypes fetch 25.8
+```
+
+That installs into `~/.cache/chtypes/artifacts/<os>-<arch>/25.8/`
+(`$CHTYPES_REGISTRY` overrides), checking an ed25519 signature over the release
+and the sha256 of every byte before anything lands. `fetch --all` takes every
+published line. From a checkout, [`scripts/fetch.sh`](scripts/fetch.sh) is the
+reference implementation of the same contract.
+
+## Quickstart
+
+One artifact, one schema, one row — the same program in each language. It shows
+the thing chtypes exists for: the row is **accepted**, and `256` is silently
+stored as `0`.
+
+<details open><summary><b>Go</b></summary>
+
+```go
+reg, _ := chtypes.NewRegistry(chtypes.DefaultRegistryDir())
+lib, _ := reg.For("25.8")                      // a line or an exact patch; never a nearest match
+cs, _ := lib.CompileDDL("x UInt8, ts DateTime DEFAULT now()")
+defer cs.Close()
+
+r, _ := cs.Row(chtypes.JSONEachRow, []byte(`{"x":256}`))
+fmt.Println(r.Outcome)                // accepted
+fmt.Println(r.Transformed[0].Reason)  // overflow_wrap — 256 stored as 0, silently
+fmt.Println(r.Substituted)            // ts: send it explicitly, or preview != stored
+```
+
+</details>
+
+<details><summary><b>Python</b></summary>
+
+```python
+from chtypes import Format, Registry
+
+registry = Registry()
+library = registry.for_version("25.8")
+
+with library.compile_ddl("x UInt8, ts DateTime DEFAULT now()") as schema:
+    r = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n')
+
+r.outcome                     # Outcome.ACCEPTED
+r.rows[0].value("x").text     # '0'             — what would actually be stored
+r.transformed[0].reason       # 'overflow_wrap' — which is the product
+r.rows[0].substituted         # ts: send it explicitly, or preview != stored
+```
+
+</details>
+
+<details><summary><b>TypeScript</b></summary>
+
+```ts
+import { Format, Registry } from '@wavehouse/chtypes';
+
+const registry = new Registry();
+const lib = registry.for('25.8');
+const schema = lib.compileDdl('x UInt8, ts DateTime DEFAULT now()');
+
+const r = schema.row(Format.JSONEachRow, Buffer.from('{"x":256}'));
+console.log(r.outcome);                 // accepted
+console.log(r.transformed[0]?.reason);  // overflow_wrap — 256 stored as 0, silently
+console.log(r.substituted[0]?.column);  // ts — send it explicitly in the real INSERT
+schema.close();                         // or `using schema = …` — see below
+```
+
+</details>
+
+<details><summary><b>Rust</b></summary>
+
+```rust
+use chtypes::{Format, Registry, NO_SETTINGS};
+
+let registry = Registry::from_search_path();
+let lib = registry.for_version("25.8")?;
+let schema = lib.compile("x UInt8, ts DateTime DEFAULT now()").compile()?;
+
+let r = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, NO_SETTINGS)?;
+assert_eq!(r.outcome, chtypes::Outcome::Accepted);
+assert_eq!(r.rows[0].values[0].text, "0");                      // what would be stored
+assert_eq!(r.transformed[0].reason, chtypes::reason::OVERFLOW_WRAP);
+```
+
+</details>
+
+Each binding frees the schema its own way: Go `defer Close()`, Python the
+context manager, Rust on drop. TypeScript has both — `schema.close()` works
+everywhere, and `using schema = lib.compileDdl(…)` is the nicer form once
+TypeScript downlevels it for you or you are on Node ≥ 24 (it is a syntax error
+in plain JavaScript on Node 22, this package's floor).
+
+A bad row is a **verdict, not an error**: `outcome` becomes `rejected` with
+ClickHouse's own error code and message. Exceptions (or the `Err` arm) are for
+the machinery — a missing artifact, an unreadable document — and for
+schema-level answers. Each binding's README has the full API table and its
+language's idioms; [`playground/`](playground/README.md) is the same guided
+tour, section for section, in all four.
+
+## What is supported
+
+Three axes — the language you call from, the platform you run on, and the
+ClickHouse line you want answers for. **[`docs/support.md`](docs/support.md)**
+has the full matrix, generated from the four manifests in this tree and from
+the release's own index, so it cannot drift from what actually ships.
+
+The short version: Go, Python, TypeScript and Rust; `linux-amd64`,
+`linux-arm64` and `darwin-arm64` (Unix only — both loaders are `dlopen`); and
+every ClickHouse line with a committed run of record in the core repository,
+which today spans 24.8 through 26.8 and grows as core certifies releases.
 
 ## Artifacts
 
@@ -64,23 +183,6 @@ contract, the asset names and the versioning rule are in
 Artifacts carry their own licence, separate from this repository's; see the
 `LICENSE` file inside each artifact release.
 
-## Quickstart
-
-```go
-reg, _ := chtypes.NewRegistry(chtypes.DefaultRegistryDir())
-lib, _ := reg.For("25.8")                       // minor line or exact patch; never a nearest match
-cs, _ := lib.CompileDDL("x UInt8, ts DateTime DEFAULT now()")
-defer cs.Close()
-r, _ := cs.Row(chtypes.JSONEachRow, []byte(`{"x":256}`))
-r.Outcome                // accepted
-r.Transformed[0].Reason  // overflow_wrap — 256 stored as 0, silently
-r.Substituted            // ts: send it explicitly, or preview != stored
-```
-
-The same program in the other three languages, section for section, is
-[`playground/`](playground/README.md). Each binding's README has the full API
-table and the language's own idioms.
-
 ## The guarantees every binding is held to
 
 - **`Transformed` is the product.** ClickHouse never says *"I changed your
@@ -95,6 +197,21 @@ table and the language's own idioms.
 - **The four bindings give one answer.** The golden set is run by all of them,
   and each is a scored column in the core repository's arbiter at the same
   agreement as the reference.
+
+## What is in this repository
+
+| | |
+|---|---|
+| [`go/`](go/README.md) | `github.com/wave-rf/chtypes/go` — package `chtypes`, cgo `dlopen`, dlopen-only by default |
+| [`python/`](python/README.md) | `chtypes` — stdlib `ctypes`, zero dependencies |
+| [`ts/`](ts/README.md) | `@wavehouse/chtypes` — `ffi-rs`, Node ≥ 22 |
+| [`rust/`](rust/README.md) | `chtypes` — `libloading` |
+| [`include/chtypes.h`](include/chtypes.h) | the C ABI every binding is written against — 28 `chs_*` functions, ABI revision 4 |
+| [`spec/`](spec/README.md) | the normative contract: [`c-abi.md`](spec/c-abi.md), [`bindings.md`](spec/bindings.md) (the shape every SDK implements), [`artifact.md`](spec/artifact.md) (what ships, how a registry is laid out) |
+| [`goldens/`](goldens/README.md) | the public golden set — served by core, not tracked here; one answer in four languages |
+| [`playground/`](playground/README.md) | four side-by-side runnable tours, same sections in every language |
+| [`docs/artifacts.md`](docs/artifacts.md) | how a consumer obtains and verifies artifacts ([`docs/fetch.md`](docs/fetch.md): the fetch/verify/signing contract every SDK implements) |
+| [`scripts/fetch.sh`](scripts/fetch.sh) | the verified download into the per-user cache |
 
 ## Developing here
 
