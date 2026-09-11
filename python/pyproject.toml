@@ -1,6 +1,6 @@
 [project]
 name = "chtypes"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python binding for the chtypes artifacts: ClickHouse's own type system, per version, behind the frozen chs_* C ABI"
 readme = "README.md"
 license = "Apache-2.0"
