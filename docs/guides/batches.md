@@ -68,9 +68,9 @@ batch.rows.forEach((r, i) => console.log(i, r.outcome, r.errCode));
 
 ```rust
 let schema = lib
-    .compile("x UInt8")
-    .settings([("input_format_allow_errors_ratio", "1")])
-    .compile()?;
+.compile("x UInt8")
+.settings([("input_format_allow_errors_ratio", "1")])
+.compile()?;
 let batch = schema.rows(Format::JsonEachRow, body, NO_SETTINGS)?;
 
 println!("{:?} {} {}", batch.outcome, batch.rows_read, batch.rows_skipped); // Accepted 3 1

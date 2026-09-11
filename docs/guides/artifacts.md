@@ -92,7 +92,7 @@ Inside, one directory per line:
     CH_VERSION            the ClickHouse version, as plain text
     unsafe_families.txt   this build's own refuse-list; empty is a valid list
   26.7/
-    ...
+...
   sdk-goldens.json        the served golden set, if the release publishes one
 ```
 

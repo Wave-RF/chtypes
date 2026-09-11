@@ -35,7 +35,7 @@ Sizes, measured 2026-08-26: 159–288 MiB per `.dylib`, 191–272 MiB per `.so`,
 
 ## `manifest.json`
 
-Exactly nine fields, written by the core repository's `lib/build.sh` with `sort_keys=True, indent=1`. A real one, verbatim:
+Exactly nine fields, written by the build that produces it with `sort_keys=True, indent=1`. A real one, verbatim:
 
 ```json
 {
@@ -81,13 +81,12 @@ The reference algorithm (`chtypes.NewRegistry` in `go/chtypes/multiversion.go`):
 2. Read `manifest.json`. **If it is missing or unparseable, skip the directory silently** — a registry may legitimately contain scratch directories, and a `.DS_Store` is not a version.
 3. `dlopen(dir/<manifest.library>, RTLD_NOW | RTLD_LOCAL)`. A failure here IS an error and MUST abort with the path and the `dlerror()` text: a directory that has a manifest and does not load is broken, not absent.
 4. Resolve the `chs_*` symbols by name. Four are **mandatory** — `chs_clickhouse_version`, `chs_init`, `chs_schema_compile`, `chs_rows`. If any is missing, `dlclose` and reject the library: it is not a chtypes artifact.
-5. Resolve `chs_abi_revision`. **Absent** -> the artifact predates the probe; record revision `0` and continue with the rules below — absence is ignorance, not incompatibility. **Present** -> call it. If it returns a value that is neither `0` nor the revision the binding was written against (`CHS_ABI_REVISION`), **reject the library**, naming both numbers: the artifact has positively stated that the binding's declarations do not describe it, and calling through them is undefined. See the core repository's C ABI specification §The ABI revision.
-6. Every other symbol is **optional**. A missing one means "this artifact predates the feature" and MUST degrade to `unsupported` at call time, never to a load failure. The reference returns a private `-3` from its C shims for a missing `chs_schema_engine` / `chs_schema_ttl` and turns it into `CodeUnsupported` with `"this artifact predates engine support (rebuild it)"`; a missing `chs_row` returns `NULL`, reported as `"this artifact predates chs_row (rebuild it)"`.
-7. Column introspection is **all-or-nothing**: `chs_schema_column_count`, `_name`, `_type`, `_default_expr`, `_default_kind`, `_default_is_literal` shipped together. If any is missing, treat the whole group as absent and leave the schema's column list empty rather than partially populated.
-8. Ask the library its own version: `chs_clickhouse_version()`. **The library names itself; nothing is inferred from the path.** Derive the minor line from that string.
-9. `chs_init(timezone, unsafe_families, out_err)`, once per library, with the contents of that version's own `unsafe_families.txt`. Each library keeps its own DateLUT and its own refuse-list. `out_err` MAY be `NULL`; when it is not and the call fails, it carries ClickHouse's own message (free with `chs_free`) — the reachable failure is an unknown timezone.
-10. Index the library under **both** its exact version and its minor line.
-11. If zero libraries loaded, that is an error naming the directory — an empty registry is a configuration mistake, not an empty result.
+5. Resolve `chs_abi_revision`. **Absent** -> the artifact predates the probe; record revision `0` and continue with the rules below — absence is ignorance, not incompatibility. **Present** -> call it. If it returns a value that is neither `0` nor the revision the binding was written against (`CHS_ABI_REVISION`), **reject the library**, naming both numbers: the artifact has positively stated that the binding's declarations do not describe it, and calling through them is undefined. 6. Every other symbol is **optional**. A missing one means "this artifact predates the feature" and MUST degrade to `unsupported` at call time, never to a load failure. The reference returns a private `-3` from its C shims for a missing `chs_schema_engine` / `chs_schema_ttl` and turns it into `CodeUnsupported` with `"this artifact predates engine support (rebuild it)"`; a missing `chs_row` returns `NULL`, reported as `"this artifact predates chs_row (rebuild it)"`.
+6. Column introspection is **all-or-nothing**: `chs_schema_column_count`, `_name`, `_type`, `_default_expr`, `_default_kind`, `_default_is_literal` shipped together. If any is missing, treat the whole group as absent and leave the schema's column list empty rather than partially populated.
+7. Ask the library its own version: `chs_clickhouse_version()`. **The library names itself; nothing is inferred from the path.** Derive the minor line from that string.
+8. `chs_init(timezone, unsafe_families, out_err)`, once per library, with the contents of that version's own `unsafe_families.txt`. Each library keeps its own DateLUT and its own refuse-list. `out_err` MAY be `NULL`; when it is not and the call fails, it carries ClickHouse's own message (free with `chs_free`) — the reachable failure is an unknown timezone.
+9. Index the library under **both** its exact version and its minor line.
+10. If zero libraries loaded, that is an error naming the directory — an empty registry is a configuration mistake, not an empty result.
 
 `RTLD_LOCAL` is not a detail: it is what keeps each library's ClickHouse symbols private, so two builds that both define `DB::DataTypeFactory` never collide. A loader that uses `RTLD_GLOBAL` will appear to work and answer with the wrong version's semantics.
 
@@ -97,7 +96,7 @@ The reference oracle also falls back to discovery when its linked build cannot a
 
 ## Verification
 
-The artifact carries its own checksum, so verification is not optional and not expensive. The core repository's artifact-cache verifier walks each version directory, re-hashes the library, and compares against `library_sha256`. Its own comment states the reason plainly: a move that reported success and truncated a 232 MB library would look identical to one that worked.
+The artifact carries its own checksum, so verification is not optional and not expensive. The build tooling's artifact-cache verifier walks each version directory, re-hashes the library, and compares against `library_sha256`. Its own comment states the reason plainly: a move that reported success and truncated a 232 MB library would look identical to one that worked.
 
 A loader SHOULD verify the hash before `dlopen` when the artifact came from anywhere other than a local build — and MUST when it came from a network. It SHOULD also assert `chs_clickhouse_version()` against `manifest.clickhouse_version` after loading, because that catches the one class of corruption a hash cannot: the right bytes in the wrong directory.
 

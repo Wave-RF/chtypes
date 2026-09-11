@@ -153,7 +153,7 @@ A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying
 - **`Transformed` is the product.** ClickHouse never says _"I changed your value"_; chtypes derives that report (`overflow_wrap`, `date_clamp`, `poisoned`, `ttl_expired`, …) and it is not optional.
 - **Over-accepts and over-rejects are both budgeted at zero** in the proof behind the artifacts: a row accepted here and rejected by the server ships before the insert fails; a row rejected here and accepted by the server is silent data loss.
 - **`unsupported` is an answer, never a guess.** A binding surfaces the library's decline; it never papers over one.
-- **The four bindings give one answer.** The golden set is run by all of them, and each is a scored column in the core repository's arbiter at the same agreement as the reference.
+- **The four bindings give one answer.** The golden set is run by all of them, and each is scored against real ClickHouse servers at the same agreement as the reference.
 
 ## What is supported
 
