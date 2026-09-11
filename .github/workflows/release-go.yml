@@ -16,7 +16,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version-file: go/go.mod }
       - run: cd go && go build ./... && go vet ./...
-      - name: the module resolves at this tag through the proxy path
-        run: |
-          echo "tag ${GITHUB_REF_NAME}: module github.com/wave-rf/chtypes/go@${GITHUB_REF_NAME#go/}"
-          echo "consumers: go get github.com/wave-rf/chtypes/go@${GITHUB_REF_NAME#go/}"
+      # A publish step exiting 0 does not mean anyone can install the package.
+      # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
+      # npm served the tarball, and for ~2 of those minutes `latest` resolved to
+      # a version that 404'd. This installs the real thing from the public
+      # registry, with no credentials, and makes it report its ABI revision.
+      - name: it installs from the public registry and speaks ABI revision
+        run: scripts/verify-published.sh go "${GITHUB_REF_NAME#go/v}"

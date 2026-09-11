@@ -30,31 +30,10 @@ jobs:
       - run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
       - name: publish
         run: cd ts && pnpm publish --provenance --access public --no-git-checks
-      # A green publish is not an installable package, and on npm the two can be
-      # minutes apart. Measured on ts/v0.1.1 (issue #10): pnpm printed
-      # "Published" at ~12:17Z, the packument did not list the version until
-      # 12:21Z, and the TARBALL did not serve until ~12:24Z — about seven
-      # minutes, and NOT atomic: for roughly two of those minutes the metadata
-      # advertised a tarball that 404'd, so `latest` resolved to a version
-      # nobody could install. `pnpm publish` sees a 2xx and reports success
-      # through all of it.
-      #
-      # So poll the TARBALL, not the metadata: the tarball is what `npm install`
-      # fetches and it is the half that lags. Anonymously, because a maintainer
-      # token can see a version the public cannot. 15 minutes, because 5 would
-      # have failed spuriously on the one real sample we have.
-      - name: the registry actually serves an installable package
-        run: |
-          ver="${GITHUB_REF_NAME#ts/v}"
-          tgz="https://registry.npmjs.org/@wavehouse/chtypes/-/chtypes-$ver.tgz"
-          for i in $(seq 1 60); do
-            code="$(curl -s -o /dev/null -w '%{http_code}' --no-netrc -H 'Authorization:' "$tgz" || true)"
-            if [ "$code" = "200" ]; then
-              echo "npm serves the @wavehouse/chtypes@$ver tarball after ~$((i*15))s"
-              exit 0
-            fi
-            echo "  attempt $i: tarball HTTP $code"
-            sleep 15
-          done
-          echo "::error::npm accepted the publish but has not served the @wavehouse/chtypes@$ver tarball in 15 minutes, so \`npm install\` fails. If \`latest\` already points at $ver, installs are BROKEN: repoint it with \`npm dist-tag add @wavehouse/chtypes@<last-good> latest\`. The version may also be staged awaiting 2FA approval — \`npm stage list @wavehouse/chtypes\` then \`npm stage approve <stage-id>\` (npm >= 11). See issue #10."
-          exit 1
+      # A publish step exiting 0 does not mean anyone can install the package.
+      # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
+      # npm served the tarball, and for ~2 of those minutes `latest` resolved to
+      # a version that 404'd. This installs the real thing from the public
+      # registry, with no credentials, and makes it report its ABI revision.
+      - name: it installs from the public registry and speaks ABI revision
+        run: scripts/verify-published.sh ts "${GITHUB_REF_NAME#ts/v}"

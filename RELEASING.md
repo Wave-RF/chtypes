@@ -16,6 +16,24 @@ Each workflow refuses a tag whose version does not equal the manifest's,
 builds, and publishes with provenance where the registry supports it. No
 long-lived token is stored for PyPI or crates.io.
 
+**And each one then installs what it just published.** The last step of every
+release workflow is `scripts/verify-published.sh <eco> <version>`: a clean-room
+install from the public registry, with no credentials, followed by importing
+the package and asserting it reports the ABI revision in `include/chtypes.h`.
+The job cannot go green until that passes, retrying for 15 minutes.
+
+This is here because a publish step exiting 0 does not mean anyone can install
+the package. On `ts/v0.1.1` the job went green about seven minutes before npm
+served the tarball, and for two of those minutes `dist-tags.latest` resolved to
+a version that 404'd — a clean `npm install` failed while CI showed a green
+release (issue #10). A publish that never completes looks identical. Presence
+is not the test: the check installs and runs, so it also catches an artifact
+that resolves but does not work, and one whose ABI disagrees with the header.
+
+It fetches anonymously on purpose. A registry can show a maintainer a version
+the public cannot see — `~/.npmrc` carrying a token is what made #10 take three
+wrong turns to diagnose — so the check is made with no credentials in scope.
+
 ## Before the first tag of each package
 
 1. Bump the manifest version (`python/pyproject.toml`, `ts/package.json`,
