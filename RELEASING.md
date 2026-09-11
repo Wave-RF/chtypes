@@ -20,7 +20,7 @@ It fetches anonymously on purpose. A registry can show a maintainer a version th
 ## Before the first tag of each package
 
 1. Bump the manifest version (`python/pyproject.toml`, `ts/package.json`, `rust/Cargo.toml`; Go has none — the tag is the version).
-2. **Regenerate the example lockfiles**, which record the bindings as path dependencies and therefore carry the version: `(cd examples/rust && cargo update -p chtypes)` and `(cd examples/python && uv lock)`. CI runs the four tours with `--locked`, so a stale one fails the `artifacts` job. This is deliberate: `examples/rust/Cargo.lock` sat at `0.1.0` through the whole `0.1.1` release, and `examples/python/uv.lock` missed `0.1.1` *and* `0.1.2`, because nothing resolved them.
+2. **Regenerate the example lockfiles**, which record the bindings as path dependencies and therefore carry the version: `(cd examples/rust && cargo update -p chtypes)` and `(cd examples/python && uv lock)`. CI runs the four tours with `--locked`, so a stale one fails the `artifacts` job. This is deliberate: `examples/rust/Cargo.lock` sat at `0.1.0` through the whole `0.1.1` release, and `examples/python/uv.lock` missed `0.1.1` _and_ `0.1.2`, because nothing resolved them.
 3. `CHANGELOG` entry naming the ABI revision the release speaks (`4` today) and the ClickHouse lines the golden set was generated on.
 4. Run that package's suite against a registry, and `scripts/check-standalone.sh` for Go.
 5. Tag: `git tag go/v0.1.0 && git push origin go/v0.1.0`, etc.
@@ -35,11 +35,11 @@ Push the four tags **one at a time**, and wait for each workflow to go green bef
 
 **Rust first** because it has the most failure surface — a `--locked` build, a `--locked` publish and an OIDC exchange — so a problem stops the sequence while nothing is public yet.
 
-⚠️ **Go last, and this is the one that matters.** A Go module publishes by **the tag existing on a public repository**. `release-go.yml` only *verifies*; it does not publish, and nothing gates it. The instant `git push origin go/v0.1.2` lands, proxy.golang.org can serve it, and it cannot be withdrawn. Every other registry has a workflow between the tag and the public artifact. Go has none, so it goes last, when the other three have already proved the release is good.
+⚠️ **Go last, and this is the one that matters.** A Go module publishes by **the tag existing on a public repository**. `release-go.yml` only _verifies_; it does not publish, and nothing gates it. The instant `git push origin go/v0.1.2` lands, proxy.golang.org can serve it, and it cannot be withdrawn. Every other registry has a workflow between the tag and the public artifact. Go has none, so it goes last, when the other three have already proved the release is good.
 
 None of the four can be taken back: crates.io and PyPI refuse to reuse a version number, and npm the same. A release is a one-way door on all four — the order only decides how much you know before you walk through the last one.
 
-⚠️ **Do not read `release-ts` or `release-rust` failing on an already-published version as broken publishing.** `error: crate chtypes@X already exists` and `[E403] You cannot publish over the previously published versions` are both reached *after* authentication succeeds, so they are the check that the publishers are still configured. Read the error before reporting a problem.
+⚠️ **Do not read `release-ts` or `release-rust` failing on an already-published version as broken publishing.** `error: crate chtypes@X already exists` and `[E403] You cannot publish over the previously published versions` are both reached _after_ authentication succeeds, so they are the check that the publishers are still configured. Read the error before reporting a problem.
 
 ## Registry setup, once each (the owner's console; nothing is stored here)
 
