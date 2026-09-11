@@ -29,7 +29,7 @@ Platform-keyed, one tree per target:
 
 `<os>` is the lowercased OS name (`linux`, `darwin`) and `<arch>` is normalized (`aarch64 → arm64`, `x86_64 → amd64`). Current keys: **`linux-arm64`** (the shipping platform) and **`darwin-arm64`** (a development floor, never an oracle). `linux-amd64` is a build target, not a built artifact, on the current host.
 
-In the core repository the caches live **outside the repository on purpose**: its `dist/out` and `lib/build` are symlinks into `~/.cache/chtypes/`, created by a helper in the core repository, so a worktree costs ~0 GB instead of 1.4 GB and removing a worktree can never destroy hours of C++ compute. Both are gitignored _without_ a trailing slash — a `dist/out/` pattern matches directories only and would leave the symlinks tracked. A loader MUST follow symlinks and MUST NOT assume the registry is inside the repository.
+**A loader MUST follow symlinks and MUST NOT assume the registry is inside any repository.** Build trees commonly symlink their output directories into `~/.cache/chtypes/` so that deleting a checkout cannot destroy hours of C++ compute, which means the path a loader is handed may be a link and the bytes may live anywhere.
 
 Sizes, measured 2026-08-26: 159–288 MiB per `.dylib`, 191–272 MiB per `.so`, and roughly **120 MB resident per loaded version** in a process that dlopens several.
 

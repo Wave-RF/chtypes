@@ -174,7 +174,7 @@ function section1() {
   } catch (err) {
     fatal(
       `open registry ${JSON.stringify(dir)}: ${err.message}\n\n` +
-        'Fetch an artifact first: `scripts/fetch.sh 25.8` (or build one in the core repository).',
+        'Fetch an artifact first: `scripts/fetch.sh 25.8`.',
     );
   }
   const versions = registry.versions();

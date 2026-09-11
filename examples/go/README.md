@@ -12,7 +12,7 @@ go run -tags chtypes_linked .   # or, with prerequisite checks: ../chplay.sh go
 
 ## Prerequisites
 
-- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the repo's the per-user cache (`~/.cache/chtypes/artifacts/<os>-<arch>/`) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`, or build one in the core repository. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
+- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/<os>-<arch>/`) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
 - **cgo**. Sections 9 and 14 (the statically linked shape) additionally need the core repository's `lib/build` on `CGO_LDFLAGS` and the `chtypes_linked` tag; `chplay.sh go` sets both when the sibling is present, and without the tag those two sections say so and skip. They use the static path it provides; everything else goes through the registry.
 - Go 1.27+.
 

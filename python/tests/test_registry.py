@@ -326,7 +326,7 @@ def test_set_default_settings_excludes_the_row_path(newest: chtypes.Library) -> 
     """The one genuinely dangerous call on the ABI, under real contention.
 
     `chs_set_default_settings` REPLACES the seeded settings list wholesale while
-    `chs_row` / `chs_rows` read that same list by reference (the core repository's C ABI specification
+    `chs_row` / `chs_rows` read that same list by reference (the C ABI contract
     §Thread-safety: it "MUST be serialized against all other calls"). ctypes
     releases the GIL for the whole duration of a foreign call, so Python threads
     genuinely can be inside `chs_rows` when a seed lands — the GIL is not the
@@ -485,7 +485,7 @@ def test_library_close_is_refcounted_per_image(tmp_path: Path, registry: chtypes
     # A one-version registry keeps the subprocess cheap: symlink one version
     # in — one this binding can LOAD. Mid-relink a registry legitimately
     # holds artifacts at an older ABI revision, which the loader refuses BY
-    # DESIGN (the core repository's C ABI specification §The ABI revision); refcounting can only be
+    # DESIGN (the C ABI contract §The ABI revision); refcounting can only be
     # measured through an artifact that loads, so stage the newest loadable
     # one and skip only when there is none. The refusal itself is exercised
     # by the loader's own gate, not weakened here.

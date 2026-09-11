@@ -160,7 +160,7 @@ fn section1() -> (Registry, Arc<Library>) {
     let registry = match Registry::from_env_or(&fallback) {
         Ok(r) => r,
         Err(err) => fatal(&format!(
-            "open registry: {err}\n\nFetch an artifact first: `scripts/fetch.sh 25.8` (or build one in the core repository)."
+            "open registry: {err}\n\nFetch an artifact first: `scripts/fetch.sh 25.8`."
         )),
     };
     let versions = registry.versions();

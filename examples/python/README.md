@@ -12,7 +12,7 @@ That is the whole command — `uv` resolves `python` as an editable path depende
 
 ## Prerequisites
 
-- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the repo's the per-user cache (`~/.cache/chtypes/artifacts/<os>-<arch>/`) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`, or build one in the core repository. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
+- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/<os>-<arch>/`) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
 - **uv** (or any Python ≥ 3.11 with `python` installed).
 
 ## Knobs

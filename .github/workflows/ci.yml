@@ -320,6 +320,23 @@ jobs:
       - name: misspell -locale US + wordlist grep, whole tree
         run: scripts/lint-prose.sh
 
+  public:
+    # BLOCKING, and a pure function of the diff. This repository is public; a
+    # pointer into the private core repository is a dead end for every reader
+    # who is not us. The rules are two literal strings with no allowlist, so
+    # there is nothing to quietly grow — see scripts/lint-public.sh for why it
+    # exists and what to write instead.
+    name: "public — no pointers into the private repository"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The selftest runs FIRST and in the same job: a rule that matches
+      # nothing passes silently, which is the exact failure this check exists
+      # to prevent, so prove both rules fire before trusting either verdict.
+      - run: scripts/lint-public.sh --selftest
+      - run: scripts/lint-public.sh
+
   prose:
     # BLOCKING. It was report-only while the tree was still hard-wrapped, which
     # was a reason to format the tree rather than to exempt the rule. dprint fmt

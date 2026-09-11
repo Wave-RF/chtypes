@@ -10,7 +10,7 @@ cargo run           # or, with prerequisite checks: ../chplay.sh rust
 
 ## Prerequisites
 
-- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the repo's the per-user cache (`~/.cache/chtypes/artifacts/<os>-<arch>/`) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`, or build one in the core repository. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
+- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/<os>-<arch>/`) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
 - Rust 1.85+ (the binding is edition 2024), and a **Unix** host: the loader is `dlopen`, and `rust` has a `compile_error!` for anything else.
 
 ## Knobs

@@ -1,7 +1,7 @@
 // Package chtypes is ClickHouse's own C++ type machinery, vendored, wrapped
 // in a C API, bound to Go via cgo.
 //
-// The surface is docs/reference/bindings.md; the C contract underneath is the core repository's C ABI specification.
+// The surface is docs/reference/bindings.md; the C contract underneath is the C ABI contract.
 // Everything semantic — type parsing, canonicalization, coercion, error codes
 // — is executed by real ClickHouse code compiled from the pinned release, so
 // it is exact by construction rather than reimplemented. Nothing in this
@@ -265,7 +265,7 @@ func parseDefaultKind(s string) DefaultKind {
 
 // Format selects the input encoding of a row. The numeric values are the C
 // ABI's enum chs_format codes and are FROZEN — bindings pass the integers
-// across the boundary (the core repository's C ABI specification §Types and schemas), so they must never
+// across the boundary (the C ABI contract §Types and schemas), so they must never
 // be renumbered.
 //
 // CSV, TSV, Values and JSONCompactEachRow are POSITIONAL: the k-th field
@@ -307,7 +307,7 @@ const (
 	// at the revision `INSERT ... FORMAT Native` uses (0), so there is no
 	// BlockInfo prefix and no per-column serialization-kind byte; blocks taken
 	// off a live TCP connection carry both and are a different contract
-	// (the core repository's C ABI specification §Native).
+	// (the C ABI contract §Native).
 	//
 	// Because the stream carries names and types, the declared schema and the
 	// payload can disagree — and ClickHouse's own resolution is not uniformly
@@ -345,7 +345,7 @@ const (
 const ExportNone Format = -1
 
 // DocFlags selects which document GROUPS the per-row documents carry
-// (the core repository's C ABI specification §Document flags). The verdict channel — batch and per-row
+// (the C ABI contract §Document flags). The verdict channel — batch and per-row
 // outcome/code/err, rows_read, rows_skipped, unsupported_settings,
 // engine_rows, storage_transforms — is ALWAYS emitted and is not a flag.
 // DocAll reproduces the full document Rows() returns, byte-for-byte at the C
@@ -354,7 +354,7 @@ const ExportNone Format = -1
 // refused loudly by the library (the whole call answers unsupported) — pass
 // flags through, never pre-validate them here.
 //
-// The cost asymmetry, so callers can reason (the core repository's C ABI specification §Document flags):
+// The cost asymmetry, so callers can reason (the C ABI contract §Document flags):
 // DocValues without DocTransforms skips the reference second-parse and the
 // wire round trip C-side — real compute saved, and detectors 2/3 have
 // nothing to run on (ref is null, no wire; that is the caller's choice, not
@@ -394,7 +394,7 @@ type Span struct {
 
 // Outcome is the verdict on one row (or one batch). Key on it, never on the
 // error code alone: a row-level Unsupported can carry ErrCode 0
-// (the core repository's C ABI specification §Top-level fields).
+// (the C ABI contract §Top-level fields).
 type Outcome int
 
 const (
@@ -586,7 +586,7 @@ func (e *SchemaError) Error() string {
 // "is a SchemaError" would be the sentinel problem wearing a type hierarchy:
 // every caller that forgot to check the predicate would keep silently turning
 // declines into rejections, which is a manufactured over-reject — data loss the
-// product never made, budgeted at zero (the core repository's C ABI specification "Error model"). As a peer,
+// product never made, budgeted at zero (the C ABI contract "Error model"). As a peer,
 // forgetting produces an unhandled error, which is loud.
 //
 // Callers switch on the type, never on a code:
@@ -625,7 +625,7 @@ const CodeUnsupported = -2
 // schemaErr is the ONE place an ABI error code becomes a Go error, so the
 // refusal/decline split cannot be decided differently in two files.
 //
-// The SIGN decides (docs/reference/bindings.md rule 12, the core repository's C ABI specification "Error model"):
+// The SIGN decides (docs/reference/bindings.md rule 12, the C ABI contract "Error model"):
 // a positive code is the server's own refusal and rides through verbatim; any
 // negative code is this library declining (-2 "I will not guess", -1 a guarded
 // exception, -3 the dlopen shim's missing-symbol sentinel) and becomes an
@@ -646,7 +646,7 @@ var Timezone = "UTC"
 
 // ABIRevision is the chs_* ABI revision this package was COMPILED against —
 // CHS_ABI_REVISION from chtypes.h, read through cgo so the two can never drift.
-// The artifact reports its own with chs_abi_revision(); see the core repository's C ABI specification
+// The artifact reports its own with chs_abi_revision(); see the C ABI contract
 // §ABI identity. A dlopen'd Library reports the loaded artifact's revision
 // through Library.ABIRevision, which is 0 when the artifact predates the probe.
 const ABIRevision = 4
@@ -675,7 +675,7 @@ type CompileOption func(*compileConfig)
 
 // WithCompileSettings declares a DECLARED settings profile — the settings
 // the deployment's server runs, fixed into the handle at compile time
-// exactly as a real CREATE TABLE fixes them into the table (the core repository's C ABI specification
+// exactly as a real CREATE TABLE fixes them into the table (the C ABI contract
 // §Compile-time settings). A nil or empty map is IDENTICAL to omitting the
 // option entirely.
 //
@@ -905,7 +905,7 @@ type filterConfig struct {
 // deserialized by the DECLARED type's own reader and injected as a typed
 // literal AFTER SQL parsing, so a value is never SQL text and NEVER needs
 // hand-escaping — injection safety is by construction, not by escaping
-// (the core repository's C ABI specification §Filters, Query parameters). Do not render values into the
+// (the C ABI contract §Filters, Query parameters). Do not render values into the
 // expression yourself.
 //
 // CHOOSE THE BRACE TYPE FOR THE VALUE'S DOMAIN. A bound value follows the
@@ -964,7 +964,7 @@ type BatchResult struct {
 	// ClickHouse's own output writer for the requested export format, copied
 	// out of the C buffer and freed before this call returns — no ownership
 	// crosses the boundary. Three states, and the distinction is the ABI's
-	// own (the core repository's C ABI specification §Rows):
+	// own (the C ABI contract §Rows):
 	//
 	//	nil            no export was requested, the export was DECLINED
 	//	               (ExportDeclined then names the reason), or a
@@ -1007,7 +1007,7 @@ type batchDoc struct {
 	// column DEFAULT). Folded into BatchResult.Transformed.
 	StorageTransforms []storageTransformDoc `json:"storage_transforms"`
 	// RowSpans: present exactly when export bytes were emitted — one
-	// {off,len} per rows[] entry, index-aligned (the core repository's C ABI specification §Rows).
+	// {off,len} per rows[] entry, index-aligned (the C ABI contract §Rows).
 	RowSpans []Span `json:"row_spans"`
 	// ExportDeclined: present exactly when an export was requested and
 	// withheld, carrying the reason; absent otherwise.

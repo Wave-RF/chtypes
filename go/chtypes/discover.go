@@ -20,7 +20,7 @@
 //
 // Never ask the customer for their settings — ask their server. The queries
 // return exactly what the server believes, spelled the way the server spells
-// it, which is what the settings gate (the core repository's C ABI specification, Settings rule 2)
+// it, which is what the settings gate (the C ABI contract, Settings rule 2)
 // validates against.
 package chtypes
 

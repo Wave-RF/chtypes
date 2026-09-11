@@ -1,7 +1,7 @@
 /**
  * The `chs_format` integer codes — the wire format of the bytes handed to
  * `Schema#row` / `Schema#rows`. These numbers are part of the C ABI
- * (the core repository's C ABI specification §Types and schemas) and MUST NOT be renumbered.
+ * (the C ABI contract §Types and schemas) and MUST NOT be renumbered.
  *
  * Name-addressed: `JSONEachRow`. Positional (the k-th field lands in the k-th
  * insertable column; MATERIALIZED / ALIAS / EPHEMERAL occupy no position):
@@ -39,7 +39,7 @@ export const Format = {
    * sends on INSERT. Modeled at the revision `INSERT ... FORMAT Native` uses
    * (0): no BlockInfo prefix and no per-column serialization-kind byte. Blocks
    * taken off a live TCP connection carry both and are a different contract
-   * (the core repository's C ABI specification §Native). Requires an artifact built at or after the Native
+   * (the C ABI contract §Native). Requires an artifact built at or after the Native
    * exposure — probe it, do not assume it from this package's version.
    */
   Native: 8,
@@ -74,7 +74,7 @@ export const EXPORT_NONE = -1;
 
 /**
  * The `doc_flags` bits (`CHS_DOC_*`, revision 3) — which document GROUPS the
- * per-row documents carry (the core repository's C ABI specification §Document flags). The verdict
+ * per-row documents carry (the C ABI contract §Document flags). The verdict
  * channel (batch and per-row outcome/code/err, rows_read, rows_skipped,
  * unsupported_settings, engine_rows, storage_transforms) is ALWAYS emitted
  * and is not a flag. `DOC_ALL` is today's full document; `0` is "lean"

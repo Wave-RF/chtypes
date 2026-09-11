@@ -21,7 +21,7 @@ chtypes answers one question — _"if this row were inserted into this table on 
 | `ts/`     | `cd ts && pnpm install && pnpm demo` |
 | `rust/`   | `cd rust && cargo run`               |
 
-All four read `$CHTYPES_REGISTRY` (default: the per-user cache) and honor `$CHTYPES_VERSION` (any spelling: `25.8`, `25.8.28.1-lts`; default: the newest line held). No artifacts yet? `../scripts/fetch.sh 25.8`, or build one in the core repository. With only one version built, everything still runs — the cross-version sweeps in section 12 degrade gracefully and say so.
+All four read `$CHTYPES_REGISTRY` (default: the per-user cache) and honor `$CHTYPES_VERSION` (any spelling: `25.8`, `25.8.28.1-lts`; default: the newest line held). No artifacts yet? `../scripts/fetch.sh 25.8`. With only one version built, everything still runs — the cross-version sweeps in section 12 degrade gracefully and say so.
 
 These are examples, not tests. The real suites live inside each binding (`../{go,python,ts,rust}/`) and the rigs (core: `tests/`). If a tour and a binding's test suite disagree, believe the test suite — then file the tour bug.
 
@@ -62,4 +62,4 @@ The tours print these differences rather than hiding them:
 
 ## History
 
-An earlier revision of these playgrounds (nine sections, live-server discovery) surfaced five cross-SDK inconsistencies in August 2026; all five were fixed in the library, the SDKs and the spec on 2026-08-26. The findings and their outcomes are recorded in `docs/reference/bindings.md` (§Teardown, §Concurrency, rule 12) and the core repository's C ABI specification (§Compile-time vs per-call settings), which is where the normative story lives.
+An earlier revision of these playgrounds (nine sections, live-server discovery) surfaced five cross-SDK inconsistencies in August 2026; all five were fixed in the library, the SDKs and the spec on 2026-08-26. The findings and their outcomes are recorded in `docs/reference/bindings.md` (§Teardown, §Concurrency, rule 12) and the C ABI contract (§Compile-time vs per-call settings), which is where the normative story lives.

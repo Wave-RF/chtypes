@@ -34,7 +34,7 @@ export interface ColumnInfo {
 export interface EngineOptions {
   /**
    * The `SETTINGS` clause after the engine — `allow_nullable_key` and friends,
-   * a namespace `DB::Settings` cannot carry (the core repository's C ABI specification §`chs_schema_engine`).
+   * a namespace `DB::Settings` cannot carry (the C ABI contract §`chs_schema_engine`).
    * Absent or empty is structurally identical to the plain engine declaration:
    * `chs_schema_engine` takes "{}" either way. Names are validated by the
    * server's own `MergeTreeSettings` object: an unknown name throws the
@@ -49,7 +49,7 @@ export interface EngineOptions {
 
 /**
  * Options for `Schema#rows` — the revision-3 export and document-flag
- * channels (the core repository's C ABI specification §Rows; docs/proposals/rows-export.md). Whatever the
+ * channels (the C ABI contract §Rows; docs/proposals/rows-export.md). Whatever the
  * options, `rows()` is always ONE `chs_rows` call — never a second call,
  * never re-parsing.
  */
@@ -84,7 +84,7 @@ export interface CompileFilterOptions {
    * deserialized by the DECLARED type's own reader and injected as a typed
    * literal AFTER SQL parsing, so a value is never SQL text and NEVER needs
    * hand-escaping — injection safety is by construction, not by escaping
-   * (the core repository's C ABI specification §Filters, Query parameters). Do not render values into
+   * (the C ABI contract §Filters, Query parameters). Do not render values into
    * the expression yourself.
    *
    * CHOOSE THE BRACE TYPE FOR THE VALUE'S DOMAIN: the declared type's own
@@ -132,12 +132,12 @@ export class Schema {
   /**
    * Every open `Filter` compiled from this handle, so `close()` can free them
    * FIRST — the C layer does not refcount, and freeing the schema under a
-   * live filter is use-after-free (the core repository's C ABI specification §Filters, handle lifetime).
+   * live filter is use-after-free (the C ABI contract §Filters, handle lifetime).
    */
   private readonly filters = new Set<Filter>();
   /**
    * Every open `Block` parsed from this handle — the same non-owning rule,
-   * the same free-before-schema order (the core repository's C ABI specification §Blocks).
+   * the same free-before-schema order (the C ABI contract §Blocks).
    */
   private readonly blocks = new Set<Block>();
 
@@ -290,7 +290,7 @@ export class Schema {
    * the same TreeRewriter + ExpressionAnalyzer pipeline the CONSTRAINT CHECK
    * path runs, so comparison semantics are WHERE-side by construction:
    * `x = 256` over UInt8 promotes (false for every row), it never wraps
-   * (the core repository's C ABI specification §Filters).
+   * (the C ABI contract §Filters).
    *
    * The expression may contain `{name:Type}` query parameters, bound with
    * `options.params` (revision 4) — substitution is the server's own
@@ -336,7 +336,7 @@ export class Schema {
   /**
    * Parse a body ONCE into a `Block` (`chs_block_parse`) — the parse half of
    * `Filter#rows`, exported so K filters can evaluate one event with no
-   * re-parse (`Filter#eval`; the core repository's C ABI specification §Blocks). Same formats and
+   * re-parse (`Filter#eval`; the C ABI contract §Blocks). Same formats and
    * settings contract as `rows` (`settings` is the PARSE-side map: format
    * settings, clock keys; evaluation takes none). Volatile DEFAULTs resolve
    * against THIS call's clock instant, so
@@ -401,7 +401,7 @@ export class Schema {
  * constructed directly.
  *
  * LIFETIME: a filter REFERENCES its schema handle — the C layer does not copy
- * and does not refcount (the core repository's C ABI specification §Filters). This binding enforces the
+ * and does not refcount (the C ABI contract §Filters). This binding enforces the
  * free order structurally, both ways: the `Filter` holds its `Schema` (so the
  * schema stays reachable), and `Schema#close` closes every open filter before
  * freeing the schema. `close()` is idempotent, and `using` / `Symbol.dispose`
@@ -419,7 +419,7 @@ export class Schema {
  * ENFORCEMENT GATE: `'error'` and `'decline'` verdicts are NOT answers — a
  * caller enforcing visibility MUST fail closed on both — and NO caller may
  * enforce read-side security on this surface until the WHERE-truth rig gates
- * green; until then it is a shadow/replay surface (the core repository's C ABI specification §Filters).
+ * green; until then it is a shadow/replay surface (the C ABI contract §Filters).
  */
 export class Filter {
   private handle: FilterHandle | null;
@@ -507,7 +507,7 @@ export class Filter {
  * One body, parsed ONCE under one schema handle and one clock instant
  * (`chs_block_parse`). Obtained from `Schema#parseBlock`; evaluated by
  * `Filter#eval`. The parse-once/eval-many twin of `Filter#rows`
- * (the core repository's C ABI specification §Blocks): the live-SSE hot path is K filters × 1 event, and
+ * (the C ABI contract §Blocks): the live-SSE hot path is K filters × 1 event, and
  * the block sheds the re-parse.
  *
  * LIFETIME: a block REFERENCES its schema handle exactly as a filter does —

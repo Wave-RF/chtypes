@@ -236,7 +236,7 @@ func ValidateType(v Version, typeExpr string) (canonical string, err error) {
 			msg = C.GoString(cErr)
 			C.chs_free(cErr)
 		}
-		// The RETURN VALUE carries the code (the core repository's C ABI specification: every out param
+		// The RETURN VALUE carries the code (the C ABI contract: every out param
 		// is optional); out_code is the convenience copy. Prefer whichever is
 		// nonzero, so the guarded-exception corner (rc=-1 with out_code=0)
 		// still funnels as the decline it is rather than "a refusal, code 0".
@@ -273,11 +273,11 @@ type CompiledSchema struct {
 	mu     sync.Mutex
 	// filters tracks every open Filter compiled from this handle, so Close
 	// can free them FIRST — the C layer does not refcount, and freeing the
-	// schema under a live filter is use-after-free (the core repository's C ABI specification §Filters,
+	// schema under a live filter is use-after-free (the C ABI contract §Filters,
 	// handle lifetime). Guarded by mu.
 	filters map[*Filter]struct{}
 	// blocks tracks every open Block parsed from this handle — the same
-	// non-owning rule, the same free-before-schema order (the core repository's C ABI specification
+	// non-owning rule, the same free-before-schema order (the C ABI contract
 	// §Blocks). Guarded by mu.
 	blocks map[*Block]struct{}
 }
@@ -431,7 +431,7 @@ func (cs *CompiledSchema) SetEngine(engine, orderBy string, opts ...EngineOption
 		msg = C.GoString(cErr)
 		C.chs_free(cErr)
 	}
-	// The sign of rc is the whole rule (docs/reference/bindings.md, the core repository's C ABI specification
+	// The sign of rc is the whole rule (docs/reference/bindings.md, the C ABI contract
 	// "Error model"). A POSITIVE rc is a real ClickHouse error code: the
 	// server's own engine validation REFUSED this DDL, so the table can never
 	// exist and no data and no retry will change that — a tenant has to be
@@ -505,7 +505,7 @@ func (cs *CompiledSchema) Close() {
 // row), it never wraps.
 //
 // LIFETIME: a Filter references its schema handle; the C layer does not
-// refcount (the core repository's C ABI specification §Filters). This binding enforces the free order
+// refcount (the C ABI contract §Filters). This binding enforces the free order
 // structurally, both ways: the Filter holds its *CompiledSchema (so the
 // schema finalizer cannot run first — Go runs finalizers in dependency
 // order), and CompiledSchema.Close closes every open Filter before freeing
@@ -521,7 +521,7 @@ func (cs *CompiledSchema) Close() {
 //
 // ENFORCEMENT GATE: nothing may enforce read-side security on this surface
 // until the WHERE-truth rig gates green (zero over-admit, zero over-hide);
-// until then it is a shadow/replay surface (the core repository's C ABI specification §Filters).
+// until then it is a shadow/replay surface (the C ABI contract §Filters).
 type Filter struct {
 	// Expr is the expression text as compiled, for logging and cache keys.
 	Expr string
@@ -658,7 +658,7 @@ func (f *Filter) closeLocked() {
 // Block is one body, parsed ONCE under one schema handle and one clock
 // instant (chs_block_parse) — the parse half of Filter.Rows, exported so K
 // filters can evaluate one event without re-parsing it (the live-SSE call
-// shape; the core repository's C ABI specification §Blocks). Per-row parse failures are recorded IN the
+// shape; the C ABI contract §Blocks). Per-row parse failures are recorded IN the
 // block (those rows answer VerdictDecline with the recorded error from every
 // filter); a call-level failure (unknown setting 115, an unsplittable body, a
 // binary decode fault, the deferred JSONEachRow framing verdict) fails
@@ -840,7 +840,7 @@ func (cs *CompiledSchema) Rows(format Format, body []byte, settings map[string]s
 
 // RowsExport is Rows with the revision-3 export and document-flag channels
 // exposed: ONE chs_rows call, never a second, never re-parsing
-// (docs/proposals/rows-export.md; the core repository's C ABI specification §Rows is normative).
+// (docs/proposals/rows-export.md; the C ABI contract §Rows is normative).
 //
 // exportFormat is ExportNone (no bytes; the docFlags still thin the
 // document) or a Format this artifact can SERIALIZE — this revision exactly
@@ -1015,7 +1015,7 @@ func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings ma
 // particular tenant's table: a gate declared in the compile profile binds
 // where a real server binds it — once, at CREATE — and then outranks the
 // per-call map for that handle, so an insert that does not repeat the gate
-// is not refused (measured on live 25.10.7.6 and 26.7.3.19; the core repository's C ABI specification,
+// is not refused (measured on live 25.10.7.6 and 26.7.3.19; the C ABI contract,
 // "Server-level type gates"). This process-wide seed stays the right channel
 // only for gateway-uniform policy.
 func SetDefaultSettings(settings map[string]string) error {

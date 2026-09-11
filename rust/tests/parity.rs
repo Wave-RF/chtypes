@@ -367,7 +367,7 @@ fn rust_values() -> BTreeMap<&'static str, Val> {
     use chtypes::{CompileMode, DocFlags, Format, Outcome, reason};
     let mut m = BTreeMap::new();
 
-    // chs_format — the numbers are frozen (the core repository's C ABI specification §Types and schemas).
+    // chs_format — the numbers are frozen (the C ABI contract §Types and schemas).
     m.insert("Format::JsonEachRow", i(Format::JsonEachRow as i64));
     m.insert("Format::Csv", i(Format::Csv as i64));
     m.insert("Format::Tsv", i(Format::Tsv as i64));

@@ -7,8 +7,8 @@ RFC 8032 spells it: point decoding with the sign-bit recovery, extended
 coordinates for the group law, and the ``[S]B = R + [k]A`` equation.
 
 Only verification. There is no signing here and never will be: the private
-half lives in the core repository's publish step. Verification is not
-secret-dependent, so the constant-time concerns of a signer do not apply.
+half is held offline and never leaves the release pipeline. Verification is
+not secret-dependent, so the constant-time concerns of a signer do not apply.
 
 A verifier costs two ~253-bit scalar multiplications — a few milliseconds
 per signature, once per fetch. Tested against RFC 8032's own vectors and the

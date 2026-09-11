@@ -1278,7 +1278,7 @@ fn a_rebuild_installs_the_highest_build() {
     assert!(
         !cases.is_empty(),
         "expected.json carries no builds.cases — regenerate the fixtures \
-         (chtypes-core: just fetch-fixtures)"
+         from the release pipeline"
     );
 
     let index: Json = serde_json::from_slice(

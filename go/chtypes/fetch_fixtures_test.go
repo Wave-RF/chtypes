@@ -298,7 +298,7 @@ func TestFixturesLock(t *testing.T) {
 func TestFixturesRebuildInstallsTheHighestBuild(t *testing.T) {
 	dir, exp := fixtureDir(t)
 	if len(exp.Builds.Cases) == 0 {
-		t.Skip("expected.json carries no builds.cases — regenerate the fixtures (chtypes-core: just fetch-fixtures)")
+		t.Skip("expected.json carries no builds.cases — regenerate the fixtures from the release pipeline")
 	}
 	var index struct {
 		Artifacts []ReleaseArtifact `json:"artifacts"`

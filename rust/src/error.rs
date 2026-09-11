@@ -60,7 +60,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Everything that can go wrong loading an artifact or asking it a question.
 ///
 /// Three different answers travel through this one type, and a caller must
-/// keep them apart (the core repository's C ABI specification §Error model):
+/// keep them apart (the C ABI contract §Error model):
 ///
 /// * **A rejection** — [`Error::Schema`]: ClickHouse itself refused, with its
 ///   own code and message. The DDL or profile can never exist on that server
@@ -283,7 +283,7 @@ pub enum Error {
     /// libraries were paired in an eval — refused here, because no handle
     /// ever crosses a `dlopen`'d image boundary. A pair from two schemas of
     /// the SAME library is NOT this error: the C layer itself answers that
-    /// with a rejected result document, code 1002 (the core repository's C ABI specification §Blocks).
+    /// with a rejected result document, code 1002 (the C ABI contract §Blocks).
     #[error(
         "chtypes: filter (ClickHouse {filter_version}) and block (ClickHouse {block_version}) \
          come from different libraries"
@@ -421,7 +421,7 @@ impl Error {
     }
 
     /// Build the right variant from a C code. The SIGN decides
-    /// (docs/reference/bindings.md rule 12, the core repository's C ABI specification §Error model): a positive
+    /// (docs/reference/bindings.md rule 12, the C ABI contract §Error model): a positive
     /// code is the server's own refusal and rides through verbatim; ANY
     /// negative code is this library declining — `-2` "I will not guess",
     /// `-1` a guarded exception, and any sentinel a later era adds — and
