@@ -193,15 +193,15 @@ class Schema:
         self._handle: int | None = handle
         # Every open Filter compiled from this handle, so close() can free
         # them FIRST — the C layer does not refcount, and freeing the schema
-        # under a live filter is use-after-free (the core repository's C ABI specification §Filters,
+        # under a live filter is use-after-free (the C ABI contract §Filters,
         # handle lifetime). A WeakSet: an abandoned Filter's own __del__
         # frees its handle, and this set never keeps one alive.
         self._filters: weakref.WeakSet[Filter] = weakref.WeakSet()
         # Every open Block parsed from this handle — the same non-owning
-        # rule, the same free-before-schema order (the core repository's C ABI specification §Blocks).
+        # rule, the same free-before-schema order (the C ABI contract §Blocks).
         self._blocks: weakref.WeakSet[Block] = weakref.WeakSet()
         # ONE handle is single-threaded, by the ABI: "a single chs_schema *
-        # MUST NOT be used from two threads at once" (the core repository's C ABI specification
+        # MUST NOT be used from two threads at once" (the C ABI contract
         # §Thread-safety). The library's readers-writer lock deliberately lets
         # row calls on DISTINCT handles run together — that is the whole point
         # of it being an RWLock — so the per-handle exclusion has to live here,
@@ -370,7 +370,7 @@ class Schema:
         `BatchResult.rows` as `Outcome.SKIPPED`, carrying the server's own
         caught error verbatim (2026-08-27).
 
-        **The revision-3 export channel** (the core repository's C ABI specification §Rows;
+        **The revision-3 export channel** (the C ABI contract §Rows;
         docs/proposals/rows-export.md) — still ONE `chs_rows` call, never a
         second, never re-parsing:
 
@@ -426,7 +426,7 @@ class Schema:
         compares as exactly that literal. The compiled handle bakes the
         values in (identity is per (schema, expr, params)); a caller
         compiling filters from tenant-influenced values MUST bound its cache
-        (LRU) and its compile rate per principal (the core repository's C ABI specification §Filters).
+        (LRU) and its compile rate per principal (the C ABI contract §Filters).
 
         CHOOSE THE BRACE TYPE FOR THE VALUE'S DOMAIN: the declared type's
         own reader WRAPS an out-of-domain integer — `{p:UInt8}` given "256"
@@ -470,7 +470,7 @@ class Schema:
     def parse_block(self, fmt: Format, body: bytes, settings: Settings | None = None) -> Block:
         """Parse a body ONCE into a `Block` (`chs_block_parse`) — the parse
         half of `Filter.rows`, exported so K filters can evaluate one event
-        with no re-parse (`Filter.eval`; the core repository's C ABI specification §Blocks). Same formats
+        with no re-parse (`Filter.eval`; the C ABI contract §Blocks). Same formats
         and settings contract as `rows` (`settings` is the PARSE-side map:
         format settings, clock keys; evaluation takes none). Volatile
         DEFAULTs resolve against THIS call's clock instant, so
@@ -524,7 +524,7 @@ class Filter:
 
     ENFORCEMENT GATE: nothing may enforce read-side security on this surface
     until the WHERE-truth rig gates green (zero over-admit, zero over-hide);
-    until then it is a shadow/replay surface (the core repository's C ABI specification §Filters).
+    until then it is a shadow/replay surface (the C ABI contract §Filters).
     """
 
     __slots__ = ("__weakref__", "_handle", "_schema", "expr")
@@ -627,7 +627,7 @@ class Block:
     """One body, parsed ONCE under one schema handle and one clock instant.
 
     Obtained from `Schema.parse_block`; evaluated by `Filter.eval`. The
-    parse-once/eval-many twin of `Filter.rows` (the core repository's C ABI specification §Blocks): the
+    parse-once/eval-many twin of `Filter.rows` (the C ABI contract §Blocks): the
     live-SSE call shape is K filters x 1 event, and the block sheds the
     re-parse. Per-row parse failures are recorded IN the block (those rows
     answer `Verdict.DECLINE` from every filter); a call-level failure raised
@@ -850,7 +850,7 @@ class Library:
 
         With `settings`, compile under a DECLARED settings profile — the
         settings the deployment's server runs, fixed into the handle at compile
-        exactly as a real CREATE TABLE fixes them into the table (the core repository's C ABI specification
+        exactly as a real CREATE TABLE fixes them into the table (the C ABI contract
         §Compile-time vs per-call settings). Values cross the boundary as
         strings, like every settings map on this ABI.
 
@@ -900,7 +900,7 @@ class Library:
         particular tenant's table: a gate declared in the compile profile binds
         where a real server binds it — once, at CREATE — and then outranks the
         per-call map for that handle (measured on live 25.10.7.6 and 26.7.3.19;
-        the core repository's C ABI specification, "Server-level type gates"). This process-wide seed stays
+        the C ABI contract, "Server-level type gates"). This process-wide seed stays
         the right channel only for gateway-uniform policy.
 
         Raises `ChtypesError` on refusal, with ClickHouse's own message —
@@ -947,7 +947,7 @@ class Library:
 
         When it does reach the C boundary it takes the loaded image's lock
         EXCLUSIVELY, like `set_default_settings` — `chs_shutdown` is the
-        other call the core repository's C ABI specification §Thread-safety requires be serialized
+        other call the C ABI contract §Thread-safety requires be serialized
         against everything else.
         """
         with _IMAGES_MU:

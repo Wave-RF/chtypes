@@ -1,7 +1,7 @@
 """Raw-preserving JSON, because the result documents carry values Python's own
 types cannot hold without changing them.
 
-Three of them, all paid for (the core repository's C ABI specification "The row result document"):
+Three of them, all paid for (the C ABI contract "The row result document"):
 
 * ClickHouse integers go to 2**256. Decoding `18446744073709551615` into a
   float yields `18446744073709552000`, and an `Int256` yields
@@ -18,7 +18,7 @@ Three of them, all paid for (the core repository's C ABI specification "The row 
   renders that way) yields `{"1":2}`, and ClickHouse's `"\\u000B"` comes back as
   `"\\u000b"`. Both are silent value differences invented by this binding, and
   both were measured: 52 and 11 cases of 34,619 in the Python-vs-Go differential
-  (chtypes-core/tests/conformance/python/README.md, classes B and C).
+  (the conformance suite, classes B and C).
 
 So nothing is ever rendered back. `decode_document` scans the document once and
 keeps, for every member of every container, the **exact source span** the

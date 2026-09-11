@@ -138,7 +138,7 @@ type FnFilterRows = unsafe extern "C" fn(
 ) -> *mut c_char;
 /// The revision-4 block twin: parse a body once (`chs_block_parse`), evaluate
 /// K filters against the block (`chs_filter_eval`), free it
-/// (`chs_block_free`). the core repository's C ABI specification §Blocks.
+/// (`chs_block_free`). The C ABI contract §Blocks.
 type FnBlockParse = unsafe extern "C" fn(
     *const ChsSchema,
     c_int,
@@ -241,7 +241,7 @@ impl Api {
             let f_compile = require(&lib, b"chs_schema_compile\0", path)?;
             let f_rows = require(&lib, b"chs_rows\0", path)?;
 
-            // The ABI identity gate (the core repository's C ABI specification §ABI identity). Optional:
+            // The ABI identity gate (the C ABI contract §ABI identity). Optional:
             // 0 means the artifact predates the probe, which is ignorance and
             // keeps the per-symbol degradation rules. A DIFFERENT nonzero
             // revision positively states that these declarations do not
@@ -476,7 +476,7 @@ impl Api {
     /// MergeTree-namespace settings (the `SETTINGS` clause after the engine),
     /// in one call. `merge_tree_settings_json` NULL/`"{}"` declares none.
     ///
-    /// Per the core repository's C ABI specification's error model, two DIFFERENT KINDS of verdict, told
+    /// Per the C ABI contract's error model, two DIFFERENT KINDS of verdict, told
     /// apart by the SIGN of the return: any POSITIVE rc is a real ClickHouse
     /// error code — the server's own refusal of this DDL, which can therefore
     /// never exist — and crosses as [`Error::Schema`] with that code and the

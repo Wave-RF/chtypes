@@ -1,6 +1,6 @@
 [package]
 name = "chtypes"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
@@ -20,7 +20,7 @@ serde = { version = "1", features = ["derive"] }
 # It deliberately does NOT read result documents. `raw_value` was the analog of
 # Go's json.RawMessage here, but serde_json cannot parse a document at all when a
 # String column's bytes are not valid UTF-8 — which is how this crate came to
-# retry through `String::from_utf8_lossy` and destroy the bytes the core repository's C ABI specification
+# retry through `String::from_utf8_lossy` and destroy the bytes the C ABI contract
 # calls authoritative. `crate::doc` reads those documents over `&[u8]`, and
 # `crate::json` compares leaf text exactly; `arbitrary_precision` is not enabled
 # for the same reason it never was (see those modules' docs).

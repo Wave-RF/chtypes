@@ -1,7 +1,7 @@
 //go:build chtypes_linked
 
 // linked_abi_check.go — the dlopen-only build hardcodes the ABI's frozen
-// numbers (the core repository's C ABI specification §Frozen: enum chs_format, CHS_DOC_*,
+// numbers (the C ABI contract §Frozen: enum chs_format, CHS_DOC_*,
 // CHS_CODE_UNSUPPORTED, CHS_EXPORT_NONE, CHS_ABI_REVISION) exactly as the
 // Python, TypeScript and Rust bindings do, because it never sees chtypes.h.
 // This file, compiled only with the linked path, pins every one of those

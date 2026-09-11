@@ -8,7 +8,7 @@
  *    bytes and passes everything else through). Decoding that document into a JS
  *    string replaces every invalid byte with U+FFFD, which then reads downstream
  *    as a silent transformation that never happened — an *invented* answer, the
- *    failure mode this product exists to prevent (the core repository's C ABI specification §Per-column
+ *    failure mode this product exists to prevent (the C ABI contract §Per-column
  *    fields: "`stored` and `ref` MUST be handled as raw bytes / raw JSON"; the
  *    reference implementation keeps `json.RawMessage`). So the document is parsed
  *    from a `Buffer`, and every value remembers the exact slice it was cut from.
@@ -477,7 +477,7 @@ export function repairBareDenormals(text: Buffer): Buffer {
 //
 // Every field of a result document is optional: a rejected row's document omits
 // `unknown_fields`, `unsupported_settings` and `computed` entirely and carries
-// `"cols":[]` (the core repository's C ABI specification §Top-level fields). A binding must therefore treat
+// `"cols":[]` (the C ABI contract §Top-level fields). A binding must therefore treat
 // each field as optional-with-a-default rather than requiring it.
 
 /**

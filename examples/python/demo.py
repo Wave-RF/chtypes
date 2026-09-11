@@ -157,7 +157,7 @@ def section1() -> tuple[Registry, chtypes.Library]:
     try:
         registry = Registry(directory)
     except chtypes.RegistryError as err:
-        fatal(f"open registry {directory!r}: {err}\n\nFetch an artifact first: `scripts/fetch.sh 25.8` (or build one in the core repository).")
+        fatal(f"open registry {directory!r}: {err}\n\nFetch an artifact first: `scripts/fetch.sh 25.8`.")
 
     versions = list(registry.versions())
     kv("registry dir", directory)

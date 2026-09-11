@@ -41,7 +41,7 @@
 //! ```
 //!
 //! The queries return exactly what the server believes, spelled the way the
-//! server spells it, which is what the settings gate (the core repository's C ABI specification,
+//! server spells it, which is what the settings gate (the C ABI contract,
 //! Settings rule 2) validates against.
 
 use std::collections::BTreeMap;

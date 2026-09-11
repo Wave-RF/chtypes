@@ -51,7 +51,6 @@ require_artifacts() {
     say ""
     say "  Fetch one first (verified, into the per-user cache):"
     say "      ../scripts/fetch.sh 25.8"
-    say "  or build one in the core repository (chtypes-core: just vendor 25.8)."
     say ""
     say "  Or point \$CHTYPES_REGISTRY at a directory that has them."
     exit 1

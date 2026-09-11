@@ -45,7 +45,7 @@ pub struct Manifest {
     pub library_bytes: u64,
     /// SHA-256 of that file — the only integrity check that means anything. This
     /// crate does not hash (it takes no crypto dependency); use
-    /// `chtypes-core/ci/cache.sh verify_artifacts` / `just verify-artifacts`, and verify before
+    /// the release pipeline's artifact verification, and verify before
     /// load when the artifact came over a network.
     #[serde(default)]
     pub library_sha256: String,

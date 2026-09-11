@@ -6,7 +6,7 @@ library: a wrong reason string here is a silent downgrade, which is the failure
 mode this repository exists to kill.
 
 Every document shape below was measured from the `darwin-arm64/25.8` artifact and
-cross-checked against `chtypes-core/lib/build/chtypes-oracle`.
+cross-checked against the reference oracle.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def test_a_five_thousand_digit_value_is_lossy_not_a_reformat() -> None:
     `reformat` is in `LOSSLESS_REASONS`, so the finding did not merely get a
     wrong label — `Transform.lossy` was False and it disappeared from
     `lossy_transforms` altogether (42 of 34,619 differential cases,
-    chtypes-core/tests/conformance/python/README.md class D).
+    the conformance suite, class D).
     """
     (transform,) = classify(
         _col(

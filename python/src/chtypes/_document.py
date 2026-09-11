@@ -3,7 +3,7 @@
 Every key is treated as optional-with-a-default. That is not defensive
 programming, it is the contract: a rejected row's document omits
 `unknown_fields`, `unsupported_settings` and `computed` entirely and carries
-`"cols":[]` (the core repository's C ABI specification "Keys may be absent").
+`"cols":[]` (the C ABI contract "Keys may be absent").
 """
 
 from __future__ import annotations
@@ -250,7 +250,7 @@ def parse_batch_document(raw: bytes, payload: bytes | None = None) -> BatchResul
         # `stored` is.
         engine_rows = tuple(preview.raw(index) for index in range(len(preview)))
 
-    # The export channel's addressing (the core repository's C ABI specification §Rows): `row_spans` is
+    # The export channel's addressing (the C ABI contract §Rows): `row_spans` is
     # present exactly when bytes were emitted, `export_declined` exactly when
     # an export was requested and withheld. Both keys absent is both the
     # no-export case and the call-level-verdict case — optional-with-default,

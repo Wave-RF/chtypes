@@ -65,7 +65,7 @@ class Format(IntEnum):
     # library sends on INSERT. Modeled at the revision `INSERT ... FORMAT
     # Native` uses (0), so there is no BlockInfo prefix and no per-column
     # serialization-kind byte; blocks taken off a live TCP connection carry
-    # both and are a different contract (the core repository's C ABI specification §Native). Requires an
+    # both and are a different contract (the C ABI contract §Native). Requires an
     # artifact built at or after the Native exposure — probe it, do not assume
     # it from the SDK version.
     NATIVE = 8
@@ -86,7 +86,7 @@ class Format(IntEnum):
 # `export=None`; the constant exists for callers that carry the wire value.
 EXPORT_NONE: Final[int] = -1
 
-# The CHS_DOC_* bitmask (the core repository's C ABI specification §Document flags): which document GROUPS
+# The CHS_DOC_* bitmask (the C ABI contract §Document flags): which document GROUPS
 # the per-row documents carry. The verdict channel (batch and per-row
 # outcome/code/err, rows_read, rows_skipped, unsupported_settings,
 # engine_rows, storage_transforms) is ALWAYS emitted and is not a flag.
@@ -500,7 +500,7 @@ class BatchResult:
     # transcription of ClickHouse's own output writer for the requested
     # format, copied out of the C buffer (which is freed before the call
     # returns — no ownership crosses the boundary). Three states, the ABI's
-    # own (the core repository's C ABI specification §Rows):
+    # own (the C ABI contract §Rows):
     #
     #   None   no export was requested, the export was DECLINED
     #          (`export_declined` then names the reason), or a call-level

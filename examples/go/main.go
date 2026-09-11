@@ -146,7 +146,7 @@ func section1() (*chtypes.Registry, *chtypes.Library) {
 	dir := registryDir()
 	reg, err := chtypes.NewRegistry(dir)
 	if err != nil {
-		fatal("open registry %q: %v\n\nFetch an artifact first: `scripts/fetch.sh 25.8` (or build one in the core repository).", dir, err)
+		fatal("open registry %q: %v\n\nFetch an artifact first: `scripts/fetch.sh 25.8`.", dir, err)
 	}
 	versions := reg.Versions()
 	kv("registry dir", dir)

@@ -39,7 +39,7 @@ pub enum CompileMode {
     /// Every setting the profile names takes the caller's value; every
     /// setting it does not name keeps the library's own compile base (build
     /// defaults plus the derived permissive type-gate list — see
-    /// the core repository's C ABI specification §Compile-time settings).
+    /// the C ABI contract §Compile-time settings).
     #[default]
     Declared = 0,
 }
@@ -101,7 +101,7 @@ impl<'a> CompileRequest<'a> {
     ///   the server's own code (`50`, `386`, …); an
     ///   `Enum … DEFAULT <out-of-domain integer>` is refused with `691` on
     ///   every line, because older servers accept the DDL and then poison the
-    ///   table (the core repository's C ABI specification §Appendix).
+    ///   table (the C ABI contract §Appendix).
     /// * [`crate::Error::Unsupported`] — **this build declines**
     ///   ([`crate::CODE_UNSUPPORTED`]): a DEFAULT that is a property of the
     ///   server or session (`hostName()`, `currentUser()`), one that would

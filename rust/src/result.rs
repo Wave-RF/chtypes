@@ -1,4 +1,4 @@
-//! The result types, field for field with the core repository's C ABI specification and
+//! The result types, field for field with the C ABI contract and
 //! `docs/reference/bindings.md`.
 //!
 //! Every field of a result document is optional at the wire level: a rejected
@@ -55,7 +55,7 @@ pub enum Format {
     /// Modeled at the revision `INSERT ... FORMAT Native` uses (0), so there
     /// is no `BlockInfo` prefix and no per-column serialization-kind byte;
     /// blocks taken off a live TCP connection carry both and are a different
-    /// contract (the core repository's C ABI specification §Native). Because the stream carries names
+    /// contract (the C ABI contract §Native). Because the stream carries names
     /// and types, the declared schema and the payload can disagree, and
     /// ClickHouse's own resolution is not uniformly an error — a type
     /// mismatch is CAST by default. Requires an artifact built at or after
@@ -87,7 +87,7 @@ impl Format {
 }
 
 /// Which document GROUPS the per-row documents carry (revision 3;
-/// the core repository's C ABI specification §Document flags). The verdict channel — batch and per-row
+/// the C ABI contract §Document flags). The verdict channel — batch and per-row
 /// outcome/code/err, `rows_read`, `rows_skipped`, `unsupported_settings`,
 /// `engine_rows`, `storage_transforms` — is ALWAYS emitted and is not a flag.
 ///
@@ -396,7 +396,7 @@ pub struct Value {
 /// before a row ships to subscribers. Its two value fields are therefore
 /// `String`, carrying U+FFFD where a byte was not valid UTF-8:
 ///
-/// * `input` is text by the ABI's own definition — the core repository's C ABI specification gives it as
+/// * `input` is text by the ABI's own definition — the C ABI contract gives it as
 ///   "the raw input **text** for this field, as a string" — and the reference
 ///   SDK's JSON decoder repairs it identically, so the two SDKs report the same
 ///   thing.
@@ -556,7 +556,7 @@ pub struct BatchResult {
     /// once by the transcription of ClickHouse's own output writer for the
     /// requested export format, copied out of the C buffer and freed before
     /// the call returned — no ownership crosses the boundary. Three states,
-    /// the ABI's own (the core repository's C ABI specification §Rows):
+    /// the ABI's own (the C ABI contract §Rows):
     ///
     /// * `None` — no export was requested, the export was DECLINED
     ///   ([`export_declined`](Self::export_declined) then names the reason),
@@ -689,7 +689,7 @@ pub(crate) struct BatchDoc {
     pub engine_rows: Option<Vec<RawText>>,
     pub storage_transforms: Vec<StorageTransformDoc>,
     /// Present exactly when export bytes were emitted — one `{off,len}` per
-    /// `rows[]` entry, index-aligned (the core repository's C ABI specification §Rows).
+    /// `rows[]` entry, index-aligned (the C ABI contract §Rows).
     pub row_spans: Option<Vec<Span>>,
     /// Present exactly when an export was requested and withheld.
     pub export_declined: String,
@@ -869,7 +869,7 @@ mod tests {
 
     #[test]
     fn a_skipped_row_parses_with_the_caught_error_and_no_values() {
-        // the core repository's C ABI specification §"outcome":"skipped" (2026-08-27): a row dropped under
+        // the C ABI contract §"outcome":"skipped" (2026-08-27): a row dropped under
         // input_format_allow_errors_* keeps its place in `rows` in the short
         // form of a rejected document, carrying the server's caught error.
         let rr =

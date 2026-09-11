@@ -173,7 +173,7 @@ The short version: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64`
 
 ## Project status
 
-Pre-1.0, and published: Go, PyPI, npm and crates.io all carry `0.1.1`. The C ABI is frozen at revision 4 (`include/chtypes.h`, 28 `chs_*` functions) and the four bindings pin that number at compile time. Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen; function signatures froze at the first tag. Anything else may still move — each binding keeps its own CHANGELOG.
+Pre-1.0, and published to all four registries — the badges above read the live version from each. The C ABI is frozen at revision 4 (`include/chtypes.h`, 28 `chs_*` functions) and the four bindings pin that number at compile time. Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen; function signatures froze at the first tag. Anything else may still move — each binding keeps its own CHANGELOG.
 
 This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the artifacts themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — is the core repository, under its own license. The bindings here contain no ClickHouse code: they load an artifact and speak the ABI. Artifacts carry their own license; see the `LICENSE` inside each release.
 

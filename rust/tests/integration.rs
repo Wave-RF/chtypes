@@ -783,7 +783,7 @@ fn the_row_and_batch_entry_points_agree_on_one_row() {
     assert_eq!(row.computed[0].kind, "MATERIALIZED");
     // `8`, matching live servers on every format. The positional path used to
     // compute MATERIALIZED from the type zero (`1`) — a wrapper bug fixed
-    // 2026-08-17; the core repository's C ABI specification §"Positional formats" records the ground truth.
+    // 2026-08-17; the C ABI contract §"Positional formats" records the ground truth.
     assert_eq!(row.computed[0].text, "8");
 
     let json = stored(&schema, Format::JsonEachRow, br#"{"x":7,"s":"hey"}"#);
@@ -1064,7 +1064,7 @@ fn rowbinary_is_read_in_clickhouses_storage_encoding() {
 /// ClickHouse's code 27.
 const ISO_Z_ROW: &[u8] = br#"{"ts":"2020-01-02T03:04:05Z"}"#;
 
-/// the core repository's C ABI specification §"Compile-time vs per-call settings" rule 3, end to end:
+/// the C ABI contract §"Compile-time vs per-call settings" rule 3, end to end:
 ///
 /// ```text
 /// per-call  >  handle profile  >  library defaults  >  ClickHouse defaults
@@ -1218,7 +1218,7 @@ fn set_engine_tells_a_server_refusal_from_a_decline() {
 
 // ---- the ABI identity probe (chs_abi_revision, added 2026-08-25) -----------
 
-/// the core repository's C ABI specification §ABI identity, over the whole registry.
+/// the C ABI contract §ABI identity, over the whole registry.
 ///
 /// A [`chtypes::Library`] that exists must report either this crate's
 /// [`chtypes::ABI_REVISION`] or `0`. `0` means the artifact predates
@@ -1261,7 +1261,7 @@ fn every_artifact_reports_a_compatible_abi_revision() {
 /// `dlopen` refcounts a mapping per file: the second `Registry` gets a second
 /// `Library` value pointing at the same C globals — including the seeded settings
 /// list `set_default_settings` REPLACES while the row path reads it by reference
-/// (the core repository's C ABI specification §Thread-safety: it "MUST be serialized against all other
+/// (the C ABI contract §Thread-safety: it "MUST be serialized against all other
 /// calls"). Until 2026-08-26 the mutex lived in the `Library` VALUE, so the two
 /// held different locks over one image and excluded nothing at all; it is now
 /// interned on the canonicalized path, exactly as `chs_init` already was

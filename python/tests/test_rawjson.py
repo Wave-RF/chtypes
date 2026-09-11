@@ -99,7 +99,7 @@ def test_a_duplicate_object_key_survives() -> None:
     Measured document from the 25.8 artifact for `m Map(String, UInt8)` fed
     `{"m":{"1":1,"1":2}}`. Rendering the decoded form gave `{"1":2}` — a value
     difference this binding invented, and 52 of 34,619 differential cases
-    (chtypes-core/tests/conformance/python/README.md class B). The decoded mapping still
+    (the conformance suite, class B). The decoded mapping still
     keeps only the last value, exactly as the reference's `json.Unmarshal`
     does; it is the reported TEXT that has to be ClickHouse's.
     """
@@ -121,7 +121,7 @@ def test_clickhouse_escape_spelling_survives() -> None:
     a scorer comparing re-parsed JSON cannot see the difference — but a
     non-UTF-8 `AggregateFunction` state has no comparable `value` and is scored
     on raw bytes, where 6 cases scored `silently_different` for exactly this
-    (chtypes-core/tests/conformance/python/README.md class C).
+    (the conformance suite, class C).
     """
     doc = decode_document(b'{"stored":"a\\u000Bb\\u001Fc"}')
     assert isinstance(doc, RawObject)

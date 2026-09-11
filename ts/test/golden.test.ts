@@ -3,7 +3,7 @@
  *
  * A few dozen cases whose expectations were produced by the library itself
  * and agreed on by every ClickHouse version in the generating registry
- * (chtypes-core: `tests/conformance/go/cmd/goldens-gen`). Every SDK runs the
+ * (the golden-set generator). Every SDK runs the
  * same file, so the four bindings are held to one answer. It is not the
  * corpus; that lives with the rigs.
  */

@@ -137,8 +137,8 @@ describe('result-document JSON', () => {
  *
  * Every document below was captured verbatim from a real artifact (`chs_row`
  * on 25.3 / 26.6 / 26.7) except the one marked hand-written, and every expected
- * reason is the reference oracle's own reply for the same case line
- * (`chtypes-core/tests/conformance/go/cmd/chtypes-oracle`, asked at 26.7).
+ * reason is the reference oracle's own reply for the same case line,
+ * asked at 26.7.
  *
  * They exist because the extension-8 differential measured 22 divergences from
  * that oracle over the six versions the registry held at the time (the rig
@@ -321,7 +321,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
 
   describe('the process-state mutators are serialized against everything else', () => {
     // `chs_set_default_settings` REPLACES a process-global that `chs_row` /
-    // `chs_rows` / `chs_schema_compile` read BY REFERENCE, so the core repository's C ABI specification
+    // `chs_rows` / `chs_schema_compile` read BY REFERENCE, so the C ABI contract
     // §Thread-safety requires it be serialized against every other call. Go
     // enforces that with an RWMutex and Python with an _RWLock, because both
     // have real threads that can be inside a foreign call. Node cannot: every
@@ -459,7 +459,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       // Direct proof rather than a claim: ask the dynamic loader whether the
       // artifacts' exported symbols reached the process-global scope. With
       // RTLD_LOCAL they must not have. RTLD_GLOBAL "will appear to work and then
-      // answer with the wrong version's semantics" (the core repository's C ABI specification).
+      // answer with the wrong version's semantics" (the C ABI contract).
       const candidates =
         process.platform === 'darwin'
           ? ['/usr/lib/libSystem.B.dylib']
@@ -599,7 +599,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
     //
     // Four classes of bytes a `JSON.parse`-based reading of the result document
     // cannot hold. Every expectation below is the reference driver's own answer to
-    // the same case on 25.8 (`chtypes-core/lib/build/chtypes-oracle`), so "more correct" here
+    // the same case on 25.8 (the reference oracle), so "more correct" here
     // means "equal to the oracle", not "reads better".
     //
     //   duplicate Map keys    {"a":1,"a":2,"a":3}  -> {"a":3}
@@ -843,7 +843,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
         // occupies no field position. Measured on darwin-arm64/25.8: the CSV path
         // computes `m` as 8, matching live servers on every format. The
         // positional path used to compute MATERIALIZED from the type zero
-        // (`1`) — a wrapper bug fixed 2026-08-17; the core repository's C ABI specification §Positional
+        // (`1`) — a wrapper bug fixed 2026-08-17; the C ABI contract §Positional
         // formats records the confirmed ground truth.
         const positional = schema.row(Format.CSV, utf8('7,"hey"'));
         expect(positional.outcome).toBe('accepted');

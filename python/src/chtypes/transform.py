@@ -210,7 +210,7 @@ def _rational(text: str) -> tuple[Fraction, bool]:
     read as "not a number" and cost a whole class of findings — `_severity`
     answered `reformat`, which is in `LOSSLESS_REASONS`, so a genuinely lossy
     5,000-digit coercion left `Transform.lossy` False and vanished from
-    `lossy_transforms` (42 cases of 34,619; chtypes-core/tests/conformance/python/README.md
+    `lossy_transforms` (42 cases of 34,619; the conformance suite,
     class D). `big.Rat` parses any length, so this must too.
 
     `Decimal`'s string parse does not go through `int()`, so it is not subject to
