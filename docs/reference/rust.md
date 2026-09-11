@@ -9,7 +9,7 @@ Unix only — the loader is `dlopen`. `cargo doc --no-deps --open` is the full r
 
 ## How to read this
 
-**The verdict is in the `Ok` value.** A row a server would reject is `Ok` with `Outcome::Rejected`. The `Err` arm is for the machinery — loading, marshalling, an unreadable document — and for schema-level answers.
+**The verdict is in the `Ok` value.** A row a server would reject is `Ok` with `Outcome::Rejected`. The `Err` arm is for the machinery — loading, marshaling, an unreadable document — and for schema-level answers.
 
 `Error::Unsupported` and `Outcome::Unsupported` (code `-2`) are neither an acceptance nor a rejection. Fall back to the server.
 

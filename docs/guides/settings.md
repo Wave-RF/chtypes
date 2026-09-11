@@ -129,7 +129,7 @@ The `SETTINGS` clause after an engine declaration is its own namespace, and it i
 The two failure modes there are deliberately different from each other:
 
 - an **unknown** MergeTree setting name is the server's own 115, a schema error;
-- a **known** name at a **non-default** value is `unsupported` — a decline. It is not modelled, so it is not guessed at, and it is certainly not silently ignored.
+- a **known** name at a **non-default** value is `unsupported` — a decline. It is not modeled, so it is not guessed at, and it is certainly not silently ignored.
 
 ## Next
 

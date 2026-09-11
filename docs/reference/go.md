@@ -48,7 +48,7 @@ The frozen numbers the default build hardcodes (`Format`, `DocFlags`, `CodeUnsup
 | `Library.ValidateType(expr)` | `chs_validate_type` | type expression → canonical spelling | S, U, E |
 | `Library.{RegisteredFamilies, FunctionFlags, ReferenceType}` | the introspection trio | family names / the volatility TSV audit, verbatim / the widened reference type (`""` if none) | U (artifact predates the symbol) |
 | `LoadedSchema.Columns` | read at compile | `[]Column`, canonicalized, declaration order | — |
-| `LoadedSchema.SetEngine(e, orderBy, opts...)` | `chs_schema_engine` | engine + sorting key (+ `WithMergeTreeSettings`) | S when rc > 0 (server refusal, e.g. 115), U when rc < 0 (unmodelled engine or key, non-default MergeTree value) |
+| `LoadedSchema.SetEngine(e, orderBy, opts...)` | `chs_schema_engine` | engine + sorting key (+ `WithMergeTreeSettings`) | S when rc > 0 (server refusal, e.g. 115), U when rc < 0 (unmodeled engine or key, non-default MergeTree value) |
 | `LoadedSchema.SetTTL(ttl)` | `chs_schema_ttl` | a table rows-TTL expression | U (every refusal), E |
 | `LoadedSchema.Row(f, raw)` / `RowWithSettings(f, raw, settings)` | `chs_row` | format, raw bytes → `RowResult` | E only; the verdict is in `Outcome` |
 | `LoadedSchema.Rows(f, body, settings)` | `chs_rows` | format, body bytes, settings → `BatchResult` | E only; verdict in `Outcome` / `EngineRows` |

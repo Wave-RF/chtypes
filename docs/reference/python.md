@@ -44,7 +44,7 @@ Row-level verdicts are **returned, never raised**: a rejected row is a `RowResul
 | Symbol | C function | Returns | Raises |
 |---|---|---|---|
 | `Schema.columns` | `chs_schema_column_*`, read at compile | `tuple[Column, ...]`, canonicalized | — |
-| `Schema.set_engine(engine, order_by, *, merge_tree_settings=None)` | `chs_schema_engine` | `None` | `SchemaError` (rc > 0, server refusal); `UnsupportedError` (rc < 0, unmodelled engine or key, non-default MergeTree setting) |
+| `Schema.set_engine(engine, order_by, *, merge_tree_settings=None)` | `chs_schema_engine` | `None` | `SchemaError` (rc > 0, server refusal); `UnsupportedError` (rc < 0, unmodeled engine or key, non-default MergeTree setting) |
 | `Schema.set_ttl(ttl_sql)` | `chs_schema_ttl` | `None` | `UnsupportedError` (any refused TTL form) |
 | `Schema.row(fmt, raw, settings=None)` | `chs_row` | `RowResult` | `ChtypesError` if closed; `TypeError` on non-bytes, or a `float` setting value |
 | `Schema.rows(fmt, body, settings=None, *, export=None, doc_flags=None)` | `chs_rows` | `BatchResult` | same as `row` |

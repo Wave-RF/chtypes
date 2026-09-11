@@ -31,7 +31,7 @@ A gateway that previews the intersection anyway shows a row that cannot exist.
 
 Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, or the `unsupported` outcome. None of them is a rejection, and none is a defect.
 
-- **Engines and sorting keys** beyond the modelled MergeTree family.
+- **Engines and sorting keys** beyond the modeled MergeTree family.
 - **TTL forms** that are not a plain rows TTL: `WHERE` and `GROUP BY` TTLs, `TO DISK` and `TO VOLUME` moves, `RECOMPRESS`, and any clock-reading TTL expression.
 - **MergeTree settings declared at a non-default value.** An unknown *name* is the server's own 115, a rejection; a known name at a value this build does not model is a decline, never a silent ignore.
 - **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
