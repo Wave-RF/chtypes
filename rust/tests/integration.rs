@@ -103,7 +103,7 @@ macro_rules! registry {
 }
 
 /// A library to run single-version assertions against: `25.8` when present (the
-/// version every observation in `spec/` was captured on), else the first loaded.
+/// version every observation in `docs/reference/` was captured on), else the first loaded.
 fn primary(reg: &Registry) -> Arc<chtypes::Library> {
     reg.for_version("25.8")
         .unwrap_or_else(|_| Arc::clone(&reg.libraries()[0]))

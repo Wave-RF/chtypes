@@ -1,7 +1,7 @@
 # Contributing
 
 chtypes' SDKs are thin, honest bindings over one frozen C ABI (`include/chtypes.h`,
-`spec/`). Most contributions are to a binding's ergonomics, its docs, or its
+`docs/reference/`). Most contributions are to a binding's ergonomics, its docs, or its
 golden cases; the type system itself is ClickHouse's, vendored in the native
 artifact, and is not reimplemented here — a PR that re-derives ClickHouse
 behavior in Go, Python, TypeScript or Rust will be declined however good it is.
@@ -13,7 +13,7 @@ behavior in Go, Python, TypeScript or Rust will be declined however good it is.
   --no-artifacts <lang>` and `scripts/check-standalone.sh --no-artifacts` are
   exactly what CI runs first; it then runs the same suites with two published
   lines. The artifact-backed proof beyond that lives in the core repository.
-- **Every binding follows the same contract** (`spec/`). A change to what a
+- **Every binding follows the same contract** (`docs/reference/`). A change to what a
   call means belongs in the spec and in all four bindings, not one.
 - **Goldens are served, not tracked.** The golden set is published in the
   rolling release as `sdk-goldens.json` and installed beside the artifacts by

@@ -9,8 +9,8 @@
 //! rule, which is why the answers are exact by construction.
 //!
 //! This crate is a peer SDK over that ABI, alongside Go, Python and TypeScript.
-//! The language-neutral contract is `spec/` in this repository; where this crate
-//! and `spec/` disagree, the spec wins and this is a bug.
+//! The language-neutral contract is `docs/reference/` in this repository; where this crate
+//! and `docs/reference/` disagree, the spec wins and this is a bug.
 //!
 //! ```no_run
 //! use chtypes::{Format, Registry, NO_SETTINGS};

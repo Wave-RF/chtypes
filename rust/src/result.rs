@@ -226,6 +226,27 @@ pub enum FilterOutcome {
     Unsupported,
 }
 
+impl FilterOutcome {
+    /// The wire spelling, as the filter result document uses it — the same
+    /// vocabulary [`Outcome::as_str`] answers in, and the one the Python and
+    /// TypeScript bindings' `FilterOutcome` values already are. [`Outcome`] had
+    /// this and [`FilterOutcome`] did not, so a caller could render every
+    /// verdict in the ABI except the filter call's own.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FilterOutcome::Ok => "ok",
+            FilterOutcome::Rejected => "rejected",
+            FilterOutcome::Unsupported => "unsupported",
+        }
+    }
+}
+
+impl std::fmt::Display for FilterOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// One `'e'` or `'d'` row, itemized: the row's 0-based index and the code and
 /// message verbatim — ClickHouse's own for an error row, this library's
 /// decline for a declined row.

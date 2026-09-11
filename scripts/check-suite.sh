@@ -58,6 +58,13 @@ if [ "$NO_ARTIFACTS" -eq 1 ]; then
 fi
 [ "$REQUIRE" -eq 0 ] || say "--require-artifacts: CHTYPES_REGISTRY=${CHTYPES_REGISTRY:-<unset — the search path>}; the golden set must run"
 
+# The binding parity contract (tests/parity/manifest.json, docs/reference/bindings.md) is
+# checked by each language's OWN suite. It needs no artifact and no registry, so
+# there is no run in which it may be absent — and a parity check that was deleted,
+# renamed or skipped would otherwise leave the census looking exactly as healthy
+# as one that ran. Each arm below asserts it off the runner's own output.
+PARITY_MIN=6
+
 LOG_DIR="$ROOT/scratch/check-suite"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$WHICH.log"; PLAIN="$LOG_DIR/$WHICH.plain.log"
 RC=0
@@ -84,6 +91,13 @@ case "$WHICH" in
     PASSED="$(printf '%s\n' "$SUMMARY" | first_number passed || true)"
     SKIPPED="$(printf '%s\n' "$SUMMARY" | first_number skipped || true)"
     ! printf '%s\n' "$SUMMARY" | grep -qE '[0-9]+ (failed|error)' || PROBLEMS+=("the summary reports failures")
+    # pytest -q names no passing test, so the parity contract's presence is read
+    # off the collector instead: these tests need no artifact and cannot skip, so
+    # collected + no failures + a non-zero pass count is them having passed.
+    PARITY_N="$( (cd "$ROOT/python" && uv run --quiet pytest -q --collect-only tests/test_parity.py 2>/dev/null) \
+                 | grep -cE '^tests/test_parity\.py::' || true)"
+    [ "${PARITY_N:-0}" -ge "$PARITY_MIN" ] || PROBLEMS+=("the binding parity contract was not proven \
+here: python collected ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/manifest.json)")
     if [ "$REQUIRE" -eq 1 ]; then
       ! grep -qE '^SKIPPED .*tests/test_golden\.py' "$PLAIN" || PROBLEMS+=("the golden set was SKIPPED with artifacts required")
       ! grep -qE '^SKIPPED .*no chtypes artifacts on the search path' "$PLAIN" || PROBLEMS+=("tests skipped for want of a registry with artifacts required")
@@ -101,6 +115,9 @@ case "$WHICH" in
     PASSED="$(printf '%s\n' "$TESTS_LINE" | first_number passed || true)"
     SKIPPED="$(printf '%s\n' "$TESTS_LINE" | first_number skipped || true)"
     ! printf '%s\n%s\n' "$FILES_LINE" "$TESTS_LINE" | grep -qE '[0-9]+ failed' || PROBLEMS+=("the summary reports failures")
+    PARITY_N="$(grep -cE '^\s*.{0,3} test/parity\.test\.ts > ' "$PLAIN" || true)"
+    [ "${PARITY_N:-0}" -ge "$PARITY_MIN" ] || PROBLEMS+=("the binding parity contract was not proven \
+here: ts ran ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/manifest.json)")
     if [ "$REQUIRE" -eq 1 ]; then
       grep -qF '✓ test/golden.test.ts >' "$PLAIN" || PROBLEMS+=("no golden case RAN with artifacts required")
       # A per-line skip is EXPECTED and not a problem: a case is only a golden
@@ -124,6 +141,9 @@ case "$WHICH" in
     [ -z "$RESULTS" ] || SUMMARY="$(printf '%s\n' "$RESULTS" | grep -c .) test binaries: $PASSED passed, $FAILED_N failed (each binary's own line above)"
     SKIPPED="$(grep -cE '^SKIP ' "$PLAIN" || true)"
     ! grep -qE '^test result: FAILED|^error(\[E[0-9]+\])?:|panicked at' "$PLAIN" || PROBLEMS+=("a test binary reported FAILED, or did not build")
+    PARITY_N="$(grep -cE '^test (parity_manifest|rust_(exposes|answers)|the_(rust|go_copy))[a-z_]* \.\.\. ok$' "$PLAIN" || true)"
+    [ "${PARITY_N:-0}" -ge "$PARITY_MIN" ] || PROBLEMS+=("the binding parity contract was not proven \
+here: rust passed ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/manifest.json)")
     if [ "$REQUIRE" -eq 1 ]; then
       grep -qE '^test goldens_hold_on_every_artifact \.\.\. ok' "$PLAIN" || PROBLEMS+=("the golden test did not pass with artifacts required")
       ! grep -qE '^SKIP goldens_hold_on_every_artifact|Every test in this file is skipped|^SKIP integration::' "$PLAIN" || PROBLEMS+=("tests skipped for want of a registry with artifacts required")

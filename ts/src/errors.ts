@@ -155,14 +155,36 @@ export function schemaErrorFor(
 // `CHTYPES_ARTIFACT_MISSING`, is the loader's — raised when a registry is
 // asked for a line no directory on the search path holds.
 
+/**
+ * The codes docs/guides/fetch.md §6 shares across every SDK, as named constants.
+ *
+ * Each error below carries its own `code`, and a caller matches on it. Naming
+ * them here is what lets that caller write `err.code === CODE_ARTIFACT_PINNED`
+ * instead of retyping the string — which is exactly why the Go, Python and Rust
+ * bindings all export them, and why this one already exported
+ * `CODE_UNSUPPORTED`. A typo in a hand-written literal is a comparison that is
+ * silently always false.
+ */
+export const CODE_ARTIFACT_MISSING = 'CHTYPES_ARTIFACT_MISSING';
+/** docs/guides/fetch.md §6: the signature did not verify against the trust list. */
+export const CODE_ARTIFACT_UNTRUSTED = 'CHTYPES_ARTIFACT_UNTRUSTED';
+/** docs/guides/fetch.md §6: a hash mismatch, or a release that disagrees with itself. */
+export const CODE_ARTIFACT_CORRUPT = 'CHTYPES_ARTIFACT_CORRUPT';
+/** docs/guides/fetch.md §6: `--frozen` refused an asset the lock file does not pin. */
+export const CODE_ARTIFACT_PINNED = 'CHTYPES_ARTIFACT_PINNED';
+/** docs/guides/fetch.md §6: the release offers nothing for this platform or line. */
+export const CODE_ARTIFACT_UNPUBLISHED = 'CHTYPES_ARTIFACT_UNPUBLISHED';
+/** docs/guides/fetch.md §6: the source could not be reached or does not serve the release. */
+export const CODE_SOURCE_UNREACHABLE = 'CHTYPES_SOURCE_UNREACHABLE';
+
 /** The codes docs/guides/fetch.md §7 shares across every SDK. */
 export type ArtifactErrorCode =
-  | 'CHTYPES_ARTIFACT_MISSING'
-  | 'CHTYPES_ARTIFACT_UNTRUSTED'
-  | 'CHTYPES_ARTIFACT_CORRUPT'
-  | 'CHTYPES_ARTIFACT_PINNED'
-  | 'CHTYPES_ARTIFACT_UNPUBLISHED'
-  | 'CHTYPES_SOURCE_UNREACHABLE';
+  | typeof CODE_ARTIFACT_MISSING
+  | typeof CODE_ARTIFACT_UNTRUSTED
+  | typeof CODE_ARTIFACT_CORRUPT
+  | typeof CODE_ARTIFACT_PINNED
+  | typeof CODE_ARTIFACT_UNPUBLISHED
+  | typeof CODE_SOURCE_UNREACHABLE;
 
 /** The command this SDK's §7 message tells a user to run. */
 export const FETCH_COMMAND = 'npx @wavehouse/chtypes fetch';

@@ -59,7 +59,14 @@ import { classify, isLossyReason } from './transform.js';
  *   stored. Only ever seen on rows inside a `BatchResult`, never as a batch
  *   verdict and never from `Schema#row`.
  */
-export type Outcome = 'accepted' | 'rejected' | 'accepted_poisoned' | 'unsupported' | 'skipped';
+export const Outcome = {
+  Accepted: 'accepted',
+  Rejected: 'rejected',
+  AcceptedPoisoned: 'accepted_poisoned',
+  Unsupported: 'unsupported',
+  Skipped: 'skipped',
+} as const;
+export type Outcome = (typeof Outcome)[keyof typeof Outcome];
 
 const EMPTY = Buffer.alloc(0);
 
@@ -475,7 +482,13 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
  *               tripped. NOT an answer, and the state an unknown verdict
  *               character degrades to.
  */
-export type Verdict = 'true' | 'false' | 'error' | 'decline';
+export const Verdict = {
+  True: 'true',
+  False: 'false',
+  Error: 'error',
+  Decline: 'decline',
+} as const;
+export type Verdict = (typeof Verdict)[keyof typeof Verdict];
 
 /** Whether a verdict is an ANSWER (`'true'`/`'false'`) rather than an error
  * or a decline. A security-enforcing caller hides the row when this is false. */
@@ -489,7 +502,28 @@ export function isAnswer(v: Verdict): boolean {
  * this binding does not recognize degrades to `'unsupported'`, never to
  * `'rejected'` (the unknown-outcome rule, docs/reference/bindings.md §RowResult).
  */
-export type FilterOutcome = 'ok' | 'rejected' | 'unsupported';
+export const FilterOutcome = {
+  Ok: 'ok',
+  Rejected: 'rejected',
+  Unsupported: 'unsupported',
+} as const;
+export type FilterOutcome = (typeof FilterOutcome)[keyof typeof FilterOutcome];
+
+/**
+ * `chs_schema_column_default_kind`'s five answers, as `ColumnInfo#defaultKind`
+ * carries them. Named here because the Go, Python and Rust bindings all name
+ * them and a TypeScript caller was otherwise typing the strings by hand — and
+ * one of them is load-bearing: `EPHEMERAL` is the column a gateway must DECLINE
+ * to preview rather than mispreview (docs/reference/bindings.md §EPHEMERAL columns).
+ */
+export const DefaultKind = {
+  None: '',
+  Default: 'DEFAULT',
+  Materialized: 'MATERIALIZED',
+  Alias: 'ALIAS',
+  Ephemeral: 'EPHEMERAL',
+} as const;
+export type DefaultKind = (typeof DefaultKind)[keyof typeof DefaultKind];
 
 /** One `'error'` or `'decline'` row, itemized: its 0-based index and the code
  * and message verbatim — ClickHouse's own for an error row, this library's

@@ -2,7 +2,7 @@
 
 This is the **SDK half** of chtypes, Apache 2.0, public: `go/ python/ ts/ rust/`
 over the frozen `chs_*` C ABI (`include/chtypes.h`, ABI revision 4, 28
-functions), the normative `spec/`, four side-by-side `examples/` tours, and
+functions), the normative `docs/reference/`, four side-by-side `examples/` tours, and
 `goldens/` — the public golden set every binding runs. The bindings contain no
 ClickHouse code; they `dlopen` per-version artifacts and speak the ABI.
 

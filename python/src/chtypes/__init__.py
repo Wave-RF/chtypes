@@ -33,7 +33,7 @@ something to learn:
   have accepted this and this build declines to guess. Treating it as either a
   rejection or an acceptance manufactures a wrong answer the product never gave.
 
-The specification in `spec/` is normative; `go/chtypes` (Go) is the reference
+The specification in `docs/reference/` is normative; `go/chtypes` (Go) is the reference
 implementation. Where this binding and that package disagree, the package is
 right.
 """
@@ -199,4 +199,4 @@ __all__ = [
     "verify_library",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
