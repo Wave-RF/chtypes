@@ -132,9 +132,11 @@ If you are developing against this repository rather than consuming a release:
 <details open><summary><b>Go</b></summary>
 
 ```text
-require github.com/wave-rf/chtypes/go v0.1.1
+require github.com/wave-rf/chtypes/go v0.0.0
 replace github.com/wave-rf/chtypes/go => ../path/to/chtypes/go
 ```
+
+The `require` version is never resolved once the module is replaced by a path, so `v0.0.0` is the honest placeholder — it is what `examples/go/go.mod` in this repository uses.
 
 </details>
 

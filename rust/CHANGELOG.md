@@ -4,12 +4,17 @@ All notable changes to the rust binding. The format is [Keep a Changelog](https:
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
-## [Unreleased]
+## [0.1.2] — 2026-09-11
 
 ### Changed — BREAKING
 
 - **The transform reason for a materialized DEFAULT is now `default_materialized`** — previously the same word spelled with an `s` — and the exported constant naming it is now `reason::DEFAULT_MATERIALIZED`. ClickHouse's own keyword is `MATERIALIZED`; its parser rejects the `s` spelling outright with a syntax error, so the reason naming that concept now matches the system it describes. Code comparing against the old string or the old constant name must be updated.
 - This is an SDK-only change and **the ABI is untouched: it remains revision 4, and no artifact needs relinking.** The reason is derived in the binding, not received from the artifact — the library emits `default_substituted`, which each binding translates. That wire value is unchanged.
+
+### Changed
+
+- **The per-language README is now an orientation page, not a manual.** It carries install, a quickstart that runs, the three outcomes and the error model, and then points at `docs/` for the rest — roughly 450 lines of reference prose moved to `docs/guides/` and `docs/reference/` rather than being repeated four times and drifting four ways.
+- **Nothing in this repository points at the private core repository any more.** Twenty-seven references to paths, files and workflows nobody outside Wave RF can open were removed from the documentation; what remains describes the artifact as something you fetch, which is all a user of a binding needs.
 
 ## [0.1.1] — 2026-09-11
 
