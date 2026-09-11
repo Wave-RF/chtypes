@@ -171,12 +171,29 @@ func parseSurface(t *testing.T) surface {
 	}
 	dir := filepath.Dir(self)
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-		name := fi.Name()
-		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
-	}, parser.ParseComments)
+	// parser.ParseFile per entry rather than parser.ParseDir: the latter is
+	// deprecated precisely because it ignores build tags, and this package has
+	// one that matters — chtypes_linked adds a whole second API surface that is
+	// NOT part of the dlopen-only contract. behindLinkedTag below does that
+	// filtering explicitly, so nothing is lost by dropping the deprecated call.
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("cannot parse the package at %s: %v", dir, err)
+		t.Fatalf("cannot read the package directory %s: %v", dir, err)
+	}
+	var files []*ast.File
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("cannot parse %s: %v", name, err)
+		}
+		files = append(files, f)
+	}
+	if len(files) == 0 {
+		t.Fatal("the syntax-tree scan found no package files; an empty surface must fail, never pass")
 	}
 	s := surface{top: map[string]bool{}, all: map[string]bool{}}
 	add := func(name string) {
@@ -190,8 +207,8 @@ func parseSurface(t *testing.T) surface {
 			s.all[recv+"."+name] = true
 		}
 	}
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
+	for _, file := range files {
+		{
 			if behindLinkedTag(file) {
 				continue
 			}
