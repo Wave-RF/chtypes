@@ -123,4 +123,3 @@ The ed25519 verifier is pure stdlib, like the rest of the package.
 ## Deeper
 
 - [`bindings.md`](bindings.md) — the normative shape all four bindings implement.
-- the core repository's C ABI specification — the `chs_*` contract, the error model and the result documents.

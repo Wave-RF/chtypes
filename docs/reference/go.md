@@ -126,4 +126,3 @@ The implementation is stdlib only — `crypto/ed25519`, `crypto/sha256`, `archiv
 ## Deeper
 
 - [`bindings.md`](bindings.md) — the normative shape all four bindings implement.
-- the core repository's C ABI specification — the `chs_*` contract, the error model and the result documents.

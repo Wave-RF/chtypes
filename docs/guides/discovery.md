@@ -118,8 +118,8 @@ const schema = lib.compileDdl(reconstructDdl(cols), { settings: profile.settings
 ```rust
 let cols = chtypes::parse_columns_result(&query(chtypes::QUERY_TABLE_COLUMNS)?)?;
 let schema = lib.compile(&chtypes::reconstruct_ddl(&cols)?)
-    .settings(settings.clone())
-    .compile()?;
+.settings(settings.clone())
+.compile()?;
 ```
 
 </details>

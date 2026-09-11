@@ -137,7 +137,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 11
+          # No version here on purpose: pnpm/action-setup reads packageManager
+          # from ts/package.json, so the pin lives in exactly one place. It used
+          # to be pinned twice and the two had already drifted.
+          package_json_file: ts/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -206,7 +209,10 @@ jobs:
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 11
+          # No version here on purpose: pnpm/action-setup reads packageManager
+          # from ts/package.json, so the pin lives in exactly one place. It used
+          # to be pinned twice and the two had already drifted.
+          package_json_file: ts/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -245,10 +251,19 @@ jobs:
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
-      - name: golangci-lint
-        run: |
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
-          cd go && "$(go env GOPATH)/bin/golangci-lint" run --timeout 5m ./...
+      # The official action downloads a PREBUILT binary and caches it. The
+      # previous step ran `go install`, which COMPILES golangci-lint from source
+      # on every run — about two minutes of build before any linting, and the
+      # only step in this workflow that does sustained compilation of a
+      # third-party tree. A run failed here on 2026-09-11 having logged nothing
+      # from the step and with its post-step skipped, which is a runner abort
+      # rather than a lint finding; it passed on rerun with no code change.
+      # Removing the compile removes that surface.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+          working-directory: go
+          args: --timeout 5m ./...
 
   lint-ts:
     name: "lint-ts — biome (ts/biome.json)"
@@ -258,7 +273,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 11
+          # No version here on purpose: pnpm/action-setup reads packageManager
+          # from ts/package.json, so the pin lives in exactly one place. It used
+          # to be pinned twice and the two had already drifted.
+          package_json_file: ts/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -317,7 +335,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 11
+          # No version here on purpose: pnpm/action-setup reads packageManager
+          # from ts/package.json, so the pin lives in exactly one place. It used
+          # to be pinned twice and the two had already drifted.
+          package_json_file: ts/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -364,7 +385,10 @@ jobs:
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 11
+          # No version here on purpose: pnpm/action-setup reads packageManager
+          # from ts/package.json, so the pin lives in exactly one place. It used
+          # to be pinned twice and the two had already drifted.
+          package_json_file: ts/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22

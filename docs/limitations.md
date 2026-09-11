@@ -62,7 +62,7 @@ Both over-accepts and over-rejects are **budgeted at zero** in the proof behind 
 
 In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather than a subclass, so `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both. The subtype was retired precisely because catching one and getting the other is a silent misclassification.
 
-the core repository's C ABI specification §Error model is the full contract.
+The ABI header is the full contract.
 
 ## Pre-1.0
 

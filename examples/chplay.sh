@@ -70,8 +70,12 @@ have_go() { command -v go >/dev/null 2>&1 && return 0
 # both are set here, otherwise the tour runs dlopen-only and those sections
 # say so.
 run_go() {
-  local core="${CHTYPES_CORE_DIR:-$HERE/../../core}"
-  if [ -n "${CHTYPES_LIB_BUILD:-}" ] || [ -d "$core/lib/build" ]; then
+  # No default that walks OUT of this repository: a public clone has no
+  # sibling checkout, and a path that only resolves on a maintainer's
+  # laptop is worse than no path. Set CHTYPES_LIB_BUILD (or
+  # CHTYPES_CORE_DIR) to opt in; absent, the linked sections skip.
+  local core="${CHTYPES_CORE_DIR:-}"
+  if [ -n "${CHTYPES_LIB_BUILD:-}" ] || { [ -n "$core" ] && [ -d "$core/lib/build" ]; }; then
     local build="${CHTYPES_LIB_BUILD:-$core/lib/build}"
     (cd "$HERE/go" && CGO_LDFLAGS="-L$build -Wl,-rpath,$build" CHTYPES_LIB_BUILD="$build" go run -tags chtypes_linked .)
   else
