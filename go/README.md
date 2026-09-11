@@ -14,12 +14,18 @@ release. The one derived result is `Transformed` — ClickHouse never says
 "I silently changed your value", so the SDK computes it from a second parse
 through a widened reference type (`chtypes/transform.go`).
 
-## Install (pre-publish)
+## Install
 
-Nothing is published yet. Consume the module with a `replace` directive:
+```sh
+go get github.com/wave-rf/chtypes/go@v0.1.0
+```
+
+The module path is lowercase — the Go norm — and freezes together with the
+function signatures at 1.0. To work against a checkout instead, use a
+`replace` directive:
 
 ```
-require github.com/wave-rf/chtypes/go v0.0.0
+require github.com/wave-rf/chtypes/go v0.1.0
 replace github.com/wave-rf/chtypes/go => ../path/to/chtypes/go
 ```
 

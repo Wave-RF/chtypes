@@ -50,5 +50,5 @@ another.
 
 `schema` is `1`. A reader must refuse a schema it does not know. Beyond
 `cases`, the `generated` header carries `at`, `by`, `note`, `platform`,
-`versions`, `exact`, `refused` and `core_commit` — and `builds` (line ->
-wrapper build) once core's next publish lands.
+`versions`, `exact`, `refused`, `core_commit` and `builds` (line -> wrapper
+build).

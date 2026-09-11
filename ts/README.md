@@ -14,10 +14,14 @@ exists for.
 Node ≥ 22, ESM only. Native calls go through `ffi-rs` (prebuilt for
 darwin-arm64/x64 and linux arm64/x64, gnu and musl — no build step).
 
-## Install (pre-publish)
+## Install
 
-The package is not published yet. Wire it up by path, with pnpm (this repo's
-package manager):
+```sh
+pnpm add @wavehouse/chtypes
+```
+
+To work against a checkout instead, wire it up by path — with pnpm, this
+repo's package manager:
 
 ```jsonc
 // your app's package.json

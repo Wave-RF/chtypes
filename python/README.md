@@ -25,14 +25,19 @@ Three outcomes travel through this API, and conflating any two is an error:
   `substituted` the volatile DEFAULTs resolved here, `computed` the
   MATERIALIZED values.
 
-## Install (pre-publish)
-
-Nothing is published yet. Install by path with `uv` (pure Python, stdlib
-`ctypes`, zero dependencies, no build step):
+## Install
 
 ```bash
-uv add --editable /path/to/chtypes/python   # in a uv project
-uv pip install -e /path/to/chtypes/python   # in a bare venv
+uv add chtypes            # in a uv project
+uv pip install chtypes    # in a bare venv
+```
+
+Pure Python — stdlib `ctypes`, zero dependencies, no build step. To work
+against a checkout instead, install it editable:
+
+```bash
+uv add --editable /path/to/chtypes/python
+uv pip install -e /path/to/chtypes/python
 ```
 
 ## Getting artifacts

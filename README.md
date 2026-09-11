@@ -24,7 +24,7 @@ This repository is the **SDK half** of chtypes, Apache 2.0:
 | [`rust/`](rust/README.md) | `chtypes` — `libloading` |
 | [`include/chtypes.h`](include/chtypes.h) | the C ABI every binding is written against — 28 `chs_*` functions, ABI revision 4 |
 | [`spec/`](spec/README.md) | the normative contract: [`c-abi.md`](spec/c-abi.md), [`bindings.md`](spec/bindings.md) (the shape every SDK implements), [`artifact.md`](spec/artifact.md) (what ships, how a registry is laid out) |
-| [`goldens/`](goldens/README.md) | the public golden set — 31 cases, one answer in four languages |
+| [`goldens/`](goldens/README.md) | the public golden set — served by core, not tracked here; one answer in four languages |
 | [`playground/`](playground/README.md) | four side-by-side runnable tours, same sections in every language |
 | [`docs/artifacts.md`](docs/artifacts.md) | how a consumer obtains and verifies artifacts ([`docs/fetch.md`](docs/fetch.md): the fetch/verify/signing contract every SDK implements) |
 | [`scripts/fetch.sh`](scripts/fetch.sh) | the verified download into the per-user cache |
@@ -41,10 +41,13 @@ An SDK answers nothing by itself. It `dlopen`s one **artifact** per ClickHouse
 release — a self-contained shared library, 160–300 MB, that names itself
 (`chs_clickhouse_version()`) and carries its own `manifest.json` — and can hold
 several versions in one process, each with its own ClickHouse. The supported
-lines are those with a committed run of record in the core repository; today
-that is 24.8, 25.3, 25.8, 25.10, 26.5, 26.6 and 26.7, on `linux-amd64`,
-`linux-arm64` and `darwin-arm64` (macOS is a development floor, not an oracle:
-its `long double` makes float parses diverge from a real server).
+lines are those with a committed run of record in the core repository, on
+`linux-amd64`, `linux-arm64` and `darwin-arm64` (macOS is a development floor,
+not an oracle: its `long double` makes float parses diverge from a real
+server). Which lines those are is a question
+[`index.json`](https://artifacts.wavehouse.dev/artifacts/index.json) answers —
+`scripts/fetch.sh --all` reads it rather than restating a list — because core
+adds a line whenever it certifies one, and a list written here goes stale.
 
 ```sh
 scripts/fetch.sh 25.8                 # one line, verified, into the per-user cache
@@ -116,7 +119,7 @@ runners' own summary lines. Then once more with two published lines (the
 newest `-lts` and `-stable` for `linux-amd64`, fetched by `scripts/fetch.sh`
 exactly as a consumer would and cached until the release changes), where the
 golden set and the registry tests must run. The bulk proof — the server-truth
-suites, the oracle, every supported line — is the core repository's `certify`
+suites, the oracle, every supported line — is the core repository's `sdk-suites`
 workflow against this same tree. Locally, `scripts/fetch.sh 25.8` fills the
 per-user cache and the plain commands then run everything;
 `scripts/check-suite.sh --no-artifacts <lang>` reproduces the artifact-free

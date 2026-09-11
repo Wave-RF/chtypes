@@ -53,11 +53,13 @@ hosted runners with no variable and no secret: once with no artifact
 `scripts/fetch.sh` (`--require-artifacts`: the goldens must run). The
 server-truth suites for these SDKs live in `../chtypes-core/tests/sdk/` and
 run from there (`just test` in the core) against this tree as a sibling; the
-artifact-backed proof is the core repository's `certify` workflow.
+artifact-backed proof is the core repository's `sdk-suites` workflow (named
+`certify` until 2026-09-11).
 
-Pre-1.0 and pre-publish: `github.com/wave-rf/chtypes/go` is the module path
-(lowercase, the Go norm) and freezes at the first tag together with the
-function signatures. Nothing publishes without a `<dir>/v*` tag, and each
-release workflow refuses a tag whose version differs from the manifest's;
-the registry setup, the order and the one manual first publish per
-registry are in `RELEASING.md`.
+Pre-1.0, and published: all four bindings are live at **0.1.0** —
+`github.com/wave-rf/chtypes/go` (lowercase, the Go norm), PyPI `chtypes`,
+npm `@wavehouse/chtypes`, crates.io `chtypes`. The module path and the
+function signatures froze at that first tag. Nothing publishes without a
+`<dir>/v*` tag, and each release workflow refuses a tag whose version differs
+from the manifest's; the registry setup and the order are in `RELEASING.md`
+(the one manual first publish per registry is done).

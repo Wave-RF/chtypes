@@ -12,10 +12,15 @@ contract; where this crate and the spec disagree, the spec wins.
 documented (`#![deny(missing_docs)]`), including which `Error` variant each
 call can produce and what each one means.
 
-## Install (pre-publish)
+## Install
 
-The crate is not published; consume it as a path dependency. Unix only — the
-loader is `dlopen`.
+```toml
+[dependencies]
+chtypes = "0.1"
+```
+
+Unix only — the loader is `dlopen`. To work against a checkout instead,
+consume it as a path dependency:
 
 ```toml
 [dependencies]
