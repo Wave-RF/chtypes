@@ -429,24 +429,3 @@ def test_the_manifest_and_the_spec_table_agree() -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(pytest.main([__file__, "-v"]))
-
-
-def test_the_package_version_and_the_manifest_agree() -> None:
-    """`chtypes.__version__` must equal pyproject.toml's version.
-
-    They were 0.1.0 and 0.1.1 respectively when this test was written, so the
-    published 0.1.1 wheel reported itself as 0.1.0 to anyone who asked. The
-    release workflow gates on the manifest and never reads `__version__`, so
-    nothing caught it: a public attribute drifted from the package it names,
-    silently, across a release. Two spellings of one fact need something that
-    fails when they disagree.
-    """
-    import tomllib
-
-    import chtypes
-
-    declared = tomllib.load((REPO / "python" / "pyproject.toml").open("rb"))["project"]["version"]
-    assert chtypes.__version__ == declared, (
-        f"chtypes.__version__ is {chtypes.__version__!r} but pyproject.toml declares "
-        f"{declared!r} — bump both, or the published package misreports its own version"
-    )

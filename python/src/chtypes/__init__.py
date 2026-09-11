@@ -40,6 +40,9 @@ right.
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError as _PackageNotFound
+from importlib.metadata import version as _package_version
+
 from ._native import ABI_REVISION
 from ._rawjson import RawNumber, quote_bare_denormals
 from .discover import (
@@ -199,4 +202,11 @@ __all__ = [
     "verify_library",
 ]
 
-__version__ = "0.1.1"
+# Derived, never written twice. pyproject.toml is the single source of truth and
+# the build reads it from there; asking importlib for it means this attribute
+# cannot drift from the package it names. It did: 0.1.1 shipped reporting 0.1.0,
+# because a second hand-maintained copy has no way to know the first one moved.
+try:
+    __version__ = _package_version("chtypes")
+except _PackageNotFound:  # a source tree that was never installed
+    __version__ = "0.0.0+unknown"
