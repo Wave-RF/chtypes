@@ -7,7 +7,7 @@ All notable changes to the ts binding. The format is
 The four bindings in this repository are released together and give one answer,
 so an entry here has a counterpart in the other three.
 
-## [Unreleased]
+## [0.1.1] — 2026-09-11
 
 - **The golden set is served, not tracked.** `goldens/cases.json` no longer
   exists in this repository. Core publishes `sdk-goldens.json` in the rolling
@@ -25,6 +25,12 @@ so an entry here has a counterpart in the other three.
   longer fails on sums naming a file the host has not finished serving.
 - README install instructions name the published package rather than a path
   dependency.
+- Two errors in the published README, both found by running the snippets
+  rather than reading them: Python's `substituted` is on `RowResult`, not
+  `BatchResult`, and TypeScript's `using schema = …` is a syntax error on
+  Node 22, this package's own `engines` floor (`schema.close()` is portable).
+- `docs/support.md` is new: which language versions, platforms and ClickHouse
+  lines are supported, generated from the manifests and the release's own index.
 
 ## [0.1.0] — 2026-09-10
 
