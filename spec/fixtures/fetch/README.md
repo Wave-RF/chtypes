@@ -18,11 +18,14 @@ Signed with the TEST key in `test-key/` (`d1251e468f9156ef`), never the release 
 Platforms `linux-arm64`, `linux-amd64`, `darwin-arm64`; lines `25.8` → `25.8.28.1-lts`, `26.7` → `26.7.3.19-stable`; release tag `fixtures`.
 Not published anywhere: platform `darwin-amd64`, line `24.8`, patch `25.8.99.1-lts` (→ `CHTYPES_ARTIFACT_UNPUBLISHED`, exit 4).
 
-Every `index.json` row carries exactly these fields: `arch`, `bytes`, `clickhouse_minor`, `clickhouse_version`, `file`, `library`, `library_sha256`, `os`, `sha256`.
+Every `index.json` row carries exactly these fields: `arch`, `build`, `bytes`, `clickhouse_minor`, `clickhouse_version`, `core_commit`, `file`, `library`, `library_sha256`, `os`, `sha256`.
 Files in every release directory: `index.json`, `SHA256SUMS`, `SHA256SUMS.sig`
 (absent in `unsigned/`), `LICENSE`, `NOTICE`, `RELEASE_NOTES.md`, and one
-`chtypes-<version>-<os>-<arch>.tar.gz` per row, each holding `manifest.json`,
-the library it names, `CH_VERSION` and `unsafe_families.txt`.
+`chtypes-<version>-<os>-<arch>[-b<build>].tar.gz` per row, each holding
+`manifest.json`, the library it names, `CH_VERSION` and `unsafe_families.txt`.
+Every fixture but `two-builds/` carries ONE row per (platform, line), under the
+unsuffixed name an artifact built before 2026-09-10 has, which every consumer
+reads as build 0; `two-builds/` carries two, and is what pins the rule below.
 
 ## Verdicts (`fetch 25.8 --platform linux-arm64`, or any published row)
 
@@ -44,6 +47,35 @@ suite makes that copy itself.
 `unsigned/` with `CHTYPES_ALLOW_UNSIGNED=1` must print one loud warning naming the
 source, then install. Exit codes are `docs/fetch.md` §6: 0 ok · 1 verification
 failed · 2 usage · 3 source unreachable · 4 not published for this platform/line.
+
+## `two-builds/` — WHICH row, when a version has several
+
+Every fixture above answers *may this release be installed at all*. This one
+answers *which of its rows*, and it is the only place the 2026-09-10 wrapper-build
+rule is pinned by evidence rather than by prose:
+
+> filter to os/arch and the requested line, take the newest clickhouse_version, then the HIGHEST build; a row with no `build` (and a file name with no -b<N>) is build 0 (docs/distribution.md §3a, sdk/docs/fetch.md §3a)
+
+line 25.8 carries an UNSUFFIXED artifact from before wrapper builds existed (read as build 0) beside its rebuild; line 26.7 carries two explicitly suffixed builds. Both resolve to build 214.
+
+It is a real `publish.sh --assemble` of two publishes at different `chtypes_build`
+values, so the two rows, their order and their `build` fields are the release
+script's own — not this generator's opinion. It is deliberately NOT in the verdict
+table above: those cases name one asset per line, which a two-row release cannot
+express. `expected.json`'s `builds.cases` is the machine-readable form of this
+table.
+
+| platform | line | installs | build | must NOT install | build |
+|---|---|---|---|---|---|
+| linux-arm64 | 25.8 | `chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz` | 214 | `chtypes-25.8.28.1-lts-linux-arm64.tar.gz` | 0 |
+| linux-arm64 | 26.7 | `chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz` | 214 | `chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz` | 105 |
+| linux-amd64 | 25.8 | `chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz` | 214 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 0 |
+| linux-amd64 | 26.7 | `chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz` | 214 | `chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz` | 105 |
+| darwin-arm64 | 25.8 | `chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz` | 214 | `chtypes-25.8.28.1-lts-darwin-arm64.tar.gz` | 0 |
+| darwin-arm64 | 26.7 | `chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz` | 214 | `chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz` | 105 |
+
+Both rows are genuine, signed and hash-correct: a fetcher that installs the
+superseded one passes every check in §3 and is still wrong.
 
 ## The rows in `signed/index.json`
 

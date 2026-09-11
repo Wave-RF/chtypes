@@ -1,10 +1,114 @@
 {
+ "builds": {
+  "cases": [
+   {
+    "clickhouse_version": "25.8.28.1-lts",
+    "install": {
+     "build": 214,
+     "file": "chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz",
+     "sha256": "f86d4feb68a80e9388ef926974da973c4a0b351885b28653dad6dd4406342c4c"
+    },
+    "line": "25.8",
+    "platform": "linux-arm64",
+    "superseded": {
+     "build": 0,
+     "file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz",
+     "sha256": "8b1d56f1a09df2b47f7bf65a792216108efcaecedc4bea84616157d03185c555"
+    }
+   },
+   {
+    "clickhouse_version": "26.7.3.19-stable",
+    "install": {
+     "build": 214,
+     "file": "chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz",
+     "sha256": "3beb777804a78842c5da93a5f8a4bea7bc0de1be34521a6b257a0a5a43a3c9da"
+    },
+    "line": "26.7",
+    "platform": "linux-arm64",
+    "superseded": {
+     "build": 105,
+     "file": "chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz",
+     "sha256": "a11a68f868b77c4f943285676e1f180e6bf028d6d70528733165166f1fcc658d"
+    }
+   },
+   {
+    "clickhouse_version": "25.8.28.1-lts",
+    "install": {
+     "build": 214,
+     "file": "chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz",
+     "sha256": "e977574e7d1fce8d178e1ee1cb61958a752d6ade515dd57080c85adcd9e0b31e"
+    },
+    "line": "25.8",
+    "platform": "linux-amd64",
+    "superseded": {
+     "build": 0,
+     "file": "chtypes-25.8.28.1-lts-linux-amd64.tar.gz",
+     "sha256": "822941ce58620366882d1e0bbe284336ece7ad385eeeb1fdec388aef127f62f3"
+    }
+   },
+   {
+    "clickhouse_version": "26.7.3.19-stable",
+    "install": {
+     "build": 214,
+     "file": "chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz",
+     "sha256": "85ae31da9317ed84a5a9bd1826c7313c5161f08d2b43c4e4d8fea9694b7e1a18"
+    },
+    "line": "26.7",
+    "platform": "linux-amd64",
+    "superseded": {
+     "build": 105,
+     "file": "chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz",
+     "sha256": "9e34a78c5f870633f382c78a7e1995f2b3016cc919213df03ef9bbf66cd64e4e"
+    }
+   },
+   {
+    "clickhouse_version": "25.8.28.1-lts",
+    "install": {
+     "build": 214,
+     "file": "chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz",
+     "sha256": "500a214ad032eb0ba2c8cd2900117a4a8b7e292edff25dc66471000df92d2b4d"
+    },
+    "line": "25.8",
+    "platform": "darwin-arm64",
+    "superseded": {
+     "build": 0,
+     "file": "chtypes-25.8.28.1-lts-darwin-arm64.tar.gz",
+     "sha256": "ecedc535b6410e42a47af1ab950198cfa8906e5bbed7a9c76b85863fe5b8ac20"
+    }
+   },
+   {
+    "clickhouse_version": "26.7.3.19-stable",
+    "install": {
+     "build": 214,
+     "file": "chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz",
+     "sha256": "e21d78645dc7395a1dffe34480c976f3b4845cc3c6782f7df57dbd83ee79ec18"
+    },
+    "line": "26.7",
+    "platform": "darwin-arm64",
+    "superseded": {
+     "build": 105,
+     "file": "chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz",
+     "sha256": "768a9fd9c7b62faff89618804880a9efc3744351fbbd36ea2181ab0183ccb60d"
+    }
+   }
+  ],
+  "fixture": "two-builds",
+  "low_build": 105,
+  "note": "line 25.8 carries an UNSUFFIXED artifact from before wrapper builds existed (read as build 0) beside its rebuild; line 26.7 carries two explicitly suffixed builds. Both resolve to build 214.",
+  "rebuild": 214,
+  "rule": "filter to os/arch and the requested line, take the newest clickhouse_version, then the HIGHEST build; a row with no `build` (and a file name with no -b<N>) is build 0 (docs/distribution.md \u00a73a, sdk/docs/fetch.md \u00a73a)",
+  "unsuffixed_lines": [
+   "25.8"
+  ]
+ },
  "generated_by": "chtypes-core tests/sdk/fetch-fixtures/gen.py \u2014 never edit by hand",
  "index_row_fields": [
   "arch",
+  "build",
   "bytes",
   "clickhouse_minor",
   "clickhouse_version",
+  "core_commit",
   "file",
   "library",
   "library_sha256",
