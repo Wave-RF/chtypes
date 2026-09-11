@@ -1,5 +1,5 @@
 // Command chtypes is the Go SDK's artifact tool — the one CLI surface every
-// chtypes SDK spells identically (docs/fetch.md §6):
+// chtypes SDK spells identically (docs/guides/fetch.md §6):
 //
 //	chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
 //	                        [--tag <t> | --url <base>] [--lock <file>] [--frozen]
@@ -343,7 +343,7 @@ func cmdWhere(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// registryDir resolves --dest the way a fetch does (docs/fetch.md §1):
+// registryDir resolves --dest the way a fetch does (docs/guides/fetch.md §1):
 // explicit, else $CHTYPES_REGISTRY, else the per-user cache — the cache
 // alone for a platform other than this host's.
 func registryDir(dest, platform string) (string, error) {

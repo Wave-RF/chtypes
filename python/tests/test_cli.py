@@ -1,4 +1,4 @@
-"""`python -m chtypes` and the `chtypes` console script — docs/fetch.md §6.
+"""`python -m chtypes` and the `chtypes` console script — docs/guides/fetch.md §6.
 
 The surface, the exit codes, stdout carrying the installed directory alone,
 progress on stderr. Most runs go through `main(argv)` in-process; the
@@ -23,7 +23,7 @@ PLATFORM = "linux-arm64"
 
 needs_fixtures = pytest.mark.skipif(
     not EXPECTED_FILE.is_file(),
-    reason=f"no fetch fixtures at {FIXTURES} (generated in the core repository, docs/fetch.md §9)",
+    reason=f"no fetch fixtures at {FIXTURES} (generated in the core repository, docs/guides/fetch.md §9)",
 )
 
 

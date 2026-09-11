@@ -67,7 +67,7 @@ def test_version_lookup_accepts_a_minor_line_and_an_exact_patch(
 def test_unresolvable_version_is_the_one_missing_artifact_error(
     registry: chtypes.Registry,
 ) -> None:
-    """docs/fetch.md §7: one identifiable error, one message, verbatim."""
+    """docs/guides/fetch.md §7: one identifiable error, one message, verbatim."""
     with pytest.raises(chtypes.ArtifactMissingError) as caught:
         registry.for_version("99.1")
     err = caught.value
@@ -101,7 +101,7 @@ def test_versions_are_ordered_by_release_not_by_string(registry: chtypes.Registr
 def test_registry_walks_the_search_path(
     monkeypatch: pytest.MonkeyPatch, isolated_search_path: Path, tmp_path: Path
 ) -> None:
-    """docs/fetch.md §1: explicit path, $CHTYPES_REGISTRY, the cache, the
+    """docs/guides/fetch.md §1: explicit path, $CHTYPES_REGISTRY, the cache, the
     system locations — in that order; fetch writes to the first of the
     first three. `Registry()` no longer needs anything set (pre-1.0 change)."""
     cache = isolated_search_path
@@ -480,7 +480,7 @@ def test_library_close_is_refcounted_per_image(tmp_path: Path, registry: chtypes
     if not versions:
         pytest.skip(
             f"no artifacts under any of {[str(p) for p in registry.search_path]} — "
-            "fetch one with `scripts/fetch.sh 25.8` (docs/fetch.md)"
+            "fetch one with `scripts/fetch.sh 25.8` (docs/guides/fetch.md)"
         )
     # A one-version registry keeps the subprocess cheap: symlink one version
     # in — one this binding can LOAD. Mid-relink a registry legitimately

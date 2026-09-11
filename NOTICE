@@ -13,9 +13,9 @@ http://www.apache.org/licenses/LICENSE-2.0
 The bindings in this repository contain no ClickHouse code. They load, at run
 time, a separately distributed native artifact that embeds a build of
 ClickHouse (https://github.com/ClickHouse/ClickHouse, Apache License 2.0).
-Those artifacts are NOT covered by this repository's licence: each artifact
+Those artifacts are NOT covered by this repository's license: each artifact
 release carries its own LICENSE file and is distributed under the Elastic
-License 2.0. See docs/artifacts.md.
+License 2.0. See docs/guides/artifacts.md.
 
 tests/fixtures/fetch/test-key/ contains an ed25519 key pair, both halves, that
 signs the fetch test fixtures and nothing else. It is derived from a public

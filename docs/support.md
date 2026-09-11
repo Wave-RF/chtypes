@@ -54,7 +54,7 @@ repository and the release publishes it:
 
 Ask for a line, never a nearest match: `for("25.8")` resolves the newest
 build of that line and fails if it is absent, rather than quietly handing
-back a neighbour whose answers differ.
+back a neighbor whose answers differ.
 
 <!-- END GENERATED -->
 

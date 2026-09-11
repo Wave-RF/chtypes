@@ -28,11 +28,11 @@ pub const CODE_UNSUPPORTED: i32 = -2;
 /// joined — `chs_block_parse` / `chs_block_free` / `chs_filter_eval`. This
 /// crate therefore speaks 4 and refuses revision-3 artifacts: calling the
 /// 5-argument `chs_filter_compile` against the 4-argument revision-3 artifact
-/// is undefined behaviour, which is exactly what this gate exists to refuse.
+/// is undefined behavior, which is exactly what this gate exists to refuse.
 pub const ABI_REVISION: i32 = 4;
 
 /// `CHTYPES_ARTIFACT_MISSING` — no installed artifact answers for the line
-/// (`docs/fetch.md` §7). The code every SDK shares for [`Error::ArtifactMissing`].
+/// (`docs/guides/fetch.md` §7). The code every SDK shares for [`Error::ArtifactMissing`].
 pub const CODE_ARTIFACT_MISSING: &str = "CHTYPES_ARTIFACT_MISSING";
 /// `CHTYPES_ARTIFACT_UNTRUSTED` — the release's `SHA256SUMS` is unsigned or
 /// mis-signed (§3 step 0); nothing was downloaded around it.
@@ -50,7 +50,7 @@ pub const CODE_ARTIFACT_UNPUBLISHED: &str = "CHTYPES_ARTIFACT_UNPUBLISHED";
 pub const CODE_SOURCE_UNREACHABLE: &str = "CHTYPES_SOURCE_UNREACHABLE";
 
 /// This SDK's fetch command, as the "Install it:" line of
-/// [`Error::ArtifactMissing`] spells it (`docs/fetch.md` §6: the crate's
+/// [`Error::ArtifactMissing`] spells it (`docs/guides/fetch.md` §6: the crate's
 /// `[[bin]]`, reached through `cargo install chtypes`).
 pub const FETCH_COMMAND: &str = "cargo install chtypes && chtypes fetch";
 
@@ -72,7 +72,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///   error. Mapping a decline onto a rejection manufactures an over-reject;
 ///   both over-accepts and over-rejects are budgeted at zero.
 /// * **Everything else** is the machinery: loading, parsing, argument
-///   marshalling. No ClickHouse verdict was reached at all
+///   marshaling. No ClickHouse verdict was reached at all
 ///   ([`Error::code`] answers `None`).
 ///
 /// Note what is *not* an error: a row the server would reject comes back as
@@ -154,7 +154,7 @@ pub enum Error {
     /// The same artifact image is already initialized with a different
     /// configuration. `dlopen` refcounts one image per path, so `chs_init`
     /// runs at most once per artifact — a second load asking for a different
-    /// timezone cannot be honoured and must not silently re-timezone the
+    /// timezone cannot be honored and must not silently re-timezone the
     /// first load's live libraries.
     #[error(
         "chtypes: {path} is already initialized with timezone {have:?}; \
@@ -248,7 +248,7 @@ pub enum Error {
     /// The result document could not be parsed even after the bare-denormal
     /// repair.
     ///
-    /// This is a hard error on purpose: the previous behaviour — retrying the
+    /// This is a hard error on purpose: the previous behavior — retrying the
     /// parse through `String::from_utf8_lossy` — silently replaced a `String`
     /// column's bytes with U+FFFD, which then read downstream as a coercion that
     /// never happened. A document this crate cannot read exactly is reported,
@@ -297,7 +297,7 @@ pub enum Error {
 
     /// No installed artifact answers for the requested ClickHouse line on this
     /// platform: the §1 search path was walked and none of its directories
-    /// holds `<line>/manifest.json` (`docs/fetch.md` §7). The message is the
+    /// holds `<line>/manifest.json` (`docs/guides/fetch.md` §7). The message is the
     /// one every SDK renders, verbatim apart from the bracketed parts, and
     /// [`Error::artifact_code`] answers [`CODE_ARTIFACT_MISSING`].
     ///
@@ -314,7 +314,7 @@ pub enum Error {
         looked_in: Vec<PathBuf>,
     },
 
-    /// The release's `SHA256SUMS` did not verify (`docs/fetch.md` §3 step 0):
+    /// The release's `SHA256SUMS` did not verify (`docs/guides/fetch.md` §3 step 0):
     /// no `SHA256SUMS.sig`, a malformed one, or a signature under no trusted
     /// key. Nothing was downloaded around it. Code [`CODE_ARTIFACT_UNTRUSTED`].
     #[error("chtypes: {origin}: SHA256SUMS is not trusted: {reason}")]
@@ -325,7 +325,7 @@ pub enum Error {
         reason: String,
     },
 
-    /// A hash disagreed somewhere in the chain (`docs/fetch.md` §3): the index
+    /// A hash disagreed somewhere in the chain (`docs/guides/fetch.md` §3): the index
     /// and `SHA256SUMS`, the downloaded tarball, the library inside it, or the
     /// installed library re-hashed in place. Reported, never repaired. Code
     /// [`CODE_ARTIFACT_CORRUPT`].
@@ -340,7 +340,7 @@ pub enum Error {
     },
 
     /// The release offers something other than what the lock file pins for
-    /// this `<os>-<arch>/<minor>` (`docs/fetch.md` §5, `--frozen`). Code
+    /// this `<os>-<arch>/<minor>` (`docs/guides/fetch.md` §5, `--frozen`). Code
     /// [`CODE_ARTIFACT_PINNED`].
     #[error("chtypes: {key}: {message}")]
     ArtifactPinned {
@@ -351,7 +351,7 @@ pub enum Error {
     },
 
     /// The release publishes nothing for the requested line (or exact patch —
-    /// a hard requirement) on this platform (`docs/fetch.md` §2). Code
+    /// a hard requirement) on this platform (`docs/guides/fetch.md` §2). Code
     /// [`CODE_ARTIFACT_UNPUBLISHED`].
     #[error(
         "chtypes: {origin} publishes no artifact for ClickHouse {requested} on {platform} (it has: {offered})"
@@ -403,7 +403,7 @@ impl Error {
         self.code() == Some(CODE_UNSUPPORTED)
     }
 
-    /// The shared artifact code (`docs/fetch.md` §7) — `CHTYPES_ARTIFACT_MISSING`,
+    /// The shared artifact code (`docs/guides/fetch.md` §7) — `CHTYPES_ARTIFACT_MISSING`,
     /// `…_UNTRUSTED`, `…_CORRUPT`, `…_PINNED`, `…_UNPUBLISHED` or
     /// `CHTYPES_SOURCE_UNREACHABLE` — for the fetch and lookup failures, `None`
     /// for everything else. Distinct from [`Error::code`], which is the
@@ -505,9 +505,9 @@ mod tests {
         // the protocol wire as an `unsupported` scope (docs/reference/bindings.md rule
         // 12). Internal sentinels never leak into the rendering.
         let decline = Error::Unsupported {
-            message: "engine not modelled".into(),
+            message: "engine not modeled".into(),
         };
-        assert_eq!(decline.to_string(), "chtypes: [-2] engine not modelled");
+        assert_eq!(decline.to_string(), "chtypes: [-2] engine not modeled");
         let predates = Error::PredatesFeature {
             feature: "chs_schema_engine",
         };
@@ -535,7 +535,7 @@ mod tests {
 
     #[test]
     fn the_artifact_missing_message_is_the_spec_s_verbatim() {
-        // docs/fetch.md §7: one message in every SDK, verbatim apart from the
+        // docs/guides/fetch.md §7: one message in every SDK, verbatim apart from the
         // bracketed parts; the "Install it:" line names THIS SDK's command.
         let err = Error::ArtifactMissing {
             line: "25.8".into(),

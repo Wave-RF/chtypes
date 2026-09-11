@@ -62,7 +62,7 @@ class Format(IntEnum):
     # as their servers do.
     ROW_BINARY_WITH_NAMES_AND_TYPES_AND_DEFAULTS = 7
     # Column-oriented, self-describing, and what every ClickHouse client
-    # library sends on INSERT. Modelled at the revision `INSERT ... FORMAT
+    # library sends on INSERT. Modeled at the revision `INSERT ... FORMAT
     # Native` uses (0), so there is no BlockInfo prefix and no per-column
     # serialization-kind byte; blocks taken off a live TCP connection carry
     # both and are a different contract (docs/reference/c-abi.md §Native). Requires an
@@ -152,7 +152,7 @@ class Verdict(StrEnum):
 
     @classmethod
     def of(cls, char: str) -> Verdict:
-        """Map a verdict character; anything unrecognised degrades to DECLINE
+        """Map a verdict character; anything unrecognized degrades to DECLINE
         (fail closed), never to FALSE (which would be an invented answer)."""
         try:
             return cls(char)
@@ -239,7 +239,7 @@ class Outcome(StrEnum):
 
     @classmethod
     def of(cls, text: str) -> Outcome:
-        """Map a document's `outcome` string; anything unrecognised degrades
+        """Map a document's `outcome` string; anything unrecognized degrades
         to UNSUPPORTED.
 
         A future artifact's new verdict is by definition an answer this
@@ -267,7 +267,7 @@ class DefaultKind(StrEnum):
     @classmethod
     def of(cls, text: str) -> DefaultKind:
         """Map a document's `default_kind` string, defaulting to NONE for
-        anything unrecognised (a future artifact must degrade, not raise)."""
+        anything unrecognized (a future artifact must degrade, not raise)."""
         try:
             return cls(text.upper() if text else "")
         except ValueError:

@@ -202,7 +202,7 @@ fn trim_json_ws(mut b: &[u8]) -> &[u8] {
 /// the decoded **bytes**, and the offset just past the closing quote.
 ///
 /// Shared with the result-document reader so that escape handling — including
-/// Go's lone-surrogate-to-U+FFFD behaviour — exists exactly once.
+/// Go's lone-surrogate-to-U+FFFD behavior — exists exactly once.
 pub(crate) fn decode_string_at(b: &[u8], at: usize) -> Option<(Vec<u8>, usize)> {
     let mut p = Parser { b, i: at };
     p.ws();

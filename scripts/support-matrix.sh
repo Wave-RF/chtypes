@@ -134,7 +134,7 @@ for minor in sorted(lines, key=order):
 w("")
 w("Ask for a line, never a nearest match: `for(\"25.8\")` resolves the newest")
 w("build of that line and fails if it is absent, rather than quietly handing")
-w("back a neighbour whose answers differ.")
+w("back a neighbor whose answers differ.")
 
 block = "\n".join(out)
 BEGIN = "<!-- BEGIN GENERATED — scripts/support-matrix.sh; do not edit by hand -->"

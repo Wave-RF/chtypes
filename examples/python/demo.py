@@ -212,7 +212,7 @@ def section1() -> tuple[Registry, chtypes.Library]:
         kv("asking for 99.9", "(no error!?)")
     except chtypes.RegistryError as err:
         kv("asking for 99.9", str(err))
-    note("no nearest-neighbour fallback, ever — a wrong-version answer is a")
+    note("no nearest-neighbor fallback, ever — a wrong-version answer is a")
     note("wrong answer with a green checkmark on it")
 
     return registry, lib
@@ -379,7 +379,7 @@ def section4(lib: chtypes.Library) -> None:
     blank()
 
     # (d) The compile MODE. One mode exists (DECLARED = 0). A binding passes
-    # an unrecognised mode THROUGH; the refusal (-2, a decline) is the
+    # an unrecognized mode THROUGH; the refusal (-2, a decline) is the
     # library's to make — unconditionally, even with no profile.
     kv("(d) compile mode", f"chtypes.COMPILE_DECLARED = {chtypes.COMPILE_DECLARED}")
     with lib.compile_ddl("a UInt8", mode=chtypes.COMPILE_DECLARED):
@@ -519,7 +519,7 @@ def section6(lib: chtypes.Library) -> None:
         note("expression evaluated through ClickHouse's own CAST path),")
         note("default_substituted (a VOLATILE default resolved from the pinned")
         note("clock), absent (no DEFAULT: the type's own zero). text is")
-        note("ClickHouse's OWN JSON rendering — never re-serialised here, because")
+        note("ClickHouse's OWN JSON rendering — never re-serialized here, because")
         note("18446744073709551615 through a double comes back ...552000.")
 
         blank()
@@ -585,7 +585,7 @@ def section6(lib: chtypes.Library) -> None:
 # WHAT: the same three-column schema fed in all ten chs_format encodings —
 # accept and reject for each text format, then the binary tier with
 # hand-built bytes.
-# WHY: format is not cosmetic. Each format has signature behaviours (CSV's
+# WHY: format is not cosmetic. Each format has signature behaviors (CSV's
 # bare-vs-quoted empty field, RBWD's marker byte, Native's silent CAST,
 # Buffers' silent reinterpret) that change what the table ends up holding.
 # LOOK FOR: the same logical row giving format-specific verdicts, and the
@@ -709,7 +709,7 @@ def section8(lib: chtypes.Library) -> None:
     with lib.compile_ddl("a UInt8") as s3:
         kv("  known, non-default", "index_granularity=4096 -> " + classify(
             lambda: s3.set_engine("MergeTree", "tuple()", merge_tree_settings={"index_granularity": "4096"})))
-        note("a DECLINE: no MergeTree setting's behaviour is modelled yet, and")
+        note("a DECLINE: no MergeTree setting's behavior is modeled yet, and")
         note("silently ignoring a declared value would fake the profile being in")
         note("force. A real server might well accept it — validate cautiously.")
     with lib.compile_ddl("a UInt8") as s4:

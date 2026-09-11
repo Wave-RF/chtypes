@@ -94,7 +94,7 @@ pub struct Library {
     minor: String,
     path: PathBuf,
     api: Api,
-    /// Serialises every call into this library. See the type docs.
+    /// Serializes every call into this library. See the type docs.
     lock: Arc<Mutex<()>>,
 }
 
@@ -363,7 +363,7 @@ impl Library {
     ///
     /// * [`Error::Schema`] — the payload was refused **wholesale** and nothing
     ///   was committed. An unknown setting name is the server's own code `115`
-    ///   with its did-you-mean hint; unrecognised `chtypes_*` names take the
+    ///   with its did-you-mean hint; unrecognized `chtypes_*` names take the
     ///   same `115`.
     /// * [`Error::PredatesFeature`] — the artifact does not export
     ///   `chs_set_default_settings`.

@@ -173,16 +173,16 @@ The short version: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64`
 
 Pre-1.0, and published: Go, PyPI, npm and crates.io all carry `0.1.1`. The C ABI is frozen at revision 4 (`include/chtypes.h`, 28 `chs_*` functions) and the four bindings pin that number at compile time. Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen; function signatures froze at the first tag. Anything else may still move — each binding keeps its own CHANGELOG.
 
-This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the artifacts themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — is the core repository, under its own licence. The bindings here contain no ClickHouse code: they load an artifact and speak the ABI. Artifacts carry their own licence; see the `LICENSE` inside each release.
+This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the artifacts themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — is the core repository, under its own license. The bindings here contain no ClickHouse code: they load an artifact and speak the ABI. Artifacts carry their own license; see the `LICENSE` inside each release.
 
 ## Contributing
 
-Issues and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md). A change to one binding's behaviour lands in all four in the same cycle; that is the contract, not a preference. Report security issues privately: [SECURITY.md](SECURITY.md).
+Issues and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md). A change to one binding's behavior lands in all four in the same cycle; that is the contract, not a preference. Report security issues privately: [SECURITY.md](SECURITY.md).
 
 ## AI-assisted development
 
 Much of this repository was written with AI assistance and reviewed by a human before merge. The review gate is the same regardless of who or what authored a change, and the test suites are deliberately built to refuse a silent pass — every artifact-dependent test skips loudly by name, and a suite that ran nothing fails. If you find documentation that drifted from the code, please open an issue; that is the failure mode we most want reported.
 
-## Licence
+## License
 
 Apache 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

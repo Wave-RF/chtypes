@@ -1,4 +1,4 @@
-//! `chtypes` — the fetch command every SDK spells identically (`docs/fetch.md`
+//! `chtypes` — the fetch command every SDK spells identically (`docs/guides/fetch.md`
 //! §6), over [`chtypes::ensure`].
 //!
 //! ```text
@@ -171,7 +171,7 @@ fn main() -> ExitCode {
     }
 }
 
-/// `docs/fetch.md` §6: 1 verification failed · 3 source unreachable · 4 not
+/// `docs/guides/fetch.md` §6: 1 verification failed · 3 source unreachable · 4 not
 /// published. Everything else that failed is 1 too — it did not succeed.
 fn exit_code_for(err: &Error) -> u8 {
     match err.artifact_code() {

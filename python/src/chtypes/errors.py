@@ -60,7 +60,7 @@ class RegistryError(ChtypesError):
     """
 
 
-# The fetch/verify codes every SDK shares (docs/fetch.md §7). A string code
+# The fetch/verify codes every SDK shares (docs/guides/fetch.md §7). A string code
 # rather than a subclass test is what a CLI, a log line or a metric keys on,
 # so it is carried on the exception as `.code` and never spelled twice.
 CODE_ARTIFACT_MISSING: Final = "CHTYPES_ARTIFACT_MISSING"
@@ -74,7 +74,7 @@ CODE_SOURCE_UNREACHABLE: Final = "CHTYPES_SOURCE_UNREACHABLE"
 class ArtifactError(RegistryError):
     """An artifact is missing, could not be obtained, or failed verification.
 
-    The base of the fetch-side family (docs/fetch.md §3, §5, §7). Every
+    The base of the fetch-side family (docs/guides/fetch.md §3, §5, §7). Every
     subclass fixes `code` to one of the six codes the four SDKs share, so a
     caller can key on either the type or the string:
 
@@ -101,7 +101,7 @@ class ArtifactError(RegistryError):
 class ArtifactMissingError(ArtifactError):
     """No artifact for the requested line anywhere on the registry search path.
 
-    The one error every SDK raises for a missing artifact (docs/fetch.md §7),
+    The one error every SDK raises for a missing artifact (docs/guides/fetch.md §7),
     with the shared message, verbatim apart from the bracketed parts: the
     line, the platform, every directory that was looked in, and this SDK's
     own fetch command. Raised by `Registry.for_version` when lazy fetch is
@@ -133,14 +133,14 @@ class ArtifactUntrustedError(ArtifactError):
 
     Verification stops here, before a byte of library moves; nothing is ever
     downloaded around it. `CHTYPES_ALLOW_UNSIGNED=1` is the one, loud escape
-    (docs/fetch.md §4).
+    (docs/guides/fetch.md §4).
     """
 
     code = CODE_ARTIFACT_UNTRUSTED
 
 
 class ArtifactCorruptError(ArtifactError):
-    """A hash disagreed somewhere in the chain (docs/fetch.md §3).
+    """A hash disagreed somewhere in the chain (docs/guides/fetch.md §3).
 
     `index.json` against the signed `SHA256SUMS`, the downloaded tarball
     against both, the manifest inside against the index, or the installed
@@ -172,7 +172,7 @@ class SourceUnreachableError(ArtifactError):
 
 class UnsignedArtifactWarning(UserWarning):
     """Emitted, once per fetch, when `CHTYPES_ALLOW_UNSIGNED=1` skips the
-    signature check — the one loud warning docs/fetch.md §4 requires."""
+    signature check — the one loud warning docs/guides/fetch.md §4 requires."""
 
 
 class SchemaError(ChtypesError):

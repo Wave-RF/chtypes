@@ -52,7 +52,7 @@ pub enum Format {
     /// ClickHouse's `Native` block format — COLUMN-oriented, self-describing,
     /// and what every ClickHouse client library sends on INSERT.
     ///
-    /// Modelled at the revision `INSERT ... FORMAT Native` uses (0), so there
+    /// Modeled at the revision `INSERT ... FORMAT Native` uses (0), so there
     /// is no `BlockInfo` prefix and no per-column serialization-kind byte;
     /// blocks taken off a live TCP connection carry both and are a different
     /// contract (`docs/reference/c-abi.md` §Native). Because the stream carries names
@@ -211,7 +211,7 @@ impl Verdict {
 /// The CALL-level verdict of [`crate::Filter::rows`] — whether evaluation
 /// completed at all; per-row failures live in the verdicts, not here. The
 /// default (and the degradation for an outcome spelling this crate does not
-/// recognise) is `Unsupported`, never `Rejected` — the same
+/// recognize) is `Unsupported`, never `Rejected` — the same
 /// vocabulary-drift rule as [`Outcome`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum FilterOutcome {
@@ -284,7 +284,7 @@ pub enum Outcome {
     AcceptedPoisoned,
     /// This build refuses to answer. Never scored as agreement, and never
     /// mapped onto accepted or rejected. Also the degradation for an outcome
-    /// spelling this crate does not recognise — see the type docs.
+    /// spelling this crate does not recognize — see the type docs.
     #[default]
     Unsupported,
     /// The row was dropped under `input_format_allow_errors_*` and the batch
@@ -316,7 +316,7 @@ impl std::fmt::Display for Outcome {
     }
 }
 
-/// Map a document's outcome string. An outcome this crate does not recognise
+/// Map a document's outcome string. An outcome this crate does not recognize
 /// degrades to [`Outcome::Unsupported`], never to [`Outcome::Rejected`]
 /// (docs/reference/bindings.md §RowResult, rule added 2026-08-26): a future artifact's
 /// new verdict is an answer this crate cannot interpret, and `Unsupported` is
@@ -784,8 +784,8 @@ pub(crate) fn batch_result_of(doc: BatchDoc) -> BatchResult {
 }
 
 /// Turn a filter document into a [`FilterResult`] — the one assembler, like
-/// [`batch_result_of`]. An unrecognised outcome spelling degrades to
-/// [`FilterOutcome::Unsupported`], never `Rejected`; an unrecognised verdict
+/// [`batch_result_of`]. An unrecognized outcome spelling degrades to
+/// [`FilterOutcome::Unsupported`], never `Rejected`; an unrecognized verdict
 /// character degrades to [`Verdict::Decline`] — both are the fail-closed,
 /// never-scored-as-agreement arms.
 pub(crate) fn filter_result_of(doc: FilterDoc) -> FilterResult {

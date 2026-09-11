@@ -145,7 +145,7 @@ CHS_API const char * chs_clickhouse_version(void);
  * PRESENCE proves a function exists, never that its signature matches. Before
  * this revision existed, a loader holding a header and an artifact built from
  * a different cycle had no way to discover the mismatch except by calling
- * through it, which is undefined behaviour. Now it can ask.
+ * through it, which is undefined behavior. Now it can ask.
  *
  * THE RULE, and it is the whole rule:
  *
@@ -184,7 +184,7 @@ CHS_API const char * chs_clickhouse_version(void);
  * chs_filter_compile / chs_filter_free / chs_filter_rows trio joins the
  * surface (25 exported functions). This is the SIGNATURE-CHANGE case: calling
  * either era's chs_rows through the other's declaration is undefined
- * behaviour, which is exactly what this gate refuses.
+ * behavior, which is exactly what this gate refuses.
  *
  * Revision 4 is the filter phase-2 cycle, 2026-08-31 (same day, second
  * cycle): chs_filter_compile gains params_json ({name:Type} query
@@ -388,7 +388,7 @@ CHS_API void chs_schema_free(chs_schema * s);
  * CREATE spelling ("CollapsingMergeTree(sign)"); `order_by` the sorting key
  * ("tuple()", "id", "(day, key)").
  *
- * Modelled: MergeTree, Replacing, Collapsing, VersionedCollapsing, Summing,
+ * Modeled: MergeTree, Replacing, Collapsing, VersionedCollapsing, Summing,
  * Aggregating — exactly mergeBlock's switch minus Graphite/Coalescing. Without
  * this call (or with "MergeTree") chs_rows behaves as if no engine were
  * declared.
@@ -402,7 +402,7 @@ CHS_API void chs_schema_free(chs_schema * s);
  *                             server's own MergeTreeSettings object, never a
  *                             hand list. A known name declared at a NON-default
  *                             value is refused (-2, naming it): no MergeTree
- *                             setting's behaviour is modelled by this build
+ *                             setting's behavior is modeled by this build
  *                             yet, and silently ignoring a declared value would
  *                             mean the declared profile is not the profile. A
  *                             name declared AT its default is inert and
@@ -411,7 +411,7 @@ CHS_API void chs_schema_free(chs_schema * s);
  *
  * Returns, and these are three DIFFERENT verdicts a caller must not conflate:
  *   0    accepted;
- *   -2   CHS_CODE_UNSUPPORTED — engine or sorting key not modelled, or a
+ *   -2   CHS_CODE_UNSUPPORTED — engine or sorting key not modeled, or a
  *        non-default MergeTree setting. "A real server might well accept
  *        this; I decline to guess";
  *   115  UNKNOWN_SETTING — the server's own REJECTION of a MergeTree setting
@@ -495,7 +495,7 @@ CHS_API int chs_schema_column_default_is_literal(const chs_schema * s, int i);
  * distinct now64(9) values. Emit `stored` verbatim: a tick count re-encoded as
  * a JSON float is a hard reject (code 27), not a coercion.
  *
- * Three keys, recognised on `settings_json` alongside ClickHouse's own, are the
+ * Three keys, recognized on `settings_json` alongside ClickHouse's own, are the
  * caller's entire interface to clock skew:
  *
  *   chtypes_now_epoch_nanos       pin the batch instant outright
@@ -741,7 +741,7 @@ CHS_API char * chs_filter_rows(
  * block may be evaluated by MANY filters, sequentially; evaluation does not
  * mutate it. Filter and block MUST come from the SAME schema handle —
  * chs_filter_eval on a mismatched pair answers a rejected document (1002),
- * loudly, never undefined behaviour.
+ * loudly, never undefined behavior.
  *
  * THREADS: a chs_filter_eval call is a use of BOTH handles — the filter's
  * rule applies (and a filter use is a use of its schema handle, as

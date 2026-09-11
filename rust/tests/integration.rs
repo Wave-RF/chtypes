@@ -42,7 +42,7 @@ fn registry() -> Option<&'static Arc<Registry>> {
             if !dir.is_dir() {
                 announce(&format!(
                     "\nSKIP: no chtypes artifact registry at {} — fetch one with scripts/fetch.sh \
-                     25.8 (docs/fetch.md), or point ${} at a registry. Every test in this file \
+                     25.8 (docs/guides/fetch.md), or point ${} at a registry. Every test in this file \
                      is skipped, each by name below.\n",
                     dir.display(),
                     chtypes::REGISTRY_ENV
@@ -53,7 +53,7 @@ fn registry() -> Option<&'static Arc<Registry>> {
                 Ok(r) if r.libraries().is_empty() => {
                     announce(&format!(
                         "\nSKIP: registry {} holds no artifact — fetch one with scripts/fetch.sh \
-                         25.8 (docs/fetch.md). Every test in this file is skipped, each by name \
+                         25.8 (docs/guides/fetch.md). Every test in this file is skipped, each by name \
                          below.\n",
                         dir.display()
                     ));
@@ -226,7 +226,7 @@ fn version_resolution_accepts_a_minor_line_a_patch_and_a_drifted_patch() {
     assert_eq!(reg.for_version(&drifted).unwrap().version(), lib.version());
 
     // A version with no artifact is an error naming what IS loaded — never the
-    // nearest neighbour.
+    // nearest neighbor.
     let err = reg.for_version("19.1").unwrap_err();
     let msg = err.to_string();
     for v in reg.versions() {
@@ -327,7 +327,7 @@ fn several_versions_answer_in_one_process_with_their_own_semantics() {
             "\nSKIP several_versions_answer_in_one_process_with_their_own_semantics (isolation \
              half): the loaded lines {minors:?} are known to agree on both probes, so no \
              divergence can be observed; the proof needs 24.8 or 25.10 beside another line \
-             — scripts/fetch.sh 24.8 (docs/fetch.md). The per-version answers were asserted.\n"
+             — scripts/fetch.sh 24.8 (docs/guides/fetch.md). The per-version answers were asserted.\n"
         ));
         return;
     }
@@ -540,7 +540,7 @@ fn a_pinned_volatile_default_stores_an_exact_timestamp() {
         .find(|t| t.column == "ts")
         .expect("ts transform");
     assert_eq!(t.reason, reason::DEFAULT_MATERIALISED);
-    assert!(!t.lossy(), "materialising a DEFAULT loses nothing");
+    assert!(!t.lossy(), "materializing a DEFAULT loses nothing");
 
     // Past the caller's skew budget the honest answer is a decline, not a
     // timestamp the server would not have written.
@@ -589,7 +589,7 @@ fn a_ttl_expired_row_is_reported_and_absent_from_the_stored_view() {
     // absent from. A binding that read only `rows` would preview a row the table
     // silently deletes at merge time.
     //
-    // The probe is arithmetic rather than a version's behaviour: a 2020 timestamp
+    // The probe is arithmetic rather than a version's behavior: a 2020 timestamp
     // under a 1-day TTL against a clock pinned to 2023 is expired on any version
     // that models TTL at all.
     assert_eq!(batch.engine_rows.as_deref(), Some(&[][..]));
@@ -1186,7 +1186,7 @@ fn set_engine_tells_a_server_refusal_from_a_decline() {
     }
     assert!(!err.is_unsupported());
 
-    // DECLINES, every flavour the negative codes cover.
+    // DECLINES, every flavor the negative codes cover.
     for (what, err) in [
         (
             "unmodelled engine",

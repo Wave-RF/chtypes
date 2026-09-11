@@ -181,7 +181,7 @@ class _RWLock:
     `chs_schema_compile`, `chs_schema_engine`, `chs_schema_ttl`,
     `chs_validate_type` and the column accessors. `docs/reference/c-abi.md`
     §Thread-safety declares those safe together **on distinct handles**, so
-    per-handle serialisation is `Schema`'s own lock and not this one.
+    per-handle serialization is `Schema`'s own lock and not this one.
 
     **The writer** is the pair that mutates per-library PROCESS state —
     `chs_set_default_settings` and `chs_shutdown` (plus `chs_init`, which the
@@ -274,7 +274,7 @@ class NativeLibrary:
     together, which is exactly what the ABI permits, and the two calls that
     mutate per-library process state — `chs_set_default_settings`,
     `chs_shutdown` — take it exclusively, which is what the ABI requires.
-    Per-handle serialisation is a DIFFERENT lock, on `Schema`, because a single
+    Per-handle serialization is a DIFFERENT lock, on `Schema`, because a single
     `chs_schema *` must never be used from two threads at once.
     """
 

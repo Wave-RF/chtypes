@@ -17,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 # serde_json reads `manifest.json` and writes the settings object that crosses the
 # C boundary — both of which are this crate's own well-formed UTF-8.
 #
-# It deliberately does NOT read result documents. `raw_value` was the analogue of
+# It deliberately does NOT read result documents. `raw_value` was the analog of
 # Go's json.RawMessage here, but serde_json cannot parse a document at all when a
 # String column's bytes are not valid UTF-8 — which is how this crate came to
 # retry through `String::from_utf8_lossy` and destroy the bytes `docs/reference/c-abi.md`
@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 
-# --- the `fetch` feature: chtypes::ensure and the `chtypes` binary (docs/fetch.md).
+# --- the `fetch` feature: chtypes::ensure and the `chtypes` binary (docs/guides/fetch.md).
 # Every crate below is optional and behind `fetch`, so `--no-default-features`
 # builds with exactly the dependency set above.
 #

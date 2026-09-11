@@ -1,6 +1,6 @@
 /**
  * Where artifacts are looked for and where a fetch writes — the §1 search
- * path of docs/fetch.md, spelled once so the loader (`Registry`), the fetch
+ * path of docs/guides/fetch.md, spelled once so the loader (`Registry`), the fetch
  * (`ensure`) and the CLI (`chtypes where`) cannot disagree about it.
  *
  * The search path, in order, first directory that holds the requested line

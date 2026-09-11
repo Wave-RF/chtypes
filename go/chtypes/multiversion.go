@@ -267,7 +267,7 @@ import (
 //	 handles; a single handle must not be used from two threads at once."
 //
 // This package enforces exactly that, at two levels. It used to hold ONE mutex
-// per Library across every call, which serialised unrelated schemas against
+// per Library across every call, which serialized unrelated schemas against
 // each other and was strictly stronger than the ABI promises.
 //
 // HANDLE LEVEL — LoadedSchema.mu, exclusive. One handle, one thread at a time,
@@ -380,7 +380,7 @@ var (
 // Registry holds one Library per ClickHouse version and dispatches by
 // version — the multi-version product path. Safe for concurrent use.
 //
-// Lookup follows the docs/fetch.md §1 search path: the directory given to
+// Lookup follows the docs/guides/fetch.md §1 search path: the directory given to
 // NewRegistry (loaded eagerly, as it always was), then $CHTYPES_REGISTRY,
 // the per-user cache and the system locations, each consulted lazily by
 // For for a line the loaded set lacks. With AutoFetch (WithAutoFetch, or
@@ -499,7 +499,7 @@ func readArtifactDir(sub string) (m struct {
 
 // Load dlopens one library and registers it under its own reported version.
 // Loading the same path twice — into this Registry or another one — reuses the
-// Library that was already initialised for it.
+// Library that was already initialized for it.
 func (r *Registry) Load(path string) error {
 	lib, err := openLibrary(path)
 	if err != nil {
@@ -522,7 +522,7 @@ func (r *Registry) Load(path string) error {
 // and re-sets DateLUT's default timezone, unconditionally, and the row and
 // compile paths read the refuse-list BY REFERENCE. So a second chs_init for a
 // path already in use would reallocate a vector out from under live readers.
-// Initialising once removes that hazard at the source, which is better than
+// Initializing once removes that hazard at the source, which is better than
 // putting a process-wide lock on every call to tolerate it.
 //
 // This is also what makes Library.mu's write side trivially safe: chs_init runs
@@ -864,7 +864,7 @@ func (l *Library) ReferenceType(typeExpr string) (string, error) {
 // Names are validated by the server's own MergeTreeSettings object: an
 // unknown name answers the server's code 115. A known name declared at a
 // NON-default value is refused (an *UnsupportedError naming it) — no MergeTree
-// setting's behaviour is modelled yet, and silently ignoring a declared value
+// setting's behavior is modeled yet, and silently ignoring a declared value
 // would mean the declared profile is not in force. Declared at the default is
 // inert and accepted.
 func (s *LoadedSchema) SetEngine(engine, orderBy string, opts ...EngineOption) error {

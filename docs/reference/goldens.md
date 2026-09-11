@@ -7,7 +7,7 @@ Core publishes the golden set in the rolling release beside the artifacts:
 
 It is a row in the signed `SHA256SUMS`, exactly like a tarball, so it verifies
 through the same chain — the ed25519 signature covers the sums, the sums name
-its sha256, and the bytes on disk must hash to it (`docs/fetch.md` §3).
+its sha256, and the bytes on disk must hash to it (`docs/guides/fetch.md` §3).
 `scripts/fetch.sh` installs it as `<registry>/sdk-goldens.json`, so every
 binding's golden test reads it **offline** after a fetch, exactly as it reads an
 artifact.
@@ -26,7 +26,7 @@ another is not a golden.
 
 That is why the set **shrinks** as lines are added, and why a shrinking set is
 not lost coverage: a case that stops being version-agnostic moves to core's
-per-line behaviour goldens, where the answer is recorded per version instead of
+per-line behavior goldens, where the answer is recorded per version instead of
 pretended to be universal.
 
 It is **not** the corpus. The differential proof — tens of thousands of cases

@@ -48,7 +48,7 @@ if (!HAVE_REGISTRY) {
     [
       '',
       '[chtypes] Native tests SKIPPED: no artifact registry on the search path.',
-      '  Fetch one into the per-user cache with scripts/fetch.sh 25.8 (docs/fetch.md),',
+      '  Fetch one into the per-user cache with scripts/fetch.sh 25.8 (docs/guides/fetch.md),',
       '  or point CHTYPES_REGISTRY at a registry directory.',
       '',
     ].join('\n'),
@@ -308,7 +308,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
     // An unknown patch inside a loaded minor line resolves to that line.
     expect(registry.for(`${preferred}.999.999`).minor).toBe(preferred);
     // A line no directory on the search path holds is the one §7 error
-    // (docs/fetch.md), a RegistryError carrying the shared code.
+    // (docs/guides/fetch.md), a RegistryError carrying the shared code.
     expect(() => registry.for('19.1')).toThrow(/^chtypes: no artifact for ClickHouse 19\.1 \(/);
     expect(() => registry.for('19.1')).toThrow(RegistryError);
     try {
@@ -482,7 +482,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
         }
       }
       if (dlsym === null) {
-        // Never silently: the behavioural test above still stands, but say so.
+        // Never silently: the behavioral test above still stands, but say so.
         console.warn('[chtypes] RTLD_LOCAL probe skipped: no libc handle on this platform');
         return;
       }
@@ -779,7 +779,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       // the stored truth it is absent from. A binding that read only `rows`
       // would preview a row the table silently deletes at merge time.
       //
-      // The probe is arithmetic rather than a version's behaviour: a 2020
+      // The probe is arithmetic rather than a version's behavior: a 2020
       // timestamp under a 1-day TTL against a clock pinned to 2023 is expired
       // on any version that models TTL at all.
       const schema = lib().compileDdl('ts DateTime, v UInt8');
@@ -888,7 +888,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
         const verified = new Registry(tmp, { verifyChecksums: true });
         expect(verified.versions()).toEqual([preferred]);
         // dlopen is refcounted, so the same artifact must resolve to the same
-        // loaded library rather than being initialised a second time.
+        // loaded library rather than being initialized a second time.
         expect(verified.for(preferred).version).toBe(registry.for(preferred).version);
         const schema = verified.for(preferred).compileDdl('x UInt8');
         try {

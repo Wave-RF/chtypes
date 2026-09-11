@@ -47,7 +47,7 @@ for honesty rather than safety. Revision **3** is the export/filter cycle,
 `chs_filter_rows` trio joined the header (see §Filters), and nothing was
 renumbered or deleted. This is the signature-change case the rule exists for:
 a caller compiled against either header calling the other artifact's
-`chs_rows` is undefined behaviour, so the revision gate is what stands between
+`chs_rows` is undefined behavior, so the revision gate is what stands between
 them. Revision **4** is the filter phase-2 cycle, 2026-08-31 (same day,
 second cycle): `chs_filter_compile` gained a `params_json` parameter (query
 parameters — the vendored `ReplaceQueryParameterVisitor` substitution; see
@@ -312,7 +312,7 @@ same is true of `enum chs_compile_mode`, whose one defined value is
 | `chs_schema_compile` | handle, or `NULL` on failure (sets `*out_code`, `*out_err`) | handle freed with `chs_schema_free`; `*out_err` with `chs_free` |
 | … its `settings_json` / `mode` | compile under a DECLARED settings profile fixed into the handle — see §Compile-time vs per-call settings. `NULL`/`"{}"` settings take a code path that makes no `Context` copy at all, i.e. "no profile" is structural rather than a special case. An unknown setting name fails with the server's own `115` in `*out_code`; a known name with an unparseable value fails with the server's own code for that; a `mode` other than `CHS_COMPILE_DECLARED` fails with `-2` | |
 | `chs_schema_engine` | `0` accepted. `-2` (`CHS_CODE_UNSUPPORTED`) for an engine or sorting key this build does not model, or a MergeTree setting declared at a non-default value. `115` — the server's own **rejection** of an unknown MergeTree setting name, with its own message; a real ClickHouse code, not a decline. `-1` for a guarded exception (measured 2026-08-17: `TTL now() + INTERVAL 1 DAY` → `-1`). `*out_err` says why in every nonzero case | `*out_err` with `chs_free` |
-| … its `merge_tree_settings_json` | the table's **MergeTree-namespace** settings (the `SETTINGS` clause after the engine — `allow_nullable_key` and friends, a namespace `DB::Settings` cannot carry). `NULL`/`"{}"` declares none. Names are validated by the server's own `MergeTreeSettings` object; a known name declared at a **non-default** value is `-2` naming it (no MergeTree setting's behaviour is modelled yet — declared values are refused, never silently ignored); declared **at** the default is inert and proceeds | |
+| … its `merge_tree_settings_json` | the table's **MergeTree-namespace** settings (the `SETTINGS` clause after the engine — `allow_nullable_key` and friends, a namespace `DB::Settings` cannot carry). `NULL`/`"{}"` declares none. Names are validated by the server's own `MergeTreeSettings` object; a known name declared at a **non-default** value is `-2` naming it (no MergeTree setting's behavior is modeled yet — declared values are refused, never silently ignored); declared **at** the default is inert and proceeds | |
 | `chs_schema_ttl` | `0` on success; **any nonzero** means unsupported (`-2` for a refused TTL form, `-1` for a guarded exception) | `*out_err` with `chs_free` |
 | … which settings it validates under | the HANDLE's declared compile profile when it has one, the process defaults otherwise (revised 2026-08-25 — it previously used the process-global `Context` regardless). It takes no settings parameter and never will: the handle IS the CREATE, and a `TTL` clause is validated by the CREATE. This is load-bearing, not symmetry — `allow_suspicious_ttl_expressions` is read inside `TTLDescription::getTTLFromAST` on every vendored era (24.8 `TTLDescription.cpp:346`, 25.8 `:355`, 26.7 `:334`; 24.8 reads it a second time in `TTLTableDescription::parse` itself, `:438`), any `CAST` in the expression reaches `CastOverloadResolver` and thus `cast_keep_nullable` and the whole `DataTypeValidationSettings` type-gate bundle, and on 26.7 `FunctionConvertSettings` takes `getFormatSettings(context)` wholesale (`FunctionsConversion.h:152`), putting `date_time_input_format` on the TTL path for that era | |
 | `chs_schema_column_count` | column count | — |
@@ -598,7 +598,7 @@ functions (`FunctionsComparison.h` — supertype promotion, const-string
 conversion, the whole per-version trichotomy), the filter answers
 **WHERE-side** semantics by construction: `x = 256` over a `UInt8` column is
 `'f'` for every row — the constant promotes, it never wraps to `x = 0`. This
-is the same measured behaviour the CHECK path already exhibits on 24.8 / 25.8
+is the same measured behavior the CHECK path already exhibits on 24.8 / 25.8
 / 26.7, and it is why a caller MUST NOT fold predicate constants through the
 insert-side coercion instead (`docs/reference/bindings.md` §Constants are not payloads).
 
@@ -632,7 +632,7 @@ Consequences, each the server's, none invented:
 * **An unbound parameter** is the server's own refusal: the visitor throws
   `UNKNOWN_QUERY_PARAMETER` (**456**, "Substitution `name` is not set") —
   probed live, byte-identical message. The compile returns `NULL` with 456
-  in `*out_code`, like any other server refusal. The revision-3 behaviour
+  in `*out_code`, like any other server refusal. The revision-3 behavior
   (every `{name:Type}` declined `-2` "render literals") is **replaced**: an
   expression with parameters and no binding now gets the server's 456, not
   a decline.
@@ -644,7 +644,7 @@ Consequences, each the server's, none invented:
   ignores an unused `param_*` (probed on both channels: TCP
   `--param_unused=5` and HTTP `?param_unused=5`, both silently fine).
 
-One **transport caveat**, documented rather than modelled: on a real server's
+One **transport caveat**, documented rather than modeled: on a real server's
 **TCP** channel, query parameters travel inside a `Settings` block
 (`TCPHandler.cpp:2112-2114` on 25.8), so a parameter whose *name* collides
 with a builtin setting name (`limit`, `offset`) fails at the protocol layer
@@ -691,7 +691,7 @@ handle; it does not copy it and does not refcount it. The caller MUST keep
 the schema handle alive for the whole life of every filter compiled from it,
 and MUST free filters (`chs_filter_free`) before freeing their schema
 (`chs_schema_free`). Freeing the schema first is use-after-free — undefined
-behaviour, not a reported error. Refcounting was considered and rejected for
+behavior, not a reported error. Refcounting was considered and rejected for
 this revision: it would change `chs_schema_free`'s semantics for every
 existing caller in the same cycle that changes `chs_rows`, and the SDKs
 (which own both lifetimes) can enforce the ordering structurally.
@@ -730,7 +730,7 @@ evaluates unboundedly in the gateway.
 | `verdicts` | one character per row, **in input order**, index-aligned with the rows the reader consumed |
 | `errors` | one entry per `'e'` or `'d'` row, carrying that row's code and message verbatim; `[]` otherwise |
 
-The verdict characters — transcribed from server behaviour, each with its
+The verdict characters — transcribed from server behavior, each with its
 source:
 
 * **`'t'` — the predicate is true for this row.** Truth is the CHECK path's
@@ -779,7 +779,7 @@ call (there is no row addressing inside a broken binary stream), mirroring
 `chs_rows`.
 
 Volatile DEFAULTs resolve against **one clock instant per call**, the same
-rule as `chs_rows`, with the same `chtypes_*` clock keys honoured.
+rule as `chs_rows`, with the same `chtypes_*` clock keys honored.
 
 ### Blocks (`chs_block_parse` / `chs_block_free` / `chs_filter_eval`) — phase 2, revision 4
 
@@ -883,7 +883,7 @@ is no analyzer "fallback").
 
 ## Thread-safety
 
-Stated by the header and honoured by the reference implementation:
+Stated by the header and honored by the reference implementation:
 
 - The library is thread-safe for concurrent `chs_row` / `chs_rows` calls **on
   distinct handles**.
@@ -967,7 +967,7 @@ TTL: now() + INTERVAL 1 DAY
 
 `settings_json` is a JSON **object** of ClickHouse format/query settings, passed
 through to the vendored server code, plus the **six** keys chtypes itself
-recognises — a closed set, enumerated below, not an open `chtypes_` namespace
+recognizes — a closed set, enumerated below, not an open `chtypes_` namespace
 (see Settings rule 2).
 
 ### Rules
@@ -976,7 +976,7 @@ recognises — a closed set, enumerated below, not an open `chtypes_` namespace
    `map[string]string`, so every value crosses as a string, and the C side parses
    from text. This is not cosmetic: `chtypes_now_epoch_nanos` is a 19-digit
    nanosecond epoch, which does not survive an IEEE double. A caller that
-   serialises `1700000000123456789` as a JSON *number* through a float — which is
+   serializes `1700000000123456789` as a JSON *number* through a float — which is
    what a JavaScript `number`, a Python `json.dumps` of a float, or Go's
    `fmt.Sprint` of a decoded `any` will do — sends `1.7e+18`, and the setting is
    **silently ignored**. Verified both ways: as a JSON number the batch instant
@@ -1015,12 +1015,12 @@ recognises — a closed set, enumerated below, not an open `chtypes_` namespace
      `chs_row` / `chs_rows` reject the call; `chs_schema_compile` fails the
      compile, where *every* `chtypes_*` key already landed). Corrected
      2026-08-26: the branches that consumed the six used to test the prefix, so
-     an unrecognised reserved name was filed under `unsupported_settings` and
+     an unrecognized reserved name was filed under `unsupported_settings` and
      the row **admitted** — an over-accept the arbiter measured on all 35
      (implementation, version) pairs. See
      `docs/proposals/chtypes-prefix-overaccept.md`.
 3. `unsupported_settings` in the result document is for settings the build
-   *models but declines* — a KNOWN name whose value this build cannot honour —
+   *models but declines* — a KNOWN name whose value this build cannot honor —
    and when non-empty the answer MUST NOT be scored as agreement (the reference
    implementation promotes such a row to `Unsupported`).
 
@@ -1031,7 +1031,7 @@ recognises — a closed set, enumerated below, not an open `chtypes_` namespace
 tests — never the `chtypes_` prefix. Anything else spelled `chtypes_*` is an
 unknown setting name and is answered as one (Settings rule 2). Three of the six
 are per-CALL and three are per-PROCESS; a per-process key handed to `chs_row` /
-`chs_rows` is recognised but not honoured there, and comes back on
+`chs_rows` is recognized but not honored there, and comes back on
 `unsupported_settings` — a decline, never an admission.
 
 Volatile-DEFAULT clock control — the caller's entire interface to clock skew,
@@ -1067,7 +1067,7 @@ only**; admission deliberately takes no per-call settings:
 |---|---|---|
 | `chtypes_default_eval_memory_bytes` | 256 MiB (`268435456`); `0` disables | Enforced mid-allocation by ClickHouse's own thread-private `MemoryTracker` (code 241, cleanly unwound). |
 | `chtypes_default_eval_wall_nanos` | 1 s; `0` disables | Detection after the fact. |
-| `chtypes_custom_settings_prefixes` | the version's shipped `config.xml` value (`SQL_` on every vendored era) | Registers the custom-setting name prefixes the unknown-setting gate honours, comma-separated — the server's own `custom_settings_prefixes` config element, applied with the server's own parser. Absent key = registration unchanged. See Settings rule 2. |
+| `chtypes_custom_settings_prefixes` | the version's shipped `config.xml` value (`SQL_` on every vendored era) | Registers the custom-setting name prefixes the unknown-setting gate honors, comma-separated — the server's own `custom_settings_prefixes` config element, applied with the server's own parser. Absent key = registration unchanged. See Settings rule 2. |
 
 A schema whose DEFAULT exceeds a ceiling is refused **at
 `chs_schema_compile`**, naming the column and the budget, as
@@ -1229,7 +1229,7 @@ normative:
    compile body makes no `Context` copy at all. "No settings declared behaves
    exactly as if this parameter did not exist" is therefore a property of the
    implementation rather than a test's claim — which is what made folding the
-   two entry points into one a rename rather than a behaviour change.
+   two entry points into one a rename rather than a behavior change.
 
 Verified on the relinked 24.8 and 25.8 darwin artifacts, 2026-08-18
 (`n Nested(a Int64, b String)`): a profile-less compile and a `{}` profile
@@ -1297,7 +1297,7 @@ string, `false`) rather than requiring it.
 | `poison` | bool | ClickHouse stored a value it cannot read back. When true, `stored` carries no renderable value. |
 | `null_input` | bool | the input for this field was a null (JSON `null`, or CSV/TSV `\N`). Distinct from `stored == null`. |
 | `dup_dropped` | bool | the row named this column more than once and ClickHouse kept the **first** value, discarding the rest with no signal |
-| `wire` | string | **present only for a text format whose `input` is in the writer's own vocabulary — `TSV` today.** The stored value written back out by ClickHouse's own serializer for that vocabulary (`serializeTextEscaped`). `wire != input` is a change ClickHouse made, and it is how the supplied-vs-stored detector works at all where the field is not a JSON value (`docs/reference/bindings.md`, detector 3). ABSENT — not empty — for every other format, so a document that never carried it is byte-identical to what it was before this field existed. A binding MUST NOT synthesise it. |
+| `wire` | string | **present only for a text format whose `input` is in the writer's own vocabulary — `TSV` today.** The stored value written back out by ClickHouse's own serializer for that vocabulary (`serializeTextEscaped`). `wire != input` is a change ClickHouse made, and it is how the supplied-vs-stored detector works at all where the field is not a JSON value (`docs/reference/bindings.md`, detector 3). ABSENT — not empty — for every other format, so a document that never carried it is byte-identical to what it was before this field existed. A binding MUST NOT synthesize it. |
 
 `stored` and `ref` MUST be handled as **raw bytes / raw JSON**, not decoded into
 the binding's native string and number types before comparison. Two reasons,
@@ -1485,7 +1485,7 @@ by *name*, not by position, so a `Nested(a, b)` declaration under
 ### `Buffers` (`CHS_BUFFERS = 9`)
 
 `Native`'s column encoding under a different frame, and the difference is the
-entire point of modelling it separately. Per block
+entire point of modeling it separately. Per block
 (`src/Formats/BuffersReader.h:13-24`, byte-identical on 26.5, 26.6 and 26.7):
 
 ```
@@ -1673,7 +1673,7 @@ reference repair is `quoteBareDenormals` in `go/chtypes/chtypes.go`:
 
 1. Fast path: if the bytes contain neither `inf` nor `nan`, return unchanged.
 2. Otherwise scan bytes, tracking whether you are inside a JSON string
-   (honouring `\` escapes). **Never rewrite inside a string.**
+   (honoring `\` escapes). **Never rewrite inside a string.**
 3. Outside a string, and only where a value may start — immediately after `:`,
    `,`, `[`, or whitespace — match `-inf`, `inf`, or `nan`, and only when the
    next byte is `,`, `}`, `]`, or end-of-input.

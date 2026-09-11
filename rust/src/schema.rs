@@ -111,9 +111,9 @@ impl Schema {
     /// `merge_tree_settings` names are validated by the server's own
     /// `MergeTreeSettings` object: an unknown name answers the server's code
     /// `115` ([`crate::Error::Schema`], code visible, so a caller can tell
-    /// "bad name" from "not modelled"). A known name declared at a
+    /// "bad name" from "not modeled"). A known name declared at a
     /// **non-default** value is refused ([`crate::Error::Unsupported`],
-    /// naming it) — no MergeTree setting's behaviour is modelled yet, and
+    /// naming it) — no MergeTree setting's behavior is modeled yet, and
     /// silently ignoring a declared value would mean the declared profile is
     /// not in force. A name declared **at** its default is inert and
     /// accepted. Values cross as strings, as everywhere on this boundary.
@@ -557,7 +557,7 @@ impl Filter<'_> {
     ///
     /// Filter and block MUST come from the SAME schema handle: a mismatched
     /// pair from two schemas of ONE library answers a REJECTED result (code
-    /// 1002) — the C layer's loud refusal, never undefined behaviour. A pair
+    /// 1002) — the C layer's loud refusal, never undefined behavior. A pair
     /// from two different LIBRARIES is [`crate::Error::CrossLibrary`]: no
     /// handle ever crosses a `dlopen`'d image boundary.
     ///

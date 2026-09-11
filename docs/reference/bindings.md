@@ -57,7 +57,7 @@ At ABI revision 3 the C `chs_rows` gained `export_format`, `doc_flags` and
 `chs_filter_free` / `chs_filter_rows` joined the surface (§Filters). What
 that means for a binding:
 
-* **`Rows()` keeps today's behaviour exactly**: one `chs_rows` call with
+* **`Rows()` keeps today's behavior exactly**: one `chs_rows` call with
   `export_format = CHS_EXPORT_NONE` (`-1`) and
   `doc_flags = CHS_DOC_ALL` (`7`), `out_bytes = NULL`. The document that
   comes back is byte-identical to revision 2's, so nothing downstream moves.
@@ -107,7 +107,7 @@ filters against the block). What that means for a binding:
 * **This revision's bindings changes are mechanical**, exactly as revision
   3's were: the hand-kept `ABI_REVISION` mirrors bump to 4 in the same
   cycle, and the cgo reference passes `NULL` for `params_json` at its
-  existing `CompileFilter(expr)` call site — behaviour-preserving for every
+  existing `CompileFilter(expr)` call site — behavior-preserving for every
   expression revision 3 accepted. The params SDK surface (a name → value
   string map argument) and the block SDK surface (a `Block` object;
   `Filter.Eval(block)`) are **specified for the SDK cycle that follows the C
@@ -242,7 +242,7 @@ the slice convention its `rows` / `set_default_settings` already use.
 
 A binding MUST expose the compile mode as a named constant equal to the C
 `CHS_COMPILE_DECLARED` (`0`) rather than a bare literal, and MUST pass an
-unrecognised mode through to the library rather than validating it locally —
+unrecognized mode through to the library rather than validating it locally —
 the refusal (`-2`) is the library's to make.
 
 ### Values a binding must accept and reject
@@ -312,7 +312,7 @@ A binding MUST promote a row whose `unsupported_settings` list is non-empty to
 `Unsupported` unless it was already `Rejected`. The reference does this in
 `rowResultOf`; skipping it turns a declined setting into a scored answer.
 
-**An `outcome` string the binding does not recognise MUST map to
+**An `outcome` string the binding does not recognize MUST map to
 `Unsupported`, never to `Rejected`** (rule added 2026-08-26; all four
 reference bindings previously defaulted the unknown arm to `Rejected`). A
 future artifact's new verdict is by definition an answer this binding cannot
@@ -418,7 +418,7 @@ union is reported (`go/chtypes/transform.go`):
    written back out by **ClickHouse's own serializer for that field's own text
    vocabulary**. `wire != input` is a change ClickHouse made, established by
    comparing the format's reader against the format's writer — nothing is
-   modelled. Text alone cannot separate a re-spelling from a loss, so a
+   modeled. Text alone cannot separate a re-spelling from a loss, so a
    difference claims the lossy reason and lets detector 2 override it.
    Without this, TSV `[NULL]` into `Array(String)` stored `[""]` and TSV
    `2026/01/15 10:30:00` into `DateTime` stored `2026-01-15 10:30:00`, and
@@ -430,7 +430,7 @@ union is reported (`go/chtypes/transform.go`):
    in exactly that escaping. A CSV field's `input` has already had its quotes
    stripped by the row splitter, so comparing it against `serializeTextCSV`
    would report a difference that is the *splitter's*, not the server's. A
-   binding must not synthesise `wire` when the C layer did not send it.
+   binding must not synthesize `wire` when the C layer did not send it.
 
 Prefer the reference detector's reason, but **never let it downgrade a lossy
 finding to `reformat`**. Neither detector reimplements a coercion rule: the
@@ -533,7 +533,7 @@ own `455`/`44`, exactly as that server's `CREATE` would — and thereafter the
 handle outranks the per-call map for that name, so step 4's per-call settings
 cannot fabricate a rejection for a table the deployment legitimately holds. A
 caller that skips step 3 and passes the gates per call only still gets the old,
-per-row behaviour, which is correct but stricter than the server.
+per-row behavior, which is correct but stricter than the server.
 
 ## Concurrency — what a binding owes the ABI (added 2026-08-26)
 
@@ -542,7 +542,7 @@ one costs a binding, because three of the four reference bindings had answered
 one of them differently and none of them had said so.
 
 1. **`chs_row` / `chs_rows` are safe together on DISTINCT handles.** A binding
-   MAY serialise them anyway; a binding that does not MUST hold rule 2.
+   MAY serialize them anyway; a binding that does not MUST hold rule 2.
 2. **One `chs_schema *` MUST NOT be used from two threads at once.** This is a
    per-handle lock, not a per-library one, and a binding that lets row calls run
    concurrently owes it.
@@ -572,9 +572,9 @@ a per-isolate counter cannot see across them. A binding whose calls are
 synchronous on a single thread satisfies rule 3 *for that thread*; it does not
 make a multi-worker setup safe, and this spec does not claim it does. A
 TypeScript caller that fans work across workers MUST seed the settings before
-starting them, or serialise the seed itself.
+starting them, or serialize the seed itself.
 
-A binding that moves from "serialise everything" to "concurrent readers" is
+A binding that moves from "serialize everything" to "concurrent readers" is
 making a claim about its own allocator interactions and MUST prove it by
 running the rigs, not by reasoning (`docs/reference/c-abi.md` §Thread-safety).
 
@@ -924,7 +924,7 @@ Raw batch document for the same case:
 
 A binding that reads only `rows` previews a row the table will silently delete.
 
-### 5. Version behaviour is non-monotonic — the registry is the point
+### 5. Version behavior is non-monotonic — the registry is the point
 
 Same case, all six artifacts then loaded (the registry holds seven today;
 26.5 is not in this capture), one process:
@@ -970,7 +970,7 @@ present on 26.6 and 26.7. In the result document this is
 `"poison":true`. A binding MUST report it as **accepted** with the poison flag,
 never as a rejection: the contract's definition and the arbiter's ground truth
 both come from a real `CREATE`/`INSERT`/`SELECT` cycle, and `format()` fusing it
-into a rejection is an artefact of that probe rather than the semantics.
+into a rejection is an artifact of that probe rather than the semantics.
 
 ## Reproducing these
 
@@ -1006,7 +1006,7 @@ library:
   records the server's own readback of those columns, which
   `bake/truth.py` collects and which the committed truth files predate.
 - **Engine, TTL and constraints as *ground truth*.** `engine`, `order_by` and
-  `ttl` are request fields the reference driver honours, but the acceptance
+  `ttl` are request fields the reference driver honors, but the acceptance
   corpus notes that a divergence caused by a `CONSTRAINT` is something no
   implementation can currently be *asked* about — that is a protocol gap, not a
   library gap. *Now asked* for `CONSTRAINT … CHECK`, on the arbiter's

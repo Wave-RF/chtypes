@@ -228,7 +228,7 @@ fn section1() -> (Registry, Arc<Library>) {
         Ok(_) => kv("asking for 99.9", "(no error!?)"),
         Err(err) => kv("asking for 99.9", &err.to_string()),
     }
-    note("no nearest-neighbour fallback, ever — a wrong-version answer is a");
+    note("no nearest-neighbor fallback, ever — a wrong-version answer is a");
     note("wrong answer with a green checkmark on it");
 
     (registry, lib)
@@ -731,7 +731,7 @@ fn section6(lib: &Arc<Library>) {
     note("expression evaluated through ClickHouse's own CAST path),");
     note("default_substituted (a VOLATILE default resolved from the pinned");
     note("clock), absent (no DEFAULT: the type's own zero). text is");
-    note("ClickHouse's OWN JSON rendering — never re-serialised here, because");
+    note("ClickHouse's OWN JSON rendering — never re-serialized here, because");
     note("18446744073709551615 through a double comes back ...552000.");
 
     blank();
@@ -849,7 +849,7 @@ fn section6(lib: &Arc<Library>) {
 // WHAT: the same three-column schema fed in all ten chs_format encodings —
 // accept and reject for each text format, then the binary tier with
 // hand-built bytes.
-// WHY: format is not cosmetic. Each format has signature behaviours (CSV's
+// WHY: format is not cosmetic. Each format has signature behaviors (CSV's
 // bare-vs-quoted empty field, RBWD's marker byte, Native's silent CAST,
 // Buffers' silent reinterpret) that change what the table ends up holding.
 // LOOK FOR: the same logical row giving format-specific verdicts, and the
@@ -1087,7 +1087,7 @@ fn section8(lib: &Arc<Library>) {
         "  known, non-default",
         &format!("index_granularity=4096 -> {verdict}"),
     );
-    note("a DECLINE: no MergeTree setting's behaviour is modelled yet, and");
+    note("a DECLINE: no MergeTree setting's behavior is modeled yet, and");
     note("silently ignoring a declared value would fake the profile being in");
     note("force. A real server might well accept it — validate cautiously.");
     let mut s4 = lib.compile("a UInt8").compile().expect("compile");

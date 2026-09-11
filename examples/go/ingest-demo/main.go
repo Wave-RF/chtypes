@@ -200,7 +200,7 @@ func run() error {
 	//
 	// Rows() is the batch twin, and it is NOT the same contract: under stock
 	// settings a row ClickHouse cannot parse ENDS the batch. The rows after it
-	// never get a verdict. That is the server's real behaviour, and a gateway
+	// never get a verdict. That is the server's real behavior, and a gateway
 	// that batches has to decide what to tell the producers of the rows that
 	// were never looked at.
 	section("5b. The same rows as one batch — one bad row ends it")

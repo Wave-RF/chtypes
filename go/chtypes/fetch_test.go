@@ -1,6 +1,6 @@
 package chtypes
 
-// fetch_test.go — the fetch contract (docs/fetch.md), offline.
+// fetch_test.go — the fetch contract (docs/guides/fetch.md), offline.
 //
 // Every test here builds a miniature release in a temp directory — tiny
 // fake libraries whose manifests hash correctly, signed with an ephemeral
@@ -260,7 +260,7 @@ func noArtifactDirs(t *testing.T, dest string) {
 // ---------------------------------------------------------------- §4
 
 func TestReleaseKeyReferenceVector(t *testing.T) {
-	// docs/fetch.md §4: "hello\n" signs under the release key to this
+	// docs/guides/fetch.md §4: "hello\n" signs under the release key to this
 	// signature; flipping one byte of the message fails.
 	sig, err := hex.DecodeString("0fee686f7ed7c64b86a7dce0ffd66b15d1504178153c3b0cc118e2c9456afa6d3e2e55019eca8f75e44ab507d65b0714523e92c7f92452821930691212e76c04")
 	if err != nil {
@@ -576,7 +576,7 @@ func TestFetchUnpublished(t *testing.T) {
 	// A line the release does not carry.
 	_, err := Ensure(context.Background(), "26.7", base)
 	wantCode(t, err, CodeArtifactUnpublished)
-	// An exact patch it does not carry — a hard requirement, never the neighbour.
+	// An exact patch it does not carry — a hard requirement, never the neighbor.
 	_, err = Ensure(context.Background(), "25.8.30.16-lts", base)
 	ae := wantCode(t, err, CodeArtifactUnpublished)
 	if !strings.Contains(ae.Msg, "exactly") {
@@ -587,7 +587,7 @@ func TestFetchUnpublished(t *testing.T) {
 		t.Fatalf("exact: %v", err)
 	}
 	// The channel may be left off — "25.8.28.1" is the "-lts" patch — but a
-	// spelled channel must match (docs/fetch.md, Decisions).
+	// spelled channel must match (docs/guides/fetch.md, Decisions).
 	if _, err := Ensure(context.Background(), "25.8.28.1", base); err != nil {
 		t.Fatalf("exact without channel: %v", err)
 	}
@@ -999,7 +999,7 @@ func TestMissingArtifactErrorVerbatim(t *testing.T) {
 		t.Fatalf("%+v", ae)
 	}
 	// The line that IS on the path is a loud load failure (a fake library),
-	// never a skip to a neighbour and never "missing".
+	// never a skip to a neighbor and never "missing".
 	_, err = reg.For("25.8")
 	if err == nil || errors.Is(err, ErrArtifactMissing) {
 		t.Fatalf("fake library: %v", err)
@@ -1045,11 +1045,11 @@ func TestAutoFetchFailureIsTheFetchError(t *testing.T) {
 	}
 	_, err = reg.For("25.8")
 	wantCode(t, err, CodeSourceUnreachable)
-	// A cancelled context stops the fetch.
+	// A canceled context stops the fetch.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := reg.ForContext(ctx, "25.8"); err == nil {
-		t.Fatal("a cancelled fetch succeeded")
+		t.Fatal("a canceled fetch succeeded")
 	}
 }
 

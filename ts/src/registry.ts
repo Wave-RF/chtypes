@@ -18,7 +18,7 @@
  *    which uses `RTLD_LAZY | RTLD_LOCAL`; `assertLocalSymbolScope()` in the test
  *    suite proves it from outside rather than trusting the claim.
  *
- * Where a registry IS follows the search path of docs/fetch.md §1 (`paths.ts`):
+ * Where a registry IS follows the search path of docs/guides/fetch.md §1 (`paths.ts`):
  * the explicit directory, `CHTYPES_REGISTRY`, the per-user cache, then the
  * reserved system locations. The first directory holding artifacts is scanned
  * and loaded at construction; a line it lacks is taken, on request, from the
@@ -64,7 +64,7 @@ export interface RegistryOptions {
    */
   verifyChecksums?: boolean;
   /**
-   * Lazy fetch on first open (docs/fetch.md §6): `open()` of a line no
+   * Lazy fetch on first open (docs/guides/fetch.md §6): `open()` of a line no
    * directory on the search path holds runs `ensure()` first, into the
    * directory a fetch writes to (§1), once per process per line. Off by
    * default — a production process must not begin a 250 MB download inside
@@ -258,7 +258,7 @@ export class Registry {
    * resolves to that line — asking for "25.8.30.16" finds the loaded 25.8.
    *
    * A line the primary directory lacks is loaded from the first later
-   * directory on the search path that holds it (docs/fetch.md §1), and joins
+   * directory on the search path that holds it (docs/guides/fetch.md §1), and joins
    * `versions()` / `libraries()` from then on. Never a fetch: this call is
    * synchronous; `open()` is the one that may fetch.
    *
@@ -288,7 +288,7 @@ export class Registry {
   }
 
   /**
-   * `for()`, with the lazy fetch of docs/fetch.md §6 in front of it: a line no
+   * `for()`, with the lazy fetch of docs/guides/fetch.md §6 in front of it: a line no
    * directory on the search path holds is fetched through `ensure()` — into
    * the directory a fetch writes to (§1), verified, once per process per line
    * even under concurrent opens — and then loaded. With `autofetch` off (the
@@ -359,7 +359,7 @@ export function compareMinor(a: string, b: string): number {
 /**
  * Where the registry is: the explicit argument, else `CHTYPES_REGISTRY`, else
  * the first of the per-user artifact cache and the system locations that
- * holds artifacts (docs/fetch.md §1). An explicit path and the environment
+ * holds artifacts (docs/guides/fetch.md §1). An explicit path and the environment
  * variable are returned as given — a wrong one must produce an error naming
  * it, not a silent fallback — while the unnamed candidates only count if they
  * actually hold artifacts.

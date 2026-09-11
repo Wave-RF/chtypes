@@ -21,7 +21,7 @@
  *
  * 3. **Duplicate keys and escape spellings survive.** ClickHouse can store a
  *    `Map` with a repeated key (`{"a":1,"a":2}`), and it writes the escape
- *    `\\u000B` where a JS re-serialisation writes `\\u000b`. `JSON.parse` collapses
+ *    `\\u000B` where a JS re-serialization writes `\\u000b`. `JSON.parse` collapses
  *    the first and loses the second, and either reports bytes the table does not
  *    hold.
  *    Object members are therefore kept as an ordered key/value list, and nothing

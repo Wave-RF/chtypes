@@ -194,7 +194,7 @@ def _scalar_text(value: object) -> tuple[str, bool]:
 
 _NOT_A_NUMBER: Final[tuple[Fraction, bool]] = (Fraction(0), False)
 
-# A ceiling on the digits `_rational` will materialise for one comparison. The
+# A ceiling on the digits `_rational` will materialize for one comparison. The
 # reference's `big.Rat` has no limit, and neither does the corpus (its longest
 # numeric field is 5,000 digits), but `Fraction(Decimal("1e999999999"))` would
 # try to build a billion-digit integer to answer "are these two equal": at that

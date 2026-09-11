@@ -157,5 +157,5 @@ Closing a schema first closes any filters and blocks open on it, which is the or
 - [`guides/batches.md`](guides/batches.md) — one row was a batch of one. Real bodies have many, and what happens at the first bad one is a policy you choose.
 - [`guides/discovery.md`](guides/discovery.md) — this example guessed a version and a settings profile. Ask the server instead.
 - [`guides/settings.md`](guides/settings.md) — why the compile call takes a settings profile, and which channel wins.
-- [`../playground/`](../playground/README.md) — a longer runnable tour, the same sections in all four languages.
+- [`../examples/`](../examples/README.md) — a longer runnable tour, the same sections in all four languages.
 - Your language's [reference page](index.md#where-to-go) — every symbol, what it returns, and what it raises.

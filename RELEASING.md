@@ -82,7 +82,7 @@ anyone asks for it; it needs the repository to be public, and that is all.
 
 ## The order
 
-1. The repository goes public (licence and history already prepared).
+1. The repository goes public (license and history already prepared).
 2. `go/v0.1.0` — the tag alone.
 3. `python/v0.1.0` — the tag, under the pending publisher.
 4. The manual `pnpm publish` and `cargo publish`, then their trusted

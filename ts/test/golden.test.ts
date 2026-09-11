@@ -81,14 +81,14 @@ if (doc !== null) {
 }
 
 // "Have a registry" is "have at least one artifact in it": the search path
-// (docs/fetch.md §1) resolves CHTYPES_REGISTRY without looking inside, so a
+// (docs/guides/fetch.md §1) resolves CHTYPES_REGISTRY without looking inside, so a
 // directory that holds nothing must skip exactly as no directory does.
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY) && doc !== null;
 if (!HAVE_REGISTRY) {
   console.warn(
     '[chtypes] golden tests SKIPPED: no artifact registry on the search path' +
       (REGISTRY === null ? '' : ` (${REGISTRY} holds no artifact)`) +
-      ' — fetch one with scripts/fetch.sh 25.8 (docs/fetch.md), or point CHTYPES_REGISTRY at a registry',
+      ' — fetch one with scripts/fetch.sh 25.8 (docs/guides/fetch.md), or point CHTYPES_REGISTRY at a registry',
   );
 }
 

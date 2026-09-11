@@ -21,7 +21,7 @@
 //!   `chs_free`.** [`Api::take`] is the only function in this crate that calls
 //!   `chs_free`, and it only ever calls the one resolved from the same `dlopen`.
 //! * **Callers hold the library lock.** The functions here do no locking; the
-//!   `Library` wrapper serialises every call, including `chs_schema_compile` and
+//!   `Library` wrapper serializes every call, including `chs_schema_compile` and
 //!   `chs_free`, exactly as the reference implementation's `dlopen` path does.
 
 use std::ffi::{CStr, CString, c_char, c_int};

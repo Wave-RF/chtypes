@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-suite.sh — run one of the non-Go SDK suites here (python, ts, rust)
-# and read its verdict off the runner's own summary line, colour stripped,
+# and read its verdict off the runner's own summary line, color stripped,
 # never off an exit code alone.
 #
 #   scripts/check-suite.sh [--no-artifacts | --require-artifacts] python|ts|rust
@@ -17,7 +17,7 @@
 #
 # --no-artifacts reproduces the artifact-free runner on a developer machine:
 # an empty XDG_CACHE_HOME and no $CHTYPES_REGISTRY, so this machine's own
-# cache is invisible (the two system roots of docs/fetch.md §1 cannot be
+# cache is invisible (the two system roots of docs/guides/fetch.md §1 cannot be
 # hidden by environment; they are named if present).
 # --require-artifacts is the second run's rule: the golden set must have RUN,
 # and no test may have skipped for want of a registry.
@@ -67,7 +67,7 @@ run() {
   local dir="$1"; shift
   RC=0
   ( cd "$dir" && "$@" ) 2>&1 | tee "$LOG" || RC=$?
-  # vitest colours its summary under CI even without a TTY, and an anchored
+  # vitest colors its summary under CI even without a TTY, and an anchored
   # grep on the raw bytes then reads "passed=0" (measured in the core
   # repository, 2026-09-09); every verdict below reads the stripped copy.
   sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$LOG" > "$PLAIN"

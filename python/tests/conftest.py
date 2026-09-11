@@ -4,7 +4,7 @@ tests need none and always run; that is what this repository's CI proves on
 hosted runners, and the artifact-backed proof is the core repository's
 `certify` workflow against this same tree.
 
-The registry comes from the search path (docs/fetch.md §1): `$CHTYPES_REGISTRY`,
+The registry comes from the search path (docs/guides/fetch.md §1): `$CHTYPES_REGISTRY`,
 else the per-user artifact cache for this host (`chtypes.default_registry_dir()`:
 `~/.cache/chtypes/artifacts/<os>-<arch>`, where `chtypes fetch` installs and a
 core-repo build lands), else the system locations. Without a single line on it
@@ -43,7 +43,7 @@ def registry() -> chtypes.Registry:
         pytest.skip(
             f"no chtypes artifacts on the search path {[str(p) for p in registry.search_path]} "
             f"(from {source}). Fetch one with `scripts/fetch.sh 25.8` or "
-            f"`uv run python -m chtypes fetch 25.8` (docs/fetch.md), build one in the core "
+            f"`uv run python -m chtypes fetch 25.8` (docs/guides/fetch.md), build one in the core "
             f"repo, or point ${chtypes.ENV_REGISTRY} at an existing registry."
         )
     return registry
@@ -88,5 +88,5 @@ def library(registry: chtypes.Registry) -> Callable[[str], chtypes.Library]:
 
 @pytest.fixture(scope="session")
 def newest(registry: chtypes.Registry) -> chtypes.Library:
-    """The newest loaded library, for behaviour that is not version-specific."""
+    """The newest loaded library, for behavior that is not version-specific."""
     return registry.libraries()[-1]

@@ -1,4 +1,4 @@
-//! `docs/fetch.md` §4: the release key, the trust policy, the signature file
+//! `docs/guides/fetch.md` §4: the release key, the trust policy, the signature file
 //! and the ed25519 check — plus the sha256 helpers the whole chain hashes with.
 
 use std::io::Read;
@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
 
-/// The release public key, raw, hex — `docs/fetch.md` §4. Every SDK embeds
+/// The release public key, raw, hex — `docs/guides/fetch.md` §4. Every SDK embeds
 /// this constant; `CHTYPES_TRUSTED_KEYS` replaces it.
 pub const RELEASE_PUBLIC_KEY_HEX: &str =
     "fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc";
@@ -78,7 +78,7 @@ pub fn key_id(key: &[u8; 32]) -> String {
 }
 
 /// Which keys sign a trusted release, and whether an unsigned one is let
-/// through (`docs/fetch.md` §4).
+/// through (`docs/guides/fetch.md` §4).
 #[derive(Debug, Clone)]
 pub struct TrustPolicy {
     keys: Vec<[u8; 32]>,
@@ -186,7 +186,7 @@ fn parse_key_list(list: &str) -> Result<Vec<[u8; 32]>> {
     Ok(out)
 }
 
-/// Parse `SHA256SUMS.sig` — `docs/fetch.md` §4:
+/// Parse `SHA256SUMS.sig` — `docs/guides/fetch.md` §4:
 ///
 /// ```text
 /// untrusted comment: chtypes artifacts, ed25519 key deb275922dbff76e
@@ -305,7 +305,7 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    /// docs/fetch.md §4, the reference vector: "hello\n" signs under the
+    /// docs/guides/fetch.md §4, the reference vector: "hello\n" signs under the
     /// release key to the signature below (openssl, -rawin); flipping one
     /// byte of the message fails.
     const VECTOR_SIG_HEX: &str = "0fee686f7ed7c64b86a7dce0ffd66b15d1504178153c3b0cc118e2c9456afa6d3e2e55019eca8f75e44ab507d65b0714523e92c7f92452821930691212e76c04";

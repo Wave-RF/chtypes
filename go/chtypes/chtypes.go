@@ -72,7 +72,7 @@
 //
 // So a schema that could never take a row starts taking rows. That is usually
 // what the tenant wants and is a second argument for substitution, but it is a
-// behaviour change the caller is making on the tenant's behalf, and it is why
+// behavior change the caller is making on the tenant's behalf, and it is why
 // every substitution is also reported as a Transform with reason
 // "default_materialised" rather than passed over in silence.
 //
@@ -303,7 +303,7 @@ const (
 	RowBinaryWithNamesAndTypesAndDefaults
 	// Native is COLUMN-oriented — per block a column count, a row count, then
 	// each column's name, type expression and whole serialized body — and it
-	// is what every ClickHouse client library sends on INSERT. It is modelled
+	// is what every ClickHouse client library sends on INSERT. It is modeled
 	// at the revision `INSERT ... FORMAT Native` uses (0), so there is no
 	// BlockInfo prefix and no per-column serialization-kind byte; blocks taken
 	// off a live TCP connection carry both and are a different contract
@@ -512,7 +512,7 @@ type RowResult struct {
 	//
 	// Sending the column also *disarms* the server-side machinery attached to
 	// it — see "What substitution disarms" in the package documentation. This
-	// list is the caller's cue to warn, not only to serialise.
+	// list is the caller's cue to warn, not only to serialize.
 	Substituted []Substitution
 	// Computed carries the MATERIALIZED columns' values for this row.
 	//
@@ -669,7 +669,7 @@ type compileConfig struct {
 }
 
 // CompileOption configures CompileDDL's settings profile. The zero value of
-// every option is CompileDDL's un-optioned behaviour, so opts... can always
+// every option is CompileDDL's un-optioned behavior, so opts... can always
 // be omitted.
 type CompileOption func(*compileConfig)
 
@@ -687,7 +687,7 @@ type CompileOption func(*compileConfig)
 // same 115. Per-call settings still govern row parsing, and only row
 // parsing.
 //
-// The one compile-shape setting modelled today is flatten_nested: at "0" a
+// The one compile-shape setting modeled today is flatten_nested: at "0" a
 // Nested(a,b) column compiles to ONE Array(Tuple(...)) column named as
 // declared, exactly as the server's CREATE does under that setting; every
 // downstream shape (Columns, name lookup, positional arity, the RowBinary
@@ -717,7 +717,7 @@ type EngineOption func(*engineConfig)
 // empty map is IDENTICAL to omitting the option. Names are validated by the
 // server's own MergeTreeSettings object: an unknown name answers the
 // server's own code 115. A known name declared at a NON-default value is
-// refused (an *UnsupportedError) — no MergeTree setting's behaviour is modelled
+// refused (an *UnsupportedError) — no MergeTree setting's behavior is modeled
 // yet, and silently ignoring a declared value would mean the declared
 // profile is not in force. Declared at the default is inert and accepted.
 func WithMergeTreeSettings(settings map[string]string) EngineOption {
@@ -784,7 +784,7 @@ const (
 	// partial answers.
 	FilterRejected
 	// FilterUnsupported: a call-level decline (-2), and the state an
-	// unrecognised outcome spelling degrades to — never FilterRejected,
+	// unrecognized outcome spelling degrades to — never FilterRejected,
 	// mirroring the unknown-outcome rule (docs/reference/bindings.md §RowResult).
 	FilterUnsupported
 )
@@ -1179,7 +1179,7 @@ func batchResultOf(js string) (BatchResult, error) {
 }
 
 // outcomeOf maps a document's outcome string. An outcome this binding does
-// not recognise degrades to Unsupported, never to Rejected: a future
+// not recognize degrades to Unsupported, never to Rejected: a future
 // artifact's new verdict is by definition an answer this binding cannot
 // interpret, and Unsupported is the arm that is never scored as agreement,
 // while a default of Rejected would manufacture an over-reject — the

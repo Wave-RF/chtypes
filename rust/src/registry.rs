@@ -15,11 +15,11 @@ pub const REGISTRY_ENV: &str = "CHTYPES_REGISTRY";
 
 /// `CHTYPES_AUTOFETCH=1` turns lazy fetch on for a search-path registry
 /// ([`Registry::from_search_path`]): opening a missing line runs
-/// [`crate::ensure`] first (`docs/fetch.md` §6). Off by default, because a
+/// [`crate::ensure`] first (`docs/guides/fetch.md` §6). Off by default, because a
 /// production process must not begin a 250 MB download inside a request.
 pub const AUTOFETCH_ENV: &str = "CHTYPES_AUTOFETCH";
 
-/// The system registry roots, `docs/fetch.md` §1 item 4 — searched after the
+/// The system registry roots, `docs/guides/fetch.md` §1 item 4 — searched after the
 /// per-user cache, never written by fetch. `<os>-<arch>` is appended.
 pub const SYSTEM_ARTIFACT_ROOTS: [&str; 2] = [
     "/usr/local/share/chtypes/artifacts",
@@ -74,7 +74,7 @@ pub struct Manifest {
 }
 
 /// Every artifact under one directory, indexed by version — or, built with
-/// [`Registry::from_search_path`], the `docs/fetch.md` §1 search path opened
+/// [`Registry::from_search_path`], the `docs/guides/fetch.md` §1 search path opened
 /// one line at a time.
 ///
 /// Each library is loaded with `RTLD_NOW | RTLD_LOCAL`, which is what lets two
@@ -98,7 +98,7 @@ pub struct Registry {
     /// Eager: `[dir]`. Lazy: the §1 search path, in order.
     search: Vec<PathBuf>,
     lazy: bool,
-    /// `docs/fetch.md` §1 item 1, kept for autofetch's `dest`.
+    /// `docs/guides/fetch.md` §1 item 1, kept for autofetch's `dest`.
     #[cfg_attr(not(feature = "fetch"), allow(dead_code))]
     explicit: Option<PathBuf>,
     timezone: String,
@@ -106,7 +106,7 @@ pub struct Registry {
     #[cfg(feature = "fetch")]
     fetch: crate::fetch::EnsureOptions,
     loaded: RwLock<Loaded>,
-    /// Serialises the lazy open path, so two threads asking for one line load
+    /// Serializes the lazy open path, so two threads asking for one line load
     /// it once.
     opening: Mutex<()>,
 }
@@ -149,13 +149,13 @@ impl Loaded {
 /// from `CHTYPES_AUTOFETCH`.
 #[derive(Debug, Clone, Default)]
 pub struct RegistryOptions {
-    /// An explicit registry directory — `docs/fetch.md` §1 item 1, searched
+    /// An explicit registry directory — `docs/guides/fetch.md` §1 item 1, searched
     /// first and written to by fetch.
     pub dir: Option<PathBuf>,
     /// The server timezone for bare `DateTime` columns; `UTC` when `None`.
     /// Never the host's `TZ`.
     pub timezone: Option<String>,
-    /// Lazy fetch on first open (`docs/fetch.md` §6). `None` reads
+    /// Lazy fetch on first open (`docs/guides/fetch.md` §6). `None` reads
     /// `CHTYPES_AUTOFETCH`; `Some(true)` turns it on regardless.
     pub autofetch: Option<bool>,
     /// How an autofetch fetches — source, tag, lock, trust policy. Its `dest`
@@ -166,7 +166,7 @@ pub struct RegistryOptions {
 }
 
 impl Registry {
-    /// A registry over the `docs/fetch.md` §1 search path for this host, with
+    /// A registry over the `docs/guides/fetch.md` §1 search path for this host, with
     /// the defaults of [`RegistryOptions`]. Nothing is loaded until
     /// [`Registry::for_version`] asks for a line; see the type docs.
     pub fn from_search_path() -> Registry {
@@ -302,7 +302,7 @@ impl Registry {
         &self.search
     }
 
-    /// Whether opening a missing line fetches it first (`docs/fetch.md` §6).
+    /// Whether opening a missing line fetches it first (`docs/guides/fetch.md` §6).
     /// Always `false` for a one-directory registry.
     pub fn autofetch(&self) -> bool {
         self.autofetch
@@ -344,7 +344,7 @@ impl Registry {
     ///
     /// Failure names what is loaded and never falls back to the nearest version:
     /// answering 26.7 semantics from a 25.8 artifact would be a lie, and version
-    /// behaviour is not monotonic (25.10 rejects a mixed-type DEFAULT that 25.8
+    /// behavior is not monotonic (25.10 rejects a mixed-type DEFAULT that 25.8
     /// and 26.6 both accept).
     ///
     /// # Errors
@@ -354,7 +354,7 @@ impl Registry {
     ///
     /// A search-path registry resolves a line it has not loaded yet by taking
     /// the first directory on its path that holds `<minor>/manifest.json`
-    /// (`docs/fetch.md` §1) and loading that one artifact. A line found
+    /// (`docs/guides/fetch.md` §1) and loading that one artifact. A line found
     /// nowhere is [`Error::ArtifactMissing`] — or, with autofetch on, is
     /// fetched first through [`crate::ensure`] (once per process per line,
     /// under one process-wide lock, so concurrent opens fetch once) and the
@@ -414,7 +414,7 @@ impl Registry {
         }
     }
 
-    /// `docs/fetch.md` §6: one process-wide lock, one attempt per line.
+    /// `docs/guides/fetch.md` §6: one process-wide lock, one attempt per line.
     #[cfg(feature = "fetch")]
     fn autofetch_line(&self, minor: &str) -> Result<PathBuf> {
         static GUARD: Mutex<std::collections::BTreeSet<String>> =
@@ -508,7 +508,7 @@ impl std::fmt::Debug for Registry {
 }
 
 /// This host's platform key, `<os>-<arch>` in the artifact spelling: `linux`
-/// or `darwin`, `arm64` or `amd64` (`docs/fetch.md` §1).
+/// or `darwin`, `arm64` or `amd64` (`docs/guides/fetch.md` §1).
 pub fn host_platform() -> String {
     let arch = match std::env::consts::ARCH {
         "x86_64" => "amd64",
@@ -525,7 +525,7 @@ pub fn host_platform() -> String {
 }
 
 /// The per-user artifact cache for one platform —
-/// `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<platform>` (`docs/fetch.md`
+/// `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<platform>` (`docs/guides/fetch.md`
 /// §1 item 3). Where fetch installs, where a core-repository build lands.
 pub fn cache_dir_for(platform: &str) -> PathBuf {
     let base = std::env::var_os("XDG_CACHE_HOME")
@@ -547,7 +547,7 @@ pub fn default_registry_dir() -> PathBuf {
     cache_dir_for(&host_platform())
 }
 
-/// The `docs/fetch.md` §1 search path for this host, in order: `explicit`,
+/// The `docs/guides/fetch.md` §1 search path for this host, in order: `explicit`,
 /// `$CHTYPES_REGISTRY`, the per-user cache, then the system locations
 /// ([`SYSTEM_ARTIFACT_ROOTS`]). Unset entries are absent; directories that
 /// do not exist are kept, so the §7 message can name every place looked in.
@@ -578,7 +578,7 @@ pub fn search_path_for(platform: &str, explicit: Option<&Path>) -> Vec<PathBuf> 
 
 /// Where fetch writes for this host: the first of `explicit`,
 /// `$CHTYPES_REGISTRY` and the per-user cache that is set — never a system
-/// location (`docs/fetch.md` §1).
+/// location (`docs/guides/fetch.md` §1).
 pub fn install_dir(explicit: Option<&Path>) -> PathBuf {
     install_dir_for(&host_platform(), explicit)
 }
@@ -654,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn the_historical_linux_library_name_is_honoured() {
+    fn the_historical_linux_library_name_is_honored() {
         let m: Manifest =
             serde_json::from_str(r#"{"library":"libchtypes_s1.so","os":"linux"}"#).unwrap();
         assert_eq!(m.library, "libchtypes_s1.so");

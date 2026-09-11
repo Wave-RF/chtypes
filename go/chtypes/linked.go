@@ -16,7 +16,7 @@ package chtypes
 // The native library keeps its historical file name `libchtypes` — it is
 // baked into every prebuilt per-version artifact (hours of C++ compute
 // each) and into their manifests, so renaming it would mean rebuilding
-// them all for zero behavioural change.
+// them all for zero behavioral change.
 //
 // The header is this repository's own include/chtypes.h — the SDK owns the
 // contract; the core repository (the C++ wrapper and its build machinery)
@@ -77,7 +77,7 @@ var (
 	// Writer: SetDefaultSettings. Readers: every entry point that reaches
 	// chs_row, chs_rows, chs_schema_compile or chs_validate_type. Read locks are
 	// shared, so this costs concurrent callers nothing and is NOT the
-	// per-schema serialisation — CompiledSchema.mu is still what makes one
+	// per-schema serialization — CompiledSchema.mu is still what makes one
 	// handle single-threaded.
 	//
 	// The dlopen'd multi-version path never calls chs_set_default_settings (it
@@ -407,7 +407,7 @@ func (cs *CompiledSchema) SetEngine(engine, orderBy string, opts ...EngineOption
 		opt(&cfg)
 	}
 	// Shared: chs_schema_engine reads the seeded settings; only
-	// SetDefaultSettings writes them. cs.mu is what serialises this handle.
+	// SetDefaultSettings writes them. cs.mu is what serializes this handle.
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
 	cs.mu.Lock()
@@ -674,7 +674,7 @@ func (f *Filter) closeLocked() {
 //
 // THREADS: one Block must not be used from two threads at once, and an Eval
 // call is a use of BOTH handles — this binding takes the schema's own handle
-// lock for every block call, which also serialises K filters over one block.
+// lock for every block call, which also serializes K filters over one block.
 type Block struct {
 	cs     *CompiledSchema
 	handle *C.chs_block
@@ -740,7 +740,7 @@ func (cs *CompiledSchema) ParseBlock(format Format, body []byte, settings map[st
 //
 // Filter and Block MUST come from the SAME schema handle: a mismatched pair
 // answers a rejected document (code 1002) — the C layer's loud refusal,
-// never undefined behaviour. The error return is only for a closed filter or
+// never undefined behavior. The error return is only for a closed filter or
 // block, or an unreadable document.
 func (f *Filter) Eval(b *Block) (FilterResult, error) {
 	cs := f.cs

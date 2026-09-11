@@ -30,7 +30,7 @@ so and names the artifact.
 
 **The C ABI and the artifact contract are the product; every language —
 go, python, ts, rust — is a peer SDK over them.** No language is privileged:
-for ABI-level questions the artifact's measured behaviour is the ground
+for ABI-level questions the artifact's measured behavior is the ground
 truth, and this spec records it.
 
 For binding-level semantics the spec cannot fully capture in prose,

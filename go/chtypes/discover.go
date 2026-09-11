@@ -287,7 +287,7 @@ func ReconstructDDL(cols []DiscoveredColumn) (string, error) {
 // core-repository build lands, and what every SDK's tests and playgrounds
 // fall back to when CHTYPES_REGISTRY is unset — one directory the four SDKs
 // agree on, so a machine set up once serves all of them. It is item 3 of the
-// docs/fetch.md §1 search path (RegistrySearchPath is the whole list).
+// docs/guides/fetch.md §1 search path (RegistrySearchPath is the whole list).
 // It is a PATH, not a promise: NewRegistry still errors if nothing is there.
 func DefaultRegistryDir() string {
 	return DefaultRegistryDirFor(HostPlatform())

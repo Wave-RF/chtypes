@@ -1,6 +1,6 @@
 package chtypes
 
-// fetch_errors.go — the one error and the shared codes (docs/fetch.md §7).
+// fetch_errors.go — the one error and the shared codes (docs/guides/fetch.md §7).
 //
 // Every SDK raises one identifiable error for a missing artifact, with one
 // verbatim message, and reports every other fetch-time condition under one
@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-// ErrorCode is the shared vocabulary of docs/fetch.md §7 — the same six
+// ErrorCode is the shared vocabulary of docs/guides/fetch.md §7 — the same six
 // strings in Go, Python, TypeScript and Rust.
 type ErrorCode string
 
@@ -71,7 +71,7 @@ func (c ErrorCode) Sentinel() error {
 	return nil
 }
 
-// ExitCode is the process exit status docs/fetch.md §6 assigns to this code:
+// ExitCode is the process exit status docs/guides/fetch.md §6 assigns to this code:
 // 1 verification failed · 3 source unreachable · 4 not published.
 func (c ErrorCode) ExitCode() int {
 	switch c {
@@ -104,7 +104,7 @@ func (e *ArtifactError) Unwrap() error { return e.Err }
 // Is makes errors.Is(err, ErrArtifact…) true for the matching code.
 func (e *ArtifactError) Is(target error) bool { return target != nil && target == e.Code.Sentinel() }
 
-// ExitCode maps an error to the docs/fetch.md §6 exit status: 0 for nil,
+// ExitCode maps an error to the docs/guides/fetch.md §6 exit status: 0 for nil,
 // the code's own status for an *ArtifactError, and 1 for anything else.
 // Usage errors are the CLI's business (2) and never come out of this
 // package as *ArtifactError.

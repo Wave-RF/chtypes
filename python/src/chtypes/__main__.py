@@ -1,4 +1,4 @@
-"""``python -m chtypes`` and the ``chtypes`` console script — docs/fetch.md §6.
+"""``python -m chtypes`` and the ``chtypes`` console script — docs/guides/fetch.md §6.
 
     chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
                             [--tag <t> | --url <base>] [--lock <file>] [--frozen]
@@ -61,7 +61,7 @@ class _Parser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog="chtypes",
-        description="Fetch, verify and locate chtypes artifacts (docs/fetch.md).",
+        description="Fetch, verify and locate chtypes artifacts (docs/guides/fetch.md).",
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
     sub.required = True
@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch = sub.add_parser(
         "fetch",
         help="install one or more ClickHouse lines, verified",
-        description="Install ClickHouse lines through the verification chain (docs/fetch.md §3).",
+        description="Install ClickHouse lines through the verification chain (docs/guides/fetch.md §3).",
     )
     fetch.add_argument(
         "lines",
@@ -140,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     where = sub.add_parser(
         "where",
         help="the registry directory fetch would write to",
-        description="Print the registry directory fetch would write to (docs/fetch.md §1).",
+        description="Print the registry directory fetch would write to (docs/guides/fetch.md §1).",
     )
     where.add_argument("--platform", metavar="<os-arch>", choices=PLATFORMS)
     return parser
@@ -261,7 +261,7 @@ _COMMANDS = {
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI; returns the exit code (docs/fetch.md §6)."""
+    """Run the CLI; returns the exit code (docs/guides/fetch.md §6)."""
     parser = build_parser()
     args = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
     # The library's loud warning reaches stderr through the progress channel

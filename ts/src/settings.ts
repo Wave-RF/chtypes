@@ -4,7 +4,7 @@ import { ChtypesError } from './errors.js';
  * A setting value crosses the boundary as a JSON **string**, always.
  *
  * This is not cosmetic (docs/reference/c-abi.md §Settings): `chtypes_now_epoch_nanos` is a
- * 19-digit nanosecond epoch, which does not survive an IEEE double. Serialised
+ * 19-digit nanosecond epoch, which does not survive an IEEE double. Serialized
  * as a JSON *number* through a JS `number` it arrives as 1.7e+18 and the setting
  * is **silently ignored** — the batch keeps stamping the real wall clock and
  * nothing anywhere says so.
@@ -33,7 +33,7 @@ export type SettingValue = string | bigint;
 export type Settings = Readonly<Record<string, SettingValue>>;
 
 /**
- * Serialise settings to the `settings_json` object the C ABI expects — every
+ * Serialize settings to the `settings_json` object the C ABI expects — every
  * value crossing as a JSON string.
  *
  * @param settings - the settings map; `undefined` encodes as `"{}"`, the

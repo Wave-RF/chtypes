@@ -162,7 +162,7 @@ impl<'a> Rdr<'a> {
     // ------------------------------------------------------------ containers
 
     /// Walk an object's members, handing each key to `f`. `f` reads that
-    /// member's value; anything it does not recognise is skipped.
+    /// member's value; anything it does not recognize is skipped.
     fn object<F>(&mut self, what: &'static str, mut f: F) -> Result<()>
     where
         F: FnMut(&mut Rdr<'a>, &[u8]) -> Result<bool>,

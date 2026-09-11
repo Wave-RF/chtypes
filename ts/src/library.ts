@@ -76,7 +76,7 @@ export interface CompileOptions {
  * inside another chtypes call (a reentrancy guard, not a lock). Two
  * `worker_threads` share one dlopen'd image and one set of C globals, which no
  * per-isolate guard can see — seed settings before starting workers, or
- * serialise the seed yourself (docs/reference/bindings.md §Concurrency).
+ * serialize the seed yourself (docs/reference/bindings.md §Concurrency).
  */
 export class Library {
   /** The exact patch this build is, e.g. "25.8.28.1-lts". */

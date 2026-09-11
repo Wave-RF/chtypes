@@ -28,7 +28,7 @@
 #
 # A suite that skipped everything is not a pass, in either run:
 # scripts/check-suite.sh and scripts/check-standalone.sh read each runner's
-# own summary line (colour stripped) and refuse zero tests passed; with
+# own summary line (color stripped) and refuse zero tests passed; with
 # --require-artifacts they also refuse a golden set that did not run. Nothing
 # in this file computes a verdict; every step runs a script or a test runner
 # whose own output is the answer.

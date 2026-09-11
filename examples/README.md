@@ -33,7 +33,7 @@ directly:
 | `ts/` | `cd ts && pnpm install && pnpm demo` |
 | `rust/` | `cd rust && cargo run` |
 
-All four read `$CHTYPES_REGISTRY` (default: the per-user cache) and honour
+All four read `$CHTYPES_REGISTRY` (default: the per-user cache) and honor
 `$CHTYPES_VERSION` (any spelling: `25.8`, `25.8.28.1-lts`; default: the
 newest line held). No artifacts yet? `../scripts/fetch.sh 25.8`, or build one in the core repository.
 With only one version built, everything still runs — the cross-version
@@ -69,7 +69,7 @@ at in the output, and which `chs_*` C functions it exercises.
    (`input` / `default` / `default_substituted` / `absent`), the pinned
    clock, MATERIALIZED values, unknown fields, and the clock-skew budget.
 7. **One schema, every format** — all ten `chs_format` codes with accepts,
-   rejects, and each format's signature behaviour; binary payloads are
+   rejects, and each format's signature behavior; binary payloads are
    hand-built hex, explained byte by byte.
 8. **Engines, MergeTree settings, and TTL** — SummingMergeTree's post-merge
    preview, the refusal-vs-decline pair on MergeTree settings, and a row
@@ -87,7 +87,7 @@ at in the output, and which `chs_*` C functions it exercises.
     under a stock compile.
 12. **Version pinning** — the same input answered differently by the
     artifacts resident in one process (25.10 rejecting a DEFAULT its
-    neighbours accept; the Buffers format not existing before 26.5).
+    neighbors accept; the Buffers format not existing before 26.5).
 13. **Teardown** — what to release and when, per SDK (and why Go's Registry
     deliberately has no teardown).
 14. **The static path (Go only)** — the cgo-linked single-version shape only

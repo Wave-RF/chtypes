@@ -56,7 +56,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 |---|---|
 | [`install.md`](install.md) | both steps, in all four languages |
 | [`quickstart.md`](quickstart.md) | the same first program, four times |
-| [`../playground/README.md`](../playground/README.md) | a longer runnable tour, section for section in all four — a diff between two of them shows only spelling |
+| [`../examples/README.md`](../examples/README.md) | a longer runnable tour, section for section in all four — a diff between two of them shows only spelling |
 | [`support.md`](support.md) | which languages, platforms and ClickHouse lines — generated, so it cannot drift |
 
 **Guides**

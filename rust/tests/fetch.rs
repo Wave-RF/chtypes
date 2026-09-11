@@ -1,4 +1,4 @@
-//! The fetch suite — `docs/fetch.md` §9, against the shared miniature releases
+//! The fetch suite — `docs/guides/fetch.md` §9, against the shared miniature releases
 //! in `tests/fixtures/fetch/` (generated in the core repository, never edited
 //! by hand). Every fixture must produce the spec's verdict and code, through
 //! the library (`chtypes::ensure`) and through the `chtypes` binary, whose exit
@@ -233,7 +233,7 @@ fn installed_and_verified_downloads_nothing_and_offline_reads_no_source() {
     assert_eq!(first.action, Action::Installed);
 
     // §3: installed and hashing what the signed release says — the three
-    // small files are read, the tarball is not (docs/fetch.md, Decisions).
+    // small files are read, the tarball is not (docs/guides/fetch.md, Decisions).
     let again = fetch::ensure("25.8", &opts(&fx, "signed", &dest)).unwrap();
     assert_eq!(again.action, Action::AlreadyInstalled);
     assert_eq!(again.dir, first.dir);
@@ -611,7 +611,7 @@ fn a_search_path_registry_reports_a_missing_line_with_the_spec_message() {
     std::fs::remove_dir_all(&dest).ok();
 }
 
-/// The search path itself, `docs/fetch.md` §1, in order.
+/// The search path itself, `docs/guides/fetch.md` §1, in order.
 #[test]
 fn the_search_path_is_the_spec_s_order() {
     let explicit = PathBuf::from("/explicit/reg");
@@ -894,7 +894,7 @@ fn the_binary_s_other_exit_codes_and_commands() {
     );
     assert!(r.stderr.contains("already installed"), "{}", r.stderr);
     // --offline is the no-source path: the cached line answers with no URL
-    // reachable at all (docs/fetch.md, Decisions).
+    // reachable at all (docs/guides/fetch.md, Decisions).
     let mut c = bin();
     c.args([
         "fetch",
@@ -1223,7 +1223,7 @@ fn a_search_path_registry_opens_one_line_lazily() {
     let Some((line, _)) = lines.first() else {
         announce(&format!(
             "\nSKIP a_search_path_registry_opens_one_line_lazily: no installed artifact under {} \
-             — fetch one with scripts/fetch.sh 25.8 (docs/fetch.md)\n",
+             — fetch one with scripts/fetch.sh 25.8 (docs/guides/fetch.md)\n",
             dir.display()
         ));
         return;

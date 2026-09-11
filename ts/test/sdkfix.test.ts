@@ -20,14 +20,14 @@ const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
 if (!HAVE_REGISTRY) {
   console.warn(
-    '[chtypes] sdkfix tests against a real registry are SKIPPED: no artifact on the search path — scripts/fetch.sh 25.8 installs one (docs/fetch.md)',
+    '[chtypes] sdkfix tests against a real registry are SKIPPED: no artifact on the search path — scripts/fetch.sh 25.8 installs one (docs/guides/fetch.md)',
   );
 }
 
 const buf = (s: string): Buffer => Buffer.from(s, 'utf8');
 
 describe('outcome degradation', () => {
-  // docs/reference/bindings.md §RowResult: an unrecognised outcome string maps to
+  // docs/reference/bindings.md §RowResult: an unrecognized outcome string maps to
   // `unsupported`, never `rejected` — a future artifact's new verdict must
   // land on the arm that is never scored as agreement, not manufacture an
   // over-reject out of vocabulary drift.

@@ -1,7 +1,7 @@
 """The pure-Python ed25519 verifier, against vectors nobody here chose.
 
 No fixtures, no artifacts: RFC 8032 §7.1's own test vectors, the release
-key's reference vector from docs/fetch.md §4, and the negatives that matter
+key's reference vector from docs/guides/fetch.md §4, and the negatives that matter
 for a verifier (a flipped message byte, a flipped signature byte, a
 non-canonical scalar, a point off the curve, wrong lengths).
 """
@@ -34,7 +34,7 @@ RFC_VECTORS = [
     ),
 ]
 
-# docs/fetch.md §4: the release key and its reference vector (openssl -rawin).
+# docs/guides/fetch.md §4: the release key and its reference vector (openssl -rawin).
 RELEASE_KEY = bytes.fromhex(fetch_module.RELEASE_PUBLIC_KEY)
 RELEASE_MESSAGE = b"hello\n"
 RELEASE_SIGNATURE = bytes.fromhex(
@@ -54,7 +54,7 @@ def test_rfc8032_vectors_reject_a_changed_message(pk: str, msg: str, sig: str) -
 
 
 def test_the_release_key_reference_vector() -> None:
-    """The exact vector docs/fetch.md §4 publishes — the same check every SDK
+    """The exact vector docs/guides/fetch.md §4 publishes — the same check every SDK
     embeds — and that flipping one byte of the message fails it."""
     assert verify(RELEASE_KEY, RELEASE_MESSAGE, RELEASE_SIGNATURE) is True
     assert verify(RELEASE_KEY, b"hellp\n", RELEASE_SIGNATURE) is False

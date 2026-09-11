@@ -29,7 +29,7 @@
  *   DEFAULT 'x'")` fails under koffi (sync and async, at every
  *   `sync_stack_size`) and succeeds under ffi-rs, which calls on the caller's
  *   own stack. Every DEFAULT, TTL and expression path is affected, i.e. the
- *   product's headline behaviour, so the FFI had to change.
+ *   product's headline behavior, so the FFI had to change.
  *
  * ffi-rs ships prebuilt binaries for darwin-arm64/x64 and linux arm64/x64
  * (gnu and musl) — the shipping platform included — and needs no build step.
@@ -297,7 +297,7 @@ export class NativeLibrary {
   static open(path: string): NativeLibrary {
     // dlopen is refcounted, and `chs_init` must run exactly once per loaded
     // library, so two Registry instances over one directory must share one
-    // NativeLibrary rather than initialising it twice.
+    // NativeLibrary rather than initializing it twice.
     const key = realpathSync(path);
     const existing = loaded.get(key);
     if (existing !== undefined) return existing;
@@ -364,7 +364,7 @@ export class NativeLibrary {
    *
    * The reference implementation reaches the same place by a different route: it
    * keeps ClickHouse's bytes in a Go string and lets `encoding/json` substitute
-   * U+FFFD when the message is marshalled out. Decoding one step earlier here
+   * U+FFFD when the message is marshaled out. Decoding one step earlier here
    * gives the same text at the surface, and no result-document value passes
    * through this method.
    */
@@ -424,7 +424,7 @@ export class NativeLibrary {
       if (this.initTimezone !== timezone) {
         throw new ChtypesError(
           `chtypes: ${this.path} is already loaded with timezone ${this.initTimezone}; ` +
-            `one loaded library gets one chs_init, so ${timezone} cannot be honoured`,
+            `one loaded library gets one chs_init, so ${timezone} cannot be honored`,
         );
       }
       return;
@@ -978,7 +978,7 @@ export class NativeLibrary {
    * already-parsed block — a pure function of (filter, block), no settings.
    * Returns the same raw filter document `chs_filter_rows` returns; a
    * cross-schema (filter, block) pair answers a rejected document (1002)
-   * from the C layer, loudly, never undefined behaviour.
+   * from the C layer, loudly, never undefined behavior.
    */
   filterEval(filter: FilterHandle, block: BlockHandle): Buffer {
     let ptr: JsExternal;

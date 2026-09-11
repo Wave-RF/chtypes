@@ -39,7 +39,7 @@ export interface EngineOptions {
    * `chs_schema_engine` takes "{}" either way. Names are validated by the
    * server's own `MergeTreeSettings` object: an unknown name throws the
    * server's own 115; a known name declared at a NON-default value is refused
-   * (`unsupported`, naming it) — no MergeTree setting's behaviour is modelled
+   * (`unsupported`, naming it) — no MergeTree setting's behavior is modeled
    * yet, and silently ignoring a declared value would mean the declared
    * profile is not in force; a name declared AT its default is inert and
    * accepted.
@@ -65,7 +65,7 @@ export interface RowsOptions {
    * A bitmask of `DOC_VALUES | DOC_TRANSFORMS | DOC_DEFAULTS` selecting the
    * document groups; the verdict channel is always present and not a flag.
    * Defaults: `DOC_ALL` when no `exportFormat` is given (the full document —
-   * plain `rows()` behaviour), `0` (LEAN — verdicts only: `values`,
+   * plain `rows()` behavior), `0` (LEAN — verdicts only: `values`,
    * `transformed`, `substituted`, `computed` and `unknownFields` all come
    * back empty) when one is. An explicit value always wins; a bit outside
    * `DOC_ALL` is refused loudly by the library, never pre-validated here.
@@ -468,7 +468,7 @@ export class Filter {
    *
    * Filter and block MUST come from the SAME schema: a mismatched pair
    * answers a REJECTED result (code 1002) — the C layer's loud refusal,
-   * never undefined behaviour. A pair from two different libraries throws
+   * never undefined behavior. A pair from two different libraries throws
    * `ChtypesError`: no handle ever crosses a dlopen'd image boundary.
    *
    * @param block - a `Block` from `Schema#parseBlock`.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `chtypes` — the one CLI surface every SDK carries (docs/fetch.md §6),
+ * `chtypes` — the one CLI surface every SDK carries (docs/guides/fetch.md §6),
  * spelled identically in all four:
  *
  *   chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]

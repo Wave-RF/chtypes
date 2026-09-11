@@ -37,7 +37,7 @@ export const CODE_UNSUPPORTED = -2;
  * joined — `chs_block_parse` / `chs_block_free` / `chs_filter_eval`. This
  * binding therefore speaks 4 and refuses revision-3 artifacts — calling the
  * 5-argument `chs_filter_compile` through the 4-argument revision-3 artifact
- * is undefined behaviour, which is exactly what the gate exists to prevent.
+ * is undefined behavior, which is exactly what the gate exists to prevent.
  */
 export const ABI_REVISION = 4;
 
@@ -149,13 +149,13 @@ export function schemaErrorFor(
 
 // ---------------------------------------------------------------- artifacts
 //
-// The fetch/verify contract (docs/fetch.md §7) shares six codes across the
+// The fetch/verify contract (docs/guides/fetch.md §7) shares six codes across the
 // four SDKs. Five of them are verdicts of the verification chain or of the
 // source and are raised by `ensure` / the CLI; the sixth,
 // `CHTYPES_ARTIFACT_MISSING`, is the loader's — raised when a registry is
 // asked for a line no directory on the search path holds.
 
-/** The codes docs/fetch.md §7 shares across every SDK. */
+/** The codes docs/guides/fetch.md §7 shares across every SDK. */
 export type ArtifactErrorCode =
   | 'CHTYPES_ARTIFACT_MISSING'
   | 'CHTYPES_ARTIFACT_UNTRUSTED'
@@ -183,7 +183,7 @@ export function artifactMissingMessage(line: string, platform: string, lookedIn:
 }
 
 /**
- * The one identifiable error for a missing artifact (docs/fetch.md §7):
+ * The one identifiable error for a missing artifact (docs/guides/fetch.md §7):
  * a `Registry` was asked for a line that no directory on its search path
  * holds. `code` is `'CHTYPES_ARTIFACT_MISSING'`; the message is the
  * contract's, and names every directory that was looked in and the command
@@ -210,7 +210,7 @@ export class ArtifactMissingError extends RegistryError {
 }
 
 /**
- * Base of the fetch-time verdicts (docs/fetch.md §3–§7). `code` is one of the
+ * Base of the fetch-time verdicts (docs/guides/fetch.md §3–§7). `code` is one of the
  * shared codes; the subclasses exist so `instanceof` reads as well as `code`.
  */
 export class FetchError extends ChtypesError {

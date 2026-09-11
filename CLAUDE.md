@@ -7,13 +7,13 @@ functions), the normative `spec/`, four side-by-side `examples/` tours, and
 ClickHouse code; they `dlopen` per-version artifacts and speak the ABI.
 
 The other half is the sibling repository `../chtypes-core` (wrapper, build,
-artifacts, rigs, corpus, runs of record; licence pending). Its `CLAUDE.md`
+artifacts, rigs, corpus, runs of record; license pending). Its `CLAUDE.md`
 carries the rules that were paid for; the ones that bind here:
 
 - **Never rebuild a ClickHouse rule in an SDK.** A binding is a thin passthrough
   to the artifact; scalar, comparison, coercion and timestamp logic never live
   in Go/Python/TS/Rust. The one derived result is `Transformed`, per spec.
-- **The four bindings give one answer.** A behaviour change lands in all four
+- **The four bindings give one answer.** A behavior change lands in all four
   in one cycle (`docs/reference/bindings.md` is the shape), and the golden set must stay
   green in all four. The golden set is **served, not tracked**: core publishes
   `sdk-goldens.json` in the rolling release as a row in the signed
@@ -31,7 +31,7 @@ carries the rules that were paid for; the ones that bind here:
 - **Never trust exit codes or self-reports.** Every test here skips LOUDLY
   without a registry and refuses a zero-run; `scripts/check-standalone.sh`
   reads its verdict off a `go test -json` census and `scripts/check-suite.sh`
-  off each runner's own summary line, colour stripped.
+  off each runner's own summary line, color stripped.
 - **The Go package is dlopen-only by default.** The linked path (package-level
   `CompileDDL`, `BuiltVersion`) is behind `-tags chtypes_linked` and needs a
   core build tree via `CGO_LDFLAGS`; `undefined: chtypes.CompileDDL` means the

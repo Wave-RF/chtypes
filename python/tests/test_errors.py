@@ -25,7 +25,7 @@ def test_unsupported_error_is_a_peer_not_a_subtype() -> None:
 
 
 def test_no_error_value_carries_the_sentinel() -> None:
-    decline = chtypes.UnsupportedError("engine not modelled")
+    decline = chtypes.UnsupportedError("engine not modeled")
     # No `.code` field at all — there is no ClickHouse code to carry — and no
     # `.unsupported` predicate on the refusal type: the TYPE is the answer.
     assert not hasattr(decline, "code")

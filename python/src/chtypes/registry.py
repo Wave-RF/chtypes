@@ -75,7 +75,7 @@ def default_registry_dir() -> str:
     chtypes/artifacts/<os>-<arch>`` with ``<arch>`` spelled the artifact way
     (``amd64``/``arm64``). Where ``chtypes fetch`` installs, where a core-repo
     build lands, and slot 3 of the registry search path every SDK walks
-    (docs/fetch.md §1). A path, not a promise: it need not exist yet."""
+    (docs/guides/fetch.md §1). A path, not a promise: it need not exist yet."""
     return cache_registry_dir()
 
 
@@ -285,9 +285,9 @@ class Schema:
         IDENTICAL to declaring no settings, byte for byte. Names are validated
         by the server's own `MergeTreeSettings` object: an unknown name raises
         `SchemaError` with the server's own code 115 (kept visible so a caller
-        can tell "bad name" from "not modelled"); a known name declared at a
+        can tell "bad name" from "not modeled"); a known name declared at a
         NON-default value raises `UnsupportedError` — no MergeTree setting's
-        behaviour is modelled yet, and silently ignoring a declared value would
+        behavior is modeled yet, and silently ignoring a declared value would
         mean the declared profile is not the profile; declared AT the default
         is inert and accepted.
         """
@@ -308,7 +308,7 @@ class Schema:
         # cannot silently be demoted to a decline.
         if rc > 0:
             raise SchemaError(rc, err)
-        raise UnsupportedError(err or "engine not modelled by this build")
+        raise UnsupportedError(err or "engine not modeled by this build")
 
     def set_ttl(self, ttl_sql: str) -> None:
         """Declare the table's rows TTL, e.g. "ts + INTERVAL 30 DAY".
@@ -321,7 +321,7 @@ class Schema:
         with self._mu:
             rc, err = self._library._native.schema_ttl(self._live(), ttl_sql)
         if rc != 0:
-            raise UnsupportedError(err or "TTL form not modelled by this build")
+            raise UnsupportedError(err or "TTL form not modeled by this build")
 
     # -- rows ---------------------------------------------------------------
 
@@ -566,7 +566,7 @@ class Filter:
 
         Filter and block MUST come from the SAME schema handle: a mismatched
         pair answers a REJECTED result (code 1002) — the C layer's loud
-        refusal, never undefined behaviour. A pair from two different
+        refusal, never undefined behavior. A pair from two different
         `Library` objects raises `ChtypesError`: no handle ever crosses a
         dlopen'd image boundary. Raises only for that, a closed filter or
         block, or an unreadable document.
@@ -642,7 +642,7 @@ class Block:
 
     THREADS: one block must not be used from two threads at once, and an
     eval is a use of BOTH handles — `Filter.eval` takes the schema's own
-    per-handle lock, which also serialises K filters over one block.
+    per-handle lock, which also serializes K filters over one block.
     """
 
     __slots__ = ("__weakref__", "_handle", "_schema")
@@ -866,7 +866,7 @@ class Library:
         ClickHouse settings, and land on the same 115). Per-call settings still
         govern row parsing, and only row parsing.
 
-        The one compile-shape setting modelled today is `flatten_nested`: at
+        The one compile-shape setting modeled today is `flatten_nested`: at
         "0" a `Nested(a,b)` column compiles to ONE `Array(Tuple(...))` column
         named as declared, exactly as the server's CREATE does under that
         setting; every downstream shape (`columns`, name lookup, positional
@@ -911,7 +911,7 @@ class Library:
         same 115; the whole payload is then refused and nothing is committed.
 
         **This is the one genuinely dangerous call on the ABI**, and it is
-        serialised: it takes the loaded image's lock EXCLUSIVELY, so no thread
+        serialized: it takes the loaded image's lock EXCLUSIVELY, so no thread
         can be inside `row` / `rows` / `compile_ddl` / `validate_type` while it
         runs. `chs_set_default_settings` replaces a process-global that the row
         path reads by reference, and ctypes releases the GIL for the whole
@@ -947,7 +947,7 @@ class Library:
 
         When it does reach the C boundary it takes the loaded image's lock
         EXCLUSIVELY, like `set_default_settings` — `chs_shutdown` is the
-        other call `docs/reference/c-abi.md` §Thread-safety requires be serialised
+        other call `docs/reference/c-abi.md` §Thread-safety requires be serialized
         against everything else.
         """
         with _IMAGES_MU:
@@ -964,7 +964,7 @@ class Library:
 class Registry:
     """Every artifact on the search path, dispatched by ClickHouse version.
 
-    The search path (docs/fetch.md §1) is walked in order — the explicit
+    The search path (docs/guides/fetch.md §1) is walked in order — the explicit
     ``directory``, ``$CHTYPES_REGISTRY``, the per-user cache, the system
     locations — and a line is served from the **first** directory that holds
     it, so a stale directory can never shadow a good one and an empty one
@@ -1171,7 +1171,7 @@ class Registry:
 
 # Lazy fetch runs ONCE per process per (destination, line), whatever the
 # number of Registry instances or threads that open it concurrently
-# (docs/fetch.md §6): the lock serializes the opens, the memo keeps a line
+# (docs/guides/fetch.md §6): the lock serializes the opens, the memo keeps a line
 # whose fetch succeeded but whose load then failed from being re-downloaded
 # on every open.
 _AUTOFETCHED: set[tuple[str, str]] = set()

@@ -23,7 +23,7 @@
 #
 #   0. SHA256SUMS.sig  an ed25519 signature over the exact bytes of SHA256SUMS,
 #                      verified under a trusted key BEFORE anything else is read
-#                      (docs/fetch.md §4): an unsigned or mis-signed release is
+#                      (docs/guides/fetch.md §4): an unsigned or mis-signed release is
 #                      CHTYPES_ARTIFACT_UNTRUSTED, never downloaded around
 #   1. index.json   names the asset and records its sha256
 #   2. SHA256SUMS   — now known authentic — records the same sha256; the two must agree
@@ -31,7 +31,7 @@
 #   4. manifest.json inside it names the library and its sha256; the installed
 #      library is re-hashed after the move, in place
 #
-# Exit codes (docs/fetch.md §6), and the §7 code every failure message names:
+# Exit codes (docs/guides/fetch.md §6), and the §7 code every failure message names:
 #   0 ok · 1 verification failed (CHTYPES_ARTIFACT_UNTRUSTED, _CORRUPT) · 2 usage ·
 #   3 source unreachable (CHTYPES_SOURCE_UNREACHABLE) · 4 not published for this
 #   platform/line (CHTYPES_ARTIFACT_UNPUBLISHED).
@@ -266,7 +266,7 @@ else say "ClickHouse $SPELLING -> line $WANT_LINE${WANT_EXACT:+ (exact $WANT_EXA
 say "source $SOURCE_DESC"
 
 # --------------------------------------------------------- step 0: the signature
-# docs/fetch.md §3 step 0 and §4. SHA256SUMS is fetched first and NOTHING — not
+# docs/guides/fetch.md §3 step 0 and §4. SHA256SUMS is fetched first and NOTHING — not
 # index.json — is read until its ed25519 signature verifies under a trusted
 # key: the embedded release key, or exactly the keys CHTYPES_TRUSTED_KEYS
 # names. The verifier is RFC 8032 in stdlib Python, because this script stands
@@ -279,7 +279,7 @@ import base64, hashlib, sys
 sums_path, sig_path, keys, keysrc = sys.argv[1:]
 def refuse(why): print(why); sys.exit(1)
 # ---- ed25519 verification, RFC 8032 over Python integers (the reference
-# vector in docs/fetch.md §4 and RFC 8032's test 1 are checked at every run).
+# vector in docs/guides/fetch.md §4 and RFC 8032's test 1 are checked at every run).
 p = 2**255 - 19
 q = 2**252 + 27742317777372353535851937790883648493
 d = (-121665 * pow(121666, p - 2, p)) % p
@@ -467,7 +467,7 @@ while :; do
 done
 
 # --------------------------------------------------------------- pick the asset
-# The listing names the artifacts' licence (Elastic License 2.0); say so once,
+# The listing names the artifacts' license (Elastic License 2.0); say so once,
 # before a byte of library moves — the SDK is Apache 2.0, the artifact is not.
 LIC="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("license","") + " " + d.get("license_url",""))' "$WORK/index.json" 2>/dev/null || true)"
 [ -n "${LIC% }" ] && echo "fetch.sh: artifacts are licensed under ${LIC% } — LICENSE and NOTICE ship beside them" >&2

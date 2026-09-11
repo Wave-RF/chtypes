@@ -94,7 +94,7 @@ fn goldens_hold_on_every_artifact() {
         Ok(r) => {
             announce(&format!(
                 "\nSKIP goldens_hold_on_every_artifact: registry {} holds no artifact — fetch one \
-                 with scripts/fetch.sh 25.8 (docs/fetch.md)\n",
+                 with scripts/fetch.sh 25.8 (docs/guides/fetch.md)\n",
                 r.dir().display()
             ));
             return;
@@ -102,7 +102,7 @@ fn goldens_hold_on_every_artifact() {
         Err(e) => {
             announce(&format!(
                 "\nSKIP goldens_hold_on_every_artifact: no artifact registry ({e}) — fetch one \
-                 with scripts/fetch.sh 25.8 (docs/fetch.md), or set $CHTYPES_REGISTRY\n"
+                 with scripts/fetch.sh 25.8 (docs/guides/fetch.md), or set $CHTYPES_REGISTRY\n"
             ));
             return;
         }

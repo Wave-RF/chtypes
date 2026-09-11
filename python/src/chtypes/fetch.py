@@ -1,4 +1,4 @@
-"""Fetching, verifying and installing artifacts — docs/fetch.md, in Python.
+"""Fetching, verifying and installing artifacts — docs/guides/fetch.md, in Python.
 
     import chtypes
     chtypes.ensure("25.8")            # installed and verified, or an ArtifactError
@@ -108,7 +108,7 @@ GOLDENS_ASSET: Final = "sdk-goldens.json"
 #: an old row, which is build 0 by definition.
 _BUILD_SUFFIX: Final = re.compile(r"-b([0-9]+)\.tar\.gz$")
 
-#: The release signing key (docs/fetch.md §4): the raw 32-byte ed25519 public
+#: The release signing key (docs/guides/fetch.md §4): the raw 32-byte ed25519 public
 #: key, hex, and its id — the first 16 hex characters of sha256 over the raw
 #: key. Every SDK embeds this constant; `CHTYPES_TRUSTED_KEYS` replaces it.
 RELEASE_PUBLIC_KEY: Final = "fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc"
@@ -120,7 +120,7 @@ SYSTEM_REGISTRY_ROOTS: Final = ("/usr/local/share/chtypes/artifacts", "/opt/chty
 
 PLATFORMS: Final = ("linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64")
 LOCK_SCHEMA: Final = 1
-#: The lock file ``--frozen`` reads when no ``--lock`` names one (docs/fetch.md,
+#: The lock file ``--frozen`` reads when no ``--lock`` names one (docs/guides/fetch.md,
 #: Decisions): relative, so it resolves against the working directory.
 DEFAULT_LOCK_FILE: Final = "chtypes.lock"
 
@@ -144,7 +144,7 @@ def _env_flag(name: str) -> bool:
 def registry_search_path(
     explicit: str | os.PathLike[str] | None = None, *, platform: str | None = None
 ) -> tuple[Path, ...]:
-    """The registry search path (docs/fetch.md §1), in order: the explicit
+    """The registry search path (docs/guides/fetch.md §1), in order: the explicit
     path, ``$CHTYPES_REGISTRY``, the per-user cache, then the system
     locations. Directories need not exist; a lookup takes the first one that
     holds the requested line. De-duplicated, order preserved.
@@ -152,7 +152,7 @@ def registry_search_path(
     ``$CHTYPES_REGISTRY`` is a directory this host dlopens from, so it is on
     the path for the host's platform only: another platform's artifacts
     (``fetch --platform``) go to that platform's own cache directory
-    (docs/fetch.md, Decisions)."""
+    (docs/guides/fetch.md, Decisions)."""
     plat = platform or host_platform()
     candidates: list[str] = []
     if explicit is not None:
@@ -171,7 +171,7 @@ def registry_search_path(
 def fetch_destination(
     explicit: str | os.PathLike[str] | None = None, *, platform: str | None = None
 ) -> Path:
-    """Where fetch writes (docs/fetch.md §1): the explicit path, else
+    """Where fetch writes (docs/guides/fetch.md §1): the explicit path, else
     ``$CHTYPES_REGISTRY``, else the per-user cache — never a system location."""
     return registry_search_path(explicit, platform=platform)[0]
 
@@ -230,7 +230,7 @@ def _version_key(version: str) -> tuple[int, ...]:
 def trusted_keys(explicit: Iterable[str] | None = None) -> tuple[bytes, ...]:
     """The raw public keys a release may be signed with: the explicit list,
     else ``$CHTYPES_TRUSTED_KEYS`` (comma-separated hex), else the embedded
-    release key. Each REPLACES the next (docs/fetch.md §4)."""
+    release key. Each REPLACES the next (docs/guides/fetch.md §4)."""
     if explicit is None:
         env = os.environ.get(ENV_TRUSTED_KEYS, "")
         explicit = [k for k in env.split(",") if k.strip()] if env.strip() else None
@@ -254,7 +254,7 @@ _resolve_keys = trusted_keys  # the parameter of the same name shadows it in Fet
 
 
 def key_id(raw_public_key: bytes) -> str:
-    """The key id docs/fetch.md §4 defines: sha256 over the raw key, first 16 hex."""
+    """The key id docs/guides/fetch.md §4 defines: sha256 over the raw key, first 16 hex."""
     return hashlib.sha256(raw_public_key).hexdigest()[:16]
 
 
@@ -711,7 +711,7 @@ class Fetcher:
                 " — pass one"
             )
         if frozen and lock is None:
-            # --frozen alone reads ./chtypes.lock (docs/fetch.md, Decisions).
+            # --frozen alone reads ./chtypes.lock (docs/guides/fetch.md, Decisions).
             lock = DEFAULT_LOCK_FILE
         self.dest = fetch_destination(dest, platform=self.platform)
         self.tag = tag or DEFAULT_TAG
@@ -1165,7 +1165,7 @@ def ensure(
     ``line`` is a minor line (``"25.8"``, resolving to the patch the release
     publishes) or an exact patch (``"25.8.28.1-lts"``, a hard requirement).
     Idempotent: installed-and-verified is a no-op. Options mirror the CLI
-    (docs/fetch.md §6): ``dest`` (else ``$CHTYPES_REGISTRY``, else the
+    (docs/guides/fetch.md §6): ``dest`` (else ``$CHTYPES_REGISTRY``, else the
     per-user cache), ``platform`` (this host's), ``url`` or ``tag``, ``lock``
     with ``frozen``, ``force``, ``offline``; ``trusted_keys`` and
     ``allow_unsigned`` default to the environment (§4). ``progress`` receives

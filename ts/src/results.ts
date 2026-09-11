@@ -280,7 +280,7 @@ export interface ColumnDoc {
 }
 
 /**
- * Map a document's outcome string. An outcome this binding does not recognise
+ * Map a document's outcome string. An outcome this binding does not recognize
  * degrades to `unsupported`, never to `rejected` (docs/reference/bindings.md
  * §RowResult, rule added 2026-08-26): a future artifact's new verdict is an
  * answer this binding cannot interpret, and `unsupported` is the arm that is
@@ -486,7 +486,7 @@ export function isAnswer(v: Verdict): boolean {
 /**
  * The CALL-level verdict of `Filter#rows` — whether evaluation completed at
  * all; per-row failures live in the verdicts, not here. An outcome spelling
- * this binding does not recognise degrades to `'unsupported'`, never to
+ * this binding does not recognize degrades to `'unsupported'`, never to
  * `'rejected'` (the unknown-outcome rule, docs/reference/bindings.md §RowResult).
  */
 export type FilterOutcome = 'ok' | 'rejected' | 'unsupported';

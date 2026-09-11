@@ -208,7 +208,7 @@ func classify(c colDoc) []Transform {
 			// `Wire` is the stored value written back by ClickHouse's own
 			// serializer for THIS field's vocabulary, so the two strings are
 			// comparable exactly. Any difference is one ClickHouse made.
-			// Nothing is modelled here: both sides are the vendored code's.
+			// Nothing is modeled here: both sides are the vendored code's.
 			if *c.Wire != c.Input {
 				// Text alone cannot separate a re-spelling from a loss, so it
 				// claims the lossy one and lets the reference detector, which

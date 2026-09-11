@@ -36,7 +36,7 @@ export const Format = {
   RowBinaryWithNamesAndTypesAndDefaults: 7,
   /**
    * Column-oriented, self-describing, and what every ClickHouse client library
-   * sends on INSERT. Modelled at the revision `INSERT ... FORMAT Native` uses
+   * sends on INSERT. Modeled at the revision `INSERT ... FORMAT Native` uses
    * (0): no BlockInfo prefix and no per-column serialization-kind byte. Blocks
    * taken off a live TCP connection carry both and are a different contract
    * (docs/reference/c-abi.md §Native). Requires an artifact built at or after the Native

@@ -4,7 +4,7 @@ chtypes' SDKs are thin, honest bindings over one frozen C ABI (`include/chtypes.
 `spec/`). Most contributions are to a binding's ergonomics, its docs, or its
 golden cases; the type system itself is ClickHouse's, vendored in the native
 artifact, and is not reimplemented here — a PR that re-derives ClickHouse
-behaviour in Go, Python, TypeScript or Rust will be declined however good it is.
+behavior in Go, Python, TypeScript or Rust will be declined however good it is.
 
 - **Build and test locally.** `scripts/fetch.sh <clickhouse-line>` installs an
   artifact for this machine into the per-user cache; each binding's README says
