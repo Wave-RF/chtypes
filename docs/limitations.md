@@ -46,7 +46,7 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 ## Filters are shadow-only for now
 
-No read-side security may be enforced on the filter surface until the WHERE-truth rig gates green. Until then it is for shadow and replay: run it beside your existing enforcement and compare, do not replace.
+No read-side security may be enforced on the filter surface until a release explicitly lifts this limitation — the CHANGELOG will say so, and until it does, assume it has not. Until then the surface is for shadow and replay: run it beside your existing enforcement and compare, do not replace.
 
 The parse-once block twin does not change that — it is a performance shape, not a maturity signal, and sits under the same gate.
 
