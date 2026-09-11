@@ -23,3 +23,13 @@ behaviour in Go, Python, TypeScript or Rust will be declined however good it is.
 
 By contributing you agree your work is licensed under the Apache License 2.0
 (`LICENSE`).
+
+## Linting
+
+Each binding has its own linter, configured to be strict but green on the current tree: `go/.golangci.yml` (golangci-lint), `ts/biome.json` (Biome), `[lints]` in `rust/Cargo.toml` (clippy, already run by CI's `rust` job), and `python/pyproject.toml`'s `[tool.ruff.lint]` section (already run by CI's `python` job). `scripts/lint-actions.sh` runs actionlint over `.github/workflows/*.yml` and shellcheck over every tracked `*.sh`.
+
+`scripts/lint-prose.sh` enforces American spelling over the whole tree — every tracked file except `**/fixtures/fetch/**` and `LICENSE`, no other exceptions. It runs two independent checks: `misspell -locale US`, and a small grep-based wordlist for a specific family of words (`canonicalise`, `normalise`, `optimisation`, `specialise`, `generalise`, `initialiser`, `desynchronise`, `parameterise`, `unmodelled`, `unmarshalling`, and their inflections) that misspell's own dictionary matcher has been proven not to catch reliably, even though some of them are present in its built-in list — see the long comment at the top of that script. Run `scripts/lint-prose.sh --selftest` to see the proof yourself: it builds a small probe file, shows `misspell -locale US` missing most of it, and shows the wordlist grep catching all of it.
+
+Markdown formatting and structure (`dprint check`, `.markdownlint.json`) run in CI's `prose` job but do not block merges yet, for the same reason: this tree's markdown was written hard-wrapped and most of it hasn't been through a `dprint fmt` pass. Dependency vulnerability scanning (`govulncheck`, `pip-audit`, `pnpm audit`, `cargo audit`) runs in CI's `security` job and also does not block — a fresh advisory against a pinned dependency with no fix available yet should not stall every unrelated PR. Both jobs still report their findings on every run.
+
+Run any of these locally with the same command CI uses; each job's step name in `.github/workflows/ci.yml` names the exact invocation.
