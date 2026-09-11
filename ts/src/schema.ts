@@ -49,7 +49,8 @@ export interface EngineOptions {
 
 /**
  * Options for `Schema#rows` — the revision-3 export and document-flag
- * channels (the C ABI contract §Rows; docs/proposals/rows-export.md). Whatever the
+ * channels (the C ABI contract §Rows, for which include/chtypes.h is the
+ * public authority). Whatever the
  * options, `rows()` is always ONE `chs_rows` call — never a second call,
  * never re-parsing.
  */

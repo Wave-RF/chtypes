@@ -54,7 +54,7 @@ src = ["src", "tests"]
 # the classes that have actually cost time here — unused imports and names (F),
 # style errors that hide real ones (E), import order drift across 20 files (I),
 # syntax this project's floor already allows (UP), and the mutable-default /
-# loop-variable-capture family (B). `just lint` and ci/steps/static-checks.sh
-# both run this, so a finding is a gate failure, not advice.
+# loop-variable-capture family (B). `just lint` and the core repository's
+# static checks both run this, so a finding is a gate failure, not advice.
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

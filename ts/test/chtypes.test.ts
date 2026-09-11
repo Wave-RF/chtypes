@@ -3,8 +3,8 @@
  * registry. Nothing here asserts on an exit code or a self-report: every case
  * asserts on the document the library produced.
  *
- * Level 3 (semantic) conformance is the rigs' job — `tests/acceptance` and
- * `tests/arbiter` score an implementation against ground truth captured from real
+ * Level 3 (semantic) conformance is the rigs' job — the core repository's
+ * acceptance and arbiter rigs score an implementation against ground truth captured from real
  * ClickHouse servers — and no unit test can stand in for it.
  *
  * Float expectations are deliberately absent: macOS's `long double` is 53-bit, so

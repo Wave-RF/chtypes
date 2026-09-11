@@ -339,9 +339,10 @@ jobs:
   public:
     # BLOCKING, and a pure function of the diff. This repository is public; a
     # pointer into the private core repository is a dead end for every reader
-    # who is not us. The rules are two literal strings with no allowlist, so
-    # there is nothing to quietly grow — see scripts/lint-public.sh for why it
-    # exists and what to write instead.
+    # who is not us, and so is a path that is not in this repository at all.
+    # lint-public's rules are two literal strings with no allowlist; lint-paths
+    # resolves every cited repository path and fails on the ones that are not
+    # there. Each script's header says why it exists and what to write instead.
     name: "public — no pointers into the private repository"
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -352,6 +353,14 @@ jobs:
       # to prevent, so prove both rules fire before trusting either verdict.
       - run: scripts/lint-public.sh --selftest
       - run: scripts/lint-public.sh
+      # The other half of the same failure. lint-public catches the private
+      # repository by NAME; lint-paths catches a citation of a path that is
+      # simply not here — which is how one proposals document that this
+      # repository does not contain was cited six times, from the C header and
+      # all four bindings' source, every one of which ships inside a published
+      # package. Selftest first, same reason.
+      - run: scripts/lint-paths.sh --selftest
+      - run: scripts/lint-paths.sh
 
   prose:
     # BLOCKING. It was report-only while the tree was still hard-wrapped, which

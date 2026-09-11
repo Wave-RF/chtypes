@@ -49,7 +49,7 @@ extern "C" {
  * The RowBinary family reads the value in ClickHouse's own storage encoding
  * (ISerialization::deserializeBinary — the exact reader BinaryRowInputFormat
  * uses), so every parse-time text guard is bypassed exactly as it is on a real
- * server (docs/type-coverage.md §11): one error code (33) for any framing
+ * server: one error code (33) for any framing
  * fault, all-or-nothing batches, input_format_allow_errors_* never applies.
  * CHS_ROW_BINARY_WITH_DEFAULTS adds the measured per-column marker byte
  * (any nonzero byte = compute the column's DEFAULT, read no value bytes).
@@ -608,8 +608,8 @@ typedef struct chs_bytes
  * then logs only a count), reported verbatim. The batch verdict, rows_read
  * and rows_skipped are exactly what they were when skips were silent.
  *
- * THE EXPORT CHANNEL (revision 3; docs/proposals/rows-export.md, normative
- * text in the C ABI contract §Rows). `export_format` is CHS_EXPORT_NONE or an
+ * THE EXPORT CHANNEL (revision 3; the normative text is the C ABI
+ * contract §Rows, for which this header is the public authority). `export_format` is CHS_EXPORT_NONE or an
  * enum chs_format value this artifact can SERIALIZE — this revision exactly
  * CHS_JSON_COMPACT_EACH_ROW. With an export requested, out_bytes (required
  * non-NULL, always initialized to {NULL,0} at entry) receives the batch's

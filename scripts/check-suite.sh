@@ -23,7 +23,7 @@
 # and no test may have skipped for want of a registry.
 #
 # The artifact-backed proof beyond these — the server-truth suites, the
-# oracle, the rigs — is the core repository's certify workflow.
+# oracle, the rigs — is the core repository's server-truth suites.
 set -euo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"

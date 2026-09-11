@@ -351,7 +351,7 @@ var goValues = map[string]any{
 	"DocDefaults":     int(chtypes.DocDefaults),
 	"DocAll":          int(chtypes.DocAll),
 
-	// docs/fetch.md §6 — the machine-readable codes the four CLIs print.
+	// docs/guides/fetch.md §6 — the machine-readable codes the four CLIs print.
 	"CodeArtifactMissing":     string(chtypes.CodeArtifactMissing),
 	"CodeArtifactUntrusted":   string(chtypes.CodeArtifactUntrusted),
 	"CodeArtifactCorrupt":     string(chtypes.CodeArtifactCorrupt),

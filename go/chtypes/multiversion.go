@@ -337,7 +337,7 @@ import (
 // into a TSan-compiled stress driver that mirrors these tests' workload
 // (steady distinct handles + compile/engine churn + validate, DEFAULT/TTL
 // evaluation included). Its runs are TSan-clean with ZERO suppressions
-// (tests/tsan/RESULTS.md — the run of record: ~33 M concurrent calls, 0
+// (the run of record, in the core repository: ~33 M concurrent calls, 0
 // reports, 0 mismatches). SCOPE, stated rather than implied: one version
 // (25.8, the reference line), one platform (darwin-arm64), that workload,
 // and the executed interleavings — other vendored lines share this wrapper
@@ -535,7 +535,7 @@ func openLibrary(path string) (*Library, error) {
 	// Key on the RESOLVED path, not the spelling: dlopen refcounts one image
 	// per file, so `./x/libchtypes.so` and its absolute spelling — or a
 	// legacy-name symlink like the libchtypes.so -> libchtypes_s1.so bridge
-	// ci/steps/stage-lib-build.sh stages — are the SAME image, and missing
+	// the core repository's build staging creates — are the SAME image, and missing
 	// the map here would run chs_init a second time on live state (the "AT
 	// MOST ONCE PER PROCESS" invariant below).
 	key := path

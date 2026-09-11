@@ -23,8 +23,8 @@ package chtypes
 // carries a copy it asserts identical at build time. WHERE the library is
 // comes from outside: this file names only `-lchtypes`, and the caller that
 // wants the linked path supplies the search path and a build-tree rpath
-// through CGO_LDFLAGS (the core repo's ci/steps/_lib.sh `linked_env` sets
-// them to its lib/build; `CHTYPES_LIB_BUILD` names the same directory for
+// through CGO_LDFLAGS (the core repository's build tooling sets them to
+// its build tree; `CHTYPES_LIB_BUILD` names the same directory for
 // unsafe_families.txt discovery). A shipped binary needs an rpath relative
 // to itself, or the RUNPATH points at the builder's filesystem and the
 // library is unfindable in a runtime image: Linux is the shipping target,
@@ -840,7 +840,8 @@ func (cs *CompiledSchema) Rows(format Format, body []byte, settings map[string]s
 
 // RowsExport is Rows with the revision-3 export and document-flag channels
 // exposed: ONE chs_rows call, never a second, never re-parsing
-// (docs/proposals/rows-export.md; the C ABI contract §Rows is normative).
+// (the C ABI contract §Rows is normative; include/chtypes.h is its
+// public authority).
 //
 // exportFormat is ExportNone (no bytes; the docFlags still thin the
 // document) or a Format this artifact can SERIALIZE — this revision exactly

@@ -291,7 +291,7 @@ const (
 	// vendored ISerialization::deserializeBinary — the reader
 	// BinaryRowInputFormat uses. Framing faults are one code (33), batches
 	// are all-or-nothing, and input_format_allow_errors_* never applies
-	// (docs/type-coverage.md §11). Requires an artifact built at or after the
+	// Requires an artifact built at or after the
 	// RowBinary exposure; older artifacts reject with "unknown format".
 	RowBinary
 	// RowBinaryWithDefaults adds the measured per-column marker byte: any
@@ -526,7 +526,7 @@ type RowResult struct {
 	// ALIAS is deliberately absent. It is computable by exactly the same
 	// machinery, and it is measured that `ALTER ... MODIFY COLUMN a ALIAS <new
 	// expr>` RETROACTIVELY CHANGES what already-inserted rows read back as
-	// (docs/defaults-matrix.md §6.5). An ALIAS is therefore a fact about
+	// An ALIAS is therefore a fact about
 	// the schema at read time, not about the row, and this library will not
 	// present one as a stored value. A caller that wants to show it must ask
 	// the server, and must label it computed-at-read.
