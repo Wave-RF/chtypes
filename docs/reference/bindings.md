@@ -2,7 +2,7 @@
 
 Every language binding wraps the same C ABI, so every language binding should present the same shape. This document fixes that shape: the names, the semantics, the result types, the version-selection rules, and what a binding must actually run before it may claim conformance.
 
-Every language — go, python, ts, rust — is a peer SDK over the same C ABI; no language is privileged. All four are scored arbiter columns (`tests/arbiter/RESULTS.md`). The Go package `go/chtypes` is the _working reference_ only in the sense that it is today's most complete SDK (see `docs/reference/README.md`). Where a language has a strong idiom that conflicts with a name here — snake_case in Python, camelCase in TypeScript, `Result`-returning methods in Rust — follow the idiom and keep the _concept_ identical. What must never drift is meaning.
+Every language — go, python, ts, rust — is a peer SDK over the same C ABI; no language is privileged. All four are scored arbiter columns (scored in the core repository). The Go package `go/chtypes` is the _working reference_ only in the sense that it is today's most complete SDK (see `docs/reference/README.md`). Where a language has a strong idiom that conflicts with a name here — snake_case in Python, camelCase in TypeScript, `Result`-returning methods in Rust — follow the idiom and keep the _concept_ identical. What must never drift is meaning.
 
 ## The object model
 
@@ -110,7 +110,7 @@ A binding MUST expose the compile mode as a named constant equal to the C `CHS_C
 ### Values a binding must accept and reject
 
 - `format` MUST be the integer `chs_format` code, exposed as a named enum/constant set with those exact numbers: `JSONEachRow=0`, `CSV=1`, `TSV=2`, `Values=3`, `JSONCompactEachRow=4`, `RowBinary=5`, `RowBinaryWithDefaults=6`, `RowBinaryWithNamesAndTypesAndDefaults=7`, `Native=8`, `Buffers=9`.
-- **A binding MUST NOT declare a format it has not asked the ARTIFACT about.** Support for `RowBinary`, `Native` and `Buffers` depends on when the loaded artifact was linked, not on the SDK's own version, and declaring one an artifact cannot parse turns a neutral `not_offered` into scored divergences. The probe is one payload through `chs_rows`: an artifact that has the reader answers `accepted`, an older one rejects. See `chtypes-core/tests/conformance/*` for the four reference probes.
+- **A binding MUST NOT declare a format it has not asked the ARTIFACT about.** Support for `RowBinary`, `Native` and `Buffers` depends on when the loaded artifact was linked, not on the SDK's own version, and declaring one an artifact cannot parse turns a neutral `not_offered` into scored divergences. The probe is one payload through `chs_rows`: an artifact that has the reader answers `accepted`, an older one rejects. The four reference probes live with the conformance suites in the core repository.
 
   **`Buffers` needs one refinement of that probe, and it is not optional.** The format arrives at ClickHouse 26.5, so on 24.8-25.10 an artifact that DOES have the decoder correctly answers `rejected` with **73 `UNKNOWN_FORMAT`** — the server's own answer. An artifact that does NOT have the decoder does not know the format integer at all and answers **117**, _"unknown format 9"_, from the text splitter's default arm. Treating both as "not supported" would discard 126 correctly-answered cases per version as `not_offered`; treating both as "supported" would score an old artifact's 117 against the server's 73. A binding MUST therefore accept `accepted` **or** `rejected` with code 73 as proof the decoder is present, and only code 117 as proof it is absent. Both codes come from the artifact, so this remains a question asked rather than assumed.
 - `raw` / `body` MUST be a byte sequence, never the language's text type, and MUST be passed with an explicit length. Binary formats contain NUL bytes, and text rows can contain invalid UTF-8 on purpose.
@@ -272,7 +272,7 @@ Reproduce the worked examples below and the `bindings.md` result-type obligation
 
 ### Level 3 — semantic conformance (the only one that means correctness)
 
-Drive the **JSONL subprocess-oracle protocol**: the base protocol in `tests/fuzz/README.md` plus the nine extensions in `tests/arbiter/PROTOCOL.md`. `chtypes-core/tests/conformance/go/cmd/chtypes-oracle` is the reference driver and `tests/fuzz/stub_oracle.py` is the minimal one.
+Drive the **JSONL subprocess-oracle protocol**: documented with the conformance suites in the core repository. the core repository's reference oracle driver is the reference driver and its minimal stub counterpart is the minimal one.
 
 One JSON object per line on stdin, one per line on stdout, **in order**:
 
@@ -319,16 +319,13 @@ The two failure modes this rule exists to prevent are the same pair the whole pr
 
 Then run the rigs and quote the run, not your intent:
 
-```text
-cd tests/acceptance && ./run.sh          # full; ./run.sh report re-judges in ~2 s
-cd tests/arbiter    && ./run.sh rescore  # ~2 min
-```
+the acceptance and arbiter rigs, which live in the core repository
 
 Never hand-edit a `RESULTS.md`. Its verdicts are computed from runs, and a hand-edited number is indistinguishable from a lie.
 
 ## Worked examples
 
-All six were produced on 2026-08-17 by `chtypes-core/lib/build/chtypes-oracle --registry <registry> --version <v>` with JSONL on stdin, against the **`darwin-arm64`** artifacts of that day — six versions were loaded then (26.5 landed later and is absent from the version tables below), and the artifacts have been relinked several times since (2026-08-25 ×2, 2026-08-26, 2026-08-27, and the 2026-08-31 revision-3 cycle). Outputs are verbatim from that capture; re-capturing at seven versions on a current artifact set remains the standing follow-up.
+All six were produced on 2026-08-17 by the core repository's oracle driver with JSONL on stdin, against the **`darwin-arm64`** artifacts of that day — six versions were loaded then (26.5 landed later and is absent from the version tables below), and the artifacts have been relinked several times since (2026-08-25 ×2, 2026-08-26, 2026-08-27, and the 2026-08-31 revision-3 cycle). Outputs are verbatim from that capture; re-capturing at seven versions on a current artifact set remains the standing follow-up.
 
 > **Platform caveat, stated because it changes answers.** macOS's `long double` is 53-bit, so _float parses_ diverge from a real server (Linux matches 395/395 of the float corpus; macOS 0/395). None of the six examples below is a float-parse boundary case, but any float expectation a binding writes into a test MUST come from a Linux artifact or a live server.
 
@@ -451,14 +448,14 @@ The insert returns rc=0 and every later `SELECT` fails with code 691 — still p
 ```bash
 # read-only; requires an artifact registry ($CHTYPES_REGISTRY)
 printf '%s\n' '{"id":"ex-overflow","schema":"x UInt8","rows":[{"x":256}],"input_format":"JSONEachRow"}' \
-  | chtypes-core/lib/build/chtypes-oracle --registry <registry> --version 25.8
+  | <the core repository's oracle driver>
 ```
 
-`chtypes-core/tests/conformance/go/cmd/chtypes-oracle/main.go` is the input-format reference; `chtypes-core/tests/conformance/go/cmd/chtypes-oracle/markers.go` is the `markers-v0` encoder (`{"$jsonraw":…}` splices verbatim text, `{"$b64":…}` splices raw bytes, `{"$missing":true}` omits the key, `{"$rowraw":…}` replaces the whole row) and is about 200 lines — port it, do not approximate it. Key order and duplicate keys are preserved deliberately, because a duplicate-key row is a real test case.
+the core repository's reference oracle driver is the input-format reference; the core repository's conformance suites is the `markers-v0` encoder (`{"$jsonraw":…}` splices verbatim text, `{"$b64":…}` splices raw bytes, `{"$missing":true}` omits the key, `{"$rowraw":…}` replaces the whole row) and is about 200 lines — port it, do not approximate it. Key order and duplicate keys are preserved deliberately, because a duplicate-key row is a real test case.
 
 ## Two things the oracle protocol does not carry
 
-> **Both were closed on 2026-08-17 by `tests/arbiter/PROTOCOL.md` extension 8**, which adds `computed` and `constraint_violated` to the reply and `caps.computed` / `caps.constraints` to the handshake. The obligation on a driver is rule 9 above. The paragraphs below are kept as the statement of the gap that motivated it, and each carries what actually remains.
+> **Both were closed on 2026-08-17 by extension 8 of the oracle protocol (core repository)**, which adds `computed` and `constraint_violated` to the reply and `caps.computed` / `caps.constraints` to the handshake. The obligation on a driver is rule 9 above. The paragraphs below are kept as the statement of the gap that motivated it, and each carries what actually remains.
 
 Worth knowing before a binding is designed around the protocol rather than the library:
 

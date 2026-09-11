@@ -29,7 +29,7 @@ Platform-keyed, one tree per target:
 
 `<os>` is the lowercased OS name (`linux`, `darwin`) and `<arch>` is normalized (`aarch64 → arm64`, `x86_64 → amd64`). Current keys: **`linux-arm64`** (the shipping platform) and **`darwin-arm64`** (a development floor, never an oracle). `linux-amd64` is a build target, not a built artifact, on the current host.
 
-In the core repository the caches live **outside the repository on purpose**: its `dist/out` and `lib/build` are symlinks into `~/.cache/chtypes/`, created by `chtypes-core/ci/cache.sh link`, so a worktree costs ~0 GB instead of 1.4 GB and removing a worktree can never destroy hours of C++ compute. Both are gitignored _without_ a trailing slash — a `dist/out/` pattern matches directories only and would leave the symlinks tracked. A loader MUST follow symlinks and MUST NOT assume the registry is inside the repository.
+In the core repository the caches live **outside the repository on purpose**: its `dist/out` and `lib/build` are symlinks into `~/.cache/chtypes/`, created by a helper in the core repository, so a worktree costs ~0 GB instead of 1.4 GB and removing a worktree can never destroy hours of C++ compute. Both are gitignored _without_ a trailing slash — a `dist/out/` pattern matches directories only and would leave the symlinks tracked. A loader MUST follow symlinks and MUST NOT assume the registry is inside the repository.
 
 Sizes, measured 2026-08-26: 159–288 MiB per `.dylib`, 191–272 MiB per `.so`, and roughly **120 MB resident per loaded version** in a process that dlopens several.
 
@@ -97,7 +97,7 @@ The reference oracle also falls back to discovery when its linked build cannot a
 
 ## Verification
 
-The artifact carries its own checksum, so verification is not optional and not expensive. `chtypes-core/ci/cache.sh verify_artifacts` (surfaced as `just verify-artifacts`) walks each version directory, re-hashes the library, and compares against `library_sha256`. Its own comment states the reason plainly: a move that reported success and truncated a 232 MB library would look identical to one that worked.
+The artifact carries its own checksum, so verification is not optional and not expensive. the core repository's artifact-cache verifier (surfaced as `just verify-artifacts`) walks each version directory, re-hashes the library, and compares against `library_sha256`. Its own comment states the reason plainly: a move that reported success and truncated a 232 MB library would look identical to one that worked.
 
 A loader SHOULD verify the hash before `dlopen` when the artifact came from anywhere other than a local build — and MUST when it came from a network. It SHOULD also assert `chs_clickhouse_version()` against `manifest.clickhouse_version` after loading, because that catches the one class of corruption a hash cannot: the right bytes in the wrong directory.
 
