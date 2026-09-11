@@ -124,4 +124,4 @@ This crate never `dlclose`s — the handle is intentionally leaked to the proces
 ## Deeper
 
 - [`bindings.md`](bindings.md) — the normative shape all four bindings implement. Where this crate and the spec disagree, **the spec wins**.
-- [`c-abi.md`](c-abi.md) — the `chs_*` contract, the error model and the result documents.
+- the core repository's C ABI specification — the `chs_*` contract, the error model and the result documents.

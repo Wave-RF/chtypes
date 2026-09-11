@@ -21,13 +21,13 @@ Registry ── For(version) ──▶ Library ── CompileDDL(ddl) ──▶ 
 | Artifact directory loader              | `NewRegistry(dir)`                                                    | `Registry(dir)`                                                         | `new Registry(dir)`                                                                                        | `Registry::new(dir)`                                            | Scans one subdirectory per version. The directory is optional in Go, Python and TypeScript and then means the `docs/guides/fetch.md` §1 search path; Rust spells that `Registry::from_search_path()`, having no default arguments               |
 | One loaded version                     | `*Library`                                                            | `Library`                                                               | `Library`                                                                                                  | `Library`                                                       | Carries `Version`, `Minor`, `Path`                                                                                                                                                                                                              |
 | ABI revision (binding)                 | `chtypes.ABIRevision`                                                 | `chtypes.ABI_REVISION`                                                  | `ABI_REVISION`                                                                                             | `chtypes::ABI_REVISION`                                         | The revision the binding was written against; cgo reads the header macro, the rest mirror it by hand                                                                                                                                            |
-| ABI revision (artifact)                | `lib.ABIRevision`                                                     | `lib.abi_revision`                                                      | `lib.abiRevision`                                                                                          | `lib.abi_revision()`                                            | `0` = predates the probe. A different nonzero value is refused at load — see `docs/reference/c-abi.md` §The ABI revision                                                                                                                        |
+| ABI revision (artifact)                | `lib.ABIRevision`                                                     | `lib.abi_revision`                                                      | `lib.abiRevision`                                                                                          | `lib.abi_revision()`                                            | `0` = predates the probe. A different nonzero value is refused at load — see the core repository's C ABI specification §The ABI revision                                                                                                        |
 | Resolve a version                      | `r.For(v)`                                                            | `r.for_version(v)` / `r[v]`                                             | `r.for(v)`                                                                                                 | `r.for_version(v)`                                              | Minor line **or** exact patch                                                                                                                                                                                                                   |
 | List versions                          | `r.Versions()`                                                        | `r.versions()`                                                          | `r.versions()`                                                                                             | `r.versions()`                                                  | Minor lines, in numeric release order                                                                                                                                                                                                           |
 | List loaded libraries                  | `r.Libraries()`                                                       | `r.libraries()`                                                         | `r.libraries()`                                                                                            | `r.libraries()`                                                 | The same numeric order — §Version selection rule 2 governs _every_ ordered surface, and this is one of them. Python's additionally opens the lines it has only discovered; Go, TypeScript and Rust list what is already loaded and open nothing |
 | The search path                        | —                                                                     | `r.search_path`                                                         | `r.searchPath`                                                                                             | `r.search_path()`                                               | The `docs/guides/fetch.md` §1 directories, in order. Go keeps it unexported and renders it into the not-found message instead                                                                                                                   |
 | Compile a column list                  | `lib.CompileDDL(ddl)`                                                 | `lib.compile_ddl(ddl)`                                                  | `lib.compileDdl(ddl)`                                                                                      | `lib.compile(ddl).compile()`                                    | Rust is a builder — see §One compile function                                                                                                                                                                                                   |
-| … under a declared settings profile    | `lib.CompileDDL(ddl, WithCompileSettings(m), WithCompileMode(m))`     | `lib.compile_ddl(ddl, settings=…, mode=…)`                              | `lib.compileDdl(ddl, {settings, mode})`                                                                    | `lib.compile(ddl).settings(…).mode(…).compile()`                | **ONE function per SDK, options optional** — see §One compile function. `docs/reference/c-abi.md` §Compile-time vs per-call settings; declaring no settings behaves exactly as if the parameter did not exist                                   |
+| … under a declared settings profile    | `lib.CompileDDL(ddl, WithCompileSettings(m), WithCompileMode(m))`     | `lib.compile_ddl(ddl, settings=…, mode=…)`                              | `lib.compileDdl(ddl, {settings, mode})`                                                                    | `lib.compile(ddl).settings(…).mode(…).compile()`                | **ONE function per SDK, options optional** — see §One compile function. the core repository's C ABI specification §Compile-time vs per-call settings; declaring no settings behaves exactly as if the parameter did not exist                   |
 | … does this artifact have that channel | `lib.HasCompileSettings()`                                            | `lib.has_compile_settings()`                                            | `lib.hasCompileSettings()`                                                                                 | `lib.has_compile_settings()`                                    | An artifact linked before `chs_schema_compile_with_settings` answers false, and a caller that needs the profile honored must ask rather than assume                                                                                             |
 | Canonicalize a type                    | `lib.ValidateType(expr)`                                              | `lib.validate_type(expr)`                                               | `lib.validateType(expr)`                                                                                   | `lib.validate_type(expr)`                                       |                                                                                                                                                                                                                                                 |
 | Declare the engine                     | `s.SetEngine(engine, orderBy)`                                        | `s.set_engine(engine, order_by)`                                        | `s.setEngine(...)`                                                                                         | `s.set_engine(engine, order_by, NO_SETTINGS)`                   |                                                                                                                                                                                                                                                 |
@@ -47,24 +47,24 @@ A binding MAY additionally expose the statically linked, single-version shape (t
 
 ### Revision 3: the `chs_rows` export/flags parameters, and the filter trio
 
-At ABI revision 3 the C `chs_rows` gained `export_format`, `doc_flags` and `out_bytes` (`docs/reference/c-abi.md` §Rows), and `chs_filter_compile` / `chs_filter_free` / `chs_filter_rows` joined the surface (§Filters). What that means for a binding:
+At ABI revision 3 the C `chs_rows` gained `export_format`, `doc_flags` and `out_bytes` (the core repository's C ABI specification §Rows), and `chs_filter_compile` / `chs_filter_free` / `chs_filter_rows` joined the surface (§Filters). What that means for a binding:
 
 - **`Rows()` keeps today's behavior exactly**: one `chs_rows` call with `export_format = CHS_EXPORT_NONE` (`-1`) and `doc_flags = CHS_DOC_ALL` (`7`), `out_bytes = NULL`. The document that comes back is byte-identical to revision 2's, so nothing downstream moves.
 - **`RowsExport()`** (per `docs/proposals/rows-export.md`: flags 0 by default, the bitmask exposed, `Payload []byte` + `Spans` from `out_bytes` + `row_spans`) and the filter SDK surface (`CompileFilter` / verdict types) were specified for the SDK cycle that FOLLOWS the C surface — this revision's bindings changes were the mechanical pass-through above and the hand-kept `ABI_REVISION` mirrors bumping to 3 in the same cycle, nothing more. One C call per SDK method, always; never a second call, never re-parsing. **That follow-on cycle has landed**, in all four bindings, at some point before the repository split squashed its history: the export channel and the filter surface are in the object-model table above and `tests/parity/manifest.json` enforces both. This paragraph is kept as the statement of the sequencing rule — the C surface first, the SDK surface in the cycle after — not as a description of what is missing.
-- **Lean documents stay SDK-derivable.** Under `CHS_DOC_TRANSFORMS` without `CHS_DOC_VALUES` the C layer retains every `cols[]` entry any spec'd detector could fire on, with the full field set (the conservative byte-equality retention rule, `docs/reference/c-abi.md` §Document flags). A binding runs the SAME detectors of §Transformed over the retained entries — no new classifier exists on either side, and the reason vocabulary does not move into C. Under `CHS_DOC_VALUES` without `CHS_DOC_TRANSFORMS` the reference parse is skipped C-side (`ref` is `null`, no `wire`), so detectors 2 and 3 have nothing to run on — that is the caller's explicit choice, not data loss.
-- **Filter verdicts map to a four-state type, and two of the states are fail-closed.** `'t'`/`'f'` are answers; `'e'` (the predicate threw on this row — the server would have failed the whole query) and `'d'` (this library declines) are NOT answers, and a caller enforcing visibility MUST hide the row / fail the request on both. A binding MUST NOT collapse `'e'` or `'d'` into `false`-the-answer: under `NOT`, a decline-read-as-false inverts fail-closed into fail-open — the measured leak class. Unknown verdict characters degrade to the decline state, mirroring the unknown- `outcome` rule below. **No SDK may offer filter-backed read-side enforcement until the WHERE-truth rig gates green** (`docs/reference/c-abi.md` §Filters, the enforcement gate); until then the surface is shadow/replay.
-- A filter handle wraps BOTH pointers' lifetimes: the SDK object MUST keep its schema object alive (a reference, not a copy) and free the filter before the schema — the C layer does not refcount (`docs/reference/c-abi.md` §Filters, handle lifetime).
+- **Lean documents stay SDK-derivable.** Under `CHS_DOC_TRANSFORMS` without `CHS_DOC_VALUES` the C layer retains every `cols[]` entry any spec'd detector could fire on, with the full field set (the conservative byte-equality retention rule, the core repository's C ABI specification §Document flags). A binding runs the SAME detectors of §Transformed over the retained entries — no new classifier exists on either side, and the reason vocabulary does not move into C. Under `CHS_DOC_VALUES` without `CHS_DOC_TRANSFORMS` the reference parse is skipped C-side (`ref` is `null`, no `wire`), so detectors 2 and 3 have nothing to run on — that is the caller's explicit choice, not data loss.
+- **Filter verdicts map to a four-state type, and two of the states are fail-closed.** `'t'`/`'f'` are answers; `'e'` (the predicate threw on this row — the server would have failed the whole query) and `'d'` (this library declines) are NOT answers, and a caller enforcing visibility MUST hide the row / fail the request on both. A binding MUST NOT collapse `'e'` or `'d'` into `false`-the-answer: under `NOT`, a decline-read-as-false inverts fail-closed into fail-open — the measured leak class. Unknown verdict characters degrade to the decline state, mirroring the unknown- `outcome` rule below. **No SDK may offer filter-backed read-side enforcement until the WHERE-truth rig gates green** (the core repository's C ABI specification §Filters, the enforcement gate); until then the surface is shadow/replay.
+- A filter handle wraps BOTH pointers' lifetimes: the SDK object MUST keep its schema object alive (a reference, not a copy) and free the filter before the schema — the C layer does not refcount (the core repository's C ABI specification §Filters, handle lifetime).
 
 ### Revision 4: filter query parameters, and the block-parse twin
 
-At ABI revision 4 the C `chs_filter_compile` gained a `params_json` parameter (`{name:Type}` query parameters, substituted by the vendored `ReplaceQueryParameterVisitor` before analysis — `docs/reference/c-abi.md` §Filters, Query parameters), and `chs_block_parse` / `chs_block_free` / `chs_filter_eval` joined the surface (§Blocks: parse a body once, evaluate K filters against the block). What that means for a binding:
+At ABI revision 4 the C `chs_filter_compile` gained a `params_json` parameter (`{name:Type}` query parameters, substituted by the vendored `ReplaceQueryParameterVisitor` before analysis — the core repository's C ABI specification §Filters, Query parameters), and `chs_block_parse` / `chs_block_free` / `chs_filter_eval` joined the surface (§Blocks: parse a body once, evaluate K filters against the block). What that means for a binding:
 
 - **This revision's bindings changes are mechanical**, exactly as revision 3's were: the hand-kept `ABI_REVISION` mirrors bump to 4 in the same cycle, and the cgo reference passes `NULL` for `params_json` at its existing `CompileFilter(expr)` call site — behavior-preserving for every expression revision 3 accepted. The params SDK surface (a name → value string map argument) and the block SDK surface (a `Block` object; `Filter.Eval(block)`) were specified for the SDK cycle that FOLLOWS the C surface (one C call per SDK method, as always). **That cycle has landed too**, in all four: the params argument rides on the one `compile_filter` entry point and the block surface is `parse_block` + `Filter.Eval`, both in the object-model table above and both enforced by `tests/parity/manifest.json`.
 - **One expectation moves, and a test suite must move with it**: an expression containing `{name:Type}` with no binding for `name` is no longer a `-2` decline ("render literals") — it is the server's own `UNKNOWN_QUERY_PARAMETER` **456**, the refusal type (`SchemaError` class), because the substitution now runs and the server's own visitor throws it.
 - **Handle-pairing refusals split by ownership, deliberately** (delivered SDK cycle, 2026-08-31): a (filter, block) pair from two different dlopen'd LIBRARIES must be refused by the BINDING before any C call — `chs_filter_eval` takes no library identity and dereferencing a foreign image's block is undefined, so each SDK checks image identity its own way (runtime check in Go/Python/TS; a `CrossLibrary` error in Rust). A same-library pair over two different SCHEMAS is C's job and stays C's: the library answers its own rejected document, code 1002, and a binding MUST pass that pair through rather than pre-empt it. A value the declared type cannot parse is the server's own **457**.
-- **When an SDK grows the params surface** it MUST pass values as strings (the `settings_json` convention), MUST NOT hand-escape values into the expression text (injection safety comes from typed substitution, not escaping), and MUST adopt the caller-side cache discipline of `docs/reference/c-abi.md` §Filters: filter handles are per-(schema, expr, params), so a cache keyed on tenant-influenced values needs a bounded LRU and a per-principal compile throttle.
+- **When an SDK grows the params surface** it MUST pass values as strings (the `settings_json` convention), MUST NOT hand-escape values into the expression text (injection safety comes from typed substitution, not escaping), and MUST adopt the caller-side cache discipline of the core repository's C ABI specification §Filters: filter handles are per-(schema, expr, params), so a cache keyed on tenant-influenced values needs a bounded LRU and a per-principal compile throttle.
 - **A block handle wraps its schema's lifetime** exactly as a filter does (reference, not copy; free blocks before the schema), a block may be evaluated by many filters sequentially, and an eval call is a use of both handles — an SDK enforcing with the schema's own lock (as the reference does for filters) gets the block rules for free.
-- **Verdict semantics do not move**: `chs_filter_eval` returns the same document `chs_filter_rows` returns, with the same four-state verdict rule above — `'e'`/`'d'` stay fail-closed, and the enforcement gate (`docs/reference/c-abi.md` §Filters) still applies to the twin. Parse-once does not mean enforce-earlier.
+- **Verdict semantics do not move**: `chs_filter_eval` returns the same document `chs_filter_rows` returns, with the same four-state verdict rule above — `'e'`/`'d'` stay fail-closed, and the enforcement gate (the core repository's C ABI specification §Filters) still applies to the twin. Parse-once does not mean enforce-earlier.
 
 ### Introspection — the same three questions in every SDK (added 2026-08-26)
 
@@ -92,7 +92,7 @@ Python, TypeScript and Rust do expose it — they also expose `set_default_setti
 
 ### One compile function
 
-**A binding MUST expose exactly one compile entry point and one engine entry point**, with the settings profile optional on each. Not two functions, not a `…V2` twin: the C ABI itself carries the settings as ordinary parameters whose `NULL` case is structurally the profile-less path (`c-abi.md` §Compile-time vs per-call settings, point 7), so a second SDK function would be inventing a distinction the library does not have. The 2026-08-24 consolidation removed exactly that duplication from all four reference bindings.
+**A binding MUST expose exactly one compile entry point and one engine entry point**, with the settings profile optional on each. Not two functions, not a `…V2` twin: the C ABI itself carries the settings as ordinary parameters whose `NULL` case is structurally the profile-less path (the core repository's C ABI specification, §Compile-time vs per-call settings), so a second SDK function would be inventing a distinction the library does not have. The 2026-08-24 consolidation removed exactly that duplication from all four reference bindings.
 
 _How_ the options are spelled is each language's own business, and the reference bindings deliberately differ rather than transliterating Go:
 
@@ -114,7 +114,7 @@ A binding MUST expose the compile mode as a named constant equal to the C `CHS_C
 
   **`Buffers` needs one refinement of that probe, and it is not optional.** The format arrives at ClickHouse 26.5, so on 24.8-25.10 an artifact that DOES have the decoder correctly answers `rejected` with **73 `UNKNOWN_FORMAT`** — the server's own answer. An artifact that does NOT have the decoder does not know the format integer at all and answers **117**, _"unknown format 9"_, from the text splitter's default arm. Treating both as "not supported" would discard 126 correctly-answered cases per version as `not_offered`; treating both as "supported" would score an old artifact's 117 against the server's 73. A binding MUST therefore accept `accepted` **or** `rejected` with code 73 as proof the decoder is present, and only code 117 as proof it is absent. Both codes come from the artifact, so this remains a question asked rather than assumed.
 - `raw` / `body` MUST be a byte sequence, never the language's text type, and MUST be passed with an explicit length. Binary formats contain NUL bytes, and text rows can contain invalid UTF-8 on purpose.
-- `settings` MUST be a mapping whose **values are strings** at the boundary. See `c-abi.md` §Settings: a 64-bit nanosecond epoch does not survive an IEEE double, and passing it as a JSON number silently disables the setting. A binding that accepts a native integer MUST stringify it exactly (Python `str(int)`, JS `BigInt.toString()`), never through a float. A binding that additionally accepts a native **boolean** MUST encode it as `"1"` / `"0"` — the spelling the server's own settings parser treats as canonical — never as the language's `True`/`false` text (documented 2026-08-26; the reference Python binding's `encode_settings` is the model: `bool` → `"1"`/`"0"`, `int` → `str(int)`, `float` refused loudly).
+- `settings` MUST be a mapping whose **values are strings** at the boundary. See the core repository's C ABI specification §Settings: a 64-bit nanosecond epoch does not survive an IEEE double, and passing it as a JSON number silently disables the setting. A binding that accepts a native integer MUST stringify it exactly (Python `str(int)`, JS `BigInt.toString()`), never through a float. A binding that additionally accepts a native **boolean** MUST encode it as `"1"` / `"0"` — the spelling the server's own settings parser treats as canonical — never as the language's `True`/`false` text (documented 2026-08-26; the reference Python binding's `encode_settings` is the model: `bool` → `"1"`/`"0"`, `int` → `str(int)`, `float` refused loudly).
 
 ## Result types
 
@@ -219,7 +219,7 @@ Declaring the profile at compile also settles the **type gates** the way a real 
 
 ## Concurrency — what a binding owes the ABI (added 2026-08-26)
 
-`docs/reference/c-abi.md` §Thread-safety states three rules. This section says what each one costs a binding, because three of the four reference bindings had answered one of them differently and none of them had said so.
+the core repository's C ABI specification §Thread-safety states three rules. This section says what each one costs a binding, because three of the four reference bindings had answered one of them differently and none of them had said so.
 
 1. **`chs_row` / `chs_rows` are safe together on DISTINCT handles.** A binding MAY serialize them anyway; a binding that does not MUST hold rule 2.
 2. **One `chs_schema *` MUST NOT be used from two threads at once.** This is a per-handle lock, not a per-library one, and a binding that lets row calls run concurrently owes it.
@@ -236,7 +236,7 @@ How the reference bindings satisfy this, and it is deliberately not the same sha
 
 **The TypeScript exemption has a boundary, and it is `worker_threads`.** Two JS threads in one process share one `dlopen`'d image and one set of C globals, and a per-isolate counter cannot see across them. A binding whose calls are synchronous on a single thread satisfies rule 3 _for that thread_; it does not make a multi-worker setup safe, and this spec does not claim it does. A TypeScript caller that fans work across workers MUST seed the settings before starting them, or serialize the seed itself.
 
-A binding that moves from "serialize everything" to "concurrent readers" is making a claim about its own allocator interactions and MUST prove it by running the rigs, not by reasoning (`docs/reference/c-abi.md` §Thread-safety).
+A binding that moves from "serialize everything" to "concurrent readers" is making a claim about its own allocator interactions and MUST prove it by running the rigs, not by reasoning (the core repository's C ABI specification §Thread-safety).
 
 ## Version selection
 
@@ -253,218 +253,9 @@ Rules:
 4. Resolution failure MUST be an error naming the versions that _are_ loaded, never a fallback to the nearest one. Answering 26.7 semantics from a 25.8 artifact is a lie, and the rigs score silent wrongness hardest.
 5. An empty version string means "whatever this build is" on the statically linked path, and MUST NOT mean "pick one" on the registry path.
 
-## Conformance
-
-### Level 1 — ABI conformance (offline, minutes)
-
-Load an artifact directory and assert, on outputs:
-
-- The library file name came from `manifest.json`'s `library` field.
-- `chs_clickhouse_version()` matches the manifest's `clickhouse_version`.
-- `chs_init` returned 0, was called once, and was passed `UTC` plus the contents of `unsafe_families.txt` (empty is a valid list, not a missing file).
-- Every returned string was freed with the _same library's_ `chs_free`; run under a leak checker and assert zero growth over a few thousand `chs_rows` calls.
-- A symbol the artifact does not export degrades to `unsupported`, and does not fail the load.
-- `chs_shutdown` is called before `dlclose`, and the process exits rather than hanging.
-
-### Level 2 — surface conformance
-
-Reproduce the worked examples below and the `bindings.md` result-type obligations. This is a unit-test suite, not a rig.
-
-### Level 3 — semantic conformance (the only one that means correctness)
-
-Drive the **JSONL subprocess-oracle protocol**: documented with the conformance suites in the core repository. the core repository's reference oracle driver is the reference driver and its minimal stub counterpart is the minimal one.
-
-One JSON object per line on stdin, one per line on stdout, **in order**:
-
-```jsonc
-// in
-{"id":"fz-…","mode":"value","schema":"x UInt8","rows":[…markers-v0…],
- "settings":{"input_format_null_as_default":"0"},"input_format":"CSV",
- "payload_hex":"01","engine":"SummingMergeTree","order_by":"(day, key)",
- "ttl":"ts + INTERVAL 30 DAY"}
-
-// out, accepted
-{"id":"fz-…","status":"ok","value":"[{\"x\": 0}]","transformed":[…],"poisoned":false}
-// out, rejected
-{"id":"fz-…","status":"error","code":27,"msg":"…"}
-// out, declined
-{"id":"fz-…","status":"error","unsupported":true,"scope":"why"}
-```
-
-Non-negotiable protocol rules:
-
-1. **One line out per line in, in order.** A reply whose `id` does not match the request is scored `crash` and the process is restarted.
-2. **Never exit on a bad case.** A case you cannot handle is `{"status":"error"}`, not a panic. For an ingest validator a panic is the request going down with the row, so a death costs coverage and is called out by name.
-3. Unknown request fields are ignored; unknown reply fields are preserved but not interpreted.
-4. Answer the `{"id":"__caps__","mode":"caps"}` handshake with **exactly one** line, or the stream desynchronizes for every case after it.
-5. **Declare only formats you actually parse.** `caps.formats` is load-bearing for fairness: the arbiter does not send a case in a format you did not declare, and records it `not_offered` — missing coverage, never a divergence. Declaring a format you cannot parse converts neutral cases into scored wrong answers. Probe the loaded artifact at startup rather than trusting the source tree: the reference driver feeds one byte into `x UInt8` as `RowBinary` and only declares the RowBinary family if the artifact accepts it.
-6. `payload_hex`, when present, **replaces `rows` entirely** — feed exactly those bytes to the parser.
-7. `value` is the canonical row-list form: a JSON list of row objects, keys sorted, integral floats collapsed, compared after re-parsing (whitespace and key order irrelevant, row order compared as a multiset). **`0` versus `"0"` does matter.** Emit ClickHouse's own numeric text verbatim — never round-trip an integer through a float; `18446744073709551615` becomes `18446744073709552000` and an `Int256` becomes `-5.78960446186581e+76`, which a scorer cannot distinguish from a real coercion defect.
-8. `transformed` may be a list of column names or the richer `[{"column","input","stored","reason"}]` form; the arbiter reduces the latter to column names. Omitting it scores 0 % recall.
-9. **Emit `computed` and `constraint_violated`, and declare both** (extension 8, added 2026-08-17). `computed` is `[{"name","kind","stored","row"}]` — the `MATERIALIZED` values from `RowResult.Computed`, with `stored` carried as ClickHouse's own JSON _text_ for rule 7's reason and `row` the 0-based index into the batch, as `transformed` does. They can never ride in `value`, because `SELECT *` does not return them, so a driver that omits the field leaves a wrong MATERIALIZED value scoring as exact agreement. `constraint_violated` is `true` when the batch was rejected with ClickHouse code 469 (`VIOLATED_CONSTRAINT`) — the implementation's own attribution of the rejection to a table-level `CONSTRAINT … CHECK`. Declare both in the handshake (`caps.computed`, `caps.constraints`): as with every capability, silence costs coverage (`not_declared`) and is never scored as a wrong answer, but a driver that stays silent leaves those two axes unmeasured for its SDK.
-10. **Decline volatile-DEFAULT cases by default.** A row whose value came from this library's own clock cannot be scored against a _recorded_ truth: the truth file holds the instant the arbiter's server stamped, yours is the instant you read, and pinning yours to theirs would be gaming the harness rather than measuring it. The reference driver's default is `-volatile=decline`, which answers `unsupported` naming the substituted columns; `-volatile=answer` is for a harness that echoes the substituted values back as the INSERT payload (which is what a gateway does, and what makes preview == stored). A binding SHOULD offer the same switch and SHOULD default to declining.
-11. **Compile with the case's compile-time settings, and declare it** (extension 9, added 2026-08-18). The truth rigs apply a case's settings to the server's CREATE as well as its INSERT, so a case declaring `flatten_nested: 0` has its ground truth recorded against an unflattened table. A driver whose artifact exports `chs_schema_compile` MUST compile under the compile-relevant subset of the case's settings (the normative list is PROTOCOL.md extension 9's table; this revision: `flatten_nested`) and declare `caps.compile_settings`; one that cannot — an implementation with no compile-time settings channel at all, such as the `stub` control — MUST stay silent, and the arbiter then withholds those cases as `not_offered` instead of scoring answers about a differently-shaped table. Declaring without compiling-with-settings converts withheld cases into scored wrong answers, the same trap as declaring a format you cannot parse.
-12. **On `chs_schema_engine`, the SIGN of the return decides the KIND of error** (added 2026-08-25; before this, bindings keyed on the literal `115`). Two answers travel down one integer and a binding MUST NOT flatten them:
-
-- **`rc > 0` — the SERVER refused.** A real ClickHouse error code out of the server's own engine validation: this DDL can never exist, no retry and no different data will change that, and the tenant has to be told. A binding MUST surface it as **the same error type it uses for a server refusal on any other schema call** — `SchemaError` (Go, Python, TS), `Error::Schema` (Rust) — carrying the server's own code _and_ the server's own message, passed through verbatim. Today `115` (unknown MergeTree setting name) is the only positive code the ABI returns here; key on the sign anyway, so a code a later era adds cannot silently be demoted. (The `Maybe you meant …` hint appears on the `DB::Settings` channels — a compile profile, a per-call map — not on the MergeTree namespace, which upstream decorates with `for storage <engine>` instead. A binding passes through whatever it is given and invents neither.)
-- **`rc < 0` — this LIBRARY declined.** `-2` "a real server might well have accepted this; I will not guess", `-1` a guarded exception, and a binding's own missing-symbol sentinel. It MUST surface as a **DISTINCT ERROR TYPE**, not as the refusal type carrying a sentinel code — `UnsupportedError` (Go, Python, TS), `Error::Unsupported` / `Error::PredatesFeature` (Rust) — and a caller must validate cautiously rather than blame the tenant.
-
-  **The decline type is a PEER of the refusal type, not a subtype** (Go and TS, 2026-08-26; Python completed the same day; Rust always was). A binding MUST NOT let a decline satisfy `errors.As(&SchemaError{})` / `instanceof SchemaError` / `except SchemaError`, because a caller who handles only the refusal arm would then convert every decline into a rejection SILENTLY — a manufactured over-reject, zero-budget. As a peer, the same omission produces an unhandled error, which is loud. (A shared BASE type — Python's `ChtypesError`, TS's `ChtypesError` — is fine: catching the base is an explicit choice to handle both arms, which is not the forget-to-check failure this rule exists to prevent.) The refusal type MUST NOT carry an `.unsupported` predicate: the type IS the answer, and a predicate is the sentinel wearing a method. The wire sentinel stays exported (`CodeUnsupported` / `CODE_UNSUPPORTED`) because row-level results carry it, but no error VALUE carries it. (An earlier revision grandfathered Python's `UnsupportedError(SchemaError)` subtype; the split was completed in the 2026-08-26 SDK-fix cycle and no subtype remains.)
-
-  The decline type's rendered message keeps the `[-2]` shape the refusal type renders its code with. That is a frozen rendering, not a field: the conformance drivers put it on the protocol wire verbatim as an `unsupported` scope, so changing the text moves rig records without changing a verdict. The rendered code is ALWAYS the header's `CHS_CODE_UNSUPPORTED` (`-2`), whatever negative integer the binding saw internally — `-1` (a guarded exception), `-2`, or a binding's own missing-symbol sentinel (Go's `dlopen` shim uses `-3` internally). Internal sentinels MUST NOT leak into the rendering.
-
-  **Neither error type may carry a GUESSED column.** A binding attributes `column` only when the C layer's own structured answer names one — and today no schema-path entry point does (`chs_schema_compile`, `chs_schema_engine`, `chs_schema_ttl` and `chs_validate_type` return a code and a message, nothing more), so the field stays empty on those paths and a message that names a column rides through verbatim inside `msg`. The TS binding's measured guess-removal is the precedent (2026-08-26: zero attributed renders in the recorded runs, scope strings unaffected); the Go static path's longest-declared-name-in-the-message guess was removed in the same cycle's follow-up. The field itself stays, for callers — e.g. a gateway's EPHEMERAL decline, which names columns it KNOWS (§EPHEMERAL below).
-
-The two failure modes this rule exists to prevent are the same pair the whole product is budgeted at zero for: reporting a decline as a refusal is a manufactured over-reject, and hiding a refusal behind a decline lets a DDL that can never exist look merely unmodeled. `docs/reference/c-abi.md` §Error model is the normative source; this rule is its binding-side restatement.
-
-Then run the rigs and quote the run, not your intent:
-
-the acceptance and arbiter rigs, which live in the core repository
-
-Never hand-edit a `RESULTS.md`. Its verdicts are computed from runs, and a hand-edited number is indistinguishable from a lie.
-
-## Worked examples
-
-All six were produced on 2026-08-17 by the core repository's oracle driver with JSONL on stdin, against the **`darwin-arm64`** artifacts of that day — six versions were loaded then (26.5 landed later and is absent from the version tables below), and the artifacts have been relinked several times since (2026-08-25 ×2, 2026-08-26, 2026-08-27, and the 2026-08-31 revision-3 cycle). Outputs are verbatim from that capture; re-capturing at seven versions on a current artifact set remains the standing follow-up.
-
-> **Platform caveat, stated because it changes answers.** macOS's `long double` is 53-bit, so _float parses_ diverge from a real server (Linux matches 395/395 of the float corpus; macOS 0/395). None of the six examples below is a float-parse boundary case, but any float expectation a binding writes into a test MUST come from a Linux artifact or a live server.
-
-### 1. Overflow wrap — the canonical silent change
-
-```jsonc
-// in
-{"id":"ex-overflow","schema":"x UInt8","rows":[{"x":256}],"input_format":"JSONEachRow"}
-// out
-{"id":"ex-overflow","status":"ok","value":"[{\"x\": 0}]","body_b64":"eyJ4IjowfQo=",
- "transformed":[{"column":"x","input":"256","stored":"0","reason":"overflow_wrap","row":0}]}
-```
-
-`256` into `UInt8` is stored as `0` and ClickHouse returns success. The insert would be accepted; the value would be wrong; nothing in ClickHouse says so. `transformed` is the entire product in one line.
-
-### 2. DDL in, canonical schema out — canonicalization is schema-aware
-
-Compiled through the C ABI (`chs_schema_compile` + the column-introspection group) on the `25.8` artifact:
-
-```text
-in:  a UInt8, b Nullable(String) DEFAULT 'x', c DateTime MATERIALIZED now()
-out: a  UInt8              kind=""             expr=""       literal=false
-     b  Nullable(String)   kind="DEFAULT"      expr="'x'"    literal=true
-     c  DateTime           kind="MATERIALIZED"  expr="now()"  literal=false
-
-in:  x Int64 DEFAULT NULL
-out: x  Nullable(Int64)    kind="DEFAULT"      expr="NULL"   literal=true
-```
-
-The second is why `validate_type` alone is insufficient: the DEFAULT rewrote the declared type. Note also the canonical spelling of parameter lists — `Decimal(18, 4)`, `Enum8('a' = 1, 'b' = 2)`, `Map(String, Array(UInt8))`, with a space after each comma — and that `Variant(UInt8, String)` canonicalizes to `Variant(String, UInt8)` with members **sorted**. A binding MUST pass the library's spelling through verbatim.
-
-### 3. A volatile DEFAULT, pinned — the one impurity, as an input
-
-```jsonc
-// in  (note: the setting value is a STRING; as a JSON number it is silently ignored)
-{"id":"pin","schema":"a UInt8, ts DateTime DEFAULT now()","rows":[{"a":1}],
- "input_format":"JSONEachRow",
- "settings":{"chtypes_now_epoch_nanos":"1700000000000000000"}}
-// out  (driver run with -volatile=answer)
-{"id":"pin","status":"ok","value":"[{\"a\": 1, \"ts\": \"2023-11-14 22:13:20\"}]",
- "transformed":[{"column":"ts","input":"","stored":"\"2023-11-14 22:13:20\"",
-                 "reason":"default_materialized","row":0}]}
-```
-
-The library resolved `now()` itself, once for the whole batch, and reported it as a substitution. **The caller MUST send `ts` as an explicit column in the INSERT.** That is the mechanism, not a nicety: if the server evaluates the expression instead, preview and stored differ _always_ at `now64` resolution (2–60 ms apart even back to back) and sometimes at `now()` resolution, because ClickHouse reads the clock once per _block_ — a 200-row insert at `max_insert_block_size=10` stamps 20 distinct `now64(9)` values.
-
-Supplying the column also **disarms** whatever was attached to the expression — measured, `x Int64 DEFAULT throwIf(1,'boom')` rejects with 395 when absent and is _accepted_ when supplied — which is why the substitution is reported as a transform rather than passed over in silence.
-
-And with a skew budget that the offset exceeds, the honest answer is a decline:
-
-```jsonc
-// in
-{"settings":{"chtypes_clock_offset_nanos":"5000000000","chtypes_max_clock_skew_nanos":"1"}}
-// out
-{"status":"error","unsupported":true,
- "scope":"client clock offset exceeds chtypes_max_clock_skew_nanos; refusing to
-          substitute a volatile DEFAULT rather than store a timestamp the server
-          would not have written"}
-```
-
-### 4. A TTL-expired row — accepted per row, not stored per batch
-
-```jsonc
-// in
-{"id":"ex-ttl","schema":"ts DateTime, v UInt8","order_by":"ts",
- "ttl":"ts + INTERVAL 1 DAY","rows":[{"ts":"2020-01-01 00:00:00","v":9}],
- "input_format":"JSONEachRow"}
-// out
-{"id":"ex-ttl","status":"ok","value":"[]","body_b64":"Cg==",
- "transformed":[{"column":"","input":"","stored":"","reason":"ttl_expired","row":0}]}
-```
-
-The row's own document says `accepted`; the batch says the part holds nothing. Raw batch document for the same case:
-
-```json
-{"outcome":"accepted","code":0,"err":"","engine_rows":[],
- "storage_transforms":[{"row":0,"column":"","reason":"ttl_expired"}],
- "rows_read":1,"rows_skipped":0,"rows":[ … the row, accepted … ]}
-```
-
-A binding that reads only `rows` previews a row the table will silently delete.
-
-### 5. Version behavior is non-monotonic — the registry is the point
-
-Same case, all six artifacts then loaded (the registry holds seven today; 26.5 is not in this capture), one process:
-
-```jsonc
-// in
-{"id":"ifmixed","schema":"a UInt8, x Int64 DEFAULT if(1,2,'a')","rows":[{"a":1}],
- "input_format":"JSONEachRow"}
-```
-
-| Version   | Answer                                                                                                                           |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| 24.8      | `ok`, `[{"a": 1, "x": 2}]`, `default_filled`                                                                                     |
-| 25.3      | `ok`, same                                                                                                                       |
-| 25.8      | `ok`, same                                                                                                                       |
-| **25.10** | **`error`, code `386`** — "There is no supertype for types UInt8, String … default expression and column type are incompatible." |
-| 26.6      | `ok`, same                                                                                                                       |
-| 26.7      | `ok`, same                                                                                                                       |
-
-Newer is **not** always more permissive. A binding MUST NOT infer one version's answer from another's, and MUST NOT treat a version it has no artifact for as "probably like the nearest one". Two more from the same sweep: `j JSON` is rejected on 24.8 with code `44` (`allow_experimental_json_type`) and accepted from 25.3 onward; `RowBinaryWithNamesAndTypesAndDefaults` answers code `73` `Unknown format` on 24.8 through 25.10 and parses on 26.6 / 26.7 — exactly as those servers do. (26.5 was not in this capture and is unmeasured here.)
-
-### 6. Accept-then-poison — an accepted insert that destroys the value
-
-```jsonc
-// in
-{"id":"enum-poison","schema":"e Enum8('a'=1,'b'=2)","rows":[{"e":null}],
- "input_format":"JSONEachRow",
- "settings":{"input_format_defaults_for_omitted_fields":"0"}}
-// out  (identical on all six versions in the capture)
-{"id":"enum-poison","status":"ok","value":"[{\"e\": null}]","poisoned":true,
- "transformed":[{"column":"e","input":"null","stored":"<unreadable>","reason":"poisoned","row":0}]}
-```
-
-The insert returns rc=0 and every later `SELECT` fails with code 691 — still present on 26.6 and 26.7. In the result document this is `"outcome":"accepted_poisoned"`, `"code":691`, with the column carrying `"poison":true`. A binding MUST report it as **accepted** with the poison flag, never as a rejection: the contract's definition and the arbiter's ground truth both come from a real `CREATE`/`INSERT`/`SELECT` cycle, and `format()` fusing it into a rejection is an artifact of that probe rather than the semantics.
-
-## Reproducing these
-
-```bash
-# read-only; requires an artifact registry ($CHTYPES_REGISTRY)
-printf '%s\n' '{"id":"ex-overflow","schema":"x UInt8","rows":[{"x":256}],"input_format":"JSONEachRow"}' \
-  | <the core repository's oracle driver>
-```
-
-the core repository's reference oracle driver is the input-format reference; the core repository's conformance suites is the `markers-v0` encoder (`{"$jsonraw":…}` splices verbatim text, `{"$b64":…}` splices raw bytes, `{"$missing":true}` omits the key, `{"$rowraw":…}` replaces the whole row) and is about 200 lines — port it, do not approximate it. Key order and duplicate keys are preserved deliberately, because a duplicate-key row is a real test case.
-
-## Two things the oracle protocol does not carry
-
-> **Both were closed on 2026-08-17 by extension 8 of the oracle protocol (core repository)**, which adds `computed` and `constraint_violated` to the reply and `caps.computed` / `caps.constraints` to the handshake. The obligation on a driver is rule 9 above. The paragraphs below are kept as the statement of the gap that motivated it, and each carries what actually remains.
-
-Worth knowing before a binding is designed around the protocol rather than the library:
-
-- **`computed`.** `MATERIALIZED` values are in the library's `RowResult.Computed` and in the raw result document, but the oracle reply had no field for them, so they were not scored. A binding that only ever speaks the protocol will not exercise that path. _Now carried_ — but scored only once a truth capture records the server's own readback of those columns, which `bake/truth.py` collects and which the committed truth files predate.
-- **Engine, TTL and constraints as _ground truth_.** `engine`, `order_by` and `ttl` are request fields the reference driver honors, but the acceptance corpus notes that a divergence caused by a `CONSTRAINT` is something no implementation can currently be _asked_ about — that is a protocol gap, not a library gap. _Now asked_ for `CONSTRAINT … CHECK`, on the arbiter's `constraint_axis`. `engine` and `ttl` still have no axis of their own, and the acceptance rig still excludes engine/TTL divergences by control probe.
-
 ## `EPHEMERAL` columns: decline to preview, never mispreview
 
-_Appended 2026-08-17. The measurement is [`c-abi.md`](c-abi.md) § EPHEMERAL — confirmed on live 24.8.14.39 / 25.8.28.1 / 26.7.3.19, identical answers. This section is the binding-surface obligation that follows from it, and it is the one place where a correct answer from this library is the wrong answer for a caller._
+_Appended 2026-08-17. The measurement is the core repository's C ABI specification, § EPHEMERAL — confirmed on live 24.8.14.39 / 25.8.28.1 / 26.7.3.19, identical answers. This section is the binding-surface obligation that follows from it, and it is the one place where a correct answer from this library is the wrong answer for a caller._
 
 An `EPHEMERAL` column is reachable **only** through an INSERT that names it in an explicit column list. `chs_row` / `chs_rows` take a _format stream_, a stream carries no column list, so this API cannot express that shape at all. For `id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1` the library answers exactly as a real `INSERT INTO t FORMAT …` (no column list) does — `e` is an unknown field in JSONEachRow, occupies no field position in CSV, and `d` is computed from `e`'s type zero, so `d = 1`. Against the INSERT it models, that is right. Against `INSERT INTO t (id, e)`, which stores `d = 6`, it is a **mispreview**: the row a subscriber would be shown is not the row the table will hold.
 

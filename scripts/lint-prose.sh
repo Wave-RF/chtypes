@@ -183,7 +183,7 @@ selftest() {
   # Not `local`: the EXIT trap below runs after this function has returned,
   # by which point a `local` variable is already out of scope under `set -u`.
   tmp="$(mktemp)"
-  trap 'rm -f "$tmp"' EXIT
+  trap 'rm -f "$tmp" "$tmp.misspell"' EXIT
   {
     echo "canonicalise the input"
     echo "normalisation of settings"
@@ -193,11 +193,11 @@ selftest() {
   } > "$tmp"
 
   echo "==> selftest: misspell -locale US alone (expected to MISS most of these — that is the point)" >&2
-  if "$MISSPELL" -locale US -source text -error "$tmp" >/tmp/lint-prose-selftest-misspell.out 2>&1; then
+  if "$MISSPELL" -locale US -source text -error "$tmp" >"$tmp.misspell" 2>&1; then
     echo "FAIL: misspell -locale US reported the probe file clean; expected at least the 'behaviour' hit" >&2
     exit 1
   fi
-  cat /tmp/lint-prose-selftest-misspell.out >&2
+  cat "$tmp.misspell" >&2
 
   echo "==> selftest: wordlist grep against the same probe file (expected to catch ALL five)" >&2
   local hits

@@ -32,7 +32,7 @@ __all__ = [
 # code: it means "a real server might well have accepted this; I decline to
 # guess". Mapping it onto a rejection manufactures an over-reject that the
 # product never made; mapping it onto an acceptance manufactures an over-accept,
-# which is the cardinal sin (docs/reference/c-abi.md "Error model").
+# which is the cardinal sin (the core repository's C ABI specification "Error model").
 CODE_UNSUPPORTED: Final[int] = -2
 
 
@@ -192,7 +192,7 @@ class SchemaError(ChtypesError):
     conflated: reporting a decline as a rejection manufactures an over-reject
     (silent data loss), and hiding a rejection behind a decline lets a DDL
     that can never exist look merely unmodeled. Both budgets are zero
-    (docs/reference/c-abi.md §Error model).
+    (the core repository's C ABI specification §Error model).
 
     Attributes:
         code: the ClickHouse error code — always the server's own.
@@ -260,7 +260,7 @@ def _error_for(code: int, msg: str, column: str = "") -> ChtypesError:
     """The ONE place an ABI error code becomes an exception, so the
     refusal/decline split cannot be decided differently in two files.
 
-    The SIGN decides (docs/reference/bindings.md rule 12, docs/reference/c-abi.md §Error model):
+    The SIGN decides (docs/reference/bindings.md rule 12, the core repository's C ABI specification §Error model):
     a positive code is the server's own refusal and rides through verbatim;
     any negative code is this library declining (`-2` "I will not guess",
     `-1` a guarded exception) and becomes an `UnsupportedError`. Keying on

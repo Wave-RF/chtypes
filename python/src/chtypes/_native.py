@@ -89,7 +89,7 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
         [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p],
     ),
     # Revision 3: chs_rows carries export_format / doc_flags / out_bytes
-    # (docs/reference/c-abi.md §Rows). The ABI-revision gate below is what guarantees
+    # (the core repository's C ABI specification §Rows). The ABI-revision gate below is what guarantees
     # this 8-argument declaration describes the loaded artifact before any
     # call is made through it.
     "chs_rows": (
@@ -105,7 +105,7 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
             ctypes.POINTER(_ChsBytes),
         ],
     ),
-    # Revision 3: the filter trio (docs/reference/c-abi.md §Filters). Optional symbols —
+    # Revision 3: the filter trio (the core repository's C ABI specification §Filters). Optional symbols —
     # a revision-0 artifact may predate them, and absence degrades to
     # UnsupportedError at call time, never a load failure.
     # Revision 4: chs_filter_compile carries params_json ({name:Type} query
@@ -123,7 +123,7 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
         ctypes.c_void_p,
         [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p],
     ),
-    # Revision 4: the block twin (docs/reference/c-abi.md §Blocks) — parse a body once,
+    # Revision 4: the block twin (the core repository's C ABI specification §Blocks) — parse a body once,
     # evaluate K filters against the block. Optional, same degradation rule.
     "chs_block_parse": (
         ctypes.c_void_p,
@@ -179,8 +179,7 @@ class _RWLock:
 
     **Readers** are every call that reaches `chs_row`, `chs_rows`,
     `chs_schema_compile`, `chs_schema_engine`, `chs_schema_ttl`,
-    `chs_validate_type` and the column accessors. `docs/reference/c-abi.md`
-    §Thread-safety declares those safe together **on distinct handles**, so
+    `chs_validate_type` and the column accessors. the core repository's C ABI specification §Thread-safety declares those safe together **on distinct handles**, so
     per-handle serialization is `Schema`'s own lock and not this one.
 
     **The writer** is the pair that mutates per-library PROCESS state —
@@ -304,7 +303,7 @@ class NativeLibrary:
                 f"chtypes: {path} does not export the chtypes C API (missing {', '.join(missing)})"
             )
 
-        # The ABI identity gate (docs/reference/c-abi.md "ABI identity"). 0 = the artifact
+        # The ABI identity gate (the core repository's C ABI specification "ABI identity"). 0 = the artifact
         # predates chs_abi_revision, which is ignorance, not incompatibility, so
         # the per-symbol degradation rules stay. A DIFFERENT nonzero revision is
         # a positive statement that these ctypes signatures do not describe this
@@ -417,7 +416,7 @@ class NativeLibrary:
                 )
             )
             if rc != 0:
-                # The RETURN VALUE carries the code (docs/reference/c-abi.md: every out
+                # The RETURN VALUE carries the code (the core repository's C ABI specification: every out
                 # param is optional); out_code is the convenience copy. Prefer
                 # whichever is nonzero, so the guarded-exception corner (the C
                 # side answers rc=-1 with out_code=0) still reads as the
@@ -645,7 +644,7 @@ class NativeLibrary:
     ) -> tuple[int | None, int, str]:
         """(block handle, code, err). code/err meaningful only on None — a
         call-level failure (unknown setting 115, framing, a binary decode
-        fault) yields no block and no partial answers (docs/reference/c-abi.md §Blocks).
+        fault) yields no block and no partial answers (the core repository's C ABI specification §Blocks).
         """
         fn = self._need("chs_block_parse", "this artifact predates chs_block_parse (rebuild it)")
         code = ctypes.c_int(0)

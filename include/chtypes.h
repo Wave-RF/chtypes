@@ -25,7 +25,7 @@
  * A loader therefore MUST pair an artifact with the header it was built
  * from: symbol PRESENCE proves a function exists, never that its signature
  * matches this file. (The presence probe stays because a Registry may load a
- * third-party-built artifact; see docs/reference/c-abi.md §ABI identity.) After the
+ * third-party-built artifact; see the core repository's C ABI specification §ABI identity.) After the
  * first publish this section is replaced by a compatibility policy and the
  * usual semantic-version rules begin.
  * -------------------------------------------------------------------------
@@ -77,7 +77,7 @@ extern "C" {
  * server_revision >= DBMS_MIN_REVISION_WITH_CUSTOM_SERIALIZATION
  * (NativeReader.cpp:182 on 24.8, :211 on 26.7), which the FORMAT path never
  * reaches. Blocks captured off a live TCP connection ARE revision-tagged and
- * are therefore NOT this format; see docs/reference/c-abi.md.
+ * are therefore NOT this format; see the core repository's C ABI specification.
  *
  * Because the stream carries names and types, this is a format where the
  * declared schema and the payload can DISAGREE — and ClickHouse's own
@@ -271,7 +271,7 @@ CHS_API int chs_init(const char * timezone, const char * unsafe_families, char *
  * `chtypes_custom_settings_prefixes` key, comma-separated, mirroring the
  * server's own custom_settings_prefixes element (absent key = unchanged).
  * Per-call settings run the same gate: an unknown name rejects that call with
- * code 115, exactly as a server rejects the whole query (docs/reference/c-abi.md,
+ * code 115, exactly as a server rejects the whole query (the core repository's C ABI specification,
  * Settings rule 2). */
 CHS_API int chs_set_default_settings(const char * settings_json, char ** out_err);
 
@@ -344,7 +344,7 @@ enum chs_compile_mode
  *                  setting the profile names takes the caller's value; every
  *                  setting it does not name keeps the library's own compile
  *                  base (build defaults plus the derived permissive type-gate
- *                  list — see docs/reference/c-abi.md §Compile-time settings). A partial
+ *                  list — see the core repository's C ABI specification §Compile-time settings). A partial
  *                  profile can therefore admit a schema the server might
  *                  refuse, but can never fabricate a rejection.
  *                  Any other value is refused loudly (-2), reserved for a
@@ -578,7 +578,7 @@ typedef struct chs_bytes
  * ALWAYS emitted and is not a flag. CHS_DOC_ALL reproduces the revision-2
  * document byte-for-byte; 0 is "lean" (verdicts only). A bit outside
  * CHS_DOC_ALL is refused loudly (the whole call answers unsupported), so a
- * future flag can never silently mean nothing. docs/reference/c-abi.md §Document flags
+ * future flag can never silently mean nothing. the core repository's C ABI specification §Document flags
  * is the full contract, including the conservative retention rule that keeps
  * TRANSFORMS-without-VALUES documents SDK-derivable and the cost asymmetry
  * (VALUES without TRANSFORMS skips the reference second-parse — real compute
@@ -609,7 +609,7 @@ typedef struct chs_bytes
  * and rows_skipped are exactly what they were when skips were silent.
  *
  * THE EXPORT CHANNEL (revision 3; docs/proposals/rows-export.md, normative
- * text in docs/reference/c-abi.md §Rows). `export_format` is CHS_EXPORT_NONE or an
+ * text in the core repository's C ABI specification §Rows). `export_format` is CHS_EXPORT_NONE or an
  * enum chs_format value this artifact can SERIALIZE — this revision exactly
  * CHS_JSON_COMPACT_EACH_ROW. With an export requested, out_bytes (required
  * non-NULL, always initialized to {NULL,0} at entry) receives the batch's
@@ -640,7 +640,7 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * Phase 2 (revision 4): one boolean SQL expression over a compiled schema's
  * columns, evaluated per row of a body — with {name:Type} query parameters,
  * and a parse-once/eval-many twin (chs_block_parse + chs_filter_eval,
- * below). docs/reference/c-abi.md §Filters and §Blocks are the full contract; the
+ * below). the core repository's C ABI specification §Filters and §Blocks are the full contract; the
  * header states the load-bearing parts.
  *
  * chs_filter_compile parses expr_sql with ClickHouse's own ParserExpression
@@ -666,7 +666,7 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * substitution. Handle identity is per-(schema, expr, params) — values are
  * baked in at compile; a caller compiling filters from tenant-influenced
  * values MUST bound its cache (LRU) and its compile rate per principal
- * (docs/reference/c-abi.md §Filters, Query parameters).
+ * (the core repository's C ABI specification §Filters, Query parameters).
  *
  * Refused (-2), never guessed: non-deterministic expressions (clock reads —
  * now() > ts —, rand(), server-constants, insertion-order functions; the
@@ -699,7 +699,7 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * outcome rejected/unsupported with "verdicts":"". Evaluation runs under the
  * DEFAULT-evaluation admission budgets; volatile DEFAULTs resolve against
  * one clock instant per call. NOTHING may enforce read-side security on this
- * API until the WHERE-truth rig gates green (docs/reference/c-abi.md §Filters) — the
+ * API until the WHERE-truth rig gates green (the core repository's C ABI specification §Filters) — the
  * twin below is call-shape, not an enforcement opening. */
 typedef struct chs_filter chs_filter;
 

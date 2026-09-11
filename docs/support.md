@@ -65,7 +65,7 @@ chtypes verify                  # re-hash every installed line against its manif
 
 ## What "supported" means for a golden answer
 
-The public golden set is generated per line and gates itself on the **exact** patch version, not the line. A case runs against an artifact only when that artifact's exact version equals the one its expectations were produced on, and skips loudly by name otherwise — an expectation produced on one build says nothing about another. See [`reference/goldens.md`](reference/goldens.md).
+The public golden set is generated per line and gates itself on the **exact** patch version, not the line. A case runs against an artifact only when that artifact's exact version equals the one its expectations were produced on, and skips loudly by name otherwise — an expectation produced on one build says nothing about another. See the core repository's golden-set documentation.
 
 This is also why the golden set shrinks as lines are added: a case the lines answer differently is refused by the generator rather than recorded twice. Version-dependent truth lives in the core repository, per line. **The SDK asserts a version-specific answer nowhere.**
 

@@ -559,7 +559,7 @@ func openLibrary(path string) (*Library, error) {
 	lib.Version = Version(C.GoString(C.chs_lib_version(&lib.lib)))
 	lib.Minor = minorOf(string(lib.Version))
 
-	// The ABI identity gate (docs/reference/c-abi.md §ABI identity). A DIFFERENT nonzero
+	// The ABI identity gate (the core repository's C ABI specification §ABI identity). A DIFFERENT nonzero
 	// revision is a positive statement that these declarations do not describe
 	// this artifact, so calling through them would be undefined — refuse, and
 	// say both numbers. Revision 0 means the artifact predates the probe and
@@ -702,11 +702,11 @@ type LoadedSchema struct {
 	// header's second clause. Distinct LoadedSchemas never contend.
 	mu sync.Mutex
 	// filters tracks every open LoadedFilter compiled from this handle, so
-	// Close can free them FIRST (docs/reference/c-abi.md §Filters, handle lifetime).
+	// Close can free them FIRST (the core repository's C ABI specification §Filters, handle lifetime).
 	// Guarded by mu.
 	filters map[*LoadedFilter]struct{}
 	// blocks tracks every open LoadedBlock parsed from this handle — the
-	// same non-owning rule, the same free-before-schema order (docs/reference/c-abi.md
+	// same non-owning rule, the same free-before-schema order (the core repository's C ABI specification
 	// §Blocks). Guarded by mu.
 	blocks map[*LoadedBlock]struct{}
 }
@@ -1107,7 +1107,7 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 	if out == nil {
 		unlock()
 		// Same degradation as Row: a NULL return is the ABI's "the loaded
-		// artifact does not export the function" (docs/reference/c-abi.md §Rows), and
+		// artifact does not export the function" (the core repository's C ABI specification §Rows), and
 		// that is a decline. chs_rows is mandatory on this loader, so today
 		// the branch is unreachable — the type still has to be the honest one.
 		return BatchResult{}, &UnsupportedError{Msg: "this artifact predates chs_rows (rebuild it)"}

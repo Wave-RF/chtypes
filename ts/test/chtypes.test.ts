@@ -321,7 +321,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
 
   describe('the process-state mutators are serialized against everything else', () => {
     // `chs_set_default_settings` REPLACES a process-global that `chs_row` /
-    // `chs_rows` / `chs_schema_compile` read BY REFERENCE, so docs/reference/c-abi.md
+    // `chs_rows` / `chs_schema_compile` read BY REFERENCE, so the core repository's C ABI specification
     // §Thread-safety requires it be serialized against every other call. Go
     // enforces that with an RWMutex and Python with an _RWLock, because both
     // have real threads that can be inside a foreign call. Node cannot: every
@@ -459,7 +459,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       // Direct proof rather than a claim: ask the dynamic loader whether the
       // artifacts' exported symbols reached the process-global scope. With
       // RTLD_LOCAL they must not have. RTLD_GLOBAL "will appear to work and then
-      // answer with the wrong version's semantics" (docs/reference/c-abi.md).
+      // answer with the wrong version's semantics" (the core repository's C ABI specification).
       const candidates =
         process.platform === 'darwin'
           ? ['/usr/lib/libSystem.B.dylib']
@@ -843,7 +843,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
         // occupies no field position. Measured on darwin-arm64/25.8: the CSV path
         // computes `m` as 8, matching live servers on every format. The
         // positional path used to compute MATERIALIZED from the type zero
-        // (`1`) — a wrapper bug fixed 2026-08-17; docs/reference/c-abi.md §Positional
+        // (`1`) — a wrapper bug fixed 2026-08-17; the core repository's C ABI specification §Positional
         // formats records the confirmed ground truth.
         const positional = schema.row(Format.CSV, utf8('7,"hey"'));
         expect(positional.outcome).toBe('accepted');

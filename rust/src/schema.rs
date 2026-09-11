@@ -256,7 +256,7 @@ impl Schema {
 
     /// [`Schema::rows`] with the revision-3 export and document-flag channels
     /// exposed: ONE `chs_rows` call, never a second, never re-parsing
-    /// (`docs/proposals/rows-export.md`; `docs/reference/c-abi.md` §Rows is normative).
+    /// (`docs/proposals/rows-export.md`; the core repository's C ABI specification §Rows is normative).
     ///
     /// `export` is `None` (no bytes; `doc_flags` still thins the document) or
     /// `Some(format)` for a [`Format`] this artifact can SERIALIZE — this
@@ -323,7 +323,7 @@ impl Schema {
     }
 
     /// Compile one boolean SQL expression over this schema's PHYSICAL columns
-    /// (`chs_filter_compile`; `docs/reference/c-abi.md` §Filters is the full contract) —
+    /// (`chs_filter_compile`; the core repository's C ABI specification §Filters is the full contract) —
     /// the same `TreeRewriter` + `ExpressionAnalyzer` pipeline the
     /// CONSTRAINT CHECK path runs, so comparison semantics are WHERE-side by
     /// construction: `x = 256` over `UInt8` promotes (false for every row),
@@ -360,7 +360,7 @@ impl Schema {
     /// MUST bound its cache (an LRU keyed on schema generation + expr +
     /// params-hash) and its compile rate per principal — the key is
     /// attacker-influencable, so an unbounded cache is a memory DoS and an
-    /// unmetered compile path is a CPU DoS (`docs/reference/c-abi.md` §Filters).
+    /// unmetered compile path is a CPU DoS (the core repository's C ABI specification §Filters).
     ///
     /// # Lifetime
     ///
@@ -425,7 +425,7 @@ impl Schema {
 
     /// Parse a body ONCE into a [`Block`] (`chs_block_parse`) — the parse
     /// half of [`Filter::rows`], exported so K filters can evaluate one
-    /// event with no re-parse ([`Filter::eval`]; `docs/reference/c-abi.md` §Blocks).
+    /// event with no re-parse ([`Filter::eval`]; the core repository's C ABI specification §Blocks).
     /// Same formats and settings contract as [`Schema::rows`] (`settings` is
     /// the PARSE-side map: format settings, clock keys; evaluation takes
     /// none). Volatile DEFAULTs resolve against THIS call's clock instant,
@@ -493,7 +493,7 @@ impl Schema {
 ///
 /// NOTHING may enforce read-side security on this surface until the
 /// WHERE-truth rig gates green (zero over-admit, zero over-hide); until then
-/// it is a shadow/replay surface (`docs/reference/c-abi.md` §Filters). In particular:
+/// it is a shadow/replay surface (the core repository's C ABI specification §Filters). In particular:
 /// [`crate::Verdict::Error`] and [`crate::Verdict::Decline`] are NOT
 /// answers, and an enforcing caller MUST fail closed on both.
 pub struct Filter<'s> {
@@ -690,7 +690,7 @@ pub(crate) fn settings_json<K: AsRef<str>, V: AsRef<str>>(settings: &[(K, V)]) -
 ///
 /// There is deliberately no lossy fallback. A result document holding a
 /// non-UTF-8 `String` value is not valid UTF-8, and the previous retry through
-/// `String::from_utf8_lossy` destroyed exactly the bytes `docs/reference/c-abi.md` calls
+/// `String::from_utf8_lossy` destroyed exactly the bytes the core repository's C ABI specification calls
 /// authoritative. `crate::doc` reads bytes, so the repair is unnecessary; a
 /// document it cannot read is [`Error::BadDocument`], never an approximation.
 fn parse_row_doc(bytes: &[u8]) -> Result<RowDoc> {

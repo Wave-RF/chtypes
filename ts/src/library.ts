@@ -44,7 +44,7 @@ export type CompileMode = (typeof CompileMode)[keyof typeof CompileMode];
 
 /**
  * Options for `Library#compileDdl` — the DECLARED settings profile a schema is
- * compiled under (docs/reference/c-abi.md §Compile-time vs per-call settings;
+ * compiled under (the core repository's C ABI specification §Compile-time vs per-call settings;
  * docs/reference/bindings.md "Compile under a declared settings profile").
  */
 export interface CompileOptions {
@@ -88,7 +88,7 @@ export class Library {
   /**
    * The chs_* ABI revision this ARTIFACT was built from, or 0 when it predates
    * `chs_abi_revision`. A `Library` that exists reports either `ABI_REVISION`
-   * or 0 — a different nonzero revision is refused at load (docs/reference/c-abi.md
+   * or 0 — a different nonzero revision is refused at load (the core repository's C ABI specification
    * §ABI identity).
    */
   readonly abiRevision: number;
@@ -187,7 +187,7 @@ export class Library {
    * particular tenant's table: a gate declared in the compile profile binds
    * where a real server binds it — once, at CREATE — and then outranks the
    * per-call map for that handle (measured on live 25.10.7.6 and 26.7.3.19;
-   * docs/reference/c-abi.md, "Server-level type gates"). This process-wide seed stays the
+   * the core repository's C ABI specification, "Server-level type gates"). This process-wide seed stays the
    * right channel only for gateway-uniform policy.
    *
    * @param settings - the seed. An unknown name refuses the WHOLE payload with

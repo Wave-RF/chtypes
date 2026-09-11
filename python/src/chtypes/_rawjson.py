@@ -1,7 +1,7 @@
 """Raw-preserving JSON, because the result documents carry values Python's own
 types cannot hold without changing them.
 
-Three of them, all paid for (docs/reference/c-abi.md "The row result document"):
+Three of them, all paid for (the core repository's C ABI specification "The row result document"):
 
 * ClickHouse integers go to 2**256. Decoding `18446744073709551615` into a
   float yields `18446744073709552000`, and an `Int256` yields

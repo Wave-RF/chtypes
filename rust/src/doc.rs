@@ -2,7 +2,7 @@
 //! `chs_rows` output.
 //!
 //! Why this is hand-written rather than `serde_json` with `RawValue` leaves —
-//! two facts, both from `docs/reference/c-abi.md`:
+//! two facts, both from the core repository's C ABI specification:
 //!
 //! 1. **A result document need not be valid UTF-8.** ClickHouse's
 //!    `serializeTextJSON` writes a `String` column's bytes through unescaped, so

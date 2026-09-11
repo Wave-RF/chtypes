@@ -107,7 +107,15 @@ here: python collected ${PARITY_N:-0} of at least $PARITY_MIN parity tests (test
     command -v pnpm >/dev/null 2>&1 || die "pnpm is not on PATH; the ts suite cannot run and must not be reported as passing"
     [ -d "$ROOT/ts/node_modules" ] || die "ts/node_modules is absent — run 'pnpm install --frozen-lockfile && pnpm build' in ts/ first"
     say "vitest run --reporter=verbose (ts/) — every skipped test is listed by name"
-    run "$ROOT/ts" env NO_COLOR=1 pnpm -s test --reporter=verbose
+    # vitest is invoked DIRECTLY, not through pnpm. The census below counts
+    # per-test lines out of the verbose reporter, and pnpm changes the child's
+    # environment in a way that makes vitest stop emitting them: measured on
+    # pnpm 12.4.1, `pnpm -s test`, `pnpm test` and `pnpm exec vitest` all yield
+    # ZERO census lines while ./node_modules/.bin/vitest yields 8, same vitest
+    # 5.0.0, same flag, same pipe. CI pins pnpm 11, where it happened to work —
+    # so this census was one Dependabot bump away from silently counting zero
+    # and failing a guard that had nothing wrong with it.
+    run "$ROOT/ts" env NO_COLOR=1 ./node_modules/.bin/vitest run --reporter=verbose
     FILES_LINE="$(grep -E '^\s*Test Files ' "$PLAIN" | tail -1 || true)"
     TESTS_LINE="$(grep -E '^\s*Tests ' "$PLAIN" | tail -1 || true)"
     SUMMARY="$(printf '%s / %s' "${FILES_LINE#"${FILES_LINE%%[![:space:]]*}"}" "${TESTS_LINE#"${TESTS_LINE%%[![:space:]]*}"}")"
@@ -122,7 +130,7 @@ here: ts ran ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/m
       grep -qF '✓ test/golden.test.ts >' "$PLAIN" || PROBLEMS+=("no golden case RAN with artifacts required")
       # A per-line skip is EXPECTED and not a problem: a case is only a golden
       # for the exact ClickHouse build it was generated on, so a registry holding
-      # an older patch skips that line by name (docs/reference/goldens.md). What must not
+      # an older patch skips that line by name (the core repository's golden-set documentation). What must not
       # happen is the set being skipped wholesale — that is the sentinel test,
       # and the rule above already requires at least one case to have run.
       ! grep -qF '↓ goldens > has at least one artifact' "$PLAIN" || PROBLEMS+=("the golden set was skipped wholesale with artifacts required")
