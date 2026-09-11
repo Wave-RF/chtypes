@@ -33,7 +33,7 @@ A binding can be conformant at three increasing levels. Claim the level you actu
 
 **Level 2 — surface conformance.** The binding exposes the names and semantics in `bindings.md`, including `Transformed` reporting and minor-line version resolution, and reproduces the worked examples in `bindings.md` byte for byte (modulo the platform caveats stated there).
 
-**Level 3 — semantic conformance.** The binding drives the JSONL oracle protocol (`tests/fuzz/README.md` plus the nine extensions in `tests/arbiter/PROTOCOL.md`) and is scored by the rigs against ground truth captured from real ClickHouse servers. This is the only level that means anything about correctness, because it is the only one where an outside process compares the answer to a real server's.
+**Level 3 — semantic conformance.** The binding drives the JSONL oracle protocol (documented with the conformance suites in the core repository) and is scored by the rigs against ground truth captured from real ClickHouse servers. This is the only level that means anything about correctness, because it is the only one where an outside process compares the answer to a real server's.
 
 ## What conformance is scored on
 
@@ -60,8 +60,8 @@ Every field, code, and example in these documents was read out of the source or 
 
 - Signatures and ownership: `include/chtypes.h`.
 - Result-document field shapes: raw `chs_row` / `chs_rows` output captured from the `darwin-arm64/25.8` artifact (ClickHouse `25.8.28.1-lts`) driven directly through the C ABI.
-- Worked examples: `chtypes-core/lib/build/chtypes-oracle --registry <registry> --version <v>` with JSONL on stdin, across all six versions then loaded (seven exist now; see `bindings.md` §Worked examples for the capture scope).
+- Worked examples: the core repository's oracle driver with JSONL on stdin, across all six versions then loaded (seven exist now; see `bindings.md` §Worked examples for the capture scope).
 - Symbol tables: `nm` on both the `darwin-arm64` and `linux-arm64` artifacts.
-- Manifest fields: real manifests under `~/.cache/chtypes/artifacts/<os>-<arch>/<minor>/`, cross-checked against the writer in `chtypes-core/lib/build.sh`.
+- Manifest fields: real manifests under `~/.cache/chtypes/artifacts/<os>-<arch>/<minor>/`, cross-checked against the writer in the core repository's build script.
 
 Where an observation is platform-sensitive — floats above all, because macOS's `long double` is 53-bit and its float parses diverge from a real server — the document says so and names the platform it came from.
