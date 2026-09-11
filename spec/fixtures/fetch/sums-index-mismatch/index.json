@@ -3,7 +3,7 @@
   {
    "arch": "arm64",
    "build": 0,
-   "bytes": 465,
+   "bytes": 461,
    "clickhouse_minor": "25.8",
    "clickhouse_version": "25.8.28.1-lts",
    "core_commit": "unknown",
@@ -16,7 +16,7 @@
   {
    "arch": "arm64",
    "build": 0,
-   "bytes": 466,
+   "bytes": 463,
    "clickhouse_minor": "26.7",
    "clickhouse_version": "26.7.3.19-stable",
    "core_commit": "unknown",
@@ -29,7 +29,7 @@
   {
    "arch": "amd64",
    "build": 0,
-   "bytes": 461,
+   "bytes": 458,
    "clickhouse_minor": "25.8",
    "clickhouse_version": "25.8.28.1-lts",
    "core_commit": "unknown",
@@ -42,7 +42,7 @@
   {
    "arch": "amd64",
    "build": 0,
-   "bytes": 462,
+   "bytes": 459,
    "clickhouse_minor": "26.7",
    "clickhouse_version": "26.7.3.19-stable",
    "core_commit": "unknown",
@@ -55,7 +55,7 @@
   {
    "arch": "arm64",
    "build": 0,
-   "bytes": 460,
+   "bytes": 457,
    "clickhouse_minor": "25.8",
    "clickhouse_version": "25.8.28.1-lts",
    "core_commit": "unknown",
@@ -68,7 +68,7 @@
   {
    "arch": "arm64",
    "build": 0,
-   "bytes": 463,
+   "bytes": 458,
    "clickhouse_minor": "26.7",
    "clickhouse_version": "26.7.3.19-stable",
    "core_commit": "unknown",

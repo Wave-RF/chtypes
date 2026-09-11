@@ -8,18 +8,18 @@ or let `dist/fetch.sh` do it, which verifies the chain for you.
 
 | ClickHouse | platform | build | asset | bytes | library |
 |---|---|---|---|---|---|
-| 25.8.28.1-lts | darwin-arm64 | 0 | `chtypes-25.8.28.1-lts-darwin-arm64.tar.gz` | 465 | `libchtypes.dylib` |
-| 25.8.28.1-lts | darwin-arm64 | 214 | `chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz` | 520 | `libchtypes.dylib` |
-| 26.7.3.19-stable | darwin-arm64 | 105 | `chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz` | 518 | `libchtypes.dylib` |
-| 26.7.3.19-stable | darwin-arm64 | 214 | `chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz` | 519 | `libchtypes.dylib` |
-| 25.8.28.1-lts | linux-amd64 | 0 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 461 | `libchtypes.so` |
-| 25.8.28.1-lts | linux-amd64 | 214 | `chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz` | 517 | `libchtypes.so` |
-| 26.7.3.19-stable | linux-amd64 | 105 | `chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz` | 514 | `libchtypes.so` |
-| 26.7.3.19-stable | linux-amd64 | 214 | `chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz` | 514 | `libchtypes.so` |
-| 25.8.28.1-lts | linux-arm64 | 0 | `chtypes-25.8.28.1-lts-linux-arm64.tar.gz` | 460 | `libchtypes.so` |
-| 25.8.28.1-lts | linux-arm64 | 214 | `chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz` | 517 | `libchtypes.so` |
-| 26.7.3.19-stable | linux-arm64 | 105 | `chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz` | 514 | `libchtypes.so` |
-| 26.7.3.19-stable | linux-arm64 | 214 | `chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz` | 515 | `libchtypes.so` |
+| 25.8.28.1-lts | darwin-arm64 | 0 | `chtypes-25.8.28.1-lts-darwin-arm64.tar.gz` | 461 | `libchtypes.dylib` |
+| 25.8.28.1-lts | darwin-arm64 | 214 | `chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz` | 516 | `libchtypes.dylib` |
+| 26.7.3.19-stable | darwin-arm64 | 105 | `chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz` | 517 | `libchtypes.dylib` |
+| 26.7.3.19-stable | darwin-arm64 | 214 | `chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz` | 518 | `libchtypes.dylib` |
+| 25.8.28.1-lts | linux-amd64 | 0 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 458 | `libchtypes.so` |
+| 25.8.28.1-lts | linux-amd64 | 214 | `chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz` | 513 | `libchtypes.so` |
+| 26.7.3.19-stable | linux-amd64 | 105 | `chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz` | 510 | `libchtypes.so` |
+| 26.7.3.19-stable | linux-amd64 | 214 | `chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz` | 511 | `libchtypes.so` |
+| 25.8.28.1-lts | linux-arm64 | 0 | `chtypes-25.8.28.1-lts-linux-arm64.tar.gz` | 457 | `libchtypes.so` |
+| 25.8.28.1-lts | linux-arm64 | 214 | `chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz` | 513 | `libchtypes.so` |
+| 26.7.3.19-stable | linux-arm64 | 105 | `chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz` | 510 | `libchtypes.so` |
+| 26.7.3.19-stable | linux-arm64 | 214 | `chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz` | 512 | `libchtypes.so` |
 
 `build` is the chtypes wrapper build (core's commit count). Rows of the
 same ClickHouse version and platform differ only in the wrapper linked

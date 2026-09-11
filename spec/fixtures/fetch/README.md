@@ -81,9 +81,9 @@ superseded one passes every check in §3 and is still wrong.
 
 | ClickHouse | platform | file | bytes | library | library_sha256 |
 |---|---|---|---|---|---|
-| 25.8.28.1-lts | darwin-arm64 | `chtypes-25.8.28.1-lts-darwin-arm64.tar.gz` | 465 | `libchtypes.dylib` | `d6ea1048c42b91f4…` |
-| 26.7.3.19-stable | darwin-arm64 | `chtypes-26.7.3.19-stable-darwin-arm64.tar.gz` | 466 | `libchtypes.dylib` | `600af8fe8d14ed19…` |
-| 25.8.28.1-lts | linux-amd64 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 461 | `libchtypes.so` | `bacc23d5e886c7b2…` |
-| 26.7.3.19-stable | linux-amd64 | `chtypes-26.7.3.19-stable-linux-amd64.tar.gz` | 462 | `libchtypes.so` | `e52e911f681ebb6c…` |
-| 25.8.28.1-lts | linux-arm64 | `chtypes-25.8.28.1-lts-linux-arm64.tar.gz` | 460 | `libchtypes.so` | `829d44597c8252ff…` |
-| 26.7.3.19-stable | linux-arm64 | `chtypes-26.7.3.19-stable-linux-arm64.tar.gz` | 463 | `libchtypes.so` | `bb9f9e21e0a01f42…` |
+| 25.8.28.1-lts | darwin-arm64 | `chtypes-25.8.28.1-lts-darwin-arm64.tar.gz` | 461 | `libchtypes.dylib` | `d6ea1048c42b91f4…` |
+| 26.7.3.19-stable | darwin-arm64 | `chtypes-26.7.3.19-stable-darwin-arm64.tar.gz` | 463 | `libchtypes.dylib` | `600af8fe8d14ed19…` |
+| 25.8.28.1-lts | linux-amd64 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 458 | `libchtypes.so` | `bacc23d5e886c7b2…` |
+| 26.7.3.19-stable | linux-amd64 | `chtypes-26.7.3.19-stable-linux-amd64.tar.gz` | 459 | `libchtypes.so` | `e52e911f681ebb6c…` |
+| 25.8.28.1-lts | linux-arm64 | `chtypes-25.8.28.1-lts-linux-arm64.tar.gz` | 457 | `libchtypes.so` | `829d44597c8252ff…` |
+| 26.7.3.19-stable | linux-arm64 | `chtypes-26.7.3.19-stable-linux-arm64.tar.gz` | 458 | `libchtypes.so` | `bb9f9e21e0a01f42…` |
