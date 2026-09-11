@@ -1,4 +1,4 @@
-//! `docs/fetch.md` §3 steps 0–2: the release's `SHA256SUMS` (verified),
+//! `docs/guides/fetch.md` §3 steps 0–2: the release's `SHA256SUMS` (verified),
 //! `index.json`, and the choice of one asset for a line and platform.
 
 use std::collections::BTreeMap;
@@ -130,7 +130,7 @@ struct Index {
 }
 
 /// What a request asks for: a minor line, and optionally an exact patch that
-/// is then a hard requirement (`docs/fetch.md` §2).
+/// is then a hard requirement (`docs/guides/fetch.md` §2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Request {
     pub(crate) spelling: String,
@@ -194,7 +194,7 @@ impl Request {
     }
 }
 
-/// A release, read and checked through `docs/fetch.md` §3 steps 0–1: the
+/// A release, read and checked through `docs/guides/fetch.md` §3 steps 0–1: the
 /// listing is only ever used after `SHA256SUMS` has verified (or the policy
 /// said, loudly, to skip that).
 pub(crate) struct Release {
@@ -363,7 +363,7 @@ impl Release {
         }
     }
 
-    /// The artifacts' licence, as the listing names it (`Elastic-2.0`).
+    /// The artifacts' license, as the listing names it (`Elastic-2.0`).
     pub(crate) fn license(&self) -> (&str, &str) {
         (&self.index.license, &self.index.license_url)
     }
@@ -393,7 +393,7 @@ impl Release {
         &self.index.artifacts
     }
 
-    /// The one row for a request on a platform (`docs/fetch.md` §2), complete
+    /// The one row for a request on a platform (`docs/guides/fetch.md` §2), complete
     /// and agreeing with `SHA256SUMS` (§3 step 2).
     ///
     /// # Errors

@@ -4,8 +4,8 @@
 
 # Go
 **/*.test
-playground/go/playground
-playground/go/ingest-demo/ingest-demo
+examples/go/playground
+examples/go/ingest-demo/ingest-demo
 
 # Python
 __pycache__/
@@ -27,3 +27,7 @@ target/
 .DS_Store
 *.log
 scratch/
+
+# Lint tooling — pinned binaries fetched by scripts/lint-*.sh (misspell,
+# shellcheck, actionlint), never checked in.
+.bin/

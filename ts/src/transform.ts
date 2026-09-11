@@ -57,7 +57,7 @@ export const Reason = {
   Reformat: 'reformat',
   DefaultFilled: 'default_filled',
   ZeroFilled: 'zero_filled',
-  DefaultMaterialised: 'default_materialised',
+  DefaultMaterialized: 'default_materialized',
   TtlExpired: 'ttl_expired',
   TtlColumnExpired: 'ttl_column_expired',
 } as const;
@@ -75,14 +75,14 @@ const NON_LOSSY = new Set<string>([
   Reason.Reformat,
   Reason.DefaultFilled,
   Reason.ZeroFilled,
-  Reason.DefaultMaterialised,
+  Reason.DefaultMaterialized,
 ]);
 
 /**
  * Whether a transform reason means information was LOST (a warning to raise to
  * the tenant) rather than merely re-spelled or filled in. False for exactly
  * four reasons — `reformat`, `default_filled`, `zero_filled`,
- * `default_materialised` — true for everything else, unknown strings included:
+ * `default_materialized` — true for everything else, unknown strings included:
  * a reason nobody has audited must degrade to a warning, never to silence.
  * Mirrors `Transform#lossy`. Never throws.
  */
@@ -142,7 +142,7 @@ export function classify(c: ColumnDoc): Transform[] {
     case 'default':
       return [transform(c.name, EMPTY, stored, Reason.DefaultFilled)];
     case 'default_substituted':
-      return [transform(c.name, EMPTY, stored, Reason.DefaultMaterialised)];
+      return [transform(c.name, EMPTY, stored, Reason.DefaultMaterialized)];
     case 'absent':
       return [transform(c.name, EMPTY, stored, Reason.ZeroFilled)];
     default:
@@ -237,7 +237,7 @@ function membersOf(v: Json): Map<string, Json> {
 }
 
 /**
- * Equal after canonicalisation, where a number and its decimal string spelling
+ * Equal after canonicalization, where a number and its decimal string spelling
  * are the same value (5 vs "5") but a float that has thrown away 60 digits of an
  * Int256 is not. Mirrors the arbiter's `_same_value`.
  */

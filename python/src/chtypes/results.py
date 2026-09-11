@@ -1,7 +1,7 @@
 """The result surface: enums, the reason vocabulary, and the typed results.
 
 Field for field the same concepts as the Go reference (`go/chtypes`), spelled
-the Python way (spec/bindings.md "The object model": follow the language idiom,
+the Python way (docs/reference/bindings.md "The object model": follow the language idiom,
 never let the meaning drift).
 """
 
@@ -62,10 +62,10 @@ class Format(IntEnum):
     # as their servers do.
     ROW_BINARY_WITH_NAMES_AND_TYPES_AND_DEFAULTS = 7
     # Column-oriented, self-describing, and what every ClickHouse client
-    # library sends on INSERT. Modelled at the revision `INSERT ... FORMAT
+    # library sends on INSERT. Modeled at the revision `INSERT ... FORMAT
     # Native` uses (0), so there is no BlockInfo prefix and no per-column
     # serialization-kind byte; blocks taken off a live TCP connection carry
-    # both and are a different contract (spec/c-abi.md §Native). Requires an
+    # both and are a different contract (docs/reference/c-abi.md §Native). Requires an
     # artifact built at or after the Native exposure — probe it, do not assume
     # it from the SDK version.
     NATIVE = 8
@@ -86,7 +86,7 @@ class Format(IntEnum):
 # `export=None`; the constant exists for callers that carry the wire value.
 EXPORT_NONE: Final[int] = -1
 
-# The CHS_DOC_* bitmask (spec/c-abi.md §Document flags): which document GROUPS
+# The CHS_DOC_* bitmask (docs/reference/c-abi.md §Document flags): which document GROUPS
 # the per-row documents carry. The verdict channel (batch and per-row
 # outcome/code/err, rows_read, rows_skipped, unsupported_settings,
 # engine_rows, storage_transforms) is ALWAYS emitted and is not a flag.
@@ -130,7 +130,7 @@ class Verdict(StrEnum):
     load-bearing: a caller enforcing visibility MUST fail closed (hide the
     row / fail the request) on ERROR and on DECLINE — collapsing either into
     "false the answer" inverts fail-closed into fail-open under NOT, the
-    measured leak class (spec/bindings.md §Revision 3). No read-side
+    measured leak class (docs/reference/bindings.md §Revision 3). No read-side
     enforcement may be built on this surface until the WHERE-truth rig gates
     green; until then it is shadow/replay only.
     """
@@ -152,7 +152,7 @@ class Verdict(StrEnum):
 
     @classmethod
     def of(cls, char: str) -> Verdict:
-        """Map a verdict character; anything unrecognised degrades to DECLINE
+        """Map a verdict character; anything unrecognized degrades to DECLINE
         (fail closed), never to FALSE (which would be an invented answer)."""
         try:
             return cls(char)
@@ -177,7 +177,7 @@ class FilterOutcome(StrEnum):
     # fault. `verdicts` is empty: a malformed body yields no partial answers.
     REJECTED = "rejected"
     # A call-level decline (-2), and the arm every unknown outcome spelling
-    # degrades to — never REJECTED (spec/bindings.md §RowResult).
+    # degrades to — never REJECTED (docs/reference/bindings.md §RowResult).
     UNSUPPORTED = "unsupported"
 
     @classmethod
@@ -239,14 +239,14 @@ class Outcome(StrEnum):
 
     @classmethod
     def of(cls, text: str) -> Outcome:
-        """Map a document's `outcome` string; anything unrecognised degrades
+        """Map a document's `outcome` string; anything unrecognized degrades
         to UNSUPPORTED.
 
         A future artifact's new verdict is by definition an answer this
         binding cannot interpret: UNSUPPORTED is the arm that is never scored
         as agreement and sends the caller to the server, while defaulting to
         REJECTED would manufacture an over-reject — the zero-budget failure —
-        out of pure vocabulary drift (spec/bindings.md §RowResult, rule added
+        out of pure vocabulary drift (docs/reference/bindings.md §RowResult, rule added
         2026-08-26; every SDK previously defaulted to REJECTED).
         """
         try:
@@ -267,7 +267,7 @@ class DefaultKind(StrEnum):
     @classmethod
     def of(cls, text: str) -> DefaultKind:
         """Map a document's `default_kind` string, defaulting to NONE for
-        anything unrecognised (a future artifact must degrade, not raise)."""
+        anything unrecognized (a future artifact must degrade, not raise)."""
         try:
             return cls(text.upper() if text else "")
         except ValueError:
@@ -302,7 +302,7 @@ class Reason:
     REFORMAT: Final = "reformat"
     DEFAULT_FILLED: Final = "default_filled"
     ZERO_FILLED: Final = "zero_filled"
-    DEFAULT_MATERIALISED: Final = "default_materialised"
+    DEFAULT_MATERIALIZED: Final = "default_materialized"
     TTL_EXPIRED: Final = "ttl_expired"
     TTL_COLUMN_EXPIRED: Final = "ttl_column_expired"
 
@@ -315,16 +315,16 @@ LOSSLESS_REASONS: Final[frozenset[str]] = frozenset(
         Reason.REFORMAT,
         Reason.DEFAULT_FILLED,
         Reason.ZERO_FILLED,
-        Reason.DEFAULT_MATERIALISED,
+        Reason.DEFAULT_MATERIALIZED,
     }
 )
 
 
 @dataclass(frozen=True, slots=True)
 class Column:
-    """One column of a compiled schema, as ClickHouse canonicalised it.
+    """One column of a compiled schema, as ClickHouse canonicalized it.
 
-    Canonicalisation is schema-aware: `x Int64 DEFAULT NULL` compiles to
+    Canonicalization is schema-aware: `x Int64 DEFAULT NULL` compiles to
     `Nullable(Int64)`. Pass `type` through verbatim — the library's spelling
     (`Decimal(18, 4)`, a space after each comma) is the canonical one.
     """
@@ -500,7 +500,7 @@ class BatchResult:
     # transcription of ClickHouse's own output writer for the requested
     # format, copied out of the C buffer (which is freed before the call
     # returns — no ownership crosses the boundary). Three states, the ABI's
-    # own (spec/c-abi.md §Rows):
+    # own (docs/reference/c-abi.md §Rows):
     #
     #   None   no export was requested, the export was DECLINED
     #          (`export_declined` then names the reason), or a call-level

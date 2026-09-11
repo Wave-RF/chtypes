@@ -2,7 +2,7 @@
 //! `chs_rows` output.
 //!
 //! Why this is hand-written rather than `serde_json` with `RawValue` leaves —
-//! two facts, both from `spec/c-abi.md`:
+//! two facts, both from `docs/reference/c-abi.md`:
 //!
 //! 1. **A result document need not be valid UTF-8.** ClickHouse's
 //!    `serializeTextJSON` writes a `String` column's bytes through unescaped, so
@@ -18,7 +18,7 @@
 //!    `Some("null")`, exactly as the reference SDK's `json.RawMessage` does.
 //!
 //! Everything else the reader does is what serde did: every field is optional
-//! with a default, unknown fields are ignored (`spec/bindings.md`: "unknown
+//! with a default, unknown fields are ignored (`docs/reference/bindings.md`: "unknown
 //! request fields are ignored"), and no number is ever routed through a float.
 
 use crate::error::{Error, Result};
@@ -162,7 +162,7 @@ impl<'a> Rdr<'a> {
     // ------------------------------------------------------------ containers
 
     /// Walk an object's members, handing each key to `f`. `f` reads that
-    /// member's value; anything it does not recognise is skipped.
+    /// member's value; anything it does not recognize is skipped.
     fn object<F>(&mut self, what: &'static str, mut f: F) -> Result<()>
     where
         F: FnMut(&mut Rdr<'a>, &[u8]) -> Result<bool>,

@@ -95,7 +95,7 @@ pub mod reason {
     /// caller must send as an explicit column. A separate reason from
     /// `default_filled` because the claim is different: the tenant is being
     /// shown a value the gateway invented, not one the server chose.
-    pub const DEFAULT_MATERIALISED: &str = "default_materialised";
+    pub const DEFAULT_MATERIALIZED: &str = "default_materialized";
     /// The whole row is past the table TTL: **not stored**.
     pub const TTL_EXPIRED: &str = "ttl_expired";
     /// The value is past a column TTL and was reset to the column's DEFAULT.
@@ -138,7 +138,7 @@ pub(crate) fn classify(c: &ColDoc) -> Vec<Transform> {
     // stored for a field they never sent.
     let filled = match c.src.as_str() {
         "default" => Some(reason::DEFAULT_FILLED),
-        "default_substituted" => Some(reason::DEFAULT_MATERIALISED),
+        "default_substituted" => Some(reason::DEFAULT_MATERIALIZED),
         "absent" => Some(reason::ZERO_FILLED),
         _ => None,
     };
@@ -227,7 +227,7 @@ fn one(c: &ColDoc, stored: RawText, reason: &str) -> Transform {
 
 // ------------------------------------------------------ supplied vs stored
 
-/// Equal after canonicalisation, where a number and its decimal string spelling
+/// Equal after canonicalization, where a number and its decimal string spelling
 /// are the same value (`5` vs `"5"`) but a float that has thrown away 60 digits
 /// of an `Int256` is not.
 fn same_value(a: &Json, b: &Json) -> bool {
@@ -784,7 +784,7 @@ mod tests {
                 ""
             ))[0]
                 .reason,
-            reason::DEFAULT_MATERIALISED
+            reason::DEFAULT_MATERIALIZED
         );
         assert_eq!(
             classify(&col("UInt8", "absent", "", "0", "", ""))[0].reason,
@@ -792,7 +792,7 @@ mod tests {
         );
         for r in [
             reason::DEFAULT_FILLED,
-            reason::DEFAULT_MATERIALISED,
+            reason::DEFAULT_MATERIALIZED,
             reason::ZERO_FILLED,
         ] {
             let t = Transform {

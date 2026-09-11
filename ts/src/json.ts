@@ -8,7 +8,7 @@
  *    bytes and passes everything else through). Decoding that document into a JS
  *    string replaces every invalid byte with U+FFFD, which then reads downstream
  *    as a silent transformation that never happened — an *invented* answer, the
- *    failure mode this product exists to prevent (spec/c-abi.md §Per-column
+ *    failure mode this product exists to prevent (docs/reference/c-abi.md §Per-column
  *    fields: "`stored` and `ref` MUST be handled as raw bytes / raw JSON"; the
  *    reference implementation keeps `json.RawMessage`). So the document is parsed
  *    from a `Buffer`, and every value remembers the exact slice it was cut from.
@@ -21,7 +21,7 @@
  *
  * 3. **Duplicate keys and escape spellings survive.** ClickHouse can store a
  *    `Map` with a repeated key (`{"a":1,"a":2}`), and it writes the escape
- *    `\\u000B` where a JS re-serialisation writes `\\u000b`. `JSON.parse` collapses
+ *    `\\u000B` where a JS re-serialization writes `\\u000b`. `JSON.parse` collapses
  *    the first and loses the second, and either reports bytes the table does not
  *    hold.
  *    Object members are therefore kept as an ordered key/value list, and nothing
@@ -171,7 +171,7 @@ class Parser {
    * A JSON number, strictly: no leading `+`, no bare `.5`, no `1.`, no leading
    * zeros. The strictness is load-bearing rather than pedantic — `parseJsonValue`
    * decides with this grammar whether a supplied CSV/TSV field *is* a JSON
-   * value, and a lenient reading invents transformations (spec/bindings.md
+   * value, and a lenient reading invents transformations (docs/reference/bindings.md
    * §detectors).
    */
   private number(): Json {
@@ -383,7 +383,7 @@ export function parseDocument(bytes: Buffer): Json {
 
 /**
  * Is this supplied text **one JSON value**? A spec rule rather than a language
- * default (spec/bindings.md §detectors, measured 2026-08-17): the text is a JSON
+ * default (docs/reference/bindings.md §detectors, measured 2026-08-17): the text is a JSON
  * value only if a strict parse consumes **all** of it, with whitespace being
  * exactly JSON's four (space, tab, LF, CR).
  *
@@ -477,7 +477,7 @@ export function repairBareDenormals(text: Buffer): Buffer {
 //
 // Every field of a result document is optional: a rejected row's document omits
 // `unknown_fields`, `unsupported_settings` and `computed` entirely and carries
-// `"cols":[]` (spec/c-abi.md §Top-level fields). A binding must therefore treat
+// `"cols":[]` (docs/reference/c-abi.md §Top-level fields). A binding must therefore treat
 // each field as optional-with-a-default rather than requiring it.
 
 /**

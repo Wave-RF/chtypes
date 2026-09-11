@@ -10,7 +10,7 @@
 //!   (compile-time) and per-call settings
 //! * columns            -> [`reconstruct_ddl`] -> [`crate::Library::compile`]
 //!
-//! The connect-time pattern, in full (`spec/bindings.md` §Discovery):
+//! The connect-time pattern, in full (`docs/reference/bindings.md` §Discovery):
 //!
 //! ```no_run
 //! use chtypes::{Format, Registry};
@@ -41,7 +41,7 @@
 //! ```
 //!
 //! The queries return exactly what the server believes, spelled the way the
-//! server spells it, which is what the settings gate (`spec/c-abi.md`,
+//! server spells it, which is what the settings gate (`docs/reference/c-abi.md`,
 //! Settings rule 2) validates against.
 
 use std::collections::BTreeMap;
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn the_query_texts_are_the_specs_verbatim() {
-        // spec/bindings.md §Discovery: "each SDK carries it verbatim, FORMAT
+        // docs/reference/bindings.md §Discovery: "each SDK carries it verbatim, FORMAT
         // JSONEachRow included". Byte-identical to the reference kit.
         assert_eq!(
             QUERY_SERVER_VERSION,
@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn parse_changed_settings_duplicates_are_last_write_wins() {
-        // The spec rule (spec/bindings.md §Discovery, 2026-08-26): a
+        // The spec rule (docs/reference/bindings.md §Discovery, 2026-08-26): a
         // duplicated name resolves to the LATER row, in every SDK, so one
         // server answer can never discover two different profiles.
         let body = b"{\"name\":\"flatten_nested\",\"value\":\"1\"}\n\

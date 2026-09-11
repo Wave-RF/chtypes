@@ -23,7 +23,7 @@
 #
 #   0. SHA256SUMS.sig  an ed25519 signature over the exact bytes of SHA256SUMS,
 #                      verified under a trusted key BEFORE anything else is read
-#                      (docs/fetch.md §4): an unsigned or mis-signed release is
+#                      (docs/guides/fetch.md §4): an unsigned or mis-signed release is
 #                      CHTYPES_ARTIFACT_UNTRUSTED, never downloaded around
 #   1. index.json   names the asset and records its sha256
 #   2. SHA256SUMS   — now known authentic — records the same sha256; the two must agree
@@ -31,7 +31,7 @@
 #   4. manifest.json inside it names the library and its sha256; the installed
 #      library is re-hashed after the move, in place
 #
-# Exit codes (docs/fetch.md §6), and the §7 code every failure message names:
+# Exit codes (docs/guides/fetch.md §6), and the §7 code every failure message names:
 #   0 ok · 1 verification failed (CHTYPES_ARTIFACT_UNTRUSTED, _CORRUPT) · 2 usage ·
 #   3 source unreachable (CHTYPES_SOURCE_UNREACHABLE) · 4 not published for this
 #   platform/line (CHTYPES_ARTIFACT_UNPUBLISHED).
@@ -58,7 +58,7 @@
 #   XDG_CACHE_HOME         cache root (default ~/.cache)
 #   CHTYPES_TRUSTED_KEYS   hex ed25519 public key(s), comma-separated. REPLACES the
 #                          embedded release key — for a mirror signed by someone
-#                          else, or spec/fixtures/fetch's test key
+#                          else, or tests/fixtures/fetch's test key
 #   CHTYPES_ALLOW_UNSIGNED 1 skips step 0 with one loud warning naming the source.
 #                          Never the default; never silent
 #   CHTYPES_DOWNLOAD_TOKEN sent as a bearer token to the artifacts host (optional)
@@ -148,7 +148,7 @@ mkdir -p "$DEST"
 # resolve-version.py is the single place that knows that 25.8, 25.8.28.1,
 # v25.8.28.1-lts and a Docker digest are three views of ONE record (its
 # docstring records the bug that cost a whole scoring column). Use it when it is
-# available; when it is not — bare runner, no uv — fall back to normalising the
+# available; when it is not — bare runner, no uv — fall back to normalizing the
 # spelling here and let the release's index.json be the authority on what exists.
 WANT_LINE=""; WANT_EXACT=""
 # Did the CALLER name a patch, or a line? It matters, and resolve-version.py
@@ -168,7 +168,7 @@ if [ "$ALL" = 1 ]; then
 elif command -v uv >/dev/null 2>&1 && [ -f "${CHTYPES_CORE_DIR:-$ROOT/../core}/ci/resolve-version.py" ]; then
   # A developer with the core repository beside this one gets its full
   # version resolver (Docker digests, moving tags); a consumer without it gets
-  # the local normalisation below, and index.json is the authority either way.
+  # the local normalization below, and index.json is the authority either way.
   RESOLVED="$(uv run --no-project python "${CHTYPES_CORE_DIR:-$ROOT/../core}/ci/resolve-version.py" "$SPELLING" 2>/dev/null || true)"
   if [ -n "$RESOLVED" ]; then
     IFS='|' read -r WANT_LINE WANT_EXACT <<EOF
@@ -266,7 +266,7 @@ else say "ClickHouse $SPELLING -> line $WANT_LINE${WANT_EXACT:+ (exact $WANT_EXA
 say "source $SOURCE_DESC"
 
 # --------------------------------------------------------- step 0: the signature
-# docs/fetch.md §3 step 0 and §4. SHA256SUMS is fetched first and NOTHING — not
+# docs/guides/fetch.md §3 step 0 and §4. SHA256SUMS is fetched first and NOTHING — not
 # index.json — is read until its ed25519 signature verifies under a trusted
 # key: the embedded release key, or exactly the keys CHTYPES_TRUSTED_KEYS
 # names. The verifier is RFC 8032 in stdlib Python, because this script stands
@@ -279,7 +279,7 @@ import base64, hashlib, sys
 sums_path, sig_path, keys, keysrc = sys.argv[1:]
 def refuse(why): print(why); sys.exit(1)
 # ---- ed25519 verification, RFC 8032 over Python integers (the reference
-# vector in docs/fetch.md §4 and RFC 8032's test 1 are checked at every run).
+# vector in docs/guides/fetch.md §4 and RFC 8032's test 1 are checked at every run).
 p = 2**255 - 19
 q = 2**252 + 27742317777372353535851937790883648493
 d = (-121665 * pow(121666, p - 2, p)) % p
@@ -383,7 +383,7 @@ fetch_release_file() { # fetch_release_file <name>: a release-level file the sou
 # it never converts a refusal into an install.
 # Only a real HTTP source can be mid-publish. A file:// fixture or a directory
 # is whatever it is, so it refuses on the first look, exactly as it always has —
-# which is also why the spec/fixtures/fetch suites stay instant.
+# which is also why the tests/fixtures/fetch suites stay instant.
 METADATA_ATTEMPTS="${CHTYPES_METADATA_ATTEMPTS:-3}"
 METADATA_RETRY_DELAY="${CHTYPES_METADATA_RETRY_DELAY:-4}"
 case "$BASE_URL" in
@@ -467,7 +467,7 @@ while :; do
 done
 
 # --------------------------------------------------------------- pick the asset
-# The listing names the artifacts' licence (Elastic License 2.0); say so once,
+# The listing names the artifacts' license (Elastic License 2.0); say so once,
 # before a byte of library moves — the SDK is Apache 2.0, the artifact is not.
 LIC="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("license","") + " " + d.get("license_url",""))' "$WORK/index.json" 2>/dev/null || true)"
 [ -n "${LIC% }" ] && echo "fetch.sh: artifacts are licensed under ${LIC% } — LICENSE and NOTICE ship beside them" >&2

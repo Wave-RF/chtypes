@@ -1,6 +1,6 @@
 package chtypes
 
-// fetch_source.go — where artifacts come from (docs/fetch.md §2).
+// fetch_source.go — where artifacts come from (docs/guides/fetch.md §2).
 //
 // CHTYPES_ARTIFACTS_URL (default https://artifacts.wavehouse.dev) plus a
 // release tag (default the rolling `artifacts`) gives <url>/<tag>/; an
@@ -113,7 +113,7 @@ func (s *source) open(ctx context.Context, name string) (io.ReadCloser, error) {
 		if err != nil {
 			// Retried on transient transport failures, as fetch.sh's
 			// `curl --retry 3` is — which does not retry a refused
-			// connection or a cancelled context.
+			// connection or a canceled context.
 			if errors.Is(err, syscall.ECONNREFUSED) || ctx.Err() != nil {
 				return nil, err
 			}

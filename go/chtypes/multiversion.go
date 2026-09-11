@@ -118,9 +118,9 @@ static const char * chs_lib_open(const char *path, chs_lib *out) {
     out->col_default_kind = (fn_col_str)   dlsym(h, "chs_schema_column_default_kind");
     out->col_default_is_literal = (fn_col_int) dlsym(h, "chs_schema_column_default_is_literal");
     // Optional: an artifact built before the ABI-revision probe reports 0,
-    // which spec/artifact.md defines as "unknown", not "incompatible".
+    // which docs/reference/artifact.md defines as "unknown", not "incompatible".
     out->abi_revision = (fn_abi_rev) dlsym(h, "chs_abi_revision");
-    // Optional: the introspection trio (spec/bindings.md §Introspection).
+    // Optional: the introspection trio (docs/reference/bindings.md §Introspection).
     // Absence degrades to unsupported at call time, never a load failure.
     out->registered_families = (fn_owned_str0) dlsym(h, "chs_registered_families");
     out->function_flags      = (fn_owned_str0) dlsym(h, "chs_function_flags");
@@ -267,7 +267,7 @@ import (
 //	 handles; a single handle must not be used from two threads at once."
 //
 // This package enforces exactly that, at two levels. It used to hold ONE mutex
-// per Library across every call, which serialised unrelated schemas against
+// per Library across every call, which serialized unrelated schemas against
 // each other and was strictly stronger than the ABI promises.
 //
 // HANDLE LEVEL — LoadedSchema.mu, exclusive. One handle, one thread at a time,
@@ -323,7 +323,7 @@ import (
 // linked path it IS reachable, and chtypes.go guards it (see defaultSettingsMu).
 // (The read-only introspection trio — chs_registered_families,
 // chs_function_flags, chs_reference_type — joined the table 2026-08-26 for
-// SDK parity, spec/bindings.md §Introspection. All three are READERS and take
+// SDK parity, docs/reference/bindings.md §Introspection. All three are READERS and take
 // the shared side like every other call.)
 //
 // WHAT IS PROVEN, AND HOW FAR. Both chs_row and chs_rows reach ClickHouse's
@@ -352,7 +352,7 @@ import (
 // chs_clickhouse_version — nothing is inferred from the file path. Each
 // loaded version costs roughly 120 MB resident. Safe for concurrent use;
 // there is deliberately no close/shutdown — a Library is never dlclose'd, so
-// none is owed (spec/bindings.md §Teardown), and it structurally cannot call
+// none is owed (docs/reference/bindings.md §Teardown), and it structurally cannot call
 // chs_set_default_settings.
 type Library struct {
 	Version Version // the exact patch, e.g. "25.8.28.1-lts"
@@ -380,7 +380,7 @@ var (
 // Registry holds one Library per ClickHouse version and dispatches by
 // version — the multi-version product path. Safe for concurrent use.
 //
-// Lookup follows the docs/fetch.md §1 search path: the directory given to
+// Lookup follows the docs/guides/fetch.md §1 search path: the directory given to
 // NewRegistry (loaded eagerly, as it always was), then $CHTYPES_REGISTRY,
 // the per-user cache and the system locations, each consulted lazily by
 // For for a line the loaded set lacks. With AutoFetch (WithAutoFetch, or
@@ -499,7 +499,7 @@ func readArtifactDir(sub string) (m struct {
 
 // Load dlopens one library and registers it under its own reported version.
 // Loading the same path twice — into this Registry or another one — reuses the
-// Library that was already initialised for it.
+// Library that was already initialized for it.
 func (r *Registry) Load(path string) error {
 	lib, err := openLibrary(path)
 	if err != nil {
@@ -522,7 +522,7 @@ func (r *Registry) Load(path string) error {
 // and re-sets DateLUT's default timezone, unconditionally, and the row and
 // compile paths read the refuse-list BY REFERENCE. So a second chs_init for a
 // path already in use would reallocate a vector out from under live readers.
-// Initialising once removes that hazard at the source, which is better than
+// Initializing once removes that hazard at the source, which is better than
 // putting a process-wide lock on every call to tolerate it.
 //
 // This is also what makes Library.mu's write side trivially safe: chs_init runs
@@ -559,7 +559,7 @@ func openLibrary(path string) (*Library, error) {
 	lib.Version = Version(C.GoString(C.chs_lib_version(&lib.lib)))
 	lib.Minor = minorOf(string(lib.Version))
 
-	// The ABI identity gate (spec/c-abi.md §ABI identity). A DIFFERENT nonzero
+	// The ABI identity gate (docs/reference/c-abi.md §ABI identity). A DIFFERENT nonzero
 	// revision is a positive statement that these declarations do not describe
 	// this artifact, so calling through them would be undefined — refuse, and
 	// say both numbers. Revision 0 means the artifact predates the probe and
@@ -606,6 +606,34 @@ func (r *Registry) Versions() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.versionsLocked()
+}
+
+// Libraries lists the libraries this registry has actually LOADED, one per
+// line, in numeric release order — the same order Versions uses, because
+// docs/reference/bindings.md §Version selection rule 2 governs "every ordered surface a
+// binding exposes" and two of them sorting differently is the bug that rule was
+// written after.
+//
+// It never loads anything: a lazily-discovered line that no For call has opened
+// yet appears in Versions and not here, which is what the peer bindings' own
+// libraries() answers (TypeScript and Rust both list "what has been opened so
+// far"). Opening 120 MB of artifact as the side effect of a listing call is not
+// something a caller can undo.
+func (r *Registry) Libraries() []*Library {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := map[*Library]bool{}
+	out := make([]*Library, 0, len(r.byID))
+	for _, l := range r.byID {
+		if !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return minorSortKey(out[i].Minor).before(minorSortKey(out[j].Minor))
+	})
+	return out
 }
 
 // For resolves a version to its library. A minor line ("25.8") or an exact
@@ -674,11 +702,11 @@ type LoadedSchema struct {
 	// header's second clause. Distinct LoadedSchemas never contend.
 	mu sync.Mutex
 	// filters tracks every open LoadedFilter compiled from this handle, so
-	// Close can free them FIRST (spec/c-abi.md §Filters, handle lifetime).
+	// Close can free them FIRST (docs/reference/c-abi.md §Filters, handle lifetime).
 	// Guarded by mu.
 	filters map[*LoadedFilter]struct{}
 	// blocks tracks every open LoadedBlock parsed from this handle — the
-	// same non-owning rule, the same free-before-schema order (spec/c-abi.md
+	// same non-owning rule, the same free-before-schema order (docs/reference/c-abi.md
 	// §Blocks). Guarded by mu.
 	blocks map[*LoadedBlock]struct{}
 }
@@ -767,7 +795,7 @@ func (l *Library) HasCompileSettings() bool {
 }
 
 // ValidateType mirrors the package-level ValidateType for a dlopen'd
-// library: the same canonicalisation and the same *SchemaError /
+// library: the same canonicalization and the same *SchemaError /
 // *UnsupportedError split, answered by THIS library's ClickHouse version.
 func (l *Library) ValidateType(typeExpr string) (canonical string, err error) {
 	cexpr := C.CString(typeExpr)
@@ -796,7 +824,7 @@ func (l *Library) ValidateType(typeExpr string) (canonical string, err error) {
 // RegisteredFamilies lists every type family in THIS library's runtime
 // registry (chs_registered_families) — the dlopen'd twin of the package-level
 // RegisteredFamilies, and one of the three-question introspection surface
-// every SDK exposes (spec/bindings.md §Introspection). An artifact built
+// every SDK exposes (docs/reference/bindings.md §Introspection). An artifact built
 // before the symbol answers an *UnsupportedError, never a load failure.
 func (l *Library) RegisteredFamilies() ([]string, error) {
 	l.mu.RLock()
@@ -820,7 +848,7 @@ func (l *Library) RegisteredFamilies() ([]string, error) {
 // FunctionFlags returns THIS library's function-volatility TSV audit
 // (chs_function_flags), verbatim — one function per line, six tab-separated
 // fields; see the package-level FunctionFlags for the field list. One of the
-// three-question introspection surface every SDK exposes (spec/bindings.md
+// three-question introspection surface every SDK exposes (docs/reference/bindings.md
 // §Introspection). An artifact built before the symbol answers an
 // *UnsupportedError.
 func (l *Library) FunctionFlags() (string, error) {
@@ -839,7 +867,7 @@ func (l *Library) FunctionFlags() (string, error) {
 // ReferenceType returns the widened reference type THIS library compares a
 // type against (chs_reference_type), "" for a type with no wider type — the
 // dlopen'd twin of the package-level ReferenceType, and one of the
-// three-question introspection surface every SDK exposes (spec/bindings.md
+// three-question introspection surface every SDK exposes (docs/reference/bindings.md
 // §Introspection). An artifact built before the symbol answers an
 // *UnsupportedError.
 func (l *Library) ReferenceType(typeExpr string) (string, error) {
@@ -864,7 +892,7 @@ func (l *Library) ReferenceType(typeExpr string) (string, error) {
 // Names are validated by the server's own MergeTreeSettings object: an
 // unknown name answers the server's code 115. A known name declared at a
 // NON-default value is refused (an *UnsupportedError naming it) — no MergeTree
-// setting's behaviour is modelled yet, and silently ignoring a declared value
+// setting's behavior is modeled yet, and silently ignoring a declared value
 // would mean the declared profile is not in force. Declared at the default is
 // inert and accepted.
 func (s *LoadedSchema) SetEngine(engine, orderBy string, opts ...EngineOption) error {
@@ -993,7 +1021,7 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 		unlock()
 		// A missing symbol is the DECLINE type, not a plain error: "this
 		// artifact predates the feature" degrades to unsupported at call time
-		// (spec/bindings.md Level 1; rule 12's missing-symbol arm). A plain
+		// (docs/reference/bindings.md Level 1; rule 12's missing-symbol arm). A plain
 		// error here read as a caller fault and could not be handled as the
 		// decline it is.
 		return RowResult{}, &UnsupportedError{Msg: "this artifact predates chs_row (rebuild it)"}
@@ -1079,7 +1107,7 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 	if out == nil {
 		unlock()
 		// Same degradation as Row: a NULL return is the ABI's "the loaded
-		// artifact does not export the function" (spec/c-abi.md §Rows), and
+		// artifact does not export the function" (docs/reference/c-abi.md §Rows), and
 		// that is a decline. chs_rows is mandatory on this loader, so today
 		// the branch is unreachable — the type still has to be the honest one.
 		return BatchResult{}, &UnsupportedError{Msg: "this artifact predates chs_rows (rebuild it)"}
@@ -1349,33 +1377,42 @@ func (b *LoadedBlock) closeLocked() {
 	}
 }
 
-// sortMinorLines orders minor lines numerically. spec/bindings.md §Version
+// sortMinorLines orders minor lines numerically. docs/reference/bindings.md §Version
 // selection rule 2 forbids string ordering — "25.10" is a LATER line than
 // "25.3", and sort.Strings put it first. (Found by the Python conformance
 // driver's differential run: every peer SDK already sorted numerically.)
 func sortMinorLines(lines []string) {
-	key := func(s string) [2]int {
-		var k [2]int
-		for i, p := range strings.SplitN(s, ".", 2) {
-			n := 0
-			for _, ch := range p {
-				if ch < '0' || ch > '9' {
-					n = -1
-					break
-				}
-				n = n*10 + int(ch-'0')
-			}
-			k[i] = n
-		}
-		return k
-	}
 	sort.Slice(lines, func(i, j int) bool {
-		a, b := key(lines[i]), key(lines[j])
-		if a[0] != b[0] {
-			return a[0] < b[0]
-		}
-		return a[1] < b[1]
+		return minorSortKey(lines[i]).before(minorSortKey(lines[j]))
 	})
+}
+
+// minorSortKey is the numeric release order of one minor line, shared by every
+// ordered surface this package exposes (Versions, Libraries, the not-found
+// error's "have […]" text) so they can never disagree.
+type minorKey [2]int
+
+func (a minorKey) before(b minorKey) bool {
+	if a[0] != b[0] {
+		return a[0] < b[0]
+	}
+	return a[1] < b[1]
+}
+
+func minorSortKey(s string) minorKey {
+	var k minorKey
+	for i, p := range strings.SplitN(s, ".", 2) {
+		n := 0
+		for _, ch := range p {
+			if ch < '0' || ch > '9' {
+				n = -1
+				break
+			}
+			n = n*10 + int(ch-'0')
+		}
+		k[i] = n
+	}
+	return k
 }
 
 func minorOf(v string) string {

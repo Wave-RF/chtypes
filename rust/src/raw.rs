@@ -3,7 +3,7 @@
 //!
 //! A ClickHouse `String` column holds **arbitrary bytes**: an
 //! `AggregateFunction` state, a protobuf blob, a mangled UTF-8 sequence a
-//! producer sent by accident. `spec/c-abi.md` is explicit that the result
+//! producer sent by accident. `docs/reference/c-abi.md` is explicit that the result
 //! document's `stored` and `ref` must be handled as raw bytes, "not decoded into
 //! the binding's native string and number types before comparison", because
 //! "decoding invalid UTF-8 into a language string replaces it with U+FFFD, which

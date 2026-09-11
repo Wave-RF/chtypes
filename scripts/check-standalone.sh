@@ -116,14 +116,28 @@ rc=0
 # The golden set is SERVED, and a fetch installs it at <registry>/sdk-goldens.json
 # — so the bare copy needs no path for it, only the registry it already gets.
 # The fetch fixtures are different: they live in this repository
-# (spec/fixtures/fetch, docs/fetch.md §9), so the fetch suite is told where they
+# (tests/fixtures/fetch, docs/guides/fetch.md §9), so the fetch suite is told where they
 # are through CHTYPES_FETCH_FIXTURES and skips loudly without them.
-( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_FETCH_FIXTURES="$ROOT/spec/fixtures/fetch" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
+( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_FETCH_FIXTURES="$ROOT/tests/fixtures/fetch" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
 [ -s "$LOG" ] || die "go test produced no -json output (rc=$rc)"
 set +e
 python3 - "$LOG" "$rc" "$HAVE_REG" "$REQUIRE" <<'PY'
 import json, sys
 log, rc, have_reg, require = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1", sys.argv[4] == "1"
+# The parity contract (tests/parity/manifest.json) is checked by each language's
+# own suite, and Go's runs here — from the bare copy, off the manifest it embeds,
+# needing no artifact and no repository root. These names must have PASSED: a
+# parity check that was deleted, renamed or skipped would otherwise leave the
+# census looking exactly as healthy as one that ran.
+PARITY = [
+    "TestParityManifestMeetsItsOwnFloors",
+    "TestParityManifestIsFullyDeclared",
+    "TestGoExposesEveryCapabilityTheContractAssignsIt",
+    "TestGoAnswersTheSameValuesAsTheOtherBindings",
+    "TestGoCLIOffersEveryContractSubcommand",
+    "TestNoGoPublicNameEscapesTheContract",
+    "TestGoUnlistedAllowlistHasNotRotted",
+]
 ran = skip = fail = 0; skips = []; noise = []; failed = []; output = {}; passed = set()
 for line in open(log, encoding="utf-8", errors="replace"):
     line = line.strip()
@@ -150,6 +164,11 @@ for n in noise[:20]: print("    " + n[:160])
 problems = []
 if fail: problems.append("%d test(s) failed" % fail)
 if ran == 0: problems.append("zero tests ran — the untagged suite asserted nothing")
+absent = [t for t in PARITY if t not in passed]
+if absent:
+    problems.append("the binding parity contract was not proven here: %s did not pass. It needs no "
+                    "artifact and no repository root, so there is no state in which it may be absent "
+                    "(tests/parity/manifest.json, docs/reference/bindings.md)" % ", ".join(absent))
 if rc != 0 and not problems: problems.append("go test exited %d with no failing record; read %s" % (rc, log))
 if require:
     # The artifact-backed run's rule, read off the same census: the golden

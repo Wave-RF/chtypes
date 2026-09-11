@@ -90,11 +90,11 @@ func testRegistryDir(t *testing.T) string {
 // one command that fills it.
 func skipNoArtifacts(t *testing.T, dir, detail string) {
 	t.Helper()
-	t.Skipf("no chtypes artifacts under %s: %s — fetch one with scripts/fetch.sh 25.8 (docs/fetch.md), or point $CHTYPES_REGISTRY at a registry", dir, detail)
+	t.Skipf("no chtypes artifacts under %s: %s — fetch one with scripts/fetch.sh 25.8 (docs/guides/fetch.md), or point $CHTYPES_REGISTRY at a registry", dir, detail)
 }
 
 // testRegistryLibrary returns one artifact's shared-library path from the
-// test registry, resolved the way the loader contract says (spec/artifact.md:
+// test registry, resolved the way the loader contract says (docs/reference/artifact.md:
 // the file name comes from manifest.json's `library` field, never guessed),
 // plus the file's extension.
 func testRegistryLibrary(t *testing.T) (path, ext string) {

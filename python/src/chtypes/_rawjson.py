@@ -1,7 +1,7 @@
 """Raw-preserving JSON, because the result documents carry values Python's own
 types cannot hold without changing them.
 
-Three of them, all paid for (spec/c-abi.md "The row result document"):
+Three of them, all paid for (docs/reference/c-abi.md "The row result document"):
 
 * ClickHouse integers go to 2**256. Decoding `18446744073709551615` into a
   float yields `18446744073709552000`, and an `Int256` yields
@@ -99,7 +99,7 @@ def decode_prefix(text: str, idx: int = 0) -> tuple[object, int]:
 class RawObject(dict):
     """A decoded JSON object that also keeps each member's exact source text.
 
-    The Python equivalent of unmarshalling into `map[string]json.RawMessage`:
+    The Python equivalent of unmarshaling into `map[string]json.RawMessage`:
     the decoded form is there for control flow (`outcome`, `code`, the flags),
     and `raw()` returns the library's own bytes for anything reported onward.
     Duplicate keys follow the reference exactly — the last value wins in the

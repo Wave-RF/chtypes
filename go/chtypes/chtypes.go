@@ -1,8 +1,8 @@
 // Package chtypes is ClickHouse's own C++ type machinery, vendored, wrapped
 // in a C API, bound to Go via cgo.
 //
-// The surface is spec/bindings.md; the C contract underneath is spec/c-abi.md.
-// Everything semantic — type parsing, canonicalisation, coercion, error codes
+// The surface is docs/reference/bindings.md; the C contract underneath is docs/reference/c-abi.md.
+// Everything semantic — type parsing, canonicalization, coercion, error codes
 // — is executed by real ClickHouse code compiled from the pinned release, so
 // it is exact by construction rather than reimplemented. Nothing in this
 // package decides what a value coerces to.
@@ -72,9 +72,9 @@
 //
 // So a schema that could never take a row starts taking rows. That is usually
 // what the tenant wants and is a second argument for substitution, but it is a
-// behaviour change the caller is making on the tenant's behalf, and it is why
+// behavior change the caller is making on the tenant's behalf, and it is why
 // every substitution is also reported as a Transform with reason
-// "default_materialised" rather than passed over in silence.
+// "default_materialized" rather than passed over in silence.
 //
 // # Clock skew: what this library tolerates, and what happens past it
 //
@@ -193,7 +193,7 @@ import (
 type Version string
 
 // Schema is one tenant table's column list, in declaration order. It is the
-// structured input to ParseSchema; the validated, canonicalised form is
+// structured input to ParseSchema; the validated, canonicalized form is
 // CompiledSchema.
 type Schema struct {
 	Columns []Column
@@ -203,7 +203,7 @@ type Schema struct {
 // ParseSchema) the fields are the caller's spelling; as an OUTPUT
 // (CompiledSchema.Columns, LoadedSchema.Columns) they are ClickHouse's own
 // canonical spelling — Type as the canonical type expression, Default as the
-// canonicalised DEFAULT expression source.
+// canonicalized DEFAULT expression source.
 type Column struct {
 	Name        string
 	Type        string // ClickHouse type expression, e.g. "Nullable(Decimal(18,4))"
@@ -228,7 +228,7 @@ const (
 	// never presented as a stored value (src "skipped").
 	KindAlias
 	// KindEphemeral: readable only through an INSERT with an explicit column
-	// list, which a format stream cannot carry — see spec/bindings.md
+	// list, which a format stream cannot carry — see docs/reference/bindings.md
 	// §EPHEMERAL for the mispreview a gateway must decline.
 	KindEphemeral
 )
@@ -265,7 +265,7 @@ func parseDefaultKind(s string) DefaultKind {
 
 // Format selects the input encoding of a row. The numeric values are the C
 // ABI's enum chs_format codes and are FROZEN — bindings pass the integers
-// across the boundary (spec/c-abi.md §Types and schemas), so they must never
+// across the boundary (docs/reference/c-abi.md §Types and schemas), so they must never
 // be renumbered.
 //
 // CSV, TSV, Values and JSONCompactEachRow are POSITIONAL: the k-th field
@@ -303,11 +303,11 @@ const (
 	RowBinaryWithNamesAndTypesAndDefaults
 	// Native is COLUMN-oriented — per block a column count, a row count, then
 	// each column's name, type expression and whole serialized body — and it
-	// is what every ClickHouse client library sends on INSERT. It is modelled
+	// is what every ClickHouse client library sends on INSERT. It is modeled
 	// at the revision `INSERT ... FORMAT Native` uses (0), so there is no
 	// BlockInfo prefix and no per-column serialization-kind byte; blocks taken
 	// off a live TCP connection carry both and are a different contract
-	// (spec/c-abi.md §Native).
+	// (docs/reference/c-abi.md §Native).
 	//
 	// Because the stream carries names and types, the declared schema and the
 	// payload can disagree — and ClickHouse's own resolution is not uniformly
@@ -345,7 +345,7 @@ const (
 const ExportNone Format = -1
 
 // DocFlags selects which document GROUPS the per-row documents carry
-// (spec/c-abi.md §Document flags). The verdict channel — batch and per-row
+// (docs/reference/c-abi.md §Document flags). The verdict channel — batch and per-row
 // outcome/code/err, rows_read, rows_skipped, unsupported_settings,
 // engine_rows, storage_transforms — is ALWAYS emitted and is not a flag.
 // DocAll reproduces the full document Rows() returns, byte-for-byte at the C
@@ -354,7 +354,7 @@ const ExportNone Format = -1
 // refused loudly by the library (the whole call answers unsupported) — pass
 // flags through, never pre-validate them here.
 //
-// The cost asymmetry, so callers can reason (spec/c-abi.md §Document flags):
+// The cost asymmetry, so callers can reason (docs/reference/c-abi.md §Document flags):
 // DocValues without DocTransforms skips the reference second-parse and the
 // wire round trip C-side — real compute saved, and detectors 2/3 have
 // nothing to run on (ref is null, no wire; that is the caller's choice, not
@@ -394,7 +394,7 @@ type Span struct {
 
 // Outcome is the verdict on one row (or one batch). Key on it, never on the
 // error code alone: a row-level Unsupported can carry ErrCode 0
-// (spec/c-abi.md §Top-level fields).
+// (docs/reference/c-abi.md §Top-level fields).
 type Outcome int
 
 const (
@@ -469,7 +469,7 @@ func (v Value) String() string { return v.Text }
 // Transform records a silent change ClickHouse made on the way to storage:
 // input 256 into UInt8 stored as 0, reason "overflow_wrap". Reason is one of
 // the stable Reason* strings below; Lossy reports whether information was
-// lost (only reformat / default_filled / zero_filled / default_materialised
+// lost (only reformat / default_filled / zero_filled / default_materialized
 // are non-lossy). Reporting these is the core product guarantee — a binding
 // that drops them hides exactly the changes a tenant needs warning about.
 type Transform struct {
@@ -512,7 +512,7 @@ type RowResult struct {
 	//
 	// Sending the column also *disarms* the server-side machinery attached to
 	// it — see "What substitution disarms" in the package documentation. This
-	// list is the caller's cue to warn, not only to serialise.
+	// list is the caller's cue to warn, not only to serialize.
 	Substituted []Substitution
 	// Computed carries the MATERIALIZED columns' values for this row.
 	//
@@ -544,7 +544,7 @@ type Computed struct {
 // Substitution is one volatile DEFAULT the library resolved instead of the
 // server.
 //
-// Expr is the DEFAULT as ClickHouse canonicalised it; Text is the value
+// Expr is the DEFAULT as ClickHouse canonicalized it; Text is the value
 // rendered by ClickHouse's own serializer for the declared type, so sending it
 // back as a JSON field round-trips to the identical stored value. Emit Text
 // verbatim: a JSON *float* for a tick count is a hard reject (code 27), never a
@@ -561,7 +561,7 @@ type Substitution struct {
 //
 // Code is ALWAYS a real ClickHouse error code. "This build declines to answer"
 // is a DIFFERENT TYPE — UnsupportedError — never this one carrying a sentinel,
-// so no SchemaError ever holds CodeUnsupported (spec/bindings.md rule 12).
+// so no SchemaError ever holds CodeUnsupported (docs/reference/bindings.md rule 12).
 type SchemaError struct {
 	Column string // "" when the failure is not attributable to one column
 	Code   int
@@ -586,7 +586,7 @@ func (e *SchemaError) Error() string {
 // "is a SchemaError" would be the sentinel problem wearing a type hierarchy:
 // every caller that forgot to check the predicate would keep silently turning
 // declines into rejections, which is a manufactured over-reject — data loss the
-// product never made, budgeted at zero (spec/c-abi.md "Error model"). As a peer,
+// product never made, budgeted at zero (docs/reference/c-abi.md "Error model"). As a peer,
 // forgetting produces an unhandled error, which is loud.
 //
 // Callers switch on the type, never on a code:
@@ -625,7 +625,7 @@ const CodeUnsupported = -2
 // schemaErr is the ONE place an ABI error code becomes a Go error, so the
 // refusal/decline split cannot be decided differently in two files.
 //
-// The SIGN decides (spec/bindings.md rule 12, spec/c-abi.md "Error model"):
+// The SIGN decides (docs/reference/bindings.md rule 12, docs/reference/c-abi.md "Error model"):
 // a positive code is the server's own refusal and rides through verbatim; any
 // negative code is this library declining (-2 "I will not guess", -1 a guarded
 // exception, -3 the dlopen shim's missing-symbol sentinel) and becomes an
@@ -646,7 +646,7 @@ var Timezone = "UTC"
 
 // ABIRevision is the chs_* ABI revision this package was COMPILED against —
 // CHS_ABI_REVISION from chtypes.h, read through cgo so the two can never drift.
-// The artifact reports its own with chs_abi_revision(); see spec/c-abi.md
+// The artifact reports its own with chs_abi_revision(); see docs/reference/c-abi.md
 // §ABI identity. A dlopen'd Library reports the loaded artifact's revision
 // through Library.ABIRevision, which is 0 when the artifact predates the probe.
 const ABIRevision = 4
@@ -669,13 +669,13 @@ type compileConfig struct {
 }
 
 // CompileOption configures CompileDDL's settings profile. The zero value of
-// every option is CompileDDL's un-optioned behaviour, so opts... can always
+// every option is CompileDDL's un-optioned behavior, so opts... can always
 // be omitted.
 type CompileOption func(*compileConfig)
 
 // WithCompileSettings declares a DECLARED settings profile — the settings
 // the deployment's server runs, fixed into the handle at compile time
-// exactly as a real CREATE TABLE fixes them into the table (spec/c-abi.md
+// exactly as a real CREATE TABLE fixes them into the table (docs/reference/c-abi.md
 // §Compile-time settings). A nil or empty map is IDENTICAL to omitting the
 // option entirely.
 //
@@ -687,7 +687,7 @@ type CompileOption func(*compileConfig)
 // same 115. Per-call settings still govern row parsing, and only row
 // parsing.
 //
-// The one compile-shape setting modelled today is flatten_nested: at "0" a
+// The one compile-shape setting modeled today is flatten_nested: at "0" a
 // Nested(a,b) column compiles to ONE Array(Tuple(...)) column named as
 // declared, exactly as the server's CREATE does under that setting; every
 // downstream shape (Columns, name lookup, positional arity, the RowBinary
@@ -717,7 +717,7 @@ type EngineOption func(*engineConfig)
 // empty map is IDENTICAL to omitting the option. Names are validated by the
 // server's own MergeTreeSettings object: an unknown name answers the
 // server's own code 115. A known name declared at a NON-default value is
-// refused (an *UnsupportedError) — no MergeTree setting's behaviour is modelled
+// refused (an *UnsupportedError) — no MergeTree setting's behavior is modeled
 // yet, and silently ignoring a declared value would mean the declared
 // profile is not in force. Declared at the default is inert and accepted.
 func WithMergeTreeSettings(settings map[string]string) EngineOption {
@@ -731,7 +731,7 @@ func WithMergeTreeSettings(settings map[string]string) EngineOption {
 // visibility MUST fail closed (hide the row / fail the request) on
 // VerdictError and VerdictDecline — collapsing either into "false the
 // answer" inverts fail-closed into fail-open under NOT, the measured leak
-// class (spec/bindings.md §Revision 3). The zero value is VerdictDecline,
+// class (docs/reference/bindings.md §Revision 3). The zero value is VerdictDecline,
 // so an unset or unknown verdict is fail-closed by construction.
 type Verdict int
 
@@ -784,10 +784,27 @@ const (
 	// partial answers.
 	FilterRejected
 	// FilterUnsupported: a call-level decline (-2), and the state an
-	// unrecognised outcome spelling degrades to — never FilterRejected,
-	// mirroring the unknown-outcome rule (spec/bindings.md §RowResult).
+	// unrecognized outcome spelling degrades to — never FilterRejected,
+	// mirroring the unknown-outcome rule (docs/reference/bindings.md §RowResult).
 	FilterUnsupported
 )
+
+// String is the wire spelling, as the filter result document carries it —
+// the same vocabulary Outcome.String answers in, and the same one the Python
+// and TypeScript bindings' FilterOutcome values already are. Outcome, Verdict
+// and DefaultKind each had a String and this one did not, so a Go caller could
+// print every verdict in the ABI except this one.
+func (f FilterOutcome) String() string {
+	switch f {
+	case FilterOK:
+		return "ok"
+	case FilterRejected:
+		return "rejected"
+	case FilterUnsupported:
+		return "unsupported"
+	}
+	return "unsupported"
+}
 
 // FilterRowError itemizes one 'e' or 'd' row: the row's 0-based index and
 // the code and message, verbatim — ClickHouse's own for an 'e' row, this
@@ -873,7 +890,7 @@ func filterResultOf(js string) (FilterResult, error) {
 }
 
 // FilterOption configures CompileFilter — the same variadic functional-option
-// shape CompileDDL uses (spec/bindings.md §One compile function: options are
+// shape CompileDDL uses (docs/reference/bindings.md §One compile function: options are
 // each language's own idiom, and this is Go's).
 type FilterOption func(*filterConfig)
 
@@ -888,7 +905,7 @@ type filterConfig struct {
 // deserialized by the DECLARED type's own reader and injected as a typed
 // literal AFTER SQL parsing, so a value is never SQL text and NEVER needs
 // hand-escaping — injection safety is by construction, not by escaping
-// (spec/c-abi.md §Filters, Query parameters). Do not render values into the
+// (docs/reference/c-abi.md §Filters, Query parameters). Do not render values into the
 // expression yourself.
 //
 // CHOOSE THE BRACE TYPE FOR THE VALUE'S DOMAIN. A bound value follows the
@@ -936,7 +953,7 @@ type BatchResult struct {
 	// row it came from — a gateway cannot tell a tenant what to fix otherwise.
 	Transformed []Transform
 	// EngineRows is the stored preview AFTER the table engine's insert-time
-	// merge, present only when SetEngine declared a specialised engine and the
+	// merge, present only when SetEngine declared a specialized engine and the
 	// batch was accepted. Each element is one stored row as a rendered JSON
 	// object. nil means no engine semantics were applied and Rows is the
 	// preview, exactly as before.
@@ -947,7 +964,7 @@ type BatchResult struct {
 	// ClickHouse's own output writer for the requested export format, copied
 	// out of the C buffer and freed before this call returns — no ownership
 	// crosses the boundary. Three states, and the distinction is the ABI's
-	// own (spec/c-abi.md §Rows):
+	// own (docs/reference/c-abi.md §Rows):
 	//
 	//	nil            no export was requested, the export was DECLINED
 	//	               (ExportDeclined then names the reason), or a
@@ -979,7 +996,7 @@ type batchDoc struct {
 	Rows        []rowDoc `json:"rows"`
 	// EngineRows: what the part will hold AFTER the table engine's insert-time
 	// merge (optimize_on_insert), present only when SetEngine declared a
-	// specialised engine. Each element is one stored row as a JSON object with
+	// specialized engine. Each element is one stored row as a JSON object with
 	// the same rendering as per-row stored values. May legitimately be shorter
 	// than Rows (a SummingMergeTree dropping an all-zero row) or reordered
 	// (the block is sorted by the sorting key before the part is written).
@@ -990,7 +1007,7 @@ type batchDoc struct {
 	// column DEFAULT). Folded into BatchResult.Transformed.
 	StorageTransforms []storageTransformDoc `json:"storage_transforms"`
 	// RowSpans: present exactly when export bytes were emitted — one
-	// {off,len} per rows[] entry, index-aligned (spec/c-abi.md §Rows).
+	// {off,len} per rows[] entry, index-aligned (docs/reference/c-abi.md §Rows).
 	RowSpans []Span `json:"row_spans"`
 	// ExportDeclined: present exactly when an export was requested and
 	// withheld, carrying the reason; absent otherwise.
@@ -1179,11 +1196,11 @@ func batchResultOf(js string) (BatchResult, error) {
 }
 
 // outcomeOf maps a document's outcome string. An outcome this binding does
-// not recognise degrades to Unsupported, never to Rejected: a future
+// not recognize degrades to Unsupported, never to Rejected: a future
 // artifact's new verdict is by definition an answer this binding cannot
 // interpret, and Unsupported is the arm that is never scored as agreement,
 // while a default of Rejected would manufacture an over-reject — the
-// zero-budget failure — out of pure vocabulary drift (spec/bindings.md
+// zero-budget failure — out of pure vocabulary drift (docs/reference/bindings.md
 // §RowResult, rule added 2026-08-26).
 func outcomeOf(s string) Outcome {
 	switch s {

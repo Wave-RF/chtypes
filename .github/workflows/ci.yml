@@ -28,7 +28,7 @@
 #
 # A suite that skipped everything is not a pass, in either run:
 # scripts/check-suite.sh and scripts/check-standalone.sh read each runner's
-# own summary line (colour stripped) and refuse zero tests passed; with
+# own summary line (color stripped) and refuse zero tests passed; with
 # --require-artifacts they also refuse a golden set that did not run. Nothing
 # in this file computes a verdict; every step runs a script or a test runner
 # whose own output is the answer.
@@ -218,3 +218,163 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: rust — suite with the registry; the golden test must run
         run: scripts/check-suite.sh --require-artifacts rust
+
+  # ── Lint / supply-chain jobs below ─────────────────────────────────
+  #
+  # All additive: none of the jobs above gained a `needs:` on any of these,
+  # and none of these renames a job above — branch protection names checks
+  # by job `name:`, and renaming one of the six above would silently drop it
+  # from the required-checks list. Every tool here is installed directly
+  # (`go install` at a pinned version, `pnpm dlx <pkg>@<version>`, `uvx
+  # <pkg>==<version>`, `cargo install --locked`) rather than through a new
+  # third-party Action, so no new `uses:` entries — and no new SHAs to
+  # pin — were needed beyond the ones this workflow already carries.
+  #
+  # `lint-go`, `lint-ts`, `lint-actions` and `misspell` are BLOCKING (once
+  # someone adds their job names to branch protection's required-checks
+  # list — this PR cannot do that itself) because each one is clean on this
+  # tree today; `prose` and `security` are deliberately NOT, for reasons in
+  # their own comments below.
+  lint-go:
+    name: "lint-go — golangci-lint (go/.golangci.yml)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false          # the module is stdlib-only: there is no go.sum to cache
+      - name: golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+          cd go && "$(go env GOPATH)/bin/golangci-lint" run --timeout 5m ./...
+
+  lint-ts:
+    name: "lint-ts — biome (ts/biome.json)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: biome lint
+        run: cd ts && pnpm dlx @biomejs/biome@2.5.13 lint .
+
+  lint-actions:
+    name: "lint-actions — actionlint + shellcheck"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false          # the module is stdlib-only: there is no go.sum to cache
+      - name: actionlint (workflows) + shellcheck (every tracked *.sh) — ubuntu-latest ships shellcheck
+        run: scripts/lint-actions.sh
+
+  misspell:
+    name: "misspell — American spelling, whole tree (scripts/lint-prose.sh)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Covers every tracked file (all four SDKs' source, docs, examples,
+    # scripts, include/chtypes.h, the root governance files) except
+    # `**/fixtures/fetch/**` (generated + ed25519-signed; editing it
+    # invalidates every signature) and `LICENSE`. Two independent checks —
+    # `misspell -locale US` and a from-scratch grep pass — because misspell's
+    # own dictionary matcher has been shown to silently miss specific words
+    # even when they're present in its built-in list; see the long comment
+    # at the top of scripts/lint-prose.sh for the proof, and run
+    # `scripts/lint-prose.sh --selftest` to re-verify it locally.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false          # the module is stdlib-only: there is no go.sum to cache
+      - name: prove the check itself catches what misspell alone misses
+        run: scripts/lint-prose.sh --selftest
+      - name: misspell -locale US + wordlist grep, whole tree
+        run: scripts/lint-prose.sh
+
+  prose:
+    # BLOCKING. It was report-only while the tree was still hard-wrapped, which
+    # was a reason to format the tree rather than to exempt the rule. dprint fmt
+    # has since run over all 40 files, markdownlint's config now scopes MD010 to
+    # prose (tabs are correct inside Go code blocks) and cedes table style to
+    # dprint, and the 35 genuine findings are fixed. Both checks pass, so both
+    # gate. Unlike `docs` and `security`, this check is a pure function of the
+    # diff: nothing outside the repository can turn it red.
+    name: "prose — markdownlint + no-hard-wrap (dprint textWrap never)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: markdownlint-cli2 (.markdownlint.json)
+        run: pnpm dlx markdownlint-cli2@0.18.1
+      - name: dprint check — prose-wrap never (dprint.json)
+        run: pnpm dlx dprint@0.57.4 check
+
+  security:
+    name: "security — dependency vulnerability scan, all four ecosystems (report only)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # NON-BLOCKING, on purpose. A scanner that reddens `main` the moment a
+    # fresh upstream advisory lands against a pinned dependency — with no
+    # patched version published yet, and no source change this repository
+    # can make in the hour it happened — is a cost with no matching benefit:
+    # it blocks every unrelated PR until someone either bumps to a version
+    # that does not exist yet or adds a time-pressured ignore entry. Each
+    # scan still runs every push and PR, and still fails its OWN step (so
+    # the finding shows up loudly on the run, color and all) — only the
+    # job's overall result is prevented from reddening the required checks.
+    # "Nobody has to go looking" is the goal here, not "nothing can ever
+    # merge while an advisory exists somewhere in the dependency graph."
+    # All four scans ran clean on 2026-09-11.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false          # the module is stdlib-only: there is no go.sum to cache
+      - name: govulncheck (go)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          cd go && "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: "pip-audit (python) — python 3.12, pinned: pip-audit's own venv bootstrap is flaky on very new interpreters"
+        run: |
+          cd python
+          uv export --no-hashes --group dev | grep -v '^-e ' > /tmp/requirements-audit.txt
+          uvx --python 3.12 pip-audit==2.10.1 -r /tmp/requirements-audit.txt
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - name: pnpm audit (ts)
+        run: cd ts && pnpm install --frozen-lockfile && pnpm audit
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+      - name: cargo audit (rust)
+        run: |
+          cargo install cargo-audit --locked
+          cd rust && "$HOME/.cargo/bin/cargo-audit" audit

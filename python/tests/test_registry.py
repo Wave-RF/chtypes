@@ -67,7 +67,7 @@ def test_version_lookup_accepts_a_minor_line_and_an_exact_patch(
 def test_unresolvable_version_is_the_one_missing_artifact_error(
     registry: chtypes.Registry,
 ) -> None:
-    """docs/fetch.md §7: one identifiable error, one message, verbatim."""
+    """docs/guides/fetch.md §7: one identifiable error, one message, verbatim."""
     with pytest.raises(chtypes.ArtifactMissingError) as caught:
         registry.for_version("99.1")
     err = caught.value
@@ -101,7 +101,7 @@ def test_versions_are_ordered_by_release_not_by_string(registry: chtypes.Registr
 def test_registry_walks_the_search_path(
     monkeypatch: pytest.MonkeyPatch, isolated_search_path: Path, tmp_path: Path
 ) -> None:
-    """docs/fetch.md §1: explicit path, $CHTYPES_REGISTRY, the cache, the
+    """docs/guides/fetch.md §1: explicit path, $CHTYPES_REGISTRY, the cache, the
     system locations — in that order; fetch writes to the first of the
     first three. `Registry()` no longer needs anything set (pre-1.0 change)."""
     cache = isolated_search_path
@@ -326,7 +326,7 @@ def test_set_default_settings_excludes_the_row_path(newest: chtypes.Library) -> 
     """The one genuinely dangerous call on the ABI, under real contention.
 
     `chs_set_default_settings` REPLACES the seeded settings list wholesale while
-    `chs_row` / `chs_rows` read that same list by reference (spec/c-abi.md
+    `chs_row` / `chs_rows` read that same list by reference (docs/reference/c-abi.md
     §Thread-safety: it "MUST be serialized against all other calls"). ctypes
     releases the GIL for the whole duration of a foreign call, so Python threads
     genuinely can be inside `chs_rows` when a seed lands — the GIL is not the
@@ -436,7 +436,7 @@ def test_set_default_settings_excludes_the_row_path(newest: chtypes.Library) -> 
 def test_closing_one_registry_leaves_another_answering(registry: chtypes.Registry) -> None:
     """Two Registries over one artifact directory share dlopen'd IMAGES.
 
-    Library.close() is refcounted on the resolved path (spec/bindings.md
+    Library.close() is refcounted on the resolved path (docs/reference/bindings.md
     §Teardown, 2026-08-26): closing the first registry must be a no-op at the
     C boundary while the second still holds the images. Before the refcount,
     this exact sequence joined the DEFAULT evaluator's threads under the
@@ -480,12 +480,12 @@ def test_library_close_is_refcounted_per_image(tmp_path: Path, registry: chtypes
     if not versions:
         pytest.skip(
             f"no artifacts under any of {[str(p) for p in registry.search_path]} — "
-            "fetch one with `scripts/fetch.sh 25.8` (docs/fetch.md)"
+            "fetch one with `scripts/fetch.sh 25.8` (docs/guides/fetch.md)"
         )
     # A one-version registry keeps the subprocess cheap: symlink one version
     # in — one this binding can LOAD. Mid-relink a registry legitimately
     # holds artifacts at an older ABI revision, which the loader refuses BY
-    # DESIGN (spec/c-abi.md §The ABI revision); refcounting can only be
+    # DESIGN (docs/reference/c-abi.md §The ABI revision); refcounting can only be
     # measured through an artifact that loads, so stage the newest loadable
     # one and skip only when there is none. The refusal itself is exercised
     # by the loader's own gate, not weakened here.
@@ -557,7 +557,7 @@ def test_library_close_is_refcounted_per_image(tmp_path: Path, registry: chtypes
 
 
 def test_the_introspection_trio_is_exposed(newest: chtypes.Library) -> None:
-    """spec/bindings.md §Introspection: the same three questions in every SDK."""
+    """docs/reference/bindings.md §Introspection: the same three questions in every SDK."""
     families = newest.registered_families()
     assert "String" in families
     assert len(families) > 100  # 139 on the 25.8 artifact; the registry grows

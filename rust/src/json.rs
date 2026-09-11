@@ -133,7 +133,7 @@ impl Json {
 /// value — a TSV field or a bare `\N` never becomes a comparable value, which is
 /// what the null-input branch of the classifier is for.
 pub(crate) fn parse_exact(text: &str) -> Option<Json> {
-    // trim_json_ws, not str::trim: the spec rule (spec/bindings.md §detectors)
+    // trim_json_ws, not str::trim: the spec rule (docs/reference/bindings.md §detectors)
     // says whitespace is exactly JSON's four. str::trim also strips NBSP and
     // friends, so "\u{00A0}42" would have parsed as a number here while a
     // real server stores the bytes verbatim — inventing a transform.
@@ -159,7 +159,7 @@ pub(crate) fn parse_exact(text: &str) -> Option<Json> {
 /// keeps every answer this crate already gives byte for byte, including
 /// `str::trim`'s slightly-wider-than-JSON idea of whitespace. The bytes path
 /// trims exactly JSON's four whitespace bytes, which is the rule
-/// `spec/bindings.md` fixes.
+/// `docs/reference/bindings.md` fixes.
 pub(crate) fn parse_exact_bytes(b: &[u8]) -> Option<Json> {
     if let Ok(text) = std::str::from_utf8(b) {
         return parse_exact(text);
@@ -179,7 +179,7 @@ pub(crate) fn parse_exact_bytes(b: &[u8]) -> Option<Json> {
 
 /// JSON's four whitespace bytes, trimmed from both ends. Not `str::trim`: a BOM
 /// or U+00A0 is not JSON whitespace, so a value padded with one is not a bare
-/// JSON value (`spec/bindings.md`, measured against the reference SDK).
+/// JSON value (`docs/reference/bindings.md`, measured against the reference SDK).
 fn trim_json_ws(mut b: &[u8]) -> &[u8] {
     while let [first, rest @ ..] = b {
         if matches!(first, b' ' | b'\t' | b'\n' | b'\r') {
@@ -202,7 +202,7 @@ fn trim_json_ws(mut b: &[u8]) -> &[u8] {
 /// the decoded **bytes**, and the offset just past the closing quote.
 ///
 /// Shared with the result-document reader so that escape handling — including
-/// Go's lone-surrogate-to-U+FFFD behaviour — exists exactly once.
+/// Go's lone-surrogate-to-U+FFFD behavior — exists exactly once.
 pub(crate) fn decode_string_at(b: &[u8], at: usize) -> Option<(Vec<u8>, usize)> {
     let mut p = Parser { b, i: at };
     p.ws();
@@ -584,7 +584,7 @@ pub(crate) fn is_numeric(s: &str) -> bool {
     !s.is_empty() && (denormal(s).is_some() || Decimal::parse(s).is_some())
 }
 
-/// A decimal number in exact normalised form: significant digits plus a power
+/// A decimal number in exact normalized form: significant digits plus a power
 /// of ten. No floats are involved at any point.
 #[derive(Debug, PartialEq, Eq)]
 struct Decimal {
@@ -657,7 +657,7 @@ impl Decimal {
         if i != bytes.len() {
             return None; // trailing junk: not a number
         }
-        // Normalise: drop leading zeros, then trailing zeros (raising exp).
+        // Normalize: drop leading zeros, then trailing zeros (raising exp).
         let first = digits.iter().position(|&d| d != 0);
         match first {
             None => Some(Decimal {
@@ -723,7 +723,7 @@ mod tests {
         assert!(parse_exact("1 2").is_none());
         assert!(parse_exact("\\N").is_none());
         assert!(parse_exact("").is_none());
-        // A numeric PREFIX is not a JSON value either. `spec/bindings.md` fixes
+        // A numeric PREFIX is not a JSON value either. `docs/reference/bindings.md` fixes
         // this as a spec rule rather than a language default, and names the
         // reference SDK's streaming parser as the wrong side of it: Go reads the
         // TSV field `4,2` as the number 4 and then reports a `reformat` against

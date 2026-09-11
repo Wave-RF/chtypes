@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-suite.sh — run one of the non-Go SDK suites here (python, ts, rust)
-# and read its verdict off the runner's own summary line, colour stripped,
+# and read its verdict off the runner's own summary line, color stripped,
 # never off an exit code alone.
 #
 #   scripts/check-suite.sh [--no-artifacts | --require-artifacts] python|ts|rust
@@ -17,7 +17,7 @@
 #
 # --no-artifacts reproduces the artifact-free runner on a developer machine:
 # an empty XDG_CACHE_HOME and no $CHTYPES_REGISTRY, so this machine's own
-# cache is invisible (the two system roots of docs/fetch.md §1 cannot be
+# cache is invisible (the two system roots of docs/guides/fetch.md §1 cannot be
 # hidden by environment; they are named if present).
 # --require-artifacts is the second run's rule: the golden set must have RUN,
 # and no test may have skipped for want of a registry.
@@ -58,6 +58,13 @@ if [ "$NO_ARTIFACTS" -eq 1 ]; then
 fi
 [ "$REQUIRE" -eq 0 ] || say "--require-artifacts: CHTYPES_REGISTRY=${CHTYPES_REGISTRY:-<unset — the search path>}; the golden set must run"
 
+# The binding parity contract (tests/parity/manifest.json, docs/reference/bindings.md) is
+# checked by each language's OWN suite. It needs no artifact and no registry, so
+# there is no run in which it may be absent — and a parity check that was deleted,
+# renamed or skipped would otherwise leave the census looking exactly as healthy
+# as one that ran. Each arm below asserts it off the runner's own output.
+PARITY_MIN=6
+
 LOG_DIR="$ROOT/scratch/check-suite"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$WHICH.log"; PLAIN="$LOG_DIR/$WHICH.plain.log"
 RC=0
@@ -67,7 +74,7 @@ run() {
   local dir="$1"; shift
   RC=0
   ( cd "$dir" && "$@" ) 2>&1 | tee "$LOG" || RC=$?
-  # vitest colours its summary under CI even without a TTY, and an anchored
+  # vitest colors its summary under CI even without a TTY, and an anchored
   # grep on the raw bytes then reads "passed=0" (measured in the core
   # repository, 2026-09-09); every verdict below reads the stripped copy.
   sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$LOG" > "$PLAIN"
@@ -84,6 +91,13 @@ case "$WHICH" in
     PASSED="$(printf '%s\n' "$SUMMARY" | first_number passed || true)"
     SKIPPED="$(printf '%s\n' "$SUMMARY" | first_number skipped || true)"
     ! printf '%s\n' "$SUMMARY" | grep -qE '[0-9]+ (failed|error)' || PROBLEMS+=("the summary reports failures")
+    # pytest -q names no passing test, so the parity contract's presence is read
+    # off the collector instead: these tests need no artifact and cannot skip, so
+    # collected + no failures + a non-zero pass count is them having passed.
+    PARITY_N="$( (cd "$ROOT/python" && uv run --quiet pytest -q --collect-only tests/test_parity.py 2>/dev/null) \
+                 | grep -cE '^tests/test_parity\.py::' || true)"
+    [ "${PARITY_N:-0}" -ge "$PARITY_MIN" ] || PROBLEMS+=("the binding parity contract was not proven \
+here: python collected ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/manifest.json)")
     if [ "$REQUIRE" -eq 1 ]; then
       ! grep -qE '^SKIPPED .*tests/test_golden\.py' "$PLAIN" || PROBLEMS+=("the golden set was SKIPPED with artifacts required")
       ! grep -qE '^SKIPPED .*no chtypes artifacts on the search path' "$PLAIN" || PROBLEMS+=("tests skipped for want of a registry with artifacts required")
@@ -101,11 +115,14 @@ case "$WHICH" in
     PASSED="$(printf '%s\n' "$TESTS_LINE" | first_number passed || true)"
     SKIPPED="$(printf '%s\n' "$TESTS_LINE" | first_number skipped || true)"
     ! printf '%s\n%s\n' "$FILES_LINE" "$TESTS_LINE" | grep -qE '[0-9]+ failed' || PROBLEMS+=("the summary reports failures")
+    PARITY_N="$(grep -cE '^\s*.{0,3} test/parity\.test\.ts > ' "$PLAIN" || true)"
+    [ "${PARITY_N:-0}" -ge "$PARITY_MIN" ] || PROBLEMS+=("the binding parity contract was not proven \
+here: ts ran ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/manifest.json)")
     if [ "$REQUIRE" -eq 1 ]; then
       grep -qF '✓ test/golden.test.ts >' "$PLAIN" || PROBLEMS+=("no golden case RAN with artifacts required")
       # A per-line skip is EXPECTED and not a problem: a case is only a golden
       # for the exact ClickHouse build it was generated on, so a registry holding
-      # an older patch skips that line by name (goldens/README.md). What must not
+      # an older patch skips that line by name (docs/reference/goldens.md). What must not
       # happen is the set being skipped wholesale — that is the sentinel test,
       # and the rule above already requires at least one case to have run.
       ! grep -qF '↓ goldens > has at least one artifact' "$PLAIN" || PROBLEMS+=("the golden set was skipped wholesale with artifacts required")
@@ -124,6 +141,9 @@ case "$WHICH" in
     [ -z "$RESULTS" ] || SUMMARY="$(printf '%s\n' "$RESULTS" | grep -c .) test binaries: $PASSED passed, $FAILED_N failed (each binary's own line above)"
     SKIPPED="$(grep -cE '^SKIP ' "$PLAIN" || true)"
     ! grep -qE '^test result: FAILED|^error(\[E[0-9]+\])?:|panicked at' "$PLAIN" || PROBLEMS+=("a test binary reported FAILED, or did not build")
+    PARITY_N="$(grep -cE '^test (parity_manifest|rust_(exposes|answers)|the_(rust|go_copy))[a-z_]* \.\.\. ok$' "$PLAIN" || true)"
+    [ "${PARITY_N:-0}" -ge "$PARITY_MIN" ] || PROBLEMS+=("the binding parity contract was not proven \
+here: rust passed ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/manifest.json)")
     if [ "$REQUIRE" -eq 1 ]; then
       grep -qE '^test goldens_hold_on_every_artifact \.\.\. ok' "$PLAIN" || PROBLEMS+=("the golden test did not pass with artifacts required")
       ! grep -qE '^SKIP goldens_hold_on_every_artifact|Every test in this file is skipped|^SKIP integration::' "$PLAIN" || PROBLEMS+=("tests skipped for want of a registry with artifacts required")

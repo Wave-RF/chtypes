@@ -1,7 +1,7 @@
 package chtypes
 
 // registry_path.go — where artifacts are looked for and where a fetch
-// writes (docs/fetch.md §1).
+// writes (docs/guides/fetch.md §1).
 //
 // A registry is a directory holding <minor>/manifest.json entries. Lookup
 // tries, in order, and takes the FIRST directory that contains the

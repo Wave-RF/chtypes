@@ -197,7 +197,7 @@ func TestConcurrentDistinctHandles(t *testing.T) {
 
 // TestConcurrentSharedHandle drives ONE handle from many goroutines. The header
 // says that is not allowed at the C level, so the package's per-handle mutex is
-// what makes it safe — this asserts the mutex actually serialises rather than
+// what makes it safe — this asserts the mutex actually serializes rather than
 // that the C library tolerates it. Answers must still be exact.
 func TestConcurrentSharedHandle(t *testing.T) {
 	r := testRegistry(t)

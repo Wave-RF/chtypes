@@ -1,6 +1,6 @@
 /**
  * The error model, which is three outcomes that must never be conflated
- * (spec/c-abi.md §Error model):
+ * (docs/reference/c-abi.md §Error model):
  *
  *   - ClickHouse rejects        -> a real ClickHouse error code
  *   - this build refuses        -> CODE_UNSUPPORTED (-2), never a ClickHouse code
@@ -26,7 +26,7 @@ export const CODE_UNSUPPORTED = -2;
  * this is a hand-kept mirror and MUST be bumped in the same cycle the header
  * is. A `Registry` refuses an artifact reporting a different nonzero revision;
  * 0 means the artifact predates the probe, which is ignorance rather than
- * incompatibility (spec/artifact.md §Loading).
+ * incompatibility (docs/reference/artifact.md §Loading).
  *
  * Revision 3 (2026-08-31): `chs_rows` gained `export_format` / `doc_flags` /
  * `out_bytes`, and the `chs_filter_compile` / `chs_filter_free` /
@@ -37,7 +37,7 @@ export const CODE_UNSUPPORTED = -2;
  * joined — `chs_block_parse` / `chs_block_free` / `chs_filter_eval`. This
  * binding therefore speaks 4 and refuses revision-3 artifacts — calling the
  * 5-argument `chs_filter_compile` through the 4-argument revision-3 artifact
- * is undefined behaviour, which is exactly what the gate exists to prevent.
+ * is undefined behavior, which is exactly what the gate exists to prevent.
  */
 export const ABI_REVISION = 4;
 
@@ -59,7 +59,7 @@ export class RegistryError extends ChtypesError {}
  * `code` is ALWAYS a real ClickHouse error code. "This build declines to
  * answer" is a DIFFERENT CLASS — `UnsupportedError` — never this one carrying
  * a sentinel, so no `SchemaError` ever holds `CODE_UNSUPPORTED`
- * (spec/bindings.md rule 12).
+ * (docs/reference/bindings.md rule 12).
  */
 export class SchemaError extends ChtypesError {
   readonly code: number;
@@ -129,7 +129,7 @@ export class UnsupportedError extends ChtypesError {
  * The ONE place an ABI error code becomes an error object, so the
  * refusal/decline split cannot be decided differently in two files.
  *
- * The SIGN decides (spec/bindings.md rule 12, spec/c-abi.md §Error model): a
+ * The SIGN decides (docs/reference/bindings.md rule 12, docs/reference/c-abi.md §Error model): a
  * positive code is the server's own refusal and rides through verbatim; any
  * negative code is this library declining (`-2` "I will not guess", `-1` a
  * guarded exception, and a binding's own missing-symbol sentinel) and becomes
@@ -149,20 +149,42 @@ export function schemaErrorFor(
 
 // ---------------------------------------------------------------- artifacts
 //
-// The fetch/verify contract (docs/fetch.md §7) shares six codes across the
+// The fetch/verify contract (docs/guides/fetch.md §7) shares six codes across the
 // four SDKs. Five of them are verdicts of the verification chain or of the
 // source and are raised by `ensure` / the CLI; the sixth,
 // `CHTYPES_ARTIFACT_MISSING`, is the loader's — raised when a registry is
 // asked for a line no directory on the search path holds.
 
-/** The codes docs/fetch.md §7 shares across every SDK. */
+/**
+ * The codes docs/guides/fetch.md §6 shares across every SDK, as named constants.
+ *
+ * Each error below carries its own `code`, and a caller matches on it. Naming
+ * them here is what lets that caller write `err.code === CODE_ARTIFACT_PINNED`
+ * instead of retyping the string — which is exactly why the Go, Python and Rust
+ * bindings all export them, and why this one already exported
+ * `CODE_UNSUPPORTED`. A typo in a hand-written literal is a comparison that is
+ * silently always false.
+ */
+export const CODE_ARTIFACT_MISSING = 'CHTYPES_ARTIFACT_MISSING';
+/** docs/guides/fetch.md §6: the signature did not verify against the trust list. */
+export const CODE_ARTIFACT_UNTRUSTED = 'CHTYPES_ARTIFACT_UNTRUSTED';
+/** docs/guides/fetch.md §6: a hash mismatch, or a release that disagrees with itself. */
+export const CODE_ARTIFACT_CORRUPT = 'CHTYPES_ARTIFACT_CORRUPT';
+/** docs/guides/fetch.md §6: `--frozen` refused an asset the lock file does not pin. */
+export const CODE_ARTIFACT_PINNED = 'CHTYPES_ARTIFACT_PINNED';
+/** docs/guides/fetch.md §6: the release offers nothing for this platform or line. */
+export const CODE_ARTIFACT_UNPUBLISHED = 'CHTYPES_ARTIFACT_UNPUBLISHED';
+/** docs/guides/fetch.md §6: the source could not be reached or does not serve the release. */
+export const CODE_SOURCE_UNREACHABLE = 'CHTYPES_SOURCE_UNREACHABLE';
+
+/** The codes docs/guides/fetch.md §7 shares across every SDK. */
 export type ArtifactErrorCode =
-  | 'CHTYPES_ARTIFACT_MISSING'
-  | 'CHTYPES_ARTIFACT_UNTRUSTED'
-  | 'CHTYPES_ARTIFACT_CORRUPT'
-  | 'CHTYPES_ARTIFACT_PINNED'
-  | 'CHTYPES_ARTIFACT_UNPUBLISHED'
-  | 'CHTYPES_SOURCE_UNREACHABLE';
+  | typeof CODE_ARTIFACT_MISSING
+  | typeof CODE_ARTIFACT_UNTRUSTED
+  | typeof CODE_ARTIFACT_CORRUPT
+  | typeof CODE_ARTIFACT_PINNED
+  | typeof CODE_ARTIFACT_UNPUBLISHED
+  | typeof CODE_SOURCE_UNREACHABLE;
 
 /** The command this SDK's §7 message tells a user to run. */
 export const FETCH_COMMAND = 'npx @wavehouse/chtypes fetch';
@@ -183,7 +205,7 @@ export function artifactMissingMessage(line: string, platform: string, lookedIn:
 }
 
 /**
- * The one identifiable error for a missing artifact (docs/fetch.md §7):
+ * The one identifiable error for a missing artifact (docs/guides/fetch.md §7):
  * a `Registry` was asked for a line that no directory on its search path
  * holds. `code` is `'CHTYPES_ARTIFACT_MISSING'`; the message is the
  * contract's, and names every directory that was looked in and the command
@@ -210,7 +232,7 @@ export class ArtifactMissingError extends RegistryError {
 }
 
 /**
- * Base of the fetch-time verdicts (docs/fetch.md §3–§7). `code` is one of the
+ * Base of the fetch-time verdicts (docs/guides/fetch.md §3–§7). `code` is one of the
  * shared codes; the subclasses exist so `instanceof` reads as well as `code`.
  */
 export class FetchError extends ChtypesError {

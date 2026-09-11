@@ -1,4 +1,4 @@
-//! Fetching, verifying and installing artifacts — `docs/fetch.md`, the
+//! Fetching, verifying and installing artifacts — `docs/guides/fetch.md`, the
 //! contract every SDK implements identically. Behind the `fetch` feature
 //! (on by default).
 //!
@@ -37,7 +37,7 @@ use source::Source;
 /// environment's trust policy, no lock, quiet.
 #[derive(Debug, Clone, Default)]
 pub struct EnsureOptions {
-    /// An explicit registry directory (`--dest`; `docs/fetch.md` §1 item 1).
+    /// An explicit registry directory (`--dest`; `docs/guides/fetch.md` §1 item 1).
     /// Searched first and written to. `None` = `$CHTYPES_REGISTRY`, else the
     /// per-user cache.
     pub dest: Option<PathBuf>,
@@ -135,7 +135,7 @@ pub struct ReleaseInfo {
     /// The id of the key that signed `SHA256SUMS`; `None` when the signature
     /// step was skipped under `CHTYPES_ALLOW_UNSIGNED=1`.
     pub signed_by: Option<String>,
-    /// The artifacts' licence, as the listing names it.
+    /// The artifacts' license, as the listing names it.
     pub license: String,
     /// Every published artifact, as listed.
     pub artifacts: Vec<IndexRow>,
@@ -143,14 +143,14 @@ pub struct ReleaseInfo {
 
 /// Make ClickHouse `line` (`25.8`, or an exact patch `25.8.28.1-lts`)
 /// installed and verified for this host, fetching it through the
-/// `docs/fetch.md` §3 chain when it is not.
+/// `docs/guides/fetch.md` §3 chain when it is not.
 ///
 /// Idempotent: a line already installed whose library hashes what the signed
 /// release lists is [`Action::AlreadyInstalled`] and nothing is downloaded —
 /// the release's three small files are read, the tarball is not. Only
 /// [`EnsureOptions::offline`] reads no source: then an installed line that
 /// hashes what its own manifest says is the answer, and nothing else is
-/// (`docs/fetch.md`, Decisions). "Installed" means anywhere on the §1 search
+/// (`docs/guides/fetch.md`, Decisions). "Installed" means anywhere on the §1 search
 /// path when no [`EnsureOptions::dest`] is given (what a registry would
 /// find), and in `dest` itself when one is (the caller named where the line
 /// must be). Otherwise the asset for the line is downloaded, hashed, unpacked
@@ -181,7 +181,7 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
     // hashes what its own manifest says is the answer, and nothing else is.
     // Otherwise the signed release is read first — SHA256SUMS, its signature,
     // index.json; never the tarball — and "installed" means hashing what that
-    // listing says (§3), the same in all four SDKs (docs/fetch.md, Decisions).
+    // listing says (§3), the same in all four SDKs (docs/guides/fetch.md, Decisions).
     let found = locate_in(&search, &request.minor).and_then(|dir| InstalledDir::read(&dir).ok());
     if opts.offline && !opts.force {
         if let Some(inst) = &found {

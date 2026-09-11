@@ -1,6 +1,6 @@
 """The artifact's own description of itself, and the paths every SDK agrees on.
 
-`manifest.json` (spec/artifact.md) is the loader's single source of truth for
+`manifest.json` (docs/reference/artifact.md) is the loader's single source of truth for
 the shared library's file name and the only integrity check that means
 anything. Shared by the loader (`registry.py`) and the fetcher (`fetch.py`),
 which is why it lives apart from both.
@@ -40,7 +40,7 @@ def cache_registry_dir(platform: str | None = None) -> str:
     """The per-user artifact cache for a platform — ``${XDG_CACHE_HOME:-~/.cache}/
     chtypes/artifacts/<os>-<arch>``, this host's by default. Where fetch installs,
     where a core-repository build lands, and slot 3 of the registry search path
-    (docs/fetch.md §1). A path, not a promise: it need not exist yet."""
+    (docs/guides/fetch.md §1). A path, not a promise: it need not exist yet."""
     base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
     return os.path.join(base, "chtypes", "artifacts", platform or host_platform())
 

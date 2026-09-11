@@ -1,7 +1,7 @@
 package chtypes
 
 // autofetch.go — the search-path miss and the opt-in lazy fetch
-// (docs/fetch.md §1, §6, §7).
+// (docs/guides/fetch.md §1, §6, §7).
 
 import (
 	"context"
@@ -44,7 +44,7 @@ func (r *Registry) ForContext(ctx context.Context, v Version) (*Library, error) 
 // loads the first one that names a library which, once loaded, answers for
 // v. A directory whose library fails to load is an error, not a skip: a
 // registry that silently passes over a broken install would answer from a
-// neighbour, and the search order is the operator's to fix.
+// neighbor, and the search order is the operator's to fix.
 func (r *Registry) loadFromSearchPath(v Version, minor string) (*Library, error) {
 	for _, dir := range r.search {
 		sub := filepath.Join(dir, minor)

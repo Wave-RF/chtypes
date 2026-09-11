@@ -1,6 +1,6 @@
 package chtypes
 
-// fetch_lock.go — pinning (docs/fetch.md §5).
+// fetch_lock.go — pinning (docs/guides/fetch.md §5).
 //
 // `fetch --lock chtypes.lock` records, per <os>-<arch>/<minor>, the asset
 // file and sha256 that were installed; `fetch --frozen` refuses anything

@@ -17,17 +17,17 @@ serde = { version = "1", features = ["derive"] }
 # serde_json reads `manifest.json` and writes the settings object that crosses the
 # C boundary — both of which are this crate's own well-formed UTF-8.
 #
-# It deliberately does NOT read result documents. `raw_value` was the analogue of
+# It deliberately does NOT read result documents. `raw_value` was the analog of
 # Go's json.RawMessage here, but serde_json cannot parse a document at all when a
 # String column's bytes are not valid UTF-8 — which is how this crate came to
-# retry through `String::from_utf8_lossy` and destroy the bytes `spec/c-abi.md`
+# retry through `String::from_utf8_lossy` and destroy the bytes `docs/reference/c-abi.md`
 # calls authoritative. `crate::doc` reads those documents over `&[u8]`, and
 # `crate::json` compares leaf text exactly; `arbitrary_precision` is not enabled
 # for the same reason it never was (see those modules' docs).
 serde_json = "1"
 thiserror = "2"
 
-# --- the `fetch` feature: chtypes::ensure and the `chtypes` binary (docs/fetch.md).
+# --- the `fetch` feature: chtypes::ensure and the `chtypes` binary (docs/guides/fetch.md).
 # Every crate below is optional and behind `fetch`, so `--no-default-features`
 # builds with exactly the dependency set above.
 #
@@ -77,3 +77,24 @@ serde_json = "1"
 [[example]]
 name = "demo"
 path = "examples/demo.rs"
+
+# CI already runs `cargo clippy --all-targets -- -D warnings`, which enforces
+# clippy's default lint set (the `correctness`/`suspicious`/`style`/
+# `complexity`/`perf` groups); this table only ADDS to that, and every entry
+# below is already clean on this tree.
+#
+# `clippy::pedantic` (317 hits) and `clippy::nursery` are not enabled: at
+# that volume it stops being "stricter" and starts being a source-wide
+# rewrite outside a lint-tooling change's scope. `clippy::cargo` is enabled
+# except `multiple_crate_versions`, which fires once (two `syn` majors pulled
+# in transitively by different dependencies) and can only be cleared by a
+# dependency bump, not a lint config. `unwrap_used`/`expect_used`/`panic`/
+# `print_stdout` were tried and dropped for the same reason (68-290 existing,
+# legitimate hits in tests and the CLI binary); `dbg_macro`/`todo`/
+# `unimplemented` were already zero-hit and are free debug-leftover guards.
+[lints.clippy]
+cargo = { level = "warn", priority = -1 }
+multiple_crate_versions = "allow"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"

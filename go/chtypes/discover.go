@@ -10,7 +10,7 @@
 //	                    per-call settings
 //	columns          -> ReconstructDDL -> CompileDDL (+ WithCompileSettings)
 //
-// The pattern, in full (spec/bindings.md §Discovery):
+// The pattern, in full (docs/reference/bindings.md §Discovery):
 //
 //  1. run QueryServerVersion, QueryChangedSettings once per connection
 //  2. cache the ServerProfile per deployment/tenant
@@ -20,7 +20,7 @@
 //
 // Never ask the customer for their settings — ask their server. The queries
 // return exactly what the server believes, spelled the way the server spells
-// it, which is what the settings gate (spec/c-abi.md, Settings rule 2)
+// it, which is what the settings gate (docs/reference/c-abi.md, Settings rule 2)
 // validates against.
 package chtypes
 
@@ -131,7 +131,7 @@ func ParseVersionResult(body []byte) (string, error) {
 // ParseChangedSettingsResult reads QueryChangedSettings' JSONEachRow body.
 // An empty body is a stock server: an empty (non-nil) map. A duplicated name
 // resolves LAST-WRITE-WINS — the later row replaces the earlier — which is
-// the spec rule (spec/bindings.md §Discovery), asserted by every SDK so one
+// the spec rule (docs/reference/bindings.md §Discovery), asserted by every SDK so one
 // server answer can never discover two different profiles.
 func ParseChangedSettingsResult(body []byte) (map[string]string, error) {
 	docs, err := jsonEachRowDocs(body)
@@ -287,7 +287,7 @@ func ReconstructDDL(cols []DiscoveredColumn) (string, error) {
 // core-repository build lands, and what every SDK's tests and playgrounds
 // fall back to when CHTYPES_REGISTRY is unset — one directory the four SDKs
 // agree on, so a machine set up once serves all of them. It is item 3 of the
-// docs/fetch.md §1 search path (RegistrySearchPath is the whole list).
+// docs/guides/fetch.md §1 search path (RegistrySearchPath is the whole list).
 // It is a PATH, not a promise: NewRegistry still errors if nothing is there.
 func DefaultRegistryDir() string {
 	return DefaultRegistryDirFor(HostPlatform())

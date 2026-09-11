@@ -25,7 +25,7 @@
  * A loader therefore MUST pair an artifact with the header it was built
  * from: symbol PRESENCE proves a function exists, never that its signature
  * matches this file. (The presence probe stays because a Registry may load a
- * third-party-built artifact; see spec/c-abi.md §ABI identity.) After the
+ * third-party-built artifact; see docs/reference/c-abi.md §ABI identity.) After the
  * first publish this section is replaced by a compatibility policy and the
  * usual semantic-version rules begin.
  * -------------------------------------------------------------------------
@@ -77,7 +77,7 @@ extern "C" {
  * server_revision >= DBMS_MIN_REVISION_WITH_CUSTOM_SERIALIZATION
  * (NativeReader.cpp:182 on 24.8, :211 on 26.7), which the FORMAT path never
  * reaches. Blocks captured off a live TCP connection ARE revision-tagged and
- * are therefore NOT this format; see spec/c-abi.md.
+ * are therefore NOT this format; see docs/reference/c-abi.md.
  *
  * Because the stream carries names and types, this is a format where the
  * declared schema and the payload can DISAGREE — and ClickHouse's own
@@ -145,7 +145,7 @@ CHS_API const char * chs_clickhouse_version(void);
  * PRESENCE proves a function exists, never that its signature matches. Before
  * this revision existed, a loader holding a header and an artifact built from
  * a different cycle had no way to discover the mismatch except by calling
- * through it, which is undefined behaviour. Now it can ask.
+ * through it, which is undefined behavior. Now it can ask.
  *
  * THE RULE, and it is the whole rule:
  *
@@ -156,7 +156,7 @@ CHS_API const char * chs_clickhouse_version(void);
  *                         the artifact and say both numbers.
  *   * Symbol ABSENT    -> the artifact predates this probe. Report revision 0
  *                         and keep the pre-existing degradation rules
- *                         (spec/artifact.md §Loading step 5); absence is not a
+ *                         (docs/reference/artifact.md §Loading step 5); absence is not a
  *                         claim of incompatibility, only of ignorance.
  *
  * It increments by exactly ONE per consolidation cycle that changes any
@@ -184,7 +184,7 @@ CHS_API const char * chs_clickhouse_version(void);
  * chs_filter_compile / chs_filter_free / chs_filter_rows trio joins the
  * surface (25 exported functions). This is the SIGNATURE-CHANGE case: calling
  * either era's chs_rows through the other's declaration is undefined
- * behaviour, which is exactly what this gate refuses.
+ * behavior, which is exactly what this gate refuses.
  *
  * Revision 4 is the filter phase-2 cycle, 2026-08-31 (same day, second
  * cycle): chs_filter_compile gains params_json ({name:Type} query
@@ -271,7 +271,7 @@ CHS_API int chs_init(const char * timezone, const char * unsafe_families, char *
  * `chtypes_custom_settings_prefixes` key, comma-separated, mirroring the
  * server's own custom_settings_prefixes element (absent key = unchanged).
  * Per-call settings run the same gate: an unknown name rejects that call with
- * code 115, exactly as a server rejects the whole query (spec/c-abi.md,
+ * code 115, exactly as a server rejects the whole query (docs/reference/c-abi.md,
  * Settings rule 2). */
 CHS_API int chs_set_default_settings(const char * settings_json, char ** out_err);
 
@@ -309,7 +309,7 @@ CHS_API void chs_free(char * p);
  * and safe to call when chs_init was never reached. */
 CHS_API void chs_shutdown(void);
 
-/* Parse and canonicalise one type expression.
+/* Parse and canonicalize one type expression.
  * Returns 0 and sets *out_canonical on success; on failure returns the error
  * code (a ClickHouse code, or CHS_CODE_UNSUPPORTED) and sets *out_code /
  * *out_err. Every out param is optional (may be NULL) — the return value
@@ -344,7 +344,7 @@ enum chs_compile_mode
  *                  setting the profile names takes the caller's value; every
  *                  setting it does not name keeps the library's own compile
  *                  base (build defaults plus the derived permissive type-gate
- *                  list — see spec/c-abi.md §Compile-time settings). A partial
+ *                  list — see docs/reference/c-abi.md §Compile-time settings). A partial
  *                  profile can therefore admit a schema the server might
  *                  refuse, but can never fabricate a rejection.
  *                  Any other value is refused loudly (-2), reserved for a
@@ -388,7 +388,7 @@ CHS_API void chs_schema_free(chs_schema * s);
  * CREATE spelling ("CollapsingMergeTree(sign)"); `order_by` the sorting key
  * ("tuple()", "id", "(day, key)").
  *
- * Modelled: MergeTree, Replacing, Collapsing, VersionedCollapsing, Summing,
+ * Modeled: MergeTree, Replacing, Collapsing, VersionedCollapsing, Summing,
  * Aggregating — exactly mergeBlock's switch minus Graphite/Coalescing. Without
  * this call (or with "MergeTree") chs_rows behaves as if no engine were
  * declared.
@@ -402,7 +402,7 @@ CHS_API void chs_schema_free(chs_schema * s);
  *                             server's own MergeTreeSettings object, never a
  *                             hand list. A known name declared at a NON-default
  *                             value is refused (-2, naming it): no MergeTree
- *                             setting's behaviour is modelled by this build
+ *                             setting's behavior is modeled by this build
  *                             yet, and silently ignoring a declared value would
  *                             mean the declared profile is not the profile. A
  *                             name declared AT its default is inert and
@@ -411,7 +411,7 @@ CHS_API void chs_schema_free(chs_schema * s);
  *
  * Returns, and these are three DIFFERENT verdicts a caller must not conflate:
  *   0    accepted;
- *   -2   CHS_CODE_UNSUPPORTED — engine or sorting key not modelled, or a
+ *   -2   CHS_CODE_UNSUPPORTED — engine or sorting key not modeled, or a
  *        non-default MergeTree setting. "A real server might well accept
  *        this; I decline to guess";
  *   115  UNKNOWN_SETTING — the server's own REJECTION of a MergeTree setting
@@ -495,7 +495,7 @@ CHS_API int chs_schema_column_default_is_literal(const chs_schema * s, int i);
  * distinct now64(9) values. Emit `stored` verbatim: a tick count re-encoded as
  * a JSON float is a hard reject (code 27), not a coercion.
  *
- * Three keys, recognised on `settings_json` alongside ClickHouse's own, are the
+ * Three keys, recognized on `settings_json` alongside ClickHouse's own, are the
  * caller's entire interface to clock skew:
  *
  *   chtypes_now_epoch_nanos       pin the batch instant outright
@@ -578,7 +578,7 @@ typedef struct chs_bytes
  * ALWAYS emitted and is not a flag. CHS_DOC_ALL reproduces the revision-2
  * document byte-for-byte; 0 is "lean" (verdicts only). A bit outside
  * CHS_DOC_ALL is refused loudly (the whole call answers unsupported), so a
- * future flag can never silently mean nothing. spec/c-abi.md §Document flags
+ * future flag can never silently mean nothing. docs/reference/c-abi.md §Document flags
  * is the full contract, including the conservative retention rule that keeps
  * TRANSFORMS-without-VALUES documents SDK-derivable and the cost asymmetry
  * (VALUES without TRANSFORMS skips the reference second-parse — real compute
@@ -609,7 +609,7 @@ typedef struct chs_bytes
  * and rows_skipped are exactly what they were when skips were silent.
  *
  * THE EXPORT CHANNEL (revision 3; docs/proposals/rows-export.md, normative
- * text in spec/c-abi.md §Rows). `export_format` is CHS_EXPORT_NONE or an
+ * text in docs/reference/c-abi.md §Rows). `export_format` is CHS_EXPORT_NONE or an
  * enum chs_format value this artifact can SERIALIZE — this revision exactly
  * CHS_JSON_COMPACT_EACH_ROW. With an export requested, out_bytes (required
  * non-NULL, always initialized to {NULL,0} at entry) receives the batch's
@@ -640,7 +640,7 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * Phase 2 (revision 4): one boolean SQL expression over a compiled schema's
  * columns, evaluated per row of a body — with {name:Type} query parameters,
  * and a parse-once/eval-many twin (chs_block_parse + chs_filter_eval,
- * below). spec/c-abi.md §Filters and §Blocks are the full contract; the
+ * below). docs/reference/c-abi.md §Filters and §Blocks are the full contract; the
  * header states the load-bearing parts.
  *
  * chs_filter_compile parses expr_sql with ClickHouse's own ParserExpression
@@ -666,7 +666,7 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * substitution. Handle identity is per-(schema, expr, params) — values are
  * baked in at compile; a caller compiling filters from tenant-influenced
  * values MUST bound its cache (LRU) and its compile rate per principal
- * (spec/c-abi.md §Filters, Query parameters).
+ * (docs/reference/c-abi.md §Filters, Query parameters).
  *
  * Refused (-2), never guessed: non-deterministic expressions (clock reads —
  * now() > ts —, rand(), server-constants, insertion-order functions; the
@@ -699,7 +699,7 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * outcome rejected/unsupported with "verdicts":"". Evaluation runs under the
  * DEFAULT-evaluation admission budgets; volatile DEFAULTs resolve against
  * one clock instant per call. NOTHING may enforce read-side security on this
- * API until the WHERE-truth rig gates green (spec/c-abi.md §Filters) — the
+ * API until the WHERE-truth rig gates green (docs/reference/c-abi.md §Filters) — the
  * twin below is call-shape, not an enforcement opening. */
 typedef struct chs_filter chs_filter;
 
@@ -741,7 +741,7 @@ CHS_API char * chs_filter_rows(
  * block may be evaluated by MANY filters, sequentially; evaluation does not
  * mutate it. Filter and block MUST come from the SAME schema handle —
  * chs_filter_eval on a mismatched pair answers a rejected document (1002),
- * loudly, never undefined behaviour.
+ * loudly, never undefined behavior.
  *
  * THREADS: a chs_filter_eval call is a use of BOTH handles — the filter's
  * rule applies (and a filter use is a use of its schema handle, as

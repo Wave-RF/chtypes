@@ -1,7 +1,7 @@
 package chtypes
 
 // fetch.go — fetching, verifying and installing artifacts: the contract
-// every SDK implements (docs/fetch.md). Ensure is the function, `chtypes
+// every SDK implements (docs/guides/fetch.md). Ensure is the function, `chtypes
 // fetch` (go/cmd/chtypes) the command; both walk the same chain:
 //
 //	0. SHA256SUMS.sig verifies over the exact bytes of SHA256SUMS under a
@@ -89,7 +89,7 @@ type FetchOptions struct {
 	HTTPClient *http.Client
 }
 
-// ReleaseIndex is a release's index.json (docs/artifacts.md §2), schema 1.
+// ReleaseIndex is a release's index.json (docs/guides/artifacts.md §2), schema 1.
 type ReleaseIndex struct {
 	Schema      int               `json:"schema"`
 	GeneratedAt string            `json:"generated_at"`
@@ -199,7 +199,7 @@ type VerifyResult struct {
 // publishes for it; an exact patch ("25.8.28.1-lts") is a hard requirement.
 // Idempotent: installed-and-verified is a no-op; otherwise the fetch walks
 // the verification chain above. Every failure is an *ArtifactError whose
-// Code is one of the docs/fetch.md §7 codes (errors.Is against the
+// Code is one of the docs/guides/fetch.md §7 codes (errors.Is against the
 // sentinels works), except a bad option, which is a plain error.
 func Ensure(ctx context.Context, spelling string, opts FetchOptions) (*Installed, error) {
 	if ctx == nil {
@@ -396,7 +396,7 @@ var channelSuffix = regexp.MustCompile(`-(lts|stable|prestable|testing)$`)
 
 // parseSpelling turns what a caller typed into (line, exact): "25.8" and
 // "v25.8" are the line; "25.8.28.1" and "v25.8.28.1-lts" are that line
-// plus an exact patch, which is a hard requirement (docs/fetch.md §2). A
+// plus an exact patch, which is a hard requirement (docs/guides/fetch.md §2). A
 // three-part spelling is taken as its line.
 func parseSpelling(s string) (line, exact string, err error) {
 	s = strings.TrimSpace(s)
@@ -426,7 +426,7 @@ func parseSpelling(s string) (line, exact string, err error) {
 // exactMatches says whether a published version satisfies an exact-patch
 // spelling. A spelling that names its channel ("25.8.28.1-lts") matches only
 // itself; one that omits it ("25.8.28.1") matches that patch on any channel —
-// the same rule in all four SDKs (docs/fetch.md, Decisions).
+// the same rule in all four SDKs (docs/guides/fetch.md, Decisions).
 func exactMatches(version, exact string) bool {
 	if version == exact {
 		return true
@@ -465,7 +465,7 @@ func lessMinor(a, b string) bool { return lessVersionKey(versionKey(a), versionK
 
 // ---------------------------------------------------------------- manifest
 
-// artifactManifest is the artifact's own record of itself (spec/artifact.md).
+// artifactManifest is the artifact's own record of itself (docs/reference/artifact.md).
 type artifactManifest struct {
 	OS                string `json:"os"`
 	Arch              string `json:"arch"`
@@ -577,7 +577,7 @@ func (f *fetcher) note(format string, args ...any) {
 	}
 }
 
-// warn is never silent: the one loud warning docs/fetch.md §4 requires.
+// warn is never silent: the one loud warning docs/guides/fetch.md §4 requires.
 func (f *fetcher) warn(format string, args ...any) {
 	w := f.opts.Progress
 	if w == nil {

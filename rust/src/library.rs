@@ -47,19 +47,19 @@ impl DefaultKind {
     }
 }
 
-/// One column of a compiled schema, as this build canonicalised it.
+/// One column of a compiled schema, as this build canonicalized it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Column {
     /// The column name.
     pub name: String,
     /// The canonical type in **ClickHouse's own spelling** — `Decimal(18, 4)`,
     /// `Enum8('a' = 1, 'b' = 2)`, `Map(String, Array(UInt8))`, with a space after
-    /// each comma. Pass it through verbatim; a binding must not normalise
+    /// each comma. Pass it through verbatim; a binding must not normalize
     /// whitespace of its own.
     pub ty: String,
     /// Which clause the column carries, if any.
     pub default_kind: DefaultKind,
-    /// The DEFAULT/MATERIALIZED/ALIAS expression as ClickHouse canonicalised it,
+    /// The DEFAULT/MATERIALIZED/ALIAS expression as ClickHouse canonicalized it,
     /// empty when there is none.
     pub default_expr: String,
     /// True when the DEFAULT is a plain literal applicable without the
@@ -85,16 +85,16 @@ pub struct Column {
 /// share ONE set of the wrapper's process-globals — the same reason `chs_init`
 /// is deduplicated by path just below. `set_default_settings` REPLACES the
 /// seeded settings list while the row path reads it by reference
-/// (`spec/c-abi.md` §Thread-safety: it "MUST be serialized against all other
+/// (`docs/reference/c-abi.md` §Thread-safety: it "MUST be serialized against all other
 /// calls"), and two `Mutex<()>` values, one per `Library`, would have excluded
 /// nothing at all. The mutex is therefore interned on the canonicalized path,
-/// exactly as `INITED` is; `spec/bindings.md` §Concurrency states the rule.
+/// exactly as `INITED` is; `docs/reference/bindings.md` §Concurrency states the rule.
 pub struct Library {
     version: String,
     minor: String,
     path: PathBuf,
     api: Api,
-    /// Serialises every call into this library. See the type docs.
+    /// Serializes every call into this library. See the type docs.
     lock: Arc<Mutex<()>>,
 }
 
@@ -235,9 +235,9 @@ impl Library {
         &self.path
     }
 
-    /// Parse and canonicalise one type expression.
+    /// Parse and canonicalize one type expression.
     ///
-    /// Canonicalisation is not a spelling normaliser: `DECIMAL(18,4)` and
+    /// Canonicalization is not a spelling normalizer: `DECIMAL(18,4)` and
     /// `Decimal64(4)` both become `Decimal(18, 4)`, `BIGINT` becomes `Int64`,
     /// `Variant(UInt8, String)` becomes `Variant(String, UInt8)` with members
     /// sorted, and `Int8(3)` drops the surplus parameter rather than failing.
@@ -247,7 +247,7 @@ impl Library {
     ///
     /// Returns the canonical spelling in **ClickHouse's own text**, verbatim —
     /// `Decimal(18, 4)` with the space after the comma. String-compare against
-    /// it exactly; never re-normalise whitespace.
+    /// it exactly; never re-normalize whitespace.
     ///
     /// # Errors
     ///
@@ -282,7 +282,7 @@ impl Library {
     ///
     /// and a DECLARED settings profile — the settings the deployment's server
     /// runs, fixed into the handle exactly as a real `CREATE TABLE` fixes them
-    /// into the table (`spec/c-abi.md` §Compile-time vs per-call settings) —
+    /// into the table (`docs/reference/c-abi.md` §Compile-time vs per-call settings) —
     /// reads as a sentence:
     ///
     /// ```no_run
@@ -342,7 +342,7 @@ impl Library {
     /// to a particular tenant's table: a gate declared in the compile profile
     /// binds where a real server binds it — once, at CREATE — and then
     /// outranks the per-call map for that handle (measured on live 25.10.7.6
-    /// and 26.7.3.19; spec/c-abi.md, "Server-level type gates"). This
+    /// and 26.7.3.19; docs/reference/c-abi.md, "Server-level type gates"). This
     /// process-wide seed stays the right channel only for gateway-uniform
     /// policy.
     ///
@@ -354,7 +354,7 @@ impl Library {
     /// [`crate::SETTING_NOW_EPOCH_NANOS`].
     ///
     /// Thread-safety: the ABI requires this call be serialized against every
-    /// other call on the same loaded image (`spec/bindings.md` §Concurrency,
+    /// other call on the same loaded image (`docs/reference/bindings.md` §Concurrency,
     /// rule 3 — the row path reads the seeded settings by reference). This
     /// crate satisfies that with the per-image mutex every call takes, so no
     /// caller-side exclusion is needed.
@@ -363,7 +363,7 @@ impl Library {
     ///
     /// * [`Error::Schema`] — the payload was refused **wholesale** and nothing
     ///   was committed. An unknown setting name is the server's own code `115`
-    ///   with its did-you-mean hint; unrecognised `chtypes_*` names take the
+    ///   with its did-you-mean hint; unrecognized `chtypes_*` names take the
     ///   same `115`.
     /// * [`Error::PredatesFeature`] — the artifact does not export
     ///   `chs_set_default_settings`.

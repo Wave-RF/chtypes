@@ -1,6 +1,6 @@
 package chtypes
 
-// fetch_sign.go — the signature (docs/fetch.md §4).
+// fetch_sign.go — the signature (docs/guides/fetch.md §4).
 //
 // SHA256SUMS.sig is two lines: an "untrusted comment:" line naming the key
 // id, and the base64 of a 64-byte ed25519 signature over the exact bytes of
@@ -22,7 +22,7 @@ import (
 )
 
 // ReleasePublicKeyHex is the raw 32-byte ed25519 public key the chtypes
-// artifact releases are signed with, as docs/fetch.md §4 publishes it.
+// artifact releases are signed with, as docs/guides/fetch.md §4 publishes it.
 // Only dist/publish.sh in the core repository holds the private half.
 const ReleasePublicKeyHex = "fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc"
 

@@ -1,7 +1,7 @@
 /**
  * The `chs_format` integer codes — the wire format of the bytes handed to
  * `Schema#row` / `Schema#rows`. These numbers are part of the C ABI
- * (spec/c-abi.md §Types and schemas) and MUST NOT be renumbered.
+ * (docs/reference/c-abi.md §Types and schemas) and MUST NOT be renumbered.
  *
  * Name-addressed: `JSONEachRow`. Positional (the k-th field lands in the k-th
  * insertable column; MATERIALIZED / ALIAS / EPHEMERAL occupy no position):
@@ -10,7 +10,7 @@
  *
  * The RowBinary family, `Native` and `Buffers` depend on when the loaded
  * ARTIFACT was linked, not on this package's version — probe the artifact
- * (feed it one payload) rather than assuming (spec/bindings.md §Values a
+ * (feed it one payload) rather than assuming (docs/reference/bindings.md §Values a
  * binding must accept and reject).
  */
 export const Format = {
@@ -36,10 +36,10 @@ export const Format = {
   RowBinaryWithNamesAndTypesAndDefaults: 7,
   /**
    * Column-oriented, self-describing, and what every ClickHouse client library
-   * sends on INSERT. Modelled at the revision `INSERT ... FORMAT Native` uses
+   * sends on INSERT. Modeled at the revision `INSERT ... FORMAT Native` uses
    * (0): no BlockInfo prefix and no per-column serialization-kind byte. Blocks
    * taken off a live TCP connection carry both and are a different contract
-   * (spec/c-abi.md §Native). Requires an artifact built at or after the Native
+   * (docs/reference/c-abi.md §Native). Requires an artifact built at or after the Native
    * exposure — probe it, do not assume it from this package's version.
    */
   Native: 8,
@@ -74,7 +74,7 @@ export const EXPORT_NONE = -1;
 
 /**
  * The `doc_flags` bits (`CHS_DOC_*`, revision 3) — which document GROUPS the
- * per-row documents carry (spec/c-abi.md §Document flags). The verdict
+ * per-row documents carry (docs/reference/c-abi.md §Document flags). The verdict
  * channel (batch and per-row outcome/code/err, rows_read, rows_skipped,
  * unsupported_settings, engine_rows, storage_transforms) is ALWAYS emitted
  * and is not a flag. `DOC_ALL` is today's full document; `0` is "lean"

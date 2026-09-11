@@ -21,7 +21,7 @@ pub const NO_SETTINGS: &[(&str, &str)] = &[];
 /// An empty query-parameter map, for the common [`Schema::compile_filter`]
 /// call with no `{name:Type}` parameters. Positionally, like the settings
 /// slice [`Schema::rows`] and [`Schema::set_engine`] already take — the
-/// crate's one-optional-parameter convention (`spec/bindings.md` §One compile
+/// crate's one-optional-parameter convention (`docs/reference/bindings.md` §One compile
 /// function).
 pub const NO_PARAMS: &[(&str, &str)] = &[];
 
@@ -79,7 +79,7 @@ impl Schema {
         }
     }
 
-    /// The declared columns, canonicalised by this build. Empty when the artifact
+    /// The declared columns, canonicalized by this build. Empty when the artifact
     /// predates the column-introspection group (which shipped all-or-nothing).
     pub fn columns(&self) -> &[Column] {
         &self.columns
@@ -111,9 +111,9 @@ impl Schema {
     /// `merge_tree_settings` names are validated by the server's own
     /// `MergeTreeSettings` object: an unknown name answers the server's code
     /// `115` ([`crate::Error::Schema`], code visible, so a caller can tell
-    /// "bad name" from "not modelled"). A known name declared at a
+    /// "bad name" from "not modeled"). A known name declared at a
     /// **non-default** value is refused ([`crate::Error::Unsupported`],
-    /// naming it) — no MergeTree setting's behaviour is modelled yet, and
+    /// naming it) — no MergeTree setting's behavior is modeled yet, and
     /// silently ignoring a declared value would mean the declared profile is
     /// not in force. A name declared **at** its default is inert and
     /// accepted. Values cross as strings, as everywhere on this boundary.
@@ -121,13 +121,13 @@ impl Schema {
     /// # Errors
     ///
     /// Two KINDS of failure travel through one return, told apart by the C
-    /// return's **sign** (`spec/bindings.md` rule 12) — never flatten them:
+    /// return's **sign** (`docs/reference/bindings.md` rule 12) — never flatten them:
     ///
     /// * [`crate::Error::Schema`] — positive code: **the server refused**.
     ///   This DDL can never exist and the tenant must be told. Today `115`
     ///   (unknown MergeTree setting name) is the only positive code here.
     /// * [`crate::Error::Unsupported`] — negative code: **this library
-    ///   declined** (`-2` unmodelled engine or sorting key, or a non-default
+    ///   declined** (`-2` unmodeled engine or sorting key, or a non-default
     ///   declared MergeTree setting value; `-1` a guarded exception). Validate
     ///   cautiously — a real server might have accepted it.
     /// * [`crate::Error::PredatesFeature`] — the artifact predates
@@ -256,7 +256,7 @@ impl Schema {
 
     /// [`Schema::rows`] with the revision-3 export and document-flag channels
     /// exposed: ONE `chs_rows` call, never a second, never re-parsing
-    /// (`docs/proposals/rows-export.md`; `spec/c-abi.md` §Rows is normative).
+    /// (`docs/proposals/rows-export.md`; `docs/reference/c-abi.md` §Rows is normative).
     ///
     /// `export` is `None` (no bytes; `doc_flags` still thins the document) or
     /// `Some(format)` for a [`Format`] this artifact can SERIALIZE — this
@@ -323,7 +323,7 @@ impl Schema {
     }
 
     /// Compile one boolean SQL expression over this schema's PHYSICAL columns
-    /// (`chs_filter_compile`; `spec/c-abi.md` §Filters is the full contract) —
+    /// (`chs_filter_compile`; `docs/reference/c-abi.md` §Filters is the full contract) —
     /// the same `TreeRewriter` + `ExpressionAnalyzer` pipeline the
     /// CONSTRAINT CHECK path runs, so comparison semantics are WHERE-side by
     /// construction: `x = 256` over `UInt8` promotes (false for every row),
@@ -360,7 +360,7 @@ impl Schema {
     /// MUST bound its cache (an LRU keyed on schema generation + expr +
     /// params-hash) and its compile rate per principal — the key is
     /// attacker-influencable, so an unbounded cache is a memory DoS and an
-    /// unmetered compile path is a CPU DoS (`spec/c-abi.md` §Filters).
+    /// unmetered compile path is a CPU DoS (`docs/reference/c-abi.md` §Filters).
     ///
     /// # Lifetime
     ///
@@ -387,7 +387,7 @@ impl Schema {
     ///
     /// # Errors
     ///
-    /// Rule 12's split (`spec/bindings.md`):
+    /// Rule 12's split (`docs/reference/bindings.md`):
     ///
     /// * [`crate::Error::Schema`] — ClickHouse itself refuses the expression:
     ///   unknown identifier (47), unknown function, a `NO_COMMON_TYPE` the
@@ -425,7 +425,7 @@ impl Schema {
 
     /// Parse a body ONCE into a [`Block`] (`chs_block_parse`) — the parse
     /// half of [`Filter::rows`], exported so K filters can evaluate one
-    /// event with no re-parse ([`Filter::eval`]; `spec/c-abi.md` §Blocks).
+    /// event with no re-parse ([`Filter::eval`]; `docs/reference/c-abi.md` §Blocks).
     /// Same formats and settings contract as [`Schema::rows`] (`settings` is
     /// the PARSE-side map: format settings, clock keys; evaluation takes
     /// none). Volatile DEFAULTs resolve against THIS call's clock instant,
@@ -493,7 +493,7 @@ impl Schema {
 ///
 /// NOTHING may enforce read-side security on this surface until the
 /// WHERE-truth rig gates green (zero over-admit, zero over-hide); until then
-/// it is a shadow/replay surface (`spec/c-abi.md` §Filters). In particular:
+/// it is a shadow/replay surface (`docs/reference/c-abi.md` §Filters). In particular:
 /// [`crate::Verdict::Error`] and [`crate::Verdict::Decline`] are NOT
 /// answers, and an enforcing caller MUST fail closed on both.
 pub struct Filter<'s> {
@@ -557,7 +557,7 @@ impl Filter<'_> {
     ///
     /// Filter and block MUST come from the SAME schema handle: a mismatched
     /// pair from two schemas of ONE library answers a REJECTED result (code
-    /// 1002) — the C layer's loud refusal, never undefined behaviour. A pair
+    /// 1002) — the C layer's loud refusal, never undefined behavior. A pair
     /// from two different LIBRARIES is [`crate::Error::CrossLibrary`]: no
     /// handle ever crosses a `dlopen`'d image boundary.
     ///
@@ -690,7 +690,7 @@ pub(crate) fn settings_json<K: AsRef<str>, V: AsRef<str>>(settings: &[(K, V)]) -
 ///
 /// There is deliberately no lossy fallback. A result document holding a
 /// non-UTF-8 `String` value is not valid UTF-8, and the previous retry through
-/// `String::from_utf8_lossy` destroyed exactly the bytes `spec/c-abi.md` calls
+/// `String::from_utf8_lossy` destroyed exactly the bytes `docs/reference/c-abi.md` calls
 /// authoritative. `crate::doc` reads bytes, so the repair is unnecessary; a
 /// document it cannot read is [`Error::BadDocument`], never an approximation.
 fn parse_row_doc(bytes: &[u8]) -> Result<RowDoc> {

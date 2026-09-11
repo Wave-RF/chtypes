@@ -40,7 +40,7 @@ import (
 )
 
 // Reasons emitted by classify. Stable strings — the harness groups on them,
-// so the spellings must never change (spec/bindings.md §Transformed). All are
+// so the spellings must never change (docs/reference/bindings.md §Transformed). All are
 // lossy except the four Transform.Lossy names as non-lossy.
 const (
 	// ReasonOverflowWrap: an integer wrapped mod 2^N (256 into UInt8 → 0).
@@ -100,13 +100,13 @@ const (
 	// Not a loss (nothing was sent to lose), but it belongs in a preview.
 	ReasonDefaultFilled = "default_filled"
 	ReasonZeroFilled    = "zero_filled"
-	// ReasonDefaultMaterialised: a VOLATILE DEFAULT (now()/now64(n)/today()/
+	// ReasonDefaultMaterialized: a VOLATILE DEFAULT (now()/now64(n)/today()/
 	// yesterday(), or an expression over one) that this library resolved from
 	// its own clock and the caller must send as an explicit column. A separate
 	// reason from default_filled because the claim is different: the tenant is
 	// being shown a value the *gateway* invented, not one the server chose.
 	// docs/defaults-matrix.md §5.4(3) asks for exactly this.
-	ReasonDefaultMaterialised = "default_materialised"
+	ReasonDefaultMaterialized = "default_materialized"
 
 	// The storage layer's own verdicts on rows the type layer accepted,
 	// produced by the vendored TTL pipeline (TTLDeleteAlgorithm /
@@ -121,7 +121,7 @@ const (
 // row never carried, without losing information.
 func (t Transform) lossyReason() bool {
 	switch t.Reason {
-	case ReasonReformat, ReasonDefaultFilled, ReasonZeroFilled, ReasonDefaultMaterialised:
+	case ReasonReformat, ReasonDefaultFilled, ReasonZeroFilled, ReasonDefaultMaterialized:
 		return false
 	}
 	return true
@@ -162,7 +162,7 @@ func classify(c colDoc) []Transform {
 			Reason: ReasonDefaultFilled}}
 	case "default_substituted":
 		return []Transform{{Column: c.Name, Input: "", Stored: stored,
-			Reason: ReasonDefaultMaterialised}}
+			Reason: ReasonDefaultMaterialized}}
 	case "absent":
 		return []Transform{{Column: c.Name, Input: "", Stored: stored,
 			Reason: ReasonZeroFilled}}
@@ -208,7 +208,7 @@ func classify(c colDoc) []Transform {
 			// `Wire` is the stored value written back by ClickHouse's own
 			// serializer for THIS field's vocabulary, so the two strings are
 			// comparable exactly. Any difference is one ClickHouse made.
-			// Nothing is modelled here: both sides are the vendored code's.
+			// Nothing is modeled here: both sides are the vendored code's.
 			if *c.Wire != c.Input {
 				// Text alone cannot separate a re-spelling from a loss, so it
 				// claims the lossy one and lets the reference detector, which
@@ -242,7 +242,7 @@ func classify(c colDoc) []Transform {
 
 // parseJSONValue decodes exactly one JSON value, keeping numbers exact.
 //
-// spec/bindings.md §detectors: the text is a JSON value only if a strict
+// docs/reference/bindings.md §detectors: the text is a JSON value only if a strict
 // parse consumes ALL of it, with whitespace being exactly JSON's four.
 // Two measured defects forced this precision (2026-08-17, 43 differential
 // cases): the old trailing-bytes check decoded a SECOND value and only
@@ -268,7 +268,7 @@ func parseJSONValue(s string) (any, bool) {
 	return v, true
 }
 
-// sameValue: equal after canonicalisation, where a number and its decimal
+// sameValue: equal after canonicalization, where a number and its decimal
 // string spelling are the same value (5 vs "5") but a float that has thrown
 // away 60 digits of an Int256 is not. Mirrors the arbiter's `_same_value` so
 // this library's reasons and the bake-off's classes describe the same thing.

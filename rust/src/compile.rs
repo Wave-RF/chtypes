@@ -39,7 +39,7 @@ pub enum CompileMode {
     /// Every setting the profile names takes the caller's value; every
     /// setting it does not name keeps the library's own compile base (build
     /// defaults plus the derived permissive type-gate list — see
-    /// `spec/c-abi.md` §Compile-time settings).
+    /// `docs/reference/c-abi.md` §Compile-time settings).
     #[default]
     Declared = 0,
 }
@@ -89,7 +89,7 @@ impl<'a> CompileRequest<'a> {
 
     /// Compile, consuming the request. Crosses the C boundary
     /// (`chs_schema_compile`) and returns the compiled [`Schema`] handle,
-    /// its columns canonicalised by this build.
+    /// its columns canonicalized by this build.
     ///
     /// # Errors
     ///
@@ -101,7 +101,7 @@ impl<'a> CompileRequest<'a> {
     ///   the server's own code (`50`, `386`, …); an
     ///   `Enum … DEFAULT <out-of-domain integer>` is refused with `691` on
     ///   every line, because older servers accept the DDL and then poison the
-    ///   table (`spec/c-abi.md` §Appendix).
+    ///   table (`docs/reference/c-abi.md` §Appendix).
     /// * [`crate::Error::Unsupported`] — **this build declines**
     ///   ([`crate::CODE_UNSUPPORTED`]): a DEFAULT that is a property of the
     ///   server or session (`hostName()`, `currentUser()`), one that would

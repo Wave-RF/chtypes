@@ -1,4 +1,4 @@
-//! `docs/fetch.md` §3 steps 3–4: the tarball hashed before it is unpacked,
+//! `docs/guides/fetch.md` §3 steps 3–4: the tarball hashed before it is unpacked,
 //! unpacked flat into a temporary sibling, renamed into place, and the
 //! installed library re-hashed where it landed.
 

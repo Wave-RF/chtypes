@@ -1,7 +1,7 @@
 /**
  * The result types and the document parsers. Field for field the same concepts
  * as the reference implementation's `RowResult` / `BatchResult`
- * (spec/bindings.md §Result types), in TypeScript spelling.
+ * (docs/reference/bindings.md §Result types), in TypeScript spelling.
  *
  * ---------------------------------------------------------------- text vs bytes
  * Every rendered value here comes in both spellings, and which one is
@@ -38,7 +38,7 @@ import { classify, isLossyReason } from './transform.js';
 
 /**
  * The verdict on a row or a batch — the error taxonomy in one string, and
- * conflating any two arms is a scoring error (spec/c-abi.md §Error model):
+ * conflating any two arms is a scoring error (docs/reference/c-abi.md §Error model):
  *
  * - `'accepted'` — the server would take this, possibly with silent coercions
  *   (read `transformed`), defaults filled and volatile DEFAULTs substituted
@@ -59,7 +59,14 @@ import { classify, isLossyReason } from './transform.js';
  *   stored. Only ever seen on rows inside a `BatchResult`, never as a batch
  *   verdict and never from `Schema#row`.
  */
-export type Outcome = 'accepted' | 'rejected' | 'accepted_poisoned' | 'unsupported' | 'skipped';
+export const Outcome = {
+  Accepted: 'accepted',
+  Rejected: 'rejected',
+  AcceptedPoisoned: 'accepted_poisoned',
+  Unsupported: 'unsupported',
+  Skipped: 'skipped',
+} as const;
+export type Outcome = (typeof Outcome)[keyof typeof Outcome];
 
 const EMPTY = Buffer.alloc(0);
 
@@ -83,7 +90,7 @@ export interface Value {
   /**
    * Where the value came from: `input` | `default` | `default_substituted` |
    * `absent` | `skipped` | `default_volatile_unresolved` | `default_pending` |
-   * `default_expr_unsupported` (spec/c-abi.md §`src` values).
+   * `default_expr_unsupported` (docs/reference/c-abi.md §`src` values).
    */
   readonly source: string;
 }
@@ -101,14 +108,14 @@ export interface Transform {
   readonly reason: string;
   /** 0-based index of the row inside the request body. */
   row: number;
-  /** False for reformat / default_filled / zero_filled / default_materialised. */
+  /** False for reformat / default_filled / zero_filled / default_materialized. */
   readonly lossy: boolean;
 }
 
 /** A volatile DEFAULT this library resolved instead of the server. */
 export interface Substitution {
   readonly column: string;
-  /** The DEFAULT as ClickHouse canonicalised it, e.g. `now()`. */
+  /** The DEFAULT as ClickHouse canonicalized it, e.g. `now()`. */
   readonly expr: string;
   /** The value rendered by ClickHouse's own serializer. Send it back verbatim. */
   readonly text: string;
@@ -143,7 +150,7 @@ export interface RowResult {
    * `accepted`. NOT a reliable sentinel for `unsupported`: a row-level decline
    * carries the document's code verbatim, which is 0 for e.g. a
    * `DEFAULT hostName()` decline and -2 only on the clock-skew decline — key on
-   * `outcome`, never on this number alone (spec/bindings.md §RowResult).
+   * `outcome`, never on this number alone (docs/reference/bindings.md §RowResult).
    */
   readonly errCode: number;
   /** ClickHouse's own message, `''` when none. */
@@ -210,7 +217,7 @@ export interface BatchResult {
    * `exportFormat`): the batch's accepted rows, serialized once by the
    * vendored writer, copied out of the C buffer and freed before the call
    * returned — no ownership crosses the FFI boundary. Three states, and the
-   * distinction is the ABI's own (spec/c-abi.md §Rows):
+   * distinction is the ABI's own (docs/reference/c-abi.md §Rows):
    *
    *   `undefined`         no export was requested, the export was DECLINED
    *                       (`exportDeclined` then names the reason), or a
@@ -280,8 +287,8 @@ export interface ColumnDoc {
 }
 
 /**
- * Map a document's outcome string. An outcome this binding does not recognise
- * degrades to `unsupported`, never to `rejected` (spec/bindings.md
+ * Map a document's outcome string. An outcome this binding does not recognize
+ * degrades to `unsupported`, never to `rejected` (docs/reference/bindings.md
  * §RowResult, rule added 2026-08-26): a future artifact's new verdict is an
  * answer this binding cannot interpret, and `unsupported` is the arm that is
  * never scored as agreement, while a default of `rejected` would manufacture
@@ -428,7 +435,7 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
 
   // row_spans is present exactly when export bytes were emitted;
   // export_declined exactly when an export was requested and withheld
-  // (spec/c-abi.md §Rows). Both absent = no export requested, or a call-level
+  // (docs/reference/c-abi.md §Rows). Both absent = no export requested, or a call-level
   // verdict preempted the machinery.
   const spansNode = field(doc, 'row_spans');
   const spans =
@@ -462,7 +469,7 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
  * MUST fail closed (hide the row / fail the request) on `'error'` AND
  * `'decline'` — collapsing either into `'false'`-the-answer inverts
  * fail-closed into fail-open under NOT, the measured leak class
- * (spec/bindings.md §Revision 3).
+ * (docs/reference/bindings.md §Revision 3).
  *
  * - `'true'`    the predicate is non-NULL and non-zero for this row.
  * - `'false'`   false OR NULL — SQL's three-valued logic collapsed at the
@@ -475,7 +482,13 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
  *               tripped. NOT an answer, and the state an unknown verdict
  *               character degrades to.
  */
-export type Verdict = 'true' | 'false' | 'error' | 'decline';
+export const Verdict = {
+  True: 'true',
+  False: 'false',
+  Error: 'error',
+  Decline: 'decline',
+} as const;
+export type Verdict = (typeof Verdict)[keyof typeof Verdict];
 
 /** Whether a verdict is an ANSWER (`'true'`/`'false'`) rather than an error
  * or a decline. A security-enforcing caller hides the row when this is false. */
@@ -486,10 +499,31 @@ export function isAnswer(v: Verdict): boolean {
 /**
  * The CALL-level verdict of `Filter#rows` — whether evaluation completed at
  * all; per-row failures live in the verdicts, not here. An outcome spelling
- * this binding does not recognise degrades to `'unsupported'`, never to
- * `'rejected'` (the unknown-outcome rule, spec/bindings.md §RowResult).
+ * this binding does not recognize degrades to `'unsupported'`, never to
+ * `'rejected'` (the unknown-outcome rule, docs/reference/bindings.md §RowResult).
  */
-export type FilterOutcome = 'ok' | 'rejected' | 'unsupported';
+export const FilterOutcome = {
+  Ok: 'ok',
+  Rejected: 'rejected',
+  Unsupported: 'unsupported',
+} as const;
+export type FilterOutcome = (typeof FilterOutcome)[keyof typeof FilterOutcome];
+
+/**
+ * `chs_schema_column_default_kind`'s five answers, as `ColumnInfo#defaultKind`
+ * carries them. Named here because the Go, Python and Rust bindings all name
+ * them and a TypeScript caller was otherwise typing the strings by hand — and
+ * one of them is load-bearing: `EPHEMERAL` is the column a gateway must DECLINE
+ * to preview rather than mispreview (docs/reference/bindings.md §EPHEMERAL columns).
+ */
+export const DefaultKind = {
+  None: '',
+  Default: 'DEFAULT',
+  Materialized: 'MATERIALIZED',
+  Alias: 'ALIAS',
+  Ephemeral: 'EPHEMERAL',
+} as const;
+export type DefaultKind = (typeof DefaultKind)[keyof typeof DefaultKind];
 
 /** One `'error'` or `'decline'` row, itemized: its 0-based index and the code
  * and message verbatim — ClickHouse's own for an error row, this library's

@@ -1,4 +1,4 @@
-//! `docs/fetch.md` §5: the lock file — per `<os>-<arch>/<minor>`, the asset
+//! `docs/guides/fetch.md` §5: the lock file — per `<os>-<arch>/<minor>`, the asset
 //! file and sha256 that were installed. Trust on first fetch, byte-identical
 //! thereafter.
 
@@ -68,7 +68,7 @@ impl LockFile {
             }),
             // `--frozen` with no lock file: nothing is pinned, so nothing is
             // installed — PINNED, like every other refusal under `--frozen`
-            // (docs/fetch.md, Decisions).
+            // (docs/guides/fetch.md, Decisions).
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::ArtifactPinned {
                 key: path.display().to_string(),
                 message: "--frozen, but there is no such lock file; nothing is pinned, so nothing is installed".into(),
@@ -134,7 +134,7 @@ impl LockFile {
     /// Write the lock back, atomically (a temp sibling, then rename).
     pub fn save(&self) -> Result<()> {
         let text = serde_json::to_string_pretty(self).map_err(|e| Error::Fetch {
-            message: format!("serialising the lock file: {e}"),
+            message: format!("serializing the lock file: {e}"),
         })? + "\n";
         let tmp = self
             .path

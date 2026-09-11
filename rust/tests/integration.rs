@@ -42,7 +42,7 @@ fn registry() -> Option<&'static Arc<Registry>> {
             if !dir.is_dir() {
                 announce(&format!(
                     "\nSKIP: no chtypes artifact registry at {} — fetch one with scripts/fetch.sh \
-                     25.8 (docs/fetch.md), or point ${} at a registry. Every test in this file \
+                     25.8 (docs/guides/fetch.md), or point ${} at a registry. Every test in this file \
                      is skipped, each by name below.\n",
                     dir.display(),
                     chtypes::REGISTRY_ENV
@@ -53,7 +53,7 @@ fn registry() -> Option<&'static Arc<Registry>> {
                 Ok(r) if r.libraries().is_empty() => {
                     announce(&format!(
                         "\nSKIP: registry {} holds no artifact — fetch one with scripts/fetch.sh \
-                         25.8 (docs/fetch.md). Every test in this file is skipped, each by name \
+                         25.8 (docs/guides/fetch.md). Every test in this file is skipped, each by name \
                          below.\n",
                         dir.display()
                     ));
@@ -103,7 +103,7 @@ macro_rules! registry {
 }
 
 /// A library to run single-version assertions against: `25.8` when present (the
-/// version every observation in `spec/` was captured on), else the first loaded.
+/// version every observation in `docs/reference/` was captured on), else the first loaded.
 fn primary(reg: &Registry) -> Arc<chtypes::Library> {
     reg.for_version("25.8")
         .unwrap_or_else(|_| Arc::clone(&reg.libraries()[0]))
@@ -121,7 +121,7 @@ fn the_registry_loads_and_libraries_name_themselves() {
     assert!(!reg.versions().is_empty());
     println!("registry {}: {:?}", reg.dir().display(), reg.versions());
 
-    // Release order, not directory order (spec/bindings.md §Version selection,
+    // Release order, not directory order (docs/reference/bindings.md §Version selection,
     // rule 2 — every ordered surface): the lexical scan put 25.10 before 25.8
     // until 2026-08-26. versions() and libraries() must agree.
     let libraries = reg.libraries();
@@ -226,7 +226,7 @@ fn version_resolution_accepts_a_minor_line_a_patch_and_a_drifted_patch() {
     assert_eq!(reg.for_version(&drifted).unwrap().version(), lib.version());
 
     // A version with no artifact is an error naming what IS loaded — never the
-    // nearest neighbour.
+    // nearest neighbor.
     let err = reg.for_version("19.1").unwrap_err();
     let msg = err.to_string();
     for v in reg.versions() {
@@ -327,7 +327,7 @@ fn several_versions_answer_in_one_process_with_their_own_semantics() {
             "\nSKIP several_versions_answer_in_one_process_with_their_own_semantics (isolation \
              half): the loaded lines {minors:?} are known to agree on both probes, so no \
              divergence can be observed; the proof needs 24.8 or 25.10 beside another line \
-             — scripts/fetch.sh 24.8 (docs/fetch.md). The per-version answers were asserted.\n"
+             — scripts/fetch.sh 24.8 (docs/guides/fetch.md). The per-version answers were asserted.\n"
         ));
         return;
     }
@@ -539,8 +539,8 @@ fn a_pinned_volatile_default_stores_an_exact_timestamp() {
         .iter()
         .find(|t| t.column == "ts")
         .expect("ts transform");
-    assert_eq!(t.reason, reason::DEFAULT_MATERIALISED);
-    assert!(!t.lossy(), "materialising a DEFAULT loses nothing");
+    assert_eq!(t.reason, reason::DEFAULT_MATERIALIZED);
+    assert!(!t.lossy(), "materializing a DEFAULT loses nothing");
 
     // Past the caller's skew budget the honest answer is a decline, not a
     // timestamp the server would not have written.
@@ -589,7 +589,7 @@ fn a_ttl_expired_row_is_reported_and_absent_from_the_stored_view() {
     // absent from. A binding that read only `rows` would preview a row the table
     // silently deletes at merge time.
     //
-    // The probe is arithmetic rather than a version's behaviour: a 2020 timestamp
+    // The probe is arithmetic rather than a version's behavior: a 2020 timestamp
     // under a 1-day TTL against a clock pinned to 2023 is expired on any version
     // that models TTL at all.
     assert_eq!(batch.engine_rows.as_deref(), Some(&[][..]));
@@ -783,7 +783,7 @@ fn the_row_and_batch_entry_points_agree_on_one_row() {
     assert_eq!(row.computed[0].kind, "MATERIALIZED");
     // `8`, matching live servers on every format. The positional path used to
     // compute MATERIALIZED from the type zero (`1`) — a wrapper bug fixed
-    // 2026-08-17; spec/c-abi.md §"Positional formats" records the ground truth.
+    // 2026-08-17; docs/reference/c-abi.md §"Positional formats" records the ground truth.
     assert_eq!(row.computed[0].text, "8");
 
     let json = stored(&schema, Format::JsonEachRow, br#"{"x":7,"s":"hey"}"#);
@@ -1064,7 +1064,7 @@ fn rowbinary_is_read_in_clickhouses_storage_encoding() {
 /// ClickHouse's code 27.
 const ISO_Z_ROW: &[u8] = br#"{"ts":"2020-01-02T03:04:05Z"}"#;
 
-/// `spec/c-abi.md` §"Compile-time vs per-call settings" rule 3, end to end:
+/// `docs/reference/c-abi.md` §"Compile-time vs per-call settings" rule 3, end to end:
 ///
 /// ```text
 /// per-call  >  handle profile  >  library defaults  >  ClickHouse defaults
@@ -1159,7 +1159,7 @@ fn a_profile_less_handle_is_untouched_by_the_profile_channel() {
     ));
 }
 
-/// `spec/bindings.md` rule 12 — the SIGN of `chs_schema_engine`'s return
+/// `docs/reference/bindings.md` rule 12 — the SIGN of `chs_schema_engine`'s return
 /// decides the KIND of error. A POSITIVE rc is the SERVER refusing a DDL that
 /// can therefore never exist and must arrive as [`chtypes::Error::Schema`],
 /// carrying the server's own code; a NEGATIVE rc is this library declining and
@@ -1186,10 +1186,10 @@ fn set_engine_tells_a_server_refusal_from_a_decline() {
     }
     assert!(!err.is_unsupported());
 
-    // DECLINES, every flavour the negative codes cover.
+    // DECLINES, every flavor the negative codes cover.
     for (what, err) in [
         (
-            "unmodelled engine",
+            "unmodeled engine",
             schema
                 .set_engine("NotAnEngine", "tuple()", NO_SETTINGS)
                 .unwrap_err(),
@@ -1218,11 +1218,11 @@ fn set_engine_tells_a_server_refusal_from_a_decline() {
 
 // ---- the ABI identity probe (chs_abi_revision, added 2026-08-25) -----------
 
-/// `spec/c-abi.md` §ABI identity, over the whole registry.
+/// `docs/reference/c-abi.md` §ABI identity, over the whole registry.
 ///
 /// A [`chtypes::Library`] that exists must report either this crate's
 /// [`chtypes::ABI_REVISION`] or `0`. `0` means the artifact predates
-/// `chs_abi_revision`, which `spec/artifact.md` §Loading defines as ignorance
+/// `chs_abi_revision`, which `docs/reference/artifact.md` §Loading defines as ignorance
 /// rather than incompatibility. Any other value would have been refused at
 /// load, so this asserts the invariant holds rather than trusting the loader's
 /// own report.
@@ -1261,11 +1261,11 @@ fn every_artifact_reports_a_compatible_abi_revision() {
 /// `dlopen` refcounts a mapping per file: the second `Registry` gets a second
 /// `Library` value pointing at the same C globals — including the seeded settings
 /// list `set_default_settings` REPLACES while the row path reads it by reference
-/// (`spec/c-abi.md` §Thread-safety: it "MUST be serialized against all other
+/// (`docs/reference/c-abi.md` §Thread-safety: it "MUST be serialized against all other
 /// calls"). Until 2026-08-26 the mutex lived in the `Library` VALUE, so the two
 /// held different locks over one image and excluded nothing at all; it is now
 /// interned on the canonicalized path, exactly as `chs_init` already was
-/// (`spec/bindings.md` §Concurrency).
+/// (`docs/reference/bindings.md` §Concurrency).
 ///
 /// This drives the shape the fix exists for: readers on one `Registry`, the seed
 /// on the other. The assertion is that every contended answer equals the

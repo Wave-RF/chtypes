@@ -18,10 +18,10 @@ import {
 } from './results.js';
 import { encodeSettings, type Settings } from './settings.js';
 
-/** One declared column, as ClickHouse canonicalised it. */
+/** One declared column, as ClickHouse canonicalized it. */
 export interface ColumnInfo {
   readonly name: string;
-  /** Canonical type — pass it through verbatim, never re-normalise whitespace. */
+  /** Canonical type — pass it through verbatim, never re-normalize whitespace. */
   readonly type: string;
   /** "" | "DEFAULT" | "MATERIALIZED" | "ALIAS" | "EPHEMERAL" */
   readonly defaultKind: string;
@@ -34,12 +34,12 @@ export interface ColumnInfo {
 export interface EngineOptions {
   /**
    * The `SETTINGS` clause after the engine — `allow_nullable_key` and friends,
-   * a namespace `DB::Settings` cannot carry (spec/c-abi.md §`chs_schema_engine`).
+   * a namespace `DB::Settings` cannot carry (docs/reference/c-abi.md §`chs_schema_engine`).
    * Absent or empty is structurally identical to the plain engine declaration:
    * `chs_schema_engine` takes "{}" either way. Names are validated by the
    * server's own `MergeTreeSettings` object: an unknown name throws the
    * server's own 115; a known name declared at a NON-default value is refused
-   * (`unsupported`, naming it) — no MergeTree setting's behaviour is modelled
+   * (`unsupported`, naming it) — no MergeTree setting's behavior is modeled
    * yet, and silently ignoring a declared value would mean the declared
    * profile is not in force; a name declared AT its default is inert and
    * accepted.
@@ -49,7 +49,7 @@ export interface EngineOptions {
 
 /**
  * Options for `Schema#rows` — the revision-3 export and document-flag
- * channels (spec/c-abi.md §Rows; docs/proposals/rows-export.md). Whatever the
+ * channels (docs/reference/c-abi.md §Rows; docs/proposals/rows-export.md). Whatever the
  * options, `rows()` is always ONE `chs_rows` call — never a second call,
  * never re-parsing.
  */
@@ -65,7 +65,7 @@ export interface RowsOptions {
    * A bitmask of `DOC_VALUES | DOC_TRANSFORMS | DOC_DEFAULTS` selecting the
    * document groups; the verdict channel is always present and not a flag.
    * Defaults: `DOC_ALL` when no `exportFormat` is given (the full document —
-   * plain `rows()` behaviour), `0` (LEAN — verdicts only: `values`,
+   * plain `rows()` behavior), `0` (LEAN — verdicts only: `values`,
    * `transformed`, `substituted`, `computed` and `unknownFields` all come
    * back empty) when one is. An explicit value always wins; a bit outside
    * `DOC_ALL` is refused loudly by the library, never pre-validated here.
@@ -84,7 +84,7 @@ export interface CompileFilterOptions {
    * deserialized by the DECLARED type's own reader and injected as a typed
    * literal AFTER SQL parsing, so a value is never SQL text and NEVER needs
    * hand-escaping — injection safety is by construction, not by escaping
-   * (spec/c-abi.md §Filters, Query parameters). Do not render values into
+   * (docs/reference/c-abi.md §Filters, Query parameters). Do not render values into
    * the expression yourself.
    *
    * CHOOSE THE BRACE TYPE FOR THE VALUE'S DOMAIN: the declared type's own
@@ -121,7 +121,7 @@ export interface CompileFilterOptions {
  */
 export class Schema {
   /**
-   * The declared columns as ClickHouse canonicalised them, in declaration
+   * The declared columns as ClickHouse canonicalized them, in declaration
    * order — flattened under `flatten_nested=1`, DEFAULT-rewritten types
    * (`x Int64 DEFAULT NULL` compiles as `Nullable(Int64)`), ALIAS types
    * inferred. A gateway detects EPHEMERAL columns here, at compile time
@@ -132,12 +132,12 @@ export class Schema {
   /**
    * Every open `Filter` compiled from this handle, so `close()` can free them
    * FIRST — the C layer does not refcount, and freeing the schema under a
-   * live filter is use-after-free (spec/c-abi.md §Filters, handle lifetime).
+   * live filter is use-after-free (docs/reference/c-abi.md §Filters, handle lifetime).
    */
   private readonly filters = new Set<Filter>();
   /**
    * Every open `Block` parsed from this handle — the same non-owning rule,
-   * the same free-before-schema order (spec/c-abi.md §Blocks).
+   * the same free-before-schema order (docs/reference/c-abi.md §Blocks).
    */
   private readonly blocks = new Set<Block>();
 
@@ -171,7 +171,7 @@ export class Schema {
    *
    * The two error classes here are the refusal/decline split and MUST be
    * handled as peers — `UnsupportedError` is deliberately NOT
-   * `instanceof SchemaError` (spec/bindings.md rule 12):
+   * `instanceof SchemaError` (docs/reference/bindings.md rule 12):
    *
    * @param engine - the engine expression, e.g. `"SummingMergeTree"`,
    *   `"CollapsingMergeTree(sign)"`.
@@ -290,7 +290,7 @@ export class Schema {
    * the same TreeRewriter + ExpressionAnalyzer pipeline the CONSTRAINT CHECK
    * path runs, so comparison semantics are WHERE-side by construction:
    * `x = 256` over UInt8 promotes (false for every row), it never wraps
-   * (spec/c-abi.md §Filters).
+   * (docs/reference/c-abi.md §Filters).
    *
    * The expression may contain `{name:Type}` query parameters, bound with
    * `options.params` (revision 4) — substitution is the server's own
@@ -336,7 +336,7 @@ export class Schema {
   /**
    * Parse a body ONCE into a `Block` (`chs_block_parse`) — the parse half of
    * `Filter#rows`, exported so K filters can evaluate one event with no
-   * re-parse (`Filter#eval`; spec/c-abi.md §Blocks). Same formats and
+   * re-parse (`Filter#eval`; docs/reference/c-abi.md §Blocks). Same formats and
    * settings contract as `rows` (`settings` is the PARSE-side map: format
    * settings, clock keys; evaluation takes none). Volatile DEFAULTs resolve
    * against THIS call's clock instant, so
@@ -401,7 +401,7 @@ export class Schema {
  * constructed directly.
  *
  * LIFETIME: a filter REFERENCES its schema handle — the C layer does not copy
- * and does not refcount (spec/c-abi.md §Filters). This binding enforces the
+ * and does not refcount (docs/reference/c-abi.md §Filters). This binding enforces the
  * free order structurally, both ways: the `Filter` holds its `Schema` (so the
  * schema stays reachable), and `Schema#close` closes every open filter before
  * freeing the schema. `close()` is idempotent, and `using` / `Symbol.dispose`
@@ -413,13 +413,13 @@ export class Schema {
  * from two threads at once, and a chs_filter call is ALSO a use of its schema
  * handle" (two filters over ONE schema must not run concurrently either). On
  * a single JS thread every call here is synchronous, so ordinary Node code
- * satisfies both by construction (spec/bindings.md §Concurrency); do not
+ * satisfies both by construction (docs/reference/bindings.md §Concurrency); do not
  * share a `Filter` — or its `Schema` — across `worker_threads`.
  *
  * ENFORCEMENT GATE: `'error'` and `'decline'` verdicts are NOT answers — a
  * caller enforcing visibility MUST fail closed on both — and NO caller may
  * enforce read-side security on this surface until the WHERE-truth rig gates
- * green; until then it is a shadow/replay surface (spec/c-abi.md §Filters).
+ * green; until then it is a shadow/replay surface (docs/reference/c-abi.md §Filters).
  */
 export class Filter {
   private handle: FilterHandle | null;
@@ -468,7 +468,7 @@ export class Filter {
    *
    * Filter and block MUST come from the SAME schema: a mismatched pair
    * answers a REJECTED result (code 1002) — the C layer's loud refusal,
-   * never undefined behaviour. A pair from two different libraries throws
+   * never undefined behavior. A pair from two different libraries throws
    * `ChtypesError`: no handle ever crosses a dlopen'd image boundary.
    *
    * @param block - a `Block` from `Schema#parseBlock`.
@@ -507,7 +507,7 @@ export class Filter {
  * One body, parsed ONCE under one schema handle and one clock instant
  * (`chs_block_parse`). Obtained from `Schema#parseBlock`; evaluated by
  * `Filter#eval`. The parse-once/eval-many twin of `Filter#rows`
- * (spec/c-abi.md §Blocks): the live-SSE hot path is K filters × 1 event, and
+ * (docs/reference/c-abi.md §Blocks): the live-SSE hot path is K filters × 1 event, and
  * the block sheds the re-parse.
  *
  * LIFETIME: a block REFERENCES its schema handle exactly as a filter does —

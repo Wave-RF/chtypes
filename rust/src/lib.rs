@@ -9,8 +9,8 @@
 //! rule, which is why the answers are exact by construction.
 //!
 //! This crate is a peer SDK over that ABI, alongside Go, Python and TypeScript.
-//! The language-neutral contract is `spec/` in this repository; where this crate
-//! and `spec/` disagree, the spec wins and this is a bug.
+//! The language-neutral contract is `docs/reference/` in this repository; where this crate
+//! and `docs/reference/` disagree, the spec wins and this is a bug.
 //!
 //! ```no_run
 //! use chtypes::{Format, Registry, NO_SETTINGS};
@@ -41,7 +41,7 @@
 //!   this; I decline to guess". Mapping it to a rejection manufactures an
 //!   over-reject; mapping it to an acceptance manufactures an over-accept, which
 //!   is the cardinal sin — rows stream to subscribers and then the insert fails.
-//! * **Never infer one version's answer from another's.** Behaviour is not
+//! * **Never infer one version's answer from another's.** Behavior is not
 //!   monotonic: 25.10 rejects a mixed-type DEFAULT that 24.8 through 25.8 and
 //!   26.6 onward all accept; `JSON` is rejected on 24.8 and accepted from 25.3.
 //!   [`Registry::for_version`] fails, naming what is loaded, rather than
@@ -64,7 +64,7 @@
 //! An artifact is one ClickHouse release compiled behind the C ABI — 166–302 MB
 //! each, hours of C++ compute. Fetch prebuilt, signed ones with the crate's own
 //! command (`cargo install chtypes` → `chtypes fetch 25.8`) or from Rust with
-//! [`ensure`] — the `docs/fetch.md` contract, behind the default-on `fetch`
+//! [`ensure`] — the `docs/guides/fetch.md` contract, behind the default-on `fetch`
 //! feature; `scripts/fetch.sh` is the reference implementation of the same
 //! chain. A local build lands in the same per-user cache
 //! (`~/.cache/chtypes/artifacts/<os>-<arch>`). [`Registry::from_search_path`]

@@ -44,8 +44,8 @@ export type CompileMode = (typeof CompileMode)[keyof typeof CompileMode];
 
 /**
  * Options for `Library#compileDdl` — the DECLARED settings profile a schema is
- * compiled under (spec/c-abi.md §Compile-time vs per-call settings;
- * spec/bindings.md "Compile under a declared settings profile").
+ * compiled under (docs/reference/c-abi.md §Compile-time vs per-call settings;
+ * docs/reference/bindings.md "Compile under a declared settings profile").
  */
 export interface CompileOptions {
   /**
@@ -67,7 +67,7 @@ export interface CompileOptions {
 
 /**
  * One loaded ClickHouse build — the entry point for compiling schemas and
- * canonicalising types under that release's exact semantics. Obtained from
+ * canonicalizing types under that release's exact semantics. Obtained from
  * `Registry#for`; never constructed directly.
  *
  * Thread-safety: every call here is synchronous on the JS thread, so ordinary
@@ -76,7 +76,7 @@ export interface CompileOptions {
  * inside another chtypes call (a reentrancy guard, not a lock). Two
  * `worker_threads` share one dlopen'd image and one set of C globals, which no
  * per-isolate guard can see — seed settings before starting workers, or
- * serialise the seed yourself (spec/bindings.md §Concurrency).
+ * serialize the seed yourself (docs/reference/bindings.md §Concurrency).
  */
 export class Library {
   /** The exact patch this build is, e.g. "25.8.28.1-lts". */
@@ -88,7 +88,7 @@ export class Library {
   /**
    * The chs_* ABI revision this ARTIFACT was built from, or 0 when it predates
    * `chs_abi_revision`. A `Library` that exists reports either `ABI_REVISION`
-   * or 0 — a different nonzero revision is refused at load (spec/c-abi.md
+   * or 0 — a different nonzero revision is refused at load (docs/reference/c-abi.md
    * §ABI identity).
    */
   readonly abiRevision: number;
@@ -102,12 +102,12 @@ export class Library {
   }
 
   /**
-   * Parse and canonicalise one type expression, e.g. `DECIMAL(18,4)` ->
+   * Parse and canonicalize one type expression, e.g. `DECIMAL(18,4)` ->
    * `Decimal(18, 4)`. The library's spelling is authoritative: pass it through
-   * verbatim and never normalise its whitespace.
+   * verbatim and never normalize its whitespace.
    *
    * Note that this alone is insufficient for a schema — `x Int64 DEFAULT NULL`
-   * canonicalises the *column* to `Nullable(Int64)`, which only `compileDdl` sees.
+   * canonicalizes the *column* to `Nullable(Int64)`, which only `compileDdl` sees.
    *
    * @param typeExpr - a ClickHouse type expression, e.g. `"Nullable(Decimal(18,4))"`.
    * @returns the canonical spelling, e.g. `"Nullable(Decimal(18, 4))"`.
@@ -187,7 +187,7 @@ export class Library {
    * particular tenant's table: a gate declared in the compile profile binds
    * where a real server binds it — once, at CREATE — and then outranks the
    * per-call map for that handle (measured on live 25.10.7.6 and 26.7.3.19;
-   * spec/c-abi.md, "Server-level type gates"). This process-wide seed stays the
+   * docs/reference/c-abi.md, "Server-level type gates"). This process-wide seed stays the
    * right channel only for gateway-uniform policy.
    *
    * @param settings - the seed. An unknown name refuses the WHOLE payload with
@@ -225,7 +225,7 @@ export class Library {
    * Every type family in this build's own runtime registry (139 entries on
    * 25.8) — the answer to "does this build track upstream type families?"
    * without a hand-maintained table. Part of the three-question introspection
-   * surface every SDK exposes (spec/bindings.md §Introspection).
+   * surface every SDK exposes (docs/reference/bindings.md §Introspection).
    *
    * @returns the family names, one per registry entry.
    * @throws {UnsupportedError} when the artifact predates
@@ -242,7 +242,7 @@ export class Library {
    * `server_constant`, `stateful`, `resolver_error_code`. ClickHouse's own
    * answers off this build's own registry, and the input to the statelessness
    * gate (`lib/tools/gen_function_flags.py`). Part of the three-question
-   * introspection surface every SDK exposes (spec/bindings.md
+   * introspection surface every SDK exposes (docs/reference/bindings.md
    * §Introspection).
    *
    * @returns the audit text, verbatim.

@@ -3,7 +3,7 @@
 Every key is treated as optional-with-a-default. That is not defensive
 programming, it is the contract: a rejected row's document omits
 `unknown_fields`, `unsupported_settings` and `computed` entirely and carries
-`"cols":[]` (spec/c-abi.md "Keys may be absent").
+`"cols":[]` (docs/reference/c-abi.md "Keys may be absent").
 """
 
 from __future__ import annotations
@@ -250,7 +250,7 @@ def parse_batch_document(raw: bytes, payload: bytes | None = None) -> BatchResul
         # `stored` is.
         engine_rows = tuple(preview.raw(index) for index in range(len(preview)))
 
-    # The export channel's addressing (spec/c-abi.md §Rows): `row_spans` is
+    # The export channel's addressing (docs/reference/c-abi.md §Rows): `row_spans` is
     # present exactly when bytes were emitted, `export_declined` exactly when
     # an export was requested and withheld. Both keys absent is both the
     # no-export case and the call-level-verdict case — optional-with-default,
@@ -281,7 +281,7 @@ def parse_filter_document(raw: bytes) -> FilterResult:
 
     The call outcome degrades unknown spellings to UNSUPPORTED and unknown
     verdict characters to DECLINE — both the fail-closed arm, never an
-    invented answer (spec/bindings.md §Revision 3).
+    invented answer (docs/reference/bindings.md §Revision 3).
     """
     doc = _obj(decode_document(raw), "filter")
     outcome = FilterOutcome.of(_text(doc, "outcome"))

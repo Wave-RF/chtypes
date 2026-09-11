@@ -1,5 +1,5 @@
 /**
- * Fetching, verifying and installing artifacts — docs/fetch.md, the contract
+ * Fetching, verifying and installing artifacts — docs/guides/fetch.md, the contract
  * every SDK implements identically: the same source (§2), the same
  * verification chain (§3), the same signature policy (§4), the same lock
  * file (§5), the same function (§6) and the same codes (§7).
@@ -48,27 +48,27 @@ import { extractTarGz } from './tar.js';
 
 // ------------------------------------------------------------- constants
 
-/** The public artifacts host (docs/fetch.md §2); `CHTYPES_ARTIFACTS_URL` overrides it. */
+/** The public artifacts host (docs/guides/fetch.md §2); `CHTYPES_ARTIFACTS_URL` overrides it. */
 export const DEFAULT_ARTIFACTS_URL = 'https://artifacts.wavehouse.dev';
 /** The rolling release every fetch reads by default; `tag` picks a frozen one. */
 export const DEFAULT_RELEASE_TAG = 'artifacts';
 /**
  * The release signing key(s) — raw 32-byte ed25519 public keys, hex
- * (docs/fetch.md §4). `CHTYPES_TRUSTED_KEYS` or the `trustedKeys` option
+ * (docs/guides/fetch.md §4). `CHTYPES_TRUSTED_KEYS` or the `trustedKeys` option
  * REPLACES this list; it is never extended silently.
  */
 export const RELEASE_PUBLIC_KEYS: readonly string[] = [
   'fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc',
 ];
-/** The lock-file schema this SDK writes and reads (docs/fetch.md §5). */
+/** The lock-file schema this SDK writes and reads (docs/guides/fetch.md §5). */
 export const LOCK_SCHEMA = 1;
-/** The lock file `frozen` reads when no `lock` names one (docs/fetch.md, Decisions); relative, so the working directory's. */
+/** The lock file `frozen` reads when no `lock` names one (docs/guides/fetch.md, Decisions); relative, so the working directory's. */
 export const DEFAULT_LOCK_FILE = 'chtypes.lock';
 const INDEX_SCHEMA = 1;
 
 // ------------------------------------------------------------------ types
 
-/** One row of a release's `index.json` (docs/artifacts.md §2). */
+/** One row of a release's `index.json` (docs/guides/artifacts.md §2). */
 export interface IndexArtifact {
   readonly os: string;
   readonly arch: string;
@@ -108,7 +108,7 @@ export interface LockEntry {
   readonly sha256: string;
 }
 
-/** `chtypes.lock` (docs/fetch.md §5): `{"schema": 1, "artifacts": {"<os>-<arch>/<minor>": {file, sha256}}}`. */
+/** `chtypes.lock` (docs/guides/fetch.md §5): `{"schema": 1, "artifacts": {"<os>-<arch>/<minor>": {file, sha256}}}`. */
 export interface LockFile {
   readonly schema: number;
   readonly artifacts: Record<string, LockEntry>;
@@ -245,7 +245,7 @@ export function compareVersions(a: string, b: string): number {
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const RAW_KEY = /^[0-9a-fA-F]{64}$/;
 
-/** The key id docs/fetch.md §4 defines: the first 16 hex characters of sha256 over the raw 32-byte public key. */
+/** The key id docs/guides/fetch.md §4 defines: the first 16 hex characters of sha256 over the raw 32-byte public key. */
 export function keyId(rawKeyHex: string): string {
   return createHash('sha256').update(Buffer.from(rawKeyHex, 'hex')).digest('hex').slice(0, 16);
 }
@@ -696,7 +696,7 @@ function forPlatform(index: ReleaseIndex, platform: string): IndexArtifact[] {
 
 // -------------------------------------------------------------- ensure
 
-/** Concurrent `ensure`s of one line in one process share one fetch (docs/fetch.md §6). */
+/** Concurrent `ensure`s of one line in one process share one fetch (docs/guides/fetch.md §6). */
 const inFlight = new Map<string, Promise<EnsureResult>>();
 
 /**
@@ -800,7 +800,7 @@ interface InstallContext {
 
 function installContext(platform: string, dest: string, options: EnsureOptions): InstallContext {
   const frozen = options.frozen ?? false;
-  // frozen without a lock path reads ./chtypes.lock (docs/fetch.md, Decisions).
+  // frozen without a lock path reads ./chtypes.lock (docs/guides/fetch.md, Decisions).
   const lockPath =
     options.lock !== undefined && options.lock !== '' ? path.resolve(options.lock) : frozen ? path.resolve(DEFAULT_LOCK_FILE) : undefined;
   const lock = lockPath !== undefined ? readLock(lockPath) : null;

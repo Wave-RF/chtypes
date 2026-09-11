@@ -21,7 +21,7 @@
 //!   `chs_free`.** [`Api::take`] is the only function in this crate that calls
 //!   `chs_free`, and it only ever calls the one resolved from the same `dlopen`.
 //! * **Callers hold the library lock.** The functions here do no locking; the
-//!   `Library` wrapper serialises every call, including `chs_schema_compile` and
+//!   `Library` wrapper serializes every call, including `chs_schema_compile` and
 //!   `chs_free`, exactly as the reference implementation's `dlopen` path does.
 
 use std::ffi::{CStr, CString, c_char, c_int};
@@ -138,7 +138,7 @@ type FnFilterRows = unsafe extern "C" fn(
 ) -> *mut c_char;
 /// The revision-4 block twin: parse a body once (`chs_block_parse`), evaluate
 /// K filters against the block (`chs_filter_eval`), free it
-/// (`chs_block_free`). `spec/c-abi.md` §Blocks.
+/// (`chs_block_free`). `docs/reference/c-abi.md` §Blocks.
 type FnBlockParse = unsafe extern "C" fn(
     *const ChsSchema,
     c_int,
@@ -222,7 +222,7 @@ impl Api {
     /// A library that has a manifest and does not load is broken, not absent, so
     /// this returns an error rather than skipping.
     pub(crate) fn open(path: &Path) -> Result<Api> {
-        // SAFETY: dlopen runs the library's initialisers. The artifact is
+        // SAFETY: dlopen runs the library's initializers. The artifact is
         // self-contained (it exports only chs_*, keeps libc++ statically inside,
         // and links nothing but libc plus CoreFoundation on macOS), which is
         // what makes loading several of them safe.
@@ -241,7 +241,7 @@ impl Api {
             let f_compile = require(&lib, b"chs_schema_compile\0", path)?;
             let f_rows = require(&lib, b"chs_rows\0", path)?;
 
-            // The ABI identity gate (spec/c-abi.md §ABI identity). Optional:
+            // The ABI identity gate (docs/reference/c-abi.md §ABI identity). Optional:
             // 0 means the artifact predates the probe, which is ignorance and
             // keeps the per-symbol degradation rules. A DIFFERENT nonzero
             // revision positively states that these declarations do not
@@ -476,14 +476,14 @@ impl Api {
     /// MergeTree-namespace settings (the `SETTINGS` clause after the engine),
     /// in one call. `merge_tree_settings_json` NULL/`"{}"` declares none.
     ///
-    /// Per `spec/c-abi.md`'s error model, two DIFFERENT KINDS of verdict, told
+    /// Per `docs/reference/c-abi.md`'s error model, two DIFFERENT KINDS of verdict, told
     /// apart by the SIGN of the return: any POSITIVE rc is a real ClickHouse
     /// error code — the server's own refusal of this DDL, which can therefore
     /// never exist — and crosses as [`Error::Schema`] with that code and the
     /// server's message (`115` with its "Maybe you meant ..." hint is today's
     /// only instance). Any NEGATIVE rc is this library declining
     /// ([`Error::Unsupported`]) — `-2` for a non-default declared value or an
-    /// unmodelled engine/key, `-1` for a guarded exception — and a caller must
+    /// unmodeled engine/key, `-1` for a guarded exception — and a caller must
     /// validate cautiously rather than tell the tenant its DDL is wrong.
     ///
     /// # Safety

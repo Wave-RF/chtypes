@@ -20,14 +20,14 @@ const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
 if (!HAVE_REGISTRY) {
   console.warn(
-    '[chtypes] sdkfix tests against a real registry are SKIPPED: no artifact on the search path — scripts/fetch.sh 25.8 installs one (docs/fetch.md)',
+    '[chtypes] sdkfix tests against a real registry are SKIPPED: no artifact on the search path — scripts/fetch.sh 25.8 installs one (docs/guides/fetch.md)',
   );
 }
 
 const buf = (s: string): Buffer => Buffer.from(s, 'utf8');
 
 describe('outcome degradation', () => {
-  // spec/bindings.md §RowResult: an unrecognised outcome string maps to
+  // docs/reference/bindings.md §RowResult: an unrecognized outcome string maps to
   // `unsupported`, never `rejected` — a future artifact's new verdict must
   // land on the arm that is never scored as agreement, not manufacture an
   // over-reject out of vocabulary drift.
@@ -45,7 +45,7 @@ describe('outcome degradation', () => {
 });
 
 describe('discovery duplicate names', () => {
-  // spec/bindings.md §Discovery: LAST write wins, in every SDK, so one server
+  // docs/reference/bindings.md §Discovery: LAST write wins, in every SDK, so one server
   // answer can never discover two different profiles.
   it('resolves a duplicated name last-write-wins', () => {
     const body = buf(
@@ -79,7 +79,7 @@ describe.skipIf(!HAVE_REGISTRY)('against a real registry', () => {
     expect(registry.versions()).toEqual(minors);
   });
 
-  it('exposes the introspection trio (spec/bindings.md §Introspection)', () => {
+  it('exposes the introspection trio (docs/reference/bindings.md §Introspection)', () => {
     const registry = new Registry(REGISTRY ?? undefined);
     const lib = registry.libraries()[registry.libraries().length - 1]!;
     const families = lib.registeredFamilies();

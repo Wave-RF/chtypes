@@ -234,7 +234,7 @@ func TestRegistryFallsThroughTheSearchPath(t *testing.T) {
 	}
 }
 
-// lockedWriter serialises progress output from concurrent fetch waiters.
+// lockedWriter serializes progress output from concurrent fetch waiters.
 type lockedWriter struct {
 	mu *sync.Mutex
 	w  *strings.Builder

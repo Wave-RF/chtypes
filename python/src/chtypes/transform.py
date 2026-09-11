@@ -78,7 +78,7 @@ def classify(col: ColDoc) -> list[Transform]:
     # stored for a field they never sent.
     filled = {
         "default": Reason.DEFAULT_FILLED,
-        "default_substituted": Reason.DEFAULT_MATERIALISED,
+        "default_substituted": Reason.DEFAULT_MATERIALIZED,
         "absent": Reason.ZERO_FILLED,
     }.get(col.src)
     if filled is not None:
@@ -132,7 +132,7 @@ def classify(col: ColDoc) -> list[Transform]:
 def _parse_json_value(text: str) -> tuple[object, bool]:
     """Decode exactly one JSON value, keeping numbers exact.
 
-    spec/bindings.md §detectors: the text is a JSON value only if a strict
+    docs/reference/bindings.md §detectors: the text is a JSON value only if a strict
     parse consumes ALL of it, with whitespace being exactly JSON's four.
     This port originally reproduced the Go reference's two defects (fixed in
     lockstep 2026-08-17): the trailing check decoded a SECOND value and only
@@ -158,7 +158,7 @@ def _skip_space(text: str, idx: int) -> int:
 
 
 def _same_value(a: object, b: object) -> bool:
-    """Equal after canonicalisation: a number and its decimal spelling are the
+    """Equal after canonicalization: a number and its decimal spelling are the
     same value (5 vs "5"), but a float that has thrown away 60 digits of an
     Int256 is not. Mirrors the arbiter's `_same_value`."""
     if isinstance(a, dict):
@@ -194,7 +194,7 @@ def _scalar_text(value: object) -> tuple[str, bool]:
 
 _NOT_A_NUMBER: Final[tuple[Fraction, bool]] = (Fraction(0), False)
 
-# A ceiling on the digits `_rational` will materialise for one comparison. The
+# A ceiling on the digits `_rational` will materialize for one comparison. The
 # reference's `big.Rat` has no limit, and neither does the corpus (its longest
 # numeric field is 5,000 digits), but `Fraction(Decimal("1e999999999"))` would
 # try to build a billion-digit integer to answer "are these two equal": at that

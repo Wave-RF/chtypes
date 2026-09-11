@@ -1,7 +1,7 @@
 """Ed25519 signature VERIFICATION, pure Python, verify-only (RFC 8032 §5.1).
 
 The standard library has no ed25519, and this binding is zero-dependency on
-purpose, so the release signature over ``SHA256SUMS`` (docs/fetch.md §4) is
+purpose, so the release signature over ``SHA256SUMS`` (docs/guides/fetch.md §4) is
 checked here with Python integers over the twisted Edwards curve, exactly as
 RFC 8032 spells it: point decoding with the sign-bit recovery, extended
 coordinates for the group law, and the ``[S]B = R + [k]A`` equation.

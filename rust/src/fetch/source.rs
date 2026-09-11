@@ -1,4 +1,4 @@
-//! `docs/fetch.md` §2: where a release comes from — the artifacts host under
+//! `docs/guides/fetch.md` §2: where a release comes from — the artifacts host under
 //! a tag, any other HTTP(S) base, a `file://` path, or a plain directory.
 
 use std::io::Read;
