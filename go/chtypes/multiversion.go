@@ -608,6 +608,34 @@ func (r *Registry) Versions() []string {
 	return r.versionsLocked()
 }
 
+// Libraries lists the libraries this registry has actually LOADED, one per
+// line, in numeric release order — the same order Versions uses, because
+// spec/bindings.md §Version selection rule 2 governs "every ordered surface a
+// binding exposes" and two of them sorting differently is the bug that rule was
+// written after.
+//
+// It never loads anything: a lazily-discovered line that no For call has opened
+// yet appears in Versions and not here, which is what the peer bindings' own
+// libraries() answers (TypeScript and Rust both list "what has been opened so
+// far"). Opening 120 MB of artifact as the side effect of a listing call is not
+// something a caller can undo.
+func (r *Registry) Libraries() []*Library {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := map[*Library]bool{}
+	out := make([]*Library, 0, len(r.byID))
+	for _, l := range r.byID {
+		if !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return minorSortKey(out[i].Minor).before(minorSortKey(out[j].Minor))
+	})
+	return out
+}
+
 // For resolves a version to its library. A minor line ("25.8") or an exact
 // patch ("25.8.28.1-lts") both work: lookup tries the given string first,
 // then its minor line, so a drifted docker patch tag still finds its line.
@@ -1354,28 +1382,37 @@ func (b *LoadedBlock) closeLocked() {
 // "25.3", and sort.Strings put it first. (Found by the Python conformance
 // driver's differential run: every peer SDK already sorted numerically.)
 func sortMinorLines(lines []string) {
-	key := func(s string) [2]int {
-		var k [2]int
-		for i, p := range strings.SplitN(s, ".", 2) {
-			n := 0
-			for _, ch := range p {
-				if ch < '0' || ch > '9' {
-					n = -1
-					break
-				}
-				n = n*10 + int(ch-'0')
-			}
-			k[i] = n
-		}
-		return k
-	}
 	sort.Slice(lines, func(i, j int) bool {
-		a, b := key(lines[i]), key(lines[j])
-		if a[0] != b[0] {
-			return a[0] < b[0]
-		}
-		return a[1] < b[1]
+		return minorSortKey(lines[i]).before(minorSortKey(lines[j]))
 	})
+}
+
+// minorSortKey is the numeric release order of one minor line, shared by every
+// ordered surface this package exposes (Versions, Libraries, the not-found
+// error's "have […]" text) so they can never disagree.
+type minorKey [2]int
+
+func (a minorKey) before(b minorKey) bool {
+	if a[0] != b[0] {
+		return a[0] < b[0]
+	}
+	return a[1] < b[1]
+}
+
+func minorSortKey(s string) minorKey {
+	var k minorKey
+	for i, p := range strings.SplitN(s, ".", 2) {
+		n := 0
+		for _, ch := range p {
+			if ch < '0' || ch > '9' {
+				n = -1
+				break
+			}
+			n = n*10 + int(ch-'0')
+		}
+		k[i] = n
+	}
+	return k
 }
 
 func minorOf(v string) string {

@@ -1,0 +1,1472 @@
+{
+  "schema": 1,
+  "title": "The chtypes binding parity contract, machine-readable",
+  "about": [
+    "This file is the ONE machine-readable source of truth for what every binding must expose. spec/bindings.md is the prose that explains why; this is what the four test suites actually run against, and scripts/check-parity-doc.sh asserts the two agree on the object-model table.",
+    "Each entry is a LOGICAL capability, not a name. The four columns are that capability's spelling in each language, and a spelling that follows the language's own idiom (CompileDDL / compile_ddl / compileDdl / compile) is the point, not a divergence. What must never drift is which capabilities exist and, where a `value` is given, what they answer.",
+    "A binding that genuinely should not have a capability declares it as {\"absent\": \"<why>\"}. An absent with no reason fails the manifest's own integrity check, so a gap cannot be recorded silently.",
+    "The `unlisted` map is the other half of the contract: public names a binding exports that the others deliberately do not need. Each one carries a reason, the no-undeclared-surface check fails on anything that is neither a capability spelling nor listed there, and an entry naming something the binding no longer exports fails too \u2014 an excuse with nothing behind it hides the next real gap.",
+    "Spelling grammar. go: `Name` for a package-level func/type/const/var, `Type.Name` for a method or exported struct field. python: a dotted path resolved from the `chtypes` package. ts: a dotted path resolved from the package index, `Class.method` meaning a prototype method. rust: `name` for a crate-root item, `Type::name` for an inherent method, `module::NAME` for a module constant, `Enum::Variant` for a variant."
+  ],
+  "languages": ["go", "python", "ts", "rust"],
+  "groups": {
+    "registry": "The artifact-directory loader and version dispatch (spec/bindings.md §The object model, §Version selection).",
+    "library": "One loaded version, and what it can be asked (§The object model, §Introspection, §Teardown).",
+    "schema": "A compiled column list and the row calls over it (§The object model, §One compile function).",
+    "filter": "The revision 3/4 filter and block surface (§Revision 3, §Revision 4).",
+    "results": "The result types every binding hands back (§Result types).",
+    "vocabulary": "Shared value sets. These carry a `value`: the four bindings must answer with the same bytes, not merely have a symbol.",
+    "errors": "The refusal/decline split and the artifact error family (§Conformance rule 12, docs/fetch.md §6).",
+    "discovery": "The three canonical connect-time queries and their parsers (§Discovery).",
+    "fetch": "Installing and verifying artifacts (docs/fetch.md).",
+    "cli": "The `chtypes` command every SDK ships."
+  },
+  "floors": {
+    "capabilities": 100,
+    "valued": 45,
+    "per_group": 3
+  },
+  "capabilities": [
+    {
+      "id": "registry.construct",
+      "group": "registry",
+      "kind": "ctor",
+      "what": "Open a registry: an explicit artifact directory, or the docs/fetch.md §1 search path when none is given",
+      "go": "NewRegistry",
+      "python": "Registry",
+      "ts": "Registry",
+      "rust": "Registry::new"
+    },
+    {
+      "id": "registry.from-search-path",
+      "group": "registry",
+      "kind": "ctor",
+      "what": "Open a registry over the search path with no explicit directory",
+      "go": {"absent": "NewRegistry's directory argument is optional: an empty string is the search path, so one constructor covers both and a second would be the `…V2` twin §One compile function forbids."},
+      "python": {"absent": "Registry()'s `directory` defaults to None, which is the search path."},
+      "ts": {"absent": "new Registry()'s `dir` is optional, which is the search path."},
+      "rust": "Registry::from_search_path"
+    },
+    {
+      "id": "registry.versions",
+      "group": "registry",
+      "kind": "method",
+      "what": "The loaded minor lines, in numeric release order (§Version selection rule 2)",
+      "go": "Registry.Versions",
+      "python": "Registry.versions",
+      "ts": "Registry.versions",
+      "rust": "Registry::versions"
+    },
+    {
+      "id": "registry.libraries",
+      "group": "registry",
+      "kind": "method",
+      "what": "The loaded Library objects themselves, in the same numeric release order — named by §Version selection rule 2 as an ordered surface a binding exposes",
+      "go": "Registry.Libraries",
+      "python": "Registry.libraries",
+      "ts": "Registry.libraries",
+      "rust": "Registry::libraries"
+    },
+    {
+      "id": "registry.for-version",
+      "group": "registry",
+      "kind": "method",
+      "what": "Resolve a minor line or an exact patch to a Library; failure names what IS loaded (§Version selection rules 3 and 4)",
+      "go": "Registry.For",
+      "python": "Registry.for_version",
+      "ts": "Registry.for",
+      "rust": "Registry::for_version"
+    },
+    {
+      "id": "registry.search-path",
+      "group": "registry",
+      "kind": "property",
+      "what": "The directories this registry consults, in order — what an ArtifactMissing error has to be able to name",
+      "go": {"absent": "The Go registry keeps its search path unexported and renders it into the ErrArtifactMissing message instead. NEEDS A DECISION: the other three expose it as an accessor, so a Go caller cannot print the path it is about to be told is empty."},
+      "python": "Registry.search_path",
+      "ts": "Registry.searchPath",
+      "rust": "Registry::search_path"
+    },
+    {
+      "id": "registry.teardown",
+      "group": "registry",
+      "kind": "method",
+      "what": "Process teardown: join the DEFAULT evaluator's background threads before dlclose (§Teardown)",
+      "go": {"absent": "Structural, and the spec says so: the Go dlopen path never dlcloses an artifact, so no chs_shutdown is ever owed. Its function-pointer table deliberately does not dlsym chs_shutdown — see §Teardown, 'the binding that deliberately has none'."},
+      "python": "Registry.close",
+      "ts": "Registry.close",
+      "rust": "Registry::shutdown"
+    },
+    {
+      "id": "registry.timezone-option",
+      "group": "registry",
+      "kind": "option",
+      "what": "Choose the server timezone assumed for bare DateTime columns; never the host's TZ",
+      "go": "Timezone",
+      "python": "Registry.__init__",
+      "ts": "RegistryOptions",
+      "rust": "RegistryOptions"
+    },
+    {
+      "id": "library.version",
+      "group": "library",
+      "kind": "property",
+      "what": "The exact patch this library reported about itself via chs_clickhouse_version (§Version selection rule 1)",
+      "go": "Library.Version",
+      "python": "Library.version",
+      "ts": "Library.version",
+      "rust": "Library::version"
+    },
+    {
+      "id": "library.minor",
+      "group": "library",
+      "kind": "property",
+      "what": "The minor line — the first two dot-separated components (§Version selection rule 2)",
+      "go": "Library.Minor",
+      "python": "Library.minor",
+      "ts": "Library.minor",
+      "rust": "Library::minor"
+    },
+    {
+      "id": "library.path",
+      "group": "library",
+      "kind": "property",
+      "what": "The artifact path this library was loaded from",
+      "go": "Library.Path",
+      "python": "Library.path",
+      "ts": "Library.path",
+      "rust": "Library::path"
+    },
+    {
+      "id": "library.abi-revision",
+      "group": "library",
+      "kind": "property",
+      "what": "The ABI revision THIS ARTIFACT was built from; 0 predates the probe (§The object model)",
+      "go": "Library.ABIRevision",
+      "python": "Library.abi_revision",
+      "ts": "Library.abiRevision",
+      "rust": "Library::abi_revision"
+    },
+    {
+      "id": "library.validate-type",
+      "group": "library",
+      "kind": "method",
+      "what": "Canonicalise a type expression",
+      "go": "Library.ValidateType",
+      "python": "Library.validate_type",
+      "ts": "Library.validateType",
+      "rust": "Library::validate_type"
+    },
+    {
+      "id": "library.compile-ddl",
+      "group": "library",
+      "kind": "method",
+      "what": "Compile a column list — EXACTLY ONE entry point, settings and mode optional on it (§One compile function)",
+      "go": "Library.CompileDDL",
+      "python": "Library.compile_ddl",
+      "ts": "Library.compileDdl",
+      "rust": "Library::compile"
+    },
+    {
+      "id": "library.compile-settings-option",
+      "group": "library",
+      "kind": "option",
+      "what": "Declare a settings profile at compile time, in the language's own idiom for an optional argument (§One compile function, the spelling table)",
+      "go": "WithCompileSettings",
+      "python": "Library.compile_ddl",
+      "ts": "CompileOptions",
+      "rust": "CompileRequest::settings"
+    },
+    {
+      "id": "library.compile-mode-option",
+      "group": "library",
+      "kind": "option",
+      "what": "Pass the compile mode through to the library rather than validating it locally (§One compile function)",
+      "go": "WithCompileMode",
+      "python": "Library.compile_ddl",
+      "ts": "CompileOptions",
+      "rust": "CompileRequest::mode"
+    },
+    {
+      "id": "library.has-compile-settings",
+      "group": "library",
+      "kind": "method",
+      "what": "Whether this artifact exports the compile-time settings channel at all",
+      "go": "Library.HasCompileSettings",
+      "python": "Library.has_compile_settings",
+      "ts": "Library.hasCompileSettings",
+      "rust": "Library::has_compile_settings"
+    },
+    {
+      "id": "library.registered-families",
+      "group": "library",
+      "kind": "method",
+      "what": "chs_registered_families — the family names, one per registry entry (§Introspection)",
+      "go": "Library.RegisteredFamilies",
+      "python": "Library.registered_families",
+      "ts": "Library.registeredFamilies",
+      "rust": "Library::registered_families"
+    },
+    {
+      "id": "library.function-flags",
+      "group": "library",
+      "kind": "method",
+      "what": "chs_function_flags — the TSV audit VERBATIM, never re-modelled (§Introspection)",
+      "go": "Library.FunctionFlags",
+      "python": "Library.function_flags",
+      "ts": "Library.functionFlags",
+      "rust": "Library::function_flags"
+    },
+    {
+      "id": "library.reference-type",
+      "group": "library",
+      "kind": "method",
+      "what": "chs_reference_type — the widened reference type as ClickHouse spells it (§Introspection)",
+      "go": "Library.ReferenceType",
+      "python": "Library.reference_type",
+      "ts": "Library.referenceType",
+      "rust": "Library::reference_type"
+    },
+    {
+      "id": "library.set-default-settings",
+      "group": "library",
+      "kind": "method",
+      "what": "Seed the process-global default settings — the admission ceilings live here (§Concurrency rule 3)",
+      "go": {"absent": "Structural, and the spec says so: the dlopen'd function-pointer table deliberately does not dlsym chs_set_default_settings — 'the one genuinely dangerous call in the ABI … a Library structurally cannot make it' (go/chtypes/multiversion.go, §Teardown). It exists package-level on the statically linked path, behind -tags chtypes_linked, guarded by defaultSettingsMu."},
+      "python": "Library.set_default_settings",
+      "ts": "Library.setDefaultSettings",
+      "rust": "Library::set_default_settings"
+    },
+    {
+      "id": "library.teardown",
+      "group": "library",
+      "kind": "method",
+      "what": "Per-library teardown before dlclose (§Teardown)",
+      "go": {"absent": "Same structural reason as registry.teardown: a Go Library is never dlclose'd, so no chs_shutdown is owed and the symbol is deliberately not resolved."},
+      "python": "Library.close",
+      "ts": "Library.shutdown",
+      "rust": "Library::shutdown"
+    },
+    {
+      "id": "schema.columns",
+      "group": "schema",
+      "kind": "property",
+      "what": "The compiled columns, with each one's canonical type and DEFAULT kind/expression",
+      "go": "LoadedSchema.Columns",
+      "python": "Schema.columns",
+      "ts": "Schema.columns",
+      "rust": "Schema::columns"
+    },
+    {
+      "id": "schema.set-engine",
+      "group": "schema",
+      "kind": "method",
+      "what": "Declare the engine and ORDER BY — EXACTLY ONE entry point, MergeTree settings optional on it (§One compile function)",
+      "go": "LoadedSchema.SetEngine",
+      "python": "Schema.set_engine",
+      "ts": "Schema.setEngine",
+      "rust": "Schema::set_engine"
+    },
+    {
+      "id": "schema.merge-tree-settings-option",
+      "group": "schema",
+      "kind": "option",
+      "what": "Declare MergeTree settings on the same engine call; an unknown name is the server's 115 and a declined value is -2, never flattened (§The object model, rule 12)",
+      "go": "WithMergeTreeSettings",
+      "python": "Schema.set_engine",
+      "ts": "EngineOptions",
+      "rust": "Schema::set_engine"
+    },
+    {
+      "id": "schema.set-ttl",
+      "group": "schema",
+      "kind": "method",
+      "what": "Declare the table-level rows TTL",
+      "go": "LoadedSchema.SetTTL",
+      "python": "Schema.set_ttl",
+      "ts": "Schema.setTtl",
+      "rust": "Schema::set_ttl"
+    },
+    {
+      "id": "schema.row",
+      "group": "schema",
+      "kind": "method",
+      "what": "Validate and coerce one row",
+      "go": "LoadedSchema.Row",
+      "python": "Schema.row",
+      "ts": "Schema.row",
+      "rust": "Schema::row"
+    },
+    {
+      "id": "schema.row-with-settings",
+      "group": "schema",
+      "kind": "method",
+      "what": "One row under a per-call settings map. §The object model: 'A default argument is fine', so the two-function and one-function shapes are both conformant",
+      "go": "LoadedSchema.RowWithSettings",
+      "python": {"absent": "Schema.row's `settings` is an optional third argument — the shape §The object model blesses explicitly for a language with default arguments."},
+      "ts": {"absent": "Schema#row's `settings` is an optional third argument — the shape §The object model blesses explicitly."},
+      "rust": "Schema::row_with_settings"
+    },
+    {
+      "id": "schema.rows",
+      "group": "schema",
+      "kind": "method",
+      "what": "Validate and coerce a whole body; ONE batch is ONE clock instant for volatile DEFAULTs",
+      "go": "LoadedSchema.Rows",
+      "python": "Schema.rows",
+      "ts": "Schema.rows",
+      "rust": "Schema::rows"
+    },
+    {
+      "id": "schema.rows-export",
+      "group": "schema",
+      "kind": "method",
+      "what": "The revision-3 export channel: still one chs_rows call, with export_format and doc_flags chosen (§Revision 3)",
+      "go": "LoadedSchema.RowsExport",
+      "python": {"absent": "Schema.rows takes keyword-only `export` and `doc_flags`; the export channel is the same one chs_rows call, so Python spells it as optional arguments rather than a twin."},
+      "ts": {"absent": "Schema#rows takes a trailing RowsOptions with `exportFormat` and `docFlags`; the export channel is the same one chs_rows call."},
+      "rust": "Schema::rows_export"
+    },
+    {
+      "id": "schema.close",
+      "group": "schema",
+      "kind": "method",
+      "what": "Release the native schema handle; filters and blocks compiled from it are freed FIRST (§Revision 3, handle lifetime)",
+      "go": "LoadedSchema.Close",
+      "python": "Schema.close",
+      "ts": "Schema.close",
+      "rust": {"absent": "Schema implements Drop, which is Rust's own spelling of the same release. There is deliberately no inherent close(): the compiler enforces the ordering a manual call only documents."}
+    },
+    {
+      "id": "schema.compile-filter",
+      "group": "filter",
+      "kind": "method",
+      "what": "Compile a WHERE predicate against this schema (§Revision 3, §Revision 4)",
+      "go": "LoadedSchema.CompileFilter",
+      "python": "Schema.compile_filter",
+      "ts": "Schema.compileFilter",
+      "rust": "Schema::compile_filter"
+    },
+    {
+      "id": "schema.filter-params-option",
+      "group": "filter",
+      "kind": "option",
+      "what": "The revision-4 {name:Type} query parameters, passed as STRINGS and never hand-escaped into the expression (§Revision 4)",
+      "go": "WithFilterParams",
+      "python": "Schema.compile_filter",
+      "ts": "CompileFilterOptions",
+      "rust": "Schema::compile_filter"
+    },
+    {
+      "id": "schema.parse-block",
+      "group": "filter",
+      "kind": "method",
+      "what": "Parse a body once into a block K filters can then be evaluated against (§Revision 4, Blocks)",
+      "go": "LoadedSchema.ParseBlock",
+      "python": "Schema.parse_block",
+      "ts": "Schema.parseBlock",
+      "rust": "Schema::parse_block"
+    },
+    {
+      "id": "filter.rows",
+      "group": "filter",
+      "kind": "method",
+      "what": "Evaluate the filter over a body, one verdict per row",
+      "go": "LoadedFilter.Rows",
+      "python": "Filter.rows",
+      "ts": "Filter.rows",
+      "rust": "Filter::rows"
+    },
+    {
+      "id": "filter.eval",
+      "group": "filter",
+      "kind": "method",
+      "what": "Evaluate the filter against an already-parsed block; a pair from two different dlopen'd libraries is refused by the BINDING before any C call (§Revision 4)",
+      "go": "LoadedFilter.Eval",
+      "python": "Filter.eval",
+      "ts": "Filter.eval",
+      "rust": "Filter::eval"
+    },
+    {
+      "id": "filter.close",
+      "group": "filter",
+      "kind": "method",
+      "what": "Free the filter handle, always before its schema (§Revision 3, handle lifetime)",
+      "go": "LoadedFilter.Close",
+      "python": "Filter.close",
+      "ts": "Filter.close",
+      "rust": {"absent": "Filter implements Drop, and its lifetime is tied to the schema's by the borrow checker — the ordering rule the other three enforce at runtime is a compile error here."}
+    },
+    {
+      "id": "block.close",
+      "group": "filter",
+      "kind": "method",
+      "what": "Free the block handle, always before its schema (§Revision 4)",
+      "go": "LoadedBlock.Close",
+      "python": "Block.close",
+      "ts": "Block.close",
+      "rust": {"absent": "Block implements Drop, with the same borrow-checked ordering as Filter."}
+    },
+    {
+      "id": "results.row-result",
+      "group": "results",
+      "kind": "type",
+      "what": "The per-row result type (§Result types, RowResult)",
+      "go": "RowResult",
+      "python": "RowResult",
+      "ts": "RowResult",
+      "rust": "RowResult"
+    },
+    {
+      "id": "results.batch-result",
+      "group": "results",
+      "kind": "type",
+      "what": "The per-batch result type, whose Transformed folds in storage_transforms (§Result types, BatchResult)",
+      "go": "BatchResult",
+      "python": "BatchResult",
+      "ts": "BatchResult",
+      "rust": "BatchResult"
+    },
+    {
+      "id": "results.transform",
+      "group": "results",
+      "kind": "type",
+      "what": "One reported silent change — the core product guarantee, never optional (§Transformed)",
+      "go": "Transform",
+      "python": "Transform",
+      "ts": "Transform",
+      "rust": "Transform"
+    },
+    {
+      "id": "results.value",
+      "group": "results",
+      "kind": "type",
+      "what": "One stored value: column, ClickHouse's own text rendering, null flag, src (§Result types)",
+      "go": "Value",
+      "python": "Value",
+      "ts": "Value",
+      "rust": "Value"
+    },
+    {
+      "id": "results.substitution",
+      "group": "results",
+      "kind": "type",
+      "what": "A volatile DEFAULT this library resolved; the caller MUST send these columns explicitly (§Result types)",
+      "go": "Substitution",
+      "python": "Substitution",
+      "ts": "Substitution",
+      "rust": "Substitution"
+    },
+    {
+      "id": "results.computed",
+      "group": "results",
+      "kind": "type",
+      "what": "MATERIALIZED values — durable, and not part of SELECT * (§Result types)",
+      "go": "Computed",
+      "python": "Computed",
+      "ts": "Computed",
+      "rust": "Computed"
+    },
+    {
+      "id": "results.column",
+      "group": "results",
+      "kind": "type",
+      "what": "One compiled column's name, canonical type and DEFAULT kind/expression",
+      "go": "Column",
+      "python": "Column",
+      "ts": "ColumnInfo",
+      "rust": "Column"
+    },
+    {
+      "id": "results.span",
+      "group": "results",
+      "kind": "type",
+      "what": "One exported row's offset and length into the export payload (§Revision 3)",
+      "go": "Span",
+      "python": "Span",
+      "ts": "Span",
+      "rust": "Span"
+    },
+    {
+      "id": "results.filter-result",
+      "group": "results",
+      "kind": "type",
+      "what": "A filter call's verdicts plus its call-level outcome (§Revision 3)",
+      "go": "FilterResult",
+      "python": "FilterResult",
+      "ts": "FilterResult",
+      "rust": "FilterResult"
+    },
+    {
+      "id": "results.filter-row-error",
+      "group": "results",
+      "kind": "type",
+      "what": "One error-or-decline row, itemized with its 0-based index",
+      "go": "FilterRowError",
+      "python": "FilterRowError",
+      "ts": "FilterRowError",
+      "rust": "FilterRowError"
+    },
+    {
+      "id": "results.transform-lossy",
+      "group": "results",
+      "kind": "member",
+      "what": "Whether a reported change LOST information — false for exactly four reasons (§Transformed)",
+      "go": "Transform.Lossy",
+      "python": "Transform.lossy",
+      "ts": "Transform",
+      "rust": "Transform::lossy"
+    },
+    {
+      "id": "results.verdict-answered",
+      "group": "results",
+      "kind": "member",
+      "what": "Whether a filter verdict is an ANSWER rather than an error or a decline — a caller enforcing visibility fails closed when it is not (§Revision 3)",
+      "go": "Verdict.Answered",
+      "python": "Verdict.answered",
+      "ts": "isAnswer",
+      "rust": "Verdict::answered"
+    },
+
+    {
+      "id": "vocab.format.json-each-row",
+      "group": "vocabulary",
+      "kind": "constant",
+      "value": 0,
+      "what": "chs_format JSONEachRow — the numbers are FROZEN (§Values a binding must accept and reject)",
+      "go": "JSONEachRow",
+      "python": "Format.JSON_EACH_ROW",
+      "ts": "Format.JSONEachRow",
+      "rust": "Format::JsonEachRow"
+    },
+    {
+      "id": "vocab.format.csv",
+      "group": "vocabulary", "kind": "constant", "value": 1,
+      "what": "chs_format CSV",
+      "go": "CSV", "python": "Format.CSV", "ts": "Format.CSV", "rust": "Format::Csv"
+    },
+    {
+      "id": "vocab.format.tsv",
+      "group": "vocabulary", "kind": "constant", "value": 2,
+      "what": "chs_format TSV — the one text format whose documents carry `wire` (detector 3)",
+      "go": "TSV", "python": "Format.TSV", "ts": "Format.TSV", "rust": "Format::Tsv"
+    },
+    {
+      "id": "vocab.format.values",
+      "group": "vocabulary", "kind": "constant", "value": 3,
+      "what": "chs_format Values",
+      "go": "Values", "python": "Format.VALUES", "ts": "Format.Values", "rust": "Format::Values"
+    },
+    {
+      "id": "vocab.format.json-compact-each-row",
+      "group": "vocabulary", "kind": "constant", "value": 4,
+      "what": "chs_format JSONCompactEachRow — this revision's only exportable format",
+      "go": "JSONCompactEachRow", "python": "Format.JSON_COMPACT_EACH_ROW", "ts": "Format.JSONCompactEachRow", "rust": "Format::JsonCompactEachRow"
+    },
+    {
+      "id": "vocab.format.row-binary",
+      "group": "vocabulary", "kind": "constant", "value": 5,
+      "what": "chs_format RowBinary — ask the ARTIFACT before declaring it (§Values a binding must accept and reject)",
+      "go": "RowBinary", "python": "Format.ROW_BINARY", "ts": "Format.RowBinary", "rust": "Format::RowBinary"
+    },
+    {
+      "id": "vocab.format.row-binary-with-defaults",
+      "group": "vocabulary", "kind": "constant", "value": 6,
+      "what": "chs_format RowBinaryWithDefaults",
+      "go": "RowBinaryWithDefaults", "python": "Format.ROW_BINARY_WITH_DEFAULTS", "ts": "Format.RowBinaryWithDefaults", "rust": "Format::RowBinaryWithDefaults"
+    },
+    {
+      "id": "vocab.format.row-binary-with-names-and-types-and-defaults",
+      "group": "vocabulary", "kind": "constant", "value": 7,
+      "what": "chs_format RowBinaryWithNamesAndTypesAndDefaults — 73 UNKNOWN_FORMAT before 26.6, exactly as those servers answer",
+      "go": "RowBinaryWithNamesAndTypesAndDefaults", "python": "Format.ROW_BINARY_WITH_NAMES_AND_TYPES_AND_DEFAULTS", "ts": "Format.RowBinaryWithNamesAndTypesAndDefaults", "rust": "Format::RowBinaryWithNamesAndTypesAndDefaults"
+    },
+    {
+      "id": "vocab.format.native",
+      "group": "vocabulary", "kind": "constant", "value": 8,
+      "what": "chs_format Native",
+      "go": "Native", "python": "Format.NATIVE", "ts": "Format.Native", "rust": "Format::Native"
+    },
+    {
+      "id": "vocab.format.buffers",
+      "group": "vocabulary", "kind": "constant", "value": 9,
+      "what": "chs_format Buffers — 26.5+; 73 proves the decoder is present and 117 proves it absent (§Values a binding must accept and reject)",
+      "go": "Buffers", "python": "Format.BUFFERS", "ts": "Format.Buffers", "rust": "Format::Buffers"
+    },
+
+    {
+      "id": "vocab.outcome.accepted",
+      "group": "vocabulary", "kind": "constant", "value": "accepted",
+      "what": "The insert would succeed — possibly with silent coercions (§RowResult)",
+      "go": "Accepted", "python": "Outcome.ACCEPTED", "ts": "Outcome.Accepted", "rust": "Outcome::Accepted"
+    },
+    {
+      "id": "vocab.outcome.rejected",
+      "group": "vocabulary", "kind": "constant", "value": "rejected",
+      "what": "The server itself would refuse this row or DDL",
+      "go": "Rejected", "python": "Outcome.REJECTED", "ts": "Outcome.Rejected", "rust": "Outcome::Rejected"
+    },
+    {
+      "id": "vocab.outcome.accepted-poisoned",
+      "group": "vocabulary", "kind": "constant", "value": "accepted_poisoned",
+      "what": "An ACCEPTED insert whose stored value no later SELECT can read back (691) — never a rejection (worked example 6)",
+      "go": "AcceptedPoisoned", "python": "Outcome.ACCEPTED_POISONED", "ts": "Outcome.AcceptedPoisoned", "rust": "Outcome::AcceptedPoisoned"
+    },
+    {
+      "id": "vocab.outcome.unsupported",
+      "group": "vocabulary", "kind": "constant", "value": "unsupported",
+      "what": "This build declines to guess; an outcome string a binding does not recognise MUST degrade to THIS, never to rejected (§RowResult)",
+      "go": "Unsupported", "python": "Outcome.UNSUPPORTED", "ts": "Outcome.Unsupported", "rust": "Outcome::Unsupported"
+    },
+    {
+      "id": "vocab.outcome.skipped",
+      "group": "vocabulary", "kind": "constant", "value": "skipped",
+      "what": "The row was dropped under input_format_allow_errors_* and the batch continued (2026-08-27)",
+      "go": "Skipped", "python": "Outcome.SKIPPED", "ts": "Outcome.Skipped", "rust": "Outcome::Skipped"
+    },
+
+    {
+      "id": "vocab.verdict.true",
+      "group": "vocabulary", "kind": "constant", "note": "No shared `value`: Go and Python render this state as the wire character the C document carries, TypeScript renders a word, and Rust renders nothing. The four-state CONCEPT is the contract (§Revision 3); the spelling is open — see the parity report.",
+      "what": "The predicate answered true for this row",
+      "go": "VerdictTrue", "python": "Verdict.TRUE", "ts": "Verdict.True", "rust": "Verdict::True"
+    },
+    {
+      "id": "vocab.verdict.false",
+      "group": "vocabulary", "kind": "constant", "note": "No shared `value`: Go and Python render this state as the wire character the C document carries, TypeScript renders a word, and Rust renders nothing. The four-state CONCEPT is the contract (§Revision 3); the spelling is open — see the parity report.",
+      "what": "The predicate answered false for this row",
+      "go": "VerdictFalse", "python": "Verdict.FALSE", "ts": "Verdict.False", "rust": "Verdict::False"
+    },
+    {
+      "id": "vocab.verdict.error",
+      "group": "vocabulary", "kind": "constant", "note": "No shared `value`: Go and Python render this state as the wire character the C document carries, TypeScript renders a word, and Rust renders nothing. The four-state CONCEPT is the contract (§Revision 3); the spelling is open — see the parity report.",
+      "what": "The predicate threw on this row — NOT an answer, and fail-closed (§Revision 3)",
+      "go": "VerdictError", "python": "Verdict.ERROR", "ts": "Verdict.Error", "rust": "Verdict::Error"
+    },
+    {
+      "id": "vocab.verdict.decline",
+      "group": "vocabulary", "kind": "constant", "note": "No shared `value`: Go and Python render this state as the wire character the C document carries, TypeScript renders a word, and Rust renders nothing. The four-state CONCEPT is the contract (§Revision 3); the spelling is open — see the parity report.",
+      "what": "This library declines — NOT an answer, fail-closed, and the arm an unknown verdict character degrades to (§Revision 3)",
+      "go": "VerdictDecline", "python": "Verdict.DECLINE", "ts": "Verdict.Decline", "rust": "Verdict::Decline"
+    },
+
+    {
+      "id": "vocab.filter-outcome.ok",
+      "group": "vocabulary", "kind": "constant", "value": "ok",
+      "what": "The filter call completed; per-row failures live in the verdicts, not here",
+      "go": "FilterOK", "python": "FilterOutcome.OK", "ts": "FilterOutcome.Ok", "rust": "FilterOutcome::Ok"
+    },
+    {
+      "id": "vocab.filter-outcome.rejected",
+      "group": "vocabulary", "kind": "constant", "value": "rejected",
+      "what": "The filter call was refused by the server's own rules",
+      "go": "FilterRejected", "python": "FilterOutcome.REJECTED", "ts": "FilterOutcome.Rejected", "rust": "FilterOutcome::Rejected"
+    },
+    {
+      "id": "vocab.filter-outcome.unsupported",
+      "group": "vocabulary", "kind": "constant", "value": "unsupported",
+      "what": "The filter call was declined; an unrecognised spelling degrades to THIS (§RowResult, the unknown-outcome rule)",
+      "go": "FilterUnsupported", "python": "FilterOutcome.UNSUPPORTED", "ts": "FilterOutcome.Unsupported", "rust": "FilterOutcome::Unsupported"
+    },
+
+    {
+      "id": "vocab.default-kind.none",
+      "group": "vocabulary", "kind": "constant", "value": "",
+      "what": "chs_schema_column_default_kind: no DEFAULT clause",
+      "go": "KindNone", "python": "DefaultKind.NONE", "ts": "DefaultKind.None", "rust": {"symbol": "DefaultKind::None", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+    },
+    {
+      "id": "vocab.default-kind.default",
+      "group": "vocabulary", "kind": "constant", "value": "DEFAULT",
+      "what": "chs_schema_column_default_kind: DEFAULT",
+      "go": "KindDefault", "python": "DefaultKind.DEFAULT", "ts": "DefaultKind.Default", "rust": {"symbol": "DefaultKind::Default", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+    },
+    {
+      "id": "vocab.default-kind.materialized",
+      "group": "vocabulary", "kind": "constant", "value": "MATERIALIZED",
+      "what": "chs_schema_column_default_kind: MATERIALIZED — durable, not in SELECT *",
+      "go": "KindMaterialized", "python": "DefaultKind.MATERIALIZED", "ts": "DefaultKind.Materialized", "rust": {"symbol": "DefaultKind::Materialized", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+    },
+    {
+      "id": "vocab.default-kind.alias",
+      "group": "vocabulary", "kind": "constant", "value": "ALIAS",
+      "what": "chs_schema_column_default_kind: ALIAS",
+      "go": "KindAlias", "python": "DefaultKind.ALIAS", "ts": "DefaultKind.Alias", "rust": {"symbol": "DefaultKind::Alias", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+    },
+    {
+      "id": "vocab.default-kind.ephemeral",
+      "group": "vocabulary", "kind": "constant", "value": "EPHEMERAL",
+      "what": "chs_schema_column_default_kind: EPHEMERAL — decline to preview, never mispreview (§EPHEMERAL columns)",
+      "go": "KindEphemeral", "python": "DefaultKind.EPHEMERAL", "ts": "DefaultKind.Ephemeral", "rust": {"symbol": "DefaultKind::Ephemeral", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+    },
+
+    {
+      "id": "vocab.reason.overflow_wrap",
+      "group": "vocabulary", "kind": "constant", "value": "overflow_wrap",
+      "what": "An integer wrapped mod 2^N (§Transformed — the reason strings are stable; the harness groups on them)",
+      "go": "ReasonOverflowWrap", "python": "Reason.OVERFLOW_WRAP", "ts": "Reason.OverflowWrap", "rust": "reason::OVERFLOW_WRAP"
+    },
+    {
+      "id": "vocab.reason.null_to_default",
+      "group": "vocabulary", "kind": "constant", "value": "null_to_default",
+      "what": "A supplied null landed in a non-Nullable column",
+      "go": "ReasonNullToDefault", "python": "Reason.NULL_TO_DEFAULT", "ts": "Reason.NullToDefault", "rust": "reason::NULL_TO_DEFAULT"
+    },
+    {
+      "id": "vocab.reason.null_loss",
+      "group": "vocabulary", "kind": "constant", "value": "null_loss",
+      "what": "A supplied value was stored as null",
+      "go": "ReasonNullLoss", "python": "Reason.NULL_LOSS", "ts": "Reason.NullLoss", "rust": "reason::NULL_LOSS"
+    },
+    {
+      "id": "vocab.reason.decimal_truncate",
+      "group": "vocabulary", "kind": "constant", "value": "decimal_truncate",
+      "what": "A Decimal lost fractional digits past its scale",
+      "go": "ReasonDecimalTruncate", "python": "Reason.DECIMAL_TRUNCATE", "ts": "Reason.DecimalTruncate", "rust": "reason::DECIMAL_TRUNCATE"
+    },
+    {
+      "id": "vocab.reason.date_clamp",
+      "group": "vocabulary", "kind": "constant", "value": "date_clamp",
+      "what": "A Date outside the type's range clamped to a bound",
+      "go": "ReasonDateClamp", "python": "Reason.DATE_CLAMP", "ts": "Reason.DateClamp", "rust": "reason::DATE_CLAMP"
+    },
+    {
+      "id": "vocab.reason.datetime_wrap",
+      "group": "vocabulary", "kind": "constant", "value": "datetime_wrap",
+      "what": "A DateTime/DateTime64/Time value wrapped or truncated",
+      "go": "ReasonDateTimeWrap", "python": "Reason.DATETIME_WRAP", "ts": "Reason.DateTimeWrap", "rust": "reason::DATETIME_WRAP"
+    },
+    {
+      "id": "vocab.reason.date_shift",
+      "group": "vocabulary", "kind": "constant", "value": "date_shift",
+      "what": "A date-looking string stored as a DIFFERENT calendar day",
+      "go": "ReasonDateShift", "python": "Reason.DATE_SHIFT", "ts": "Reason.DateShift", "rust": "reason::DATE_SHIFT"
+    },
+    {
+      "id": "vocab.reason.uuid_mangle",
+      "group": "vocabulary", "kind": "constant", "value": "uuid_mangle",
+      "what": "parseUUID mapped non-hex bytes to 0xff and returned success",
+      "go": "ReasonUUIDMangle", "python": "Reason.UUID_MANGLE", "ts": "Reason.UuidMangle", "rust": "reason::UUID_MANGLE"
+    },
+    {
+      "id": "vocab.reason.ip_mangle",
+      "group": "vocabulary", "kind": "constant", "value": "ip_mangle",
+      "what": "An IPv4/IPv6 value silently altered by the parser",
+      "go": "ReasonIPMangle", "python": "Reason.IP_MANGLE", "ts": "Reason.IpMangle", "rust": "reason::IP_MANGLE"
+    },
+    {
+      "id": "vocab.reason.float_precision",
+      "group": "vocabulary", "kind": "constant", "value": "float_precision",
+      "what": "A float lost precision on the way to storage",
+      "go": "ReasonFloatPrecision", "python": "Reason.FLOAT_PRECISION", "ts": "Reason.FloatPrecision", "rust": "reason::FLOAT_PRECISION"
+    },
+    {
+      "id": "vocab.reason.lossy_numeric",
+      "group": "vocabulary", "kind": "constant", "value": "lossy_numeric",
+      "what": "A numeric change the classifier cannot name more precisely",
+      "go": "ReasonLossyNumeric", "python": "Reason.LOSSY_NUMERIC", "ts": "Reason.LossyNumeric", "rust": "reason::LOSSY_NUMERIC"
+    },
+    {
+      "id": "vocab.reason.fixedstring_pad",
+      "group": "vocabulary", "kind": "constant", "value": "fixedstring_pad",
+      "what": "A FixedString padded or truncated to its declared width",
+      "go": "ReasonStringPad", "python": "Reason.FIXEDSTRING_PAD", "ts": "Reason.FixedStringPad", "rust": "reason::FIXEDSTRING_PAD"
+    },
+    {
+      "id": "vocab.reason.emptied",
+      "group": "vocabulary", "kind": "constant", "value": "emptied",
+      "what": "A non-empty string stored as the empty string",
+      "go": "ReasonEmptied", "python": "Reason.EMPTIED", "ts": "Reason.Emptied", "rust": "reason::EMPTIED"
+    },
+    {
+      "id": "vocab.reason.element_changed",
+      "group": "vocabulary", "kind": "constant", "value": "element_changed",
+      "what": "A change inside an Array/Tuple/Map element — the comparison recurses",
+      "go": "ReasonElementChanged", "python": "Reason.ELEMENT_CHANGED", "ts": "Reason.ElementChanged", "rust": "reason::ELEMENT_CHANGED"
+    },
+    {
+      "id": "vocab.reason.enum_coerce",
+      "group": "vocabulary", "kind": "constant", "value": "enum_coerce",
+      "what": "An Enum input coerced to a different member spelling",
+      "go": "ReasonEnumCoerce", "python": "Reason.ENUM_COERCE", "ts": "Reason.EnumCoerce", "rust": "reason::ENUM_COERCE"
+    },
+    {
+      "id": "vocab.reason.value_changed",
+      "group": "vocabulary", "kind": "constant", "value": "value_changed",
+      "what": "A visible change no more precise reason covers — also the ref_unclassified conservative upgrade (§ref_unclassified)",
+      "go": "ReasonValueChanged", "python": "Reason.VALUE_CHANGED", "ts": "Reason.ValueChanged", "rust": "reason::VALUE_CHANGED"
+    },
+    {
+      "id": "vocab.reason.poisoned",
+      "group": "vocabulary", "kind": "constant", "value": "poisoned",
+      "what": "ClickHouse stored a value it cannot read back; every later SELECT fails with 691. Still an ACCEPTED insert",
+      "go": "ReasonPoisoned", "python": "Reason.POISONED", "ts": "Reason.Poisoned", "rust": "reason::POISONED"
+    },
+    {
+      "id": "vocab.reason.duplicate_key_dropped",
+      "group": "vocabulary", "kind": "constant", "value": "duplicate_key_dropped",
+      "what": "The row supplied this column twice and ClickHouse kept the FIRST value",
+      "go": "ReasonDuplicateKeyDropped", "python": "Reason.DUPLICATE_KEY_DROPPED", "ts": "Reason.DuplicateKeyDropped", "rust": "reason::DUPLICATE_KEY_DROPPED"
+    },
+    {
+      "id": "vocab.reason.reformat",
+      "group": "vocabulary", "kind": "constant", "value": "reformat",
+      "what": "A representation change with nothing lost — one of the four NON-lossy reasons (§Transformed)",
+      "go": "ReasonReformat", "python": "Reason.REFORMAT", "ts": "Reason.Reformat", "rust": "reason::REFORMAT"
+    },
+    {
+      "id": "vocab.reason.default_filled",
+      "group": "vocabulary", "kind": "constant", "value": "default_filled",
+      "what": "A column the row never supplied, populated from the DDL DEFAULT — NON-lossy",
+      "go": "ReasonDefaultFilled", "python": "Reason.DEFAULT_FILLED", "ts": "Reason.DefaultFilled", "rust": "reason::DEFAULT_FILLED"
+    },
+    {
+      "id": "vocab.reason.zero_filled",
+      "group": "vocabulary", "kind": "constant", "value": "zero_filled",
+      "what": "A column the row never supplied, populated from the type zero — NON-lossy",
+      "go": "ReasonZeroFilled", "python": "Reason.ZERO_FILLED", "ts": "Reason.ZeroFilled", "rust": "reason::ZERO_FILLED"
+    },
+    {
+      "id": "vocab.reason.default_materialised",
+      "group": "vocabulary", "kind": "constant", "value": "default_materialised",
+      "what": "A VOLATILE DEFAULT this library resolved from its own clock — NON-lossy, and the caller MUST send the column explicitly. The British spelling is the frozen wire constant; a cross-repo rename is negotiated separately",
+      "go": "ReasonDefaultMaterialised", "python": "Reason.DEFAULT_MATERIALISED", "ts": "Reason.DefaultMaterialised", "rust": "reason::DEFAULT_MATERIALISED"
+    },
+    {
+      "id": "vocab.reason.ttl_expired",
+      "group": "vocabulary", "kind": "constant", "value": "ttl_expired",
+      "what": "The whole row is past its TTL: accepted per row, not stored per batch (worked example 4)",
+      "go": "ReasonTTLExpired", "python": "Reason.TTL_EXPIRED", "ts": "Reason.TtlExpired", "rust": "reason::TTL_EXPIRED"
+    },
+    {
+      "id": "vocab.reason.ttl_column_expired",
+      "group": "vocabulary", "kind": "constant", "value": "ttl_column_expired",
+      "what": "The value reset to the column DEFAULT by a column TTL",
+      "go": "ReasonTTLColumnExpired", "python": "Reason.TTL_COLUMN_EXPIRED", "ts": "Reason.TtlColumnExpired", "rust": "reason::TTL_COLUMN_EXPIRED"
+    },
+
+    {
+      "id": "const.abi-revision",
+      "group": "vocabulary", "kind": "constant", "value": 4,
+      "what": "The chs_* ABI revision this binding was written against; a different nonzero artifact revision is refused at load (§The object model)",
+      "go": "ABIRevision", "python": "ABI_REVISION", "ts": "ABI_REVISION", "rust": "ABI_REVISION"
+    },
+    {
+      "id": "const.code-unsupported",
+      "group": "vocabulary", "kind": "constant", "value": -2,
+      "what": "CHS_CODE_UNSUPPORTED — the wire sentinel row-level results still carry. No error VALUE carries it (rule 12)",
+      "go": "CodeUnsupported", "python": "CODE_UNSUPPORTED", "ts": "CODE_UNSUPPORTED", "rust": "CODE_UNSUPPORTED"
+    },
+    {
+      "id": "const.compile-declared",
+      "group": "vocabulary", "kind": "constant", "value": 0,
+      "what": "CHS_COMPILE_DECLARED — the compile mode as a NAMED constant, never a bare literal (§One compile function)",
+      "go": "CompileDeclared", "python": "COMPILE_DECLARED", "ts": "CompileMode.Declared", "rust": "CompileMode::Declared"
+    },
+    {
+      "id": "const.export-none",
+      "group": "vocabulary", "kind": "constant", "value": -1,
+      "what": "CHS_EXPORT_NONE — today's path, byte-identical documents (§Revision 3)",
+      "go": "ExportNone", "python": "EXPORT_NONE", "ts": "EXPORT_NONE", "rust": {"absent": "rows_export takes export: Option<Format>, so the None case IS the sentinel and a CHS_EXPORT_NONE constant would be a second way to say it. ffi::EXPORT_NONE stays crate-private."}
+    },
+    {
+      "id": "const.doc-values",
+      "group": "vocabulary", "kind": "constant", "value": 1,
+      "what": "CHS_DOC_VALUES (§Document flags)",
+      "go": "DocValues", "python": "DOC_VALUES", "ts": "DOC_VALUES", "rust": "DocFlags::VALUES"
+    },
+    {
+      "id": "const.doc-transforms",
+      "group": "vocabulary", "kind": "constant", "value": 2,
+      "what": "CHS_DOC_TRANSFORMS — lean documents stay SDK-derivable under it (§Revision 3)",
+      "go": "DocTransforms", "python": "DOC_TRANSFORMS", "ts": "DOC_TRANSFORMS", "rust": "DocFlags::TRANSFORMS"
+    },
+    {
+      "id": "const.doc-defaults",
+      "group": "vocabulary", "kind": "constant", "value": 4,
+      "what": "CHS_DOC_DEFAULTS (§Document flags)",
+      "go": "DocDefaults", "python": "DOC_DEFAULTS", "ts": "DOC_DEFAULTS", "rust": "DocFlags::DEFAULTS"
+    },
+    {
+      "id": "const.doc-all",
+      "group": "vocabulary", "kind": "constant", "value": 7,
+      "what": "CHS_DOC_ALL — reproduces the full document Rows() returns, byte-for-byte at the C layer",
+      "go": "DocAll", "python": "DOC_ALL", "ts": "DOC_ALL", "rust": "DocFlags::ALL"
+    },
+
+    {
+      "id": "errors.refusal",
+      "group": "errors",
+      "kind": "type",
+      "what": "The REFUSAL type: the server itself would refuse this. Carries the server's own code and message verbatim (rule 12, rc > 0)",
+      "go": "SchemaError",
+      "python": "SchemaError",
+      "ts": "SchemaError",
+      "rust": "Error::Schema"
+    },
+    {
+      "id": "errors.decline",
+      "group": "errors",
+      "kind": "type",
+      "what": "The DECLINE type, a PEER of the refusal type and never a subtype of it (rule 12, rc < 0). A decline satisfying the refusal's catch converts every decline into a rejection SILENTLY",
+      "go": "UnsupportedError",
+      "python": "UnsupportedError",
+      "ts": "UnsupportedError",
+      "rust": "Error::Unsupported"
+    },
+    {
+      "id": "errors.base",
+      "group": "errors",
+      "kind": "type",
+      "what": "A shared BASE type both arms descend from — catching it is an explicit choice to handle both, which is not the forget-to-check failure rule 12 exists to prevent",
+      "go": {"absent": "Go's two arms are independent types and errors.As is the idiom; there is no base to inherit from, and rule 12 requires only that a decline never satisfies errors.As(&SchemaError{})."},
+      "python": "ChtypesError",
+      "ts": "ChtypesError",
+      "rust": {"absent": "Error is one enum, so its variants share a type by construction; Error::is_unsupported is the explicit both-arms predicate."}
+    },
+    {
+      "id": "errors.artifact-missing",
+      "group": "errors",
+      "kind": "type",
+      "what": "No artifact for this line on the search path (docs/fetch.md §6, exit 1)",
+      "go": "ErrArtifactMissing",
+      "python": "ArtifactMissingError",
+      "ts": "ArtifactMissingError",
+      "rust": "Error::ArtifactMissing"
+    },
+    {
+      "id": "errors.artifact-untrusted",
+      "group": "errors",
+      "kind": "type",
+      "what": "The signature did not verify against the trust list",
+      "go": "ErrArtifactUntrusted",
+      "python": "ArtifactUntrustedError",
+      "ts": "ArtifactUntrustedError",
+      "rust": "Error::ArtifactUntrusted"
+    },
+    {
+      "id": "errors.artifact-corrupt",
+      "group": "errors",
+      "kind": "type",
+      "what": "The bytes did not hash to what SHA256SUMS says",
+      "go": "ErrArtifactCorrupt",
+      "python": "ArtifactCorruptError",
+      "ts": "ArtifactCorruptError",
+      "rust": "Error::ArtifactCorrupt"
+    },
+    {
+      "id": "errors.artifact-pinned",
+      "group": "errors",
+      "kind": "type",
+      "what": "--frozen refused an asset the lock file does not pin",
+      "go": "ErrArtifactPinned",
+      "python": "ArtifactPinnedError",
+      "ts": "ArtifactPinnedError",
+      "rust": "Error::ArtifactPinned"
+    },
+    {
+      "id": "errors.artifact-unpublished",
+      "group": "errors",
+      "kind": "type",
+      "what": "The release does not offer this line for this platform",
+      "go": "ErrArtifactUnpublished",
+      "python": "ArtifactUnpublishedError",
+      "ts": "ArtifactUnpublishedError",
+      "rust": "Error::ArtifactUnpublished"
+    },
+    {
+      "id": "errors.source-unreachable",
+      "group": "errors",
+      "kind": "type",
+      "what": "The artifact source could not be read",
+      "go": "ErrSourceUnreachable",
+      "python": "SourceUnreachableError",
+      "ts": "SourceUnreachableError",
+      "rust": "Error::SourceUnreachable"
+    },
+    {
+      "id": "errors.artifact-code-missing",
+      "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_MISSING",
+      "what": "The docs/fetch.md §6 machine-readable code, which the four CLIs print identically",
+      "go": "CodeArtifactMissing", "python": "CODE_ARTIFACT_MISSING", "ts": "CODE_ARTIFACT_MISSING", "rust": "CODE_ARTIFACT_MISSING"
+    },
+    {
+      "id": "errors.artifact-code-untrusted",
+      "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_UNTRUSTED",
+      "what": "docs/fetch.md §6",
+      "go": "CodeArtifactUntrusted", "python": "CODE_ARTIFACT_UNTRUSTED", "ts": "CODE_ARTIFACT_UNTRUSTED", "rust": "CODE_ARTIFACT_UNTRUSTED"
+    },
+    {
+      "id": "errors.artifact-code-corrupt",
+      "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_CORRUPT",
+      "what": "docs/fetch.md §6",
+      "go": "CodeArtifactCorrupt", "python": "CODE_ARTIFACT_CORRUPT", "ts": "CODE_ARTIFACT_CORRUPT", "rust": "CODE_ARTIFACT_CORRUPT"
+    },
+    {
+      "id": "errors.artifact-code-pinned",
+      "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_PINNED",
+      "what": "docs/fetch.md §6",
+      "go": "CodeArtifactPinned", "python": "CODE_ARTIFACT_PINNED", "ts": "CODE_ARTIFACT_PINNED", "rust": "CODE_ARTIFACT_PINNED"
+    },
+    {
+      "id": "errors.artifact-code-unpublished",
+      "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_UNPUBLISHED",
+      "what": "docs/fetch.md §6",
+      "go": "CodeArtifactUnpublished", "python": "CODE_ARTIFACT_UNPUBLISHED", "ts": "CODE_ARTIFACT_UNPUBLISHED", "rust": "CODE_ARTIFACT_UNPUBLISHED"
+    },
+    {
+      "id": "errors.artifact-code-source-unreachable",
+      "group": "errors", "kind": "constant", "value": "CHTYPES_SOURCE_UNREACHABLE",
+      "what": "docs/fetch.md §6",
+      "go": "CodeSourceUnreachable", "python": "CODE_SOURCE_UNREACHABLE", "ts": "CODE_SOURCE_UNREACHABLE", "rust": "CODE_SOURCE_UNREACHABLE"
+    },
+
+    {
+      "id": "discovery.query-server-version",
+      "group": "discovery", "kind": "constant",
+      "value": "SELECT version() AS version FORMAT JSONEachRow",
+      "what": "The canonical connect-time query, carried VERBATIM by every SDK (§Discovery)",
+      "go": "QueryServerVersion", "python": "QUERY_SERVER_VERSION", "ts": "QUERY_SERVER_VERSION", "rust": "QUERY_SERVER_VERSION"
+    },
+    {
+      "id": "discovery.query-changed-settings",
+      "group": "discovery", "kind": "constant",
+      "value": "SELECT name, value FROM system.settings WHERE changed FORMAT JSONEachRow",
+      "what": "The declared profile, from the server itself — never ask the customer (§Discovery)",
+      "go": "QueryChangedSettings", "python": "QUERY_CHANGED_SETTINGS", "ts": "QUERY_CHANGED_SETTINGS", "rust": "QUERY_CHANGED_SETTINGS"
+    },
+    {
+      "id": "discovery.query-table-columns",
+      "group": "discovery", "kind": "constant",
+      "value": "SELECT name, type, default_kind, default_expression, position FROM system.columns WHERE database = {db:String} AND table = {table:String} ORDER BY position FORMAT JSONEachRow",
+      "what": "Everything a column-declaration list needs INCLUDING default_kind and default_expression (§Discovery)",
+      "go": "QueryTableColumns", "python": "QUERY_TABLE_COLUMNS", "ts": "QUERY_TABLE_COLUMNS", "rust": "QUERY_TABLE_COLUMNS"
+    },
+    {
+      "id": "discovery.parse-version",
+      "group": "discovery", "kind": "function",
+      "what": "Parse QueryServerVersion's body",
+      "go": "ParseVersionResult", "python": "parse_version_result", "ts": "parseVersionResult", "rust": "parse_version_result"
+    },
+    {
+      "id": "discovery.parse-changed-settings",
+      "group": "discovery", "kind": "function",
+      "what": "Parse QueryChangedSettings' body; duplicates resolve LAST-WRITE-WINS (§Discovery)",
+      "go": "ParseChangedSettingsResult", "python": "parse_changed_settings_result", "ts": "parseChangedSettingsResult", "rust": "parse_changed_settings_result"
+    },
+    {
+      "id": "discovery.parse-columns",
+      "group": "discovery", "kind": "function",
+      "what": "Parse QueryTableColumns' body; `position` survives quoted and bare spellings without routing through a float (§Discovery)",
+      "go": "ParseColumnsResult", "python": "parse_columns_result", "ts": "parseColumnsResult", "rust": "parse_columns_result"
+    },
+    {
+      "id": "discovery.reconstruct-ddl",
+      "group": "discovery", "kind": "function",
+      "what": "The DDL-reconstruction helper — a spelling exercise only; the library's own compile is the judge (§Discovery)",
+      "go": "ReconstructDDL", "python": "reconstruct_ddl", "ts": "reconstructDdl", "rust": "reconstruct_ddl"
+    },
+    {
+      "id": "discovery.server-profile",
+      "group": "discovery", "kind": "type",
+      "what": "The parsed server profile: version string plus the changed-settings map, cached per deployment (§Discovery)",
+      "go": "ServerProfile", "python": "ServerProfile", "ts": "ServerProfile", "rust": "ServerProfile"
+    },
+    {
+      "id": "discovery.discovered-column",
+      "group": "discovery", "kind": "type",
+      "what": "One row of QueryTableColumns, default_kind and default_expression carried",
+      "go": "DiscoveredColumn", "python": "DiscoveredColumn", "ts": "DiscoveredColumn", "rust": "DiscoveredColumn"
+    },
+
+    {
+      "id": "fetch.ensure",
+      "group": "fetch", "kind": "function",
+      "what": "Install one line, verified, into the registry directory (docs/fetch.md)",
+      "go": "Ensure", "python": "ensure", "ts": "ensure", "rust": "ensure"
+    },
+    {
+      "id": "fetch.ensure-all",
+      "group": "fetch", "kind": "function",
+      "what": "Install every published line for this platform",
+      "go": "FetchAll", "python": "fetch_lines", "ts": "ensureAll", "rust": "fetch::ensure_all"
+    },
+    {
+      "id": "fetch.list-installed",
+      "group": "fetch", "kind": "function",
+      "what": "What is installed, per line, on the search path",
+      "go": "ListInstalled", "python": "fetch.installed_lines", "ts": "listArtifacts", "rust": "installed_lines"
+    },
+    {
+      "id": "fetch.verify-installed",
+      "group": "fetch", "kind": "function",
+      "what": "Re-hash what is installed against each artifact's own manifest — the `chtypes verify` command's engine",
+      "go": "VerifyInstalled", "python": "fetch.verify_registry", "ts": "verifyInstalled", "rust": "fetch::verify_installed"
+    },
+    {
+      "id": "fetch.registry-search-path",
+      "group": "fetch", "kind": "function",
+      "what": "The docs/fetch.md §1 search path, in order, for this host",
+      "go": "RegistrySearchPath", "python": "registry_search_path", "ts": "registrySearchPath", "rust": "registry_search_path"
+    },
+    {
+      "id": "fetch.default-registry-dir",
+      "group": "fetch", "kind": "function",
+      "what": "The per-user artifact cache — the one directory the four SDKs agree on",
+      "go": "DefaultRegistryDir", "python": "default_registry_dir", "ts": "defaultRegistryDir", "rust": "default_registry_dir"
+    },
+    {
+      "id": "fetch.fetch-destination",
+      "group": "fetch", "kind": "function",
+      "what": "Where a fetch for this host WRITES (§1) — never a system location",
+      "go": "FetchRegistryDir", "python": "fetch_destination", "ts": "fetchDestination", "rust": "install_dir"
+    },
+    {
+      "id": "fetch.host-platform",
+      "group": "fetch", "kind": "function",
+      "what": "This host's <os>-<arch> key, spelled the artifact way",
+      "go": "HostPlatform", "python": "host_platform", "ts": "hostPlatform", "rust": "host_platform"
+    },
+    {
+      "id": "fetch.key-id",
+      "group": "fetch", "kind": "function",
+      "what": "The short id a signature file's comment line names",
+      "go": "KeyID", "python": "fetch.key_id", "ts": "keyId", "rust": "fetch::key_id"
+    },
+    {
+      "id": "fetch.parse-signature-file",
+      "group": "fetch", "kind": "function",
+      "what": "Split SHA256SUMS.sig into its comment and its raw signature",
+      "go": "ParseSignatureFile", "python": {"absent": "Python keeps signature parsing private (_parse_signature) and exposes only verify_sums_signature. NEEDS A DECISION \u2014 Go, TS and Rust export the splitter."}, "ts": "parseSignatureFile", "rust": "fetch::parse_signature_file"
+    },
+    {
+      "id": "fetch.read-lock",
+      "group": "fetch", "kind": "function",
+      "what": "Read a chtypes.lock",
+      "go": "ReadLockFile", "python": "fetch.read_lock", "ts": "readLock", "rust": "LockFile::load"
+    },
+    {
+      "id": "fetch.release-key-id",
+      "group": "fetch", "kind": "constant", "value": "deb275922dbff76e",
+      "what": "The release key's short id — identical in all four, or one SDK trusts a key the others do not",
+      "go": "ReleaseKeyID", "python": "RELEASE_KEY_ID", "ts": {"absent": "TS carries RELEASE_PUBLIC_KEYS (a list, for rotation) and derives the id with keyId(); it exports no precomputed id constant. NEEDS A DECISION: the other three export one."}, "rust": "fetch::RELEASE_KEY_ID"
+    },
+    {
+      "id": "fetch.release-public-key",
+      "group": "fetch", "kind": "constant", "value": "fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc",
+      "what": "The raw 32-byte ed25519 release public key, hex, as docs/fetch.md §4 publishes it",
+      "go": "ReleasePublicKeyHex", "python": "RELEASE_PUBLIC_KEY", "ts": {"absent": "TS exports RELEASE_PUBLIC_KEYS, a LIST of trusted keys for rotation, rather than one scalar. The list's first element is this value; the parity test checks that instead."}, "rust": "fetch::RELEASE_PUBLIC_KEY_HEX"
+    },
+    {
+      "id": "fetch.default-artifacts-url",
+      "group": "fetch", "kind": "constant", "value": "https://artifacts.wavehouse.dev",
+      "what": "The public artifacts host every SDK defaults to",
+      "go": "DefaultArtifactsURL", "python": "fetch.DEFAULT_ARTIFACTS_URL", "ts": "DEFAULT_ARTIFACTS_URL", "rust": "fetch::DEFAULT_ARTIFACTS_URL"
+    },
+    {
+      "id": "fetch.default-release-tag",
+      "group": "fetch", "kind": "constant", "value": "artifacts",
+      "what": "The rolling release a fetch reads when no tag is named",
+      "go": "DefaultReleaseTag", "python": "fetch.DEFAULT_TAG", "ts": "DEFAULT_RELEASE_TAG", "rust": "fetch::DEFAULT_TAG"
+    },
+    {
+      "id": "fetch.default-lock-file",
+      "group": "fetch", "kind": "constant", "value": "chtypes.lock",
+      "what": "The file --frozen reads when --lock names none",
+      "go": "DefaultLockFile", "python": "fetch.DEFAULT_LOCK_FILE", "ts": {"absent": "TS's readLock takes the path explicitly and its CLI spells the default inline; it exports no constant. NEEDS A DECISION — the other three export one."}, "rust": "fetch::DEFAULT_LOCK_FILE"
+    },
+    {
+      "id": "fetch.lock-schema",
+      "group": "fetch", "kind": "constant", "value": 1,
+      "what": "The lock file schema every SDK reads and writes",
+      "go": "LockSchema", "python": "fetch.LOCK_SCHEMA", "ts": "LOCK_SCHEMA", "rust": {"absent": "The Rust lock reader validates the schema number inside LockFile rather than exporting it. NEEDS A DECISION — the other three export it."}
+    },
+    {
+      "id": "fetch.env-registry",
+      "group": "fetch", "kind": "constant", "value": "CHTYPES_REGISTRY",
+      "what": "The environment variable naming an explicit registry (docs/fetch.md §1)",
+      "go": {"absent": "Go spells the name inline in RegistrySearchPath and exports no constant for it. NEEDS A DECISION — the other three export one."},
+      "python": "ENV_REGISTRY", "ts": {"absent": "TS spells the name inline in resolveRegistryDir. NEEDS A DECISION."}, "rust": "REGISTRY_ENV"
+    },
+    {
+      "id": "fetch.env-autofetch",
+      "group": "fetch", "kind": "constant", "value": "CHTYPES_AUTOFETCH",
+      "what": "The environment variable turning lazy fetch on (docs/fetch.md §6)",
+      "go": {"absent": "Spelled inline; see fetch.env-registry."},
+      "python": "ENV_AUTOFETCH", "ts": {"absent": "Spelled inline; see fetch.env-registry."}, "rust": "AUTOFETCH_ENV"
+    },
+    {
+      "id": "fetch.command",
+      "group": "fetch", "kind": "constant",
+      "what": "This SDK's own fetch command, as the docs/fetch.md §7 message spells it. The VALUE is deliberately per-language — it is the command a caller of THIS SDK runs",
+      "go": "GoFetchCommand", "python": {"absent": "The Python message builds the command inline in errors.py's ArtifactMissingError. NEEDS A DECISION — Go, TS and Rust export it."}, "ts": "FETCH_COMMAND", "rust": "FETCH_COMMAND"
+    },
+
+    {
+      "id": "cli.fetch",
+      "group": "cli", "kind": "cli", "value": "fetch",
+      "what": "`chtypes fetch <line>` — install a line",
+      "go": "fetch", "python": "fetch", "ts": "fetch", "rust": "fetch"
+    },
+    {
+      "id": "cli.verify",
+      "group": "cli", "kind": "cli", "value": "verify",
+      "what": "`chtypes verify` — re-hash what is installed",
+      "go": "verify", "python": "verify", "ts": "verify", "rust": "verify"
+    },
+    {
+      "id": "cli.list",
+      "group": "cli", "kind": "cli", "value": "list",
+      "what": "`chtypes list` — what the release offers and what is installed",
+      "go": "list", "python": "list", "ts": "list", "rust": "list"
+    },
+    {
+      "id": "cli.where",
+      "group": "cli", "kind": "cli", "value": "where",
+      "what": "`chtypes where` — the search path and the write destination",
+      "go": "where", "python": "where", "ts": "where", "rust": "where"
+    }
+  ],
+
+  "unlisted": {
+    "go": {
+      "Version": "A named string type for a version spelling; the other three take plain strings.",
+      "Schema": "The Go-only alias for a column-list string.",
+      "Registry.ForContext": "Context-aware resolve, Go's own idiom for what TS spells as the async Registry#open.",
+      "Registry.Load": "Load one explicit artifact path into an existing registry.",
+      "RegistryOption": "The functional-option carrier §One compile function's table names for Go.",
+      "CompileOption": "Functional option carrier.",
+      "EngineOption": "Functional option carrier.",
+      "FilterOption": "Functional option carrier.",
+      "WithAutoFetch": "Registry option; Python/TS/Rust spell it as a constructor field.",
+      "WithFetchOptions": "Registry option; Python/TS/Rust spell it as a constructor field.",
+      "FetchOptions": "The fetch option struct; every binding has one, shaped its own way.",
+      "Installed": "Fetch result record.",
+      "ReleaseIndex": "Parsed release index.",
+      "ReleaseArtifact": "One row of the release index.",
+      "ReleaseArtifact.Platform": "Accessor on a fetch record.",
+      "ReleaseArtifact.BuildNumber": "Accessor on a fetch record.",
+      "ListRelease": "What the release offers; the `list` command's engine.",
+      "VerifyResult": "One verify verdict.",
+      "VerifySignature": "Ed25519 verification.",
+      "ParseTrustedKeys": "Trust-list parsing.",
+      "ReleasePublicKey": "The key as a typed ed25519.PublicKey, alongside the hex constant.",
+      "LockFile": "Lock file document.",
+      "LockEntry": "One lock pin.",
+      "LockFile.Write": "Write a lock file.",
+      "NewLockFile": "Construct a lock file.",
+      "LockKey": "The platform/line key a pin is stored under.",
+      "ExitCode": "Map an error to the docs/fetch.md §6 exit status; the other CLIs map it internally.",
+      "ErrorCode": "The artifact error code as a named string type.",
+      "ErrorCode.ExitCode": "Accessor.",
+      "ErrorCode.Sentinel": "Accessor.",
+      "ArtifactError": "The single artifact error type Go uses instead of a class per code.",
+      "ArtifactError.Error": "error interface.",
+      "ArtifactError.Is": "errors.Is support.",
+      "ArtifactError.Unwrap": "errors.Unwrap support.",
+      "SchemaError.Error": "error interface.",
+      "UnsupportedError.Error": "error interface.",
+      "SystemRegistryDirs": "The two system roots of docs/fetch.md §1.",
+      "DefaultRegistryDirFor": "The per-user cache for another platform.",
+      "ValidPlatform": "Platform-key validation.",
+      "QuoteIdentifier": "Backtick-quoting for reconstruct; the others keep it private.",
+      "Timezone": "The package-level server timezone; see registry.timezone-option.",
+      "Outcome.String": "Stringer.",
+      "Verdict.String": "Stringer.",
+      "Value.String": "Stringer.",
+      "DefaultKind.String": "Stringer.",
+      "Format": "The format enum type itself.",
+      "Outcome": "The outcome enum type itself.",
+      "Verdict": "The verdict enum type itself.",
+      "FilterOutcome": "The filter-outcome enum type itself.",
+      "DefaultKind": "The default-kind enum type itself.",
+      "CompileMode": "The compile-mode enum type itself.",
+      "DocFlags": "The document-flag type itself.",
+      "Library": "The library type itself.",
+      "Registry": "The registry type itself.",
+      "LoadedSchema": "The schema type itself.",
+      "LoadedFilter": "The filter type itself.",
+      "LoadedBlock": "The block type itself.",
+      "FilterRowError": "Result type."
+    },
+    "python": {
+      "Registry.__getitem__": "r[v] alongside for_version, Python's own idiom.",
+      "Registry.__contains__": "`in` support.",
+      "Registry.__iter__": "Iteration over libraries.",
+      "Registry.__len__": "len() support.",
+      "Registry.__enter__": "Context manager.",
+      "Registry.__exit__": "Context manager.",
+      "Schema.__enter__": "Context manager.",
+      "Schema.__exit__": "Context manager.",
+      "Filter.__enter__": "Context manager.",
+      "Filter.__exit__": "Context manager.",
+      "Block.__enter__": "Context manager.",
+      "Block.__exit__": "Context manager.",
+      "Manifest": "The parsed manifest.json; TS and Rust export theirs too.",
+      "read_manifest": "Read a manifest.json.",
+      "verify_library": "Hash one library against its manifest.",
+      "minor_of": "The minor line of a version spelling.",
+      "RawNumber": "Raw JSON number preservation — never route a stored value through a float.",
+      "quote_bare_denormals": "JSON repair for bare inf/nan, which ClickHouse emits and JSON does not define.",
+      "RegistryError": "Registry-layer error.",
+      "ArtifactError": "The base every artifact error descends from.",
+      "UnsignedArtifactWarning": "The loud warning --allow-unsigned raises.",
+      "LOSSLESS_REASONS": "The four non-lossy reasons as a set; TS has isLossyReason, Go and Rust a Lossy predicate.",
+      "Reason": "The reason namespace itself.",
+      "Format": "The format enum type itself.",
+      "Outcome": "The outcome enum type itself.",
+      "Verdict": "The verdict enum type itself.",
+      "FilterOutcome": "The filter-outcome enum type itself.",
+      "DefaultKind": "The default-kind enum type itself.",
+      "RowResult.accepted": "Convenience predicate.",
+      "RowResult.poisoned": "Convenience predicate.",
+      "RowResult.value": "Look one column's Value up by name.",
+      "RowResult.lossy_transforms": "Convenience filter.",
+      "BatchResult.lossy_transforms": "Convenience filter.",
+      "BatchResult.transforms_for_row": "Transform.Row is filled in, so this indexes on it.",
+      "Verdict.of": "Parse a verdict character, unknown degrading to decline.",
+      "Outcome.of": "Parse an outcome string, unknown degrading to unsupported.",
+      "FilterOutcome.of": "Parse a filter outcome, unknown degrading to unsupported.",
+      "DefaultKind.of": "Parse a default kind.",
+      "ENV_REGISTRY": "Environment variable name.",
+      "ENV_AUTOFETCH": "Environment variable name.",
+      "RELEASE_KEY_ID": "Release key id.",
+      "RELEASE_PUBLIC_KEY": "Release key hex."
+    },
+    "ts": {
+      "Registry.open": "The async resolve, TS's own idiom for what Go spells as ForContext.",
+      "Registry.has": "Membership test, as Python's __contains__.",
+      "Registry.dir": "The primary registry directory.",
+      "Schema.forgetFilter": "Bookkeeping a caller needs when it closes a filter itself.",
+      "Schema.forgetBlock": "Bookkeeping a caller needs when it closes a block itself.",
+      "Block.nativeLib": "Image identity, for the cross-library refusal of §Revision 4.",
+      "Block.liveHandle": "Handle access for the same check.",
+      "Manifest": "The parsed manifest.json.",
+      "RegistryOptions": "Registry option object.",
+      "CompileOptions": "Compile option object.",
+      "EngineOptions": "Engine option object.",
+      "RowsOptions": "Rows option object, carrying exportFormat and docFlags.",
+      "CompileFilterOptions": "Filter option object, carrying params.",
+      "EnsureOptions": "Fetch option object.",
+      "EnsureResult": "Fetch result.",
+      "FetchEvent": "Fetch progress event.",
+      "IndexArtifact": "One row of the release index.",
+      "InstalledArtifact": "One installed artifact.",
+      "ListResult": "What `list` prints.",
+      "LockEntry": "One lock pin.",
+      "LockFile": "Lock file document.",
+      "ReleaseIndex": "Parsed release index.",
+      "VersionRequest": "A parsed version spelling.",
+      "ArtifactErrorCode": "The artifact code union.",
+      "RegistryError": "Registry-layer error.",
+      "FetchError": "Fetch-layer error.",
+      "artifactMissingMessage": "The §7 message body, shared by the loader and the CLI.",
+      "compareVersions": "Numeric release ordering.",
+      "compareMinor": "Numeric minor-line ordering — §Version selection rule 2.",
+      "parseVersionSpelling": "Split a spelling into line and exact patch.",
+      "resolvePlatform": "Platform key resolution.",
+      "isPlatformKey": "Platform-key validation.",
+      "cacheRegistryDir": "The per-user cache for a platform.",
+      "systemRegistryDirs": "The two system roots of docs/fetch.md §1.",
+      "looksLikeRegistry": "Whether a directory holds artifacts.",
+      "resolveRegistryDir": "The first search-path entry that held something.",
+      "selectArtifact": "Pick one release row for a spelling.",
+      "selectAll": "Pick every offered line.",
+      "trustedKeys": "Trust-list resolution.",
+      "verifyEd25519": "Ed25519 verification.",
+      "sha256File": "Hash a file.",
+      "RELEASE_PUBLIC_KEYS": "The trust list; see fetch.release-public-key.",
+      "extractTarGz": "Tar extraction, which Node does not ship.",
+      "ExtractedEntry": "Tar entry.",
+      "nativeStats": "FFI counters, for the reentrancy proof of §Concurrency.",
+      "encodeSettings": "Settings encoding — bool to \"1\"/\"0\", int stringified exactly.",
+      "Settings": "The settings map type.",
+      "SettingValue": "The settings value type.",
+      "isLossyReason": "The four non-lossy reasons as a predicate.",
+      "Reason": "The reason namespace itself.",
+      "Format": "The format enum itself.",
+      "formatName": "Format code to name.",
+      "CompileMode": "The compile-mode enum itself.",
+      "minorOf": "The minor line of a version spelling.",
+      "defaultRegistryDir": "Alias kept beside cacheRegistryDir.",
+      "fetchDestination": "Where a fetch writes.",
+      "isValidUtf8": "Byte-level text handling.",
+      "Json": "Raw JSON handling — never route a stored value through a float.",
+      "parseDocument": "Result document parsing.",
+      "parseJsonValue": "Raw JSON handling.",
+      "rawBytes": "Raw JSON handling.",
+      "rawText": "Raw JSON handling.",
+      "repairBareDenormals": "JSON repair for bare inf/nan.",
+      "JsonKind": "Raw JSON handling.",
+      "ColumnDoc": "The per-column result document."
+    },
+    "rust": {
+      "Registry::from_env": "Rust has no default arguments, so each construction shape is its own constructor.",
+      "Registry::from_env_or_default": "Constructor shape.",
+      "Registry::from_env_or": "Constructor shape.",
+      "Registry::from_search_path_with": "Constructor shape.",
+      "Registry::with_timezone": "Constructor shape.",
+      "Registry::dir": "The primary registry directory.",
+      "Registry::autofetch": "Whether lazy fetch is on.",
+      "Library::load": "Load one explicit artifact path, as Go's Registry.Load does.",
+      "Schema::library": "The library a schema holds alive.",
+      "Filter::schema": "The schema a filter holds alive.",
+      "Block::schema": "The schema a block holds alive.",
+      "CompileRequest": "The builder §One compile function's table names for Rust.",
+      "CompileRequest::compile": "The builder's terminal.",
+      "CompileMode": "The compile-mode enum itself.",
+      "CompileMode::code": "The ABI integer behind a mode.",
+      "Format": "The format enum itself.",
+      "Outcome": "The outcome enum itself.",
+      "Verdict": "The verdict enum itself.",
+      "FilterOutcome": "The filter-outcome enum itself.",
+      "DefaultKind": "The default-kind enum itself.",
+      "DefaultKind::Other": "An unrecognised kind passes through rather than raising.",
+      "DocFlags": "The document-flag type itself.",
+      "Error": "The one error enum.",
+      "Error::code": "The ClickHouse code, when there is one.",
+      "Error::is_unsupported": "The explicit both-arms predicate; see errors.base.",
+      "Error::artifact_code": "The docs/fetch.md §6 code, when there is one.",
+      "Error::Registry": "Registry-layer error.",
+      "Error::Load": "Load failure.",
+      "Error::NotAnArtifact": "Load failure.",
+      "Error::CorruptArtifact": "Load failure.",
+      "Error::VersionMismatch": "The right bytes in the wrong directory.",
+      "Error::Init": "chs_init failure.",
+      "Error::InitConflict": "One image, two timezones.",
+      "Error::EmptyRegistry": "Nothing loaded.",
+      "Error::NoSuchVersion": "Resolution failure naming what IS loaded.",
+      "Error::NoRegistryEnv": "No registry configured.",
+      "Error::PredatesFeature": "A decline arm: the artifact predates the entry point.",
+      "Error::BadDocument": "A result document that did not parse.",
+      "Error::Nul": "An interior NUL in a string crossing the boundary.",
+      "Error::Discovery": "A discovery body that did not parse.",
+      "Error::CrossLibrary": "The §Revision 4 cross-library refusal, as a typed error.",
+      "Error::Fetch": "Fetch-layer error.",
+      "Result": "The crate's Result alias.",
+      "RawText": "Bytes with a fallible UTF-8 view — never a String carrying invented U+FFFD.",
+      "Manifest": "The parsed manifest.json.",
+      "RegistryOptions": "Registry option struct.",
+      "Action": "What a fetch did.",
+      "Installed": "Fetch result.",
+      "EnsureOptions": "Fetch option struct.",
+      "NO_SETTINGS": "The empty settings slice, so the common path is not None-shaped.",
+      "NO_PARAMS": "The empty params slice.",
+      "SETTING_NOW_EPOCH_NANOS": "The clock-pinning setting name as a constant; the other three document it in prose.",
+      "SETTING_CLOCK_OFFSET_NANOS": "As above.",
+      "SETTING_MAX_CLOCK_SKEW_NANOS": "As above.",
+      "SETTING_DEFAULT_EVAL_MEMORY_BYTES": "As above.",
+      "SETTING_DEFAULT_EVAL_WALL_NANOS": "As above.",
+      "DEFAULT_TIMEZONE": "The UTC default.",
+      "REGISTRY_ENV": "Environment variable name.",
+      "AUTOFETCH_ENV": "Environment variable name.",
+      "SYSTEM_ARTIFACT_ROOTS": "The two system roots of docs/fetch.md §1.",
+      "cache_dir_for": "The per-user cache for a platform.",
+      "install_dir_for": "Where a fetch for another platform writes.",
+      "search_path_for": "The search path for another platform.",
+      "locate": "Find a line on the search path.",
+      "locate_in": "Find a line in given directories.",
+      "reason": "The reason module itself."
+    }
+  }
+}

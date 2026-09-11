@@ -789,6 +789,23 @@ const (
 	FilterUnsupported
 )
 
+// String is the wire spelling, as the filter result document carries it —
+// the same vocabulary Outcome.String answers in, and the same one the Python
+// and TypeScript bindings' FilterOutcome values already are. Outcome, Verdict
+// and DefaultKind each had a String and this one did not, so a Go caller could
+// print every verdict in the ABI except this one.
+func (f FilterOutcome) String() string {
+	switch f {
+	case FilterOK:
+		return "ok"
+	case FilterRejected:
+		return "rejected"
+	case FilterUnsupported:
+		return "unsupported"
+	}
+	return "unsupported"
+}
+
 // FilterRowError itemizes one 'e' or 'd' row: the row's 0-based index and
 // the code and message, verbatim — ClickHouse's own for an 'e' row, this
 // library's decline for a 'd' row.
