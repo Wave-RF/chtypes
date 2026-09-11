@@ -190,7 +190,7 @@ Note the space after each comma inside a parameter list. A binding that string-c
 
 And the case `chs_validate_type` structurally cannot answer — which is why `ValidateType` alone is insufficient and a schema-aware compile exists:
 
-```
+```text
 DDL:       x Int64 DEFAULT NULL
 canonical: x Nullable(Int64)  DEFAULT  NULL   (default_is_literal = true)
 ```
@@ -397,7 +397,7 @@ Things that are `unsupported` rather than rejected, by design:
 
 Observed, verbatim, on `25.8`:
 
-```
+```text
 DDL: h String DEFAULT hostName()
 → code -2, "DEFAULT hostname() is a property of the ClickHouse server, not of
    the client: resolving it here would store the gateway's answer"
@@ -441,7 +441,7 @@ Volatile-DEFAULT clock control — the caller's entire interface to clock skew, 
 
 With none of them set, **tolerated skew is unbounded** and the library stamps whatever the local clock says. Past the budget the row comes back `unsupported`, which is the only safe direction: a substituted timestamp too far in the _past_ under a `TTL` is accepted, previewed as accepted, and then **silently deleted at merge time**, with no error at any point. Verified:
 
-```
+```text
 settings {"chtypes_clock_offset_nanos":"5000000000","chtypes_max_clock_skew_nanos":"1"}
 → outcome "unsupported", code -2,
   "client clock offset exceeds chtypes_max_clock_skew_nanos; refusing to
@@ -468,7 +468,7 @@ Platform caveat a binding must not paper over: the ceiling covers ClickHouse's `
 
 Several type families are gated at column-creation time by settings that are properties of _the server the table lives on_, not of the row — `allow_suspicious_low_cardinality_types`, `allow_experimental_json_type`, `allow_experimental_time_time64_type`, and friends. A gateway knows these once and SHOULD declare them in the tenant's `chs_schema_compile` profile, which is where a real server binds them; failing that it MAY seed them with `chs_set_default_settings` or repeat them per call, and anything a per-call settings map sets still wins over the process seed. Verified on `25.8`:
 
-```
+```text
 lc LowCardinality(UInt32)  with no settings           → rejected, code 455
 lc LowCardinality(UInt32)  allow_suspicious_low_cardinality_types=1 → accepted
 ```
@@ -483,7 +483,9 @@ ClickHouse decides some things once, at `CREATE TABLE`, and other things per `IN
 2. **The profile is an overlay, not a replacement** (`mode = 0`, DECLARED — the only mode defined). Every name the profile declares takes the caller's value; every name it does not declare keeps the library's own _compile base_: ClickHouse's build defaults plus the derived permissive type-gate list (`lib/tools/gen_type_gate_settings.py`) plus the evaluation envelope. A partial profile can therefore admit a schema the server might refuse — the row path still re-checks the type gates the profile did NOT declare, under per-call settings — but it can never fabricate a rejection. `mode != 0` is refused loudly (`-2`) **unconditionally — including when the profile is `NULL` or `"{}"`**; a future COMPLETE mode (undeclared names taking the build's own server defaults) is reserved and unimplemented. (Corrected 2026-08-26: the empty-profile fast path used to return before the mode was examined, so `compile(ddl, mode=7)` compiled while `compile(ddl, {flatten_nested:0}, mode=7)` declined — the same argument answered two ways. The bindings were right to pass the mode through unvalidated, per `docs/reference/bindings.md`; the library simply never looked. Found by the four `examples/` tours, finding 1.)
 3. **The row path resolves THREE settings channels, in ONE order** (normative; revised 2026-08-25):
 
-       per-call map  >  handle profile  >  library defaults  >  ClickHouse defaults
+   ```text
+   per-call map  >  handle profile  >  library defaults  >  ClickHouse defaults
+   ```
 
    `chs_row` / `chs_rows` build their `Settings` by applying the library defaults (`chs_set_default_settings`) first, then the settings the handle's compile profile declared, then the per-call map — later writes win, so the list above IS the precedence. Format settings, `input_format_*`, `date_time_input_format`, the `chtypes_*` clock keys are per-INSERT decisions on a real server, so a per-call value always beats a declared one; but a caller that declared its gateway's settings ONCE at `chs_schema_compile` now gets them on every row call without repeating them, which is what "settings settable at DDL" means.
 
@@ -605,7 +607,7 @@ They are **not** in `cols`' stored row, because `SELECT *` does not return them 
 
 **The wire contract, at the revision the FORMAT path uses.** `NativeInputFormat` builds its `NativeReader` with a hard-coded `server_revision = 0` in every vendored tag (`Impl/NativeFormat.cpp:20-25` on 24.8, `:20-25` on 26.7). At revision 0 the body is, per block:
 
-```
+```text
 varuint  n_columns
 varuint  n_rows
 n_columns x {
@@ -646,7 +648,7 @@ Every one of those verdicts is produced by driving the vendored `DB::NativeReade
 
 `Native`'s column encoding under a different frame, and the difference is the entire point of modeling it separately. Per block (`src/Formats/BuffersReader.h:13-24`, byte-identical on 26.5, 26.6 and 26.7):
 
-```
+```text
 uint64le  n_columns
 uint64le  n_rows
 n_columns x {
@@ -760,7 +762,7 @@ Verified: `f Float64` given `1e400` yields `"stored":"inf"` after the repair, cl
 
 Every entry point is a pure function of five inputs:
 
-```
+```text
 (build version, schema text, row bytes, settings, clock instant)
 ```
 

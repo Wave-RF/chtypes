@@ -8,7 +8,7 @@ A filter compiles **one boolean expression** against a schema's physical columns
 
 This is the single most important thing on the page. `x = 256` over a `UInt8` column is **false for every row**, because a comparison _promotes_ the constant. It does not wrap it to `0` and match every genuine zero, which is exactly what the insert path does to the same literal.
 
-```
+```text
 insert side:   256 into UInt8   →  stored as 0            (overflow_wrap)
 WHERE side:    x = 256          →  false, for every row   (promotion)
 ```
@@ -128,7 +128,7 @@ This is the trap, and it is the mirror image of the promotion rule above.
 
 A bound value is deserialized by the **brace type's own reader**, which **wraps** an out-of-domain integer. `{p:UInt8}` given `"256"` binds `0` — and then matches every genuine zero in your data. Meanwhile the same constant written as a literal in the expression promotes and matches nothing.
 
-```
+```text
 x = 256        (literal)      →  never true
 x = {p:UInt8}  bound "256"    →  binds 0, matches every real zero
 ```

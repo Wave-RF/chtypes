@@ -4,7 +4,7 @@
 
 chtypes answers that question with ClickHouse's own code. Real C++ — `DataTypeFactory`, `ISerialization`, `ReadHelpers`, `evaluateMissingDefaults`, the MergeTree insert-time merge — is compiled per ClickHouse release into a native library and reached from Go, Python, TypeScript and Rust through a small frozen C ABI. Nothing semantic is reimplemented, so _"what does ClickHouse do with `256` into a `UInt8`?"_ is answered by ClickHouse, not by a model of it.
 
-```
+```text
 row + schema + ClickHouse version  ─▶  accepted / rejected / unsupported
                                        the stored value, byte for byte
                                        every silent change, named
@@ -50,7 +50,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 
 ## Where to go
 
-**Start here**
+### Start here
 
 |                                                  |                                                                                                          |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
@@ -59,7 +59,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 | [`../examples/README.md`](../examples/README.md) | a longer runnable tour, section for section in all four — a diff between two of them shows only spelling |
 | [`support.md`](support.md)                       | which languages, platforms and ClickHouse lines — generated, so it cannot drift                          |
 
-**Guides**
+### Guides
 
 |                                                          |                                                                       |
 | -------------------------------------------------------- | --------------------------------------------------------------------- |
@@ -73,7 +73,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 | [`guides/fetch.md`](guides/fetch.md)                     | the fetch and verification contract, normatively                      |
 | [`limitations.md`](limitations.md)                       | what chtypes declines to answer, and why                              |
 
-**Reference**
+### Reference
 
 |                                                                                                                                                                       |                                                                                                              |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |

@@ -31,7 +31,7 @@
 
 _"What does ClickHouse do with `256` into a `UInt8`?"_ has exactly one correct answer, and it is whatever ClickHouse's code does — which changes between releases. chtypes compiles ClickHouse's real C++ (`DataTypeFactory`, `ISerialization`, `ReadHelpers`, `evaluateMissingDefaults`, the MergeTree insert-time merge) per release into a native artifact behind a small frozen C ABI, and hands it to Go, Python, TypeScript and Rust. Nothing semantic is reimplemented in any binding.
 
-```
+```text
 row + schema + ClickHouse version  ─▶  accepted / rejected / poisoned
                                        the stored value, byte for byte
                                        every silent change, named

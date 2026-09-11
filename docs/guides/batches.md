@@ -83,7 +83,7 @@ for (i, r) in batch.rows.iter().enumerate() {
 
 Given the body
 
-```
+```text
 {"x":1}
 {"x":oops}
 {"x":3}

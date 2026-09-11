@@ -6,7 +6,7 @@ The table below is **generated** from this tree's four manifests and from the re
 
 <!-- BEGIN GENERATED — scripts/support-matrix.sh; do not edit by hand -->
 
-### Languages
+## Languages
 
 | Binding | Package | Requires | Loads the artifact with |
 |---|---|---|---|
@@ -15,7 +15,7 @@ The table below is **generated** from this tree's four manifests and from the re
 | TypeScript | `@wavehouse/chtypes` | Node 22+, ESM only | `ffi-rs` (prebuilt) |
 | Rust | `chtypes` | Rust 1.85+ (edition 2024) | `libloading` |
 
-### Platforms
+## Platforms
 
 The artifact is native code, so a platform is supported only if the release publishes a build for it. Today that is:
 
@@ -25,7 +25,7 @@ The artifact is native code, so a platform is supported only if the release publ
 
 Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Windows artifact and no 32-bit build.
 
-### ClickHouse lines
+## ClickHouse lines
 
 One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has a committed run of record in the core repository and the release publishes it:
 

@@ -303,37 +303,16 @@ jobs:
         run: scripts/lint-prose.sh
 
   prose:
-    name: "prose — markdownlint + no-hard-wrap check (report only)"
+    # BLOCKING. It was report-only while the tree was still hard-wrapped, which
+    # was a reason to format the tree rather than to exempt the rule. dprint fmt
+    # has since run over all 40 files, markdownlint's config now scopes MD010 to
+    # prose (tabs are correct inside Go code blocks) and cedes table style to
+    # dprint, and the 35 genuine findings are fixed. Both checks pass, so both
+    # gate. Unlike `docs` and `security`, this check is a pure function of the
+    # diff: nothing outside the repository can turn it red.
+    name: "prose — markdownlint + no-hard-wrap (dprint textWrap never)"
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # NON-BLOCKING, on purpose — same shape as the `docs` job above. This
-    # repository's markdown was written hard-wrapped, file by file, across
-    # many sessions (measured 2026-09-11: every one of the 35 tracked *.md
-    # files needs reformatting under `dprint check`, and markdownlint finds
-    # 91 pre-existing findings — missing fenced-code-block languages,
-    # list-marker consistency, stray blank lines — none of it something a
-    # lint-tooling change should silently rewrite). Two other efforts are
-    # already reworking large parts of this repository's docs in parallel.
-    # Blocking here would redden every PR's CI on prose debt this job
-    # cannot itself pay down. Flip continue-on-error off once the tree
-    # passes both tools cleanly.
-    #
-    # dprint (github.com/dprint/dprint), not prettier: Rust/wasm, AST-based
-    # (remark-equivalent — it does not corrupt tables or fenced blocks),
-    # and unwrapping prose (`textWrap: "never"` in dprint.json) is a
-    # first-class formatter option rather than a side effect. Verified
-    # against every tracked *.md file in this tree before adopting it:
-    # fenced-code-block contents come out byte-identical (embedded-language
-    # formatting is off in dprint.json) and every GFM table's cell count is
-    # unchanged — with one exception, and it is a pre-existing bug in the
-    # SOURCE, not a dprint defect: spec/c-abi.md has an accidental blank
-    # line splitting one table into a headerless orphan (around the
-    # `chs_shutdown`/`chs_free` rows), which both dprint and a from-scratch
-    # remark/prettier parse merge into one corrupted row — any strict
-    # CommonMark/GFM table parser will do the same. That line needs a
-    # manual fix (removing the stray blank line) independent of tooling
-    # choice; see the PR description.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0

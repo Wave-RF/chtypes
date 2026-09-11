@@ -96,7 +96,7 @@ plat_order = sorted(platforms, key=lambda p: (p.split("-")[0], p.split("-")[1]))
 out = []
 w = out.append
 
-w("### Languages")
+w("## Languages")
 w("")
 w("| Binding | Package | Requires | Loads the artifact with |")
 w("|---|---|---|---|")
@@ -105,7 +105,7 @@ w("| Python | `chtypes` | Python %s+ | stdlib `ctypes` (no build step, no depend
 w("| TypeScript | `@wavehouse/chtypes` | Node %s+, ESM only | `ffi-rs` (prebuilt) |" % node_min)
 w("| Rust | `chtypes` | Rust %s+ (edition %s) | `libloading` |" % (rust_min, rust_ed))
 w("")
-w("### Platforms")
+w("## Platforms")
 w("")
 w("The artifact is native code, so a platform is supported only if the release publishes a build for it. Today that is:")
 w("")
@@ -116,7 +116,7 @@ for p in plat_order:
 w("")
 w("Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Windows artifact and no 32-bit build.")
 w("")
-w("### ClickHouse lines")
+w("## ClickHouse lines")
 w("")
 w("One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has a committed run of record in the core repository and the release publishes it:")
 w("")

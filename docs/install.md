@@ -131,7 +131,7 @@ If you are developing against this repository rather than consuming a release:
 
 <details open><summary><b>Go</b></summary>
 
-```
+```text
 require github.com/wave-rf/chtypes/go v0.1.1
 replace github.com/wave-rf/chtypes/go => ../path/to/chtypes/go
 ```

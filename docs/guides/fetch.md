@@ -67,7 +67,7 @@ Only an `http(s)` source can be mid-publish. A `file://` URL or a plain director
 
 `SHA256SUMS.sig` is two lines:
 
-```
+```text
 untrusted comment: chtypes artifacts, ed25519 key deb275922dbff76e
 <base64 of the 64-byte ed25519 signature over the bytes of SHA256SUMS>
 ```
@@ -102,7 +102,7 @@ That is the lockfile model every package manager uses: trust on first fetch, byt
 
 One CLI surface, spelled identically:
 
-```
+```text
 chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
                         [--tag <t> | --url <base>] [--lock <file>] [--frozen]
                         [--force] [--offline]
@@ -126,7 +126,7 @@ chtypes where                        the registry directory fetch would write to
 
 Every SDK raises one identifiable error for a missing artifact — Go `ErrArtifactMissing` (works with `errors.Is`), Python `ArtifactMissingError`, TypeScript `ArtifactMissingError` with `code = 'CHTYPES_ARTIFACT_MISSING'`, Rust `Error::ArtifactMissing` — with this message, verbatim apart from the bracketed parts:
 
-```
+```text
 chtypes: no artifact for ClickHouse <line> (<os>-<arch>). Looked in: <dir1>, <dir2>, ….
 Install it:  <this SDK's fetch command> <line>
 or set CHTYPES_AUTOFETCH=1 to fetch on first use.

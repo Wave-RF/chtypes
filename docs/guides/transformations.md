@@ -93,7 +93,7 @@ A column with a volatile DEFAULT — `now()`, `now64(n)`, `today()`, `yesterday(
 
 That creates an obligation. **Send every substituted column as an explicit value in the real INSERT.** If you do not, the server evaluates `now()` at its own instant, and the row it stores is not the row you previewed. The gap is small and it is real, and it is worst in exactly the case you care about: a user staring at a preview of what is about to be written.
 
-```
+```text
 preview at 10:30:00.120  ts = 2026-01-15 10:30:00
 INSERT   at 10:30:01.4   ts = 2026-01-15 10:30:01   ← what actually landed
 ```

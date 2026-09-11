@@ -84,7 +84,7 @@ A fetch **writes** to the first of (1), (2), (3) that is set, and never to (4). 
 
 Inside, one directory per line:
 
-```
+```text
 <registry>/
   25.8/
     manifest.json         the record — read this, infer nothing
@@ -163,7 +163,7 @@ In TypeScript the split is in the method names rather than a flag: `registry.for
 
 A line no directory on the search path holds is one identifiable error in every binding — Go's `ErrArtifactMissing` (which works with `errors.Is`), Python's and TypeScript's `ArtifactMissingError`, Rust's `Error::ArtifactMissing` — carrying the same message everywhere apart from the bracketed parts:
 
-```
+```text
 chtypes: no artifact for ClickHouse 25.8 (darwin-arm64). Looked in: /Users/me/.cache/chtypes/artifacts/darwin-arm64, /usr/local/share/chtypes/artifacts/darwin-arm64, /opt/chtypes/artifacts/darwin-arm64.
 Install it:  python -m chtypes fetch 25.8
 or set CHTYPES_AUTOFETCH=1 to fetch on first use.
@@ -177,7 +177,7 @@ It names every directory it looked in and the exact command that would fix it, b
 
 One release, one `index.json` (schema 1), and it is a **complete set rather than a delta**: read it and you see everything that tag offers. Asset names are
 
-```
+```text
 chtypes-<clickhouse_version>-<os>-<arch>[-b<build>].tar.gz
 ```
 

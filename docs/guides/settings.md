@@ -8,7 +8,7 @@ So settings travel on four channels, and the rule is: **the settings chtypes see
 
 On the row path, the leftmost channel that names a setting wins:
 
-```
+```text
 per-call map  >  handle compile profile  >  library defaults  >  ClickHouse's own defaults
 ```
 
@@ -72,7 +72,7 @@ A gate named in the **compile profile** binds at compile. A refusing value fails
 
 This is the one place the precedence table above does not hold, and it holds the way it does because a table that exists is a table that exists: the gate settled at CREATE, and no later INSERT reopens the question.
 
-## Values cross as strings. Always.
+## Values cross as strings. Always
 
 This has cost real bugs, so each binding enforces it as hard as its type system allows.
 
@@ -89,7 +89,7 @@ The reason is one setting in particular. `chtypes_now_epoch_nanos` is a 19-digit
 
 Spell a setting wrong and you get ClickHouse's own **code 115**, did-you-mean hint included, on every channel:
 
-```
+```text
 [115] Setting nope_not_a_setting is neither a builtin setting nor started with
 the prefix 'SQL_' registered for user-defined settings
 ```

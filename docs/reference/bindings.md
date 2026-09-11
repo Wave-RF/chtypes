@@ -8,7 +8,7 @@ Every language — go, python, ts, rust — is a peer SDK over the same C ABI; n
 
 Four objects. Nothing else is required.
 
-```
+```text
 Registry ── For(version) ──▶ Library ── CompileDDL(ddl) ──▶ Schema ── Rows(...) ──▶ BatchResult
                                 │                             │
                           ValidateType(expr)            SetEngine / SetTTL      Row(...)  ──▶ RowResult
@@ -168,7 +168,7 @@ ClickHouse has no notion of "I changed your value": `readIntText` wraps mod 2^N,
 
 `Transform` is `{Column, Input, Stored, Reason, Row}` plus a `Lossy()` predicate. The reason strings are stable — the harness groups on them — and a binding MUST use exactly these spellings:
 
-```
+```text
 overflow_wrap      null_to_default   null_loss        decimal_truncate
 date_clamp         datetime_wrap     date_shift       uuid_mangle
 ip_mangle          float_precision   lossy_numeric    fixedstring_pad
@@ -319,7 +319,7 @@ The two failure modes this rule exists to prevent are the same pair the whole pr
 
 Then run the rigs and quote the run, not your intent:
 
-```
+```text
 cd tests/acceptance && ./run.sh          # full; ./run.sh report re-judges in ~2 s
 cd tests/arbiter    && ./run.sh rescore  # ~2 min
 ```
@@ -348,7 +348,7 @@ All six were produced on 2026-08-17 by `chtypes-core/lib/build/chtypes-oracle --
 
 Compiled through the C ABI (`chs_schema_compile` + the column-introspection group) on the `25.8` artifact:
 
-```
+```text
 in:  a UInt8, b Nullable(String) DEFAULT 'x', c DateTime MATERIALIZED now()
 out: a  UInt8              kind=""             expr=""       literal=false
      b  Nullable(String)   kind="DEFAULT"      expr="'x'"    literal=true

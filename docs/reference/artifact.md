@@ -6,7 +6,7 @@ An artifact is one ClickHouse release, compiled, wrapped in the `chs_*` C ABI, p
 
 One directory per **ClickHouse minor line**, each self-contained:
 
-```
+```text
 <registry>/
   24.8/
     manifest.json          required — the loader's source of truth
@@ -23,7 +23,7 @@ One directory per **ClickHouse minor line**, each self-contained:
 
 Platform-keyed, one tree per target:
 
-```
+```text
 ~/.cache/chtypes/artifacts/<os>-<arch>/<minor>/…
 ```
 
