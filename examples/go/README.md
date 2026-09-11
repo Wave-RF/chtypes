@@ -5,15 +5,16 @@ Sixteen sections over the whole chtypes surface, matching `../python`, `../ts` a
 ## Run it
 
 ```bash
-go run -tags chtypes_linked .   # or, with prerequisite checks: ../chplay.sh go
-# (the tag adds the statically linked section — §static artifact — which
-#  needs a core build tree via CGO_LDFLAGS; the registry sections need only artifacts)
+go run .            # 16/16 sections, dlopen-only — what a public clone runs
+../chplay.sh go     # the same tour with prerequisite checks; this is what CI runs
 ```
+
+`chplay.sh` is the tested path: CI runs `chplay.sh --require-all --locked`, so the command above is verified on every pull request rather than merely written down.
 
 ## Prerequisites
 
 - **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/<os>-<arch>/`) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
-- **cgo**. Sections 9 and 14 (the statically linked shape) additionally need the core repository's `lib/build` on `CGO_LDFLAGS` and the `chtypes_linked` tag; `chplay.sh go` sets both when the sibling is present, and without the tag those two sections say so and skip. They use the static path it provides; everything else goes through the registry.
+- **cgo — optional, and not available to a public clone.** Sections 9 and 14 (the statically linked shape) need a core build tree on `CGO_LDFLAGS` plus the `chtypes_linked` tag. That tree is not public: adding the tag without one fails at link time with `library 'chtypes' not found`, which is why it is not in the command above. Without the tag those two sections say so and skip, and the other fourteen run against the registry. `chplay.sh go` adds the tag only when `CHTYPES_CORE_DIR` or `CHTYPES_LIB_BUILD` points at such a tree.
 - Go 1.27+.
 
 ## Knobs
