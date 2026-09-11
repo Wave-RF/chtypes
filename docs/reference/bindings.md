@@ -1054,7 +1054,7 @@ A gateway that forwards INSERTs therefore MUST NOT present a `chs_row` /
    columns.
 5. **Count the declines.** This is a decline that real traffic can hit, so it
    belongs in the `unsupported`-rate metric a consumer keeps
-   ([`../docs/production-plan.md`](../docs/production-plan.md) §9), not only in a
+   (the core repository's `docs/production-plan.md` §9), not only in a
    log line.
 
 This is not an over-accept or an over-reject in the rigs' sense, and no rig can

@@ -88,7 +88,7 @@ The public golden set is generated per line and gates itself on the **exact**
 patch version, not the line. A case runs against an artifact only when that
 artifact's exact version equals the one its expectations were produced on, and
 skips loudly by name otherwise — an expectation produced on one build says
-nothing about another. See [`goldens/README.md`](../goldens/README.md).
+nothing about another. See [`reference/goldens.md`](reference/goldens.md).
 
 This is also why the golden set shrinks as lines are added: a case the lines
 answer differently is refused by the generator rather than recorded twice.

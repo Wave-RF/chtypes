@@ -1,30 +1,18 @@
-# The chtypes specification
+# Reference
 
-chtypes answers one question, exactly: **if this row were inserted into this
-ClickHouse table on this ClickHouse version, what would happen?** It answers it
-by running ClickHouse's own C++ type machinery — `DataTypeFactory`,
-`ISerialization`, `ReadHelpers`, `evaluateMissingDefaults`, the TTL algorithms,
-`MergeTreeDataWriter::mergeBlock` — vendored per release and linked behind a
-small C ABI. Nothing in chtypes reimplements a coercion rule, which is why the
-answers are exact by construction rather than approximately right.
+The deep layer, under [the guides](../guides/). Most people never need to read it: the guides and the per-language pages cover using chtypes. This is for anyone implementing against the ABI, auditing what an artifact promises, or checking whether a binding conforms.
 
-This directory is the **language-neutral contract** for that product. It exists
-because the shipping artifact is a shared library with a frozen C ABI, and a
-shared library can be driven from any language. Go was first; Python, Rust and
-TypeScript are peers today — all four are scored arbiter columns. All of them
-must mean the same thing.
-
-## What is normative here
-
-| Document | Scope |
+| Page | For |
 |---|---|
-| [`c-abi.md`](c-abi.md) | The ground truth: every `chs_*` function, ownership, thread-safety, error model, and the exact JSON result documents `chs_row` / `chs_rows` return. |
-| [`artifact.md`](artifact.md) | The artifact and registry directory contract: file names, `manifest.json`, platform keys, multi-version layout, verification. |
-| [`bindings.md`](bindings.md) | The API shape every language binding implements, plus worked examples and what a binding must do to claim conformance. |
+| [`go.md`](go.md) · [`python.md`](python.md) · [`ts.md`](ts.md) · [`rust.md`](rust.md) | the per-language API surface |
+| [`c-abi.md`](c-abi.md) | the ground truth: every `chs_*` function, ownership, thread-safety, the error model, and the exact `chs_row` / `chs_rows` result documents |
+| [`artifact.md`](artifact.md) | the artifact and registry contract: file names, `manifest.json`, platform keys, multi-version layout, verification |
+| [`bindings.md`](bindings.md) | the API shape every binding implements, and what one must do to claim conformance |
+| [`goldens.md`](goldens.md) | the served golden set, and why it shrinks as ClickHouse lines are added |
 
-`MUST`, `MUST NOT`, `SHOULD`, `MAY` are used in the RFC 2119 sense. Where a
-statement is an observation from a specific artifact rather than a rule, it says
-so and names the artifact.
+`MUST`, `MUST NOT`, `SHOULD`, `MAY` are RFC 2119. Where a statement is an observation from a specific artifact rather than a rule, it says so and names the artifact.
+
+The C ABI and the artifact contract are the product; Go, Python, TypeScript and Rust are peer SDKs over them. No language is privileged.
 
 ## What is normative, and where the working reference lives
 
