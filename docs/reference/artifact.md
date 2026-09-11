@@ -99,7 +99,7 @@ The reference oracle also falls back to discovery when its linked build cannot a
 
 The artifact carries its own checksum, so verification is not optional and not expensive. The build tooling's artifact-cache verifier walks each version directory, re-hashes the library, and compares against `library_sha256`. Its own comment states the reason plainly: a move that reported success and truncated a 232 MB library would look identical to one that worked.
 
-A loader SHOULD verify the hash before `dlopen` when the artifact came from anywhere other than a local build — and MUST when it came from a network. It SHOULD also assert `chs_clickhouse_version()` against `manifest.clickhouse_version` after loading, because that catches the one class of corruption a hash cannot: the right bytes in the wrong directory.
+A loader SHOULD verify the hash before `dlopen` when the artifact came from anywhere other than a local build — and MUST when it came from a network. **Two of the four bindings implement this today**: Python (`verify_hashes`) and TypeScript (`verifyChecksums`). Go has no load-time hash check, and the Rust crate says so in its own source — it takes no crypto dependency and relies on the release pipeline's verification instead. A caller pointing either at network-sourced bytes must verify before constructing the registry. This is a known divergence, not a license to skip it; see issue #13. It SHOULD also assert `chs_clickhouse_version()` against `manifest.clickhouse_version` after loading, because that catches the one class of corruption a hash cannot: the right bytes in the wrong directory.
 
 ## Platform properties a loader must respect
 
