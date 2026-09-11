@@ -54,7 +54,7 @@ Row-level verdicts are **returned, never raised**: a rejected row is a `RowResul
 
 The export channel is keyword-only on `rows`: `export=Format.JSON_COMPACT_EACH_ROW` and `doc_flags=DOC_VALUES | DOC_TRANSFORMS`. There is no separate `rows_export` method.
 
-`Schema`, `Filter` and `Block` are all context managers.
+`Registry`, `Schema`, `Filter` and `Block` are all context managers. (`Library` deliberately is not — see `bindings.md` §Teardown: reopening after a full close segfaults, so a scope-based release on a `Library` is the mid-lifecycle teardown that section warns against.)
 
 ## Filter and Block
 

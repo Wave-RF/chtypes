@@ -41,6 +41,8 @@ npm install @wavehouse/chtypes
 
 ESM only. Native calls go through `ffi-rs`, prebuilt for darwin arm64/x64 and linux arm64/x64 (gnu and musl), so there is no build step.
 
+⚠️ That is the FFI loader's matrix, not the artifact's. chtypes artifacts are published for **darwin-arm64, linux-amd64 and linux-arm64 only** ([support.md](support.md)). On an Intel Mac or a musl distribution the package installs and `ffi-rs` resolves, and then `chtypes fetch <line>` has nothing to give you.
+
 </details>
 
 <details><summary><b>Rust</b></summary>
