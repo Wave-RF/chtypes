@@ -183,6 +183,9 @@ const lib = registry.for('25.8');     // minor line or exact patch both resolve
 using schema = lib.compileDdl('id LowCardinality(UInt32), x UInt8, ts DateTime DEFAULT now()', {
   settings: { allow_suspicious_low_cardinality_types: '1' },
 });
+// `using` needs explicit resource management: TypeScript downlevels it, and
+// plain JavaScript needs Node >= 24. On Node 22 call `schema.close()` instead —
+// same effect, and every disposable here has both.
 
 const good = schema.row(Format.JSONEachRow, Buffer.from('{"id": 7, "x": 256}'));
 console.log(good.outcome);                  // accepted

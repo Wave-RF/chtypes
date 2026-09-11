@@ -23,7 +23,7 @@
 #      registry tests against them. This is "does the published SDK work
 #      with the published artifacts", kept small on purpose: two lines, the
 #      SDK's own tests. The bulk proof — the server-truth suites, the oracle,
-#      the rigs, every supported line — is the core repository's certify
+#      the rigs, every supported line — is the core repository's sdk-suites
 #      workflow, against this same tree.
 #
 # A suite that skipped everything is not a pass, in either run:
@@ -63,6 +63,35 @@ jobs:
           grep -qE "ABI_REVISION = $rev" ts/src/*.ts
           grep -qE "ABI_REVISION: i32 = $rev" rust/src/*.rs
           echo "ABI revision $rev agreed by the header and four bindings"
+
+  docs:
+    name: "docs — the support matrix still matches what the release serves"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # NON-BLOCKING, on purpose, and deliberately not a required check. The
+    # matrix names the ClickHouse lines the release publishes, and core adds a
+    # line whenever it certifies one — a cross-repo event this repository
+    # cannot fix by itself. Blocking here would redden main on somebody else's
+    # commit, which is the trade core already refused for fetch-fixtures-check.
+    # A warning is the right volume: the docs are stale, nothing is broken.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: docs/support.md matches the manifests and the live index
+        run: |
+          if ! scripts/support-matrix.sh --check; then
+            {
+              echo "### docs/support.md is stale"
+              echo
+              echo "The release publishes something \`docs/support.md\` does not name."
+              echo "Regenerate and commit:"
+              echo
+              echo '```sh'
+              echo 'scripts/support-matrix.sh'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
   go:
     name: "go — build, vet, standalone check (no artifacts)"
