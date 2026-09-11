@@ -80,7 +80,7 @@ chtypes verify                  # re-hash every installed line against its manif
 `chtypes list` and `chtypes verify` are spelled the same way in all four
 bindings (`go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest`,
 `python -m chtypes`, `npx @wavehouse/chtypes`, `cargo install chtypes`), and
-`docs/fetch.md` §6 is the contract they share.
+[`guides/fetch.md`](guides/fetch.md) §6 is the contract they share.
 
 ## What "supported" means for a golden answer
 
