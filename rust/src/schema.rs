@@ -256,7 +256,8 @@ impl Schema {
 
     /// [`Schema::rows`] with the revision-3 export and document-flag channels
     /// exposed: ONE `chs_rows` call, never a second, never re-parsing
-    /// (`docs/proposals/rows-export.md`; the C ABI contract §Rows is normative).
+    /// (the C ABI contract §Rows is normative; `include/chtypes.h` is its
+    /// public authority).
     ///
     /// `export` is `None` (no bytes; `doc_flags` still thins the document) or
     /// `Some(format)` for a [`Format`] this artifact can SERIALIZE — this

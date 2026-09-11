@@ -370,8 +370,9 @@ class Schema:
         `BatchResult.rows` as `Outcome.SKIPPED`, carrying the server's own
         caught error verbatim (2026-08-27).
 
-        **The revision-3 export channel** (the C ABI contract §Rows;
-        docs/proposals/rows-export.md) — still ONE `chs_rows` call, never a
+        **The revision-3 export channel** (the C ABI contract §Rows, for
+        which `include/chtypes.h` is the public authority) — still ONE
+        `chs_rows` call, never a
         second, never re-parsing:
 
         `export` is None (no bytes — today's path, byte-identical documents)

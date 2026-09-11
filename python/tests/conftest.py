@@ -2,7 +2,7 @@
 not run at all — it skips, loudly, by name. The fetch, CLI and pure-Python
 tests need none and always run; that is what this repository's CI proves on
 hosted runners, and the artifact-backed proof is the core repository's
-`certify` workflow against this same tree.
+server-truth suites against this same tree.
 
 The registry comes from the search path (docs/guides/fetch.md §1): `$CHTYPES_REGISTRY`,
 else the per-user artifact cache for this host (`chtypes.default_registry_dir()`:

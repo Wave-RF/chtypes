@@ -456,7 +456,7 @@ fn rust_values() -> BTreeMap<&'static str, Val> {
     m.insert("DocFlags::DEFAULTS", i(DocFlags::DEFAULTS.bits() as i64));
     m.insert("DocFlags::ALL", i(DocFlags::ALL.bits() as i64));
 
-    // docs/fetch.md §6 — the machine-readable codes the four CLIs print.
+    // docs/guides/fetch.md §6 — the machine-readable codes the four CLIs print.
     m.insert("CODE_ARTIFACT_MISSING", s(chtypes::CODE_ARTIFACT_MISSING));
     m.insert(
         "CODE_ARTIFACT_UNTRUSTED",

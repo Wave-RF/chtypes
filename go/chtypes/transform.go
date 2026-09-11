@@ -105,7 +105,6 @@ const (
 	// its own clock and the caller must send as an explicit column. A separate
 	// reason from default_filled because the claim is different: the tenant is
 	// being shown a value the *gateway* invented, not one the server chose.
-	// docs/defaults-matrix.md §5.4(3) asks for exactly this.
 	ReasonDefaultMaterialized = "default_materialized"
 
 	// The storage layer's own verdicts on rows the type layer accepted,

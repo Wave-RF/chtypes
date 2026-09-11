@@ -158,7 +158,7 @@ let batch = schema.rows_export(
 
 Three payload states, and they are distinct: absent means no export was requested, it was declined (the reason is in `export_declined`), or a call-level verdict preempted it; present-but-empty means the export ran and emitted nothing. The bytes are copied out of the C buffer and freed before the call returns, so no ownership crosses the boundary.
 
-**Document flags** thin the _description_ without ever changing the _verdict_. Passing an export format defaults them to lean — verdicts only — because the usual reason to export is to forward bytes rather than to read a report. Ask for `DOC_VALUES`, `DOC_TRANSFORMS` or `DOC_DEFAULTS` back explicitly if you want them. A plain `rows` call is the all-flags spelling and stays byte-identical to what it always returned.
+**Document flags** thin the _description_ without ever changing the _verdict_. Passing an export format defaults them to lean — verdicts only — because the usual reason to export is to forward bytes rather than to read a report. Ask for the values, transforms or defaults back explicitly if you want them — `DocValues` / `DocTransforms` / `DocDefaults` in Go, `DOC_VALUES` / `DOC_TRANSFORMS` / `DOC_DEFAULTS` in Python and TypeScript, `DocFlags::VALUES` / `DocFlags::TRANSFORMS` / `DocFlags::DEFAULTS` in Rust. A plain `rows` call is the all-flags spelling and stays byte-identical to what it always returned.
 
 ## Next
 

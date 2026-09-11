@@ -21,7 +21,7 @@
 # Without a registry — a hosted CI runner, a fresh clone — the suite still
 # runs: the fetch, fixture and CLI tests need no artifact, and every test that
 # does SKIPS, by name, in the census; the golden set and the registry suite
-# are then the core repository's certify workflow's to prove. --no-artifacts
+# are then the core repository's server-truth suites' to prove. --no-artifacts
 # reproduces that runner here: an empty XDG_CACHE_HOME and no
 # $CHTYPES_REGISTRY, so this machine's own cache is invisible.
 # --require-artifacts is the opposite rule, for CI's artifact-backed run:

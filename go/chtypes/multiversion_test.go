@@ -85,7 +85,7 @@ func testRegistryDir(t *testing.T) string {
 // skipNoArtifacts is the one skip every registry test lands on when the
 // registry it was pointed at holds nothing. It is the right verdict — a
 // hosted CI runner has no artifacts, and the artifact-backed proof runs in
-// the core repository's certify workflow against this same tree — but never a
+// the core repository's server-truth suites against this same tree — but never a
 // quiet one: the message names the directory, what was wrong with it, and the
 // one command that fills it.
 func skipNoArtifacts(t *testing.T, dir, detail string) {

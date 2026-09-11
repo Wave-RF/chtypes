@@ -2,7 +2,7 @@
   "schema": 1,
   "title": "The chtypes binding parity contract, machine-readable",
   "about": [
-    "This file is the ONE machine-readable source of truth for what every binding must expose. docs/reference/bindings.md is the prose that explains why; this is what the four test suites actually run against, and scripts/check-parity-doc.sh asserts the two agree on the object-model table.",
+    "This file is the ONE machine-readable source of truth for what every binding must expose. docs/reference/bindings.md is the prose that explains why; this is what the four test suites actually run against, and python/tests/test_parity.py asserts the two agree on the object-model table.",
     "Each entry is a LOGICAL capability, not a name. The four columns are that capability's spelling in each language, and a spelling that follows the language's own idiom (CompileDDL / compile_ddl / compileDdl / compile) is the point, not a divergence. What must never drift is which capabilities exist and, where a `value` is given, what they answer.",
     "A binding that genuinely should not have a capability declares it as {\"absent\": \"<why>\"}. An absent with no reason fails the manifest's own integrity check, so a gap cannot be recorded silently.",
     "The `unlisted` map is the other half of the contract: public names a binding exports that the others deliberately do not need. Each one carries a reason, the no-undeclared-surface check fails on anything that is neither a capability spelling nor listed there, and an entry naming something the binding no longer exports fails too \u2014 an excuse with nothing behind it hides the next real gap.",
@@ -16,9 +16,9 @@
     "filter": "The revision 3/4 filter and block surface (§Revision 3, §Revision 4).",
     "results": "The result types every binding hands back (§Result types).",
     "vocabulary": "Shared value sets. These carry a `value`: the four bindings must answer with the same bytes, not merely have a symbol.",
-    "errors": "The refusal/decline split and the artifact error family (§Conformance rule 12, docs/fetch.md §6).",
+    "errors": "The refusal/decline split and the artifact error family (§Conformance rule 12, docs/guides/fetch.md §6).",
     "discovery": "The three canonical connect-time queries and their parsers (§Discovery).",
-    "fetch": "Installing and verifying artifacts (docs/fetch.md).",
+    "fetch": "Installing and verifying artifacts (docs/guides/fetch.md).",
     "cli": "The `chtypes` command every SDK ships."
   },
   "floors": {
@@ -31,7 +31,7 @@
       "id": "registry.construct",
       "group": "registry",
       "kind": "ctor",
-      "what": "Open a registry: an explicit artifact directory, or the docs/fetch.md §1 search path when none is given",
+      "what": "Open a registry: an explicit artifact directory, or the docs/guides/fetch.md §1 search path when none is given",
       "go": "NewRegistry",
       "python": "Registry",
       "ts": "Registry",
@@ -928,7 +928,7 @@
       "id": "errors.artifact-missing",
       "group": "errors",
       "kind": "type",
-      "what": "No artifact for this line on the search path (docs/fetch.md §6, exit 1)",
+      "what": "No artifact for this line on the search path (docs/guides/fetch.md §6, exit 1)",
       "go": "ErrArtifactMissing",
       "python": "ArtifactMissingError",
       "ts": "ArtifactMissingError",
@@ -987,37 +987,37 @@
     {
       "id": "errors.artifact-code-missing",
       "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_MISSING",
-      "what": "The docs/fetch.md §6 machine-readable code, which the four CLIs print identically",
+      "what": "The docs/guides/fetch.md §6 machine-readable code, which the four CLIs print identically",
       "go": "CodeArtifactMissing", "python": "CODE_ARTIFACT_MISSING", "ts": "CODE_ARTIFACT_MISSING", "rust": "CODE_ARTIFACT_MISSING"
     },
     {
       "id": "errors.artifact-code-untrusted",
       "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_UNTRUSTED",
-      "what": "docs/fetch.md §6",
+      "what": "docs/guides/fetch.md §6",
       "go": "CodeArtifactUntrusted", "python": "CODE_ARTIFACT_UNTRUSTED", "ts": "CODE_ARTIFACT_UNTRUSTED", "rust": "CODE_ARTIFACT_UNTRUSTED"
     },
     {
       "id": "errors.artifact-code-corrupt",
       "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_CORRUPT",
-      "what": "docs/fetch.md §6",
+      "what": "docs/guides/fetch.md §6",
       "go": "CodeArtifactCorrupt", "python": "CODE_ARTIFACT_CORRUPT", "ts": "CODE_ARTIFACT_CORRUPT", "rust": "CODE_ARTIFACT_CORRUPT"
     },
     {
       "id": "errors.artifact-code-pinned",
       "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_PINNED",
-      "what": "docs/fetch.md §6",
+      "what": "docs/guides/fetch.md §6",
       "go": "CodeArtifactPinned", "python": "CODE_ARTIFACT_PINNED", "ts": "CODE_ARTIFACT_PINNED", "rust": "CODE_ARTIFACT_PINNED"
     },
     {
       "id": "errors.artifact-code-unpublished",
       "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_UNPUBLISHED",
-      "what": "docs/fetch.md §6",
+      "what": "docs/guides/fetch.md §6",
       "go": "CodeArtifactUnpublished", "python": "CODE_ARTIFACT_UNPUBLISHED", "ts": "CODE_ARTIFACT_UNPUBLISHED", "rust": "CODE_ARTIFACT_UNPUBLISHED"
     },
     {
       "id": "errors.artifact-code-source-unreachable",
       "group": "errors", "kind": "constant", "value": "CHTYPES_SOURCE_UNREACHABLE",
-      "what": "docs/fetch.md §6",
+      "what": "docs/guides/fetch.md §6",
       "go": "CodeSourceUnreachable", "python": "CODE_SOURCE_UNREACHABLE", "ts": "CODE_SOURCE_UNREACHABLE", "rust": "CODE_SOURCE_UNREACHABLE"
     },
 
@@ -1082,7 +1082,7 @@
     {
       "id": "fetch.ensure",
       "group": "fetch", "kind": "function",
-      "what": "Install one line, verified, into the registry directory (docs/fetch.md)",
+      "what": "Install one line, verified, into the registry directory (docs/guides/fetch.md)",
       "go": "Ensure", "python": "ensure", "ts": "ensure", "rust": "ensure"
     },
     {
@@ -1106,7 +1106,7 @@
     {
       "id": "fetch.registry-search-path",
       "group": "fetch", "kind": "function",
-      "what": "The docs/fetch.md §1 search path, in order, for this host",
+      "what": "The docs/guides/fetch.md §1 search path, in order, for this host",
       "go": "RegistrySearchPath", "python": "registry_search_path", "ts": "registrySearchPath", "rust": "registry_search_path"
     },
     {
@@ -1154,7 +1154,7 @@
     {
       "id": "fetch.release-public-key",
       "group": "fetch", "kind": "constant", "value": "fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc",
-      "what": "The raw 32-byte ed25519 release public key, hex, as docs/fetch.md §4 publishes it",
+      "what": "The raw 32-byte ed25519 release public key, hex, as docs/guides/fetch.md §4 publishes it",
       "go": "ReleasePublicKeyHex", "python": "RELEASE_PUBLIC_KEY", "ts": {"absent": "TS exports RELEASE_PUBLIC_KEYS, a LIST of trusted keys for rotation, rather than one scalar. The list's first element is this value; the parity test checks that instead."}, "rust": "fetch::RELEASE_PUBLIC_KEY_HEX"
     },
     {
@@ -1184,21 +1184,21 @@
     {
       "id": "fetch.env-registry",
       "group": "fetch", "kind": "constant", "value": "CHTYPES_REGISTRY",
-      "what": "The environment variable naming an explicit registry (docs/fetch.md §1)",
+      "what": "The environment variable naming an explicit registry (docs/guides/fetch.md §1)",
       "go": {"absent": "Go spells the name inline in RegistrySearchPath and exports no constant for it. NEEDS A DECISION — the other three export one."},
       "python": "ENV_REGISTRY", "ts": {"absent": "TS spells the name inline in resolveRegistryDir. NEEDS A DECISION."}, "rust": "REGISTRY_ENV"
     },
     {
       "id": "fetch.env-autofetch",
       "group": "fetch", "kind": "constant", "value": "CHTYPES_AUTOFETCH",
-      "what": "The environment variable turning lazy fetch on (docs/fetch.md §6)",
+      "what": "The environment variable turning lazy fetch on (docs/guides/fetch.md §6)",
       "go": {"absent": "Spelled inline; see fetch.env-registry."},
       "python": "ENV_AUTOFETCH", "ts": {"absent": "Spelled inline; see fetch.env-registry."}, "rust": "AUTOFETCH_ENV"
     },
     {
       "id": "fetch.command",
       "group": "fetch", "kind": "constant",
-      "what": "This SDK's own fetch command, as the docs/fetch.md §7 message spells it. The VALUE is deliberately per-language — it is the command a caller of THIS SDK runs",
+      "what": "This SDK's own fetch command, as the docs/guides/fetch.md §7 message spells it. The VALUE is deliberately per-language — it is the command a caller of THIS SDK runs",
       "go": "GoFetchCommand", "python": {"absent": "The Python message builds the command inline in errors.py's ArtifactMissingError. NEEDS A DECISION — Go, TS and Rust export it."}, "ts": "FETCH_COMMAND", "rust": "FETCH_COMMAND"
     },
 
@@ -1256,7 +1256,7 @@
       "LockFile.Write": "Write a lock file.",
       "NewLockFile": "Construct a lock file.",
       "LockKey": "The platform/line key a pin is stored under.",
-      "ExitCode": "Map an error to the docs/fetch.md §6 exit status; the other CLIs map it internally.",
+      "ExitCode": "Map an error to the docs/guides/fetch.md §6 exit status; the other CLIs map it internally.",
       "ErrorCode": "The artifact error code as a named string type.",
       "ErrorCode.ExitCode": "Accessor.",
       "ErrorCode.Sentinel": "Accessor.",
@@ -1266,7 +1266,7 @@
       "ArtifactError.Unwrap": "errors.Unwrap support.",
       "SchemaError.Error": "error interface.",
       "UnsupportedError.Error": "error interface.",
-      "SystemRegistryDirs": "The two system roots of docs/fetch.md §1.",
+      "SystemRegistryDirs": "The two system roots of docs/guides/fetch.md §1.",
       "DefaultRegistryDirFor": "The per-user cache for another platform.",
       "ValidPlatform": "Platform-key validation.",
       "QuoteIdentifier": "Backtick-quoting for reconstruct; the others keep it private.",
@@ -1367,7 +1367,7 @@
       "resolvePlatform": "Platform key resolution.",
       "isPlatformKey": "Platform-key validation.",
       "cacheRegistryDir": "The per-user cache for a platform.",
-      "systemRegistryDirs": "The two system roots of docs/fetch.md §1.",
+      "systemRegistryDirs": "The two system roots of docs/guides/fetch.md §1.",
       "looksLikeRegistry": "Whether a directory holds artifacts.",
       "resolveRegistryDir": "The first search-path entry that held something.",
       "selectArtifact": "Pick one release row for a spelling.",
@@ -1426,7 +1426,7 @@
       "Error": "The one error enum.",
       "Error::code": "The ClickHouse code, when there is one.",
       "Error::is_unsupported": "The explicit both-arms predicate; see errors.base.",
-      "Error::artifact_code": "The docs/fetch.md §6 code, when there is one.",
+      "Error::artifact_code": "The docs/guides/fetch.md §6 code, when there is one.",
       "Error::Registry": "Registry-layer error.",
       "Error::Load": "Load failure.",
       "Error::NotAnArtifact": "Load failure.",
@@ -1460,7 +1460,7 @@
       "DEFAULT_TIMEZONE": "The UTC default.",
       "REGISTRY_ENV": "Environment variable name.",
       "AUTOFETCH_ENV": "Environment variable name.",
-      "SYSTEM_ARTIFACT_ROOTS": "The two system roots of docs/fetch.md §1.",
+      "SYSTEM_ARTIFACT_ROOTS": "The two system roots of docs/guides/fetch.md §1.",
       "cache_dir_for": "The per-user cache for a platform.",
       "install_dir_for": "Where a fetch for another platform writes.",
       "search_path_for": "The search path for another platform.",
