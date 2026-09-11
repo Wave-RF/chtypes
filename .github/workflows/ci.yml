@@ -225,6 +225,22 @@ jobs:
       - name: rust — suite with the registry; the golden test must run
         run: scripts/check-suite.sh --require-artifacts rust
 
+      # The examples are advertised in README.md as four runnable tours, and
+      # until now nothing ran them: a signature change in any binding would
+      # break its tour with every gate green, and examples/rust/Cargo.lock sat
+      # at 0.1.0 through the whole 0.1.1 release because nothing resolved it.
+      # This is the only job with an artifact already in hand and all four
+      # toolchains already set up, so the marginal cost is one step.
+      #
+      # BOTH FLAGS ARE LOAD-BEARING. --require-all: chplay SKIPS a missing
+      # toolchain, so without it a run where all four skipped exits 0 and
+      # proves nothing. --locked: an unlocked resolve silently REWRITES a
+      # drifted lockfile and exits 0 — and on a runner that rewrite is thrown
+      # away, so the drift would pass forever. Verified by planting the 0.1.0
+      # drift back into the lock: --locked exits 1, unlocked exits 0.
+      - name: examples — the four tours actually run, on their committed lockfiles
+        run: examples/chplay.sh --require-all --locked
+
   # ── Lint / supply-chain jobs below ─────────────────────────────────
   #
   # All additive: none of the jobs above gained a `needs:` on any of these,

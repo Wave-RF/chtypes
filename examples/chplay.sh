@@ -5,6 +5,8 @@
 #   ./chplay.sh go           run one (any of: go python ts rust)
 #   ./chplay.sh go rust      run a subset
 #   ./chplay.sh --list       show what would run, and with which toolchain
+#   ./chplay.sh --require-all  a missing toolchain is a FAILURE, not a skip
+#   ./chplay.sh --locked       every tour honors its committed lockfile
 #
 # Every tour is OFFLINE: it needs only that language's toolchain plus the
 # artifacts in the registry (scripts/fetch.sh, or a core-repository build).
@@ -12,6 +14,16 @@
 #
 # A missing toolchain is a SKIP with instructions, never a failure. A tour
 # that crashes is a failure and makes this script exit nonzero.
+#
+# THE TWO CI FLAGS, and why they exist. Interactively a skip is the right
+# answer: you should not need four toolchains to see one tour. In CI it is
+# the wrong answer twice over — a run where all four silently skipped exits
+# 0 and proves nothing, and a tour resolved against a freshly-solved
+# dependency set cannot catch a committed lockfile that has drifted. That
+# is what let examples/rust/Cargo.lock sit at 0.1.0 through the whole 0.1.1
+# release with every gate green. --require-all turns a skip into a failure;
+# --locked makes each tour use its lockfile as committed and fail if it no
+# longer resolves. CI passes both; neither changes what a tour prints.
 #
 # The one thing here that DOES want a server — go/ingest-demo — is not run by
 # this script at all; see go/ingest-demo/README.md (the optional online demo).
@@ -25,11 +37,15 @@ _arch="$(uname -m)"; case "$_arch" in x86_64|amd64) _arch=amd64 ;; arm64|aarch64
 REGISTRY="${CHTYPES_REGISTRY:-${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/$(uname -s | tr '[:upper:]' '[:lower:]')-$_arch}"
 ALL_LANGS=(go python ts rust)
 
+# Both default off: the interactive run is the forgiving one.
+REQUIRE_ALL=0
+LOCKED=0
+
 bold()  { printf '\033[1m%s\033[0m' "$1"; }
 say()   { printf '%s\n' "$*"; }
 
 usage() {
-  sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -84,7 +100,10 @@ run_go() {
 
 have_python() { command -v uv >/dev/null 2>&1 && return 0
   SKIP_REASON="uv not found — brew install uv (or https://docs.astral.sh/uv); or skip it: ./chplay.sh go ts rust"; return 1; }
-run_python() { (cd "$HERE/python" && uv run demo.py); }
+run_python() {
+  if [ "$LOCKED" -eq 1 ]; then (cd "$HERE/python" && uv run --locked demo.py)
+  else (cd "$HERE/python" && uv run demo.py); fi
+}
 
 have_ts() {
   command -v node >/dev/null 2>&1 || { SKIP_REASON="node not found — brew install node; or skip it: ./chplay.sh go python rust"; return 1; }
@@ -92,14 +111,21 @@ have_ts() {
   return 0
 }
 run_ts() {
-  (cd "$HERE/ts" &&
-    { [ -d node_modules ] || pnpm install --silent; } &&
-    node demo.mjs)
+  if [ "$LOCKED" -eq 1 ]; then
+    (cd "$HERE/ts" && pnpm install --frozen-lockfile --silent && node demo.mjs)
+  else
+    (cd "$HERE/ts" &&
+      { [ -d node_modules ] || pnpm install --silent; } &&
+      node demo.mjs)
+  fi
 }
 
 have_rust() { command -v cargo >/dev/null 2>&1 && return 0
   SKIP_REASON="rust toolchain not found — install rustup (https://rustup.rs); or skip it: ./chplay.sh go python ts"; return 1; }
-run_rust() { (cd "$HERE/rust" && cargo run --quiet); }
+run_rust() {
+  if [ "$LOCKED" -eq 1 ]; then (cd "$HERE/rust" && cargo run --quiet --locked)
+  else (cd "$HERE/rust" && cargo run --quiet); fi
+}
 
 # ------------------------------------------------------------------ driving
 
@@ -107,6 +133,8 @@ langs=()
 for arg in "$@"; do
   case "$arg" in
   -h | --help) usage ;;
+  --require-all) REQUIRE_ALL=1 ;;
+  --locked) LOCKED=1 ;;
   --list)
     require_artifacts
     say "artifacts: $(artifact_count) version(s) under $REGISTRY"
@@ -127,6 +155,8 @@ done
 
 require_artifacts
 say "chplay: $(artifact_count) artifact version(s) under $REGISTRY"
+[ "$REQUIRE_ALL" -eq 1 ] && say "chplay: --require-all — a missing toolchain fails this run"
+[ "$LOCKED" -eq 1 ] && say "chplay: --locked — every tour must resolve its committed lockfile"
 [ -n "${CHTYPES_VERSION:-}" ] && say "chplay: CHTYPES_VERSION=$CHTYPES_VERSION (tours will select it)"
 
 logdir="$(mktemp -d "${TMPDIR:-/tmp}/chplay.XXXXXX")"
@@ -138,9 +168,18 @@ failed=0
 for l in "${langs[@]}"; do
   SKIP_REASON=""
   if ! "have_$l"; then
-    say ""
-    say "$(bold "-- $l: SKIPPED") — $SKIP_REASON"
-    results+=("$l: skipped — $SKIP_REASON")
+    if [ "$REQUIRE_ALL" -eq 1 ]; then
+      # A gate that skipped everything exits 0 and proves nothing.
+      say ""
+      say "$(bold "-- $l: FAILED") — toolchain missing, and --require-all forbids a skip"
+      say "   $SKIP_REASON"
+      results+=("$l: FAILED — toolchain missing under --require-all")
+      failed=1
+    else
+      say ""
+      say "$(bold "-- $l: SKIPPED") — $SKIP_REASON"
+      results+=("$l: skipped — $SKIP_REASON")
+    fi
     continue
   fi
   say ""
