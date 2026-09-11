@@ -121,7 +121,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: ruff, and the package imports
         run: |
           cd python && uv sync --locked --group dev && uv run ruff check src tests && uv run ruff format --check src tests
@@ -200,7 +200,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: python — suite with the registry; the golden set must run
         run: cd python && uv sync --locked --group dev && cd .. && scripts/check-suite.sh --require-artifacts python
 
