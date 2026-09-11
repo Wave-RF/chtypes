@@ -30,6 +30,7 @@ import ast
 import importlib
 import inspect
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -354,30 +355,72 @@ def test_the_unlisted_allowlist_has_not_rotted() -> None:
     )
 
 
+# Names the manifest carries that `spec/bindings.md` is not expected to spell.
+# An option CARRIER is a type, not a capability — the document describes the
+# shape ("a trailing options object") and each language names its own carrier —
+# and a constructor is spelled `Registry(dir)` in prose, not `__init__`.
+DOC_EXEMPT = {
+    "CompileOptions",
+    "EngineOptions",
+    "RowsOptions",
+    "CompileFilterOptions",
+    "RegistryOptions",
+    "CompileRequest",
+    "__init__",
+}
+
+
 def test_the_manifest_and_the_spec_table_agree() -> None:
-    """`spec/bindings.md`'s object-model table is for humans and this manifest is
-    for machines, so they are two statements of one contract and they can drift.
-    The parse below is deliberately shallow — it reads the table's Concept column
-    and asserts each row is REPRESENTED here, not that the markdown is a data
-    format. Markdown is never parsed at test time to decide what must exist.
+    """The two halves of one contract, kept in step — in this direction only.
+
+    `spec/bindings.md` is prose for humans and the manifest is data for machines.
+    The manifest is never DERIVED from the markdown, at test time or any other:
+    a table is a layout, and a test that parses one breaks on a reflow. What is
+    checked is the weaker, sturdier property — that every object-model spelling
+    the manifest requires is a spelling the document actually names, so a
+    capability cannot be enforced in four languages while the document that is
+    supposed to explain it has never heard of it.
+
+    The match is on the member name, case-insensitively, because the document
+    writes call sites (`r.Versions()`, `lib.compile_ddl(ddl)`) where the manifest
+    writes paths (`Registry.Versions`, `Library.compile_ddl`).
+
+    It searches the document's TABLE ROWS, not its prose. That is the whole
+    difference between a check and a coincidence: `validate_type` appears in a
+    sentence about why validate_type alone is insufficient, so a whole-document
+    substring search would go on finding it long after the table stopped naming
+    it — measured, on the first version of this test.
     """
-    doc = (REPO / "spec" / "bindings.md").read_text(encoding="utf-8")
-    rows = [
-        line.split("|")[1].strip()
-        for line in doc.splitlines()
-        if line.startswith("| `chs_") or line.startswith("| ")
-    ]
-    named = {
-        "chs_registered_families": "library.registered-families",
-        "chs_function_flags": "library.function-flags",
-        "chs_reference_type": "library.reference-type",
-    }
-    ids = {c["id"] for c in CAPABILITIES}
-    missing = [cid for entry, cid in named.items() if f"`{entry}`" in doc and cid not in ids]
-    assert rows, "spec/bindings.md has no tables — the document this contract restates is gone"
-    assert not missing, (
-        "spec/bindings.md names ABI entry points the parity manifest does not cover: "
-        + ", ".join(missing)
+    full = (REPO / "spec" / "bindings.md").read_text(encoding="utf-8")
+    doc = "\n".join(line for line in full.splitlines() if line.lstrip().startswith("|"))
+    assert "| Concept | Go | Python | TypeScript | Rust |" in full, (
+        "spec/bindings.md's object-model table has lost a language column. Every language is a peer "
+        "SDK over the same C ABI and the document says so in its own second paragraph; a table with "
+        "three of the four columns is how Rust came to be described only in a Notes cell."
+    )
+
+    object_model = {"registry", "library", "schema", "filter"}
+    undocumented: list[str] = []
+    checked = 0
+    for cap in CAPABILITIES:
+        if cap["group"] not in object_model:
+            continue
+        for lang in MANIFEST_DOC["languages"]:
+            spelled = spelling(cap, lang)
+            if not spelled:
+                continue
+            member = re.split(r"[.:]+", spelled)[-1]
+            if member in DOC_EXEMPT:
+                continue
+            checked += 1
+            if member.lower() not in doc.lower():
+                undocumented.append(f"{cap['id']}: {lang} `{spelled}` — {cap['what']}")
+    assert checked > 0, "no object-model spelling was compared against spec/bindings.md"
+    assert not undocumented, (
+        f"the parity manifest requires {len(undocumented)} spelling(s) that spec/bindings.md never "
+        f"names:\n  " + "\n  ".join(undocumented) + "\n\nEither document them there, or — if the "
+        f"capability should not be required at all — remove it from the manifest. The two are one "
+        f"contract stated twice."
     )
 
 

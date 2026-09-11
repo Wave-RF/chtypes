@@ -25,25 +25,34 @@ Registry ── For(version) ──▶ Library ── CompileDDL(ddl) ──▶ 
                           ValidateType(expr)            SetEngine / SetTTL      Row(...)  ──▶ RowResult
 ```
 
-| Concept | Go | Python | TypeScript | Notes |
-|---|---|---|---|---|
-| Artifact directory loader | `NewRegistry(dir)` | `Registry(dir)` | `new Registry(dir)` | Scans one subdirectory per version |
-| One loaded version | `*Library` | `Library` | `Library` | Carries `Version`, `Minor`, `Path` |
-| ABI revision (binding) | `chtypes.ABIRevision` | `chtypes.ABI_REVISION` | `ABI_REVISION` | Rust: `chtypes::ABI_REVISION`. The revision the binding was written against; cgo reads the header macro, the rest mirror it by hand |
-| ABI revision (artifact) | `lib.ABIRevision` | `lib.abi_revision` | `lib.abiRevision` | Rust: `lib.abi_revision()`. `0` = predates the probe. A different nonzero value is refused at load — see `spec/c-abi.md` §The ABI revision |
-| Resolve a version | `r.For(v)` | `r.for_version(v)` / `r[v]` | `r.for(v)` | Minor line **or** exact patch |
-| List versions | `r.Versions()` | `r.versions()` | `r.versions()` | Minor lines, sorted |
-| Compile a column list | `lib.CompileDDL(ddl)` | `lib.compile_ddl(ddl)` | `lib.compileDdl(ddl)` | Rust: `lib.compile(ddl).compile()` (builder) |
-| … under a declared settings profile | `lib.CompileDDL(ddl, WithCompileSettings(m))` | `lib.compile_ddl(ddl, settings=…, mode=…)` | `lib.compileDdl(ddl, {settings, mode})` | **ONE function per SDK, options optional** — see §One compile function. Rust: `lib.compile(ddl).settings(…).compile()`. `spec/c-abi.md` §Compile-time vs per-call settings; declaring no settings behaves exactly as if the parameter did not exist |
-| Canonicalise a type | `lib.ValidateType(expr)` | `lib.validate_type(expr)` | `lib.validateType(expr)` | |
-| Declare the engine | `s.SetEngine(engine, orderBy)` | `s.set_engine(engine, order_by)` | `s.setEngine(...)` | |
-| … + MergeTree settings | `s.SetEngine(engine, orderBy, WithMergeTreeSettings(m))` | `s.set_engine(..., merge_tree_settings=…)` | `s.setEngine(..., {mergeTreeSettings})` | Same one function. Unknown name ⇒ the server's **115 rejection**; a non-default declared value ⇒ **-2 unsupported** (never silently ignored); a binding MUST NOT flatten those two into one verdict — see rule 12 |
-| Declare the rows TTL | `s.SetTTL(ttl)` | `s.set_ttl(ttl)` | `s.setTtl(ttl)` | |
-| One row | `s.Row(format, raw)` | `s.row(format, raw)` | `s.row(format, raw)` | |
-| One row + settings | `s.RowWithSettings(format, raw, settings)` | `s.row(..., settings=)` | `s.row(..., settings)` | A default argument is fine |
-| A whole body | `s.Rows(format, body, settings)` | `s.rows(...)` | `s.rows(...)` | |
-| Release | `s.Close()` | context manager / `close()` | `s.close()` / `Symbol.dispose` | |
-| Process teardown | package-level only — `*Registry`/`*Library` expose none, deliberately | `Registry.close()` / `Library.close()`, context manager | `registry.close()` / `library.shutdown()`, `Symbol.dispose` | Rust: `Registry::shutdown()` / `Library::shutdown()`. **Required before `dlclose`** — see below |
+**Every row of this table is enforced.** `tests/parity/manifest.json` is the machine-readable half of this document — one entry per logical capability, its spelling in all four languages, and for the shared vocabularies the VALUE every binding must answer with — and each language's own suite checks its own column (`python/tests/test_parity.py`, `ts/test/parity.test.ts`, `go/chtypes/parity_test.go`, `rust/tests/parity.rs`). The manifest is not derived from this table at test time and never will be: markdown is for humans and a test that parses one breaks on a reflow. The two are kept in step by a check that every spelling named here appears there, and a gap a binding SHOULD have is written into the manifest as an `absent` carrying its reason — an absence nobody had to justify in writing fails the manifest's own integrity check.
+
+| Concept | Go | Python | TypeScript | Rust | Notes |
+|---|---|---|---|---|---|
+| Artifact directory loader | `NewRegistry(dir)` | `Registry(dir)` | `new Registry(dir)` | `Registry::new(dir)` | Scans one subdirectory per version. The directory is optional in Go, Python and TypeScript and then means the `docs/fetch.md` §1 search path; Rust spells that `Registry::from_search_path()`, having no default arguments |
+| One loaded version | `*Library` | `Library` | `Library` | `Library` | Carries `Version`, `Minor`, `Path` |
+| ABI revision (binding) | `chtypes.ABIRevision` | `chtypes.ABI_REVISION` | `ABI_REVISION` | `chtypes::ABI_REVISION` | The revision the binding was written against; cgo reads the header macro, the rest mirror it by hand |
+| ABI revision (artifact) | `lib.ABIRevision` | `lib.abi_revision` | `lib.abiRevision` | `lib.abi_revision()` | `0` = predates the probe. A different nonzero value is refused at load — see `spec/c-abi.md` §The ABI revision |
+| Resolve a version | `r.For(v)` | `r.for_version(v)` / `r[v]` | `r.for(v)` | `r.for_version(v)` | Minor line **or** exact patch |
+| List versions | `r.Versions()` | `r.versions()` | `r.versions()` | `r.versions()` | Minor lines, in numeric release order |
+| List loaded libraries | `r.Libraries()` | `r.libraries()` | `r.libraries()` | `r.libraries()` | The same numeric order — §Version selection rule 2 governs *every* ordered surface, and this is one of them. Python's additionally opens the lines it has only discovered; Go, TypeScript and Rust list what is already loaded and open nothing |
+| The search path | — | `r.search_path` | `r.searchPath` | `r.search_path()` | The `docs/fetch.md` §1 directories, in order. Go keeps it unexported and renders it into the not-found message instead |
+| Compile a column list | `lib.CompileDDL(ddl)` | `lib.compile_ddl(ddl)` | `lib.compileDdl(ddl)` | `lib.compile(ddl).compile()` | Rust is a builder — see §One compile function |
+| … under a declared settings profile | `lib.CompileDDL(ddl, WithCompileSettings(m), WithCompileMode(m))` | `lib.compile_ddl(ddl, settings=…, mode=…)` | `lib.compileDdl(ddl, {settings, mode})` | `lib.compile(ddl).settings(…).mode(…).compile()` | **ONE function per SDK, options optional** — see §One compile function. `spec/c-abi.md` §Compile-time vs per-call settings; declaring no settings behaves exactly as if the parameter did not exist |
+| … does this artifact have that channel | `lib.HasCompileSettings()` | `lib.has_compile_settings()` | `lib.hasCompileSettings()` | `lib.has_compile_settings()` | An artifact linked before `chs_schema_compile_with_settings` answers false, and a caller that needs the profile honoured must ask rather than assume |
+| Canonicalise a type | `lib.ValidateType(expr)` | `lib.validate_type(expr)` | `lib.validateType(expr)` | `lib.validate_type(expr)` | |
+| Declare the engine | `s.SetEngine(engine, orderBy)` | `s.set_engine(engine, order_by)` | `s.setEngine(...)` | `s.set_engine(engine, order_by, NO_SETTINGS)` | |
+| … + MergeTree settings | `s.SetEngine(engine, orderBy, WithMergeTreeSettings(m))` | `s.set_engine(..., merge_tree_settings=…)` | `s.setEngine(..., {mergeTreeSettings})` | `s.set_engine(engine, order_by, settings)` | Same one function. Unknown name ⇒ the server's **115 rejection**; a non-default declared value ⇒ **-2 unsupported** (never silently ignored); a binding MUST NOT flatten those two into one verdict — see rule 12 |
+| Declare the rows TTL | `s.SetTTL(ttl)` | `s.set_ttl(ttl)` | `s.setTtl(ttl)` | `s.set_ttl(ttl)` | |
+| One row | `s.Row(format, raw)` | `s.row(format, raw)` | `s.row(format, raw)` | `s.row(format, raw)` | |
+| One row + settings | `s.RowWithSettings(format, raw, settings)` | `s.row(..., settings=)` | `s.row(..., settings)` | `s.row_with_settings(format, raw, settings)` | A default argument is fine, and so is a second function: Python and TypeScript have named optional arguments and use them, Go and Rust do not and do not |
+| A whole body | `s.Rows(format, body, settings)` | `s.rows(...)` | `s.rows(...)` | `s.rows(format, body, settings)` | |
+| … with the export channel | `s.RowsExport(..., exportFormat, docFlags)` | `s.rows(..., export=…, doc_flags=…)` | `s.rows(..., {exportFormat, docFlags})` | `s.rows_export(..., export, flags)` | §Revision 3. Still ONE `chs_rows` call. Same split as the row above: an optional argument where the language has one, a second function where it does not |
+| Parse a body into a block | `s.ParseBlock(format, body, settings)` | `s.parse_block(...)` | `s.parseBlock(...)` | `s.parse_block(...)` | §Revision 4 — parse once, evaluate K filters against it |
+| Compile a filter | `s.CompileFilter(expr, WithFilterParams(p))` | `s.compile_filter(expr, params=…)` | `s.compileFilter(expr, {params})` | `s.compile_filter(expr, params)` | §Revision 3, §Revision 4. Params cross as STRINGS and are never hand-escaped into the expression text |
+| Release | `s.Close()` | context manager / `close()` | `s.close()` / `Symbol.dispose` | `Drop` | Rust has no inherent `close()` on purpose: the borrow checker enforces the free-before-schema order the other three enforce at runtime |
+| Process teardown | package-level only — `*Registry`/`*Library` expose none, deliberately | `Registry.close()` / `Library.close()`; `Registry` is a context manager | `registry.close()` / `library.shutdown()`; `Registry`, `Schema`, `Filter` and `Block` are `Symbol.dispose` | `Registry::shutdown()` / `Library::shutdown()` | **Required before `dlclose`** — see below. Note that in both Python and TypeScript it is the *Registry* that carries the scope-based form and the `Library` that does not; that asymmetry is deliberate for now and §Teardown says why |
+| Server timezone | `chtypes.Timezone` (package-level, set before the first call) | `Registry(…, timezone=…)` | `new Registry(dir, {timezone})` | `Registry::with_timezone(dir, tz)`, `RegistryOptions::timezone` | The timezone assumed for bare `DateTime`/`DateTime64` columns. **Never the host's `TZ`**, which would leak into every result; `UTC` is what a stock ClickHouse container runs. Go's is a process-global and the other three are per-registry |
 
 A binding MAY additionally expose the statically linked, single-version shape
 (the reference's package-level `ValidateType` / `CompileDDL`, linked against one
@@ -64,11 +73,17 @@ that means for a binding:
 * **`RowsExport()`** (per `docs/proposals/rows-export.md`: flags 0 by
   default, the bitmask exposed, `Payload []byte` + `Spans` from
   `out_bytes` + `row_spans`) and the filter SDK surface
-  (`CompileFilter` / verdict types) are **specified for the SDK cycle that
-  follows the C surface** — this revision's bindings changes are the
+  (`CompileFilter` / verdict types) were specified for the SDK cycle that
+  FOLLOWS the C surface — this revision's bindings changes were the
   mechanical pass-through above and the hand-kept `ABI_REVISION` mirrors
   bumping to 3 in the same cycle, nothing more. One C call per SDK method,
   always; never a second call, never re-parsing.
+  **That follow-on cycle has landed**, in all four bindings, at some point
+  before the repository split squashed its history: the export channel and
+  the filter surface are in the object-model table above and
+  `tests/parity/manifest.json` enforces both. This paragraph is kept as the
+  statement of the sequencing rule — the C surface first, the SDK surface in
+  the cycle after — not as a description of what is missing.
 * **Lean documents stay SDK-derivable.** Under `CHS_DOC_TRANSFORMS` without
   `CHS_DOC_VALUES` the C layer retains every `cols[]` entry any spec'd
   detector could fire on, with the full field set (the conservative
@@ -110,8 +125,12 @@ filters against the block). What that means for a binding:
   existing `CompileFilter(expr)` call site — behaviour-preserving for every
   expression revision 3 accepted. The params SDK surface (a name → value
   string map argument) and the block SDK surface (a `Block` object;
-  `Filter.Eval(block)`) are **specified for the SDK cycle that follows the C
-  surface** (one C call per SDK method, as always).
+  `Filter.Eval(block)`) were specified for the SDK cycle that FOLLOWS the C
+  surface (one C call per SDK method, as always).
+  **That cycle has landed too**, in all four: the params argument rides on
+  the one `compile_filter` entry point and the block surface is
+  `parse_block` + `Filter.Eval`, both in the object-model table above and
+  both enforced by `tests/parity/manifest.json`.
 * **One expectation moves, and a test suite must move with it**: an
   expression containing `{name:Type}` with no binding for `name` is no
   longer a `-2` decline ("render literals") — it is the server's own
@@ -200,7 +219,18 @@ decision (Rust deliberately has no `Drop` for the same shared-image reason),
 and a host that runs two registries over one artifact owns the ordering of
 its explicit teardown calls. The known residue: TS's `using`/`Symbol.dispose`
 sugar makes an accidental early `close()` easier to write than in Rust; if
-that ever bites, the fix is the same resolved-path refcount Python carries. This paragraph replaced a table row that read
+that ever bites, the fix is the same resolved-path refcount Python carries.
+
+**And the scope-based form stops short of the `Library` on purpose, in both
+languages that have one.** Python makes `Registry`, `Schema`, `Filter` and
+`Block` context managers and NOT `Library`; TypeScript gives `Symbol.dispose`
+to the same four and not to `Library`. That is the *reopening* rule below
+made structural: a `with library:` or a `using library` closes at the end of
+a block, which is precisely the mid-lifecycle close that is measured to
+SEGFAULT on the next open. The cost is that `with registry.for_version("25.8")
+as lib:` reads as though it should work and raises, and the surfaces test
+(`tests/parity/manifest.json`) records the asymmetry rather than letting it
+look accidental. This paragraph replaced a table row that read
 "`chs_shutdown` via the loader | same | same | Required before `dlclose`" for
 all three columns, which the Go implementation had never matched; found by the
 four `playground/` tours, finding 2. The spec row was the wrong one.
