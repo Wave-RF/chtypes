@@ -388,12 +388,12 @@ date_clamp         datetime_wrap     date_shift       uuid_mangle
 ip_mangle          float_precision   lossy_numeric    fixedstring_pad
 emptied            element_changed   enum_coerce      value_changed
 poisoned           duplicate_key_dropped
-reformat           default_filled    zero_filled      default_materialised
+reformat           default_filled    zero_filled      default_materialized
 ttl_expired        ttl_column_expired
 ```
 
 `Lossy()` is **false** for exactly four of them — `reformat`,
-`default_filled`, `zero_filled`, `default_materialised` — and true for
+`default_filled`, `zero_filled`, `default_materialized` — and true for
 everything else. All of them are still *reported*: a preview must show the
 tenant what the table will actually hold, and `1700000000` becoming
 `"2023-11-14 22:13:20"` is a visible change even though nothing was lost. Only
@@ -873,7 +873,7 @@ library's spelling through verbatim.
 // out  (driver run with -volatile=answer)
 {"id":"pin","status":"ok","value":"[{\"a\": 1, \"ts\": \"2023-11-14 22:13:20\"}]",
  "transformed":[{"column":"ts","input":"","stored":"\"2023-11-14 22:13:20\"",
-                 "reason":"default_materialised","row":0}]}
+                 "reason":"default_materialized","row":0}]}
 ```
 
 The library resolved `now()` itself, once for the whole batch, and reported it as

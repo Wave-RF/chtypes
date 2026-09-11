@@ -735,7 +735,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
             stored: '"2023-11-14 22:13:20"',
             inputBytes: buf(''),
             storedBytes: buf('"2023-11-14 22:13:20"'),
-            reason: 'default_materialised',
+            reason: 'default_materialized',
             row: 0,
             lossy: false,
           },
@@ -764,7 +764,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
         expect(row.errCode).toBe(CODE_UNSUPPORTED);
         expect(row.values.find((v) => v.column === 'ts')!.source).toBe('default_volatile_unresolved');
         // A declined volatile DEFAULT is never reported as a transformation.
-        expect(reasons(row.transformed)).not.toContain('default_materialised');
+        expect(reasons(row.transformed)).not.toContain('default_materialized');
       } finally {
         schema.close();
       }

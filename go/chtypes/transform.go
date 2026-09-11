@@ -100,13 +100,13 @@ const (
 	// Not a loss (nothing was sent to lose), but it belongs in a preview.
 	ReasonDefaultFilled = "default_filled"
 	ReasonZeroFilled    = "zero_filled"
-	// ReasonDefaultMaterialised: a VOLATILE DEFAULT (now()/now64(n)/today()/
+	// ReasonDefaultMaterialized: a VOLATILE DEFAULT (now()/now64(n)/today()/
 	// yesterday(), or an expression over one) that this library resolved from
 	// its own clock and the caller must send as an explicit column. A separate
 	// reason from default_filled because the claim is different: the tenant is
 	// being shown a value the *gateway* invented, not one the server chose.
 	// docs/defaults-matrix.md §5.4(3) asks for exactly this.
-	ReasonDefaultMaterialised = "default_materialised"
+	ReasonDefaultMaterialized = "default_materialized"
 
 	// The storage layer's own verdicts on rows the type layer accepted,
 	// produced by the vendored TTL pipeline (TTLDeleteAlgorithm /
@@ -121,7 +121,7 @@ const (
 // row never carried, without losing information.
 func (t Transform) lossyReason() bool {
 	switch t.Reason {
-	case ReasonReformat, ReasonDefaultFilled, ReasonZeroFilled, ReasonDefaultMaterialised:
+	case ReasonReformat, ReasonDefaultFilled, ReasonZeroFilled, ReasonDefaultMaterialized:
 		return false
 	}
 	return true
@@ -162,7 +162,7 @@ func classify(c colDoc) []Transform {
 			Reason: ReasonDefaultFilled}}
 	case "default_substituted":
 		return []Transform{{Column: c.Name, Input: "", Stored: stored,
-			Reason: ReasonDefaultMaterialised}}
+			Reason: ReasonDefaultMaterialized}}
 	case "absent":
 		return []Transform{{Column: c.Name, Input: "", Stored: stored,
 			Reason: ReasonZeroFilled}}

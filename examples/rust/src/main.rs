@@ -786,7 +786,7 @@ fn section6(lib: &Arc<Library>) {
         );
     }
     note("lossy() is false for exactly four reasons (reformat, default_filled,");
-    note("zero_filled, default_materialised) and true for everything else");
+    note("zero_filled, default_materialized) and true for everything else");
 
     blank();
     kv("unknown_fields[]", &format!("{:?}", r.unknown_fields));

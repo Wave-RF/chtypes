@@ -539,7 +539,7 @@ fn a_pinned_volatile_default_stores_an_exact_timestamp() {
         .iter()
         .find(|t| t.column == "ts")
         .expect("ts transform");
-    assert_eq!(t.reason, reason::DEFAULT_MATERIALISED);
+    assert_eq!(t.reason, reason::DEFAULT_MATERIALIZED);
     assert!(!t.lossy(), "materializing a DEFAULT loses nothing");
 
     // Past the caller's skew budget the honest answer is a decline, not a

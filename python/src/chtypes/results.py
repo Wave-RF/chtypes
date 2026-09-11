@@ -302,7 +302,7 @@ class Reason:
     REFORMAT: Final = "reformat"
     DEFAULT_FILLED: Final = "default_filled"
     ZERO_FILLED: Final = "zero_filled"
-    DEFAULT_MATERIALISED: Final = "default_materialised"
+    DEFAULT_MATERIALIZED: Final = "default_materialized"
     TTL_EXPIRED: Final = "ttl_expired"
     TTL_COLUMN_EXPIRED: Final = "ttl_column_expired"
 
@@ -315,7 +315,7 @@ LOSSLESS_REASONS: Final[frozenset[str]] = frozenset(
         Reason.REFORMAT,
         Reason.DEFAULT_FILLED,
         Reason.ZERO_FILLED,
-        Reason.DEFAULT_MATERIALISED,
+        Reason.DEFAULT_MATERIALIZED,
     }
 )
 

@@ -101,7 +101,7 @@ export interface Transform {
   readonly reason: string;
   /** 0-based index of the row inside the request body. */
   row: number;
-  /** False for reformat / default_filled / zero_filled / default_materialised. */
+  /** False for reformat / default_filled / zero_filled / default_materialized. */
   readonly lossy: boolean;
 }
 

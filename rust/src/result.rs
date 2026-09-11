@@ -409,7 +409,7 @@ impl Transform {
     /// written having changed (`1700000000` -> `"2023-11-14 22:13:20"`).
     ///
     /// False for exactly four reasons — `reformat`, `default_filled`,
-    /// `zero_filled`, `default_materialised` — and true for everything else.
+    /// `zero_filled`, `default_materialized` — and true for everything else.
     /// All of them are still reported: a preview must show the tenant what the
     /// table will actually hold. Only the lossy ones are a warning.
     pub fn lossy(&self) -> bool {
@@ -418,7 +418,7 @@ impl Transform {
             crate::reason::REFORMAT
                 | crate::reason::DEFAULT_FILLED
                 | crate::reason::ZERO_FILLED
-                | crate::reason::DEFAULT_MATERIALISED
+                | crate::reason::DEFAULT_MATERIALIZED
         )
     }
 }

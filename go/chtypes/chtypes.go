@@ -74,7 +74,7 @@
 // what the tenant wants and is a second argument for substitution, but it is a
 // behavior change the caller is making on the tenant's behalf, and it is why
 // every substitution is also reported as a Transform with reason
-// "default_materialised" rather than passed over in silence.
+// "default_materialized" rather than passed over in silence.
 //
 // # Clock skew: what this library tolerates, and what happens past it
 //
@@ -469,7 +469,7 @@ func (v Value) String() string { return v.Text }
 // Transform records a silent change ClickHouse made on the way to storage:
 // input 256 into UInt8 stored as 0, reason "overflow_wrap". Reason is one of
 // the stable Reason* strings below; Lossy reports whether information was
-// lost (only reformat / default_filled / zero_filled / default_materialised
+// lost (only reformat / default_filled / zero_filled / default_materialized
 // are non-lossy). Reporting these is the core product guarantee — a binding
 // that drops them hides exactly the changes a tenant needs warning about.
 type Transform struct {

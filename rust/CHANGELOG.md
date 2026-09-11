@@ -7,6 +7,13 @@ All notable changes to the rust binding. The format is
 The four bindings in this repository are released together and give one answer,
 so an entry here has a counterpart in the other three.
 
+## [Unreleased]
+
+### Changed — BREAKING
+
+- **The `default_materialised` transform reason is now `default_materialized`**, and the constant naming it is renamed: `reason::DEFAULT_MATERIALISED -> reason::DEFAULT_MATERIALIZED`. ClickHouse's own keyword is `MATERIALIZED` — its parser rejects `MATERIALISED` outright with a syntax error — so the reason naming that concept now matches the system it describes. Code comparing against the old string or constant must be updated.
+- This is an SDK-only change and **the ABI is untouched: it remains revision 4, and no artifact needs relinking.** The reason is derived in the binding, not received from the artifact — the library emits `default_substituted`, which each binding translates. That wire value is unchanged.
+
 ## [0.1.1] — 2026-09-11
 
 - **The golden set is served, not tracked.** `goldens/cases.json` no longer

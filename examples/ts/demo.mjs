@@ -569,7 +569,7 @@ function section6(lib) {
       kv(`  ${t.reason}`, `${t.column}: ${t.input || '(absent)'} -> ${t.stored}   lossy=${t.lossy}`);
     }
     note('lossy is false for exactly four reasons (reformat, default_filled,');
-    note('zero_filled, default_materialised) and true for everything else');
+    note('zero_filled, default_materialized) and true for everything else');
 
     blank();
     kv('unknownFields[]', JSON.stringify(r.unknownFields));

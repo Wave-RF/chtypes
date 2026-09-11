@@ -542,7 +542,7 @@ def section6(lib: chtypes.Library) -> None:
         for t in r.transformed:
             kv(f"  {t.reason}", f"{t.column}: {t.input or '(absent)'} -> {t.stored}   lossy={t.lossy}")
         note("lossy is False for exactly four reasons (reformat, default_filled,")
-        note("zero_filled, default_materialised) and True for everything else")
+        note("zero_filled, default_materialized) and True for everything else")
 
         blank()
         kv("unknown_fields[]", str(list(r.unknown_fields)))

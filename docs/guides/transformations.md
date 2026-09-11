@@ -68,7 +68,7 @@ There are 24 stable reason spellings, and they are wire constants: the artifact 
 
 Four of them are **lossless** — the stored value means the same thing, it is just spelled differently or was filled in:
 
-`reformat` · `default_filled` · `zero_filled` · `default_materialised`
+`reformat` · `default_filled` · `zero_filled` · `default_materialized`
 
 Every other reason is **lossy**: information the caller sent is not in the table. Each binding exposes the distinction as one predicate rather than making you keep the list — `Transform.Lossy()` in Go, `Transform::lossy()` in Rust, `isLossyReason(reason)` in TypeScript, `LOSSLESS_REASONS` in Python.
 
@@ -83,7 +83,7 @@ The lossy ones, by what they are about:
 | identifiers | `uuid_mangle`, `ip_mangle` |
 | the loud one | `poisoned` |
 
-> `default_materialised` is spelled with an `s`. It is a frozen wire constant rather than prose, so it stays as the artifact emits it — do not "correct" it in code or in a comparison.
+> `default_materialized` is spelled with an `s`. It is a frozen wire constant rather than prose, so it stays as the artifact emits it — do not "correct" it in code or in a comparison.
 
 **`poisoned` is the one to wire an alert to.** It means the stored value is not merely different but meaningless — the row was accepted and what landed cannot be read back as what was sent. A batch carrying one gets the outcome `accepted_poisoned` rather than `accepted`, which exists precisely so a caller can branch on it without scanning the reasons.
 

@@ -78,7 +78,7 @@ def classify(col: ColDoc) -> list[Transform]:
     # stored for a field they never sent.
     filled = {
         "default": Reason.DEFAULT_FILLED,
-        "default_substituted": Reason.DEFAULT_MATERIALISED,
+        "default_substituted": Reason.DEFAULT_MATERIALIZED,
         "absent": Reason.ZERO_FILLED,
     }.get(col.src)
     if filled is not None:

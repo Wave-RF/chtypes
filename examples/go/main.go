@@ -589,7 +589,7 @@ func section6(lib *chtypes.Library) {
 		kv("  "+t.Reason, fmt.Sprintf("%s: %s -> %s   lossy=%v", t.Column, or(t.Input, "(absent)"), t.Stored, t.Lossy()))
 	}
 	note("Lossy() is false for exactly four reasons (reformat, default_filled,")
-	note("zero_filled, default_materialised) and true for everything else")
+	note("zero_filled, default_materialized) and true for everything else")
 
 	blank()
 	kv("UnknownFields[]", fmt.Sprintf("%v", r.UnknownFields))

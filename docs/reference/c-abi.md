@@ -490,7 +490,7 @@ Emission rules, all normative:
 * **The full-arity guard, fail-closed**: if any accepted row's stored block
   lost a wire column (the known poison arms can do this), the batch exports
   NO bytes and the document carries the reason — the same posture as the
-  engine path's heterogeneous-columns guard (`rows materialised different
+  engine path's heterogeneous-columns guard (`rows materialized different
   column sets`). Never emit a row with silently absent columns.
 * A serialization failure while writing, and
   `output_format_json_validate_utf8 = 1` (which re-shapes the byte stream
