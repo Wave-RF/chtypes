@@ -1,0 +1,101 @@
+version: "2"
+
+# A curated allowlist (`default: none` + explicit `enable:`), adapted from
+# Wave-RF/WaveHouse's .golangci.yml. Kept STRICT-BUT-GREEN: every linter and
+# sub-check below already passes on go/chtypes and go/cmd/chtypes with zero
+# findings. Nothing here was made to pass by editing source — a rule that
+# would need a source change to satisfy is left off (or its one offending
+# sub-check disabled) and named as a follow-up in the PR description instead.
+#
+# Deliberately NOT enabled, and why (each has real, pre-existing findings
+# that would need a source edit outside this change's scope):
+#   - errcheck   (46 findings — mostly unchecked Close()/Fprint()/os.Remove()
+#     in fetch.go and tests)
+#   - gosec      (12 findings — file-permission and decompression-bomb
+#     advice against a CLI that deliberately reads/writes/untars by path
+#     after verifying signatures)
+#   - unconvert  (3 findings — unsafe.Pointer conversions in multiversion.go)
+#   - misspell   (Go doc comments here intentionally use ClickHouse's own
+#     British-English vocabulary — "behaviour", "materialised", etc. — some
+#     of it inside string literals that are literal ClickHouse setting
+#     names, e.g. `"default_materialised"`. American-spelling enforcement
+#     belongs on prose docs only; see the `misspell` CI job.)
+#   - gofumpt / goimports formatters (3 files not gofumpt-clean)
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - unused
+    - gocritic
+    - revive
+    - ineffassign
+    - bodyclose
+    - noctx
+    - errorlint
+    - tparallel
+    - usetesting
+    - wastedassign
+    - gocheckcompilerdirectives
+    - dupword
+    - durationcheck
+    - makezero
+  settings:
+    staticcheck:
+      # QF1001/QF1003 are style "quickfix" suggestions (De Morgan's law,
+      # tagged switch) with existing hits; ST1000 (package comment form)
+      # fires on discover.go's own file-header comment, which several
+      # files here carry in this repo's "<file> — <what it is>." voice
+      # rather than the single canonical "Package chtypes ..." doc comment
+      # — a repo-wide comment-style choice, not something to touch here.
+      # Every other staticcheck class (SA*, S1*, most ST1*, …) stays on.
+      checks:
+        - all
+        - -QF1001
+        - -QF1003
+        - -ST1000
+    gocritic:
+      # Three specific existing hits, not whole diagnostic groups:
+      #   dupSubExpr    — multiversion.go's ABI-mismatch checks compare the
+      #                    same expression to two different constants; the
+      #                    LHS repetition is intentional, not a copy-paste bug.
+      #   exitAfterDefer — cmd/chtypes/main.go's os.Exit(run(...)) is the
+      #                    top-level entrypoint; nothing is deferred above it.
+      #   ifElseChain    — one existing if/else chain in chtypes.go.
+      disabled-checks:
+        - dupSubExpr
+        - exitAfterDefer
+        - ifElseChain
+    errorlint:
+      # `asserts` is errorlint's type-assertion-on-error check; one existing
+      # hit in a test (golden_test.go) that intentionally type-asserts a
+      # sentinel error. errorf and comparison stay on.
+      asserts: false
+    revive:
+      # Opt in to specific rules only; skip the default set's noisy
+      # doc-comment and unused-parameter rules for internal packages.
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+run:
+  timeout: 5m
