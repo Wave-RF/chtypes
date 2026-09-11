@@ -52,5 +52,5 @@ Throughout, `payload_len` appears as `Computed`, never in `Values`. It is `MATER
 
 ## Two things this demo does not do
 
-- **It does not compare anything.** Everything here is insert-side coercion. A `WHERE`-clause constant is a different question with different rules — see the [`docs/reference/c-abi.md`](../../../docs/reference/c-abi.md) on filters before folding a predicate operand through this API.
+- **It does not compare anything.** Everything here is insert-side coercion. A `WHERE`-clause constant is a different question with different rules — see the the core repository's C ABI specification on filters before folding a predicate operand through this API.
 - **It is running on macOS.** That is a dev floor, not an oracle: macOS `long double` is 53-bit, so float parses diverge from real servers. Nothing in this batch is float-sensitive, but do not take float results from a Mac.

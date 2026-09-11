@@ -81,7 +81,7 @@ The reference algorithm (`chtypes.NewRegistry` in `go/chtypes/multiversion.go`):
 2. Read `manifest.json`. **If it is missing or unparseable, skip the directory silently** — a registry may legitimately contain scratch directories, and a `.DS_Store` is not a version.
 3. `dlopen(dir/<manifest.library>, RTLD_NOW | RTLD_LOCAL)`. A failure here IS an error and MUST abort with the path and the `dlerror()` text: a directory that has a manifest and does not load is broken, not absent.
 4. Resolve the `chs_*` symbols by name. Four are **mandatory** — `chs_clickhouse_version`, `chs_init`, `chs_schema_compile`, `chs_rows`. If any is missing, `dlclose` and reject the library: it is not a chtypes artifact.
-5. Resolve `chs_abi_revision`. **Absent** -> the artifact predates the probe; record revision `0` and continue with the rules below — absence is ignorance, not incompatibility. **Present** -> call it. If it returns a value that is neither `0` nor the revision the binding was written against (`CHS_ABI_REVISION`), **reject the library**, naming both numbers: the artifact has positively stated that the binding's declarations do not describe it, and calling through them is undefined. See `docs/reference/c-abi.md` §The ABI revision.
+5. Resolve `chs_abi_revision`. **Absent** -> the artifact predates the probe; record revision `0` and continue with the rules below — absence is ignorance, not incompatibility. **Present** -> call it. If it returns a value that is neither `0` nor the revision the binding was written against (`CHS_ABI_REVISION`), **reject the library**, naming both numbers: the artifact has positively stated that the binding's declarations do not describe it, and calling through them is undefined. See the core repository's C ABI specification §The ABI revision.
 6. Every other symbol is **optional**. A missing one means "this artifact predates the feature" and MUST degrade to `unsupported` at call time, never to a load failure. The reference returns a private `-3` from its C shims for a missing `chs_schema_engine` / `chs_schema_ttl` and turns it into `CodeUnsupported` with `"this artifact predates engine support (rebuild it)"`; a missing `chs_row` returns `NULL`, reported as `"this artifact predates chs_row (rebuild it)"`.
 7. Column introspection is **all-or-nothing**: `chs_schema_column_count`, `_name`, `_type`, `_default_expr`, `_default_kind`, `_default_is_literal` shipped together. If any is missing, treat the whole group as absent and leave the schema's column list empty rather than partially populated.
 8. Ask the library its own version: `chs_clickhouse_version()`. **The library names itself; nothing is inferred from the path.** Derive the minor line from that string.
@@ -97,7 +97,7 @@ The reference oracle also falls back to discovery when its linked build cannot a
 
 ## Verification
 
-The artifact carries its own checksum, so verification is not optional and not expensive. the core repository's artifact-cache verifier (surfaced as `just verify-artifacts`) walks each version directory, re-hashes the library, and compares against `library_sha256`. Its own comment states the reason plainly: a move that reported success and truncated a 232 MB library would look identical to one that worked.
+The artifact carries its own checksum, so verification is not optional and not expensive. The core repository's artifact-cache verifier walks each version directory, re-hashes the library, and compares against `library_sha256`. Its own comment states the reason plainly: a move that reported success and truncated a 232 MB library would look identical to one that worked.
 
 A loader SHOULD verify the hash before `dlopen` when the artifact came from anywhere other than a local build — and MUST when it came from a network. It SHOULD also assert `chs_clickhouse_version()` against `manifest.clickhouse_version` after loading, because that catches the one class of corruption a hash cannot: the right bytes in the wrong directory.
 
@@ -108,18 +108,6 @@ A loader SHOULD verify the hash before `dlopen` when the artifact came from anyw
 - **Static-TLS exhaustion.** With the full seven-version registry on glibc, the **third** artifact fails to load with `cannot allocate memory in static TLS block`. The fix is `GLIBC_TUNABLES=glibc.rtld.optional_static_tls=131072`, baked into the artifact image and passed by `lib/tools/oracle-linux.sh` for images that predate it. A loader that dlopens three or more versions on glibc MUST either run in an environment that sets this or surface the error with the remedy, because the raw message names nothing actionable.
 - **rpath.** A shipped binary needs an rpath relative to itself or its RUNPATH points at the builder's filesystem. Linux is the shipping target and cgo accepts `$ORIGIN`; a relocatable darwin binary needs `-ldflags "-r @loader_path"` because cgo's flag validator rejects `@loader_path`.
 - **macOS is a development floor, not an oracle.** Its `long double` is 53-bit, so float parses diverge from a real server — the float corpus matches 395/395 on Linux and 0/395 on macOS. Float expectations MUST come from a Linux artifact or a live server. Additionally, the mandatory `new_delete` archive that routes plain `operator new` into ClickHouse's `MemoryTracker` cannot be linked on macOS, so the DEFAULT-evaluation memory ceiling is weaker there.
-
-## Reproducibility, and what is actually established
-
-State this accurately, because the repo's own documents are careful about it and a binding's users will ask.
-
-**Established, measured layer by layer on Linux from a fixed tree:** generated inputs, the wrapper object file, the unstripped and stripped shared library, and a ClickHouse translation unit recompiled in place are all byte-identical across rebuilds — _once_ `-ffile-prefix-map` is applied to the **build** directory as well as the source directory. ClickHouse sets it for the source tree only, so a fresh CI workspace path changes the digest; with `-DCMAKE_{C,CXX}_FLAGS=-ffile-prefix-map=<build>=/BUILD` the two digests match.
-
-**Not established:** a full end-to-end two-image comparison. `dist/release.sh --check-determinism` (two `--no-cache` image builds, sha256 compared) is implemented and **has never been run to completion**; the layered result above is what is measured. `dist/README.md` still carries the older, blunter statement — "Not established. Signs are not a measurement."
-
-**Cross-host builds of the same platform key are not bit-identical today.** `dist/Dockerfile` drops to `-DNO_ARMV81_OR_HIGHER=1` on Apple Silicon, so a Mac-built `linux/arm64` artifact differs from a Graviton-built one. Any digest-keyed cache MUST include the builder's host architecture in its key.
-
-**A `library_sha256` is therefore a provenance record, not a reproducibility claim.** It proves the bytes you loaded are the bytes that were tested. It does not yet prove anyone else can rebuild them.
 
 ## The one failure mode to design against
 

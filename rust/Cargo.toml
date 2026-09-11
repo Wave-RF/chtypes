@@ -20,7 +20,7 @@ serde = { version = "1", features = ["derive"] }
 # It deliberately does NOT read result documents. `raw_value` was the analog of
 # Go's json.RawMessage here, but serde_json cannot parse a document at all when a
 # String column's bytes are not valid UTF-8 — which is how this crate came to
-# retry through `String::from_utf8_lossy` and destroy the bytes `docs/reference/c-abi.md`
+# retry through `String::from_utf8_lossy` and destroy the bytes the core repository's C ABI specification
 # calls authoritative. `crate::doc` reads those documents over `&[u8]`, and
 # `crate::json` compares leaf text exactly; `arbitrary_precision` is not enabled
 # for the same reason it never was (see those modules' docs).

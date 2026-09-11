@@ -85,7 +85,7 @@ pub struct Column {
 /// share ONE set of the wrapper's process-globals — the same reason `chs_init`
 /// is deduplicated by path just below. `set_default_settings` REPLACES the
 /// seeded settings list while the row path reads it by reference
-/// (`docs/reference/c-abi.md` §Thread-safety: it "MUST be serialized against all other
+/// (the core repository's C ABI specification §Thread-safety: it "MUST be serialized against all other
 /// calls"), and two `Mutex<()>` values, one per `Library`, would have excluded
 /// nothing at all. The mutex is therefore interned on the canonicalized path,
 /// exactly as `INITED` is; `docs/reference/bindings.md` §Concurrency states the rule.
@@ -282,7 +282,7 @@ impl Library {
     ///
     /// and a DECLARED settings profile — the settings the deployment's server
     /// runs, fixed into the handle exactly as a real `CREATE TABLE` fixes them
-    /// into the table (`docs/reference/c-abi.md` §Compile-time vs per-call settings) —
+    /// into the table (the core repository's C ABI specification §Compile-time vs per-call settings) —
     /// reads as a sentence:
     ///
     /// ```no_run
@@ -342,7 +342,7 @@ impl Library {
     /// to a particular tenant's table: a gate declared in the compile profile
     /// binds where a real server binds it — once, at CREATE — and then
     /// outranks the per-call map for that handle (measured on live 25.10.7.6
-    /// and 26.7.3.19; docs/reference/c-abi.md, "Server-level type gates"). This
+    /// and 26.7.3.19; the core repository's C ABI specification, "Server-level type gates"). This
     /// process-wide seed stays the right channel only for gateway-uniform
     /// policy.
     ///

@@ -38,7 +38,7 @@ import { classify, isLossyReason } from './transform.js';
 
 /**
  * The verdict on a row or a batch — the error taxonomy in one string, and
- * conflating any two arms is a scoring error (docs/reference/c-abi.md §Error model):
+ * conflating any two arms is a scoring error (the core repository's C ABI specification §Error model):
  *
  * - `'accepted'` — the server would take this, possibly with silent coercions
  *   (read `transformed`), defaults filled and volatile DEFAULTs substituted
@@ -90,7 +90,7 @@ export interface Value {
   /**
    * Where the value came from: `input` | `default` | `default_substituted` |
    * `absent` | `skipped` | `default_volatile_unresolved` | `default_pending` |
-   * `default_expr_unsupported` (docs/reference/c-abi.md §`src` values).
+   * `default_expr_unsupported` (the core repository's C ABI specification §`src` values).
    */
   readonly source: string;
 }
@@ -217,7 +217,7 @@ export interface BatchResult {
    * `exportFormat`): the batch's accepted rows, serialized once by the
    * vendored writer, copied out of the C buffer and freed before the call
    * returned — no ownership crosses the FFI boundary. Three states, and the
-   * distinction is the ABI's own (docs/reference/c-abi.md §Rows):
+   * distinction is the ABI's own (the core repository's C ABI specification §Rows):
    *
    *   `undefined`         no export was requested, the export was DECLINED
    *                       (`exportDeclined` then names the reason), or a
@@ -435,7 +435,7 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
 
   // row_spans is present exactly when export bytes were emitted;
   // export_declined exactly when an export was requested and withheld
-  // (docs/reference/c-abi.md §Rows). Both absent = no export requested, or a call-level
+  // (the core repository's C ABI specification §Rows). Both absent = no export requested, or a call-level
   // verdict preempted the machinery.
   const spansNode = field(doc, 'row_spans');
   const spans =

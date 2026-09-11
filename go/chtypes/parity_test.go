@@ -284,7 +284,7 @@ func receiverName(expr ast.Expr) string {
 // The spellings whose shared value is a STRING but whose Go representation is a
 // typed integer render through the same String() a caller would use.
 var goValues = map[string]any{
-	// chs_format — the numbers are frozen (docs/reference/c-abi.md §Types and schemas).
+	// chs_format — the numbers are frozen (the core repository's C ABI specification §Types and schemas).
 	"JSONEachRow":                           int(chtypes.JSONEachRow),
 	"CSV":                                   int(chtypes.CSV),
 	"TSV":                                   int(chtypes.TSV),
