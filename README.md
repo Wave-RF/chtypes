@@ -1,6 +1,8 @@
 <h1 align="center">chtypes</h1>
 
-<p align="center"><strong>ClickHouse's own type system, as a library you can call.</strong></p>
+<p align="center">
+  <strong>ClickHouse's own type system, as a library you can call.</strong>
+</p>
 
 <p align="center">
   Validate, coerce and preview rows <em>before</em> they reach a server —<br>
@@ -27,7 +29,7 @@
 
 ---
 
-*"What does ClickHouse do with `256` into a `UInt8`?"* has exactly one correct answer, and it is whatever ClickHouse's code does — which changes between releases. chtypes compiles ClickHouse's real C++ (`DataTypeFactory`, `ISerialization`, `ReadHelpers`, `evaluateMissingDefaults`, the MergeTree insert-time merge) per release into a native artifact behind a small frozen C ABI, and hands it to Go, Python, TypeScript and Rust. Nothing semantic is reimplemented in any binding.
+_"What does ClickHouse do with `256` into a `UInt8`?"_ has exactly one correct answer, and it is whatever ClickHouse's code does — which changes between releases. chtypes compiles ClickHouse's real C++ (`DataTypeFactory`, `ISerialization`, `ReadHelpers`, `evaluateMissingDefaults`, the MergeTree insert-time merge) per release into a native artifact behind a small frozen C ABI, and hands it to Go, Python, TypeScript and Rust. Nothing semantic is reimplemented in any binding.
 
 ```
 row + schema + ClickHouse version  ─▶  accepted / rejected / poisoned
@@ -137,18 +139,18 @@ A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying
 
 ## How it compares
 
-|  | chtypes | hand-rolled validation | round-trip to a real server |
-|---|---|---|---|
-| Exact ClickHouse semantics | ClickHouse's own C++ | an approximation that drifts | yes |
-| Answers before the insert | yes | yes | no — the row has already gone |
-| Names what was silently changed | yes, every coercion | no | no |
-| Per-release answers | one artifact per ClickHouse line | no | only that one server's version |
-| Cost per row | in-process call | in-process call | a network round trip |
-| Needs a running ClickHouse | no | no | yes |
+|                                 | chtypes                          | hand-rolled validation       | round-trip to a real server    |
+| ------------------------------- | -------------------------------- | ---------------------------- | ------------------------------ |
+| Exact ClickHouse semantics      | ClickHouse's own C++             | an approximation that drifts | yes                            |
+| Answers before the insert       | yes                              | yes                          | no — the row has already gone  |
+| Names what was silently changed | yes, every coercion              | no                           | no                             |
+| Per-release answers             | one artifact per ClickHouse line | no                           | only that one server's version |
+| Cost per row                    | in-process call                  | in-process call              | a network round trip           |
+| Needs a running ClickHouse      | no                               | no                           | yes                            |
 
 ## The guarantees every binding is held to
 
-- **`Transformed` is the product.** ClickHouse never says *"I changed your value"*; chtypes derives that report (`overflow_wrap`, `date_clamp`, `poisoned`, `ttl_expired`, …) and it is not optional.
+- **`Transformed` is the product.** ClickHouse never says _"I changed your value"_; chtypes derives that report (`overflow_wrap`, `date_clamp`, `poisoned`, `ttl_expired`, …) and it is not optional.
 - **Over-accepts and over-rejects are both budgeted at zero** in the proof behind the artifacts: a row accepted here and rejected by the server ships before the insert fails; a row rejected here and accepted by the server is silent data loss.
 - **`unsupported` is an answer, never a guess.** A binding surfaces the library's decline; it never papers over one.
 - **The four bindings give one answer.** The golden set is run by all of them, and each is a scored column in the core repository's arbiter at the same agreement as the reference.
@@ -161,13 +163,13 @@ The short version: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64`
 
 ## Documentation
 
-| | |
-|---|---|
-| [Install](docs/install.md) · [Quickstart](docs/quickstart.md) | getting a binding and an artifact, and the first program |
-| [Guides](docs/guides/) | artifacts, fetching, settings, batches, filters, discovery, multi-version, transformations |
-| [Reference](docs/reference/) | per-language API, the C ABI contract, the binding contract |
-| [Supported versions](docs/support.md) | languages, platforms, ClickHouse lines |
-| [Examples](examples/) | four side-by-side runnable tours, same sections in every language |
+|                                                               |                                                                                            |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [Install](docs/install.md) · [Quickstart](docs/quickstart.md) | getting a binding and an artifact, and the first program                                   |
+| [Guides](docs/guides/)                                        | artifacts, fetching, settings, batches, filters, discovery, multi-version, transformations |
+| [Reference](docs/reference/)                                  | per-language API, the C ABI contract, the binding contract                                 |
+| [Supported versions](docs/support.md)                         | languages, platforms, ClickHouse lines                                                     |
+| [Examples](examples/)                                         | four side-by-side runnable tours, same sections in every language                          |
 
 ## Project status
 

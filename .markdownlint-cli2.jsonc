@@ -1,0 +1,19 @@
+{
+  // markdownlint-cli2 CLI config: which files to lint. Rule configuration
+  // lives in .markdownlint.json (NOT here) so editor markdownlint
+  // extensions, which read .markdownlint.json directly, stay in sync with
+  // the CLI.
+  //
+  // markdownlint checks Markdown *style* — headings, lists, spacing — one
+  // file at a time, with no model of the site and no opinion on wrapping.
+  // Long-line / hard-wrapped prose is deliberately NOT enforced here
+  // (MD013 is off in .markdownlint.json): WaveHouse tried a bespoke
+  // no-hard-wrap markdownlint rule (regex-classified lines, no AST) and it
+  // silently corrupted content twice — a pipe-less table, a short setext
+  // underline. That job belongs to `prettier --prose-wrap never --check`
+  // instead (AST-based, and formatting is its whole job) — see the `prose`
+  // CI job and .prettierrc.json. No custom rules live here.
+  "gitignore": true,
+  "globs": ["**/*.md"],
+  "ignores": ["**/node_modules/**", "**/dist/**", "**/target/**", "**/.venv/**", "**/tests/fixtures/**", "**/.claude/**"]
+}

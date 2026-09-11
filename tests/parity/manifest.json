@@ -151,7 +151,7 @@
       "id": "library.validate-type",
       "group": "library",
       "kind": "method",
-      "what": "Canonicalise a type expression",
+      "what": "Canonicalize a type expression",
       "go": "Library.ValidateType",
       "python": "Library.validate_type",
       "ts": "Library.validateType",
@@ -211,7 +211,7 @@
       "id": "library.function-flags",
       "group": "library",
       "kind": "method",
-      "what": "chs_function_flags — the TSV audit VERBATIM, never re-modelled (§Introspection)",
+      "what": "chs_function_flags — the TSV audit VERBATIM, never re-modeled (§Introspection)",
       "go": "Library.FunctionFlags",
       "python": "Library.function_flags",
       "ts": "Library.functionFlags",
@@ -615,7 +615,7 @@
     {
       "id": "vocab.outcome.unsupported",
       "group": "vocabulary", "kind": "constant", "value": "unsupported",
-      "what": "This build declines to guess; an outcome string a binding does not recognise MUST degrade to THIS, never to rejected (§RowResult)",
+      "what": "This build declines to guess; an outcome string a binding does not recognize MUST degrade to THIS, never to rejected (§RowResult)",
       "go": "Unsupported", "python": "Outcome.UNSUPPORTED", "ts": "Outcome.Unsupported", "rust": "Outcome::Unsupported"
     },
     {
@@ -665,7 +665,7 @@
     {
       "id": "vocab.filter-outcome.unsupported",
       "group": "vocabulary", "kind": "constant", "value": "unsupported",
-      "what": "The filter call was declined; an unrecognised spelling degrades to THIS (§RowResult, the unknown-outcome rule)",
+      "what": "The filter call was declined; an unrecognized spelling degrades to THIS (§RowResult, the unknown-outcome rule)",
       "go": "FilterUnsupported", "python": "FilterOutcome.UNSUPPORTED", "ts": "FilterOutcome.Unsupported", "rust": "FilterOutcome::Unsupported"
     },
 
@@ -673,31 +673,31 @@
       "id": "vocab.default-kind.none",
       "group": "vocabulary", "kind": "constant", "value": "",
       "what": "chs_schema_column_default_kind: no DEFAULT clause",
-      "go": "KindNone", "python": "DefaultKind.NONE", "ts": "DefaultKind.None", "rust": {"symbol": "DefaultKind::None", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+      "go": "KindNone", "python": "DefaultKind.NONE", "ts": "DefaultKind.None", "rust": {"symbol": "DefaultKind::None", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognized spelling), so the variant is the value and there is no string to compare."}
     },
     {
       "id": "vocab.default-kind.default",
       "group": "vocabulary", "kind": "constant", "value": "DEFAULT",
       "what": "chs_schema_column_default_kind: DEFAULT",
-      "go": "KindDefault", "python": "DefaultKind.DEFAULT", "ts": "DefaultKind.Default", "rust": {"symbol": "DefaultKind::Default", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+      "go": "KindDefault", "python": "DefaultKind.DEFAULT", "ts": "DefaultKind.Default", "rust": {"symbol": "DefaultKind::Default", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognized spelling), so the variant is the value and there is no string to compare."}
     },
     {
       "id": "vocab.default-kind.materialized",
       "group": "vocabulary", "kind": "constant", "value": "MATERIALIZED",
       "what": "chs_schema_column_default_kind: MATERIALIZED — durable, not in SELECT *",
-      "go": "KindMaterialized", "python": "DefaultKind.MATERIALIZED", "ts": "DefaultKind.Materialized", "rust": {"symbol": "DefaultKind::Materialized", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+      "go": "KindMaterialized", "python": "DefaultKind.MATERIALIZED", "ts": "DefaultKind.Materialized", "rust": {"symbol": "DefaultKind::Materialized", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognized spelling), so the variant is the value and there is no string to compare."}
     },
     {
       "id": "vocab.default-kind.alias",
       "group": "vocabulary", "kind": "constant", "value": "ALIAS",
       "what": "chs_schema_column_default_kind: ALIAS",
-      "go": "KindAlias", "python": "DefaultKind.ALIAS", "ts": "DefaultKind.Alias", "rust": {"symbol": "DefaultKind::Alias", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+      "go": "KindAlias", "python": "DefaultKind.ALIAS", "ts": "DefaultKind.Alias", "rust": {"symbol": "DefaultKind::Alias", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognized spelling), so the variant is the value and there is no string to compare."}
     },
     {
       "id": "vocab.default-kind.ephemeral",
       "group": "vocabulary", "kind": "constant", "value": "EPHEMERAL",
       "what": "chs_schema_column_default_kind: EPHEMERAL — decline to preview, never mispreview (§EPHEMERAL columns)",
-      "go": "KindEphemeral", "python": "DefaultKind.EPHEMERAL", "ts": "DefaultKind.Ephemeral", "rust": {"symbol": "DefaultKind::Ephemeral", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognised spelling), so the variant is the value and there is no string to compare."}
+      "go": "KindEphemeral", "python": "DefaultKind.EPHEMERAL", "ts": "DefaultKind.Ephemeral", "rust": {"symbol": "DefaultKind::Ephemeral", "value_check": false, "why": "Rust's DefaultKind has no public renderer (DefaultKind::parse is private and DefaultKind::Other carries the unrecognized spelling), so the variant is the value and there is no string to compare."}
     },
 
     {
@@ -1421,7 +1421,7 @@
       "Verdict": "The verdict enum itself.",
       "FilterOutcome": "The filter-outcome enum itself.",
       "DefaultKind": "The default-kind enum itself.",
-      "DefaultKind::Other": "An unrecognised kind passes through rather than raising.",
+      "DefaultKind::Other": "An unrecognized kind passes through rather than raising.",
       "DocFlags": "The document-flag type itself.",
       "Error": "The one error enum.",
       "Error::code": "The ClickHouse code, when there is one.",

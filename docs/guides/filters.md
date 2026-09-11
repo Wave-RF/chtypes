@@ -6,7 +6,7 @@ A filter compiles **one boolean expression** against a schema's physical columns
 
 ## WHERE-side semantics, which are not insert-side semantics
 
-This is the single most important thing on the page. `x = 256` over a `UInt8` column is **false for every row**, because a comparison *promotes* the constant. It does not wrap it to `0` and match every genuine zero, which is exactly what the insert path does to the same literal.
+This is the single most important thing on the page. `x = 256` over a `UInt8` column is **false for every row**, because a comparison _promotes_ the constant. It does not wrap it to `0` and match every genuine zero, which is exactly what the insert path does to the same literal.
 
 ```
 insert side:   256 into UInt8   →  stored as 0            (overflow_wrap)
@@ -17,12 +17,12 @@ So never reuse insert-side coercion to fold a `WHERE` constant. The filter surfa
 
 ## Four verdicts, two of which are not answers
 
-| verdict | meaning |
-|---|---|
-| `true` | the predicate is non-NULL and non-zero for this row |
-| `false` | it is not |
-| `error` | the predicate **threw** on this row — a real server fails the whole query |
-| `decline` | this library declines to answer for this row |
+| verdict   | meaning                                                                   |
+| --------- | ------------------------------------------------------------------------- |
+| `true`    | the predicate is non-NULL and non-zero for this row                       |
+| `false`   | it is not                                                                 |
+| `error`   | the predicate **threw** on this row — a real server fails the whole query |
+| `decline` | this library declines to answer for this row                              |
 
 **`error` and `decline` are not answers, and an enforcing caller must fail closed on both.** Collapsing either into "false" is the bug this vocabulary exists to prevent: "the predicate blew up" and "the predicate is false" lead to opposite decisions when the predicate is a security boundary.
 
@@ -116,7 +116,7 @@ Clock reads are refused at **compile** time, as a decline: a predicate whose tru
 
 An expression may carry `{name:Type}` query parameters, bound as a map (a slice of pairs in Rust) of **string** values, exactly as the server's own parameter channels carry them.
 
-Substitution is the server's own `ReplaceQueryParameterVisitor`: each value is deserialized by the **declared type's own reader** and injected as a typed literal *after* SQL parsing. A value is therefore never SQL text.
+Substitution is the server's own `ReplaceQueryParameterVisitor`: each value is deserialized by the **declared type's own reader** and injected as a typed literal _after_ SQL parsing. A value is therefore never SQL text.
 
 > **Never hand-escape a value into the expression.** Injection safety here is by construction, and building the string yourself throws it away. A hostile value like `' OR 1=1 --` bound as a parameter compares as exactly that literal string.
 
@@ -144,7 +144,7 @@ The compiled handle **bakes the parameter values in**: identity is per `(schema,
 - **a bounded cache**, keyed on (schema generation, expression, params hash) — an unbounded one is a memory denial of service;
 - **a per-principal compile throttle** — an unmetered compile path is a CPU denial of service.
 
-One naming trap, and it belongs to the transport rather than to this library: on a real server's **TCP** channel, a parameter *named* `limit` or `offset` fails at the protocol layer with code 26 even when unused, because parameters ride in a Settings block there. HTTP is fine, and this library matches the HTTP substitution semantics. Avoid those two names for anything that will ever cross TCP.
+One naming trap, and it belongs to the transport rather than to this library: on a real server's **TCP** channel, a parameter _named_ `limit` or `offset` fails at the protocol layer with code 26 even when unused, because parameters ride in a Settings block there. HTTP is fine, and this library matches the HTTP substitution semantics. Avoid those two names for anything that will ever cross TCP.
 
 ## The block twin — parse once, evaluate K times
 
@@ -215,12 +215,12 @@ A filter and a block must come from the **same schema handle**. A mismatched pai
 
 Neither may outlive its schema, and each binding enforces that in its own idiom:
 
-| | |
-|---|---|
-| Go | the schema's `Close` frees open filters and blocks first, and finalizers run in dependency order |
-| Python | `Schema.close()` frees open filters and blocks first |
-| TypeScript | `Schema#close` frees them first; `using` nests naturally — block, filter, schema |
-| Rust | a `Filter` and a `Block` **borrow** their `Schema`, so the wrong free order does not compile |
+|            |                                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------ |
+| Go         | the schema's `Close` frees open filters and blocks first, and finalizers run in dependency order |
+| Python     | `Schema.close()` frees open filters and blocks first                                             |
+| TypeScript | `Schema#close` frees them first; `using` nests naturally — block, filter, schema                 |
+| Rust       | a `Filter` and a `Block` **borrow** their `Schema`, so the wrong free order does not compile     |
 
 In Go a filter call is also a use of its schema handle, so two filters over one schema never run concurrently. Parallelism comes from more schemas, not from sharing one.
 

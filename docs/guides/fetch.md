@@ -21,12 +21,12 @@ Fetch **writes** to the first of (1), (2), (3) that is set; never to (4). `<os>`
 
 A release holds four kinds of file:
 
-| file | what it is |
-|---|---|
-| `SHA256SUMS`, `SHA256SUMS.sig` | the signed manifest of every other file (§3, §4) |
-| `index.json` | the listing: one row per artifact, per platform (schema 1) |
+| file                                          | what it is                                                                 |
+| --------------------------------------------- | -------------------------------------------------------------------------- |
+| `SHA256SUMS`, `SHA256SUMS.sig`                | the signed manifest of every other file (§3, §4)                           |
+| `index.json`                                  | the listing: one row per artifact, per platform (schema 1)                 |
 | `chtypes-<version>-<os>-<arch>[-b<N>].tar.gz` | the artifacts. `-b<N>` is the wrapper build; a name without one is build 0 |
-| `sdk-goldens.json` | the **served golden set** the SDK suites run |
+| `sdk-goldens.json`                            | the **served golden set** the SDK suites run                               |
 
 `sdk-goldens.json` is a row in `SHA256SUMS` like any tarball, so it verifies through the same chain, and a fetch installs it at `<registry>/sdk-goldens.json` — beside the artifacts, where every binding's golden test reads it offline (see [`docs/reference/goldens.md`](../reference/goldens.md); `CHTYPES_GOLDENS` overrides the path). A release that does not publish one predates the served set: that is a note, not a failure, and the golden tests skip loudly until it does.
 
@@ -50,10 +50,10 @@ A publish into the rolling release is **three objects** — `SHA256SUMS`, `SHA25
 
 Exactly **two** of the failures above are symptoms of reading inside that window, and both are retried — three attempts about four seconds apart, roughly ten seconds in all:
 
-| symptom | code |
-|---|---|
+| symptom                                             | code                         |
+| --------------------------------------------------- | ---------------------------- |
 | step 0: the signature verifies under no trusted key | `CHTYPES_ARTIFACT_UNTRUSTED` |
-| step 2: `index.json` and `SHA256SUMS` disagree | `CHTYPES_ARTIFACT_CORRUPT` |
+| step 2: `index.json` and `SHA256SUMS` disagree      | `CHTYPES_ARTIFACT_CORRUPT`   |
 
 Nothing else retries. A tarball whose hash is wrong (step 3) is the release lying about a byte, not a half-finished upload, and refuses at once — as do the two above once the attempts run out, with the same code and the same exit status they have always had. **A retry buys ten seconds; it never converts a refusal into an install.**
 
@@ -61,7 +61,7 @@ Step 2 is therefore checked twice: once for the whole release as soon as the thr
 
 Only an `http(s)` source can be mid-publish. A `file://` URL or a plain directory is read exactly once and refuses on the first look, which is also why the `tests/fixtures/fetch` suites stay instant.
 
-**Not covered, by design, and said out loud:** freshness. A host serving an older *signed* release is accepted; §5 pins are how a consumer refuses that. Build provenance (which workflow built which commit) is a later, separate layer (Sigstore attestations, once every build runs in CI).
+**Not covered, by design, and said out loud:** freshness. A host serving an older _signed_ release is accepted; §5 pins are how a consumer refuses that. Build provenance (which workflow built which commit) is a later, separate layer (Sigstore attestations, once every build runs in CI).
 
 ## 4. The signature
 
@@ -74,11 +74,11 @@ untrusted comment: chtypes artifacts, ed25519 key deb275922dbff76e
 
 The key id is the first 16 hex characters of sha256 over the raw 32-byte public key. The release key today:
 
-| | |
-|---|---|
-| public key (raw, hex) | `fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc` |
-| key id | `deb275922dbff76e` |
-| private half | Phase app `chtypes`, `/infra`, `CHTYPES_SIGNING_KEY`; only `dist/publish.sh` in the core repository signs |
+|                       |                                                                                                           |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| public key (raw, hex) | `fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc`                                        |
+| key id                | `deb275922dbff76e`                                                                                        |
+| private half          | Phase app `chtypes`, `/infra`, `CHTYPES_SIGNING_KEY`; only `dist/publish.sh` in the core repository signs |
 
 Every SDK embeds that public key as a constant and verifies with it. Policy, same in all four:
 
@@ -86,7 +86,7 @@ Every SDK embeds that public key as a constant and verifies with it. Policy, sam
 - `CHTYPES_ALLOW_UNSIGNED=1` skips step 0 and prints one loud warning naming the source. Never the default; never silent.
 - Once files are in a registry directory, the loader trusts the directory. Verification is a fetch-time policy, not a load-time gate — exactly as a runtime trusts `node_modules`. Custom or modified artifacts are installed by copying them in.
 
-Reference vector (openssl, `-rawin`): message `68656c6c6f0a` ("hello\n") signs under the key above to ``0fee686f7ed7c64b86a7dce0ffd66b15d1504178153c3b0cc118e2c9456afa6d3e2e55019eca8f75e44ab507d65b0714523e92c7f92452821930691212e76c04``; flipping one byte of the message fails.
+Reference vector (openssl, `-rawin`): message `68656c6c6f0a` ("hello\n") signs under the key above to `0fee686f7ed7c64b86a7dce0ffd66b15d1504178153c3b0cc118e2c9456afa6d3e2e55019eca8f75e44ab507d65b0714523e92c7f92452821930691212e76c04`; flipping one byte of the message fails.
 
 ## 5. Pinning
 
@@ -111,12 +111,12 @@ chtypes list   [--dest <dir>]        what is installed, and what the release off
 chtypes where                        the registry directory fetch would write to
 ```
 
-| SDK | invocation | library call |
-|---|---|---|
-| TypeScript | `npx @wavehouse/chtypes fetch 25.8` (`bin: chtypes`) | `ensure('25.8', opts)` |
-| Python | `python -m chtypes fetch 25.8` and the `chtypes` console script | `chtypes.ensure('25.8', **opts)` |
-| Rust | `cargo install chtypes` → `chtypes fetch 25.8` (the crate's `[[bin]]`) | `chtypes::ensure("25.8", &opts)` |
-| Go | `go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8` | `chtypes.Ensure(ctx, "25.8", opts)` |
+| SDK        | invocation                                                             | library call                        |
+| ---------- | ---------------------------------------------------------------------- | ----------------------------------- |
+| TypeScript | `npx @wavehouse/chtypes fetch 25.8` (`bin: chtypes`)                   | `ensure('25.8', opts)`              |
+| Python     | `python -m chtypes fetch 25.8` and the `chtypes` console script        | `chtypes.ensure('25.8', **opts)`    |
+| Rust       | `cargo install chtypes` → `chtypes fetch 25.8` (the crate's `[[bin]]`) | `chtypes::ensure("25.8", &opts)`    |
+| Go         | `go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8`   | `chtypes.Ensure(ctx, "25.8", opts)` |
 
 `ensure` is idempotent: installed-and-verified is a no-op, otherwise it fetches through §3. Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source unreachable · 4 not published for this platform/line.
 
@@ -149,9 +149,9 @@ A `brew install chtypes` or a Debian package would pre-seed the system locations
 Where the four implementations diverged, one rule was chosen and the odd ones out were changed the same day; where reconciling would have cost more than it is worth today, the difference is recorded here instead of hidden. These bind §1–§7.
 
 1. **`--frozen` without `--lock` reads `./chtypes.lock`** (relative to the working directory), in the library call as well as the CLI. A lock file that does not exist under `--frozen` is `CHTYPES_ARTIFACT_PINNED` (exit 1): nothing is pinned, so nothing is installed — the same verdict as a line the lock does not pin. It is decided after the release loads, so an untrusted or unreachable source is reported ahead of it. (Python refused `--frozen` without `--lock` as a usage error, TypeScript's library call did too, and Rust's missing-lock error carried no code; all three changed.)
-2. **An explicit destination is the only place "already installed" is looked for.** `--dest <dir>` / the `dest` option means that directory; an install elsewhere on the §1 path does not satisfy it (a container build's `--dest /opt/chtypes/artifacts` must not be satisfied by the builder's own cache). All four did this. *Known difference, not reconciled:* without a `dest`, Rust also accepts an install anywhere on the §1 search path (what a registry would find); Go, Python and TypeScript look only in the directory fetch would write to. It shows only when a line sits in a later slot than the write directory — the system slots are empty today.
-3. **A fetch for another platform never writes into `CHTYPES_REGISTRY`.** That variable names a directory this host dlopens from, so it is on the search path for the host's platform only; `fetch --platform <other>` writes to that platform's own per-user cache (`…/chtypes/artifacts/<os>-<arch>`), and `--dest` still wins. (Python wrote into `CHTYPES_REGISTRY`; changed.) *Known difference:* Go and TypeScript also read `CHTYPES_TARGET` as the default `--platform` (see [`artifacts.md`](artifacts.md)); Python and Rust take `--platform` only.
-4. **An explicit registry directory that lacks a line falls through** to the rest of the §1 path, in every SDK's search-path constructor. In Rust that constructor is `Registry::from_search_path()` / `Registry::from_search_path_with(RegistryOptions { dir, .. })`; `Registry::new(dir)` stays the single-directory loader (eager, that directory only, `Error::NoSuchVersion` for a line it lacks), by design. *Known difference:* a named directory that does not exist — Python skips it silently; Go and TypeScript refuse unless autofetch is on (then it is the destination-to-be); Rust's single-directory constructor refuses.
+2. **An explicit destination is the only place "already installed" is looked for.** `--dest <dir>` / the `dest` option means that directory; an install elsewhere on the §1 path does not satisfy it (a container build's `--dest /opt/chtypes/artifacts` must not be satisfied by the builder's own cache). All four did this. _Known difference, not reconciled:_ without a `dest`, Rust also accepts an install anywhere on the §1 search path (what a registry would find); Go, Python and TypeScript look only in the directory fetch would write to. It shows only when a line sits in a later slot than the write directory — the system slots are empty today.
+3. **A fetch for another platform never writes into `CHTYPES_REGISTRY`.** That variable names a directory this host dlopens from, so it is on the search path for the host's platform only; `fetch --platform <other>` writes to that platform's own per-user cache (`…/chtypes/artifacts/<os>-<arch>`), and `--dest` still wins. (Python wrote into `CHTYPES_REGISTRY`; changed.) _Known difference:_ Go and TypeScript also read `CHTYPES_TARGET` as the default `--platform` (see [`artifacts.md`](artifacts.md)); Python and Rust take `--platform` only.
+4. **An explicit registry directory that lacks a line falls through** to the rest of the §1 path, in every SDK's search-path constructor. In Rust that constructor is `Registry::from_search_path()` / `Registry::from_search_path_with(RegistryOptions { dir, .. })`; `Registry::new(dir)` stays the single-directory loader (eager, that directory only, `Error::NoSuchVersion` for a line it lacks), by design. _Known difference:_ a named directory that does not exist — Python skips it silently; Go and TypeScript refuse unless autofetch is on (then it is the destination-to-be); Rust's single-directory constructor refuses.
 5. **`CHTYPES_ALLOW_UNSIGNED=1` skips step 0 entirely**: `SHA256SUMS.sig` is not even fetched, so a present-but-wrong signature installs, behind the one loud warning naming the source. `SHA256SUMS` itself is still required and steps 1–4 still run — a tampered tarball is still refused. All four agree.
 6. **"Installed" is decided against the signed release.** A plain `ensure` / `fetch` of an installed line reads `SHA256SUMS`, its signature and `index.json` — never the tarball — and reports installed when the library in place hashes what that listing says (§3). `--offline` is the one path that reads no source: an installed line that hashes what its own `manifest.json` says is the answer; anything else is `CHTYPES_SOURCE_UNREACHABLE` (a damaged install, `CHTYPES_ARTIFACT_CORRUPT`). (Rust's plain `ensure` was local-only; changed.)
 7. **An exact patch spelled without its channel matches that patch on any channel**: `25.8.28.1` and `v25.8.28.1` take `25.8.28.1-lts`; a spelled channel (`25.8.28.1-stable`) matches only itself, and a miss is `CHTYPES_ARTIFACT_UNPUBLISHED`, never the neighboring patch. (Go required the exact string; changed.)

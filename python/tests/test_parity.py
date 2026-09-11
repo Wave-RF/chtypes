@@ -67,7 +67,7 @@ CAPABILITIES = MANIFEST_DOC.get("capabilities", [])
 
 
 def column(cap: dict, lang: str) -> dict:
-    """One capability's column for one language, normalised to a dict."""
+    """One capability's column for one language, normalized to a dict."""
     raw = cap.get(lang)
     if isinstance(raw, str):
         return {"symbol": raw}
@@ -393,7 +393,10 @@ def test_the_manifest_and_the_spec_table_agree() -> None:
     """
     full = (REPO / "docs" / "reference" / "bindings.md").read_text(encoding="utf-8")
     doc = "\n".join(line for line in full.splitlines() if line.lstrip().startswith("|"))
-    assert "| Concept | Go | Python | TypeScript | Rust |" in full, (
+    # Whitespace-insensitive: dprint pads markdown table columns, and this
+    # assertion is about which COLUMNS exist, not about their alignment.
+    squashed = re.sub(r"[ \t]+", " ", full)
+    assert "| Concept | Go | Python | TypeScript | Rust |" in squashed, (
         "docs/reference/bindings.md's object-model table has lost a language column. Every language is a peer "
         "SDK over the same C ABI and the document says so in its own second paragraph; a table with "
         "three of the four columns is how Rust came to be described only in a Notes cell."

@@ -1,6 +1,6 @@
 # Transformations — the silent-change report
 
-ClickHouse never says *"I changed your value."* It accepts the row and stores something else. `256` into a `UInt8` is stored as `0`, `'2300-01-01'` into a `Date` is clamped, an out-of-domain `Enum` element is coerced — and the INSERT returns success every time.
+ClickHouse never says _"I changed your value."_ It accepts the row and stores something else. `256` into a `UInt8` is stored as `0`, `'2300-01-01'` into a `Date` is clamped, an out-of-domain `Enum` element is coerced — and the INSERT returns success every time.
 
 `transformed` is chtypes' report of exactly that, per row, per column, with a name for what happened. It is the **one derived answer** in the whole system: every other verdict is relayed from ClickHouse's own code, but ClickHouse has no "what did you change" channel to relay, so chtypes computes it by parsing the value a second time through a widened reference type and comparing. That derivation is why the product exists.
 
@@ -8,11 +8,11 @@ ClickHouse never says *"I changed your value."* It accepts the row and stores so
 
 An accepted row carries three lists, and they answer three different questions.
 
-| list | question | must the caller act? |
-|---|---|---|
-| `transformed` | what did ClickHouse silently change? | show it, or you are lying to a user |
+| list          | question                                    | must the caller act?                     |
+| ------------- | ------------------------------------------- | ---------------------------------------- |
+| `transformed` | what did ClickHouse silently change?        | show it, or you are lying to a user      |
 | `substituted` | which volatile DEFAULTs were resolved here? | **yes** — echo them into the real INSERT |
-| `computed` | what did MATERIALIZED columns evaluate to? | no, informational |
+| `computed`    | what did MATERIALIZED columns evaluate to?  | no, informational                        |
 
 A `Transform` names the column, the input text, the stored text, and the reason. Reading one:
 
@@ -74,14 +74,14 @@ Every other reason is **lossy**: information the caller sent is not in the table
 
 The lossy ones, by what they are about:
 
-| | |
-|---|---|
-| numeric domain | `overflow_wrap`, `decimal_truncate`, `lossy_numeric`, `float_precision` |
-| time | `date_clamp`, `datetime_wrap`, `date_shift`, `ttl_expired`, `ttl_column_expired` |
-| null handling | `null_to_default`, `null_loss` |
+|                              |                                                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------- |
+| numeric domain               | `overflow_wrap`, `decimal_truncate`, `lossy_numeric`, `float_precision`                                  |
+| time                         | `date_clamp`, `datetime_wrap`, `date_shift`, `ttl_expired`, `ttl_column_expired`                         |
+| null handling                | `null_to_default`, `null_loss`                                                                           |
 | strings and structured types | `fixedstring_pad`, `emptied`, `element_changed`, `enum_coerce`, `duplicate_key_dropped`, `value_changed` |
-| identifiers | `uuid_mangle`, `ip_mangle` |
-| the loud one | `poisoned` |
+| identifiers                  | `uuid_mangle`, `ip_mangle`                                                                               |
+| the loud one                 | `poisoned`                                                                                               |
 
 > `default_materialized` is spelled with an `s`. It is a frozen wire constant rather than prose, so it stays as the artifact emits it — do not "correct" it in code or in a comparison.
 

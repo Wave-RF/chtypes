@@ -1,6 +1,6 @@
 # chtypes — Rust SDK
 
-**If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native library behind the frozen `chs_*` C ABI and reached here through `libloading`. Nothing semantic is reimplemented, so *"what does ClickHouse do with `256` into a `UInt8`?"* is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
+**If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native library behind the frozen `chs_*` C ABI and reached here through `libloading`. Nothing semantic is reimplemented, so _"what does ClickHouse do with `256` into a `UInt8`?"_ is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
 
 Unix only — the loader is `dlopen`.
 
@@ -52,16 +52,16 @@ The row is **accepted** and `256` is silently stored as `0`. That report — `tr
 
 `cargo doc --no-deps --open` is the full reference — every public item is documented (`#![deny(missing_docs)]`), including which `Error` variant each call can produce.
 
-| | |
-|---|---|
-| [Quickstart](https://github.com/wave-rf/chtypes/blob/main/docs/quickstart.md) | the same program in all four languages |
-| [Rust API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/rust.md) | the map of the crate, with the C entry point under each item |
-| [Artifacts](https://github.com/wave-rf/chtypes/blob/main/docs/guides/artifacts.md) | getting one, where it lands, verifying and pinning it |
-| [Batches](https://github.com/wave-rf/chtypes/blob/main/docs/guides/batches.md) | always `rows`, and the two bad-row policies |
-| [Transformations](https://github.com/wave-rf/chtypes/blob/main/docs/guides/transformations.md) | the silent-change report, and the DEFAULTs you must echo back |
-| [Settings](https://github.com/wave-rf/chtypes/blob/main/docs/guides/settings.md) · [Discovery](https://github.com/wave-rf/chtypes/blob/main/docs/guides/discovery.md) | the four channels; asking a real server what profile to validate under |
+|                                                                                                                                                                             |                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [Quickstart](https://github.com/wave-rf/chtypes/blob/main/docs/quickstart.md)                                                                                               | the same program in all four languages                                    |
+| [Rust API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/rust.md)                                                                                   | the map of the crate, with the C entry point under each item              |
+| [Artifacts](https://github.com/wave-rf/chtypes/blob/main/docs/guides/artifacts.md)                                                                                          | getting one, where it lands, verifying and pinning it                     |
+| [Batches](https://github.com/wave-rf/chtypes/blob/main/docs/guides/batches.md)                                                                                              | always `rows`, and the two bad-row policies                               |
+| [Transformations](https://github.com/wave-rf/chtypes/blob/main/docs/guides/transformations.md)                                                                              | the silent-change report, and the DEFAULTs you must echo back             |
+| [Settings](https://github.com/wave-rf/chtypes/blob/main/docs/guides/settings.md) · [Discovery](https://github.com/wave-rf/chtypes/blob/main/docs/guides/discovery.md)       | the four channels; asking a real server what profile to validate under    |
 | [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process |
-| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md) | what works where; what chtypes declines to answer |
+| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                         |
 
 Where this crate and the normative spec disagree, **the spec wins**.
 

@@ -161,7 +161,7 @@ type surface struct {
 
 // parseSurface reads every .go file beside this test — the package as a
 // consumer's `go get` tree holds it — and returns its exported names. Build
-// tags are honoured the way the default build sees them: a file behind
+// tags are honored the way the default build sees them: a file behind
 // chtypes_linked is NOT part of the dlopen-only surface this contract governs.
 func parseSurface(t *testing.T) surface {
 	t.Helper()

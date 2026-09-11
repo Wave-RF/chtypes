@@ -107,22 +107,18 @@ w("| Rust | `chtypes` | Rust %s+ (edition %s) | `libloading` |" % (rust_min, rus
 w("")
 w("### Platforms")
 w("")
-w("The artifact is native code, so a platform is supported only if the release")
-w("publishes a build for it. Today that is:")
+w("The artifact is native code, so a platform is supported only if the release publishes a build for it. Today that is:")
 w("")
 for p in plat_order:
     note = " — development floor, not an oracle: its `long double` makes float parses diverge from a real server" \
            if p.startswith("darwin") else ""
     w("- `%s`%s" % (p, note))
 w("")
-w("Both loaders are `dlopen`, so all four bindings are Unix-only. There is no")
-w("Windows artifact and no 32-bit build.")
+w("Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Windows artifact and no 32-bit build.")
 w("")
 w("### ClickHouse lines")
 w("")
-w("One artifact per ClickHouse line, each carrying that release's own C++. A")
-w("line is supported when it has a committed run of record in the core")
-w("repository and the release publishes it:")
+w("One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has a committed run of record in the core repository and the release publishes it:")
 w("")
 w("| Line | Exact version | Platforms |")
 w("|---|---|---|")
@@ -132,9 +128,7 @@ for minor in sorted(lines, key=order):
     marks = "all" if len(have) == len(plat_order) else ", ".join("`%s`" % p for p in have)
     w("| `%s` | `%s` | %s |" % (minor, e["exact"], marks))
 w("")
-w("Ask for a line, never a nearest match: `for(\"25.8\")` resolves the newest")
-w("build of that line and fails if it is absent, rather than quietly handing")
-w("back a neighbor whose answers differ.")
+w("Ask for a line, never a nearest match: `for(\"25.8\")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.")
 
 block = "\n".join(out)
 BEGIN = "<!-- BEGIN GENERATED — scripts/support-matrix.sh; do not edit by hand -->"

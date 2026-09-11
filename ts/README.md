@@ -1,6 +1,6 @@
 # chtypes — TypeScript SDK
 
-**If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native library behind the frozen `chs_*` C ABI and reached here through `ffi-rs`. Nothing semantic is reimplemented, so *"what does ClickHouse do with `256` into a `UInt8`?"* is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
+**If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native library behind the frozen `chs_*` C ABI and reached here through `ffi-rs`. Nothing semantic is reimplemented, so _"what does ClickHouse do with `256` into a `UInt8`?"_ is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
 
 Node ≥ 22, ESM only. `ffi-rs` ships prebuilt for darwin arm64/x64 and linux arm64/x64 (gnu and musl), so there is **no build step**.
 
@@ -40,7 +40,7 @@ The row is **accepted** and `256` is silently stored as `0`. That report — `tr
 
 ## Three outcomes, and conflating any two is a bug
 
-A bad **row** is a verdict, not an exception: `outcome` becomes `'rejected'` with ClickHouse's own code and message. Exceptions are for schema-level answers — `compileDdl`, `setEngine`, `setTtl`, `validateType` — and there the class *is* the verdict.
+A bad **row** is a verdict, not an exception: `outcome` becomes `'rejected'` with ClickHouse's own code and message. Exceptions are for schema-level answers — `compileDdl`, `setEngine`, `setTtl`, `validateType` — and there the class _is_ the verdict.
 
 - `SchemaError` — the server refused, and `code` is a real ClickHouse code.
 - `UnsupportedError` — chtypes declines to guess, and a real server might well have accepted. **Fall back to the server.**
@@ -48,16 +48,16 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `'rejected'` wit
 
 ## Documentation
 
-| | |
-|---|---|
-| [Quickstart](https://github.com/wave-rf/chtypes/blob/main/docs/quickstart.md) | the same program in all four languages |
-| [TypeScript API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/ts.md) | every symbol, the C entry point under it, what it returns and what it throws |
-| [Artifacts](https://github.com/wave-rf/chtypes/blob/main/docs/guides/artifacts.md) | getting one, where it lands, verifying and pinning it |
-| [Batches](https://github.com/wave-rf/chtypes/blob/main/docs/guides/batches.md) | always `rows`, and the two bad-row policies |
-| [Transformations](https://github.com/wave-rf/chtypes/blob/main/docs/guides/transformations.md) | the silent-change report, and the DEFAULTs you must echo back |
-| [Settings](https://github.com/wave-rf/chtypes/blob/main/docs/guides/settings.md) · [Discovery](https://github.com/wave-rf/chtypes/blob/main/docs/guides/discovery.md) | the four channels; asking a real server what profile to validate under |
-| [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process |
-| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md) | what works where; what chtypes declines to answer |
+|                                                                                                                                                                             |                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [Quickstart](https://github.com/wave-rf/chtypes/blob/main/docs/quickstart.md)                                                                                               | the same program in all four languages                                       |
+| [TypeScript API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/ts.md)                                                                               | every symbol, the C entry point under it, what it returns and what it throws |
+| [Artifacts](https://github.com/wave-rf/chtypes/blob/main/docs/guides/artifacts.md)                                                                                          | getting one, where it lands, verifying and pinning it                        |
+| [Batches](https://github.com/wave-rf/chtypes/blob/main/docs/guides/batches.md)                                                                                              | always `rows`, and the two bad-row policies                                  |
+| [Transformations](https://github.com/wave-rf/chtypes/blob/main/docs/guides/transformations.md)                                                                              | the silent-change report, and the DEFAULTs you must echo back                |
+| [Settings](https://github.com/wave-rf/chtypes/blob/main/docs/guides/settings.md) · [Discovery](https://github.com/wave-rf/chtypes/blob/main/docs/guides/discovery.md)       | the four channels; asking a real server what profile to validate under       |
+| [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process    |
+| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                            |
 
 ## Four things specific to this binding
 

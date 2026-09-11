@@ -131,22 +131,22 @@ Three separate answers, and each is worth reading for what it is.
 
 **The row was accepted.** The INSERT would have succeeded. Nothing failed, nothing warned.
 
-**And `256` is stored as `0`.** That is `overflow_wrap`, one of the named reasons in `transformed`, and it is the thing a validator written by hand almost never catches — the row is *valid*, it is just not the row you sent. [`guides/transformations.md`](guides/transformations.md) is the full report and the rest of the reasons.
+**And `256` is stored as `0`.** That is `overflow_wrap`, one of the named reasons in `transformed`, and it is the thing a validator written by hand almost never catches — the row is _valid_, it is just not the row you sent. [`guides/transformations.md`](guides/transformations.md) is the full report and the rest of the reasons.
 
 **`ts` was substituted, not stored.** The column has a volatile DEFAULT (`now()`), so chtypes resolved it here, once for the batch, and told you in `substituted`. **Send every substituted column as an explicit value in the real INSERT** — otherwise the server re-evaluates `now()` at its own instant and the preview you showed a user is not what landed. Pin the instant for tests with the `chtypes_now_epoch_nanos` setting.
 
-**The bad row is a verdict, not an exception.** `outcome` became `rejected` and carries ClickHouse's own code (27) and its own message. No binding raises on a bad row. Exceptions and the `Err` arm are for the machinery — a missing artifact, an unreadable document — and for schema-level answers such as a DDL the server refuses. There is a third outcome, `unsupported`, which means *this build declines to answer and a real server might well have accepted it*; never treat one as a rejection. [`index.md`](index.md#three-outcomes-and-conflating-any-two-is-a-bug) is the distinction in full.
+**The bad row is a verdict, not an exception.** `outcome` became `rejected` and carries ClickHouse's own code (27) and its own message. No binding raises on a bad row. Exceptions and the `Err` arm are for the machinery — a missing artifact, an unreadable document — and for schema-level answers such as a DDL the server refuses. There is a third outcome, `unsupported`, which means _this build declines to answer and a real server might well have accepted it_; never treat one as a rejection. [`index.md`](index.md#three-outcomes-and-conflating-any-two-is-a-bug) is the distinction in full.
 
 ## Freeing the handle
 
 Each binding frees the schema its own way, and all four release the native handle deterministically:
 
-| | |
-|---|---|
-| Go | `defer schema.Close()` (a finalizer is the backup, not the contract) |
-| Python | the context manager above, or `schema.close()` |
-| TypeScript | `schema.close()` |
-| Rust | on drop; a `Filter` or `Block` borrows its `Schema`, so the wrong order does not compile |
+|            |                                                                                          |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| Go         | `defer schema.Close()` (a finalizer is the backup, not the contract)                     |
+| Python     | the context manager above, or `schema.close()`                                           |
+| TypeScript | `schema.close()`                                                                         |
+| Rust       | on drop; a `Filter` or `Block` borrows its `Schema`, so the wrong order does not compile |
 
 TypeScript also has `using schema = lib.compileDdl(…)`, which is nicer, but explicit resource management is a **syntax error in plain JavaScript on Node 22** — this package's own floor. `schema.close()` works everywhere, so portable examples use it. Reach for `using` once TypeScript downlevels it for you, or once you are on Node ≥ 24.
 

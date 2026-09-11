@@ -19,12 +19,12 @@ cargo install chtypes && chtypes fetch 25.8                          # Rust
 
 All four print the installed directory alone on stdout and progress on stderr, so `dir="$(python -m chtypes fetch 25.8)"` composes. The other three subcommands are spelled identically everywhere:
 
-| command | answers |
-|---|---|
+| command           | answers                                                     |
+| ----------------- | ----------------------------------------------------------- |
 | `fetch <line>...` | install one or more lines (`--all` for every published one) |
-| `verify` | re-hash every installed line against its own manifest |
-| `list` | what is installed, and what the release offers |
-| `where` | the registry directory a fetch would write to |
+| `verify`          | re-hash every installed line against its own manifest       |
+| `list`            | what is installed, and what the release offers              |
+| `where`           | the registry directory a fetch would write to               |
 
 Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source unreachable · 4 not published for this platform or line.
 
@@ -129,7 +129,7 @@ A fetch is a **verification chain, not a download**. Nothing is a verdict but th
 
 The install is atomic — unpack into a temporary sibling, rename into place — so an interrupted fetch can never leave a half-installed line for a loader to find. Any mismatch is `CHTYPES_ARTIFACT_CORRUPT` and nothing is installed.
 
-The reason this is worth five steps rather than one: a truncated 300 MB library and a good one produce the same `curl` and `tar` status, and the failure being prevented is silent. A wrong or damaged library loaded into a gateway that then answers *authoritatively* about types is exactly the outcome chtypes exists to stop.
+The reason this is worth five steps rather than one: a truncated 300 MB library and a good one produce the same `curl` and `tar` status, and the failure being prevented is silent. A wrong or damaged library loaded into a gateway that then answers _authoritatively_ about types is exactly the outcome chtypes exists to stop.
 
 Two environment variables move the trust boundary, and both are deliberate:
 

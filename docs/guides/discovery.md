@@ -6,11 +6,11 @@ That split is deliberate. A library that opened its own connection would need cr
 
 ## The three queries
 
-| constant | answers | feeds |
-|---|---|---|
-| `QUERY_SERVER_VERSION` | the exact release | which artifact to resolve |
-| `QUERY_CHANGED_SETTINGS` | every setting changed from default | the compile profile **and** the per-call settings |
-| `QUERY_TABLE_COLUMNS` | one table's columns, kinds and expressions | reconstructing DDL to compile |
+| constant                 | answers                                    | feeds                                             |
+| ------------------------ | ------------------------------------------ | ------------------------------------------------- |
+| `QUERY_SERVER_VERSION`   | the exact release                          | which artifact to resolve                         |
+| `QUERY_CHANGED_SETTINGS` | every setting changed from default         | the compile profile **and** the per-call settings |
+| `QUERY_TABLE_COLUMNS`    | one table's columns, kinds and expressions | reconstructing DDL to compile                     |
 
 In Go the constants are `QueryServerVersion`, `QueryChangedSettings` and `QueryTableColumns`; the other three bindings spell them in screaming snake case.
 

@@ -18,12 +18,12 @@ An INSERT whose explicit column list names an EPHEMERAL column cannot be preview
 
 Detect the intersection at compile time and decline it rather than mispreview:
 
-| | |
-|---|---|
-| Go | `schema.Columns`, `DefaultKind == chtypes.KindEphemeral` |
-| Python | `schema.columns`, `DefaultKind.EPHEMERAL` |
-| TypeScript | `schema.columns`, `defaultKind === 'EPHEMERAL'` |
-| Rust | `schema.columns()`, `DefaultKind::Ephemeral` |
+|            |                                                          |
+| ---------- | -------------------------------------------------------- |
+| Go         | `schema.Columns`, `DefaultKind == chtypes.KindEphemeral` |
+| Python     | `schema.columns`, `DefaultKind.EPHEMERAL`                |
+| TypeScript | `schema.columns`, `defaultKind === 'EPHEMERAL'`          |
+| Rust       | `schema.columns()`, `DefaultKind::Ephemeral`             |
 
 A gateway that previews the intersection anyway shows a row that cannot exist.
 
@@ -33,7 +33,7 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 
 - **Engines and sorting keys** beyond the modeled MergeTree family.
 - **TTL forms** that are not a plain rows TTL: `WHERE` and `GROUP BY` TTLs, `TO DISK` and `TO VOLUME` moves, `RECOMPRESS`, and any clock-reading TTL expression.
-- **MergeTree settings declared at a non-default value.** An unknown *name* is the server's own 115, a rejection; a known name at a value this build does not model is a decline, never a silent ignore.
+- **MergeTree settings declared at a non-default value.** An unknown _name_ is the server's own 115, a rejection; a known name at a value this build does not model is a decline, never a silent ignore.
 - **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
 - **Blocking DEFAULTs**, such as anything calling `sleep`.
 - **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md).

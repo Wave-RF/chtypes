@@ -27,3 +27,7 @@ target/
 .DS_Store
 *.log
 scratch/
+
+# Lint tooling — pinned binaries fetched by scripts/lint-*.sh (misspell,
+# shellcheck, actionlint), never checked in.
+.bin/

@@ -2,7 +2,7 @@
 
 **Call `rows` for everything.** One row is a batch of one. The vendored reader does all the framing internally, so a bare JSON object, NDJSON and a `[...]`-wrapped array are the same `JSONEachRow` body — never split or sniff a payload in your own language.
 
-There is a `row` sugar in every binding for call sites that *semantically* expect exactly one row: a config check, a test, a single-record webhook. On a multi-row body it returns the first row and ignores the rest, which makes it the wrong call for anything wire-facing.
+There is a `row` sugar in every binding for call sites that _semantically_ expect exactly one row: a config check, a test, a single-record webhook. On a multi-row body it returns the first row and ignores the rest, which makes it the wrong call for anything wire-facing.
 
 Two more reasons `rows` is the unit rather than a loop over `row`:
 
@@ -158,7 +158,7 @@ let batch = schema.rows_export(
 
 Three payload states, and they are distinct: absent means no export was requested, it was declined (the reason is in `export_declined`), or a call-level verdict preempted it; present-but-empty means the export ran and emitted nothing. The bytes are copied out of the C buffer and freed before the call returns, so no ownership crosses the boundary.
 
-**Document flags** thin the *description* without ever changing the *verdict*. Passing an export format defaults them to lean — verdicts only — because the usual reason to export is to forward bytes rather than to read a report. Ask for `DOC_VALUES`, `DOC_TRANSFORMS` or `DOC_DEFAULTS` back explicitly if you want them. A plain `rows` call is the all-flags spelling and stays byte-identical to what it always returned.
+**Document flags** thin the _description_ without ever changing the _verdict_. Passing an export format defaults them to lean — verdicts only — because the usual reason to export is to forward bytes rather than to read a report. Ask for `DOC_VALUES`, `DOC_TRANSFORMS` or `DOC_DEFAULTS` back explicitly if you want them. A plain `rows` call is the all-flags spelling and stays byte-identical to what it always returned.
 
 ## Next
 
