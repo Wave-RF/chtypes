@@ -567,7 +567,7 @@ fn a_pinned_volatile_default_stores_an_exact_timestamp() {
 }
 
 #[test]
-fn a_ttl_expired_row_is_accepted_per_row_and_not_stored_per_batch() {
+fn a_ttl_expired_row_is_reported_and_absent_from_the_stored_view() {
     let reg = registry!();
     let lib = primary(reg);
     let mut schema = lib.compile("ts DateTime, v UInt8").compile().unwrap();
@@ -581,10 +581,17 @@ fn a_ttl_expired_row_is_accepted_per_row_and_not_stored_per_batch() {
         )
         .expect("rows");
 
-    // The row's own document says accepted; the batch says the part holds
-    // nothing. A binding that read only `rows` would preview a row the table
+    // SHAPE, not a verdict. What ClickHouse *decides* about a TTL-expired row is
+    // ClickHouse's answer and belongs in the served golden set; asserting it here
+    // would put a second copy of a ClickHouse rule in the SDK. What this pins is
+    // the binding's own contract: the transform is well-formed and carries its
+    // row index, and `engine_rows` — not `rows` — is the stored truth it is
+    // absent from. A binding that read only `rows` would preview a row the table
     // silently deletes at merge time.
-    assert_eq!(batch.rows[0].outcome, Outcome::Accepted);
+    //
+    // The probe is arithmetic rather than a version's behaviour: a 2020 timestamp
+    // under a 1-day TTL against a clock pinned to 2023 is expired on any version
+    // that models TTL at all.
     assert_eq!(batch.engine_rows.as_deref(), Some(&[][..]));
     let t = batch
         .transformed
