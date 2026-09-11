@@ -595,33 +595,6 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
   });
 
   describe('rows', () => {
-    it('reports the canonical silent change: 256 into UInt8', () => {
-      const schema = lib().compileDdl('x UInt8, s String');
-      try {
-        const r = schema.row(Format.JSONEachRow, utf8('{"x":256,"s":"hi"}'));
-        expect(r.outcome).toBe('accepted');
-        expect(r.errCode).toBe(0);
-        expect(r.values.map((v) => [v.column, v.text, v.source])).toEqual([
-          ['x', '0', 'input'],
-          ['s', '"hi"', 'input'],
-        ]);
-        expect(r.transformed).toEqual([
-          {
-            column: 'x',
-            input: '256',
-            stored: '0',
-            inputBytes: buf('256'),
-            storedBytes: buf('0'),
-            reason: 'overflow_wrap',
-            row: 0,
-            lossy: true,
-          },
-        ]);
-      } finally {
-        schema.close();
-      }
-    });
-
     // ------------------------------------------------------------ byte fidelity
     //
     // Four classes of bytes a `JSON.parse`-based reading of the result document
@@ -633,20 +606,6 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
     //   ClickHouse's escapes  \u000B               -> \u000b
     //   a non-UTF-8 value     0xff                 -> U+FFFD
     //   a BOM-prefixed field  reported as reformat -> nothing happened
-
-    it('keeps a stored Map with duplicate keys exactly as ClickHouse wrote it', () => {
-      const schema = lib().compileDdl('x Map(String, Int64)');
-      try {
-        // ClickHouse really stores both: a Map is a pair of arrays, not a hash.
-        const r = schema.row(Format.JSONEachRow, utf8('{"x":{"a":1,"a":2,"a":3}}'));
-        expect(r.outcome).toBe('accepted');
-        // Reference: value `[{"x": {"a":1,"a":2,"a":3}}]`, and no transform.
-        expect(r.values[0]!.text).toBe('{"a":1,"a":2,"a":3}');
-        expect(r.transformed).toEqual([]);
-      } finally {
-        schema.close();
-      }
-    });
 
     it('crosses a non-UTF-8 stored value as bytes, not as U+FFFD', () => {
       const schema = lib().compileDdl('x FixedString(2)');

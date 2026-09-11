@@ -29,7 +29,7 @@ are fixed; fields are added, never changed.
 ## 1. The asset names
 
 ```
-chtypes-<clickhouse_version>-<os>-<arch>.tar.gz
+chtypes-<clickhouse_version>-<os>-<arch>[-b<build>].tar.gz
 ```
 
 `<clickhouse_version>` is **the manifest's `clickhouse_version`**, verbatim,
@@ -41,11 +41,21 @@ is normalised, and `publish.sh` fails if the manifest and the platform it was
 found under disagree about anything else).
 
 ```
-chtypes-24.8.14.39-lts-darwin-arm64.tar.gz
-chtypes-25.8.28.1-lts-linux-amd64.tar.gz
-chtypes-26.7.3.19-stable-darwin-arm64.tar.gz
+chtypes-24.8.14.39-lts-darwin-arm64.tar.gz                 # an old row: build 0
+chtypes-25.8.28.1-lts-linux-amd64-b1789079289.tar.gz
+chtypes-26.7.3.19-stable-darwin-arm64-b1789079289.tar.gz
 ```
 
+`-b<build>` is the **wrapper** build for that ClickHouse version, and the number
+is the core commit's UNIX timestamp rather than a count. A rebuild of the same
+ClickHouse version is published as a NEW row beside the old one, never a swap,
+and the release keeps the two highest builds per (version, platform). A name
+with no `-b<N>` was published before builds existed and **is build 0**.
+
+So a consumer resolves a line to its newest `clickhouse_version` and then, among
+rows of that version and platform, to the **highest build** — the row's own
+`build` field when it has one, else the suffix, else 0. A lock file pins a file
+name and a sha256, which is exactly what keeps a pin valid across a rebuild.
 Each tarball holds the artifact directory's files **at the tar root**, no
 leading directory:
 
