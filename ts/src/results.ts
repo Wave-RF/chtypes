@@ -108,7 +108,7 @@ export interface Transform {
 /** A volatile DEFAULT this library resolved instead of the server. */
 export interface Substitution {
   readonly column: string;
-  /** The DEFAULT as ClickHouse canonicalised it, e.g. `now()`. */
+  /** The DEFAULT as ClickHouse canonicalized it, e.g. `now()`. */
   readonly expr: string;
   /** The value rendered by ClickHouse's own serializer. Send it back verbatim. */
   readonly text: string;

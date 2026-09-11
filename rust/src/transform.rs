@@ -227,7 +227,7 @@ fn one(c: &ColDoc, stored: RawText, reason: &str) -> Transform {
 
 // ------------------------------------------------------ supplied vs stored
 
-/// Equal after canonicalisation, where a number and its decimal string spelling
+/// Equal after canonicalization, where a number and its decimal string spelling
 /// are the same value (`5` vs `"5"`) but a float that has thrown away 60 digits
 /// of an `Int256` is not.
 fn same_value(a: &Json, b: &Json) -> bool {

@@ -64,7 +64,7 @@ pub struct Manifest {
     /// `linux` | `darwin`, lowercased.
     #[serde(default)]
     pub os: String,
-    /// `arm64` | `amd64`, normalised.
+    /// `arm64` | `amd64`, normalized.
     #[serde(default)]
     pub arch: String,
     /// The generated refuse-list, inline. `unsafe_families.txt` next to the

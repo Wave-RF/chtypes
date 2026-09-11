@@ -434,7 +434,7 @@ impl Transform {
 pub struct Substitution {
     /// The column whose volatile DEFAULT was resolved here.
     pub column: String,
-    /// The DEFAULT as ClickHouse canonicalised it.
+    /// The DEFAULT as ClickHouse canonicalized it.
     pub expr: String,
     /// The value rendered by ClickHouse's own serializer for the declared type,
     /// so sending it back verbatim round-trips to the identical stored value.
@@ -515,7 +515,7 @@ pub struct BatchResult {
     /// time.
     pub transformed: Vec<Transform>,
     /// The stored preview **after** the engine's insert-time merge, as raw JSON
-    /// objects. Present only when a specialised engine or a TTL forced the
+    /// objects. Present only when a specialized engine or a TTL forced the
     /// storage path. When present it — not [`rows`](Self::rows) — is the stored
     /// truth: it can be shorter (a `SummingMergeTree` dropping an all-zero row)
     /// or reordered (the block is sorted by the sorting key first).

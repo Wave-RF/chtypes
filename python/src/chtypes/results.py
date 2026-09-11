@@ -322,9 +322,9 @@ LOSSLESS_REASONS: Final[frozenset[str]] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class Column:
-    """One column of a compiled schema, as ClickHouse canonicalised it.
+    """One column of a compiled schema, as ClickHouse canonicalized it.
 
-    Canonicalisation is schema-aware: `x Int64 DEFAULT NULL` compiles to
+    Canonicalization is schema-aware: `x Int64 DEFAULT NULL` compiles to
     `Nullable(Int64)`. Pass `type` through verbatim — the library's spelling
     (`Decimal(18, 4)`, a space after each comma) is the canonical one.
     """

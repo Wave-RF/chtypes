@@ -47,19 +47,19 @@ impl DefaultKind {
     }
 }
 
-/// One column of a compiled schema, as this build canonicalised it.
+/// One column of a compiled schema, as this build canonicalized it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Column {
     /// The column name.
     pub name: String,
     /// The canonical type in **ClickHouse's own spelling** — `Decimal(18, 4)`,
     /// `Enum8('a' = 1, 'b' = 2)`, `Map(String, Array(UInt8))`, with a space after
-    /// each comma. Pass it through verbatim; a binding must not normalise
+    /// each comma. Pass it through verbatim; a binding must not normalize
     /// whitespace of its own.
     pub ty: String,
     /// Which clause the column carries, if any.
     pub default_kind: DefaultKind,
-    /// The DEFAULT/MATERIALIZED/ALIAS expression as ClickHouse canonicalised it,
+    /// The DEFAULT/MATERIALIZED/ALIAS expression as ClickHouse canonicalized it,
     /// empty when there is none.
     pub default_expr: String,
     /// True when the DEFAULT is a plain literal applicable without the
@@ -235,9 +235,9 @@ impl Library {
         &self.path
     }
 
-    /// Parse and canonicalise one type expression.
+    /// Parse and canonicalize one type expression.
     ///
-    /// Canonicalisation is not a spelling normaliser: `DECIMAL(18,4)` and
+    /// Canonicalization is not a spelling normalizer: `DECIMAL(18,4)` and
     /// `Decimal64(4)` both become `Decimal(18, 4)`, `BIGINT` becomes `Int64`,
     /// `Variant(UInt8, String)` becomes `Variant(String, UInt8)` with members
     /// sorted, and `Int8(3)` drops the surplus parameter rather than failing.
@@ -247,7 +247,7 @@ impl Library {
     ///
     /// Returns the canonical spelling in **ClickHouse's own text**, verbatim —
     /// `Decimal(18, 4)` with the space after the comma. String-compare against
-    /// it exactly; never re-normalise whitespace.
+    /// it exactly; never re-normalize whitespace.
     ///
     /// # Errors
     ///

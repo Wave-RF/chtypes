@@ -89,7 +89,7 @@ impl<'a> CompileRequest<'a> {
 
     /// Compile, consuming the request. Crosses the C boundary
     /// (`chs_schema_compile`) and returns the compiled [`Schema`] handle,
-    /// its columns canonicalised by this build.
+    /// its columns canonicalized by this build.
     ///
     /// # Errors
     ///

@@ -52,7 +52,7 @@ at in the output, and which `chs_*` C functions it exercises.
 1. **Load the library and check the ABI** — the multi-version dlopen
    registry, artifacts naming themselves, the ABI-revision check on both
    sides, and the refusal (never a fallback) for a version that is not built.
-2. **Ask a build about itself** — type validation and canonicalisation from
+2. **Ask a build about itself** — type validation and canonicalization from
    the build's own `DataTypeFactory`, plus (where the SDK exposes them) the
    widened reference type, the type-family registry, and the function-flags
    audit.

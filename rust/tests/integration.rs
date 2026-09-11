@@ -1189,7 +1189,7 @@ fn set_engine_tells_a_server_refusal_from_a_decline() {
     // DECLINES, every flavor the negative codes cover.
     for (what, err) in [
         (
-            "unmodelled engine",
+            "unmodeled engine",
             schema
                 .set_engine("NotAnEngine", "tuple()", NO_SETTINGS)
                 .unwrap_err(),

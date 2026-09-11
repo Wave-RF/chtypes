@@ -494,7 +494,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
   });
 
   describe('types and schemas', () => {
-    it('canonicalises a type expression and hands back the library spelling verbatim', () => {
+    it('canonicalizes a type expression and hands back the library spelling verbatim', () => {
       const l = lib();
       expect(l.validateType('DECIMAL(18,4)')).toBe('Decimal(18, 4)');
       expect(l.validateType('Decimal64(4)')).toBe('Decimal(18, 4)');
@@ -522,7 +522,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       }
     });
 
-    it('canonicalises schema-aware: a DEFAULT can rewrite the declared type', () => {
+    it('canonicalizes schema-aware: a DEFAULT can rewrite the declared type', () => {
       const schema = lib().compileDdl('x Int64 DEFAULT NULL');
       try {
         expect(schema.columns).toEqual([

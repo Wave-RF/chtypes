@@ -309,7 +309,7 @@ CHS_API void chs_free(char * p);
  * and safe to call when chs_init was never reached. */
 CHS_API void chs_shutdown(void);
 
-/* Parse and canonicalise one type expression.
+/* Parse and canonicalize one type expression.
  * Returns 0 and sets *out_canonical on success; on failure returns the error
  * code (a ClickHouse code, or CHS_CODE_UNSUPPORTED) and sets *out_code /
  * *out_err. Every out param is optional (may be NULL) — the return value

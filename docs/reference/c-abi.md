@@ -350,7 +350,7 @@ same is true of `enum chs_compile_mode`, whose one defined value is
 > revision of this spec said "bindings MUST treat any nonzero as unsupported".
 > That was written before the MergeTree-settings channel existed and is
 > corrected here. A later revision said `115` specifically; 2026-08-25
-> generalised it to the sign, because "which codes are positive" is upstream's
+> generalized it to the sign, because "which codes are positive" is upstream's
 > decision and not this ABI's.)
 
 `chs_schema_compile` takes a ClickHouse **column-declaration list**, not a
@@ -363,7 +363,7 @@ Column-level `TTL` clauses belong in this string and are captured here;
 `chs_schema_column_default_kind` returns one of `""`, `"DEFAULT"`,
 `"MATERIALIZED"`, `"ALIAS"`, `"EPHEMERAL"`.
 
-**Canonicalisation is schema-aware, and it is not a spelling normaliser.**
+**Canonicalization is schema-aware, and it is not a spelling normalizer.**
 Observed on the `25.8` artifact:
 
 | Input | Canonical |
@@ -380,7 +380,7 @@ Observed on the `25.8` artifact:
 
 Note the space after each comma inside a parameter list. A binding that
 string-compares canonical types MUST use the library's spelling verbatim and MUST
-NOT normalise whitespace of its own.
+NOT normalize whitespace of its own.
 
 And the case `chs_validate_type` structurally cannot answer — which is why
 `ValidateType` alone is insufficient and a schema-aware compile exists:
@@ -1439,7 +1439,7 @@ revision would expect are **absent** here, both gated on the revision:
   `server_revision >= DBMS_MIN_REVISION_WITH_CUSTOM_SERIALIZATION` (54454) —
   `NativeReader.cpp:182` on 24.8, `:211` on 26.7. That byte is written for
   every column, including in zero-row blocks, so mistaking one contract for
-  the other desynchronises immediately rather than subtly.
+  the other desynchronizes immediately rather than subtly.
 
 **Blocks captured off a live TCP connection are therefore NOT this format.**
 `TCPHandler` passes the *negotiated* `client_tcp_protocol_version`
@@ -1447,7 +1447,7 @@ revision would expect are **absent** here, both gated on the revision:
 practice is ≥ 54454, so those blocks carry both prefixes. `chs_rows` with
 `CHS_NATIVE` models the FORMAT path — an HTTP/`INSERT … FORMAT Native` body —
 and nothing else. A gateway that terminates the native TCP protocol itself has
-a different, revision-parameterised job — one chtypes setting carrying the
+a different, revision-parameterized job — one chtypes setting carrying the
 negotiated revision, passed to the `NativeReader` constructor — which is a
 deliberate future decision, not part of this contract.
 
@@ -1564,7 +1564,7 @@ Same document, wrapped:
 | `rows_read` | int | rows the reader consumed, failed ones included |
 | `rows_skipped` | int | rows dropped under `input_format_allow_errors_num` / `_ratio` |
 | `rows` | object[] | one row document per row the reader consumed, **in input order** — accepted, poisoned, batch-aborting rejected, and (since 2026-08-27) skipped rows alike. |
-| `engine_rows` | raw JSON object[] | present only when a specialised engine or a TTL forced the storage path. What the part will hold **after** the engine's insert-time merge. |
+| `engine_rows` | raw JSON object[] | present only when a specialized engine or a TTL forced the storage path. What the part will hold **after** the engine's insert-time merge. |
 | `storage_transforms` | object[] | what the storage layer did to rows the type layer accepted |
 | `row_spans` | object[] | **only when an export was requested AND emitted** (revision 3): one `{"off","len"}` per `rows[]` entry, index-aligned; `len` 0 for non-accepted rows. See §Rows, the export channel. |
 | `export_declined` | string | **only when an export was requested and withheld**: the reason (batch not `accepted`, the full-arity guard, a serialization failure, `output_format_json_validate_utf8`). `out_bytes` stays `{NULL,0}`. |

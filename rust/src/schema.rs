@@ -79,7 +79,7 @@ impl Schema {
         }
     }
 
-    /// The declared columns, canonicalised by this build. Empty when the artifact
+    /// The declared columns, canonicalized by this build. Empty when the artifact
     /// predates the column-introspection group (which shipped all-or-nothing).
     pub fn columns(&self) -> &[Column] {
         &self.columns
@@ -127,7 +127,7 @@ impl Schema {
     ///   This DDL can never exist and the tenant must be told. Today `115`
     ///   (unknown MergeTree setting name) is the only positive code here.
     /// * [`crate::Error::Unsupported`] — negative code: **this library
-    ///   declined** (`-2` unmodelled engine or sorting key, or a non-default
+    ///   declined** (`-2` unmodeled engine or sorting key, or a non-default
     ///   declared MergeTree setting value; `-1` a guarded exception). Validate
     ///   cautiously — a real server might have accepted it.
     /// * [`crate::Error::PredatesFeature`] — the artifact predates

@@ -233,11 +233,11 @@ function section1() {
 // ---------------------------------------------------------------------------
 // SECTION 2 — Ask a build about itself
 //
-// WHAT: type validation and canonicalisation, straight from this build's own
+// WHAT: type validation and canonicalization, straight from this build's own
 // DataTypeFactory — plus the widened REFERENCE type and the full type-family
 // registry this SDK also exposes.
-// WHY: canonicalisation is how you compare a tenant's declared type against
-// what the server will actually store — and it is NOT a spelling normaliser,
+// WHY: canonicalization is how you compare a tenant's declared type against
+// what the server will actually store — and it is NOT a spelling normalizer,
 // it is the server's own parse.
 // LOOK FOR: Variant members being SORTED, BIGINT becoming Int64, the error
 // for an unknown family carrying ClickHouse's own code 50, and 139 type
@@ -256,7 +256,7 @@ function section2(lib) {
   }
   note('Variant members are SORTED; surplus parameters are dropped; the');
   note("space after each comma is the library's own spelling — compare");
-  note('canonical strings verbatim, never re-normalise whitespace');
+  note('canonical strings verbatim, never re-normalize whitespace');
   blank();
 
   // An unknown family is a typed error carrying ClickHouse's OWN code and
@@ -711,7 +711,7 @@ function section7(lib, registry) {
 function section8(lib) {
   section(8, 'Engines, MergeTree settings, and TTL');
 
-  // (a) A specialised engine changes what the table STORES.
+  // (a) A specialized engine changes what the table STORES.
   withSchema(lib, 'day Date, key UInt32, v UInt64', (schema) => {
     kv('(a) setEngine', 'SummingMergeTree ORDER BY (day, key)');
     schema.setEngine('SummingMergeTree', '(day, key)');

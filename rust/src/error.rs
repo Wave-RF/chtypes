@@ -143,7 +143,7 @@ pub enum Error {
     /// `rc` cannot say which name was rejected.
     #[error("chtypes: chs_init failed for {path}: rc={rc}: {message}")]
     Init {
-        /// The library whose initialisation failed.
+        /// The library whose initialization failed.
         path: PathBuf,
         /// `chs_init`'s nonzero return.
         rc: i32,

@@ -67,7 +67,7 @@ export interface CompileOptions {
 
 /**
  * One loaded ClickHouse build — the entry point for compiling schemas and
- * canonicalising types under that release's exact semantics. Obtained from
+ * canonicalizing types under that release's exact semantics. Obtained from
  * `Registry#for`; never constructed directly.
  *
  * Thread-safety: every call here is synchronous on the JS thread, so ordinary
@@ -102,12 +102,12 @@ export class Library {
   }
 
   /**
-   * Parse and canonicalise one type expression, e.g. `DECIMAL(18,4)` ->
+   * Parse and canonicalize one type expression, e.g. `DECIMAL(18,4)` ->
    * `Decimal(18, 4)`. The library's spelling is authoritative: pass it through
-   * verbatim and never normalise its whitespace.
+   * verbatim and never normalize its whitespace.
    *
    * Note that this alone is insufficient for a schema — `x Int64 DEFAULT NULL`
-   * canonicalises the *column* to `Nullable(Int64)`, which only `compileDdl` sees.
+   * canonicalizes the *column* to `Nullable(Int64)`, which only `compileDdl` sees.
    *
    * @param typeExpr - a ClickHouse type expression, e.g. `"Nullable(Decimal(18,4))"`.
    * @returns the canonical spelling, e.g. `"Nullable(Decimal(18, 4))"`.

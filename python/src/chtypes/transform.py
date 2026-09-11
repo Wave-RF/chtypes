@@ -158,7 +158,7 @@ def _skip_space(text: str, idx: int) -> int:
 
 
 def _same_value(a: object, b: object) -> bool:
-    """Equal after canonicalisation: a number and its decimal spelling are the
+    """Equal after canonicalization: a number and its decimal spelling are the
     same value (5 vs "5"), but a float that has thrown away 60 digits of an
     Int256 is not. Mirrors the arbiter's `_same_value`."""
     if isinstance(a, dict):

@@ -11,7 +11,7 @@ so an entry here has a counterpart in the other three.
 
 ### Changed — BREAKING
 
-- **The `default_materialised` transform reason is now `default_materialized`**, and the constant naming it is renamed: `Reason.DEFAULT_MATERIALISED -> Reason.DEFAULT_MATERIALIZED`. ClickHouse's own keyword is `MATERIALIZED` — its parser rejects `MATERIALISED` outright with a syntax error — so the reason naming that concept now matches the system it describes. Code comparing against the old string or constant must be updated.
+- **The transform reason for a materialized DEFAULT is now `default_materialized`** — previously the same word spelled with an `s` — and the exported constant naming it is now `Reason.DEFAULT_MATERIALIZED`. ClickHouse's own keyword is `MATERIALIZED`; its parser rejects the `s` spelling outright with a syntax error, so the reason naming that concept now matches the system it describes. Code comparing against the old string or the old constant name must be updated.
 - This is an SDK-only change and **the ABI is untouched: it remains revision 4, and no artifact needs relinking.** The reason is derived in the binding, not received from the artifact — the library emits `default_substituted`, which each binding translates. That wire value is unchanged.
 
 ## [0.1.1] — 2026-09-11

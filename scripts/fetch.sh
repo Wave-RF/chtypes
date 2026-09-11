@@ -148,7 +148,7 @@ mkdir -p "$DEST"
 # resolve-version.py is the single place that knows that 25.8, 25.8.28.1,
 # v25.8.28.1-lts and a Docker digest are three views of ONE record (its
 # docstring records the bug that cost a whole scoring column). Use it when it is
-# available; when it is not — bare runner, no uv — fall back to normalising the
+# available; when it is not — bare runner, no uv — fall back to normalizing the
 # spelling here and let the release's index.json be the authority on what exists.
 WANT_LINE=""; WANT_EXACT=""
 # Did the CALLER name a patch, or a line? It matters, and resolve-version.py
@@ -168,7 +168,7 @@ if [ "$ALL" = 1 ]; then
 elif command -v uv >/dev/null 2>&1 && [ -f "${CHTYPES_CORE_DIR:-$ROOT/../core}/ci/resolve-version.py" ]; then
   # A developer with the core repository beside this one gets its full
   # version resolver (Docker digests, moving tags); a consumer without it gets
-  # the local normalisation below, and index.json is the authority either way.
+  # the local normalization below, and index.json is the authority either way.
   RESOLVED="$(uv run --no-project python "${CHTYPES_CORE_DIR:-$ROOT/../core}/ci/resolve-version.py" "$SPELLING" 2>/dev/null || true)"
   if [ -n "$RESOLVED" ]; then
     IFS='|' read -r WANT_LINE WANT_EXACT <<EOF

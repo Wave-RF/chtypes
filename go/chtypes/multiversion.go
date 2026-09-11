@@ -767,7 +767,7 @@ func (l *Library) HasCompileSettings() bool {
 }
 
 // ValidateType mirrors the package-level ValidateType for a dlopen'd
-// library: the same canonicalisation and the same *SchemaError /
+// library: the same canonicalization and the same *SchemaError /
 // *UnsupportedError split, answered by THIS library's ClickHouse version.
 func (l *Library) ValidateType(typeExpr string) (canonical string, err error) {
 	cexpr := C.CString(typeExpr)

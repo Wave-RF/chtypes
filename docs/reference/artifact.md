@@ -30,7 +30,7 @@ Platform-keyed, one tree per target:
 ~/.cache/chtypes/artifacts/<os>-<arch>/<minor>/…
 ```
 
-`<os>` is the lowercased OS name (`linux`, `darwin`) and `<arch>` is normalised
+`<os>` is the lowercased OS name (`linux`, `darwin`) and `<arch>` is normalized
 (`aarch64 → arm64`, `x86_64 → amd64`). Current keys: **`linux-arm64`** (the
 shipping platform) and **`darwin-arm64`** (a development floor, never an
 oracle). `linux-amd64` is a build target, not a built artifact, on the current
@@ -76,7 +76,7 @@ A real one, verbatim:
 | `clickhouse_minor` | string | The minor line, e.g. `25.8`. Informational — a loader SHOULD derive the minor from the library's own reported version instead. |
 | `clickhouse_commit` | string | The upstream commit the tree was built from. Provenance; the only field that ties an artifact to a specific ClickHouse source state. |
 | `os` | string | `linux` \| `darwin`. Lowercased `platform.system()`. |
-| `arch` | string | `arm64` \| `amd64`. Normalised. |
+| `arch` | string | `arm64` \| `amd64`. Normalized. |
 | `unsafe_families` | string | The generated refuse-list, inline. Duplicates `unsafe_families.txt`; empty on every current artifact. |
 
 Additive changes to this file are allowed. A loader MUST ignore fields it does

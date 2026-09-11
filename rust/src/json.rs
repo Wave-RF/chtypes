@@ -584,7 +584,7 @@ pub(crate) fn is_numeric(s: &str) -> bool {
     !s.is_empty() && (denormal(s).is_some() || Decimal::parse(s).is_some())
 }
 
-/// A decimal number in exact normalised form: significant digits plus a power
+/// A decimal number in exact normalized form: significant digits plus a power
 /// of ten. No floats are involved at any point.
 #[derive(Debug, PartialEq, Eq)]
 struct Decimal {
@@ -657,7 +657,7 @@ impl Decimal {
         if i != bytes.len() {
             return None; // trailing junk: not a number
         }
-        // Normalise: drop leading zeros, then trailing zeros (raising exp).
+        // Normalize: drop leading zeros, then trailing zeros (raising exp).
         let first = digits.iter().position(|&d| d != 0);
         match first {
             None => Some(Decimal {

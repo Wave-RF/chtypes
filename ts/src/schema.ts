@@ -18,10 +18,10 @@ import {
 } from './results.js';
 import { encodeSettings, type Settings } from './settings.js';
 
-/** One declared column, as ClickHouse canonicalised it. */
+/** One declared column, as ClickHouse canonicalized it. */
 export interface ColumnInfo {
   readonly name: string;
-  /** Canonical type — pass it through verbatim, never re-normalise whitespace. */
+  /** Canonical type — pass it through verbatim, never re-normalize whitespace. */
   readonly type: string;
   /** "" | "DEFAULT" | "MATERIALIZED" | "ALIAS" | "EPHEMERAL" */
   readonly defaultKind: string;
@@ -121,7 +121,7 @@ export interface CompileFilterOptions {
  */
 export class Schema {
   /**
-   * The declared columns as ClickHouse canonicalised them, in declaration
+   * The declared columns as ClickHouse canonicalized them, in declaration
    * order — flattened under `flatten_nested=1`, DEFAULT-rewritten types
    * (`x Int64 DEFAULT NULL` compiles as `Nullable(Int64)`), ALIAS types
    * inferred. A gateway detects EPHEMERAL columns here, at compile time

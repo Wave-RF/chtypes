@@ -206,10 +206,10 @@ func checkVersion(v Version) error {
 // ---------------------------------------------------------------- public API
 
 // ValidateType reports whether a type expression is legal on this version,
-// and returns its canonical form (chs_validate_type). Canonicalisation is
-// ClickHouse's own and not a spelling normaliser: "DECIMAL(18,4)" →
+// and returns its canonical form (chs_validate_type). Canonicalization is
+// ClickHouse's own and not a spelling normalizer: "DECIMAL(18,4)" →
 // "Decimal(18, 4)", "BIGINT" → "Int64", Variant members are sorted. Compare
-// the returned spelling verbatim; never re-normalise whitespace.
+// the returned spelling verbatim; never re-normalize whitespace.
 //
 // Errors: a *SchemaError when ClickHouse itself refuses the expression
 // (Code is the server's own, e.g. 50 "Unknown data type family"); an
@@ -1044,7 +1044,7 @@ func SetDefaultSettings(settings map[string]string) error {
 // RegisteredFamilies lists every type family in ClickHouse's runtime registry
 // (chs_registered_families) — 139 entries on the 25.8 artifact. There is no
 // table to maintain: rebasing onto a new release picks up new families
-// automatically. The only error is a failed library initialisation.
+// automatically. The only error is a failed library initialization.
 //
 // One of the three-question introspection surface every SDK exposes
 // (docs/reference/bindings.md §Introspection); the dlopen'd path's twin is
@@ -1076,7 +1076,7 @@ func RegisteredFamilies() ([]string, error) {
 // One of the three-question introspection surface every SDK exposes
 // (docs/reference/bindings.md §Introspection); the dlopen'd path's twin is
 // (*Library).FunctionFlags. The only error is a failed library
-// initialisation.
+// initialization.
 func FunctionFlags() (string, error) {
 	if err := ensureInit(); err != nil {
 		return "", err
@@ -1099,7 +1099,7 @@ func FunctionFlags() (string, error) {
 // One of the three-question introspection surface every SDK exposes
 // (docs/reference/bindings.md §Introspection); the dlopen'd path's twin is
 // (*Library).ReferenceType. The only error is a failed library
-// initialisation.
+// initialization.
 func ReferenceType(typeExpr string) (string, error) {
 	if err := ensureInit(); err != nil {
 		return "", err

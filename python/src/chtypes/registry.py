@@ -763,11 +763,11 @@ class Library:
     # -- types --------------------------------------------------------------
 
     def validate_type(self, type_expr: str) -> str:
-        """Parse and canonicalise one type expression.
+        """Parse and canonicalize one type expression.
 
         The canonical spelling is the library's own (`Decimal(18, 4)`, a space
         after each comma; `Variant` members sorted) and must be passed through
-        verbatim — never whitespace-normalised by the caller.
+        verbatim — never whitespace-normalized by the caller.
 
         Returns the canonical type expression. Raises `SchemaError` with
         ClickHouse's own code and message when the expression is refused

@@ -341,7 +341,7 @@ export class NativeLibrary {
         // null: an empty error message is not the absence of an error message.
         if (n === 0) return Buffer.alloc(0);
         // createExternalBuffer WRAPS the library's own allocation, so the copy is
-        // not an optimisation to skip: `chs_free` runs in the finally below and
+        // not an optimization to skip: `chs_free` runs in the finally below and
         // the caller would be reading freed memory.
         return Buffer.from(createExternalBuffer(ptr, n));
       }

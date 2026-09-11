@@ -2,7 +2,7 @@
 // in a C API, bound to Go via cgo.
 //
 // The surface is docs/reference/bindings.md; the C contract underneath is docs/reference/c-abi.md.
-// Everything semantic — type parsing, canonicalisation, coercion, error codes
+// Everything semantic — type parsing, canonicalization, coercion, error codes
 // — is executed by real ClickHouse code compiled from the pinned release, so
 // it is exact by construction rather than reimplemented. Nothing in this
 // package decides what a value coerces to.
@@ -193,7 +193,7 @@ import (
 type Version string
 
 // Schema is one tenant table's column list, in declaration order. It is the
-// structured input to ParseSchema; the validated, canonicalised form is
+// structured input to ParseSchema; the validated, canonicalized form is
 // CompiledSchema.
 type Schema struct {
 	Columns []Column
@@ -203,7 +203,7 @@ type Schema struct {
 // ParseSchema) the fields are the caller's spelling; as an OUTPUT
 // (CompiledSchema.Columns, LoadedSchema.Columns) they are ClickHouse's own
 // canonical spelling — Type as the canonical type expression, Default as the
-// canonicalised DEFAULT expression source.
+// canonicalized DEFAULT expression source.
 type Column struct {
 	Name        string
 	Type        string // ClickHouse type expression, e.g. "Nullable(Decimal(18,4))"
@@ -544,7 +544,7 @@ type Computed struct {
 // Substitution is one volatile DEFAULT the library resolved instead of the
 // server.
 //
-// Expr is the DEFAULT as ClickHouse canonicalised it; Text is the value
+// Expr is the DEFAULT as ClickHouse canonicalized it; Text is the value
 // rendered by ClickHouse's own serializer for the declared type, so sending it
 // back as a JSON field round-trips to the identical stored value. Emit Text
 // verbatim: a JSON *float* for a tick count is a hard reject (code 27), never a
@@ -936,7 +936,7 @@ type BatchResult struct {
 	// row it came from — a gateway cannot tell a tenant what to fix otherwise.
 	Transformed []Transform
 	// EngineRows is the stored preview AFTER the table engine's insert-time
-	// merge, present only when SetEngine declared a specialised engine and the
+	// merge, present only when SetEngine declared a specialized engine and the
 	// batch was accepted. Each element is one stored row as a rendered JSON
 	// object. nil means no engine semantics were applied and Rows is the
 	// preview, exactly as before.
@@ -979,7 +979,7 @@ type batchDoc struct {
 	Rows        []rowDoc `json:"rows"`
 	// EngineRows: what the part will hold AFTER the table engine's insert-time
 	// merge (optimize_on_insert), present only when SetEngine declared a
-	// specialised engine. Each element is one stored row as a JSON object with
+	// specialized engine. Each element is one stored row as a JSON object with
 	// the same rendering as per-row stored values. May legitimately be shorter
 	// than Rows (a SummingMergeTree dropping an all-zero row) or reordered
 	// (the block is sorted by the sorting key before the part is written).

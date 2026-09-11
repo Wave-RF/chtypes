@@ -222,7 +222,7 @@ impl Api {
     /// A library that has a manifest and does not load is broken, not absent, so
     /// this returns an error rather than skipping.
     pub(crate) fn open(path: &Path) -> Result<Api> {
-        // SAFETY: dlopen runs the library's initialisers. The artifact is
+        // SAFETY: dlopen runs the library's initializers. The artifact is
         // self-contained (it exports only chs_*, keeps libc++ statically inside,
         // and links nothing but libc plus CoreFoundation on macOS), which is
         // what makes loading several of them safe.
@@ -483,7 +483,7 @@ impl Api {
     /// server's message (`115` with its "Maybe you meant ..." hint is today's
     /// only instance). Any NEGATIVE rc is this library declining
     /// ([`Error::Unsupported`]) — `-2` for a non-default declared value or an
-    /// unmodelled engine/key, `-1` for a guarded exception — and a caller must
+    /// unmodeled engine/key, `-1` for a guarded exception — and a caller must
     /// validate cautiously rather than tell the tenant its DDL is wrong.
     ///
     /// # Safety

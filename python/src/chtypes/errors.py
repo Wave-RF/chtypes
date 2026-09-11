@@ -191,7 +191,7 @@ class SchemaError(ChtypesError):
     never catches a decline (docs/reference/bindings.md rule 12). The two must never be
     conflated: reporting a decline as a rejection manufactures an over-reject
     (silent data loss), and hiding a rejection behind a decline lets a DDL
-    that can never exist look merely unmodelled. Both budgets are zero
+    that can never exist look merely unmodeled. Both budgets are zero
     (docs/reference/c-abi.md §Error model).
 
     Attributes:

@@ -268,7 +268,7 @@ func parseJSONValue(s string) (any, bool) {
 	return v, true
 }
 
-// sameValue: equal after canonicalisation, where a number and its decimal
+// sameValue: equal after canonicalization, where a number and its decimal
 // string spelling are the same value (5 vs "5") but a float that has thrown
 // away 60 digits of an Int256 is not. Mirrors the arbiter's `_same_value` so
 // this library's reasons and the bake-off's classes describe the same thing.

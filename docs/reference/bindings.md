@@ -35,7 +35,7 @@ Registry ── For(version) ──▶ Library ── CompileDDL(ddl) ──▶ 
 | List versions | `r.Versions()` | `r.versions()` | `r.versions()` | Minor lines, sorted |
 | Compile a column list | `lib.CompileDDL(ddl)` | `lib.compile_ddl(ddl)` | `lib.compileDdl(ddl)` | Rust: `lib.compile(ddl).compile()` (builder) |
 | … under a declared settings profile | `lib.CompileDDL(ddl, WithCompileSettings(m))` | `lib.compile_ddl(ddl, settings=…, mode=…)` | `lib.compileDdl(ddl, {settings, mode})` | **ONE function per SDK, options optional** — see §One compile function. Rust: `lib.compile(ddl).settings(…).compile()`. `docs/reference/c-abi.md` §Compile-time vs per-call settings; declaring no settings behaves exactly as if the parameter did not exist |
-| Canonicalise a type | `lib.ValidateType(expr)` | `lib.validate_type(expr)` | `lib.validateType(expr)` | |
+| Canonicalize a type | `lib.ValidateType(expr)` | `lib.validate_type(expr)` | `lib.validateType(expr)` | |
 | Declare the engine | `s.SetEngine(engine, orderBy)` | `s.set_engine(engine, order_by)` | `s.setEngine(...)` | |
 | … + MergeTree settings | `s.SetEngine(engine, orderBy, WithMergeTreeSettings(m))` | `s.set_engine(..., merge_tree_settings=…)` | `s.setEngine(..., {mergeTreeSettings})` | Same one function. Unknown name ⇒ the server's **115 rejection**; a non-default declared value ⇒ **-2 unsupported** (never silently ignored); a binding MUST NOT flatten those two into one verdict — see rule 12 |
 | Declare the rows TTL | `s.SetTTL(ttl)` | `s.set_ttl(ttl)` | `s.setTtl(ttl)` | |
@@ -469,7 +469,7 @@ computes, so a caller that folds a predicate constant through `chs_row` /
 `chs_rows` — or caches one it derived that way — is reusing the answer to a
 question it did not ask: `WHERE x = 256` rewritten to `WHERE x = 0` silently
 matches every row that legitimately holds zero, and returns them as if the
-tenant had asked for them. A binding or gateway that canonicalises comparison
+tenant had asked for them. A binding or gateway that canonicalizes comparison
 constants MUST therefore **refuse an operand outside the column type's domain**
 rather than reuse the insert coercion: check the literal against the domain
 first, and where it does not fit, decline the predicate or forward it unfolded
@@ -668,7 +668,7 @@ Non-negotiable protocol rules:
 3. Unknown request fields are ignored; unknown reply fields are preserved but
    not interpreted.
 4. Answer the `{"id":"__caps__","mode":"caps"}` handshake with **exactly one**
-   line, or the stream desynchronises for every case after it.
+   line, or the stream desynchronizes for every case after it.
 5. **Declare only formats you actually parse.** `caps.formats` is load-bearing
    for fairness: the arbiter does not send a case in a format you did not
    declare, and records it `not_offered` — missing coverage, never a divergence.
@@ -797,7 +797,7 @@ Non-negotiable protocol rules:
    The two failure modes this rule exists to prevent are the same pair the
    whole product is budgeted at zero for: reporting a decline as a refusal is
    a manufactured over-reject, and hiding a refusal behind a decline lets a
-   DDL that can never exist look merely unmodelled. `docs/reference/c-abi.md` §Error
+   DDL that can never exist look merely unmodeled. `docs/reference/c-abi.md` §Error
    model is the normative source; this rule is its binding-side restatement.
 
 Then run the rigs and quote the run, not your intent:
@@ -841,7 +841,7 @@ artifact set remains the standing follow-up.
 would be accepted; the value would be wrong; nothing in ClickHouse says so.
 `transformed` is the entire product in one line.
 
-### 2. DDL in, canonical schema out — canonicalisation is schema-aware
+### 2. DDL in, canonical schema out — canonicalization is schema-aware
 
 Compiled through the C ABI (`chs_schema_compile` + the column-introspection
 group) on the `25.8` artifact:
@@ -859,7 +859,7 @@ out: x  Nullable(Int64)    kind="DEFAULT"      expr="NULL"   literal=true
 The second is why `validate_type` alone is insufficient: the DEFAULT rewrote the
 declared type. Note also the canonical spelling of parameter lists —
 `Decimal(18, 4)`, `Enum8('a' = 1, 'b' = 2)`, `Map(String, Array(UInt8))`, with a
-space after each comma — and that `Variant(UInt8, String)` canonicalises to
+space after each comma — and that `Variant(UInt8, String)` canonicalizes to
 `Variant(String, UInt8)` with members **sorted**. A binding MUST pass the
 library's spelling through verbatim.
 
