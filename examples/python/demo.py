@@ -231,7 +231,7 @@ def section1() -> tuple[Registry, chtypes.Library]:
 # types explaining how transformation findings are made.
 # C API: chs_validate_type, chs_reference_type, chs_registered_families,
 # chs_function_flags — the whole introspection trio, exposed per Library in
-# every SDK since the 2026-08-26 parity cycle (spec/bindings.md
+# every SDK since the 2026-08-26 parity cycle (docs/reference/bindings.md
 # §Introspection).
 # ---------------------------------------------------------------------------
 def section2(lib: chtypes.Library) -> None:
@@ -270,7 +270,7 @@ def section2(lib: chtypes.Library) -> None:
     flags = [line for line in lib.function_flags().split("\n") if line]
     kv("function_flags", f"{len(flags)} registered functions audited (TSV)")
     note("the volatility audit behind the statelessness gate — every SDK")
-    note("exposes the trio (spec/bindings.md §Introspection)")
+    note("exposes the trio (docs/reference/bindings.md §Introspection)")
 
 
 # ---------------------------------------------------------------------------
@@ -826,7 +826,7 @@ def section9(lib: chtypes.Library) -> None:
 # WHY: the three kinds demand three different reactions (tell the tenant /
 # fall back cautiously / fix the deployment). Since 2026-08-26 the decline
 # type is a PEER of the refusal type in every SDK — Python's grandfathered
-# subclass is retired (spec/bindings.md rule 12) — so a bare `except
+# subclass is retired (docs/reference/bindings.md rule 12) — so a bare `except
 # SchemaError` can never swallow a decline again: forgetting the decline arm
 # now raises past the handler (loud) instead of silently converting declines
 # into rejections (a manufactured over-reject, budgeted at zero).
@@ -1014,7 +1014,7 @@ def section13(registry: Registry) -> None:
     note("chs_init also registers chs_shutdown with atexit(), so an ordinary")
     note("process would be fine without this — close() is for callers that")
     note("control their own teardown order. Go's Registry deliberately has NO")
-    note("teardown (it never dlcloses; spec/bindings.md §Teardown); TS has")
+    note("teardown (it never dlcloses; docs/reference/bindings.md §Teardown); TS has")
     note("close()/Symbol.dispose; Rust has Registry::shutdown() and Drop.")
 
 
@@ -1025,13 +1025,13 @@ def section13(registry: Registry) -> None:
 # use it through package-level functions; that is also the only place Go
 # exposes SetDefaultSettings and RegisteredFamilies. Python cannot have that
 # shape: ctypes always dlopens, so Registry is the only loader here — and it
-# is the product path anyway. spec/bindings.md makes the static shape
+# is the product path anyway. docs/reference/bindings.md makes the static shape
 # explicitly optional. See go/main.go section 14 for the real thing.
 # ---------------------------------------------------------------------------
 def section14() -> None:
     section(14, "The static path (Go only)")
     kv("not offered in Python", "ctypes always dlopens; Registry is the only loader")
-    note("see go/main.go section 14 — spec/bindings.md §The object model makes")
+    note("see go/main.go section 14 — docs/reference/bindings.md §The object model makes")
     note("the statically-linked single-version shape explicitly optional")
 
 
@@ -1151,7 +1151,7 @@ def section16(lib: chtypes.Library) -> None:
             note("PROMOTES, never wraps: false for x=0 AND x=255. The insert side")
             note("of this same library stores 256 as 0 (section 5's overflow_wrap)")
             note("— which is why predicate constants must never be folded through")
-            note("insert coercion (spec/bindings.md §Constants are not payloads)")
+            note("insert coercion (docs/reference/bindings.md §Constants are not payloads)")
         blank()
 
         # NULL is not true — three-valued logic collapsed at the WHERE
@@ -1327,7 +1327,7 @@ def feed(schema: chtypes.Schema, label: str, fmt: Format, body: bytes) -> None:
 
 def describe_error(call, what: str) -> None:
     """Print which typed error a call raises. The two verdict types are PEERS
-    (spec/bindings.md rule 12): neither except arm can catch the other's."""
+    (docs/reference/bindings.md rule 12): neither except arm can catch the other's."""
     try:
         result = call()
         if hasattr(result, "close"):
@@ -1367,7 +1367,7 @@ def caught(call) -> str:
         return "(no error)"
     except chtypes.ChtypesError as err:
         # Both verdict arms on purpose: since the peer-type split
-        # (spec/bindings.md rule 12) `except SchemaError` no longer catches
+        # (docs/reference/bindings.md rule 12) `except SchemaError` no longer catches
         # declines, and this helper wants either arm's rendered text.
         return str(err)
 

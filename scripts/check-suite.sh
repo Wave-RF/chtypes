@@ -105,7 +105,7 @@ case "$WHICH" in
       grep -qF '✓ test/golden.test.ts >' "$PLAIN" || PROBLEMS+=("no golden case RAN with artifacts required")
       # A per-line skip is EXPECTED and not a problem: a case is only a golden
       # for the exact ClickHouse build it was generated on, so a registry holding
-      # an older patch skips that line by name (goldens/README.md). What must not
+      # an older patch skips that line by name (docs/reference/goldens.md). What must not
       # happen is the set being skipped wholesale — that is the sentinel test,
       # and the rule above already requires at least one case to have run.
       ! grep -qF '↓ goldens > has at least one artifact' "$PLAIN" || PROBLEMS+=("the golden set was skipped wholesale with artifacts required")

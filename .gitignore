@@ -4,8 +4,8 @@
 
 # Go
 **/*.test
-playground/go/playground
-playground/go/ingest-demo/ingest-demo
+examples/go/playground
+examples/go/ingest-demo/ingest-demo
 
 # Python
 __pycache__/

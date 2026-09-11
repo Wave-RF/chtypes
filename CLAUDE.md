@@ -2,7 +2,7 @@
 
 This is the **SDK half** of chtypes, Apache 2.0, public: `go/ python/ ts/ rust/`
 over the frozen `chs_*` C ABI (`include/chtypes.h`, ABI revision 4, 28
-functions), the normative `spec/`, four side-by-side `playground/` tours, and
+functions), the normative `spec/`, four side-by-side `examples/` tours, and
 `goldens/` — the public golden set every binding runs. The bindings contain no
 ClickHouse code; they `dlopen` per-version artifacts and speak the ABI.
 
@@ -14,7 +14,7 @@ carries the rules that were paid for; the ones that bind here:
   to the artifact; scalar, comparison, coercion and timestamp logic never live
   in Go/Python/TS/Rust. The one derived result is `Transformed`, per spec.
 - **The four bindings give one answer.** A behaviour change lands in all four
-  in one cycle (`spec/bindings.md` is the shape), and the golden set must stay
+  in one cycle (`docs/reference/bindings.md` is the shape), and the golden set must stay
   green in all four. The golden set is **served, not tracked**: core publishes
   `sdk-goldens.json` in the rolling release as a row in the signed
   `SHA256SUMS`, `scripts/fetch.sh` installs it at `<registry>/sdk-goldens.json`,

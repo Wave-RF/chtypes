@@ -6,7 +6,7 @@ directory here is the same guided tour of that library from one SDK:
 **sixteen numbered sections, in the same order, against the same schemas and
 the same rows** in all four languages, so you can run two side by side and
 diff them. What survives the diff is the language's own idiom, which is
-exactly what `spec/bindings.md` says a binding may vary and nothing else.
+exactly what `docs/reference/bindings.md` says a binding may vary and nothing else.
 
 **Everything runs offline.** Each tour needs only its language's toolchain
 plus artifacts in the per-user cache — no Docker, no ClickHouse
@@ -118,10 +118,10 @@ The tours print these differences rather than hiding them:
 
 - **Loaders.** Go alone adds a statically linked path (section 14); Python
   (ctypes), TS (ffi-rs) and Rust (libloading) always dlopen. Optional by
-  `spec/bindings.md`.
+  `docs/reference/bindings.md`.
 - **Introspection.** All four SDKs expose the full trio per `Library` —
   `reference_type`, `registered_families`, `function_flags` — since the
-  2026-08-26 parity cycle (`spec/bindings.md` §Introspection); Go's static
+  2026-08-26 parity cycle (`docs/reference/bindings.md` §Introspection); Go's static
   path mirrors them as package-level functions.
 - **Error shapes.** Peer types everywhere: Go and TS peer classes, Rust
   sibling enum variants, Python peer exceptions (its grandfathered
@@ -132,7 +132,7 @@ The tours print these differences rather than hiding them:
   does not typecheck there.
 - **Teardown.** Python `close()`/context manager, TS `close()`/
   `Symbol.dispose`, Rust `shutdown()`/`Drop`, Go deliberately nothing
-  (`spec/bindings.md` §Teardown).
+  (`docs/reference/bindings.md` §Teardown).
 
 ## Also here
 
@@ -147,6 +147,6 @@ The tours print these differences rather than hiding them:
 An earlier revision of these playgrounds (nine sections, live-server
 discovery) surfaced five cross-SDK inconsistencies in August 2026; all five
 were fixed in the library, the SDKs and the spec on 2026-08-26. The findings
-and their outcomes are recorded in `spec/bindings.md` (§Teardown,
-§Concurrency, rule 12) and `spec/c-abi.md` (§Compile-time vs per-call
+and their outcomes are recorded in `docs/reference/bindings.md` (§Teardown,
+§Concurrency, rule 12) and `docs/reference/c-abi.md` (§Compile-time vs per-call
 settings), which is where the normative story lives.

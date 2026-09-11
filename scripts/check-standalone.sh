@@ -116,9 +116,9 @@ rc=0
 # The golden set is SERVED, and a fetch installs it at <registry>/sdk-goldens.json
 # — so the bare copy needs no path for it, only the registry it already gets.
 # The fetch fixtures are different: they live in this repository
-# (spec/fixtures/fetch, docs/fetch.md §9), so the fetch suite is told where they
+# (tests/fixtures/fetch, docs/fetch.md §9), so the fetch suite is told where they
 # are through CHTYPES_FETCH_FIXTURES and skips loudly without them.
-( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_FETCH_FIXTURES="$ROOT/spec/fixtures/fetch" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
+( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_FETCH_FIXTURES="$ROOT/tests/fixtures/fetch" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
 [ -s "$LOG" ] || die "go test produced no -json output (rc=$rc)"
 set +e
 python3 - "$LOG" "$rc" "$HAVE_REG" "$REQUIRE" <<'PY'

@@ -58,7 +58,7 @@
 #   XDG_CACHE_HOME         cache root (default ~/.cache)
 #   CHTYPES_TRUSTED_KEYS   hex ed25519 public key(s), comma-separated. REPLACES the
 #                          embedded release key — for a mirror signed by someone
-#                          else, or spec/fixtures/fetch's test key
+#                          else, or tests/fixtures/fetch's test key
 #   CHTYPES_ALLOW_UNSIGNED 1 skips step 0 with one loud warning naming the source.
 #                          Never the default; never silent
 #   CHTYPES_DOWNLOAD_TOKEN sent as a bearer token to the artifacts host (optional)
@@ -383,7 +383,7 @@ fetch_release_file() { # fetch_release_file <name>: a release-level file the sou
 # it never converts a refusal into an install.
 # Only a real HTTP source can be mid-publish. A file:// fixture or a directory
 # is whatever it is, so it refuses on the first look, exactly as it always has —
-# which is also why the spec/fixtures/fetch suites stay instant.
+# which is also why the tests/fixtures/fetch suites stay instant.
 METADATA_ATTEMPTS="${CHTYPES_METADATA_ATTEMPTS:-3}"
 METADATA_RETRY_DELAY="${CHTYPES_METADATA_RETRY_DELAY:-4}"
 case "$BASE_URL" in

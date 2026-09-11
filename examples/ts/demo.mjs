@@ -244,7 +244,7 @@ function section1() {
 // families read from the build itself (no list to maintain).
 // C API: chs_validate_type, chs_reference_type, chs_registered_families,
 // chs_function_flags — the whole introspection trio, exposed per Library in
-// every SDK since the 2026-08-26 parity cycle (spec/bindings.md
+// every SDK since the 2026-08-26 parity cycle (docs/reference/bindings.md
 // §Introspection).
 // ---------------------------------------------------------------------------
 function section2(lib) {
@@ -292,7 +292,7 @@ function section2(lib) {
   const flags = lib.functionFlags().split('\n').filter((l) => l !== '');
   kv('functionFlags', `${flags.length} registered functions audited (TSV)`);
   note('the volatility audit behind the statelessness gate — every SDK');
-  note('exposes the trio (spec/bindings.md §Introspection)');
+  note('exposes the trio (docs/reference/bindings.md §Introspection)');
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,7 +1059,7 @@ function section13(registry) {
   note("chs_init also registers chs_shutdown with atexit(), so an ordinary");
   note('process would be fine without this — close() is for callers that');
   note("control their own teardown order. Go's Registry deliberately has NO");
-  note('teardown (it never dlcloses; spec/bindings.md §Teardown); Python has');
+  note('teardown (it never dlcloses; docs/reference/bindings.md §Teardown); Python has');
   note('close() + context manager; Rust has Registry::shutdown() and Drop.');
 }
 
@@ -1070,13 +1070,13 @@ function section13(registry) {
 // use it through package-level functions; that is also the only place Go
 // exposes SetDefaultSettings and RegisteredFamilies. TypeScript cannot have
 // that shape: ffi-rs always dlopens, so Registry is the only loader here —
-// and it is the product path anyway. spec/bindings.md makes the static shape
+// and it is the product path anyway. docs/reference/bindings.md makes the static shape
 // explicitly optional. See go/main.go section 14 for the real thing.
 // ---------------------------------------------------------------------------
 function section14() {
   section(14, 'The static path (Go only)');
   kv('not offered in TypeScript', 'ffi-rs always dlopens; Registry is the only loader');
-  note('see go/main.go section 14 — spec/bindings.md §The object model makes');
+  note('see go/main.go section 14 — docs/reference/bindings.md §The object model makes');
   note('the statically-linked single-version shape explicitly optional');
 }
 
@@ -1205,7 +1205,7 @@ function section16(lib) {
     note('PROMOTES, never wraps: false for x=0 AND x=255. The insert side of');
     note("this same library stores 256 as 0 (section 5's overflow_wrap) —");
     note('which is why predicate constants must never be folded through');
-    note('insert coercion (spec/bindings.md §Constants are not payloads)');
+    note('insert coercion (docs/reference/bindings.md §Constants are not payloads)');
   }
   blank();
 

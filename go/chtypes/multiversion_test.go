@@ -94,7 +94,7 @@ func skipNoArtifacts(t *testing.T, dir, detail string) {
 }
 
 // testRegistryLibrary returns one artifact's shared-library path from the
-// test registry, resolved the way the loader contract says (spec/artifact.md:
+// test registry, resolved the way the loader contract says (docs/reference/artifact.md:
 // the file name comes from manifest.json's `library` field, never guessed),
 // plus the file's extension.
 func testRegistryLibrary(t *testing.T) (path, ext string) {

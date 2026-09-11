@@ -1,4 +1,4 @@
-# playground/ts — the TypeScript tour
+# examples/ts — the TypeScript tour
 
 Sixteen sections over the whole chtypes surface, matching `../go`,
 `../python` and `../rust` section for section. See

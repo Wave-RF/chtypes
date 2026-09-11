@@ -236,7 +236,7 @@ func ValidateType(v Version, typeExpr string) (canonical string, err error) {
 			msg = C.GoString(cErr)
 			C.chs_free(cErr)
 		}
-		// The RETURN VALUE carries the code (spec/c-abi.md: every out param
+		// The RETURN VALUE carries the code (docs/reference/c-abi.md: every out param
 		// is optional); out_code is the convenience copy. Prefer whichever is
 		// nonzero, so the guarded-exception corner (rc=-1 with out_code=0)
 		// still funnels as the decline it is rather than "a refusal, code 0".
@@ -273,11 +273,11 @@ type CompiledSchema struct {
 	mu     sync.Mutex
 	// filters tracks every open Filter compiled from this handle, so Close
 	// can free them FIRST — the C layer does not refcount, and freeing the
-	// schema under a live filter is use-after-free (spec/c-abi.md §Filters,
+	// schema under a live filter is use-after-free (docs/reference/c-abi.md §Filters,
 	// handle lifetime). Guarded by mu.
 	filters map[*Filter]struct{}
 	// blocks tracks every open Block parsed from this handle — the same
-	// non-owning rule, the same free-before-schema order (spec/c-abi.md
+	// non-owning rule, the same free-before-schema order (docs/reference/c-abi.md
 	// §Blocks). Guarded by mu.
 	blocks map[*Block]struct{}
 }
@@ -361,7 +361,7 @@ func CompileDDL(v Version, ddl string, opts ...CompileOption) (*CompiledSchema, 
 			msg = C.GoString(cErr)
 			C.chs_free(cErr)
 		}
-		// No column is attributed, deliberately (spec/bindings.md rule 12):
+		// No column is attributed, deliberately (docs/reference/bindings.md rule 12):
 		// chs_schema_compile's structured answer is a code and a message,
 		// nothing more, and the longest-declared-name-in-the-message guess
 		// this call used to make added no information (the library's own
@@ -431,7 +431,7 @@ func (cs *CompiledSchema) SetEngine(engine, orderBy string, opts ...EngineOption
 		msg = C.GoString(cErr)
 		C.chs_free(cErr)
 	}
-	// The sign of rc is the whole rule (spec/bindings.md, spec/c-abi.md
+	// The sign of rc is the whole rule (docs/reference/bindings.md, docs/reference/c-abi.md
 	// "Error model"). A POSITIVE rc is a real ClickHouse error code: the
 	// server's own engine validation REFUSED this DDL, so the table can never
 	// exist and no data and no retry will change that — a tenant has to be
@@ -505,7 +505,7 @@ func (cs *CompiledSchema) Close() {
 // row), it never wraps.
 //
 // LIFETIME: a Filter references its schema handle; the C layer does not
-// refcount (spec/c-abi.md §Filters). This binding enforces the free order
+// refcount (docs/reference/c-abi.md §Filters). This binding enforces the free order
 // structurally, both ways: the Filter holds its *CompiledSchema (so the
 // schema finalizer cannot run first — Go runs finalizers in dependency
 // order), and CompiledSchema.Close closes every open Filter before freeing
@@ -521,7 +521,7 @@ func (cs *CompiledSchema) Close() {
 //
 // ENFORCEMENT GATE: nothing may enforce read-side security on this surface
 // until the WHERE-truth rig gates green (zero over-admit, zero over-hide);
-// until then it is a shadow/replay surface (spec/c-abi.md §Filters).
+// until then it is a shadow/replay surface (docs/reference/c-abi.md §Filters).
 type Filter struct {
 	// Expr is the expression text as compiled, for logging and cache keys.
 	Expr string
@@ -658,7 +658,7 @@ func (f *Filter) closeLocked() {
 // Block is one body, parsed ONCE under one schema handle and one clock
 // instant (chs_block_parse) — the parse half of Filter.Rows, exported so K
 // filters can evaluate one event without re-parsing it (the live-SSE call
-// shape; spec/c-abi.md §Blocks). Per-row parse failures are recorded IN the
+// shape; docs/reference/c-abi.md §Blocks). Per-row parse failures are recorded IN the
 // block (those rows answer VerdictDecline with the recorded error from every
 // filter); a call-level failure (unknown setting 115, an unsplittable body, a
 // binary decode fault, the deferred JSONEachRow framing verdict) fails
@@ -834,13 +834,13 @@ func (b *Block) closeLocked() {
 // unreadable result document, never a ClickHouse verdict.
 func (cs *CompiledSchema) Rows(format Format, body []byte, settings map[string]string) (BatchResult, error) {
 	// export off, all document groups on: the revision-3 pass-through that
-	// keeps Rows() byte-identical to revision 2 (spec/bindings.md §Revision 3).
+	// keeps Rows() byte-identical to revision 2 (docs/reference/bindings.md §Revision 3).
 	return cs.rowsThrough(format, body, settings, ExportNone, DocAll)
 }
 
 // RowsExport is Rows with the revision-3 export and document-flag channels
 // exposed: ONE chs_rows call, never a second, never re-parsing
-// (docs/proposals/rows-export.md; spec/c-abi.md §Rows is normative).
+// (docs/proposals/rows-export.md; docs/reference/c-abi.md §Rows is normative).
 //
 // exportFormat is ExportNone (no bytes; the docFlags still thin the
 // document) or a Format this artifact can SERIALIZE — this revision exactly
@@ -1015,7 +1015,7 @@ func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings ma
 // particular tenant's table: a gate declared in the compile profile binds
 // where a real server binds it — once, at CREATE — and then outranks the
 // per-call map for that handle, so an insert that does not repeat the gate
-// is not refused (measured on live 25.10.7.6 and 26.7.3.19; spec/c-abi.md,
+// is not refused (measured on live 25.10.7.6 and 26.7.3.19; docs/reference/c-abi.md,
 // "Server-level type gates"). This process-wide seed stays the right channel
 // only for gateway-uniform policy.
 func SetDefaultSettings(settings map[string]string) error {
@@ -1047,7 +1047,7 @@ func SetDefaultSettings(settings map[string]string) error {
 // automatically. The only error is a failed library initialisation.
 //
 // One of the three-question introspection surface every SDK exposes
-// (spec/bindings.md §Introspection); the dlopen'd path's twin is
+// (docs/reference/bindings.md §Introspection); the dlopen'd path's twin is
 // (*Library).RegisteredFamilies.
 func RegisteredFamilies() ([]string, error) {
 	if err := ensureInit(); err != nil {
@@ -1074,7 +1074,7 @@ func RegisteredFamilies() ([]string, error) {
 // the admitted volatile set is exactly the four clock reads).
 //
 // One of the three-question introspection surface every SDK exposes
-// (spec/bindings.md §Introspection); the dlopen'd path's twin is
+// (docs/reference/bindings.md §Introspection); the dlopen'd path's twin is
 // (*Library).FunctionFlags. The only error is a failed library
 // initialisation.
 func FunctionFlags() (string, error) {
@@ -1097,7 +1097,7 @@ func FunctionFlags() (string, error) {
 // transformation finding explainable.
 //
 // One of the three-question introspection surface every SDK exposes
-// (spec/bindings.md §Introspection); the dlopen'd path's twin is
+// (docs/reference/bindings.md §Introspection); the dlopen'd path's twin is
 // (*Library).ReferenceType. The only error is a failed library
 // initialisation.
 func ReferenceType(typeExpr string) (string, error) {

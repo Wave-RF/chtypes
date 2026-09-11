@@ -121,7 +121,7 @@ fn the_registry_loads_and_libraries_name_themselves() {
     assert!(!reg.versions().is_empty());
     println!("registry {}: {:?}", reg.dir().display(), reg.versions());
 
-    // Release order, not directory order (spec/bindings.md §Version selection,
+    // Release order, not directory order (docs/reference/bindings.md §Version selection,
     // rule 2 — every ordered surface): the lexical scan put 25.10 before 25.8
     // until 2026-08-26. versions() and libraries() must agree.
     let libraries = reg.libraries();
@@ -783,7 +783,7 @@ fn the_row_and_batch_entry_points_agree_on_one_row() {
     assert_eq!(row.computed[0].kind, "MATERIALIZED");
     // `8`, matching live servers on every format. The positional path used to
     // compute MATERIALIZED from the type zero (`1`) — a wrapper bug fixed
-    // 2026-08-17; spec/c-abi.md §"Positional formats" records the ground truth.
+    // 2026-08-17; docs/reference/c-abi.md §"Positional formats" records the ground truth.
     assert_eq!(row.computed[0].text, "8");
 
     let json = stored(&schema, Format::JsonEachRow, br#"{"x":7,"s":"hey"}"#);
@@ -1064,7 +1064,7 @@ fn rowbinary_is_read_in_clickhouses_storage_encoding() {
 /// ClickHouse's code 27.
 const ISO_Z_ROW: &[u8] = br#"{"ts":"2020-01-02T03:04:05Z"}"#;
 
-/// `spec/c-abi.md` §"Compile-time vs per-call settings" rule 3, end to end:
+/// `docs/reference/c-abi.md` §"Compile-time vs per-call settings" rule 3, end to end:
 ///
 /// ```text
 /// per-call  >  handle profile  >  library defaults  >  ClickHouse defaults
@@ -1159,7 +1159,7 @@ fn a_profile_less_handle_is_untouched_by_the_profile_channel() {
     ));
 }
 
-/// `spec/bindings.md` rule 12 — the SIGN of `chs_schema_engine`'s return
+/// `docs/reference/bindings.md` rule 12 — the SIGN of `chs_schema_engine`'s return
 /// decides the KIND of error. A POSITIVE rc is the SERVER refusing a DDL that
 /// can therefore never exist and must arrive as [`chtypes::Error::Schema`],
 /// carrying the server's own code; a NEGATIVE rc is this library declining and
@@ -1218,11 +1218,11 @@ fn set_engine_tells_a_server_refusal_from_a_decline() {
 
 // ---- the ABI identity probe (chs_abi_revision, added 2026-08-25) -----------
 
-/// `spec/c-abi.md` §ABI identity, over the whole registry.
+/// `docs/reference/c-abi.md` §ABI identity, over the whole registry.
 ///
 /// A [`chtypes::Library`] that exists must report either this crate's
 /// [`chtypes::ABI_REVISION`] or `0`. `0` means the artifact predates
-/// `chs_abi_revision`, which `spec/artifact.md` §Loading defines as ignorance
+/// `chs_abi_revision`, which `docs/reference/artifact.md` §Loading defines as ignorance
 /// rather than incompatibility. Any other value would have been refused at
 /// load, so this asserts the invariant holds rather than trusting the loader's
 /// own report.
@@ -1261,11 +1261,11 @@ fn every_artifact_reports_a_compatible_abi_revision() {
 /// `dlopen` refcounts a mapping per file: the second `Registry` gets a second
 /// `Library` value pointing at the same C globals — including the seeded settings
 /// list `set_default_settings` REPLACES while the row path reads it by reference
-/// (`spec/c-abi.md` §Thread-safety: it "MUST be serialized against all other
+/// (`docs/reference/c-abi.md` §Thread-safety: it "MUST be serialized against all other
 /// calls"). Until 2026-08-26 the mutex lived in the `Library` VALUE, so the two
 /// held different locks over one image and excluded nothing at all; it is now
 /// interned on the canonicalized path, exactly as `chs_init` already was
-/// (`spec/bindings.md` §Concurrency).
+/// (`docs/reference/bindings.md` §Concurrency).
 ///
 /// This drives the shape the fix exists for: readers on one `Registry`, the seed
 /// on the other. The assertion is that every contended answer equals the

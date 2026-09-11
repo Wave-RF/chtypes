@@ -206,7 +206,7 @@ func section1() (*chtypes.Registry, *chtypes.Library) {
 // error for an unknown family carrying ClickHouse's own code 50.
 // C API: chs_validate_type, plus the introspection trio — chs_reference_type,
 // chs_registered_families, chs_function_flags — exposed per Library in every
-// SDK since the 2026-08-26 parity cycle (spec/bindings.md §Introspection).
+// SDK since the 2026-08-26 parity cycle (docs/reference/bindings.md §Introspection).
 // ---------------------------------------------------------------------------
 func section2(lib *chtypes.Library) {
 	section(2, "Ask a build about itself")
@@ -236,7 +236,7 @@ func section2(lib *chtypes.Library) {
 	}
 	blank()
 
-	// The introspection trio, per Library (spec/bindings.md §Introspection).
+	// The introspection trio, per Library (docs/reference/bindings.md §Introspection).
 	if ref, err := lib.ReferenceType("UInt8"); err == nil {
 		kv("ReferenceType(UInt8)", "-> "+ref+"  (the widened second-parse type)")
 	} else {
@@ -855,7 +855,7 @@ func section9() {
 	// Go note: on the dlopen'd Registry path, SetDefaultSettings is
 	// STRUCTURALLY unreachable — the function-pointer table deliberately
 	// omits chs_set_default_settings, because it reallocates a process-global
-	// the row path reads by reference (see spec/bindings.md §Teardown). The
+	// the row path reads by reference (see docs/reference/bindings.md §Teardown). The
 	// static cgo path (one artifact, linked at build time — here lib/build)
 	// exposes it as the package-level SetDefaultSettings, so this section
 	// demonstrates all four layers there. Python/TS/Rust expose the seed on
@@ -1109,7 +1109,7 @@ func section13() {
 	note("with atexit(), so an ordinary process needs no call. Omitting the")
 	note("symbol from the function-pointer table is also what makes")
 	note("chs_set_default_settings structurally unreachable from a Library —")
-	note("a property worth more than the entry point (spec/bindings.md")
+	note("a property worth more than the entry point (docs/reference/bindings.md")
 	note("§Teardown). Python (registry.close()), TS (close()/Symbol.dispose)")
 	note("and Rust (Registry::shutdown()) each show their SDK's shape.")
 }
@@ -1122,7 +1122,7 @@ func section13() {
 // through package-level functions.
 // WHY: it is the fast path for a binary that serves exactly one ClickHouse
 // version, and it is the only place Go exposes SetDefaultSettings (section 9)
-// and RegisteredFamilies. The Registry is the product path; spec/bindings.md
+// and RegisteredFamilies. The Registry is the product path; docs/reference/bindings.md
 // makes this static shape explicitly optional, and the other three SDKs
 // (ctypes/ffi-rs/libloading — always dlopen) print a stub for this section.
 // C API: same 22 functions, resolved by the linker instead of dlsym.
@@ -1262,7 +1262,7 @@ func section16(lib *chtypes.Library) {
 	note("PROMOTES, never wraps: false for x=0 AND x=255. The insert side of")
 	note("this same library stores 256 as 0 (section 5's overflow_wrap) —")
 	note("which is why predicate constants must never be folded through")
-	note("insert coercion (spec/bindings.md §Constants are not payloads)")
+	note("insert coercion (docs/reference/bindings.md §Constants are not payloads)")
 	f.Close()
 	blank()
 

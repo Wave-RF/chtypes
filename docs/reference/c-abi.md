@@ -32,7 +32,7 @@ rests on.
 * **Different (both nonzero)** — a binding MUST refuse to load the artifact and
   MUST name both numbers. Calling through mismatched declarations is undefined.
 * **Symbol ABSENT** — the artifact predates the probe. Report revision `0` and
-  keep the per-symbol degradation rules of `spec/artifact.md` §Loading step 5.
+  keep the per-symbol degradation rules of `docs/reference/artifact.md` §Loading step 5.
   Absence is a claim of ignorance, not of incompatibility.
 
 It increments by exactly one per consolidation cycle that changes ANY existing
@@ -539,7 +539,7 @@ drops is a verdict about that row). Flags thin the *description*, never the
 `doc_flags = CHS_DOC_ALL` is today's document, byte-for-byte.
 `doc_flags = 0` is "lean": `"cols":[]`, no `unknown_fields`, no `computed`,
 verdicts intact. Absent keys are the additive-safe shape
-(`spec/bindings.md` §RowResult: every field is optional-with-a-default).
+(`docs/reference/bindings.md` §RowResult: every field is optional-with-a-default).
 
 **`CHS_DOC_TRANSFORMS` without `CHS_DOC_VALUES` — the retention rule.** The
 document keeps a `cols[]` entry unless it is **provably change-free by raw
@@ -551,7 +551,7 @@ value exists to have changed). Everything else — every other `src`, every
 byte difference, every case the equality test cannot vouch for — is retained
 with its **full field set**, so an SDK derives `Transformed` from the
 retained entries with the same detectors it runs on a full document
-(`spec/bindings.md` §Transformed): nothing is classified C-side, no reason
+(`docs/reference/bindings.md` §Transformed): nothing is classified C-side, no reason
 strings move into the library, and over-retention costs bytes while
 under-retention is forbidden. The guarantee a binding may rely on: **a column
 any spec'd detector would fire on is always retained.**
@@ -600,7 +600,7 @@ conversion, the whole per-version trichotomy), the filter answers
 `'f'` for every row — the constant promotes, it never wraps to `x = 0`. This
 is the same measured behaviour the CHECK path already exhibits on 24.8 / 25.8
 / 26.7, and it is why a caller MUST NOT fold predicate constants through the
-insert-side coercion instead (`spec/bindings.md` §Constants are not payloads).
+insert-side coercion instead (`docs/reference/bindings.md` §Constants are not payloads).
 
 #### Query parameters (`params_json`) — revision 4
 
@@ -1156,8 +1156,8 @@ normative:
    mode was examined, so `compile(ddl, mode=7)` compiled while
    `compile(ddl, {flatten_nested:0}, mode=7)` declined — the same argument
    answered two ways. The bindings were right to pass the mode through
-   unvalidated, per `spec/bindings.md`; the library simply never looked. Found
-   by the four `playground/` tours, finding 1.)
+   unvalidated, per `docs/reference/bindings.md`; the library simply never looked. Found
+   by the four `examples/` tours, finding 1.)
 3. **The row path resolves THREE settings channels, in ONE order**
    (normative; revised 2026-08-25):
 
@@ -1297,7 +1297,7 @@ string, `false`) rather than requiring it.
 | `poison` | bool | ClickHouse stored a value it cannot read back. When true, `stored` carries no renderable value. |
 | `null_input` | bool | the input for this field was a null (JSON `null`, or CSV/TSV `\N`). Distinct from `stored == null`. |
 | `dup_dropped` | bool | the row named this column more than once and ClickHouse kept the **first** value, discarding the rest with no signal |
-| `wire` | string | **present only for a text format whose `input` is in the writer's own vocabulary — `TSV` today.** The stored value written back out by ClickHouse's own serializer for that vocabulary (`serializeTextEscaped`). `wire != input` is a change ClickHouse made, and it is how the supplied-vs-stored detector works at all where the field is not a JSON value (`spec/bindings.md`, detector 3). ABSENT — not empty — for every other format, so a document that never carried it is byte-identical to what it was before this field existed. A binding MUST NOT synthesise it. |
+| `wire` | string | **present only for a text format whose `input` is in the writer's own vocabulary — `TSV` today.** The stored value written back out by ClickHouse's own serializer for that vocabulary (`serializeTextEscaped`). `wire != input` is a change ClickHouse made, and it is how the supplied-vs-stored detector works at all where the field is not a JSON value (`docs/reference/bindings.md`, detector 3). ABSENT — not empty — for every other format, so a document that never carried it is byte-identical to what it was before this field existed. A binding MUST NOT synthesise it. |
 
 `stored` and `ref` MUST be handled as **raw bytes / raw JSON**, not decoded into
 the binding's native string and number types before comparison. Two reasons,
@@ -1602,7 +1602,7 @@ outcome spelling:
   budget-exceeding row still aborts it with that row's error.
 - **No `CHS_ABI_REVISION` bump, deliberately.** This is a vocabulary addition
   to the result *document*, not a signature change: no function, argument or
-  `enum chs_format` moved. The unknown-outcome rule (spec/bindings.md
+  `enum chs_format` moved. The unknown-outcome rule (docs/reference/bindings.md
   §RowResult, 2026-08-26) is what makes it additive-safe: a binding that
   predates the spelling degrades a `skipped` row to `Unsupported` — a
   decline, never scored as agreement, never a manufactured rejection — which

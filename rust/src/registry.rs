@@ -130,7 +130,7 @@ impl Loaded {
             .insert(library.minor().to_string(), Arc::clone(&library));
         self.libraries.push(library);
         // Release order, not scan order: the directory listing is lexical,
-        // which put 25.10 before 25.8 (spec/bindings.md §Version selection,
+        // which put 25.10 before 25.8 (docs/reference/bindings.md §Version selection,
         // rule 2 — every ordered surface uses numeric release order; fixed
         // 2026-08-26).
         self.libraries.sort_by_key(|l| minor_order(l.minor()));

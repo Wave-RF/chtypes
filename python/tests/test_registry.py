@@ -326,7 +326,7 @@ def test_set_default_settings_excludes_the_row_path(newest: chtypes.Library) -> 
     """The one genuinely dangerous call on the ABI, under real contention.
 
     `chs_set_default_settings` REPLACES the seeded settings list wholesale while
-    `chs_row` / `chs_rows` read that same list by reference (spec/c-abi.md
+    `chs_row` / `chs_rows` read that same list by reference (docs/reference/c-abi.md
     §Thread-safety: it "MUST be serialized against all other calls"). ctypes
     releases the GIL for the whole duration of a foreign call, so Python threads
     genuinely can be inside `chs_rows` when a seed lands — the GIL is not the
@@ -436,7 +436,7 @@ def test_set_default_settings_excludes_the_row_path(newest: chtypes.Library) -> 
 def test_closing_one_registry_leaves_another_answering(registry: chtypes.Registry) -> None:
     """Two Registries over one artifact directory share dlopen'd IMAGES.
 
-    Library.close() is refcounted on the resolved path (spec/bindings.md
+    Library.close() is refcounted on the resolved path (docs/reference/bindings.md
     §Teardown, 2026-08-26): closing the first registry must be a no-op at the
     C boundary while the second still holds the images. Before the refcount,
     this exact sequence joined the DEFAULT evaluator's threads under the
@@ -485,7 +485,7 @@ def test_library_close_is_refcounted_per_image(tmp_path: Path, registry: chtypes
     # A one-version registry keeps the subprocess cheap: symlink one version
     # in — one this binding can LOAD. Mid-relink a registry legitimately
     # holds artifacts at an older ABI revision, which the loader refuses BY
-    # DESIGN (spec/c-abi.md §The ABI revision); refcounting can only be
+    # DESIGN (docs/reference/c-abi.md §The ABI revision); refcounting can only be
     # measured through an artifact that loads, so stage the newest loadable
     # one and skip only when there is none. The refusal itself is exercised
     # by the loader's own gate, not weakened here.
@@ -557,7 +557,7 @@ def test_library_close_is_refcounted_per_image(tmp_path: Path, registry: chtypes
 
 
 def test_the_introspection_trio_is_exposed(newest: chtypes.Library) -> None:
-    """spec/bindings.md §Introspection: the same three questions in every SDK."""
+    """docs/reference/bindings.md §Introspection: the same three questions in every SDK."""
     families = newest.registered_families()
     assert "String" in families
     assert len(families) > 100  # 139 on the 25.8 artifact; the registry grows

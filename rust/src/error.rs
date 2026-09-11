@@ -17,7 +17,7 @@ pub const CODE_UNSUPPORTED: i32 = -2;
 /// this is a hand-kept mirror and MUST be bumped in the same cycle the header
 /// is. [`crate::Library`] refuses to load an artifact reporting a different
 /// nonzero revision; 0 means the artifact predates the probe, which is
-/// ignorance rather than incompatibility (`spec/artifact.md` §Loading).
+/// ignorance rather than incompatibility (`docs/reference/artifact.md` §Loading).
 ///
 /// Revision 3 (2026-08-31): `chs_rows` gained `export_format` / `doc_flags` /
 /// `out_bytes`, and the `chs_filter_compile` / `chs_filter_free` /
@@ -60,7 +60,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Everything that can go wrong loading an artifact or asking it a question.
 ///
 /// Three different answers travel through this one type, and a caller must
-/// keep them apart (`spec/c-abi.md` §Error model):
+/// keep them apart (`docs/reference/c-abi.md` §Error model):
 ///
 /// * **A rejection** — [`Error::Schema`]: ClickHouse itself refused, with its
 ///   own code and message. The DDL or profile can never exist on that server
@@ -200,7 +200,7 @@ pub enum Error {
     ///
     /// `code` is ALWAYS a real ClickHouse error code: a decline is a
     /// DIFFERENT variant ([`Error::Unsupported`] / [`Error::PredatesFeature`]),
-    /// never this one carrying a negative sentinel (spec/bindings.md rule 12).
+    /// never this one carrying a negative sentinel (docs/reference/bindings.md rule 12).
     #[error("{}", schema_display(*code, message, column.as_deref()))]
     Schema {
         /// ClickHouse's own error code.
@@ -222,7 +222,7 @@ pub enum Error {
     /// reported as one.
     ///
     /// The rendered message keeps the frozen `[-2]` shape [`Error::Schema`]
-    /// renders its code with (spec/bindings.md rule 12): the conformance
+    /// renders its code with (docs/reference/bindings.md rule 12): the conformance
     /// drivers put this exact string on the protocol wire as an `unsupported`
     /// scope, so the rendering is part of the contract even though the
     /// sentinel is not a field. Whatever negative integer the binding saw
@@ -238,7 +238,7 @@ pub enum Error {
     /// the feature. Reported as unsupported at call time, never as a load
     /// failure. Renders with the same frozen `[-2]` shape as
     /// [`Error::Unsupported`] — a binding-internal missing-symbol sentinel
-    /// must never leak into the rendering (spec/bindings.md rule 12).
+    /// must never leak into the rendering (docs/reference/bindings.md rule 12).
     #[error("chtypes: [-2] this artifact predates {feature} (rebuild it)")]
     PredatesFeature {
         /// The symbol or capability the artifact does not export.
@@ -283,7 +283,7 @@ pub enum Error {
     /// libraries were paired in an eval — refused here, because no handle
     /// ever crosses a `dlopen`'d image boundary. A pair from two schemas of
     /// the SAME library is NOT this error: the C layer itself answers that
-    /// with a rejected result document, code 1002 (`spec/c-abi.md` §Blocks).
+    /// with a rejected result document, code 1002 (`docs/reference/c-abi.md` §Blocks).
     #[error(
         "chtypes: filter (ClickHouse {filter_version}) and block (ClickHouse {block_version}) \
          come from different libraries"
@@ -421,7 +421,7 @@ impl Error {
     }
 
     /// Build the right variant from a C code. The SIGN decides
-    /// (spec/bindings.md rule 12, spec/c-abi.md §Error model): a positive
+    /// (docs/reference/bindings.md rule 12, docs/reference/c-abi.md §Error model): a positive
     /// code is the server's own refusal and rides through verbatim; ANY
     /// negative code is this library declining — `-2` "I will not guess",
     /// `-1` a guarded exception, and any sentinel a later era adds — and
@@ -444,7 +444,7 @@ impl Error {
 
 /// The frozen rendering the refusal variant shares with its peers in every
 /// SDK: `chtypes: [<code>] <msg>`, with `chtypes: column "<c>": …` when a
-/// column is attributed (spec/bindings.md rule 12 — the shape the conformance
+/// column is attributed (docs/reference/bindings.md rule 12 — the shape the conformance
 /// drivers put on the wire).
 fn schema_display(code: i32, message: &str, column: Option<&str>) -> String {
     match column {
@@ -475,7 +475,7 @@ mod tests {
         // A positive code is the server's own refusal, verbatim; ANY negative
         // code is a decline — -2 "I will not guess", -1 a guarded exception,
         // and any sentinel a later era adds. A negative Error::Schema must be
-        // unmakeable through the funnel (spec/bindings.md rule 12).
+        // unmakeable through the funnel (docs/reference/bindings.md rule 12).
         assert!(matches!(
             Error::from_code(115, "bad name".into()),
             Error::Schema { code: 115, .. }
@@ -502,7 +502,7 @@ mod tests {
     fn the_rendered_sentinel_shape_is_frozen() {
         // The decline renders the header's -2 in the same shape the refusal
         // renders its code — the conformance drivers put this exact string on
-        // the protocol wire as an `unsupported` scope (spec/bindings.md rule
+        // the protocol wire as an `unsupported` scope (docs/reference/bindings.md rule
         // 12). Internal sentinels never leak into the rendering.
         let decline = Error::Unsupported {
             message: "engine not modelled".into(),

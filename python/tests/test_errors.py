@@ -1,7 +1,7 @@
 """The error model's shape: peer types, the frozen rendering, the funnel.
 
 No fixtures — nothing here needs an artifact. The peer-type split
-(spec/bindings.md rule 12; completed for Python 2026-08-26) is a contract
+(docs/reference/bindings.md rule 12; completed for Python 2026-08-26) is a contract
 about the TYPES, and the types can be asserted offline.
 """
 
@@ -37,7 +37,7 @@ def test_no_error_value_carries_the_sentinel() -> None:
 def test_the_rendered_sentinel_shape_is_frozen() -> None:
     # The decline renders the header's -2 in the same shape the refusal
     # renders its code — the conformance drivers put this exact string on the
-    # protocol wire as an `unsupported` scope (spec/bindings.md rule 12).
+    # protocol wire as an `unsupported` scope (docs/reference/bindings.md rule 12).
     assert str(chtypes.UnsupportedError("nope")) == "chtypes: [-2] nope"
     assert str(chtypes.SchemaError(115, "bad name")) == "chtypes: [115] bad name"
     # Column-attributed shapes (used only by callers that KNOW a column —
@@ -61,7 +61,7 @@ def test_unknown_outcome_strings_degrade_to_unsupported() -> None:
     # A future artifact's new verdict is an answer this binding cannot
     # interpret; UNSUPPORTED is never scored as agreement, while a default of
     # REJECTED would manufacture an over-reject out of vocabulary drift
-    # (spec/bindings.md §RowResult).
+    # (docs/reference/bindings.md §RowResult).
     assert Outcome.of("accepted") is Outcome.ACCEPTED
     assert Outcome.of("rejected") is Outcome.REJECTED
     assert Outcome.of("accepted_poisoned") is Outcome.ACCEPTED_POISONED

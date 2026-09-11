@@ -1,6 +1,6 @@
 /**
  * The error model, which is three outcomes that must never be conflated
- * (spec/c-abi.md §Error model):
+ * (docs/reference/c-abi.md §Error model):
  *
  *   - ClickHouse rejects        -> a real ClickHouse error code
  *   - this build refuses        -> CODE_UNSUPPORTED (-2), never a ClickHouse code
@@ -26,7 +26,7 @@ export const CODE_UNSUPPORTED = -2;
  * this is a hand-kept mirror and MUST be bumped in the same cycle the header
  * is. A `Registry` refuses an artifact reporting a different nonzero revision;
  * 0 means the artifact predates the probe, which is ignorance rather than
- * incompatibility (spec/artifact.md §Loading).
+ * incompatibility (docs/reference/artifact.md §Loading).
  *
  * Revision 3 (2026-08-31): `chs_rows` gained `export_format` / `doc_flags` /
  * `out_bytes`, and the `chs_filter_compile` / `chs_filter_free` /
@@ -59,7 +59,7 @@ export class RegistryError extends ChtypesError {}
  * `code` is ALWAYS a real ClickHouse error code. "This build declines to
  * answer" is a DIFFERENT CLASS — `UnsupportedError` — never this one carrying
  * a sentinel, so no `SchemaError` ever holds `CODE_UNSUPPORTED`
- * (spec/bindings.md rule 12).
+ * (docs/reference/bindings.md rule 12).
  */
 export class SchemaError extends ChtypesError {
   readonly code: number;
@@ -129,7 +129,7 @@ export class UnsupportedError extends ChtypesError {
  * The ONE place an ABI error code becomes an error object, so the
  * refusal/decline split cannot be decided differently in two files.
  *
- * The SIGN decides (spec/bindings.md rule 12, spec/c-abi.md §Error model): a
+ * The SIGN decides (docs/reference/bindings.md rule 12, docs/reference/c-abi.md §Error model): a
  * positive code is the server's own refusal and rides through verbatim; any
  * negative code is this library declining (`-2` "I will not guess", `-1` a
  * guarded exception, and a binding's own missing-symbol sentinel) and becomes

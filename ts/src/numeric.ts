@@ -7,7 +7,7 @@
  */
 
 /**
- * Whitespace is exactly JSON's four bytes (spec/bindings.md §detectors) — never
+ * Whitespace is exactly JSON's four bytes (docs/reference/bindings.md §detectors) — never
  * `String.prototype.trim()`, whose `WhiteSpace` set includes `<ZWNBSP>`.
  * `trim()` here made `<BOM>42` numeric text, and the detector then reported 12
  * `reformat` transforms on CSV/TSV fields that were stored exactly as supplied.

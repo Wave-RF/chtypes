@@ -6,7 +6,7 @@ package chtypes
 // fake libraries whose manifests hash correctly, signed with an ephemeral
 // ed25519 key — and drives Ensure at it through file://, a plain
 // directory, or a loopback httptest server that counts what was read.
-// The shared fixtures under spec/fixtures/fetch/ are exercised by
+// The shared fixtures under tests/fixtures/fetch/ are exercised by
 // fetch_fixtures_test.go with the same expectations.
 
 import (

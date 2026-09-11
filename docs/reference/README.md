@@ -121,7 +121,7 @@ repeatable.
   matches the caller's header: pair an artifact with the header it was built
   from. Loaders still treat a missing symbol as "this artifact cannot do
   that" and degrade to `unsupported`, never as a load failure. Signatures
-  freeze at 1.0; `spec/c-abi.md` §Stability is the norm.
+  freeze at 1.0; `docs/reference/c-abi.md` §Stability is the norm.
 - **Wall-clock-dependent cases can never be goldens.** Anything whose answer
   depends on when it ran is either pinned via `chtypes_now_epoch_nanos` or
   declined; it is never recorded as an expected value.

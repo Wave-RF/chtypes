@@ -3,7 +3,7 @@ import { ChtypesError } from './errors.js';
 /**
  * A setting value crosses the boundary as a JSON **string**, always.
  *
- * This is not cosmetic (spec/c-abi.md §Settings): `chtypes_now_epoch_nanos` is a
+ * This is not cosmetic (docs/reference/c-abi.md §Settings): `chtypes_now_epoch_nanos` is a
  * 19-digit nanosecond epoch, which does not survive an IEEE double. Serialised
  * as a JSON *number* through a JS `number` it arrives as 1.7e+18 and the setting
  * is **silently ignored** — the batch keeps stamping the real wall clock and
@@ -17,7 +17,7 @@ export type SettingValue = string | bigint;
 
 /**
  * A map of ClickHouse query/format settings plus the six `chtypes_*` keys
- * (clock control and admission budgets — spec/c-abi.md §Settings), by name.
+ * (clock control and admission budgets — docs/reference/c-abi.md §Settings), by name.
  *
  * Accepted everywhere settings travel: the compile profile
  * (`Library#compileDdl`), the per-call map (`Schema#row` / `Schema#rows`), the
@@ -56,7 +56,7 @@ export function encodeSettings(settings?: Settings): string {
         `chtypes: setting ${JSON.stringify(key)} must be a string or a bigint, got ` +
           `${typeof value}. A JS number cannot carry a 19-digit nanosecond epoch: ` +
           `1700000000123456789 becomes 1.7e+18 and the setting is silently ignored ` +
-          `(spec/c-abi.md §Settings).`,
+          `(docs/reference/c-abi.md §Settings).`,
       );
     }
   }

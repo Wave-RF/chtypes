@@ -132,7 +132,7 @@ def classify(col: ColDoc) -> list[Transform]:
 def _parse_json_value(text: str) -> tuple[object, bool]:
     """Decode exactly one JSON value, keeping numbers exact.
 
-    spec/bindings.md §detectors: the text is a JSON value only if a strict
+    docs/reference/bindings.md §detectors: the text is a JSON value only if a strict
     parse consumes ALL of it, with whitespace being exactly JSON's four.
     This port originally reproduced the Go reference's two defects (fixed in
     lockstep 2026-08-17): the trailing check decoded a SECOND value and only

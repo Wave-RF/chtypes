@@ -1,6 +1,6 @@
 /**
  * The artifact-directory loader: one subdirectory per ClickHouse minor line,
- * each self-contained (spec/artifact.md).
+ * each self-contained (docs/reference/artifact.md).
  *
  *   <registry>/25.8/{manifest.json, libchtypes.dylib, CH_VERSION, unsafe_families.txt}
  *
@@ -217,7 +217,7 @@ export class Registry {
     const library = new Library(native);
     this.loaded.push(library);
     // Release order, not scan order: the directory listing is lexical, which
-    // put 25.10 before 25.8 (spec/bindings.md §Version selection, rule 2 —
+    // put 25.10 before 25.8 (docs/reference/bindings.md §Version selection, rule 2 —
     // every ordered surface uses numeric release order; fixed 2026-08-26).
     this.loaded.sort((a, b) => compareMinor(a.minor, b.minor));
     this.byPath.set(sub, library);

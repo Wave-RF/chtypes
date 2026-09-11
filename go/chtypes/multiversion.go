@@ -118,9 +118,9 @@ static const char * chs_lib_open(const char *path, chs_lib *out) {
     out->col_default_kind = (fn_col_str)   dlsym(h, "chs_schema_column_default_kind");
     out->col_default_is_literal = (fn_col_int) dlsym(h, "chs_schema_column_default_is_literal");
     // Optional: an artifact built before the ABI-revision probe reports 0,
-    // which spec/artifact.md defines as "unknown", not "incompatible".
+    // which docs/reference/artifact.md defines as "unknown", not "incompatible".
     out->abi_revision = (fn_abi_rev) dlsym(h, "chs_abi_revision");
-    // Optional: the introspection trio (spec/bindings.md §Introspection).
+    // Optional: the introspection trio (docs/reference/bindings.md §Introspection).
     // Absence degrades to unsupported at call time, never a load failure.
     out->registered_families = (fn_owned_str0) dlsym(h, "chs_registered_families");
     out->function_flags      = (fn_owned_str0) dlsym(h, "chs_function_flags");
@@ -323,7 +323,7 @@ import (
 // linked path it IS reachable, and chtypes.go guards it (see defaultSettingsMu).
 // (The read-only introspection trio — chs_registered_families,
 // chs_function_flags, chs_reference_type — joined the table 2026-08-26 for
-// SDK parity, spec/bindings.md §Introspection. All three are READERS and take
+// SDK parity, docs/reference/bindings.md §Introspection. All three are READERS and take
 // the shared side like every other call.)
 //
 // WHAT IS PROVEN, AND HOW FAR. Both chs_row and chs_rows reach ClickHouse's
@@ -352,7 +352,7 @@ import (
 // chs_clickhouse_version — nothing is inferred from the file path. Each
 // loaded version costs roughly 120 MB resident. Safe for concurrent use;
 // there is deliberately no close/shutdown — a Library is never dlclose'd, so
-// none is owed (spec/bindings.md §Teardown), and it structurally cannot call
+// none is owed (docs/reference/bindings.md §Teardown), and it structurally cannot call
 // chs_set_default_settings.
 type Library struct {
 	Version Version // the exact patch, e.g. "25.8.28.1-lts"
@@ -559,7 +559,7 @@ func openLibrary(path string) (*Library, error) {
 	lib.Version = Version(C.GoString(C.chs_lib_version(&lib.lib)))
 	lib.Minor = minorOf(string(lib.Version))
 
-	// The ABI identity gate (spec/c-abi.md §ABI identity). A DIFFERENT nonzero
+	// The ABI identity gate (docs/reference/c-abi.md §ABI identity). A DIFFERENT nonzero
 	// revision is a positive statement that these declarations do not describe
 	// this artifact, so calling through them would be undefined — refuse, and
 	// say both numbers. Revision 0 means the artifact predates the probe and
@@ -674,11 +674,11 @@ type LoadedSchema struct {
 	// header's second clause. Distinct LoadedSchemas never contend.
 	mu sync.Mutex
 	// filters tracks every open LoadedFilter compiled from this handle, so
-	// Close can free them FIRST (spec/c-abi.md §Filters, handle lifetime).
+	// Close can free them FIRST (docs/reference/c-abi.md §Filters, handle lifetime).
 	// Guarded by mu.
 	filters map[*LoadedFilter]struct{}
 	// blocks tracks every open LoadedBlock parsed from this handle — the
-	// same non-owning rule, the same free-before-schema order (spec/c-abi.md
+	// same non-owning rule, the same free-before-schema order (docs/reference/c-abi.md
 	// §Blocks). Guarded by mu.
 	blocks map[*LoadedBlock]struct{}
 }
@@ -796,7 +796,7 @@ func (l *Library) ValidateType(typeExpr string) (canonical string, err error) {
 // RegisteredFamilies lists every type family in THIS library's runtime
 // registry (chs_registered_families) — the dlopen'd twin of the package-level
 // RegisteredFamilies, and one of the three-question introspection surface
-// every SDK exposes (spec/bindings.md §Introspection). An artifact built
+// every SDK exposes (docs/reference/bindings.md §Introspection). An artifact built
 // before the symbol answers an *UnsupportedError, never a load failure.
 func (l *Library) RegisteredFamilies() ([]string, error) {
 	l.mu.RLock()
@@ -820,7 +820,7 @@ func (l *Library) RegisteredFamilies() ([]string, error) {
 // FunctionFlags returns THIS library's function-volatility TSV audit
 // (chs_function_flags), verbatim — one function per line, six tab-separated
 // fields; see the package-level FunctionFlags for the field list. One of the
-// three-question introspection surface every SDK exposes (spec/bindings.md
+// three-question introspection surface every SDK exposes (docs/reference/bindings.md
 // §Introspection). An artifact built before the symbol answers an
 // *UnsupportedError.
 func (l *Library) FunctionFlags() (string, error) {
@@ -839,7 +839,7 @@ func (l *Library) FunctionFlags() (string, error) {
 // ReferenceType returns the widened reference type THIS library compares a
 // type against (chs_reference_type), "" for a type with no wider type — the
 // dlopen'd twin of the package-level ReferenceType, and one of the
-// three-question introspection surface every SDK exposes (spec/bindings.md
+// three-question introspection surface every SDK exposes (docs/reference/bindings.md
 // §Introspection). An artifact built before the symbol answers an
 // *UnsupportedError.
 func (l *Library) ReferenceType(typeExpr string) (string, error) {
@@ -993,7 +993,7 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 		unlock()
 		// A missing symbol is the DECLINE type, not a plain error: "this
 		// artifact predates the feature" degrades to unsupported at call time
-		// (spec/bindings.md Level 1; rule 12's missing-symbol arm). A plain
+		// (docs/reference/bindings.md Level 1; rule 12's missing-symbol arm). A plain
 		// error here read as a caller fault and could not be handled as the
 		// decline it is.
 		return RowResult{}, &UnsupportedError{Msg: "this artifact predates chs_row (rebuild it)"}
@@ -1079,7 +1079,7 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 	if out == nil {
 		unlock()
 		// Same degradation as Row: a NULL return is the ABI's "the loaded
-		// artifact does not export the function" (spec/c-abi.md §Rows), and
+		// artifact does not export the function" (docs/reference/c-abi.md §Rows), and
 		// that is a decline. chs_rows is mandatory on this loader, so today
 		// the branch is unreachable — the type still has to be the honest one.
 		return BatchResult{}, &UnsupportedError{Msg: "this artifact predates chs_rows (rebuild it)"}
@@ -1349,7 +1349,7 @@ func (b *LoadedBlock) closeLocked() {
 	}
 }
 
-// sortMinorLines orders minor lines numerically. spec/bindings.md §Version
+// sortMinorLines orders minor lines numerically. docs/reference/bindings.md §Version
 // selection rule 2 forbids string ordering — "25.10" is a LATER line than
 // "25.3", and sort.Strings put it first. (Found by the Python conformance
 // driver's differential run: every peer SDK already sorted numerically.)

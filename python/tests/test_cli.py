@@ -17,7 +17,7 @@ import pytest
 import chtypes
 from chtypes.__main__ import main
 
-FIXTURES = Path(__file__).resolve().parents[2] / "spec" / "fixtures" / "fetch"
+FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "fetch"
 EXPECTED_FILE = FIXTURES / "expected.json"
 PLATFORM = "linux-arm64"
 

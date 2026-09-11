@@ -336,7 +336,7 @@ fn section2(lib: &Arc<Library>) {
             note("columns: name, deterministic, deterministic_in_query,");
             note("server_constant, stateful, resolver_error_code — ClickHouse's own");
             note("answers, and the raw material of the volatile-set build gate.");
-            note("every SDK exposes this call (spec/bindings.md §Introspection).");
+            note("every SDK exposes this call (docs/reference/bindings.md §Introspection).");
         }
         Err(err) => kv("function_flags", &err.to_string()),
     }
@@ -1625,7 +1625,7 @@ fn section13() {
     note("chs_init also registers chs_shutdown with atexit(), so an ordinary");
     note("process would be fine without this — shutdown() is for callers that");
     note("control their own teardown order. Go's Registry deliberately has NO");
-    note("teardown (it never dlcloses; spec/bindings.md §Teardown); Python has");
+    note("teardown (it never dlcloses; docs/reference/bindings.md §Teardown); Python has");
     note("close() + context manager; TS has close()/Symbol.dispose.");
 }
 
@@ -1636,7 +1636,7 @@ fn section13() {
 // use it through package-level functions; that is also the only place Go
 // exposes SetDefaultSettings and RegisteredFamilies. Rust cannot have that
 // shape here: the loader is dlopen (libloading), so Registry is the only
-// loader — and it is the product path anyway. spec/bindings.md makes the
+// loader — and it is the product path anyway. docs/reference/bindings.md makes the
 // static shape explicitly optional. See go/main.go section 14.
 // ---------------------------------------------------------------------------
 fn section14() {
@@ -1645,7 +1645,7 @@ fn section14() {
         "not offered in Rust",
         "the loader is dlopen (libloading); Registry is the only loader",
     );
-    note("see go/main.go section 14 — spec/bindings.md §The object model makes");
+    note("see go/main.go section 14 — docs/reference/bindings.md §The object model makes");
     note("the statically-linked single-version shape explicitly optional");
 }
 
@@ -1870,7 +1870,7 @@ fn section16(lib: &Arc<Library>) {
     note("PROMOTES, never wraps: false for x=0 AND x=255. The insert side of");
     note("this same library stores 256 as 0 (section 5's overflow_wrap) —");
     note("which is why predicate constants must never be folded through");
-    note("insert coercion (spec/bindings.md §Constants are not payloads)");
+    note("insert coercion (docs/reference/bindings.md §Constants are not payloads)");
     blank();
 
     // NULL is not true — three-valued logic collapsed at the WHERE boundary.

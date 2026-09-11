@@ -1,6 +1,6 @@
 /**
  * The native layer: one `dlopen`'d chtypes artifact behind the frozen `chs_*` C
- * ABI (spec/c-abi.md). Everything about ownership and lifetime lives here so no
+ * ABI (docs/reference/c-abi.md). Everything about ownership and lifetime lives here so no
  * caller ever has to remember it.
  *
  * ------------------------------------------------------------------ memory
@@ -89,7 +89,7 @@ function missingSymbol(err: unknown): string | null {
 /**
  * A symbol the artifact does not export means "this artifact predates the
  * feature" and MUST degrade to `unsupported` at call time — never to a load
- * failure (spec/artifact.md §Loading, step 5).
+ * failure (docs/reference/artifact.md §Loading, step 5).
  */
 function unsupportedIfMissing<T>(err: unknown, message: string): T {
   if (missingSymbol(err) !== null) throw new UnsupportedError(message);
@@ -101,7 +101,7 @@ function asBuffer(bytes: Uint8Array): Buffer {
     throw new ChtypesError(
       'chtypes: row bodies must be a byte sequence, not a string: binary formats ' +
         'contain NUL bytes and text rows can carry invalid UTF-8 on purpose ' +
-        '(spec/bindings.md §Values a binding must accept and reject).',
+        '(docs/reference/bindings.md §Values a binding must accept and reject).',
     );
   }
   return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -134,7 +134,7 @@ const dropIntSlot = (s: Slot): void =>
 function declare(library: string) {
   const d = (retType: DataType, paramsType: DataType[]) => ({ library, retType, paramsType });
   return define({
-    // Mandatory four (spec/artifact.md §Loading, step 4). chs_schema_compile is
+    // Mandatory four (docs/reference/artifact.md §Loading, step 4). chs_schema_compile is
     // the ONE consolidated compile entry point — settings_json and mode are
     // always part of its signature now, not a separate `_v2` overload.
     chs_clickhouse_version: d(Str, []),
@@ -175,7 +175,7 @@ function declare(library: string) {
     chs_filter_compile: d(External, [External, Str, Str, External, External]),
     chs_filter_free: d(Void, [External]),
     chs_filter_rows: d(External, [External, I32, U8Array, U64, Str]),
-    // Revision 4: the block twin (spec/c-abi.md §Blocks) — parse a body once,
+    // Revision 4: the block twin (docs/reference/c-abi.md §Blocks) — parse a body once,
     // evaluate K filters against the block. Optional, same degradation rule.
     chs_block_parse: d(External, [External, I32, U8Array, U64, Str, External, External]),
     chs_block_free: d(Void, [External]),
@@ -207,7 +207,7 @@ export class NativeLibrary {
    *
    * `chs_set_default_settings` REPLACES a process-global that `chs_row` /
    * `chs_rows` / `chs_schema_compile` read **by reference**, so
-   * `spec/c-abi.md` §Thread-safety requires it be serialized against every
+   * `docs/reference/c-abi.md` §Thread-safety requires it be serialized against every
    * other call. Go enforces that with an `RWMutex` and Python with an
    * `_RWLock`, because both have real threads inside a foreign call.
    *
@@ -223,7 +223,7 @@ export class NativeLibrary {
    *
    * Not a lock. It cannot make a `worker_threads` setup safe — separate JS
    * threads share one dlopen'd image and one set of C globals, and only one of
-   * them would see this counter. `spec/bindings.md` §Concurrency says so.
+   * them would see this counter. `docs/reference/bindings.md` §Concurrency says so.
    */
   private inCall = 0;
   readonly path: string;
@@ -251,7 +251,7 @@ export class NativeLibrary {
       throw new ChtypesError(`chtypes: ${path} did not report a ClickHouse version`);
     }
 
-    // The ABI identity gate (spec/c-abi.md §ABI identity). ffi-rs resolves
+    // The ABI identity gate (docs/reference/c-abi.md §ABI identity). ffi-rs resolves
     // symbols at call time, so absence surfaces as its missing-symbol throw —
     // which here means "the artifact predates the probe" (revision 0), keeping
     // the per-symbol degradation rules. A DIFFERENT nonzero revision is a
@@ -325,7 +325,7 @@ export class NativeLibrary {
    * `AggregateFunction` column holds arbitrary bytes: a UTF-8 decode here would
    * replace every invalid byte with U+FFFD before any caller could see the
    * value, and the binding would then report bytes the table does not hold
-   * (spec/c-abi.md §Per-column fields; the reference implementation crosses this
+   * (docs/reference/c-abi.md §Per-column fields; the reference implementation crosses this
    * boundary with `C.GoString`, which is a byte copy, and keeps
    * `json.RawMessage` from there on). The copy is bounded by the `strlen` this
    * class already probes — bytes, not a latin1 round trip, because a `Buffer`
@@ -399,7 +399,7 @@ export class NativeLibrary {
       throw new ChtypesError(
         `chtypes: ${what} was called from inside another chtypes call on ${this.path}; ` +
           `it replaces process-global state the row path reads by reference and ` +
-          `must be serialized against every other call (spec/c-abi.md §Thread-safety)`,
+          `must be serialized against every other call (docs/reference/c-abi.md §Thread-safety)`,
       );
     }
   }
@@ -434,7 +434,7 @@ export class NativeLibrary {
       const rc = Number(this.fns.chs_init([timezone, unsafeFamilies, ...errSlot]));
       if (rc !== 0) {
         // The one reachable failure is an unknown timezone; out_err is the only
-        // way to say which name was rejected (spec/c-abi.md chs_init).
+        // way to say which name was rejected (docs/reference/c-abi.md chs_init).
         const message = this.takeString(readPtr(errSlot)) ?? '';
         throw new ChtypesError(
           `chtypes: chs_init failed for ${this.path} (rc ${rc})${message === '' ? '' : `: ${message}`}`,
@@ -546,7 +546,7 @@ export class NativeLibrary {
   /**
    * Compile a column-declaration list, optionally under a DECLARED settings
    * profile fixed into the handle exactly as a real CREATE TABLE fixes its
-   * settings into the table (spec/c-abi.md §Compile-time vs per-call
+   * settings into the table (docs/reference/c-abi.md §Compile-time vs per-call
    * settings). `settingsJson` "{}" plus `mode` 0 (`CHS_COMPILE_DECLARED`) is
    * structurally the plain compile — the settings-free path this build has
    * always taken. Throws `SchemaError` when the SERVER refuses — an unknown
@@ -575,7 +575,7 @@ export class NativeLibrary {
       // (the bare message) in `scope`, never `err.message` — 6,411 recorded
       // `unsupported` records across 7 versions, zero scope differences from
       // the reference column, and zero column-attributed renders anywhere in
-      // the recorded output. See playground/README.md finding 5.
+      // the recorded output. See examples/README.md finding 5.
       throw schemaErrorFor(readInt(codeSlot), message);
     } finally {
       dropIntSlot(codeSlot);
@@ -586,7 +586,7 @@ export class NativeLibrary {
   /**
    * Does this artifact export the consolidated, settings-aware
    * `chs_schema_compile`? True on every artifact this repo builds — the
-   * symbol is one of the mandatory four (spec/artifact.md §Loading, step 4).
+   * symbol is one of the mandatory four (docs/reference/artifact.md §Loading, step 4).
    * The probe stays for a Registry that may someday load a third-party-built
    * artifact that lacks it.
    *
@@ -595,7 +595,7 @@ export class NativeLibrary {
    * resolves symbols at call time, so this asks with a call the ABI defines as
    * refused loudly and cheaply: `mode 1` with a non-empty profile answers `-2`
    * and creates no handle on every artifact that exports the symbol
-   * (spec/c-abi.md §Compile-time vs per-call settings, rule 2), while an
+   * (docs/reference/c-abi.md §Compile-time vs per-call settings, rule 2), while an
    * artifact without the symbol throws ffi-rs's missing-symbol error. Cached:
    * one refused compile per loaded library.
    *
@@ -647,7 +647,7 @@ export class NativeLibrary {
    * "{}" is structurally the plain engine declaration this build has always
    * made.
    *
-   * Error mapping per spec/c-abi.md: the SIGN of rc decides the KIND of
+   * Error mapping per docs/reference/c-abi.md: the SIGN of rc decides the KIND of
    * answer. A positive rc is a real ClickHouse code — the server's own
    * refusal of this DDL, which can therefore never exist — and crosses
    * verbatim as a `SchemaError` with that code and the server's message
@@ -755,7 +755,7 @@ export class NativeLibrary {
 
   /**
    * `chs_rows`: a whole request body — ONE call, whatever the caller asked
-   * for (spec/c-abi.md §Rows; revision 3). `exportFormat` is `EXPORT_NONE`
+   * for (docs/reference/c-abi.md §Rows; revision 3). `exportFormat` is `EXPORT_NONE`
    * (-1, the default — no bytes) or an `enum chs_format` value the artifact
    * can serialize; `docFlags` selects the document groups (`DOC_ALL`
    * reproduces the revision-2 document byte-for-byte). Returns the raw result
@@ -789,7 +789,7 @@ export class NativeLibrary {
    *
    * Degrades exactly as `row` does (the asymmetry was a 2026-08-26 fix): a
    * missing symbol and a NULL return are both the ABI's "the loaded artifact
-   * does not export the function" (spec/c-abi.md §Rows) and surface as the
+   * does not export the function" (docs/reference/c-abi.md §Rows) and surface as the
    * DECLINE type, never a crash and never a generic error a caller cannot
    * handle as the decline it is. `chs_rows` is one of the mandatory four, so
    * with repo-built artifacts the branch is unreachable — the type still has
@@ -857,7 +857,7 @@ export class NativeLibrary {
   /**
    * `chs_filter_compile`: one boolean expression over a compiled schema's
    * PHYSICAL columns, compiled by the same TreeRewriter + ExpressionAnalyzer
-   * pipeline the CONSTRAINT CHECK path runs (spec/c-abi.md §Filters).
+   * pipeline the CONSTRAINT CHECK path runs (docs/reference/c-abi.md §Filters).
    *
    * The error split is rule 12's: a NULL handle with a positive code is the
    * server's own refusal (`SchemaError`, code and message verbatim — unknown
@@ -927,7 +927,7 @@ export class NativeLibrary {
   /**
    * `chs_block_parse` (revision 4): parse a body ONCE into a block — the
    * parse half of `chs_filter_rows`, exported so K filters can evaluate one
-   * event with no re-parse (spec/c-abi.md §Blocks). A call-level failure
+   * event with no re-parse (docs/reference/c-abi.md §Blocks). A call-level failure
    * (unknown setting 115, framing, a binary decode fault) returns NULL with
    * ClickHouse's own code/message — a malformed body yields no block and no
    * partial answers; the sign of the code picks the error class, exactly as

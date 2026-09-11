@@ -9,7 +9,7 @@ parsers below, and then declares what it learned:
     profile.settings -> compile_ddl(settings=...) (compile-time) and per-call
     columns          -> reconstruct_ddl -> compile_ddl
 
-The pattern, in full (spec/bindings.md §Discovery):
+The pattern, in full (docs/reference/bindings.md §Discovery):
 
     1. run QUERY_SERVER_VERSION, QUERY_CHANGED_SETTINGS once per connection
     2. cache the ServerProfile per deployment/tenant
@@ -19,7 +19,7 @@ The pattern, in full (spec/bindings.md §Discovery):
 
 Never ask the customer for their settings — ask their server. The queries
 return exactly what the server believes, spelled the way the server spells it,
-which is what the settings gate (spec/c-abi.md, Settings rule 2) validates
+which is what the settings gate (docs/reference/c-abi.md, Settings rule 2) validates
 against.
 
 Parse and reconstruction failures raise `ValueError`: they are verdicts about
@@ -50,7 +50,7 @@ __all__ = [
 # an HTTP client gets back are exactly what the matching parse_* function
 # consumes. A native-protocol client that returns typed rows instead can ignore
 # the parsers and fill the dataclasses directly. The SQL text is identical
-# across every SDK (spec/bindings.md §Discovery).
+# across every SDK (docs/reference/bindings.md §Discovery).
 
 # QUERY_SERVER_VERSION names the deployment's exact release — the string
 # Registry.for_version resolves (minor line or exact patch both work).
@@ -158,7 +158,7 @@ def parse_changed_settings_result(body: bytes) -> dict[str, str]:
 
     An empty body is a stock server: an empty dict, not an error. A duplicated
     `name` resolves LAST-WRITE-WINS — the later row replaces the earlier —
-    which is the spec rule (spec/bindings.md §Discovery), asserted by every
+    which is the spec rule (docs/reference/bindings.md §Discovery), asserted by every
     SDK so one server answer can never discover two different profiles.
     """
     out: dict[str, str] = {}

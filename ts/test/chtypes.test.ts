@@ -110,7 +110,7 @@ describe('result-document JSON', () => {
   });
 
   it('decides "is this text one JSON value?" by the spec rule, not by trim()', () => {
-    // spec/bindings.md §detectors: a strict parse must consume ALL of it, with
+    // docs/reference/bindings.md §detectors: a strict parse must consume ALL of it, with
     // whitespace being exactly JSON's four. Both edges cost false transforms —
     // a numeric prefix (Go's streaming decoder read `1.2.3.4` as 1.2) and U+FEFF
     // as whitespace (JS `trim()` strips <ZWNBSP>, so `<BOM>42` read as 42).
@@ -321,7 +321,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
 
   describe('the process-state mutators are serialized against everything else', () => {
     // `chs_set_default_settings` REPLACES a process-global that `chs_row` /
-    // `chs_rows` / `chs_schema_compile` read BY REFERENCE, so spec/c-abi.md
+    // `chs_rows` / `chs_schema_compile` read BY REFERENCE, so docs/reference/c-abi.md
     // §Thread-safety requires it be serialized against every other call. Go
     // enforces that with an RWMutex and Python with an _RWLock, because both
     // have real threads that can be inside a foreign call. Node cannot: every
@@ -397,7 +397,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       // all of them. If their symbols had collided every version would answer
       // alike — the failure mode that "exits 0, reports zero duplicate symbols,
       // runs, and answers with one version's semantics for both"
-      // (spec/artifact.md).
+      // (docs/reference/artifact.md).
       //
       // WHICH version says what is ClickHouse's answer; it lives in the served
       // golden set and is named nowhere here. This asserts only that the answers
@@ -459,7 +459,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       // Direct proof rather than a claim: ask the dynamic loader whether the
       // artifacts' exported symbols reached the process-global scope. With
       // RTLD_LOCAL they must not have. RTLD_GLOBAL "will appear to work and then
-      // answer with the wrong version's semantics" (spec/c-abi.md).
+      // answer with the wrong version's semantics" (docs/reference/c-abi.md).
       const candidates =
         process.platform === 'darwin'
           ? ['/usr/lib/libSystem.B.dylib']
@@ -567,7 +567,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
         // spelling Go's dlopen'd path, Python and Rust all use — three of the
         // four SDKs — and this binding used to be the odd one out, GUESSING
         // the column by looking for a declared name inside the server's text
-        // (playground/README.md finding 5). The library's own message already
+        // (examples/README.md finding 5). The library's own message already
         // names the column when it knows one, which is asserted here, so the
         // guess added nothing.
         expect(e.column).toBeUndefined();
@@ -843,7 +843,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
         // occupies no field position. Measured on darwin-arm64/25.8: the CSV path
         // computes `m` as 8, matching live servers on every format. The
         // positional path used to compute MATERIALIZED from the type zero
-        // (`1`) — a wrapper bug fixed 2026-08-17; spec/c-abi.md §Positional
+        // (`1`) — a wrapper bug fixed 2026-08-17; docs/reference/c-abi.md §Positional
         // formats records the confirmed ground truth.
         const positional = schema.row(Format.CSV, utf8('7,"hey"'));
         expect(positional.outcome).toBe('accepted');

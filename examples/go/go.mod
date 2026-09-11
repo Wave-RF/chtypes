@@ -1,4 +1,4 @@
-module github.com/wave-rf/chtypes/playground/go
+module github.com/wave-rf/chtypes/examples/go
 
 go 1.27
 

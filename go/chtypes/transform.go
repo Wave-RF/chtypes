@@ -40,7 +40,7 @@ import (
 )
 
 // Reasons emitted by classify. Stable strings — the harness groups on them,
-// so the spellings must never change (spec/bindings.md §Transformed). All are
+// so the spellings must never change (docs/reference/bindings.md §Transformed). All are
 // lossy except the four Transform.Lossy names as non-lossy.
 const (
 	// ReasonOverflowWrap: an integer wrapped mod 2^N (256 into UInt8 → 0).
@@ -242,7 +242,7 @@ func classify(c colDoc) []Transform {
 
 // parseJSONValue decodes exactly one JSON value, keeping numbers exact.
 //
-// spec/bindings.md §detectors: the text is a JSON value only if a strict
+// docs/reference/bindings.md §detectors: the text is a JSON value only if a strict
 // parse consumes ALL of it, with whitespace being exactly JSON's four.
 // Two measured defects forced this precision (2026-08-17, 43 differential
 // cases): the old trailing-bytes check decoded a SECOND value and only

@@ -1,4 +1,4 @@
-# playground/go — the Go tour
+# examples/go — the Go tour
 
 Sixteen sections over the whole chtypes surface, matching `../python`,
 `../ts` and `../rust` section for section. See [`../README.md`](../README.md)
@@ -51,7 +51,7 @@ places where Go's spelling is its own.
   `*UnsupportedError` carries none, and a decline can never satisfy
   `errors.As(&SchemaError{})`. Section 10 is the idiom.
 - **No teardown, deliberately.** Go never `dlclose`s, so its `Registry` owes
-  no `chs_shutdown` (`spec/bindings.md` §Teardown). Section 13 explains.
+  no `chs_shutdown` (`docs/reference/bindings.md` §Teardown). Section 13 explains.
 
 ## Also in this directory
 

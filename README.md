@@ -139,7 +139,7 @@ A bad row is a **verdict, not an error**: `outcome` becomes `rejected` with
 ClickHouse's own error code and message. Exceptions (or the `Err` arm) are for
 the machinery — a missing artifact, an unreadable document — and for
 schema-level answers. Each binding's README has the full API table and its
-language's idioms; [`playground/`](playground/README.md) is the same guided
+language's idioms; [`examples/`](examples/README.md) is the same guided
 tour, section for section, in all four.
 
 ## What is supported
@@ -207,9 +207,9 @@ Artifacts carry their own licence, separate from this repository's; see the
 | [`ts/`](ts/README.md) | `@wavehouse/chtypes` — `ffi-rs`, Node ≥ 22 |
 | [`rust/`](rust/README.md) | `chtypes` — `libloading` |
 | [`include/chtypes.h`](include/chtypes.h) | the C ABI every binding is written against — 28 `chs_*` functions, ABI revision 4 |
-| [`spec/`](spec/README.md) | the normative contract: [`c-abi.md`](spec/c-abi.md), [`bindings.md`](spec/bindings.md) (the shape every SDK implements), [`artifact.md`](spec/artifact.md) (what ships, how a registry is laid out) |
-| [`goldens/`](goldens/README.md) | the public golden set — served by core, not tracked here; one answer in four languages |
-| [`playground/`](playground/README.md) | four side-by-side runnable tours, same sections in every language |
+| [`spec/`](spec/README.md) | the normative contract: [`c-abi.md`](docs/reference/c-abi.md), [`bindings.md`](docs/reference/bindings.md) (the shape every SDK implements), [`artifact.md`](docs/reference/artifact.md) (what ships, how a registry is laid out) |
+| [`goldens/`](docs/reference/goldens.md) | the public golden set — served by core, not tracked here; one answer in four languages |
+| [`examples/`](examples/README.md) | four side-by-side runnable tours, same sections in every language |
 | [`docs/artifacts.md`](docs/artifacts.md) | how a consumer obtains and verifies artifacts ([`docs/fetch.md`](docs/fetch.md): the fetch/verify/signing contract every SDK implements) |
 | [`scripts/fetch.sh`](scripts/fetch.sh) | the verified download into the per-user cache |
 
@@ -227,7 +227,7 @@ both are green.
 **Testing, with and without artifacts.** CI here runs on GitHub's hosted
 runners with no repository variable and no secret, and runs every suite
 twice. First with *no* artifact on the search path: the fetch/verify/install
-contract against `spec/fixtures/fetch`, the CLIs and the pure units (result
+contract against `tests/fixtures/fetch`, the CLIs and the pure units (result
 documents, transform classification, error shaping, the search path) run in
 full, and every test that needs an artifact is *skipped by name* with the one
 command that would fill the gap — a suite that skipped everything fails,

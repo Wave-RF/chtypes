@@ -124,7 +124,7 @@ The reference algorithm (`chtypes.NewRegistry` in
    value that is neither `0` nor the revision the binding was written against
    (`CHS_ABI_REVISION`), **reject the library**, naming both numbers: the
    artifact has positively stated that the binding's declarations do not
-   describe it, and calling through them is undefined. See `spec/c-abi.md`
+   describe it, and calling through them is undefined. See `docs/reference/c-abi.md`
    §The ABI revision.
 6. Every other symbol is **optional**. A missing one means "this artifact
    predates the feature" and MUST degrade to `unsupported` at call time, never to

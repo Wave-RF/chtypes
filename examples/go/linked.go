@@ -1,7 +1,7 @@
 //go:build chtypes_linked
 
 // linked.go — the two demonstrations only the STATICALLY LINKED Go shape can
-// give (spec/bindings.md makes that shape optional; the Registry is the
+// give (docs/reference/bindings.md makes that shape optional; the Registry is the
 // product path). Built only with `-tags chtypes_linked`, which needs the core
 // repository's lib/build on CGO_LDFLAGS (`chplay.sh go` sets both when the
 // sibling is present). Without the tag, linked_stub.go prints what was skipped.

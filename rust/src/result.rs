@@ -1,5 +1,5 @@
-//! The result types, field for field with `spec/c-abi.md` and
-//! `spec/bindings.md`.
+//! The result types, field for field with `docs/reference/c-abi.md` and
+//! `docs/reference/bindings.md`.
 //!
 //! Every field of a result document is optional at the wire level: a rejected
 //! row omits `unknown_fields`, `unsupported_settings` and `computed` entirely
@@ -55,7 +55,7 @@ pub enum Format {
     /// Modelled at the revision `INSERT ... FORMAT Native` uses (0), so there
     /// is no `BlockInfo` prefix and no per-column serialization-kind byte;
     /// blocks taken off a live TCP connection carry both and are a different
-    /// contract (`spec/c-abi.md` §Native). Because the stream carries names
+    /// contract (`docs/reference/c-abi.md` §Native). Because the stream carries names
     /// and types, the declared schema and the payload can disagree, and
     /// ClickHouse's own resolution is not uniformly an error — a type
     /// mismatch is CAST by default. Requires an artifact built at or after
@@ -87,7 +87,7 @@ impl Format {
 }
 
 /// Which document GROUPS the per-row documents carry (revision 3;
-/// `spec/c-abi.md` §Document flags). The verdict channel — batch and per-row
+/// `docs/reference/c-abi.md` §Document flags). The verdict channel — batch and per-row
 /// outcome/code/err, `rows_read`, `rows_skipped`, `unsupported_settings`,
 /// `engine_rows`, `storage_transforms` — is ALWAYS emitted and is not a flag.
 ///
@@ -170,7 +170,7 @@ pub struct Span {
 /// visibility MUST fail closed (hide the row / fail the request) on
 /// [`Verdict::Error`] and [`Verdict::Decline`] — collapsing either into
 /// "false the answer" inverts fail-closed into fail-open under `NOT`, the
-/// measured leak class (`spec/bindings.md` §Revision 3). The default is
+/// measured leak class (`docs/reference/bindings.md` §Revision 3). The default is
 /// `Decline`, so an unset or unknown verdict is fail-closed by construction.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Verdict {
@@ -266,7 +266,7 @@ pub struct FilterResult {
 /// The verdict on one row or one batch.
 ///
 /// `Unsupported` is the default and the unknown-string degradation, and
-/// deliberately so (spec/bindings.md §RowResult, 2026-08-26): an outcome this
+/// deliberately so (docs/reference/bindings.md §RowResult, 2026-08-26): an outcome this
 /// crate cannot interpret must never come back as `Accepted` (an over-accept
 /// streams rows to subscribers and then fails the insert) — and must not come
 /// back as `Rejected` either, which would manufacture an over-reject (silent
@@ -318,7 +318,7 @@ impl std::fmt::Display for Outcome {
 
 /// Map a document's outcome string. An outcome this crate does not recognise
 /// degrades to [`Outcome::Unsupported`], never to [`Outcome::Rejected`]
-/// (spec/bindings.md §RowResult, rule added 2026-08-26): a future artifact's
+/// (docs/reference/bindings.md §RowResult, rule added 2026-08-26): a future artifact's
 /// new verdict is an answer this crate cannot interpret, and `Unsupported` is
 /// the arm that is never scored as agreement, while a default of `Rejected`
 /// would manufacture an over-reject — the zero-budget failure — out of pure
@@ -375,7 +375,7 @@ pub struct Value {
 /// before a row ships to subscribers. Its two value fields are therefore
 /// `String`, carrying U+FFFD where a byte was not valid UTF-8:
 ///
-/// * `input` is text by the ABI's own definition — `spec/c-abi.md` gives it as
+/// * `input` is text by the ABI's own definition — `docs/reference/c-abi.md` gives it as
 ///   "the raw input **text** for this field, as a string" — and the reference
 ///   SDK's JSON decoder repairs it identically, so the two SDKs report the same
 ///   thing.
@@ -535,7 +535,7 @@ pub struct BatchResult {
     /// once by the transcription of ClickHouse's own output writer for the
     /// requested export format, copied out of the C buffer and freed before
     /// the call returned — no ownership crosses the boundary. Three states,
-    /// the ABI's own (`spec/c-abi.md` §Rows):
+    /// the ABI's own (`docs/reference/c-abi.md` §Rows):
     ///
     /// * `None` — no export was requested, the export was DECLINED
     ///   ([`export_declined`](Self::export_declined) then names the reason),
@@ -668,7 +668,7 @@ pub(crate) struct BatchDoc {
     pub engine_rows: Option<Vec<RawText>>,
     pub storage_transforms: Vec<StorageTransformDoc>,
     /// Present exactly when export bytes were emitted — one `{off,len}` per
-    /// `rows[]` entry, index-aligned (`spec/c-abi.md` §Rows).
+    /// `rows[]` entry, index-aligned (`docs/reference/c-abi.md` §Rows).
     pub row_spans: Option<Vec<Span>>,
     /// Present exactly when an export was requested and withheld.
     pub export_declined: String,
@@ -833,7 +833,7 @@ mod tests {
 
     #[test]
     fn an_unknown_outcome_degrades_to_unsupported_never_rejected() {
-        // spec/bindings.md §RowResult (2026-08-26): a future artifact's new
+        // docs/reference/bindings.md §RowResult (2026-08-26): a future artifact's new
         // verdict lands on the arm that is never scored as agreement; a
         // default of Rejected would manufacture an over-reject.
         let rr = parse_row(r#"{"outcome":"verdict_from_the_future","code":0,"err":"","cols":[]}"#);
@@ -848,7 +848,7 @@ mod tests {
 
     #[test]
     fn a_skipped_row_parses_with_the_caught_error_and_no_values() {
-        // spec/c-abi.md §"outcome":"skipped" (2026-08-27): a row dropped under
+        // docs/reference/c-abi.md §"outcome":"skipped" (2026-08-27): a row dropped under
         // input_format_allow_errors_* keeps its place in `rows` in the short
         // form of a rejected document, carrying the server's caught error.
         let rr =

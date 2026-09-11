@@ -32,7 +32,7 @@ __all__ = [
 # code: it means "a real server might well have accepted this; I decline to
 # guess". Mapping it onto a rejection manufactures an over-reject that the
 # product never made; mapping it onto an acceptance manufactures an over-accept,
-# which is the cardinal sin (spec/c-abi.md "Error model").
+# which is the cardinal sin (docs/reference/c-abi.md "Error model").
 CODE_UNSUPPORTED: Final[int] = -2
 
 
@@ -188,11 +188,11 @@ class SchemaError(ChtypesError):
     "This build declines to answer" is a DIFFERENT TYPE — `UnsupportedError`,
     a PEER of this one since 2026-08-26, deliberately NOT a subclass — so no
     `SchemaError` ever carries `CODE_UNSUPPORTED` and ``except SchemaError``
-    never catches a decline (spec/bindings.md rule 12). The two must never be
+    never catches a decline (docs/reference/bindings.md rule 12). The two must never be
     conflated: reporting a decline as a rejection manufactures an over-reject
     (silent data loss), and hiding a rejection behind a decline lets a DDL
     that can never exist look merely unmodelled. Both budgets are zero
-    (spec/c-abi.md §Error model).
+    (docs/reference/c-abi.md §Error model).
 
     Attributes:
         code: the ClickHouse error code — always the server's own.
@@ -224,7 +224,7 @@ class UnsupportedError(ChtypesError):
     breaches), a compile `mode` the library does not define, and any symbol
     the loaded artifact predates.
 
-    A PEER of `SchemaError`, deliberately NOT a subclass (spec/bindings.md
+    A PEER of `SchemaError`, deliberately NOT a subclass (docs/reference/bindings.md
     rule 12; the pre-2026-08-26 subtype was grandfathered and is gone): a
     decline that still satisfied ``except SchemaError`` would let every
     handler that forgot the distinction silently convert declines into
@@ -260,7 +260,7 @@ def _error_for(code: int, msg: str, column: str = "") -> ChtypesError:
     """The ONE place an ABI error code becomes an exception, so the
     refusal/decline split cannot be decided differently in two files.
 
-    The SIGN decides (spec/bindings.md rule 12, spec/c-abi.md §Error model):
+    The SIGN decides (docs/reference/bindings.md rule 12, docs/reference/c-abi.md §Error model):
     a positive code is the server's own refusal and rides through verbatim;
     any negative code is this library declining (`-2` "I will not guess",
     `-1` a guarded exception) and becomes an `UnsupportedError`. Keying on

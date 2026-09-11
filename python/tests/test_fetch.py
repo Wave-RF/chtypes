@@ -1,4 +1,4 @@
-"""docs/fetch.md, tested offline against `spec/fixtures/fetch/` (§9).
+"""docs/fetch.md, tested offline against `tests/fixtures/fetch/` (§9).
 
 Every fixture release is served over ``file://`` and must produce the spec's
 verdict and code — read off `expected.json`, never restated here. The rest is
@@ -35,13 +35,13 @@ from chtypes.fetch import (
     verify_registry,
 )
 
-FIXTURES = Path(__file__).resolve().parents[2] / "spec" / "fixtures" / "fetch"
+FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "fetch"
 EXPECTED_FILE = FIXTURES / "expected.json"
 
 pytestmark = pytest.mark.skipif(
     not EXPECTED_FILE.is_file(),
     reason=(
-        f"no fetch fixtures at {FIXTURES}: spec/fixtures/fetch is generated in the core "
+        f"no fetch fixtures at {FIXTURES}: tests/fixtures/fetch is generated in the core "
         f"repository (docs/fetch.md §9) and must be present for the fetch suite to run"
     ),
 )

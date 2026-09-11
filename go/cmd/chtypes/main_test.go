@@ -2,7 +2,7 @@ package main
 
 // main_test.go — the §6 surface: exit codes, stdout discipline (fetch prints
 // the installed directory alone), progress on stderr. The fetch/verify/list
-// flows run against the shared fixtures (spec/fixtures/fetch, reached by
+// flows run against the shared fixtures (tests/fixtures/fetch, reached by
 // $CHTYPES_FETCH_FIXTURES or by path) and SKIP LOUDLY without them; the
 // usage and `where` checks need nothing.
 
@@ -31,12 +31,12 @@ func fixtures(t *testing.T) (dir, key string) {
 	t.Helper()
 	dir = os.Getenv("CHTYPES_FETCH_FIXTURES")
 	if dir == "" {
-		dir = filepath.Join("..", "..", "..", "spec", "fixtures", "fetch")
+		dir = filepath.Join("..", "..", "..", "tests", "fixtures", "fetch")
 	}
 	abs, _ := filepath.Abs(dir)
 	b, err := os.ReadFile(filepath.Join(abs, "test-key", "public.hex"))
 	if err != nil {
-		t.Skipf("shared fetch fixtures not found: %v (set CHTYPES_FETCH_FIXTURES to spec/fixtures/fetch)", err)
+		t.Skipf("shared fetch fixtures not found: %v (set CHTYPES_FETCH_FIXTURES to tests/fixtures/fetch)", err)
 	}
 	return abs, strings.TrimSpace(string(b))
 }

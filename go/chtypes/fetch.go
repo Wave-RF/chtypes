@@ -465,7 +465,7 @@ func lessMinor(a, b string) bool { return lessVersionKey(versionKey(a), versionK
 
 // ---------------------------------------------------------------- manifest
 
-// artifactManifest is the artifact's own record of itself (spec/artifact.md).
+// artifactManifest is the artifact's own record of itself (docs/reference/artifact.md).
 type artifactManifest struct {
 	OS                string `json:"os"`
 	Arch              string `json:"arch"`

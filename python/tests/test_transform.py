@@ -70,7 +70,7 @@ def test_one_value_spelled_two_ways_is_not_reported_at_any_length() -> None:
 
     With `_rational` failing on the long side, `10**4999` and `1e4999` compared
     unequal and the detector reported a `reformat` that nothing justified. Exact
-    comparison is a contract (spec/bindings.md: "Numeric comparison MUST be
+    comparison is a contract (docs/reference/bindings.md: "Numeric comparison MUST be
     exact"), and it does not get to stop being exact past 4,300 digits.
     """
     assert classify(_col(base="Decimal(76, 0)", input="1e4999", stored_raw="1" + "0" * 4999)) == []

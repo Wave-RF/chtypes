@@ -1,7 +1,7 @@
 """The result surface: enums, the reason vocabulary, and the typed results.
 
 Field for field the same concepts as the Go reference (`go/chtypes`), spelled
-the Python way (spec/bindings.md "The object model": follow the language idiom,
+the Python way (docs/reference/bindings.md "The object model": follow the language idiom,
 never let the meaning drift).
 """
 
@@ -65,7 +65,7 @@ class Format(IntEnum):
     # library sends on INSERT. Modelled at the revision `INSERT ... FORMAT
     # Native` uses (0), so there is no BlockInfo prefix and no per-column
     # serialization-kind byte; blocks taken off a live TCP connection carry
-    # both and are a different contract (spec/c-abi.md §Native). Requires an
+    # both and are a different contract (docs/reference/c-abi.md §Native). Requires an
     # artifact built at or after the Native exposure — probe it, do not assume
     # it from the SDK version.
     NATIVE = 8
@@ -86,7 +86,7 @@ class Format(IntEnum):
 # `export=None`; the constant exists for callers that carry the wire value.
 EXPORT_NONE: Final[int] = -1
 
-# The CHS_DOC_* bitmask (spec/c-abi.md §Document flags): which document GROUPS
+# The CHS_DOC_* bitmask (docs/reference/c-abi.md §Document flags): which document GROUPS
 # the per-row documents carry. The verdict channel (batch and per-row
 # outcome/code/err, rows_read, rows_skipped, unsupported_settings,
 # engine_rows, storage_transforms) is ALWAYS emitted and is not a flag.
@@ -130,7 +130,7 @@ class Verdict(StrEnum):
     load-bearing: a caller enforcing visibility MUST fail closed (hide the
     row / fail the request) on ERROR and on DECLINE — collapsing either into
     "false the answer" inverts fail-closed into fail-open under NOT, the
-    measured leak class (spec/bindings.md §Revision 3). No read-side
+    measured leak class (docs/reference/bindings.md §Revision 3). No read-side
     enforcement may be built on this surface until the WHERE-truth rig gates
     green; until then it is shadow/replay only.
     """
@@ -177,7 +177,7 @@ class FilterOutcome(StrEnum):
     # fault. `verdicts` is empty: a malformed body yields no partial answers.
     REJECTED = "rejected"
     # A call-level decline (-2), and the arm every unknown outcome spelling
-    # degrades to — never REJECTED (spec/bindings.md §RowResult).
+    # degrades to — never REJECTED (docs/reference/bindings.md §RowResult).
     UNSUPPORTED = "unsupported"
 
     @classmethod
@@ -246,7 +246,7 @@ class Outcome(StrEnum):
         binding cannot interpret: UNSUPPORTED is the arm that is never scored
         as agreement and sends the caller to the server, while defaulting to
         REJECTED would manufacture an over-reject — the zero-budget failure —
-        out of pure vocabulary drift (spec/bindings.md §RowResult, rule added
+        out of pure vocabulary drift (docs/reference/bindings.md §RowResult, rule added
         2026-08-26; every SDK previously defaulted to REJECTED).
         """
         try:
@@ -500,7 +500,7 @@ class BatchResult:
     # transcription of ClickHouse's own output writer for the requested
     # format, copied out of the C buffer (which is freed before the call
     # returns — no ownership crosses the boundary). Three states, the ABI's
-    # own (spec/c-abi.md §Rows):
+    # own (docs/reference/c-abi.md §Rows):
     #
     #   None   no export was requested, the export was DECLINED
     #          (`export_declined` then names the reason), or a call-level

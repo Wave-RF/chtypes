@@ -1,7 +1,7 @@
 # ingest-demo — chtypes shaped like a real ingest worker
 
 **This is the OPTIONAL, ONLINE demo.** Unlike everything else under
-`playground/`, it needs a **reachable ClickHouse server** (`CH_ADDR`), and
+`examples/`, it needs a **reachable ClickHouse server** (`CH_ADDR`), and
 `../../chplay.sh` never runs it. The offline tours' section 11 walks the same
 discovery flow against canned bytes; come here when you want to see it against
 the real thing.
@@ -25,7 +25,7 @@ docker run -d --name chguide-ch --label com.docker.compose.project=chguide \
     -e CLICKHOUSE_PASSWORD=chguide clickhouse/clickhouse-server:25.8
 
 IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' chguide-ch)
-cd playground/go && CH_ADDR=http://$IP:8123 go run ./ingest-demo
+cd examples/go && CH_ADDR=http://$IP:8123 go run ./ingest-demo
 
 docker rm -f chguide-ch          # when you are done
 ```
@@ -87,7 +87,7 @@ reading the table actually sees.
 
 - **It does not compare anything.** Everything here is insert-side coercion. A
   `WHERE`-clause constant is a different question with different rules — see the
-  [`spec/c-abi.md`](../../../spec/c-abi.md) on filters before folding a
+  [`docs/reference/c-abi.md`](../../../docs/reference/c-abi.md) on filters before folding a
   predicate operand through this API.
 - **It is running on macOS.** That is a dev floor, not an oracle: macOS
   `long double` is 53-bit, so float parses diverge from real servers. Nothing in

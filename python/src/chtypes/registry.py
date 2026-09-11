@@ -97,7 +97,7 @@ _INITIALIZED_IMAGES: dict[str, str] = {}
 # one artifact directory share the C globals `chs_shutdown` tears into:
 # closing the first must be a no-op at the C boundary while the second still
 # holds the image, and only the LAST close runs `chs_shutdown`
-# (spec/bindings.md §Teardown). Guarded by `_IMAGES_MU`, as is
+# (docs/reference/bindings.md §Teardown). Guarded by `_IMAGES_MU`, as is
 # `_INITIALIZED_IMAGES`, so two threads constructing Libraries over one
 # artifact cannot double-init or double-count. (The lock is cheap: load and close
 # paths only, never a row call.)
@@ -109,7 +109,7 @@ def _minor_sort_key(minor: str) -> tuple[int, int, str]:
     """Order minor lines numerically.
 
     25.10 is a LATER minor than 25.8, so string comparison of minor lines is
-    meaningless and must not be used for ordering (spec/bindings.md, "Version
+    meaningless and must not be used for ordering (docs/reference/bindings.md, "Version
     selection", rule 2).
     """
     parts = minor.split(".")
@@ -132,7 +132,7 @@ def encode_settings(settings: Settings | None) -> str:
     settings parser treats as canonical — never as Python's ``"True"`` text
     (which the server would refuse to parse for a numeric-backed bool
     setting). Checked BEFORE `int`, because `bool` is an `int` subclass and
-    `str(True)` is exactly the wrong answer. Spec: spec/bindings.md, "Values a
+    `str(True)` is exactly the wrong answer. Spec: docs/reference/bindings.md, "Values a
     binding must accept and reject".
     """
     if not settings:
@@ -193,15 +193,15 @@ class Schema:
         self._handle: int | None = handle
         # Every open Filter compiled from this handle, so close() can free
         # them FIRST — the C layer does not refcount, and freeing the schema
-        # under a live filter is use-after-free (spec/c-abi.md §Filters,
+        # under a live filter is use-after-free (docs/reference/c-abi.md §Filters,
         # handle lifetime). A WeakSet: an abandoned Filter's own __del__
         # frees its handle, and this set never keeps one alive.
         self._filters: weakref.WeakSet[Filter] = weakref.WeakSet()
         # Every open Block parsed from this handle — the same non-owning
-        # rule, the same free-before-schema order (spec/c-abi.md §Blocks).
+        # rule, the same free-before-schema order (docs/reference/c-abi.md §Blocks).
         self._blocks: weakref.WeakSet[Block] = weakref.WeakSet()
         # ONE handle is single-threaded, by the ABI: "a single chs_schema *
-        # MUST NOT be used from two threads at once" (spec/c-abi.md
+        # MUST NOT be used from two threads at once" (docs/reference/c-abi.md
         # §Thread-safety). The library's readers-writer lock deliberately lets
         # row calls on DISTINCT handles run together — that is the whole point
         # of it being an RWLock — so the per-handle exclusion has to live here,
@@ -370,7 +370,7 @@ class Schema:
         `BatchResult.rows` as `Outcome.SKIPPED`, carrying the server's own
         caught error verbatim (2026-08-27).
 
-        **The revision-3 export channel** (spec/c-abi.md §Rows;
+        **The revision-3 export channel** (docs/reference/c-abi.md §Rows;
         docs/proposals/rows-export.md) — still ONE `chs_rows` call, never a
         second, never re-parsing:
 
@@ -426,7 +426,7 @@ class Schema:
         compares as exactly that literal. The compiled handle bakes the
         values in (identity is per (schema, expr, params)); a caller
         compiling filters from tenant-influenced values MUST bound its cache
-        (LRU) and its compile rate per principal (spec/c-abi.md §Filters).
+        (LRU) and its compile rate per principal (docs/reference/c-abi.md §Filters).
 
         CHOOSE THE BRACE TYPE FOR THE VALUE'S DOMAIN: the declared type's
         own reader WRAPS an out-of-domain integer — `{p:UInt8}` given "256"
@@ -470,7 +470,7 @@ class Schema:
     def parse_block(self, fmt: Format, body: bytes, settings: Settings | None = None) -> Block:
         """Parse a body ONCE into a `Block` (`chs_block_parse`) — the parse
         half of `Filter.rows`, exported so K filters can evaluate one event
-        with no re-parse (`Filter.eval`; spec/c-abi.md §Blocks). Same formats
+        with no re-parse (`Filter.eval`; docs/reference/c-abi.md §Blocks). Same formats
         and settings contract as `rows` (`settings` is the PARSE-side map:
         format settings, clock keys; evaluation takes none). Volatile
         DEFAULTs resolve against THIS call's clock instant, so
@@ -524,7 +524,7 @@ class Filter:
 
     ENFORCEMENT GATE: nothing may enforce read-side security on this surface
     until the WHERE-truth rig gates green (zero over-admit, zero over-hide);
-    until then it is a shadow/replay surface (spec/c-abi.md §Filters).
+    until then it is a shadow/replay surface (docs/reference/c-abi.md §Filters).
     """
 
     __slots__ = ("__weakref__", "_handle", "_schema", "expr")
@@ -627,7 +627,7 @@ class Block:
     """One body, parsed ONCE under one schema handle and one clock instant.
 
     Obtained from `Schema.parse_block`; evaluated by `Filter.eval`. The
-    parse-once/eval-many twin of `Filter.rows` (spec/c-abi.md §Blocks): the
+    parse-once/eval-many twin of `Filter.rows` (docs/reference/c-abi.md §Blocks): the
     live-SSE call shape is K filters x 1 event, and the block sheds the
     re-parse. Per-row parse failures are recorded IN the block (those rows
     answer `Verdict.DECLINE` from every filter); a call-level failure raised
@@ -783,7 +783,7 @@ class Library:
             # negative one — `-2` for an unsafe family this build refuses to
             # construct, `-1` for a guarded exception — is this library
             # declining (`UnsupportedError`), never a rejection the product
-            # invented (spec/bindings.md rule 12).
+            # invented (docs/reference/bindings.md rule 12).
             raise _error_for(code, err or f"invalid type expression: {type_expr!r}")
         return canonical
 
@@ -806,7 +806,7 @@ class Library:
         new release picks up new families automatically).
 
         Part of the three-question introspection surface every SDK exposes
-        (spec/bindings.md §Introspection). Raises `UnsupportedError` when the
+        (docs/reference/bindings.md §Introspection). Raises `UnsupportedError` when the
         artifact predates `chs_registered_families`.
         """
         return [line for line in self._native.registered_families().split("\n") if line]
@@ -820,7 +820,7 @@ class Library:
         (`lib/tools/gen_function_flags.py`).
 
         Part of the three-question introspection surface every SDK exposes
-        (spec/bindings.md §Introspection). Raises `UnsupportedError` when the
+        (docs/reference/bindings.md §Introspection). Raises `UnsupportedError` when the
         artifact predates `chs_function_flags`.
         """
         return self._native.function_flags()
@@ -850,7 +850,7 @@ class Library:
 
         With `settings`, compile under a DECLARED settings profile — the
         settings the deployment's server runs, fixed into the handle at compile
-        exactly as a real CREATE TABLE fixes them into the table (spec/c-abi.md
+        exactly as a real CREATE TABLE fixes them into the table (docs/reference/c-abi.md
         §Compile-time vs per-call settings). Values cross the boundary as
         strings, like every settings map on this ABI.
 
@@ -879,7 +879,7 @@ class Library:
             # refused HERE — and it is a decline, not a rejection a real server
             # would have made. `_error_for` keys on the SIGN of the code, so a
             # future negative sentinel can never become "a SchemaError with a
-            # negative code" (spec/bindings.md rule 12).
+            # negative code" (docs/reference/bindings.md rule 12).
             raise _error_for(code, err or f"invalid column list: {ddl!r}")
         return Schema(self, handle, ddl)
 
@@ -900,7 +900,7 @@ class Library:
         particular tenant's table: a gate declared in the compile profile binds
         where a real server binds it — once, at CREATE — and then outranks the
         per-call map for that handle (measured on live 25.10.7.6 and 26.7.3.19;
-        spec/c-abi.md, "Server-level type gates"). This process-wide seed stays
+        docs/reference/c-abi.md, "Server-level type gates"). This process-wide seed stays
         the right channel only for gateway-uniform policy.
 
         Raises `ChtypesError` on refusal, with ClickHouse's own message —
@@ -929,7 +929,7 @@ class Library:
 
         `dlopen` refcounts ONE image per file, so two `Registry` instances
         over one artifact share the C globals `chs_shutdown` tears into. This
-        call is therefore refcounted on the resolved path (spec/bindings.md
+        call is therefore refcounted on the resolved path (docs/reference/bindings.md
         §Teardown, 2026-08-26): closing one wrapper while another still holds
         the image is a no-op at the C boundary — the survivor's evaluator
         threads keep running — and only the final close runs `chs_shutdown`.
@@ -947,7 +947,7 @@ class Library:
 
         When it does reach the C boundary it takes the loaded image's lock
         EXCLUSIVELY, like `set_default_settings` — `chs_shutdown` is the
-        other call `spec/c-abi.md` §Thread-safety requires be serialised
+        other call `docs/reference/c-abi.md` §Thread-safety requires be serialised
         against everything else.
         """
         with _IMAGES_MU:

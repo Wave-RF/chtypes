@@ -1,4 +1,4 @@
-# playground/rust — the Rust tour
+# examples/rust — the Rust tour
 
 Sixteen sections over the whole chtypes surface, matching `../go`,
 `../python` and `../ts` section for section. See

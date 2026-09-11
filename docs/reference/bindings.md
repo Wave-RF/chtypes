@@ -30,11 +30,11 @@ Registry ── For(version) ──▶ Library ── CompileDDL(ddl) ──▶ 
 | Artifact directory loader | `NewRegistry(dir)` | `Registry(dir)` | `new Registry(dir)` | Scans one subdirectory per version |
 | One loaded version | `*Library` | `Library` | `Library` | Carries `Version`, `Minor`, `Path` |
 | ABI revision (binding) | `chtypes.ABIRevision` | `chtypes.ABI_REVISION` | `ABI_REVISION` | Rust: `chtypes::ABI_REVISION`. The revision the binding was written against; cgo reads the header macro, the rest mirror it by hand |
-| ABI revision (artifact) | `lib.ABIRevision` | `lib.abi_revision` | `lib.abiRevision` | Rust: `lib.abi_revision()`. `0` = predates the probe. A different nonzero value is refused at load — see `spec/c-abi.md` §The ABI revision |
+| ABI revision (artifact) | `lib.ABIRevision` | `lib.abi_revision` | `lib.abiRevision` | Rust: `lib.abi_revision()`. `0` = predates the probe. A different nonzero value is refused at load — see `docs/reference/c-abi.md` §The ABI revision |
 | Resolve a version | `r.For(v)` | `r.for_version(v)` / `r[v]` | `r.for(v)` | Minor line **or** exact patch |
 | List versions | `r.Versions()` | `r.versions()` | `r.versions()` | Minor lines, sorted |
 | Compile a column list | `lib.CompileDDL(ddl)` | `lib.compile_ddl(ddl)` | `lib.compileDdl(ddl)` | Rust: `lib.compile(ddl).compile()` (builder) |
-| … under a declared settings profile | `lib.CompileDDL(ddl, WithCompileSettings(m))` | `lib.compile_ddl(ddl, settings=…, mode=…)` | `lib.compileDdl(ddl, {settings, mode})` | **ONE function per SDK, options optional** — see §One compile function. Rust: `lib.compile(ddl).settings(…).compile()`. `spec/c-abi.md` §Compile-time vs per-call settings; declaring no settings behaves exactly as if the parameter did not exist |
+| … under a declared settings profile | `lib.CompileDDL(ddl, WithCompileSettings(m))` | `lib.compile_ddl(ddl, settings=…, mode=…)` | `lib.compileDdl(ddl, {settings, mode})` | **ONE function per SDK, options optional** — see §One compile function. Rust: `lib.compile(ddl).settings(…).compile()`. `docs/reference/c-abi.md` §Compile-time vs per-call settings; declaring no settings behaves exactly as if the parameter did not exist |
 | Canonicalise a type | `lib.ValidateType(expr)` | `lib.validate_type(expr)` | `lib.validateType(expr)` | |
 | Declare the engine | `s.SetEngine(engine, orderBy)` | `s.set_engine(engine, order_by)` | `s.setEngine(...)` | |
 | … + MergeTree settings | `s.SetEngine(engine, orderBy, WithMergeTreeSettings(m))` | `s.set_engine(..., merge_tree_settings=…)` | `s.setEngine(..., {mergeTreeSettings})` | Same one function. Unknown name ⇒ the server's **115 rejection**; a non-default declared value ⇒ **-2 unsupported** (never silently ignored); a binding MUST NOT flatten those two into one verdict — see rule 12 |
@@ -53,7 +53,7 @@ product.
 ### Revision 3: the `chs_rows` export/flags parameters, and the filter trio
 
 At ABI revision 3 the C `chs_rows` gained `export_format`, `doc_flags` and
-`out_bytes` (`spec/c-abi.md` §Rows), and `chs_filter_compile` /
+`out_bytes` (`docs/reference/c-abi.md` §Rows), and `chs_filter_compile` /
 `chs_filter_free` / `chs_filter_rows` joined the surface (§Filters). What
 that means for a binding:
 
@@ -72,7 +72,7 @@ that means for a binding:
 * **Lean documents stay SDK-derivable.** Under `CHS_DOC_TRANSFORMS` without
   `CHS_DOC_VALUES` the C layer retains every `cols[]` entry any spec'd
   detector could fire on, with the full field set (the conservative
-  byte-equality retention rule, `spec/c-abi.md` §Document flags). A binding
+  byte-equality retention rule, `docs/reference/c-abi.md` §Document flags). A binding
   runs the SAME detectors of §Transformed over the retained entries — no new
   classifier exists on either side, and the reason vocabulary does not move
   into C. Under `CHS_DOC_VALUES` without `CHS_DOC_TRANSFORMS` the reference
@@ -88,18 +88,18 @@ that means for a binding:
   inverts fail-closed into fail-open — the measured leak class. Unknown
   verdict characters degrade to the decline state, mirroring the unknown-
   `outcome` rule below. **No SDK may offer filter-backed read-side
-  enforcement until the WHERE-truth rig gates green** (`spec/c-abi.md`
+  enforcement until the WHERE-truth rig gates green** (`docs/reference/c-abi.md`
   §Filters, the enforcement gate); until then the surface is shadow/replay.
 * A filter handle wraps BOTH pointers' lifetimes: the SDK object MUST keep
   its schema object alive (a reference, not a copy) and free the filter
   before the schema — the C layer does not refcount
-  (`spec/c-abi.md` §Filters, handle lifetime).
+  (`docs/reference/c-abi.md` §Filters, handle lifetime).
 
 ### Revision 4: filter query parameters, and the block-parse twin
 
 At ABI revision 4 the C `chs_filter_compile` gained a `params_json`
 parameter (`{name:Type}` query parameters, substituted by the vendored
-`ReplaceQueryParameterVisitor` before analysis — `spec/c-abi.md` §Filters,
+`ReplaceQueryParameterVisitor` before analysis — `docs/reference/c-abi.md` §Filters,
 Query parameters), and `chs_block_parse` / `chs_block_free` /
 `chs_filter_eval` joined the surface (§Blocks: parse a body once, evaluate K
 filters against the block). What that means for a binding:
@@ -131,7 +131,7 @@ filters against the block). What that means for a binding:
   (the `settings_json` convention), MUST NOT hand-escape values into the
   expression text (injection safety comes from typed substitution, not
   escaping), and MUST adopt the caller-side cache discipline of
-  `spec/c-abi.md` §Filters: filter handles are per-(schema, expr, params),
+  `docs/reference/c-abi.md` §Filters: filter handles are per-(schema, expr, params),
   so a cache keyed on tenant-influenced values needs a bounded LRU and a
   per-principal compile throttle.
 * **A block handle wraps its schema's lifetime** exactly as a filter does
@@ -142,7 +142,7 @@ filters against the block). What that means for a binding:
 * **Verdict semantics do not move**: `chs_filter_eval` returns the same
   document `chs_filter_rows` returns, with the same four-state verdict rule
   above — `'e'`/`'d'` stay fail-closed, and the enforcement gate
-  (`spec/c-abi.md` §Filters) still applies to the twin. Parse-once does not
+  (`docs/reference/c-abi.md` §Filters) still applies to the twin. Parse-once does not
   mean enforce-earlier.
 
 ### Introspection — the same three questions in every SDK (added 2026-08-26)
@@ -203,7 +203,7 @@ sugar makes an accidental early `close()` easier to write than in Rust; if
 that ever bites, the fix is the same resolved-path refcount Python carries. This paragraph replaced a table row that read
 "`chs_shutdown` via the loader | same | same | Required before `dlclose`" for
 all three columns, which the Go implementation had never matched; found by the
-four `playground/` tours, finding 2. The spec row was the wrong one.
+four `examples/` tours, finding 2. The spec row was the wrong one.
 
 **Reopening after a full close is not promised, and does not work.** Once the
 LAST holder of an image has closed it (`chs_shutdown` ran, `dlclose` followed),
@@ -537,7 +537,7 @@ per-row behaviour, which is correct but stricter than the server.
 
 ## Concurrency — what a binding owes the ABI (added 2026-08-26)
 
-`spec/c-abi.md` §Thread-safety states three rules. This section says what each
+`docs/reference/c-abi.md` §Thread-safety states three rules. This section says what each
 one costs a binding, because three of the four reference bindings had answered
 one of them differently and none of them had said so.
 
@@ -576,7 +576,7 @@ starting them, or serialise the seed itself.
 
 A binding that moves from "serialise everything" to "concurrent readers" is
 making a claim about its own allocator interactions and MUST prove it by
-running the rigs, not by reasoning (`spec/c-abi.md` §Thread-safety).
+running the rigs, not by reasoning (`docs/reference/c-abi.md` §Thread-safety).
 
 ## Version selection
 
@@ -797,7 +797,7 @@ Non-negotiable protocol rules:
    The two failure modes this rule exists to prevent are the same pair the
    whole product is budgeted at zero for: reporting a decline as a refusal is
    a manufactured over-reject, and hiding a refusal behind a decline lets a
-   DDL that can never exist look merely unmodelled. `spec/c-abi.md` §Error
+   DDL that can never exist look merely unmodelled. `docs/reference/c-abi.md` §Error
    model is the normative source; this rule is its binding-side restatement.
 
 Then run the rigs and quote the run, not your intent:

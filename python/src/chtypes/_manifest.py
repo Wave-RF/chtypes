@@ -1,6 +1,6 @@
 """The artifact's own description of itself, and the paths every SDK agrees on.
 
-`manifest.json` (spec/artifact.md) is the loader's single source of truth for
+`manifest.json` (docs/reference/artifact.md) is the loader's single source of truth for
 the shared library's file name and the only integrity check that means
 anything. Shared by the loader (`registry.py`) and the fetcher (`fetch.py`),
 which is why it lives apart from both.
