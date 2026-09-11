@@ -96,6 +96,46 @@ def _assert_installed(directory: Path, row: dict) -> None:
 
 
 @pytest.mark.parametrize(
+    "case",
+    (_expected().get("builds") or {}).get("cases", []) if EXPECTED_FILE.is_file() else [],
+    ids=lambda c: f"{c['platform']}-{c['line']}",
+)
+def test_a_rebuild_installs_the_highest_build(case: dict, dest: Path) -> None:
+    """`two-builds/` publishes one ClickHouse version twice, as a rebuild does.
+
+    A release keeps the two highest builds per (version, platform), so resolving
+    a line is not a question about the ClickHouse version alone: among rows of
+    the newest version the highest `build` wins. Before this, nothing in any
+    suite covered that — the rule lived only in unit tests of the comparator.
+
+    The proof is the library's own bytes. Both rows carry the same
+    `clickhouse_version`, so a manifest check cannot tell them apart; their
+    `library_sha256` differs, and `_assert_installed` hashes what landed. An
+    implementation that took the first matching row, or the older build, fails
+    here rather than passing quietly.
+    """
+    installed = ensure(
+        case["line"],
+        platform=case["platform"],
+        url=_url("two-builds"),
+        dest=dest,
+        trusted_keys=_test_keys(),
+    )
+    assert installed == dest / case["line"]
+
+    index = json.loads((FIXTURES / "two-builds" / "index.json").read_text())
+    (want,) = [a for a in index["artifacts"] if a["file"] == case["install"]["file"]]
+    (other,) = [a for a in index["artifacts"] if a["file"] == case["superseded"]["file"]]
+    assert want["build"] > other["build"], "the fixture's own case is upside down"
+    assert want["clickhouse_version"] == other["clickhouse_version"] == case["clickhouse_version"]
+
+    _assert_installed(installed, want)
+    # Say the negative outright: the superseded build is not what is on disk.
+    library = installed / chtypes.read_manifest(installed).library  # type: ignore[union-attr]
+    assert hashlib.sha256(library.read_bytes()).hexdigest() != other["library_sha256"]
+
+
+@pytest.mark.parametrize(
     "verdict",
     _expected()["verdicts"] if EXPECTED_FILE.is_file() else [],
     ids=lambda v: (

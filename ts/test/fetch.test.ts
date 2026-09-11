@@ -1095,6 +1095,47 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under spec/fixtures/fetch (d
     expect(await codeOf(ensure(fixtureLine, fixture('signed', scratch('fixture-dest2'))))).toBe('CHTYPES_ARTIFACT_UNTRUSTED');
   });
 
+  it('expected.json: a rebuild installs the HIGHEST build, not the first or the older row', async () => {
+    // two-builds/ publishes one ClickHouse version twice — the shape a rebuild
+    // leaves behind, and the shape the live release has carried since builds
+    // existed. Resolving a line is therefore not a question about the ClickHouse
+    // version alone: among rows of the newest version, the highest build wins.
+    //
+    // The proof is the installed library's own bytes. Both rows carry the same
+    // clickhouse_version, so a manifest check cannot separate them; their
+    // library_sha256 differs. An implementation that took the first matching row
+    // — or the older build — fails here instead of passing quietly.
+    process.env['CHTYPES_TRUSTED_KEYS'] = key;
+    const expected = JSON.parse(readFileSync(path.join(SPEC_FIXTURES, 'expected.json'), 'utf8')) as {
+      builds?: { cases: { platform: string; line: string; clickhouse_version: string; install: { file: string; sha256: string; build: number }; superseded: { file: string; sha256: string; build: number } }[] };
+    };
+    const cases = expected.builds?.cases ?? [];
+    expect(cases.length, 'expected.json carries no builds.cases — regenerate the fixtures').toBeGreaterThan(0);
+
+    const index = JSON.parse(readFileSync(path.join(SPEC_FIXTURES, 'two-builds', 'index.json'), 'utf8')) as {
+      artifacts: { file: string; build?: number; clickhouse_version: string; library: string; library_sha256: string }[];
+    };
+    const rowFor = (file: string) => index.artifacts.find((a) => a.file === file);
+
+    for (const c of cases) {
+      const want = rowFor(c.install.file);
+      const other = rowFor(c.superseded.file);
+      expect(want, `two-builds/index.json has no row for ${c.install.file}`).toBeDefined();
+      expect(other, `two-builds/index.json has no row for ${c.superseded.file}`).toBeDefined();
+      // The fixture must actually pose the question: same version, different builds.
+      expect(want!.clickhouse_version).toBe(other!.clickhouse_version);
+      expect(want!.build ?? 0).toBeGreaterThan(other!.build ?? 0);
+
+      const dest = scratch(`two-builds-${c.platform}-${c.line}`);
+      const r = await ensure(c.line, fixture('two-builds', dest, { platform: c.platform }));
+      const installed = createHash('sha256')
+        .update(readFileSync(path.join(r.dir, want!.library)))
+        .digest('hex');
+      expect(installed, `${c.platform} ${c.line}: the superseded build landed`).toBe(want!.library_sha256);
+      expect(installed).not.toBe(other!.library_sha256);
+    }
+  });
+
   it('expected.json: the unpublished platform, line and patch are CHTYPES_ARTIFACT_UNPUBLISHED against signed/', async () => {
     process.env['CHTYPES_TRUSTED_KEYS'] = key;
     const expected = JSON.parse(readFileSync(path.join(SPEC_FIXTURES, 'expected.json'), 'utf8')) as {

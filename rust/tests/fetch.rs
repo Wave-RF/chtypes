@@ -1253,3 +1253,81 @@ fn a_search_path_registry_opens_one_line_lazily() {
     );
     assert_eq!(reg.libraries().len(), 1);
 }
+
+/// `expected.json`'s `builds.cases`, against the `two-builds/` fixture: one
+/// ClickHouse version published twice, which is the shape a rebuild leaves
+/// behind and the shape the live release has carried since builds existed.
+///
+/// Resolving a line is therefore not a question about the ClickHouse version
+/// alone — among rows of the newest version the highest build wins. Until this,
+/// nothing in any of the four suites covered that; the rule was pinned only by
+/// unit tests of the comparator itself.
+///
+/// The proof is the installed library's own bytes. Both rows carry the same
+/// `clickhouse_version`, so a manifest check cannot separate them; their
+/// `library_sha256` differs. An implementation that took the first matching row,
+/// or the older build, fails here instead of passing quietly.
+#[test]
+fn a_rebuild_installs_the_highest_build() {
+    let fx = fixtures!();
+    let doc = expected(&fx);
+    let cases = doc["builds"]["cases"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !cases.is_empty(),
+        "expected.json carries no builds.cases — regenerate the fixtures \
+         (chtypes-core: just fetch-fixtures)"
+    );
+
+    let index: Json = serde_json::from_slice(
+        &std::fs::read(fx.join("two-builds").join("index.json")).expect("two-builds/index.json"),
+    )
+    .expect("two-builds/index.json parses");
+    let row_for = |file: &str| -> Json {
+        index["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["file"] == file)
+            .unwrap_or_else(|| panic!("two-builds/index.json has no row for {file}"))
+            .clone()
+    };
+
+    for (i, c) in cases.iter().enumerate() {
+        let platform = c["platform"].as_str().unwrap();
+        let line = c["line"].as_str().unwrap();
+        let ctx = format!("{platform} {line}");
+        let want = row_for(c["install"]["file"].as_str().unwrap());
+        let other = row_for(c["superseded"]["file"].as_str().unwrap());
+
+        // The fixture must actually pose the question: same version, two builds.
+        assert_eq!(
+            want["clickhouse_version"], other["clickhouse_version"],
+            "{ctx}: the two rows are different versions, so this proves nothing about builds"
+        );
+        let (wb, ob) = (
+            want["build"].as_u64().unwrap_or(0),
+            other["build"].as_u64().unwrap_or(0),
+        );
+        assert!(wb > ob, "{ctx}: the fixture's own case is upside down");
+
+        let dest = tmp(&format!("two-builds-{i}"));
+        let mut o = opts(&fx, "two-builds", &dest);
+        o.platform = Some(platform.to_string());
+        let installed = fetch::ensure(line, &o).unwrap_or_else(|e| panic!("{ctx}: {e}"));
+
+        let on_disk = sha256_file(&installed.library).expect("hash the installed library");
+        assert_eq!(
+            on_disk,
+            want["library_sha256"].as_str().unwrap(),
+            "{ctx}: installed library is not build {wb}"
+        );
+        assert_ne!(
+            on_disk,
+            other["library_sha256"].as_str().unwrap(),
+            "{ctx}: the SUPERSEDED build {ob} is what landed"
+        );
+    }
+}

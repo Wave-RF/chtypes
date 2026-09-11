@@ -49,6 +49,23 @@ type fixtureExpectations struct {
 		TrustedKeys   string  `json:"trusted_keys"` // "test" | "release"
 		Why           string  `json:"why"`
 	} `json:"verdicts"`
+	Builds struct {
+		Cases []struct {
+			Platform          string `json:"platform"`
+			Line              string `json:"line"`
+			ClickHouseVersion string `json:"clickhouse_version"`
+			Install           struct {
+				File   string `json:"file"`
+				SHA256 string `json:"sha256"`
+				Build  int    `json:"build"`
+			} `json:"install"`
+			Superseded struct {
+				File   string `json:"file"`
+				SHA256 string `json:"sha256"`
+				Build  int    `json:"build"`
+			} `json:"superseded"`
+		} `json:"cases"`
+	} `json:"builds"`
 }
 
 // fixtureDir locates spec/fixtures/fetch or skips loudly.
@@ -261,4 +278,82 @@ func TestFixturesLock(t *testing.T) {
 		t.Fatalf("exit %d", ExitCode(err))
 	}
 	noArtifactDirs(t, dest)
+}
+
+// TestFixturesRebuildInstallsTheHighestBuild walks expected.json's builds.cases
+// against the two-builds/ fixture, where one ClickHouse version is published
+// twice — the shape a rebuild leaves behind, and the shape the live release has
+// carried since builds existed.
+//
+// Resolving a line is therefore not a question about the ClickHouse version
+// alone: among rows of the newest version, the highest build wins. Until this,
+// nothing in any of the four suites covered that; the rule was pinned only by
+// unit tests of the comparator itself.
+//
+// The proof is the installed library's own bytes. Both rows carry the same
+// clickhouse_version, so a manifest check cannot separate them — their
+// library_sha256 differs, and the installed file is hashed in place. An
+// implementation that took the first matching row, or the older build, fails
+// here instead of passing quietly.
+func TestFixturesRebuildInstallsTheHighestBuild(t *testing.T) {
+	dir, exp := fixtureDir(t)
+	if len(exp.Builds.Cases) == 0 {
+		t.Skip("expected.json carries no builds.cases — regenerate the fixtures (chtypes-core: just fetch-fixtures)")
+	}
+	var index struct {
+		Artifacts []ReleaseArtifact `json:"artifacts"`
+	}
+	blob, err := os.ReadFile(filepath.Join(dir, "two-builds", "index.json"))
+	if err != nil {
+		t.Fatalf("two-builds/index.json: %v", err)
+	}
+	if err := json.Unmarshal(blob, &index); err != nil {
+		t.Fatalf("two-builds/index.json: %v", err)
+	}
+	rowFor := func(file string) *ReleaseArtifact {
+		for i := range index.Artifacts {
+			if index.Artifacts[i].File == file {
+				return &index.Artifacts[i]
+			}
+		}
+		return nil
+	}
+
+	for _, c := range exp.Builds.Cases {
+		c := c
+		t.Run(c.Platform+"/"+c.Line, func(t *testing.T) {
+			isolateEnv(t)
+			t.Setenv(envTrustedKeys, strings.Join(exp.TrustedKeys, ","))
+			want, other := rowFor(c.Install.File), rowFor(c.Superseded.File)
+			if want == nil || other == nil {
+				t.Fatalf("two-builds/index.json has no row for %s or %s", c.Install.File, c.Superseded.File)
+			}
+			if want.BuildNumber() <= other.BuildNumber() {
+				t.Fatalf("the fixture's own case is upside down: install b%d, superseded b%d", want.BuildNumber(), other.BuildNumber())
+			}
+			if want.ClickHouseVersion != other.ClickHouseVersion {
+				t.Fatalf("the two rows are different versions, so this proves nothing about builds: %s vs %s", want.ClickHouseVersion, other.ClickHouseVersion)
+			}
+
+			dest := t.TempDir()
+			inst, err := Ensure(context.Background(), c.Line, FetchOptions{
+				URL: "file://" + filepath.Join(dir, "two-builds"), Dest: dest, Platform: c.Platform,
+			})
+			if err != nil {
+				t.Fatalf("%s %s: %v", c.Platform, c.Line, err)
+			}
+			// The library on disk must be the HIGHER build's, byte for byte.
+			lib := filepath.Join(inst.Dir, inst.Library)
+			got, err := fileSHA256(lib)
+			if err != nil {
+				t.Fatalf("hash %s: %v", lib, err)
+			}
+			if got != want.LibrarySHA256 {
+				t.Fatalf("%s %s: installed library hashes %s, want build %d (%s)", c.Platform, c.Line, got, want.BuildNumber(), want.LibrarySHA256)
+			}
+			if got == other.LibrarySHA256 {
+				t.Fatalf("%s %s: the SUPERSEDED build %d is what landed", c.Platform, c.Line, other.BuildNumber())
+			}
+		})
+	}
 }

@@ -653,8 +653,12 @@ export function selectArtifact(index: ReleaseIndex, platform: string, req: Versi
       );
     }
   }
-  // A release should not carry two patches of one line; if it does, the newer one.
-  return hit.sort((a, b) => compareVersions(a.clickhouse_version, b.clickhouse_version))[hit.length - 1]!;
+  // A line can carry more than one row: two patches, or the same patch built
+  // twice (a release keeps the two highest builds per version). Take the newest
+  // by version and then by BUILD — never by list order, which is what a
+  // version-only comparison degrades to once two rows compare equal, because
+  // Array.prototype.sort is stable.
+  return hit.reduce((best, a) => (newerRow(a, best) ? a : best));
 }
 
 /**
