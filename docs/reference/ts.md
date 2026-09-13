@@ -40,6 +40,8 @@ The two are **peers**. A decline never satisfies `instanceof SchemaError`.
 | `Library#setDefaultSettings(settings)`              | `chs_set_default_settings`                                   | —                                                 | `ChtypesError` (refused **wholesale** with 115 + hint; reentrancy; a JS `number` value); `UnsupportedError`                                                        |
 | `Library#shutdown()`                                | `chs_shutdown`                                               | —                                                 | `ChtypesError` (reentrancy); a missing symbol is ignored                                                                                                           |
 
+`Registry`, `Schema`, `Filter` and `Block` have `Symbol.dispose`; **`Library` deliberately does not** — see `bindings.md` §Teardown. A `using library` closes at the end of a block, which is precisely the mid-lifecycle close that is measured to segfault on the next open.
+
 ## Schema
 
 | Symbol                                                      | C function                     | Params                                                                                            | Returns                                          | Errors                                                                                        |
