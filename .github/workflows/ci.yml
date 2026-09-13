@@ -107,8 +107,18 @@ jobs:
         run: cd go && go build ./... && go vet ./...
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
         run: scripts/check-standalone.sh --no-artifacts
+      # The census JSON is diagnostic: it is how a failure is READ, never how a
+      # verdict is reached — scripts/check-standalone.sh already decided, and
+      # this job's result does not depend on the upload landing. So the upload
+      # must not be able to fail a REQUIRED check. On 2026-09-13 the org's
+      # Actions artifact storage filled (97.6% one sibling repository) and every
+      # CreateArtifact in the org was refused; without this, `go` and
+      # `artifacts` both go red for a reason that has nothing to do with the
+      # SDK, and no pull request can land until storage frees days later.
+      # A genuine upload failure is still visible: the step itself shows red.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
+        continue-on-error: true
         with:
           name: check-standalone-json-no-artifacts
           path: scratch/check-standalone.json
@@ -195,8 +205,10 @@ jobs:
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: go — standalone check with the registry; TestGoldens must run
         run: scripts/check-standalone.sh --registry "$CHTYPES_REGISTRY" --require-artifacts
+      # Diagnostic, and must not fail this required job — see the `go` job above.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
+        continue-on-error: true
         with:
           name: check-standalone-json-artifacts
           path: scratch/check-standalone.json
