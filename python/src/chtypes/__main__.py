@@ -76,7 +76,9 @@ def build_parser() -> argparse.ArgumentParser:
     fetch = sub.add_parser(
         "fetch",
         help="install one or more ClickHouse lines, verified",
-        description="Install ClickHouse lines through the verification chain (docs/guides/fetch.md §3).",
+        description=(
+            "Install ClickHouse lines through the verification chain (docs/guides/fetch.md §3)."
+        ),
     )
     fetch.add_argument(
         "lines",

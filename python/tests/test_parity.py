@@ -127,7 +127,9 @@ def test_every_capability_is_fully_declared() -> None:
             problems.append(f"{cid}: duplicate id")
         seen.add(cid)
         if not cap.get("what", "").strip():
-            problems.append(f"{cid}: no `what` — a capability with no description is a name, not a contract")
+            problems.append(
+                f"{cid}: no `what` — a capability with no description is a name, not a contract"
+            )
         if cap.get("group") not in MANIFEST_DOC["groups"]:
             problems.append(f"{cid}: unknown group {cap.get('group')!r}")
 
@@ -135,7 +137,9 @@ def test_every_capability_is_fully_declared() -> None:
         for lang in MANIFEST_DOC["languages"]:
             col = column(cap, lang)
             if not col:
-                problems.append(f"{cid}: no {lang} column at all — declare a spelling or an absence")
+                problems.append(
+                    f"{cid}: no {lang} column at all — declare a spelling or an absence"
+                )
                 continue
             if "absent" in col:
                 absent += 1
@@ -148,7 +152,9 @@ def test_every_capability_is_fully_declared() -> None:
                 problems.append(f"{cid}: {lang} column has neither `symbol` nor `absent`")
         if absent == len(MANIFEST_DOC["languages"]):
             problems.append(f"{cid}: absent in every binding — that is a note, not a contract")
-    assert not problems, "the parity manifest is not internally consistent:\n  " + "\n  ".join(problems)
+    assert not problems, "the parity manifest is not internally consistent:\n  " + "\n  ".join(
+        problems
+    )
 
 
 def test_the_go_copy_of_the_manifest_is_byte_identical() -> None:
@@ -162,7 +168,8 @@ def test_the_go_copy_of_the_manifest_is_byte_identical() -> None:
     if GO_COPY.read_bytes() != MANIFEST.read_bytes():
         pytest.fail(
             f"{GO_COPY} has drifted from {MANIFEST}. The manifest is one file; this is its "
-            f"embedded copy. Re-sync it:\n\n    cp tests/parity/manifest.json go/chtypes/testdata/parity.json\n"
+            f"embedded copy. Re-sync it:\n\n    "
+            f"cp tests/parity/manifest.json go/chtypes/testdata/parity.json\n"
         )
 
 
@@ -285,7 +292,8 @@ def test_the_cli_offers_every_contract_subcommand() -> None:
     """`chtypes fetch|verify|list|where` is a surface too, and it drifted once."""
     source = (SRC / "__main__.py").read_text(encoding="utf-8")
     missing = [
-        f"{cap['id']}: the python CLI has no `{cap['value']}` subcommand, which {also_in(cap)} offer"
+        f"{cap['id']}: the python CLI has no `{cap['value']}` subcommand, "
+        f"which {also_in(cap)} offer"
         for cap in CAPABILITIES
         if cap["kind"] == "cli" and spelling(cap, LANG) and f'"{cap["value"]}"' not in source
     ]
@@ -334,8 +342,8 @@ def test_no_public_name_escapes_the_contract() -> None:
     assert not undeclared, (
         f"python exports {len(undeclared)} public name(s) the parity contract has never heard "
         f"of:\n  " + "\n  ".join(undeclared) + "\n\nEither give each one a capability in "
-        f"tests/parity/manifest.json (if the other bindings should have it too) or list it under "
-        f'`unlisted.python` with a reason (if it is deliberately ours alone).'
+        "tests/parity/manifest.json (if the other bindings should have it too) or list it under "
+        "`unlisted.python` with a reason (if it is deliberately ours alone)."
     )
 
 
@@ -397,8 +405,9 @@ def test_the_manifest_and_the_spec_table_agree() -> None:
     # assertion is about which COLUMNS exist, not about their alignment.
     squashed = re.sub(r"[ \t]+", " ", full)
     assert "| Concept | Go | Python | TypeScript | Rust |" in squashed, (
-        "docs/reference/bindings.md's object-model table has lost a language column. Every language is a peer "
-        "SDK over the same C ABI and the document says so in its own second paragraph; a table with "
+        "docs/reference/bindings.md's object-model table has lost a language "
+        "column. Every language is a peer SDK over the same C ABI and the "
+        "document says so in its own second paragraph; a table with "
         "three of the four columns is how Rust came to be described only in a Notes cell."
     )
 
@@ -420,10 +429,11 @@ def test_the_manifest_and_the_spec_table_agree() -> None:
                 undocumented.append(f"{cap['id']}: {lang} `{spelled}` — {cap['what']}")
     assert checked > 0, "no object-model spelling was compared against docs/reference/bindings.md"
     assert not undocumented, (
-        f"the parity manifest requires {len(undocumented)} spelling(s) that docs/reference/bindings.md never "
+        f"the parity manifest requires {len(undocumented)} spelling(s) that "
+        f"docs/reference/bindings.md never "
         f"names:\n  " + "\n  ".join(undocumented) + "\n\nEither document them there, or — if the "
-        f"capability should not be required at all — remove it from the manifest. The two are one "
-        f"contract stated twice."
+        "capability should not be required at all — remove it from the manifest. The two are one "
+        "contract stated twice."
     )
 
 

@@ -23,7 +23,10 @@ PLATFORM = "linux-arm64"
 
 needs_fixtures = pytest.mark.skipif(
     not EXPECTED_FILE.is_file(),
-    reason=f"no fetch fixtures at {FIXTURES} (generated in the core repository, docs/guides/fetch.md §9)",
+    reason=(
+        f"no fetch fixtures at {FIXTURES} "
+        "(generated in the core repository, docs/guides/fetch.md §9)"
+    ),
 )
 
 
