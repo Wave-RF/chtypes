@@ -133,8 +133,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: ruff, and the package imports
+        # ONE COMMAND PER LINE, deliberately. These were a single `&&` chain
+        # followed by a second line, and `bash -e` does NOT exit when a command
+        # inside an && list fails — only the last one in the list is subject to
+        # it. So `ruff check` failed, `ruff format` never ran, and the step's
+        # status became that of the LAST line (the import), which passes. This
+        # required check reported success while printing E501 errors into its
+        # own log, on every run. Measured 2026-09-14: eleven of them, back
+        # through at least three commits.
         run: |
-          cd python && uv sync --locked --group dev && uv run ruff check src tests && uv run ruff format --check src tests
+          cd python
+          uv sync --locked --group dev
+          uv run ruff check src tests
+          uv run ruff format --check src tests
           uv run python -c 'import chtypes; print("chtypes", chtypes.ABI_REVISION)'
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts python

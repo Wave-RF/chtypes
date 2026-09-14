@@ -179,7 +179,8 @@ class _RWLock:
 
     **Readers** are every call that reaches `chs_row`, `chs_rows`,
     `chs_schema_compile`, `chs_schema_engine`, `chs_schema_ttl`,
-    `chs_validate_type` and the column accessors. The C ABI contract §Thread-safety declares those safe together **on distinct handles**, so
+    `chs_validate_type` and the column accessors. The C ABI contract
+    §Thread-safety declares those safe together **on distinct handles**, so
     per-handle serialization is `Schema`'s own lock and not this one.
 
     **The writer** is the pair that mutates per-library PROCESS state —
