@@ -12,7 +12,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { Format, Registry, SchemaError, looksLikeRegistry, resolveRegistryDir } from '../src/index.js';
+import { Format, Registry, SchemaError, Verdict, looksLikeRegistry, resolveRegistryDir } from '../src/index.js';
+
+// The document spells a verdict in one wire character (`Verdict`); the golden
+// set spells it out, deliberately binding-agnostic — Go's verdictName and
+// Python's VERDICTS do the same translation before comparing.
+const VERDICT_NAMES: Record<Verdict, string> = {
+  [Verdict.True]: 'true',
+  [Verdict.False]: 'false',
+  [Verdict.Error]: 'error',
+  [Verdict.Decline]: 'decline',
+};
 
 // The set is SERVED, not tracked: core publishes sdk-goldens.json in the rolling
 // release as a row in the signed SHA256SUMS, so a fetch installs it beside the
@@ -138,7 +148,7 @@ describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
               const fr = filter.rows(format as never, body, c.settings);
               expect(fr.outcome).toBe('ok');
               expect(c.expect.outcome).toBe('ok');
-              expect(fr.verdicts).toEqual(c.expect.verdicts);
+              expect(fr.verdicts.map((v) => VERDICT_NAMES[v])).toEqual(c.expect.verdicts);
             } finally {
               filter.close();
             }

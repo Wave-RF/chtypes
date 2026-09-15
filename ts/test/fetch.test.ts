@@ -32,6 +32,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { EXIT, runCli, type CliIo } from '../src/cli.js';
 import {
   ArtifactCorruptError,
+  ArtifactError,
   ArtifactMissingError,
   ArtifactPinnedError,
   ArtifactUnpublishedError,
@@ -761,6 +762,30 @@ describe('the tar reader: files only, confined to the destination', () => {
     await expect(extractTarGz(corrupt, out)).rejects.toThrow(/checksum/);
     const notGzip = write('plain.tgz', Buffer.from('not a gzip stream'));
     await expect(extractTarGz(notGzip, out)).rejects.toThrow(ArtifactCorruptError);
+  });
+});
+
+// ------------------------------------------------------------- errors
+
+describe('ArtifactError: one catchable type for all six artifact conditions (chtypes-sdk#13 A3)', () => {
+  it('every artifact error is an ArtifactError and a RegistryError; the five verdicts stay FetchErrors too', () => {
+    const missing = new ArtifactMissingError('25.8', 'linux-arm64', ['/a']);
+    const verdicts = [
+      new ArtifactUntrustedError('untrusted'),
+      new ArtifactCorruptError('corrupt'),
+      new ArtifactPinnedError('pinned'),
+      new ArtifactUnpublishedError('unpublished'),
+      new SourceUnreachableError('unreachable'),
+    ];
+    for (const err of [missing, ...verdicts]) {
+      expect(err).toBeInstanceOf(ArtifactError);
+      expect(err).toBeInstanceOf(RegistryError);
+      expect(err).toBeInstanceOf(ChtypesError);
+    }
+    // The missing-artifact case is not a fetch verdict; the five verdicts are
+    // — that distinction still holds under the shared ArtifactError base.
+    expect(missing).not.toBeInstanceOf(FetchError);
+    for (const err of verdicts) expect(err).toBeInstanceOf(FetchError);
   });
 });
 

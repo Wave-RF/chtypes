@@ -186,6 +186,26 @@ export type ArtifactErrorCode =
   | typeof CODE_ARTIFACT_UNPUBLISHED
   | typeof CODE_SOURCE_UNREACHABLE;
 
+/**
+ * The single catchable type for every artifact-loading condition: a missing
+ * artifact (`ArtifactMissingError`) or one of the five fetch/verify verdicts
+ * (`FetchError`'s subclasses) — the six conditions docs/guides/fetch.md §3, §5
+ * and §7 name. A caller that wants "the loader could not produce a usable
+ * artifact" now catches exactly this one class, matching Python's
+ * `ArtifactError`, Go's `*ArtifactError` (`.Code`), and Rust's
+ * `Error::artifact_code()` (chtypes-sdk#13 A3, aligned 2026-09-15) — before
+ * this, `ArtifactMissingError` was a `RegistryError` while the other five
+ * were unrelated `FetchError`s, and a caller had to catch both types to
+ * cover all six conditions.
+ *
+ * A `RegistryError`, because every one of these is a reason the loader could
+ * not serve a version — `catch`es written against the pre-existing
+ * `RegistryError` contract keep working unchanged.
+ */
+export abstract class ArtifactError extends RegistryError {
+  abstract readonly code: ArtifactErrorCode;
+}
+
 /** The command this SDK's §7 message tells a user to run. */
 export const FETCH_COMMAND = 'npx @wavehouse/chtypes fetch';
 
@@ -211,10 +231,12 @@ export function artifactMissingMessage(line: string, platform: string, lookedIn:
  * contract's, and names every directory that was looked in and the command
  * that installs the line.
  *
- * A subclass of `RegistryError`, so a `catch` written against `for()`'s
- * documented error keeps working; the `code` is what a caller matches on.
+ * A subclass of `ArtifactError` (itself a `RegistryError`), so a `catch`
+ * written against `for()`'s documented `RegistryError`, or against the
+ * single catchable `ArtifactError`, both keep working; the `code` is what a
+ * caller matches on.
  */
-export class ArtifactMissingError extends RegistryError {
+export class ArtifactMissingError extends ArtifactError {
   readonly code = 'CHTYPES_ARTIFACT_MISSING' as const;
   /** The minor line that was asked for, e.g. `25.8`. */
   readonly line: string;
@@ -234,8 +256,13 @@ export class ArtifactMissingError extends RegistryError {
 /**
  * Base of the fetch-time verdicts (docs/guides/fetch.md §3–§7). `code` is one of the
  * shared codes; the subclasses exist so `instanceof` reads as well as `code`.
+ *
+ * An `ArtifactError`, alongside `ArtifactMissingError` — so `catch (err) { if
+ * (err instanceof ArtifactError) … }` handles all six artifact conditions in
+ * one arm, while `instanceof FetchError` still isolates these five verdicts
+ * from a missing artifact when that distinction matters.
  */
-export class FetchError extends ChtypesError {
+export class FetchError extends ArtifactError {
   readonly code: Exclude<ArtifactErrorCode, 'CHTYPES_ARTIFACT_MISSING'>;
 
   constructor(
