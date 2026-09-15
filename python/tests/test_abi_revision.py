@@ -8,8 +8,9 @@ mismatched declarations"). This suite is the first thing in this repository
 that actually RUNS that rule instead of assuming it.
 
 The fixture is a pair of stub shared libraries generated from `include/chtypes.h`
-itself (core's `tests/sdk/abi-fixtures/gen.py`): one registry whose artifact
-answers `abi_revision + 1` (`wrong-revision/`), one answering `abi_revision`
+itself, by the served ABI-revision fixture generator (`abi-revision/gen.py`):
+one registry whose artifact answers `abi_revision + 1` (`wrong-revision/`), one
+answering `abi_revision`
 exactly (`at-revision/`), both on ClickHouse minor line "0.0". **Both halves
 matter** — without the `at-revision` control, a binding whose own
 `ABI_REVISION` had drifted would refuse everything and pass the refusal case
@@ -44,8 +45,8 @@ import pytest
 
 import chtypes
 
-#: Where the fixture root lives. Set by `tests/sdk/abi-fixtures/gen.py build`
-#: (core repo); this suite never builds one itself.
+#: Where the fixture root lives. Built by the served abi-revision generator
+#: (`abi-revision/gen.py build`, core repo); this suite never builds one itself.
 ENV_ABI_FIXTURES: Final = "CHTYPES_ABI_FIXTURES"
 
 #: The one ClickHouse minor line every fixture artifact answers to.
@@ -97,6 +98,22 @@ def _names_number(message: str, n: int) -> bool:
     return re.search(rf"(^|[^0-9]){n}([^0-9]|$)", message) is not None
 
 
+def _without_fixture_path(message: str, root: Path) -> str:
+    """Strip every occurrence of the fixture root from a message before
+    `_names_number` checks it. The refusal message embeds the artifact's
+    PATH, and a path segment can itself hold a standalone digit (a scratchpad
+    session id such as `4d9fd784-...`), which would let the path alone
+    satisfy "the message names 4" for reasons that have nothing to do with
+    the refusal text itself. Both the given root and its resolved form are
+    stripped (macOS's `/tmp` vs `/private/tmp` differ), longest first so one
+    is never a partial match of the other.
+    """
+    candidates = sorted({str(root), os.path.realpath(root)}, key=len, reverse=True)
+    for candidate in candidates:
+        message = message.replace(candidate, "<fixture>")
+    return message
+
+
 def test_wrong_revision_is_refused(
     abi_fixture: dict,
     isolated_search_path: Path,
@@ -106,8 +123,9 @@ def test_wrong_revision_is_refused(
     with pytest.raises(chtypes.RegistryError) as excinfo:
         registry.for_version(FIXTURE_MINOR)
     message = str(excinfo.value)
+    stripped = _without_fixture_path(message, root)
     for n in (abi_fixture["mismatch_revision"], abi_fixture["abi_revision"]):
-        assert _names_number(message, n), f"the refusal does not name {n}: {message!r}"
+        assert _names_number(stripped, n), f"the refusal does not name {n}: {message!r}"
 
 
 def test_matching_revision_loads(
