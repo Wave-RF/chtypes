@@ -18,6 +18,8 @@ import "github.com/wave-rf/chtypes/go/chtypes"
 
 The default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing, includes no header, and needs no build tree. That is what `go get` gives a consumer, and it is all you need.
 
+**cgo is required to build, and glibc to run.** The package's untagged `import "C"` is a thin layer of C shims over each artifact's `chs_*` function table, so a build needs `CGO_ENABLED=1` and a C compiler on `PATH`. Go switches cgo off by itself when it finds no compiler or is cross-compiling, and the build then fails with `undefined: Registry`, which does not mention cgo. At run time the artifact is a shared object that needs only the C library (`libc`, `libm`, `libpthread`, `librt` and `libdl`) and carries its C++ runtime inside. glibc 2.29 or newer runs every published artifact; from ClickHouse 25.8 on, 2.17 is enough, while 24.8 and 25.3 need 2.29 on `linux-amd64` and 2.27 on `linux-arm64`. So a glibc image such as `gcr.io/distroless/base-debian12` or `debian:bookworm-slim` runs it, while `FROM scratch`, `gcr.io/distroless/static` and musl distributions such as Alpine cannot. Build in a glibc image that has a compiler, such as the Debian-based `golang` images.
+
 </details>
 
 <details><summary><b>Python</b></summary>
@@ -51,12 +53,7 @@ ESM only. Native calls go through `ffi-rs`, prebuilt for darwin arm64/x64 and li
 cargo add chtypes
 ```
 
-or in `Cargo.toml`:
-
-```toml
-[dependencies]
-chtypes = "0.1"
-```
+`cargo add` writes the current version into `Cargo.toml`. Before 1.0 a minor release may break the API, and Cargo's default version requirement never crosses a minor release on its own, so moving to a new one is another `cargo add chtypes`.
 
 The `fetch` feature is on by default and carries the `chtypes` binary, `ensure` and autofetch. `default-features = false` drops it and every dependency it brings, leaving the loader alone.
 
