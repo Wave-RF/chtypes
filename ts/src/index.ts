@@ -50,6 +50,7 @@ export {
 export {
   compareVersions,
   DEFAULT_ARTIFACTS_URL,
+  DEFAULT_LOCK_FILE,
   DEFAULT_RELEASE_TAG,
   ensure,
   ensureAll,
@@ -59,6 +60,7 @@ export {
   parseSignatureFile,
   parseVersionSpelling,
   readLock,
+  RELEASE_KEY_ID,
   RELEASE_PUBLIC_KEYS,
   resolvePlatform,
   selectAll,
@@ -80,6 +82,8 @@ export {
 } from './fetch.js';
 export {
   cacheRegistryDir,
+  ENV_AUTOFETCH,
+  ENV_REGISTRY,
   fetchDestination,
   hostPlatform,
   isPlatformKey,

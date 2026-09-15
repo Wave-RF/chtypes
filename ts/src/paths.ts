@@ -19,6 +19,12 @@
 import os from 'node:os';
 import path from 'node:path';
 
+/** The environment variable naming an explicit registry (§1 item 2). */
+export const ENV_REGISTRY = 'CHTYPES_REGISTRY';
+
+/** The environment variable that turns lazy fetch on for every registry (docs/guides/fetch.md §6). */
+export const ENV_AUTOFETCH = 'CHTYPES_AUTOFETCH';
+
 /**
  * This host's platform key, `<os>-<arch>` in the artifact spellings
  * (`linux`/`darwin`, `arm64`/`amd64`), e.g. `darwin-arm64`.
@@ -58,7 +64,7 @@ export function systemRegistryDirs(platform: string = hostPlatform()): string[] 
 export function registrySearchPath(explicit?: string, platform: string = hostPlatform()): string[] {
   const out: string[] = [];
   if (explicit !== undefined && explicit !== '') out.push(path.resolve(explicit));
-  const env = process.env['CHTYPES_REGISTRY'];
+  const env = process.env[ENV_REGISTRY];
   if (env !== undefined && env !== '') out.push(path.resolve(env));
   out.push(cacheRegistryDir(platform), ...systemRegistryDirs(platform));
   return [...new Set(out)];
@@ -75,7 +81,7 @@ export function registrySearchPath(explicit?: string, platform: string = hostPla
  */
 export function fetchDestination(explicit?: string, platform: string = hostPlatform()): string {
   if (explicit !== undefined && explicit !== '') return path.resolve(explicit);
-  const env = process.env['CHTYPES_REGISTRY'];
+  const env = process.env[ENV_REGISTRY];
   if (env !== undefined && env !== '' && platform === hostPlatform()) return path.resolve(env);
   return cacheRegistryDir(platform);
 }

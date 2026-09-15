@@ -13,6 +13,9 @@ use crate::error::{Error, Result};
 /// The lock file's default name, for `--frozen` without `--lock`.
 pub const DEFAULT_LOCK_FILE: &str = "chtypes.lock";
 
+/// The lock file schema every SDK reads and writes.
+pub const LOCK_SCHEMA: u64 = 1;
+
 /// One pinned asset.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockEntry {
@@ -49,10 +52,10 @@ impl LockFile {
                     serde_json::from_slice(&bytes).map_err(|e| Error::Fetch {
                         message: format!("lock file {}: {e}", path.display()),
                     })?;
-                if lock.schema != 1 {
+                if lock.schema != LOCK_SCHEMA {
                     return Err(Error::Fetch {
                         message: format!(
-                            "lock file {} is schema {}, and this crate reads schema 1",
+                            "lock file {} is schema {}, and this crate reads schema {LOCK_SCHEMA}",
                             path.display(),
                             lock.schema
                         ),
@@ -62,7 +65,7 @@ impl LockFile {
                 Ok(lock)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && !must_exist => Ok(LockFile {
-                schema: 1,
+                schema: LOCK_SCHEMA,
                 artifacts: BTreeMap::new(),
                 path: path.to_path_buf(),
             }),

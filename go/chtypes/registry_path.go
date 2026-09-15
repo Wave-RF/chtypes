@@ -24,9 +24,16 @@ import (
 	"runtime"
 )
 
+// EnvRegistry is the environment variable naming an explicit registry
+// directory (§1 item 2) — what a caller sets instead of passing one to
+// NewRegistry.
+const EnvRegistry = "CHTYPES_REGISTRY"
+
+// EnvAutoFetch is the environment variable that turns lazy fetch on for
+// every registry (docs/guides/fetch.md §6) when set to "1".
+const EnvAutoFetch = "CHTYPES_AUTOFETCH"
+
 const (
-	envRegistry     = "CHTYPES_REGISTRY"
-	envAutoFetch    = "CHTYPES_AUTOFETCH"
 	envTrustedKeys  = "CHTYPES_TRUSTED_KEYS"
 	envAllowUnsign  = "CHTYPES_ALLOW_UNSIGNED"
 	envArtifactsURL = "CHTYPES_ARTIFACTS_URL"
@@ -79,7 +86,7 @@ func RegistrySearchPath(explicit string) []string {
 }
 
 func registrySearchPathFor(explicit, platform string) []string {
-	cands := []string{explicit, os.Getenv(envRegistry), DefaultRegistryDirFor(platform)}
+	cands := []string{explicit, os.Getenv(EnvRegistry), DefaultRegistryDirFor(platform)}
 	cands = append(cands, SystemRegistryDirs(platform)...)
 	seen := map[string]bool{}
 	var out []string
@@ -104,7 +111,7 @@ func fetchRegistryDirFor(explicit, platform string) string {
 	if explicit != "" {
 		return explicit
 	}
-	if env := os.Getenv(envRegistry); env != "" {
+	if env := os.Getenv(EnvRegistry); env != "" {
 		return env
 	}
 	return DefaultRegistryDirFor(platform)

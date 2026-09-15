@@ -14,6 +14,7 @@ __all__ = [
     "CODE_ARTIFACT_UNTRUSTED",
     "CODE_SOURCE_UNREACHABLE",
     "CODE_UNSUPPORTED",
+    "FETCH_COMMAND",
     "ArtifactCorruptError",
     "ArtifactError",
     "ArtifactMissingError",
@@ -70,6 +71,11 @@ CODE_ARTIFACT_PINNED: Final = "CHTYPES_ARTIFACT_PINNED"
 CODE_ARTIFACT_UNPUBLISHED: Final = "CHTYPES_ARTIFACT_UNPUBLISHED"
 CODE_SOURCE_UNREACHABLE: Final = "CHTYPES_SOURCE_UNREACHABLE"
 
+# This SDK's own fetch command, as the docs/guides/fetch.md §7 "Install it" message
+# spells it. The VALUE is deliberately per-language — it is the command a
+# caller of THIS SDK runs — go/ts/rust each carry their own equivalent.
+FETCH_COMMAND: Final = "python -m chtypes fetch"
+
 
 class ArtifactError(RegistryError):
     """An artifact is missing, could not be obtained, or failed verification.
@@ -123,7 +129,7 @@ class ArtifactMissingError(ArtifactError):
         super().__init__(
             f"chtypes: no artifact for ClickHouse {line} ({platform}). "
             f"Looked in: {', '.join(self.looked_in)}.\n"
-            f"Install it:  python -m chtypes fetch {line}\n"
+            f"Install it:  {FETCH_COMMAND} {line}\n"
             f"or set CHTYPES_AUTOFETCH=1 to fetch on first use."
         )
 

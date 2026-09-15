@@ -189,7 +189,7 @@ func TestRegistryFallsThroughTheSearchPath(t *testing.T) {
 		t.Skipf("need two installed lines under %s, have %d", root, len(installed))
 	}
 	isolateEnv(t)
-	t.Setenv(envRegistry, root)
+	t.Setenv(EnvRegistry, root)
 	small := smallestInstalled(t)
 	explicit := t.TempDir()
 	// Copy the smallest line into the explicit directory (a second image of
@@ -219,7 +219,7 @@ func TestRegistryFallsThroughTheSearchPath(t *testing.T) {
 	}
 	lib, err := reg.For(Version(other.Line))
 	if err != nil {
-		t.Fatalf("fallthrough to %s: %v", envRegistry, err)
+		t.Fatalf("fallthrough to %s: %v", EnvRegistry, err)
 	}
 	if lib.Minor != other.Line || !strings.HasPrefix(lib.Path, root) {
 		t.Fatalf("got %s from %s", lib.Minor, lib.Path)

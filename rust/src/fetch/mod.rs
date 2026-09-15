@@ -17,7 +17,7 @@ mod trust;
 
 use std::path::{Path, PathBuf};
 
-pub use lock::{DEFAULT_LOCK_FILE, LockEntry, LockFile, lock_key};
+pub use lock::{DEFAULT_LOCK_FILE, LOCK_SCHEMA, LockEntry, LockFile, lock_key};
 pub use release::IndexRow;
 pub use source::{ARTIFACTS_URL_ENV, DEFAULT_ARTIFACTS_URL, DEFAULT_TAG, DOWNLOAD_TOKEN_ENV};
 pub use trust::{
