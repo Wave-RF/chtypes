@@ -20,6 +20,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Notes
 
+- Speaks **ABI revision 4**, unchanged since 0.1.0, so no artifact needs relinking. The golden set this release was tested against is the one core serves, generated on the ClickHouse lines 24.8, 25.3, 25.8, 25.10, 26.2, 26.3, 26.4, 26.5, 26.6, 26.7 and 26.8.
 - `Library` still has no scope-based release in Python or TypeScript, while `Registry`, `Schema`, `Filter` and `Block` do. That asymmetry is deliberate — a `with library:` or `using library` closes at the end of a block, which is the mid-lifecycle teardown measured to segfault on the next open — and it is now recorded in the parity manifest so no future audit reopens it as a gap.
 
 - **`RegistryOptions` gained a public field** (`verify_checksums`), so an exhaustive struct literal that does not end with `..Default::default()` no longer compiles. This is the only source-breaking change in the Rust crate besides the verdict characters.
