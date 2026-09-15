@@ -82,7 +82,7 @@
       "group": "registry",
       "kind": "property",
       "what": "The directories this registry consults, in order — what an ArtifactMissing error has to be able to name",
-      "go": {"absent": "The Go registry keeps its search path unexported and renders it into the ErrArtifactMissing message instead. NEEDS A DECISION: the other three expose it as an accessor, so a Go caller cannot print the path it is about to be told is empty."},
+      "go": "Registry.SearchPath",
       "python": "Registry.search_path",
       "ts": "Registry.searchPath",
       "rust": "Registry::search_path"
@@ -1147,7 +1147,7 @@
       "id": "fetch.parse-signature-file",
       "group": "fetch", "kind": "function",
       "what": "Split SHA256SUMS.sig into its comment and its raw signature",
-      "go": "ParseSignatureFile", "python": {"absent": "Python keeps signature parsing private (_parse_signature) and exposes only verify_sums_signature. NEEDS A DECISION \u2014 Go, TS and Rust export the splitter."}, "ts": "parseSignatureFile", "rust": "fetch::parse_signature_file"
+      "go": "ParseSignatureFile", "python": "fetch.parse_signature_file", "ts": "parseSignatureFile", "rust": "fetch::parse_signature_file"
     },
     {
       "id": "fetch.read-lock",
@@ -1159,7 +1159,7 @@
       "id": "fetch.release-key-id",
       "group": "fetch", "kind": "constant", "value": "deb275922dbff76e",
       "what": "The release key's short id — identical in all four, or one SDK trusts a key the others do not",
-      "go": "ReleaseKeyID", "python": "RELEASE_KEY_ID", "ts": {"absent": "TS carries RELEASE_PUBLIC_KEYS (a list, for rotation) and derives the id with keyId(); it exports no precomputed id constant. NEEDS A DECISION: the other three export one."}, "rust": "fetch::RELEASE_KEY_ID"
+      "go": "ReleaseKeyID", "python": "RELEASE_KEY_ID", "ts": "RELEASE_KEY_ID", "rust": "fetch::RELEASE_KEY_ID"
     },
     {
       "id": "fetch.release-public-key",
@@ -1183,33 +1183,33 @@
       "id": "fetch.default-lock-file",
       "group": "fetch", "kind": "constant", "value": "chtypes.lock",
       "what": "The file --frozen reads when --lock names none",
-      "go": "DefaultLockFile", "python": "fetch.DEFAULT_LOCK_FILE", "ts": {"absent": "TS's readLock takes the path explicitly and its CLI spells the default inline; it exports no constant. NEEDS A DECISION — the other three export one."}, "rust": "fetch::DEFAULT_LOCK_FILE"
+      "go": "DefaultLockFile", "python": "fetch.DEFAULT_LOCK_FILE", "ts": "DEFAULT_LOCK_FILE", "rust": "fetch::DEFAULT_LOCK_FILE"
     },
     {
       "id": "fetch.lock-schema",
       "group": "fetch", "kind": "constant", "value": 1,
       "what": "The lock file schema every SDK reads and writes",
-      "go": "LockSchema", "python": "fetch.LOCK_SCHEMA", "ts": "LOCK_SCHEMA", "rust": {"absent": "The Rust lock reader validates the schema number inside LockFile rather than exporting it. NEEDS A DECISION — the other three export it."}
+      "go": "LockSchema", "python": "fetch.LOCK_SCHEMA", "ts": "LOCK_SCHEMA", "rust": "fetch::LOCK_SCHEMA"
     },
     {
       "id": "fetch.env-registry",
       "group": "fetch", "kind": "constant", "value": "CHTYPES_REGISTRY",
       "what": "The environment variable naming an explicit registry (docs/guides/fetch.md §1)",
-      "go": {"absent": "Go spells the name inline in RegistrySearchPath and exports no constant for it. NEEDS A DECISION — the other three export one."},
-      "python": "ENV_REGISTRY", "ts": {"absent": "TS spells the name inline in resolveRegistryDir. NEEDS A DECISION."}, "rust": "REGISTRY_ENV"
+      "go": "EnvRegistry",
+      "python": "ENV_REGISTRY", "ts": "ENV_REGISTRY", "rust": "REGISTRY_ENV"
     },
     {
       "id": "fetch.env-autofetch",
       "group": "fetch", "kind": "constant", "value": "CHTYPES_AUTOFETCH",
       "what": "The environment variable turning lazy fetch on (docs/guides/fetch.md §6)",
-      "go": {"absent": "Spelled inline; see fetch.env-registry."},
-      "python": "ENV_AUTOFETCH", "ts": {"absent": "Spelled inline; see fetch.env-registry."}, "rust": "AUTOFETCH_ENV"
+      "go": "EnvAutoFetch",
+      "python": "ENV_AUTOFETCH", "ts": "ENV_AUTOFETCH", "rust": "AUTOFETCH_ENV"
     },
     {
       "id": "fetch.command",
       "group": "fetch", "kind": "constant",
       "what": "This SDK's own fetch command, as the docs/guides/fetch.md §7 message spells it. The VALUE is deliberately per-language — it is the command a caller of THIS SDK runs",
-      "go": "GoFetchCommand", "python": {"absent": "The Python message builds the command inline in errors.py's ArtifactMissingError. NEEDS A DECISION — Go, TS and Rust export it."}, "ts": "FETCH_COMMAND", "rust": "FETCH_COMMAND"
+      "go": "GoFetchCommand", "python": "FETCH_COMMAND", "ts": "FETCH_COMMAND", "rust": "FETCH_COMMAND"
     },
 
     {

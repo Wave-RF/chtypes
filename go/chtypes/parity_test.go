@@ -371,6 +371,8 @@ var goValues = map[string]any{
 	"DefaultReleaseTag":   chtypes.DefaultReleaseTag,
 	"DefaultLockFile":     chtypes.DefaultLockFile,
 	"LockSchema":          chtypes.LockSchema,
+	"EnvRegistry":         chtypes.EnvRegistry,
+	"EnvAutoFetch":        chtypes.EnvAutoFetch,
 }
 
 // ---------------------------------------------------------------------- tests

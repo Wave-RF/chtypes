@@ -79,6 +79,7 @@ __all__ = [
     "fetch_lines",
     "fetch_destination",
     "installed_lines",
+    "parse_signature_file",
     "read_lock",
     "registry_search_path",
     "trusted_keys",
@@ -258,7 +259,7 @@ def key_id(raw_public_key: bytes) -> str:
     return hashlib.sha256(raw_public_key).hexdigest()[:16]
 
 
-def _parse_signature(sig: bytes) -> tuple[str, bytes]:
+def parse_signature_file(sig: bytes) -> tuple[str, bytes]:
     """``SHA256SUMS.sig`` -> (the comment line, the 64 signature bytes)."""
     comment = ""
     body: list[str] = []
@@ -285,7 +286,7 @@ def verify_sums_signature(sums: bytes, sig: bytes, keys: Sequence[bytes], source
     """Step 0 of the chain: the signature over the EXACT bytes of ``SHA256SUMS``
     with one of the trusted keys. Returns the id of the key that verified;
     raises `ArtifactUntrustedError` otherwise."""
-    comment, signature = _parse_signature(sig)
+    comment, signature = parse_signature_file(sig)
     for raw in keys:
         if _ed25519_verify(raw, sums, signature):
             return key_id(raw)

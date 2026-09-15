@@ -40,7 +40,7 @@ import (
 func isolateEnv(t *testing.T) string {
 	t.Helper()
 	cache := t.TempDir()
-	for _, k := range []string{envRegistry, envAutoFetch, envTrustedKeys, envAllowUnsign, envTarget, envArtifactsURL, envDownloadTok} {
+	for _, k := range []string{EnvRegistry, EnvAutoFetch, envTrustedKeys, envAllowUnsign, envTarget, envArtifactsURL, envDownloadTok} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("XDG_CACHE_HOME", cache)
@@ -870,7 +870,7 @@ func TestFetchCrossPlatformDest(t *testing.T) {
 	writeRelease(t, rel, priv, fakeArtifact(other, "25.8.28.1-lts"))
 	// $CHTYPES_REGISTRY is a directory this host dlopens from; a fetch for
 	// another platform must not write there, only into that platform's cache.
-	t.Setenv(envRegistry, filepath.Join(t.TempDir(), "hostreg"))
+	t.Setenv(EnvRegistry, filepath.Join(t.TempDir(), "hostreg"))
 	var progress bytes.Buffer
 	inst, err := Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Platform: other, Progress: &progress})
 	if err != nil {
@@ -884,7 +884,7 @@ func TestFetchCrossPlatformDest(t *testing.T) {
 		t.Fatalf("no cross-platform note:\n%s", progress.String())
 	}
 	// For this host, $CHTYPES_REGISTRY is where a fetch writes (§1).
-	if got := FetchRegistryDir(""); got != os.Getenv(envRegistry) {
+	if got := FetchRegistryDir(""); got != os.Getenv(EnvRegistry) {
 		t.Fatalf("FetchRegistryDir = %s", got)
 	}
 	if _, err := Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Platform: "windows-amd64"}); err == nil {
@@ -929,7 +929,7 @@ func TestRegistrySearchPathOrder(t *testing.T) {
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("search path = %v, want %v", got, want)
 	}
-	t.Setenv(envRegistry, "/env/reg")
+	t.Setenv(EnvRegistry, "/env/reg")
 	got = RegistrySearchPath("/explicit")
 	want = append([]string{"/explicit", "/env/reg", cacheDir}, sys...)
 	if strings.Join(got, "|") != strings.Join(want, "|") {
@@ -942,7 +942,7 @@ func TestRegistrySearchPathOrder(t *testing.T) {
 	if FetchRegistryDir("") != "/env/reg" || FetchRegistryDir("/x") != "/x" {
 		t.Fatal("FetchRegistryDir")
 	}
-	t.Setenv(envRegistry, "")
+	t.Setenv(EnvRegistry, "")
 	if FetchRegistryDir("") != cacheDir || DefaultRegistryDir() != cacheDir {
 		t.Fatalf("FetchRegistryDir = %s, DefaultRegistryDir = %s, want %s", FetchRegistryDir(""), DefaultRegistryDir(), cacheDir)
 	}
@@ -1038,7 +1038,7 @@ func TestAutoFetchFailureIsTheFetchError(t *testing.T) {
 	_, err = reg.For("25.8")
 	wantCode(t, err, CodeSourceUnreachable)
 	// The env spelling turns it on too.
-	t.Setenv(envAutoFetch, "1")
+	t.Setenv(EnvAutoFetch, "1")
 	reg, err = NewRegistry(dest, WithFetchOptions(FetchOptions{URL: url}))
 	if err != nil {
 		t.Fatal(err)

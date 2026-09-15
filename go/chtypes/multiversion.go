@@ -456,7 +456,7 @@ func NewRegistry(dir string, opts ...RegistryOption) (*Registry, error) {
 	for _, o := range opts {
 		o(r)
 	}
-	if os.Getenv(envAutoFetch) == "1" {
+	if os.Getenv(EnvAutoFetch) == "1" {
 		r.autoFetch = true
 	}
 	r.search = RegistrySearchPath(dir)
@@ -675,6 +675,16 @@ func (r *Registry) Versions() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.versionsLocked()
+}
+
+// SearchPath is the §1 directories this registry consults, in order — the
+// same list an ArtifactMissing error names as "Looked in", so a caller can
+// print the path it is about to be told is empty. Set once at construction
+// and never mutated after, so no lock is needed.
+func (r *Registry) SearchPath() []string {
+	out := make([]string, len(r.search))
+	copy(out, r.search)
+	return out
 }
 
 // Libraries lists the libraries this registry has actually LOADED, one per

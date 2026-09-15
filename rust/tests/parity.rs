@@ -495,6 +495,7 @@ fn rust_values() -> BTreeMap<&'static str, Val> {
             "fetch::DEFAULT_LOCK_FILE",
             s(chtypes::fetch::DEFAULT_LOCK_FILE),
         );
+        m.insert("fetch::LOCK_SCHEMA", i(chtypes::fetch::LOCK_SCHEMA as i64));
     }
     m.insert("REGISTRY_ENV", s(chtypes::REGISTRY_ENV));
     m.insert("AUTOFETCH_ENV", s(chtypes::AUTOFETCH_ENV));
