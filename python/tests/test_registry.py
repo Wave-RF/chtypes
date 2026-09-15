@@ -178,6 +178,29 @@ def test_manifest_ignores_unknown_fields(tmp_path: Path) -> None:
     assert manifest.library == "libchtypes.so"
 
 
+def test_verify_library_accepts_an_uppercase_digest(tmp_path: Path) -> None:
+    """A hex digest is the same digest in either case.
+
+    Go lower-cases (`strings.ToLower`) and Rust lower-cases
+    (`.to_ascii_lowercase()`) before comparing; Python and TypeScript once
+    compared raw, so an uppercase `library_sha256` was accepted by two
+    bindings and refused by two. docs/reference/artifact.md asserts all four
+    behave alike, so this pins it.
+    """
+    payload = b"not really a library"
+    (tmp_path / "fake.so").write_bytes(payload)
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "library": "fake.so",
+                "library_bytes": len(payload),
+                "library_sha256": hashlib.sha256(payload).hexdigest().upper(),
+            }
+        )
+    )
+    chtypes.verify_library(tmp_path)  # must NOT raise
+
+
 def test_verify_library_checks_the_bytes(tmp_path: Path) -> None:
     payload = b"not really a library"
     (tmp_path / "fake.so").write_bytes(payload)

@@ -205,6 +205,90 @@ fn the_registry_loads_and_libraries_name_themselves() {
     );
 }
 
+/// `RegistryOptions::verify_checksums` against real bytes
+/// (`docs/reference/artifact.md` §Verification).
+///
+/// Two halves, because a load that succeeds proves nothing on its own — it
+/// would succeed just as well if the check never ran. The second half hashes
+/// the same real library under a manifest that claims a different digest, and
+/// asserts the refusal carries the artifact's OWN sha256: only a hash that
+/// actually streamed those 200-odd megabytes can produce that string.
+#[test]
+fn a_verified_registry_hashes_the_real_artifact_before_it_loads() {
+    let reg = registry!();
+    let lib = primary(reg);
+    let dir = lib
+        .path()
+        .parent()
+        .expect("artifact directory")
+        .to_path_buf();
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
+    let recorded = manifest["library_sha256"]
+        .as_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if recorded.is_empty() {
+        announce(&format!(
+            "\nSKIP {}: {} records no library_sha256\n",
+            test_name!(),
+            dir.display()
+        ));
+        return;
+    }
+
+    // The real registry with verification on: the artifact's own bytes are
+    // re-hashed and the line opens. dlopen refcounts one image per path, so
+    // this shares the library the suite already holds rather than mapping a
+    // second copy of it.
+    let verified = Registry::from_search_path_with(chtypes::RegistryOptions {
+        dir: Some(registry_dir()),
+        verify_checksums: true,
+        ..Default::default()
+    });
+    let same = verified
+        .for_version(lib.minor())
+        .expect("a real artifact must survive its own checksum");
+    assert_eq!(same.version(), lib.version());
+
+    // The same library, hard-linked so the bytes are the artifact's own, under
+    // a manifest that claims a digest of zeros.
+    let tmp = std::env::temp_dir().join(format!("chtypes-rs-verify-real-{}", std::process::id()));
+    let sub = tmp.join(lib.minor());
+    std::fs::create_dir_all(&sub).unwrap();
+    let linked = sub.join(lib.path().file_name().unwrap());
+    if std::fs::hard_link(lib.path(), &linked).is_err() {
+        announce(&format!(
+            "\nSKIP {}: cannot hard-link {} into {}\n",
+            test_name!(),
+            lib.path().display(),
+            sub.display()
+        ));
+        std::fs::remove_dir_all(&tmp).ok();
+        return;
+    }
+    let mut tampered = manifest.clone();
+    tampered["library_sha256"] = serde_json::Value::String("00".repeat(32));
+    std::fs::write(sub.join("manifest.json"), tampered.to_string()).unwrap();
+
+    let bad = Registry::from_search_path_with(chtypes::RegistryOptions {
+        dir: Some(tmp.clone()),
+        verify_checksums: true,
+        ..Default::default()
+    });
+    let err = bad
+        .for_version(lib.minor())
+        .expect_err("a manifest claiming the wrong digest must refuse");
+    match &err {
+        chtypes::Error::ChecksumMismatch { actual, .. } => assert_eq!(
+            *actual, recorded,
+            "the refusal must carry the digest it computed over the real bytes"
+        ),
+        other => panic!("want a checksum refusal before dlopen, got {other:?}"),
+    }
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
 #[test]
 fn version_resolution_accepts_a_minor_line_a_patch_and_a_drifted_patch() {
     let reg = registry!();

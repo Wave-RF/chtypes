@@ -251,6 +251,14 @@ export function keyId(rawKeyHex: string): string {
 }
 
 /**
+ * `keyId(RELEASE_PUBLIC_KEYS[0])`, precomputed — the id the signature file's
+ * comment line names for the primary release key. `RELEASE_PUBLIC_KEYS` stays
+ * the list to verify against (rotation adds a second entry); this is the one
+ * short id go/python/rust each export as a scalar constant.
+ */
+export const RELEASE_KEY_ID: string = keyId(RELEASE_PUBLIC_KEYS[0]!);
+
+/**
  * Verify an ed25519 signature over `message` with a raw public key, through
  * `node:crypto` — the key wrapped as SPKI DER, the 64-byte signature as is.
  * False, never a throw, for a malformed key or signature.

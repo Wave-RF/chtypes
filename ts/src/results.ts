@@ -466,34 +466,38 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
 /**
  * One row's answer from `Filter#rows`. Two of the four states are ANSWERS and
  * two are NOT, and the split is load-bearing: a caller enforcing visibility
- * MUST fail closed (hide the row / fail the request) on `'error'` AND
- * `'decline'` — collapsing either into `'false'`-the-answer inverts
+ * MUST fail closed (hide the row / fail the request) on `'e'` AND
+ * `'d'` — collapsing either into `'f'`-the-answer inverts
  * fail-closed into fail-open under NOT, the measured leak class
  * (docs/reference/bindings.md §Revision 3).
  *
- * - `'true'`    the predicate is non-NULL and non-zero for this row.
- * - `'false'`   false OR NULL — SQL's three-valued logic collapsed at the
- *               WHERE boundary, computed by the vendored functions.
- * - `'error'`   the predicate THREW on this row's values (e.g. NO_COMMON_TYPE
- *               386 from `s = 257` over String). On a real server a WHERE
- *               that throws fails the WHOLE query. NOT an answer.
- * - `'decline'` this library declines to answer for this row — unparseable
- *               under the schema, poisoned, or the admission envelope
- *               tripped. NOT an answer, and the state an unknown verdict
- *               character degrades to.
+ * Rendered as the wire character the C result document carries — the same
+ * spelling Go and Python use — rather than a word (docs/reference/bindings.md
+ * §Revision 3; aligned 2026-09-15, chtypes-sdk#13 A1).
+ *
+ * - `'t'` the predicate is non-NULL and non-zero for this row.
+ * - `'f'` false OR NULL — SQL's three-valued logic collapsed at the
+ *         WHERE boundary, computed by the vendored functions.
+ * - `'e'` the predicate THREW on this row's values (e.g. NO_COMMON_TYPE
+ *         386 from `s = 257` over String). On a real server a WHERE
+ *         that throws fails the WHOLE query. NOT an answer.
+ * - `'d'` this library declines to answer for this row — unparseable
+ *         under the schema, poisoned, or the admission envelope
+ *         tripped. NOT an answer, and the state an unknown verdict
+ *         character degrades to.
  */
 export const Verdict = {
-  True: 'true',
-  False: 'false',
-  Error: 'error',
-  Decline: 'decline',
+  True: 't',
+  False: 'f',
+  Error: 'e',
+  Decline: 'd',
 } as const;
 export type Verdict = (typeof Verdict)[keyof typeof Verdict];
 
-/** Whether a verdict is an ANSWER (`'true'`/`'false'`) rather than an error
+/** Whether a verdict is an ANSWER (`'t'`/`'f'`) rather than an error
  * or a decline. A security-enforcing caller hides the row when this is false. */
 export function isAnswer(v: Verdict): boolean {
-  return v === 'true' || v === 'false';
+  return v === 't' || v === 'f';
 }
 
 /**
@@ -525,7 +529,7 @@ export const DefaultKind = {
 } as const;
 export type DefaultKind = (typeof DefaultKind)[keyof typeof DefaultKind];
 
-/** One `'error'` or `'decline'` row, itemized: its 0-based index and the code
+/** One `'e'` or `'d'` row, itemized: its 0-based index and the code
  * and message verbatim — ClickHouse's own for an error row, this library's
  * decline otherwise. */
 export interface FilterRowError {
@@ -553,7 +557,7 @@ export interface FilterResult {
    * resync tails after a bad text row.
    */
   readonly verdicts: Verdict[];
-  /** Every `'error'` and `'decline'` row, itemized. */
+  /** Every `'e'` and `'d'` row, itemized. */
   readonly errors: FilterRowError[];
 }
 
@@ -577,18 +581,18 @@ export function filterResultOf(doc: Json): FilterResult {
   for (const ch of asString(field(doc, 'verdicts'))) {
     switch (ch) {
       case 't':
-        verdicts.push('true');
+        verdicts.push('t');
         break;
       case 'f':
-        verdicts.push('false');
+        verdicts.push('f');
         break;
       case 'e':
-        verdicts.push('error');
+        verdicts.push('e');
         break;
       default:
         // 'd', and any character this binding does not know: decline — fail
         // closed, mirroring the unknown-outcome rule.
-        verdicts.push('decline');
+        verdicts.push('d');
     }
   }
   const errors: FilterRowError[] = items(field(doc, 'errors')).map((e) => ({

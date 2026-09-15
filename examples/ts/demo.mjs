@@ -1280,7 +1280,7 @@ function section16(lib) {
     const hostileOk =
       hr.outcome === 'ok' &&
       hr.verdicts.length === 3 &&
-      hr.verdicts[0] === 'false' && hr.verdicts[1] === 'false' && hr.verdicts[2] === 'true';
+      hr.verdicts[0] === 'f' && hr.verdicts[1] === 'f' && hr.verdicts[2] === 't';
     kv("t = `' OR 1=1 --` (hostile)", `verdicts ${verdictString(hr)}   hostile-value-inert: ${hostileOk}`);
     note('the value became a typed LITERAL after SQL parsing — it matches');
     note('only the row holding exactly that string; no OR 1=1 semantics,');
@@ -1334,7 +1334,7 @@ function section16(lib) {
 }
 
 // verdictString renders a FilterResult's verdicts as the document's compact
-// t/f/e/d string ('true' -> t, 'false' -> f, 'error' -> e, 'decline' -> d).
+// t/f/e/d string — each verdict is already exactly that wire character.
 function verdictString(fr) {
   if (fr.outcome !== 'ok') {
     return `(call-level: outcome=${fr.outcome} code=${fr.errCode} ${truncate(fr.errMsg, 40)})`;

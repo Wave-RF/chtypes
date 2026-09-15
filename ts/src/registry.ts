@@ -34,7 +34,15 @@ import { ArtifactMissingError, FETCH_COMMAND, RegistryError } from './errors.js'
 import { ensure, type EnsureOptions } from './fetch.js';
 import { NativeLibrary } from './ffi.js';
 import { Library, minorOf } from './library.js';
-import { cacheRegistryDir, fetchDestination, hostPlatform, registrySearchPath, systemRegistryDirs } from './paths.js';
+import {
+  cacheRegistryDir,
+  ENV_AUTOFETCH,
+  ENV_REGISTRY,
+  fetchDestination,
+  hostPlatform,
+  registrySearchPath,
+  systemRegistryDirs,
+} from './paths.js';
 
 /** The nine fields `lib/build.sh` writes. Unknown fields are ignored. */
 export interface Manifest {
@@ -132,7 +140,7 @@ export class Registry {
     this.platform = hostPlatform();
     this.timezone = options.timezone ?? 'UTC';
     this.verifyChecksums = options.verifyChecksums ?? false;
-    this.autofetch = options.autofetch ?? envFlag('CHTYPES_AUTOFETCH');
+    this.autofetch = options.autofetch ?? envFlag(ENV_AUTOFETCH);
     this.fetchOptions = options.fetch ?? {};
     this.explicit = dir !== undefined && dir !== '' ? path.resolve(dir) : undefined;
     this.searchPath = registrySearchPath(dir, this.platform);
@@ -140,7 +148,7 @@ export class Registry {
     // A directory somebody NAMED and that does not exist is a configuration
     // mistake and must be an error naming it, never a silent fallback — unless
     // autofetch is on, in which case it is the destination the first fetch creates.
-    const fromEnv = process.env['CHTYPES_REGISTRY'];
+    const fromEnv = process.env[ENV_REGISTRY];
     const named = [this.explicit, fromEnv !== undefined && fromEnv !== '' ? path.resolve(fromEnv) : undefined];
     for (const d of named) {
       if (d !== undefined && !isDirectory(d) && !this.autofetch) {
@@ -366,7 +374,7 @@ export function compareMinor(a: string, b: string): number {
  */
 export function resolveRegistryDir(explicit?: string): string | null {
   if (explicit !== undefined && explicit !== '') return path.resolve(explicit);
-  const fromEnv = process.env['CHTYPES_REGISTRY'];
+  const fromEnv = process.env[ENV_REGISTRY];
   if (fromEnv !== undefined && fromEnv !== '') return path.resolve(fromEnv);
   const platform = hostPlatform();
   for (const candidate of [cacheRegistryDir(platform), ...systemRegistryDirs(platform)]) {
@@ -449,7 +457,10 @@ function verifyChecksum(libPath: string, manifest: Manifest): void {
     );
   }
   const actual = createHash('sha256').update(bytes).digest('hex');
-  if (actual !== expected) {
+  // Case-insensitive: a hex digest is the same digest in either case, and Go
+  // and Rust already lower-case before comparing. Comparing raw here made an
+  // uppercase manifest digest pass in two bindings and fail in two.
+  if (actual !== expected.toLowerCase()) {
     throw new RegistryError(`chtypes: ${libPath} sha256 ${actual} does not match manifest ${expected}`);
   }
 }

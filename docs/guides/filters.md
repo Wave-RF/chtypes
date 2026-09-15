@@ -79,8 +79,8 @@ const res = f.rows(Format.JSONEachRow, body);
 
 if (res.outcome !== 'ok') throw new FailClosed();
 res.verdicts.forEach((v, i) => {
-  if (!isAnswer(v)) throw new FailClosed();   // 'error' or 'decline'
-  console.log(i, v === 'true');
+  if (!isAnswer(v)) throw new FailClosed();   // 'e' or 'd'
+  console.log(i, v === 't');
 });
 f.close();
 ```

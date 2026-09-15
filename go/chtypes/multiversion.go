@@ -386,6 +386,8 @@ var (
 // For for a line the loaded set lacks. With AutoFetch (WithAutoFetch, or
 // CHTYPES_AUTOFETCH=1) a line found nowhere is fetched first (Ensure),
 // once per process per line; without it, the miss is ErrArtifactMissing.
+// With WithVerifyChecksums every library is re-hashed against its own
+// manifest.json before it is dlopen'd, whichever path found it.
 type Registry struct {
 	mu   sync.RWMutex
 	byID map[string]*Library
@@ -397,6 +399,7 @@ type Registry struct {
 	explicit  string   // the constructor's directory, "" for the search path alone
 	search    []string // the §1 search path, in order
 	autoFetch bool
+	verify    bool // re-hash each library against its manifest before dlopen
 	fetch     FetchOptions
 }
 
@@ -413,6 +416,28 @@ func WithAutoFetch(on bool) RegistryOption { return func(r *Registry) { r.autoFe
 // registry's own write directory (§1) and Platform is always this host's:
 // a registry only ever dlopens artifacts it can run.
 func WithFetchOptions(o FetchOptions) RegistryOption { return func(r *Registry) { r.fetch = o } }
+
+// WithVerifyChecksums re-hashes every library this registry loads against
+// its own manifest.json BEFORE dlopen — the load-time half of the integrity
+// chain (docs/reference/artifact.md §Verification), and the same option
+// Python spells verify_hashes, TypeScript verifyChecksums and Rust
+// RegistryOptions::verify_checksums.
+//
+// Off by default, exactly as in the other three: hashing a 232 MB library
+// is not free, and a locally built artifact has nothing to prove. Turn it
+// on for anything that did not come from a local build — the spec says a
+// loader SHOULD verify then — and it is a MUST for bytes that arrived over
+// a network, where a move that reported success and truncated the library
+// looks identical to one that worked.
+//
+// What it checks, per line, in this order: library_bytes when the manifest
+// carries one, then the sha256 of the library about to be loaded against
+// library_sha256. Either mismatch fails the load naming the path and both
+// values, and nothing is dlopen'd. A manifest that carries NO
+// library_sha256 is REFUSED rather than passed: verification asked for and
+// not possible is not verification (TypeScript and Rust refuse it too;
+// Python's verify_library returns silently, the one gap issue #13 leaves).
+func WithVerifyChecksums(on bool) RegistryOption { return func(r *Registry) { r.verify = on } }
 
 // NewRegistry opens a registry. With a directory, every artifact under it
 // is loaded now — one directory per version, each holding the manifest.json
@@ -431,7 +456,7 @@ func NewRegistry(dir string, opts ...RegistryOption) (*Registry, error) {
 	for _, o := range opts {
 		o(r)
 	}
-	if os.Getenv(envAutoFetch) == "1" {
+	if os.Getenv(EnvAutoFetch) == "1" {
 		r.autoFetch = true
 	}
 	r.search = RegistrySearchPath(dir)
@@ -500,7 +525,17 @@ func readArtifactDir(sub string) (m struct {
 // Load dlopens one library and registers it under its own reported version.
 // Loading the same path twice — into this Registry or another one — reuses the
 // Library that was already initialized for it.
+//
+// With WithVerifyChecksums the library is re-hashed against the manifest.json
+// beside it FIRST, and a mismatch returns before anything is dlopen'd: an
+// image cannot be unmapped, so the check has to happen while refusing is
+// still possible.
 func (r *Registry) Load(path string) error {
+	if r.verify {
+		if err := verifyArtifactLibrary(path); err != nil {
+			return err
+		}
+	}
 	lib, err := openLibrary(path)
 	if err != nil {
 		return err
@@ -509,6 +544,40 @@ func (r *Registry) Load(path string) error {
 	defer r.mu.Unlock()
 	r.byID[string(lib.Version)] = lib
 	r.byID[lib.Minor] = lib
+	return nil
+}
+
+// verifyArtifactLibrary re-hashes one shared library against the
+// manifest.json beside it — the load-time check WithVerifyChecksums turns on,
+// and the same predicate VerifyInstalled applies to a whole registry.
+//
+// It hashes the file that is ABOUT TO BE LOADED, not the file name the
+// manifest carries: those are the same file in every artifact directory, and
+// hashing anything else would leave the loaded bytes unchecked (a legacy-name
+// symlink resolves to the same bytes and still passes). A manifest with no
+// library_sha256 fails here rather than passing quietly — readManifest
+// refuses one, and verification that cannot happen must not report success.
+func verifyArtifactLibrary(path string) error {
+	m, err := readManifest(filepath.Join(filepath.Dir(path), "manifest.json"))
+	if err != nil {
+		return fmt.Errorf("chtypes: cannot verify %s: %w", path, err)
+	}
+	if m.LibraryBytes > 0 {
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("chtypes: cannot verify %s: %w", path, err)
+		}
+		if info.Size() != m.LibraryBytes {
+			return fmt.Errorf("chtypes: %s is %d bytes, manifest says %d", path, info.Size(), m.LibraryBytes)
+		}
+	}
+	got, err := fileSHA256(path)
+	if err != nil {
+		return fmt.Errorf("chtypes: cannot verify %s: %w", path, err)
+	}
+	if want := strings.ToLower(m.LibrarySHA256); got != want {
+		return fmt.Errorf("chtypes: %s sha256 %s does not match manifest %s", path, got, want)
+	}
 	return nil
 }
 
@@ -606,6 +675,16 @@ func (r *Registry) Versions() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.versionsLocked()
+}
+
+// SearchPath is the §1 directories this registry consults, in order — the
+// same list an ArtifactMissing error names as "Looked in", so a caller can
+// print the path it is about to be told is empty. Set once at construction
+// and never mutated after, so no lock is needed.
+func (r *Registry) SearchPath() []string {
+	out := make([]string, len(r.search))
+	copy(out, r.search)
+	return out
 }
 
 // Libraries lists the libraries this registry has actually LOADED, one per

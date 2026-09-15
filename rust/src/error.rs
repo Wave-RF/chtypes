@@ -125,6 +125,20 @@ pub enum Error {
         actual: u64,
     },
 
+    /// The library's bytes do not hash to `manifest.library_sha256`. Raised
+    /// only when the caller asked for the check
+    /// ([`crate::RegistryOptions::verify_checksums`]), and raised BEFORE
+    /// `dlopen`: nothing of this artifact is mapped.
+    #[error("chtypes: {path}: sha256 {actual} does not match manifest {expected}")]
+    ChecksumMismatch {
+        /// The library whose bytes disagree with its manifest.
+        path: PathBuf,
+        /// `manifest.library_sha256`.
+        expected: String,
+        /// What the file on disk actually hashes to.
+        actual: String,
+    },
+
     /// `chs_clickhouse_version()` disagrees with `manifest.clickhouse_version`:
     /// the right bytes in the wrong directory, the one corruption a checksum
     /// cannot catch.

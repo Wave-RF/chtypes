@@ -364,7 +364,7 @@ fn s(v: &str) -> Val {
 }
 
 fn rust_values() -> BTreeMap<&'static str, Val> {
-    use chtypes::{CompileMode, DocFlags, Format, Outcome, reason};
+    use chtypes::{CompileMode, DocFlags, Format, Outcome, Verdict, reason};
     let mut m = BTreeMap::new();
 
     // chs_format — the numbers are frozen (the C ABI contract §Types and schemas).
@@ -389,6 +389,15 @@ fn rust_values() -> BTreeMap<&'static str, Val> {
     m.insert("Format::Buffers", i(Format::Buffers as i64));
 
     // The row/batch verdict vocabulary, as the result document spells it.
+    // Filter verdicts — the wire characters, aligned across all four bindings
+    // (issue #13 A1). The contract gives these a shared value.
+    m.insert("Verdict::True", s(&Verdict::True.as_char().to_string()));
+    m.insert("Verdict::False", s(&Verdict::False.as_char().to_string()));
+    m.insert("Verdict::Error", s(&Verdict::Error.as_char().to_string()));
+    m.insert(
+        "Verdict::Decline",
+        s(&Verdict::Decline.as_char().to_string()),
+    );
     m.insert("Outcome::Accepted", s(Outcome::Accepted.as_str()));
     m.insert("Outcome::Rejected", s(Outcome::Rejected.as_str()));
     m.insert(
@@ -495,6 +504,7 @@ fn rust_values() -> BTreeMap<&'static str, Val> {
             "fetch::DEFAULT_LOCK_FILE",
             s(chtypes::fetch::DEFAULT_LOCK_FILE),
         );
+        m.insert("fetch::LOCK_SCHEMA", i(chtypes::fetch::LOCK_SCHEMA as i64));
     }
     m.insert("REGISTRY_ENV", s(chtypes::REGISTRY_ENV));
     m.insert("AUTOFETCH_ENV", s(chtypes::AUTOFETCH_ENV));

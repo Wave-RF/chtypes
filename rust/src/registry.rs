@@ -43,10 +43,18 @@ pub struct Manifest {
     /// catches a move that reported success and truncated a 232 MB library.
     #[serde(default)]
     pub library_bytes: u64,
-    /// SHA-256 of that file — the only integrity check that means anything. This
-    /// crate does not hash (it takes no crypto dependency); use
-    /// the release pipeline's artifact verification, and verify before
-    /// load when the artifact came over a network.
+    /// SHA-256 of that file — the only integrity check that means anything.
+    ///
+    /// **This crate hashes.** It used to say the opposite here — "does not
+    /// hash (it takes no crypto dependency)" — and that was a divergence
+    /// rather than a design: Python and TypeScript have offered a load-time
+    /// check for as long as they have existed, so whether an artifact was
+    /// re-hashed before `dlopen` depended on which binding a consumer picked
+    /// (issue #13, item A2). Security posture is not an API spelling, so the
+    /// dependency was taken: `sha2`, pure Rust, no system library, and
+    /// unconditional rather than behind `fetch`. Opt in per registry with
+    /// [`RegistryOptions::verify_checksums`]; the release pipeline's own
+    /// verification is still what proves the bytes at their source.
     #[serde(default)]
     pub library_sha256: String,
     /// The exact release. Cross-checked against `chs_clickhouse_version()`, never
@@ -103,6 +111,9 @@ pub struct Registry {
     explicit: Option<PathBuf>,
     timezone: String,
     autofetch: bool,
+    /// Re-hash each library against its manifest before `dlopen`
+    /// ([`RegistryOptions::verify_checksums`]).
+    verify: bool,
     #[cfg(feature = "fetch")]
     fetch: crate::fetch::EnsureOptions,
     loaded: RwLock<Loaded>,
@@ -158,6 +169,35 @@ pub struct RegistryOptions {
     /// Lazy fetch on first open (`docs/guides/fetch.md` §6). `None` reads
     /// `CHTYPES_AUTOFETCH`; `Some(true)` turns it on regardless.
     pub autofetch: Option<bool>,
+    /// Re-hash every library this registry loads against its own
+    /// `manifest.json` BEFORE `dlopen` — `docs/reference/artifact.md`
+    /// §Verification, and the same option Python spells `verify_hashes`,
+    /// TypeScript `verifyChecksums` and Go `WithVerifyChecksums`.
+    ///
+    /// `false` by default, exactly as in the other three: hashing a 232 MB
+    /// library is not free, and a locally built artifact has nothing to
+    /// prove. Turn it on for anything that did not come from a local build —
+    /// the spec says a loader SHOULD verify then — and it is a MUST for bytes
+    /// that arrived over a network, where a move that reported success and
+    /// truncated the library looks identical to one that worked.
+    ///
+    /// What it ADDS, per line, is the sha256 of the file being loaded
+    /// compared against `library_sha256`: a mismatch fails the open with
+    /// [`Error::ChecksumMismatch`] and nothing is mapped. (The cheaper
+    /// `library_bytes` check that runs just before it is not conditional on
+    /// this option — this crate has always made it.) A manifest carrying NO
+    /// `library_sha256` is REFUSED rather
+    /// than passed: verification asked for and not possible is not
+    /// verification (Go and TypeScript refuse it too; Python's
+    /// `verify_library` returns silently, the one gap issue #13 leaves).
+    ///
+    /// The one-directory constructors ([`Registry::new`] and its `from_env*`
+    /// and `with_timezone` variants) take no options — Rust has no default
+    /// arguments — so a caller that wants a verified registry over one
+    /// explicit directory passes it here as [`RegistryOptions::dir`]: that
+    /// directory is the first thing on the search path, and every line it
+    /// serves is verified as it opens.
+    pub verify_checksums: bool,
     /// How an autofetch fetches — source, tag, lock, trust policy. Its `dest`
     /// is overridden by [`RegistryOptions::dir`], so the fetched line lands
     /// where this registry looks first.
@@ -191,6 +231,7 @@ impl Registry {
                 .timezone
                 .unwrap_or_else(|| DEFAULT_TIMEZONE.to_string()),
             autofetch,
+            verify: opts.verify_checksums,
             #[cfg(feature = "fetch")]
             fetch: opts.fetch,
             loaded: RwLock::new(Loaded::default()),
@@ -268,7 +309,9 @@ impl Registry {
             if !sub.is_dir() {
                 continue;
             }
-            if let Some(library) = load_artifact_dir(&sub, timezone)? {
+            // No verification on this path: the one-directory constructors
+            // take no options (see RegistryOptions::verify_checksums).
+            if let Some(library) = load_artifact_dir(&sub, timezone, false)? {
                 loaded.insert(library);
             }
         }
@@ -283,6 +326,7 @@ impl Registry {
             explicit: None,
             timezone: timezone.to_string(),
             autofetch: false,
+            verify: false,
             #[cfg(feature = "fetch")]
             fetch: crate::fetch::EnsureOptions::default(),
             loaded: RwLock::new(loaded),
@@ -379,12 +423,14 @@ impl Registry {
             Some(dir) => dir,
             None => self.autofetch_or_missing(&minor)?,
         };
-        let library = load_artifact_dir(&dir, &self.timezone)?.ok_or_else(|| Error::Registry {
-            dir: dir.clone(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "manifest.json is present but names no library",
-            ),
+        let library = load_artifact_dir(&dir, &self.timezone, self.verify)?.ok_or_else(|| {
+            Error::Registry {
+                dir: dir.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "manifest.json is present but names no library",
+                ),
+            }
         })?;
         self.loaded
             .write()
@@ -456,7 +502,7 @@ impl Registry {
 /// registry may hold scratch directories, and a `.DS_Store` is not a version);
 /// an error when there IS a manifest and the library does not load — broken,
 /// not absent.
-fn load_artifact_dir(sub: &Path, timezone: &str) -> Result<Option<Arc<Library>>> {
+fn load_artifact_dir(sub: &Path, timezone: &str, verify: bool) -> Result<Option<Arc<Library>>> {
     let Ok(text) = std::fs::read_to_string(sub.join("manifest.json")) else {
         return Ok(None);
     };
@@ -479,6 +525,34 @@ fn load_artifact_dir(sub: &Path, timezone: &str) -> Result<Option<Arc<Library>>>
             return Err(Error::CorruptArtifact {
                 path,
                 expected: manifest.library_bytes,
+                actual,
+            });
+        }
+    }
+
+    // The hash decides BEFORE dlopen: an image cannot be unmapped once it is
+    // mapped, so refusing has to happen while refusing is still possible. The
+    // file hashed is the one about to be loaded — a legacy-name symlink
+    // resolves to the same bytes and still passes, while any other file in
+    // the directory would leave the loaded bytes unchecked.
+    if verify {
+        if manifest.library_sha256.is_empty() {
+            return Err(Error::Registry {
+                dir: sub.to_path_buf(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "verification was asked for and manifest.json carries no library_sha256",
+                ),
+            });
+        }
+        let actual = crate::digest::sha256_file(&path).map_err(|source| Error::Registry {
+            dir: path.clone(),
+            source,
+        })?;
+        if actual != manifest.library_sha256.to_ascii_lowercase() {
+            return Err(Error::ChecksumMismatch {
+                path,
+                expected: manifest.library_sha256,
                 actual,
             });
         }
@@ -658,6 +732,99 @@ mod tests {
         let m: Manifest =
             serde_json::from_str(r#"{"library":"libchtypes_s1.so","os":"linux"}"#).unwrap();
         assert_eq!(m.library, "libchtypes_s1.so");
+    }
+
+    /// A registry directory holding one line whose "library" is plain text:
+    /// enough for the loader to reach `dlopen`, never enough to survive it.
+    /// The verdict every verification test below reads is WHICH error came
+    /// back — a checksum error means the hash decided first, a load error
+    /// means it passed and the open went on.
+    fn fake_artifact(tag: &str, sha256: Option<&str>) -> PathBuf {
+        let body = b"not a shared library";
+        let dir = std::env::temp_dir().join(format!(
+            "chtypes-rs-verify-{}-{tag}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let sub = dir.join("25.8");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("libchtypes.so"), body).unwrap();
+        let hash = match sha256 {
+            Some(s) => format!(r#","library_sha256":"{s}""#),
+            None => String::new(),
+        };
+        std::fs::write(
+            sub.join("manifest.json"),
+            format!(
+                r#"{{"library":"libchtypes.so","library_bytes":{}{hash},
+                    "clickhouse_version":"25.8.1.1","clickhouse_minor":"25.8"}}"#,
+                body.len()
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    fn open_verified(dir: &Path) -> Error {
+        let reg = Registry::from_search_path_with(RegistryOptions {
+            dir: Some(dir.to_path_buf()),
+            verify_checksums: true,
+            ..RegistryOptions::default()
+        });
+        reg.for_version("25.8")
+            .expect_err("a text file cannot dlopen; the open must fail")
+    }
+
+    #[test]
+    fn verify_checksums_refuses_bytes_the_manifest_does_not_claim() {
+        let dir = fake_artifact("mismatch", Some(&"00".repeat(32)));
+        let err = open_verified(&dir);
+        assert!(
+            matches!(err, Error::ChecksumMismatch { .. }),
+            "want the checksum refusal BEFORE dlopen, got {err:?}"
+        );
+
+        // The same directory with the option off: the open reaches dlopen,
+        // which is what proves the OPTION — not merely the broken file —
+        // produced the verdict above.
+        let reg = Registry::from_search_path_with(RegistryOptions {
+            dir: Some(dir.clone()),
+            ..RegistryOptions::default()
+        });
+        let err = reg.for_version("25.8").unwrap_err();
+        assert!(
+            !matches!(err, Error::ChecksumMismatch { .. }),
+            "without verify_checksums the hash must not be consulted; got {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn verify_checksums_accepts_matching_bytes_and_loads_on() {
+        // sha256 of "not a shared library", the body fake_artifact writes.
+        let dir = fake_artifact(
+            "match",
+            Some(&crate::digest::sha256_hex(b"not a shared library")),
+        );
+        let err = open_verified(&dir);
+        assert!(
+            matches!(err, Error::Load { .. } | Error::NotAnArtifact { .. }),
+            "matching bytes must pass verification and fail at dlopen, got {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn verify_checksums_refuses_a_manifest_with_no_hash() {
+        // Verification asked for and not possible is not verification.
+        let dir = fake_artifact("nohash", None);
+        let err = open_verified(&dir);
+        let text = err.to_string();
+        assert!(
+            matches!(err, Error::Registry { .. }) && text.contains("library_sha256"),
+            "want a refusal naming the unverifiable artifact, got {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

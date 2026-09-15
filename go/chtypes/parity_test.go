@@ -316,6 +316,13 @@ var goValues = map[string]any{
 	"KindEphemeral":    chtypes.KindEphemeral.String(),
 
 	// The transform reason vocabulary — stable strings; the harness groups on them.
+	// Filter verdicts — the wire characters, aligned across all four bindings
+	// (issue #13 A1). The contract gives these a shared value, so this table
+	// must carry them or the suite fails by name.
+	"VerdictTrue":    chtypes.VerdictTrue.String(),
+	"VerdictFalse":   chtypes.VerdictFalse.String(),
+	"VerdictError":   chtypes.VerdictError.String(),
+	"VerdictDecline": chtypes.VerdictDecline.String(),
 	"ReasonOverflowWrap":        chtypes.ReasonOverflowWrap,
 	"ReasonNullToDefault":       chtypes.ReasonNullToDefault,
 	"ReasonNullLoss":            chtypes.ReasonNullLoss,
@@ -371,6 +378,8 @@ var goValues = map[string]any{
 	"DefaultReleaseTag":   chtypes.DefaultReleaseTag,
 	"DefaultLockFile":     chtypes.DefaultLockFile,
 	"LockSchema":          chtypes.LockSchema,
+	"EnvRegistry":         chtypes.EnvRegistry,
+	"EnvAutoFetch":        chtypes.EnvAutoFetch,
 }
 
 // ---------------------------------------------------------------------- tests

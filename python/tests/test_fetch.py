@@ -504,7 +504,7 @@ def test_trusted_keys_policy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_signature_file_shape() -> None:
     sig = (FIXTURES / "signed" / "SHA256SUMS.sig").read_bytes()
-    comment, raw = fetch_module._parse_signature(sig)
+    comment, raw = fetch_module.parse_signature_file(sig)
     assert comment == f"chtypes artifacts, ed25519 key {_expected()['key_id']}"
     assert len(raw) == 64
     sums = (FIXTURES / "signed" / "SHA256SUMS").read_bytes()
@@ -517,9 +517,9 @@ def test_signature_file_shape() -> None:
             sums + b"\n", sig, fetch_module.trusted_keys(_test_keys()), "x"
         )
     with pytest.raises(chtypes.ArtifactUntrustedError, match="base64"):
-        fetch_module._parse_signature(b"untrusted comment: x\n!!!\n")
+        fetch_module.parse_signature_file(b"untrusted comment: x\n!!!\n")
     with pytest.raises(chtypes.ArtifactUntrustedError, match="64"):
-        fetch_module._parse_signature(b"untrusted comment: x\nAAAA\n")
+        fetch_module.parse_signature_file(b"untrusted comment: x\nAAAA\n")
 
 
 # ------------------------------------------------------------- tar safety

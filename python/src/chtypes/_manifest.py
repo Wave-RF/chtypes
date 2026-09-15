@@ -111,7 +111,10 @@ def verify_library(version_dir: str | os.PathLike[str]) -> None:
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
             digest.update(chunk)
-    if digest.hexdigest() != manifest.library_sha256:
+    # Case-insensitive: a hex digest is the same digest in either case, and Go
+    # and Rust already lower-case before comparing. Comparing raw here made an
+    # uppercase manifest digest pass in two bindings and fail in two.
+    if digest.hexdigest() != manifest.library_sha256.lower():
         raise RegistryError(
             f"chtypes: {path} sha256 {digest.hexdigest()} != manifest {manifest.library_sha256}"
         )

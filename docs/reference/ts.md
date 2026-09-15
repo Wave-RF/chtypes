@@ -71,7 +71,7 @@ schema.rows(Format.JSONEachRow, body, undefined, {
 | `Filter#rows(format, body, settings?)`                | `chs_filter_rows`                    | `FilterResult` — per-row verdicts                                                     | `ChtypesError` (closed filter, `number` setting)    |
 | `Filter#eval(block)`                                  | `chs_filter_eval`                    | the same `FilterResult` `rows` answers; a cross-schema pair answers `'rejected'`/1002 | `ChtypesError` (closed handles, cross-library pair) |
 | `Filter#close()` / `Block#close()` / `Symbol.dispose` | `chs_filter_free` / `chs_block_free` | —                                                                                     | never throw; idempotent                             |
-| `isAnswer(v)`                                         | —                                    | `true` for `'true'` and `'false'` only — **fail closed on the other two**             | never throws                                        |
+| `isAnswer(v)`                                         | —                                    | `true` for `'t'` and `'f'` only — **fail closed on the other two**                    | never throws                                        |
 
 `Schema#close` frees open filters and blocks first, the C-required order, and `using` nests naturally: block, filter, schema.
 
@@ -122,7 +122,7 @@ The parsers read the `JSONEachRow` bytes through this package's own byte-exact r
 
 **The byte-exact JSON kit** — `parseDocument`, `parseJsonValue`, `repairBareDenormals`, `rawBytes`, `rawText`, `isValidUtf8`, `Json`, `JsonKind`.
 
-**Errors** — `ChtypesError` (base), `RegistryError`, `ArtifactMissingError`, `FetchError` and its five verdict subclasses, `SchemaError`, `UnsupportedError`.
+**Errors** — `ChtypesError` (base), `RegistryError`, `ArtifactError` (the single catchable type for `ArtifactMissingError` and `FetchError` with its five verdict subclasses), `SchemaError`, `UnsupportedError`.
 
 ## Two Node facts worth knowing
 

@@ -346,7 +346,7 @@ export class Schema {
    * volatile DEFAULT.
    *
    * Per-row parse failures do NOT throw — they are recorded IN the block and
-   * answer `'decline'` from every filter, with the recorded error. Release
+   * answer `'d'` from every filter, with the recorded error. Release
    * with `close()` / `Symbol.dispose`; `schema.close()` closes open blocks
    * FIRST, the C-required order.
    *
@@ -417,7 +417,7 @@ export class Schema {
  * satisfies both by construction (docs/reference/bindings.md §Concurrency); do not
  * share a `Filter` — or its `Schema` — across `worker_threads`.
  *
- * ENFORCEMENT GATE: `'error'` and `'decline'` verdicts are NOT answers — a
+ * ENFORCEMENT GATE: `'e'` and `'d'` verdicts are NOT answers — a
  * caller enforcing visibility MUST fail closed on both — and NO caller may
  * enforce read-side security on this surface until the WHERE-truth rig gates
  * green; until then it is a shadow/replay surface (the C ABI contract §Filters).
@@ -441,7 +441,7 @@ export class Filter {
    * formats and settings contract as `Schema#rows`, ONE C call. Rows are
    * evaluated INDEPENDENTLY (there is no INSERT to abort):
    * `input_format_allow_errors_*` does not apply, a bad text row declines
-   * (`'decline'`) and the tail resyncs so verdict indexes keep matching input
+   * (`'d'`) and the tail resyncs so verdict indexes keep matching input
    * rows, and volatile DEFAULTs resolve against one clock instant per call.
    *
    * @param format - the wire format code (`Format`).
@@ -462,7 +462,7 @@ export class Filter {
    * Evaluate this filter over an already-parsed `Block` (`chs_filter_eval`)
    * — the SAME result document `rows` returns: same `FilterResult` fields,
    * same verdicts, same `errors` rule (a row the parse recorded as
-   * unparseable answers `'decline'` with the recorded error). Evaluation is
+   * unparseable answers `'d'` with the recorded error). Evaluation is
    * a pure function of (filter, block): no settings, and the block is
    * neither consumed nor mutated, so one block can be evaluated by K filters
    * sequentially with no re-parse — the live-SSE call shape.
