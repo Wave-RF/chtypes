@@ -209,6 +209,10 @@ jobs:
           done
           ls -la "$CHTYPES_REGISTRY"
           cat "$CHTYPES_REGISTRY"/*/manifest.json
+      - name: the wrong-revision ABI fixture, built from this header — every suite must refuse it (#36)
+        run: |
+          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
+          echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

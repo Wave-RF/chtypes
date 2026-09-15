@@ -22,6 +22,12 @@
 # --require-artifacts is the second run's rule: the golden set must have RUN,
 # and no test may have skipped for want of a registry.
 #
+# $CHTYPES_ABI_FIXTURES, when set, names a wrong-revision fixture set
+# (scripts/abi-fixtures.sh builds one), and then each suite's two ABI-revision
+# cases must have RUN and passed: the refusal naming both numbers, and the
+# matching-revision control. A skipped or absent case reads exactly like a
+# working handshake, which is the failure the fixture exists to close (#36).
+#
 # The artifact-backed proof beyond these — the server-truth suites, the
 # oracle, the rigs — is the core repository's server-truth suites.
 set -euo pipefail
@@ -102,6 +108,14 @@ here: python collected ${PARITY_N:-0} of at least $PARITY_MIN parity tests (test
       ! grep -qE '^SKIPPED .*tests/test_golden\.py' "$PLAIN" || PROBLEMS+=("the golden set was SKIPPED with artifacts required")
       ! grep -qE '^SKIPPED .*no chtypes artifacts on the search path' "$PLAIN" || PROBLEMS+=("tests skipped for want of a registry with artifacts required")
     fi
+    if [ -n "${CHTYPES_ABI_FIXTURES:-}" ]; then
+      # pytest -q names no passing test: collected by name + not skipped + no
+      # failure in the summary is the two cases having passed.
+      ! grep -qF 'no ABI revision fixture' "$PLAIN" || PROBLEMS+=("the ABI-revision cases SKIPPED although \$CHTYPES_ABI_FIXTURES is set")
+      ABI_N="$( (cd "$ROOT/python" && uv run --quiet pytest -q --collect-only tests/test_abi_revision.py 2>/dev/null) \
+               | grep -cE '^tests/test_abi_revision\.py::test_(wrong_revision_is_refused|matching_revision_loads)$' || true)"
+      [ "${ABI_N:-0}" -eq 2 ] || PROBLEMS+=("the ABI-revision handshake was not proven here: python collected ${ABI_N:-0} of its 2 cases")
+    fi
     ;;
   ts)
     command -v pnpm >/dev/null 2>&1 || die "pnpm is not on PATH; the ts suite cannot run and must not be reported as passing"
@@ -136,6 +150,12 @@ here: ts ran ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/m
       ! grep -qF '↓ goldens > has at least one artifact' "$PLAIN" || PROBLEMS+=("the golden set was skipped wholesale with artifacts required")
       ! grep -qE 'SKIPPED: (no artifact|none on the search path)' "$PLAIN" || PROBLEMS+=("tests skipped for want of a registry with artifacts required")
     fi
+    if [ -n "${CHTYPES_ABI_FIXTURES:-}" ]; then
+      for c in 'wrong revision is refused naming both numbers' 'matching revision loads'; do
+        grep -qF "✓ test/abi-revision.test.ts > abi revision fixture > $c" "$PLAIN" \
+          || PROBLEMS+=("the ABI-revision case '$c' did not pass although \$CHTYPES_ABI_FIXTURES is set")
+      done
+    fi
     ;;
   rust)
     command -v cargo >/dev/null 2>&1 || die "cargo is not on PATH; the rust suite cannot run and must not be reported as passing"
@@ -155,6 +175,14 @@ here: rust passed ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/par
     if [ "$REQUIRE" -eq 1 ]; then
       grep -qE '^test goldens_hold_on_every_artifact \.\.\. ok' "$PLAIN" || PROBLEMS+=("the golden test did not pass with artifacts required")
       ! grep -qE '^SKIP goldens_hold_on_every_artifact|Every test in this file is skipped|^SKIP integration::' "$PLAIN" || PROBLEMS+=("tests skipped for want of a registry with artifacts required")
+    fi
+    if [ -n "${CHTYPES_ABI_FIXTURES:-}" ]; then
+      # libtest reports an early return as `ok`, so `ok` alone cannot tell a case
+      # that ran from one that skipped; the uncaptured "ran" line is the proof.
+      for t in wrong_revision_is_refused matching_revision_loads; do
+        { grep -qE "^test $t \.\.\. ok$" "$PLAIN" && grep -qF "ABI fixture: ran $t" "$PLAIN"; } \
+          || PROBLEMS+=("the ABI-revision case $t did not RUN and pass although \$CHTYPES_ABI_FIXTURES is set")
+      done
     fi
     ;;
 esac

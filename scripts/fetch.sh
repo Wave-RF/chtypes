@@ -9,9 +9,14 @@
 #                                                      rolling `artifacts` release)
 #   scripts/fetch.sh 25.8 --url https://…/download/x   any base URL (or a local dir)
 #   scripts/fetch.sh 25.8 --repo owner/name            a GitHub Releases source instead
+#   scripts/fetch.sh --release-file NAME --dest DIR    one release-level file, e.g. sdk-fetch-fixtures.tar.gz
 #
 # (--out is an alias for --dest, and --all takes every line the release
-# publishes for the platform; both are the spellings .github/workflows use.)
+# publishes for the platform; both are the spellings .github/workflows use.
+# --release-file installs no artifact: it verifies the release exactly as below,
+# steps 0-2, then installs the one named file that is a row in the signed
+# SHA256SUMS into --dest, which it requires. The SDK suites' served fixtures
+# arrive that way.)
 #
 # Installs into <dest>/<clickhouse_minor>/, which is exactly the layout
 # chtypes.NewRegistry scans: one directory per version, each holding the
@@ -68,7 +73,7 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPTS")"
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/chtypes"
 
-usage() { sed -n '2,12p' "$0"; exit 2; }
+usage() { sed -n '2,13p' "$0"; exit 2; }
 die()   { echo "fetch.sh: $*" >&2; exit 1; }
 bad_usage() { echo "fetch.sh: $*" >&2; exit 2; }
 # fail <CHTYPES_…> <message> — every failure names its §7 code and exits with
@@ -87,7 +92,7 @@ say()   { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
 
 # ------------------------------------------------------------------ arguments
 SPELLING=""; PLATFORM=""; DEST=""; TAG=""; BASE_URL=""
-REPO="${CHTYPES_RELEASE_REPO:-}"; FORCE=0; ALL=0
+REPO="${CHTYPES_RELEASE_REPO:-}"; FORCE=0; ALL=0; RELEASE_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform) [ $# -ge 2 ] || bad_usage "--platform needs a value"; PLATFORM="$2"; shift ;;
@@ -97,6 +102,7 @@ while [ $# -gt 0 ]; do
     --tag)      [ $# -ge 2 ] || bad_usage "--tag needs a value";      TAG="$2"; shift ;;
     --url)      [ $# -ge 2 ] || bad_usage "--url needs a value";      BASE_URL="$2"; shift ;;
     --repo)     [ $# -ge 2 ] || bad_usage "--repo needs a value";     REPO="$2"; shift ;;
+    --release-file) [ $# -ge 2 ] || bad_usage "--release-file needs a file name"; RELEASE_FILE="$2"; shift ;;
     --all)      ALL=1 ;;
     --force)    FORCE=1 ;;
     -h|--help)  usage ;;
@@ -111,7 +117,13 @@ if [ "$ALL" = 1 ]; then
   [ -z "$SPELLING" ] || bad_usage "--all installs every published line; drop the version argument ($SPELLING)"
   SPELLING="--all"
 fi
-[ -n "$SPELLING" ] || { echo "fetch.sh: a ClickHouse version spelling is required (or --all)" >&2; usage; }
+if [ -n "$RELEASE_FILE" ]; then
+  [ -z "$SPELLING" ] || bad_usage "--release-file installs one release-level file, not an artifact; drop '$SPELLING'"
+  [ -n "$DEST" ] || bad_usage "--release-file needs --dest: a release-level file has no default home"
+  case "$RELEASE_FILE" in */*|.*|"") bad_usage "--release-file takes a bare file name as SHA256SUMS lists it: $RELEASE_FILE" ;; esac
+else
+  [ -n "$SPELLING" ] || { echo "fetch.sh: a ClickHouse version spelling is required (or --all)" >&2; usage; }
+fi
 [ -n "$BASE_URL" ] && [ -n "$TAG" ] && bad_usage "--url names a full base; --tag selects a release on the artifacts host (or in --repo) — pass one"
 
 sha256_of() {
@@ -151,6 +163,7 @@ mkdir -p "$DEST"
 # available; when it is not — bare runner, no uv — fall back to normalizing the
 # spelling here and let the release's index.json be the authority on what exists.
 WANT_LINE=""; WANT_EXACT=""
+if [ -z "$RELEASE_FILE" ]; then
 # Did the CALLER name a patch, or a line? It matters, and resolve-version.py
 # cannot answer it: asked for the line `25.8` it helpfully expands to the patch
 # the moving tag points at today (25.8.30.16-lts here), which is often NEWER
@@ -191,6 +204,7 @@ if [ -z "$WANT_LINE" ]; then
   WANT_LINE="$(printf '%s' "$BARE" | cut -d. -f1,2)"
   [ -n "$WANT_LINE" ] || bad_usage "cannot make a ClickHouse version out of '$SPELLING'"
   echo "fetch.sh: resolve-version.py unavailable; taking '$SPELLING' as line $WANT_LINE" >&2
+fi
 fi
 
 # ------------------------------------------------------------ where to fetch
@@ -261,7 +275,8 @@ get_file() { # get_file <asset-name> <destination>  ->  0 fetched · 1 absent (4
 
 SOURCE_DESC="$BASE_URL"
 [ "$SOURCE_KIND" = url ] || SOURCE_DESC="$REPO@${TAG:-latest} (via $SOURCE_KIND)"
-if [ "$ALL" = 1 ]; then say "every published ClickHouse line, $PLATFORM -> $DEST"
+if [ -n "$RELEASE_FILE" ]; then say "release-level file $RELEASE_FILE -> $DEST"
+elif [ "$ALL" = 1 ]; then say "every published ClickHouse line, $PLATFORM -> $DEST"
 else say "ClickHouse $SPELLING -> line $WANT_LINE${WANT_EXACT:+ (exact $WANT_EXACT)}, $PLATFORM"; fi
 say "source $SOURCE_DESC"
 
@@ -465,6 +480,37 @@ while :; do
   sleep "$METADATA_RETRY_DELAY"
   attempt=$((attempt + 1))
 done
+
+# install_release_file <name> <label> <required: 0|1> — a release-level file
+# that is a row in the signed SHA256SUMS, verified through the same chain as a
+# tarball: the signature covers the sums, the sums name its sha256, and the
+# bytes on disk must hash to it before it moves into <dest>. Absent from the
+# sums: a refusal when required, otherwise return 1 and let the caller say why.
+install_release_file() {
+  local name="$1" label="$2" required="$3" want got rc=0
+  want="$(awk -v f="$name" '$2 == f || $2 == "*" f {print $1}' "$WORK/SHA256SUMS" | head -1)"
+  if [ -z "$want" ]; then
+    [ "$required" != 1 ] || fail CHTYPES_ARTIFACT_UNPUBLISHED "the signed SHA256SUMS at $SOURCE_DESC does not list $name"
+    return 1
+  fi
+  get_file "$name" "$WORK/$name" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) fail CHTYPES_ARTIFACT_CORRUPT "SHA256SUMS lists $name but $SOURCE_DESC does not serve it — the release disagrees with itself; not installing it" ;;
+    *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $name from $SOURCE_DESC" ;;
+  esac
+  got="$(sha256_of "$WORK/$name")"
+  [ "$got" = "$want" ] \
+    || fail CHTYPES_ARTIFACT_CORRUPT "$name hashes to $got but the signed SHA256SUMS says $want — not installing it"
+  mkdir -p "$DEST"
+  mv -f "$WORK/$name" "$DEST/$name"
+  say "$label verified and installed: $DEST/$name"
+}
+
+if [ -n "$RELEASE_FILE" ]; then
+  install_release_file "$RELEASE_FILE" "$RELEASE_FILE" 1
+  exit 0
+fi
 
 # --------------------------------------------------------------- pick the asset
 # The listing names the artifacts' license (Elastic License 2.0); say so once,
@@ -680,27 +726,8 @@ if [ "$ALL" = 1 ]; then say "$INSTALLED version(s) installed into $DEST"; fi
 # it. Say so once and carry on — a missing golden set makes the golden tests
 # skip, which they already do loudly.
 install_goldens() {
-  local name=sdk-goldens.json
-  local want
-  want="$(awk -v f="$name" '$2 == f || $2 == "*" f {print $1}' "$WORK/SHA256SUMS" | head -1)"
-  if [ -z "$want" ]; then
-    echo "fetch.sh: this release does not publish $name (an older release predates the served" >&2
-    echo "          golden set); the SDKs' golden tests will skip until it does" >&2
-    return 0
-  fi
-  local rc=0
-  get_file "$name" "$WORK/$name" || rc=$?
-  case "$rc" in
-    0) ;;
-    1) fail CHTYPES_ARTIFACT_CORRUPT "SHA256SUMS lists $name but $SOURCE_DESC does not serve it — the release disagrees with itself; not installing it" ;;
-    *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $name from $SOURCE_DESC" ;;
-  esac
-  local got
-  got="$(sha256_of "$WORK/$name")"
-  [ "$got" = "$want" ] \
-    || fail CHTYPES_ARTIFACT_CORRUPT "$name hashes to $got but the signed SHA256SUMS says $want — not installing it"
-  mkdir -p "$DEST"
-  mv -f "$WORK/$name" "$DEST/$name"
-  say "golden set verified and installed: $DEST/$name"
+  install_release_file sdk-goldens.json "golden set" 0 && return 0
+  echo "fetch.sh: this release does not publish sdk-goldens.json (an older release predates the served" >&2
+  echo "          golden set); the SDKs' golden tests will skip until it does" >&2
 }
 install_goldens
