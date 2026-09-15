@@ -92,6 +92,17 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// A library file named by a manifest could not be read (its size, or its
+    /// bytes while verifying) — the file, not the registry directory.
+    #[error("chtypes: cannot read library {path}: {source}")]
+    LibraryRead {
+        /// The library file that could not be read.
+        path: PathBuf,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
     /// A directory carried a `manifest.json` and the library still would not
     /// `dlopen`. That is broken, not absent, so it aborts the scan.
     #[error("chtypes: dlopen {path}: {message}")]

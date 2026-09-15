@@ -1440,6 +1440,7 @@
       "Error::is_unsupported": "The explicit both-arms predicate; see errors.base.",
       "Error::artifact_code": "The docs/guides/fetch.md §6 code, when there is one.",
       "Error::Registry": "Registry-layer error.",
+      "Error::LibraryRead": "The file-vs-directory split of the registry-layer error: a manifested library file, not the registry directory, could not be read.",
       "Error::Load": "Load failure.",
       "Error::NotAnArtifact": "Load failure.",
       "Error::CorruptArtifact": "Load failure.",

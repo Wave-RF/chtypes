@@ -283,8 +283,9 @@ impl Registry {
     ///
     /// # Errors
     ///
-    /// * [`Error::Registry`] — the directory (or a manifested library file)
-    ///   could not be read.
+    /// * [`Error::Registry`] — the registry directory itself could not be read.
+    /// * [`Error::LibraryRead`] — a manifested library file could not be read
+    ///   (its size, or its bytes while verifying).
     /// * [`Error::CorruptArtifact`] — a library's size on disk disagrees with
     ///   its manifest's `library_bytes`.
     /// * [`Error::VersionMismatch`] — `chs_clickhouse_version()` disagrees
@@ -516,8 +517,8 @@ fn load_artifact_dir(sub: &Path, timezone: &str, verify: bool) -> Result<Option<
 
     if manifest.library_bytes > 0 {
         let actual = std::fs::metadata(&path)
-            .map_err(|source| Error::Registry {
-                dir: path.clone(),
+            .map_err(|source| Error::LibraryRead {
+                path: path.clone(),
                 source,
             })?
             .len();
@@ -545,8 +546,8 @@ fn load_artifact_dir(sub: &Path, timezone: &str, verify: bool) -> Result<Option<
                 ),
             });
         }
-        let actual = crate::digest::sha256_file(&path).map_err(|source| Error::Registry {
-            dir: path.clone(),
+        let actual = crate::digest::sha256_file(&path).map_err(|source| Error::LibraryRead {
+            path: path.clone(),
             source,
         })?;
         if actual != manifest.library_sha256.to_ascii_lowercase() {
@@ -833,6 +834,77 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let err = Registry::new(&dir).unwrap_err();
         assert!(matches!(err, Error::EmptyRegistry { .. }), "got {err:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A manifest naming a library file that is never written: the size check
+    /// and the verification hash both read that FILE, and a registry-directory
+    /// error (`Error::Registry`) would name the wrong path entirely.
+    fn missing_library_artifact(tag: &str, library_bytes: u64, sha256: Option<&str>) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "chtypes-rs-missing-lib-{}-{tag}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let sub = dir.join("25.8");
+        std::fs::create_dir_all(&sub).unwrap();
+        let hash = match sha256 {
+            Some(s) => format!(r#","library_sha256":"{s}""#),
+            None => String::new(),
+        };
+        std::fs::write(
+            sub.join("manifest.json"),
+            format!(
+                r#"{{"library":"libchtypes.so","library_bytes":{library_bytes}{hash},
+                    "clickhouse_version":"25.8.1.1","clickhouse_minor":"25.8"}}"#
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_missing_library_file_is_library_read_at_the_size_check() {
+        // library_bytes > 0 always runs the size check (RegistryOptions::verify_checksums
+        // docs), before dlopen and before verification — the library file does
+        // not exist on disk at all here, so `std::fs::metadata` fails first.
+        let dir = missing_library_artifact("size", 232226512, None);
+        let reg = Registry::from_search_path_with(RegistryOptions {
+            dir: Some(dir.clone()),
+            ..RegistryOptions::default()
+        });
+        let err = reg
+            .for_version("25.8")
+            .expect_err("the manifested library file does not exist");
+        match &err {
+            Error::LibraryRead { path, .. } => {
+                assert_eq!(*path, dir.join("25.8").join("libchtypes.so"));
+            }
+            other => panic!("want Error::LibraryRead naming the missing file, got {other:?}"),
+        }
+        assert!(
+            err.to_string().starts_with("chtypes: cannot read library "),
+            "got {err}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_missing_library_file_is_library_read_at_the_verification_hash() {
+        // library_bytes: 0 skips the size check; verify_checksums: true reaches
+        // the sha256 read instead, and the library file still does not exist.
+        let dir = missing_library_artifact("hash", 0, Some(&"00".repeat(32)));
+        let err = open_verified(&dir);
+        match &err {
+            Error::LibraryRead { path, .. } => {
+                assert_eq!(*path, dir.join("25.8").join("libchtypes.so"));
+            }
+            other => panic!("want Error::LibraryRead naming the missing file, got {other:?}"),
+        }
+        assert!(
+            err.to_string().starts_with("chtypes: cannot read library "),
+            "got {err}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }
