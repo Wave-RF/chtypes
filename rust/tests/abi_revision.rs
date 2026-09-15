@@ -102,11 +102,35 @@ fn fixture() -> Option<Fixture> {
     })
 }
 
+/// Remove every occurrence of the fixture root — and its canonical form,
+/// since macOS's `/tmp` vs `/private/tmp` differ — from `message`, replacing
+/// each with `<fixture>`. The scratchpad root itself can carry a standalone
+/// digit (`.../4d9fd784-.../`), which `names_number` would otherwise happily
+/// match, making the "names both numbers" assertion vacuous on some
+/// machines. The longer of the two candidate strings is stripped first, so
+/// stripping the shorter one first cannot leave a mangled remainder of the
+/// longer one behind.
+fn strip_fixture_root(message: &str, root: &std::path::Path) -> String {
+    let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut candidates = vec![root.display().to_string(), canonical.display().to_string()];
+    candidates.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    candidates.dedup();
+    let mut stripped = message.to_string();
+    for candidate in candidates {
+        if !candidate.is_empty() {
+            stripped = stripped.replace(&candidate, "<fixture>");
+        }
+    }
+    stripped
+}
+
 /// "The message says N", not "the message contains the digits of N": a
 /// refusal naming revision 4 must not be satisfied by the 4 in a path like
 /// `.../24.8/`, and one naming 5 must not be satisfied by 15. Equivalent to
 /// the regex `(^|[^0-9])N([^0-9]|$)`, hand-rolled because this crate takes no
-/// regex dependency.
+/// regex dependency. Callers checking a message that embeds the fixture path
+/// must run it through [`strip_fixture_root`] first — the path itself can
+/// carry a standalone digit.
 fn names_number(message: &str, n: i64) -> bool {
     let needle = n.to_string();
     let bytes = message.as_bytes();
@@ -152,11 +176,18 @@ fn wrong_revision_is_refused() {
         Err(e) => e,
     };
     let message = err.to_string();
+    // The refusal must name both numbers ITSELF — never by accident through a
+    // digit that happens to live in the fixture's own path (this scratchpad's
+    // root starts with `4d9fd784-`, a standalone "4" the digit-boundary check
+    // would otherwise accept).
+    let stripped = strip_fixture_root(&message, &fx.root);
 
     for n in [fx.mismatch_revision, fx.abi_revision] {
         assert!(
-            names_number(&message, n),
-            "the refusal does not name {n} as a whole number, which step 5 requires: {message}"
+            names_number(&stripped, n),
+            "the refusal does not name {n} as a whole number (checked with the fixture path \
+             stripped out, so a digit in the path cannot satisfy this), which step 5 requires: \
+             {message}"
         );
     }
 
