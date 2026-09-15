@@ -1,23 +1,28 @@
 /**
  * The ABI-revision handshake, RUN against a fixture rather than assumed
- * (chtypes-core#42, #40; this SDK's issue #36).
+ * (#36).
  *
  * docs/reference/artifact.md step 5 is normative: an artifact whose
  * `chs_abi_revision()` answers a value that is neither 0 nor the revision
  * this binding was written against MUST be rejected, naming BOTH numbers.
- * The fixture is a stub shared library generated from the header itself
- * (core `tests/sdk/abi-fixtures/gen.py`): one registry root whose artifact
- * answers `abi_revision + 1` (`wrong-revision/`), one answering the header's
- * own `abi_revision` (`at-revision/`, the control — without it a binding
- * whose own `ABI_REVISION` had drifted would refuse everything and pass the
- * refusal case for entirely the wrong reason).
+ * The fixture is a stub shared library built from the header itself by the
+ * fixture generator the signed release serves as `abi-revision/gen.py`: one
+ * registry root whose artifact answers `abi_revision + 1`
+ * (`wrong-revision/`), one answering the header's own `abi_revision`
+ * (`at-revision/`, the control — without it a binding whose own
+ * `ABI_REVISION` had drifted would refuse everything and pass the refusal
+ * case for entirely the wrong reason).
  *
  * Every expected number comes from the fixture's own `fixture.json`, never
  * from the exported `ABI_REVISION` — a case that read the constant under
- * test could not catch that constant being wrong.
+ * test could not catch that constant being wrong. The refusal message is
+ * checked with the fixture root's own text (and its realpath — macOS's
+ * `/tmp` resolves to `/private/tmp`) stripped out first, so a digit that
+ * happens to sit in a temp-directory name can never stand in for a digit the
+ * binding itself was supposed to print.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Registry, RegistryError } from '../src/index.js';
@@ -82,6 +87,33 @@ function namesNumber(message: string, n: number): boolean {
   return new RegExp(`(^|[^0-9])${n}([^0-9]|$)`).test(message);
 }
 
+/**
+ * Strip every occurrence of the fixture root — as given, and as
+ * `fs.realpathSync` resolves it, since macOS's `/tmp` is a symlink to
+ * `/private/tmp` and the two spellings can both appear depending on which
+ * one a caller passed in — out of a message, longest first so the longer
+ * (realpath) form is never left partially replaced by a shorter prefix
+ * match. A digit sitting in a fixture directory name (a temp path, a run
+ * id) must never be able to stand in for a digit the refusal itself is
+ * required to print.
+ */
+function stripFixtureRoot(message: string, root: string): string {
+  let real = root;
+  try {
+    real = realpathSync(root);
+  } catch {
+    // The root not resolving is not this helper's problem to raise; the
+    // caller already has a live Registry error to report if anything here
+    // was actually wrong.
+  }
+  const candidates = [...new Set([root, real])].sort((a, b) => b.length - a.length);
+  let stripped = message;
+  for (const candidate of candidates) {
+    stripped = stripped.split(candidate).join('<fixture>');
+  }
+  return stripped;
+}
+
 describe.skipIf(!HAVE_FIXTURES)('abi revision fixture', () => {
   it('wrong revision is refused naming both numbers', () => {
     const doc = DOC!;
@@ -96,9 +128,10 @@ describe.skipIf(!HAVE_FIXTURES)('abi revision fixture', () => {
       RegistryError,
     );
     const message = thrown instanceof Error ? thrown.message : String(thrown);
+    const stripped = stripFixtureRoot(message, root);
     for (const n of [doc.mismatch_revision, doc.abi_revision]) {
       expect(
-        namesNumber(message, n),
+        namesNumber(stripped, n),
         `the refusal does not name ${n} (the artifact reports ${doc.mismatch_revision}, ` +
           `this binding speaks ${doc.abi_revision}): ${message}`,
       ).toBe(true);
