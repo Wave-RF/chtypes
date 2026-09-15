@@ -39,7 +39,7 @@ One artifact per ClickHouse line, each carrying that release's own C++. A line i
 | `26.3` | `26.3.33.24-lts` | all |
 | `26.4` | `26.4.5.143-stable` | all |
 | `26.5` | `26.5.7.64-stable` | all |
-| `26.6` | `26.6.6.15-stable` | all |
+| `26.6` | `26.6.7.18-stable` | all |
 | `26.7` | `26.7.8.15-stable` | all |
 | `26.8` | `26.8.4.11-lts` | all |
 
