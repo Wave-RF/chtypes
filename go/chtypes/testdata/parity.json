@@ -108,6 +108,16 @@
       "rust": "RegistryOptions"
     },
     {
+      "id": "registry.verify-checksums",
+      "group": "registry",
+      "kind": "option",
+      "what": "Re-hash each library against its manifest's library_sha256 BEFORE dlopen — off by default, SHOULD be on for an artifact that did not come from a local build and MUST be on for one that came over a network (docs/reference/artifact.md §Verification)",
+      "go": "WithVerifyChecksums",
+      "python": "Registry.__init__",
+      "ts": "RegistryOptions",
+      "rust": "RegistryOptions"
+    },
+    {
       "id": "library.version",
       "group": "library",
       "kind": "property",
@@ -1431,6 +1441,7 @@
       "Error::Load": "Load failure.",
       "Error::NotAnArtifact": "Load failure.",
       "Error::CorruptArtifact": "Load failure.",
+      "Error::ChecksumMismatch": "The load-time checksum refusal; see registry.verify-checksums.",
       "Error::VersionMismatch": "The right bytes in the wrong directory.",
       "Error::Init": "chs_init failure.",
       "Error::InitConflict": "One image, two timezones.",

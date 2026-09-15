@@ -26,16 +26,27 @@ serde = { version = "1", features = ["derive"] }
 # for the same reason it never was (see those modules' docs).
 serde_json = "1"
 thiserror = "2"
+# sha2 is NOT optional, and that is the point: load-time checksum verification
+# (RegistryOptions::verify_checksums) is a security posture, and the consumer
+# who builds `--no-default-features` — no downloader, artifacts arriving by
+# some path this crate never sees — is precisely the one who most needs to
+# re-hash them before dlopen. Gating the hash behind `fetch` would mean "you
+# may verify only if you also compile an HTTP client, a tar reader and
+# ed25519", which is backwards. It is pure Rust with no system dependency,
+# `default-features = false` (no std digest extras), and it is the same digest
+# the fetch chain hashes with — one copy, pinned to the series ed25519-dalek
+# itself uses.
+sha2 = { version = "0.11", default-features = false }
 
 # --- the `fetch` feature: chtypes::ensure and the `chtypes` binary (docs/guides/fetch.md).
 # Every crate below is optional and behind `fetch`, so `--no-default-features`
 # builds with exactly the dependency set above.
 #
 # ed25519-dalek verifies SHA256SUMS.sig (spec §4); verification only, so the
-# precomputed tables and zeroize are off. sha2 is the digest the whole chain
-# hashes with, pinned to the series dalek itself uses so there is one copy.
+# precomputed tables and zeroize are off. The digest the whole chain hashes
+# with is the unconditional `sha2` above — the loader needs it with or without
+# this feature.
 ed25519-dalek = { version = "3", optional = true, default-features = false }
-sha2 = { version = "0.11", optional = true, default-features = false }
 # ureq fetches over HTTPS (rustls + webpki roots, no OpenSSL). Its gzip feature
 # is OFF on purpose: a transparently un-gzipped body would hash differently
 # from the bytes SHA256SUMS records. base64 (for the signature file) is pinned
@@ -51,7 +62,6 @@ default = ["fetch"]
 # `chtypes::ensure`, the registry's autofetch option and the `chtypes` binary.
 fetch = [
   "dep:ed25519-dalek",
-  "dep:sha2",
   "dep:ureq",
   "dep:base64",
   "dep:tar",

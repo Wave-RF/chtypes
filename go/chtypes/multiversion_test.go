@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -125,4 +126,188 @@ func testRegistryLibrary(t *testing.T) (path, ext string) {
 	}
 	t.Skipf("registry %s holds no loadable artifact (no <dir>/manifest.json naming an existing library)", root)
 	return "", ""
+}
+
+// ------------------------------------------------- load-time verification
+//
+// WithVerifyChecksums is the Go half of docs/reference/artifact.md
+// §Verification, and the thing under test is the ORDER: the hash decides
+// before dlopen, because an image cannot be unmapped once it is mapped. The
+// artifact-free cases below therefore use a library that could never load — a
+// text file — and read the verdict off WHICH error came back: a checksum
+// error means the check ran first, a dlopen error means it passed and the
+// load went on.
+
+// writeFakeArtifact lays out <dir>/<line>/ with a manifest and a stand-in
+// "library" that is plain text: enough for the loader to reach dlopen, and
+// never enough to survive it.
+func writeFakeArtifact(t *testing.T, dir, line string, manifest map[string]any, body []byte) string {
+	t.Helper()
+	sub := filepath.Join(dir, line)
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name, _ := manifest["library"].(string)
+	if err := os.WriteFile(filepath.Join(sub, name), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blob, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "manifest.json"), blob, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return sub
+}
+
+func TestVerifyChecksumsRefusesBytesTheManifestDoesNotClaim(t *testing.T) {
+	body := []byte("not a shared library")
+	dir := t.TempDir()
+	writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"library_bytes":      len(body),
+		"library_sha256":     strings.Repeat("00", 32),
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+	}, body)
+
+	_, err := NewRegistry(dir, WithVerifyChecksums(true))
+	if err == nil {
+		t.Fatal("a library whose bytes do not match its manifest loaded anyway")
+	}
+	if !strings.Contains(err.Error(), "does not match manifest") {
+		t.Fatalf("want the checksum refusal BEFORE dlopen, got: %v", err)
+	}
+
+	// The same directory without the option: the load gets as far as dlopen,
+	// which is what proves the option — and not merely the broken file —
+	// produced the verdict above.
+	_, err = NewRegistry(dir)
+	if err == nil || strings.Contains(err.Error(), "does not match manifest") {
+		t.Fatalf("without WithVerifyChecksums the hash must not be consulted; got: %v", err)
+	}
+}
+
+func TestVerifyChecksumsAcceptsMatchingBytesAndLoadsOn(t *testing.T) {
+	body := []byte("not a shared library")
+	dir := t.TempDir()
+	writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"library_bytes":      len(body),
+		"library_sha256":     sha256Hex(body),
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+	}, body)
+
+	// The hash matches, so verification passes and the load proceeds to dlopen,
+	// which is where a text file dies. A checksum error here would mean the
+	// check refused bytes it had just been told were correct.
+	_, err := NewRegistry(dir, WithVerifyChecksums(true))
+	if err == nil {
+		t.Fatal("a text file cannot dlopen; the load must still fail")
+	}
+	if strings.Contains(err.Error(), "does not match manifest") || strings.Contains(err.Error(), "cannot verify") {
+		t.Fatalf("matching bytes must pass verification; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "dlopen") {
+		t.Fatalf("want the dlopen failure that follows a passing check, got: %v", err)
+	}
+}
+
+func TestVerifyChecksumsRefusesAManifestWithNoHash(t *testing.T) {
+	body := []byte("not a shared library")
+	dir := t.TempDir()
+	writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+	}, body)
+
+	// Verification asked for and not possible is not verification: a manifest
+	// carrying no library_sha256 is refused, never passed over in silence.
+	_, err := NewRegistry(dir, WithVerifyChecksums(true))
+	if err == nil || !strings.Contains(err.Error(), "cannot verify") {
+		t.Fatalf("want a refusal naming the unverifiable artifact, got: %v", err)
+	}
+}
+
+func TestVerifyChecksumsAgainstARealArtifact(t *testing.T) {
+	inst := smallestInstalled(t)
+	// One line, hard-linked rather than copied: the bytes (and so the hash) are
+	// the artifact's own, and nothing duplicates 230 MB to prove it.
+	dir := t.TempDir()
+	sub := filepath.Join(dir, inst.Line)
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(inst.Dir, inst.Library), filepath.Join(sub, inst.Library)); err != nil {
+		t.Skipf("cannot hard-link %s into %s: %v", inst.Library, sub, err)
+	}
+	for _, name := range []string{"manifest.json", "unsafe_families.txt"} {
+		blob, err := os.ReadFile(filepath.Join(inst.Dir, name))
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(sub, name), blob, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r, err := NewRegistry(dir, WithVerifyChecksums(true))
+	if err != nil {
+		t.Fatalf("a real artifact must survive its own checksum: %v", err)
+	}
+	lib, err := r.For(Version(inst.Line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := lib.CompileDDL("x UInt8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	res, err := cs.Rows(JSONEachRow, []byte(`{"x":1}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != Accepted || len(res.Rows) != 1 {
+		t.Fatalf("verified artifact answered %+v", res)
+	}
+
+	// The load above passing is not proof that anything was hashed. Same real
+	// library, same hard link, a manifest that claims a different digest: the
+	// refusal has to name the artifact's OWN sha256, which only a hash that
+	// actually ran over those bytes can produce.
+	bad := t.TempDir()
+	badSub := filepath.Join(bad, inst.Line)
+	if err := os.MkdirAll(badSub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(inst.Dir, inst.Library), filepath.Join(badSub, inst.Library)); err != nil {
+		t.Fatal(err)
+	}
+	blob, err := os.ReadFile(filepath.Join(inst.Dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(blob, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["library_sha256"] = strings.Repeat("00", 32)
+	tampered, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badSub, "manifest.json"), tampered, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewRegistry(bad, WithVerifyChecksums(true))
+	if err == nil {
+		t.Fatal("a manifest claiming the wrong digest for a real library was accepted")
+	}
+	if !strings.Contains(err.Error(), strings.ToLower(inst.LibrarySHA256)) {
+		t.Fatalf("the refusal must carry the digest it computed (%s); got: %v", inst.LibrarySHA256, err)
+	}
 }

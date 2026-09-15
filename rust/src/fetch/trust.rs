@@ -1,13 +1,17 @@
 //! `docs/guides/fetch.md` §4: the release key, the trust policy, the signature file
 //! and the ed25519 check — plus the sha256 helpers the whole chain hashes with.
-
-use std::io::Read;
-use std::path::Path;
+//!
+//! Those helpers MOVED to `crate::digest` and are re-exported here unchanged,
+//! so `fetch::sha256_file` / `fetch::sha256_hex` still resolve. They had to
+//! leave: the loader's `RegistryOptions::verify_checksums` hashes with the
+//! same function and exists without the `fetch` feature.
 
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
+pub(crate) use crate::digest::hex;
+pub use crate::digest::{sha256_file, sha256_hex};
 use crate::error::{Error, Result};
 
 /// The release public key, raw, hex — `docs/guides/fetch.md` §4. Every SDK embeds
@@ -236,26 +240,6 @@ pub fn verify_signature(key: &[u8; 32], message: &[u8], signature: &[u8; 64]) ->
         .is_ok()
 }
 
-/// Lowercase hex sha256 of `bytes`.
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
-}
-
-/// Lowercase hex sha256 of a file, streamed.
-pub fn sha256_file(path: &Path) -> std::io::Result<String> {
-    let mut file = std::fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1 << 20];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex(&hasher.finalize()))
-}
-
 /// A streaming sha256 for the download path: hash what is written.
 pub(crate) struct Hashing<W> {
     inner: W,
@@ -290,15 +274,6 @@ impl<W: std::io::Write> std::io::Write for Hashing<W> {
     fn flush(&mut self) -> std::io::Result<()> {
         self.inner.flush()
     }
-}
-
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        use std::fmt::Write;
-        let _ = write!(s, "{b:02x}");
-    }
-    s
 }
 
 #[cfg(test)]
