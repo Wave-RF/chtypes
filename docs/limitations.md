@@ -66,6 +66,6 @@ The ABI header is the full contract.
 
 ## Pre-1.0
 
-What is frozen in the ABI, and why, is maintained in the core repository; artifacts and SDK versions are matched by ABI revision, and a mismatch is refused at load, naming both numbers — see [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path).
+What is already frozen before 1.0, and how an artifact and the SDK opening it are matched, is in [`support.md`](support.md#pre-10).
 
 Anything else may still move before 1.0. Each binding's own CHANGELOG carries its list.

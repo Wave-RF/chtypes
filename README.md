@@ -173,7 +173,7 @@ The short version: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64`
 
 ## Project status
 
-Pre-1.0, and published to all four registries — the badges above read the live version from each. What is frozen in the ABI, and why, is maintained in the core repository; artifacts and SDK versions are matched by ABI revision, and a mismatch is refused at load, naming both numbers — see [`docs/guides/fetch.md`](docs/guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path). Anything else may still move — each binding keeps its own CHANGELOG.
+Pre-1.0, and published to all four registries — the badges above read the live version from each. What is already frozen before 1.0 is in [`docs/support.md`](docs/support.md#pre-10).
 
 This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the artifacts themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — is the core repository, under its own license. The bindings here contain no ClickHouse code: they load an artifact and speak the ABI. Artifacts carry their own license; see the `LICENSE` inside each release.
 
