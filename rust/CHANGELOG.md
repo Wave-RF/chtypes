@@ -4,6 +4,12 @@ All notable changes to the rust binding. The format is [Keep a Changelog](https:
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
+## [Unreleased]
+
+### Fixed
+
+- **An unreadable library file now reports `Error::LibraryRead` naming the file**, where it previously reported `Error::Registry` with the file's path in the `dir` field meant for the registry directory (#34). This covers both read sites: the `library_bytes` size check and the checksum-verification hash. `Error` is `#[non_exhaustive]`, so this new variant is additive.
+
 ## [0.2.0] — 2026-09-15
 
 ### Changed — BREAKING
