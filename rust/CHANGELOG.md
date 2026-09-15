@@ -4,7 +4,7 @@ All notable changes to the rust binding. The format is [Keep a Changelog](https:
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
-## [Unreleased]
+## [0.2.1] — 2026-09-15
 
 ### Added
 
@@ -13,6 +13,11 @@ The four bindings in this repository are released together and give one answer, 
 ### Fixed
 
 - **An unreadable library file now reports `Error::LibraryRead` naming the file**, where it previously reported `Error::Registry` with the file's path in the `dir` field meant for the registry directory (#34). This covers both read sites: the `library_bytes` size check and the checksum-verification hash. `Error` is `#[non_exhaustive]`, so this new variant is additive.
+
+### Notes
+
+- Speaks **ABI revision 4**, unchanged since 0.1.0, so no artifact needs relinking. The golden set this release was tested against is the one core serves, generated on the ClickHouse lines 24.8, 25.3, 25.8, 25.10, 26.2, 26.3, 26.4, 26.5, 26.6, 26.7 and 26.8.
+- **The ABI-revision refusal is now run, not assumed.** This binding's suite points a registry at a generated artifact answering the wrong revision and asserts the load is refused naming both numbers, beside a matching-revision control that must load; CI fails the build if either case did not run (#36).
 
 ## [0.2.0] — 2026-09-15
 

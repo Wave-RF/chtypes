@@ -4,6 +4,16 @@ All notable changes to the go binding. The format is [Keep a Changelog](https://
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
+## [0.2.1] — 2026-09-15
+
+Released in step with the Rust crate, which gains `Registry::open` and `Error::LibraryRead`; this binding's public API is unchanged.
+
+### Notes
+
+- Speaks **ABI revision 4**, unchanged since 0.1.0, so no artifact needs relinking. The golden set this release was tested against is the one core serves, generated on the ClickHouse lines 24.8, 25.3, 25.8, 25.10, 26.2, 26.3, 26.4, 26.5, 26.6, 26.7 and 26.8.
+- **The ABI-revision refusal is now run, not assumed.** This binding's suite points a registry at a generated artifact answering the wrong revision and asserts the load is refused naming both numbers, beside a matching-revision control that must load; CI fails the build if either case did not run (#36).
+- A fetch test that could fail under load (its publish window healed on a wall-clock timer) now heals on the first refused read; test-only (#38).
+
 ## [0.2.0] — 2026-09-15
 
 ### Changed — BREAKING
