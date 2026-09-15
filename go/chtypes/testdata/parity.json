@@ -627,27 +627,27 @@
 
     {
       "id": "vocab.verdict.true",
-      "group": "vocabulary", "kind": "constant", "note": "No shared `value`: Go and Python render this state as the wire character the C document carries, TypeScript renders a word, and Rust renders nothing. The four-state CONCEPT is the contract (§Revision 3); the spelling is open — see the parity report.",
+      "group": "vocabulary", "kind": "constant", "value": "t",
       "what": "The predicate answered true for this row",
-      "go": "VerdictTrue", "python": "Verdict.TRUE", "ts": "Verdict.True", "rust": "Verdict::True"
+      "go": {"symbol": "VerdictTrue", "value_check": false, "why": "VerdictTrue is a typed int constant with no string equality; Verdict.String() renders it as `t`, but the go value table (parity_test.go) has not been extended to cover it."}, "python": "Verdict.TRUE", "ts": "Verdict.True", "rust": {"symbol": "Verdict::True", "value_check": false, "why": "Verdict::True is a bare enum variant with no string equality; Verdict::as_char() renders it as `t`, but the rust value table (tests/parity.rs) has not been extended to cover it."}
     },
     {
       "id": "vocab.verdict.false",
-      "group": "vocabulary", "kind": "constant", "note": "No shared `value`: Go and Python render this state as the wire character the C document carries, TypeScript renders a word, and Rust renders nothing. The four-state CONCEPT is the contract (§Revision 3); the spelling is open — see the parity report.",
+      "group": "vocabulary", "kind": "constant", "value": "f",
       "what": "The predicate answered false for this row",
-      "go": "VerdictFalse", "python": "Verdict.FALSE", "ts": "Verdict.False", "rust": "Verdict::False"
+      "go": {"symbol": "VerdictFalse", "value_check": false, "why": "VerdictFalse is a typed int constant with no string equality; Verdict.String() renders it as `f`, but the go value table (parity_test.go) has not been extended to cover it."}, "python": "Verdict.FALSE", "ts": "Verdict.False", "rust": {"symbol": "Verdict::False", "value_check": false, "why": "Verdict::False is a bare enum variant with no string equality; Verdict::as_char() renders it as `f`, but the rust value table (tests/parity.rs) has not been extended to cover it."}
     },
     {
       "id": "vocab.verdict.error",
-      "group": "vocabulary", "kind": "constant", "note": "No shared `value`: Go and Python render this state as the wire character the C document carries, TypeScript renders a word, and Rust renders nothing. The four-state CONCEPT is the contract (§Revision 3); the spelling is open — see the parity report.",
+      "group": "vocabulary", "kind": "constant", "value": "e",
       "what": "The predicate threw on this row — NOT an answer, and fail-closed (§Revision 3)",
-      "go": "VerdictError", "python": "Verdict.ERROR", "ts": "Verdict.Error", "rust": "Verdict::Error"
+      "go": {"symbol": "VerdictError", "value_check": false, "why": "VerdictError is a typed int constant with no string equality; Verdict.String() renders it as `e`, but the go value table (parity_test.go) has not been extended to cover it."}, "python": "Verdict.ERROR", "ts": "Verdict.Error", "rust": {"symbol": "Verdict::Error", "value_check": false, "why": "Verdict::Error is a bare enum variant with no string equality; Verdict::as_char() renders it as `e`, but the rust value table (tests/parity.rs) has not been extended to cover it."}
     },
     {
       "id": "vocab.verdict.decline",
-      "group": "vocabulary", "kind": "constant", "note": "No shared `value`: Go and Python render this state as the wire character the C document carries, TypeScript renders a word, and Rust renders nothing. The four-state CONCEPT is the contract (§Revision 3); the spelling is open — see the parity report.",
+      "group": "vocabulary", "kind": "constant", "value": "d",
       "what": "This library declines — NOT an answer, fail-closed, and the arm an unknown verdict character degrades to (§Revision 3)",
-      "go": "VerdictDecline", "python": "Verdict.DECLINE", "ts": "Verdict.Decline", "rust": "Verdict::Decline"
+      "go": {"symbol": "VerdictDecline", "value_check": false, "why": "VerdictDecline is a typed int constant with no string equality; Verdict.String() renders it as `d`, but the go value table (parity_test.go) has not been extended to cover it."}, "python": "Verdict.DECLINE", "ts": "Verdict.Decline", "rust": {"symbol": "Verdict::Decline", "value_check": false, "why": "Verdict::Decline is a bare enum variant with no string equality; Verdict::as_char() renders it as `d`, but the rust value table (tests/parity.rs) has not been extended to cover it."}
     },
 
     {
@@ -1359,6 +1359,7 @@
       "VersionRequest": "A parsed version spelling.",
       "ArtifactErrorCode": "The artifact code union.",
       "RegistryError": "Registry-layer error.",
+      "ArtifactError": "The base every artifact error descends from, matching Python's ArtifactError and Go's *ArtifactError (chtypes-sdk#13 A3).",
       "FetchError": "Fetch-layer error.",
       "artifactMissingMessage": "The §7 message body, shared by the loader and the CLI.",
       "compareVersions": "Numeric release ordering.",

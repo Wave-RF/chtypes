@@ -26,6 +26,7 @@ export {
 export {
   ABI_REVISION,
   ArtifactCorruptError,
+  ArtifactError,
   ArtifactMissingError,
   ArtifactPinnedError,
   ArtifactUnpublishedError,
