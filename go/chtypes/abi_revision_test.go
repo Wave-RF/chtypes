@@ -1,6 +1,5 @@
 // abi_revision_test.go — the ABI-revision handshake, run against a
-// wrong-revision fixture rather than assumed (chtypes-core#41,
-// Wave-RF/chtypes#36).
+// wrong-revision fixture rather than assumed (#36).
 //
 // docs/reference/artifact.md step 5 is normative: an artifact whose
 // chs_abi_revision() answers a value that is neither 0 nor the revision this
@@ -20,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +69,26 @@ func namesNumber(message string, n int) bool {
 	return regexp.MustCompile(fmt.Sprintf(`(^|[^0-9])%d([^0-9]|$)`, n)).MatchString(message)
 }
 
+// scrubFixtureRoot removes every occurrence of the fixture root — and its
+// symlink-resolved spelling, since macOS's /tmp vs /private/tmp differ — from
+// message. Without this, namesNumber can be satisfied by a bare digit inside
+// the fixture PATH itself (a scratchpad directory name, a request ID) rather
+// than by anything the refusal actually said, which makes "names both
+// numbers" vacuous on some machines. Longest spelling first, so one is never
+// a no-op prefix of the other.
+func scrubFixtureRoot(message, root string) string {
+	forms := []string{root}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+		forms = append(forms, resolved)
+	}
+	sort.Slice(forms, func(i, j int) bool { return len(forms[i]) > len(forms[j]) })
+	scrubbed := message
+	for _, f := range forms {
+		scrubbed = strings.ReplaceAll(scrubbed, f, "<fixture>")
+	}
+	return scrubbed
+}
+
 // TestABIRevisionMismatchIsRefused loads a registry over an artifact whose
 // chs_abi_revision() answers the header's revision plus one. Refusal must
 // happen at NewRegistry — not a Registry that later degrades — and the
@@ -83,10 +104,16 @@ func TestABIRevisionMismatchIsRefused(t *testing.T) {
 			wrong, doc.MismatchRevision, doc.MismatchRevision, doc.ABIRevision)
 	}
 	msg := err.Error()
-	if !namesNumber(msg, doc.MismatchRevision) {
+	// Checked with the fixture root scrubbed out: a path segment can itself
+	// hold a standalone digit (this scratchpad's own request ID does), so
+	// checking the raw message could pass on the path alone rather than on
+	// anything the refusal said. The failure text below still quotes the
+	// original, unscrubbed message.
+	scrubbed := scrubFixtureRoot(msg, doc.Root)
+	if !namesNumber(scrubbed, doc.MismatchRevision) {
 		t.Fatalf("refusal for %s does not name the mismatched revision %d: %s", wrong, doc.MismatchRevision, msg)
 	}
-	if !namesNumber(msg, doc.ABIRevision) {
+	if !namesNumber(scrubbed, doc.ABIRevision) {
 		t.Fatalf("refusal for %s does not name this package's own revision %d: %s", wrong, doc.ABIRevision, msg)
 	}
 }
