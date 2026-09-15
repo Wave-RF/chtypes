@@ -122,7 +122,7 @@ rc=0
 [ -s "$LOG" ] || die "go test produced no -json output (rc=$rc)"
 set +e
 python3 - "$LOG" "$rc" "$HAVE_REG" "$REQUIRE" <<'PY'
-import json, sys
+import json, os, sys
 log, rc, have_reg, require = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1", sys.argv[4] == "1"
 # The parity contract (tests/parity/manifest.json) is checked by each language's
 # own suite, and Go's runs here — from the bare copy, off the manifest it embeds,
@@ -176,6 +176,13 @@ if require:
     if "TestGoldens" not in passed: problems.append("TestGoldens did not pass with artifacts required")
     starved = [t for t in skips if any("no chtypes artifacts under" in l for l in output.get(t, []))]
     if starved: problems.append("%d test(s) skipped for want of a registry with artifacts required: %s" % (len(starved), ", ".join(starved)))
+# The ABI-revision handshake (#36). When $CHTYPES_ABI_FIXTURES names a
+# wrong-revision fixture set (scripts/abi-fixtures.sh), both halves must have
+# PASSED: a skipped or absent case reads exactly like a working handshake.
+if os.environ.get("CHTYPES_ABI_FIXTURES"):
+    for t in ("TestABIRevisionMismatchIsRefused", "TestABIRevisionControlLoads"):
+        if t not in passed:
+            problems.append("%s did not pass although $CHTYPES_ABI_FIXTURES is set" % t)
 if problems:
     print("  VERDICT: NOT a pass —"); [print("    * " + p) for p in problems]; sys.exit(1)
 mode = "" if have_reg else " (no artifact registry: %d test(s) skipped by name above)" % skip
