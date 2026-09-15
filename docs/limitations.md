@@ -58,7 +58,7 @@ The parse-once block twin does not change that — it is a performance shape, no
 
 `unsupported` (`CODE_UNSUPPORTED`, the wire sentinel `-2`) is neither an acceptance nor a rejection, and treating it as either is the most expensive mistake available here.
 
-Both over-accepts and over-rejects are **budgeted at zero** in the proof behind the artifacts: a row accepted here and rejected by the server ships before the insert fails, and a row rejected here and accepted by the server is silent data loss. A decline is how the system stays honest about the cases it cannot reach that bar on.
+Over-accepts and over-rejects are both **budgeted at zero** in the differential proof the artifacts are built from: a row accepted here and rejected by the server ships before the insert fails, and a row rejected here and accepted by the server is silent data loss. Neither is acceptable, so neither has a budget. A decline is how the system stays honest about the cases it cannot reach that bar on.
 
 In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather than a subclass, so `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both. The subtype was retired precisely because catching one and getting the other is a silent misclassification.
 
@@ -66,6 +66,6 @@ The ABI header is the full contract.
 
 ## Pre-1.0
 
-The ABI is frozen at revision 4 and all four bindings pin that number at compile time. Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen; function signatures froze at the first tag.
+What is frozen in the ABI, and why, is maintained in the core repository; artifacts and SDK versions are matched by ABI revision, and a mismatch is refused at load, naming both numbers — see [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path).
 
 Anything else may still move before 1.0. Each binding's own CHANGELOG carries its list.

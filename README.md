@@ -151,7 +151,7 @@ A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying
 ## The guarantees every binding is held to
 
 - **`Transformed` is the product.** ClickHouse never says _"I changed your value"_; chtypes derives that report (`overflow_wrap`, `date_clamp`, `poisoned`, `ttl_expired`, …) and it is not optional.
-- **Over-accepts and over-rejects are both budgeted at zero** in the proof behind the artifacts: a row accepted here and rejected by the server ships before the insert fails; a row rejected here and accepted by the server is silent data loss.
+- **Over-accepts and over-rejects are both budgeted at zero** — the guarantee and what backs it: [`docs/limitations.md`](docs/limitations.md#the-error-model-is-normative).
 - **`unsupported` is an answer, never a guess.** A binding surfaces the library's decline; it never papers over one.
 - **The four bindings give one answer.** The golden set is run by all of them, and each is scored against real ClickHouse servers at the same agreement as the reference.
 
@@ -173,7 +173,7 @@ The short version: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64`
 
 ## Project status
 
-Pre-1.0, and published to all four registries — the badges above read the live version from each. The C ABI is frozen at revision 4 (`include/chtypes.h`, 28 `chs_*` functions) and the four bindings pin that number at compile time. Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen; function signatures froze at the first tag. Anything else may still move — each binding keeps its own CHANGELOG.
+Pre-1.0, and published to all four registries — the badges above read the live version from each. What is frozen in the ABI, and why, is maintained in the core repository; artifacts and SDK versions are matched by ABI revision, and a mismatch is refused at load, naming both numbers — see [`docs/guides/fetch.md`](docs/guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path). Anything else may still move — each binding keeps its own CHANGELOG.
 
 This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the artifacts themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — is the core repository, under its own license. The bindings here contain no ClickHouse code: they load an artifact and speak the ABI. Artifacts carry their own license; see the `LICENSE` inside each release.
 

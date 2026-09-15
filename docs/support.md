@@ -19,7 +19,7 @@ The table below is **generated** from this tree's four manifests and from the re
 
 The artifact is native code, so a platform is supported only if the release publishes a build for it. Today that is:
 
-- `darwin-arm64` — development floor, not an oracle: its `long double` makes float parses diverge from a real server
+- `darwin-arm64` — see [macOS is a development floor, not an oracle](limitations.md#macos-is-a-development-floor-not-an-oracle)
 - `linux-amd64`
 - `linux-arm64`
 
@@ -71,8 +71,8 @@ This is also why the golden set shrinks as lines are added: a case the lines ans
 
 ## macOS is a development floor
 
-The darwin artifacts exist so you can develop and run the suites on a laptop. They are not an oracle: macOS's `long double` makes some float parses diverge from a real server, so a float expectation is taken from Linux or from a live ClickHouse, never from a Mac.
+The darwin artifacts exist so you can develop and run the suites on a laptop. They are not an oracle — see [Known limitations → macOS is a development floor, not an oracle](limitations.md#macos-is-a-development-floor-not-an-oracle) for why.
 
 ## Pre-1.0
 
-The ABI is frozen at revision 4 (`include/chtypes.h`, 28 `chs_*` functions) and the four bindings pin that number at compile time. Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen; function signatures froze at the first tag. Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list.
+What is frozen in the ABI, and why, is maintained in the core repository; artifacts and SDK versions are matched by ABI revision, and a mismatch is refused at load, naming both numbers — see [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path). Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list.
