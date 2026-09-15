@@ -73,14 +73,7 @@ let installed = ensure("25.8", &EnsureOptions::default())?;   // installed.dir, 
 
 ## Where it lands, and where it is looked for
 
-A **registry** is a directory holding one subdirectory per ClickHouse minor line. Lookup walks a search path and takes the **first directory that holds the line asked for**:
-
-1. a path handed to the registry constructor;
-2. `$CHTYPES_REGISTRY`;
-3. `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>` — the per-user cache, where a fetch installs;
-4. `/usr/local/share/chtypes/artifacts/<os>-<arch>`, then `/opt/chtypes/artifacts/<os>-<arch>` — reserved system locations, empty today, for images that bake artifacts in.
-
-A fetch **writes** to the first of (1), (2), (3) that is set, and never to (4). `<os>` is `linux` or `darwin`; `<arch>` is `amd64` or `arm64`, in exactly those spellings. One machine set up once therefore serves all four bindings, and a core build lands in the same place.
+A **registry** is a directory holding one subdirectory per ClickHouse minor line, looked for in the order [`fetch.md` §1](fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) defines.
 
 Inside, one directory per line:
 

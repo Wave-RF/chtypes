@@ -110,7 +110,7 @@ w("")
 w("The artifact is native code, so a platform is supported only if the release publishes a build for it. Today that is:")
 w("")
 for p in plat_order:
-    note = " — development floor, not an oracle: its `long double` makes float parses diverge from a real server" \
+    note = " — see [macOS is a development floor, not an oracle](limitations.md#macos-is-a-development-floor-not-an-oracle)" \
            if p.startswith("darwin") else ""
     w("- `%s`%s" % (p, note))
 w("")
