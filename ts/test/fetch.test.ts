@@ -806,6 +806,37 @@ describe('the registry: the search path, the §7 error and autofetch', () => {
     expect(err.lookedIn).toEqual(['/a']);
   });
 
+  it('accepts an UPPERCASE library_sha256 — a hex digest is the same digest in either case', () => {
+    // Go lower-cases (strings.ToLower) and Rust lower-cases (.to_ascii_lowercase())
+    // before comparing; TypeScript and Python once compared raw, so an uppercase
+    // manifest digest was accepted by two bindings and refused by two.
+    // docs/reference/artifact.md asserts all four behave alike, so this pins it.
+    const dir = scratch('upper');
+    const verdir = path.join(dir, '25.8');
+    mkdirSync(verdir, { recursive: true });
+    const payload = Buffer.from('not really a library');
+    writeFileSync(path.join(verdir, 'libchtypes.so'), payload);
+    writeFileSync(
+      path.join(verdir, 'manifest.json'),
+      JSON.stringify({
+        library: 'libchtypes.so',
+        library_bytes: payload.byteLength,
+        library_sha256: createHash('sha256').update(payload).digest('hex').toUpperCase(),
+      }),
+    );
+    // The hash must PASS, so the failure that follows is dlopen's, not sha256's.
+    // Asserting "no sha256 error" is the whole point: a passing load would prove
+    // nothing if the check had simply been skipped.
+    let thrown: unknown;
+    try {
+      new Registry(dir, { verifyChecksums: true });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeDefined(); // a text file is not a library: dlopen must fail
+    expect(String((thrown as Error).message)).not.toMatch(/does not match manifest/);
+  });
+
   it('a named directory that does not exist is an error naming it; with autofetch it is the destination-to-be', () => {
     process.env['XDG_CACHE_HOME'] = scratch('xdg');
     delete process.env['CHTYPES_REGISTRY'];

@@ -457,7 +457,10 @@ function verifyChecksum(libPath: string, manifest: Manifest): void {
     );
   }
   const actual = createHash('sha256').update(bytes).digest('hex');
-  if (actual !== expected) {
+  // Case-insensitive: a hex digest is the same digest in either case, and Go
+  // and Rust already lower-case before comparing. Comparing raw here made an
+  // uppercase manifest digest pass in two bindings and fail in two.
+  if (actual !== expected.toLowerCase()) {
     throw new RegistryError(`chtypes: ${libPath} sha256 ${actual} does not match manifest ${expected}`);
   }
 }
