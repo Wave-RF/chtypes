@@ -20,7 +20,7 @@ It fetches anonymously on purpose. A registry can show a maintainer a version th
 ## Before the first tag of each package
 
 1. Bump the manifest version (`python/pyproject.toml`, `ts/package.json`, `rust/Cargo.toml`; Go has none — the tag is the version).
-2. **Regenerate the example lockfiles**, which record the bindings as path dependencies and therefore carry the version: `(cd examples/rust && cargo update -p chtypes)` and `(cd examples/python && uv lock)`. CI runs the four tours with `--locked`, so a stale one fails the `artifacts` job. This is deliberate: `examples/rust/Cargo.lock` sat at `0.1.0` through the whole `0.1.1` release, and `examples/python/uv.lock` missed `0.1.1` _and_ `0.1.2`, because nothing resolved them.
+2. **Regenerate the lockfiles that carry the version** — the crate's own and the examples': `(cd rust && cargo update -p chtypes)`, `(cd examples/rust && cargo update -p chtypes)` and `(cd examples/python && uv lock)`. `rust/Cargo.lock` records `chtypes`'s own version, so `cargo build --locked` fails the moment `Cargo.toml` is bumped without it. CI runs the four tours with `--locked`, so a stale one fails the `artifacts` job. This is deliberate: `examples/rust/Cargo.lock` sat at `0.1.0` through the whole `0.1.1` release, and `examples/python/uv.lock` missed `0.1.1` _and_ `0.1.2`, because nothing resolved them.
 3. `CHANGELOG` entry naming the ABI revision the release speaks (`4` today) and the ClickHouse lines the golden set was generated on.
 4. Run that package's suite against a registry, and `scripts/check-standalone.sh` for Go.
 5. Tag: `git tag go/v0.1.0 && git push origin go/v0.1.0`, etc.
