@@ -35,7 +35,13 @@ use source::Source;
 /// How [`ensure`] fetches. `Default` is what `chtypes fetch <line>` does with
 /// no flags: this host's platform, the artifacts host's rolling release, the
 /// environment's trust policy, no lock, quiet.
-#[derive(Debug, Clone, Default)]
+///
+/// `PartialEq` is derived so [`Registry::open`](crate::Registry::open) can
+/// tell whether [`RegistryOptions::fetch`](crate::RegistryOptions::fetch) was
+/// left at its default — every field here is a `bool`, a `String`/`PathBuf`,
+/// or an `Option`/`Vec` of one, so the comparison is structural and exact,
+/// never a `Debug`-string comparison standing in for one.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct EnsureOptions {
     /// An explicit registry directory (`--dest`; `docs/guides/fetch.md` §1 item 1).
     /// Searched first and written to. `None` = `$CHTYPES_REGISTRY`, else the

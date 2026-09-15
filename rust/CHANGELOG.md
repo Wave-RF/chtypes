@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`Registry::open(dir, RegistryOptions)`**: an eager, one-directory registry that also takes `verify_checksums`, closing the verification asymmetry with Go's `WithVerifyChecksums`, Python's `verify_hashes` and TypeScript's `verifyChecksums` — a Rust caller no longer has to switch to `from_search_path_with` to verify a single directory. `RegistryOptions.dir`, `.autofetch` and (with the `fetch` feature) `.fetch` only mean something on the search path, so `open` refuses a non-default value for any of them, naming the field and `from_search_path_with`, rather than ignoring it. `with_timezone` is now a thin wrapper over `open`; `new` and the `from_env*` constructors are unchanged (#35).
+
 ### Fixed
 
 - **An unreadable library file now reports `Error::LibraryRead` naming the file**, where it previously reported `Error::Registry` with the file's path in the `dir` field meant for the registry directory (#34). This covers both read sites: the `library_bytes` size check and the checksum-verification hash. `Error` is `#[non_exhaustive]`, so this new variant is additive.

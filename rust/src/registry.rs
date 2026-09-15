@@ -91,10 +91,11 @@ pub struct Manifest {
 ///
 /// Two shapes, one type:
 ///
-/// * **One directory, eager** — [`Registry::new`] and its `from_env*`
-///   variants scan the directory and load every artifact in it up front.
-///   [`Registry::for_version`] answers from what is loaded and fails with
-///   [`Error::NoSuchVersion`], naming what is loaded.
+/// * **One directory, eager** — [`Registry::new`], its `from_env*` variants,
+///   [`Registry::with_timezone`] and [`Registry::open`] (which also honors
+///   [`RegistryOptions::verify_checksums`]) scan the directory and load every
+///   artifact in it up front. [`Registry::for_version`] answers from what is
+///   loaded and fails with [`Error::NoSuchVersion`], naming what is loaded.
 /// * **The search path, lazy** — [`Registry::from_search_path`] loads nothing
 ///   until a line is asked for, then takes the first directory on the §1
 ///   search path that holds it. A line found nowhere is
@@ -191,12 +192,15 @@ pub struct RegistryOptions {
     /// verification (Go and TypeScript refuse it too; Python's
     /// `verify_library` returns silently, the one gap issue #13 leaves).
     ///
-    /// The one-directory constructors ([`Registry::new`] and its `from_env*`
-    /// and `with_timezone` variants) take no options — Rust has no default
+    /// [`Registry::new`], its `from_env*` variants and
+    /// [`Registry::with_timezone`] take no options — Rust has no default
     /// arguments — so a caller that wants a verified registry over one
-    /// explicit directory passes it here as [`RegistryOptions::dir`]: that
-    /// directory is the first thing on the search path, and every line it
-    /// serves is verified as it opens.
+    /// explicit directory has two routes: [`Registry::open`], which takes
+    /// this struct directly for that one directory, or passing the directory
+    /// here as [`RegistryOptions::dir`] and going through
+    /// [`Registry::from_search_path_with`], where that directory is the first
+    /// thing on the search path and every line it serves is verified as it
+    /// opens.
     pub verify_checksums: bool,
     /// How an autofetch fetches — source, tag, lock, trust policy. Its `dest`
     /// is overridden by [`RegistryOptions::dir`], so the fetched line lands
@@ -276,25 +280,118 @@ impl Registry {
     /// columns. Only pass something other than `UTC` when you know the target
     /// server's timezone; the host's `TZ` must never decide it.
     ///
-    /// A subdirectory without a readable `manifest.json` is skipped silently
-    /// (a registry may hold scratch directories); a directory that HAS a
-    /// manifest and then fails to load is broken, not absent, and aborts the
-    /// scan with an error.
+    /// A thin wrapper over [`Registry::open`] with everything but `timezone`
+    /// at its [`RegistryOptions`] default (so, no verification) — see its
+    /// docs for the scan and load behavior.
     ///
     /// # Errors
     ///
-    /// * [`Error::Registry`] — the registry directory itself could not be read.
+    /// See [`Registry::open`].
+    pub fn with_timezone(dir: impl AsRef<Path>, timezone: &str) -> Result<Registry> {
+        Registry::open(
+            dir,
+            RegistryOptions {
+                timezone: Some(timezone.to_string()),
+                ..RegistryOptions::default()
+            },
+        )
+    }
+
+    /// Load every artifact under `dir` eagerly, honoring the two
+    /// [`RegistryOptions`] that mean something for a single directory —
+    /// [`RegistryOptions::timezone`] (`UTC` when `None`) and
+    /// [`RegistryOptions::verify_checksums`] — so a caller no longer has to
+    /// switch to [`Registry::from_search_path_with`] to get a verified
+    /// registry over one explicit directory (issue #35).
+    ///
+    /// The fields that only make sense on the §1 search path —
+    /// [`RegistryOptions::dir`], [`RegistryOptions::autofetch`] and, with the
+    /// `fetch` feature, [`RegistryOptions::fetch`] — are REFUSED, not
+    /// silently ignored, when they are not at their default: `dir` is
+    /// already this function's first argument, and neither autofetch nor a
+    /// fetch policy means anything without a search path to fall back on.
+    /// That refusal happens FIRST, before anything on disk is touched.
+    ///
+    /// Otherwise this scans `dir` exactly as [`Registry::with_timezone`]
+    /// always has: a subdirectory without a readable `manifest.json` is
+    /// skipped silently (a registry may hold scratch directories); a
+    /// directory that HAS a manifest and then fails to load is broken, not
+    /// absent, and aborts the scan with an error.
+    ///
+    /// ```no_run
+    /// use chtypes::{Registry, RegistryOptions};
+    ///
+    /// let registry = Registry::open(
+    ///     "/var/lib/chtypes/artifacts",
+    ///     RegistryOptions {
+    ///         verify_checksums: true,
+    ///         ..Default::default()
+    ///     },
+    /// )?;
+    /// # Ok::<(), chtypes::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::Registry`] with an `io::ErrorKind::InvalidInput` source —
+    ///   `opts.dir`, `opts.autofetch` or (with the `fetch` feature)
+    ///   `opts.fetch` was not at its default; the message names the field and
+    ///   [`Registry::from_search_path_with`], which does honor it.
+    /// * [`Error::Registry`] — the registry directory itself could not be
+    ///   read, or — with [`RegistryOptions::verify_checksums`] — a manifest
+    ///   carries no `library_sha256`.
     /// * [`Error::LibraryRead`] — a manifested library file could not be read
     ///   (its size, or its bytes while verifying).
     /// * [`Error::CorruptArtifact`] — a library's size on disk disagrees with
     ///   its manifest's `library_bytes`.
+    /// * [`Error::ChecksumMismatch`] — with [`RegistryOptions::verify_checksums`],
+    ///   a library's hash disagrees with its manifest's `library_sha256`.
     /// * [`Error::VersionMismatch`] — `chs_clickhouse_version()` disagrees
     ///   with the manifest's `clickhouse_version`.
     /// * [`Error::EmptyRegistry`] — the directory held no loadable artifact;
     ///   an empty registry is a configuration mistake, not an empty result.
     /// * Everything [`Library::load`] can return, per artifact.
-    pub fn with_timezone(dir: impl AsRef<Path>, timezone: &str) -> Result<Registry> {
+    pub fn open(dir: impl AsRef<Path>, opts: RegistryOptions) -> Result<Registry> {
         let dir = dir.as_ref().to_path_buf();
+
+        // Refuse the search-path-only fields FIRST, before touching disk.
+        if opts.dir.is_some() {
+            return Err(Error::Registry {
+                dir,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "RegistryOptions.dir is not honored by Registry::open (its directory is \
+                     the first argument); use Registry::from_search_path_with",
+                ),
+            });
+        }
+        if opts.autofetch.is_some() {
+            return Err(Error::Registry {
+                dir,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "RegistryOptions.autofetch is not honored by Registry::open; use \
+                     Registry::from_search_path_with",
+                ),
+            });
+        }
+        #[cfg(feature = "fetch")]
+        if opts.fetch != crate::fetch::EnsureOptions::default() {
+            return Err(Error::Registry {
+                dir,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "RegistryOptions.fetch is not honored by Registry::open; use \
+                     Registry::from_search_path_with",
+                ),
+            });
+        }
+
+        let timezone = opts
+            .timezone
+            .unwrap_or_else(|| DEFAULT_TIMEZONE.to_string());
+        let verify = opts.verify_checksums;
+
         let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
             .map_err(|source| Error::Registry {
                 dir: dir.clone(),
@@ -310,9 +407,7 @@ impl Registry {
             if !sub.is_dir() {
                 continue;
             }
-            // No verification on this path: the one-directory constructors
-            // take no options (see RegistryOptions::verify_checksums).
-            if let Some(library) = load_artifact_dir(&sub, timezone, false)? {
+            if let Some(library) = load_artifact_dir(&sub, &timezone, verify)? {
                 loaded.insert(library);
             }
         }
@@ -325,9 +420,12 @@ impl Registry {
             dir,
             lazy: false,
             explicit: None,
-            timezone: timezone.to_string(),
+            timezone,
             autofetch: false,
-            verify: false,
+            // So a lazy open later on THIS registry, if any is ever added,
+            // verifies too — there is one code path, and this is what
+            // opts.verify_checksums means for it.
+            verify,
             #[cfg(feature = "fetch")]
             fetch: crate::fetch::EnsureOptions::default(),
             loaded: RwLock::new(loaded),
@@ -904,6 +1002,155 @@ mod tests {
         assert!(
             err.to_string().starts_with("chtypes: cannot read library "),
             "got {err}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // `Registry::open` — `new`/`with_timezone`/`from_env*` route through it now,
+    // so the tests above passing unchanged (they all go through
+    // `from_search_path_with` or `new`) are the regression proof for those.
+    // These cover only what `open` adds.
+
+    /// The shape every search-path-only-field refusal must have: `Error::Registry`
+    /// with an `InvalidInput` source naming `field` AND
+    /// `Registry::from_search_path_with`. `InvalidInput` (rather than, say,
+    /// `NotFound`) is itself the proof the refusal ran BEFORE `read_dir` — the
+    /// directory passed by every caller below does not exist.
+    fn assert_refused_field(err: &Error, field: &str) {
+        match err {
+            Error::Registry { source, .. } => {
+                assert_eq!(
+                    source.kind(),
+                    std::io::ErrorKind::InvalidInput,
+                    "a refusal for {field} must not touch disk (this dir does not exist; \
+                     NotFound here would mean Registry::open tried to scan it instead of \
+                     refusing first): got {source:?}"
+                );
+                let text = source.to_string();
+                assert!(
+                    text.contains(field),
+                    "the refusal must name {field}, got {text:?}"
+                );
+                assert!(
+                    text.contains("Registry::from_search_path_with"),
+                    "the refusal must name the constructor that honors {field}, got {text:?}"
+                );
+            }
+            other => panic!("want Error::Registry naming {field}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_refuses_a_non_default_dir_before_touching_disk() {
+        let missing =
+            std::env::temp_dir().join(format!("chtypes-rs-open-refuse-dir-{}", std::process::id()));
+        let err = Registry::open(
+            &missing,
+            RegistryOptions {
+                dir: Some(PathBuf::from("/somewhere/else")),
+                ..RegistryOptions::default()
+            },
+        )
+        .expect_err("RegistryOptions.dir is not honored by Registry::open");
+        assert_refused_field(&err, "RegistryOptions.dir");
+    }
+
+    #[test]
+    fn open_refuses_a_non_default_autofetch_before_touching_disk() {
+        let missing = std::env::temp_dir().join(format!(
+            "chtypes-rs-open-refuse-autofetch-{}",
+            std::process::id()
+        ));
+        let err = Registry::open(
+            &missing,
+            RegistryOptions {
+                autofetch: Some(true),
+                ..RegistryOptions::default()
+            },
+        )
+        .expect_err("RegistryOptions.autofetch is not honored by Registry::open");
+        assert_refused_field(&err, "RegistryOptions.autofetch");
+    }
+
+    #[cfg(feature = "fetch")]
+    #[test]
+    fn open_refuses_a_non_default_fetch_before_touching_disk() {
+        let missing = std::env::temp_dir().join(format!(
+            "chtypes-rs-open-refuse-fetch-{}",
+            std::process::id()
+        ));
+        let err = Registry::open(
+            &missing,
+            RegistryOptions {
+                fetch: crate::fetch::EnsureOptions {
+                    force: true,
+                    ..crate::fetch::EnsureOptions::default()
+                },
+                ..RegistryOptions::default()
+            },
+        )
+        .expect_err("RegistryOptions.fetch is not honored by Registry::open");
+        assert_refused_field(&err, "RegistryOptions.fetch");
+    }
+
+    #[test]
+    fn open_with_verify_checksums_refuses_a_mismatch_at_construction() {
+        let dir = fake_artifact("open-mismatch", Some(&"00".repeat(32)));
+        let err = Registry::open(
+            &dir,
+            RegistryOptions {
+                verify_checksums: true,
+                ..RegistryOptions::default()
+            },
+        )
+        .expect_err("a text file's hash cannot match the manifest's fabricated one");
+        assert!(
+            matches!(err, Error::ChecksumMismatch { .. }),
+            "want the checksum refusal AT CONSTRUCTION (open is eager), got {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn open_with_verify_checksums_refuses_a_manifest_with_no_hash() {
+        let dir = fake_artifact("open-nohash", None);
+        let err = Registry::open(
+            &dir,
+            RegistryOptions {
+                verify_checksums: true,
+                ..RegistryOptions::default()
+            },
+        )
+        .expect_err("verification asked for and not possible is not verification");
+        let text = err.to_string();
+        assert!(
+            matches!(err, Error::Registry { .. }) && text.contains("library_sha256"),
+            "want a refusal naming the unverifiable artifact, got {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn open_with_verify_checksums_accepts_matching_bytes_and_loads_on() {
+        // sha256 of "not a shared library", the body fake_artifact writes —
+        // mirrors verify_checksums_accepts_matching_bytes_and_loads_on's
+        // assertion for the search-path registry: matching bytes must clear
+        // verification and fail only at dlopen.
+        let dir = fake_artifact(
+            "open-match",
+            Some(&crate::digest::sha256_hex(b"not a shared library")),
+        );
+        let err = Registry::open(
+            &dir,
+            RegistryOptions {
+                verify_checksums: true,
+                ..RegistryOptions::default()
+            },
+        )
+        .expect_err("a text file cannot dlopen; the open must fail");
+        assert!(
+            matches!(err, Error::Load { .. } | Error::NotAnArtifact { .. }),
+            "matching bytes must pass verification and fail at dlopen, got {err:?}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

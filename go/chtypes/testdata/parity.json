@@ -1418,6 +1418,7 @@
       "Registry::from_env_or": "Constructor shape.",
       "Registry::from_search_path_with": "Constructor shape.",
       "Registry::with_timezone": "Constructor shape.",
+      "Registry::open": "Constructor shape: the one-directory eager route that also takes RegistryOptions, so verify_checksums works without switching to from_search_path_with (issue #35).",
       "Registry::dir": "The primary registry directory.",
       "Registry::autofetch": "Whether lazy fetch is on.",
       "Library::load": "Load one explicit artifact path, as Go's Registry.Load does.",
