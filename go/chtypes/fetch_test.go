@@ -195,18 +195,34 @@ type countingServer struct {
 	mu   sync.Mutex
 	hits map[string]int
 	all  atomic.Int64
+
+	hookMu sync.Mutex
+	hooks  map[string]func()
 }
 
 func serveRelease(t *testing.T, dir string) *countingServer {
 	t.Helper()
-	cs := &countingServer{hits: map[string]int{}}
+	cs := &countingServer{hits: map[string]int{}, hooks: map[string]func(){}}
 	fs := http.FileServer(http.Dir(dir))
 	cs.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/")
 		cs.mu.Lock()
-		cs.hits[strings.TrimPrefix(r.URL.Path, "/")]++
+		cs.hits[name]++
+		firstServe := cs.hits[name] == 1
 		cs.mu.Unlock()
 		cs.all.Add(1)
+		// Serve first, so the response the caller is waiting on (the bad
+		// signature, on the first read) is already written before any hook
+		// below is allowed to mutate the file on disk.
 		fs.ServeHTTP(w, r)
+		if firstServe {
+			cs.hookMu.Lock()
+			hook := cs.hooks[name]
+			cs.hookMu.Unlock()
+			if hook != nil {
+				hook()
+			}
+		}
 	}))
 	t.Cleanup(cs.Close)
 	return cs
@@ -216,6 +232,17 @@ func (cs *countingServer) count(name string) int {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	return cs.hits[name]
+}
+
+// afterFirstServe registers fn to run once name has been served for the
+// first time — synchronously, in the handler's own goroutine, right after
+// the response bytes for that first read are written. It exists so a test
+// can heal a file the instant the bad version has actually been read, not
+// after some wall-clock guess at when that read will have happened.
+func (cs *countingServer) afterFirstServe(name string, fn func()) {
+	cs.hookMu.Lock()
+	defer cs.hookMu.Unlock()
+	cs.hooks[name] = fn
 }
 
 // wantCode asserts the §7 code, the errors.Is sentinel, the errors.As
@@ -1075,11 +1102,13 @@ func TestLoadReleaseRetriesThroughAPublishWindow(t *testing.T) {
 	srv := serveRelease(t, rel)
 	dest := filepath.Join(t.TempDir(), "reg")
 
-	// The publish completes while the first retry is sleeping.
-	go func() {
-		time.Sleep(50 * time.Millisecond)
+	// The publish completes the instant the bad signature has actually been
+	// read once — not on a wall-clock guess at when that read happens. Under
+	// load, Ensure's first read can be delayed past any fixed sleep, which
+	// would let it see the already-healed signature and never retry at all.
+	srv.afterFirstServe("SHA256SUMS.sig", func() {
 		_ = os.WriteFile(sigPath, good, 0o644)
-	}()
+	})
 
 	inst, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
 	if err != nil {
