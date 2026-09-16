@@ -4,6 +4,13 @@ All notable changes to the ts binding. The format is [Keep a Changelog](https://
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
+## [Unreleased]
+
+### Added
+
+- **This binding now speaks ABI revision 5** — the explicit INSERT column list. `Schema#row`, `Schema#rows` (and its export channel) and `Schema#parseBlock` all gain the option through `RowsOptions#columns`: name the columns this data supplies, and the server computes the rest with them in scope for their DEFAULTs. Absent or an empty array is the no-list behavior of every earlier revision; a listed `EPHEMERAL` column's value is read and is in scope for the DEFAULTs that reference it, and is still never stored and never exported. An unknown name, an `ALIAS` column or a repeated name is the server's own refusal (codes 16, 16 and 15), surfaced through the row/batch outcome exactly as it arrives — nothing is validated locally.
+- **This release requires revision-5 artifacts.** A revision-4 artifact — everything published so far — is refused at load, naming both numbers (`chtypes: <path> reports ABI revision 4, this binding speaks 5; refusing to call through mismatched declarations`).
+
 ## [0.2.1] — 2026-09-15
 
 Released in step with the Rust crate, which gains `Registry::open` and `Error::LibraryRead`; this binding's public API is unchanged.

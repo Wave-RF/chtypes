@@ -49,10 +49,10 @@ The two are **peers**. A decline never satisfies `instanceof SchemaError`.
 | `Schema#columns`                                            | the column getters, at compile | —                                                                                                 | `ColumnInfo[]`, canonicalized, declaration order | —                                                                                             |
 | `Schema#setEngine(engine, orderBy, { mergeTreeSettings }?)` | `chs_schema_engine`            | engine, sorting key, MergeTree-namespace `SETTINGS`                                               | —                                                | the sign of rc decides: `SchemaError` (rc > 0, today 115); `UnsupportedError` (rc < 0)        |
 | `Schema#setTtl(ttl)`                                        | `chs_schema_ttl`               | a rows-TTL expression                                                                             | —                                                | `UnsupportedError` on any nonzero rc                                                          |
-| `Schema#row(format, raw, settings?)`                        | `chs_row`                      | format code, row **bytes**                                                                        | `RowResult`                                      | `ChtypesError` (closed schema, `number` setting)                                              |
+| `Schema#row(format, raw, settings?, options?)`              | `chs_row`                      | format code, row **bytes**, per-call settings, and `RowsOptions#columns`                          | `RowResult`                                      | `ChtypesError` (closed schema, `number` setting)                                              |
 | `Schema#rows(format, body, settings?, options?)`            | `chs_rows`                     | format code, body **bytes**, per-call settings, and `RowsOptions`                                 | `BatchResult`                                    | `ChtypesError` (closed schema, `number` setting)                                              |
 | `Schema#compileFilter(expr, { params }?)`                   | `chs_filter_compile`           | one boolean expression; `params` binds `{name:Type}` — values are **strings**, never hand-escaped | `Filter`                                         | `SchemaError` (47, **456**, **457**); `UnsupportedError` (clock reads)                        |
-| `Schema#parseBlock(format, body, settings?)`                | `chs_block_parse`              | parse a body ONCE                                                                                 | `Block`                                          | `SchemaError` (115, framing, decode fault — no block, no partial answers); `UnsupportedError` |
+| `Schema#parseBlock(format, body, settings?, options?)`      | `chs_block_parse`              | parse a body ONCE, and `RowsOptions#columns`                                                      | `Block`                                          | `SchemaError` (115, framing, decode fault — no block, no partial answers); `UnsupportedError` |
 | `Schema#close()` / `Symbol.dispose`                         | `chs_schema_free`              | —                                                                                                 | —                                                | never throws; idempotent                                                                      |
 
 `RowsOptions` is the export channel — there is no separate `rowsExport` method:
@@ -63,6 +63,15 @@ schema.rows(Format.JSONEachRow, body, undefined, {
   docFlags: DOC_VALUES | DOC_TRANSFORMS,    // default: DOC_ALL with no export, 0 (lean) with one
 });
 ```
+
+`RowsOptions#columns` (ABI revision 5) is the same options object's other field, shared by `row`, `rows` and `parseBlock`: name the INSERT column list, and the server computes the rest with the listed values in scope for their DEFAULTs. Absent or an empty array is the no-list behavior of every earlier revision:
+
+```ts
+// e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1 — read but never stored, in scope for d.
+schema.row(Format.JSONEachRow, Buffer.from('{"id":3,"e":5}'), undefined, { columns: ['id', 'e'] }); // d = 6
+```
+
+An unknown name, an `ALIAS` column, or a repeated name is the server's own refusal (codes 16, 16, 15) surfaced through the outcome, never checked locally.
 
 ## Filter and Block
 
