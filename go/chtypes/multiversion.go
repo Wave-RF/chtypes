@@ -37,7 +37,10 @@ typedef void         (*fn_schema_free)(void *);
 // chtypes.h) with the identical layout; the revision gate below is what
 // guarantees the layouts agree before any call is made.
 typedef struct { char * data; size_t len; } chs_lib_bytes;
-typedef char *       (*fn_rows)(const void *, int, const char *, size_t, const char *, int, unsigned, chs_lib_bytes *);
+// Revision 5: chs_rows, chs_row and chs_block_parse each gain a trailing
+// columns_json (the INSERT column list) — NULL for "no list", the
+// unchanged behavior of every earlier revision.
+typedef char *       (*fn_rows)(const void *, int, const char *, size_t, const char *, int, unsigned, chs_lib_bytes *, const char *);
 // Revision 3: the filter trio (optional symbols — a revision-0 artifact may
 // predate them; absence degrades to unsupported at call time).
 // Revision 4: chs_filter_compile carries params_json ({name:Type} query
@@ -47,10 +50,10 @@ typedef char *       (*fn_rows)(const void *, int, const char *, size_t, const c
 typedef void *       (*fn_filter_compile)(const void *, const char *, const char *, int *, char **);
 typedef void         (*fn_filter_free)(void *);
 typedef char *       (*fn_filter_rows)(const void *, int, const char *, size_t, const char *);
-typedef void *       (*fn_block_parse)(const void *, int, const char *, size_t, const char *, int *, char **);
+typedef void *       (*fn_block_parse)(const void *, int, const char *, size_t, const char *, int *, char **, const char *);
 typedef void         (*fn_block_free)(void *);
 typedef char *       (*fn_filter_eval)(const void *, const void *);
-typedef char *       (*fn_row)(const void *, int, const char *, size_t, const char *);
+typedef char *       (*fn_row)(const void *, int, const char *, size_t, const char *, const char *);
 typedef int          (*fn_engine)(void *, const char *, const char *, const char *, char **);
 typedef int          (*fn_ttl)(void *, const char *, char **);
 typedef int          (*fn_col_count)(const void *);
@@ -161,16 +164,16 @@ static void *       chs_lib_compile(chs_lib *l, const char *s, const char *j, in
     return l->compile(s, j, mode, c, e);
 }
 static void         chs_lib_schema_free(chs_lib *l, void *s)     { l->schema_free(s); }
-static char *       chs_lib_rows(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st) {
+static char *       chs_lib_rows(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st, const char *cols) {
     // -1 = CHS_EXPORT_NONE, 7u = CHS_DOC_ALL, no export buffer — the
     // revision-3 pass-through that keeps Rows() byte-identical to revision 2.
-    return l->rows(s, f, b, n, st, -1, 7u, (chs_lib_bytes *)0);
+    return l->rows(s, f, b, n, st, -1, 7u, (chs_lib_bytes *)0, cols);
 }
 // The export spelling: RowsExport's one call. ob may be NULL only when
 // ef == -1 (the library initializes *ob to {NULL,0} at entry otherwise).
 static char * chs_lib_rows_export(chs_lib *l, const void *s, int f, const char *b, size_t n,
-                                  const char *st, int ef, unsigned df, chs_lib_bytes *ob) {
-    return l->rows(s, f, b, n, st, ef, df, ob);
+                                  const char *st, int ef, unsigned df, chs_lib_bytes *ob, const char *cols) {
+    return l->rows(s, f, b, n, st, ef, df, ob, cols);
 }
 // The filter trio. has_filter is all-or-nothing like the introspection
 // checks: the three symbols shipped together at revision 3.
@@ -193,8 +196,8 @@ static int chs_lib_has_block(chs_lib *l) {
     return l->block_parse && l->block_free && l->filter_eval;
 }
 static void * chs_lib_block_parse(chs_lib *l, const void *s, int fmt, const char *b, size_t n,
-                                  const char *st, int *c, char **err) {
-    return l->block_parse(s, fmt, b, n, st, c, err);
+                                  const char *st, int *c, char **err, const char *cols) {
+    return l->block_parse(s, fmt, b, n, st, c, err, cols);
 }
 static void chs_lib_block_free(chs_lib *l, void *b) { l->block_free(b); }
 static char * chs_lib_filter_eval(chs_lib *l, const void *f, const void *b) {
@@ -208,9 +211,9 @@ static int chs_lib_ttl(chs_lib *l, void *s, const char *t, char **err) {
     if (!l->ttl) return -3; // artifact predates chs_schema_ttl
     return l->ttl(s, t, err);
 }
-static char * chs_lib_row(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st) {
+static char * chs_lib_row(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st, const char *cols) {
     if (!l->row) return NULL; // artifact predates chs_row
-    return l->row(s, f, b, n, st);
+    return l->row(s, f, b, n, st, cols);
 }
 static int chs_lib_validate(chs_lib *l, const char *e, char **canon, int *code, char **err) {
     return l->validate(e, canon, code, err);
@@ -1065,15 +1068,31 @@ func (s *LoadedSchema) Close() {
 	s.handle = nil
 }
 
+// columnsCArgLoaded is the dlopen'd path's twin of the linked path's
+// columnsCArg: a NULL pointer for "no list" (nil/empty), never the empty
+// array "[]" — INSERT INTO t () FORMAT X is a syntax error (code 62) on
+// every server, so this binding never renders one. A non-nil result is a
+// live C.CString the caller must C.free. Named distinctly from the linked
+// path's helper because both files compile together under the
+// chtypes_linked build tag.
+func columnsCArgLoaded(columns []string) *C.char {
+	if len(columns) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(columns) // []string cannot fail to marshal
+	return C.CString(string(b))
+}
+
 // Row validates and coerces a single row body, mirroring CompiledSchema.Row.
-func (s *LoadedSchema) Row(format Format, raw []byte) (RowResult, error) {
-	return s.RowWithSettings(format, raw, nil)
+func (s *LoadedSchema) Row(format Format, raw []byte, opts ...rowOption) (RowResult, error) {
+	return s.RowWithSettings(format, raw, nil, opts...)
 }
 
 // RowWithSettings mirrors CompiledSchema.RowWithSettings for a dlopen'd
 // library. An artifact built before chs_row reports an error rather than
-// guessing at batch semantics.
-func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[string]string) (RowResult, error) {
+// guessing at batch semantics. WithColumns declares the revision-5 INSERT
+// column list; see its doc for the full contract.
+func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[string]string, opts ...rowOption) (RowResult, error) {
 	sj := settingsJSON(settings)
 	csj := C.CString(sj)
 	defer C.free(unsafe.Pointer(csj))
@@ -1086,6 +1105,11 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 		defer C.free(unsafe.Pointer(praw))
 	}
 
+	pcols := columnsCArgLoaded(columnsOf(opts))
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
+	}
+
 	// One critical section for the call, the result read and the free: the
 	// header's "a single handle must not be used from two threads at once".
 	// Distinct handles run this concurrently — that is the whole relaxation.
@@ -1094,7 +1118,7 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 		unlock()
 		return RowResult{}, fmt.Errorf("chtypes: schema is closed")
 	}
-	out := C.chs_lib_row(&s.lib.lib, s.handle, C.int(format), praw, C.size_t(len(raw)), csj)
+	out := C.chs_lib_row(&s.lib.lib, s.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)
 	runtime.KeepAlive(raw)
 	if out == nil {
 		unlock()
@@ -1120,27 +1144,29 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 // CompiledSchema.Rows: same parameters, same settings precedence, same
 // BatchResult contract (the error return is only for a closed schema or a
 // missing symbol, never a ClickHouse verdict).
-func (s *LoadedSchema) Rows(format Format, body []byte, settings map[string]string) (BatchResult, error) {
+func (s *LoadedSchema) Rows(format Format, body []byte, settings map[string]string, opts ...rowOption) (BatchResult, error) {
 	// export off, all document groups on — the same revision-3 pass-through
 	// as the static path, so Rows() is byte-identical to revision 2.
-	return s.rowsThrough(format, body, settings, ExportNone, DocAll)
+	return s.rowsThrough(format, body, settings, ExportNone, DocAll, columnsOf(opts))
 }
 
 // RowsExport mirrors CompiledSchema.RowsExport for a dlopen'd library — the
 // same signature, the same BatchResult Payload/Spans/ExportDeclined contract,
 // one C call. See the static twin for the full doc; the export buffer is
-// copied and freed with THIS library's chs_free before returning.
-func (s *LoadedSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, docFlags ...DocFlags) (BatchResult, error) {
-	var flags DocFlags
-	for _, f := range docFlags {
-		flags |= f
+// copied and freed with THIS library's chs_free before returning. opts
+// accepts DocFlags values and WithColumns (the revision-5 column list) in
+// any mix.
+func (s *LoadedSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...rowsExportOption) (BatchResult, error) {
+	var cfg rowsExportConfig
+	for _, o := range opts {
+		o.applyRowsExport(&cfg)
 	}
-	return s.rowsThrough(format, body, settings, exportFormat, flags)
+	return s.rowsThrough(format, body, settings, exportFormat, cfg.flags, cfg.columns)
 }
 
 // rowsThrough is the ONE chs_rows call site on the dlopen'd path — the
 // static path's twin, with the identical parameter and result contract.
-func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags) (BatchResult, error) {
+func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags, columns []string) (BatchResult, error) {
 	sj := settingsJSON(settings)
 	csj := C.CString(sj)
 	defer C.free(unsafe.Pointer(csj))
@@ -1151,6 +1177,11 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 	} else {
 		pbody = C.CString("")
 		defer C.free(unsafe.Pointer(pbody))
+	}
+
+	pcols := columnsCArgLoaded(columns)
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
 	}
 
 	var ob *C.chs_lib_bytes
@@ -1168,7 +1199,7 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 		return BatchResult{}, fmt.Errorf("chtypes: schema is closed")
 	}
 	out := C.chs_lib_rows_export(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj,
-		C.int(exportFormat), C.uint(flags), ob)
+		C.int(exportFormat), C.uint(flags), ob, pcols)
 	runtime.KeepAlive(body)
 	// Copy-then-free the export buffer inside the critical section (chs_free
 	// pairs with the call that produced the pointer, on the handle lock).
@@ -1342,7 +1373,11 @@ type LoadedBlock struct {
 // LoadedFilter.Eval. The error return carries the call-level refusal (an
 // unknown setting's 115, a framing or decode fault — no partial block exists
 // on any error), or the decline for an artifact that predates the twin.
-func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[string]string) (*LoadedBlock, error) {
+// WithColumns declares the revision-5 INSERT column list, read exactly as
+// Row/Rows read it — filters still compile over the schema's physical
+// columns and evaluate the stored tuple, so a listed EPHEMERAL column stays
+// unreferenceable in a filter.
+func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[string]string, opts ...rowOption) (*LoadedBlock, error) {
 	if C.chs_lib_has_block(&s.lib.lib) == 0 {
 		return nil, &UnsupportedError{Msg: "this artifact predates chs_block_parse (rebuild it)"}
 	}
@@ -1355,6 +1390,10 @@ func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[strin
 		pbody = C.CString("")
 		defer C.free(unsafe.Pointer(pbody))
 	}
+	pcols := columnsCArgLoaded(columnsOf(opts))
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
+	}
 	var code C.int
 	var cErr *C.char
 	unlock := s.lock()
@@ -1362,7 +1401,7 @@ func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[strin
 		unlock()
 		return nil, fmt.Errorf("chtypes: schema is closed")
 	}
-	h := C.chs_lib_block_parse(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr)
+	h := C.chs_lib_block_parse(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr, pcols)
 	runtime.KeepAlive(body)
 	if h == nil {
 		msg := ""

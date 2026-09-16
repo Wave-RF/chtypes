@@ -4,6 +4,16 @@ All notable changes to the go binding. The format is [Keep a Changelog](https://
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
+## [Unreleased]
+
+### Added
+
+- **`WithColumns` names the INSERT column list.** A functional option on `Row`, `RowWithSettings`, `Rows`, `RowsExport` and `ParseBlock` (and the `Loaded*` twins): `chtypes.WithColumns([]string{"id", "e"})` is the `INSERT INTO t (id, e) …` shape — the data supplies exactly the listed columns, and the server computes the rest, with the listed values (including a listed `EPHEMERAL` column's) in scope for their DEFAULT expressions. A nil or empty slice is identical to omitting the option — today's no-list behavior — and this binding never renders that as `INSERT INTO t () …`, which is a syntax error (code 62) on every server. Names are not validated locally: an unknown column, an ALIAS column (the same code and message as unknown), and a repeated name each surface the server's own code (16, 16, 15) exactly as it comes back. Additive: every existing call site keeps compiling unchanged (#7).
+
+### Notes
+
+- **This binding now speaks ABI revision 5.** `chs_row`, `chs_rows` and `chs_block_parse` each gained the trailing `columns_json` parameter `WithColumns` carries, so a **revision-5 artifact is required**: a revision-4 artifact (every artifact published so far) is refused at load, naming both numbers.
+
 ## [0.2.1] — 2026-09-15
 
 Released in step with the Rust crate, which gains `Registry::open` and `Error::LibraryRead`; this binding's public API is unchanged.

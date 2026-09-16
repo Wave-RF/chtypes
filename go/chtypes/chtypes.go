@@ -931,6 +931,92 @@ func WithFilterParams(params map[string]string) FilterOption {
 	return func(c *filterConfig) { c.params = params }
 }
 
+// -------------------------------------------------------------- row options
+
+// rowConfig is Row / RowWithSettings / Rows / RowsExport / ParseBlock's
+// assembled options — today just the revision-5 INSERT column list.
+type rowConfig struct {
+	columns []string
+}
+
+// rowOption configures a row-level call, the same variadic functional-option
+// shape CompileDDL/CompileFilter use (WithCompileSettings, WithFilterParams).
+// Kept unexported: WithColumns is the one capability the parity contract
+// names for this option group (schema.columns-option); the carrier type
+// itself needs no name of its own, and every sibling option type
+// (CompileOption, FilterOption, EngineOption) needed its own entry in
+// tests/parity/manifest.json's `unlisted` table for exactly this reason.
+type rowOption func(*rowConfig)
+
+// WithColumns declares the INSERT column list (ABI revision 5) for Row,
+// RowWithSettings, Rows, RowsExport and ParseBlock — the
+// `INSERT INTO t (a, b, …)` shape. The data then supplies exactly the listed
+// columns — k-th field to k-th listed column in the positional formats (CSV,
+// TSV, Values, JSONCompactEachRow, the binary family), keys matched against
+// the listed set in the JSON family — and the server computes every unlisted
+// column, with the listed values in scope for their DEFAULT expressions. A
+// listed EPHEMERAL column's value is read and is in scope for the DEFAULTs
+// referencing it, and is still never stored and never exported.
+//
+// A nil or empty slice is IDENTICAL to omitting the option: today's no-list
+// behavior, where the data supplies every plain column. This binding NEVER
+// renders that as `INSERT INTO t () …` — that statement is a syntax error,
+// code 62, on every server — so absent and empty both mean "send no list at
+// all", never an empty one.
+//
+// Names are not validated here: an unknown column, an ALIAS column (refused
+// with the SAME code and message as unknown — the two are indistinguishable
+// from the wire), and a repeated name are each refused with the server's own
+// code (16, 16, 15 respectively), surfaced exactly as they come back. This
+// package never reimplements a ClickHouse rule.
+func WithColumns(columns []string) rowOption {
+	return func(c *rowConfig) { c.columns = columns }
+}
+
+// columnsOf resolves a rowOption slice to the declared column list, or nil
+// for "no list" — the one assembly step shared by the linked and dlopen'd
+// paths, each of which renders it into the wire columns_json (or passes a
+// NULL pointer) at its own cgo boundary.
+func columnsOf(opts []rowOption) []string {
+	var c rowConfig
+	for _, o := range opts {
+		o(&c)
+	}
+	if len(c.columns) == 0 {
+		return nil
+	}
+	return c.columns
+}
+
+// rowsExportConfig is RowsExport's assembled options: the pre-existing
+// DocFlags document-group selection plus the revision-5 column list.
+type rowsExportConfig struct {
+	flags   DocFlags
+	columns []string
+}
+
+// rowsExportOption is what RowsExport's variadic parameter accepts. It
+// unifies RowsExport's pre-existing DocFlags-only surface with rowOption
+// (WithColumns) so the new option can ride the same call without breaking
+// any existing DocFlags-only call site — Go permits only one variadic
+// parameter, and DocFlags already occupied it.
+type rowsExportOption interface {
+	applyRowsExport(*rowsExportConfig)
+}
+
+// applyRowsExport lets a bare DocFlags value keep working exactly as every
+// existing RowsExport(..., chtypes.DocAll) call site already does.
+func (d DocFlags) applyRowsExport(c *rowsExportConfig) { c.flags |= d }
+
+// applyRowsExport lets a rowOption (WithColumns) ride the same call.
+func (o rowOption) applyRowsExport(c *rowsExportConfig) {
+	var rc rowConfig
+	o(&rc)
+	if len(rc.columns) > 0 {
+		c.columns = rc.columns
+	}
+}
+
 // BatchResult is the outcome of one request body, which may hold many rows.
 //
 // A body is not a row: WaveHouse ships JSONEachRow bodies with many rows per
