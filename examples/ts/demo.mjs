@@ -74,6 +74,12 @@ payload_len UInt32 MATERIALIZED length(payload)`;
 // small schema, and both DEFAULTs give the empty-field rules something to do.
 const FORMAT_DDL = "device_id UInt32, seq UInt8 DEFAULT 7, label String DEFAULT 'unknown'";
 
+// Section 17's table: an EPHEMERAL input column feeding a DEFAULT — exactly
+// core's explicit-column-list proposal §3 example. `e` cannot be reached at
+// all without a column list (it occupies no field position and is never
+// name-matched); LISTED, its value is read and is in scope for `d`'s DEFAULT.
+const COLUMNS_DDL = 'id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1';
+
 // Pinning the clock is what makes a demo with now64(3) in it reproducible.
 // The value is a STRING at the boundary, always: 19 digits do not survive an
 // IEEE double — and in this SDK a JS `number` setting is a runtime error on
@@ -137,6 +143,7 @@ function main() {
     section14();
     section15(lib);
     section16(lib);
+    section17(lib);
   } finally {
     // The teardown section 13 narrates: the LAST thing this process does
     // with the registry. Reopening an artifact after a full close is not a
@@ -1331,6 +1338,57 @@ function section16(lib) {
   note('over-hide). Until that run of record exists this is a shadow/replay');
   note('surface: log disagreements, enforce with what enforced yesterday —');
   note('the twin is a call shape, not an enforcement opening.');
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 17 — The INSERT column list
+//
+// WHAT: name the columns THIS ROW supplies (RowsOptions#columns) instead of
+// relying on the no-list default — the revision-5 columns_json trailing
+// chs_row, chs_rows and chs_block_parse.
+// WHY: WaveHouse's own INSERT is ALWAYS an explicit column list, including
+// EPHEMERAL columns, which the no-list ABI could never express: fed without
+// a list, an EPHEMERAL value is silently dropped as an unknown field and a
+// DEFAULT that references it computes from the type's own zero instead — a
+// wrong stored value with no error anywhere (core's explicit-column-list
+// proposal §4).
+// LOOK FOR: the listed EPHEMERAL value feeding the DEFAULT (d = 6, not the
+// type-zero-derived 1 the no-list shape would store); the refusal when the
+// list names a column the schema does not have (code 16 — the SAME code and
+// message an ALIAS column in the list gets, indistinguishable from the wire).
+// C API: chs_row's trailing columns_json (ABI revision 5).
+// ---------------------------------------------------------------------------
+function section17(lib) {
+  section(17, 'The INSERT column list');
+  if (lib.abiRevision < 5) {
+    note(`SKIPPED: section 17 needs a revision-5 artifact (this one reports ABI revision ${lib.abiRevision})`);
+    return;
+  }
+
+  withSchema(lib, COLUMNS_DDL, (schema) => {
+    kv('schema', COLUMNS_DDL);
+    blank();
+
+    const listed = schema.row(Format.JSONEachRow, utf8('{"id":3,"e":5}'), undefined, { columns: ['id', 'e'] });
+    const d = listed.values.find((v) => v.column === 'd');
+    kv('row {id:3,e:5}  columns=[id,e]', `${listed.outcome}  d=${d ? d.text : '<missing>'}`);
+    note("e is EPHEMERAL: LISTED, so its value IS read and IS in scope for");
+    note("d's DEFAULT (e + 1) — d stores 6. With NO list at all e would be an");
+    note("unknown field and d would fall back to its own DEFAULT's type zero");
+    note('(1) — the wrong-stored-value failure this option exists to close');
+    blank();
+
+    const refused = schema.row(Format.JSONEachRow, utf8('{"id":1,"nosuch":5}'), undefined, {
+      columns: ['id', 'nosuch'],
+    });
+    kv(
+      'row  columns=[id,nosuch]  (unknown column)',
+      `${refused.outcome}  code=${refused.errCode}  ${truncate(refused.errMsg, 56)}`,
+    );
+    note('code 16 NO_SUCH_COLUMN_IN_TABLE — the SAME code and message an');
+    note('ALIAS column in the list would get: the two refusals are');
+    note('indistinguishable from the wire');
+  });
 }
 
 // verdictString renders a FilterResult's verdicts as the document's compact

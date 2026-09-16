@@ -136,6 +136,7 @@ export {
   type ColumnInfo,
   type CompileFilterOptions,
   type EngineOptions,
+  type RowOptions,
   type RowsOptions,
 } from './schema.js';
 export { encodeSettings, type Settings, type SettingValue } from './settings.js';

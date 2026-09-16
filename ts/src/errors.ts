@@ -34,10 +34,15 @@ export const CODE_UNSUPPORTED = -2;
  *
  * Revision 4 (2026-08-31, the filter phase-2 cycle): `chs_filter_compile`
  * gained `params_json` (`{name:Type}` query parameters), and the block twin
- * joined — `chs_block_parse` / `chs_block_free` / `chs_filter_eval`. This
- * binding therefore speaks 4 and refuses revision-3 artifacts — calling the
- * 5-argument `chs_filter_compile` through the 4-argument revision-3 artifact
- * is undefined behavior, which is exactly what the gate exists to prevent.
+ * joined — `chs_block_parse` / `chs_block_free` / `chs_filter_eval`.
+ *
+ * Revision 5 (2026-09-15, the explicit INSERT column list): `chs_row`,
+ * `chs_rows` and `chs_block_parse` each gained a trailing `columns_json` —
+ * `RowsOptions#columns`. This binding therefore speaks 5 and refuses
+ * revision-4 artifacts — calling the 6-argument `chs_row` (or the
+ * 9-argument `chs_rows`, or the 8-argument `chs_block_parse`) through a
+ * revision-4 artifact's shorter declaration is undefined behavior, which is
+ * exactly what the gate exists to prevent.
  */
 export const ABI_REVISION = 5;
 

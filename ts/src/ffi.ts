@@ -96,6 +96,23 @@ function unsupportedIfMissing<T>(err: unknown, message: string): T {
   throw err;
 }
 
+/**
+ * Serialize an INSERT column list to the `columns_json` the C ABI expects
+ * (revision 5; `chtypes.h`'s `chs_row` comment is the normative text). The
+ * header states NULL and `"[]"` are the SAME input — "an empty array NEVER
+ * renders as `()`: `INSERT INTO t () FORMAT X` is code 62 SYNTAX_ERROR on
+ * every line" — so this binding always sends `"[]"` for "no list" rather
+ * than a real C NULL: ffi-rs's `DataType.String` cannot carry one for an
+ * INPUT parameter (probed empirically against ffi-rs 1.3.7 — passing JS
+ * `null`/`undefined` throws before the native call is even made, and there
+ * is no documented, safe way to synthesize a null pointer for a `Str`-typed
+ * argument). `"[]"` is the ABI's own other spelling of "no list" and is
+ * therefore exactly as correct, never a rendered-SQL empty list.
+ */
+function encodeColumns(columns?: readonly string[]): string {
+  return columns === undefined || columns.length === 0 ? '[]' : JSON.stringify(columns);
+}
+
 function asBuffer(bytes: Uint8Array): Buffer {
   if (typeof bytes === 'string') {
     throw new ChtypesError(
@@ -144,7 +161,10 @@ function declare(library: string) {
     // Revision 3: export_format (int), doc_flags (unsigned — I32 carries the
     // three defined bits and any refused ones identically), out_bytes
     // (chs_bytes * — passed as a 16-byte scratch buffer, see `rows`).
-    chs_rows: d(External, [External, I32, U8Array, U64, Str, I32, I32, U8Array]),
+    // Revision 5: chs_rows gains a trailing columns_json (the INSERT column
+    // list) — see `encodeColumns` for why this binding always sends "[]"
+    // rather than a real NULL for "no list".
+    chs_rows: d(External, [External, I32, U8Array, U64, Str, I32, I32, U8Array, Str]),
     // Everything else is optional and degrades to `unsupported` at call time.
     chs_free: d(Void, [External]),
     chs_shutdown: d(Void, []),
@@ -161,7 +181,8 @@ function declare(library: string) {
     chs_schema_column_default_kind: d(Str, [External, I32]),
     chs_schema_column_default_expr: d(Str, [External, I32]),
     chs_schema_column_default_is_literal: d(I32, [External, I32]),
-    chs_row: d(External, [External, I32, U8Array, U64, Str]),
+    // Revision 5: chs_row gains the same trailing columns_json as chs_rows.
+    chs_row: d(External, [External, I32, U8Array, U64, Str, Str]),
     chs_reference_type: d(External, [Str]),
     chs_registered_families: d(External, []),
     chs_function_flags: d(External, []),
@@ -177,7 +198,8 @@ function declare(library: string) {
     chs_filter_rows: d(External, [External, I32, U8Array, U64, Str]),
     // Revision 4: the block twin (the C ABI contract §Blocks) — parse a body once,
     // evaluate K filters against the block. Optional, same degradation rule.
-    chs_block_parse: d(External, [External, I32, U8Array, U64, Str, External, External]),
+    // Revision 5: chs_block_parse gains the same trailing columns_json.
+    chs_block_parse: d(External, [External, I32, U8Array, U64, Str, External, External, Str]),
     chs_block_free: d(Void, [External]),
     chs_filter_eval: d(External, [External, External]),
     // Reached through the artifact's own dependency graph (it links libc), and
@@ -736,13 +758,18 @@ export class NativeLibrary {
   /**
    * `chs_row`: one row body. Returns the raw result document **as bytes** — a
    * stored value can be any byte sequence, so the document can be too.
+   *
+   * `columns` (revision 5) is the INSERT column list — `RowsOptions#columns`,
+   * read exactly as `chs_row` documents it. Absent or empty means no list,
+   * encoded per `encodeColumns`.
    */
-  row(handle: SchemaHandle, format: number, raw: Uint8Array, settingsJson: string): Buffer {
+  row(handle: SchemaHandle, format: number, raw: Uint8Array, settingsJson: string, columns?: readonly string[]): Buffer {
     const body = asBuffer(raw);
+    const columnsJson = encodeColumns(columns);
     let ptr: JsExternal;
     try {
       ptr = this.entered(
-        () => this.fns.chs_row([handle, format, body, body.length, settingsJson]) as JsExternal,
+        () => this.fns.chs_row([handle, format, body, body.length, settingsJson, columnsJson]) as JsExternal,
       );
     } catch (err) {
       return unsupportedIfMissing(err, 'this artifact predates chs_row (rebuild it)');
@@ -794,6 +821,11 @@ export class NativeLibrary {
    * handle as the decline it is. `chs_rows` is one of the mandatory four, so
    * with repo-built artifacts the branch is unreachable — the type still has
    * to be the honest one.
+   *
+   * `columns` (revision 5) is the INSERT column list — `RowsOptions#columns`,
+   * read exactly as `chs_row` documents it; the export channel is unchanged
+   * by it (an exported row still carries the stored columns in declared
+   * order). Absent or empty means no list, encoded per `encodeColumns`.
    */
   rows(
     handle: SchemaHandle,
@@ -802,8 +834,10 @@ export class NativeLibrary {
     settingsJson: string,
     exportFormat: number = EXPORT_NONE,
     docFlags: number = DOC_ALL,
+    columns?: readonly string[],
   ): { doc: Buffer; payload: Buffer | null } {
     const buf = asBuffer(body);
+    const columnsJson = encodeColumns(columns);
     // The chs_bytes out-param: {char *data; size_t len}, 16 bytes, zeroed.
     const outBytes = Buffer.alloc(16);
     let ptr: JsExternal;
@@ -819,6 +853,7 @@ export class NativeLibrary {
             exportFormat,
             docFlags,
             outBytes,
+            columnsJson,
           ]) as JsExternal,
       );
     } catch (err) {
@@ -932,9 +967,22 @@ export class NativeLibrary {
    * ClickHouse's own code/message — a malformed body yields no block and no
    * partial answers; the sign of the code picks the error class, exactly as
    * `filterCompile`. A missing symbol degrades to the decline type.
+   *
+   * `columns` (revision 5) is the INSERT column list, read exactly as
+   * `chs_row` documents it — filters still compile over the schema's
+   * physical columns and evaluate the stored tuple, so a listed EPHEMERAL
+   * column stays unreferenceable in a filter. Absent or empty means no
+   * list, encoded per `encodeColumns`.
    */
-  blockParse(schema: SchemaHandle, format: number, body: Uint8Array, settingsJson: string): BlockHandle {
+  blockParse(
+    schema: SchemaHandle,
+    format: number,
+    body: Uint8Array,
+    settingsJson: string,
+    columns?: readonly string[],
+  ): BlockHandle {
     const buf = asBuffer(body);
+    const columnsJson = encodeColumns(columns);
     const codeSlot = intSlot();
     const errSlot = ptrSlot();
     try {
@@ -950,6 +998,7 @@ export class NativeLibrary {
               settingsJson,
               ...codeSlot,
               ...errSlot,
+              columnsJson,
             ]) as JsExternal,
         );
       } catch (err) {
