@@ -11,7 +11,7 @@ approximately right.
 This file is a tutorial you RUN. Seventeen numbered sections walk the whole
 public API of the Python SDK, from loading an artifact to tearing down, each
 with a comment saying what it demonstrates, why an ingest pipeline cares, and
-what to look at in the output. The same fourteen sections — same numbering,
+what to look at in the output. The same seventeen sections — same numbering,
 same schemas, same rows — exist in go/main.go, ts/demo.mjs and
 rust/src/main.rs, so you can diff two tours and see only the language idioms
 differ.
