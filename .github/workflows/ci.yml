@@ -183,6 +183,8 @@ jobs:
           components: clippy, rustfmt
       - name: build, clippy, fmt
         run: cd rust && cargo build --locked && cargo clippy --locked --all-targets -- -D warnings && cargo fmt --check
+      - name: --no-default-features — the configuration docs/install.md tells a consumer to build
+        run: cd rust && cargo test --locked --no-default-features && cargo clippy --locked --all-targets --no-default-features -- -D warnings
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts rust
 
