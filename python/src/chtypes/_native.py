@@ -84,14 +84,26 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
     "chs_schema_column_default_kind": (ctypes.c_char_p, [ctypes.c_void_p, ctypes.c_int]),
     "chs_schema_column_default_expr": (ctypes.c_char_p, [ctypes.c_void_p, ctypes.c_int]),
     "chs_schema_column_default_is_literal": (ctypes.c_int, [ctypes.c_void_p, ctypes.c_int]),
+    # Revision 5: chs_row gains a trailing columns_json (the INSERT column
+    # list). The ABI-revision gate below guarantees this 6-argument
+    # declaration describes the loaded artifact before any call is made
+    # through it: a rev-4 artifact (5-argument shape) is refused at load.
     "chs_row": (
         ctypes.c_void_p,
-        [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p],
+        [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+        ],
     ),
     # Revision 3: chs_rows carries export_format / doc_flags / out_bytes
-    # (the C ABI contract §Rows). The ABI-revision gate below is what guarantees
-    # this 8-argument declaration describes the loaded artifact before any
-    # call is made through it.
+    # (the C ABI contract §Rows). Revision 5 appends columns_json, LAST, after
+    # out_bytes. The ABI-revision gate below is what guarantees this
+    # 9-argument declaration describes the loaded artifact before any call is
+    # made through it.
     "chs_rows": (
         ctypes.c_void_p,
         [
@@ -103,6 +115,7 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
             ctypes.c_int,
             ctypes.c_uint,
             ctypes.POINTER(_ChsBytes),
+            ctypes.c_char_p,
         ],
     ),
     # Revision 3: the filter trio (the C ABI contract §Filters). Optional symbols —
@@ -125,6 +138,7 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
     ),
     # Revision 4: the block twin (the C ABI contract §Blocks) — parse a body once,
     # evaluate K filters against the block. Optional, same degradation rule.
+    # Revision 5 appends columns_json, LAST, after out_err.
     "chs_block_parse": (
         ctypes.c_void_p,
         [
@@ -135,6 +149,7 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
             ctypes.c_char_p,
             _c_int_p,
             _c_owned_p,
+            ctypes.c_char_p,
         ],
     ),
     "chs_block_free": (None, [ctypes.c_void_p]),
@@ -540,7 +555,18 @@ class NativeLibrary:
 
     # -- rows --------------------------------------------------------------
 
-    def row(self, handle: int, fmt: int, raw: bytes, settings_json: str) -> bytes:
+    def row(
+        self,
+        handle: int,
+        fmt: int,
+        raw: bytes,
+        settings_json: str,
+        columns_json: str | None = None,
+    ) -> bytes:
+        """`columns_json` (revision 5) is the INSERT column list, already
+        JSON-encoded, or None for "no list" — passed through to the C side as
+        NULL, never as the literal string `"[]"` (the caller-facing rule is
+        `Schema.row`'s; this layer only forwards what it is given)."""
         fn = self._fn.get("chs_row")
         if fn is None:
             raise UnsupportedError("this artifact predates chs_row (rebuild it)")
@@ -548,7 +574,14 @@ class NativeLibrary:
             # NUL bytes are legal inside a RowBinary body, so the length is
             # passed explicitly and `strlen` is never involved.
             out = self._take(
-                fn(ctypes.c_void_p(handle), fmt, raw, len(raw), settings_json.encode())
+                fn(
+                    ctypes.c_void_p(handle),
+                    fmt,
+                    raw,
+                    len(raw),
+                    settings_json.encode(),
+                    columns_json.encode() if columns_json is not None else None,
+                )
             )
         if out is None:
             raise UnsupportedError("this artifact predates chs_row (rebuild it)")
@@ -562,11 +595,14 @@ class NativeLibrary:
         settings_json: str,
         export_format: int,
         doc_flags: int,
+        columns_json: str | None = None,
     ) -> tuple[bytes, bytes | None]:
         """(document, payload). `export_format` is -1 (CHS_EXPORT_NONE — no
         export, payload None) or an `enum chs_format` value; `doc_flags` the
         CHS_DOC_* bitmask. Both ride through UNVALIDATED — an unknown value is
         the library's loud refusal to make, never this binding's guess.
+        `columns_json` (revision 5) is the INSERT column list, already
+        JSON-encoded, or None for "no list" — forwarded as NULL, never `"[]"`.
 
         Ownership: the export buffer is COPIED into a Python `bytes` and the
         C side's `data` freed with THIS library's `chs_free` before returning
@@ -585,6 +621,7 @@ class NativeLibrary:
                 export_format,
                 doc_flags,
                 ctypes.byref(out_bytes) if out_bytes is not None else None,
+                columns_json.encode() if columns_json is not None else None,
             )
             payload: bytes | None = None
             if out_bytes is not None and out_bytes.data:
@@ -643,11 +680,18 @@ class NativeLibrary:
     # -- blocks --------------------------------------------------------------
 
     def block_parse(
-        self, handle: int, fmt: int, body: bytes, settings_json: str
+        self,
+        handle: int,
+        fmt: int,
+        body: bytes,
+        settings_json: str,
+        columns_json: str | None = None,
     ) -> tuple[int | None, int, str]:
         """(block handle, code, err). code/err meaningful only on None — a
         call-level failure (unknown setting 115, framing, a binary decode
         fault) yields no block and no partial answers (the C ABI contract §Blocks).
+        `columns_json` (revision 5) is the INSERT column list, already
+        JSON-encoded, or None for "no list" — forwarded as NULL, never `"[]"`.
         """
         fn = self._need("chs_block_parse", "this artifact predates chs_block_parse (rebuild it)")
         code = ctypes.c_int(0)
@@ -661,6 +705,7 @@ class NativeLibrary:
                 settings_json.encode(),
                 ctypes.byref(code),
                 ctypes.byref(err),
+                columns_json.encode() if columns_json is not None else None,
             )
             if not bhandle:
                 return None, int(code.value), self._take_err(err)

@@ -4,6 +4,13 @@ All notable changes to the python binding. The format is [Keep a Changelog](http
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
+## [Unreleased]
+
+### Added
+
+- **This binding now speaks ABI revision 5.** `Schema.row`, `Schema.rows` and `Schema.parse_block` gain a keyword-only `columns` argument (a sequence of column names) — the INSERT column list: the data supplies exactly those columns, in list order for the positional formats, and the server computes the rest with the listed values in scope for their DEFAULT expressions. `None` or an empty sequence is the no-list behavior of every earlier revision and is marshaled to NULL, never to `"[]"` (an empty column list renders as `INSERT INTO t () FORMAT X`, which is code 62 `SYNTAX_ERROR` on every served ClickHouse line — measured 2026-09-15). A listed `EPHEMERAL` column's value is read and is in scope for the DEFAULTs that reference it, and is still never stored and never exported. This binding does not validate column names locally: an unknown column, an `ALIAS` column, and a repeated name are all refused by the server, with its own codes (16, 16 and 15 respectively), surfaced exactly as they come back.
+- This release **requires revision-5 artifacts**. A revision-4 artifact (or any artifact reporting a `chs_abi_revision()` other than 5 or 0) is refused at load, naming both the binding's revision and the artifact's.
+
 ## [0.2.1] — 2026-09-15
 
 Released in step with the Rust crate, which gains `Registry::open` and `Error::LibraryRead`; this binding's public API is unchanged.
