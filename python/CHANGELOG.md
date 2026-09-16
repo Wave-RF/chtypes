@@ -4,6 +4,12 @@ All notable changes to the python binding. The format is [Keep a Changelog](http
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
+## [Unreleased]
+
+### Changed
+
+- **`Registry(..., verify_hashes=True)` now refuses an artifact whose manifest carries no `library_sha256`, instead of loading it silently.** This is a behavior change in a security posture, not a silent fix: previously, asking for verification against a manifest with the field absent returned as if the bytes had been checked, when they never were — the caller believed the load was verified and it was not. `verify_library` now raises `RegistryError` naming the path and saying the manifest carries no `library_sha256`, the same shape its hash-mismatch path has always raised. `verify_hashes` off is unaffected: the field stays optional for a caller who did not ask. Go, TypeScript and Rust already refused this case; this was the one gap issue #13's item A2 left (#48).
+
 ## [0.2.1] — 2026-09-15
 
 Released in step with the Rust crate, which gains `Registry::open` and `Error::LibraryRead`; this binding's public API is unchanged.
