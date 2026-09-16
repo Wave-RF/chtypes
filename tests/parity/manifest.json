@@ -379,6 +379,16 @@
       "rust": "Schema::parse_block"
     },
     {
+      "id": "schema.columns-option",
+      "group": "schema",
+      "kind": "option",
+      "what": "Name the INSERT column list for a row, rows, rows-export or parse-block call (revision 5): the data supplies exactly these columns, in list order for the positional formats, and the server computes the rest with them in scope. Absent — or an empty list — is the no-list behavior of every earlier revision, never an empty `()`, which is a syntax error on every line. A listed EPHEMERAL column is read and is in scope for the DEFAULTs referencing it, and is still never stored",
+      "go": "WithColumns",
+      "python": "Schema.row",
+      "ts": "RowsOptions",
+      "rust": "RowOptions"
+    },
+    {
       "id": "filter.rows",
       "group": "filter",
       "kind": "method",
