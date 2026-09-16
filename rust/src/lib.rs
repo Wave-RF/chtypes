@@ -127,7 +127,7 @@ pub use result::{
     RowResult, Span, Substitution, Transform, Value, Verdict,
 };
 pub use schema::{
-    Block, Filter, NO_PARAMS, NO_SETTINGS, SETTING_CLOCK_OFFSET_NANOS,
+    Block, Filter, NO_PARAMS, NO_SETTINGS, RowOptions, SETTING_CLOCK_OFFSET_NANOS,
     SETTING_DEFAULT_EVAL_MEMORY_BYTES, SETTING_DEFAULT_EVAL_WALL_NANOS,
     SETTING_MAX_CLOCK_SKEW_NANOS, SETTING_NOW_EPOCH_NANOS, Schema,
 };

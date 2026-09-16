@@ -8,10 +8,10 @@
 //! libraries behind a 22-function C ABI), which is why they are exact rather
 //! than approximately right.
 //!
-//! This file is a tutorial you RUN. Fourteen numbered sections walk the whole
+//! This file is a tutorial you RUN. Seventeen numbered sections walk the whole
 //! public API of the Rust SDK, from loading an artifact to tearing down, each
 //! with a comment saying what it demonstrates, why an ingest pipeline cares,
-//! and what to look at in the output. The same fourteen sections — same
+//! and what to look at in the output. The same seventeen sections — same
 //! numbering, same schemas, same rows — exist in go/main.go, python/demo.py
 //! and ts/demo.mjs, so you can diff two tours and see only the language
 //! idioms differ.
@@ -34,9 +34,9 @@ use std::sync::Arc;
 
 use chtypes::{
     BatchResult, CompileMode, DefaultKind, DocFlags, Error, FilterOutcome, FilterResult, Format,
-    Library, Outcome, Registry, Value, NO_PARAMS, NO_SETTINGS, QUERY_CHANGED_SETTINGS,
-    QUERY_SERVER_VERSION, SETTING_CLOCK_OFFSET_NANOS, SETTING_MAX_CLOCK_SKEW_NANOS,
-    SETTING_NOW_EPOCH_NANOS,
+    Library, Outcome, Registry, RowOptions, Value, NO_PARAMS, NO_SETTINGS,
+    QUERY_CHANGED_SETTINGS, QUERY_SERVER_VERSION, SETTING_CLOCK_OFFSET_NANOS,
+    SETTING_MAX_CLOCK_SKEW_NANOS, SETTING_NOW_EPOCH_NANOS,
 };
 
 // ------------------------------------------------------------- the fixture
@@ -125,6 +125,7 @@ fn main() {
     section14();
     section15(&lib);
     section16(&lib);
+    section17(&lib);
 
     // The teardown section 13 narrates: the LAST thing this process does
     // with the registry. Reopening an artifact after a full shutdown is not
@@ -2070,6 +2071,122 @@ fn section16(lib: &Arc<Library>) {
     note("over-hide). Until that run of record exists this is a shadow/replay");
     note("surface: log disagreements, enforce with what enforced yesterday —");
     note("the twin is a call shape, not an enforcement opening.");
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 17 — The INSERT column list
+//
+// WHAT: chs_row / chs_rows / chs_block_parse's revision-5 `columns_json`
+// argument (Rust: RowOptions.columns) — the explicit `INSERT INTO t (a, b,
+// …)` shape: the data supplies exactly the listed columns and the server
+// computes the rest, with the listed values in scope for their DEFAULT
+// expressions.
+// WHY: an EPHEMERAL column has NO other way in — it occupies no field
+// position and a bare INSERT cannot address it — so a gateway whose tenant
+// supplies one (WaveHouse's own insert form is every insertable column in
+// declared order, EPHEMERAL included) needs this option to express it at
+// all, rather than silently dropping the value or refusing every such row.
+// LOOK FOR: the listed EPHEMERAL column feeding the DEFAULT it is in scope
+// for (d = 6) while never itself being stored; Some(vec![]) behaving exactly
+// like no list at all (never rendered as `()`, a syntax error everywhere);
+// and the refusal for a name the table does not have (code 16 — the SAME
+// code an ALIAS column gets, by design: neither is in getInsertable()).
+// C API: chs_row (revision 5, columns_json).
+// ---------------------------------------------------------------------------
+fn section17(lib: &Arc<Library>) {
+    section(17, "The INSERT column list");
+
+    // No revision-5 artifact is published yet (core relinks separately from
+    // this ABI/SDK change), so this section degrades LOUDLY rather than
+    // failing the tour on every artifact that exists today.
+    if lib.abi_revision() < 5 {
+        note(&format!(
+            "SKIPPED: section 17 needs a revision-5 artifact (this one reports {})",
+            lib.abi_revision()
+        ));
+        return;
+    }
+
+    // id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1 — the header's own
+    // revision-5 example (include/chtypes.h, the EPHEMERAL columns_json
+    // paragraph): e occupies no field position and a bare INSERT cannot
+    // reach it at all.
+    let schema = lib
+        .compile("id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1")
+        .compile()
+        .expect("compile");
+
+    let opts = RowOptions {
+        columns: Some(vec!["id".to_string(), "e".to_string()]),
+        ..RowOptions::default()
+    };
+    let row = schema
+        .row_with_options(Format::JsonEachRow, br#"{"id":3,"e":5}"#, &opts)
+        .expect("row_with_options");
+    let vals: Vec<String> = row
+        .values
+        .iter()
+        .map(|v| format!("{}={}({})", v.column, text_or(v), v.source))
+        .collect();
+    kv(
+        "columns [id, e]  row {id:3,e:5}",
+        &format!("{}  {}", row.outcome.as_str(), vals.join(" ")),
+    );
+    note("e is READ and is in scope for d's DEFAULT (e + 1 = 6) — e is NEVER");
+    note("stored and never exported; it has no other way in, since it occupies");
+    note("no field position and a bare INSERT cannot address it at all");
+    blank();
+
+    // The empty-list-is-no-list rule: Some(vec![]) behaves EXACTLY like
+    // None, never rendered as `()` — `INSERT INTO t () FORMAT X` is a syntax
+    // error (code 62) on every ClickHouse line.
+    let plain = lib
+        .compile("id UInt32, d UInt8 DEFAULT 9")
+        .compile()
+        .expect("compile");
+    let empty_opts = RowOptions {
+        columns: Some(Vec::new()),
+        ..RowOptions::default()
+    };
+    let row = plain
+        .row_with_options(Format::JsonEachRow, br#"{"id":1}"#, &empty_opts)
+        .expect("row_with_options");
+    kv(
+        "columns Some([])  row {id:1}",
+        &format!(
+            "{}  d={}   (identical to no list — never `()`, a syntax error)",
+            row.outcome.as_str(),
+            row.values
+                .iter()
+                .find(|v| v.column == "d")
+                .map(text_or)
+                .unwrap_or_default()
+        ),
+    );
+    blank();
+
+    // The refusal: a name the table does not have. Code 16 — the SAME code
+    // an ALIAS column gets, because neither is in getInsertable() and the
+    // statement cannot tell them apart from the wire.
+    let bad_opts = RowOptions {
+        columns: Some(vec!["id".to_string(), "nosuch".to_string()]),
+        ..RowOptions::default()
+    };
+    let refused = schema
+        .row_with_options(Format::JsonEachRow, br#"{"id":1,"nosuch":2}"#, &bad_opts)
+        .expect("row_with_options");
+    kv(
+        "columns [id, nosuch]",
+        &format!(
+            "{}  code={}  {}",
+            refused.outcome.as_str(),
+            refused.err_code,
+            truncate(&refused.err_msg, 56)
+        ),
+    );
+    note("the SAME code an ALIAS column gets: neither is in getInsertable(),");
+    note("so the statement cannot tell them apart from the wire — a caller");
+    note("that needs the distinction must read it off the schema it already holds");
 }
 
 /// Render a FilterResult's verdicts as the document's compact t/f/e/d string.
