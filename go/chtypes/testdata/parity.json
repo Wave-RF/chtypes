@@ -868,7 +868,7 @@
 
     {
       "id": "const.abi-revision",
-      "group": "vocabulary", "kind": "constant", "value": 4,
+      "group": "vocabulary", "kind": "constant", "value": 5,
       "what": "The chs_* ABI revision this binding was written against; a different nonzero artifact revision is refused at load (§The object model)",
       "go": "ABIRevision", "python": "ABI_REVISION", "ts": "ABI_REVISION", "rust": "ABI_REVISION"
     },
