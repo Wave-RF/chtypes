@@ -1355,6 +1355,7 @@
       "RELEASE_PUBLIC_KEY": "Release key hex."
     },
     "ts": {
+      "RowOptions": "The revision-5 column-list option's own type, split off RowsOptions (schema.columns-option) so row() and parseBlock() do not advertise the exportFormat and docFlags they ignore; RowsOptions extends it and still carries the capability.",
       "Registry.open": "The async resolve, TS's own idiom for what Go spells as ForContext.",
       "Registry.has": "Membership test, as Python's __contains__.",
       "Registry.dir": "The primary registry directory.",
