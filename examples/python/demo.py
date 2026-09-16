@@ -8,7 +8,7 @@ come from ClickHouse's own C++ (vendored per release into shared libraries
 behind a 22-function C ABI), which is why they are exact rather than
 approximately right.
 
-This file is a tutorial you RUN. Fourteen numbered sections walk the whole
+This file is a tutorial you RUN. Seventeen numbered sections walk the whole
 public API of the Python SDK, from loading an artifact to tearing down, each
 with a comment saying what it demonstrates, why an ingest pipeline cares, and
 what to look at in the output. The same fourteen sections — same numbering,

@@ -12,6 +12,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Notes
 
+- ⚠️ **`RowsExport`'s variadic parameter changed type** from `...DocFlags` to the option type `WithColumns` and `DocFlags` both satisfy. Every ordinary call still compiles — `RowsExport(f, body, settings, export, chtypes.DocAll)` is unchanged — but a caller that built a `[]DocFlags` and expanded it with `slice...` no longer does, and must pass the values directly or build the option slice instead.
+
 - **This binding now speaks ABI revision 5.** `chs_row`, `chs_rows` and `chs_block_parse` each gained the trailing `columns_json` parameter `WithColumns` carries, so a **revision-5 artifact is required**: a revision-4 artifact (every artifact published so far) is refused at load, naming both numbers.
 
 ## [0.2.1] — 2026-09-15
