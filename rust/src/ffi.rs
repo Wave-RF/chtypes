@@ -95,17 +95,21 @@ type FnEngine = unsafe extern "C" fn(
     *mut *mut c_char,
 ) -> c_int;
 type FnTtl = unsafe extern "C" fn(*mut ChsSchema, *const c_char, *mut *mut c_char) -> c_int;
+/// `chs_row` at revision 5: the revision-4 shape plus a trailing
+/// `columns_json` — the INSERT column list. `NULL` is today's no-list
+/// behavior; the revision gate in [`Api::open`] is what guarantees an
+/// artifact answering revision 5 was built against this exact declaration.
 type FnRow = unsafe extern "C" fn(
     *const ChsSchema,
     c_int,
     *const c_char,
     usize,
     *const c_char,
+    *const c_char,
 ) -> *mut c_char;
-/// `chs_rows` at revision 3: the revision-2 shape plus `export_format`,
-/// `doc_flags` and the `chs_bytes` out-param. The revision gate in
-/// [`Api::open`] is what guarantees an artifact answering revision 3 was
-/// built against this exact declaration.
+/// `chs_rows` at revision 5: the revision-3 shape (`export_format`,
+/// `doc_flags`, the `chs_bytes` out-param) plus a trailing `columns_json`,
+/// read exactly as [`FnRow`]'s.
 type FnRows = unsafe extern "C" fn(
     *const ChsSchema,
     c_int,
@@ -115,6 +119,7 @@ type FnRows = unsafe extern "C" fn(
     c_int,
     std::ffi::c_uint,
     *mut ChsBytes,
+    *const c_char,
 ) -> *mut c_char;
 /// `chs_filter_compile` at revision 4: expr, `params_json` (`{name:Type}`
 /// query-parameter bindings — a JSON object of name -> value STRING, `"{}"`
@@ -138,7 +143,8 @@ type FnFilterRows = unsafe extern "C" fn(
 ) -> *mut c_char;
 /// The revision-4 block twin: parse a body once (`chs_block_parse`), evaluate
 /// K filters against the block (`chs_filter_eval`), free it
-/// (`chs_block_free`). The C ABI contract §Blocks.
+/// (`chs_block_free`). The C ABI contract §Blocks. At revision 5
+/// `chs_block_parse` gains the same trailing `columns_json` as [`FnRow`].
 type FnBlockParse = unsafe extern "C" fn(
     *const ChsSchema,
     c_int,
@@ -147,6 +153,7 @@ type FnBlockParse = unsafe extern "C" fn(
     *const c_char,
     *mut c_int,
     *mut *mut c_char,
+    *const c_char,
 ) -> *mut ChsBlock;
 type FnBlockFree = unsafe extern "C" fn(*mut ChsBlock);
 type FnFilterEval = unsafe extern "C" fn(*const ChsFilter, *const ChsBlock) -> *mut c_char;
@@ -560,6 +567,13 @@ impl Api {
     /// `chs_row`. `raw` is passed counted, not NUL-terminated: binary formats
     /// contain NUL bytes.
     ///
+    /// `columns_json` (revision 5) is the INSERT column list: `None` sends a
+    /// NULL pointer — today's no-list behavior — and is also what a caller
+    /// MUST pass for an empty list, never a JSON `"[]"` string: `INSERT INTO
+    /// t () FORMAT X` is a syntax error (code 62) on every ClickHouse line,
+    /// so an empty array rendered into parentheses is not this ABI's "no
+    /// list" spelling.
+    ///
     /// # Safety
     /// `handle` must come from this library's [`Api::compile`].
     pub(crate) unsafe fn row(
@@ -568,10 +582,12 @@ impl Api {
         format: i32,
         raw: &[u8],
         settings_json: &CStr,
+        columns_json: Option<&CStr>,
     ) -> Result<Vec<u8>> {
         // SAFETY: the caller's `# Safety` clause guarantees `handle` came from this
         // library's `compile`. `raw` is passed as pointer+length, so it needs no NUL
-        // and may contain interior NULs, which the binary formats do.
+        // and may contain interior NULs, which the binary formats do. `columns_json`
+        // is either NULL or a valid NUL-terminated `&CStr`.
         unsafe {
             let Some(f) = self.f_row.as_ref() else {
                 return Err(Error::PredatesFeature { feature: "chs_row" });
@@ -582,6 +598,7 @@ impl Api {
                 counted_ptr(raw),
                 raw.len(),
                 settings_json.as_ptr(),
+                columns_json.map_or(std::ptr::null(), CStr::as_ptr),
             );
             self.take(out)
                 .ok_or(Error::PredatesFeature { feature: "chs_row" })
@@ -604,8 +621,17 @@ impl Api {
     /// not NUL-terminated by contract — and freed with this library's own
     /// `chs_free` before returning, so no ownership crosses this boundary.
     ///
+    /// `columns_json` (revision 5) is the INSERT column list, read exactly as
+    /// [`Api::row`]'s: `None` is a NULL pointer, never a JSON `"[]"` string.
+    /// The export channel is unchanged by it — an exported row carries the
+    /// stored columns in declared order, directly INSERT-able with no list.
+    ///
     /// # Safety
     /// `handle` must come from this library's [`Api::compile`].
+    // `chs_rows` itself takes nine parameters; this wrapper mirrors its
+    // arity rather than inventing a struct that would exist only to satisfy
+    // the lint (the call is private and has exactly one call site).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) unsafe fn rows(
         &self,
         handle: *mut ChsSchema,
@@ -614,11 +640,13 @@ impl Api {
         settings_json: &CStr,
         export_format: i32,
         doc_flags: u32,
+        columns_json: Option<&CStr>,
     ) -> Result<(Vec<u8>, Option<Vec<u8>>)> {
         // SAFETY: the caller's `# Safety` clause guarantees `handle` came from this
         // library's `compile`. `body` is passed as pointer+length, so it needs no NUL
         // and may contain interior NULs, which the binary formats do. The export
         // buffer is a local the library initializes to {NULL,0} at entry.
+        // `columns_json` is either NULL or a valid NUL-terminated `&CStr`.
         unsafe {
             let mut buf = ChsBytes {
                 data: std::ptr::null_mut(),
@@ -638,6 +666,7 @@ impl Api {
                 } else {
                     std::ptr::null_mut()
                 },
+                columns_json.map_or(std::ptr::null(), CStr::as_ptr),
             );
             // Copy-then-free the export buffer FIRST, whatever happens to the
             // document: this is the one place that sees the pointer.
@@ -773,6 +802,12 @@ impl Api {
     /// decode fault): a malformed body yields no block and no partial
     /// answers.
     ///
+    /// `columns_json` (revision 5) is the INSERT column list, read exactly as
+    /// [`Api::row`]'s: `None` is a NULL pointer, never a JSON `"[]"` string.
+    /// Filters still compile over the schema's physical columns and evaluate
+    /// the stored tuple, so a listed `EPHEMERAL` column stays unreferenceable
+    /// in a filter.
+    ///
     /// # Safety
     /// `handle` must come from this library's [`Api::compile`] and outlive
     /// the returned block.
@@ -782,6 +817,7 @@ impl Api {
         format: i32,
         body: &[u8],
         settings_json: &CStr,
+        columns_json: Option<&CStr>,
     ) -> Result<*mut ChsBlock> {
         if !self.has_block() {
             return Err(Error::PredatesFeature {
@@ -794,6 +830,7 @@ impl Api {
         // SAFETY: the caller's `# Safety` clause guarantees `handle`; `body`
         // is passed counted and may contain interior NULs; out-params are
         // live for the call and the error string goes through take().
+        // `columns_json` is either NULL or a valid NUL-terminated `&CStr`.
         unsafe {
             let block = f(
                 handle,
@@ -803,6 +840,7 @@ impl Api {
                 settings_json.as_ptr(),
                 &mut code,
                 &mut err,
+                columns_json.map_or(std::ptr::null(), CStr::as_ptr),
             );
             let message = self.take(err);
             if block.is_null() {

@@ -69,6 +69,8 @@ Where this crate and the normative spec disagree, **the spec wins**.
 
 **Two settings shapes, and the difference will catch you once.** The compile builder's `.settings(...)` takes anything iterable, so `[("k", "v")]` is fine. `rows`, `row_with_settings` and `Filter::rows` take `&[(K, V)]` — a **slice reference** — so write `&[("k", "v")]`, or `NO_SETTINGS` for the empty case.
 
+**The INSERT column list (revision 5) is an options struct, not another argument.** `row`, `rows`, `rows_export` and `parse_block` are unchanged; `row_with_options`, `rows_with_options`, `rows_export_with_options` and `parse_block_with_options` take a `RowOptions { settings, columns }` instead — `RowOptions::default()` is today's no-list behavior, and `columns: Some(vec!["id".into(), "e".into()])` names the list, including a listed `EPHEMERAL` column that feeds a `DEFAULT` and is never itself stored.
+
 **Lifetimes do the work other bindings do at runtime.** A `Filter` and a `Block` borrow their `Schema`, so freeing the schema first does not compile. `Schema` is `Send` and deliberately **not** `Sync`: one native handle must not reach two threads, and the type system enforces it. Parallelism comes from more schemas, not shared ones. `Library` and `Registry` are `Send + Sync` — share them freely.
 
 **Two constructors, two behaviors.** `Registry::from_search_path()` is lazy and walks the search path, loading one line per open. `Registry::new(dir)` is the single-directory loader: eager, that directory only, answering `Error::NoSuchVersion` for a line it lacks.

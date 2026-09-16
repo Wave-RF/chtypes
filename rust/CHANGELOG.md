@@ -4,6 +4,13 @@ All notable changes to the rust binding. The format is [Keep a Changelog](https:
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
+## [Unreleased]
+
+### Added
+
+- **`RowOptions` carries the revision-5 INSERT column list.** `Schema::row_with_options`, `rows_with_options`, `rows_export_with_options` and `parse_block_with_options` take it; `row`, `row_with_settings`, `rows`, `rows_export` and `parse_block` are unchanged and route through the new methods with `RowOptions::default()` (no list), so every existing call still compiles. `RowOptions.columns: Option<Vec<String>>` names the INSERT column list — the data supplies exactly those columns, in list order for the positional formats, and the server computes the rest with them in scope. Absent, or an empty list, is the no-list behavior of every earlier revision; it is **never** rendered as an empty `()`, which is a syntax error (code 62) on every ClickHouse line, so this crate sends a NULL pointer for both. A listed `EPHEMERAL` column's value is read and is in scope for the DEFAULTs referencing it, and is still never stored and never exported; an unknown, `ALIAS` or duplicate listed name is refused with the server's own code (16, 16, 15 respectively) — this crate does no local validation of the list.
+- The crate now speaks **ABI revision 5**: `chs_row`, `chs_rows` and `chs_block_parse` each gained the trailing `columns_json` parameter, and the crate now requires a revision-5 artifact. A revision-4 artifact is refused **at load**, naming both numbers — an artifact built before this change cannot be called through the new declarations, which is exactly the undefined behavior the ABI-revision gate exists to refuse.
+
 ## [0.2.1] — 2026-09-15
 
 ### Added
