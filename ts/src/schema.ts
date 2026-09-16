@@ -48,41 +48,19 @@ export interface EngineOptions {
 }
 
 /**
- * Options for `Schema#row`, `Schema#rows`, and `Schema#parseBlock` — the
- * revision-3 export/document-flag channels and the revision-5 INSERT column
- * list (the C ABI contract §Rows, for which include/chtypes.h is the public
- * authority; `tests/parity/manifest.json` capability `schema.columns-option`
- * spells this whole capability `RowsOptions` in TypeScript — one options
- * type across all four entry points, rather than a separate type per
- * method). Whatever the options, `rows()` is always ONE `chs_rows` call —
- * never a second call, never re-parsing.
+ * Options for `Schema#row` and `Schema#parseBlock` — the revision-5 INSERT
+ * column list (the C ABI contract §Rows, for which include/chtypes.h is the
+ * public authority). `RowsOptions` (below) extends this with the
+ * revision-3 export/document-flag channels, which are meaningless on
+ * `row()` and `parseBlock()` — this type simply does not offer them, rather
+ * than offering fields those two methods would silently ignore.
  */
-export interface RowsOptions {
+export interface RowOptions {
   /**
-   * A `Format` the artifact can SERIALIZE — this revision exactly
-   * `Format.JSONCompactEachRow`. Any other value answers the whole call
-   * `outcome: 'unsupported'` and processes nothing — loud, never silent.
-   * Absent = no export: today's path, byte-identical to revision 2.
-   *
-   * Meaningful only on `Schema#rows`; `row()` and `parseBlock()` ignore it.
-   */
-  readonly exportFormat?: Format | undefined;
-  /**
-   * A bitmask of `DOC_VALUES | DOC_TRANSFORMS | DOC_DEFAULTS` selecting the
-   * document groups; the verdict channel is always present and not a flag.
-   * Defaults: `DOC_ALL` when no `exportFormat` is given (the full document —
-   * plain `rows()` behavior), `0` (LEAN — verdicts only: `values`,
-   * `transformed`, `substituted`, `computed` and `unknownFields` all come
-   * back empty) when one is. An explicit value always wins; a bit outside
-   * `DOC_ALL` is refused loudly by the library, never pre-validated here.
-   *
-   * Meaningful only on `Schema#rows`; `row()` and `parseBlock()` ignore it.
-   */
-  readonly docFlags?: number | undefined;
-  /**
-   * The revision-5 INSERT column list, for `row()`, `rows()` (and its export
-   * channel) and `parseBlock()` alike: name the columns THIS DATA supplies,
-   * and the server computes the rest with them in scope for their DEFAULTs.
+   * The revision-5 INSERT column list, for `row()`, `parseBlock()`, and
+   * `rows()` (and its export channel) via `RowsOptions` extending this:
+   * name the columns THIS DATA supplies, and the server computes the rest
+   * with them in scope for their DEFAULTs.
    *
    * Absent or an empty array is the no-list behavior of every revision
    * before 5 — the data supplies every plain column — and is NEVER rendered
@@ -106,6 +84,37 @@ export interface RowsOptions {
    * surfaced through the row/batch outcome exactly as it arrives.
    */
   readonly columns?: readonly string[] | undefined;
+}
+
+/**
+ * Options for `Schema#rows` — `RowOptions` (the revision-5 column list,
+ * shared with `row()` and `parseBlock()`) plus the revision-3
+ * export/document-flag channels (the C ABI contract §Rows, for which
+ * include/chtypes.h is the public authority). `tests/parity/manifest.json`
+ * capability `schema.columns-option` spells the shared column-list
+ * capability `RowsOptions` in TypeScript — this type still carries it, now
+ * through inheriting `RowOptions` rather than declaring its own `columns`
+ * field. Whatever the options, `rows()` is always ONE `chs_rows` call —
+ * never a second call, never re-parsing.
+ */
+export interface RowsOptions extends RowOptions {
+  /**
+   * A `Format` the artifact can SERIALIZE — this revision exactly
+   * `Format.JSONCompactEachRow`. Any other value answers the whole call
+   * `outcome: 'unsupported'` and processes nothing — loud, never silent.
+   * Absent = no export: today's path, byte-identical to revision 2.
+   */
+  readonly exportFormat?: Format | undefined;
+  /**
+   * A bitmask of `DOC_VALUES | DOC_TRANSFORMS | DOC_DEFAULTS` selecting the
+   * document groups; the verdict channel is always present and not a flag.
+   * Defaults: `DOC_ALL` when no `exportFormat` is given (the full document —
+   * plain `rows()` behavior), `0` (LEAN — verdicts only: `values`,
+   * `transformed`, `substituted`, `computed` and `unknownFields` all come
+   * back empty) when one is. An explicit value always wins; a bit outside
+   * `DOC_ALL` is refused loudly by the library, never pre-validated here.
+   */
+  readonly docFlags?: number | undefined;
 }
 
 /**
@@ -258,14 +267,16 @@ export class Schema {
    * @param settings - per-call settings; they win over the compile profile and
    *   the library defaults (except a type gate the profile declared, which the
    *   handle has already settled, as a real server's CREATE does).
-   * @param options - `RowsOptions#columns` (revision 5), the INSERT column
-   *   list; `exportFormat` / `docFlags` are meaningless here and ignored.
+   * @param options - `RowOptions#columns` (revision 5), the INSERT column
+   *   list. `row()` takes `RowOptions`, not `RowsOptions`: the revision-3
+   *   export/doc-flag channels are meaningless on a single row, so this
+   *   method's options type simply does not offer them.
    * @returns the `RowResult` — verdict, stored values, and every silent change.
    * @throws {ChtypesError} when the schema is closed, or a settings value is a
    *   JS `number`.
    * @throws {UnsupportedError} when the artifact predates `chs_row`.
    */
-  row(format: Format, raw: Uint8Array, settings?: Settings, options?: RowsOptions): RowResult {
+  row(format: Format, raw: Uint8Array, settings?: Settings, options?: RowOptions): RowResult {
     const doc = this.native.row(this.live(), format, raw, encodeSettings(settings), options?.columns);
     return rowResultOf(parseDocument(doc));
   }
@@ -392,10 +403,12 @@ export class Schema {
    * @param format - the wire format code (`Format`).
    * @param body - the rows as bytes (never a JS string).
    * @param settings - parse-side settings; same precedence as `Schema#rows`.
-   * @param options - `RowsOptions#columns` (revision 5), the INSERT column
-   *   list read exactly as `Schema#row` reads it; `exportFormat` / `docFlags`
-   *   are meaningless here and ignored. Filters compiled against this schema
-   *   still evaluate the schema's PHYSICAL columns, so a listed `EPHEMERAL`
+   * @param options - `RowOptions#columns` (revision 5), the INSERT column
+   *   list read exactly as `Schema#row` reads it. `parseBlock()` takes
+   *   `RowOptions`, not `RowsOptions`: the revision-3 export/doc-flag
+   *   channels are meaningless here, so this method's options type simply
+   *   does not offer them. Filters compiled against this schema still
+   *   evaluate the schema's PHYSICAL columns, so a listed `EPHEMERAL`
    *   column stays unreferenceable in a filter.
    * @returns the parsed `Block`.
    * @throws {SchemaError} on a call-level failure — an unknown setting's
@@ -405,7 +418,7 @@ export class Schema {
    * @throws {UnsupportedError} when this build declines the call, or the
    *   artifact predates the block twin.
    */
-  parseBlock(format: Format, body: Uint8Array, settings?: Settings, options?: RowsOptions): Block {
+  parseBlock(format: Format, body: Uint8Array, settings?: Settings, options?: RowOptions): Block {
     const handle = this.native.blockParse(this.live(), format, body, encodeSettings(settings), options?.columns);
     const block = new Block(this.native, this, handle);
     this.blocks.add(block);
