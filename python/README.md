@@ -58,13 +58,15 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 | [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process    |
 | [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                            |
 
-## Three things specific to this binding
+## Four things specific to this binding
 
 **A settings value must never be a `float`.** `encode_settings` stringifies an `int` exactly and raises `TypeError` on a `float`: a 19-digit `chtypes_now_epoch_nanos` does not survive an IEEE double, and as a JSON number the setting would be silently ignored.
 
 **`substituted` is on `RowResult`, not on `BatchResult`.** Reach it through `batch.rows[i].substituted`. `BatchResult` does carry a batch-level `transformed`, which folds in the storage layer's own verdicts.
 
 **`ctypes` releases the GIL for the whole duration of a foreign call**, so the GIL is not the exclusion. The package uses a writer-preferring readers-writer lock per loaded image plus one plain lock per `Schema`; `set_default_settings` and `close` take it exclusively, as the ABI requires. Measured under contention: 27,770 batch reads across 8 threads against 566 concurrent settings swaps, every answer byte-identical to the uncontended one.
+
+**The INSERT column list (ABI revision 5) is a keyword-only `columns` on the same calls** — `schema.row(fmt, raw, columns=["id", "e"])`, and the same argument on `Schema.rows` and `Schema.parse_block`. `None` or an empty sequence is the no-list behavior of every earlier revision; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored. This release requires a revision-5 artifact — a revision-4 one is refused at load, naming both revisions.
 
 ## Tests
 

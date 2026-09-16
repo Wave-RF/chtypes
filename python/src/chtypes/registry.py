@@ -12,7 +12,7 @@ import json
 import os
 import threading
 import weakref
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
 from types import TracebackType
@@ -59,6 +59,7 @@ __all__ = [
     "Registry",
     "Schema",
     "Settings",
+    "encode_columns",
     "encode_settings",
     "host_platform",
     "minor_of",
@@ -152,6 +153,29 @@ def encode_settings(settings: Settings | None) -> str:
                 "nanosecond epoch, and the setting would be silently ignored"
             )
     return json.dumps(out)
+
+
+def encode_columns(columns: Sequence[str] | None) -> str | None:
+    """Encode the revision-5 INSERT column list the way the C ABI requires:
+    a JSON array of column-name strings (`["id", "e"]`), or `None` for "no
+    list" — the behavior of every revision before 5, where the data supplies
+    every plain column.
+
+    `None` and an EMPTY sequence are the SAME input and both encode to
+    `None`, never to `"[]"`: `INSERT INTO t () FORMAT X` is code 62
+    `SYNTAX_ERROR` on every served line (measured 2026-09-15, core's
+    explicit-column-list measurements), so an implementation that renders an
+    empty list into parentheses sends a statement no ClickHouse has ever
+    accepted.
+
+    No local validation of names — an unknown column, an `ALIAS` column and a
+    repeated name are all refused by the SERVER, with its own codes (16, 16,
+    15 respectively), surfaced exactly as they come back rather than
+    pre-checked here.
+    """
+    if not columns:
+        return None
+    return json.dumps(list(columns))
 
 
 def _as_bytes(raw: object, what: str) -> bytes:
@@ -325,13 +349,34 @@ class Schema:
 
     # -- rows ---------------------------------------------------------------
 
-    def row(self, fmt: Format, raw: bytes, settings: Settings | None = None) -> RowResult:
+    def row(
+        self,
+        fmt: Format,
+        raw: bytes,
+        settings: Settings | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> RowResult:
         """Validate and coerce one row: what would this INSERT do to this value?
 
         `fmt` is a `Format` code, `raw` the row's wire bytes (bytes, never
         text: binary formats contain NULs and text rows may carry invalid
         UTF-8 on purpose), `settings` an optional per-call settings mapping
         (values cross as strings; see `encode_settings`).
+
+        `columns` (revision 5) names the INSERT column list — `INSERT INTO t
+        (id, e) FORMAT ...` rather than `INSERT INTO t FORMAT ...`: the data
+        supplies exactly these columns, in list order for the positional
+        formats (arity = list length), and the server computes the rest with
+        the listed values in scope for their DEFAULT expressions. `None` or
+        an empty sequence is the no-list behavior of every revision before
+        5 — never rendered as `()`, which is a syntax error on every served
+        line (see `encode_columns`). A listed `EPHEMERAL` column's value IS
+        read and is in scope for the DEFAULTs that reference it, and is
+        still never stored and never exported. This binding does not
+        validate names locally: an unknown column, an `ALIAS` column, or a
+        name repeated in the list are refused by the SERVER (codes 16, 16,
+        15), surfaced exactly as it comes back.
 
         Returns a `RowResult` — a verdict, never an exception: a row the
         server would refuse comes back `Outcome.REJECTED` with the server's
@@ -342,7 +387,11 @@ class Schema:
         """
         with self._mu:
             doc = self._library._native.row(
-                self._live(), int(fmt), _as_bytes(raw, "row"), encode_settings(settings)
+                self._live(),
+                int(fmt),
+                _as_bytes(raw, "row"),
+                encode_settings(settings),
+                encode_columns(columns),
             )
         return parse_row_document(doc)
 
@@ -354,6 +403,7 @@ class Schema:
         *,
         export: Format | int | None = None,
         doc_flags: int | None = None,
+        columns: Sequence[str] | None = None,
     ) -> BatchResult:
         """Validate and coerce a whole request body, which may hold many rows.
 
@@ -391,6 +441,12 @@ class Schema:
         `computed`, `substituted`, `unknown_fields` all come back empty) when
         `export` is given, the proposal's export-spelling default. An
         explicit int always wins, over both.
+
+        `columns` (revision 5) names the INSERT column list, exactly as
+        `Schema.row` reads it — `None` or an empty sequence is today's
+        no-list behavior (see `encode_columns`); the export channel is
+        unchanged by it, and an exported row still carries the stored
+        columns in declared order, directly INSERT-able with no list.
         """
         export_format = EXPORT_NONE if export is None else int(export)
         if doc_flags is None:
@@ -405,6 +461,7 @@ class Schema:
                 encode_settings(settings),
                 export_format,
                 flags,
+                encode_columns(columns),
             )
         return parse_batch_document(doc, payload=payload)
 
@@ -468,7 +525,14 @@ class Schema:
             self._filters.add(f)
         return f
 
-    def parse_block(self, fmt: Format, body: bytes, settings: Settings | None = None) -> Block:
+    def parse_block(
+        self,
+        fmt: Format,
+        body: bytes,
+        settings: Settings | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> Block:
         """Parse a body ONCE into a `Block` (`chs_block_parse`) — the parse
         half of `Filter.rows`, exported so K filters can evaluate one event
         with no re-parse (`Filter.eval`; the C ABI contract §Blocks). Same formats
@@ -478,6 +542,12 @@ class Schema:
         `filter.eval(schema.parse_block(body))` ≡ `filter.rows(body)` exactly
         when the clock is pinned (`chtypes_now_epoch_nanos`) or the schema
         has no volatile DEFAULT.
+
+        `columns` (revision 5) names the INSERT column list, read exactly as
+        `Schema.row` reads it — `None` or an empty sequence is today's
+        no-list behavior (see `encode_columns`). Filters still compile over
+        the schema's PHYSICAL columns and evaluate the stored tuple, so a
+        listed `EPHEMERAL` column stays unreferenceable in a filter.
 
         A call-level failure — an unknown setting's 115, an unsplittable
         body, a binary decode fault, the deferred JSONEachRow framing verdict
@@ -493,7 +563,11 @@ class Schema:
         """
         with self._mu:
             bhandle, code, err = self._library._native.block_parse(
-                self._live(), int(fmt), _as_bytes(body, "body"), encode_settings(settings)
+                self._live(),
+                int(fmt),
+                _as_bytes(body, "body"),
+                encode_settings(settings),
+                encode_columns(columns),
             )
             if bhandle is None:
                 raise _error_for(code, err or "block parse refused")

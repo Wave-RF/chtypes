@@ -124,6 +124,7 @@ def main() -> None:
         section14()
         section15(lib)
         section16(lib)
+        section17(lib)
     finally:
         # The teardown section 13 narrates: the LAST thing this process does
         # with the registry. Reopening an artifact after a full close is not a
@@ -1264,6 +1265,66 @@ def section16(lib: chtypes.Library) -> None:
     note("the twin is a call shape, not an enforcement opening.")
 
 
+# ---------------------------------------------------------------------------
+# SECTION 17 — The INSERT column list
+#
+# WHAT: `chs_row` / `chs_rows` / `chs_block_parse` gained a trailing
+# `columns_json` at ABI revision 5 — the INSERT column list. `INSERT INTO t
+# FORMAT X` (no list) supplies every PLAIN column from the data; `INSERT INTO
+# t (id, e) FORMAT X` supplies exactly the listed columns and the server
+# computes the rest, with the listed values in scope for their DEFAULTs. The
+# one situation where the two shapes differ is an EPHEMERAL column: it has no
+# stored slot at all and is reachable ONLY through an explicit list.
+# WHY: WaveHouse's own INSERT is always the explicit-list shape (its list is
+# every insertable column, EPHEMERAL included), so this is the one gap between
+# "chtypes models the no-list INSERT" and "what WaveHouse actually sends".
+# LOOK FOR: `d = 6`, not the type-zero `d = 1` a no-list insert would give —
+# the listed EPHEMERAL `e` fed `d`'s `DEFAULT e + 1` and was itself discarded
+# (never stored, never exported) — and the unknown-column refusal, code 16,
+# raised before any byte of the body is parsed.
+# C API: `chs_row` / `chs_rows` with `columns_json` (`Schema.row(...,
+# columns=[...])` / `Schema.rows(..., columns=[...])`).
+# ---------------------------------------------------------------------------
+def section17(lib: chtypes.Library) -> None:
+    section(17, "The INSERT column list")
+
+    if lib.abi_revision < 5:
+        note("SKIPPED: section 17 needs a revision-5 artifact")
+        return
+
+    ddl = "id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1"
+    kv("schema", ddl)
+    blank()
+
+    with lib.compile_ddl(ddl) as schema:
+        # A listed EPHEMERAL column: read, in scope for d's DEFAULT, never
+        # stored and never exported.
+        kv("(a) list = (id, e)", '{"id":3,"e":5}')
+        feed(schema, "JSONEachRow (id, e)", Format.JSON_EACH_ROW, b'{"id":3,"e":5}',
+             columns=["id", "e"])
+        note("d = 6, not the type-zero d = 1 a no-list insert of this same row")
+        note("would give (a no-list INSERT cannot reach e at all — it is an")
+        note("unknown field, skipped by default). e itself never appears above:")
+        note("it is read and discarded, exactly as the ABI documents it.")
+        blank()
+
+        # The refusal: an unknown name in the list is the SERVER's own
+        # NO_SUCH_COLUMN_IN_TABLE, raised before any byte of the body parses.
+        kv("(b) list names an unknown column", '{"id":1,"nosuch":2}')
+        feed(schema, "JSONEachRow (id, nosuch)", Format.JSON_EACH_ROW,
+             b'{"id":1,"nosuch":2}', columns=["id", "nosuch"])
+        note("code 16 NO_SUCH_COLUMN_IN_TABLE — the same code (and the same")
+        note("message) an ALIAS column in the list would raise; a duplicate")
+        note("name in the list is a different refusal, code 15")
+    blank()
+
+    note("`columns=None` or `columns=[]` are the SAME input as every earlier")
+    note("revision — never rendered as `()`: `INSERT INTO t () FORMAT X` is a")
+    note("SYNTAX_ERROR (code 62) on every served line. This binding does no")
+    note("local name validation: unknown / ALIAS / duplicate are the server's")
+    note("own codes, surfaced exactly as they come back.")
+
+
 def verdict_string(fr: chtypes.FilterResult) -> str:
     """Render a FilterResult's verdicts as the document's compact t/f/e/d
     string."""
@@ -1306,10 +1367,19 @@ def fatal(message: str) -> None:
     raise SystemExit(1)
 
 
-def feed(schema: chtypes.Schema, label: str, fmt: Format, body: bytes) -> None:
+def feed(
+    schema: chtypes.Schema,
+    label: str,
+    fmt: Format,
+    body: bytes,
+    *,
+    columns: list[str] | None = None,
+) -> None:
     """Run one payload through rows() and print the verdict on one line, plus
-    a "~" line per Transform (a silent change ClickHouse made)."""
-    batch = schema.rows(fmt, body)
+    a "~" line per Transform (a silent change ClickHouse made). `columns`
+    (ABI revision 5) is the INSERT column list — section 17's only caller
+    that ever passes it."""
+    batch = schema.rows(fmt, body, columns=columns)
     parts = [batch.outcome.value]
     if batch.err_code:
         parts.append(f"code={batch.err_code}")
