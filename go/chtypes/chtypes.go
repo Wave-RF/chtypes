@@ -649,7 +649,7 @@ var Timezone = "UTC"
 // The artifact reports its own with chs_abi_revision(); see the C ABI contract
 // §ABI identity. A dlopen'd Library reports the loaded artifact's revision
 // through Library.ABIRevision, which is 0 when the artifact predates the probe.
-const ABIRevision = 4
+const ABIRevision = 5
 
 // CompileMode selects how a settings profile handed to CompileDDL relates to
 // the settings this build compiles under. Numeric values are part of the

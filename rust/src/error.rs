@@ -26,10 +26,10 @@ pub const CODE_UNSUPPORTED: i32 = -2;
 /// Revision 4 (2026-08-31, the filter phase-2 cycle): `chs_filter_compile`
 /// gained `params_json` (`{name:Type}` query parameters), and the block twin
 /// joined — `chs_block_parse` / `chs_block_free` / `chs_filter_eval`. This
-/// crate therefore speaks 4 and refuses revision-3 artifacts: calling the
+/// crate therefore speaks 5 and refuses revision-4 artifacts: calling the
 /// 5-argument `chs_filter_compile` against the 4-argument revision-3 artifact
 /// is undefined behavior, which is exactly what this gate exists to refuse.
-pub const ABI_REVISION: i32 = 4;
+pub const ABI_REVISION: i32 = 5;
 
 /// `CHTYPES_ARTIFACT_MISSING` — no installed artifact answers for the line
 /// (`docs/guides/fetch.md` §7). The code every SDK shares for [`Error::ArtifactMissing`].

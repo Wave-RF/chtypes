@@ -196,7 +196,11 @@ CHS_API const char * chs_clickhouse_version(void);
  *
  * There is no revision 0 artifact — 0 is reserved for "the symbol was absent".
  */
-#define CHS_ABI_REVISION 4
+/* Revision 5 (the explicit INSERT column list): chs_row, chs_rows and
+ * chs_block_parse each gained a trailing `columns_json`. A revision-4
+ * artifact does not have it, so calling through these declarations against
+ * one is exactly the undefined behavior the gate above refuses. */
+#define CHS_ABI_REVISION 5
 CHS_API int chs_abi_revision(void);
 
 /* -------------------------------------------------------------------------
@@ -555,9 +559,25 @@ CHS_API int chs_schema_column_default_is_literal(const chs_schema * s, int i);
  * the schema at read time and not about the row. This library will not present
  * one as a stored value.
  *
- * EPHEMERAL has no value at all (Code 16 in both paths). Its effect is visible
- * only through the DEFAULT columns that reference it, which are computed. */
-CHS_API char * chs_row(const chs_schema * s, int format, const char * raw, size_t raw_len, const char * settings_json);
+ * EPHEMERAL has no value at all (Code 16 in both paths) when no column list
+ * is given. Its effect is visible only through the DEFAULT columns that
+ * reference it, which are computed. A LISTED ephemeral column is different:
+ * see `columns_json` below.
+ *
+ * `columns_json` (revision 5) is the INSERT column list: a JSON array of
+ * column-name strings, e.g. ["id","e"]. NULL — or "[]" — means NO list, the
+ * behavior of every revision before 5, where the data supplies every plain
+ * column. An empty array NEVER renders as `()`: `INSERT INTO t () FORMAT X`
+ * is code 62 SYNTAX_ERROR on every line, so "[]" and NULL are the same input.
+ * With a list, the data supplies exactly the listed columns — k-th field to
+ * k-th listed column in the positional formats, keys matched against the
+ * listed set in the JSON family — and the server computes the rest, with the
+ * listed values in scope for their DEFAULT expressions. A listed EPHEMERAL
+ * column's value IS read and is in scope for the DEFAULTs referencing it,
+ * and is still never stored and never exported. A name that is unknown, an
+ * ALIAS, or repeated is refused with the server's own code. */
+CHS_API char * chs_row(const chs_schema * s, int format, const char * raw, size_t raw_len, const char * settings_json,
+                       const char * columns_json);
 
 /* A counted, library-owned byte buffer: the chs_rows export channel's
  * out-param. `data` is malloc'd by the library — free it with the SAME
@@ -631,10 +651,16 @@ typedef struct chs_bytes
  * NULL out_bytes with an export requested answer the WHOLE call
  * {"outcome":"unsupported","code":-2,…} and process nothing — loud, never
  * silent. With export_format = CHS_EXPORT_NONE and doc_flags = CHS_DOC_ALL
- * the document is byte-identical to revision 2's. */
+ * the document is byte-identical to revision 2's.
+ *
+ * `columns_json` (revision 5) is the INSERT column list, read exactly as
+ * chs_row reads it — NULL or "[]" is today's no-list behavior. The export
+ * channel is unchanged by it: an exported row carries the stored columns in
+ * declared order, so it stays directly INSERT-able with no list. */
 CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, size_t body_len,
                         const char * settings_json,
-                        int export_format, unsigned doc_flags, chs_bytes * out_bytes);
+                        int export_format, unsigned doc_flags, chs_bytes * out_bytes,
+                        const char * columns_json);
 
 /* ------------------------------------------------------------------ filters
  * Phase 2 (revision 4): one boolean SQL expression over a compiled schema's
@@ -749,9 +775,14 @@ CHS_API char * chs_filter_rows(
  * chs_block_parse is a use of the schema handle, like any parse. */
 typedef struct chs_block chs_block;
 
+/* `columns_json` (revision 5) is the INSERT column list, read exactly as
+ * chs_row reads it — NULL or "[]" is today's no-list behavior. Filters still
+ * compile over the schema's physical columns and evaluate the stored tuple,
+ * so a listed EPHEMERAL column stays unreferenceable in a filter. */
 CHS_API chs_block * chs_block_parse(
     const chs_schema * s, int format, const char * body, size_t body_len,
-    const char * settings_json, int * out_code, char ** out_err);
+    const char * settings_json, int * out_code, char ** out_err,
+    const char * columns_json);
 
 CHS_API void chs_block_free(chs_block * b);
 

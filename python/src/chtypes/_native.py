@@ -151,7 +151,9 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
 # 4 = the filter phase-2 cycle, 2026-08-31: chs_filter_compile gained
 # params_json ({name:Type} query parameters) and the block twin joined
 # (chs_block_parse / chs_block_free / chs_filter_eval).
-ABI_REVISION: Final = 4
+# 5 = the explicit INSERT column list, 2026-09-15: chs_row, chs_rows and
+# chs_block_parse each gained a trailing columns_json.
+ABI_REVISION: Final = 5
 
 _MANDATORY: Final = (
     "chs_clickhouse_version",

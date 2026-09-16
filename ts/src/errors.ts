@@ -39,7 +39,7 @@ export const CODE_UNSUPPORTED = -2;
  * 5-argument `chs_filter_compile` through the 4-argument revision-3 artifact
  * is undefined behavior, which is exactly what the gate exists to prevent.
  */
-export const ABI_REVISION = 4;
+export const ABI_REVISION = 5;
 
 /** Base class for everything this package throws. */
 export class ChtypesError extends Error {
