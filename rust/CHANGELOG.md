@@ -4,6 +4,16 @@ All notable changes to the rust binding. The format is [Keep a Changelog](https:
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
+## [0.2.2] — 2026-09-17
+
+No public API change.
+
+### Notes
+
+- **The parity value check now skips `fetch::*` rows loudly when built without the `fetch` feature, instead of failing to cover them silently.** `pub mod fetch` is `#[cfg(feature = "fetch")]`, so with `--no-default-features` — the configuration `docs/install.md` tells a consumer to build for the loader without the downloader — the module and its constants do not exist in the compiled surface at all. The check now gates those rows on the feature directly, prints which ids it skipped, and asserts at least one was skipped so the skip path itself cannot go quiet; every other row, and every `fetch::*` row when the feature is on, is still asserted exactly as before. CI now also builds and clippies this crate `--no-default-features`. Test-and-CI only; no library behavior changed (#45).
+- Speaks **ABI revision 4**, unchanged since 0.1.0, so no artifact needs relinking. The golden set this release was tested against is the one core serves, generated on the ClickHouse lines 24.8, 25.3, 25.8, 25.10, 26.2, 26.3, 26.4, 26.5, 26.6, 26.7 and 26.8.
+- Seven facts about the compiled library's behavior that a consumer previously had to discover by experiment are now written down: `CHECK`-constraint batch rejection, binding filter parameters as `String`, single-line compact JSON array loss under `allow_errors`, the JSONCompactEachRow export field separator, the value-injection pattern and its compile-time wrap trap, `Columns` as canonical and in declaration order, and the frozen-signatures promise reworded ahead of the next ABI revision (#56). That promise is now stated once, in `docs/support.md`, and linked from everywhere else rather than restated in nine places (#69).
+
 ## [0.2.1] — 2026-09-15
 
 ### Added

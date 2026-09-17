@@ -4,11 +4,16 @@ All notable changes to the go binding. The format is [Keep a Changelog](https://
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
-## [Unreleased]
+## [0.2.2] — 2026-09-17
 
 ### Fixed
 
 - **A fetch with no `--dest` now installs the golden set.** `installGoldens` wrote to `Dest` — the raw fetch option exactly as the caller passed it — in all four places it needed a directory: the `MkdirAll`, its own error message, the `WriteFile` path and the success line. The artifact install path already used the RESOLVED directory ($CHTYPES_REGISTRY, else the per-user artifact cache), which is why only the golden set was affected. With `Dest` empty, `os.MkdirAll("", 0o755)` could not succeed, so `installGoldens` took its deliberately non-fatal "cannot write" branch — and that hid it: the fetch still exited 0, the artifact still installed, and the only symptom was one line of prose and a golden set that silently never appeared, so every golden test in every binding skipped loudly on a machine where the fetch had reported success. An explicit `--dest` was never affected (#49).
+
+### Notes
+
+- Speaks **ABI revision 4**, unchanged since 0.1.0, so no artifact needs relinking. The golden set this release was tested against is the one core serves, generated on the ClickHouse lines 24.8, 25.3, 25.8, 25.10, 26.2, 26.3, 26.4, 26.5, 26.6, 26.7 and 26.8.
+- Seven facts about the compiled library's behavior that a consumer previously had to discover by experiment are now written down: `CHECK`-constraint batch rejection, binding filter parameters as `String`, single-line compact JSON array loss under `allow_errors`, the JSONCompactEachRow export field separator, the value-injection pattern and its compile-time wrap trap, `Columns` as canonical and in declaration order, and the frozen-signatures promise reworded ahead of the next ABI revision (#56). That promise is now stated once, in `docs/support.md`, and linked from everywhere else rather than restated in nine places (#69).
 
 ## [0.2.1] — 2026-09-15
 
