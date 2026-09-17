@@ -122,7 +122,7 @@ Substitution is the server's own `ReplaceQueryParameterVisitor`: each value is d
 
 An **unbound** parameter is the server's own **456** ("Substitution `name` is not set"); an **unparseable** value is the server's own **457**. Both arrive as schema errors, verbatim. A bound name the expression never uses is simply ignored.
 
-### Size the brace type for the value's domain
+### Bind `String`, whatever the column's type
 
 This is the trap, and it is the mirror image of the promotion rule above.
 
@@ -133,9 +133,11 @@ x = 256        (literal)      →  never true
 x = {p:UInt8}  bound "256"    →  binds 0, matches every real zero
 ```
 
-That behavior is uniform across every supported line and matches a real server, so it is not a bug to route around — it is a sizing decision you have to make. **Size the type for the tenant-supplied domain** (`{p:UInt64}`, `{p:String}`) or validate the value before you bind it. A too-narrow parameter type silently matches the wrong rows, which on a tenant boundary is the worst failure available.
+That behavior is uniform across every supported line and matches a real server, so it is not a bug to route around. But it is also not a sizing decision: a query parameter's type is the **reader's** type, not the column's, so there is no column-shaped domain to size a brace type for in the first place. **Bind `{p:String}`, whatever the column's type, and let the comparison coerce.** Binding the column's own narrow type is what reintroduces the wrap above; a `String` parameter has no narrow domain to wrap out of. A too-narrow parameter type silently matches the wrong rows, which on a tenant boundary is the worst failure available — the fix is not a better-sized type, it is not binding a narrow one at all.
 
-Malformed spellings do refuse loudly with the server's own **457** — `"-1"`, `"+7"` and `"007"` as a `UInt8` are all errors — and an empty string refuses with **32**. It is only the in-range-for-the-wire, out-of-range-for-the-type case that wraps.
+Binding a narrow integer type carries two more failure shapes, both sidestepped the same way: a malformed spelling refuses loudly with the server's own **457** — `"-1"`, `"+7"` and `"007"` as a `UInt8` are all errors — and an empty string refuses with **32**. Both come from the integer reader's own parsing rules; bind `String` and neither applies.
+
+`String` parameter values follow ClickHouse's own escaped-text field rules: a backslash, a tab, a newline and a carriage return must each be escaped in the value you bind. A value ending in a trailing backslash is refused with the server's own **code 25**.
 
 ### Bounding the compile path
 
