@@ -126,13 +126,7 @@ chtypes where                        the registry directory fetch would write to
 
 ## 7. The one error
 
-Every SDK raises one identifiable error for a missing artifact — Go `ErrArtifactMissing` (works with `errors.Is`), Python `ArtifactMissingError`, TypeScript `ArtifactMissingError` with `code = 'CHTYPES_ARTIFACT_MISSING'`, Rust `Error::ArtifactMissing` — with this message, verbatim apart from the bracketed parts:
-
-```text
-chtypes: no artifact for ClickHouse <line> (<os>-<arch>). Looked in: <dir1>, <dir2>, ….
-Install it:  <this SDK's fetch command> <line>
-or set CHTYPES_AUTOFETCH=1 to fetch on first use.
-```
+The message a missing artifact produces, the directories it names and the rule that a version is never a nearest match are in [`artifacts.md` → The one error](artifacts.md#the-one-error). What belongs here is the code every binding carries with it:
 
 Codes, shared: `CHTYPES_ARTIFACT_MISSING`, `CHTYPES_ARTIFACT_UNTRUSTED`, `CHTYPES_ARTIFACT_CORRUPT` (any hash mismatch), `CHTYPES_ARTIFACT_PINNED`, `CHTYPES_ARTIFACT_UNPUBLISHED`, `CHTYPES_SOURCE_UNREACHABLE`.
 
