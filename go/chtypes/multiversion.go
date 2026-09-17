@@ -435,8 +435,7 @@ func WithFetchOptions(o FetchOptions) RegistryOption { return func(r *Registry) 
 // library_sha256. Either mismatch fails the load naming the path and both
 // values, and nothing is dlopen'd. A manifest that carries NO
 // library_sha256 is REFUSED rather than passed: verification asked for and
-// not possible is not verification (TypeScript and Rust refuse it too;
-// Python's verify_library returns silently, the one gap issue #13 leaves).
+// not possible is not verification — all four bindings refuse it.
 func WithVerifyChecksums(on bool) RegistryOption { return func(r *Registry) { r.verify = on } }
 
 // NewRegistry opens a registry. With a directory, every artifact under it
