@@ -4,7 +4,7 @@
 import "github.com/wave-rf/chtypes/go/chtypes"
 ```
 
-Module path `github.com/wave-rf/chtypes/go` — lowercase, the Go norm, frozen together with the function signatures at 1.0. `go doc github.com/wave-rf/chtypes/go/chtypes` is the same surface with the full prose; every exported symbol carries its contract.
+Module path `github.com/wave-rf/chtypes/go` — lowercase, the Go norm, frozen since the first tag; what freezes for the function signatures is in [`support.md`](../support.md#pre-10). `go doc github.com/wave-rf/chtypes/go/chtypes` is the same surface with the full prose; every exported symbol carries its contract.
 
 ## How to read the Errors column
 

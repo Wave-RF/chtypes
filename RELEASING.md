@@ -25,7 +25,7 @@ It fetches anonymously on purpose. A registry can show a maintainer a version th
 4. Run that package's suite against a registry, and `scripts/check-standalone.sh` for Go.
 5. Tag: `git tag go/v0.1.0 && git push origin go/v0.1.0`, etc.
 
-The first tag freezes the `chs_*` signatures and the Go module path.
+The first tag freezes the Go module path; what freezes for the `chs_*` signatures is in [`docs/support.md`](docs/support.md#pre-10).
 
 ## Every release after the first: the order, and why Go is last
 
