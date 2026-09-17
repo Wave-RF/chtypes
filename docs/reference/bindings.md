@@ -117,6 +117,12 @@ A binding MUST expose the compile mode as a named constant equal to the C `CHS_C
 - `raw` / `body` MUST be a byte sequence, never the language's text type, and MUST be passed with an explicit length. Binary formats contain NUL bytes, and text rows can contain invalid UTF-8 on purpose.
 - `settings` MUST be a mapping whose **values are strings** at the boundary: a 64-bit nanosecond epoch does not survive an IEEE double, and passing it as a JSON number silently disables the setting. A binding that accepts a native integer MUST stringify it exactly (Python `str(int)`, JS `BigInt.toString()`), never through a float. A binding that additionally accepts a native **boolean** MUST encode it as `"1"` / `"0"` — the spelling the server's own settings parser treats as canonical — never as the language's `True`/`false` text (documented 2026-08-26; the reference Python binding's `encode_settings` is the model: `bool` → `"1"`/`"0"`, `int` → `str(int)`, `float` refused loudly).
 
+### `Columns` is canonical and in declaration order
+
+This is a promise a caller may rely on, not merely a return shape: the column list a compiled `Schema` hands back comes back **canonicalized** and in **declaration order**, in every binding (the per-language reference tables spell the concrete return type — `docs/reference/go.md`, `docs/reference/python.md`, `docs/reference/rust.md`, `docs/reference/ts.md` — this section is the guarantee behind that shape).
+
+⚠️ **With the caveat that matters: the artifact's normalized type spelling can differ between ClickHouse lines.** The same DDL compiled against two different lines can canonicalize a type differently, so a schema hash taken over the SDK's canonical types is not stable across lines — the hash moves for a schema that never changed. A cross-line-stable hash MUST be taken over the caller's own DDL text instead, never over the canonical column list.
+
 ## Result types
 
 ### `RowResult`
