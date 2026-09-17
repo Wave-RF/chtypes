@@ -10,7 +10,7 @@ Two steps, in this order: the **binding** for your language, then at least one *
 go get github.com/wave-rf/chtypes/go
 ```
 
-The module path is lowercase — the Go norm — and freezes together with the function signatures at 1.0. Import it as:
+The module path is lowercase — the Go norm — and froze at the first tag; what freezes for the function signatures is in [`support.md`](support.md#pre-10). Import it as:
 
 ```go
 import "github.com/wave-rf/chtypes/go/chtypes"
