@@ -38,6 +38,90 @@ die()  { printf 'check-suite: %s\n' "$*" >&2; exit 1; }
 say()  { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
 note() { printf '    %s\n' "$*" >&2; }
 
+# abi_case_ran <test-name> <file> — true iff libtest reported `ok` for
+# <test-name> in <file> AND the fixture's own uncaptured "ran" line for it is
+# present. Deliberately STRICT and unchanged since before #66: `ok` is
+# anchored to end-of-line. #66 was found to have THREE distinct measured
+# interleave shapes (three separate PRs, none touching Rust), and every shape
+# that loosens this anchor enough to accept one of them also accepts at
+# least one that must be refused:
+#
+#   1. `test wrong_revision_is_refused ... okABI fixture: ran matching_revision_loads`
+#      (verdict present, junk appended after it)
+#   2. `test wrong_revision_is_refused ... ABI fixture: ran matching_revision_loads`
+#      (verdict displaced — no "ok" on this line at all)
+#   3. `ABI fixture: ran matching_revision_loadstest wrong_revision_is_refused ... `
+#      (line PREFIXED — breaks the `^` start anchor too, and carries no
+#      verdict either)
+#
+# Shape 3 is decisive: a matcher loose enough to accept it is really just
+# "the test name appears somewhere on some line" — and the test's own name
+# also appears on ITS OWN `ABI fixture: ran wrong_revision_is_refused` line,
+# which prints at the START of the test body, before it can possibly have
+# passed. A matcher that accepts that is worse than #66's original bug: today
+# this census cries wolf (a false red on a case that ran and passed); a
+# loosened matcher would go quiet on a real failure — reporting RUN-and-passed
+# for a case that merely started and then panicked. This gate exists
+# specifically to prove the ABI-revision refusal ran, so a false green here is
+# the one outcome that must not happen. So the anchor stays exactly as it
+# was; see --selftest, which pins that with all three shapes plus a clean
+# line. The actual fix is making the input well-formed, not widening what
+# counts as a pass — see the rust arm below: all three shapes only ever
+# occurred because that arm's stdout and stderr were merged with `2>&1`
+# before capture, and libtest's OWN "test NAME ... ok" print (stdout) was
+# measured byte-clean on its own, ten times over at default full
+# parallelism, once stderr was captured separately instead.
+abi_case_ran() {
+  local t="$1" file="$2"
+  grep -qE "^test $t \.\.\. ok$" "$file" && grep -qF "ABI fixture: ran $t" "$file"
+}
+
+if [ "${1:-}" = "--selftest" ]; then
+  # Pin the matcher's strictness: all three interleave shapes measured on
+  # #66 (three separate PRs — #61, #65, #71 — none touching Rust) must read
+  # as NOT RUN, because none of them carries a trustworthy verdict; only a
+  # clean, un-interleaved line may read as RUN. A future change that loosens
+  # the anchor to make one of these pass must break this test.
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+
+  printf 'test wrong_revision_is_refused ... ok\n' > "$tmp/clean.log"
+  printf 'ABI fixture: ran wrong_revision_is_refused\n' >> "$tmp/clean.log"
+  abi_case_ran wrong_revision_is_refused "$tmp/clean.log" \
+    || { echo "SELFTEST FAILED: a clean, un-interleaved pass was read as absent" >&2; exit 1; }
+
+  # Shape 1 (PR #61): verdict present, junk appended after "ok" on the line.
+  printf 'ABI fixture: ran wrong_revision_is_refused\ntest wrong_revision_is_refused ... okABI fixture: ran matching_revision_loads\n' \
+    > "$tmp/shape1.log"
+  abi_case_ran wrong_revision_is_refused "$tmp/shape1.log" \
+    && { echo "SELFTEST FAILED: shape 1 (#61, ok present but line not ended) was read as RUN — the anchor must stay strict" >&2; exit 1; }
+
+  # Shape 2 (PR #65): verdict displaced — no "ok" on this line at all.
+  printf 'test wrong_revision_is_refused ... ABI fixture: ran matching_revision_loads\n' \
+    > "$tmp/shape2.log"
+  abi_case_ran wrong_revision_is_refused "$tmp/shape2.log" \
+    && { echo "SELFTEST FAILED: shape 2 (#65, no ok on the line) was read as RUN" >&2; exit 1; }
+
+  # Shape 3 (PR #71): line PREFIXED — breaks the ^ start anchor too, and the
+  # test's own name is present only because it names ITSELF at test START,
+  # not because it passed. The decisive case: a matcher that accepts this
+  # would go quiet on a real failure, which is worse than #66's original bug.
+  printf 'ABI fixture: ran matching_revision_loadstest wrong_revision_is_refused ... \n' \
+    > "$tmp/shape3.log"
+  abi_case_ran wrong_revision_is_refused "$tmp/shape3.log" \
+    && { echo "SELFTEST FAILED: shape 3 (#71, line prefixed, no verdict) was read as RUN — this would go quiet on a real failure" >&2; exit 1; }
+
+  # Negative control: the case genuinely did not run (the fixture directory
+  # was unset, so the test announced its own skip on stderr and returned).
+  # The census must still fail this, loudly and by name, or the fix has
+  # turned the gate into a no-op.
+  printf 'SKIPPED: no ABI revision fixture: $CHTYPES_ABI_FIXTURES is unset\n' > "$tmp/skipped.log"
+  abi_case_ran wrong_revision_is_refused "$tmp/skipped.log" \
+    && { echo "SELFTEST FAILED: a case that did not run was reported as RUN" >&2; exit 1; }
+
+  echo "check-suite: selftest ok — the ABI-fixture matcher stays strict on all three #66 interleave shapes and a genuine non-run, and still reads a clean line as RUN"
+  exit 0
+fi
+
 WHICH=""; NO_ARTIFACTS=0; REQUIRE=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -177,10 +261,43 @@ here: rust passed ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/par
       ! grep -qE '^SKIP goldens_hold_on_every_artifact|Every test in this file is skipped|^SKIP integration::' "$PLAIN" || PROBLEMS+=("tests skipped for want of a registry with artifacts required")
     fi
     if [ -n "${CHTYPES_ABI_FIXTURES:-}" ]; then
-      # libtest reports an early return as `ok`, so `ok` alone cannot tell a case
-      # that ran from one that skipped; the uncaptured "ran" line is the proof.
+      # abi_case_ran (above) reads the verdict off a plain log and STAYS
+      # STRICT — see its own comment for why loosening it is unsafe, not
+      # merely unnecessary.
+      #
+      # THE FIX (#66): libtest's own progress line ("test NAME ... ok") is
+      # written to stdout, and rust/tests/abi_revision.rs's `announce` writes
+      # its own "ABI fixture: ran NAME" proof directly, unbuffered, to the
+      # REAL stderr (deliberately — so it survives on a PASSING test even
+      # without --nocapture). The census above and the ordinary run() helper
+      # both merge those two streams with `2>&1` before capturing, so two
+      # independent, unsynchronized write()s land on one fd, and the pipe can
+      # interleave them at an arbitrary byte boundary — measured in three
+      # separate shapes across three PRs (#61, #65, #71), none touching
+      # Rust. MEASURED (ten repeated runs, default full parallelism,
+      # `cargo test --test abi_revision`, stdout and stderr captured to
+      # SEPARATE files): stdout alone was byte-clean every time — libtest's
+      # own printing needs no help from thread count. `--test-threads=1`
+      # neither fixes this (merged output still splits: in single-threaded
+      # mode libtest prints "test NAME ... " BEFORE running the test body,
+      # so this test's OWN mid-body stderr write still lands inside its own
+      # line once merged) nor is it needed (stdout stays clean under full
+      # parallelism). So the fix is simply never merging the two streams for
+      # this proof: this binary is run again here, alone, stdout and stderr
+      # captured SEPARATELY, and only concatenated together after both have
+      # finished — which cannot itself introduce an interleave. Every
+      # verdict below is read off that concatenation, never off the
+      # suite-wide, 2>&1-merged $PLAIN above (which still runs this binary
+      # too, as part of the ordinary suite, and is not relied on here).
+      ABI_STDOUT="$LOG_DIR/rust-abi-fixture.stdout.log"
+      ABI_STDERR="$LOG_DIR/rust-abi-fixture.stderr.log"
+      ABI_PLAIN="$LOG_DIR/rust-abi-fixture.plain.log"
+      ( cd "$ROOT/rust" && cargo test --locked --test abi_revision ) \
+        > "$ABI_STDOUT" 2> "$ABI_STDERR" || true
+      cat "$ABI_STDOUT" "$ABI_STDERR"
+      sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$ABI_STDOUT" "$ABI_STDERR" > "$ABI_PLAIN"
       for t in wrong_revision_is_refused matching_revision_loads; do
-        { grep -qE "^test $t \.\.\. ok$" "$PLAIN" && grep -qF "ABI fixture: ran $t" "$PLAIN"; } \
+        abi_case_ran "$t" "$ABI_PLAIN" \
           || PROBLEMS+=("the ABI-revision case $t did not RUN and pass although \$CHTYPES_ABI_FIXTURES is set")
       done
     fi
