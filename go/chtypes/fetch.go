@@ -265,15 +265,15 @@ func (f *fetcher) installGoldens(ctx context.Context) {
 		f.say("NOT installing %s: it hashes to %s but the signed SHA256SUMS says %s", goldensAsset, got, want)
 		return
 	}
-	if err := os.MkdirAll(f.opts.Dest, 0o755); err != nil {
-		f.say("could not create %s: %v — the golden tests will skip", f.opts.Dest, err)
+	if err := os.MkdirAll(f.dest, 0o755); err != nil {
+		f.say("could not create %s: %v — the golden tests will skip", f.dest, err)
 		return
 	}
-	if err := os.WriteFile(filepath.Join(f.opts.Dest, goldensAsset), blob, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(f.dest, goldensAsset), blob, 0o644); err != nil {
 		f.say("could not write %s: %v — the golden tests will skip", goldensAsset, err)
 		return
 	}
-	f.say("golden set verified and installed: %s", filepath.Join(f.opts.Dest, goldensAsset))
+	f.say("golden set verified and installed: %s", filepath.Join(f.dest, goldensAsset))
 }
 
 // FetchAll installs every line the release publishes for the platform —

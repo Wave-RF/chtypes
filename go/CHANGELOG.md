@@ -4,6 +4,12 @@ All notable changes to the go binding. The format is [Keep a Changelog](https://
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
+## [Unreleased]
+
+### Fixed
+
+- **A fetch with no `--dest` now installs the golden set.** `installGoldens` wrote to `Dest` — the raw fetch option exactly as the caller passed it — in all four places it needed a directory: the `MkdirAll`, its own error message, the `WriteFile` path and the success line. The artifact install path already used the RESOLVED directory ($CHTYPES_REGISTRY, else the per-user artifact cache), which is why only the golden set was affected. With `Dest` empty, `os.MkdirAll("", 0o755)` could not succeed, so `installGoldens` took its deliberately non-fatal "cannot write" branch — and that hid it: the fetch still exited 0, the artifact still installed, and the only symptom was one line of prose and a golden set that silently never appeared, so every golden test in every binding skipped loudly on a machine where the fetch had reported success. An explicit `--dest` was never affected (#49).
+
 ## [0.2.1] — 2026-09-15
 
 Released in step with the Rust crate, which gains `Registry::open` and `Error::LibraryRead`; this binding's public API is unchanged.
