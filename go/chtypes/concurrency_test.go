@@ -86,12 +86,22 @@ func testRegistry(t *testing.T) *Registry {
 	// $CHTYPES_REGISTRY first, else the per-user artifact cache (see
 	// artifact cache, three levels up from this package (see testRegistryDir).
 	dir := testRegistryDir(t)
+	// Construction is lazy — it reads manifests and dlopens nothing — so the
+	// lines this helper promises are live have to be asked for. WithPreload is
+	// exactly that request, and it is what keeps "the registry did not load"
+	// a loud SKIP here rather than the same failure repeated by every
+	// artifact test downstream: an artifact this build cannot open (a refused
+	// ABI revision, say) used to fail the constructor and skip right here.
 	r, err := NewRegistry(dir)
 	if err != nil {
 		skipNoArtifacts(t, dir, "the registry did not load: "+err.Error())
 	}
-	if len(r.Versions()) == 0 {
-		skipNoArtifacts(t, dir, "the registry loaded no versions")
+	versions := r.Versions()
+	if len(versions) == 0 {
+		skipNoArtifacts(t, dir, "the registry discovered no versions")
+	}
+	if r, err = NewRegistry(dir, WithPreload(versions...)); err != nil {
+		skipNoArtifacts(t, dir, "the registry did not load: "+err.Error())
 	}
 	return r
 }

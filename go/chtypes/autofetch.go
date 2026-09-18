@@ -20,8 +20,7 @@ func (r *Registry) ForContext(ctx context.Context, v Version) (*Library, error) 
 		return l, nil
 	}
 	minor := minorOf(string(v))
-	// §1: the first directory on the search path that contains the line.
-	if l, err := r.loadFromSearchPath(v, minor); l != nil || err != nil {
+	if l, err := r.resolveWithoutFetch(v, minor); l != nil || err != nil {
 		return l, err
 	}
 	if !r.autoFetch {
@@ -38,6 +37,32 @@ func (r *Registry) ForContext(ctx context.Context, v Version) (*Library, error) 
 		return l, nil
 	}
 	return nil, fmt.Errorf("chtypes: fetched %s but the library there does not answer for ClickHouse %s", dir, v)
+}
+
+// resolveWithoutFetch is the whole of resolution EXCEPT the fetch: what is
+// already loaded, then the line's directory as the construction-time scan
+// recorded it, then a fresh walk of the §1 search path for a line installed
+// since. (nil, nil) means "no directory holds it", which is a fetch's cue on
+// the For path and ErrArtifactMissing on the preload path — preload never
+// fetches, and this is the one function that makes those two paths identical
+// in everything else.
+func (r *Registry) resolveWithoutFetch(v Version, minor string) (*Library, error) {
+	if l := r.lookup(v); l != nil {
+		return l, nil
+	}
+	// The scan already resolved every line it could see to the FIRST directory
+	// holding it, and it knows which line a manifest claims even when the
+	// directory is not named after it — which the <dir>/<minor> walk below
+	// cannot see.
+	if sub, ok := r.knownDir(minor); ok {
+		if err := r.loadArtifactDir(sub); err != nil {
+			return nil, err
+		}
+		if l := r.lookup(v); l != nil {
+			return l, nil
+		}
+	}
+	return r.loadFromSearchPath(v, minor)
 }
 
 // loadFromSearchPath walks the §1 directories for <minor>/manifest.json and
@@ -61,6 +86,15 @@ func (r *Registry) loadFromSearchPath(v Version, minor string) (*Library, error)
 	return nil, nil
 }
 
+// knownDir is the artifact directory the construction-time scan recorded for
+// a line, if it saw one.
+func (r *Registry) knownDir(minor string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	sub, ok := r.known[minor]
+	return sub, ok
+}
+
 // loadArtifactDir loads the artifact directory sub (<registry>/<minor>).
 func (r *Registry) loadArtifactDir(sub string) error {
 	m, ok := readArtifactDir(sub)
@@ -73,9 +107,11 @@ func (r *Registry) loadArtifactDir(sub string) error {
 	return nil
 }
 
-// discover records, for a registry opened on the search path alone, which
-// line each directory would serve — first directory wins — without
-// dlopening anything.
+// discover records which line each directory on the §1 search path would
+// serve — first directory wins — without dlopening anything. It runs for
+// BOTH constructor shapes: an explicit directory is the head of the same
+// search path, and skipping the scan for it left Versions() empty until
+// something had been opened.
 func (r *Registry) discover() {
 	r.mu.Lock()
 	defer r.mu.Unlock()

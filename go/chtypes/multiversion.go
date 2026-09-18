@@ -389,25 +389,30 @@ var (
 // version — the multi-version product path. Safe for concurrent use.
 //
 // Lookup follows the docs/guides/fetch.md §1 search path: the directory given to
-// NewRegistry (loaded eagerly, as it always was), then $CHTYPES_REGISTRY,
-// the per-user cache and the system locations, each consulted lazily by
-// For for a line the loaded set lacks. With AutoFetch (WithAutoFetch, or
-// CHTYPES_AUTOFETCH=1) a line found nowhere is fetched first (Ensure),
-// once per process per line; without it, the miss is ErrArtifactMissing.
-// With WithVerifyChecksums every library is re-hashed against its own
-// manifest.json before it is dlopen'd, whichever path found it.
+// NewRegistry, then $CHTYPES_REGISTRY, the per-user cache and the system
+// locations, each consulted by For for a line the loaded set lacks. With
+// AutoFetch (WithAutoFetch, or CHTYPES_AUTOFETCH=1) a line found nowhere is
+// fetched first (Ensure), once per process per line; without it, the miss is
+// ErrArtifactMissing. With WithVerifyChecksums every library is re-hashed
+// against its own manifest.json before it is dlopen'd, whichever path found it.
+//
+// LOADING IS LAZY, with or without a directory: constructing a Registry reads
+// manifest.json files and dlopens nothing. Nothing in this package opens an
+// artifact except a request for a specific version (For / ForContext / Load)
+// or an explicit WithPreload.
 type Registry struct {
 	mu   sync.RWMutex
 	byID map[string]*Library
 	// known maps a minor line to the artifact directory discovered for it
-	// on the search path at construction (a lazy registry), whether or not
-	// it has been dlopen'd yet. Guarded by mu.
+	// on the search path at construction, whether or not it has been
+	// dlopen'd yet. Guarded by mu.
 	known map[string]string
 
 	explicit  string   // the constructor's directory, "" for the search path alone
 	search    []string // the §1 search path, in order
 	autoFetch bool
-	verify    bool // re-hash each library against its manifest before dlopen
+	verify    bool     // re-hash each library against its manifest before dlopen
+	preload   []string // the lines opened at construction (WithPreload)
 	fetch     FetchOptions
 }
 
@@ -446,18 +451,46 @@ func WithFetchOptions(o FetchOptions) RegistryOption { return func(r *Registry) 
 // not possible is not verification — all four bindings refuse it.
 func WithVerifyChecksums(on bool) RegistryOption { return func(r *Registry) { r.verify = on } }
 
-// NewRegistry opens a registry. With a directory, every artifact under it
-// is loaded now — one directory per version, each holding the manifest.json
-// the build writes:
+// WithPreload opens these lines AT CONSTRUCTION — the one eager path, and the
+// same option Python spells preload=[…], TypeScript {preload: […]} and Rust
+// RegistryOptions::preload.
+//
+// Each entry is a version spelling resolved exactly as For resolves one: a
+// minor line ("25.8") or an exact patch ("25.8.28.1-lts"), never a path. They
+// are opened in the order given, before NewRegistry returns, and an entry no
+// directory on the §1 search path holds is ErrArtifactMissing — the same §7
+// error the first For would have raised, raised earlier.
+//
+// Preload NEVER fetches, even with AutoFetch on: autofetch is a first-use
+// behavior in all four bindings, and a constructor is a worse place than a
+// request to begin a 250 MB download. An empty list is exactly the default.
+//
+// Preload is a deployment's pinned set, deliberately not "everything in the
+// directory": a registry directory is whatever a fetch left behind, and
+// loading it all costs about 120 MB resident per line.
+func WithPreload(versions ...string) RegistryOption {
+	return func(r *Registry) { r.preload = append(r.preload, versions...) }
+}
+
+// NewRegistry opens a registry. It reads the manifest.json files it can see
+// and DLOPENS NOTHING — one directory per version, each holding the
+// manifest.json the build writes:
 //
 //	dir/25.8/{manifest.json,libchtypes.so}
 //	dir/26.6/{manifest.json,libchtypes.so}
 //
-// — and it is an error for that directory to hold nothing (unless
-// AutoFetch is on, in which case a fetch will populate it). With "" the
-// registry is the §1 search path alone: nothing is dlopen'd until For asks
-// for a line, and it is an error for the whole path to hold nothing
-// (again unless AutoFetch is on).
+// With "" the registry is the §1 search path alone; with a directory, that
+// directory is the head of the same path. Either way the first For for a line
+// is what opens it, and WithPreload is the way to open a named set up front.
+//
+// Construction fails only for what manifests can decide: a directory the
+// CALLER NAMED that does not exist or cannot be read, a search path on which
+// no directory holds a single readable <minor>/manifest.json, and a
+// WithPreload entry no directory holds. Both empty-registry checks are
+// suppressed when AutoFetch is on, because a fetch will populate the path.
+// Everything a bad artifact can be wrong about — truncated bytes, a failed
+// checksum, a refused ABI revision, a manifest that disagrees with the library
+// it names — is reported by the first call that asks for that line.
 func NewRegistry(dir string, opts ...RegistryOption) (*Registry, error) {
 	r := &Registry{byID: map[string]*Library{}, known: map[string]string{}, explicit: dir}
 	for _, o := range opts {
@@ -467,49 +500,42 @@ func NewRegistry(dir string, opts ...RegistryOption) (*Registry, error) {
 		r.autoFetch = true
 	}
 	r.search = RegistrySearchPath(dir)
-	if dir == "" {
-		r.discover()
-		if len(r.known) == 0 && !r.autoFetch {
-			return nil, fmt.Errorf("chtypes: no version artifacts on the registry search path (looked in: %s)", strings.Join(r.search, ", "))
-		}
-		return r, nil
-	}
-	loaded, err := r.loadDir(dir)
-	if err != nil {
-		if !(r.autoFetch && os.IsNotExist(err)) {
+	// A directory somebody NAMED and cannot be read is a configuration
+	// mistake named now, and it is the typo guard: /var/lib/chtyeps fails
+	// here rather than three calls later. It costs a directory listing and
+	// no dlopen. With AutoFetch the directory is the destination-to-be.
+	if dir != "" && !r.autoFetch {
+		if _, err := os.ReadDir(dir); err != nil {
 			return nil, err
 		}
 	}
-	if loaded == 0 && !r.autoFetch {
-		return nil, fmt.Errorf("chtypes: no version artifacts under %s", dir)
+	r.discover()
+	if len(r.known) == 0 && !r.autoFetch {
+		return nil, fmt.Errorf("chtypes: no version artifacts on the registry search path (looked in: %s)", strings.Join(r.search, ", "))
+	}
+	if err := r.preloadLines(); err != nil {
+		return nil, err
 	}
 	return r, nil
 }
 
-// loadDir dlopens every artifact directory under dir and returns how many
-// it loaded. A directory without a readable manifest.json is skipped; one
-// whose library fails to load is an error naming it.
-func (r *Registry) loadDir(dir string) (int, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0, err
+// preloadLines opens WithPreload's lines, in order, before the constructor
+// returns. It goes through the §1 search path and never through the fetch
+// path: preload does not fetch.
+func (r *Registry) preloadLines() error {
+	for _, v := range r.preload {
+		if v == "" {
+			return fmt.Errorf("chtypes: WithPreload: an empty version does not mean 'pick one'")
+		}
+		l, err := r.resolveWithoutFetch(Version(v), minorOf(v))
+		if err != nil {
+			return err
+		}
+		if l == nil {
+			return missingArtifactError(v, HostPlatform(), r.search)
+		}
 	}
-	var loaded int
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		sub := filepath.Join(dir, e.Name())
-		m, ok := readArtifactDir(sub)
-		if !ok {
-			continue
-		}
-		if err := r.Load(filepath.Join(sub, m.Library)); err != nil {
-			return loaded, fmt.Errorf("%s: %w", sub, err)
-		}
-		loaded++
-	}
-	return loaded, nil
+	return nil
 }
 
 // readArtifactDir reads one <minor>/manifest.json; ok is false when the
@@ -675,9 +701,14 @@ func openLibrary(path string) (*Library, error) {
 	return lib, nil
 }
 
-// Versions lists the ClickHouse minor lines this registry can answer for:
-// every loaded library's line, plus — for a registry opened on the search
-// path alone — every line discovered there at construction.
+// Versions lists the ClickHouse minor lines this registry CAN ANSWER FOR:
+// every loaded library's line, plus every line the construction-time manifest
+// scan discovered on the §1 search path, whether or not it has been opened.
+// That is one meaning in all four bindings, and it is the meaning that
+// survives lazy loading — "the lines that happen to be open" would read as an
+// empty registry until the first For.
+//
+// It opens nothing.
 func (r *Registry) Versions() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
