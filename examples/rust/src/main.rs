@@ -150,7 +150,7 @@ fn main() {
 // C API: chs_clickhouse_version, chs_abi_revision, chs_init (implicit on
 // load), chs_free (implicit on every returned string).
 // Rust extras: Registry::from_env_or ($CHTYPES_REGISTRY or the fallback),
-// registry.dir(), registry.libraries().
+// registry.dir(), registry.libraries() (what is OPEN, not what is available).
 // ---------------------------------------------------------------------------
 fn section1() -> (Registry, Arc<Library>) {
     section(1, "Load the library and check the ABI");
@@ -166,9 +166,12 @@ fn section1() -> (Registry, Arc<Library>) {
     };
     let versions = registry.versions();
     kv("registry dir", &registry.dir().display().to_string());
-    kv("versions resident", &versions.join("  "));
-    kv("libraries loaded", &registry.libraries().len().to_string());
-    note("one dlopen (RTLD_LOCAL) per version — all live in THIS process at once");
+    kv("versions available", &versions.join("  "));
+    // Construction read the manifests and dlopen'd nothing, so this is 0 here
+    // and one higher after each for_version below. RegistryOptions::preload is
+    // how a deployment opens a pinned set up front instead.
+    kv("libraries open", &registry.libraries().len().to_string());
+    note("one dlopen (RTLD_LOCAL) per version ASKED FOR — ~120 MB resident each");
     if versions.len() == 1 {
         note("only one artifact is built; the tour still runs, and section 12's");
         note("cross-version sweeps will degrade gracefully. More: `scripts/fetch.sh 26.7`");

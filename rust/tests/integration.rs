@@ -49,16 +49,38 @@ fn registry() -> Option<&'static Arc<Registry>> {
                 ));
                 return None;
             }
-            match Registry::new(&dir) {
-                Ok(r) if r.libraries().is_empty() => {
+            // Construction reads manifests and dlopens nothing, so "the
+            // registry loads" has to be ASKED FOR: `preload` is that request,
+            // and it is what construction used to do on its own. Without it
+            // `libraries()` is empty here and every test below skips — a suite
+            // that silently tests nothing looks exactly like one that passes.
+            let lines = match Registry::new(&dir) {
+                Ok(r) => r.versions(),
+                Err(e) => {
                     announce(&format!(
-                        "\nSKIP: registry {} holds no artifact — fetch one with scripts/fetch.sh \
-                         25.8 (docs/guides/fetch.md). Every test in this file is skipped, each by name \
-                         below.\n",
+                        "\nSKIP: registry at {} did not open: {e}. Every test in this file is \
+                         skipped.\n",
                         dir.display()
                     ));
-                    None
+                    return None;
                 }
+            };
+            if lines.is_empty() {
+                announce(&format!(
+                    "\nSKIP: registry {} holds no artifact — fetch one with scripts/fetch.sh \
+                     25.8 (docs/guides/fetch.md). Every test in this file is skipped, each by name \
+                     below.\n",
+                    dir.display()
+                ));
+                return None;
+            }
+            match Registry::open(
+                &dir,
+                chtypes::RegistryOptions {
+                    preload: lines,
+                    ..Default::default()
+                },
+            ) {
                 Ok(r) => Some(Arc::new(r)),
                 Err(e) => {
                     announce(&format!(
@@ -245,7 +267,8 @@ fn a_verified_registry_hashes_the_real_artifact_before_it_loads() {
         dir: Some(registry_dir()),
         verify_checksums: true,
         ..Default::default()
-    });
+    })
+    .expect("the registry directory holds a manifest, so construction must succeed");
     let same = verified
         .for_version(lib.minor())
         .expect("a real artifact must survive its own checksum");
@@ -275,7 +298,8 @@ fn a_verified_registry_hashes_the_real_artifact_before_it_loads() {
         dir: Some(tmp.clone()),
         verify_checksums: true,
         ..Default::default()
-    });
+    })
+    .expect("the registry directory holds a manifest, so construction must succeed");
     let err = bad
         .for_version(lib.minor())
         .expect_err("a manifest claiming the wrong digest must refuse");
