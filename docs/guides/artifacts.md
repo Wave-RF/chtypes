@@ -108,7 +108,7 @@ What a loader does with that directory, in order. This is the reference algorith
 
 `RTLD_LOCAL` is not a detail: it is what keeps each library's ClickHouse symbols private, so two builds that both define `DB::DataTypeFactory` never collide. A loader that uses `RTLD_GLOBAL` will appear to work and answer with the wrong version's semantics. [`multi-version.md`](multi-version.md) is what that buys you.
 
-Loading is lazy per line in every binding's search-path constructor: constructing a registry reads manifests, and asking for a version is what dlopens it.
+Whether a binding's search-path constructor dlopens anything before a version is asked for is not uniform — three lazy, one eager — see [`multi-version.md`](multi-version.md#how-it-works-and-what-it-costs) for which is which and what it costs.
 
 ## Verification, and what it is not
 

@@ -8,7 +8,7 @@ Every artifact is opened with `RTLD_NOW | RTLD_LOCAL`. `RTLD_LOCAL` is the entir
 
 The cost, measured: **about 120 MB resident per loaded version** (160–300 MB on disk). Load the lines you serve, not every line published.
 
-Loading is lazy per line. Constructing a registry reads manifests and dlopens nothing; asking for a version is what opens it.
+Loading is lazy per line in three of the four bindings' search-path constructors — Go's `NewRegistry("")`, Python's `Registry()` and Rust's `Registry::from_search_path()` read manifests and dlopen nothing until a version is asked for — but TypeScript's `new Registry()` is eager: it dlopens every version under the first matching search-path directory at construction, so a machine with eleven installed lines pays for eleven `dlopen`s at startup rather than one.
 
 <details open><summary><b>Go</b></summary>
 
