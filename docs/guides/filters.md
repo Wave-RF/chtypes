@@ -122,7 +122,7 @@ Substitution is the server's own `ReplaceQueryParameterVisitor`: each value is d
 
 An **unbound** parameter is the server's own **456** ("Substitution `name` is not set"); an **unparseable** value is the server's own **457**. Both arrive as schema errors, verbatim. A bound name the expression never uses is simply ignored.
 
-### Bind `String`, whatever the column's type
+### Bind `String` for narrow integer columns
 
 This is the trap, and it is the mirror image of the promotion rule above.
 
@@ -133,9 +133,13 @@ x = 256        (literal)      →  never true
 x = {p:UInt8}  bound "256"    →  binds 0, matches every real zero
 ```
 
-That behavior is uniform across every supported line and matches a real server, so it is not a bug to route around. But it is also not a sizing decision: a query parameter's type is the **reader's** type, not the column's, so there is no column-shaped domain to size a brace type for in the first place. **Bind `{p:String}`, whatever the column's type, and let the comparison coerce.** Binding the column's own narrow type is what reintroduces the wrap above; a `String` parameter has no narrow domain to wrap out of. A too-narrow parameter type silently matches the wrong rows, which on a tenant boundary is the worst failure available — the fix is not a better-sized type, it is not binding a narrow one at all.
+That behavior is uniform across every supported line and matches a real server, so it is not a bug to route around, and the fix is not a better-sized brace type — binding the column's own narrow type at any width is what reintroduces the wrap above. For a **narrow** integer column — `UInt8`, `UInt16`, `UInt32`, `Int8`, `Int16` or `Int32` — bind `{p:String}` instead, with a canonical spelling of the value: the comparison then coerces the bound `String` against the column's type, and an out-of-domain canonical value answers a clean `false`, matching nothing, rather than wrapping into a real row. That recommendation is bounded, not unconditional, and the boundaries below were measured by the artifact producer against live servers across eight served ClickHouse lines — they are part of what the recipe means, not a caveat appended to it:
 
-Binding a narrow integer type carries two more failure shapes, both sidestepped the same way: a malformed spelling refuses loudly with the server's own **457** — `"-1"`, `"+7"` and `"007"` as a `UInt8` are all errors — and an empty string refuses with **32**. Both come from the integer reader's own parsing rules; bind `String` and neither applies.
+- **It stops at 64 bits.** Comparison-time coercion promotes the column's own type before parsing the bound value, and `UInt64`/`Int64` have nothing wider left to promote to — so the same wrap this section opened with returns, on the comparison side instead of the substitution side. `u64 = {p:String}` bound `"18446744073709551616"` matches exactly the row holding `0`; `i64 = {p:String}` bound `"9223372036854775808"` matches the row holding `-9223372036854775808`. Binding `String` **moves** that hazard from narrow columns to wide ones; it does not remove it — do not bind `String` in place of `UInt64` or `Int64` on this reasoning.
+- **It depends on the value's spelling, not just its magnitude.** A clean `false` is what a _canonical_ out-of-domain value gets. Against a narrow integer column, `"007"`, `"+7"`, `" 7"`, `"7.0"`, `"-1"` and `"abc"` each throw code **53** instead, and `""` throws **32** — exactly the spellings a gateway forwards from a caller unvalidated. Validate the value's spelling as canonical before binding it; the outcome is `false` or an error depending on spelling, never uniformly `false`.
+- **It does not extend to ordering comparisons.** `u8 < 256` (literal) admits every row; `u8 < '256'` (bound `String`) admits none — a failed conversion becomes a constant for the whole comparison, so `<` cannot admit what `=` would not. Do not carry this recipe to `<`, `<=`, `>` or `>=`.
+
+Two error channels are in play here, and binding `String` moves a value between them rather than exempting it from both. **Substitution time**, before any row is read, is where the declared brace type's own reader deserializes the bound value: `{p:UInt8}` bound `"-1"`, `"+7"` or `"007"` is the server's own **457**, and an empty string is **32**. **Comparison time**, after substitution has already succeeded, is where the code-53 cases above are thrown, against a narrow column. Binding `String` takes a value out of the substitution channel — it does not make a bad spelling valid, it changes when and how that spelling is rejected.
 
 `String` parameter values follow ClickHouse's own escaped-text field rules: a backslash, a tab, a newline and a carriage return must each be escaped in the value you bind. A value ending in a trailing backslash is refused with the server's own **code 25**.
 
