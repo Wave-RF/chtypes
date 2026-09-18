@@ -166,7 +166,7 @@ if [ "${1:-}" = "--selftest" ]; then
   N="$(grep -cE "$PARITY_OK_RE" "$tmp/parity-shape3.log" || true)"
   [ "$N" -eq 0 ] || { echo "SELFTEST FAILED: parity shape 3 (line prefixed, no verdict) counted as $N, not 0 — this would go quiet on a real failure" >&2; exit 1; }
 
-  # Threshold behaviour (#77): this census is a COUNT against PARITY_MIN
+  # Threshold behavior (#77): this census is a COUNT against PARITY_MIN
   # (6, below), not a boolean about one case, so a fix that only repairs the
   # matcher and leaves the counting/threshold wiring broken would still turn
   # the gate into a no-op. Simulate the ORIGINAL exposure at scale: six real
