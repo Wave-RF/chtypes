@@ -100,10 +100,14 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
         ],
     ),
     # Revision 3: chs_rows carries export_format / doc_flags / out_bytes
-    # (the C ABI contract §Rows). Revision 5 appends columns_json, LAST, after
-    # out_bytes. The ABI-revision gate below is what guarantees this
-    # 9-argument declaration describes the loaded artifact before any call is
-    # made through it.
+    # (the C ABI contract §Rows). Revision 5 appends columns_json after
+    # out_bytes and then, in the same open window, the attached row filter
+    # LAST. This binding never attaches one and passes NULL — today's
+    # behavior byte for byte — but the parameter is DECLARED, because calling
+    # a ten-parameter symbol through a nine-parameter declaration leaves the
+    # callee reading the filter slot from whatever happened to occupy it. The
+    # ABI-revision gate below is what guarantees this 10-argument declaration
+    # describes the loaded artifact before any call is made through it.
     "chs_rows": (
         ctypes.c_void_p,
         [
@@ -116,6 +120,7 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
             ctypes.c_uint,
             ctypes.POINTER(_ChsBytes),
             ctypes.c_char_p,
+            ctypes.c_void_p,
         ],
     ),
     # Revision 3: the filter trio (the C ABI contract §Filters). Optional symbols —
@@ -622,6 +627,11 @@ class NativeLibrary:
                 doc_flags,
                 ctypes.byref(out_bytes) if out_bytes is not None else None,
                 columns_json.encode() if columns_json is not None else None,
+                # The attached row filter: NULL, which is "no filter" and
+                # today's behavior exactly. Nothing in this binding can attach
+                # one — the argument exists so the call matches the symbol,
+                # not to open new surface.
+                None,
             )
             payload: bytes | None = None
             if out_bytes is not None and out_bytes.data:

@@ -63,6 +63,27 @@ jobs:
           grep -qE "ABI_REVISION = $rev" ts/src/*.ts
           grep -qE "ABI_REVISION: i32 = $rev" rust/src/*.rs
           echo "ABI revision $rev agreed by the header and four bindings"
+      # An agreed revision NUMBER proves nothing about the declarations it is
+      # supposed to stand for, which is exactly how a nine-parameter typedef
+      # for a ten-parameter symbol passed all twelve required checks. The step
+      # below generates the prototype table from include/chtypes.h and asserts
+      # every binding's own FFI declaration against it — parameter count AND
+      # each parameter's type.
+      #
+      # It belongs in THIS job, not in the artifacts leg: an artifact-gated
+      # check would not have caught this one and will not catch the next,
+      # because while published artifacts are revision 4 the bindings refuse
+      # at load and a wrong declaration is never exercised. This job runs on
+      # every pull request with nothing but a checkout.
+      #
+      # The selftest runs FIRST and in the same job, the precedent
+      # scripts/lint-public.sh set: it plants a wrong arity AND a wrong type in
+      # every binding and requires each to be caught, because a check that has
+      # only ever passed is not known to work.
+      - name: selftest — a wrong arity and a wrong type fire in every binding
+        run: scripts/check-abi-decls.py --selftest
+      - name: every binding's chs_* declaration matches the header's prototype
+        run: scripts/check-abi-decls.py
 
   docs:
     name: "docs — the support matrix still matches what the release serves"

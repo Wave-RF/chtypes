@@ -146,6 +146,31 @@ const dropPtrSlot = (s: Slot): void =>
 const dropIntSlot = (s: Slot): void =>
   freePointer({ paramsType: [I32], paramsValue: s, pointerType: PointerType.RsPointer });
 
+/**
+ * A NULL pointer, for an `External` parameter this binding has no value to
+ * supply — today, only `chs_rows`' attached row filter.
+ *
+ * `Str` cannot carry a NULL (see `encodeColumns`), but `External` can, and
+ * this is how: seed an 8-byte slot with 0, read it back as a pointer, and the
+ * value IS the null pointer. That was MEASURED against ffi-rs 1.3.7 rather
+ * than assumed — a C function reporting the address it received answers 0 for
+ * this value and a real address for a live slot — and the value is a copy, so
+ * it outlives the slot it came from and the slot is freed immediately.
+ */
+const NULL_PTR: JsExternal = (() => {
+  const slot = ptrSlot();
+  const p = readPtr(slot);
+  dropPtrSlot(slot);
+  // Checked here rather than believed: a non-null value in this slot would
+  // hand the library a pointer to read a filter out of, and the symptom would
+  // be a crash inside the artifact with nothing pointing back here. Every
+  // import of this module runs the assertion, so no test has to remember it.
+  if (!isNullPointer(p)) {
+    throw new ChtypesError('chtypes: internal — the NULL pointer constant did not come back null');
+  }
+  return p;
+})();
+
 // ------------------------------------------------------------ the symbol table
 
 function declare(library: string) {
@@ -163,8 +188,13 @@ function declare(library: string) {
     // (chs_bytes * — passed as a 16-byte scratch buffer, see `rows`).
     // Revision 5: chs_rows gains a trailing columns_json (the INSERT column
     // list) — see `encodeColumns` for why this binding always sends "[]"
-    // rather than a real NULL for "no list".
-    chs_rows: d(External, [External, I32, U8Array, U64, Str, I32, I32, U8Array, Str]),
+    // rather than a real NULL for "no list" — and then, in the same open
+    // window, the attached row filter LAST. This binding never attaches one
+    // and passes NULL_PTR, which is today's behavior byte for byte; the
+    // parameter is DECLARED because calling a ten-parameter symbol through a
+    // nine-parameter descriptor leaves the callee reading the filter slot
+    // from whatever happened to occupy it.
+    chs_rows: d(External, [External, I32, U8Array, U64, Str, I32, I32, U8Array, Str, External]),
     // Everything else is optional and degrades to `unsupported` at call time.
     chs_free: d(Void, [External]),
     chs_shutdown: d(Void, []),
@@ -854,6 +884,11 @@ export class NativeLibrary {
             docFlags,
             outBytes,
             columnsJson,
+            // The attached row filter: NULL, which is "no filter" and today's
+            // behavior exactly. Nothing in this binding can attach one — the
+            // argument exists so the call matches the symbol, not to open new
+            // surface.
+            NULL_PTR,
           ]) as JsExternal,
       );
     } catch (err) {

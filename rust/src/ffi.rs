@@ -109,7 +109,11 @@ type FnRow = unsafe extern "C" fn(
 ) -> *mut c_char;
 /// `chs_rows` at revision 5: the revision-3 shape (`export_format`,
 /// `doc_flags`, the `chs_bytes` out-param) plus a trailing `columns_json`,
-/// read exactly as [`FnRow`]'s.
+/// read exactly as [`FnRow`]'s, and then — in the same open revision-5
+/// window — the attached row filter LAST. This crate never attaches one and
+/// passes NULL, which is today's behavior byte for byte; the parameter is
+/// declared because calling a ten-parameter symbol through a nine-parameter
+/// declaration leaves the callee reading that slot from whatever occupied it.
 type FnRows = unsafe extern "C" fn(
     *const ChsSchema,
     c_int,
@@ -120,6 +124,7 @@ type FnRows = unsafe extern "C" fn(
     std::ffi::c_uint,
     *mut ChsBytes,
     *const c_char,
+    *const ChsFilter,
 ) -> *mut c_char;
 /// `chs_filter_compile` at revision 4: expr, `params_json` (`{name:Type}`
 /// query-parameter bindings — a JSON object of name -> value STRING, `"{}"`
@@ -628,9 +633,9 @@ impl Api {
     ///
     /// # Safety
     /// `handle` must come from this library's [`Api::compile`].
-    // `chs_rows` itself takes nine parameters; this wrapper mirrors its
-    // arity rather than inventing a struct that would exist only to satisfy
-    // the lint (the call is private and has exactly one call site).
+    // `chs_rows` itself takes ten parameters; this wrapper mirrors the ones a
+    // caller supplies rather than inventing a struct that would exist only to
+    // satisfy the lint (the call is private and has exactly one call site).
     #[allow(clippy::too_many_arguments)]
     pub(crate) unsafe fn rows(
         &self,
@@ -667,6 +672,11 @@ impl Api {
                     std::ptr::null_mut()
                 },
                 columns_json.map_or(std::ptr::null(), CStr::as_ptr),
+                // The attached row filter: NULL, which is "no filter" and
+                // today's behavior exactly. Nothing in this crate can attach
+                // one — the parameter exists here so the declaration matches
+                // the symbol, not to open new surface.
+                std::ptr::null(),
             );
             // Copy-then-free the export buffer FIRST, whatever happens to the
             // document: this is the one place that sees the pointer.
