@@ -387,7 +387,7 @@ def test_shutdown_then_the_process_exits(registry: chtypes.Registry) -> None:
         import chtypes
         from chtypes import Format
         registry = chtypes.Registry({str(registry.directory)!r})
-        library = registry.libraries()[-1]
+        library = registry.for_version(registry.versions()[-1])
         schema = library.compile_ddl("a UInt8, ts DateTime DEFAULT now()")
         result = schema.row(Format.JSON_EACH_ROW, b'{{"a":1}}')
         assert result.substituted, result
@@ -414,7 +414,7 @@ def test_the_host_timezone_does_not_leak_into_answers(registry: chtypes.Registry
         import chtypes
         from chtypes import Format
         registry = chtypes.Registry({str(registry.directory)!r})
-        library = registry.libraries()[-1]
+        library = registry.for_version(registry.versions()[-1])
         with library.compile_ddl("ts DateTime") as schema:
             print(schema.row(Format.JSON_EACH_ROW, b'{{"ts":1700000000}}').value("ts").text)
         with library.compile_ddl("ts DateTime DEFAULT now()") as schema:
@@ -561,7 +561,7 @@ def test_closing_one_registry_leaves_another_answering(registry: chtypes.Registr
     a.close()
     # The survivor still answers — including a DEFAULT evaluation, which is
     # exactly the machinery chs_shutdown tears down.
-    lib = b.libraries()[-1]
+    lib = b.for_version(b.versions()[-1])
     with lib.compile_ddl("a UInt8, d UInt8 DEFAULT a + 1") as schema:
         got = schema.rows(Format.JSON_EACH_ROW, b'{"a": 4}\n')
         assert got.outcome is Outcome.ACCEPTED
@@ -638,7 +638,7 @@ def test_library_close_is_refcounted_per_image(tmp_path: Path, registry: chtypes
         a.close()
         assert calls["n"] == 0, f"first close reached the C boundary: {calls}"
         # The survivor still answers after its sibling closed.
-        with b.libraries()[0].compile_ddl("x UInt8") as schema:
+        with b.for_version(b.versions()[0]).compile_ddl("x UInt8") as schema:
             row = schema.row(chtypes.Format.JSON_EACH_ROW, b'{"x": 256}')
             assert row.outcome is chtypes.Outcome.ACCEPTED
         a.close()

@@ -141,7 +141,10 @@ describe.skipIf(!HAVE_FIXTURES)('abi revision fixture', () => {
   it('matching revision loads', () => {
     const doc = DOC!;
     const root = ROOT!;
-    const registry = new Registry(path.join(root, 'at-revision'));
+    // Construction opens nothing, so the control artifact is opened by
+    // `preload` — the constructor-time spelling of that request, and the one
+    // whose failure is this test's verdict.
+    const registry = new Registry(path.join(root, 'at-revision'), { preload: [doc.clickhouse_minor] });
     const libs = registry.libraries();
     expect(libs).toHaveLength(1);
     const lib = libs[0]!;

@@ -871,11 +871,17 @@ describe('the registry: the search path, the §7 error and autofetch', () => {
       try {
         expect(layered.dir).toBe(primary);
         expect(layered.searchPath.slice(0, 2)).toEqual([primary, secondary]);
-        expect(layered.versions()).toEqual([first]);
+        // versions() is every line this registry CAN answer for, loaded or
+        // merely discovered — so the layered line is in it from construction,
+        // before anything is opened. libraries() is the half that grows.
+        const bothLines = [first, second].sort(compareVersions);
+        expect(layered.versions()).toEqual(bothLines);
+        expect(layered.libraries()).toEqual([]);
         expect(layered.has(second)).toBe(true);
         expect(layered.has('19.1')).toBe(false);
         expect(layered.for(second).minor).toBe(second);
-        expect(layered.versions()).toEqual([first, second].sort(compareVersions));
+        expect(layered.versions()).toEqual(bothLines);
+        expect(layered.libraries()).toHaveLength(1);
         try {
           layered.for('19.1');
           throw new Error('unreachable');
@@ -892,6 +898,7 @@ describe('the registry: the search path, the §7 error and autofetch', () => {
       try {
         expect(fell.dir).toBe(secondary);
         expect(fell.versions()).toEqual([second]);
+        expect(fell.libraries()).toEqual([]);
       } finally {
         fell.close();
       }

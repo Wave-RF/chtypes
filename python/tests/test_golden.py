@@ -80,7 +80,14 @@ def test_golden(registry: chtypes.Registry, case: dict) -> None:
     exact = GOLDENS["generated"].get("exact") or {}
     checked = 0
     skipped: list[str] = []
-    for lib in registry.libraries():
+    # Construction opens nothing, so the goldens ASK for every line they are
+    # about to score: `libraries()` lists what is open, and an empty list here
+    # would score nothing and report itself green — which the tail assertion
+    # exists to refuse.
+    for line in registry.versions():
+        registry.for_version(line)
+    libraries = registry.libraries()
+    for lib in libraries:
         # A case is only a golden for the EXACT build it was generated against.
         # The rolling index keeps older patch rows, so a machine can hold a patch
         # the generator never saw; that is a loud skip, never a failure.
@@ -139,7 +146,7 @@ def test_golden(registry: chtypes.Registry, case: dict) -> None:
             schema.close()
     # Every library either ran the case or was skipped by name, and a run that
     # checked nothing is a skip rather than a silent pass.
-    assert checked + len(skipped) == len(registry.libraries()) > 0
+    assert checked + len(skipped) == len(libraries) > 0
     if checked == 0:
         pytest.skip(
             "no artifact matches the golden set's generated versions — " + "; ".join(skipped)

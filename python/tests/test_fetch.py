@@ -619,7 +619,7 @@ def test_autofetch_runs_ensure_once_per_line_under_one_lock(
     line, however many threads open it. The fetch is faked to stage a REAL
     artifact (a symlink to one this suite already loads), so the open then
     succeeds and the same Library comes back to every thread."""
-    real = Path(registry.libraries()[-1].path).parent
+    real = Path(registry.for_version(registry.versions()[-1]).path).parent
     calls: list[str] = []
     entered = threading.Event()
     release = threading.Event()
