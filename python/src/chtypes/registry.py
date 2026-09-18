@@ -29,6 +29,7 @@ from ._manifest import (
 )
 from ._native import NativeLibrary
 from .errors import (
+    FETCH_COMMAND,
     ArtifactMissingError,
     ChtypesError,
     RegistryError,
@@ -1051,12 +1052,37 @@ class Registry:
 
     Loading is lazy and per line: constructing a `Registry` reads manifests
     (cheap) and `dlopen`s nothing; `for_version` loads the one line asked
-    for, once. A line missing from every directory is `ArtifactMissingError`
-    (§7) — unless lazy fetch is on (``autofetch=True`` or
-    ``CHTYPES_AUTOFETCH=1``), in which case `ensure` runs first, under one
-    process-wide lock per line so concurrent opens fetch once. Off by
-    default: a production process must not begin a 250 MB download inside a
-    request.
+    for, once. **Nothing in this library opens an artifact except a request
+    for a specific version, or an explicit ``preload``** — not `versions()`,
+    not `libraries()`, not `in`, not `len()`, not `repr()`. A line missing
+    from every directory is `ArtifactMissingError` (§7) — unless lazy fetch
+    is on (``autofetch=True`` or ``CHTYPES_AUTOFETCH=1``), in which case
+    `ensure` runs first, under one process-wide lock per line so concurrent
+    opens fetch once. Off by default: a production process must not begin a
+    250 MB download inside a request.
+
+    ``preload`` is the one eager path: the lines a deployment pins, opened in
+    order before the constructor returns. An entry no directory on the search
+    path holds is `ArtifactMissingError` — the same §7 error the first
+    `for_version` would have raised, raised earlier — and it never fetches,
+    even with ``autofetch`` on. Deliberately a list of lines rather than
+    "everything in the directory": a registry directory is whatever a fetch
+    left behind, and each line costs about 120 MB resident.
+
+    ``verify_hashes`` is a policy on the registry, not a property of the
+    preload list: **a library's checksum is computed immediately before that
+    library is `dlopen`ed, and at no other time** — at construction for the
+    preloaded lines, at first use for the rest, never for a line nobody asks
+    for.
+
+    Construction fails only for what manifests can decide: a directory the
+    CALLER NAMED that does not exist or cannot be read, a search path on which
+    no directory holds a readable ``<minor>/manifest.json``, and a ``preload``
+    entry no directory holds (the first two are suppressed with ``autofetch``,
+    which will populate the path). Everything a bad artifact can be wrong
+    about — truncated bytes, a failed checksum, a refused ABI revision, a
+    manifest that disagrees with the library it names — is reported by the
+    first call that asks for that line.
 
     `directory` is where fetch writes — the first of the explicit path,
     ``$CHTYPES_REGISTRY`` and the cache; `search_path` is every directory
@@ -1082,6 +1108,7 @@ class Registry:
         timezone: str = DEFAULT_TIMEZONE,
         verify_hashes: bool = False,
         autofetch: bool | None = None,
+        preload: Sequence[str] | None = None,
     ) -> None:
         self.search_path: tuple[Path, ...] = registry_search_path(directory)
         self.directory: Path = fetch_destination(directory)
@@ -1096,17 +1123,26 @@ class Registry:
         self._index: dict[str, Path] = {}
         self._closed = False
         self._mu = threading.RLock()
-        if directory is not None:
-            # An explicit directory that exists but cannot be read is a
-            # configuration mistake, named now. One that does not exist yet
-            # is fine: fetch creates it.
+        if directory is not None and not self._autofetch:
+            # A directory somebody NAMED and cannot be read is a configuration
+            # mistake named now, and it is the typo guard: /var/lib/chtyeps
+            # fails here rather than three calls later. It costs a directory
+            # listing and no dlopen. With autofetch on, the directory is the
+            # destination the first fetch creates.
             try:
                 Path(directory).iterdir()
-            except FileNotFoundError:
-                pass
             except OSError as exc:
                 raise RegistryError(f"chtypes: cannot read registry {directory}: {exc}") from exc
         self._scan()
+        if not self._index and not self._autofetch:
+            looked = ", ".join(str(p) for p in self.search_path)
+            raise RegistryError(
+                f"chtypes: no artifacts in any registry directory. Looked in: {looked}.\n"
+                f"Install one:  {FETCH_COMMAND} <line>\n"
+                "or set CHTYPES_AUTOFETCH=1 to fetch on first use."
+            )
+        for spelling in preload or ():
+            self._preload(spelling)
 
     def __repr__(self) -> str:
         return f"<chtypes.Registry {self.directory} versions={self.versions()}>"
@@ -1156,6 +1192,24 @@ class Registry:
         self._by_id[library.minor] = library
         return library
 
+    def _preload(self, version: str) -> None:
+        """Open one ``preload`` entry, at construction, without fetching.
+
+        Resolution is `for_version`'s, minus the fetch: preload never fetches,
+        even with ``autofetch`` on. A line no directory holds is the same §7
+        `ArtifactMissingError` the first `for_version` would have raised —
+        raised earlier, not a new type.
+        """
+        if not version:
+            raise RegistryError("chtypes: preload: an empty version does not mean 'pick one'")
+        minor = minor_of(version)
+        with self._mu:
+            if version in self._by_id or minor in self._by_id:
+                return
+            if minor not in self._index:
+                raise ArtifactMissingError(minor, host_platform(), self.search_path)
+            self._load(minor, self._index[minor])
+
     def _autofetch_line(self, version: str) -> None:
         key = (str(self.directory), minor_of(version))
         with _autofetch_lock(key):
@@ -1167,17 +1221,27 @@ class Registry:
     # ----------------------------------------------------------- resolution
 
     def versions(self) -> tuple[str, ...]:
-        """The ClickHouse minor lines this registry can answer for, in release order."""
+        """Every ClickHouse minor line this registry CAN ANSWER FOR, in release order.
+
+        Loaded or merely discovered by the manifest scan, which is one meaning
+        in all four bindings and the one that survives lazy loading: "the lines
+        that happen to be open" would read as an empty registry until the first
+        `for_version`. It opens nothing.
+        """
         minors = {lib.minor for lib in self._by_id.values()} | set(self._index)
         return tuple(sorted(minors, key=_minor_sort_key))
 
     def libraries(self) -> tuple[Library, ...]:
-        """One entry per line, loaded, in release order."""
+        """The libraries this registry has LOADED, in release order.
+
+        What is open right now, never what could be: a discovered line that no
+        `for_version` and no ``preload`` has opened appears in `versions` and
+        not here. **This call opens nothing** — opening 120 MB of artifact per
+        line as the side effect of a listing is not something a caller can
+        undo, and it is what Go, TypeScript and Rust have always answered.
+        """
         with self._mu:
-            for minor in list(self._index):
-                if minor not in self._by_id:
-                    self._load(minor, self._index[minor])
-        unique = {id(lib): lib for lib in self._by_id.values()}
+            unique = {id(lib): lib for lib in self._by_id.values()}
         return tuple(sorted(unique.values(), key=lambda lib: _minor_sort_key(lib.minor)))
 
     def for_version(self, version: str) -> Library:
@@ -1219,6 +1283,7 @@ class Registry:
         )
 
     def __iter__(self) -> Iterator[Library]:
+        """Iterate the LOADED libraries. Like `libraries`, it opens nothing."""
         return iter(self.libraries())
 
     def __len__(self) -> int:

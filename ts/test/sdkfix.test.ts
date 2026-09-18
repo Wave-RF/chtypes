@@ -62,7 +62,12 @@ describe('discovery duplicate names', () => {
 
 describe.skipIf(!HAVE_REGISTRY)('against a real registry', () => {
   it('libraries() comes back in release order, not directory order', () => {
-    const registry = new Registry(REGISTRY ?? undefined);
+    // `libraries()` lists what is OPEN and construction opens nothing, so this
+    // asks for every line first. Driving the preload off `versions()` is what
+    // keeps the assertion from passing vacuously over an empty list.
+    const registry = new Registry(REGISTRY ?? undefined, {
+      preload: new Registry(REGISTRY ?? undefined).versions(),
+    });
     const minors = registry.libraries().map((l) => l.minor);
     const numeric = (m: string): number => {
       const [a = '0', b = '0'] = m.split('.');
@@ -80,7 +85,8 @@ describe.skipIf(!HAVE_REGISTRY)('against a real registry', () => {
   });
 
   it('exposes the introspection trio (docs/reference/bindings.md §Introspection)', () => {
-    const registry = new Registry(REGISTRY ?? undefined);
+    const discovered = new Registry(REGISTRY ?? undefined).versions();
+    const registry = new Registry(REGISTRY ?? undefined, { preload: discovered.slice(-1) });
     const lib = registry.libraries()[registry.libraries().length - 1]!;
     const families = lib.registeredFamilies();
     expect(families).toContain('String');
@@ -95,7 +101,8 @@ describe.skipIf(!HAVE_REGISTRY)('against a real registry', () => {
   });
 
   it('rows() degrades a missing chs_rows to UnsupportedError, exactly as row() does', () => {
-    const registry = new Registry(REGISTRY ?? undefined);
+    const discovered = new Registry(REGISTRY ?? undefined).versions();
+    const registry = new Registry(REGISTRY ?? undefined, { preload: discovered.slice(0, 1) });
     const lib = registry.libraries()[0]!;
     const schema = lib.compileDdl('x UInt8');
     try {

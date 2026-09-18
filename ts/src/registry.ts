@@ -20,11 +20,10 @@
  *
  * Where a registry IS follows the search path of docs/guides/fetch.md §1 (`paths.ts`):
  * the explicit directory, `CHTYPES_REGISTRY`, the per-user cache, then the
- * reserved system locations. The first directory holding artifacts is scanned
- * and loaded at construction; a line it lacks is taken, on request, from the
- * first later directory that has it. A line no directory has is the one §7
- * error, `ArtifactMissingError` — or, with `autofetch`, a fetch on first
- * `open()`.
+ * reserved system locations. Construction READS THE MANIFESTS on that path and
+ * `dlopen`s nothing; a line is taken, on request, from the first directory that
+ * has it. A line no directory has is the one §7 error,
+ * `ArtifactMissingError` — or, with `autofetch`, a fetch on first `open()`.
  */
 
 import { createHash } from 'node:crypto';
@@ -69,8 +68,34 @@ export interface RegistryOptions {
    * Re-hash each library and compare against `manifest.library_sha256` before
    * loading. SHOULD be on for an artifact that came from anywhere but a local
    * build, and MUST be on for one that came over a network.
+   *
+   * A policy on the REGISTRY, not a property of `preload`: a library's
+   * checksum is computed immediately before that library is `dlopen`ed and at
+   * no other time — at construction for the preloaded lines, at first use for
+   * the rest, never for a line nobody asks for.
    */
   verifyChecksums?: boolean;
+  /**
+   * Open these lines AT CONSTRUCTION — the one eager path, and the same option
+   * Go spells `WithPreload(...)`, Python `preload=[...]` and Rust
+   * `RegistryOptions::preload`.
+   *
+   * Each entry is a version spelling resolved exactly as `for()` resolves one:
+   * a minor line (`'25.8'`) or an exact patch (`'25.8.28.1-lts'`), never a
+   * path. They are opened in the order given, before the constructor returns,
+   * and an entry no directory on the §1 search path holds is
+   * `ArtifactMissingError` — the same §7 error the first `for()` would have
+   * thrown, thrown earlier.
+   *
+   * It NEVER fetches, even with `autofetch` on: this constructor is
+   * synchronous and `ensure()` is not, and autofetch is a first-use behavior
+   * in all four bindings. An empty list is exactly the default.
+   *
+   * Deliberately a list of lines rather than "everything in the directory": a
+   * registry directory is whatever a fetch left behind, and each open costs
+   * about 120 MB resident.
+   */
+  preload?: readonly string[] | undefined;
   /**
    * Lazy fetch on first open (docs/guides/fetch.md §6): `open()` of a line no
    * directory on the search path holds runs `ensure()` first, into the
@@ -86,13 +111,20 @@ export interface RegistryOptions {
 
 /**
  * The artifact-directory loader — the multi-version entry point of this
- * package. Construction scans one subdirectory per ClickHouse version, dlopens
- * each artifact into its own symbol scope (`RTLD_LOCAL`, ~120 MB resident per
- * version), verifies its ABI revision against this binding's `ABI_REVISION`
- * (a different nonzero revision is refused; 0 means the artifact predates the
- * probe and degrades per symbol), and runs each library's one-time
- * `chs_init` with the UTC default timezone and the artifact's own
- * `unsafe_families.txt`.
+ * package.
+ *
+ * **Construction reads `manifest.json` files and `dlopen`s nothing**, with or
+ * without a directory. Nothing in this package opens an artifact except a
+ * request for a specific version (`for()` / `open()`) or an explicit
+ * `preload` — not `versions()`, not `libraries()`, not `has()`. An open costs
+ * about 120 MB resident per version, which a listing call must not spend on a
+ * caller's behalf.
+ *
+ * An open dlopens the artifact into its own symbol scope (`RTLD_LOCAL`),
+ * verifies its ABI revision against this binding's `ABI_REVISION` (a different
+ * nonzero revision is refused; 0 means the artifact predates the probe and
+ * degrades per symbol), and runs that library's one-time `chs_init` with the
+ * registry's timezone and the artifact's own `unsafe_families.txt`.
  *
  * Libraries are never dlclosed; `close()` joins background threads only.
  * Loading the same artifact path from two `Registry` instances shares one
@@ -100,9 +132,9 @@ export interface RegistryOptions {
  */
 export class Registry {
   /**
-   * The primary registry directory: the first on the search path that held
-   * artifacts, scanned and loaded at construction — or, with `autofetch` and
-   * nothing installed anywhere, the directory the first fetch will create.
+   * The primary registry directory: the first on the search path that holds
+   * artifacts — or, with `autofetch` and nothing installed anywhere, the
+   * directory the first fetch will create.
    */
   readonly dir: string;
   /** The §1 search path, in order, every candidate whether or not it exists. */
@@ -113,6 +145,13 @@ export class Registry {
   private readonly byId = new Map<string, Library>();
   private readonly byPath = new Map<string, Library>();
   private readonly loaded: Library[] = [];
+  /**
+   * Minor line -> the FIRST directory on the search path that holds it, as the
+   * construction-time manifest scan found it. What `versions()` answers from,
+   * and what makes "no artifact anywhere" and a bad `preload` entry decidable
+   * at construction without a single `dlopen`.
+   */
+  private readonly known = new Map<string, string>();
   private readonly timezone: string;
   private readonly verifyChecksums: boolean;
   private readonly autofetch: boolean;
@@ -120,21 +159,26 @@ export class Registry {
   private readonly explicit: string | undefined;
 
   /**
-   * Scan and load a registry.
+   * Scan a registry. Reads manifests; opens nothing unless `preload` names a
+   * line.
    *
    * @param dir - the registry root; the head of the search path. Absent, the
    *   path is `CHTYPES_REGISTRY`, the per-user artifact cache, then the system
    *   locations (see `registrySearchPath` / `defaultRegistryDir`).
-   * @param options - timezone, checksum verification, autofetch — see `RegistryOptions`.
-   * @throws {RegistryError} when a directory named explicitly (the argument or
-   *   `CHTYPES_REGISTRY`) does not exist and autofetch is off, when no
-   *   directory on the search path holds an artifact (and autofetch is off),
-   *   the primary directory cannot be read, an artifact fails its checksum,
-   *   fails to load, or reports a ClickHouse version different from its
-   *   manifest's.
+   * @param options - timezone, checksum verification, autofetch, preload — see
+   *   `RegistryOptions`.
+   * @throws {RegistryError} for what manifests can decide, and only that: a
+   *   directory named explicitly (the argument or `CHTYPES_REGISTRY`) that does
+   *   not exist, and no directory on the search path holding a readable
+   *   `<minor>/manifest.json` — both suppressed when autofetch is on. A
+   *   `preload` entry no directory holds is `ArtifactMissingError`. Everything
+   *   a bad artifact can be wrong about — a failed checksum, a load failure, a
+   *   library whose ClickHouse version disagrees with its manifest — is
+   *   reported by the call that opens it, which is `preload`'s open at
+   *   construction or the first `for()` otherwise.
    * @throws {ChtypesError} when an artifact reports a different nonzero ABI
    *   revision than this binding speaks, or `chs_init` fails (e.g. an unknown
-   *   timezone — the message names it).
+   *   timezone — the message names it); again, from the call that opens it.
    */
   constructor(dir?: string, options: RegistryOptions = {}) {
     this.platform = hostPlatform();
@@ -156,6 +200,36 @@ export class Registry {
       }
     }
 
+    // The scan: every directory on the path, in order, first one holding a line
+    // wins. Manifests only — this is the cheap half of what construction used
+    // to do, and it is all that is left of it.
+    for (const root of this.searchPath) {
+      if (!isDirectory(root)) continue;
+      let entries: string[];
+      try {
+        entries = readdirSync(root);
+      } catch {
+        continue; // unreadable: not a registry, and not this call's business
+      }
+      for (const entry of entries.sort()) {
+        // A dot-directory is never a version: fetch stages its downloads and
+        // unpacks in hidden siblings, and a .DS_Store is not a version either.
+        if (entry.startsWith('.')) continue;
+        const sub = path.join(root, entry);
+        if (!isDirectory(sub)) continue;
+        // A registry may legitimately hold scratch directories: a missing or
+        // unparseable manifest is skipped in silence.
+        const manifest = readManifest(sub);
+        if (manifest === null) continue;
+        // The manifest's own claim; the directory name is only the last
+        // resort, exactly as it is when the library is finally loaded and
+        // names itself.
+        const claimed = manifest.clickhouse_minor ?? minorOf(manifest.clickhouse_version ?? '');
+        const line = claimed !== '' ? claimed : entry;
+        if (!this.known.has(line)) this.known.set(line, sub);
+      }
+    }
+
     const primary = this.searchPath.find((d) => looksLikeRegistry(d));
     if (primary === undefined) {
       if (!this.autofetch) {
@@ -166,30 +240,27 @@ export class Registry {
         );
       }
       this.dir = fetchDestination(this.explicit, this.platform);
-      return;
+    } else {
+      this.dir = primary;
     }
-    this.dir = primary;
 
-    let entries: string[];
-    try {
-      entries = readdirSync(this.dir);
-    } catch (err) {
-      throw new RegistryError(`chtypes: cannot read registry ${this.dir}: ${String(err)}`, { cause: err });
+    // The one eager path, and the only thing here that opens anything.
+    for (const version of options.preload ?? []) {
+      this.preloadLine(version);
     }
-    for (const entry of entries.sort()) {
-      // A dot-directory is never a version: fetch stages its downloads and
-      // unpacks in hidden siblings, and a .DS_Store is not a version either.
-      if (entry.startsWith('.')) continue;
-      const sub = path.join(this.dir, entry);
-      if (!isDirectory(sub)) continue;
-      // A registry may legitimately hold scratch directories: a missing or
-      // unparseable manifest is skipped in silence.
-      const manifest = readManifest(sub);
-      if (manifest === null) continue;
-      this.load(sub, manifest);
+  }
+
+  /**
+   * Open one `preload` entry, before the constructor returns, without
+   * fetching. Resolution is `for()`'s, and so is the failure: a line no
+   * directory holds is the same `ArtifactMissingError`, raised earlier.
+   */
+  private preloadLine(version: string): void {
+    if (version === '') {
+      throw new RegistryError("chtypes: preload: an empty version does not mean 'pick one'");
     }
-    if (this.loaded.length === 0) {
-      throw new RegistryError(`chtypes: no version artifacts under ${this.dir}`);
+    if (this.resolve(version) === undefined) {
+      throw new ArtifactMissingError(minorOf(version), this.platform, this.searchPath);
     }
   }
 
@@ -250,12 +321,61 @@ export class Registry {
     return this.byId.get(version) ?? this.byId.get(minorOf(version));
   }
 
-  /** The ClickHouse minor lines this registry has loaded, oldest first. */
-  versions(): string[] {
-    return [...new Set(this.loaded.map((l) => l.minor))].sort(compareMinor);
+  /**
+   * Resolve without fetching: what is already open, then the line's directory
+   * as the construction-time scan recorded it, then a fresh walk of the search
+   * path for a line installed since. `undefined` means no directory holds it,
+   * which is a fetch's cue on `open()` and the §7 error everywhere else —
+   * `preload` never fetches, and this is the one function that makes the
+   * preload path and the first-use path identical in everything else.
+   */
+  private resolve(version: string): Library | undefined {
+    const hit = this.lookup(version);
+    if (hit !== undefined) return hit;
+    const minor = minorOf(version);
+    // The scan already resolved every line it could see to the FIRST directory
+    // holding it, and it knows which line a manifest claims even when the
+    // directory is not named after it — which the <dir>/<minor> walk below
+    // cannot see.
+    const scanned = this.known.get(minor);
+    if (scanned !== undefined) {
+      const manifest = readManifest(scanned);
+      if (manifest !== null) {
+        this.load(scanned, manifest);
+        const found = this.lookup(version);
+        if (found !== undefined) return found;
+      }
+    }
+    for (const dir of this.searchPath) {
+      if (this.loadLine(dir, minor) !== null) {
+        const found = this.lookup(version);
+        if (found !== undefined) return found;
+      }
+    }
+    return undefined;
   }
 
-  /** Every loaded library, in release order (oldest minor line first). */
+  /**
+   * Every ClickHouse minor line this registry CAN ANSWER FOR, oldest first —
+   * the ones it has opened plus the ones its construction-time manifest scan
+   * discovered on the search path.
+   *
+   * That is one meaning in all four bindings, and it is the meaning that
+   * survives lazy loading: "the lines that happen to be open" would read as an
+   * empty registry until the first `for()`. It opens nothing.
+   */
+  versions(): string[] {
+    const lines = new Set(this.loaded.map((l) => l.minor));
+    for (const line of this.known.keys()) lines.add(line);
+    return [...lines].sort(compareMinor);
+  }
+
+  /**
+   * The libraries this registry has OPENED, in release order (oldest minor
+   * line first) — what is open right now, never what could be. A discovered
+   * line that no `for()` and no `preload` has opened appears in `versions()`
+   * and not here. It opens nothing.
+   */
   libraries(): readonly Library[] {
     return this.loaded;
   }
@@ -265,10 +385,11 @@ export class Registry {
    * ("25.8.28.1-lts") both work, and an unknown patch inside a loaded minor line
    * resolves to that line — asking for "25.8.30.16" finds the loaded 25.8.
    *
-   * A line the primary directory lacks is loaded from the first later
-   * directory on the search path that holds it (docs/guides/fetch.md §1), and joins
-   * `versions()` / `libraries()` from then on. Never a fetch: this call is
-   * synchronous; `open()` is the one that may fetch.
+   * **This is what opens an artifact.** Construction does not: the line is
+   * taken from the first directory on the search path that holds it
+   * (docs/guides/fetch.md §1), `dlopen`ed once, and joins `libraries()` from
+   * then on. Never a fetch: this call is synchronous; `open()` is the one that
+   * may fetch.
    *
    * Failure is the one §7 error, never a fallback to the nearest version:
    * answering 26.7 semantics from a 25.8 artifact is a lie, and silent
@@ -283,16 +404,9 @@ export class Registry {
    * @throws {RegistryError} when a directory holds the line but it does not load.
    */
   for(version: string): Library {
-    const hit = this.lookup(version);
+    const hit = this.resolve(version);
     if (hit !== undefined) return hit;
-    const minor = minorOf(version);
-    for (const dir of this.searchPath) {
-      if (this.loadLine(dir, minor) !== null) {
-        const found = this.lookup(version);
-        if (found !== undefined) return found;
-      }
-    }
-    throw new ArtifactMissingError(minor, this.platform, this.searchPath);
+    throw new ArtifactMissingError(minorOf(version), this.platform, this.searchPath);
   }
 
   /**

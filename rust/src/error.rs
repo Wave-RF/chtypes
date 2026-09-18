@@ -195,17 +195,33 @@ pub enum Error {
         want: String,
     },
 
-    /// The directory exists and holds no loadable artifact. An empty registry is
-    /// a configuration mistake, not an empty result.
-    #[error("chtypes: no version artifacts under {dir}")]
+    /// No directory this registry would look in holds a readable
+    /// `<minor>/manifest.json`. An empty registry is a configuration mistake,
+    /// not an empty result — and it is decidable from manifests alone, which
+    /// is why it is still a CONSTRUCTION error now that loading is lazy.
+    #[error(
+        "chtypes: no version artifacts in any registry directory (looked in: {})",
+        looked_in_display(looked_in)
+    )]
     EmptyRegistry {
-        /// The directory that held no loadable artifact.
-        dir: PathBuf,
+        /// Every directory looked in, in order — the one directory of
+        /// [`crate::Registry::open`], or the whole `docs/guides/fetch.md` §1
+        /// search path. Named so the message is actionable, exactly as the
+        /// other three bindings' messages are.
+        looked_in: Vec<PathBuf>,
     },
 
     /// No artifact answers for the requested version. Naming what *is* loaded is
     /// part of the contract: answering 26.7 semantics from a 25.8 artifact would
     /// be a lie, so there is deliberately no nearest-match fallback.
+    ///
+    /// ⚠️ **No longer constructed by this crate, as of 0.3.0.** It was a
+    /// one-directory registry's answer for a line it had not loaded, and under
+    /// lazy loading "what IS loaded" is "nothing" — so that answer is
+    /// [`Error::ArtifactMissing`] now, which names the directory, the platform
+    /// and the fetch command, and is what the other three bindings give. The
+    /// variant is kept rather than removed so a caller matching it still
+    /// compiles; the arm is simply never taken.
     #[error("chtypes: no vendored build for ClickHouse {requested} (have {loaded})")]
     NoSuchVersion {
         /// The version that was asked for.
@@ -476,6 +492,15 @@ fn schema_display(code: i32, message: &str, column: Option<&str>) -> String {
         Some(c) => format!("chtypes: column {c:?}: [{code}] {message}"),
         None => format!("chtypes: [{code}] {message}"),
     }
+}
+
+/// The directories an [`Error::EmptyRegistry`] looked in, comma-separated.
+fn looked_in_display(looked_in: &[PathBuf]) -> String {
+    looked_in
+        .iter()
+        .map(|d| d.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The §7 message, verbatim apart from the bracketed parts: the line, the

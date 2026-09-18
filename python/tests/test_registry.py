@@ -20,16 +20,35 @@ from chtypes._native import NativeLibrary
 from chtypes.fetch import cache_registry_dir
 
 
+def all_libraries(registry: chtypes.Registry) -> tuple[chtypes.Library, ...]:
+    """Every line this registry can answer for, OPENED.
+
+    `libraries()` lists what is open right now, and construction opens nothing,
+    so a test that wants every line has to ASK for every line. Driving this off
+    `versions()` rather than off `libraries()` is the difference between
+    checking every artifact and vacuously checking none — which is what these
+    tests did for one commit when `libraries()` stopped loading.
+    """
+    lines = registry.versions()
+    for line in lines:
+        registry.for_version(line)
+    libraries = registry.libraries()
+    assert len(libraries) == len(lines), (
+        f"asked for {len(lines)} lines and {len(libraries)} are open: {lines}"
+    )
+    return libraries
+
+
 def test_library_file_name_comes_from_the_manifest(registry: chtypes.Registry) -> None:
     # Not from a hard-coded name, not from a glob, not from the platform. The
     # Linux artifacts in this tree still ship the historical `libchtypes_s1.so`.
-    for lib in registry.libraries():
+    for lib in all_libraries(registry):
         assert Path(lib.path).name == lib.manifest.library
         assert Path(lib.path).is_file()
 
 
 def test_library_names_itself(registry: chtypes.Registry) -> None:
-    for lib in registry.libraries():
+    for lib in all_libraries(registry):
         # chs_clickhouse_version(), cross-checked against the manifest: nothing
         # is inferred from the directory or the file name.
         assert lib.version == lib.manifest.clickhouse_version
@@ -40,7 +59,7 @@ def test_library_names_itself(registry: chtypes.Registry) -> None:
 
 
 def test_several_versions_coexist_in_one_process(registry: chtypes.Registry) -> None:
-    libraries = registry.libraries()
+    libraries = all_libraries(registry)
     if len(libraries) < 2:
         pytest.skip(f"{registry.directory} holds only {len(libraries)} artifact")
     assert len({lib.version for lib in libraries}) == len(libraries)
@@ -55,7 +74,7 @@ def test_several_versions_coexist_in_one_process(registry: chtypes.Registry) -> 
 def test_version_lookup_accepts_a_minor_line_and_an_exact_patch(
     registry: chtypes.Registry,
 ) -> None:
-    for lib in registry.libraries():
+    for lib in all_libraries(registry):
         assert registry.for_version(lib.minor) is lib
         assert registry.for_version(lib.version) is lib
         # A drifted docker tag resolves to its minor line rather than silently
@@ -104,25 +123,30 @@ def test_registry_walks_the_search_path(
 ) -> None:
     """docs/guides/fetch.md §1: explicit path, $CHTYPES_REGISTRY, the cache, the
     system locations — in that order; fetch writes to the first of the
-    first three. `Registry()` no longer needs anything set (pre-1.0 change)."""
+    first three. `Registry()` no longer needs anything set (pre-1.0 change).
+
+    Every registry here is built with ``autofetch=True``, and only because of
+    it: this test is about the SHAPE of the search path, and none of these
+    directories holds an artifact — which is now a construction error, exactly
+    the one autofetch suppresses because a fetch is going to populate it."""
     cache = isolated_search_path
-    reg = chtypes.Registry()
+    reg = chtypes.Registry(autofetch=True)
     assert reg.search_path == (cache,)  # system roots are patched out here
     assert reg.directory == cache
     assert reg.versions() == ()
 
     env_dir = tmp_path / "env-registry"
     monkeypatch.setenv(chtypes.ENV_REGISTRY, str(env_dir))
-    reg = chtypes.Registry()
+    reg = chtypes.Registry(autofetch=True)
     assert reg.search_path == (env_dir, cache)
     assert reg.directory == env_dir
 
     explicit = tmp_path / "explicit"
-    reg = chtypes.Registry(explicit)
+    reg = chtypes.Registry(explicit, autofetch=True)
     assert reg.search_path == (explicit, env_dir, cache)
     assert reg.directory == explicit
     # Explicit == env: de-duplicated, order kept.
-    assert chtypes.Registry(env_dir).search_path == (env_dir, cache)
+    assert chtypes.Registry(env_dir, autofetch=True).search_path == (env_dir, cache)
     # The public helper is the same walk, with the reserved system slots.
     monkeypatch.setattr(
         "chtypes.fetch.SYSTEM_REGISTRY_ROOTS", ("/usr/local/share/chtypes/artifacts",)
@@ -160,10 +184,27 @@ def test_a_directory_without_a_manifest_is_not_a_version(
     scratch = tmp_path / "25.8"
     scratch.mkdir()
     (scratch / "manifest.json").write_text('{"clickhouse_version": "25.8.1"}')
-    # An empty registry is not an error at construction any more — the §7
-    # error comes at open time, naming every directory searched.
+    # A search path on which no directory holds a readable <minor>/manifest.json
+    # is decidable from manifests, so it is decided at CONSTRUCTION, naming
+    # every directory looked in. A scratch directory whose manifest names no
+    # library is not a version, which is the whole point here: this path is
+    # empty even though `25.8/manifest.json` exists.
+    with pytest.raises(chtypes.RegistryError) as refused:
+        chtypes.Registry(tmp_path)
+    assert str(tmp_path) in str(refused.value)
+    assert str(isolated_search_path) in str(refused.value)
+
+    # With one real line elsewhere on the path the registry constructs, and the
+    # §7 error for the line nobody holds still comes at open time, naming every
+    # directory searched.
+    line = isolated_search_path / "24.8"
+    line.mkdir(parents=True)
+    (line / "libchtypes.so").write_bytes(b"not a shared library")
+    (line / "manifest.json").write_text(
+        '{"library": "libchtypes.so", "clickhouse_version": "24.8.1.1", "clickhouse_minor": "24.8"}'
+    )
     reg = chtypes.Registry(tmp_path)
-    assert reg.versions() == ()
+    assert reg.versions() == ("24.8",)
     assert "25.8" not in reg
     with pytest.raises(chtypes.ArtifactMissingError) as caught:
         reg.for_version("25.8")
@@ -247,7 +288,7 @@ def test_registry_verify_hashes_refuses_a_manifest_with_no_hash(
     `verify_hashes` off the field stays optional for a caller who did not
     ask, and the same directory loads normally.
     """
-    smallest = min(registry.libraries(), key=lambda lib: lib.manifest.library_bytes or 1 << 62)
+    smallest = min(all_libraries(registry), key=lambda lib: lib.manifest.library_bytes or 1 << 62)
     fields = dataclasses.asdict(smallest.manifest)
     del fields["library_sha256"]
     line = tmp_path / smallest.minor
@@ -255,9 +296,16 @@ def test_registry_verify_hashes_refuses_a_manifest_with_no_hash(
     (line / smallest.manifest.library).symlink_to(Path(smallest.path).resolve())
     (line / "manifest.json").write_text(json.dumps(fields))
 
+    # A preloaded line is hashed at construction, so the refusal arrives
+    # from the constructor rather than from a listing call — `libraries()`
+    # lists what is open and opens nothing.
+    with pytest.raises(chtypes.RegistryError, match="library_sha256"):
+        chtypes.Registry(tmp_path, verify_hashes=True, preload=[smallest.minor])
+    # And a line opened lazily is hashed too: the option is a policy on the
+    # registry, not a property of the preload list.
     strict = chtypes.Registry(tmp_path, verify_hashes=True)
     with pytest.raises(chtypes.RegistryError, match="library_sha256"):
-        strict.libraries()
+        strict.for_version(smallest.minor)
 
     lenient = chtypes.Registry(tmp_path, verify_hashes=False)
     loaded = lenient.for_version(smallest.minor)  # must NOT raise
@@ -268,7 +316,7 @@ def test_verify_a_real_artifact(registry: chtypes.Registry) -> None:
     # The one integrity check that means anything, run against the real bytes: a
     # move that reported success and truncated a 232 MB library looks identical
     # to one that worked.
-    smallest = min(registry.libraries(), key=lambda lib: lib.manifest.library_bytes or 1 << 62)
+    smallest = min(all_libraries(registry), key=lambda lib: lib.manifest.library_bytes or 1 << 62)
     chtypes.verify_library(Path(smallest.path).parent)
 
 
@@ -339,7 +387,7 @@ def test_shutdown_then_the_process_exits(registry: chtypes.Registry) -> None:
         import chtypes
         from chtypes import Format
         registry = chtypes.Registry({str(registry.directory)!r})
-        library = registry.libraries()[-1]
+        library = registry.for_version(registry.versions()[-1])
         schema = library.compile_ddl("a UInt8, ts DateTime DEFAULT now()")
         result = schema.row(Format.JSON_EACH_ROW, b'{{"a":1}}')
         assert result.substituted, result
@@ -366,7 +414,7 @@ def test_the_host_timezone_does_not_leak_into_answers(registry: chtypes.Registry
         import chtypes
         from chtypes import Format
         registry = chtypes.Registry({str(registry.directory)!r})
-        library = registry.libraries()[-1]
+        library = registry.for_version(registry.versions()[-1])
         with library.compile_ddl("ts DateTime") as schema:
             print(schema.row(Format.JSON_EACH_ROW, b'{{"ts":1700000000}}').value("ts").text)
         with library.compile_ddl("ts DateTime DEFAULT now()") as schema:
@@ -513,7 +561,7 @@ def test_closing_one_registry_leaves_another_answering(registry: chtypes.Registr
     a.close()
     # The survivor still answers — including a DEFAULT evaluation, which is
     # exactly the machinery chs_shutdown tears down.
-    lib = b.libraries()[-1]
+    lib = b.for_version(b.versions()[-1])
     with lib.compile_ddl("a UInt8, d UInt8 DEFAULT a + 1") as schema:
         got = schema.rows(Format.JSON_EACH_ROW, b'{"a": 4}\n')
         assert got.outcome is Outcome.ACCEPTED
@@ -590,7 +638,7 @@ def test_library_close_is_refcounted_per_image(tmp_path: Path, registry: chtypes
         a.close()
         assert calls["n"] == 0, f"first close reached the C boundary: {calls}"
         # The survivor still answers after its sibling closed.
-        with b.libraries()[0].compile_ddl("x UInt8") as schema:
+        with b.for_version(b.versions()[0]).compile_ddl("x UInt8") as schema:
             row = schema.row(chtypes.Format.JSON_EACH_ROW, b'{"x": 256}')
             assert row.outcome is chtypes.Outcome.ACCEPTED
         a.close()

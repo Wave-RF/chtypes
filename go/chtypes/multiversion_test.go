@@ -32,11 +32,19 @@ func TestRegistryLoadsAndDispatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("registry versions: %v", r.Versions())
-
-	lib, err := r.For(Version(r.Versions()[0]))
-	if err != nil {
+	// Construction dlopens nothing, so the artifact is opened by an explicit
+	// request. These stand-in directories say "x" in their manifests while the
+	// library names itself something else, and rule 1 is that the LIBRARY
+	// names itself — so the one request that does not go through a line is
+	// Load, and the dispatch below is off what the library reported.
+	if err := r.Load(filepath.Join(dir, "a", "libchtypes"+soext)); err != nil {
 		t.Fatal(err)
 	}
+	libs := r.Libraries()
+	if len(libs) != 1 {
+		t.Fatalf("one explicit Load must open exactly one library, got %d", len(libs))
+	}
+	lib := libs[0]
 	cs, err := lib.CompileDDL("x UInt8")
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +180,7 @@ func TestVerifyChecksumsRefusesBytesTheManifestDoesNotClaim(t *testing.T) {
 		"clickhouse_minor":   "25.8",
 	}, body)
 
-	_, err := NewRegistry(dir, WithVerifyChecksums(true))
+	_, err := NewRegistry(dir, WithVerifyChecksums(true), WithPreload("25.8"))
 	if err == nil {
 		t.Fatal("a library whose bytes do not match its manifest loaded anyway")
 	}
@@ -183,7 +191,7 @@ func TestVerifyChecksumsRefusesBytesTheManifestDoesNotClaim(t *testing.T) {
 	// The same directory without the option: the load gets as far as dlopen,
 	// which is what proves the option — and not merely the broken file —
 	// produced the verdict above.
-	_, err = NewRegistry(dir)
+	_, err = NewRegistry(dir, WithPreload("25.8"))
 	if err == nil || strings.Contains(err.Error(), "does not match manifest") {
 		t.Fatalf("without WithVerifyChecksums the hash must not be consulted; got: %v", err)
 	}
@@ -203,7 +211,7 @@ func TestVerifyChecksumsAcceptsMatchingBytesAndLoadsOn(t *testing.T) {
 	// The hash matches, so verification passes and the load proceeds to dlopen,
 	// which is where a text file dies. A checksum error here would mean the
 	// check refused bytes it had just been told were correct.
-	_, err := NewRegistry(dir, WithVerifyChecksums(true))
+	_, err := NewRegistry(dir, WithVerifyChecksums(true), WithPreload("25.8"))
 	if err == nil {
 		t.Fatal("a text file cannot dlopen; the load must still fail")
 	}
@@ -226,7 +234,7 @@ func TestVerifyChecksumsRefusesAManifestWithNoHash(t *testing.T) {
 
 	// Verification asked for and not possible is not verification: a manifest
 	// carrying no library_sha256 is refused, never passed over in silence.
-	_, err := NewRegistry(dir, WithVerifyChecksums(true))
+	_, err := NewRegistry(dir, WithVerifyChecksums(true), WithPreload("25.8"))
 	if err == nil || !strings.Contains(err.Error(), "cannot verify") {
 		t.Fatalf("want a refusal naming the unverifiable artifact, got: %v", err)
 	}
@@ -254,7 +262,7 @@ func TestVerifyChecksumsAgainstARealArtifact(t *testing.T) {
 		}
 	}
 
-	r, err := NewRegistry(dir, WithVerifyChecksums(true))
+	r, err := NewRegistry(dir, WithVerifyChecksums(true), WithPreload(inst.Line))
 	if err != nil {
 		t.Fatalf("a real artifact must survive its own checksum: %v", err)
 	}
@@ -303,7 +311,7 @@ func TestVerifyChecksumsAgainstARealArtifact(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(badSub, "manifest.json"), tampered, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewRegistry(bad, WithVerifyChecksums(true))
+	_, err = NewRegistry(bad, WithVerifyChecksums(true), WithPreload(inst.Line))
 	if err == nil {
 		t.Fatal("a manifest claiming the wrong digest for a real library was accepted")
 	}

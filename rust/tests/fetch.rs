@@ -569,11 +569,24 @@ fn ensure_all_installs_every_published_line() {
 #[test]
 fn a_search_path_registry_reports_a_missing_line_with_the_spec_message() {
     let dest = tmp("missing");
+    // §7 is about a LINE found nowhere, not about a machine with nothing on
+    // it: a search path holding no readable <minor>/manifest.json at all is
+    // decidable from manifests, so it is decided at construction. One
+    // installed line here, and the test asks for a different one — which is
+    // the §7 case, and keeps this test meaningful whether or not the host
+    // running it happens to have a registry of its own.
+    std::fs::create_dir_all(dest.join("25.8")).unwrap();
+    std::fs::write(
+        dest.join("25.8").join("manifest.json"),
+        r#"{"library":"libchtypes.so","clickhouse_version":"25.8.1.1","clickhouse_minor":"25.8"}"#,
+    )
+    .unwrap();
     let reg = Registry::from_search_path_with(RegistryOptions {
         dir: Some(dest.clone()),
         autofetch: Some(false),
         ..Default::default()
-    });
+    })
+    .expect("the registry directory holds a manifest, so construction must succeed");
     assert!(!reg.autofetch());
     assert_eq!(reg.search_path()[0], dest);
     assert_eq!(reg.dir(), dest, "fetch writes to the explicit directory");
@@ -1107,7 +1120,8 @@ fn inner_autofetch_runs_ensure_once_per_line() {
     let reg = Registry::from_search_path_with(RegistryOptions {
         dir: Some(dest.clone()),
         ..Default::default()
-    });
+    })
+    .expect("the registry directory holds a manifest, so construction must succeed");
     assert!(reg.autofetch(), "CHTYPES_AUTOFETCH=1 turns it on");
     assert!(!dest.join("25.8").exists());
     let err = reg.for_version("25.8").unwrap_err();
@@ -1147,7 +1161,8 @@ fn inner_autofetch_runs_ensure_once_per_line() {
             ..Default::default()
         },
         ..Default::default()
-    });
+    })
+    .expect("the registry directory holds a manifest, so construction must succeed");
     let err = reg.for_version("26.7").unwrap_err();
     assert_eq!(
         err.artifact_code(),
@@ -1167,7 +1182,8 @@ fn inner_autofetch_runs_ensure_once_per_line() {
         dir: Some(dest.clone()),
         autofetch: Some(false),
         ..Default::default()
-    });
+    })
+    .expect("the registry directory holds a manifest, so construction must succeed");
     let err = reg.for_version("99.9").unwrap_err();
     assert_eq!(err.artifact_code(), Some("CHTYPES_ARTIFACT_MISSING"));
     println!("INNER-OK autofetch");
@@ -1232,7 +1248,8 @@ fn a_search_path_registry_opens_one_line_lazily() {
         dir: Some(dir.clone()),
         autofetch: Some(false),
         ..Default::default()
-    });
+    })
+    .expect("the registry directory holds a manifest, so construction must succeed");
     assert!(reg.libraries().is_empty());
     assert!(
         reg.versions().contains(line),

@@ -106,7 +106,13 @@ describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
   // A skipped describe still evaluates its body, so the registry is opened
   // only when there is one. Without it no per-case test is generated and the
   // sentinel below is what the census shows as skipped, by name.
-  const libraries = REGISTRY !== null && HAVE_REGISTRY ? new Registry(REGISTRY).libraries() : [];
+  // Construction opens nothing, so the goldens ask for every line they are
+  // about to score: `libraries()` lists what is open, and an empty list here
+  // would score nothing and report itself green.
+  const libraries =
+    REGISTRY !== null && HAVE_REGISTRY
+      ? new Registry(REGISTRY, { preload: new Registry(REGISTRY).versions() }).libraries()
+      : [];
   it('has at least one artifact to run against', () => {
     expect(libraries.length).toBeGreaterThan(0);
   });
