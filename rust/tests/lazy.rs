@@ -15,12 +15,37 @@
 //! directory it was given: a `from_search_path` registry would also see this
 //! machine's own cache, and `versions()` has to answer about the directory
 //! under test.
+//!
+//! **Every case here runs in BOTH feature configurations**, including the
+//! `--no-default-features` build `docs/install.md` tells a consumer to use for
+//! the loader without the downloader. Nothing in this file is behind a feature
+//! gate, and `the_whole_file_runs_in_both_feature_configurations` at the
+//! bottom is the check rather than the claim — a case that silently stopped
+//! existing in one configuration would look exactly like one that passed.
+//! `preload_never_fetches` is about autofetch and still needs no `fetch`
+//! feature, which is not an accident: preload never reaches the fetch path at
+//! all, so the same assertion holds either way.
 
 use std::path::{Path, PathBuf};
 
 use chtypes::{Error, Registry, RegistryOptions};
 
 const BODY: &[u8] = b"not a shared library";
+
+/// `sha256(BODY)`, pinned rather than computed.
+///
+/// The crate's only PUBLIC hasher is `chtypes::fetch::sha256_hex`, and
+/// `pub mod fetch` is behind the `fetch` feature — calling it here made this
+/// whole test binary fail to compile under `--no-default-features`, which is
+/// the same defect #45 fixed for `tests/parity.rs`.
+///
+/// A wrong constant cannot pass quietly: the test that uses it asserts BOTH
+/// directions on the same directory — the line whose manifest carries this
+/// digest must clear verification and fail at `dlopen`, and its neighbor
+/// carrying zeroes must fail with `ChecksumMismatch`. A digest that did not
+/// match the bytes would turn the first of those into a `ChecksumMismatch` and
+/// fail the assertion.
+const BODY_SHA256: &str = "c80ebb9dc312f3c343c4e4af53b3ed437cab683a234d64b4c21f23ad097c2710";
 
 fn scratch(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -161,6 +186,15 @@ fn preload_never_fetches() {
     // a worse place than a request to begin a 250 MB download. `Registry::open`
     // refuses `autofetch` outright, so this goes through the search path — with
     // an explicit `dir` first on it, and a line nothing publishes.
+    //
+    // It needs no `fetch` feature, and that is the point rather than a
+    // convenience: `RegistryOptions::autofetch` is not gated (only
+    // `RegistryOptions::fetch` is), and preload returns ArtifactMissing from
+    // `Registry::preload` itself without ever reaching `autofetch_or_missing`.
+    // So this asserts the same thing in both builds — where a `fetch`-feature
+    // build would have answered `Error::Fetch` if preload HAD taken that path,
+    // and a no-feature build would have answered the "feature disabled" error.
+    // Neither appears, which is the proof.
     let dir = stand_in_registry("preload-nofetch", &["25.8"]);
     let err = Registry::from_search_path_with(RegistryOptions {
         dir: Some(dir.clone()),
@@ -231,7 +265,7 @@ fn a_broken_neighbor_is_no_longer_the_whole_registrys_problem() {
     // to fail at construction and serve neither.
     let dir = scratch("neighbor");
     stand_in(&dir, "25.8", Some(&"00".repeat(32)));
-    stand_in(&dir, "26.7", Some(&chtypes::fetch::sha256_hex(BODY)));
+    stand_in(&dir, "26.7", Some(BODY_SHA256));
 
     let reg = Registry::open(
         &dir,
@@ -305,4 +339,39 @@ fn from_search_path_is_fallible_and_scans_manifests() {
         );
     }
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Every case in this file runs in BOTH feature configurations — the check,
+/// not the claim.
+///
+/// `tests/parity.rs` gates its `fetch::*` rows on the feature and then asserts
+/// that the skip path itself cannot go quiet. This file takes the other route:
+/// it carries no conditional-compilation attribute at all, so nothing here can
+/// be present in one build and absent in the other. That is worth something
+/// only while it stays true, and "a case that silently stops existing looks
+/// exactly like one that passes" is the failure this suite exists to refuse —
+/// so the invariant is read off the source rather than off a comment.
+///
+/// The needle is assembled at compile time on purpose: spelled out, it would
+/// match this test's own text and fire on every run.
+#[test]
+fn the_whole_file_runs_in_both_feature_configurations() {
+    let source = include_str!("lazy.rs");
+    let attribute = concat!("#[c", "fg(");
+    assert!(
+        !source.contains(attribute),
+        "tests/lazy.rs grew a conditional-compilation attribute. A case behind one vanishes \
+         from the --no-default-features build — the loader-without-downloader configuration \
+         docs/install.md tells a consumer to use — and looks exactly like a pass. Either keep \
+         the case feature-free, or give it the loud-skip treatment tests/parity.rs uses: name \
+         what was skipped, and fail if nothing was."
+    );
+    // Loud, so the two CI legs are distinguishable in a log rather than
+    // identically green.
+    let cases = source.matches("\n#[test]").count();
+    assert!(cases >= 9, "this file scores {cases} cases; it had 10");
+    eprintln!(
+        "lazy: {cases} cases, all running with the `fetch` feature {}",
+        if cfg!(feature = "fetch") { "ON" } else { "OFF" }
+    );
 }
