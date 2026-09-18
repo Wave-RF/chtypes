@@ -197,9 +197,12 @@ CHS_API const char * chs_clickhouse_version(void);
  * There is no revision 0 artifact — 0 is reserved for "the symbol was absent".
  */
 /* Revision 5 (the explicit INSERT column list): chs_row, chs_rows and
- * chs_block_parse each gained a trailing `columns_json`. A revision-4
- * artifact does not have it, so calling through these declarations against
- * one is exactly the undefined behavior the gate above refuses. */
+ * chs_block_parse each gained a trailing `columns_json`; in the same open
+ * window (core#73) chs_rows gained a trailing `const chs_filter * filter`
+ * after it — one revision, because nothing built against 5 had shipped when
+ * the second change landed. A revision-4 artifact has neither, so calling
+ * through these declarations against one is exactly the undefined behavior
+ * the gate above refuses. Still 28 exported functions. */
 #define CHS_ABI_REVISION 5
 CHS_API int chs_abi_revision(void);
 
@@ -597,6 +600,10 @@ typedef struct chs_bytes
 /* export_format sentinel: no export requested; out_bytes may be NULL. */
 #define CHS_EXPORT_NONE (-1)
 
+/* A compiled row filter (chs_filter_compile, §filters below); declared here
+ * because chs_rows takes one — attached, or NULL for no filter. */
+typedef struct chs_filter chs_filter;
+
 /* doc_flags bits — which document GROUPS the per-row documents carry. The
  * verdict channel (batch and per-row outcome/code/err, rows_read,
  * rows_skipped, unsupported_settings, engine_rows, storage_transforms) is
@@ -661,11 +668,56 @@ typedef struct chs_bytes
  * `columns_json` (revision 5) is the INSERT column list, read exactly as
  * chs_row reads it — NULL or "[]" is today's no-list behavior. The export
  * channel is unchanged by it: an exported row carries the stored columns in
- * declared order, so it stays directly INSERT-able with no list. */
+ * declared order, so it stays directly INSERT-able with no list.
+ *
+ * THE ATTACHED ROW FILTER (revision 5, second half — core#73; the C ABI
+ * contract §Rows, "The attached row filter", is normative). `filter` is a
+ * compiled handle from chs_filter_compile over THIS schema handle, or NULL.
+ * NULL is today's behavior BYTE-FOR-BYTE: no key joins the document and no
+ * code path changes. With a filter attached, ONE parse serves both the
+ * verdicts and the export: every rows[] document gains, as its FIRST key,
+ * "verdict" — one of 't' 'f' 'e' 'd', the same four characters with the same
+ * meanings as chs_filter_rows — evaluated over the row's STORED tuple
+ * (post-DEFAULT, post-coercion, MATERIALIZED filled: the view chs_block_parse
+ * gives a filter), and the export channel emits bytes ONLY for rows whose
+ * verdict is 't'. 'f', 'e' and 'd' CUT the row: no bytes, its row_spans
+ * entry is {0,0}; 'e' and 'd' are not answers, so a security-enforcing
+ * caller gets fail-closed for free. A row whose parse outcome is not
+ * "accepted" (skipped, the aborting row, accepted_poisoned, no stored block)
+ * is 'd', carrying the row's own code/err; an 'e' (the predicate threw the
+ * server's own error) and an eval-time 'd' (the admission envelope) add
+ * "verdict_code" and "verdict_err" beside "verdict". The batch verdict,
+ * rows_read and rows_skipped are the PARSE's and do not move; two counts join
+ * them, "rows_passed" (accepted rows with 't') and "rows_cut" (accepted rows
+ * with any other verdict), so rows_passed + rows_cut is the number of
+ * accepted rows. Engine/TTL previews (engine_rows, storage_transforms) are
+ * over the parsed batch, not the exported subset — as they are today for a
+ * caller that cuts after exporting.
+ *
+ * CONTRACT: for an accepted batch, chs_rows(…, filter) ≡ chs_rows(…, NULL)
+ * → chs_block_parse(out_bytes, JSONCompactEachRow, no list) →
+ * chs_filter_eval(filter) → drop every row whose verdict is not 't' — row
+ * for row (the verdicts) and byte for byte (the surviving spans). Two
+ * consequences a caller MUST know: (1) a batch that is not "accepted"
+ * exports NOTHING, exactly as without a filter (export_declined names the
+ * verdict) — over a CONSTRAINT-bearing schema one violating row rejects the
+ * batch (469) and no passing row's bytes flow, whatever its verdict says;
+ * (2) verdicts here index rows[] — the rows THIS reader consumed, which
+ * stops at an aborting row — whereas chs_filter_rows / chs_block_parse read
+ * every row of the body, so the two verdict strings can differ in LENGTH on
+ * one body (measured: 3 vs 2 on a three-row body with a violator second).
+ * Never zip one call's verdicts against another call's rows.
+ *
+ * A filter attached with export_format = CHS_EXPORT_NONE is legal: verdicts
+ * are answered, no bytes. A filter compiled over a DIFFERENT schema handle
+ * answers the whole call rejected (1002), loudly. Parameters bind at
+ * chs_filter_compile exactly as for chs_filter_rows. A chs_rows call with a
+ * filter is a use of the filter handle too: its thread rule applies. */
 CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, size_t body_len,
                         const char * settings_json,
                         int export_format, unsigned doc_flags, chs_bytes * out_bytes,
-                        const char * columns_json);
+                        const char * columns_json,
+                        const chs_filter * filter);
 
 /* ------------------------------------------------------------------ filters
  * Phase 2 (revision 4): one boolean SQL expression over a compiled schema's
@@ -732,8 +784,8 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * one clock instant per call. NOTHING may enforce read-side security on this
  * API until the WHERE-truth rig gates green (the C ABI contract §Filters) — the
  * twin below is call-shape, not an enforcement opening. */
-typedef struct chs_filter chs_filter;
-
+/* typedef struct chs_filter chs_filter; — declared above chs_rows, which
+ * takes one (revision 5, second half). */
 CHS_API chs_filter * chs_filter_compile(
     const chs_schema * s, const char * expr_sql, const char * params_json,
     int * out_code, char ** out_err);
