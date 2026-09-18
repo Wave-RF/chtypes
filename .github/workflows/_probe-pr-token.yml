@@ -2,7 +2,13 @@
 # default GITHUB_TOKEN can open a pull request in this repository, for
 # issue #100. Deleted before the real PR is opened.
 name: _probe-pr-token
-on: workflow_dispatch
+# workflow_dispatch only fires for a workflow file already on the default
+# branch, so this probe fires on pull_request instead — it needs no merge to
+# exercise the same in-repo (non-fork) GITHUB_TOKEN permissions the real
+# scheduled workflow would run under.
+on:
+  pull_request:
+    branches: [main]
 permissions:
   contents: write
   pull-requests: write
