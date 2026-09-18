@@ -95,6 +95,14 @@ Bad rows are skipped with the server's own machinery — resync is line-based an
 
 So one `rows` call answers, per input record and in input order: accepted with its stored values, or skipped with ClickHouse's own code and message. **A skipped row is never stored** — filter on the row's own `outcome` when rendering survivors, not on the batch's.
 
+### The wire format decides what one bad record can cost
+
+Under `allow_errors`, NDJSON and a multi-line JSON array resynchronize per record, so a malformed record costs only itself, as in the example above. A **single-line compact JSON array** has no per-record newline to resynchronize on, so one malformed record inside it loses the **entire** batch. This is server-faithful — it is how ClickHouse's own reader behaves, because the line is the unit it can resynchronise on — so the wire format is an operational choice worth making deliberately whenever `allow_errors` is in force.
+
+### CHECK constraints are batch-level, not per-row
+
+A `CHECK` in the compiled DDL is evaluated, and a violation answers ClickHouse's own **code 469**. Like the server, **one violating row rejects the entire batch** — the batch `outcome` is `rejected`, and every row is discarded together — and the export channel declines rather than emitting partial bytes. A caller that assumes per-row rejection here will build a partial-success path that never fires.
+
 ## The pairing rule for a gateway and a worker
 
 If you validate in one process and INSERT from another, the settings chtypes sees must be the settings the INSERT runs under. `input_format_allow_errors_*` is the one exception, and it matters:
@@ -155,6 +163,8 @@ let batch = schema.rows_export(
 </details>
 
 `JSONCompactEachRow` is the one format this ABI revision serializes; asking for another answers `unsupported` for the whole call rather than silently emitting nothing. `spans` is index-aligned with `rows` and is `{0, 0}` for any row that was not accepted. Slicing a span out of the payload **is** that row's line, its trailing newline included, and concatenating the non-zero spans reproduces the payload exactly.
+
+Within a row, `JSONCompactEachRow` separates fields with a comma **and a space** — `", "`, not a bare comma — so anything comparing exported bytes literally, or sizing a buffer from a field count, needs the exact separator.
 
 Three payload states, and they are distinct: absent means no export was requested, it was declined (the reason is in `export_declined`), or a call-level verdict preempted it; present-but-empty means the export ran and emitted nothing. The bytes are copied out of the C buffer and freed before the call returns, so no ownership crosses the boundary.
 

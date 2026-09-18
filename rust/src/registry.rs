@@ -189,8 +189,7 @@ pub struct RegistryOptions {
     /// this option — this crate has always made it.) A manifest carrying NO
     /// `library_sha256` is REFUSED rather
     /// than passed: verification asked for and not possible is not
-    /// verification (Go and TypeScript refuse it too; Python's
-    /// `verify_library` returns silently, the one gap issue #13 leaves).
+    /// verification — all four bindings refuse it.
     ///
     /// [`Registry::new`], its `from_env*` variants and
     /// [`Registry::with_timezone`] take no options — Rust has no default

@@ -106,7 +106,9 @@ def verify_library(version_dir: str | os.PathLike[str]) -> None:
             f"chtypes: {path} is {size} bytes, manifest says {manifest.library_bytes}"
         )
     if not manifest.library_sha256:
-        return
+        raise RegistryError(
+            f"chtypes: {path} cannot be verified: manifest carries no library_sha256"
+        )
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1 << 20), b""):

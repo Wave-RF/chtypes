@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -219,6 +220,48 @@ def test_verify_library_checks_the_bytes(tmp_path: Path) -> None:
     (tmp_path / "manifest.json").write_text(json.dumps({**good, "library_bytes": 999}))
     with pytest.raises(chtypes.RegistryError, match="bytes"):
         chtypes.verify_library(tmp_path)
+
+
+def test_verify_library_refuses_a_manifest_with_no_hash(tmp_path: Path) -> None:
+    """Verification asked for and not possible is not verification (#48): Go,
+    TypeScript and Rust all refuse an artifact whose manifest carries no
+    `library_sha256` when checksums are asked for. `verify_library` runs only
+    when a caller asked for it (`Registry(verify_hashes=True)`), so a manifest
+    missing the field must raise here too, not return quietly.
+    """
+    payload = b"not really a library"
+    (tmp_path / "fake.so").write_bytes(payload)
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"library": "fake.so", "library_bytes": len(payload)})
+    )
+    with pytest.raises(chtypes.RegistryError, match="library_sha256"):
+        chtypes.verify_library(tmp_path)
+
+
+def test_registry_verify_hashes_refuses_a_manifest_with_no_hash(
+    registry: chtypes.Registry, tmp_path: Path
+) -> None:
+    """`Registry(..., verify_hashes=True)` must not load bytes it never
+    checked (#48): a manifest with the field simply absent is exactly the
+    shape a truncated or hand-assembled artifact directory has. With
+    `verify_hashes` off the field stays optional for a caller who did not
+    ask, and the same directory loads normally.
+    """
+    smallest = min(registry.libraries(), key=lambda lib: lib.manifest.library_bytes or 1 << 62)
+    fields = dataclasses.asdict(smallest.manifest)
+    del fields["library_sha256"]
+    line = tmp_path / smallest.minor
+    line.mkdir()
+    (line / smallest.manifest.library).symlink_to(Path(smallest.path).resolve())
+    (line / "manifest.json").write_text(json.dumps(fields))
+
+    strict = chtypes.Registry(tmp_path, verify_hashes=True)
+    with pytest.raises(chtypes.RegistryError, match="library_sha256"):
+        strict.libraries()
+
+    lenient = chtypes.Registry(tmp_path, verify_hashes=False)
+    loaded = lenient.for_version(smallest.minor)  # must NOT raise
+    assert loaded.version == smallest.version
 
 
 def test_verify_a_real_artifact(registry: chtypes.Registry) -> None:

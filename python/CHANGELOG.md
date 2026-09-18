@@ -11,6 +11,17 @@ The four bindings in this repository are released together and give one answer, 
 - **This binding now speaks ABI revision 5.** `Schema.row`, `Schema.rows` and `Schema.parse_block` gain a keyword-only `columns` argument (a sequence of column names) — the INSERT column list: the data supplies exactly those columns, in list order for the positional formats, and the server computes the rest with the listed values in scope for their DEFAULT expressions. `None` or an empty sequence is the no-list behavior of every earlier revision and is marshaled to NULL, never to `"[]"` (an empty column list renders as `INSERT INTO t () FORMAT X`, which is code 62 `SYNTAX_ERROR` on every served ClickHouse line — measured 2026-09-15). A listed `EPHEMERAL` column's value is read and is in scope for the DEFAULTs that reference it, and is still never stored and never exported. This binding does not validate column names locally: an unknown column, an `ALIAS` column, and a repeated name are all refused by the server, with its own codes (16, 16 and 15 respectively), surfaced exactly as they come back.
 - This release **requires revision-5 artifacts**. A revision-4 artifact (or any artifact reporting a `chs_abi_revision()` other than 5 or 0) is refused at load, naming both the binding's revision and the artifact's.
 
+## [0.2.2] — 2026-09-17
+
+### Changed
+
+- **`Registry(..., verify_hashes=True)` now refuses an artifact whose manifest carries no `library_sha256`, instead of loading it silently.** This is a behavior change in a security posture, not a silent fix: previously, asking for verification against a manifest with the field absent returned as if the bytes had been checked, when they never were — the caller believed the load was verified and it was not. `verify_library` now raises `RegistryError` naming the path and saying the manifest carries no `library_sha256`, the same shape its hash-mismatch path has always raised. `verify_hashes` off is unaffected: the field stays optional for a caller who did not ask. Go, TypeScript and Rust already refused this case; this was the one gap issue #13's item A2 left (#48).
+
+### Notes
+
+- Speaks **ABI revision 4**, unchanged since 0.1.0, so no artifact needs relinking. The golden set this release was tested against is the one core serves, generated on the ClickHouse lines 24.8, 25.3, 25.8, 25.10, 26.2, 26.3, 26.4, 26.5, 26.6, 26.7 and 26.8.
+- Seven facts about the compiled library's behavior that a consumer previously had to discover by experiment are now written down: `CHECK`-constraint batch rejection, binding filter parameters as `String`, single-line compact JSON array loss under `allow_errors`, the JSONCompactEachRow export field separator, the value-injection pattern and its compile-time wrap trap, `Columns` as canonical and in declaration order, and the frozen-signatures promise reworded ahead of the next ABI revision (#56). That promise is now stated once, in `docs/support.md`, and linked from everywhere else rather than restated in nine places (#69).
+
 ## [0.2.1] — 2026-09-15
 
 Released in step with the Rust crate, which gains `Registry::open` and `Error::LibraryRead`; this binding's public API is unchanged.

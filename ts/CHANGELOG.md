@@ -11,6 +11,15 @@ The four bindings in this repository are released together and give one answer, 
 - **This binding now speaks ABI revision 5** — the explicit INSERT column list. `Schema#row`, `Schema#rows` (and its export channel) and `Schema#parseBlock` all gain the option: name the columns this data supplies, and the server computes the rest with them in scope for their DEFAULTs. `row()` and `parseBlock()` take the new `RowOptions` (just `columns` — the revision-3 export/doc-flag channels are meaningless on either, so that type does not offer them); `rows()` keeps `RowsOptions`, which now `extends RowOptions` to add `exportFormat` and `docFlags`. Absent or an empty array is the no-list behavior of every earlier revision; a listed `EPHEMERAL` column's value is read and is in scope for the DEFAULTs that reference it, and is still never stored and never exported. An unknown name, an `ALIAS` column or a repeated name is the server's own refusal (codes 16, 16 and 15), surfaced through the row/batch outcome exactly as it arrives — nothing is validated locally.
 - **This release requires revision-5 artifacts.** A revision-4 artifact — everything published so far — is refused at load, naming both numbers (`chtypes: <path> reports ABI revision 4, this binding speaks 5; refusing to call through mismatched declarations`).
 
+## [0.2.2] — 2026-09-17
+
+No functional change in this binding. This release ships together with the other three because the four give one answer, not because anything here moved.
+
+### Notes
+
+- Speaks **ABI revision 4**, unchanged since 0.1.0, so no artifact needs relinking. The golden set this release was tested against is the one core serves, generated on the ClickHouse lines 24.8, 25.3, 25.8, 25.10, 26.2, 26.3, 26.4, 26.5, 26.6, 26.7 and 26.8.
+- Seven facts about the compiled library's behavior that a consumer previously had to discover by experiment are now written down: `CHECK`-constraint batch rejection, binding filter parameters as `String`, single-line compact JSON array loss under `allow_errors`, the JSONCompactEachRow export field separator, the value-injection pattern and its compile-time wrap trap, `Columns` as canonical and in declaration order, and the frozen-signatures promise reworded ahead of the next ABI revision (#56). That promise is now stated once, in `docs/support.md`, and linked from everywhere else rather than restated in nine places (#69).
+
 ## [0.2.1] — 2026-09-15
 
 Released in step with the Rust crate, which gains `Registry::open` and `Error::LibraryRead`; this binding's public API is unchanged.

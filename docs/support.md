@@ -39,9 +39,9 @@ One artifact per ClickHouse line, each carrying that release's own C++. A line i
 | `26.3` | `26.3.33.24-lts` | all |
 | `26.4` | `26.4.5.143-stable` | all |
 | `26.5` | `26.5.7.64-stable` | all |
-| `26.6` | `26.6.7.18-stable` | all |
-| `26.7` | `26.7.9.12-stable` | all |
-| `26.8` | `26.8.5.13-lts` | all |
+| `26.6` | `26.6.8.7-stable` | all |
+| `26.7` | `26.7.10.6-stable` | all |
+| `26.8` | `26.8.6.5-lts` | all |
 
 Ask for a line, never a nearest match: `for("25.8")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.
 
@@ -75,4 +75,4 @@ The darwin artifacts exist so you can develop and run the suites on a laptop. Th
 
 ## Pre-1.0
 
-Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen. The `chs_*` function signatures are not frozen forever: they change only with an ABI revision bump, and revision 5 — the INSERT column list — is the first such change since the first tag. That is what the revision is for: an artifact and the SDK opening it are matched by ABI revision — see [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) — and what that revision covers is maintained in the core repository. Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list.
+Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen. A function's exact signature is not one of those things: pre-1.0, a signature change rides an ABI revision instead, and that revision is what a caller can actually rely on — an SDK refuses to load an artifact whose revision it does not speak, naming both numbers, and that refusal is shipped and run by every binding's own suite, not merely documented. See [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) for where that match happens; what a given revision covers is maintained in the core repository. This tree speaks ABI revision 5 (`include/chtypes.h`) — revision 5, the INSERT column list, is the first signature change since the first tag. Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list.

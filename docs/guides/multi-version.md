@@ -81,6 +81,12 @@ Measured under contention in Python's own suite: 27,770 batch reads across 8 thr
 
 **Parallelism comes from more schemas, not from sharing one.** That is true in every binding; Rust is simply the one that will not compile the alternative.
 
+### Above 26.2 on Linux, the process is what scales — not more handles
+
+_Operational, dated 2026-09-17 — not a safety change; the guarantee above still holds exactly as written: concurrent calls on distinct handles are safe, one handle is single-threaded._ The artifact producer — this repository has not run the following and publishes no benchmark figure of its own — found that on Linux, ClickHouse lines above 26.2 (26.3 through 26.8 at the time of writing, with 26.6 the one they benchmarked directly) stop gaining ParseBlock throughput from adding handles inside one process, because an upstream change now routes every allocation in the image through one global tracker; separate processes were unaffected in their measurements and kept scaling. The mechanism cannot occur on macOS. They also read each pinned line's own upstream allocator-tracker source rather than trusting version numbers alone, since 24.8 and 25.3 are LTS lines that take independent backports, and confirmed the mechanism is absent on 24.8, 25.3, 25.8, 25.10 and 26.2 — but of those, only 25.8 and 26.2 were also benchmarked to show scaling intact, so read 24.8, 25.3 and 25.10 as confirmed clean by source, not as measured for throughput.
+
+A fix is specified and queued behind other work; the producer's current read is that this holds through the next cutover, not that it is permanent, so treat it as today's upstream state rather than a fixed property of these lines. Until it changes, size gateway concurrency above 26.2 by process count rather than by handles per process — separate processes keep scaling on every line above.
+
 ### One boundary worth naming: `worker_threads`
 
 In Node, two JS threads share one dlopen'd image and one set of C globals, which no per-isolate counter can see. Seed default settings **before** starting workers, or serialize the seed yourself, and do not share a `Schema` across workers.

@@ -666,6 +666,7 @@ fn rust_answers_the_same_values_as_the_other_bindings() {
     let table = rust_values();
     let mut wrong = Vec::new();
     let mut uncovered = Vec::new();
+    let mut skipped = Vec::new();
     let mut checked = 0usize;
     for cap in capabilities(&doc) {
         let Some(want_raw) = cap.get("value") else {
@@ -680,6 +681,26 @@ fn rust_answers_the_same_values_as_the_other_bindings() {
             continue;
         }
         let id = cap["id"].as_str().unwrap_or("?");
+        // `pub mod fetch` is `#[cfg(feature = "fetch")]` (src/lib.rs) — with
+        // `default-features = false`, the configuration docs/install.md tells a
+        // consumer to use for the loader without the downloader, the whole
+        // module and its six constants do not exist in this crate's compiled
+        // surface at all. That is not the manifest's `{"absent": "<why>"}`
+        // mechanism: the capability is not absent from rust, it is present
+        // exactly when the (default) `fetch` feature is on, and the manifest
+        // has no per-feature axis — it is one contract shared by four
+        // languages, not by a language's build configurations. So this test
+        // gates the affected rows on the feature directly and says so loudly,
+        // rather than reporting a contract that has not actually fallen
+        // behind. Every other row — and every `fetch::*` row when the feature
+        // IS on — is still asserted exactly as before.
+        if !cfg!(feature = "fetch") && sym.starts_with("fetch::") {
+            eprintln!(
+                "SKIP {id}: `{sym}` is behind the `fetch` feature, which this build does not have (--no-default-features)"
+            );
+            skipped.push(id.to_string());
+            continue;
+        }
         let Some(got) = table.get(sym.as_str()) else {
             uncovered.push(format!(
                 "{id}: the contract gives `{sym}` a shared value and the rust value table does not carry it"
@@ -697,6 +718,24 @@ fn rust_answers_the_same_values_as_the_other_bindings() {
                 "{id}: rust `{sym}` is {got:?}, the contract says {want:?}"
             ));
         }
+    }
+    if !cfg!(feature = "fetch") {
+        // The skip path itself must not go quiet: if nothing was skipped here,
+        // either the manifest dropped every `fetch::*` row (a contract
+        // regression `uncovered`/the floor below would also catch) or the
+        // `fetch::` spelling this loop keys on has drifted from what
+        // `rust_values()` actually gates — either way, this is not the
+        // no-default-features run it claims to be.
+        assert!(
+            !skipped.is_empty(),
+            "built without the `fetch` feature, but no fetch::* value row was skipped — the \
+             skip condition above no longer matches anything in the manifest"
+        );
+        eprintln!(
+            "{} fetch::* value(s) skipped — this build has no `fetch` feature: {}",
+            skipped.len(),
+            skipped.join(", ")
+        );
     }
     // A value table that stopped covering the contract is the quiet failure this
     // guards: the check would still "pass", having compared less and less.
