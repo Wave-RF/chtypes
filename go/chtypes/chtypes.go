@@ -462,12 +462,15 @@ type Value struct {
 	//                          from an input row
 	//   "ephemeral_input"      revision 5: a LISTED EPHEMERAL column's read
 	//                          value (see SourceEphemeralInput) — never stored,
-	//                          never exported
+	//                          never exported, and — like "skipped" — EXCLUDED
+	//                          from RowResult.Values; never seen on a Value
+	//                          returned from this package
 	//   "materialized_input"   revision 5: a LISTED MATERIALIZED column's
 	//                          supplied value under
 	//                          insert_allow_materialized_columns=1 (see
 	//                          SourceMaterializedInput) — stored, replacing the
-	//                          column's expression
+	//                          column's expression, and INCLUDED in
+	//                          RowResult.Values
 	Source string
 }
 
@@ -481,12 +484,16 @@ func (v Value) String() string { return v.Text }
 const (
 	// SourceEphemeralInput: a listed EPHEMERAL column's read value. The
 	// server reads it — it is in scope for the DEFAULT expressions that
-	// reference it — and it is reported here so a caller can see what was
-	// read. It is never stored and never exported.
+	// reference it — and it is never stored and never exported. rowResultOf
+	// excludes it from RowResult.Values exactly as it already excludes
+	// "skipped": a value that is never stored must not sit where a caller
+	// reads the stored row (a hash, a signature) or it leaks a column the
+	// table never held, one layer above the export channel.
 	SourceEphemeralInput = "ephemeral_input"
 	// SourceMaterializedInput: a listed MATERIALIZED column's supplied value
 	// under insert_allow_materialized_columns=1. The supplied value REPLACES
-	// the column's expression and IS stored.
+	// the column's expression and IS stored — unlike SourceEphemeralInput,
+	// it stays IN RowResult.Values.
 	SourceMaterializedInput = "materialized_input"
 )
 
@@ -963,14 +970,16 @@ type rowConfig struct {
 	columns []string
 }
 
-// rowOption configures a row-level call, the same variadic functional-option
+// RowOption configures a row-level call, the same variadic functional-option
 // shape CompileDDL/CompileFilter use (WithCompileSettings, WithFilterParams).
-// Kept unexported: WithColumns is the one capability the parity contract
-// names for this option group (schema.columns-option); the carrier type
-// itself needs no name of its own, and every sibling option type
-// (CompileOption, FilterOption, EngineOption) needed its own entry in
-// tests/parity/manifest.json's `unlisted` table for exactly this reason.
-type rowOption func(*rowConfig)
+// Exported, like every sibling option type (CompileOption, FilterOption,
+// EngineOption) — revive's unexported-return check (WithColumns returned the
+// unexported rowOption) caught this one as the odd one out, and it carries
+// its own entry in tests/parity/manifest.json's `unlisted` table for the same
+// reason the others do: WithColumns is the one capability the parity contract
+// names for this option group (schema.columns-option), and the carrier type
+// itself needs no capability entry of its own.
+type RowOption func(*rowConfig)
 
 // WithColumns declares the INSERT column list (ABI revision 5) for Row,
 // RowWithSettings, Rows, RowsExport and ParseBlock — the
@@ -993,15 +1002,15 @@ type rowOption func(*rowConfig)
 // from the wire), and a repeated name are each refused with the server's own
 // code (16, 16, 15 respectively), surfaced exactly as they come back. This
 // package never reimplements a ClickHouse rule.
-func WithColumns(columns []string) rowOption {
+func WithColumns(columns []string) RowOption {
 	return func(c *rowConfig) { c.columns = columns }
 }
 
-// columnsOf resolves a rowOption slice to the declared column list, or nil
+// columnsOf resolves a RowOption slice to the declared column list, or nil
 // for "no list" — the one assembly step shared by the linked and dlopen'd
 // paths, each of which renders it into the wire columns_json (or passes a
 // NULL pointer) at its own cgo boundary.
-func columnsOf(opts []rowOption) []string {
+func columnsOf(opts []RowOption) []string {
 	var c rowConfig
 	for _, o := range opts {
 		o(&c)
@@ -1019,12 +1028,18 @@ type rowsExportConfig struct {
 	columns []string
 }
 
-// rowsExportOption is what RowsExport's variadic parameter accepts. It
-// unifies RowsExport's pre-existing DocFlags-only surface with rowOption
+// RowsExportOption is what RowsExport's variadic parameter accepts. It
+// unifies RowsExport's pre-existing DocFlags-only surface with RowOption
 // (WithColumns) so the new option can ride the same call without breaking
 // any existing DocFlags-only call site — Go permits only one variadic
 // parameter, and DocFlags already occupied it.
-type rowsExportOption interface {
+//
+// Exported, not just for consistency with RowOption/CompileOption/FilterOption/
+// EngineOption: a caller cannot declare or build a slice of an unexported
+// interface type, and RowsExport's variadic parameter changed from ...DocFlags
+// to this type in the same revision-5 change — a caller migrating off a built
+// []DocFlags needs a nameable type to migrate to.
+type RowsExportOption interface {
 	applyRowsExport(*rowsExportConfig)
 }
 
@@ -1032,8 +1047,8 @@ type rowsExportOption interface {
 // existing RowsExport(..., chtypes.DocAll) call site already does.
 func (d DocFlags) applyRowsExport(c *rowsExportConfig) { c.flags |= d }
 
-// applyRowsExport lets a rowOption (WithColumns) ride the same call.
-func (o rowOption) applyRowsExport(c *rowsExportConfig) {
+// applyRowsExport lets a RowOption (WithColumns) ride the same call.
+func (o RowOption) applyRowsExport(c *rowsExportConfig) {
 	var rc rowConfig
 	o(&rc)
 	if len(rc.columns) > 0 {
@@ -1339,7 +1354,13 @@ func rowResultOf(doc rowDoc) RowResult {
 		res.Outcome = Unsupported
 	}
 	for _, c := range doc.Cols {
-		if c.Src == "skipped" {
+		// "skipped" (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
+		// SourceEphemeralInput (a LISTED EPHEMERAL column: read, but never
+		// stored — see Value.Source) are both excluded from Values, which is
+		// the stored row. SourceMaterializedInput stays IN: under
+		// insert_allow_materialized_columns=1 the supplied value genuinely IS
+		// stored, replacing the column's expression (issue #53).
+		if c.Src == "skipped" || c.Src == SourceEphemeralInput {
 			continue
 		}
 		res.Values = append(res.Values, Value{
