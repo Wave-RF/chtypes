@@ -1,8 +1,12 @@
 # ci — the SDK repository's own gate, on GitHub's hosted runners only.
 #
 # This repository is public and its CI is deliberately small — the bindings,
-# and how to use them — with no repository variable, no secret, and no
-# runner of our own. It runs every suite twice, on ubuntu-latest:
+# and how to use them — with no secret and no runner of our own. The only
+# repository variables are CHTYPES_ARTIFACTS_URL and CHTYPES_ARTIFACTS_TAG
+# (both optional, both plain non-secret config — visible to a fork's
+# pull_request run same as everything else here), which point the
+# `artifacts` job at a channel other than the rolling release; see that
+# job's own comment for why. It runs every suite twice, on ubuntu-latest:
 #
 #   1. WITHOUT artifacts (the go / python / ts / rust jobs). Every binding
 #      builds, lints and type-checks; the header and the four bindings agree
@@ -22,9 +26,13 @@
 #      release changes, and the same suites then RUN the golden set and the
 #      registry tests against them. This is "does the published SDK work
 #      with the published artifacts", kept small on purpose: two lines, the
-#      SDK's own tests. The bulk proof — the server-truth suites, the oracle,
-#      the rigs, every supported line — is the core repository's sdk-suites
-#      workflow, against this same tree.
+#      SDK's own tests. Which release this job reads is itself an input —
+#      CHTYPES_ARTIFACTS_URL / CHTYPES_ARTIFACTS_TAG, unset by default and
+#      then identical to today — so a branch built against a different ABI
+#      revision can point at its own channel with no workflow edit (#85).
+#      The bulk proof — the server-truth suites, the oracle, the rigs, every
+#      supported line — is the core repository's sdk-suites workflow,
+#      against this same tree.
 #
 # A suite that skipped everything is not a pass, in either run:
 # scripts/check-suite.sh and scripts/check-standalone.sh read each runner's
@@ -195,19 +203,42 @@ jobs:
     needs: [abi, go, python, ts, rust]
     env:
       CHTYPES_REGISTRY: ${{ github.workspace }}/.artifacts
+      # The channel this job resolves — host and release tag — is an INPUT,
+      # never a literal here, for the same reason scripts/published-lines.sh
+      # reads the live index instead of hard-coding a line (its own header
+      # says why): the day a branch's own channel has content, this job must
+      # go green with no workflow edit, nothing to switch back on, nothing to
+      # remember (#85). Both variables are optional and both default to
+      # empty, which published-lines.sh and fetch.sh already treat exactly
+      # like unset — falling back to their own built-in default, the rolling
+      # `artifacts` release at https://artifacts.wavehouse.dev — so on `main`,
+      # where neither is set, this job's resolved channel is byte-for-byte
+      # what it was before this existed. They are plain repository
+      # variables, not secrets: non-sensitive config, visible to a fork's
+      # pull_request run same as everything else in this workflow. A branch
+      # whose channel is set but empty of content is NOT skipped: the steps
+      # below still run, and published-lines.sh/fetch.sh refuse loudly —
+      # honestly red — exactly as they would for any other unpublished line.
+      CHTYPES_ARTIFACTS_URL: ${{ vars.CHTYPES_ARTIFACTS_URL }}
+      CHTYPES_ARTIFACTS_TAG: ${{ vars.CHTYPES_ARTIFACTS_TAG }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: the newest -lts and -stable lines the release publishes (live index.json)
         id: lines
-        run: scripts/published-lines.sh --platform linux-amd64 | tee -a "$GITHUB_OUTPUT"
+        run: |
+          tag_args=()
+          [ -n "$CHTYPES_ARTIFACTS_TAG" ] && tag_args=(--tag "$CHTYPES_ARTIFACTS_TAG")
+          scripts/published-lines.sh --platform linux-amd64 "${tag_args[@]}" | tee -a "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .artifacts
           key: chtypes-artifacts-linux-amd64-${{ steps.lines.outputs.key }}
       - name: fetch, verified — an already-installed line is re-hashed and not downloaded
         run: |
+          tag_args=()
+          [ -n "$CHTYPES_ARTIFACTS_TAG" ] && tag_args=(--tag "$CHTYPES_ARTIFACTS_TAG")
           for line in ${{ steps.lines.outputs.lines }}; do
-            scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY"
+            scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY" "${tag_args[@]}"
           done
           ls -la "$CHTYPES_REGISTRY"
           cat "$CHTYPES_REGISTRY"/*/manifest.json
