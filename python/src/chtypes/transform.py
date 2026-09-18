@@ -30,7 +30,7 @@ from json import JSONDecodeError
 from typing import TYPE_CHECKING, Final
 
 from ._rawjson import RawNumber, decode_prefix
-from .results import Reason, Transform
+from .results import Reason, Source, Transform
 
 if TYPE_CHECKING:  # avoids an import cycle: _document imports this module
     from ._document import ColDoc
@@ -38,8 +38,20 @@ if TYPE_CHECKING:  # avoids an import cycle: _document imports this module
 __all__ = ["classify"]
 
 # src values that carry no value to compare, so they emit no transformation.
+#
+# Source.EPHEMERAL_INPUT (issue #97): a listed EPHEMERAL column's value is
+# read but never stored, so — like "skipped" — there is no stored value to
+# have silently changed. NOT Source.MATERIALIZED_INPUT: under
+# insert_allow_materialized_columns=1 that value IS stored, replacing the
+# column's expression, and must still be classified.
 _SILENT_SOURCES: Final = frozenset(
-    {"skipped", "default_expr_unsupported", "default_volatile_unresolved", "default_pending"}
+    {
+        "skipped",
+        "default_expr_unsupported",
+        "default_volatile_unresolved",
+        "default_pending",
+        Source.EPHEMERAL_INPUT,
+    }
 )
 
 

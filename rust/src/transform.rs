@@ -105,11 +105,18 @@ pub mod reason {
 /// Derive the transformations for one column document.
 pub(crate) fn classify(c: &ColDoc) -> Vec<Transform> {
     match c.src.as_str() {
-        // Never read from an input row, or no value at all: nothing to compare.
+        // Never read from an input row, or no value at all: nothing to
+        // compare. crate::result::source::EPHEMERAL_INPUT (issue #97): a
+        // listed EPHEMERAL column's value is read but never stored, so —
+        // like "skipped" — there is no stored value to have silently
+        // changed. NOT crate::result::source::MATERIALIZED_INPUT: under
+        // insert_allow_materialized_columns=1 that value IS stored,
+        // replacing the column's expression, and must still be classified.
         "skipped"
         | "default_expr_unsupported"
         | "default_volatile_unresolved"
-        | "default_pending" => return Vec::new(),
+        | "default_pending"
+        | "ephemeral_input" => return Vec::new(),
         _ => {}
     }
 
@@ -908,5 +915,103 @@ mod tests {
             "",
         ));
         assert_eq!(t[0].reason, reason::LOSSY_NUMERIC);
+    }
+
+    // ------------------------------------------------------------------ #97
+
+    /// eph_col: `src` "ephemeral_input", no `"stored"` key at all — an
+    /// EPHEMERAL column is never written. mat_col: `src` "materialized_input",
+    /// `"stored": 0` — the supplied value DID land, overflowing. Both carry
+    /// the identical UInt8-overflow reference shape (input 256, `ref_type`
+    /// Int256, `ref` 256) so that the reference-type detector (not gated on
+    /// `src`) would flag both if `classify` did not stop the ephemeral one
+    /// first.
+    ///
+    /// Parsed with this crate's own document reader (`crate::doc::row_doc`),
+    /// not the hand-built `col()` helper the rest of this module uses, per
+    /// the issue: "Build them from a result document parsed by the binding's
+    /// own parser wherever that is possible, rather than hand-constructing
+    /// the result object."
+    const EPHEMERAL_AND_MATERIALIZED_DOC: &[u8] = br#"{
+        "outcome": "accepted",
+        "cols": [
+            {
+                "name": "eph_col", "type": "UInt8", "base": "UInt8",
+                "src": "ephemeral_input", "input": "256",
+                "ref_type": "Int256", "ref": 256, "nullable": false
+            },
+            {
+                "name": "mat_col", "type": "UInt8", "base": "UInt8",
+                "src": "materialized_input", "input": "256", "stored": 0,
+                "ref_type": "Int256", "ref": 256, "nullable": false
+            }
+        ]
+    }"#;
+
+    #[test]
+    fn values_excludes_ephemeral_input_keeps_materialized_input() {
+        // `row_result_of`'s own column loop already special-cases
+        // `source::EPHEMERAL_INPUT` the same way it special-cases "skipped"
+        // (and that loop `continue`s before it ever reaches its
+        // `classify(c)` call, so it cannot observe the `classify` bug the
+        // next test exercises). This was already correct before #97's fix;
+        // it simply had no test. Expect PASS both before and after the
+        // `classify` fix — this is not what that fix changes.
+        let doc = crate::doc::row_doc(EPHEMERAL_AND_MATERIALIZED_DOC).unwrap();
+        let res = crate::result::row_result_of(doc);
+        let columns: std::collections::HashSet<&str> =
+            res.values.iter().map(|v| v.column.as_str()).collect();
+        assert!(
+            !columns.contains("eph_col"),
+            "values contains eph_col (src ephemeral_input): a column that is \
+             never stored must not appear in the stored-row view"
+        );
+        assert!(
+            columns.contains("mat_col"),
+            "values is missing mat_col (src materialized_input): it IS \
+             stored under insert_allow_materialized_columns=1 and must stay \
+             in values"
+        );
+    }
+
+    #[test]
+    fn classify_excludes_ephemeral_input_still_classifies_materialized_input() {
+        // `classify` ITSELF, called directly on a `ColDoc` parsed off the
+        // wire. `row_result_of`'s loop already `continue`s past
+        // `source::EPHEMERAL_INPUT` before it ever calls `classify`, so
+        // driving this through `row_result_of` (as the test above does)
+        // would pass before the fix for the wrong reason — it would never
+        // run the code under test. `classify` must be correct standing
+        // alone: it is the piece #53 deliberately left as "a behavior
+        // judgement" per the issue, and nothing stops a future caller (or a
+        // refactor of that loop) from invoking it on an ephemeral_input
+        // column without the same guard.
+        //
+        // Before the fix, eph_col's early-return match arm does not include
+        // "ephemeral_input", so `classify` falls through to the
+        // reference-type detector, sees stored ("") disagree with the
+        // reference-widened value ("256"), and reports a phantom
+        // overflow_wrap transform for a column that was never stored. This
+        // assertion FAILS before the fix, PASSES after.
+        //
+        // mat_col carries the identical overflow shape but `src`
+        // "materialized_input", which must keep classifying either way — the
+        // guard against folding the two early-return arms together (the
+        // issue's explicit warning).
+        let doc = crate::doc::row_doc(EPHEMERAL_AND_MATERIALIZED_DOC).unwrap();
+        let eph = doc.cols.iter().find(|c| c.name == "eph_col").unwrap();
+        let mat = doc.cols.iter().find(|c| c.name == "mat_col").unwrap();
+
+        let eph_transforms = classify(eph);
+        assert!(
+            eph_transforms.is_empty(),
+            "classify() reported a transform for eph_col (src \
+             ephemeral_input), want none: {eph_transforms:?}"
+        );
+
+        let mat_transforms = classify(mat);
+        assert_eq!(mat_transforms.len(), 1, "{mat_transforms:?}");
+        assert_eq!(mat_transforms[0].reason, reason::OVERFLOW_WRAP);
+        assert_eq!(mat_transforms[0].column, "mat_col");
     }
 }

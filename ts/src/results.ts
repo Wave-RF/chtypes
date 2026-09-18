@@ -340,7 +340,10 @@ function outcomeOf(s: string): Outcome {
   }
 }
 
-function columnDocOf(raw: Json): ColumnDoc {
+// Exported (but not re-exported from index.ts, so the public surface is
+// unchanged) so tests can parse a single `cols[]` entry the way `rowResultOf`
+// does and call `classify()` on it directly — see transform.test.ts, #97.
+export function columnDocOf(raw: Json): ColumnDoc {
   const poison = asBool(field(raw, 'poison'));
   const inputNode = field(raw, 'input');
   const storedNode = field(raw, 'stored');
