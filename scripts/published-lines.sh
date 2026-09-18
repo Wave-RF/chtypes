@@ -33,7 +33,7 @@ die() { echo "published-lines: $*" >&2; exit 1; }
 # pick_lines <index.json> <platform> <url-label>
 #
 # Reads <index.json>, restricts to <platform> (os-arch), and prints
-# `lines=`/`key=` to stdout and the chosen row for each kind, labelled, to
+# `lines=`/`key=` to stdout and the chosen row for each kind, labeled, to
 # stderr. <url-label> is only for the error messages. Shared between the real
 # run (fed the curled index) and --selftest (fed a planted fixture), so there
 # is exactly one definition of "which row wins".
