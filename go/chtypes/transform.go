@@ -128,7 +128,13 @@ func (t Transform) lossyReason() bool {
 
 func classify(c colDoc) []Transform {
 	switch c.Src {
-	case "skipped", "default_expr_unsupported", "default_volatile_unresolved", "default_pending":
+	// SourceEphemeralInput (issue #97): a listed EPHEMERAL column's value is
+	// read but never stored, so — like "skipped" — there is no stored value
+	// to have silently changed. NOT SourceMaterializedInput: under
+	// insert_allow_materialized_columns=1 that value IS stored, replacing
+	// the column's expression, and must still be classified.
+	case "skipped", "default_expr_unsupported", "default_volatile_unresolved", "default_pending",
+		SourceEphemeralInput:
 		return nil
 	}
 
