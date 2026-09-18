@@ -39,8 +39,13 @@ typedef void         (*fn_schema_free)(void *);
 typedef struct { char * data; size_t len; } chs_lib_bytes;
 // Revision 5: chs_rows, chs_row and chs_block_parse each gain a trailing
 // columns_json (the INSERT column list) — NULL for "no list", the
-// unchanged behavior of every earlier revision.
-typedef char *       (*fn_rows)(const void *, int, const char *, size_t, const char *, int, unsigned, chs_lib_bytes *, const char *);
+// unchanged behavior of every earlier revision. In the same open window,
+// chs_rows gains a second trailing parameter, the attached row filter (a
+// `const chs_filter *` in the real header; `const void *` here, as this
+// file never includes chtypes.h) — NULL for "no filter", today's behavior
+// byte for byte. This loader never attaches one; both wrappers below pass
+// NULL.
+typedef char *       (*fn_rows)(const void *, int, const char *, size_t, const char *, int, unsigned, chs_lib_bytes *, const char *, const void *);
 // Revision 3: the filter trio (optional symbols — a revision-0 artifact may
 // predate them; absence degrades to unsupported at call time).
 // Revision 4: chs_filter_compile carries params_json ({name:Type} query
@@ -167,13 +172,13 @@ static void         chs_lib_schema_free(chs_lib *l, void *s)     { l->schema_fre
 static char *       chs_lib_rows(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st, const char *cols) {
     // -1 = CHS_EXPORT_NONE, 7u = CHS_DOC_ALL, no export buffer — the
     // revision-3 pass-through that keeps Rows() byte-identical to revision 2.
-    return l->rows(s, f, b, n, st, -1, 7u, (chs_lib_bytes *)0, cols);
+    return l->rows(s, f, b, n, st, -1, 7u, (chs_lib_bytes *)0, cols, (const void *)0);
 }
 // The export spelling: RowsExport's one call. ob may be NULL only when
 // ef == -1 (the library initializes *ob to {NULL,0} at entry otherwise).
 static char * chs_lib_rows_export(chs_lib *l, const void *s, int f, const char *b, size_t n,
                                   const char *st, int ef, unsigned df, chs_lib_bytes *ob, const char *cols) {
-    return l->rows(s, f, b, n, st, ef, df, ob, cols);
+    return l->rows(s, f, b, n, st, ef, df, ob, cols, (const void *)0);
 }
 // The filter trio. has_filter is all-or-nothing like the introspection
 // checks: the three symbols shipped together at revision 3.

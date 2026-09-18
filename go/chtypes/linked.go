@@ -926,7 +926,7 @@ func (cs *CompiledSchema) rowsThrough(format Format, body []byte, settings map[s
 		ob = &obv
 	}
 	out := C.chs_rows(cs.handle, C.int(format), pbody, C.size_t(len(body)), csj,
-		C.int(exportFormat), C.uint(flags), ob, pcols)
+		C.int(exportFormat), C.uint(flags), ob, pcols, nil)
 	runtime.KeepAlive(body)
 	// Copy-then-free the export buffer FIRST, whatever happens to the
 	// document: the bytes are library-owned malloc'd memory and this is the
