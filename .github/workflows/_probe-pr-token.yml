@@ -1,0 +1,37 @@
+# _probe-pr-token — THROWAWAY, not for merge. Empirically checks whether the
+# default GITHUB_TOKEN can open a pull request in this repository, for
+# issue #100. Deleted before the real PR is opened.
+name: _probe-pr-token
+on: workflow_dispatch
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: attempt to open a PR with the default GITHUB_TOKEN
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -x
+          git config user.name "probe-pr-token"
+          git config user.email "probe@example.invalid"
+          git checkout -b probe/pr-token-check-100
+          echo "probe $(date -u +%FT%TZ)" > PROBE_DELETE_ME.txt
+          git add PROBE_DELETE_ME.txt
+          git commit -m "probe: does GITHUB_TOKEN open a PR here (issue #100)"
+          git push origin probe/pr-token-check-100
+          set +e
+          gh pr create --base main --head probe/pr-token-check-100 \
+            --title "PROBE (auto, do not merge) — issue #100 token check" \
+            --body "Throwaway probe for issue #100. Safe to close/delete." 2>probe_err.txt
+          rc=$?
+          set -e
+          echo "=== gh pr create exit code: $rc ==="
+          echo "=== stderr/stdout ==="
+          cat probe_err.txt
+          echo "PROBE_RESULT_RC=$rc" >> "$GITHUB_STEP_SUMMARY"
+          cat probe_err.txt >> "$GITHUB_STEP_SUMMARY"
