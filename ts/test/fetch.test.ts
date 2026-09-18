@@ -829,7 +829,7 @@ describe('the registry: the search path, the §7 error and autofetch', () => {
     // nothing if the check had simply been skipped.
     let thrown: unknown;
     try {
-      new Registry(dir, { verifyChecksums: true });
+      new Registry(dir, { verifyChecksums: true, preload: ['25.8'] });
     } catch (e) {
       thrown = e;
     }
