@@ -307,6 +307,26 @@ class Reason:
     TTL_COLUMN_EXPIRED: Final = "ttl_column_expired"
 
 
+class Source:
+    """The two revision-5 `Value.source` provenances `columns_json` introduces
+    (issue #53).
+
+    Not an enum, for the same reason as `Reason`: `src` is a growing
+    vocabulary arriving from the C layer, and an unrecognized spelling from a
+    newer artifact must pass through unchanged, not raise.
+    """
+
+    #: A listed EPHEMERAL column's read value. The server reads it — it is in
+    #: scope for the DEFAULT expressions that reference it — and it is
+    #: reported here so a caller can see what was read. Never stored, never
+    #: exported.
+    EPHEMERAL_INPUT: Final = "ephemeral_input"
+    #: A listed MATERIALIZED column's supplied value under
+    #: ``insert_allow_materialized_columns=1``. The supplied value REPLACES
+    #: the column's expression and IS stored.
+    MATERIALIZED_INPUT: Final = "materialized_input"
+
+
 # Exactly four reasons change how a value is written, or add one the row never
 # carried, without losing information. Everything else is a warning. All of them
 # are still reported: a preview must show what the table will actually hold.
@@ -351,6 +371,9 @@ class Value:
     text: str
     null: bool
     source: str  # the document's `src`: input | default | default_substituted | absent | ...
+    # | skipped | default_volatile_unresolved | default_pending | default_expr_unsupported
+    # | ephemeral_input | materialized_input (revision 5, `Source.EPHEMERAL_INPUT` /
+    # `Source.MATERIALIZED_INPUT` — see `Source`)
 
 
 @dataclass(frozen=True, slots=True)

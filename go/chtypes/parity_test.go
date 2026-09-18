@@ -348,6 +348,10 @@ var goValues = map[string]any{
 	"ReasonTTLExpired":          chtypes.ReasonTTLExpired,
 	"ReasonTTLColumnExpired":    chtypes.ReasonTTLColumnExpired,
 
+	// The two revision-5 `src` provenances columns_json introduces (issue #53).
+	"SourceEphemeralInput":    chtypes.SourceEphemeralInput,
+	"SourceMaterializedInput": chtypes.SourceMaterializedInput,
+
 	// ABI identity and the document/compile/export channels.
 	"ABIRevision":     chtypes.ABIRevision,
 	"CodeUnsupported": chtypes.CodeUnsupported,

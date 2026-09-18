@@ -117,6 +117,7 @@ export {
   FilterOutcome,
   isAnswer,
   Outcome,
+  Source,
   Verdict,
   type BatchResult,
   type ColumnDoc,

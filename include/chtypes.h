@@ -467,7 +467,8 @@ CHS_API int chs_schema_column_default_is_literal(const chs_schema * s, int i);
  *  "code":0,"err":"",
  *  "computed":[{"name":"m","kind":"MATERIALIZED","stored":11}],
  *  "cols":[{"name":"x","type":"UInt8","base":"UInt8","nullable":false,
- *           "src":"input"|"default"|"default_substituted"|"absent"|"skipped",
+ *           "src":"input"|"default"|"default_substituted"|"absent"|"skipped"
+ *                |"ephemeral_input"|"materialized_input",  // revision 5, see columns_json below
  *           "input":"256",
  *           "stored":"0",          // ClickHouse's JSON text of the stored value
  *           "ref":"256",           // same input through a widened reference type
@@ -574,8 +575,12 @@ CHS_API int chs_schema_column_default_is_literal(const chs_schema * s, int i);
  * listed set in the JSON family — and the server computes the rest, with the
  * listed values in scope for their DEFAULT expressions. A listed EPHEMERAL
  * column's value IS read and is in scope for the DEFAULTs referencing it,
- * and is still never stored and never exported. A name that is unknown, an
- * ALIAS, or repeated is refused with the server's own code. */
+ * and is still never stored and never exported — reported in `cols` with
+ * `"src":"ephemeral_input"` so a caller can see what was read. A listed
+ * MATERIALIZED column, under `insert_allow_materialized_columns=1`, has its
+ * supplied value REPLACE the column's expression and IS stored — reported
+ * with `"src":"materialized_input"`. A name that is unknown, an ALIAS, or
+ * repeated is refused with the server's own code. */
 CHS_API char * chs_row(const chs_schema * s, int format, const char * raw, size_t raw_len, const char * settings_json,
                        const char * columns_json);
 

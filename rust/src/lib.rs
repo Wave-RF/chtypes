@@ -122,6 +122,7 @@ pub use registry::{
     cache_dir_for, default_registry_dir, host_platform, install_dir, install_dir_for,
     installed_lines, locate, locate_in, registry_search_path, search_path_for,
 };
+pub use result::source;
 pub use result::{
     BatchResult, Computed, DocFlags, FilterOutcome, FilterResult, FilterRowError, Format, Outcome,
     RowResult, Span, Substitution, Transform, Value, Verdict,

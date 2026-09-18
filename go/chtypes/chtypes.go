@@ -460,11 +460,35 @@ type Value struct {
 	//   "absent"               the type's own default, no DEFAULT declared
 	//   "skipped"              MATERIALIZED / ALIAS / EPHEMERAL, never read
 	//                          from an input row
+	//   "ephemeral_input"      revision 5: a LISTED EPHEMERAL column's read
+	//                          value (see SourceEphemeralInput) — never stored,
+	//                          never exported
+	//   "materialized_input"   revision 5: a LISTED MATERIALIZED column's
+	//                          supplied value under
+	//                          insert_allow_materialized_columns=1 (see
+	//                          SourceMaterializedInput) — stored, replacing the
+	//                          column's expression
 	Source string
 }
 
 // String returns Text — ClickHouse's own JSON rendering of the stored value.
 func (v Value) String() string { return v.Text }
+
+// The two revision-5 Value.Source provenances columns_json introduces
+// (issue #53). Bare string constants, matching the Reason* shape above: `src`
+// is a growing vocabulary a binding must pass through verbatim, so these name
+// two of its spellings rather than wrapping it in a closed type.
+const (
+	// SourceEphemeralInput: a listed EPHEMERAL column's read value. The
+	// server reads it — it is in scope for the DEFAULT expressions that
+	// reference it — and it is reported here so a caller can see what was
+	// read. It is never stored and never exported.
+	SourceEphemeralInput = "ephemeral_input"
+	// SourceMaterializedInput: a listed MATERIALIZED column's supplied value
+	// under insert_allow_materialized_columns=1. The supplied value REPLACES
+	// the column's expression and IS stored.
+	SourceMaterializedInput = "materialized_input"
+)
 
 // Transform records a silent change ClickHouse made on the way to storage:
 // input 256 into UInt8 stored as 0, reason "overflow_wrap". Reason is one of

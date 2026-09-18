@@ -90,10 +90,34 @@ export interface Value {
   /**
    * Where the value came from: `input` | `default` | `default_substituted` |
    * `absent` | `skipped` | `default_volatile_unresolved` | `default_pending` |
-   * `default_expr_unsupported` (the C ABI contract §`src` values).
+   * `default_expr_unsupported` | `ephemeral_input` | `materialized_input`
+   * (revision 5 — see {@link Source}) (the C ABI contract §`src` values).
    */
   readonly source: string;
 }
+
+/**
+ * The two revision-5 `source` provenances `columns_json` introduces (issue
+ * #53). A plain const object, not a closed union: `source` is a growing
+ * vocabulary arriving from the C layer, and an unrecognized spelling from a
+ * newer artifact must pass through unchanged, not be rejected.
+ */
+export const Source = {
+  /**
+   * A listed EPHEMERAL column's read value. The server reads it — it is in
+   * scope for the DEFAULT expressions that reference it — and it is
+   * reported here so a caller can see what was read. Never stored, never
+   * exported.
+   */
+  EphemeralInput: 'ephemeral_input',
+  /**
+   * A listed MATERIALIZED column's supplied value under
+   * `insert_allow_materialized_columns=1`. The supplied value REPLACES the
+   * column's expression and IS stored.
+   */
+  MaterializedInput: 'materialized_input',
+} as const;
+export type Source = (typeof Source)[keyof typeof Source];
 
 /** A silent change: input 256 into UInt8 stored as 0. */
 export interface Transform {

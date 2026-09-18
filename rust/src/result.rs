@@ -383,9 +383,28 @@ pub struct Value {
     pub null: bool,
     /// The `src` string from the result document: `input`, `default`,
     /// `default_substituted`, `absent`, `default_volatile_unresolved`,
-    /// `default_pending`, `default_expr_unsupported`. (`skipped` columns are
-    /// dropped from the stored row.)
+    /// `default_pending`, `default_expr_unsupported`, and — revision 5 — the
+    /// two [`source`] provenances. (`skipped` columns are dropped from the
+    /// stored row.)
     pub source: String,
+}
+
+/// The two revision-5 `Value::source` provenances `columns_json` introduces
+/// (issue #53).
+///
+/// Plain `&str` constants, not an enum: `src` is a growing vocabulary
+/// arriving from the C layer, and an unrecognized spelling from a newer
+/// artifact must pass through unchanged, not be rejected.
+pub mod source {
+    /// A listed EPHEMERAL column's read value. The server reads it — it is
+    /// in scope for the DEFAULT expressions that reference it — and it is
+    /// reported here so a caller can see what was read. Never stored, never
+    /// exported.
+    pub const EPHEMERAL_INPUT: &str = "ephemeral_input";
+    /// A listed MATERIALIZED column's supplied value under
+    /// `insert_allow_materialized_columns=1`. The supplied value REPLACES
+    /// the column's expression and IS stored.
+    pub const MATERIALIZED_INPUT: &str = "materialized_input";
 }
 
 /// One silent change: input `256` into `UInt8` stored as `0`.

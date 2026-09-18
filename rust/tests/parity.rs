@@ -364,7 +364,7 @@ fn s(v: &str) -> Val {
 }
 
 fn rust_values() -> BTreeMap<&'static str, Val> {
-    use chtypes::{CompileMode, DocFlags, Format, Outcome, Verdict, reason};
+    use chtypes::{CompileMode, DocFlags, Format, Outcome, Verdict, reason, source};
     let mut m = BTreeMap::new();
 
     // chs_format — the numbers are frozen (the C ABI contract §Types and schemas).
@@ -449,6 +449,10 @@ fn rust_values() -> BTreeMap<&'static str, Val> {
     );
     m.insert("reason::TTL_EXPIRED", s(reason::TTL_EXPIRED));
     m.insert("reason::TTL_COLUMN_EXPIRED", s(reason::TTL_COLUMN_EXPIRED));
+
+    // The two revision-5 `src` provenances columns_json introduces (issue #53).
+    m.insert("source::EPHEMERAL_INPUT", s(source::EPHEMERAL_INPUT));
+    m.insert("source::MATERIALIZED_INPUT", s(source::MATERIALIZED_INPUT));
 
     // ABI identity and the document/compile channels.
     m.insert("ABI_REVISION", i(chtypes::ABI_REVISION as i64));

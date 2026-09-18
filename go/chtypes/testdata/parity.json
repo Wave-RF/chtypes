@@ -867,6 +867,19 @@
     },
 
     {
+      "id": "vocab.src.ephemeral_input",
+      "group": "vocabulary", "kind": "constant", "value": "ephemeral_input",
+      "what": "columns_json (revision 5): a listed EPHEMERAL column's read value — reported in the column results, never stored, never exported (issue #53)",
+      "go": "SourceEphemeralInput", "python": "Source.EPHEMERAL_INPUT", "ts": "Source.EphemeralInput", "rust": "source::EPHEMERAL_INPUT"
+    },
+    {
+      "id": "vocab.src.materialized_input",
+      "group": "vocabulary", "kind": "constant", "value": "materialized_input",
+      "what": "columns_json (revision 5): a listed MATERIALIZED column's supplied value under insert_allow_materialized_columns=1 — replaces the column's expression and IS stored (issue #53)",
+      "go": "SourceMaterializedInput", "python": "Source.MATERIALIZED_INPUT", "ts": "Source.MaterializedInput", "rust": "source::MATERIALIZED_INPUT"
+    },
+
+    {
       "id": "const.abi-revision",
       "group": "vocabulary", "kind": "constant", "value": 5,
       "what": "The chs_* ABI revision this binding was written against; a different nonzero artifact revision is refused at load (§The object model)",
