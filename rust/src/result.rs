@@ -383,9 +383,33 @@ pub struct Value {
     pub null: bool,
     /// The `src` string from the result document: `input`, `default`,
     /// `default_substituted`, `absent`, `default_volatile_unresolved`,
-    /// `default_pending`, `default_expr_unsupported`. (`skipped` columns are
-    /// dropped from the stored row.)
+    /// `default_pending`, `default_expr_unsupported`, and — revision 5 — the
+    /// two [`source`] provenances. (`skipped` columns, and
+    /// [`source::EPHEMERAL_INPUT`] columns, are both dropped from the
+    /// stored row — never seen here; [`source::MATERIALIZED_INPUT`] stays
+    /// in.)
     pub source: String,
+}
+
+/// The two revision-5 `Value::source` provenances `columns_json` introduces
+/// (issue #53).
+///
+/// Plain `&str` constants, not an enum: `src` is a growing vocabulary
+/// arriving from the C layer, and an unrecognized spelling from a newer
+/// artifact must pass through unchanged, not be rejected.
+pub mod source {
+    /// A listed EPHEMERAL column's read value. The server reads it — it is
+    /// in scope for the DEFAULT expressions that reference it — and it is
+    /// never stored and never exported. `row_result_of` excludes it from
+    /// `values` exactly as it already excludes `"skipped"`: a value that is
+    /// never stored must not sit where a caller reads the stored row (a
+    /// hash, a signature).
+    pub const EPHEMERAL_INPUT: &str = "ephemeral_input";
+    /// A listed MATERIALIZED column's supplied value under
+    /// `insert_allow_materialized_columns=1`. The supplied value REPLACES
+    /// the column's expression and IS stored — unlike [`EPHEMERAL_INPUT`],
+    /// it stays IN `values`.
+    pub const MATERIALIZED_INPUT: &str = "materialized_input";
 }
 
 /// One silent change: input `256` into `UInt8` stored as `0`.
@@ -731,7 +755,14 @@ pub(crate) fn row_result_of(doc: RowDoc) -> RowResult {
         res.outcome = Outcome::Unsupported;
     }
     for c in &doc.cols {
-        if c.src == "skipped" {
+        // "skipped" (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
+        // source::EPHEMERAL_INPUT (a LISTED EPHEMERAL column: read, but
+        // never stored — see `Value::source`) are both excluded from
+        // `values`, which is the stored row. source::MATERIALIZED_INPUT
+        // stays IN: under insert_allow_materialized_columns=1 the supplied
+        // value genuinely IS stored, replacing the column's expression
+        // (issue #53).
+        if c.src == "skipped" || c.src == source::EPHEMERAL_INPUT {
             continue;
         }
         res.values.push(Value {

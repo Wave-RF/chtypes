@@ -142,6 +142,13 @@ This is a promise a caller may rely on, not merely a return shape: the column li
 
 `Value` is `{Column, Text, Null, Source}`, where `Text` is ClickHouse's own JSON rendering of the stored value and `Source` is the `src` string from the result document. `Null` is true only for a genuine stored null — a poisoned column is `Null == false` with an empty `Text`, because there is no value, not a null one.
 
+**Revision 5 adds two `Source` provenances, `columns_json`'s own (issue #53), each exposed as a named vocabulary constant the way `Reason` already is** (Go `SourceEphemeralInput` / `SourceMaterializedInput`, Python `Source.EPHEMERAL_INPUT` / `Source.MATERIALIZED_INPUT`, TypeScript `Source.EphemeralInput` / `Source.MaterializedInput`, Rust `source::EPHEMERAL_INPUT` / `source::MATERIALIZED_INPUT`):
+
+- `ephemeral_input` — a listed EPHEMERAL column's read value. The server reads it, it is in scope for the `DEFAULT` expressions that reference it, and it is **never stored and never exported**. A binding MUST exclude it from `RowResult.Values`, exactly as it already excludes `src == "skipped"` — a value that is never stored must not sit where a caller reads the stored row (a hash, a signature would otherwise be computed over a column the table never held, the same leak the release-blocker text warns about for export, one layer up). It is reported only through the per-column result document, carrying its `src`.
+- `materialized_input` — a listed MATERIALIZED column's supplied value under `insert_allow_materialized_columns=1`, where the supplied value **replaces** the column's expression and **is** stored. A binding MUST keep it IN `RowResult.Values` — the two provenances get opposite treatment, not the same one.
+
+A binding MUST pass an unrecognized `Source`/`src` string through verbatim, exactly as it already does for every prior spelling — `src` is a growing vocabulary, not a closed set, and there is no "unknown degrades to X" arm to keep in sync the way `Outcome` has one.
+
 `Substitution` is `{Column, Expr, Text}`. `Computed` is `{Column, Kind, Text}`.
 
 A binding MUST promote a row whose `unsupported_settings` list is non-empty to `Unsupported` unless it was already `Rejected`. The reference does this in `rowResultOf`; skipping it turns a declined setting into a scored answer.

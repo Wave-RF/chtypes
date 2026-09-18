@@ -695,7 +695,7 @@ type Block struct {
 // Row/Rows read it — filters still compile over the schema's physical
 // columns and evaluate the stored tuple, so a listed EPHEMERAL column stays
 // unreferenceable in a filter.
-func (cs *CompiledSchema) ParseBlock(format Format, body []byte, settings map[string]string, opts ...rowOption) (*Block, error) {
+func (cs *CompiledSchema) ParseBlock(format Format, body []byte, settings map[string]string, opts ...RowOption) (*Block, error) {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
 	cs.mu.Lock()
@@ -845,7 +845,7 @@ func (b *Block) closeLocked() {
 //
 // WithColumns declares the revision-5 INSERT column list (see its doc); a
 // nil or empty list is today's no-list behavior, unchanged.
-func (cs *CompiledSchema) Rows(format Format, body []byte, settings map[string]string, opts ...rowOption) (BatchResult, error) {
+func (cs *CompiledSchema) Rows(format Format, body []byte, settings map[string]string, opts ...RowOption) (BatchResult, error) {
 	// export off, all document groups on: the revision-3 pass-through that
 	// keeps Rows() byte-identical to revision 2 (docs/reference/bindings.md §Revision 3).
 	return cs.rowsThrough(format, body, settings, ExportNone, DocAll, columnsOf(opts))
@@ -880,7 +880,7 @@ func (cs *CompiledSchema) Rows(format Format, body []byte, settings map[string]s
 // column list) in any mix — the export tuple is unchanged by a column list:
 // an exported row still carries the stored columns in declared order, so it
 // stays directly INSERT-able with no list.
-func (cs *CompiledSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...rowsExportOption) (BatchResult, error) {
+func (cs *CompiledSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...RowsExportOption) (BatchResult, error) {
 	var cfg rowsExportConfig
 	for _, o := range opts {
 		o.applyRowsExport(&cfg)
@@ -969,14 +969,14 @@ func (cs *CompiledSchema) rowsThrough(format Format, body []byte, settings map[s
 //
 // WithColumns declares the revision-5 INSERT column list; see its doc for
 // the full contract.
-func (cs *CompiledSchema) Row(format Format, raw []byte, opts ...rowOption) (RowResult, error) {
+func (cs *CompiledSchema) Row(format Format, raw []byte, opts ...RowOption) (RowResult, error) {
 	return cs.RowWithSettings(format, raw, nil, opts...)
 }
 
 // RowWithSettings is Row with per-call ClickHouse settings applied. Values
 // must be strings (see SetDefaultSettings); an unknown setting name rejects
 // the call with the server's own code 115 in the RowResult.
-func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings map[string]string, opts ...rowOption) (RowResult, error) {
+func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings map[string]string, opts ...RowOption) (RowResult, error) {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
 	cs.mu.Lock()

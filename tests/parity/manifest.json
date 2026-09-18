@@ -548,6 +548,16 @@
       "ts": "isAnswer",
       "rust": "Verdict::answered"
     },
+    {
+      "id": "results.ephemeral-input-excluded-from-values",
+      "group": "results",
+      "kind": "rule",
+      "what": "RowResult.Values/values excludes a column reported with src == \"ephemeral_input\", exactly as src == \"skipped\" already is: it was read but is never stored, so it must not sit where a caller reads the stored row (a hash, a signature) — the same leak the release-blocker text warns about for export, one layer up. src == \"materialized_input\" stays IN Values: it IS stored, replacing the column's expression (issue #53). Not independently value-checked by this manifest — it keys on the vocab.src.ephemeral_input spelling below, and the exclusion itself needs a real artifact to assert against end to end; the pre-existing src == \"skipped\" exclusion this mirrors is likewise undeclared here (a gap, not a new one).",
+      "go": "SourceEphemeralInput",
+      "python": "Source.EPHEMERAL_INPUT",
+      "ts": "Source.EphemeralInput",
+      "rust": "source::EPHEMERAL_INPUT"
+    },
 
     {
       "id": "vocab.format.json-each-row",
@@ -864,6 +874,19 @@
       "group": "vocabulary", "kind": "constant", "value": "ttl_column_expired",
       "what": "The value reset to the column DEFAULT by a column TTL",
       "go": "ReasonTTLColumnExpired", "python": "Reason.TTL_COLUMN_EXPIRED", "ts": "Reason.TtlColumnExpired", "rust": "reason::TTL_COLUMN_EXPIRED"
+    },
+
+    {
+      "id": "vocab.src.ephemeral_input",
+      "group": "vocabulary", "kind": "constant", "value": "ephemeral_input",
+      "what": "columns_json (revision 5): a listed EPHEMERAL column's read value — reported in the column results, never stored, never exported (issue #53)",
+      "go": "SourceEphemeralInput", "python": "Source.EPHEMERAL_INPUT", "ts": "Source.EphemeralInput", "rust": "source::EPHEMERAL_INPUT"
+    },
+    {
+      "id": "vocab.src.materialized_input",
+      "group": "vocabulary", "kind": "constant", "value": "materialized_input",
+      "what": "columns_json (revision 5): a listed MATERIALIZED column's supplied value under insert_allow_materialized_columns=1 — replaces the column's expression and IS stored (issue #53)",
+      "go": "SourceMaterializedInput", "python": "Source.MATERIALIZED_INPUT", "ts": "Source.MaterializedInput", "rust": "source::MATERIALIZED_INPUT"
     },
 
     {
@@ -1259,6 +1282,8 @@
       "CompileOption": "Functional option carrier.",
       "EngineOption": "Functional option carrier.",
       "FilterOption": "Functional option carrier.",
+      "RowOption": "Functional option carrier.",
+      "RowsExportOption": "Functional option carrier; exported (unlike a plain option type) because a caller migrating off RowsExport's old ...DocFlags variadic needs a nameable type to build a []RowsExportOption.",
       "WithAutoFetch": "Registry option; Python/TS/Rust spell it as a constructor field.",
       "WithFetchOptions": "Registry option; Python/TS/Rust spell it as a constructor field.",
       "FetchOptions": "The fetch option struct; every binding has one, shaped its own way.",

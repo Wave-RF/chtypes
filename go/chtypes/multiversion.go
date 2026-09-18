@@ -1083,7 +1083,7 @@ func columnsCArgLoaded(columns []string) *C.char {
 }
 
 // Row validates and coerces a single row body, mirroring CompiledSchema.Row.
-func (s *LoadedSchema) Row(format Format, raw []byte, opts ...rowOption) (RowResult, error) {
+func (s *LoadedSchema) Row(format Format, raw []byte, opts ...RowOption) (RowResult, error) {
 	return s.RowWithSettings(format, raw, nil, opts...)
 }
 
@@ -1091,7 +1091,7 @@ func (s *LoadedSchema) Row(format Format, raw []byte, opts ...rowOption) (RowRes
 // library. An artifact built before chs_row reports an error rather than
 // guessing at batch semantics. WithColumns declares the revision-5 INSERT
 // column list; see its doc for the full contract.
-func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[string]string, opts ...rowOption) (RowResult, error) {
+func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[string]string, opts ...RowOption) (RowResult, error) {
 	sj := settingsJSON(settings)
 	csj := C.CString(sj)
 	defer C.free(unsafe.Pointer(csj))
@@ -1143,7 +1143,7 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 // CompiledSchema.Rows: same parameters, same settings precedence, same
 // BatchResult contract (the error return is only for a closed schema or a
 // missing symbol, never a ClickHouse verdict).
-func (s *LoadedSchema) Rows(format Format, body []byte, settings map[string]string, opts ...rowOption) (BatchResult, error) {
+func (s *LoadedSchema) Rows(format Format, body []byte, settings map[string]string, opts ...RowOption) (BatchResult, error) {
 	// export off, all document groups on — the same revision-3 pass-through
 	// as the static path, so Rows() is byte-identical to revision 2.
 	return s.rowsThrough(format, body, settings, ExportNone, DocAll, columnsOf(opts))
@@ -1155,7 +1155,7 @@ func (s *LoadedSchema) Rows(format Format, body []byte, settings map[string]stri
 // copied and freed with THIS library's chs_free before returning. opts
 // accepts DocFlags values and WithColumns (the revision-5 column list) in
 // any mix.
-func (s *LoadedSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...rowsExportOption) (BatchResult, error) {
+func (s *LoadedSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...RowsExportOption) (BatchResult, error) {
 	var cfg rowsExportConfig
 	for _, o := range opts {
 		o.applyRowsExport(&cfg)
@@ -1376,7 +1376,7 @@ type LoadedBlock struct {
 // Row/Rows read it — filters still compile over the schema's physical
 // columns and evaluate the stored tuple, so a listed EPHEMERAL column stays
 // unreferenceable in a filter.
-func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[string]string, opts ...rowOption) (*LoadedBlock, error) {
+func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[string]string, opts ...RowOption) (*LoadedBlock, error) {
 	if C.chs_lib_has_block(&s.lib.lib) == 0 {
 		return nil, &UnsupportedError{Msg: "this artifact predates chs_block_parse (rebuild it)"}
 	}

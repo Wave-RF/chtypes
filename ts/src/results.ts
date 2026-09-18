@@ -90,10 +90,39 @@ export interface Value {
   /**
    * Where the value came from: `input` | `default` | `default_substituted` |
    * `absent` | `skipped` | `default_volatile_unresolved` | `default_pending` |
-   * `default_expr_unsupported` (the C ABI contract §`src` values).
+   * `default_expr_unsupported` | `ephemeral_input` | `materialized_input`
+   * (revision 5 — see {@link Source}) (the C ABI contract §`src` values).
+   * `ephemeral_input` is excluded from `RowResult.values`/`values`, like
+   * `skipped`; never seen here. `materialized_input` stays in `values`.
    */
   readonly source: string;
 }
+
+/**
+ * The two revision-5 `source` provenances `columns_json` introduces (issue
+ * #53). A plain const object, not a closed union: `source` is a growing
+ * vocabulary arriving from the C layer, and an unrecognized spelling from a
+ * newer artifact must pass through unchanged, not be rejected.
+ */
+export const Source = {
+  /**
+   * A listed EPHEMERAL column's read value. The server reads it — it is in
+   * scope for the DEFAULT expressions that reference it — and it is never
+   * stored and never exported. `rowResultOf` excludes it from `values`
+   * exactly as it already excludes `'skipped'`: a value that is never
+   * stored must not sit where a caller reads the stored row (a hash, a
+   * signature).
+   */
+  EphemeralInput: 'ephemeral_input',
+  /**
+   * A listed MATERIALIZED column's supplied value under
+   * `insert_allow_materialized_columns=1`. The supplied value REPLACES the
+   * column's expression and IS stored — unlike `EphemeralInput`, it stays
+   * IN `values`.
+   */
+  MaterializedInput: 'materialized_input',
+} as const;
+export type Source = (typeof Source)[keyof typeof Source];
 
 /** A silent change: input 256 into UInt8 stored as 0. */
 export interface Transform {
@@ -358,7 +387,13 @@ export function rowResultOf(doc: Json): RowResult {
 
   for (const rawCol of items(field(doc, 'cols'))) {
     const c = columnDocOf(rawCol);
-    if (c.src === 'skipped') continue;
+    // 'skipped' (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
+    // Source.EphemeralInput (a LISTED EPHEMERAL column: read, but never
+    // stored — see the `source` doc on `Value`) are both excluded from
+    // `values`, which is the stored row. Source.MaterializedInput stays IN:
+    // under insert_allow_materialized_columns=1 the supplied value genuinely
+    // IS stored, replacing the column's expression (issue #53).
+    if (c.src === 'skipped' || c.src === Source.EphemeralInput) continue;
     values.push({
       column: c.name,
       text: c.stored,
