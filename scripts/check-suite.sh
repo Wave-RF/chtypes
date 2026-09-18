@@ -76,6 +76,24 @@ abi_case_ran() {
   grep -qE "^test $t \.\.\. ok$" "$file" && grep -qF "ABI fixture: ran $t" "$file"
 }
 
+# PARITY_OK_RE (#77) — the rust arm's OTHER census carries the same
+# end-anchor shape as abi_case_ran above, and reads it off the very same
+# kind of merged capture: the suite-wide $PLAIN is `2>&1 | tee`'d in run()
+# below, so anything a parity test writes to stderr mid-body can land inside
+# libtest's own "test NAME ... ok" progress line (stdout) and break the `$`
+# anchor — see abi_case_ran's comment for the three shapes actually measured
+# on #66 (same libtest engine, same mechanism). Nothing in rust/tests/parity.rs
+# writes to stderr TODAY, which is why this has never fired — the exposure
+# was latent, found while fixing #66 and filed separately as #77 because it
+# is a different check. It is worse in one respect: this census is a COUNT
+# against a THRESHOLD ($PARITY_MIN, below), not a boolean about one named
+# case, so an interleave silently UNDERCOUNTS rather than naming a specific
+# case as unproven — the failure message would say the parity suite is short
+# of cases, sending the next reader to the parity tests, which are fine.
+# Factored out (like abi_case_ran) so --selftest and the real census below
+# drive the exact same pattern — no re-implemented regex.
+PARITY_OK_RE='^test (parity_manifest|rust_(exposes|answers)|the_(rust|go_copy))[a-z_]* \.\.\. ok$'
+
 if [ "${1:-}" = "--selftest" ]; then
   # Pin the matcher's strictness: all three interleave shapes measured on
   # #66 (three separate PRs — #61, #65, #71 — none touching Rust) must read
@@ -118,7 +136,57 @@ if [ "${1:-}" = "--selftest" ]; then
   abi_case_ran wrong_revision_is_refused "$tmp/skipped.log" \
     && { echo "SELFTEST FAILED: a case that did not run was reported as RUN" >&2; exit 1; }
 
-  echo "check-suite: selftest ok — the ABI-fixture matcher stays strict on all three #66 interleave shapes and a genuine non-run, and still reads a clean line as RUN"
+  # PARITY_OK_RE (#77) — same three interleave shapes as above, driven
+  # through the SAME regex the rust arm's census counts with (no
+  # re-implemented pattern), spelled with real parity test names
+  # (rust/tests/parity.rs) in place of the ABI-fixture's. Unlike
+  # abi_case_ran this is a COUNT, not a boolean, so each assertion below
+  # reads grep -c's own number rather than its exit status.
+  printf 'test parity_manifest_meets_its_own_floors ... ok\ntest rust_exposes_every_capability_the_contract_assigns_it ... ok\ntest the_rust_cli_offers_every_contract_subcommand ... ok\n' \
+    > "$tmp/parity-clean.log"
+  N="$(grep -cE "$PARITY_OK_RE" "$tmp/parity-clean.log")"
+  [ "$N" -eq 3 ] || { echo "SELFTEST FAILED: 3 clean parity lines counted as $N, not 3" >&2; exit 1; }
+
+  # Shape 1 (#61's shape on #66): verdict present, junk appended after "ok".
+  printf 'test rust_answers_the_same_values_as_the_other_bindings ... okABI fixture: ran matching_revision_loads\n' \
+    > "$tmp/parity-shape1.log"
+  N="$(grep -cE "$PARITY_OK_RE" "$tmp/parity-shape1.log" || true)"
+  [ "$N" -eq 0 ] || { echo "SELFTEST FAILED: parity shape 1 (ok present, line not ended) counted as $N, not 0 — the anchor must stay strict" >&2; exit 1; }
+
+  # Shape 2 (#65's shape on #66): verdict displaced — no "ok" on the line at all.
+  printf 'test the_go_copy_of_the_manifest_is_byte_identical ... ABI fixture: ran matching_revision_loads\n' \
+    > "$tmp/parity-shape2.log"
+  N="$(grep -cE "$PARITY_OK_RE" "$tmp/parity-shape2.log" || true)"
+  [ "$N" -eq 0 ] || { echo "SELFTEST FAILED: parity shape 2 (no ok on the line) counted as $N, not 0" >&2; exit 1; }
+
+  # Shape 3 (#71's shape on #66): line PREFIXED, breaking the ^ anchor too,
+  # and carrying no verdict.
+  printf 'ABI fixture: ran matching_revision_loadstest the_rust_unlisted_allowlist_has_not_rotted ... \n' \
+    > "$tmp/parity-shape3.log"
+  N="$(grep -cE "$PARITY_OK_RE" "$tmp/parity-shape3.log" || true)"
+  [ "$N" -eq 0 ] || { echo "SELFTEST FAILED: parity shape 3 (line prefixed, no verdict) counted as $N, not 0 — this would go quiet on a real failure" >&2; exit 1; }
+
+  # Threshold behavior (#77): this census is a COUNT against PARITY_MIN
+  # (6, below), not a boolean about one case, so a fix that only repairs the
+  # matcher and leaves the counting/threshold wiring broken would still turn
+  # the gate into a no-op. Simulate the ORIGINAL exposure at scale: six real
+  # passing tests (one per test name this pattern recognizes), every one
+  # corrupted the same way (shape 2), as would land in the merged $PLAIN if
+  # every parity test wrote to stderr mid-body. If the count silently
+  # cleared the >= 6 threshold anyway, the fix would have quietly turned the
+  # gate off; it must instead undercount to 0, and that count must then fail
+  # the threshold comparison the real census applies.
+  : > "$tmp/parity-undercount.log"
+  for t in parity_manifest_meets_its_own_floors parity_manifest_is_fully_declared \
+           the_go_copy_of_the_manifest_is_byte_identical rust_exposes_every_capability_the_contract_assigns_it \
+           rust_answers_the_same_values_as_the_other_bindings the_rust_cli_offers_every_contract_subcommand; do
+    printf 'test %s ... ABI fixture: ran matching_revision_loads\n' "$t" >> "$tmp/parity-undercount.log"
+  done
+  N="$(grep -cE "$PARITY_OK_RE" "$tmp/parity-undercount.log" || true)"
+  [ "$N" -eq 0 ] || { echo "SELFTEST FAILED: 6 interleaved parity lines counted as $N, not 0 — corrupted lines must never clear the threshold" >&2; exit 1; }
+  [ "$N" -lt 6 ] || { echo "SELFTEST FAILED: an under-count of $N was read as meeting PARITY_MIN=6 — the threshold gate would be a no-op" >&2; exit 1; }
+
+  echo "check-suite: selftest ok — the ABI-fixture matcher stays strict on all three #66 interleave shapes and a genuine non-run, still reads a clean line as RUN, and the parity census matcher (#77) stays strict on the same three shapes, counts a clean line, and still fails its threshold on an undercount"
   exit 0
 fi
 
@@ -253,7 +321,37 @@ here: ts ran ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/m
     [ -z "$RESULTS" ] || SUMMARY="$(printf '%s\n' "$RESULTS" | grep -c .) test binaries: $PASSED passed, $FAILED_N failed (each binary's own line above)"
     SKIPPED="$(grep -cE '^SKIP ' "$PLAIN" || true)"
     ! grep -qE '^test result: FAILED|^error(\[E[0-9]+\])?:|panicked at' "$PLAIN" || PROBLEMS+=("a test binary reported FAILED, or did not build")
-    PARITY_N="$(grep -cE '^test (parity_manifest|rust_(exposes|answers)|the_(rust|go_copy))[a-z_]* \.\.\. ok$' "$PLAIN" || true)"
+    # PARITY_OK_RE (defined above, shared with --selftest) has the same
+    # end-anchor shape as abi_case_ran, and #77 found it reads the same kind
+    # of exposed input: the suite-wide $PLAIN above is the ordinary run()
+    # helper's `2>&1 | tee` capture, so anything rust/tests/parity.rs writes
+    # to stderr mid-body could land inside libtest's own "test NAME ... ok"
+    # progress line (stdout) and break the `$` anchor — see abi_case_ran's
+    # comment for the three shapes #66 actually measured (same libtest
+    # engine, same mechanism). Nothing in parity.rs writes to stderr TODAY,
+    # so this has never fired, but the fix does not depend on that staying
+    # true, and this census is worse when it does fire: it is a COUNT
+    # against a THRESHOLD rather than a boolean about one named case, so an
+    # interleave would silently UNDERCOUNT instead of naming an unproven
+    # case — a red that sends the next reader to the parity tests, which are
+    # fine (#77).
+    #
+    # THE FIX, same shape as #66: the parity tests live in their own binary
+    # (`cargo test --test parity`), so exactly as #66 did for the ABI
+    # fixture, it is run again here, alone, with stdout and stderr captured
+    # to SEPARATE files and concatenated only after both are complete —
+    # which cannot itself introduce an interleave. PARITY_N is read off that
+    # concatenation, never off the suite-wide, 2>&1-merged $PLAIN above
+    # (which still runs these tests too, as part of the ordinary suite, and
+    # is not relied on here).
+    PARITY_STDOUT="$LOG_DIR/rust-parity.stdout.log"
+    PARITY_STDERR="$LOG_DIR/rust-parity.stderr.log"
+    PARITY_PLAIN="$LOG_DIR/rust-parity.plain.log"
+    ( cd "$ROOT/rust" && cargo test --locked --test parity ) \
+      > "$PARITY_STDOUT" 2> "$PARITY_STDERR" || true
+    cat "$PARITY_STDOUT" "$PARITY_STDERR"
+    sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$PARITY_STDOUT" "$PARITY_STDERR" > "$PARITY_PLAIN"
+    PARITY_N="$(grep -cE "$PARITY_OK_RE" "$PARITY_PLAIN" || true)"
     [ "${PARITY_N:-0}" -ge "$PARITY_MIN" ] || PROBLEMS+=("the binding parity contract was not proven \
 here: rust passed ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/manifest.json)")
     if [ "$REQUIRE" -eq 1 ]; then
