@@ -226,10 +226,10 @@ fn a_checksum_is_computed_immediately_before_a_dlopen_and_at_no_other_time() {
 }
 
 #[test]
-fn a_broken_neighbour_is_no_longer_the_whole_registrys_problem() {
+fn a_broken_neighbor_is_no_longer_the_whole_registrys_problem() {
     // A registry over a directory holding a corrupt 25.8 and a good 26.7 used
     // to fail at construction and serve neither.
-    let dir = scratch("neighbour");
+    let dir = scratch("neighbor");
     stand_in(&dir, "25.8", Some(&"00".repeat(32)));
     stand_in(&dir, "26.7", Some(&chtypes::fetch::sha256_hex(BODY)));
 
@@ -240,7 +240,7 @@ fn a_broken_neighbour_is_no_longer_the_whole_registrys_problem() {
             ..Default::default()
         },
     )
-    .expect("a corrupt neighbour must not stop the registry constructing");
+    .expect("a corrupt neighbor must not stop the registry constructing");
     assert_eq!(reg.versions(), vec!["25.8", "26.7"]);
     // The honest line passes its hash and dies at dlopen, which is the proof
     // the hash ran and passed rather than never running.

@@ -162,7 +162,7 @@ describe('lazy loading', () => {
     expect(String((thrown as Error).message)).not.toMatch(/does not match manifest/);
   });
 
-  it('an honest line in a directory with a corrupt neighbour still serves', () => {
+  it('an honest line in a directory with a corrupt neighbor still serves', () => {
     const dir = scratch('mixed');
     standIn(dir, '25.8', { library_sha256: '00'.repeat(32) }); // corrupt
     standIn(dir, '26.7', { library_sha256: createHash('sha256').update(BODY).digest('hex') });

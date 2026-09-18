@@ -6,9 +6,26 @@ One process can hold as many ClickHouse versions as you have artifacts for, each
 
 Every artifact is opened with `RTLD_NOW | RTLD_LOCAL`. `RTLD_LOCAL` is the entire mechanism: it keeps each library's ClickHouse symbols private, so two builds that both define `DB::DataTypeFactory` never collide. A loader that used `RTLD_GLOBAL` would appear to work and then answer with the wrong version's semantics — which is worse than failing.
 
-The cost, measured: **about 120 MB resident per loaded version** (160–300 MB on disk). Load the lines you serve, not every line published.
+The cost, measured: **about 120 MB resident per loaded version** (160–300 MB on disk). Load the lines you serve, not every line published. Seven artifacts in one directory, opened from one process: **1.096 s and 351 MB resident** to open them all, against **1 ms and 66.8 MB** to open none.
 
-Loading is lazy per line. Constructing a registry reads manifests and dlopens nothing; asking for a version is what opens it.
+**Loading is lazy per line, in every binding and in every constructor.** Constructing a registry — with a directory or without one — reads `manifest.json` files and dlopens nothing. **Nothing in these libraries opens an artifact except a request for a specific version, or an explicit `preload`.** Not `versions()`, not `libraries()`, not a membership test, not formatting the registry.
+
+This is a single-sourced statement of fact; nothing else in the docs restates it.
+
+### Opening a pinned set up front: `preload`
+
+A deployment that knows which lines it serves can open them at construction, and find out at construction if one is missing. It is a constructor option in all four, it takes a **list of lines** rather than "everything in the directory" — a registry directory is whatever a fetch left behind — and an entry no directory on the search path holds raises the ordinary artifact-missing error, earlier than it otherwise would. It never fetches, even with autofetch on.
+
+| SDK        | spelling                                                                                      |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| Go         | `chtypes.NewRegistry(dir, chtypes.WithPreload("25.8", "26.7"))`                               |
+| Python     | `Registry(dir, preload=["25.8", "26.7"])`                                                     |
+| TypeScript | `new Registry(dir, { preload: ['25.8', '26.7'] })`                                            |
+| Rust       | `Registry::open(dir, RegistryOptions { preload: vec!["25.8".into()], ..Default::default() })` |
+
+Checksum verification (`WithVerifyChecksums` / `verify_hashes` / `verifyChecksums` / `verify_checksums`) is a policy on the registry and not a property of that list: **a library's checksum is computed immediately before that library is dlopen'd, and at no other time** — at construction for the preloaded lines, at first use for the rest, never for a line nobody asks for.
+
+`versions()` lists every line the registry can answer for, loaded or discovered; `libraries()` lists the ones it has actually opened.
 
 <details open><summary><b>Go</b></summary>
 
@@ -46,13 +63,13 @@ console.log(registry.versions());
 <details><summary><b>Rust</b></summary>
 
 ```rust
-let registry = Registry::from_search_path();   // lazy
+let registry = Registry::from_search_path()?;  // scans manifests, opens nothing
 let old = registry.for_version("24.8")?;       // Arc<Library>
 let recent = registry.for_version("26.7")?;
 println!("{:?}", registry.versions());
 ```
 
-`Registry::new(dir)` is the other constructor: a single directory, loaded eagerly, answering `Error::NoSuchVersion` for a line it lacks. `from_search_path` is the one that walks the path.
+`Registry::new(dir)` is the other constructor: a single directory, lazy in the same way, answering `Error::ArtifactMissing` for a line it lacks. `from_search_path` is the one that walks the path, and it is fallible because the scan it runs can be — an unreadable directory, or nothing installed anywhere.
 
 </details>
 
