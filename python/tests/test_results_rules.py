@@ -88,7 +88,7 @@ def test_unknown_verdict_degrades_to_decline() -> None:
 def test_value_null_false_when_poisoned(poison: str, want: bool) -> None:
     doc = (
         '{"outcome": "accepted", "cols": [{"name": "c", "type": "UInt8", "base": "UInt8", '
-        '"src": "input", "input": "", "stored": null, "poison": ' + poison + ', '
+        '"src": "input", "input": "", "stored": null, "poison": ' + poison + ", "
         '"nullable": true}]}'
     ).encode()
     result = parse_row_document(doc)
