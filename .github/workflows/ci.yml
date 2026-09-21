@@ -16,6 +16,8 @@
 #      test that needs an artifact SKIPS, loudly, by name, naming the one
 #      command that would fill the gap. This is what a contributor with no
 #      network and no artifacts gets, and it must be an honest result.
+#      Each of these four also builds the wrong-revision ABI fixture and runs
+#      its own binding's two mismatch cases — see the block below.
 #
 #   2. WITH two published artifacts (the artifacts job, after 1 is green).
 #      The newest -lts and the newest -stable line the public release
@@ -40,6 +42,31 @@
 # --require-artifacts they also refuse a golden set that did not run. Nothing
 # in this file computes a verdict; every step runs a script or a test runner
 # whose own output is the answer.
+#
+# THE ABI-REVISION MISMATCH CASES RUN IN RUN 1, NOT ONLY RUN 2 (#105). Each
+# binding's refusal case and its matching-revision control only run when
+# $CHTYPES_ABI_FIXTURES names a fixture set, and that variable used to be set
+# in the `artifacts` job alone. On integration/rev5 that job is red by design
+# — revision-5 bindings against revision-4 published artifacts — and being
+# expected-red is what made it a hiding place: TestABIRevisionMismatchIsRefused
+# broke there (the refusal is a LOAD-time gate and lazy construction no longer
+# loads), TypeScript had the same latent break, and no required check covered
+# either, because none of them set the variable. The fixture needs NO
+# published artifact: scripts/abi-fixtures.sh builds the wrong-revision /
+# at-revision stub pair from include/chtypes.h itself. So each of the four
+# no-artifact jobs — which are the ones that gate every pull request — now
+# builds it and runs its own binding's two cases, and the census in
+# check-standalone.sh / check-suite.sh already fails when either case did not
+# RUN and pass. Nothing new computes a verdict here either.
+#
+# It is deliberately in the four existing jobs rather than a fifth: those four
+# are already required checks, so the coverage is blocking the day this lands
+# with nobody having to edit branch protection, and a red one names the
+# binding in its own check name. The cost is that each fetches the served
+# generator (sdk-fetch-fixtures.tar.gz, signature and hash chain as always)
+# from the artifacts host, so these four now depend on that host being
+# reachable — accepted on purpose: a fixture build that quietly skipped when
+# the host was down would rebuild the exact blind spot this closes.
 name: ci
 
 on:
@@ -113,6 +140,17 @@ jobs:
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: build and vet, dlopen-only
         run: cd go && go build ./... && go vet ./...
+      # The wrong-revision ABI fixture, in the NO-ARTIFACT leg (#105). It is
+      # generated from include/chtypes.h by the served generator, so it needs
+      # no registry and no published line — see the block at the top of this
+      # file for why that matters. With the variable set,
+      # check-standalone.sh's census below refuses a run in which
+      # TestABIRevisionMismatchIsRefused or TestABIRevisionControlLoads did
+      # not pass; without it they skip by name and nothing gates them.
+      - name: the wrong-revision ABI fixture, built from this header — no registry needed
+        run: |
+          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
+          echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
         run: scripts/check-standalone.sh --no-artifacts
       # The census JSON is diagnostic: it is how a failure is READ, never how a
@@ -155,6 +193,14 @@ jobs:
           uv run ruff check src tests
           uv run ruff format --check src tests
           uv run python -c 'import chtypes; print("chtypes", chtypes.ABI_REVISION)'
+      # No registry, no published line — see the `go` job's copy of this step
+      # and the block at the top of this file (#105). check-suite.sh's python
+      # arm refuses a run in which test_wrong_revision_is_refused or
+      # test_matching_revision_loads did not collect and pass.
+      - name: the wrong-revision ABI fixture, built from this header — no registry needed
+        run: |
+          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
+          echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts python
 
@@ -177,6 +223,15 @@ jobs:
           cache-dependency-path: ts/pnpm-lock.yaml
       - name: build and typecheck
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
+      # No registry, no published line — see the `go` job's copy of this step
+      # and the block at the top of this file (#105). check-suite.sh's ts arm
+      # refuses a run in which either named case under `abi revision fixture`
+      # did not pass. TypeScript is the binding that carried the same latent
+      # break as Go and that nothing caught.
+      - name: the wrong-revision ABI fixture, built from this header — no registry needed
+        run: |
+          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
+          echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts ts
 
@@ -193,6 +248,15 @@ jobs:
         run: cd rust && cargo build --locked && cargo clippy --locked --all-targets -- -D warnings && cargo fmt --check
       - name: --no-default-features — the configuration docs/install.md tells a consumer to build
         run: cd rust && cargo test --locked --no-default-features && cargo clippy --locked --all-targets --no-default-features -- -D warnings
+      # No registry, no published line — see the `go` job's copy of this step
+      # and the block at the top of this file (#105). check-suite.sh's rust
+      # arm reruns tests/abi_revision.rs alone, stdout and stderr captured
+      # SEPARATELY (#66), and refuses a run in which either case did not
+      # report `ok` on a clean line.
+      - name: the wrong-revision ABI fixture, built from this header — no registry needed
+        run: |
+          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
+          echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts rust
 
@@ -247,11 +311,35 @@ jobs:
           scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
           echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
 
+      # ── The five suites below each carry `id:` and `continue-on-error`.
+      #
+      # WHY (#105). Measured on integration/rev5: this job fails at its GO
+      # step, and every later step is SKIPPED — so the python, ts and rust
+      # artifact suites and all four examples/ tours had not executed at all
+      # for any change in that cycle. One failing suite was withholding four
+      # more results, on the branch where all four bindings were being
+      # rewritten, and "runnable" was simply unmeasured there.
+      #
+      # `continue-on-error: true` lets each of the five report; the `verdict`
+      # step at the end of this job reads every `outcome` and FAILS THE JOB
+      # unless all five succeeded. The point is that five results are
+      # reported, never that a failure is tolerated — a green job with a
+      # failing suite would be the opposite of this change, and the verdict
+      # step exists to make that impossible. Read `outcome`, never
+      # `conclusion`: `conclusion` is what continue-on-error rewrote the
+      # result to (`success`), `outcome` is what the step actually did.
+      #
+      # ⚠️ The steps BEFORE these five deliberately stay fail-fast: if the
+      # fetch or the fixture build did not happen, running the suites proves
+      # nothing. The verdict below then reports those five as `skipped`,
+      # which it also counts as a failure.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: go — standalone check with the registry; TestGoldens must run
+        id: suite-go
+        continue-on-error: true
         run: scripts/check-standalone.sh --registry "$CHTYPES_REGISTRY" --require-artifacts
       # Diagnostic, and must not fail this required job — see the `go` job above.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -265,6 +353,8 @@ jobs:
 
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: python — suite with the registry; the golden set must run
+        id: suite-python
+        continue-on-error: true
         run: cd python && uv sync --locked --group dev && cd .. && scripts/check-suite.sh --require-artifacts python
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -279,10 +369,14 @@ jobs:
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       - name: ts — suite with the registry; the golden set must run
+        id: suite-ts
+        continue-on-error: true
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && cd .. && scripts/check-suite.sh --require-artifacts ts
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: rust — suite with the registry; the golden test must run
+        id: suite-rust
+        continue-on-error: true
         run: scripts/check-suite.sh --require-artifacts rust
 
       # The examples are advertised in README.md as four runnable tours, and
@@ -299,7 +393,65 @@ jobs:
       # away, so the drift would pass forever. Verified by planting the 0.1.0
       # drift back into the lock: --locked exits 1, unlocked exits 0.
       - name: examples — the four tours actually run, on their committed lockfiles
+        id: tours
+        continue-on-error: true
         run: examples/chplay.sh --require-all --locked
+
+      # ── This job's actual verdict (#105) ───────────────────────────────
+      #
+      # Reads each suite step's own `outcome` and exits non-zero unless all
+      # five say `success`, so the job's conclusion is exactly what it was
+      # before — red when anything is wrong — while all five results are
+      # now REPORTED instead of four of them being withheld by the first
+      # failure. `skipped` counts as a failure: it means a fail-fast step
+      # above stopped the suite from running, which is not a pass.
+      #
+      # WHY ONE JOB rather than five. Branch protection names required
+      # checks by job `name:` — the same trap the lint block below warns
+      # about — so splitting this into five jobs would silently drop
+      # "artifacts — two published lines, linux-amd64, every suite runs its
+      # goldens" from the required list, and leave five new names unrequired
+      # until a human edited protection. It also keeps one live-index read,
+      # one cache entry and one set of five toolchains rather than five of
+      # each. The trade is that the per-suite results are read here instead
+      # of in the checks list, which is why this writes them to the run's
+      # step summary as well as its log: nobody should have to open a
+      # 30-minute job to find out whether the tours ran.
+      - name: verdict — all five results, and this job is red if any of them is not a pass
+        if: always()
+        env:
+          GO_OUTCOME: ${{ steps.suite-go.outcome }}
+          PYTHON_OUTCOME: ${{ steps.suite-python.outcome }}
+          TS_OUTCOME: ${{ steps.suite-ts.outcome }}
+          RUST_OUTCOME: ${{ steps.suite-rust.outcome }}
+          TOURS_OUTCOME: ${{ steps.tours.outcome }}
+        run: |
+          failed=0
+          {
+            echo "### artifacts — five results, reported whatever any one of them did"
+            echo
+            echo "| suite | result |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          row() {
+            if [ "$2" = "success" ]; then
+              printf '| %s | pass |\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf '| %s | **%s** |\n' "$1" "$2" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+            printf '  %-16s %s\n' "$1" "$2"
+          }
+          row "go" "$GO_OUTCOME"
+          row "python" "$PYTHON_OUTCOME"
+          row "ts" "$TS_OUTCOME"
+          row "rust" "$RUST_OUTCOME"
+          row "examples tours" "$TOURS_OUTCOME"
+          if [ "$failed" -ne 0 ]; then
+            echo "artifacts: at least one of the five above is not a pass — every one of them ran and is reported here and in the step summary" >&2
+            exit 1
+          fi
+          echo "artifacts: all five passed"
 
   # ── Lint / supply-chain jobs below ─────────────────────────────────
   #
