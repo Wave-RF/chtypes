@@ -131,6 +131,16 @@ export const Source = {
    * IN `values`.
    */
   MaterializedInput: 'materialized_input',
+  /**
+   * A VOLATILE DEFAULT (`now()`/`now64(n)`/`today()`/`yesterday()`, or an
+   * expression over one) this library resolved locally rather than
+   * ClickHouse — the caller MUST send it as an explicit column on any later
+   * INSERT, or the value silently drifts each attempt. `rowResultOf` has
+   * always populated `substituted` for exactly this src value; like
+   * `Skipped` before issue #90, it had no named constant of its own (issue
+   * #122).
+   */
+  DefaultSubstituted: 'default_substituted',
 } as const;
 export type Source = (typeof Source)[keyof typeof Source];
 
@@ -443,7 +453,7 @@ export function rowResultOf(doc: Json): RowResult {
       isNull: c.storedIsNull && !c.poison,
       source: c.src,
     });
-    if (c.src === 'default_substituted') {
+    if (c.src === Source.DefaultSubstituted) {
       substituted.push({ column: c.name, expr: c.input, text: c.stored, bytes: c.storedBytes });
     }
     transformed.push(...classify(c));
