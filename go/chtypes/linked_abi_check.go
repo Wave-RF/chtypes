@@ -56,4 +56,8 @@ const (
 	_ = uint(int(Native) - int(C.CHS_NATIVE))
 	_ = uint(int(C.CHS_BUFFERS) - int(Buffers))
 	_ = uint(int(Buffers) - int(C.CHS_BUFFERS))
+	_ = uint(int(C.CHS_CSV_WITH_NAMES) - int(CSVWithNames))
+	_ = uint(int(CSVWithNames) - int(C.CHS_CSV_WITH_NAMES))
+	_ = uint(int(C.CHS_TSV_WITH_NAMES) - int(TSVWithNames))
+	_ = uint(int(TSVWithNames) - int(C.CHS_TSV_WITH_NAMES))
 )

@@ -270,7 +270,8 @@ func parseDefaultKind(s string) DefaultKind {
 //
 // CSV, TSV, Values and JSONCompactEachRow are POSITIONAL: the k-th field
 // addresses the k-th insertable column (MATERIALIZED/ALIAS/EPHEMERAL occupy
-// no position). JSONEachRow and Native address columns by NAME. The RowBinary
+// no position). JSONEachRow and Native address columns by NAME, and so do
+// CSVWithNames and TSVWithNames, through their header row. The RowBinary
 // family, Native and Buffers are binary and all-or-nothing per batch.
 type Format int
 
@@ -335,6 +336,21 @@ const (
 	// do. Requires an artifact built at or after the Buffers exposure; older
 	// ones reject with "unknown format".
 	Buffers
+	// CSVWithNames is CSV whose first row is a header naming the columns, so
+	// the data is addressed by NAME. With a column list as well (WithColumns),
+	// the list decides the block and the header decides the layout. Header
+	// names match EXACTLY through ClickHouse 26.4 and case-insensitively from
+	// 26.5, exactly as those servers do.
+	//
+	// It joined enum chs_format inside ABI revision 5, so a revision-5
+	// artifact built before it existed does not know it and rejects with
+	// "unknown format" — the revision check cannot tell. Probe the artifact
+	// rather than assuming it from this package's version.
+	CSVWithNames
+	// TSVWithNames is TSV whose first row is a header naming the columns;
+	// everything CSVWithNames says about the header, a column list, header
+	// matching and probing the artifact applies unchanged.
+	TSVWithNames
 )
 
 // ExportNone is RowsExport's "no export requested" sentinel — the C ABI's

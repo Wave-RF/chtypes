@@ -295,6 +295,8 @@ var goValues = map[string]any{
 	"RowBinaryWithNamesAndTypesAndDefaults": int(chtypes.RowBinaryWithNamesAndTypesAndDefaults),
 	"Native":                                int(chtypes.Native),
 	"Buffers":                               int(chtypes.Buffers),
+	"CSVWithNames":                          int(chtypes.CSVWithNames),
+	"TSVWithNames":                          int(chtypes.TSVWithNames),
 
 	// The row/batch verdict vocabulary, as the result document spells it.
 	"Accepted":         chtypes.Accepted.String(),

@@ -118,7 +118,34 @@ extern "C" {
  * Impl/BuffersFormat.cpp:88 on 26.5 (:89 on 26.6 and 26.7), reached from
  * registerFormats.cpp:179 / :184 / :185; no tag at 25.10 or earlier contains
  * the string, the reader, or the register function at all. On those lines this
- * library answers 73 UNKNOWN_FORMAT, which is what the server answers. */
+ * library answers 73 UNKNOWN_FORMAT, which is what the server answers.
+ *
+ * CHS_CSV_WITH_NAMES and CHS_TSV_WITH_NAMES are CSVWithNames and
+ * TSVWithNames: CSV and TSV whose first row is a HEADER naming the columns.
+ * The semantics, as the artifact producer measured them on real servers
+ * (chtypes#55: 28 shapes, both spellings, eleven lines):
+ *
+ *   * The header row names the columns, so the data is addressed by NAME,
+ *     not by position.
+ *   * With a column list as well (`columns_json`), the LIST decides the
+ *     block and the HEADER decides the layout. A listed column the header
+ *     omits takes its DEFAULT under input_format_defaults_for_omitted_fields=1
+ *     and the reader's zero under 0; an unlisted column the header names is
+ *     an unknown field; an unlisted column takes its DEFAULT whatever that
+ *     setting says.
+ *   * Header-name matching differs by line: EXACT through 26.4,
+ *     case-insensitive from 26.5. The same header can therefore bind
+ *     differently on either side of that boundary, exactly as the servers do.
+ *   * As an export_format they are the existing loud decline, like every
+ *     format other than CHS_JSON_COMPACT_EACH_ROW.
+ *
+ * Both formats exist on every line that measurement covered, so unlike
+ * CHS_BUFFERS there is no 73 era. They joined this enum inside revision 5,
+ * AFTER the revision number was set (see Revision 5 below), so an artifact
+ * built from a revision-5 header commit that predates them reports revision 5
+ * and does not know 10 or 11. Being in this enum is therefore never proof
+ * that a loaded artifact parses them: ask the artifact
+ * (docs/reference/bindings.md §Values a binding must accept and reject). */
 enum chs_format
 {
     CHS_JSON_EACH_ROW = 0,
@@ -130,7 +157,9 @@ enum chs_format
     CHS_ROW_BINARY_WITH_DEFAULTS = 6,
     CHS_ROW_BINARY_WITH_NAMES_AND_TYPES_AND_DEFAULTS = 7,
     CHS_NATIVE = 8,
-    CHS_BUFFERS = 9
+    CHS_BUFFERS = 9,
+    CHS_CSV_WITH_NAMES = 10,
+    CHS_TSV_WITH_NAMES = 11
 };
 
 /* The ClickHouse release this library was vendored from, e.g. "25.8.28.1". */
@@ -202,7 +231,18 @@ CHS_API const char * chs_clickhouse_version(void);
  * after it — one revision, because nothing built against 5 had shipped when
  * the second change landed. A revision-4 artifact has neither, so calling
  * through these declarations against one is exactly the undefined behavior
- * the gate above refuses. Still 28 exported functions. */
+ * the gate above refuses. Still 28 exported functions.
+ *
+ * Later in the same open window, `CHS_CSV_WITH_NAMES = 10` and
+ * `CHS_TSV_WITH_NAMES = 11` were appended to `enum chs_format` (chtypes#55),
+ * again without a bump: additive values inside an unreleased revision are not
+ * a new revision. One consequence, and it is why the comment above
+ * `enum chs_format` says to ask the artifact: an artifact built from a
+ * revision-5 header commit that predates those two values reports revision 5
+ * here, passes the gate above, and does not know format 10 or 11. The
+ * revision gate cannot catch that. The format probe can, which is why a
+ * format is declared only after the loaded artifact has been asked about it,
+ * never from this enum or this number. */
 #define CHS_ABI_REVISION 5
 CHS_API int chs_abi_revision(void);
 

@@ -77,6 +77,21 @@ pub enum Format {
     /// their servers do; probe the artifact rather than assuming it from this
     /// crate's version.
     Buffers = 9,
+    /// `CSV` whose first row is a header naming the columns, so the data is
+    /// addressed by NAME. With a column list as well
+    /// ([`crate::RowOptions`]), the list decides the block and the header
+    /// decides the layout. Header names match EXACTLY through ClickHouse 26.4
+    /// and case-insensitively from 26.5, exactly as those servers do.
+    ///
+    /// It joined `enum chs_format` inside ABI revision 5, so a revision-5
+    /// artifact built before it existed does not know it — the revision check
+    /// cannot tell. Probe the artifact rather than assuming it from this
+    /// crate's version.
+    CsvWithNames = 10,
+    /// `TSV` whose first row is a header naming the columns. Everything
+    /// [`Format::CsvWithNames`] says about the header, a column list, header
+    /// matching and probing the artifact applies unchanged.
+    TsvWithNames = 11,
 }
 
 impl Format {
@@ -1230,6 +1245,8 @@ mod tests {
         assert_eq!(Format::RowBinaryWithNamesAndTypesAndDefaults.code(), 7);
         assert_eq!(Format::Native.code(), 8);
         assert_eq!(Format::Buffers.code(), 9);
+        assert_eq!(Format::CsvWithNames.code(), 10);
+        assert_eq!(Format::TsvWithNames.code(), 11);
     }
 
     // ---------------------------------------------- issue #54: rows_export_with

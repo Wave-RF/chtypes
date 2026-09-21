@@ -387,6 +387,8 @@ fn rust_values() -> BTreeMap<&'static str, Val> {
     );
     m.insert("Format::Native", i(Format::Native as i64));
     m.insert("Format::Buffers", i(Format::Buffers as i64));
+    m.insert("Format::CsvWithNames", i(Format::CsvWithNames as i64));
+    m.insert("Format::TsvWithNames", i(Format::TsvWithNames as i64));
 
     // The row/batch verdict vocabulary, as the result document spells it.
     // Filter verdicts — the wire characters, aligned across all four bindings

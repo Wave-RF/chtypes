@@ -50,9 +50,11 @@ No read-side security may be enforced on the filter surface until a release expl
 
 The parse-once block twin does not change that — it is a performance shape, not a maturity signal, and sits under the same gate.
 
-## Binary formats depend on the artifact, not the binding
+## Some formats depend on the artifact, not the binding
 
 `RowBinary` and its family, `Native` and `Buffers` parse only on artifacts new enough to carry the reader. This is a property of the **loaded artifact's age**, not of your binding's version, so probe the artifact rather than assuming from the package version. Earlier artifacts answer 73 or 117 exactly as their own servers do.
+
+`CSVWithNames` and `TSVWithNames` are text formats with the same property. They joined the format set inside ABI revision 5 without changing the revision number, so an artifact built before them can report revision 5 and still not know them. Probe for them the same way.
 
 ## The error model is normative
 
