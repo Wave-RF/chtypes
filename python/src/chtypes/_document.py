@@ -156,11 +156,11 @@ def _row_result(doc: RawObject) -> RowResult:
         # MATERIALIZED / ALIAS / EPHEMERAL are never read from an input row and
         # are not part of the stored row a subscriber would SELECT. A listed
         # EPHEMERAL column's ephemeral_input value IS read but is never
-        # stored either, so it is excluded here too — exactly as "skipped" is
-        # — never sitting where a caller reads the stored row (issue #53).
+        # stored either, so it is excluded here too — exactly as Source.SKIPPED
+        # is — never sitting where a caller reads the stored row (issue #53).
         # materialized_input stays IN: it IS stored, replacing the column's
         # expression.
-        if col.src in ("skipped", Source.EPHEMERAL_INPUT):
+        if col.src in (Source.SKIPPED, Source.EPHEMERAL_INPUT):
             continue
         values.append(
             Value(

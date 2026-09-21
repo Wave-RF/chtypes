@@ -309,17 +309,25 @@ class Reason:
 
 class Source:
     """The two revision-5 `Value.source` provenances `columns_json` introduces
-    (issue #53).
+    (issue #53), plus the pre-existing `SKIPPED` provenance named alongside
+    them (issue #90).
 
     Not an enum, for the same reason as `Reason`: `src` is a growing
     vocabulary arriving from the C layer, and an unrecognized spelling from a
     newer artifact must pass through unchanged, not raise.
     """
 
+    #: MATERIALIZED / ALIAS / EPHEMERAL, never read from an input row.
+    #: Predates revision 5 — unlike the two provenances below — but
+    #: ``_row_result`` has excluded it from ``RowResult.values`` from the
+    #: start, the same exclusion ``EPHEMERAL_INPUT`` was modeled on. Named
+    #: here, in the same idiom, so the exclusion can be keyed on a symbol
+    #: rather than a bare string literal.
+    SKIPPED: Final = "skipped"
     #: A listed EPHEMERAL column's read value. The server reads it — it is in
     #: scope for the DEFAULT expressions that reference it — and it is never
     #: stored and never exported. ``_row_result`` excludes it from
-    #: ``RowResult.values`` exactly as it already excludes ``"skipped"``: a
+    #: ``RowResult.values`` exactly as it already excludes ``SKIPPED``: a
     #: value that is never stored must not sit where a caller reads the
     #: stored row (a hash, a signature).
     EPHEMERAL_INPUT: Final = "ephemeral_input"

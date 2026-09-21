@@ -459,7 +459,8 @@ type Value struct {
 	//                          it as an explicit column; see RowResult.Substituted
 	//   "absent"               the type's own default, no DEFAULT declared
 	//   "skipped"              MATERIALIZED / ALIAS / EPHEMERAL, never read
-	//                          from an input row
+	//                          from an input row (see SourceSkipped) —
+	//                          EXCLUDED from RowResult.Values
 	//   "ephemeral_input"      revision 5: a LISTED EPHEMERAL column's read
 	//                          value (see SourceEphemeralInput) — never stored,
 	//                          never exported, and — like "skipped" — EXCLUDED
@@ -496,6 +497,15 @@ const (
 	// it stays IN RowResult.Values.
 	SourceMaterializedInput = "materialized_input"
 )
+
+// SourceSkipped names the "skipped" Value.Source provenance: MATERIALIZED /
+// ALIAS / EPHEMERAL, never read from an input row. Predates revision 5 — it
+// is not one of the two provenances above — but rowResultOf has excluded it
+// from RowResult.Values from the start, the same exclusion
+// SourceEphemeralInput was modeled on. Named here, in the same idiom as
+// SourceEphemeralInput and SourceMaterializedInput, so the exclusion can be
+// keyed on a symbol rather than a bare string literal (issue #90).
+const SourceSkipped = "skipped"
 
 // Transform records a silent change ClickHouse made on the way to storage:
 // input 256 into UInt8 stored as 0, reason "overflow_wrap". Reason is one of
@@ -1354,13 +1364,13 @@ func rowResultOf(doc rowDoc) RowResult {
 		res.Outcome = Unsupported
 	}
 	for _, c := range doc.Cols {
-		// "skipped" (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
+		// SourceSkipped (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
 		// SourceEphemeralInput (a LISTED EPHEMERAL column: read, but never
 		// stored — see Value.Source) are both excluded from Values, which is
 		// the stored row. SourceMaterializedInput stays IN: under
 		// insert_allow_materialized_columns=1 the supplied value genuinely IS
 		// stored, replacing the column's expression (issue #53).
-		if c.Src == "skipped" || c.Src == SourceEphemeralInput {
+		if c.Src == SourceSkipped || c.Src == SourceEphemeralInput {
 			continue
 		}
 		res.Values = append(res.Values, Value{
