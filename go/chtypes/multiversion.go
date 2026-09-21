@@ -443,12 +443,22 @@ func WithFetchOptions(o FetchOptions) RegistryOption { return func(r *Registry) 
 // a network, where a move that reported success and truncated the library
 // looks identical to one that worked.
 //
-// What it checks, per line, in this order: library_bytes when the manifest
-// carries one, then the sha256 of the library about to be loaded against
-// library_sha256. Either mismatch fails the load naming the path and both
-// values, and nothing is dlopen'd. A manifest that carries NO
+// What it ADDS, per line, is the sha256 of the library about to be loaded
+// compared against library_sha256: a mismatch fails the load naming the path
+// and both values, and nothing is dlopen'd. A manifest that carries NO
 // library_sha256 is REFUSED rather than passed: verification asked for and
-// not possible is not verification — all four bindings refuse it.
+// not possible is not verification — all four bindings refuse it. (The
+// cheaper library_bytes size check that runs just before it is NOT
+// conditional on this option — Load has always made it, every call,
+// checkLibraryBytes above; issue #82.)
+//
+// Timing, read together with that: **a library's checksum is computed
+// immediately before that library is dlopen'ed, and at no other time** — at
+// construction for the WithPreload'ed lines, at first use for the rest,
+// never for a line nobody asks for. The size check runs at that exact same
+// point, for the same reason, whether or not this option is on: Load is the
+// one place both checks live, and neither runs before Load is actually
+// asked to open something.
 func WithVerifyChecksums(on bool) RegistryOption { return func(r *Registry) { r.verify = on } }
 
 // WithPreload opens these lines AT CONSTRUCTION — the one eager path, and the
@@ -559,11 +569,19 @@ func readArtifactDir(sub string) (m struct {
 // Loading the same path twice — into this Registry or another one — reuses the
 // Library that was already initialized for it.
 //
-// With WithVerifyChecksums the library is re-hashed against the manifest.json
-// beside it FIRST, and a mismatch returns before anything is dlopen'd: an
-// image cannot be unmapped, so the check has to happen while refusing is
-// still possible.
+// The manifest.json beside path is consulted TWICE, for two different
+// questions, on two different conditions:
+//
+//   - checkLibraryBytes runs ALWAYS, whether or not WithVerifyChecksums is
+//     on (issue #82): a size mismatch fails the load before dlopen.
+//   - With WithVerifyChecksums the library is ALSO re-hashed against the
+//     manifest.json beside it, and a mismatch likewise returns before
+//     anything is dlopen'd: an image cannot be unmapped, so both checks have
+//     to happen while refusing is still possible.
 func (r *Registry) Load(path string) error {
+	if err := checkLibraryBytes(path); err != nil {
+		return err
+	}
 	if r.verify {
 		if err := verifyArtifactLibrary(path); err != nil {
 			return err
@@ -580,9 +598,49 @@ func (r *Registry) Load(path string) error {
 	return nil
 }
 
+// checkLibraryBytes compares path's file size against its manifest.json's
+// library_bytes — the load-path check that runs on EVERY Load, regardless of
+// WithVerifyChecksums (issue #82, split out of #50's lazy-loading design so
+// the behavior change was not hidden inside it). It is nearly free (one
+// stat, never a re-hash of the library's contents) and it catches the
+// commonest shape of a broken artifact directory: a truncated or
+// partially-written library file. What WithVerifyChecksums adds on top is
+// the sha256 re-hash in verifyArtifactLibrary, unchanged.
+//
+// A manifest.json that cannot be read or parsed, or one that carries no
+// library_bytes (0, its zero value for a manifest predating the field), is
+// silently not asked: this must not become a reason Load fails for a caller
+// who supplies a bare path with no sibling manifest at all, which worked
+// before this check existed and still must. This is deliberately looser
+// than readManifest, which also requires library_sha256 because it exists
+// only for verification — the size check must not require a hash it never
+// touches.
+func checkLibraryBytes(path string) error {
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(path), "manifest.json"))
+	if err != nil {
+		return nil
+	}
+	var m struct {
+		LibraryBytes int64 `json:"library_bytes"`
+	}
+	if err := json.Unmarshal(b, &m); err != nil || m.LibraryBytes <= 0 {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("chtypes: cannot check %s: %w", path, err)
+	}
+	if info.Size() != m.LibraryBytes {
+		return fmt.Errorf("chtypes: %s is %d bytes, manifest says %d", path, info.Size(), m.LibraryBytes)
+	}
+	return nil
+}
+
 // verifyArtifactLibrary re-hashes one shared library against the
-// manifest.json beside it — the load-time check WithVerifyChecksums turns on,
-// and the same predicate VerifyInstalled applies to a whole registry.
+// manifest.json beside it — the load-time check WithVerifyChecksums turns
+// on. checkLibraryBytes above already ran unconditionally before this is
+// ever called, so this function is hash-only; folding the size check back in
+// here too would just re-stat a file this call never needed to.
 //
 // It hashes the file that is ABOUT TO BE LOADED, not the file name the
 // manifest carries: those are the same file in every artifact directory, and
@@ -594,15 +652,6 @@ func verifyArtifactLibrary(path string) error {
 	m, err := readManifest(filepath.Join(filepath.Dir(path), "manifest.json"))
 	if err != nil {
 		return fmt.Errorf("chtypes: cannot verify %s: %w", path, err)
-	}
-	if m.LibraryBytes > 0 {
-		info, err := os.Stat(path)
-		if err != nil {
-			return fmt.Errorf("chtypes: cannot verify %s: %w", path, err)
-		}
-		if info.Size() != m.LibraryBytes {
-			return fmt.Errorf("chtypes: %s is %d bytes, manifest says %d", path, info.Size(), m.LibraryBytes)
-		}
 	}
 	got, err := fileSHA256(path)
 	if err != nil {
