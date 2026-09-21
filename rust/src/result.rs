@@ -436,6 +436,14 @@ pub mod source {
     /// the column's expression and IS stored — unlike [`EPHEMERAL_INPUT`],
     /// it stays IN `values`.
     pub const MATERIALIZED_INPUT: &str = "materialized_input";
+    /// A VOLATILE DEFAULT (`now()`/`now64(n)`/`today()`/`yesterday()`, or an
+    /// expression over one) this crate resolved locally rather than
+    /// ClickHouse — the caller MUST send it as an explicit column on any
+    /// later INSERT, or the value silently drifts each attempt.
+    /// `row_result_of` has always populated `substituted` for exactly this
+    /// src value; like [`SKIPPED`] before issue #90, it had no named
+    /// constant of its own (issue #122).
+    pub const DEFAULT_SUBSTITUTED: &str = "default_substituted";
 }
 
 /// One silent change: input `256` into `UInt8` stored as `0`.
@@ -840,7 +848,7 @@ pub(crate) fn row_result_of(doc: RowDoc) -> RowResult {
             null: c.stored_is_json_null() && !c.poison,
             source: c.src.clone(),
         });
-        if c.src == "default_substituted" {
+        if c.src == source::DEFAULT_SUBSTITUTED {
             res.substituted.push(Substitution {
                 column: c.name.clone(),
                 // For a DEFAULT-sourced column the ABI puts the EXPRESSION in
@@ -948,6 +956,135 @@ mod tests {
     fn parse_row(s: &str) -> RowResult {
         let repaired = quote_bare_denormals(s.as_bytes());
         row_result_of(crate::doc::row_doc(&repaired).unwrap())
+    }
+
+    fn parse_filter(s: &str) -> FilterResult {
+        let repaired = quote_bare_denormals(s.as_bytes());
+        filter_result_of(crate::doc::filter_doc(&repaired).unwrap())
+    }
+
+    // Issue #122: five more results-group rules the four bindings agree on
+    // by construction, declared nowhere in tests/parity/manifest.json until
+    // this change. Every document below is parsed through the same
+    // production path parse_row/parse_filter (row_result_of/filter_result_of)
+    // already use, rather than constructing a result struct by hand.
+
+    #[test]
+    fn unsupported_settings_forces_unsupported_unless_rejected() {
+        // results.unsupported-settings-forces-unsupported: a non-empty
+        // unsupported_settings forces outcome to Unsupported, UNLESS it is
+        // already Rejected — the precedence is part of the rule.
+        let accepted = parse_row(
+            r#"{"outcome":"accepted","unsupported_settings":["some_setting"],"cols":[]}"#,
+        );
+        assert_eq!(
+            accepted.outcome,
+            Outcome::Unsupported,
+            "an accepted row with unsupported_settings must degrade to Unsupported"
+        );
+        let rejected = parse_row(
+            r#"{"outcome":"rejected","unsupported_settings":["some_setting"],"cols":[]}"#,
+        );
+        assert_eq!(
+            rejected.outcome,
+            Outcome::Rejected,
+            "a rejected row with unsupported_settings must stay Rejected — a rejection outranks a mere decline"
+        );
+    }
+
+    #[test]
+    fn unknown_outcome_degrades_to_unsupported() {
+        // results.unknown-outcome-degrades-to-unsupported: an outcome string
+        // this crate does not recognize MUST map to Unsupported, never to
+        // Rejected, for BOTH RowResult and FilterResult.
+        let rr = parse_row(r#"{"outcome":"totally-unknown-future-outcome","cols":[]}"#);
+        assert_eq!(rr.outcome, Outcome::Unsupported);
+
+        let fr = parse_filter(
+            r#"{"outcome":"totally-unknown-future-outcome","verdicts":"","errors":[]}"#,
+        );
+        assert_eq!(fr.outcome, FilterOutcome::Unsupported);
+    }
+
+    #[test]
+    fn unknown_verdict_degrades_to_decline() {
+        // results.unknown-verdict-degrades-to-decline: an unrecognized
+        // verdict character MUST degrade to Decline, never be collapsed
+        // into False (an invented answer).
+        let rr = parse_row(r#"{"outcome":"accepted","cols":[],"verdict":"z"}"#);
+        assert_eq!(rr.verdict, Some(Verdict::Decline));
+
+        let fr = parse_filter(r#"{"outcome":"ok","verdicts":"z","errors":[]}"#);
+        assert_eq!(fr.verdicts, vec![Verdict::Decline]);
+    }
+
+    #[test]
+    fn value_null_false_when_poisoned() {
+        // results.null-false-when-poisoned: Value::null is true only when
+        // the stored text is literally "null" AND the column is not
+        // poisoned — poison silently overrides a textual null.
+        let not_poisoned = parse_row(
+            r#"{"outcome":"accepted","cols":[{"name":"c","type":"UInt8","base":"UInt8","src":"input","input":"","stored":null,"poison":false,"nullable":true}]}"#,
+        );
+        assert_eq!(not_poisoned.values.len(), 1);
+        assert!(
+            not_poisoned.values[0].null,
+            "a genuine stored null (not poisoned) must be null == true"
+        );
+
+        let poisoned = parse_row(
+            r#"{"outcome":"accepted","cols":[{"name":"c","type":"UInt8","base":"UInt8","src":"input","input":"","stored":null,"poison":true,"nullable":true}]}"#,
+        );
+        assert_eq!(poisoned.values.len(), 1);
+        assert!(
+            !poisoned.values[0].null,
+            "a poisoned column reporting textual null must be null == false"
+        );
+    }
+
+    #[test]
+    fn default_substituted_populates_substituted() {
+        // results.default-substituted-populates-substituted: src ==
+        // source::DEFAULT_SUBSTITUTED is the only src value that populates
+        // RowResult::substituted.
+        assert_eq!(source::DEFAULT_SUBSTITUTED, "default_substituted");
+        let rr = parse_row(
+            r#"{"outcome":"accepted","cols":[
+                {"name":"ts","type":"DateTime","base":"DateTime","src":"default_substituted","input":"now()","stored":"2026-09-21 00:00:00","nullable":false},
+                {"name":"in_col","type":"UInt8","base":"UInt8","src":"input","input":"5","stored":5,"nullable":false}
+            ]}"#,
+        );
+        assert_eq!(
+            rr.substituted.len(),
+            1,
+            "substituted must have exactly one entry (only the default_substituted column): {:?}",
+            rr.substituted
+        );
+        assert_eq!(rr.substituted[0].column, "ts");
+        assert_eq!(rr.substituted[0].expr, "now()");
+        assert_eq!(rr.substituted[0].text, "\"2026-09-21 00:00:00\"");
+    }
+
+    #[test]
+    fn non_ok_filter_result_forces_empty_verdicts_and_errors() {
+        // results.non-ok-filter-result-forces-empty: a FilterResult whose
+        // outcome is anything but Ok forces verdicts and errors empty —
+        // no partial answers — even if the wire document carried bytes for
+        // them alongside a non-OK outcome.
+        let fr = parse_filter(
+            r#"{"outcome":"rejected","code":115,"err":"unknown setting","verdicts":"tfed","errors":[{"row":0,"code":27,"err":"boom"}]}"#,
+        );
+        assert_eq!(fr.outcome, FilterOutcome::Rejected);
+        assert!(
+            fr.verdicts.is_empty(),
+            "verdicts must be empty on a non-OK FilterResult: {:?}",
+            fr.verdicts
+        );
+        assert!(
+            fr.errors.is_empty(),
+            "errors must be empty on a non-OK FilterResult: {:?}",
+            fr.errors
+        );
     }
 
     #[test]

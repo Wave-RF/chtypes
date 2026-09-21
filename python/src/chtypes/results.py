@@ -336,6 +336,14 @@ class Source:
     #: the column's expression and IS stored — unlike ``EPHEMERAL_INPUT``, it
     #: stays IN ``RowResult.values``.
     MATERIALIZED_INPUT: Final = "materialized_input"
+    #: A VOLATILE DEFAULT (``now()``/``now64(n)``/``today()``/``yesterday()``,
+    #: or an expression over one) this library resolved locally rather than
+    #: ClickHouse — the caller MUST send it as an explicit column on any
+    #: later INSERT, or the value silently drifts each attempt.
+    #: ``_row_result`` has always populated ``RowResult.substituted`` for
+    #: exactly this src value; like ``SKIPPED`` before issue #90, it had no
+    #: named constant of its own (issue #122).
+    DEFAULT_SUBSTITUTED: Final = "default_substituted"
 
 
 # Exactly four reasons change how a value is written, or add one the row never

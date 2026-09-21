@@ -170,7 +170,7 @@ def _row_result(doc: RawObject) -> RowResult:
                 source=col.src,
             )
         )
-        if col.src == "default_substituted":
+        if col.src == Source.DEFAULT_SUBSTITUTED:
             substituted.append(Substitution(column=col.name, expr=col.input, text=col.stored))
         transformed.extend(classify(col))
 

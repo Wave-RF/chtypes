@@ -507,6 +507,17 @@ const (
 // keyed on a symbol rather than a bare string literal (issue #90).
 const SourceSkipped = "skipped"
 
+// SourceDefaultSubstituted names the "default_substituted" Value.Source
+// provenance: a VOLATILE DEFAULT (now()/now64(n)/today()/yesterday(), or an
+// expression over one) that this library resolved locally rather than
+// ClickHouse — the caller MUST send it as an explicit column on any later
+// INSERT, or the value silently drifts each attempt. rowResultOf has always
+// populated RowResult.Substituted for exactly this src value; like
+// SourceSkipped before issue #90, it had no named constant of its own.
+// Named here, in the same idiom, so the population rule can be keyed on a
+// symbol rather than a bare string literal (issue #122).
+const SourceDefaultSubstituted = "default_substituted"
+
 // Transform records a silent change ClickHouse made on the way to storage:
 // input 256 into UInt8 stored as 0, reason "overflow_wrap". Reason is one of
 // the stable Reason* strings below; Lossy reports whether information was
@@ -1487,7 +1498,7 @@ func rowResultOf(doc rowDoc) RowResult {
 			Null:   string(c.StoredRaw) == "null" && !c.Poison,
 			Source: c.Src,
 		})
-		if c.Src == "default_substituted" {
+		if c.Src == SourceDefaultSubstituted {
 			res.Substituted = append(res.Substituted, Substitution{
 				Column: c.Name, Expr: c.Input, Text: c.Stored(),
 			})
