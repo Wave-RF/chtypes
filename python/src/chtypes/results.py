@@ -80,6 +80,16 @@ class Format(IntEnum):
     # caught. Earlier vendored trees answer 73 UNKNOWN_FORMAT, exactly as their
     # servers do — probe the artifact, do not assume it from the SDK version.
     BUFFERS = 9
+    # CSV / TSV whose first row is a header naming the columns, so the data is
+    # addressed by NAME. With a column list as well (`columns=`), the list
+    # decides the block and the header decides the layout. Header names match
+    # EXACTLY through ClickHouse 26.4 and case-insensitively from 26.5, exactly
+    # as those servers do. Both joined `enum chs_format` inside ABI revision 5,
+    # so a revision-5 artifact built before they existed does not know them —
+    # the revision check cannot tell. Probe the artifact, do not assume it
+    # from the SDK version.
+    CSV_WITH_NAMES = 10
+    TSV_WITH_NAMES = 11
 
 
 # The C CHS_EXPORT_NONE sentinel (-1): no export requested. `rows()` spells it

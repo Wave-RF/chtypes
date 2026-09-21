@@ -734,6 +734,18 @@
       "what": "chs_format Buffers — 26.5+; 73 proves the decoder is present and 117 proves it absent (§Values a binding must accept and reject)",
       "go": "Buffers", "python": "Format.BUFFERS", "ts": "Format.Buffers", "rust": "Format::Buffers"
     },
+    {
+      "id": "vocab.format.csv-with-names",
+      "group": "vocabulary", "kind": "constant", "value": 10,
+      "what": "chs_format CSVWithNames — joined inside revision 5, so a revision-5 artifact built before it does not know it and the revision check cannot tell; ask the ARTIFACT before declaring it (§Values a binding must accept and reject)",
+      "go": "CSVWithNames", "python": "Format.CSV_WITH_NAMES", "ts": "Format.CSVWithNames", "rust": "Format::CsvWithNames"
+    },
+    {
+      "id": "vocab.format.tsv-with-names",
+      "group": "vocabulary", "kind": "constant", "value": 11,
+      "what": "chs_format TSVWithNames — joined inside revision 5 with CSVWithNames; the same probe rule applies (§Values a binding must accept and reject)",
+      "go": "TSVWithNames", "python": "Format.TSV_WITH_NAMES", "ts": "Format.TSVWithNames", "rust": "Format::TsvWithNames"
+    },
 
     {
       "id": "vocab.outcome.accepted",

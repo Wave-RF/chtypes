@@ -113,7 +113,7 @@ cargo install chtypes && chtypes fetch 25.8    # also verify, list, where
 
 **`DocFlags`** — `NONE`, `VALUES`, `TRANSFORMS`, `DEFAULTS`, `ALL`, plus `bits()`.
 
-**Constants** — `Format` (codes 0–9), `CompileMode::Declared` = 0, `CODE_UNSUPPORTED` = `-2`, `ABI_REVISION`, `DEFAULT_TIMEZONE`, `NO_SETTINGS`, `NO_PARAMS`, `REGISTRY_ENV`, `AUTOFETCH_ENV`, `SYSTEM_ARTIFACT_ROOTS`, `CODE_ARTIFACT_*` / `CODE_SOURCE_UNREACHABLE`, `FETCH_COMMAND`, the `SETTING_*` keys, and `reason::*` (the 24 stable spellings).
+**Constants** — `Format` (codes 0–11), `CompileMode::Declared` = 0, `CODE_UNSUPPORTED` = `-2`, `ABI_REVISION`, `DEFAULT_TIMEZONE`, `NO_SETTINGS`, `NO_PARAMS`, `REGISTRY_ENV`, `AUTOFETCH_ENV`, `SYSTEM_ARTIFACT_ROOTS`, `CODE_ARTIFACT_*` / `CODE_SOURCE_UNREACHABLE`, `FETCH_COMMAND`, the `SETTING_*` keys, and `reason::*` (the 24 stable spellings).
 
 **`DefaultKind`** — `None`, `Default`, `Materialized`, `Alias`, `Ephemeral`, and `Other(String)`: the ABI grows additively, so an unknown spelling is passed through rather than rejected.
 
