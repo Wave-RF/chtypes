@@ -346,11 +346,11 @@ const (
 	// artifact built before it existed does not know it and rejects with
 	// "unknown format" — the revision check cannot tell. Probe the artifact
 	// rather than assuming it from this package's version.
-	CSVWithNames Format = 99 // PLANT: must turn the Go parity check and the linked build red; reverted in the next commit
+	CSVWithNames
 	// TSVWithNames is TSV whose first row is a header naming the columns;
 	// everything CSVWithNames says about the header, a column list, header
 	// matching and probing the artifact applies unchanged.
-	TSVWithNames Format = iota // PLANT: keeps TSVWithNames at 11
+	TSVWithNames
 )
 
 // ExportNone is RowsExport's "no export requested" sentinel — the C ABI's
