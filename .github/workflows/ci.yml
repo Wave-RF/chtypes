@@ -154,6 +154,28 @@ jobs:
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: build and vet, dlopen-only
         run: cd go && go build ./... && go vet ./...
+      # The OTHER Go build (#118). go/chtypes/linked.go is cgo over
+      # include/chtypes.h, so the compiler type-checks every `C.chs_*` call
+      # site and go/chtypes/linked_abi_check.go pins the frozen ABI numbers to
+      # the header — and until now no job passed `-tags chtypes_linked`, so
+      # neither check had ever run. scripts/check-abi-decls.py covers that file
+      # for ARITY only, on the stated grounds that the compiler has its types.
+      # The compiler was never invoked.
+      #
+      # It belongs HERE, in the no-artifact leg, and why is the finding #118
+      # asked for. The tagged build was believed to need a native library from
+      # the other half of the project: measured, it does not. Type-checking a
+      # non-main cgo package runs the C compiler and only PROBES the link, so
+      # it needs a compiler and the in-repo header and nothing else — which
+      # this job already has, from a bare checkout, with no network. The
+      # artifact-backed job would have bought less coverage at a higher price:
+      # it is red by design on a revision branch, and #105 is the record of
+      # what an expected-red job does to a check placed inside it. Selftest
+      # first, same rule as `abi` and `public`.
+      - name: selftest — a mistyped call site and a drifted header constant fail the linked build
+        run: scripts/check-linked-build.sh --selftest
+      - name: type-check the linked path — cgo against include/chtypes.h, no artifact needed
+        run: scripts/check-linked-build.sh
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
         run: scripts/check-standalone.sh --no-artifacts
       # The census JSON is diagnostic: it is how a failure is READ, never how a
