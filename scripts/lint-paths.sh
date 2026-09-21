@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # lint-paths.sh — no tracked file may cite a repository path that does not exist.
 #
-# WHY THIS EXISTS. `docs/proposals/rows-export.md` was cited six times — in
-# include/chtypes.h and in all four bindings' source, every one of which ships
-# inside the crate, the sdist, the module and the npm tarball — for a file that
-# is not in this repository. Four more dead citations were found the same way
+# WHY THIS EXISTS. A `rows-export.md` design proposal's path was cited six
+# times — in include/chtypes.h and in all four bindings' source, every one of
+# which ships inside the crate, the sdist, the module and the npm tarball —
+# for a file that is not in this repository (it lives under the private
+# repository's own proposal directory; naming that path here would be exactly
+# the kind of leak lint-public.sh now also checks for, so this WHY names the
+# file, not where it actually lives). Four more dead citations were found the
+# same way
 # (`docs/defaults-matrix.md`, `docs/type-coverage.md`, `docs/fetch.md` after it
 # moved under guides/, and a `scripts/check-parity-doc.sh` that has never
 # existed while the check it named was real and living in the Python suite).
