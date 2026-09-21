@@ -336,6 +336,24 @@ pub enum Error {
         block_version: String,
     },
 
+    /// A [`crate::Filter`] passed to [`crate::Schema::rows_export_with`] and
+    /// the [`crate::Schema`] it was called on came from two DIFFERENT loaded
+    /// libraries — refused here, because no handle ever crosses a `dlopen`'d
+    /// image boundary. A filter from a DIFFERENT `Schema` of the SAME
+    /// library is NOT this error: the C layer itself answers that with a
+    /// rejected result document, code 1002 (the C ABI contract §Rows, "The
+    /// attached row filter").
+    #[error(
+        "chtypes: filter (ClickHouse {filter_version}) and schema (ClickHouse {schema_version}) \
+         come from different libraries"
+    )]
+    CrossLibrarySchema {
+        /// The filter's library, by its own reported version.
+        filter_version: String,
+        /// The schema's library, by its own reported version.
+        schema_version: String,
+    },
+
     /// No installed artifact answers for the requested ClickHouse line on this
     /// platform: the §1 search path was walked and none of its directories
     /// holds `<line>/manifest.json` (`docs/guides/fetch.md` §7). The message is the

@@ -437,8 +437,8 @@ impl Schema {
     }
 
     /// The ONE `chs_rows` call site — [`Schema::rows`], [`Schema::rows_export`],
-    /// [`Schema::rows_with_options`] and [`Schema::rows_export_with_options`]
-    /// are all single invocations of it.
+    /// [`Schema::rows_with_options`], [`Schema::rows_export_with_options`] and
+    /// [`Schema::rows_export_with`] are all single invocations of it.
     fn rows_through(
         &self,
         format: Format,
@@ -447,12 +447,37 @@ impl Schema {
         export_code: i32,
         doc_flags: DocFlags,
     ) -> Result<BatchResult> {
+        self.rows_through_filtered(
+            format,
+            body,
+            options,
+            export_code,
+            doc_flags,
+            std::ptr::null(),
+        )
+    }
+
+    /// [`Schema::rows_through`]'s twin with the attached-filter parameter
+    /// exposed — see [`Schema::rows_export_with`] for the contract. `filter`
+    /// is NULL for every call except that one.
+    fn rows_through_filtered(
+        &self,
+        format: Format,
+        body: &[u8],
+        options: &RowOptions,
+        export_code: i32,
+        doc_flags: DocFlags,
+        filter: *const ChsFilter,
+    ) -> Result<BatchResult> {
         let json = settings_json(&options.settings)?;
         let cols = columns_json(&options.columns)?;
         let (doc, payload): (BatchDoc, Option<Vec<u8>>) = {
             let _guard = self.lib.lock();
             // SAFETY: our own handle, under the library lock; the byte slice
-            // outlives the call.
+            // outlives the call. `filter`, when non-null, is the caller's own
+            // (`rows_export_with`'s `# Safety` clause: it comes from this
+            // schema's library, and the borrow of `Filter<'_>` keeps it alive
+            // for at least this call).
             let (out, payload) = unsafe {
                 self.lib.api().rows(
                     self.handle,
@@ -462,6 +487,7 @@ impl Schema {
                     export_code,
                     doc_flags.bits(),
                     cols.as_deref(),
+                    filter,
                 )?
             };
             (parse_batch_doc(&out)?, payload)
@@ -469,6 +495,70 @@ impl Schema {
         let mut res = batch_result_of(doc);
         res.payload = payload;
         Ok(res)
+    }
+
+    /// [`Schema::rows_export`] with a compiled [`Filter`] attached to the
+    /// export channel (revision 5, second half —
+    /// `docs/guides/filters.md` "Exporting only the rows a filter admits"):
+    /// ONE `chs_rows` parse then answers both the per-row verdict
+    /// ([`RowResult::verdict`]) and, for rows whose verdict is
+    /// [`crate::Verdict::True`], the export bytes.
+    ///
+    /// [`crate::Verdict::Error`] (the predicate threw) and
+    /// [`crate::Verdict::Decline`] (declined — including a row whose own
+    /// parse outcome was not [`crate::Outcome::Accepted`]) are NEVER
+    /// exported and NEVER collapsed into [`crate::Verdict::False`]:
+    /// collapsing either turns fail-closed into fail-open, the leak class
+    /// this surface exists to prevent. A security-enforcing caller must
+    /// treat any row whose [`RowResult::verdict`] is not
+    /// `Some(v) if v.answered()` as a refusal — hide the row or fail the
+    /// request, never export it. [`BatchResult::rows_passed`] and
+    /// [`BatchResult::rows_cut`] join the result;
+    /// `rows_passed + rows_cut` equals the accepted-row count.
+    ///
+    /// `filter` must be compiled over THIS schema: one from a different
+    /// `Schema` of the SAME loaded library rejects the whole call, loudly
+    /// ([`crate::Outcome::Rejected`], code 1002 — the C layer's own answer,
+    /// exactly as [`Filter::eval`] lets it answer for a mismatched
+    /// (filter, block) pair). One from a DIFFERENT loaded library is
+    /// [`crate::Error::CrossLibrarySchema`], refused before any C call — no
+    /// handle ever crosses a `dlopen`'d image boundary. The borrow checker
+    /// enforces the rest structurally: `filter` keeps ITS schema alive for
+    /// at least this call, exactly as every other `Filter` call does — this
+    /// is the SAME lifetime mechanism [`Schema::compile_filter`] already
+    /// gives you, not a second one.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::Error::CrossLibrarySchema`], plus every error
+    /// [`Schema::rows_export`] can return.
+    pub fn rows_export_with<K: AsRef<str>, V: AsRef<str>>(
+        &self,
+        format: Format,
+        body: &[u8],
+        settings: &[(K, V)],
+        export: Option<Format>,
+        doc_flags: DocFlags,
+        filter: &Filter<'_>,
+    ) -> Result<BatchResult> {
+        if !Arc::ptr_eq(&self.lib, &filter.schema.lib) {
+            return Err(Error::CrossLibrarySchema {
+                filter_version: filter.schema.lib.version().to_string(),
+                schema_version: self.lib.version().to_string(),
+            });
+        }
+        let export_code = export.map_or(EXPORT_NONE, Format::code);
+        self.rows_through_filtered(
+            format,
+            body,
+            &RowOptions {
+                settings: owned_pairs(settings),
+                columns: None,
+            },
+            export_code,
+            doc_flags,
+            filter.handle,
+        )
     }
 
     /// Compile one boolean SQL expression over this schema's PHYSICAL columns

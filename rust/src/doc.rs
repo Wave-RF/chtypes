@@ -254,6 +254,13 @@ impl<'a> Rdr<'a> {
                         Ok(())
                     })?;
                 }
+                // Revision 5, the attached row filter: present exactly when
+                // a filter was attached to the call that produced this
+                // document (the C ABI contract §Rows, "The attached row
+                // filter").
+                b"verdict" => d.verdict = r.text()?.chars().next(),
+                b"verdict_code" => d.verdict_code = r.i32_field()?,
+                b"verdict_err" => d.verdict_err = r.text()?,
                 _ => return Ok(false),
             }
             Ok(true)
@@ -351,6 +358,9 @@ impl<'a> Rdr<'a> {
                     }
                 }
                 b"export_declined" => d.export_declined = r.text()?,
+                // Revision 5, the attached row filter — see `row()` above.
+                b"rows_passed" => d.rows_passed = r.usize_field()?,
+                b"rows_cut" => d.rows_cut = r.usize_field()?,
                 _ => return Ok(false),
             }
             Ok(true)

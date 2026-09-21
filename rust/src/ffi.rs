@@ -631,8 +631,15 @@ impl Api {
     /// The export channel is unchanged by it — an exported row carries the
     /// stored columns in declared order, directly INSERT-able with no list.
     ///
+    /// `filter` (revision 5, second half) is the attached row filter — NULL
+    /// for "no filter" (today's behavior byte for byte; every call except
+    /// [`crate::Schema::rows_export_with`] passes NULL here) or a compiled
+    /// `chs_filter` from THIS same library.
+    ///
     /// # Safety
-    /// `handle` must come from this library's [`Api::compile`].
+    /// `handle` must come from this library's [`Api::compile`]. `filter`,
+    /// when non-null, must come from this same library's
+    /// [`Api::filter_compile`] and must outlive this call.
     // `chs_rows` itself takes ten parameters; this wrapper mirrors the ones a
     // caller supplies rather than inventing a struct that would exist only to
     // satisfy the lint (the call is private and has exactly one call site).
@@ -646,6 +653,7 @@ impl Api {
         export_format: i32,
         doc_flags: u32,
         columns_json: Option<&CStr>,
+        filter: *const ChsFilter,
     ) -> Result<(Vec<u8>, Option<Vec<u8>>)> {
         // SAFETY: the caller's `# Safety` clause guarantees `handle` came from this
         // library's `compile`. `body` is passed as pointer+length, so it needs no NUL
@@ -672,11 +680,7 @@ impl Api {
                     std::ptr::null_mut()
                 },
                 columns_json.map_or(std::ptr::null(), CStr::as_ptr),
-                // The attached row filter: NULL, which is "no filter" and
-                // today's behavior exactly. Nothing in this crate can attach
-                // one — the parameter exists here so the declaration matches
-                // the symbol, not to open new surface.
-                std::ptr::null(),
+                filter,
             );
             // Copy-then-free the export buffer FIRST, whatever happens to the
             // document: this is the one place that sees the pointer.
