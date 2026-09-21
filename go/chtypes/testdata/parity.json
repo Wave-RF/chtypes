@@ -359,6 +359,26 @@
       "rust": "Schema::rows_export"
     },
     {
+      "id": "schema.rows-export-with",
+      "group": "schema",
+      "kind": "method",
+      "what": "RowsExport's twin with a compiled filter attached to the export channel (revision 5, second half): ONE chs_rows parse answers both a per-row verdict and, for verdict 't' rows, the export bytes — docs/guides/filters.md \"Exporting only the rows a filter admits\"",
+      "go": "LoadedSchema.RowsExportWith",
+      "python": "Schema.rows",
+      "ts": "Schema.rows",
+      "rust": "Schema::rows_export_with"
+    },
+    {
+      "id": "schema.row-filter-option",
+      "group": "filter",
+      "kind": "option",
+      "what": "Attach the compiled filter to the export channel. Verdicts index THIS call's rows, never another call's; 'e' and 'd' are NEVER exported and NEVER collapsed into 'f' — collapsing either inverts fail-closed into fail-open. A filter compiled over a different schema handle rejects the whole call, loudly (code 1002)",
+      "go": "WithRowFilter",
+      "python": "Schema.rows",
+      "ts": "RowsOptions",
+      "rust": "Schema::rows_export_with"
+    },
+    {
       "id": "schema.close",
       "group": "schema",
       "kind": "method",
@@ -1314,6 +1334,8 @@
       "FilterOption": "Functional option carrier.",
       "RowOption": "Functional option carrier.",
       "RowsExportOption": "Functional option carrier; exported (unlike a plain option type) because a caller migrating off RowsExport's old ...DocFlags variadic needs a nameable type to build a []RowsExportOption.",
+      "RowsOption": "Functional option carrier for RowsExportWith — a distinct type from RowsExportOption because RowsExportWith is a new entry point with its own opts, not an added option on RowsExport.",
+      "WithDocFlags": "RowsExportWith's own spelling of the pre-existing DocFlags document-group selection (schema.rows-export already covers the capability) — a function rather than a bare DocFlags value because RowsExportWith's opts are RowsOption, not DocFlags.",
       "WithAutoFetch": "Registry option; Python/TS/Rust spell it as a constructor field.",
       "WithFetchOptions": "Registry option; Python/TS/Rust spell it as a constructor field.",
       "FetchOptions": "The fetch option struct; every binding has one, shaped its own way.",
@@ -1523,6 +1545,7 @@
       "Error::Nul": "An interior NUL in a string crossing the boundary.",
       "Error::Discovery": "A discovery body that did not parse.",
       "Error::CrossLibrary": "The §Revision 4 cross-library refusal, as a typed error.",
+      "Error::CrossLibrarySchema": "Schema::rows_export_with's cross-library refusal (a filter and the schema it is attached to come from two different loaded libraries), the same shape as Error::CrossLibrary for a (filter, block) pair.",
       "Error::Fetch": "Fetch-layer error.",
       "Result": "The crate's Result alias.",
       "RawText": "Bytes with a fallible UTF-8 view — never a String carrying invented U+FFFD.",

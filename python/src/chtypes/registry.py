@@ -406,6 +406,7 @@ class Schema:
         export: Format | int | None = None,
         doc_flags: int | None = None,
         columns: Sequence[str] | None = None,
+        row_filter: Filter | None = None,
     ) -> BatchResult:
         """Validate and coerce a whole request body, which may hold many rows.
 
@@ -449,13 +450,70 @@ class Schema:
         no-list behavior (see `encode_columns`); the export channel is
         unchanged by it, and an exported row still carries the stored
         columns in declared order, directly INSERT-able with no list.
+
+        `row_filter` (revision 5, second half — docs/guides/filters.md
+        "Exporting only the rows a filter admits") attaches a compiled
+        `Filter` to this call's export channel: ONE `chs_rows` parse then
+        answers both the per-row verdict (`RowResult.verdict`,
+        `Verdict.TRUE`/`FALSE`/`ERROR`/`DECLINE`) and, for rows whose
+        verdict is `Verdict.TRUE`, the export bytes. `None` (the default) is
+        today's behavior byte for byte. `Verdict.ERROR` (the predicate
+        threw) and `Verdict.DECLINE` (this library declines — including a
+        row whose own `outcome` was not `Outcome.ACCEPTED`) are NEVER
+        exported and NEVER collapsed into `Verdict.FALSE`: collapsing
+        either turns fail-closed into fail-open, the leak class this
+        surface exists to prevent. A security-enforcing caller must treat
+        any `RowResult.verdict` that is `None` or not `.answered` as a
+        refusal — hide the row or fail the request, never export it.
+        `BatchResult.rows_passed` and `.rows_cut` join the document;
+        `rows_passed + rows_cut` equals the accepted-row count.
+
+        The filter must be compiled over THIS schema: one from a different
+        `Schema` of the SAME library rejects the whole call, loudly
+        (`Outcome.REJECTED`, code 1002 — the same cross-schema rule
+        `Filter.eval` enforces for a (filter, block) pair). One from a
+        DIFFERENT `Library` raises `ChtypesError` here, before any C call —
+        no handle crosses a dlopen'd image boundary. Lifetime is unchanged
+        from `compile_filter` / `Filter.rows`: keep the filter's schema open
+        for as long as the filter is used; this reuses that existing
+        mechanism rather than inventing a second one.
         """
         export_format = EXPORT_NONE if export is None else int(export)
         if doc_flags is None:
             flags = DOC_ALL if export is None else 0
         else:
             flags = int(doc_flags)
-        with self._mu:
+
+        if row_filter is None:
+            with self._mu:
+                doc, payload = self._library._native.rows(
+                    self._live(),
+                    int(fmt),
+                    _as_bytes(body, "body"),
+                    encode_settings(settings),
+                    export_format,
+                    flags,
+                    encode_columns(columns),
+                )
+            return parse_batch_document(doc, payload=payload)
+
+        fs = row_filter._schema
+        if fs._library is not self._library:
+            raise ChtypesError(
+                "chtypes: filter and schema come from different libraries "
+                f"(ClickHouse {fs._library.version} vs {self._library.version})"
+            )
+        # An attached-filter call is a use of BOTH handles. Same schema: one
+        # lock. Two schemas (same library — the C layer answers its
+        # rejected-1002 document): both locks, in a fixed global order so a
+        # crossed call cannot deadlock against a concurrent one running the
+        # other way — the same pattern Filter.eval uses.
+        locks = [self._mu] if fs is self else sorted((self._mu, fs._mu), key=id)
+        with ExitStack() as stack:
+            for mu in locks:
+                stack.enter_context(mu)
+            if row_filter._handle is None:
+                raise ChtypesError("chtypes: filter is closed")
             doc, payload = self._library._native.rows(
                 self._live(),
                 int(fmt),
@@ -464,6 +522,7 @@ class Schema:
                 export_format,
                 flags,
                 encode_columns(columns),
+                filter_handle=row_filter._handle,
             )
         return parse_batch_document(doc, payload=payload)
 

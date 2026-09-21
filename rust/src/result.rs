@@ -208,6 +208,24 @@ impl Verdict {
     }
 }
 
+/// Map ONE wire verdict character to a [`Verdict`] — the single place that
+/// decision is made, shared by [`filter_result_of`] (`chs_filter_rows`'s /
+/// `chs_block_parse`'s `verdicts` string, one char per row) and
+/// [`row_result_of`] (`chs_rows`'s per-row `verdict` field, the revision-5
+/// attached filter). A second, drifted copy of this match is exactly how
+/// `'e'` or `'d'` could get silently collapsed into `'f'` in one call path
+/// and not the other — the fail-open bug this vocabulary exists to prevent.
+pub(crate) fn verdict_of(c: char) -> Verdict {
+    match c {
+        't' => Verdict::True,
+        'f' => Verdict::False,
+        'e' => Verdict::Error,
+        // 'd', and any character this crate does not know: decline — fail
+        // closed, mirroring the unknown-outcome rule.
+        _ => Verdict::Decline,
+    }
+}
+
 /// The CALL-level verdict of [`crate::Filter::rows`] — whether evaluation
 /// completed at all; per-row failures live in the verdicts, not here. The
 /// default (and the degradation for an outcome spelling this crate does not
@@ -539,6 +557,26 @@ pub struct RowResult {
     pub substituted: Vec<Substitution>,
     /// `MATERIALIZED` values — durable, but not part of `SELECT *`.
     pub computed: Vec<Computed>,
+    /// This row's filter verdict from [`crate::Schema::rows_export_with`],
+    /// beside `outcome` above — the two are independent facts, and neither
+    /// replaces the other (`docs/guides/filters.md` "Exporting only the
+    /// rows a filter admits"). `None` from every OTHER row-producing call
+    /// ([`crate::Schema::row`], [`crate::Schema::rows`],
+    /// [`crate::Schema::rows_export`], [`crate::Schema::rows_with_options`],
+    /// [`crate::Schema::rows_export_with_options`]) — `rows_export_with` is
+    /// the only entry point that ever attaches a filter, so it is the only
+    /// one whose rows carry `Some`. A security-enforcing caller MUST fail
+    /// closed — hide the row / fail the request — on a verdict that is
+    /// `None` or `!Verdict::answered`.
+    pub verdict: Option<Verdict>,
+    /// Set beside [`Verdict::Error`] (the predicate threw, ClickHouse's own
+    /// code/message), beside an eval-time [`Verdict::Decline`] (the
+    /// admission envelope), and for a row whose own `outcome` is not
+    /// [`Outcome::Accepted`] (its own parse error, reported as `Decline`).
+    /// `0` otherwise.
+    pub verdict_code: i32,
+    /// The message beside `verdict_code`; empty otherwise.
+    pub verdict_err: String,
 }
 
 /// The outcome of one request body, which may hold many rows.
@@ -610,6 +648,17 @@ pub struct BatchResult {
     /// no export was requested. A decline here is `-2`-class honesty, never a
     /// server verdict.
     pub export_declined: String,
+    /// [`crate::Schema::rows_export_with`] only: accepted rows whose verdict
+    /// is [`Verdict::True`], and accepted rows with any other verdict,
+    /// respectively. `rows_passed + rows_cut` equals the accepted-row
+    /// count. Both `0` when no filter was attached — indistinguishable from
+    /// "filter attached, nothing passed and nothing accepted", so key
+    /// presence on whether `rows_export_with` was called, never on these
+    /// being nonzero.
+    pub rows_passed: usize,
+    /// Accepted rows with any verdict OTHER than [`Verdict::True`]; see
+    /// `rows_passed`.
+    pub rows_cut: usize,
 }
 
 impl BatchResult {
@@ -641,6 +690,13 @@ pub(crate) struct RowDoc {
     pub unsupported_settings: Vec<String>,
     pub cols: Vec<ColDoc>,
     pub computed: Vec<CompDoc>,
+    /// Present exactly when a filter was attached to the call that produced
+    /// this document (revision 5, `chs_rows`'s attached row filter) — `None`
+    /// from every plain Row/Rows document and from `rows_export_with` with
+    /// no filter attached.
+    pub verdict: Option<char>,
+    pub verdict_code: i32,
+    pub verdict_err: String,
 }
 
 #[derive(Debug, Default)]
@@ -725,6 +781,11 @@ pub(crate) struct BatchDoc {
     pub row_spans: Option<Vec<Span>>,
     /// Present exactly when an export was requested and withheld.
     pub export_declined: String,
+    /// [`crate::Schema::rows_export_with`] only: accepted rows whose verdict
+    /// is `'t'`, and accepted rows with any other verdict, respectively.
+    /// `0` when no filter was attached.
+    pub rows_passed: usize,
+    pub rows_cut: usize,
 }
 
 /// The wire document `chs_filter_rows` returns.
@@ -798,6 +859,11 @@ pub(crate) fn row_result_of(doc: RowDoc) -> RowResult {
             text: m.stored.unwrap_or_default(),
         });
     }
+    if let Some(c) = doc.verdict {
+        res.verdict = Some(verdict_of(c));
+        res.verdict_code = doc.verdict_code;
+        res.verdict_err = doc.verdict_err;
+    }
     res
 }
 
@@ -816,6 +882,8 @@ pub(crate) fn batch_result_of(doc: BatchDoc) -> BatchResult {
         engine_rows_raw: doc.engine_rows,
         spans: doc.row_spans,
         export_declined: doc.export_declined,
+        rows_passed: doc.rows_passed,
+        rows_cut: doc.rows_cut,
         ..Default::default()
     };
     for (i, rd) in doc.rows.into_iter().enumerate() {
@@ -867,16 +935,7 @@ pub(crate) fn filter_result_of(doc: FilterDoc) -> FilterResult {
         // document already promises.
         return res;
     }
-    res.verdicts = doc
-        .verdicts
-        .chars()
-        .map(|c| match c {
-            't' => Verdict::True,
-            'f' => Verdict::False,
-            'e' => Verdict::Error,
-            _ => Verdict::Decline,
-        })
-        .collect();
+    res.verdicts = doc.verdicts.chars().map(verdict_of).collect();
     res.errors = doc.errors;
     res
 }
@@ -1034,5 +1093,108 @@ mod tests {
         assert_eq!(Format::RowBinaryWithNamesAndTypesAndDefaults.code(), 7);
         assert_eq!(Format::Native.code(), 8);
         assert_eq!(Format::Buffers.code(), 9);
+    }
+
+    // ---------------------------------------------- issue #54: rows_export_with
+    //
+    // These cover what can be exercised WITHOUT a loaded artifact: the pure
+    // document-decoding logic (`verdict_of`, `row_result_of`,
+    // `batch_result_of` against a hand-built document shaped exactly as the
+    // C ABI contract §Rows describes chs_rows' attached-filter document).
+    // `Schema::rows_export_with`'s cross-library refusal
+    // (`Error::CrossLibrarySchema`) needs two distinct `dlopen`'d libraries
+    // to construct even a `Schema` — the same limitation
+    // `Filter::eval`'s pre-existing cross-library check has, with no unit
+    // test of its own for the same reason — so it is wired (mirrors
+    // `Filter::eval`'s already-established pattern exactly) but not run
+    // here. No revision-5 artifact exists yet (issue #54's own blocker), so
+    // the end-to-end path — a real filter compiled and evaluated through
+    // `chs_rows` — cannot run either.
+
+    #[test]
+    fn verdict_of_maps_the_four_characters() {
+        // The single source of truth `verdict_of` implements. Fail-closed
+        // lives here: 'e' and 'd' — and anything unrecognized — must never
+        // map to Verdict::False.
+        assert_eq!(verdict_of('t'), Verdict::True);
+        assert_eq!(verdict_of('f'), Verdict::False);
+        assert_eq!(verdict_of('e'), Verdict::Error);
+        assert_eq!(verdict_of('d'), Verdict::Decline);
+        assert_eq!(verdict_of('?'), Verdict::Decline);
+        for c in ['e', 'd', '?'] {
+            assert_ne!(
+                verdict_of(c),
+                Verdict::False,
+                "verdict_of({c:?}) collapsed a non-answer into False — fail-open"
+            );
+        }
+    }
+
+    #[test]
+    fn attached_filter_verdicts_decode_all_four_characters_and_rows_passed_cut() {
+        // A hand-built document shaped as chs_rows answers WITH an attached
+        // filter: four rows exercising all four verdict characters, one of
+        // them ('d') on a row whose own parse outcome is not accepted, plus
+        // rows_passed/rows_cut at the batch level. This is the
+        // acceptance-bar test for property (3) — bytes only for 't', e/d
+        // never collapsed into f — at the decoding layer.
+        let doc = crate::doc::batch_doc(
+            br#"{
+                "outcome":"accepted","code":0,"err":"","rows_read":4,"rows_skipped":0,
+                "rows_passed":1,"rows_cut":3,
+                "rows":[
+                    {"outcome":"accepted","code":0,"err":"","cols":[],"verdict":"t"},
+                    {"outcome":"accepted","code":0,"err":"","cols":[],"verdict":"f"},
+                    {"outcome":"accepted","code":0,"err":"","cols":[],"verdict":"e","verdict_code":386,"verdict_err":"no common type"},
+                    {"outcome":"skipped","code":117,"err":"bad row","cols":[],"verdict":"d","verdict_code":117,"verdict_err":"bad row"}
+                ],
+                "row_spans":[{"off":0,"len":5},{"off":0,"len":0},{"off":0,"len":0},{"off":0,"len":0}]
+            }"#,
+        )
+        .unwrap();
+        let br = batch_result_of(doc);
+
+        assert_eq!(br.rows_passed, 1);
+        assert_eq!(br.rows_cut, 3);
+        assert_eq!(br.rows_passed + br.rows_cut, 4);
+
+        let want = [
+            Verdict::True,
+            Verdict::False,
+            Verdict::Error,
+            Verdict::Decline,
+        ];
+        for (i, w) in want.iter().enumerate() {
+            assert_eq!(br.rows[i].verdict, Some(*w), "row {i}");
+        }
+        // Property (3), directly: neither non-answer decoded as False.
+        assert_ne!(br.rows[2].verdict, Some(Verdict::False));
+        assert_ne!(br.rows[3].verdict, Some(Verdict::False));
+        assert!(!br.rows[2].verdict.unwrap().answered());
+        assert!(!br.rows[3].verdict.unwrap().answered());
+
+        // Row 3's own outcome is not accepted, and it still carries
+        // verdict_code / verdict_err beside verdict, per the contract.
+        assert_eq!(br.rows[3].outcome, Outcome::Skipped);
+        assert_eq!(br.rows[3].verdict_code, 117);
+        assert_eq!(br.rows[3].verdict_err, "bad row");
+        assert_eq!(br.rows[2].verdict_code, 386);
+        assert_eq!(br.rows[2].verdict_err, "no common type");
+    }
+
+    #[test]
+    fn no_filter_leaves_verdict_none_and_rows_passed_cut_at_zero() {
+        // The ordinary Row/Rows/RowsExport document — no "verdict" key at
+        // all — leaves verdict None rather than decoding an absent field
+        // into something that could be mistaken for a real decline.
+        let doc = crate::doc::batch_doc(
+            br#"{"outcome":"accepted","code":0,"err":"","rows_read":1,"rows_skipped":0,
+                "rows":[{"outcome":"accepted","code":0,"err":"","cols":[]}]}"#,
+        )
+        .unwrap();
+        let br = batch_result_of(doc);
+        assert_eq!(br.rows_passed, 0);
+        assert_eq!(br.rows_cut, 0);
+        assert_eq!(br.rows[0].verdict, None);
     }
 }

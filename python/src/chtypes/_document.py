@@ -186,6 +186,16 @@ def _row_result(doc: RawObject) -> RowResult:
             )
         )
 
+    # `verdict` (RowsExportWith's Python spelling: `rows(..., row_filter=)`)
+    # is present exactly when a filter was attached to the call that
+    # produced this document — absent from every Row/Rows document and from
+    # `rows()` with no `row_filter`. `Verdict.of` degrades an unrecognized
+    # character to DECLINE, never to an invented answer.
+    verdict_char = _text(doc, "verdict")
+    verdict = Verdict.of(verdict_char) if verdict_char else None
+    verdict_code = _count(doc, "verdict_code")
+    verdict_err = _text(doc, "verdict_err")
+
     return RowResult(
         outcome=outcome,
         err_code=_count(doc, "code"),
@@ -196,6 +206,9 @@ def _row_result(doc: RawObject) -> RowResult:
         unsupported_settings=unsupported_settings,
         substituted=tuple(substituted),
         computed=tuple(computed),
+        verdict=verdict,
+        verdict_code=verdict_code,
+        verdict_err=verdict_err,
     )
 
 
@@ -228,6 +241,9 @@ def parse_batch_document(raw: bytes, payload: bytes | None = None) -> BatchResul
                 unsupported_settings=row.unsupported_settings,
                 substituted=row.substituted,
                 computed=row.computed,
+                verdict=row.verdict,
+                verdict_code=row.verdict_code,
+                verdict_err=row.verdict_err,
             )
         )
         transformed.extend(indexed)
@@ -279,6 +295,8 @@ def parse_batch_document(raw: bytes, payload: bytes | None = None) -> BatchResul
         payload=payload,
         spans=spans,
         export_declined=_text(doc, "export_declined"),
+        rows_passed=_count(doc, "rows_passed"),
+        rows_cut=_count(doc, "rows_cut"),
     )
 
 

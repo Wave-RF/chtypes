@@ -189,11 +189,14 @@ function declare(library: string) {
     // Revision 5: chs_rows gains a trailing columns_json (the INSERT column
     // list) — see `encodeColumns` for why this binding always sends "[]"
     // rather than a real NULL for "no list" — and then, in the same open
-    // window, the attached row filter LAST. This binding never attaches one
-    // and passes NULL_PTR, which is today's behavior byte for byte; the
-    // parameter is DECLARED because calling a ten-parameter symbol through a
-    // nine-parameter descriptor leaves the callee reading the filter slot
-    // from whatever happened to occupy it.
+    // window, the attached row filter LAST: NULL_PTR for "no filter" (every
+    // plain `rows()` call, and `rows()` with no `options.rowFilter`), a real
+    // filter handle when `Schema#rows` was given one (`rows()`'s own
+    // spelling for RowsExportWith — docs/guides/filters.md "Exporting only
+    // the rows a filter admits"). The parameter was DECLARED before any
+    // caller could supply a value, because calling a ten-parameter symbol
+    // through a nine-parameter descriptor leaves the callee reading the
+    // filter slot from whatever happened to occupy it.
     chs_rows: d(External, [External, I32, U8Array, U64, Str, I32, I32, U8Array, Str, External]),
     // Everything else is optional and degrades to `unsupported` at call time.
     chs_free: d(Void, [External]),
@@ -856,6 +859,11 @@ export class NativeLibrary {
    * read exactly as `chs_row` documents it; the export channel is unchanged
    * by it (an exported row still carries the stored columns in declared
    * order). Absent or empty means no list, encoded per `encodeColumns`.
+   *
+   * `filterHandle` (revision 5, second half) is the attached row filter —
+   * `undefined`/`null` (the default) sends `NULL_PTR`, "no filter" and
+   * today's behavior byte for byte. `Schema#rows`'s `options.rowFilter` is
+   * the only caller that ever supplies one.
    */
   rows(
     handle: SchemaHandle,
@@ -865,6 +873,7 @@ export class NativeLibrary {
     exportFormat: number = EXPORT_NONE,
     docFlags: number = DOC_ALL,
     columns?: readonly string[],
+    filterHandle?: FilterHandle | null,
   ): { doc: Buffer; payload: Buffer | null } {
     const buf = asBuffer(body);
     const columnsJson = encodeColumns(columns);
@@ -884,11 +893,7 @@ export class NativeLibrary {
             docFlags,
             outBytes,
             columnsJson,
-            // The attached row filter: NULL, which is "no filter" and today's
-            // behavior exactly. Nothing in this binding can attach one — the
-            // argument exists so the call matches the symbol, not to open new
-            // surface.
-            NULL_PTR,
+            filterHandle ?? NULL_PTR,
           ]) as JsExternal,
       );
     } catch (err) {
