@@ -240,6 +240,55 @@ func TestVerifyChecksumsRefusesAManifestWithNoHash(t *testing.T) {
 	}
 }
 
+// TestLoadRefusesBadLibraryBytesWithoutVerification is issue #82's level-up:
+// the size check runs on EVERY Load, whether or not WithVerifyChecksums is
+// on, because it is nearly free (one stat, no re-hash) and it is the
+// commonest shape of a broken artifact directory — a truncated or
+// partially-written library file. Before #82 this registry constructed fine
+// with WithVerifyChecksums off; the whole point of the change is that it
+// no longer does.
+func TestLoadRefusesBadLibraryBytesWithoutVerification(t *testing.T) {
+	body := []byte("not a shared library")
+	dir := t.TempDir()
+	writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"library_bytes":      len(body) + 1,
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+	}, body)
+
+	// No WithVerifyChecksums anywhere in this call.
+	_, err := NewRegistry(dir, WithPreload("25.8"))
+	if err == nil {
+		t.Fatal("a library whose bytes do not match its manifest loaded anyway, with no verification asked for")
+	}
+	if !strings.Contains(err.Error(), "manifest says") {
+		t.Fatalf("want the size refusal naming both counts, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "dlopen") {
+		t.Fatalf("the size check must refuse BEFORE dlopen is ever attempted, got: %v", err)
+	}
+}
+
+// TestLoadIgnoresAbsentLibraryBytesWithoutVerification is the companion
+// case: a manifest that predates the field (library_bytes 0, its zero
+// value) or carries no manifest.json at all must not turn into a new reason
+// Load fails for a caller who never asked for a size to be checked against.
+func TestLoadIgnoresAbsentLibraryBytesWithoutVerification(t *testing.T) {
+	body := []byte("not a shared library")
+	dir := t.TempDir()
+	writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+	}, body)
+
+	_, err := NewRegistry(dir, WithPreload("25.8"))
+	if err == nil || !strings.Contains(err.Error(), "dlopen") {
+		t.Fatalf("want the load to reach (and fail at) dlopen with no library_bytes to check, got: %v", err)
+	}
+}
+
 func TestVerifyChecksumsAgainstARealArtifact(t *testing.T) {
 	inst := smallestInstalled(t)
 	// One line, hard-linked rather than copied: the bytes (and so the hash) are

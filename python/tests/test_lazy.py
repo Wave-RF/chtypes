@@ -149,6 +149,56 @@ def test_verification_covers_a_lazily_opened_line_too(
     )
 
 
+def test_library_bytes_is_checked_on_every_load_without_verify_hashes(
+    tmp_path: Path, isolated_search_path: Path
+) -> None:
+    """The size check runs unconditionally, unlike the hash above (issue #82).
+
+    Unlike `verify_hashes`'s sha256 comparison, the manifest's
+    ``library_bytes`` size check is NOT conditional on it: it is nearly free
+    (one stat, never a re-hash of the library's contents), and it catches the
+    commonest shape of a broken artifact directory — a truncated or
+    partially-written library file. ``verify_hashes`` is False everywhere
+    below, on purpose.
+    """
+    root = tmp_path / "registry"
+    stand_in(root, "25.8", library_bytes=len(BODY) + 1)
+
+    # Preloaded: the refusal arrives from the constructor, BEFORE dlopen.
+    with pytest.raises(chtypes.RegistryError, match="is .* bytes, manifest says"):
+        chtypes.Registry(root, preload=["25.8"])
+
+    # Lazily opened: the same refusal arrives from the call that asks.
+    registry = chtypes.Registry(root)
+    with pytest.raises(chtypes.RegistryError, match="is .* bytes, manifest says"):
+        registry.for_version("25.8")
+    assert registry.libraries() == ()
+
+
+def test_an_absent_library_bytes_is_not_asked(tmp_path: Path, isolated_search_path: Path) -> None:
+    """A manifest predating the field (or none at all) must never become a
+    NEW reason a load fails, with or without verification."""
+    root = tmp_path / "registry"
+    sub = root / "25.8"
+    sub.mkdir(parents=True)
+    (sub / "libchtypes.so").write_bytes(BODY)
+    (sub / "manifest.json").write_text(
+        json.dumps(
+            {
+                "library": "libchtypes.so",
+                "clickhouse_version": "25.8.1.1",
+                "clickhouse_minor": "25.8",
+            }
+        )
+    )
+
+    # Reaches (and fails at) dlopen — the size check never had a value to
+    # compare against.
+    with pytest.raises(chtypes.ChtypesError) as caught:
+        chtypes.Registry(root, preload=["25.8"])
+    assert "bytes, manifest says" not in str(caught.value)
+
+
 def test_a_named_directory_that_cannot_be_read_fails_at_construction(
     tmp_path: Path, isolated_search_path: Path
 ) -> None:

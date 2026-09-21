@@ -85,26 +85,56 @@ def read_manifest(version_dir: str | os.PathLike[str]) -> Manifest | None:
         return None
 
 
+def check_library_bytes(
+    version_dir: str | os.PathLike[str], manifest: Manifest | None = None
+) -> None:
+    """Compare the shared library's on-disk size to the manifest's ``library_bytes``.
+
+    Unconditional on the load path, unlike ``verify_library``'s hash check
+    below (issue #82): nearly free (one ``stat``, never a re-hash of the
+    library's contents), and it catches the commonest shape of a broken
+    artifact directory -- a truncated or partially-written library file.
+
+    A manifest with no ``library_bytes`` (0, its default for one that
+    predates the field) is not asked, so this is a no-op for one: a
+    directory with no size to compare against must never become a new
+    reason a load fails.
+    """
+    directory = Path(version_dir)
+    if manifest is None:
+        manifest = read_manifest(directory)
+        if manifest is None:
+            raise RegistryError(f"chtypes: no usable manifest.json in {directory}")
+    if not manifest.library_bytes:
+        return
+    path = directory / manifest.library
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise RegistryError(f"chtypes: {path}: {exc}") from exc
+    if size != manifest.library_bytes:
+        raise RegistryError(
+            f"chtypes: {path} is {size} bytes, manifest says {manifest.library_bytes}"
+        )
+
+
 def verify_library(version_dir: str | os.PathLike[str]) -> None:
     """Re-hash the shared library and compare it against the manifest.
 
     The artifact carries its own checksum, so this is neither optional nor
     expensive for anything that arrived over a network: a move that reported
     success and truncated a 232 MB library looks identical to one that worked.
+    The size check ahead of the hash, ``check_library_bytes``, ALSO runs
+    unconditionally on the load path outside of verification (issue #82);
+    calling it here too keeps this function's own behavior unchanged for a
+    caller who invokes it directly.
     """
     directory = Path(version_dir)
     manifest = read_manifest(directory)
     if manifest is None:
         raise RegistryError(f"chtypes: no usable manifest.json in {directory}")
+    check_library_bytes(directory, manifest)
     path = directory / manifest.library
-    try:
-        size = path.stat().st_size
-    except OSError as exc:
-        raise RegistryError(f"chtypes: {path}: {exc}") from exc
-    if manifest.library_bytes and size != manifest.library_bytes:
-        raise RegistryError(
-            f"chtypes: {path} is {size} bytes, manifest says {manifest.library_bytes}"
-        )
     if not manifest.library_sha256:
         raise RegistryError(
             f"chtypes: {path} cannot be verified: manifest carries no library_sha256"

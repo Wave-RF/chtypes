@@ -73,6 +73,12 @@ export interface RegistryOptions {
    * checksum is computed immediately before that library is `dlopen`ed and at
    * no other time — at construction for the preloaded lines, at first use for
    * the rest, never for a line nobody asks for.
+   *
+   * What this option ADDS is the sha256 comparison. The cheaper
+   * `manifest.library_bytes` size check that runs just before it is NOT
+   * conditional on this option — `load()` below always makes it, on every
+   * open, regardless (issue #82). Its timing is the same as the checksum's:
+   * at construction for the preloaded lines, at first use for the rest.
    */
   verifyChecksums?: boolean;
   /**
@@ -270,6 +276,11 @@ export class Registry {
     if (already !== undefined) return already;
 
     const libPath = path.join(sub, manifest.library);
+    // Unconditional, unlike the hash below: nearly free (one stat, never a
+    // re-hash of the library's contents), and it catches the commonest shape
+    // of a broken artifact directory — a truncated or partially-written
+    // library file (issue #82).
+    checkLibraryBytes(libPath, manifest);
     if (this.verifyChecksums) verifyChecksum(libPath, manifest);
 
     // A directory that has a manifest and does not load is broken, not absent.
@@ -559,17 +570,27 @@ function readUnsafeFamilies(dir: string, manifest: Manifest): string {
   }
 }
 
+/**
+ * Compare `libPath`'s on-disk size to `manifest.library_bytes` — the load-path
+ * check `load()` runs on EVERY open, whether or not `verifyChecksums` is on
+ * (issue #82). A manifest with no `library_bytes` (`undefined`, the shape a
+ * manifest predating the field parses to) is not asked, so this is a no-op
+ * for one.
+ */
+function checkLibraryBytes(libPath: string, manifest: Manifest): void {
+  if (manifest.library_bytes === undefined) return;
+  const actual = statSync(libPath).size;
+  if (actual !== manifest.library_bytes) {
+    throw new RegistryError(`chtypes: ${libPath} is ${actual} bytes, manifest says ${manifest.library_bytes}`);
+  }
+}
+
 function verifyChecksum(libPath: string, manifest: Manifest): void {
   const expected = manifest.library_sha256;
   if (expected === undefined || expected === '') {
     throw new RegistryError(`chtypes: ${libPath} cannot be verified: its manifest carries no library_sha256`);
   }
   const bytes = readFileSync(libPath);
-  if (manifest.library_bytes !== undefined && bytes.byteLength !== manifest.library_bytes) {
-    throw new RegistryError(
-      `chtypes: ${libPath} is ${bytes.byteLength} bytes, manifest says ${manifest.library_bytes}`,
-    );
-  }
   const actual = createHash('sha256').update(bytes).digest('hex');
   // Case-insensitive: a hex digest is the same digest in either case, and Go
   // and Rust already lower-case before comparing. Comparing raw here made an

@@ -24,6 +24,12 @@ The four bindings in this repository are released together and give one answer, 
 
 - **`verifyChecksums` is unchanged, and the timing is now stated: a library's checksum is computed immediately before that library is `dlopen`ed, and at no other time** — at construction for the `preload`ed lines, at first use for the rest, never for a line nobody asks for. It is a policy on the registry, not a property of the preload list: a lazily-opened line is hashed too (#50).
 
+- **BREAKING: `library_bytes` is now checked on EVERY load, not only under `verifyChecksums`** (issue #82, split out of #50 so the behavior change was not hidden inside a larger one). The size check — the file's actual length against the manifest's `library_bytes` — used to run only when verification was on, bundled inside the sha256 comparison; Go and Python agreed with TypeScript on that, and Rust did not, checking bytes unconditionally on every load. It is nearly free (one `stat`, never a re-hash of the library's contents) and it catches the commonest shape of a broken artifact directory — a truncated or partially-written library file — so all four bindings now check it unconditionally, and TypeScript stops being three of the four that didn't.
+
+  **What changes for a caller who never asked for verification:** an artifact directory whose manifest carries a `library_bytes` that does not match the file on disk now fails the load (`for()`, `open()`, and `preload`, which all route through the same internal loader) with `chtypes: <path> is <n> bytes, manifest says <m>`, refused before `dlopen` is ever attempted. Before this change the same directory reached `dlopen` regardless — usually failing there too, with a less specific error, though a stale-rather-than-corrupt manifest could pass through unnoticed. A manifest with no `library_bytes` at all (`undefined`, its shape for one that predates the field) is unaffected either way: this was never, and is still not, a reason a load fails for a directory with no size to check against.
+
+  **Timing, read together with `verifyChecksums`'s rule above:** the size check runs at the exact same point the hash check does — immediately before `dlopen`, at construction for `preload`ed lines and at first use for the rest — because the internal loader is the one place both checks live, whether or not verification is on.
+
 ## [0.2.2] — 2026-09-17
 
 No functional change in this binding. This release ships together with the other three because the four give one answer, not because anything here moved.
