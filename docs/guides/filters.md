@@ -215,6 +215,39 @@ Evaluation is a pure function of (filter, block). It takes no settings, and it n
 
 Per-row parse failures live **inside** the block and answer `decline`. A call-level failure yields no block at all, and no partial answers.
 
+## Exporting only the rows a filter admits
+
+Attach a compiled filter to `rows`'s export channel ([`batches.md` → Exporting the accepted rows as wire bytes](batches.md#exporting-the-accepted-rows-as-wire-bytes)) and one parse answers both questions at once: the same four verdicts as above, one per row, and — for the rows whose verdict is `t` — the exported bytes. This is the row-level-security shape: compile a tenant's predicate once, reuse the handle across batches, and export only the rows it admits. It is still under the enforcement gate at the top of this page: shadow and replay, not a replacement for existing enforcement, until the WHERE-truth rig gates green.
+
+<details open><summary><b>Go</b></summary>
+
+```go
+f, err := schema.CompileFilter("tenant = {t:String}", chtypes.WithFilterParams(map[string]string{"t": "acme"}))
+if err != nil {
+	log.Fatal(err)
+}
+defer f.Close()
+
+batch, err := schema.RowsExportWith(chtypes.JSONEachRow, body, nil, chtypes.JSONCompactEachRow, chtypes.WithRowFilter(f))
+// batch.Payload holds the bytes of only the rows whose verdict was 't'
+```
+
+</details>
+
+Go spells this `RowsExportWith(..., WithRowFilter(filter))` — a new entry point rather than an added option on `RowsExport`, so that call's existing signature never moves. The other three bindings surface the same call through their own idiom for the export channel (`docs/reference/bindings.md`'s shape table); the concept is identical across all four — one call, one parse, a verdict per row, bytes for the `t` rows — even where the exact spelling differs by language.
+
+Each row's document gains `verdict` — the same `t`/`f`/`e`/`d` as above — beside its own parse `outcome`; the two are independent facts, and neither one replaces the other. A row whose own `outcome` is not `accepted` — `skipped`, the row that aborted a strict batch, `accepted_poisoned`, an accepted row missing a stored wire column — is answered `d`, carrying that row's own error; a row the predicate itself declines at evaluation time is also `d`, and both cases add `verdict_code` and `verdict_err` beside `verdict`, exactly as an `e` does.
+
+Three consequences follow, and a consumer meets each of them:
+
+- **A batch whose own `outcome` is not `accepted` exports nothing, filter or no filter.** Measured by the artifact producer: a `CONSTRAINT … CHECK` violator anywhere in the batch rejects the whole batch with code **469**, and the table stores nothing, so no passing row's bytes flow either, whatever its own verdict would have been. There is no path by which such a batch exports its admitted rows; attaching a filter does not create one.
+
+> ⚠️ **Verdicts index THIS call's rows — never another call's.** Measured by the artifact producer: a filtered export call and a plain `chs_filter_rows` / block-parse call reading the identical body can come back with a **different number of verdicts**, because the filtered export call stops at whichever row aborts its own parse, while the other reads the whole body regardless. Zipping one call's verdicts against another call's rows is exactly the mistake that costs a caller its own withhold-on-mismatch check — index verdicts only against the rows of the SAME call that produced them.
+
+- **`d` here is this library's convention, not the server's answer.** Measured by the artifact producer: over a CONSTRAINT-bearing schema, a row that never reaches storage never reaches the predicate either — the server has no verdict to offer for it at all. Reporting that as `d` rather than `f` is a choice this library makes, not a fact the server hands back; `f` ("not in the admitted set") is a defensible alternative reading of the same measurement, just not the one made here. Because export emits bytes only for `t` and excludes both `e` and `d`, a reader who treats `d` as "what the server said" may derive behavior from a value that is actually this library's own to define.
+
+The export mechanics you already know from the plain export channel carry over unchanged: `row_spans` stays index-aligned with the batch's rows, and a cut row — `f`, `e` or `d` — gets `{0, 0}` exactly as a non-accepted row does today. Two counts join the document, `rows_passed` (accepted rows whose verdict is `t`) and `rows_cut` (accepted rows with any other verdict); `rows_passed + rows_cut` is the number of accepted rows. A filter compiled over a different schema handle than the one the call runs against rejects the whole call, loudly — the same cross-schema rule as [Lifetimes](#lifetimes), below. A filter attached with no export requested is legal: you get verdicts and no bytes, exactly as `f.Rows` already gives you above.
+
 ## Lifetimes
 
 A filter and a block must come from the **same schema handle**. A mismatched pair from one library answers `rejected` with code 1002, loudly; a pair from two different libraries is refused before any C call is made.
