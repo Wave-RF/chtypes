@@ -70,8 +70,8 @@ const (
 	// ReasonLossyNumeric: a numeric change the classifier cannot name more
 	// precisely (also denormal folding: 1e400 stored as "inf").
 	ReasonLossyNumeric = "lossy_numeric"
-	// ReasonStringPad: a FixedString padded with NUL bytes to its width.
-	ReasonStringPad = "fixedstring_pad"
+	// ReasonFixedStringPad: a FixedString padded with NUL bytes to its width.
+	ReasonFixedStringPad = "fixedstring_pad"
 	// ReasonEmptied: a non-empty string stored as the empty string.
 	ReasonEmptied = "emptied"
 	// ReasonElementChanged: a change inside an Array/Tuple/Map element.
@@ -503,7 +503,7 @@ func reasonFor(base, stored, ref string) string {
 	case base == "Float32", base == "Float64", base == "BFloat16":
 		return ReasonFloatPrecision
 	case strings.HasPrefix(base, "FixedString"):
-		return ReasonStringPad
+		return ReasonFixedStringPad
 	case isIntFamily(base):
 		return ReasonOverflowWrap
 	}
