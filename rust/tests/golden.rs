@@ -43,6 +43,8 @@ fn goldens(registry_dir: &std::path::Path) -> Option<Json> {
     Some(doc)
 }
 
+// Text formats only: a golden case must be version-agnostic, and a binary
+// format's bytes depend on when the artifact was linked.
 fn format_of(name: &str) -> Format {
     match name {
         "JSONEachRow" => Format::JsonEachRow,
@@ -50,6 +52,8 @@ fn format_of(name: &str) -> Format {
         "TSV" => Format::Tsv,
         "Values" => Format::Values,
         "JSONCompactEachRow" => Format::JsonCompactEachRow,
+        "CSVWithNames" => Format::CsvWithNames,
+        "TSVWithNames" => Format::TsvWithNames,
         other => panic!("unknown golden format {other}"),
     }
 }

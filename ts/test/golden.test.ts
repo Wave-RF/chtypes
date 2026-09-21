@@ -62,12 +62,16 @@ interface GoldenFile {
   cases: GoldenCase[];
 }
 
+// Text formats only: a golden case must be version-agnostic, and a binary
+// format's bytes depend on when the artifact was linked.
 const FORMATS: Record<string, number> = {
   JSONEachRow: Format.JSONEachRow,
   CSV: Format.CSV,
   TSV: Format.TSV,
   Values: Format.Values,
   JSONCompactEachRow: Format.JSONCompactEachRow,
+  CSVWithNames: Format.CSVWithNames,
+  TSVWithNames: Format.TSVWithNames,
 };
 
 // A registry fetched before core started serving the set has no file. That is a

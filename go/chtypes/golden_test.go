@@ -60,8 +60,11 @@ type goldenCase struct {
 	} `json:"expect"`
 }
 
+// Text formats only: a golden case must be version-agnostic, and a binary
+// format's bytes depend on when the artifact was linked.
 var goldenFormats = map[string]Format{
 	"JSONEachRow": JSONEachRow, "CSV": CSV, "TSV": TSV, "Values": Values, "JSONCompactEachRow": JSONCompactEachRow,
+	"CSVWithNames": CSVWithNames, "TSVWithNames": TSVWithNames,
 }
 
 func loadGoldens(t *testing.T, registryDir string) goldenFile {

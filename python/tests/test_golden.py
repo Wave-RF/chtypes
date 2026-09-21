@@ -18,12 +18,16 @@ import pytest
 import chtypes
 from chtypes import FilterOutcome, Format, Outcome, SchemaError, Verdict
 
+# Text formats only: a golden case must be version-agnostic, and a binary
+# format's bytes depend on when the artifact was linked.
 FORMATS = {
     "JSONEachRow": Format.JSON_EACH_ROW,
     "CSV": Format.CSV,
     "TSV": Format.TSV,
     "Values": Format.VALUES,
     "JSONCompactEachRow": Format.JSON_COMPACT_EACH_ROW,
+    "CSVWithNames": Format.CSV_WITH_NAMES,
+    "TSVWithNames": Format.TSV_WITH_NAMES,
 }
 # The document spells a verdict in one character; the golden spells it out.
 VERDICTS = {
