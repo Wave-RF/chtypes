@@ -256,8 +256,15 @@ jobs:
     # cheaper half of this trade.
     #
     # It deliberately has no `needs:` and nothing `needs:` it. A failure here
-    # withholds no other job's result, which is the same rule the `artifacts`
-    # job's verdict step enforces internally.
+    # withholds no other job's result, and — for the same reason, one level
+    # down — its four binding steps carry `continue-on-error` and an `id`,
+    # with the verdict at the end, exactly as the `artifacts` job does. That
+    # is not symmetry for its own sake: the FIRST version of this job was
+    # fail-fast, and the planted-regression run for #105 showed it skipping
+    # python, ts and rust the moment Go failed — reproducing, inside the job
+    # built to close that blind spot, the very masking the same issue's other
+    # half is about. A job whose subject is "all four bindings" must report
+    # all four.
     name: "abi-fixtures — the ABI-revision refusal, all four bindings, no published artifact"
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -273,10 +280,14 @@ jobs:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: go — TestABIRevisionMismatchIsRefused and TestABIRevisionControlLoads must both pass
+        id: abi-go
+        continue-on-error: true
         run: scripts/check-standalone.sh --no-artifacts
 
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: python — test_wrong_revision_is_refused and test_matching_revision_loads must both pass
+        id: abi-python
+        continue-on-error: true
         run: cd python && uv sync --locked --group dev && cd .. && scripts/check-suite.sh --no-artifacts python
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -291,11 +302,56 @@ jobs:
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       - name: ts — both cases under `abi revision fixture` must pass
+        id: abi-ts
+        continue-on-error: true
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && cd .. && scripts/check-suite.sh --no-artifacts ts
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: rust — wrong_revision_is_refused and matching_revision_loads must both pass
+        id: abi-rust
+        continue-on-error: true
         run: scripts/check-suite.sh --no-artifacts rust
+
+      # Same rule as the `artifacts` job's verdict below, and for the same
+      # reason: `outcome`, never `conclusion` — continue-on-error rewrites a
+      # failed step's `conclusion` to `success`, so an aggregate that read
+      # `conclusion` would pass while a binding's refusal was broken. That is
+      # measured, not assumed; it is visible on this repository's own planted
+      # run for #105. `skipped` is a failure too: it means the fixture build
+      # or a toolchain setup stopped the binding from being checked at all.
+      - name: verdict — all four bindings' results, and this job is red if any is not a pass
+        if: always()
+        env:
+          GO_OUTCOME: ${{ steps.abi-go.outcome }}
+          PYTHON_OUTCOME: ${{ steps.abi-python.outcome }}
+          TS_OUTCOME: ${{ steps.abi-ts.outcome }}
+          RUST_OUTCOME: ${{ steps.abi-rust.outcome }}
+        run: |
+          failed=0
+          {
+            echo "### abi-fixtures — the ABI-revision refusal, per binding"
+            echo
+            echo "| binding | result |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          row() {
+            if [ "$2" = "success" ]; then
+              printf '| %s | pass |\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf '| %s | **%s** |\n' "$1" "$2" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+            printf '  %-8s %s\n' "$1" "$2"
+          }
+          row "go" "$GO_OUTCOME"
+          row "python" "$PYTHON_OUTCOME"
+          row "ts" "$TS_OUTCOME"
+          row "rust" "$RUST_OUTCOME"
+          if [ "$failed" -ne 0 ]; then
+            echo "abi-fixtures: at least one binding above did not prove its ABI-revision refusal — all four were checked and are reported here and in the step summary" >&2
+            exit 1
+          fi
+          echo "abi-fixtures: all four bindings refused the wrong revision and loaded the matching one"
 
   artifacts:
     name: "artifacts — two published lines, linux-amd64, every suite runs its goldens"
