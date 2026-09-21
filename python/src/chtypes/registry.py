@@ -22,6 +22,7 @@ from ._document import parse_batch_document, parse_filter_document, parse_row_do
 from ._manifest import (
     Manifest,
     cache_registry_dir,
+    check_library_bytes,
     host_platform,
     minor_of,
     read_manifest,
@@ -1075,6 +1076,13 @@ class Registry:
     preloaded lines, at first use for the rest, never for a line nobody asks
     for.
 
+    **The manifest's ``library_bytes`` size check runs at that same point,
+    every time, whether or not ``verify_hashes`` is on** (issue #82): it is
+    nearly free (one stat, never a re-hash of the library's contents), and it
+    catches the commonest shape of a broken artifact directory — a truncated
+    or partially-written library file. What ``verify_hashes`` adds on top is
+    the sha256 comparison; the size check is not conditional on it.
+
     Construction fails only for what manifests can decide: a directory the
     CALLER NAMED that does not exist or cannot be read, a search path on which
     no directory holds a readable ``<minor>/manifest.json``, and a ``preload``
@@ -1174,8 +1182,16 @@ class Registry:
         manifest = read_manifest(entry)
         if manifest is None:
             raise RegistryError(f"chtypes: {entry} no longer holds a usable manifest.json")
+        # check_library_bytes runs UNCONDITIONALLY (issue #82): nearly free
+        # (one stat, never a re-hash), and it catches the commonest shape of
+        # a broken artifact directory -- a truncated or partially-written
+        # library file. verify_library, gated on verify_hashes, checks it
+        # too as part of the fuller hash comparison, so it is not repeated
+        # here when verification is already going to make it.
         if self._verify_hashes:
             verify_library(entry)
+        else:
+            check_library_bytes(entry, manifest)
         # A directory that has a manifest and does not load is broken, not
         # absent: this is an error, naming the path.
         library = Library(str(entry / manifest.library), manifest, self._timezone)
