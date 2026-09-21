@@ -40,8 +40,8 @@ One artifact per ClickHouse line, each carrying that release's own C++. A line i
 | `26.4` | `26.4.5.143-stable` | all |
 | `26.5` | `26.5.7.64-stable` | all |
 | `26.6` | `26.6.8.7-stable` | all |
-| `26.7` | `26.7.12.6-stable` | all |
-| `26.8` | `26.8.8.8-lts` | all |
+| `26.7` | `26.7.13.12-stable` | all |
+| `26.8` | `26.8.9.10-lts` | all |
 
 Ask for a line, never a nearest match: `for("25.8")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.
 
