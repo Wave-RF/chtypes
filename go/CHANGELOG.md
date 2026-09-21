@@ -35,6 +35,10 @@ The four bindings in this repository are released together and give one answer, 
 
 - **`Versions()` means "every line this registry can answer for", loaded or discovered, in all four bindings.** It already did here, with one hole: `discover()` ran only when `dir` was `""`, so an explicit-directory registry had an empty known set and its `Versions()` was fed entirely by what happened to be loaded. Under lazy loading that is `[]` for a directory full of artifacts. `discover()` now runs for both constructor shapes. `Libraries()` is unchanged and still lists what is open (#50).
 
+- **CSV rejection messages are now ClickHouse's own text** (with revision-5 artifacts). The error **codes are unchanged**, and so is every verdict and every stored value; only the human-readable message moved, because CSV rows are now read by ClickHouse's own CSV reader rather than a hand-written splitter. **Match on the error code, never on the message text** — the message is ClickHouse's to change between releases.
+
+- **An empty CSV field under `input_format_defaults_for_omitted_fields=0` is now reported as an input, and its coercion as a transform** (with revision-5 artifacts). Where the previous reader reported no transform, the detector now lists `enum_coerce` or `fixedstring_pad` for such a field, because its reference value is the empty string. **Stored values are unchanged** — this changes what is reported, not what is stored. A caller that reads "no transform" as "the value was not changed" should expect these rows to report one. Under the default setting (`1`) an empty field still takes the column's `DEFAULT`, as before.
+
 ### Notes
 
 - ⚠️ **`RowsExport`'s variadic parameter changed type** from `...DocFlags` to `...RowsExportOption`, which `WithColumns` and `DocFlags` both satisfy. Every ordinary call still compiles — `RowsExport(f, body, settings, export, chtypes.DocAll)` is unchanged — but a caller that built a `[]DocFlags` and expanded it with `slice...` no longer does, and must pass the values directly or build a `[]chtypes.RowsExportOption` instead.
