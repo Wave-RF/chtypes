@@ -601,6 +601,7 @@ class NativeLibrary:
         export_format: int,
         doc_flags: int,
         columns_json: str | None = None,
+        filter_handle: int | None = None,
     ) -> tuple[bytes, bytes | None]:
         """(document, payload). `export_format` is -1 (CHS_EXPORT_NONE — no
         export, payload None) or an `enum chs_format` value; `doc_flags` the
@@ -608,6 +609,11 @@ class NativeLibrary:
         the library's loud refusal to make, never this binding's guess.
         `columns_json` (revision 5) is the INSERT column list, already
         JSON-encoded, or None for "no list" — forwarded as NULL, never `"[]"`.
+
+        `filter_handle` (revision 5, second half) is the attached row filter
+        — None (the default) is "no filter", today's behavior byte for byte.
+        `Schema.rows`'s `row_filter=` is the only caller that ever passes one;
+        every other call site forwards None exactly as before.
 
         Ownership: the export buffer is COPIED into a Python `bytes` and the
         C side's `data` freed with THIS library's `chs_free` before returning
@@ -627,11 +633,7 @@ class NativeLibrary:
                 doc_flags,
                 ctypes.byref(out_bytes) if out_bytes is not None else None,
                 columns_json.encode() if columns_json is not None else None,
-                # The attached row filter: NULL, which is "no filter" and
-                # today's behavior exactly. Nothing in this binding can attach
-                # one — the argument exists so the call matches the symbol,
-                # not to open new surface.
-                None,
+                ctypes.c_void_p(filter_handle) if filter_handle is not None else None,
             )
             payload: bytes | None = None
             if out_bytes is not None and out_bytes.data:

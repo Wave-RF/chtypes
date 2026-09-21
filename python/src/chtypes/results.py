@@ -460,6 +460,20 @@ class RowResult:
     unsupported_settings: tuple[str, ...] = ()
     substituted: tuple[Substitution, ...] = ()
     computed: tuple[Computed, ...] = ()
+    # `Schema.rows(..., row_filter=...)` only: this row's filter verdict,
+    # beside `outcome` above — the two are independent facts, and neither
+    # replaces the other (docs/guides/filters.md "Exporting only the rows a
+    # filter admits"). `None` when no filter was attached to the call that
+    # produced this row (every plain `row`/`rows` call, and `rows` with no
+    # `row_filter`). A security-enforcing caller MUST fail closed — hide the
+    # row / fail the request — on a verdict that is `None` or not `.answered`.
+    verdict: Verdict | None = None
+    # Set beside `Verdict.ERROR` (the predicate threw, ClickHouse's own
+    # code/message), beside an eval-time `Verdict.DECLINE` (the admission
+    # envelope), and for a row whose own `outcome` is not ACCEPTED (its own
+    # parse error, reported as DECLINE). 0/"" otherwise.
+    verdict_code: int = 0
+    verdict_err: str = ""
 
     @property
     def accepted(self) -> bool:
@@ -556,6 +570,14 @@ class BatchResult:
     # export was requested. A decline here is -2-class honesty, never a
     # server verdict.
     export_declined: str = ""
+    # `row_filter=` only: accepted rows whose verdict is TRUE, and accepted
+    # rows with any other verdict, respectively. `rows_passed + rows_cut`
+    # equals the accepted-row count. Both zero when no filter was attached —
+    # indistinguishable from "filter attached, nothing passed and nothing
+    # accepted", so key presence on whether `row_filter` was passed, never on
+    # these being nonzero.
+    rows_passed: int = 0
+    rows_cut: int = 0
 
     @property
     def lossy_transforms(self) -> tuple[Transform, ...]:
