@@ -31,6 +31,10 @@ The four bindings in this repository are released together and give one answer, 
 
   **Timing, read together with `verify_hashes`'s rule above:** the size check runs at the exact same point the hash check does — immediately before `dlopen`, at construction for `preload`ed lines and at first use for the rest — because `_load` is the one place both checks live, whether or not verification is on.
 
+- **CSV rejection messages are now ClickHouse's own text** (with revision-5 artifacts). The error **codes are unchanged**, and so is every verdict and every stored value; only the human-readable message moved, because CSV rows are now read by ClickHouse's own CSV reader rather than a hand-written splitter. **Match on the error code, never on the message text** — the message is ClickHouse's to change between releases.
+
+- **An empty CSV field under `input_format_defaults_for_omitted_fields=0` is now reported as an input, and its coercion as a transform** (with revision-5 artifacts). Where the previous reader reported no transform, the detector now lists `enum_coerce` or `fixedstring_pad` for such a field, because its reference value is the empty string. **Stored values are unchanged** — this changes what is reported, not what is stored. A caller that reads "no transform" as "the value was not changed" should expect these rows to report one. Under the default setting (`1`) an empty field still takes the column's `DEFAULT`, as before.
+
 ## [0.2.2] — 2026-09-17
 
 ### Changed
