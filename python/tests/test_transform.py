@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from chtypes._document import ColDoc, _col_doc, parse_row_document
 from chtypes._rawjson import decode_document
-from chtypes.results import Reason
+from chtypes.results import Reason, Source
 from chtypes.transform import classify
 
 # Longer than CPython's `int_max_str_digits` guard (4,300 digits), which is the
@@ -185,3 +185,47 @@ def test_classify_excludes_ephemeral_input_still_classifies_materialized_input()
     (mat_transform,) = classify(cols["mat_col"])
     assert mat_transform.reason == Reason.OVERFLOW_WRAP
     assert mat_transform.column == "mat_col"
+
+
+# ------------------------------------------------------------------- #90 ---
+#
+# `RowResult.values` excludes a column reported with `Source.SKIPPED`
+# (MATERIALIZED / ALIAS / EPHEMERAL, never read from an input row) — the rule
+# `Source.EPHEMERAL_INPUT`'s exclusion (#97, above) was modeled on. That
+# exclusion is real and has been correct all along (`_row_result`'s column
+# loop already special-cased it before #97 ever added the ephemeral case),
+# but — like the ephemeral_input exclusion before #97's test — it had no
+# test of its own. This is that test: it is expected to PASS immediately,
+# not to catch a bug.
+_SKIPPED_AND_INPUT_DOC = b"""{
+    "outcome": "accepted",
+    "cols": [
+        {
+            "name": "mat_col", "type": "UInt8", "base": "UInt8",
+            "src": "skipped", "nullable": false
+        },
+        {
+            "name": "in_col", "type": "UInt8", "base": "UInt8",
+            "src": "input", "input": "5", "stored": 5, "nullable": false
+        }
+    ]
+}"""
+
+
+def test_values_excludes_skipped_keeps_input() -> None:
+    """The `RowResult.values` exclusion for `Source.SKIPPED`.
+
+    This behavior already existed and was already correct; this test only
+    gives it the coverage it lacked. Confirmed passing on the first run, not
+    added to fix a failure.
+    """
+    assert Source.SKIPPED == "skipped"
+    result = parse_row_document(_SKIPPED_AND_INPUT_DOC)
+    columns = {v.column for v in result.values}
+    assert "mat_col" not in columns, (
+        "values contains mat_col (src skipped): a column that is never "
+        "read from an input row must not appear in the stored-row view"
+    )
+    assert "in_col" in columns, (
+        "values is missing in_col (src input): an ordinary supplied column must stay in values"
+    )

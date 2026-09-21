@@ -1014,4 +1014,46 @@ mod tests {
         assert_eq!(mat_transforms[0].reason, reason::OVERFLOW_WRAP);
         assert_eq!(mat_transforms[0].column, "mat_col");
     }
+
+    // ------------------------------------------------------------------ #90
+
+    /// `row_result_of`'s `values` exclusion for `source::SKIPPED`
+    /// (MATERIALIZED / ALIAS / EPHEMERAL, never read from an input row) —
+    /// the rule `source::EPHEMERAL_INPUT`'s exclusion above was modeled on.
+    /// That exclusion is real and has been correct all along; it simply had
+    /// no test of its own, like the ephemeral_input exclusion before #97's
+    /// test above. Expect this to PASS immediately — it is coverage for
+    /// existing behavior, not a regression fix.
+    const SKIPPED_AND_INPUT_DOC: &[u8] = br#"{
+        "outcome": "accepted",
+        "cols": [
+            {
+                "name": "mat_col", "type": "UInt8", "base": "UInt8",
+                "src": "skipped", "nullable": false
+            },
+            {
+                "name": "in_col", "type": "UInt8", "base": "UInt8",
+                "src": "input", "input": "5", "stored": 5, "nullable": false
+            }
+        ]
+    }"#;
+
+    #[test]
+    fn values_excludes_skipped_keeps_input() {
+        assert_eq!(crate::result::source::SKIPPED, "skipped");
+        let doc = crate::doc::row_doc(SKIPPED_AND_INPUT_DOC).unwrap();
+        let res = crate::result::row_result_of(doc);
+        let columns: std::collections::HashSet<&str> =
+            res.values.iter().map(|v| v.column.as_str()).collect();
+        assert!(
+            !columns.contains("mat_col"),
+            "values contains mat_col (src skipped): a column that is never \
+             read from an input row must not appear in the stored-row view"
+        );
+        assert!(
+            columns.contains("in_col"),
+            "values is missing in_col (src input): an ordinary supplied \
+             column must stay in values"
+        );
+    }
 }

@@ -100,16 +100,26 @@ export interface Value {
 
 /**
  * The two revision-5 `source` provenances `columns_json` introduces (issue
- * #53). A plain const object, not a closed union: `source` is a growing
- * vocabulary arriving from the C layer, and an unrecognized spelling from a
- * newer artifact must pass through unchanged, not be rejected.
+ * #53), plus the pre-existing `Skipped` provenance named alongside them
+ * (issue #90). A plain const object, not a closed union: `source` is a
+ * growing vocabulary arriving from the C layer, and an unrecognized spelling
+ * from a newer artifact must pass through unchanged, not be rejected.
  */
 export const Source = {
+  /**
+   * MATERIALIZED / ALIAS / EPHEMERAL, never read from an input row.
+   * Predates revision 5 — unlike the two provenances below — but
+   * `rowResultOf` has excluded it from `values` from the start, the same
+   * exclusion `EphemeralInput` was modeled on. Named here, in the same
+   * idiom, so the exclusion can be keyed on a symbol rather than a bare
+   * string literal.
+   */
+  Skipped: 'skipped',
   /**
    * A listed EPHEMERAL column's read value. The server reads it — it is in
    * scope for the DEFAULT expressions that reference it — and it is never
    * stored and never exported. `rowResultOf` excludes it from `values`
-   * exactly as it already excludes `'skipped'`: a value that is never
+   * exactly as it already excludes `Source.Skipped`: a value that is never
    * stored must not sit where a caller reads the stored row (a hash, a
    * signature).
    */
@@ -390,13 +400,13 @@ export function rowResultOf(doc: Json): RowResult {
 
   for (const rawCol of items(field(doc, 'cols'))) {
     const c = columnDocOf(rawCol);
-    // 'skipped' (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
+    // Source.Skipped (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
     // Source.EphemeralInput (a LISTED EPHEMERAL column: read, but never
     // stored — see the `source` doc on `Value`) are both excluded from
     // `values`, which is the stored row. Source.MaterializedInput stays IN:
     // under insert_allow_materialized_columns=1 the supplied value genuinely
     // IS stored, replacing the column's expression (issue #53).
-    if (c.src === 'skipped' || c.src === Source.EphemeralInput) continue;
+    if (c.src === Source.Skipped || c.src === Source.EphemeralInput) continue;
     values.push({
       column: c.name,
       text: c.stored,
