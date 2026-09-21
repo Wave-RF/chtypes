@@ -811,7 +811,7 @@
       "id": "vocab.reason.fixedstring_pad",
       "group": "vocabulary", "kind": "constant", "value": "fixedstring_pad",
       "what": "A FixedString padded or truncated to its declared width",
-      "go": "ReasonStringPad", "python": "Reason.FIXEDSTRING_PAD", "ts": "Reason.FixedStringPad", "rust": "reason::FIXEDSTRING_PAD"
+      "go": "ReasonFixedStringPad", "python": "Reason.FIXEDSTRING_PAD", "ts": "Reason.FixedStringPad", "rust": "reason::FIXEDSTRING_PAD"
     },
     {
       "id": "vocab.reason.emptied",

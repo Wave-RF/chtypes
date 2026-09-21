@@ -334,7 +334,7 @@ var goValues = map[string]any{
 	"ReasonIPMangle":            chtypes.ReasonIPMangle,
 	"ReasonFloatPrecision":      chtypes.ReasonFloatPrecision,
 	"ReasonLossyNumeric":        chtypes.ReasonLossyNumeric,
-	"ReasonStringPad":           chtypes.ReasonStringPad,
+	"ReasonFixedStringPad":      chtypes.ReasonFixedStringPad,
 	"ReasonEmptied":             chtypes.ReasonEmptied,
 	"ReasonElementChanged":      chtypes.ReasonElementChanged,
 	"ReasonEnumCoerce":          chtypes.ReasonEnumCoerce,
