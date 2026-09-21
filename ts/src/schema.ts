@@ -115,6 +115,29 @@ export interface RowsOptions extends RowOptions {
    * `DOC_ALL` is refused loudly by the library, never pre-validated here.
    */
   readonly docFlags?: number | undefined;
+  /**
+   * Attach a compiled `Filter` to this call's export channel (revision 5,
+   * second half — docs/guides/filters.md "Exporting only the rows a filter
+   * admits"): ONE `chs_rows` parse then answers both the per-row verdict
+   * (`RowResult#verdict`) and, for rows whose verdict is `'t'`, the export
+   * bytes. Absent is today's behavior byte for byte.
+   *
+   * `'e'` (the predicate threw) and `'d'` (declined — including a row whose
+   * own parse `outcome` was not `'accepted'`) are NEVER exported and NEVER
+   * collapsed into `'f'`: collapsing either turns fail-closed into
+   * fail-open, the leak class this surface exists to prevent. A
+   * security-enforcing caller must treat any `RowResult#verdict` that is
+   * `undefined` or not `isAnswer()` as a refusal — hide the row or fail the
+   * request, never export it.
+   *
+   * The filter must be compiled over THIS schema: one from a different
+   * `Schema` of the SAME loaded library rejects the whole call, loudly
+   * (`outcome: 'rejected'`, code 1002 — the same cross-schema rule
+   * `Filter#eval` lets the C layer enforce for a (filter, block) pair). One
+   * from a DIFFERENT loaded library throws `ChtypesError` before any C
+   * call — no handle crosses a dlopen'd image boundary.
+   */
+  readonly rowFilter?: Filter | undefined;
 }
 
 /**
@@ -310,18 +333,30 @@ export class Schema {
    * @param body - the whole request body as bytes (never a JS string).
    * @param settings - per-call settings; same precedence as `row`.
    * @param options - the revision-3 export/doc-flag channels, plus
-   *   `columns` (revision 5), the INSERT column list — see `RowsOptions`;
-   *   absent = today's full document, byte-identical to revision 2, and no
-   *   list, byte-identical to every revision before 5.
+   *   `columns` (revision 5), the INSERT column list, and `rowFilter`
+   *   (revision 5, second half) — see `RowsOptions`; absent = today's full
+   *   document, byte-identical to revision 2, no list, byte-identical to
+   *   every revision before 5, and no filter, byte-identical byte for byte.
    * @returns the `BatchResult`. When `engineRows` is present it — not `rows` —
    *   is the stored truth, and batch-level storage transforms (`ttl_expired`,
-   *   `ttl_column_expired`) are folded into `transformed`.
+   *   `ttl_column_expired`) are folded into `transformed`. With
+   *   `options.rowFilter`, `rowsPassed`/`rowsCut` join the result and every
+   *   row carries its filter `verdict` beside its own `outcome`.
    * @throws {ChtypesError} when the schema is closed, a settings value is a JS
-   *   `number`, or the artifact predates `chs_rows` (a mandatory symbol).
+   *   `number`, the artifact predates `chs_rows` (a mandatory symbol), the
+   *   filter is closed, or the filter comes from a different loaded library.
    */
   rows(format: Format, body: Uint8Array, settings?: Settings, options?: RowsOptions): BatchResult {
     const exportFormat = options?.exportFormat ?? EXPORT_NONE;
     const docFlags = options?.docFlags ?? (options?.exportFormat === undefined ? DOC_ALL : 0);
+    const rowFilter = options?.rowFilter;
+    let filterHandle: FilterHandle | undefined;
+    if (rowFilter !== undefined) {
+      if (rowFilter.nativeLib !== this.native) {
+        throw new ChtypesError('chtypes: filter and schema come from different libraries');
+      }
+      filterHandle = rowFilter.liveHandle();
+    }
     const { doc, payload } = this.native.rows(
       this.live(),
       format,
@@ -330,6 +365,7 @@ export class Schema {
       exportFormat,
       docFlags,
       options?.columns,
+      filterHandle,
     );
     return batchResultOf(parseDocument(doc), payload);
   }
@@ -491,6 +527,18 @@ export class Filter {
     readonly expr: string,
   ) {
     this.handle = handle;
+  }
+
+  /** @internal — the loaded library this filter's handle belongs to, for
+   * `Schema#rows(options.rowFilter)`'s cross-library check. */
+  get nativeLib(): NativeLibrary {
+    return this.native;
+  }
+
+  /** @internal — the live handle, for `Schema#rows(options.rowFilter)`. */
+  liveHandle(): FilterHandle {
+    if (this.handle === null) throw new ChtypesError('chtypes: filter is closed');
+    return this.handle;
   }
 
   /**

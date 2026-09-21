@@ -207,6 +207,25 @@ export interface RowResult {
   readonly substituted: Substitution[];
   /** MATERIALIZED values — durable, but not part of `SELECT *`. */
   readonly computed: Computed[];
+  /**
+   * `Schema#rows(..., { rowFilter })` only: this row's filter verdict,
+   * beside `outcome` above — the two are independent facts, and neither
+   * replaces the other (docs/guides/filters.md "Exporting only the rows a
+   * filter admits"). `undefined` when no filter was attached to the call
+   * that produced this row (every plain `row()`/`rows()` call, and `rows()`
+   * with no `rowFilter`). A security-enforcing caller MUST fail closed —
+   * hide the row / fail the request — on a verdict that is `undefined` or
+   * not `isAnswer()`.
+   */
+  readonly verdict: Verdict | undefined;
+  /**
+   * Set beside `'e'` (the predicate threw, ClickHouse's own code/message),
+   * beside an eval-time `'d'` (the admission envelope), and for a row whose
+   * own `outcome` is not `'accepted'` (its own parse error, reported as
+   * `'d'`). 0/`''` otherwise.
+   */
+  readonly verdictCode: number;
+  readonly verdictErr: string;
 }
 
 /**
@@ -285,6 +304,16 @@ export interface BatchResult {
    * server verdict.
    */
   readonly exportDeclined: string | undefined;
+  /**
+   * `rows(..., { rowFilter })` only: accepted rows whose verdict is `'t'`,
+   * and accepted rows with any other verdict, respectively. `rowsPassed +
+   * rowsCut` equals the accepted-row count. Both `0` when no filter was
+   * attached — indistinguishable from "filter attached, nothing passed and
+   * nothing accepted", so key presence on whether `rowFilter` was passed,
+   * never on these being nonzero.
+   */
+  readonly rowsPassed: number;
+  readonly rowsCut: number;
 }
 
 /** One row's byte range inside an export `payload` — see `BatchResult#spans`. */
@@ -427,6 +456,16 @@ export function rowResultOf(doc: Json): RowResult {
     bytes: rawBytes(field(raw, 'stored')),
   }));
 
+  // `verdict` (RowsExportWith's TypeScript spelling: `rows(..., { rowFilter })`)
+  // is present exactly when a filter was attached to the call that produced
+  // this document — absent from every Row/Rows document and from `rows()`
+  // with no `rowFilter`. `verdictOf` degrades an unrecognized character to
+  // `'d'`, never to an invented answer.
+  const verdictNode = field(doc, 'verdict');
+  const verdict: Verdict | undefined = verdictNode === undefined ? undefined : verdictOf(asString(verdictNode));
+  const verdictCode = asInt(field(doc, 'verdict_code'));
+  const verdictErr = asString(field(doc, 'verdict_err'));
+
   return {
     values,
     transformed,
@@ -437,6 +476,9 @@ export function rowResultOf(doc: Json): RowResult {
     unsupportedSettings,
     substituted,
     computed,
+    verdict,
+    verdictCode,
+    verdictErr,
   };
 }
 
@@ -506,6 +548,8 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
     payload: payload ?? undefined,
     spans,
     exportDeclined,
+    rowsPassed: asInt(field(doc, 'rows_passed')),
+    rowsCut: asInt(field(doc, 'rows_cut')),
   };
 }
 
@@ -546,6 +590,30 @@ export type Verdict = (typeof Verdict)[keyof typeof Verdict];
  * or a decline. A security-enforcing caller hides the row when this is false. */
 export function isAnswer(v: Verdict): boolean {
   return v === 't' || v === 'f';
+}
+
+/**
+ * Map ONE wire verdict character to a `Verdict` — the single place that
+ * decision is made, shared by `filterResultOf` (`chs_filter_rows`'s /
+ * `chs_block_parse`'s `verdicts` string, one char per row) and `rowResultOf`
+ * (`chs_rows`'s per-row `verdict` field, the revision-5 attached filter). A
+ * second, drifted copy of this switch is exactly how `'e'` or `'d'` could
+ * get silently collapsed into `'f'` in one call path and not the other —
+ * the fail-open bug this vocabulary exists to prevent.
+ */
+function verdictOf(ch: string): Verdict {
+  switch (ch) {
+    case 't':
+      return 't';
+    case 'f':
+      return 'f';
+    case 'e':
+      return 'e';
+    default:
+      // 'd', and any character this binding does not know: decline — fail
+      // closed, mirroring the unknown-outcome rule.
+      return 'd';
+  }
 }
 
 /**
@@ -627,21 +695,7 @@ export function filterResultOf(doc: Json): FilterResult {
 
   const verdicts: Verdict[] = [];
   for (const ch of asString(field(doc, 'verdicts'))) {
-    switch (ch) {
-      case 't':
-        verdicts.push('t');
-        break;
-      case 'f':
-        verdicts.push('f');
-        break;
-      case 'e':
-        verdicts.push('e');
-        break;
-      default:
-        // 'd', and any character this binding does not know: decline — fail
-        // closed, mirroring the unknown-outcome rule.
-        verdicts.push('d');
-    }
+    verdicts.push(verdictOf(ch));
   }
   const errors: FilterRowError[] = items(field(doc, 'errors')).map((e) => ({
     row: asInt(field(e, 'row')),
