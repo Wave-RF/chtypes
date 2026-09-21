@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 import { ChtypesError } from '../src/errors.js';
 import type { FilterHandle, NativeLibrary, SchemaHandle } from '../src/ffi.js';
 import { parseDocument } from '../src/json.js';
-import { batchResultOf, isAnswer, Verdict } from '../src/results.js';
+import { batchResultOf, isAnswer, type Verdict } from '../src/results.js';
 import { Filter, Schema } from '../src/schema.js';
 
 // A stand-in for NativeLibrary: just enough surface (`columns`) for
