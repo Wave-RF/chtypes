@@ -29,6 +29,9 @@ doc comment describing it:
     go         go/chtypes/multiversion.go   the cgo `fn_*` typedefs, paired to
                                             symbols by their own dlsym casts
     go-linked  go/chtypes/linked.go         the direct `C.chs_*(...)` call sites
+                                            (arity here; their TYPES are the C
+                                            compiler's, run by
+                                            scripts/check-linked-build.sh)
     python     python/src/chtypes/_native.py   the `_SIGNATURES` argtypes/restype
     ts         ts/src/ffi.ts                the ffi-rs `d(ret, [params])` table
     rust       rust/src/ffi.rs              the `extern "C"` fn type aliases,
@@ -71,10 +74,31 @@ Concretely, this check DOES NOT distinguish:
     Rust; this checks that a parameter IS the bytes-struct pointer, never that
     the four re-declarations agree field for field.
   * Anything in `go/chtypes/linked.go` beyond ARITY. That file includes the
-    real header, so cgo type-checks its calls — but only under
-    `-tags chtypes_linked`, which needs a core build tree and which CI never
-    builds. Arity at the call site is therefore a real check here and the
-    types are not checked at all.
+    real header, so cgo type-checks its calls — which is strictly stronger
+    than the equivalence classes below, and a second looser copy of it here
+    would be a liability rather than redundancy.
+
+    ⚠️ That exemption was once a hole, and it is worth knowing why it is not
+    one now. The types were checked only under `-tags chtypes_linked`, and
+    NOTHING BUILT THAT TAG: no CI job passed it, on the received (and
+    `unverified`) reason that a linked build needs a native build tree from
+    the other half of the project, which public CI has no access to. So the
+    linked path's arity was checked on every pull request and its types were
+    checked by nobody, while this file said the compiler had them.
+
+    Measured 2026-09-21 (#118), the received reason is WRONG. `go build` and
+    `go vet` of a non-main cgo package compile and type-check the translation
+    unit and only PROBE the link; the probe's failure for want of the library
+    is recorded and deferred to whoever links a binary. The type check
+    therefore needs a C compiler and the in-repo header and nothing else.
+    scripts/check-linked-build.sh now runs it in the no-artifact CI leg, on
+    every pull request, with three mistyped plants proving it goes red.
+
+    So this file's arity-only treatment of `linked.go` is now correct rather
+    than merely cheap — but the two are a PAIR. If check-linked-build.sh is
+    removed, or stops building the tag, or its `go` job loses these steps,
+    the linked path's types go straight back to being checked by nobody and
+    this paragraph is the only warning.
   * Calling convention, variadics, and function-pointer parameters. The ABI
     has none of these; if one appears, the header parser refuses it loudly
     rather than guessing.
@@ -564,7 +588,7 @@ def check(root: str, verbose: bool = False) -> tuple[int, list[str]]:
             dret, dparams = entry
             if name == "go-linked":
                 n = dparams  # an int: this source is checked for ARITY only
-                verdict = "ok (arity only — see the limits at the top of the script)"
+                verdict = "ok (arity here; types by scripts/check-linked-build.sh)"
                 if n != len(pcls):
                     verdict = f"ARITY: {n} argument(s) at the call site, the header takes {len(pcls)}"
                     findings.append(f"{name}: C.{sym} is called with {n} argument(s); the header takes {len(pcls)}")
