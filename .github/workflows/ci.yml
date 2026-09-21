@@ -6,7 +6,9 @@
 # (both optional, both plain non-secret config — visible to a fork's
 # pull_request run same as everything else here), which point the
 # `artifacts` job at a channel other than the rolling release; see that
-# job's own comment for why. It runs every suite twice, on ubuntu-latest:
+# job's own comment for why. It runs every suite three times, on
+# ubuntu-latest, and the three legs differ in exactly what the suites are
+# given:
 #
 #   1. WITHOUT artifacts (the go / python / ts / rust jobs). Every binding
 #      builds, lints and type-checks; the header and the four bindings agree
@@ -16,8 +18,9 @@
 #      test that needs an artifact SKIPS, loudly, by name, naming the one
 #      command that would fill the gap. This is what a contributor with no
 #      network and no artifacts gets, and it must be an honest result.
-#      Each of these four also builds the wrong-revision ABI fixture and runs
-#      its own binding's two mismatch cases — see the block below.
+#      ⚠️ Nothing that reaches the network belongs in these four — see the
+#      `abi-fixtures` job's own header, which is separate for exactly that
+#      reason.
 #
 #   2. WITH two published artifacts (the artifacts job, after 1 is green).
 #      The newest -lts and the newest -stable line the public release
@@ -36,37 +39,27 @@
 #      supported line — is the core repository's sdk-suites workflow,
 #      against this same tree.
 #
-# A suite that skipped everything is not a pass, in either run:
+#   3. WITH A GENERATED FIXTURE AND NO PUBLISHED ARTIFACT (the abi-fixtures
+#      job, #105). Each binding's ABI-revision refusal case and its
+#      matching-revision control run only when $CHTYPES_ABI_FIXTURES names a
+#      fixture set, and that variable used to be set in run 2 alone — a job
+#      that is red by design on a revision branch, which is exactly how a
+#      broken refusal hid there. The fixture pair is generated from
+#      include/chtypes.h, so it needs no channel and no published line, and
+#      this leg therefore gates every pull request whatever any channel has
+#      published. It is its own job rather than four extra steps in run 1
+#      because the generator is fetched over the network and run 1's whole
+#      point is that it needs none; the job's own header argues that at
+#      length, and it is the argument someone will later want to "simplify"
+#      away.
+#
+# A suite that skipped everything is not a pass, in any of the three:
 # scripts/check-suite.sh and scripts/check-standalone.sh read each runner's
 # own summary line (color stripped) and refuse zero tests passed; with
-# --require-artifacts they also refuse a golden set that did not run. Nothing
-# in this file computes a verdict; every step runs a script or a test runner
-# whose own output is the answer.
-#
-# THE ABI-REVISION MISMATCH CASES RUN IN RUN 1, NOT ONLY RUN 2 (#105). Each
-# binding's refusal case and its matching-revision control only run when
-# $CHTYPES_ABI_FIXTURES names a fixture set, and that variable used to be set
-# in the `artifacts` job alone. On integration/rev5 that job is red by design
-# — revision-5 bindings against revision-4 published artifacts — and being
-# expected-red is what made it a hiding place: TestABIRevisionMismatchIsRefused
-# broke there (the refusal is a LOAD-time gate and lazy construction no longer
-# loads), TypeScript had the same latent break, and no required check covered
-# either, because none of them set the variable. The fixture needs NO
-# published artifact: scripts/abi-fixtures.sh builds the wrong-revision /
-# at-revision stub pair from include/chtypes.h itself. So each of the four
-# no-artifact jobs — which are the ones that gate every pull request — now
-# builds it and runs its own binding's two cases, and the census in
-# check-standalone.sh / check-suite.sh already fails when either case did not
-# RUN and pass. Nothing new computes a verdict here either.
-#
-# It is deliberately in the four existing jobs rather than a fifth: those four
-# are already required checks, so the coverage is blocking the day this lands
-# with nobody having to edit branch protection, and a red one names the
-# binding in its own check name. The cost is that each fetches the served
-# generator (sdk-fetch-fixtures.tar.gz, signature and hash chain as always)
-# from the artifacts host, so these four now depend on that host being
-# reachable — accepted on purpose: a fixture build that quietly skipped when
-# the host was down would rebuild the exact blind spot this closes.
+# --require-artifacts they also refuse a golden set that did not run, and with
+# $CHTYPES_ABI_FIXTURES set they refuse an ABI-revision case that did not RUN
+# and pass. Nothing in this file computes a verdict; every step runs a script
+# or a test runner whose own output is the answer.
 name: ci
 
 on:
@@ -140,17 +133,6 @@ jobs:
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: build and vet, dlopen-only
         run: cd go && go build ./... && go vet ./...
-      # The wrong-revision ABI fixture, in the NO-ARTIFACT leg (#105). It is
-      # generated from include/chtypes.h by the served generator, so it needs
-      # no registry and no published line — see the block at the top of this
-      # file for why that matters. With the variable set,
-      # check-standalone.sh's census below refuses a run in which
-      # TestABIRevisionMismatchIsRefused or TestABIRevisionControlLoads did
-      # not pass; without it they skip by name and nothing gates them.
-      - name: the wrong-revision ABI fixture, built from this header — no registry needed
-        run: |
-          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
-          echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
         run: scripts/check-standalone.sh --no-artifacts
       # The census JSON is diagnostic: it is how a failure is READ, never how a
@@ -193,14 +175,6 @@ jobs:
           uv run ruff check src tests
           uv run ruff format --check src tests
           uv run python -c 'import chtypes; print("chtypes", chtypes.ABI_REVISION)'
-      # No registry, no published line — see the `go` job's copy of this step
-      # and the block at the top of this file (#105). check-suite.sh's python
-      # arm refuses a run in which test_wrong_revision_is_refused or
-      # test_matching_revision_loads did not collect and pass.
-      - name: the wrong-revision ABI fixture, built from this header — no registry needed
-        run: |
-          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
-          echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts python
 
@@ -223,15 +197,6 @@ jobs:
           cache-dependency-path: ts/pnpm-lock.yaml
       - name: build and typecheck
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
-      # No registry, no published line — see the `go` job's copy of this step
-      # and the block at the top of this file (#105). check-suite.sh's ts arm
-      # refuses a run in which either named case under `abi revision fixture`
-      # did not pass. TypeScript is the binding that carried the same latent
-      # break as Go and that nothing caught.
-      - name: the wrong-revision ABI fixture, built from this header — no registry needed
-        run: |
-          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
-          echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts ts
 
@@ -248,16 +213,88 @@ jobs:
         run: cd rust && cargo build --locked && cargo clippy --locked --all-targets -- -D warnings && cargo fmt --check
       - name: --no-default-features — the configuration docs/install.md tells a consumer to build
         run: cd rust && cargo test --locked --no-default-features && cargo clippy --locked --all-targets --no-default-features -- -D warnings
-      # No registry, no published line — see the `go` job's copy of this step
-      # and the block at the top of this file (#105). check-suite.sh's rust
-      # arm reruns tests/abi_revision.rs alone, stdout and stderr captured
-      # SEPARATELY (#66), and refuses a run in which either case did not
-      # report `ok` on a clean line.
-      - name: the wrong-revision ABI fixture, built from this header — no registry needed
+      - name: suite — the artifact tests skip by name, the rest runs
+        run: scripts/check-suite.sh --no-artifacts rust
+
+  abi-fixtures:
+    # ⚠️ THIS JOB IS SEPARATE FROM THE FOUR ABOVE ON PURPOSE. DO NOT FOLD IT
+    # BACK INTO THEM — the saving looks real and the cost is invisible.
+    #
+    # The four no-artifact jobs exist to prove one property, stated in this
+    # file's own header: "This is what a contributor with no network and no
+    # artifacts gets, and it must be an honest result." `scripts/abi-fixtures.sh`
+    # needs no REGISTRY, but it does need the NETWORK — the fixture generator
+    # is served, not tracked (`sdk-fetch-fixtures.tar.gz`, through the release's
+    # ed25519 signature and sha256 chain). Putting that fetch inside those four
+    # would leave them running, and named, exactly as they are today while they
+    # had quietly stopped testing the scenario they document: a suite that began
+    # requiring the host in order to pass would no longer be caught by the only
+    # thing watching for it. That is the same shape as the regression this job
+    # exists to prevent — a check that still runs but no longer means what its
+    # name says — so buying this coverage with that proof would be a bad trade
+    # at any price.
+    #
+    # WHAT IT COVERS (#105). Each binding's ABI-revision refusal case and its
+    # matching-revision control run only when $CHTYPES_ABI_FIXTURES names a
+    # fixture set, and until now that variable was set in the `artifacts` job
+    # alone. On `integration/rev5` that job is red by design — revision-5
+    # bindings, revision-4 published artifacts — and being expected-red is what
+    # made it a hiding place: TestABIRevisionMismatchIsRefused broke there (the
+    # refusal is a LOAD-time gate, and lazy construction no longer loads),
+    # TypeScript carried the identical latent break, and no required check
+    # covered either. The fixture pair is generated from include/chtypes.h
+    # itself, so it needs no published artifact and this job gates every pull
+    # request regardless of what any channel has published.
+    #
+    # WHY IT RUNS THE WHOLE NO-ARTIFACT SUITE rather than the four cases alone:
+    # check-standalone.sh and check-suite.sh ALREADY fail when the variable is
+    # set and either case did not RUN and pass, so this job adds no verdict
+    # logic of its own. In particular it does not re-implement check-suite.sh's
+    # abi_case_ran matcher, whose own comment explains at length why a second,
+    # looser copy of it is dangerous rather than merely redundant. The price is
+    # that the rest of each suite runs twice per pull request; that is the
+    # cheaper half of this trade.
+    #
+    # It deliberately has no `needs:` and nothing `needs:` it. A failure here
+    # withholds no other job's result, which is the same rule the `artifacts`
+    # job's verdict step enforces internally.
+    name: "abi-fixtures — the ABI-revision refusal, all four bindings, no published artifact"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: the wrong-revision ABI fixture, built from this header — no published artifact
         run: |
           scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
           echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
-      - name: suite — the artifact tests skip by name, the rest runs
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false          # the module is stdlib-only: there is no go.sum to cache
+      - name: go — TestABIRevisionMismatchIsRefused and TestABIRevisionControlLoads must both pass
+        run: scripts/check-standalone.sh --no-artifacts
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - name: python — test_wrong_revision_is_refused and test_matching_revision_loads must both pass
+        run: cd python && uv sync --locked --group dev && cd .. && scripts/check-suite.sh --no-artifacts python
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          # No version here on purpose: pnpm/action-setup reads packageManager
+          # from ts/package.json, so the pin lives in exactly one place. It used
+          # to be pinned twice and the two had already drifted.
+          package_json_file: ts/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - name: ts — both cases under `abi revision fixture` must pass
+        run: cd ts && pnpm install --frozen-lockfile && pnpm build && cd .. && scripts/check-suite.sh --no-artifacts ts
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+      - name: rust — wrong_revision_is_refused and matching_revision_loads must both pass
         run: scripts/check-suite.sh --no-artifacts rust
 
   artifacts:
