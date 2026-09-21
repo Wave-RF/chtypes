@@ -162,6 +162,52 @@ describe('lazy loading', () => {
     expect(String((thrown as Error).message)).not.toMatch(/does not match manifest/);
   });
 
+  it('library_bytes is checked on every load, whether or not verifyChecksums is on', () => {
+    // Issue #82's level-up: unlike the sha256 check above, the size check —
+    // the file's actual length against the manifest's library_bytes — is
+    // NOT conditional on verifyChecksums. It is nearly free (one stat, never
+    // a re-hash of the library's contents) and it catches the commonest
+    // shape of a broken artifact directory: a truncated or
+    // partially-written library file. No verifyChecksums anywhere below.
+    const dir = scratch('bytes');
+    standIn(dir, '25.8', { library_bytes: Buffer.byteLength(BODY) + 1 });
+
+    expect(() => new Registry(dir, { preload: ['25.8'] })).toThrow(/is \d+ bytes, manifest says \d+/);
+
+    // The refusal must arrive BEFORE dlopen is ever attempted, not as a
+    // dlopen failure that happens to mention a size.
+    let thrown: unknown;
+    try {
+      new Registry(dir, { preload: ['25.8'] });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(String((thrown as Error).message)).not.toMatch(/dlopen/);
+
+    // Lazily opened, not just preloaded: the same registry's for() refuses
+    // the same way when nobody preloaded the line.
+    const registry = new Registry(dir);
+    expect(() => registry.for('25.8')).toThrow(/is \d+ bytes, manifest says \d+/);
+  });
+
+  it('an absent library_bytes is not asked, with or without verification', () => {
+    // A manifest predating the field, or a bare library with no manifest at
+    // all, must not turn into a NEW reason a load fails: the size check is
+    // silently a no-op when there is nothing to compare against, exactly as
+    // it always was under verifyChecksums.
+    const dir = scratch('nobytes');
+    const sub = path.join(dir, '25.8');
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(path.join(sub, 'libchtypes.so'), BODY);
+    writeFileSync(
+      path.join(sub, 'manifest.json'),
+      JSON.stringify({ library: 'libchtypes.so', clickhouse_version: '25.8.1.1', clickhouse_minor: '25.8' }),
+    );
+    // Reaches (and fails at) dlopen — the size check never had a value to
+    // compare against.
+    expect(() => new Registry(dir, { preload: ['25.8'] })).toThrow(ChtypesError);
+  });
+
   it('an honest line in a directory with a corrupt neighbor still serves', () => {
     const dir = scratch('mixed');
     standIn(dir, '25.8', { library_sha256: '00'.repeat(32) }); // corrupt
