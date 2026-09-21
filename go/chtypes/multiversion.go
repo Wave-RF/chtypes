@@ -180,6 +180,17 @@ static char * chs_lib_rows_export(chs_lib *l, const void *s, int f, const char *
                                   const char *st, int ef, unsigned df, chs_lib_bytes *ob, const char *cols) {
     return l->rows(s, f, b, n, st, ef, df, ob, cols, (const void *)0);
 }
+// RowsExportWith's one call: the same wrapper as chs_lib_rows_export, with
+// the attached row filter (revision 5, second half) as chs_rows' tenth
+// argument instead of the hardcoded NULL above. fh is the filter handle —
+// the Go side only calls this when WithRowFilter attached one; a call with
+// no filter takes chs_lib_rows_export instead, which keeps that path's
+// NULL-is-unchanged-byte-for-byte contract untouched.
+static char * chs_lib_rows_export_filtered(chs_lib *l, const void *s, int f, const char *b, size_t n,
+                                  const char *st, int ef, unsigned df, chs_lib_bytes *ob, const char *cols,
+                                  const void *fh) {
+    return l->rows(s, f, b, n, st, ef, df, ob, cols, fh);
+}
 // The filter trio. has_filter is all-or-nothing like the introspection
 // checks: the three symbols shipped together at revision 3.
 static int chs_lib_has_filter(chs_lib *l) {
@@ -1304,6 +1315,112 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 		// artifact does not export the function" (the C ABI contract §Rows), and
 		// that is a decline. chs_rows is mandatory on this loader, so today
 		// the branch is unreachable — the type still has to be the honest one.
+		return BatchResult{}, &UnsupportedError{Msg: "this artifact predates chs_rows (rebuild it)"}
+	}
+	js := C.GoString(out)
+	C.chs_lib_free(&s.lib.lib, out)
+	unlock()
+
+	res, err := batchResultOf(js)
+	if err != nil {
+		return res, err
+	}
+	res.Payload = payload
+	return res, nil
+}
+
+// RowsExportWith exports only the rows a compiled filter admits — the
+// row-level-security shape (docs/guides/filters.md "Exporting only the rows
+// a filter admits"). RowsExport's own signature never moves; this is a NEW
+// entry point because RowsExport's variadic parameter is already spent, not
+// an option riding it. WithRowFilter attaches the filter; WithDocFlags
+// selects the document groups. With no WithRowFilter this behaves exactly
+// like RowsExport — same one chs_rows call, same rowsThrough.
+func (s *LoadedSchema) RowsExportWith(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...RowsOption) (BatchResult, error) {
+	var cfg rowsExportWithConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	if cfg.filter == nil {
+		return s.rowsThrough(format, body, settings, exportFormat, cfg.flags, nil)
+	}
+	if cfg.filter.schema.lib != s.lib {
+		return BatchResult{}, fmt.Errorf("chtypes: filter (ClickHouse %s) and schema (ClickHouse %s) come from different libraries", cfg.filter.schema.lib.Version, s.lib.Version)
+	}
+	return s.rowsThroughWithFilter(format, body, settings, exportFormat, cfg.flags, cfg.filter)
+}
+
+// rowsThroughWithFilter is rowsThrough's twin for an attached filter: the
+// same one chs_rows call, with the filter's handle as the tenth argument.
+// Locking mirrors LoadedFilter.Eval's cross-schema case: when the filter's
+// schema is this same handle, one lock covers both (a filter call is a use
+// of its schema handle too, and chs_rows already is one for s); when it
+// differs — same library, different LoadedSchema, the case the C layer
+// answers rejected/1002 for — both handle locks are taken in a fixed global
+// order under the library's shared read lock, exactly as Eval does, so a
+// crossed call cannot deadlock against a concurrent one running the other
+// way.
+func (s *LoadedSchema) rowsThroughWithFilter(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags, f *LoadedFilter) (BatchResult, error) {
+	fs := f.schema
+	sj := settingsJSON(settings)
+	csj := C.CString(sj)
+	defer C.free(unsafe.Pointer(csj))
+
+	var pbody *C.char
+	if len(body) > 0 {
+		pbody = (*C.char)(unsafe.Pointer(&body[0]))
+	} else {
+		pbody = C.CString("")
+		defer C.free(unsafe.Pointer(pbody))
+	}
+
+	var ob *C.chs_lib_bytes
+	var obv C.chs_lib_bytes
+	if exportFormat != ExportNone {
+		ob = &obv
+	}
+
+	var unlock func()
+	if fs == s {
+		unlock = s.lock()
+	} else {
+		first, second := s, fs
+		if uintptr(unsafe.Pointer(first)) > uintptr(unsafe.Pointer(second)) {
+			first, second = second, first
+		}
+		s.lib.mu.RLock()
+		first.mu.Lock()
+		second.mu.Lock()
+		unlock = func() {
+			second.mu.Unlock()
+			first.mu.Unlock()
+			s.lib.mu.RUnlock()
+		}
+	}
+	if s.handle == nil {
+		unlock()
+		return BatchResult{}, fmt.Errorf("chtypes: schema is closed")
+	}
+	if f.handle == nil {
+		unlock()
+		return BatchResult{}, fmt.Errorf("chtypes: filter is closed")
+	}
+	out := C.chs_lib_rows_export_filtered(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj,
+		C.int(exportFormat), C.uint(flags), ob, nil, f.handle)
+	runtime.KeepAlive(body)
+	// Copy-then-free the export buffer inside the critical section, exactly
+	// as rowsThrough does.
+	var payload []byte
+	if ob != nil && obv.data != nil {
+		if obv.len > 0 {
+			payload = C.GoBytes(unsafe.Pointer(obv.data), C.int(obv.len))
+		} else {
+			payload = []byte{}
+		}
+		C.chs_lib_free(&s.lib.lib, obv.data)
+	}
+	if out == nil {
+		unlock()
 		return BatchResult{}, &UnsupportedError{Msg: "this artifact predates chs_rows (rebuild it)"}
 	}
 	js := C.GoString(out)

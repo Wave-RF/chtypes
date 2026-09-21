@@ -572,6 +572,22 @@ type RowResult struct {
 	// present one as a stored value. A caller that wants to show it must ask
 	// the server, and must label it computed-at-read.
 	Computed []Computed
+	// Verdict is this row's filter verdict from RowsExportWith's attached
+	// filter (docs/guides/filters.md "Exporting only the rows a filter
+	// admits"): nil when no filter was attached to the call that produced
+	// this row (Row, Rows, RowsExport, and RowsExportWith with no
+	// WithRowFilter) — never treat a nil Verdict as an answer. Beside
+	// Outcome, not instead of it: the two are independent facts. A
+	// security-enforcing caller MUST fail closed — hide the row / fail the
+	// request — on any Verdict that is nil or !Answered().
+	Verdict *Verdict
+	// VerdictCode and VerdictErr carry the row's own error beside a
+	// non-answer verdict: set for VerdictError (the predicate threw,
+	// ClickHouse's own code/message), for an eval-time VerdictDecline (the
+	// admission envelope), and for a row whose own Outcome is not Accepted
+	// (its own parse error, reported as VerdictDecline). Zero/"" otherwise.
+	VerdictCode int
+	VerdictErr  string
 }
 
 // Computed is one MATERIALIZED column's value for a row: stored at insert,
@@ -913,21 +929,33 @@ func filterResultOf(js string) (FilterResult, error) {
 	}
 	res.Verdicts = make([]Verdict, 0, len(doc.Verdicts))
 	for _, c := range doc.Verdicts {
-		switch c {
-		case 't':
-			res.Verdicts = append(res.Verdicts, VerdictTrue)
-		case 'f':
-			res.Verdicts = append(res.Verdicts, VerdictFalse)
-		case 'e':
-			res.Verdicts = append(res.Verdicts, VerdictError)
-		default:
-			// 'd', and any character this binding does not know: decline —
-			// fail closed, mirroring the unknown-outcome rule.
-			res.Verdicts = append(res.Verdicts, VerdictDecline)
-		}
+		res.Verdicts = append(res.Verdicts, verdictOf(c))
 	}
 	res.Errors = doc.Errors
 	return res, nil
+}
+
+// verdictOf maps ONE wire verdict character to a Verdict — the single place
+// that decision is made, shared by filterResultOf (chs_filter_rows' /
+// chs_block_parse's "verdicts" string, one char per row) and rowResultOf
+// (chs_rows' per-row "verdict" field, the revision-5 attached filter). A
+// second, drifted copy of this switch is exactly how 'e' or 'd' could get
+// silently collapsed into VerdictFalse in one call path and not the other —
+// the fail-open bug this vocabulary exists to prevent
+// (docs/guides/filters.md "Four verdicts, two of which are not answers").
+func verdictOf(c rune) Verdict {
+	switch c {
+	case 't':
+		return VerdictTrue
+	case 'f':
+		return VerdictFalse
+	case 'e':
+		return VerdictError
+	default:
+		// 'd', and any character this binding does not know: decline — fail
+		// closed, mirroring the unknown-outcome rule.
+		return VerdictDecline
+	}
 }
 
 // FilterOption configures CompileFilter — the same variadic functional-option
@@ -970,6 +998,61 @@ type filterConfig struct {
 // DoS.
 func WithFilterParams(params map[string]string) FilterOption {
 	return func(c *filterConfig) { c.params = params }
+}
+
+// ----------------------------------------------------- filtered row export
+
+// rowsExportWithConfig is RowsExportWith's assembled options: DocFlags plus
+// an attached row filter. A separate carrier from rowsExportConfig
+// (RowsExport's own) because this call's growth slot carries a schema-bound
+// filter handle that RowsExport's option set never needed.
+type rowsExportWithConfig struct {
+	flags  DocFlags
+	filter *LoadedFilter
+}
+
+// RowsOption configures RowsExportWith — a new entry point rather than an
+// option added to RowsExport, because RowsExport's own variadic parameter
+// was already spent (docs/guides/filters.md "Exporting only the rows a
+// filter admits"; the decision is issue #54's own). WithRowFilter and
+// WithDocFlags are its two options.
+type RowsOption func(*rowsExportWithConfig)
+
+// WithRowFilter attaches a compiled filter to RowsExportWith's export
+// channel: ONE chs_rows parse then answers both the per-row verdict
+// ('t'/'f'/'e'/'d', RowResult.Verdict) and, for rows whose verdict is 't',
+// the export bytes. Omitting it is legal and behaves exactly like
+// RowsExport — the header's own NULL-is-unchanged-byte-for-byte contract.
+//
+// 'e' (the predicate threw) and 'd' (declined — including a row whose own
+// parse Outcome was not Accepted) are NEVER exported and NEVER collapsed
+// into 'f': collapsing either turns fail-closed into fail-open, the leak
+// class this surface exists to prevent. A security-enforcing caller must
+// treat any RowResult.Verdict that is nil or !Answered() as a refusal —
+// hide the row or fail the request, never export it.
+//
+// The filter must be compiled over THIS call's own schema handle; one from
+// a different LoadedSchema of the SAME loaded library rejects the whole
+// call, loudly (BatchResult.Outcome == Rejected, ErrCode 1002 — the
+// existing cross-schema rule LoadedFilter.Eval already enforces for a
+// (filter, block) pair). One from a DIFFERENT loaded library is refused
+// before any C call, since no handle crosses a dlopen'd image boundary.
+//
+// Lifetime: unchanged from CompileFilter / f.Rows — the filter's schema
+// must stay open for as long as the filter is used, and the schema's Close
+// frees open filters first. RowsExportWith reuses that existing mechanism;
+// it does not invent a second one.
+func WithRowFilter(f *LoadedFilter) RowsOption {
+	return func(c *rowsExportWithConfig) { c.filter = f }
+}
+
+// WithDocFlags selects which document groups RowsExportWith's per-row
+// documents carry — RowsExportWith's own spelling of the DocFlags option,
+// named as a function (rather than passing a bare DocFlags, as RowsExport
+// accepts) because RowsExportWith's opts are RowsOption values. Repeated
+// calls OR their bits together, exactly as RowsExport's DocFlags args do.
+func WithDocFlags(flags DocFlags) RowsOption {
+	return func(c *rowsExportWithConfig) { c.flags |= flags }
 }
 
 // -------------------------------------------------------------- row options
@@ -1120,6 +1203,14 @@ type BatchResult struct {
 	// or no export was requested. A decline here is -2-class honesty, never a
 	// server verdict.
 	ExportDeclined string
+	// RowsPassed and RowsCut (RowsExportWith only): accepted rows whose
+	// verdict is 't', and accepted rows with any other verdict, respectively.
+	// RowsPassed + RowsCut == the accepted-row count. Both zero when no
+	// filter was attached — indistinguishable from "filter attached, nothing
+	// passed and nothing accepted", so a caller keys presence on whether it
+	// called RowsExportWith with WithRowFilter, never on these being nonzero.
+	RowsPassed int
+	RowsCut    int
 }
 
 type batchDoc struct {
@@ -1147,6 +1238,10 @@ type batchDoc struct {
 	// ExportDeclined: present exactly when an export was requested and
 	// withheld, carrying the reason; absent otherwise.
 	ExportDeclined string `json:"export_declined"`
+	// RowsPassed/RowsCut: present exactly when a filter was attached
+	// (RowsExportWith), absent (zero) otherwise.
+	RowsPassed int `json:"rows_passed"`
+	RowsCut    int `json:"rows_cut"`
 }
 
 type storageTransformDoc struct {
@@ -1165,6 +1260,13 @@ type rowDoc struct {
 	UnsupportedSettings []string  `json:"unsupported_settings"`
 	Cols                []colDoc  `json:"cols"`
 	Computed            []compDoc `json:"computed"`
+	// Verdict/VerdictCode/VerdictErr (RowsExportWith only): present exactly
+	// when a filter was attached to the call that produced this document —
+	// absent (Verdict == "") from every Row/Rows/RowsExport document and
+	// from RowsExportWith with no filter attached.
+	Verdict     string `json:"verdict"`
+	VerdictCode int    `json:"verdict_code"`
+	VerdictErr  string `json:"verdict_err"`
 }
 
 type compDoc struct {
@@ -1312,6 +1414,7 @@ func batchResultOf(js string) (BatchResult, error) {
 		RowsRead: doc.RowsRead, RowsSkipped: doc.RowsSkipped,
 		EngineRows: doc.EngineRows,
 		Spans:      doc.RowSpans, ExportDeclined: doc.ExportDeclined,
+		RowsPassed: doc.RowsPassed, RowsCut: doc.RowsCut,
 	}
 	for i, rd := range doc.Rows {
 		rr := rowResultOf(rd)
@@ -1362,6 +1465,12 @@ func rowResultOf(doc rowDoc) RowResult {
 	}
 	if len(doc.UnsupportedSettings) > 0 && res.Outcome != Rejected {
 		res.Outcome = Unsupported
+	}
+	if doc.Verdict != "" {
+		v := verdictOf([]rune(doc.Verdict)[0])
+		res.Verdict = &v
+		res.VerdictCode = doc.VerdictCode
+		res.VerdictErr = doc.VerdictErr
 	}
 	for _, c := range doc.Cols {
 		// SourceSkipped (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
