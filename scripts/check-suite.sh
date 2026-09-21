@@ -76,6 +76,40 @@ abi_case_ran() {
   grep -qE "^test $t \.\.\. ok$" "$file" && grep -qF "ABI fixture: ran $t" "$file"
 }
 
+# python_abi_case_failed <test-name> <file> — true iff pytest's own "short
+# test summary info" reports FAILED for tests/test_abi_revision.py::<test-name>
+# in <file> (#112). Companion to abi_case_ran above, not a replacement for
+# either existing python ABI-revision assertion below: "SKIPPED" and
+# "collected" each prove a different absence (the fixture unset; the case
+# never existing), and neither fires for a case that RAN and FAILED, which is
+# the shape a real regression takes — pytest's own summary line said so
+# already ("the summary reports failures"), but named no case, because
+# nothing here had read that line yet. This does.
+#
+# Requires -rfs on the pytest invocation below, not a bare -rs: pytest's -r
+# is a `store`, not an `append`, so the LAST -r on the effective command line
+# wins — and pyproject.toml's addopts already carries "-ra". A bare -rs here
+# would silently OVERRIDE that and drop the FAILED short-summary line
+# entirely (measured: with plain -rs a case that ran and failed left nothing
+# but its traceback in the plain log, in a shape pytest documents no promise
+# about). That is the well-formed-input fix, same shape as the rust arm's
+# separated stdout/stderr capture below (#66) — the census reads a line
+# pytest is documented to print, rather than a matcher loosened to go
+# spelunking in a traceback for the test's own name.
+#
+# Anchored on the exact node id at both ends (space or end-of-line after it),
+# so a scan of the whole log matches only the one case named — never a
+# neighboring FAILED line, and never a same-prefixed test name (see
+# --selftest). No libtest-style interleave risk here: this suite runs
+# single-threaded, with no xdist, and the short test summary is written once,
+# after every test body has already finished — unlike abi_case_ran's
+# mid-body progress line, there is nothing for a case's own output to land
+# inside of.
+python_abi_case_failed() {
+  local t="$1" file="$2"
+  grep -qE "^FAILED tests/test_abi_revision\.py::$t( |\$)" "$file"
+}
+
 # PARITY_OK_RE (#77) — the rust arm's OTHER census carries the same
 # end-anchor shape as abi_case_ran above, and reads it off the very same
 # kind of merged capture: the suite-wide $PLAIN is `2>&1 | tee`'d in run()
@@ -186,7 +220,61 @@ if [ "${1:-}" = "--selftest" ]; then
   [ "$N" -eq 0 ] || { echo "SELFTEST FAILED: 6 interleaved parity lines counted as $N, not 0 — corrupted lines must never clear the threshold" >&2; exit 1; }
   [ "$N" -lt 6 ] || { echo "SELFTEST FAILED: an under-count of $N was read as meeting PARITY_MIN=6 — the threshold gate would be a no-op" >&2; exit 1; }
 
-  echo "check-suite: selftest ok — the ABI-fixture matcher stays strict on all three #66 interleave shapes and a genuine non-run, still reads a clean line as RUN, and the parity census matcher (#77) stays strict on the same three shapes, counts a clean line, and still fails its threshold on an undercount"
+  # python_abi_case_failed (#112) — pin that a case which RAN and FAILED is
+  # read off pytest's own "short test summary info" FAILED line, the shape a
+  # real regression takes and the one the two existing python ABI-revision
+  # assertions (SKIPPED, collected) cannot see (neither fires for a case
+  # that ran and failed). Positive case first, using the exact line measured
+  # from a planted refusal-guard defect (a guard replaced with one that can
+  # never be true — issue #112's own reproduction).
+  printf 'FAILED tests/test_abi_revision.py::test_wrong_revision_is_refused - Failed: DID NOT RAISE RegistryError\n' \
+    > "$tmp/pyabi-failed.log"
+  python_abi_case_failed test_wrong_revision_is_refused "$tmp/pyabi-failed.log" \
+    || { echo "SELFTEST FAILED: a genuine FAILED summary line for the case was read as not-failed" >&2; exit 1; }
+
+  # Negative control: an ordinary clean run (pytest -q names no PASSED line
+  # at all, so a log with nothing FAILED in it must never trip this).
+  printf '122 passed, 20 skipped in 2.52s\n' > "$tmp/pyabi-clean.log"
+  python_abi_case_failed test_wrong_revision_is_refused "$tmp/pyabi-clean.log" \
+    && { echo "SELFTEST FAILED: a clean run with no FAILED line was read as failed" >&2; exit 1; }
+
+  # Negative control: the case genuinely did not run (fixture unset — this
+  # is what the existing SKIPPED assertion above already catches). This
+  # matcher must stay quiet on that shape too, so the two assertions cover
+  # distinct failure modes rather than one masking the other.
+  printf 'SKIPPED [1] tests/test_abi_revision.py:56: no ABI revision fixture: $CHTYPES_ABI_FIXTURES is unset\n' \
+    > "$tmp/pyabi-skipped.log"
+  python_abi_case_failed test_wrong_revision_is_refused "$tmp/pyabi-skipped.log" \
+    && { echo "SELFTEST FAILED: a SKIPPED line was read as a FAILED one" >&2; exit 1; }
+
+  # Negative control: a FAILED line for an unrelated test must not satisfy
+  # the case this census is naming — a census that lit up on ANY failure
+  # would stop pointing at the ABI-revision guarantee specifically.
+  printf 'FAILED tests/test_registry.py::test_something_else - AssertionError\n' \
+    > "$tmp/pyabi-other.log"
+  python_abi_case_failed test_wrong_revision_is_refused "$tmp/pyabi-other.log" \
+    && { echo "SELFTEST FAILED: an unrelated test's FAILED line was read as this case having failed" >&2; exit 1; }
+
+  # Negative control: the anchor must stop at the test name's own end, not
+  # just its start — a same-prefixed neighbor (a real pytest node id shape:
+  # a longer test name sharing this one's prefix) must not satisfy it either,
+  # or the census would name the wrong case as the ABI-revision guarantee
+  # while a different test entirely was what actually failed.
+  printf 'FAILED tests/test_abi_revision.py::test_wrong_revision_is_refused_and_something_else - AssertionError\n' \
+    > "$tmp/pyabi-prefix.log"
+  python_abi_case_failed test_wrong_revision_is_refused "$tmp/pyabi-prefix.log" \
+    && { echo "SELFTEST FAILED: a same-prefixed neighboring test name was read as this case" >&2; exit 1; }
+
+  # The other case name must be matched independently — the loop in the
+  # python arm below calls this once per case, and a matcher that only
+  # ever recognized one hardcoded name would silently stop covering the
+  # control.
+  printf 'FAILED tests/test_abi_revision.py::test_matching_revision_loads - AssertionError\n' \
+    > "$tmp/pyabi-control-failed.log"
+  python_abi_case_failed test_matching_revision_loads "$tmp/pyabi-control-failed.log" \
+    || { echo "SELFTEST FAILED: the matching_revision_loads control's own FAILED line was not recognized" >&2; exit 1; }
+
+  echo "check-suite: selftest ok — the ABI-fixture matcher stays strict on all three #66 interleave shapes and a genuine non-run, still reads a clean line as RUN, the parity census matcher (#77) stays strict on the same three shapes, counts a clean line, and still fails its threshold on an undercount, and the python ABI-revision FAILED-line matcher (#112) names a case that ran and failed without tripping on a clean run, a skip, an unrelated failure, or a same-prefixed neighbor"
   exit 0
 fi
 
@@ -243,8 +331,16 @@ PROBLEMS=(); SUMMARY=""; PASSED=0; SKIPPED=""
 case "$WHICH" in
   python)
     command -v uv >/dev/null 2>&1 || die "uv is not on PATH; the python suite cannot run and must not be reported as passing"
-    say "pytest -q -rs (python/)"
-    run "$ROOT/python" uv run --quiet pytest -q -rs tests
+    say "pytest -q -rfs (python/)"
+    # -rfs, not just -rs: pytest's -r is a `store`, not an `append` — the last
+    # -r on the effective command line wins over pyproject.toml's addopts
+    # "-ra", so a bare -rs here would silently DROP the "short test summary
+    # info" FAILED lines the ABI-revision census below depends on (measured:
+    # with plain -rs a case that ran and failed left no FAILED line anywhere
+    # in the plain log — only its traceback, which the golden/registry
+    # censuses below do not parse). Adding f keeps both: skip lines other
+    # assertions in this arm already read, and now failure lines too.
+    run "$ROOT/python" uv run --quiet pytest -q -rfs tests
     SUMMARY="$(grep -E '^[0-9]+ (passed|failed|skipped|error)' "$PLAIN" | tail -1 || true)"
     PASSED="$(printf '%s\n' "$SUMMARY" | first_number passed || true)"
     SKIPPED="$(printf '%s\n' "$SUMMARY" | first_number skipped || true)"
@@ -262,11 +358,20 @@ here: python collected ${PARITY_N:-0} of at least $PARITY_MIN parity tests (test
     fi
     if [ -n "${CHTYPES_ABI_FIXTURES:-}" ]; then
       # pytest -q names no passing test: collected by name + not skipped + no
-      # failure in the summary is the two cases having passed.
+      # failure in the summary is the two cases having passed. Neither of
+      # these two checks fires for a case that RAN and FAILED — the shape a
+      # real regression takes (#112) — so that shape is read separately,
+      # below, off the same -rfs short summary the SKIPPED check already
+      # reads. The SKIPPED and collected checks are NOT replaced: they catch
+      # a case never running at all, which python_abi_case_failed cannot.
       ! grep -qF 'no ABI revision fixture' "$PLAIN" || PROBLEMS+=("the ABI-revision cases SKIPPED although \$CHTYPES_ABI_FIXTURES is set")
       ABI_N="$( (cd "$ROOT/python" && uv run --quiet pytest -q --collect-only tests/test_abi_revision.py 2>/dev/null) \
                | grep -cE '^tests/test_abi_revision\.py::test_(wrong_revision_is_refused|matching_revision_loads)$' || true)"
       [ "${ABI_N:-0}" -eq 2 ] || PROBLEMS+=("the ABI-revision handshake was not proven here: python collected ${ABI_N:-0} of its 2 cases")
+      for t in test_wrong_revision_is_refused test_matching_revision_loads; do
+        ! python_abi_case_failed "$t" "$PLAIN" \
+          || PROBLEMS+=("the ABI-revision case $t did not pass although \$CHTYPES_ABI_FIXTURES is set")
+      done
     fi
     ;;
   ts)
