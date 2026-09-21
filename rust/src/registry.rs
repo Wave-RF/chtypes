@@ -207,6 +207,20 @@ pub struct RegistryOptions {
     /// at construction for the preloaded lines, at first use for the rest,
     /// never for a line nobody asks for.
     ///
+    /// **The `library_bytes` size check above runs at that exact same
+    /// point, unconditionally** (issue #82, decided alongside Go, Python and
+    /// TypeScript, which gained this size check outside of verification in
+    /// the same change): at construction for a preloaded line, at first use
+    /// for the rest, on every load whether or not this option is on. Before
+    /// #50 made loading lazy, that meant this crate's size check ran for
+    /// every artifact in a registry directory at CONSTRUCTION, whether or
+    /// not a caller ever asked for the line — a stronger, eager signal this
+    /// crate no longer gives: it now runs only for a line something actually
+    /// loads, the same scope the checksum has always had. The size check
+    /// stayed unconditional on verification throughout; what changed under
+    /// #50 was its SCOPE (every artifact vs. only the ones loaded), not
+    /// whether verification gates it.
+    ///
     /// [`Registry::new`], its `from_env*` variants and
     /// [`Registry::with_timezone`] take no options — Rust has no default
     /// arguments — so a caller that wants a verified registry over one
@@ -1030,6 +1044,61 @@ mod tests {
             !matches!(err, Error::ChecksumMismatch { .. }),
             "without verify_checksums the hash must not be consulted; got {err:?}"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Issue #82's parity claim, made explicit: the manifest's `library_bytes`
+    /// size check is UNCONDITIONAL, unlike the hash the test above exercises.
+    /// `fake_artifact` always writes `library_bytes` matching the real body, so
+    /// this hand-writes a manifest with a WRONG size instead, and asserts the
+    /// load is refused with no `verify_checksums` anywhere in sight — this
+    /// crate has made this check unconditionally since before #50's lazy
+    /// loading moved it from construction to first use, and this pins the
+    /// mismatch case specifically (the existing
+    /// `a_missing_library_file_is_library_read_at_the_size_check` only proves
+    /// the check runs at all, via an absent file).
+    #[test]
+    fn library_bytes_mismatch_refuses_without_verify_checksums() {
+        let body = b"not a shared library";
+        let dir = std::env::temp_dir().join(format!(
+            "chtypes-rs-bytes-unconditional-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let sub = dir.join("25.8");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("libchtypes.so"), body).unwrap();
+        // Wrong size, and deliberately NO library_sha256: if the load reached
+        // the hash check at all, this manifest could not satisfy it either,
+        // so refusing the size check name specifically proves it ran FIRST,
+        // unconditionally.
+        std::fs::write(
+            sub.join("manifest.json"),
+            format!(
+                r#"{{"library":"libchtypes.so","library_bytes":{},
+                    "clickhouse_version":"25.8.1.1","clickhouse_minor":"25.8"}}"#,
+                body.len() + 1
+            ),
+        )
+        .unwrap();
+
+        let reg = Registry::from_search_path_with(RegistryOptions {
+            dir: Some(dir.clone()),
+            ..RegistryOptions::default()
+        })
+        .expect("the directory holds a manifest, so construction must succeed");
+        let err = reg
+            .for_version("25.8")
+            .expect_err("a size mismatch must refuse even with verify_checksums off");
+        match &err {
+            Error::CorruptArtifact {
+                expected, actual, ..
+            } => {
+                assert_eq!(*expected, body.len() as u64 + 1);
+                assert_eq!(*actual, body.len() as u64);
+            }
+            other => panic!("want Error::CorruptArtifact naming both sizes, got {other:?}"),
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 
