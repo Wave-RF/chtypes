@@ -251,6 +251,73 @@ func ValidateType(v Version, typeExpr string) (canonical string, err error) {
 	return canonical, nil
 }
 
+// ------------------------------------------------------------------ quoting
+//
+// The statically linked twins of Library.QuoteIdentifier and its two
+// siblings: passthroughs over the vendored backQuote / backQuoteIfNeed /
+// quoteString. Nothing here spells the rule; the answers are this build's.
+
+// quoteLinked is the one call site for all three symbols in the linked path:
+// counted input, an owned answer freed with chs_free, an optional error
+// string on the same terms.
+func quoteLinked(v Version, s string, call func(*C.char, C.size_t, **C.char, **C.char) C.int) (string, error) {
+	if err := checkVersion(v); err != nil {
+		return "", err
+	}
+	var p *C.char
+	if len(s) > 0 {
+		p = (*C.char)(unsafe.Pointer(unsafe.StringData(s)))
+	} else {
+		p = C.CString("")
+		defer C.free(unsafe.Pointer(p))
+	}
+	var cOut, cErr *C.char
+	rc := call(p, C.size_t(len(s)), &cOut, &cErr)
+	// Taken on EVERY path: the library owns whatever it wrote, and an answer
+	// left behind on an error return is a leak nothing else can reach.
+	out, msg := "", ""
+	if cOut != nil {
+		out = C.GoString(cOut)
+		C.chs_free(cOut)
+	}
+	if cErr != nil {
+		msg = C.GoString(cErr)
+		C.chs_free(cErr)
+	}
+	runtime.KeepAlive(s)
+	if rc != 0 {
+		return "", schemaErr(int(rc), msg, "")
+	}
+	return out, nil
+}
+
+// QuoteIdentifier spells name as a back-quoted identifier — ALWAYS quoted
+// (chs_quote_identifier). The linked twin of Library.QuoteIdentifier.
+func QuoteIdentifier(v Version, name string) (string, error) {
+	return quoteLinked(v, name, func(p *C.char, n C.size_t, out, err **C.char) C.int {
+		return C.chs_quote_identifier(p, n, out, err)
+	})
+}
+
+// QuoteIdentifierIfNeeded spells name bare where THIS build says a bare
+// spelling is legal, and back-quotes it otherwise
+// (chs_quote_identifier_if_needed). Which names it leaves bare is the
+// build's own rule and differs between builds.
+func QuoteIdentifierIfNeeded(v Version, name string) (string, error) {
+	return quoteLinked(v, name, func(p *C.char, n C.size_t, out, err **C.char) C.int {
+		return C.chs_quote_identifier_if_needed(p, n, out, err)
+	})
+}
+
+// QuoteLiteral spells text as a ClickHouse string literal, quotes and escapes
+// included (chs_quote_literal). text is counted, so a value carrying a NUL
+// byte is quoted correctly.
+func QuoteLiteral(v Version, text string) (string, error) {
+	return quoteLinked(v, text, func(p *C.char, n C.size_t, out, err **C.char) C.int {
+		return C.chs_quote_literal(p, n, out, err)
+	})
+}
+
 // CompiledSchema is a schema bound to the vendored ClickHouse build — the
 // statically linked twin of LoadedSchema. Columns/Canonical/LiteralDefault
 // mirror the C column-introspection group in ClickHouse's own canonical
@@ -303,7 +370,11 @@ func ParseSchema(v Version, s Schema) (*CompiledSchema, error) {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(QuoteIdentifier(c.Name))
+		quoted, err := QuoteIdentifier(v, c.Name)
+		if err != nil {
+			return nil, err
+		}
+		b.WriteString(quoted)
 		b.WriteByte(' ')
 		b.WriteString(c.Type)
 		if k := c.DefaultKind.String(); k != "" && c.Default != "" {

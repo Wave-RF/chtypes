@@ -1102,7 +1102,7 @@ fn a_reconstructed_table_compiles_through_the_library_itself() {
         cols.iter().map(|c| c.position).collect::<Vec<_>>(),
         vec![1, 2, 3, 4, 5]
     );
-    let ddl = chtypes::reconstruct_ddl(&cols).expect("reconstruct_ddl");
+    let ddl = lib.reconstruct_ddl(&cols).expect("reconstruct_ddl");
 
     // The helper is a spelling exercise; the library's compile is the judge.
     let schema = lib

@@ -60,6 +60,22 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
     "chs_free": (None, [ctypes.c_void_p]),
     "chs_validate_type": (ctypes.c_int, [ctypes.c_char_p, _c_owned_p, _c_int_p, _c_owned_p]),
     "chs_reference_type": (ctypes.c_void_p, [ctypes.c_char_p]),
+    # Revision 5, additive: the quoting trio, straight off the vendored
+    # backQuote / backQuoteIfNeed / quoteString. The input is COUNTED — a
+    # literal may carry a NUL byte, so the length is the contract and
+    # `strlen` is not — and the answer arrives in a `char **` out-param.
+    "chs_quote_identifier": (
+        ctypes.c_int,
+        [ctypes.c_char_p, ctypes.c_size_t, _c_owned_p, _c_owned_p],
+    ),
+    "chs_quote_identifier_if_needed": (
+        ctypes.c_int,
+        [ctypes.c_char_p, ctypes.c_size_t, _c_owned_p, _c_owned_p],
+    ),
+    "chs_quote_literal": (
+        ctypes.c_int,
+        [ctypes.c_char_p, ctypes.c_size_t, _c_owned_p, _c_owned_p],
+    ),
     "chs_registered_families": (ctypes.c_void_p, []),
     "chs_function_flags": (ctypes.c_void_p, []),
     # settings_json + mode compile a column list under a DECLARED settings
@@ -455,6 +471,31 @@ class NativeLibrary:
         with self._lock.read():
             raw = self._take(fn(type_expr.encode()))
         return (raw or b"").decode("utf-8", "surrogateescape")
+
+    # -- quoting -----------------------------------------------------------
+
+    def quote(self, symbol: str, text: bytes) -> tuple[str, int, str]:
+        """(quoted, code, err) from one of the three `chs_quote_*` symbols.
+
+        The input is COUNTED, so `text` is bytes and its length is passed
+        explicitly: a string literal may legally carry a NUL byte and
+        `strlen` would truncate it. The answer is always NUL-free — every
+        byte the server escapes comes back escaped — so reading it as a C
+        string is exact, not a best effort.
+        """
+        fn = self._need(symbol, f"this artifact predates {symbol} (rebuild it)")
+        quoted = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        with self._lock.read():
+            rc = int(fn(text, len(text), ctypes.byref(quoted), ctypes.byref(err)))
+            # Both out-params are taken on EVERY path, success or failure:
+            # the library owns whatever it wrote, and an answer left behind
+            # on an error return is a leak nothing else can reach.
+            raw = self._take(quoted.value)
+            message = self._take_err(err)
+        if rc != 0:
+            return "", rc, message
+        return (raw or b"").decode("utf-8", "surrogateescape"), 0, ""
 
     def registered_families(self) -> str:
         """The newline-separated family list, verbatim."""

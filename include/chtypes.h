@@ -363,6 +363,40 @@ CHS_API void chs_shutdown(void);
  * carries the code, so a caller that wants only the verdict needs no slots. */
 CHS_API int chs_validate_type(const char * type_expr, char ** out_canonical, int * out_code, char ** out_err);
 
+/* Spell an identifier, or a string value, the way ClickHouse itself spells it.
+ *
+ * Each of the three is a PASSTHROUGH over the vendored function the server's
+ * own formatter runs and nothing else:
+ *
+ *   chs_quote_identifier            backQuote        — always quotes
+ *   chs_quote_identifier_if_needed  backQuoteIfNeed  — quotes where the build
+ *                                                      itself says it must
+ *   chs_quote_literal               quoteString      — a string value as a
+ *                                                      ClickHouse string literal
+ *
+ * A binding calls these instead of spelling the rule itself. The rule is the
+ * BUILD's, not this header's: which names chs_quote_identifier_if_needed leaves
+ * bare is a property of the vendored ClickHouse tree and differs between them,
+ * so a caller that needs one answer for several versions must ask each library.
+ *
+ * The argument contract, identical for all three:
+ *
+ *   - Inputs are COUNTED, never strlen'd. A literal may carry a NUL byte, and
+ *     every byte the server escapes comes back escaped — so the ANSWER is
+ *     always a NUL-free C string even when the input was not.
+ *   - A NULL pointer with length 0 is the EMPTY input. An empty identifier is
+ *     quoted, never bare.
+ *   - 0 on success, with *out_quoted set to a malloc'd string the caller frees
+ *     with chs_free().
+ *   - 1002 with *out_err set for a NULL pointer with a NONZERO length, or a
+ *     NULL out_quoted. Any other nonzero return is a guarded exception's code,
+ *     with its message in *out_err.
+ *   - out_err is OPTIONAL and may be NULL; the return value carries the code.
+ *   - All three are callable BEFORE chs_init: none of them touches a Context. */
+CHS_API int chs_quote_identifier(const char * name, size_t name_len, char ** out_quoted, char ** out_err);
+CHS_API int chs_quote_identifier_if_needed(const char * name, size_t name_len, char ** out_quoted, char ** out_err);
+CHS_API int chs_quote_literal(const char * text, size_t text_len, char ** out_quoted, char ** out_err);
+
 /* A compiled schema: a ClickHouse column-declaration list, e.g.
  *   "a UInt8, b Nullable(String) DEFAULT 'x', c DateTime MATERIALIZED now()"
  * Parsed with ClickHouse's own ParserColumnDeclarationList, so DEFAULT

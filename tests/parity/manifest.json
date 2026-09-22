@@ -259,6 +259,24 @@
       "rust": "Library::reference_type"
     },
     {
+      "id": "library.quote-identifier",
+      "group": "library", "kind": "method",
+      "what": "chs_quote_identifier — an identifier spelled the way ClickHouse spells it, ALWAYS quoted; the safe default (§Quoting)",
+      "go": "Library.QuoteIdentifier", "python": "Library.quote_identifier", "ts": "Library.quoteIdentifier", "rust": "Library::quote_identifier"
+    },
+    {
+      "id": "library.quote-identifier-if-needed",
+      "group": "library", "kind": "method",
+      "what": "chs_quote_identifier_if_needed — bare where THIS build says bare is legal, quoted otherwise; which names those are is the build's own rule and differs per line (§Quoting)",
+      "go": "Library.QuoteIdentifierIfNeeded", "python": "Library.quote_identifier_if_needed", "ts": "Library.quoteIdentifierIfNeeded", "rust": "Library::quote_identifier_if_needed"
+    },
+    {
+      "id": "library.quote-literal",
+      "group": "library", "kind": "method",
+      "what": "chs_quote_literal — a string value as a ClickHouse string literal, quotes and escapes included; the call for splicing a value into DDL (§Quoting)",
+      "go": "Library.QuoteLiteral", "python": "Library.quote_literal", "ts": "Library.quoteLiteral", "rust": "Library::quote_literal"
+    },
+    {
       "id": "library.set-default-settings",
       "group": "library",
       "kind": "method",
@@ -1228,9 +1246,9 @@
     },
     {
       "id": "discovery.reconstruct-ddl",
-      "group": "discovery", "kind": "function",
-      "what": "The DDL-reconstruction helper — a spelling exercise only; the library's own compile is the judge (§Discovery)",
-      "go": "ReconstructDDL", "python": "reconstruct_ddl", "ts": "reconstructDdl", "rust": "reconstruct_ddl"
+      "group": "discovery", "kind": "method",
+      "what": "The DDL-reconstruction helper — a spelling exercise only; the column NAME is spelled by the library's own identifier quoting, and the library's own compile is the judge (§Discovery)",
+      "go": "Library.ReconstructDDL", "python": "Library.reconstruct_ddl", "ts": "Library.reconstructDdl", "rust": "Library::reconstruct_ddl"
     },
     {
       "id": "discovery.server-profile",
@@ -1439,7 +1457,6 @@
       "SystemRegistryDirs": "The two system roots of docs/guides/fetch.md §1.",
       "DefaultRegistryDirFor": "The per-user cache for another platform.",
       "ValidPlatform": "Platform-key validation.",
-      "QuoteIdentifier": "Backtick-quoting for reconstruct; the others keep it private.",
       "Timezone": "The package-level server timezone; see registry.timezone-option.",
       "Outcome.String": "Stringer.",
       "Verdict.String": "Stringer.",

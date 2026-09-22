@@ -106,7 +106,7 @@ Two related settings bound the same clock: `chtypes_clock_offset_nanos` carries 
 
 To stamp a server-side value — a tenant, a role claim — onto every row, compile one schema per `(table, role, claim)` with `DEFAULT '<claim>'`, and cache the compiled schema per key.
 
-Quoting the claim into a valid ClickHouse string literal before it is spliced into that DDL text is the caller's own job: none of the four bindings export a value-literal quoting helper today. The one quoting surface this SDK does export, [`QuoteIdentifier`](../reference/go.md) (Go; the same job stays private in the other three, per each binding's own `reconstruct_ddl`), escapes an **identifier** — a table or column name — not a string value, so it does not cover this step.
+Quoting the claim into a valid ClickHouse string literal before it is spliced into that DDL text is **`QuoteLiteral`'s job, not yours** — `lib.QuoteLiteral(claim)` in Go, `quote_literal` / `quoteLiteral` / `quote_literal` in the other three. It is a passthrough over ClickHouse's own `quoteString`, so the escaping is the server's rather than a rule any binding spells, and its input is counted: a claim carrying a NUL byte is quoted correctly. Do not hand-roll it, and do not reach for `QuoteIdentifier` here — that one escapes an **identifier**, a table or column name, not a string value (`../reference/bindings.md` §Quoting).
 
 ⚠️ **Safe only when paired with a filter that checks the STORED value against the same claim.** An out-of-domain claim into a narrow column wraps silently **at compile**: `UInt8 DEFAULT '256'` stores **0**. So the DEFAULT alone is not an isolation mechanism — the check on the stored value is what makes it one.
 

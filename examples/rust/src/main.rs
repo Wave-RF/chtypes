@@ -1370,17 +1370,19 @@ fn section10(lib: &Arc<Library>) {
 // SECTION 11 — The discovery kit, offline
 //
 // WHAT: the three canonical queries chtypes ships for learning who a
-// deployment is, their typed parsers, and reconstruct_ddl — run here against
+// deployment is, their typed parsers, and Library::reconstruct_ddl — run here against
 // CANNED bytes shaped exactly like a real server's JSONEachRow responses.
 // WHY: chtypes NEVER opens a socket. You run these queries with whatever
 // client you already have; the kit gives you the SQL and parses the results.
 // The payoff is the last step: the server's own version string resolves an
 // artifact, and the discovered settings become the compile profile — so the
 // handle behaves like a table created on THAT deployment.
-// LOOK FOR: the reconstructed DDL (backticks where needed, DEFAULTs carried),
+// LOOK FOR: the reconstructed DDL (the server's own identifier spelling,
+// DEFAULTs carried),
 // and the SAME ROW accepted under the discovered profile but rejected under a
 // stock compile — the measurable reason discovery matters.
-// C API: none until the compile at the end — the kit is pure client-side.
+// C API: chs_quote_identifier for the reconstruction, then the compile — the
+// queries and parsers themselves are pure client-side.
 // (The ONLINE version of this flow, against a real server, is
 // go/ingest-demo/ — the optional demo chplay.sh never runs.)
 // ---------------------------------------------------------------------------
@@ -1440,10 +1442,8 @@ fn section11(registry: &Registry) {
     }
     note("default_kind/default_expression are CARRIED — dropping them would");
     note("silently lose the DEFAULT semantics sections 6 and 8 run on");
-    let ddl = chtypes::reconstruct_ddl(&cols).expect("reconstruct");
-    kv("  reconstruct_ddl", &ddl);
-    note("`reading c` came back BACKTICKED — identifiers are quoted exactly");
-    note("where ClickHouse requires it");
+    note("reconstruction needs the library — the column NAME is spelled by");
+    note("ClickHouse's own quoting, not by a rule in the binding");
     blank();
 
     // The payoff: version -> artifact, settings -> profile, and a measurable
@@ -1468,6 +1468,11 @@ fn section11(registry: &Registry) {
             lib.minor()
         ),
     );
+    let ddl = lib.reconstruct_ddl(&cols).expect("reconstruct");
+    kv("  lib.reconstruct_ddl", &ddl);
+    note("`reading c` came back QUOTED, in the spelling THIS build prints —");
+    note("quote_identifier is the artifact's own backQuote, not a copy here");
+    blank();
     let row = br#"{"ts":"2026-01-15T10:30:00Z","device_id":9,"reading c":21.5}"#;
     kv("the same row, twice", std::str::from_utf8(row).unwrap());
     let pairs: Vec<(&str, &str)> = settings

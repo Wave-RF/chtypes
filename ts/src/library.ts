@@ -3,6 +3,7 @@
  * and nothing is ever inferred from the directory or the file name.
  */
 
+import { reconstructDdlWith, type DiscoveredColumn } from './discover.js';
 import { schemaErrorFor } from './errors.js';
 import type { NativeLibrary } from './ffi.js';
 import { Schema } from './schema.js';
@@ -219,6 +220,86 @@ export class Library {
    */
   referenceType(typeExpr: string): string {
     return this.native.referenceType(typeExpr);
+  }
+
+  /**
+   * Spell `name` as a back-quoted identifier — ALWAYS quoted, which is the
+   * safe default and the one to reach for without thinking
+   * (`chs_quote_identifier`, the vendored `backQuote`).
+   *
+   * The bytes are this library's own: an embedded back-quote comes back in the
+   * spelling the server's formatter prints, not in a spelling of ours. Reach
+   * for `quoteIdentifierIfNeeded` only when the bare spelling matters to
+   * something downstream.
+   *
+   * @param name - a table, column or alias name.
+   * @returns the quoted identifier.
+   * @throws {UnsupportedError} when the artifact predates
+   *   `chs_quote_identifier`.
+   */
+  quoteIdentifier(name: string): string {
+    return this.quote('chs_quote_identifier', name);
+  }
+
+  /**
+   * Spell `name` bare where THIS library's ClickHouse says a bare spelling is
+   * legal, and back-quote it otherwise (`chs_quote_identifier_if_needed`, the
+   * vendored `backQuoteIfNeed`).
+   *
+   * Which names it leaves bare is a property of the vendored build, not of
+   * this package, and it CHANGES between builds — ask the library you will
+   * compile against rather than caching an answer across versions.
+   *
+   * @param name - a table, column or alias name.
+   * @returns the identifier, bare or quoted.
+   * @throws {UnsupportedError} when the artifact predates
+   *   `chs_quote_identifier_if_needed`.
+   */
+  quoteIdentifierIfNeeded(name: string): string {
+    return this.quote('chs_quote_identifier_if_needed', name);
+  }
+
+  /**
+   * Spell `text` as a ClickHouse string literal, quotes and escapes included
+   * (`chs_quote_literal`, the vendored `quoteString`) — the call to reach for
+   * when a value is spliced into DDL, e.g. a DEFAULT expression.
+   *
+   * The input is counted, so a value carrying a NUL byte is quoted correctly;
+   * the answer is escaped and therefore NUL-free.
+   *
+   * @param text - the string value.
+   * @returns the ClickHouse string literal.
+   * @throws {UnsupportedError} when the artifact predates `chs_quote_literal`.
+   */
+  quoteLiteral(text: string): string {
+    return this.quote('chs_quote_literal', text);
+  }
+
+  private quote(
+    symbol: 'chs_quote_identifier' | 'chs_quote_identifier_if_needed' | 'chs_quote_literal',
+    text: string,
+  ): string {
+    const r = this.native.quote(symbol, text);
+    if (!r.ok) throw schemaErrorFor(r.code, r.message || `${symbol} refused the input`);
+    return r.quoted;
+  }
+
+  /**
+   * Turn `QUERY_TABLE_COLUMNS`' rows back into the column-declaration list
+   * `compileDdl` takes.
+   *
+   * It hangs off a Library because the one thing it spells — the column NAME —
+   * is spelled by this library's own `quoteIdentifier`; see `discover.ts` for
+   * what reconstruction does and does not promise.
+   *
+   * @param cols - the discovered columns, e.g. from `parseColumnsResult`.
+   * @returns the column-declaration list for `compileDdl`.
+   * @throws {ChtypesError} when a column is inconsistent, or there are none.
+   * @throws {UnsupportedError} when the artifact predates
+   *   `chs_quote_identifier`.
+   */
+  reconstructDdl(cols: readonly DiscoveredColumn[]): string {
+    return reconstructDdlWith(cols, (name) => this.quoteIdentifier(name));
   }
 
   /**

@@ -217,6 +217,13 @@ function declare(library: string) {
     // Revision 5: chs_row gains the same trailing columns_json as chs_rows.
     chs_row: d(External, [External, I32, U8Array, U64, Str, Str]),
     chs_reference_type: d(External, [Str]),
+    // Revision 5, additive: the quoting trio, straight off the vendored
+    // backQuote / backQuoteIfNeed / quoteString. The input is `U8Array`, not
+    // `Str`, for the same reason a row body is: it is COUNTED, and a string
+    // literal may legally carry a NUL byte that `Str` would truncate at.
+    chs_quote_identifier: d(I32, [U8Array, U64, External, External]),
+    chs_quote_identifier_if_needed: d(I32, [U8Array, U64, External, External]),
+    chs_quote_literal: d(I32, [U8Array, U64, External, External]),
     chs_registered_families: d(External, []),
     chs_function_flags: d(External, []),
     // Revision 3: the filter trio. Optional like everything above — a missing
@@ -574,6 +581,48 @@ export class NativeLibrary {
       return this.takeString(this.fns.chs_reference_type([expr]) as JsExternal) ?? '';
     } catch (err) {
       return unsupportedIfMissing(err, 'this artifact predates chs_reference_type (rebuild it)');
+    }
+  }
+
+  /**
+   * One of the three `chs_quote_*` symbols. The input is COUNTED — a string
+   * literal may legally carry a NUL byte — so it travels as bytes with an
+   * explicit length, never as a `Str`. The answer is always NUL-free, since
+   * every byte the server escapes comes back escaped.
+   *
+   * Both out-param slots are read and released on EVERY path, success or
+   * failure: the library owns whatever it wrote, and an answer left behind on
+   * an error return is a leak nothing else can reach.
+   */
+  quote(
+    symbol: 'chs_quote_identifier' | 'chs_quote_identifier_if_needed' | 'chs_quote_literal',
+    text: string,
+  ): { quoted: string; code: number; message: string; ok: boolean } {
+    const bytes = Buffer.from(text, 'utf8');
+    // Resolved as three separate properties rather than by indexing with the
+    // union: each descriptor has its own call signature, and indexing would
+    // leave a union of them that cannot be called with one argument list.
+    const fn =
+      symbol === 'chs_quote_identifier'
+        ? this.fns.chs_quote_identifier
+        : symbol === 'chs_quote_identifier_if_needed'
+          ? this.fns.chs_quote_identifier_if_needed
+          : this.fns.chs_quote_literal;
+    const outSlot = ptrSlot();
+    const errSlot = ptrSlot();
+    try {
+      let rc: number;
+      try {
+        rc = this.entered(() => Number(fn([bytes, bytes.length, ...outSlot, ...errSlot])));
+      } catch (err) {
+        return unsupportedIfMissing(err, `this artifact predates ${symbol} (rebuild it)`);
+      }
+      const quoted = this.takeString(readPtr(outSlot)) ?? '';
+      const message = this.takeString(readPtr(errSlot)) ?? '';
+      return { quoted, code: rc, message, ok: rc === 0 };
+    } finally {
+      dropPtrSlot(outSlot);
+      dropPtrSlot(errSlot);
     }
   }
 

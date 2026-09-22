@@ -686,6 +686,38 @@ PLANTS = (
         "type FnTtl = unsafe extern \"C\" fn(*mut ChsSchema, *const c_char) -> c_int;",
         "rust: chs_schema_ttl declares 2 parameter(s); the header takes 3",
     ),
+    # The revision-5 quoting trio, symbol by symbol: the table above shows the
+    # three are DECLARED everywhere, and these show the checker actually fires
+    # on them — separately, because a symbol reported as `—` would have looked
+    # exactly as calm as one that agrees.
+    (
+        "go quote arity",
+        "go/chtypes/multiversion.go",
+        "typedef int          (*fn_quote)(const char *, size_t, char **, char **);",
+        "typedef int          (*fn_quote)(const char *, size_t, char **);",
+        "go: chs_quote_literal declares 3 parameter(s); the header takes 4",
+    ),
+    (
+        "python quote type",
+        "python/src/chtypes/_native.py",
+        "        [ctypes.c_char_p, ctypes.c_size_t, _c_owned_p, _c_owned_p],\n    ),\n    \"chs_registered_families\"",
+        "        [ctypes.c_char_p, ctypes.c_int, _c_owned_p, _c_owned_p],\n    ),\n    \"chs_registered_families\"",
+        "python: chs_quote_literal parameter 2 declared int; the header says size",
+    ),
+    (
+        "ts quote arity",
+        "ts/src/ffi.ts",
+        "chs_quote_literal: d(I32, [U8Array, U64, External, External]),",
+        "chs_quote_literal: d(I32, [U8Array, U64, External]),",
+        "ts: chs_quote_literal declares 3 parameter(s); the header takes 4",
+    ),
+    (
+        "rust quote type",
+        "rust/src/ffi.rs",
+        "    unsafe extern \"C\" fn(*const c_char, usize, *mut *mut c_char, *mut *mut c_char) -> c_int;",
+        "    unsafe extern \"C\" fn(*const c_char, c_int, *mut *mut c_char, *mut *mut c_char) -> c_int;",
+        "rust: chs_quote_identifier parameter 2 declared int; the header says size",
+    ),
     (
         "rust type",
         "rust/src/ffi.rs",

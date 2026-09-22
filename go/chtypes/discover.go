@@ -8,7 +8,7 @@
 //	profile.Version  -> Registry.For / the artifact to load
 //	profile.Settings -> CompileDDL's WithCompileSettings (compile-time) and
 //	                    per-call settings
-//	columns          -> ReconstructDDL -> CompileDDL (+ WithCompileSettings)
+//	columns          -> Library.ReconstructDDL -> CompileDDL (+ WithCompileSettings)
 //
 // The pattern, in full (docs/reference/bindings.md §Discovery):
 //
@@ -192,38 +192,14 @@ func ParseColumnsResult(body []byte) ([]DiscoveredColumn, error) {
 	return out, nil
 }
 
-// QuoteIdentifier spells an identifier the way ClickHouse DDL requires:
-// plain [A-Za-z_][A-Za-z0-9_]* stays bare, anything else — the flattened
-// Nested idiom (`n.a`), spaces, keywords by accident, a leading digit, an
-// empty name — is backticked, with backticks DOUBLED (`a“b`). ClickHouse's
-// own parser accepts both the doubled and the backslash spelling (measured
-// through chs_schema_compile: both round-trip to the same column name);
-// doubling is the one every peer SDK's reconstruction uses, so it is the one
-// exported spelling.
-//
-// Exported deliberately: this package used to keep TWO private copies with
-// different escapes (ParseSchema's backslash `\x60` vs discovery's doubling),
-// and at least one consumer re-implemented the helper because neither was
-// public. This is the single identifier-quoting function; ParseSchema and
-// ReconstructDDL both use it.
-func QuoteIdentifier(name string) string {
-	plain := name != "" && !(name[0] >= '0' && name[0] <= '9')
-	for i := 0; plain && i < len(name); i++ {
-		c := name[i]
-		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
-			plain = false
-		}
-	}
-	if plain {
-		return name
-	}
-	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-}
-
 // ReconstructDDL turns QueryTableColumns' rows back into the
 // column-declaration list CompileDDL takes. It is a spelling exercise, not a
 // semantic one: types and expressions are the server's own text, passed
 // through verbatim.
+//
+// It hangs off a Library because the one thing it does spell — the column
+// NAME — is spelled by the library's own QuoteIdentifier. This package used
+// to compute that itself and the copy disagreed with the server (issue #52).
 //
 // Two facts a caller must know, both properties of the server rather than of
 // this function:
@@ -239,7 +215,7 @@ func QuoteIdentifier(name string) string {
 //     carries.
 //   - a MATERIALIZED/ALIAS column reconstructs with its expression; an
 //     EPHEMERAL column may legitimately have an empty default_expression.
-func ReconstructDDL(cols []DiscoveredColumn) (string, error) {
+func (l *Library) ReconstructDDL(cols []DiscoveredColumn) (string, error) {
 	if len(cols) == 0 {
 		return "", fmt.Errorf("chtypes: no columns to reconstruct")
 	}
@@ -251,7 +227,11 @@ func ReconstructDDL(cols []DiscoveredColumn) (string, error) {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(QuoteIdentifier(c.Name))
+		quoted, err := l.QuoteIdentifier(c.Name)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(quoted)
 		b.WriteByte(' ')
 		b.WriteString(c.Type)
 		switch c.DefaultKind {

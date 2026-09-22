@@ -26,15 +26,15 @@ The demo creates `chguide_demo.events` itself, so it is self-contained. It needs
 
 ## What each step shows
 
-| Step                      | What it demonstrates                                                                                                                                                         |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Discovery              | The three canonical queries run with **your own** HTTP client. chtypes never opens a socket — it ships the SQL and the parsers.                                              |
-| 2. `ReconstructDDL`       | `system.columns` rows back into a column-declaration list. Note how much of the table is carried by `default_expression` — an easy column to leave out of a discovery query. |
-| 3. Registry               | One artifact per ClickHouse version; `For()` resolves the server's exact version to the right one. No nearest-version fallback.                                              |
-| 4. `CompileDDL`           | Compiled under the **discovered** profile, not a guessed one.                                                                                                                |
-| 5a. Per-row admission     | `Row()` — one verdict per record, the shape a per-record ingest path already has.                                                                                            |
-| 5b. The same rows batched | `Rows()` — under stock settings **one unparseable row ends the batch** and the rows after it never get a verdict.                                                            |
-| 6. Unknown setting        | A refusal carrying ClickHouse's own code `115`, as distinct from a chtypes _decline_.                                                                                        |
+| Step                      | What it demonstrates                                                                                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1. Discovery              | The three canonical queries run with **your own** HTTP client. chtypes never opens a socket — it ships the SQL and the parsers.                                                                                                      |
+| 2. Registry               | One artifact per ClickHouse version; `For()` resolves the server's exact version to the right one. No nearest-version fallback.                                                                                                      |
+| 3. `lib.ReconstructDDL`   | `system.columns` rows back into a column-declaration list, the column names spelled by the artifact's own quoting. Note how much of the table is carried by `default_expression` — an easy column to leave out of a discovery query. |
+| 4. `CompileDDL`           | Compiled under the **discovered** profile, not a guessed one.                                                                                                                                                                        |
+| 5a. Per-row admission     | `Row()` — one verdict per record, the shape a per-record ingest path already has.                                                                                                                                                    |
+| 5b. The same rows batched | `Rows()` — under stock settings **one unparseable row ends the batch** and the rows after it never get a verdict.                                                                                                                    |
+| 6. Unknown setting        | A refusal carrying ClickHouse's own code `115`, as distinct from a chtypes _decline_.                                                                                                                                                |
 
 ## The five rows, and the decision each one forces
 

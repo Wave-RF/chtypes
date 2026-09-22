@@ -67,6 +67,11 @@ typedef int          (*fn_col_int)(const void *, int);
 typedef int         (*fn_abi_rev)(void);
 typedef char *       (*fn_owned_str0)(void);          // chs_registered_families, chs_function_flags
 typedef char *       (*fn_owned_str1)(const char *);  // chs_reference_type
+// Revision 5, additive: the quoting trio. ONE typedef for all three — they
+// share a signature, and the dlsym casts below are what pair each symbol to
+// it. The input is COUNTED (a literal may carry a NUL byte); the answer is an
+// owned string in *out_quoted, released with THIS library's own chs_free.
+typedef int          (*fn_quote)(const char *, size_t, char **, char **);
 
 typedef struct {
     void *handle;
@@ -96,6 +101,9 @@ typedef struct {
     fn_block_parse    block_parse;         // optional; the revision-4 block twin
     fn_block_free     block_free;
     fn_filter_eval    filter_eval;
+    fn_quote          quote_identifier;           // optional; the quoting trio
+    fn_quote          quote_identifier_if_needed;
+    fn_quote          quote_literal;
 } chs_lib;
 
 static const char * chs_lib_open(const char *path, chs_lib *out) {
@@ -141,6 +149,12 @@ static const char * chs_lib_open(const char *path, chs_lib *out) {
     out->block_parse = (fn_block_parse) dlsym(h, "chs_block_parse");
     out->block_free  = (fn_block_free)  dlsym(h, "chs_block_free");
     out->filter_eval = (fn_filter_eval) dlsym(h, "chs_filter_eval");
+    // Optional: the quoting trio (revision 5, additive). Same degradation
+    // rule — an artifact that predates them answers unsupported at call time
+    // rather than failing to load.
+    out->quote_identifier           = (fn_quote) dlsym(h, "chs_quote_identifier");
+    out->quote_identifier_if_needed = (fn_quote) dlsym(h, "chs_quote_identifier_if_needed");
+    out->quote_literal              = (fn_quote) dlsym(h, "chs_quote_literal");
     // Mandatory = the original core API, exported by every artifact ever
     // shipped: version/init/compile/rows AND free/validate/schema_free. The
     // shims below call the latter three without NULL checks, so admitting a
@@ -233,6 +247,20 @@ static char * chs_lib_row(chs_lib *l, const void *s, int f, const char *b, size_
 }
 static int chs_lib_validate(chs_lib *l, const char *e, char **canon, int *code, char **err) {
     return l->validate(e, canon, code, err);
+}
+// The quoting trio. -3 is the "this artifact predates the symbol" signal the
+// Go side keys on, the same sentinel chs_lib_engine and chs_lib_ttl use.
+static int chs_lib_quote_identifier(chs_lib *l, const char *s, size_t n, char **out, char **err) {
+    if (!l->quote_identifier) return -3;
+    return l->quote_identifier(s, n, out, err);
+}
+static int chs_lib_quote_identifier_if_needed(chs_lib *l, const char *s, size_t n, char **out, char **err) {
+    if (!l->quote_identifier_if_needed) return -3;
+    return l->quote_identifier_if_needed(s, n, out, err);
+}
+static int chs_lib_quote_literal(chs_lib *l, const char *s, size_t n, char **out, char **err) {
+    if (!l->quote_literal) return -3;
+    return l->quote_literal(s, n, out, err);
 }
 // Column introspection is all-or-nothing: an artifact either exports the whole
 // group (they shipped together) or none of it. col_count answering -1 is the
@@ -1061,6 +1089,98 @@ func (l *Library) ReferenceType(typeExpr string) (string, error) {
 	l.mu.RUnlock()
 	return s, nil
 }
+
+// ------------------------------------------------------------------ quoting
+//
+// Three passthroughs over the vendored backQuote / backQuoteIfNeed /
+// quoteString. This package spells NONE of the rule itself: it used to, and
+// the copy disagreed with the server (issue #52). The answers are the loaded
+// build's own and differ between builds, which is why they hang off a
+// Library rather than off the package.
+
+// quote is the one call site for all three symbols: counted input, an owned
+// answer released with THIS library's chs_free, an optional error string on
+// the same terms.
+func (l *Library) quote(kind int, s string) (string, error) {
+	// The counted-buffer idiom the row calls use: a real pointer even for an
+	// empty input, so nothing depends on the NULL-plus-zero spelling.
+	var p *C.char
+	if len(s) > 0 {
+		p = (*C.char)(unsafe.Pointer(unsafe.StringData(s)))
+	} else {
+		p = C.CString("")
+		defer C.free(unsafe.Pointer(p))
+	}
+	var cOut, cErr *C.char
+	l.mu.RLock()
+	var rc C.int
+	switch kind {
+	case quoteAlways:
+		rc = C.chs_lib_quote_identifier(&l.lib, p, C.size_t(len(s)), &cOut, &cErr)
+	case quoteIfNeeded:
+		rc = C.chs_lib_quote_identifier_if_needed(&l.lib, p, C.size_t(len(s)), &cOut, &cErr)
+	default:
+		rc = C.chs_lib_quote_literal(&l.lib, p, C.size_t(len(s)), &cOut, &cErr)
+	}
+	// Both out params are taken on EVERY path, success or failure: the
+	// library owns whatever it wrote, and an answer left behind on an error
+	// return is a leak nothing else can reach.
+	out, msg := "", ""
+	if cOut != nil {
+		out = C.GoString(cOut)
+		C.chs_lib_free(&l.lib, cOut)
+	}
+	if cErr != nil {
+		msg = C.GoString(cErr)
+		C.chs_lib_free(&l.lib, cErr)
+	}
+	l.mu.RUnlock()
+	runtime.KeepAlive(s)
+	switch rc {
+	case 0:
+		return out, nil
+	case -3:
+		return "", &UnsupportedError{Msg: "this artifact predates the chs_quote_* trio (rebuild it)"}
+	default:
+		return "", schemaErr(int(rc), msg, "")
+	}
+}
+
+const (
+	quoteAlways = iota
+	quoteIfNeeded
+	quoteValue
+)
+
+// QuoteIdentifier spells name as a back-quoted identifier — ALWAYS quoted,
+// which is the safe default and the one to reach for without thinking
+// (chs_quote_identifier, the vendored backQuote). The bytes are this
+// library's own: an embedded back-quote comes back in the spelling the
+// server's formatter prints, not in a spelling of ours.
+//
+// Use QuoteIdentifierIfNeeded only when the bare spelling matters to
+// something downstream; which names it leaves bare is the loaded build's own
+// rule, so two libraries may answer differently for the same name.
+func (l *Library) QuoteIdentifier(name string) (string, error) { return l.quote(quoteAlways, name) }
+
+// QuoteIdentifierIfNeeded spells name bare where THIS library's ClickHouse
+// says a bare spelling is legal, and back-quotes it otherwise
+// (chs_quote_identifier_if_needed, the vendored backQuoteIfNeed).
+//
+// The set of names it quotes is a property of the vendored build, not of this
+// package, and it CHANGES between builds — ask the library you will compile
+// against rather than caching an answer across versions.
+func (l *Library) QuoteIdentifierIfNeeded(name string) (string, error) {
+	return l.quote(quoteIfNeeded, name)
+}
+
+// QuoteLiteral spells text as a ClickHouse string literal, quotes and escapes
+// included (chs_quote_literal, the vendored quoteString) — the call to reach
+// for when a value is being spliced into DDL, e.g. a DEFAULT expression.
+//
+// text is counted, so a value carrying a NUL byte is quoted correctly; the
+// answer is escaped and therefore NUL-free.
+func (l *Library) QuoteLiteral(text string) (string, error) { return l.quote(quoteValue, text) }
 
 // SetEngine mirrors CompiledSchema.SetEngine for a dlopen'd library,
 // including WithMergeTreeSettings. An artifact built before chs_schema_engine

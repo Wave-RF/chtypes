@@ -8,7 +8,7 @@
 //! * `profile.version`  -> [`crate::Registry::for_version`] / the artifact to load
 //! * `profile.settings` -> [`crate::Library::compile`]'s `.settings(...)`
 //!   (compile-time) and per-call settings
-//! * columns            -> [`reconstruct_ddl`] -> [`crate::Library::compile`]
+//! * columns            -> [`crate::Library::reconstruct_ddl`] -> [`crate::Library::compile`]
 //!
 //! The connect-time pattern, in full (`docs/reference/bindings.md` §Discovery):
 //!
@@ -32,7 +32,7 @@
 //! //    this version's server would refuse — a typo is caught at declare
 //! //    time, not swallowed.
 //! let columns = chtypes::parse_columns_result(&query(chtypes::QUERY_TABLE_COLUMNS))?;
-//! let ddl = chtypes::reconstruct_ddl(&columns)?;
+//! let ddl = lib.reconstruct_ddl(&columns)?;
 //! let schema = lib.compile(&ddl).settings(settings.clone()).compile()?;
 //!
 //! // 4. pass the same profile (plus per-INSERT overrides) per call.
@@ -271,24 +271,15 @@ pub fn parse_columns_result(body: &[u8]) -> Result<Vec<DiscoveredColumn>> {
     Ok(out)
 }
 
-/// Quote an identifier the way ClickHouse DDL requires: plain
-/// `[A-Za-z_][A-Za-z0-9_]*` stays bare, anything else is backticked with
-/// backticks doubled. `system.columns` can return anything — the flattened
-/// Nested idiom (`n.a`), spaces, keywords.
-fn backquote_if_needed(name: &str) -> String {
-    let bytes = name.as_bytes();
-    let plain = !bytes.is_empty()
-        && !bytes[0].is_ascii_digit()
-        && bytes
-            .iter()
-            .all(|&c| c == b'_' || c.is_ascii_alphanumeric());
-    if plain {
-        return name.to_string();
-    }
-    format!("`{}`", name.replace('`', "``"))
-}
-
-/// Turn [`QUERY_TABLE_COLUMNS`]' rows back into the column-declaration list
+/// The body of [`crate::Library::reconstruct_ddl`], with the identifier
+/// quoting HANDED IN rather than computed here.
+///
+/// `quote` is the loaded library's own
+/// [`crate::Library::quote_identifier`]. This module used to spell the rule
+/// itself and the copy disagreed with the server (issue #52); nothing in this
+/// file decides how a name is spelled.
+///
+/// Turns [`QUERY_TABLE_COLUMNS`]' rows back into the column-declaration list
 /// [`crate::Library::compile`] takes. It is a spelling exercise, not a
 /// semantic one: types and expressions are the server's own text, passed
 /// through verbatim, and the library's own compile is the judge of the
@@ -315,7 +306,12 @@ fn backquote_if_needed(name: &str) -> String {
 ///   DEFAULT/MATERIALIZED/ALIAS column without its expression, an expression
 ///   with no kind (which would silently drop semantics), or an unknown
 ///   `default_kind`.
-pub fn reconstruct_ddl(cols: &[DiscoveredColumn]) -> Result<String> {
+/// * whatever `quote` answers — for the library's own quoting, an
+///   [`Error::PredatesFeature`] from an artifact without `chs_quote_identifier`.
+pub(crate) fn reconstruct_ddl_with(
+    cols: &[DiscoveredColumn],
+    quote: impl Fn(&str) -> Result<String>,
+) -> Result<String> {
     if cols.is_empty() {
         return discovery_err("no columns to reconstruct");
     }
@@ -327,7 +323,7 @@ pub fn reconstruct_ddl(cols: &[DiscoveredColumn]) -> Result<String> {
         if i > 0 {
             out.push_str(", ");
         }
-        out.push_str(&backquote_if_needed(&c.name));
+        out.push_str(&quote(&c.name)?);
         out.push(' ');
         out.push_str(&c.r#type);
         match c.default_kind.as_str() {
@@ -481,8 +477,19 @@ mod tests {
         }
     }
 
+    /// The stand-in for the library's own quoting in the tests below.
+    ///
+    /// It is deliberately NOT a ClickHouse spelling: these cases exist to
+    /// pin the parts of reconstruction that are this crate's — the kinds,
+    /// the expressions, the refusals — and a plausible-looking quoter here
+    /// would be a second copy of the rule that #52 deleted. The real
+    /// spelling is measured against a loaded artifact (issue #119).
+    fn marker(name: &str) -> Result<String> {
+        Ok(format!("<{name}>"))
+    }
+
     #[test]
-    fn reconstruct_ddl_spells_kinds_and_backquotes_only_where_needed() {
+    fn reconstruct_ddl_spells_kinds_and_leaves_the_name_to_the_library() {
         let cols = [
             DiscoveredColumn {
                 name: "id".into(),
@@ -515,20 +522,16 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let ddl = reconstruct_ddl(&cols).unwrap();
+        let ddl = reconstruct_ddl_with(&cols, marker).unwrap();
+        // Every name is whatever the quoter answered, verbatim: this function
+        // no longer decides which names are spelled how.
         assert!(
-            ddl.contains("`n.a` Array(Int64)"),
-            "flattened-Nested name not backquoted: {ddl}"
+            ddl.contains("<n.a> Array(Int64)"),
+            "the name did not come from the quoter: {ddl}"
         );
-        assert!(ddl.contains("ts DateTime DEFAULT now()"), "{ddl}");
-        assert!(ddl.contains("e UInt8 EPHEMERAL"), "{ddl}");
-        assert!(ddl.contains("m UInt64 MATERIALIZED id + 1"), "{ddl}");
-
-        // A backtick inside a name is doubled, and a leading digit backquotes.
-        assert_eq!(backquote_if_needed("a`b"), "`a``b`");
-        assert_eq!(backquote_if_needed("1x"), "`1x`");
-        assert_eq!(backquote_if_needed("with space"), "`with space`");
-        assert_eq!(backquote_if_needed("plain_Name9"), "plain_Name9");
+        assert!(ddl.contains("<ts> DateTime DEFAULT now()"), "{ddl}");
+        assert!(ddl.contains("<e> UInt8 EPHEMERAL"), "{ddl}");
+        assert!(ddl.contains("<m> UInt64 MATERIALIZED id + 1"), "{ddl}");
     }
 
     #[test]
@@ -536,49 +539,61 @@ mod tests {
         // DEFAULT/MATERIALIZED/ALIAS require an expression.
         for kind in ["DEFAULT", "MATERIALIZED", "ALIAS"] {
             assert!(
-                reconstruct_ddl(&[DiscoveredColumn {
-                    name: "x".into(),
-                    r#type: "UInt8".into(),
-                    default_kind: kind.into(),
-                    ..Default::default()
-                }])
+                reconstruct_ddl_with(
+                    &[DiscoveredColumn {
+                        name: "x".into(),
+                        r#type: "UInt8".into(),
+                        default_kind: kind.into(),
+                        ..Default::default()
+                    }],
+                    marker
+                )
                 .is_err(),
                 "{kind} without expression must error"
             );
         }
         // An unknown kind errors rather than passing through.
         assert!(
-            reconstruct_ddl(&[DiscoveredColumn {
-                name: "x".into(),
-                r#type: "UInt8".into(),
-                default_kind: "WEIRD".into(),
-                ..Default::default()
-            }])
+            reconstruct_ddl_with(
+                &[DiscoveredColumn {
+                    name: "x".into(),
+                    r#type: "UInt8".into(),
+                    default_kind: "WEIRD".into(),
+                    ..Default::default()
+                }],
+                marker
+            )
             .is_err()
         );
         // An expression with no kind errors: it would silently drop semantics.
         assert!(
-            reconstruct_ddl(&[DiscoveredColumn {
-                name: "x".into(),
-                r#type: "UInt8".into(),
-                default_expression: "1".into(),
-                ..Default::default()
-            }])
+            reconstruct_ddl_with(
+                &[DiscoveredColumn {
+                    name: "x".into(),
+                    r#type: "UInt8".into(),
+                    default_expression: "1".into(),
+                    ..Default::default()
+                }],
+                marker
+            )
             .is_err()
         );
         // No columns is a wrong table, not an empty DDL.
-        assert!(reconstruct_ddl(&[]).is_err());
+        assert!(reconstruct_ddl_with(&[], marker).is_err());
         // EPHEMERAL may omit its expression, and may carry one.
         assert_eq!(
-            reconstruct_ddl(&[DiscoveredColumn {
-                name: "e".into(),
-                r#type: "UInt8".into(),
-                default_kind: "EPHEMERAL".into(),
-                default_expression: "7".into(),
-                ..Default::default()
-            }])
+            reconstruct_ddl_with(
+                &[DiscoveredColumn {
+                    name: "e".into(),
+                    r#type: "UInt8".into(),
+                    default_kind: "EPHEMERAL".into(),
+                    default_expression: "7".into(),
+                    ..Default::default()
+                }],
+                marker
+            )
             .unwrap(),
-            "e UInt8 EPHEMERAL 7"
+            "<e> UInt8 EPHEMERAL 7"
         );
     }
 

@@ -4,8 +4,9 @@
 // It walks the whole connect-time-to-publish path against a REAL ClickHouse:
 //
 //  1. discovery   — the three canonical queries, run over plain HTTP
-//  2. reconstruct — system.columns rows -> a column-declaration list
-//  3. registry    — pick the artifact matching the server's own version
+//  2. registry    — pick the artifact matching the server's own version
+//  3. reconstruct — system.columns rows -> a column-declaration list, with the
+//     column names spelled by the artifact's own quoting
 //  4. compile     — CompileDDL under the deployment's declared profile
 //  5. rows        — a batch through Rows(), and the publish decision per row
 //
@@ -140,19 +141,8 @@ func run() error {
 	// column to leave out — loses the table's DEFAULT semantics silently.
 	// Note how much of this table is carried by that one column.
 
-	// ------------------------------------------------------- 2. reconstruct
-	section("2. ReconstructDDL")
-
-	ddl, err := chtypes.ReconstructDDL(cols)
-	if err != nil {
-		return err
-	}
-	for _, part := range strings.Split(ddl, ", ") {
-		fmt.Printf("      %s\n", part)
-	}
-
-	// ---------------------------------------------------------- 3. registry
-	section("3. Registry — artifact matching the server")
+	// ---------------------------------------------------------- 2. registry
+	section("2. Registry — artifact matching the server")
 
 	dir := registryDir()
 	reg, err := chtypes.NewRegistry(dir)
@@ -167,6 +157,17 @@ func run() error {
 		return fmt.Errorf("no artifact for server %s: %w", profile.Version, err)
 	}
 	kv("resolved", fmt.Sprintf("%s (minor %s)", lib.Version, lib.Minor))
+
+	// ------------------------------------------------------- 3. reconstruct
+	section("3. lib.ReconstructDDL")
+
+	ddl, err := lib.ReconstructDDL(cols)
+	if err != nil {
+		return err
+	}
+	for _, part := range strings.Split(ddl, ", ") {
+		fmt.Printf("      %s\n", part)
+	}
 
 	// ----------------------------------------------------------- 4. compile
 	section("4. CompileDDL under the declared profile")
