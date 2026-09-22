@@ -342,10 +342,16 @@ fn version_resolution_accepts_a_minor_line_a_patch_and_a_drifted_patch() {
     // nearest one, which would be a wrong answer dressed as a right one.
     let err = reg.for_version("19.1").unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("19.1"), "the error must name what was asked for: {msg}");
+    assert!(
+        msg.contains("19.1"),
+        "the error must name what was asked for: {msg}"
+    );
     for d in reg.search_path() {
         let dir = d.display().to_string();
-        assert!(msg.contains(&dir), "error must name every directory looked in: {msg}");
+        assert!(
+            msg.contains(&dir),
+            "error must name every directory looked in: {msg}"
+        );
     }
     assert!(err.code().is_none());
 }
