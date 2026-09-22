@@ -47,6 +47,8 @@ The four bindings in this repository are released together and give one answer, 
 
 - **An unlisted column now takes its `DEFAULT` regardless of `input_format_defaults_for_omitted_fields` when a column list is present** (with revision-5 artifacts). With an INSERT column list, a column the list does not name is computed from its `DEFAULT` expression under `input_format_defaults_for_omitted_fields=0` as well as under the default `1`. This is a fix in the artifact that rides revision 5, and it applies to **every format**, not only `CSVWithNames` and `TSVWithNames`.
 
+- **The rolling artifacts channel now serves ABI revision 5.** A 0.2.x consumer that fetches from the default channel will download an artifact its bindings **refuse at load** — correct behavior that looks exactly like a broken install. ⚠️ **Pinning an exact ClickHouse version does not avoid this**: a relink republishes the same `clickhouse_version`, and an exact request resolves to the highest-ranked matching row, which is the revision-5 one. The only way to stay on revision 4 is `--url` / `--tag` pointed at a source that still serves revision-4 artifacts, if one is retained. **Upgrading to 0.3.0 is the supported path.**
+
 ## [0.2.2] — 2026-09-17
 
 ### Changed

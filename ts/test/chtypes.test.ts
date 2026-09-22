@@ -891,7 +891,13 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       try {
         symlinkSync(path.join(registry.dir, preferred), path.join(tmp, preferred), 'dir');
         const verified = new Registry(tmp, { verifyChecksums: true, preload: [preferred] });
-        expect(verified.versions()).toEqual([preferred]);
+        // versions() lists every line this registry can ANSWER FOR, which since
+        // #50 includes lines discovered further along the search path — naming a
+        // directory prepends to it, it does not replace it, so $CHTYPES_REGISTRY
+        // is still on the path here. What this test assembled is the one
+        // symlinked line, so assert on what it LOADED.
+        expect(verified.libraries().map((l) => l.minor)).toEqual([preferred]);
+        expect(verified.versions()).toContain(preferred);
         // dlopen is refcounted, so the same artifact must resolve to the same
         // loaded library rather than being initialized a second time.
         expect(verified.for(preferred).version).toBe(registry.for(preferred).version);
