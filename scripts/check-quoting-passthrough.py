@@ -360,9 +360,17 @@ PLANTS = (
 
 
 def selftest(root: str) -> int:
-    n, _ = check(root)
+    n, lines = check(root)
     if n:
-        print("SELFTEST FAILED: the tree does not pass, so a planted failure proves nothing", file=sys.stderr)
+        # The findings go out too. This branch is what a REAL re-grown rule
+        # trips first (the selftest step runs before the bare one), and a red
+        # log that says only "the tree does not pass" sends the reader back to
+        # run the check by hand to learn which line it was.
+        print(
+            "SELFTEST FAILED: the tree itself does not pass, so a planted failure would prove\n"
+            "nothing. The findings below are REAL — fix them first:\n" + "\n".join(lines),
+            file=sys.stderr,
+        )
         return 1
 
     tmp = tempfile.mkdtemp(prefix="quoting-passthrough-selftest-")
