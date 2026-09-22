@@ -333,12 +333,25 @@ fn version_resolution_accepts_a_minor_line_a_patch_and_a_drifted_patch() {
     let drifted = format!("{}.99.7-lts", lib.minor());
     assert_eq!(reg.for_version(&drifted).unwrap().version(), lib.version());
 
-    // A version with no artifact is an error naming what IS loaded — never the
-    // nearest neighbor.
+    // A version with no artifact is an error naming WHERE IT LOOKED — never the
+    // nearest neighbor. #50 stopped constructing Error::NoSuchVersion for this:
+    // under lazy loading "what IS loaded" is not a useful answer, because
+    // nothing need be open yet, so ArtifactMissing names the directories
+    // searched instead. The property that matters is unchanged — asking for a
+    // line this registry does not hold ERRORS rather than answering with the
+    // nearest one, which would be a wrong answer dressed as a right one.
     let err = reg.for_version("19.1").unwrap_err();
     let msg = err.to_string();
-    for v in reg.versions() {
-        assert!(msg.contains(&v), "error must name loaded versions: {msg}");
+    assert!(
+        msg.contains("19.1"),
+        "the error must name what was asked for: {msg}"
+    );
+    for d in reg.search_path() {
+        let dir = d.display().to_string();
+        assert!(
+            msg.contains(&dir),
+            "error must name every directory looked in: {msg}"
+        );
     }
     assert!(err.code().is_none());
 }
