@@ -59,7 +59,9 @@ npx @wavehouse/chtypes fetch 25.8
 cargo install chtypes && chtypes fetch 25.8
 ```
 
-An ed25519 signature over the release and the sha256 of every byte are checked before anything lands. `fetch --all` takes every published line. Full details: [docs/install.md](docs/install.md).
+An ed25519 signature over the release and the sha256 of every byte are checked before anything lands.
+
+> ⚠️ **From 0.3.0 the rolling channel serves ABI revision 5.** A 0.2.x binding will download these artifacts and refuse them at load. Pinning an exact ClickHouse version does not help — a relink republishes the same version and the newest row wins. Point `--url` / `--tag` at a source still serving revision 4, or upgrade to 0.3.0. `fetch --all` takes every published line. Full details: [docs/install.md](docs/install.md).
 
 ## Quickstart
 
