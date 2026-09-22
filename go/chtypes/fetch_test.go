@@ -415,8 +415,13 @@ func TestFetchSignedRelease(t *testing.T) {
 	}
 
 	// A registry can be opened on it — the fake library will not dlopen,
-	// which is the loud error, not a skip.
-	if _, err := NewRegistry(dest); err == nil {
+	// which is the loud error, not a skip. Construction reads manifests and
+	// dlopens nothing, so the open is the thing that has to be asked for.
+	reg, err := NewRegistry(dest)
+	if err != nil {
+		t.Fatalf("a registry over the installed line must construct: %v", err)
+	}
+	if _, err := reg.For("25.8"); err == nil {
 		t.Fatal("a fake library dlopen'd")
 	}
 	// ListInstalled / VerifyInstalled see it.

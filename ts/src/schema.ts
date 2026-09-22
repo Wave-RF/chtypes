@@ -48,13 +48,56 @@ export interface EngineOptions {
 }
 
 /**
- * Options for `Schema#rows` — the revision-3 export and document-flag
- * channels (the C ABI contract §Rows, for which include/chtypes.h is the
- * public authority). Whatever the
- * options, `rows()` is always ONE `chs_rows` call — never a second call,
- * never re-parsing.
+ * Options for `Schema#row` and `Schema#parseBlock` — the revision-5 INSERT
+ * column list (the C ABI contract §Rows, for which include/chtypes.h is the
+ * public authority). `RowsOptions` (below) extends this with the
+ * revision-3 export/document-flag channels, which are meaningless on
+ * `row()` and `parseBlock()` — this type simply does not offer them, rather
+ * than offering fields those two methods would silently ignore.
  */
-export interface RowsOptions {
+export interface RowOptions {
+  /**
+   * The revision-5 INSERT column list, for `row()`, `parseBlock()`, and
+   * `rows()` (and its export channel) via `RowsOptions` extending this:
+   * name the columns THIS DATA supplies, and the server computes the rest
+   * with them in scope for their DEFAULTs.
+   *
+   * Absent or an empty array is the no-list behavior of every revision
+   * before 5 — the data supplies every plain column — and is NEVER rendered
+   * as `INSERT INTO t () FORMAT X`: that is code 62 `SYNTAX_ERROR` on every
+   * line, so this binding always crosses the ABI's OTHER no-list spelling,
+   * `"[]"`, which `chs_row`'s own comment states is byte-for-byte the same
+   * input as a real NULL.
+   *
+   * With a list: positional formats address the k-th field to the k-th
+   * LISTED column (the list order, not declared order, is the wire order,
+   * and the list length is the arity); JSON-family formats match keys
+   * against the listed set, and a key naming an unlisted table column is an
+   * unknown field under `input_format_skip_unknown_fields`, exactly as a
+   * key naming no column at all. A listed `EPHEMERAL` column's value IS
+   * read and IS in scope for the DEFAULTs that reference it, and is still
+   * never stored and never exported — `chs_schema_column_default_kind`
+   * reports `'EPHEMERAL'` for it (see `ColumnInfo#defaultKind`).
+   *
+   * Not validated here: an unknown name, an `ALIAS` column, or a repeated
+   * name is the SERVER's own refusal (codes 16, 16 and 15 respectively),
+   * surfaced through the row/batch outcome exactly as it arrives.
+   */
+  readonly columns?: readonly string[] | undefined;
+}
+
+/**
+ * Options for `Schema#rows` — `RowOptions` (the revision-5 column list,
+ * shared with `row()` and `parseBlock()`) plus the revision-3
+ * export/document-flag channels (the C ABI contract §Rows, for which
+ * include/chtypes.h is the public authority). `tests/parity/manifest.json`
+ * capability `schema.columns-option` spells the shared column-list
+ * capability `RowsOptions` in TypeScript — this type still carries it, now
+ * through inheriting `RowOptions` rather than declaring its own `columns`
+ * field. Whatever the options, `rows()` is always ONE `chs_rows` call —
+ * never a second call, never re-parsing.
+ */
+export interface RowsOptions extends RowOptions {
   /**
    * A `Format` the artifact can SERIALIZE — this revision exactly
    * `Format.JSONCompactEachRow`. Any other value answers the whole call
@@ -72,6 +115,29 @@ export interface RowsOptions {
    * `DOC_ALL` is refused loudly by the library, never pre-validated here.
    */
   readonly docFlags?: number | undefined;
+  /**
+   * Attach a compiled `Filter` to this call's export channel (revision 5,
+   * second half — docs/guides/filters.md "Exporting only the rows a filter
+   * admits"): ONE `chs_rows` parse then answers both the per-row verdict
+   * (`RowResult#verdict`) and, for rows whose verdict is `'t'`, the export
+   * bytes. Absent is today's behavior byte for byte.
+   *
+   * `'e'` (the predicate threw) and `'d'` (declined — including a row whose
+   * own parse `outcome` was not `'accepted'`) are NEVER exported and NEVER
+   * collapsed into `'f'`: collapsing either turns fail-closed into
+   * fail-open, the leak class this surface exists to prevent. A
+   * security-enforcing caller must treat any `RowResult#verdict` that is
+   * `undefined` or not `isAnswer()` as a refusal — hide the row or fail the
+   * request, never export it.
+   *
+   * The filter must be compiled over THIS schema: one from a different
+   * `Schema` of the SAME loaded library rejects the whole call, loudly
+   * (`outcome: 'rejected'`, code 1002 — the same cross-schema rule
+   * `Filter#eval` lets the C layer enforce for a (filter, block) pair). One
+   * from a DIFFERENT loaded library throws `ChtypesError` before any C
+   * call — no handle crosses a dlopen'd image boundary.
+   */
+  readonly rowFilter?: Filter | undefined;
 }
 
 /**
@@ -224,13 +290,17 @@ export class Schema {
    * @param settings - per-call settings; they win over the compile profile and
    *   the library defaults (except a type gate the profile declared, which the
    *   handle has already settled, as a real server's CREATE does).
+   * @param options - `RowOptions#columns` (revision 5), the INSERT column
+   *   list. `row()` takes `RowOptions`, not `RowsOptions`: the revision-3
+   *   export/doc-flag channels are meaningless on a single row, so this
+   *   method's options type simply does not offer them.
    * @returns the `RowResult` — verdict, stored values, and every silent change.
    * @throws {ChtypesError} when the schema is closed, or a settings value is a
    *   JS `number`.
    * @throws {UnsupportedError} when the artifact predates `chs_row`.
    */
-  row(format: Format, raw: Uint8Array, settings?: Settings): RowResult {
-    const doc = this.native.row(this.live(), format, raw, encodeSettings(settings));
+  row(format: Format, raw: Uint8Array, settings?: Settings, options?: RowOptions): RowResult {
+    const doc = this.native.row(this.live(), format, raw, encodeSettings(settings), options?.columns);
     return rowResultOf(parseDocument(doc));
   }
 
@@ -262,17 +332,31 @@ export class Schema {
    * @param format - the wire format code (`Format`).
    * @param body - the whole request body as bytes (never a JS string).
    * @param settings - per-call settings; same precedence as `row`.
-   * @param options - the revision-3 export/doc-flag channels; absent =
-   *   today's full document, byte-identical to revision 2.
+   * @param options - the revision-3 export/doc-flag channels, plus
+   *   `columns` (revision 5), the INSERT column list, and `rowFilter`
+   *   (revision 5, second half) — see `RowsOptions`; absent = today's full
+   *   document, byte-identical to revision 2, no list, byte-identical to
+   *   every revision before 5, and no filter, byte-identical byte for byte.
    * @returns the `BatchResult`. When `engineRows` is present it — not `rows` —
    *   is the stored truth, and batch-level storage transforms (`ttl_expired`,
-   *   `ttl_column_expired`) are folded into `transformed`.
+   *   `ttl_column_expired`) are folded into `transformed`. With
+   *   `options.rowFilter`, `rowsPassed`/`rowsCut` join the result and every
+   *   row carries its filter `verdict` beside its own `outcome`.
    * @throws {ChtypesError} when the schema is closed, a settings value is a JS
-   *   `number`, or the artifact predates `chs_rows` (a mandatory symbol).
+   *   `number`, the artifact predates `chs_rows` (a mandatory symbol), the
+   *   filter is closed, or the filter comes from a different loaded library.
    */
   rows(format: Format, body: Uint8Array, settings?: Settings, options?: RowsOptions): BatchResult {
     const exportFormat = options?.exportFormat ?? EXPORT_NONE;
     const docFlags = options?.docFlags ?? (options?.exportFormat === undefined ? DOC_ALL : 0);
+    const rowFilter = options?.rowFilter;
+    let filterHandle: FilterHandle | undefined;
+    if (rowFilter !== undefined) {
+      if (rowFilter.nativeLib !== this.native) {
+        throw new ChtypesError('chtypes: filter and schema come from different libraries');
+      }
+      filterHandle = rowFilter.liveHandle();
+    }
     const { doc, payload } = this.native.rows(
       this.live(),
       format,
@@ -280,6 +364,8 @@ export class Schema {
       encodeSettings(settings),
       exportFormat,
       docFlags,
+      options?.columns,
+      filterHandle,
     );
     return batchResultOf(parseDocument(doc), payload);
   }
@@ -353,6 +439,13 @@ export class Schema {
    * @param format - the wire format code (`Format`).
    * @param body - the rows as bytes (never a JS string).
    * @param settings - parse-side settings; same precedence as `Schema#rows`.
+   * @param options - `RowOptions#columns` (revision 5), the INSERT column
+   *   list read exactly as `Schema#row` reads it. `parseBlock()` takes
+   *   `RowOptions`, not `RowsOptions`: the revision-3 export/doc-flag
+   *   channels are meaningless here, so this method's options type simply
+   *   does not offer them. Filters compiled against this schema still
+   *   evaluate the schema's PHYSICAL columns, so a listed `EPHEMERAL`
+   *   column stays unreferenceable in a filter.
    * @returns the parsed `Block`.
    * @throws {SchemaError} on a call-level failure — an unknown setting's
    *   115, an unsplittable body, a binary decode fault, the deferred
@@ -361,8 +454,8 @@ export class Schema {
    * @throws {UnsupportedError} when this build declines the call, or the
    *   artifact predates the block twin.
    */
-  parseBlock(format: Format, body: Uint8Array, settings?: Settings): Block {
-    const handle = this.native.blockParse(this.live(), format, body, encodeSettings(settings));
+  parseBlock(format: Format, body: Uint8Array, settings?: Settings, options?: RowOptions): Block {
+    const handle = this.native.blockParse(this.live(), format, body, encodeSettings(settings), options?.columns);
     const block = new Block(this.native, this, handle);
     this.blocks.add(block);
     return block;
@@ -434,6 +527,18 @@ export class Filter {
     readonly expr: string,
   ) {
     this.handle = handle;
+  }
+
+  /** @internal — the loaded library this filter's handle belongs to, for
+   * `Schema#rows(options.rowFilter)`'s cross-library check. */
+  get nativeLib(): NativeLibrary {
+    return this.native;
+  }
+
+  /** @internal — the live handle, for `Schema#rows(options.rowFilter)`. */
+  liveHandle(): FilterHandle {
+    if (this.handle === null) throw new ChtypesError('chtypes: filter is closed');
+    return this.handle;
   }
 
   /**

@@ -106,13 +106,13 @@ Two related settings bound the same clock: `chtypes_clock_offset_nanos` carries 
 
 To stamp a server-side value — a tenant, a role claim — onto every row, compile one schema per `(table, role, claim)` with `DEFAULT '<claim>'`, and cache the compiled schema per key.
 
-Quoting the claim into a valid ClickHouse string literal before it is spliced into that DDL text is the caller's own job: none of the four bindings export a value-literal quoting helper today. The one quoting surface this SDK does export, [`QuoteIdentifier`](../reference/go.md) (Go; the same job stays private in the other three, per each binding's own `reconstruct_ddl`), escapes an **identifier** — a table or column name — not a string value, so it does not cover this step.
+Quoting the claim into a valid ClickHouse string literal before it is spliced into that DDL text is **`QuoteLiteral`'s job, not yours** — `lib.QuoteLiteral(claim)` in Go, `quote_literal` / `quoteLiteral` / `quote_literal` in the other three. It is a passthrough over ClickHouse's own `quoteString`, so the escaping is the server's rather than a rule any binding spells, and its input is counted: a claim carrying a NUL byte is quoted correctly. Do not hand-roll it, and do not reach for `QuoteIdentifier` here — that one escapes an **identifier**, a table or column name, not a string value (`../reference/bindings.md` §Quoting).
 
 ⚠️ **Safe only when paired with a filter that checks the STORED value against the same claim.** An out-of-domain claim into a narrow column wraps silently **at compile**: `UInt8 DEFAULT '256'` stores **0**. So the DEFAULT alone is not an isolation mechanism — the check on the stored value is what makes it one.
 
 That wrap happens at **compile**, the moment the schema is built from the DDL text — a different site from the bind-side wrap documented on [`filters.md`](filters.md), where the same shape of out-of-domain value arrives as a query parameter instead of a DDL literal.
 
-A forward-looking alternative removes the literal, and the quoting question, entirely: `tenant String DEFAULT _tenant, _tenant String EPHEMERAL`, where the claim travels in the row itself and reaches the `DEFAULT` only through an explicit column list. **Not available yet** — it needs the C exports ABI revision 5 adds; the SDK on `main` speaks ABI revision 4 today (`include/chtypes.h`).
+An alternative removes the literal, and the quoting question, entirely: `tenant String DEFAULT _tenant, _tenant String EPHEMERAL`, where the claim travels in the row itself and reaches the `DEFAULT` only through an explicit column list — the listed `EPHEMERAL` column's value is read and is in scope for the DEFAULT that references it, and is still never stored and never exported. This needs the explicit INSERT column list ABI revision 5 adds (`WithColumns` in Go, `columns=` in Python, `{columns}` in TypeScript, `RowOptions.columns` in Rust — see [`reference/bindings.md`](../reference/bindings.md)), which this SDK now speaks (`include/chtypes.h`).
 
 ## MATERIALIZED columns, and why they are not in `values`
 

@@ -191,17 +191,17 @@ for l in "${langs[@]}"; do
     rc=$?
   fi
   # Never trust the exit code alone: count the numbered section banners the
-  # tour actually printed. 16 means the whole tour ran (15 and 16 — the
-  # revision-3 export and filter sections — PRINT even when they degrade on
-  # an artifact that predates the surface).
+  # tour actually printed. 17 means the whole tour ran (15, 16 and 17 — the
+  # revision-3 export and filter sections and the revision-5 column list —
+  # PRINT even when they degrade on an artifact that predates the surface).
   sections=$(grep -c '^=== ' "$log" 2>/dev/null || true)
-  if [ "$rc" -eq 0 ] && [ "${sections:-0}" -ge 16 ]; then
-    results+=("$l: ok — $sections/16 sections ran")
+  if [ "$rc" -eq 0 ] && [ "${sections:-0}" -ge 17 ]; then
+    results+=("$l: ok — $sections/17 sections ran")
   elif [ "$rc" -eq 0 ]; then
-    results+=("$l: FAILED — exited 0 but only ${sections:-0}/16 sections printed")
+    results+=("$l: FAILED — exited 0 but only ${sections:-0}/17 sections printed")
     failed=1
   else
-    results+=("$l: FAILED — exit $rc after ${sections:-0}/16 sections")
+    results+=("$l: FAILED — exit $rc after ${sections:-0}/17 sections")
     failed=1
   fi
 done

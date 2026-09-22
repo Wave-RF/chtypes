@@ -108,7 +108,7 @@ What a loader does with that directory, in order. This is the reference algorith
 
 `RTLD_LOCAL` is not a detail: it is what keeps each library's ClickHouse symbols private, so two builds that both define `DB::DataTypeFactory` never collide. A loader that uses `RTLD_GLOBAL` will appear to work and answer with the wrong version's semantics. [`multi-version.md`](multi-version.md) is what that buys you.
 
-Whether a binding's search-path constructor dlopens anything before a version is asked for is not uniform — three lazy, one eager — see [`multi-version.md`](multi-version.md#how-it-works-and-what-it-costs) for which is which and what it costs.
+**Loading is lazy per line, in every binding and in every constructor**, and an eager set is asked for with `preload`. The cost of an open, measured: **about 120 MB resident per line**, so seven artifacts in one directory are 1.096 s and 351 MB to open at construction against 1 ms and 66.8 MB to open none. [`multi-version.md`](multi-version.md#how-it-works-and-what-it-costs) is the single-sourced statement of that rule and of `preload`'s four spellings.
 
 ## Verification, and what it is not
 

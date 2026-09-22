@@ -8,10 +8,10 @@
 // libraries behind a 22-function C ABI), which is why they are exact rather
 // than approximately right.
 //
-// This file is a tutorial you RUN. Fourteen numbered sections walk the whole
+// This file is a tutorial you RUN. Seventeen numbered sections walk the whole
 // public API of the TypeScript SDK, from loading an artifact to tearing down,
 // each with a comment saying what it demonstrates, why an ingest pipeline
-// cares, and what to look at in the output. The same fourteen sections — same
+// cares, and what to look at in the output. The same seventeen sections — same
 // numbering, same schemas, same rows — exist in go/main.go, python/demo.py
 // and rust/src/main.rs, so you can diff two tours and see only the language
 // idioms differ.
@@ -49,7 +49,6 @@ import {
   parseChangedSettingsResult,
   parseColumnsResult,
   parseVersionResult,
-  reconstructDdl,
   defaultRegistryDir,
 } from '@wavehouse/chtypes';
 
@@ -73,6 +72,12 @@ payload_len UInt32 MATERIALIZED length(payload)`;
 // formats (CSV, TSV, Values, RowBinary...) are far easier to read against a
 // small schema, and both DEFAULTs give the empty-field rules something to do.
 const FORMAT_DDL = "device_id UInt32, seq UInt8 DEFAULT 7, label String DEFAULT 'unknown'";
+
+// Section 17's table: an EPHEMERAL input column feeding a DEFAULT — exactly
+// core's explicit-column-list proposal §3 example. `e` cannot be reached at
+// all without a column list (it occupies no field position and is never
+// name-matched); LISTED, its value is read and is in scope for `d`'s DEFAULT.
+const COLUMNS_DDL = 'id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1';
 
 // Pinning the clock is what makes a demo with now64(3) in it reproducible.
 // The value is a STRING at the boundary, always: 19 digits do not survive an
@@ -137,6 +142,7 @@ function main() {
     section14();
     section15(lib);
     section16(lib);
+    section17(lib);
   } finally {
     // The teardown section 13 narrates: the LAST thing this process does
     // with the registry. Reopening an artifact after a full close is not a
@@ -900,17 +906,19 @@ function section10(lib) {
 // SECTION 11 — The discovery kit, offline
 //
 // WHAT: the three canonical queries chtypes ships for learning who a
-// deployment is, their typed parsers, and reconstructDdl — run here against
+// deployment is, their typed parsers, and Library#reconstructDdl — run here against
 // CANNED bytes shaped exactly like a real server's JSONEachRow responses.
 // WHY: chtypes NEVER opens a socket. You run these queries with whatever
 // client you already have; the kit gives you the SQL and parses the results.
 // The payoff is the last step: the server's own version string resolves an
 // artifact, and the discovered settings become the compile profile — so the
 // handle behaves like a table created on THAT deployment.
-// LOOK FOR: the reconstructed DDL (backticks where needed, DEFAULTs carried),
+// LOOK FOR: the reconstructed DDL (the server's own identifier spelling,
+// DEFAULTs carried),
 // and the SAME ROW accepted under the discovered profile but rejected under a
 // stock compile — the measurable reason discovery matters.
-// C API: none until the compile at the end — the kit is pure client-side.
+// C API: chs_quote_identifier for the reconstruction, then the compile — the
+// queries and parsers themselves are pure client-side.
 // (The ONLINE version of this flow, against a real server, is
 // go/ingest-demo/ — the optional demo chplay.sh never runs.)
 // ---------------------------------------------------------------------------
@@ -943,10 +951,8 @@ function section11(registry) {
   }
   note('default_kind/default_expression are CARRIED — dropping them would');
   note('silently lose the DEFAULT semantics sections 6 and 8 run on');
-  const ddl = reconstructDdl(cols);
-  kv('  reconstructDdl', ddl);
-  note('`reading c` came back BACKTICKED — identifiers are quoted exactly');
-  note('where ClickHouse requires it');
+  note('reconstruction needs the library — the column NAME is spelled by');
+  note("ClickHouse's own quoting, not by a rule in the binding");
   blank();
 
   // The payoff: version -> artifact, settings -> profile, and a measurable
@@ -961,6 +967,11 @@ function section11(registry) {
     return;
   }
   kv(`registry.for(${version})`, `artifact ${lib.version}  (exact patch -> the ${lib.minor} line)`);
+  const ddl = lib.reconstructDdl(cols);
+  kv('  lib.reconstructDdl', ddl);
+  note('`reading c` came back QUOTED, in the spelling THIS build prints —');
+  note("quoteIdentifier is the artifact's own backQuote, not a copy here");
+  blank();
   const row = utf8('{"ts":"2026-01-15T10:30:00Z","device_id":9,"reading c":21.5}');
   kv('the same row, twice', '{"ts":"2026-01-15T10:30:00Z","device_id":9,"reading c":21.5}');
   const profiled = lib.compileDdl(ddl, { settings });
@@ -1331,6 +1342,57 @@ function section16(lib) {
   note('over-hide). Until that run of record exists this is a shadow/replay');
   note('surface: log disagreements, enforce with what enforced yesterday —');
   note('the twin is a call shape, not an enforcement opening.');
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 17 — The INSERT column list
+//
+// WHAT: name the columns THIS ROW supplies (RowsOptions#columns) instead of
+// relying on the no-list default — the revision-5 columns_json trailing
+// chs_row, chs_rows and chs_block_parse.
+// WHY: WaveHouse's own INSERT is ALWAYS an explicit column list, including
+// EPHEMERAL columns, which the no-list ABI could never express: fed without
+// a list, an EPHEMERAL value is silently dropped as an unknown field and a
+// DEFAULT that references it computes from the type's own zero instead — a
+// wrong stored value with no error anywhere (core's explicit-column-list
+// proposal §4).
+// LOOK FOR: the listed EPHEMERAL value feeding the DEFAULT (d = 6, not the
+// type-zero-derived 1 the no-list shape would store); the refusal when the
+// list names a column the schema does not have (code 16 — the SAME code and
+// message an ALIAS column in the list gets, indistinguishable from the wire).
+// C API: chs_row's trailing columns_json (ABI revision 5).
+// ---------------------------------------------------------------------------
+function section17(lib) {
+  section(17, 'The INSERT column list');
+  if (lib.abiRevision < 5) {
+    note(`SKIPPED: section 17 needs a revision-5 artifact (this one reports ABI revision ${lib.abiRevision})`);
+    return;
+  }
+
+  withSchema(lib, COLUMNS_DDL, (schema) => {
+    kv('schema', COLUMNS_DDL);
+    blank();
+
+    const listed = schema.row(Format.JSONEachRow, utf8('{"id":3,"e":5}'), undefined, { columns: ['id', 'e'] });
+    const d = listed.values.find((v) => v.column === 'd');
+    kv('row {id:3,e:5}  columns=[id,e]', `${listed.outcome}  d=${d ? d.text : '<missing>'}`);
+    note("e is EPHEMERAL: LISTED, so its value IS read and IS in scope for");
+    note("d's DEFAULT (e + 1) — d stores 6. With NO list at all e would be an");
+    note("unknown field and d would fall back to its own DEFAULT's type zero");
+    note('(1) — the wrong-stored-value failure this option exists to close');
+    blank();
+
+    const refused = schema.row(Format.JSONEachRow, utf8('{"id":1,"nosuch":5}'), undefined, {
+      columns: ['id', 'nosuch'],
+    });
+    kv(
+      'row  columns=[id,nosuch]  (unknown column)',
+      `${refused.outcome}  code=${refused.errCode}  ${truncate(refused.errMsg, 56)}`,
+    );
+    note('code 16 NO_SUCH_COLUMN_IN_TABLE — the SAME code and message an');
+    note('ALIAS column in the list would get: the two refusals are');
+    note('indistinguishable from the wire');
+  });
 }
 
 // verdictString renders a FilterResult's verdicts as the document's compact

@@ -8,10 +8,10 @@
 // behind a 22-function C ABI), which is why they are exact rather than
 // approximately right.
 //
-// This file is a tutorial you RUN. Sixteen numbered sections walk the whole
+// This file is a tutorial you RUN. Seventeen numbered sections walk the whole
 // public API of the Go SDK, from loading an artifact to tearing down, each
 // with a comment saying what it demonstrates, why an ingest pipeline cares,
-// and what to look at in the output. The same sixteen sections — same
+// and what to look at in the output. The same seventeen sections — same
 // numbering, same schemas, same rows — exist in python/demo.py, ts/demo.mjs
 // and rust/src/main.rs, so you can diff two tours and see only the language
 // idioms differ.
@@ -122,6 +122,7 @@ func main() {
 	section14()
 	section15(lib)
 	section16(lib)
+	section17(lib)
 
 	blank()
 	line("Done. Every value above was measured by this run.")
@@ -923,17 +924,19 @@ func section10(lib *chtypes.Library) {
 // SECTION 11 — The discovery kit, offline
 //
 // WHAT: the three canonical queries chtypes ships for learning who a
-// deployment is, their typed parsers, and ReconstructDDL — run here against
+// deployment is, their typed parsers, and Library.ReconstructDDL — run here against
 // CANNED bytes shaped exactly like a real server's JSONEachRow responses.
 // WHY: chtypes NEVER opens a socket. You run these queries with whatever
 // client you already have; the kit gives you the SQL and parses the results.
 // The payoff is the last step: the server's own version string resolves an
 // artifact, and the discovered settings become the compile profile — so the
 // handle behaves like a table created on THAT deployment.
-// LOOK FOR: the reconstructed DDL (backticks where needed, DEFAULTs carried),
+// LOOK FOR: the reconstructed DDL (the server's own identifier spelling,
+// DEFAULTs carried),
 // and the SAME ROW accepted under the discovered profile but rejected under a
 // stock compile — the measurable reason discovery matters.
-// C API: none until the compile at the end — the kit is pure client-side.
+// C API: chs_quote_identifier for the reconstruction, then the compile — the
+// queries and parsers themselves are pure client-side.
 // (The ONLINE version of this flow, against a real server, is
 // go/ingest-demo/ — the optional demo chplay.sh never runs.)
 // ---------------------------------------------------------------------------
@@ -980,13 +983,8 @@ func section11(reg *chtypes.Registry) {
 	}
 	note("default_kind/default_expression are CARRIED — dropping them would")
 	note("silently lose the DEFAULT semantics sections 6 and 8 run on")
-	ddl, err := chtypes.ReconstructDDL(cols)
-	if err != nil {
-		fatal("%v", err)
-	}
-	kv("  ReconstructDDL", ddl)
-	note("`reading c` came back BACKTICKED — identifiers are quoted exactly")
-	note("where ClickHouse requires it")
+	note("reconstruction needs the library — the column NAME is spelled by")
+	note("ClickHouse's own quoting, not by a rule in the binding")
 	blank()
 
 	// The payoff: version -> artifact, settings -> profile, and a measurable
@@ -999,6 +997,14 @@ func section11(reg *chtypes.Registry) {
 		return
 	}
 	kv("registry.For("+version+")", "artifact "+string(lib.Version)+"  (exact patch -> the "+lib.Minor+" line)")
+	ddl, err := lib.ReconstructDDL(cols)
+	if err != nil {
+		fatal("%v", err)
+	}
+	kv("  lib.ReconstructDDL", ddl)
+	note("`reading c` came back QUOTED, in the spelling THIS build prints —")
+	note("QuoteIdentifier is the artifact's own backQuote, not a copy here")
+	blank()
 	sProf, err := lib.CompileDDL(ddl, chtypes.WithCompileSettings(settings))
 	if err != nil {
 		fatal("%v", err)
@@ -1416,6 +1422,70 @@ func verdictString(fr chtypes.FilterResult) string {
 		b.WriteString(v.String())
 	}
 	return "\"" + b.String() + "\""
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 17 — The INSERT column list
+//
+// WHAT: chtypes.WithColumns names the INSERT column list (ABI revision 5) —
+// the `INSERT INTO t (a, b, …)` shape. The data then supplies exactly the
+// listed columns, and the server computes the rest with them in scope.
+// WHY: an EPHEMERAL column has NO value at all outside a column list — it
+// exists only to feed another column's DEFAULT — so a gateway that never
+// declares one can never reach it. This is also the shape WaveHouse's own
+// INSERT path always uses: its list is every insertable column, EPHEMERAL
+// included.
+// LOOK FOR: a listed EPHEMERAL column's value reaching `d`'s DEFAULT (d = 6)
+// while never appearing among the stored Values itself; and the SAME server
+// code (16) an unknown column and an ALIAS column in the list both answer —
+// indistinguishable from the wire.
+// C API: chs_row's trailing columns_json (ABI revision 5).
+// ---------------------------------------------------------------------------
+func section17(lib *chtypes.Library) {
+	section(17, "The INSERT column list")
+
+	if lib.ABIRevision < 5 {
+		note("SKIPPED: section 17 needs a revision-5 artifact")
+		note(fmt.Sprintf("(this artifact reports ABI revision %d; `just refresh <version>`", lib.ABIRevision))
+		note("relinks it once revision-5 artifacts exist — the surface is additive)")
+		return
+	}
+
+	// e is EPHEMERAL: no value at all outside a column list. d's DEFAULT
+	// reads e, so a caller that wants d computed from a supplied e must list
+	// e explicitly — there is no other way to reach it.
+	s, err := lib.CompileDDL("id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1")
+	must(err)
+	defer s.Close()
+
+	r, err := s.Row(chtypes.JSONEachRow, []byte(`{"id":3,"e":5}`),
+		chtypes.WithColumns([]string{"id", "e"}))
+	must(err)
+	var vals []string
+	for _, v := range r.Values {
+		vals = append(vals, fmt.Sprintf("%s=%s(%s)", v.Column, textOr(v), v.Source))
+	}
+	kv("list (id, e), e=5", fmt.Sprintf("%s  %s", r.Outcome, strings.Join(vals, " ")))
+	note("e was READ and was in scope for d's DEFAULT (d = e + 1 = 6), but e")
+	note("is NOT among the Values above: a listed EPHEMERAL column is never")
+	note("stored and never exported, exactly as if it did not exist to SELECT *")
+	blank()
+
+	// The refusal: an unknown name in the list. Names are never validated
+	// locally — this is the server's own code, surfaced exactly as it comes
+	// back (an ALIAS column in the list answers the SAME code and message).
+	r2, err := s.Row(chtypes.JSONEachRow, []byte(`{"id":1,"nosuch":2}`),
+		chtypes.WithColumns([]string{"id", "nosuch"}))
+	must(err)
+	kv("list (id, nosuch)", fmt.Sprintf("%s  code=%d  %s", r2.Outcome, r2.ErrCode, truncate(r2.ErrMsg, 56)))
+	note("code 16 NO_SUCH_COLUMN_IN_TABLE — indistinguishable on the wire from")
+	note("naming an ALIAS column; a repeated name answers the server's own")
+	note("code 15 instead (not shown). This library reimplements none of them.")
+	blank()
+
+	note("an absent or EMPTY list means exactly the same thing — today's")
+	note("no-list behavior — and NEVER renders as `INSERT INTO t () …`: that")
+	note("statement is a syntax error, code 62, on every server")
 }
 
 // ---------------------------------------------------------------- plumbing

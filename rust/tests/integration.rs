@@ -49,16 +49,38 @@ fn registry() -> Option<&'static Arc<Registry>> {
                 ));
                 return None;
             }
-            match Registry::new(&dir) {
-                Ok(r) if r.libraries().is_empty() => {
+            // Construction reads manifests and dlopens nothing, so "the
+            // registry loads" has to be ASKED FOR: `preload` is that request,
+            // and it is what construction used to do on its own. Without it
+            // `libraries()` is empty here and every test below skips — a suite
+            // that silently tests nothing looks exactly like one that passes.
+            let lines = match Registry::new(&dir) {
+                Ok(r) => r.versions(),
+                Err(e) => {
                     announce(&format!(
-                        "\nSKIP: registry {} holds no artifact — fetch one with scripts/fetch.sh \
-                         25.8 (docs/guides/fetch.md). Every test in this file is skipped, each by name \
-                         below.\n",
+                        "\nSKIP: registry at {} did not open: {e}. Every test in this file is \
+                         skipped.\n",
                         dir.display()
                     ));
-                    None
+                    return None;
                 }
+            };
+            if lines.is_empty() {
+                announce(&format!(
+                    "\nSKIP: registry {} holds no artifact — fetch one with scripts/fetch.sh \
+                     25.8 (docs/guides/fetch.md). Every test in this file is skipped, each by name \
+                     below.\n",
+                    dir.display()
+                ));
+                return None;
+            }
+            match Registry::open(
+                &dir,
+                chtypes::RegistryOptions {
+                    preload: lines,
+                    ..Default::default()
+                },
+            ) {
                 Ok(r) => Some(Arc::new(r)),
                 Err(e) => {
                     announce(&format!(
@@ -245,7 +267,8 @@ fn a_verified_registry_hashes_the_real_artifact_before_it_loads() {
         dir: Some(registry_dir()),
         verify_checksums: true,
         ..Default::default()
-    });
+    })
+    .expect("the registry directory holds a manifest, so construction must succeed");
     let same = verified
         .for_version(lib.minor())
         .expect("a real artifact must survive its own checksum");
@@ -275,7 +298,8 @@ fn a_verified_registry_hashes_the_real_artifact_before_it_loads() {
         dir: Some(tmp.clone()),
         verify_checksums: true,
         ..Default::default()
-    });
+    })
+    .expect("the registry directory holds a manifest, so construction must succeed");
     let err = bad
         .for_version(lib.minor())
         .expect_err("a manifest claiming the wrong digest must refuse");
@@ -309,12 +333,25 @@ fn version_resolution_accepts_a_minor_line_a_patch_and_a_drifted_patch() {
     let drifted = format!("{}.99.7-lts", lib.minor());
     assert_eq!(reg.for_version(&drifted).unwrap().version(), lib.version());
 
-    // A version with no artifact is an error naming what IS loaded — never the
-    // nearest neighbor.
+    // A version with no artifact is an error naming WHERE IT LOOKED — never the
+    // nearest neighbor. #50 stopped constructing Error::NoSuchVersion for this:
+    // under lazy loading "what IS loaded" is not a useful answer, because
+    // nothing need be open yet, so ArtifactMissing names the directories
+    // searched instead. The property that matters is unchanged — asking for a
+    // line this registry does not hold ERRORS rather than answering with the
+    // nearest one, which would be a wrong answer dressed as a right one.
     let err = reg.for_version("19.1").unwrap_err();
     let msg = err.to_string();
-    for v in reg.versions() {
-        assert!(msg.contains(&v), "error must name loaded versions: {msg}");
+    assert!(
+        msg.contains("19.1"),
+        "the error must name what was asked for: {msg}"
+    );
+    for d in reg.search_path() {
+        let dir = d.display().to_string();
+        assert!(
+            msg.contains(&dir),
+            "error must name every directory looked in: {msg}"
+        );
     }
     assert!(err.code().is_none());
 }
@@ -1078,7 +1115,7 @@ fn a_reconstructed_table_compiles_through_the_library_itself() {
         cols.iter().map(|c| c.position).collect::<Vec<_>>(),
         vec![1, 2, 3, 4, 5]
     );
-    let ddl = chtypes::reconstruct_ddl(&cols).expect("reconstruct_ddl");
+    let ddl = lib.reconstruct_ddl(&cols).expect("reconstruct_ddl");
 
     // The helper is a spelling exercise; the library's compile is the judge.
     let schema = lib

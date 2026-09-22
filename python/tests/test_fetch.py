@@ -619,7 +619,7 @@ def test_autofetch_runs_ensure_once_per_line_under_one_lock(
     line, however many threads open it. The fetch is faked to stage a REAL
     artifact (a symlink to one this suite already loads), so the open then
     succeeds and the same Library comes back to every thread."""
-    real = Path(registry.libraries()[-1].path).parent
+    real = Path(registry.for_version(registry.versions()[-1]).path).parent
     calls: list[str] = []
     entered = threading.Event()
     release = threading.Event()
@@ -668,13 +668,16 @@ def test_autofetch_runs_ensure_once_per_line_under_one_lock(
     # re-fetches (the line is there), and a broken fetch would not loop.
     assert real.name in chtypes.Registry(dest, autofetch=True)
     assert calls == [real.name]
-    # Off by default, and CHTYPES_AUTOFETCH=1 turns it on.
+    # Off by default, and CHTYPES_AUTOFETCH=1 turns it on. With autofetch off
+    # an empty registry fails at CONSTRUCTION, not at the open: #50 moved that
+    # error earlier so a mistyped directory is named before any request, and
+    # all four bindings answer the same way (Rust has always had EmptyRegistry).
     monkeypatch.setattr("chtypes.registry._AUTOFETCHED", set())
     other = tmp_path / "other"
-    with pytest.raises(chtypes.ArtifactMissingError):
+    with pytest.raises(chtypes.RegistryError):
         chtypes.Registry(other).for_version(real.name)
     monkeypatch.setenv(chtypes.ENV_AUTOFETCH, "1")
     assert isinstance(chtypes.Registry(other).for_version(real.name), chtypes.Library)
     assert calls == [real.name, real.name]
-    with pytest.raises(chtypes.ArtifactMissingError):
+    with pytest.raises(chtypes.RegistryError):
         chtypes.Registry(tmp_path / "third", autofetch=False).for_version(real.name)

@@ -26,10 +26,10 @@ pub const CODE_UNSUPPORTED: i32 = -2;
 /// Revision 4 (2026-08-31, the filter phase-2 cycle): `chs_filter_compile`
 /// gained `params_json` (`{name:Type}` query parameters), and the block twin
 /// joined — `chs_block_parse` / `chs_block_free` / `chs_filter_eval`. This
-/// crate therefore speaks 4 and refuses revision-3 artifacts: calling the
+/// crate therefore speaks 5 and refuses revision-4 artifacts: calling the
 /// 5-argument `chs_filter_compile` against the 4-argument revision-3 artifact
 /// is undefined behavior, which is exactly what this gate exists to refuse.
-pub const ABI_REVISION: i32 = 4;
+pub const ABI_REVISION: i32 = 5;
 
 /// `CHTYPES_ARTIFACT_MISSING` — no installed artifact answers for the line
 /// (`docs/guides/fetch.md` §7). The code every SDK shares for [`Error::ArtifactMissing`].
@@ -195,17 +195,33 @@ pub enum Error {
         want: String,
     },
 
-    /// The directory exists and holds no loadable artifact. An empty registry is
-    /// a configuration mistake, not an empty result.
-    #[error("chtypes: no version artifacts under {dir}")]
+    /// No directory this registry would look in holds a readable
+    /// `<minor>/manifest.json`. An empty registry is a configuration mistake,
+    /// not an empty result — and it is decidable from manifests alone, which
+    /// is why it is still a CONSTRUCTION error now that loading is lazy.
+    #[error(
+        "chtypes: no version artifacts in any registry directory (looked in: {})",
+        looked_in_display(looked_in)
+    )]
     EmptyRegistry {
-        /// The directory that held no loadable artifact.
-        dir: PathBuf,
+        /// Every directory looked in, in order — the one directory of
+        /// [`crate::Registry::open`], or the whole `docs/guides/fetch.md` §1
+        /// search path. Named so the message is actionable, exactly as the
+        /// other three bindings' messages are.
+        looked_in: Vec<PathBuf>,
     },
 
     /// No artifact answers for the requested version. Naming what *is* loaded is
     /// part of the contract: answering 26.7 semantics from a 25.8 artifact would
     /// be a lie, so there is deliberately no nearest-match fallback.
+    ///
+    /// ⚠️ **No longer constructed by this crate, as of 0.3.0.** It was a
+    /// one-directory registry's answer for a line it had not loaded, and under
+    /// lazy loading "what IS loaded" is "nothing" — so that answer is
+    /// [`Error::ArtifactMissing`] now, which names the directory, the platform
+    /// and the fetch command, and is what the other three bindings give. The
+    /// variant is kept rather than removed so a caller matching it still
+    /// compiles; the arm is simply never taken.
     #[error("chtypes: no vendored build for ClickHouse {requested} (have {loaded})")]
     NoSuchVersion {
         /// The version that was asked for.
@@ -318,6 +334,24 @@ pub enum Error {
         filter_version: String,
         /// The block's library, by its own reported version.
         block_version: String,
+    },
+
+    /// A [`crate::Filter`] passed to [`crate::Schema::rows_export_with`] and
+    /// the [`crate::Schema`] it was called on came from two DIFFERENT loaded
+    /// libraries — refused here, because no handle ever crosses a `dlopen`'d
+    /// image boundary. A filter from a DIFFERENT `Schema` of the SAME
+    /// library is NOT this error: the C layer itself answers that with a
+    /// rejected result document, code 1002 (the C ABI contract §Rows, "The
+    /// attached row filter").
+    #[error(
+        "chtypes: filter (ClickHouse {filter_version}) and schema (ClickHouse {schema_version}) \
+         come from different libraries"
+    )]
+    CrossLibrarySchema {
+        /// The filter's library, by its own reported version.
+        filter_version: String,
+        /// The schema's library, by its own reported version.
+        schema_version: String,
     },
 
     /// No installed artifact answers for the requested ClickHouse line on this
@@ -476,6 +510,15 @@ fn schema_display(code: i32, message: &str, column: Option<&str>) -> String {
         Some(c) => format!("chtypes: column {c:?}: [{code}] {message}"),
         None => format!("chtypes: [{code}] {message}"),
     }
+}
+
+/// The directories an [`Error::EmptyRegistry`] looked in, comma-separated.
+fn looked_in_display(looked_in: &[PathBuf]) -> String {
+    looked_in
+        .iter()
+        .map(|d| d.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The §7 message, verbatim apart from the bracketed parts: the line, the

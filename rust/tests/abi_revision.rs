@@ -148,18 +148,28 @@ fn names_number(message: &str, n: i64) -> bool {
     false
 }
 
-/// A registry over `<root>/wrong-revision` is refused — Rust's `Registry`
-/// loads every artifact in a one-directory registry EAGERLY, at construction
-/// (`Registry::new`/`Registry::with_timezone` scans the directory and calls
-/// `Library::load` before returning), so the ABI-revision gate in
-/// `ffi::Api::open` fires from the construction call itself, never from a
-/// later `for_version`.
+/// A registry over `<root>/wrong-revision` is refused. Construction reads
+/// manifests and `dlopen`s nothing, so the ABI-revision gate in
+/// `ffi::Api::open` fires from the call that OPENS the line —
+/// `RegistryOptions::preload`, here, which is the constructor-time spelling of
+/// that request and the same one every other binding uses.
 #[test]
 fn wrong_revision_is_refused() {
     let Some(fx) = fixture() else { return };
     let wrong = fx.root.join("wrong-revision");
 
-    let err = match Registry::new(&wrong) {
+    let open_wrong = || {
+        Registry::open(
+            &wrong,
+            chtypes::RegistryOptions {
+                preload: Registry::new(&wrong)
+                    .map(|r| r.versions())
+                    .unwrap_or_default(),
+                ..Default::default()
+            },
+        )
+    };
+    let err = match open_wrong() {
         Ok(r) => {
             let loaded: Vec<String> = r
                 .libraries()
@@ -204,7 +214,14 @@ fn matching_revision_loads() {
     let Some(fx) = fixture() else { return };
     let at_revision = fx.root.join("at-revision");
 
-    let reg = Registry::new(&at_revision).unwrap_or_else(|e| {
+    let reg = Registry::open(
+        &at_revision,
+        chtypes::RegistryOptions {
+            preload: vec!["0.0".into()],
+            ..Default::default()
+        },
+    )
+    .unwrap_or_else(|e| {
         panic!(
             "the control artifact at {} was refused: {e}",
             at_revision.display()

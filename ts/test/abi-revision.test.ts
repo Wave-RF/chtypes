@@ -120,11 +120,14 @@ describe.skipIf(!HAVE_FIXTURES)('abi revision fixture', () => {
     const root = ROOT!;
     let thrown: unknown;
     try {
-      new Registry(path.join(root, 'wrong-revision'));
+      // Construction opens nothing, so the open is asked for with `preload` —
+      // the constructor-time spelling of that request, and the one whose
+      // failure is this test's verdict.
+      new Registry(path.join(root, 'wrong-revision'), { preload: [doc.clickhouse_minor] });
     } catch (err) {
       thrown = err;
     }
-    expect(thrown, 'a wrong-revision artifact must be refused at construction, not accepted').toBeInstanceOf(
+    expect(thrown, 'a wrong-revision artifact must be refused when it is opened, not accepted').toBeInstanceOf(
       RegistryError,
     );
     const message = thrown instanceof Error ? thrown.message : String(thrown);
@@ -141,7 +144,10 @@ describe.skipIf(!HAVE_FIXTURES)('abi revision fixture', () => {
   it('matching revision loads', () => {
     const doc = DOC!;
     const root = ROOT!;
-    const registry = new Registry(path.join(root, 'at-revision'));
+    // Construction opens nothing, so the control artifact is opened by
+    // `preload` — the constructor-time spelling of that request, and the one
+    // whose failure is this test's verdict.
+    const registry = new Registry(path.join(root, 'at-revision'), { preload: [doc.clickhouse_minor] });
     const libs = registry.libraries();
     expect(libs).toHaveLength(1);
     const lib = libs[0]!;

@@ -70,8 +70,8 @@ const (
 	// ReasonLossyNumeric: a numeric change the classifier cannot name more
 	// precisely (also denormal folding: 1e400 stored as "inf").
 	ReasonLossyNumeric = "lossy_numeric"
-	// ReasonStringPad: a FixedString padded with NUL bytes to its width.
-	ReasonStringPad = "fixedstring_pad"
+	// ReasonFixedStringPad: a FixedString padded with NUL bytes to its width.
+	ReasonFixedStringPad = "fixedstring_pad"
 	// ReasonEmptied: a non-empty string stored as the empty string.
 	ReasonEmptied = "emptied"
 	// ReasonElementChanged: a change inside an Array/Tuple/Map element.
@@ -128,7 +128,13 @@ func (t Transform) lossyReason() bool {
 
 func classify(c colDoc) []Transform {
 	switch c.Src {
-	case "skipped", "default_expr_unsupported", "default_volatile_unresolved", "default_pending":
+	// SourceEphemeralInput (issue #97): a listed EPHEMERAL column's value is
+	// read but never stored, so — like "skipped" — there is no stored value
+	// to have silently changed. NOT SourceMaterializedInput: under
+	// insert_allow_materialized_columns=1 that value IS stored, replacing
+	// the column's expression, and must still be classified.
+	case "skipped", "default_expr_unsupported", "default_volatile_unresolved", "default_pending",
+		SourceEphemeralInput:
 		return nil
 	}
 
@@ -497,7 +503,7 @@ func reasonFor(base, stored, ref string) string {
 	case base == "Float32", base == "Float64", base == "BFloat16":
 		return ReasonFloatPrecision
 	case strings.HasPrefix(base, "FixedString"):
-		return ReasonStringPad
+		return ReasonFixedStringPad
 	case isIntFamily(base):
 		return ReasonOverflowWrap
 	}

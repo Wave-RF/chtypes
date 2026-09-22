@@ -89,19 +89,23 @@ func scrubFixtureRoot(message, root string) string {
 	return scrubbed
 }
 
-// TestABIRevisionMismatchIsRefused loads a registry over an artifact whose
+// TestABIRevisionMismatchIsRefused opens an artifact whose
 // chs_abi_revision() answers the header's revision plus one. Refusal must
-// happen at NewRegistry — not a Registry that later degrades — and the
-// error must name both the mismatched revision and this binding's own.
+// happen at the call that OPENS it — not a Library that later degrades — and
+// the error must name both the mismatched revision and this binding's own.
+//
+// Construction reads manifests and dlopens nothing, so the open is asked for
+// with WithPreload: the constructor-time spelling of that request, and the one
+// whose failure is this test's verdict.
 func TestABIRevisionMismatchIsRefused(t *testing.T) {
 	doc := loadABIRevisionFixture(t)
 	wrong := filepath.Join(doc.Root, "wrong-revision")
 
-	_, err := NewRegistry(wrong)
+	_, err := NewRegistry(wrong, WithPreload(doc.ClickHouseMinor))
 	if err == nil {
-		t.Fatalf("NewRegistry(%s) succeeded for an artifact reporting ABI revision %d; "+
+		t.Fatalf("NewRegistry(%s, WithPreload(%q)) succeeded for an artifact reporting ABI revision %d; "+
 			"docs/reference/artifact.md step 5 requires it be refused, naming both %d and %d",
-			wrong, doc.MismatchRevision, doc.MismatchRevision, doc.ABIRevision)
+			wrong, doc.ClickHouseMinor, doc.MismatchRevision, doc.MismatchRevision, doc.ABIRevision)
 	}
 	msg := err.Error()
 	// Checked with the fixture root scrubbed out: a path segment can itself
@@ -126,10 +130,13 @@ func TestABIRevisionControlLoads(t *testing.T) {
 	doc := loadABIRevisionFixture(t)
 	at := filepath.Join(doc.Root, "at-revision")
 
-	r, err := NewRegistry(at)
+	// Preloaded for symmetry with the mismatch case above: both verdicts then
+	// come from the same call on the same code path, which is the whole point
+	// of a control.
+	r, err := NewRegistry(at, WithPreload(doc.ClickHouseMinor))
 	if err != nil {
-		t.Fatalf("NewRegistry(%s) refused an artifact reporting the header's own ABI revision %d: %v",
-			at, doc.ABIRevision, err)
+		t.Fatalf("NewRegistry(%s, WithPreload(%q)) refused an artifact reporting the header's own ABI revision %d: %v",
+			at, doc.ClickHouseMinor, doc.ABIRevision, err)
 	}
 	// Registry and Library are both documented as never needing a
 	// close/shutdown (docs/reference/bindings.md §Teardown; multiversion.go's

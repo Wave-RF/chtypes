@@ -82,31 +82,41 @@ pub struct Manifest {
 }
 
 /// Every artifact under one directory, indexed by version — or, built with
-/// [`Registry::from_search_path`], the `docs/guides/fetch.md` §1 search path opened
-/// one line at a time.
+/// [`Registry::from_search_path`], the `docs/guides/fetch.md` §1 search path.
 ///
 /// Each library is loaded with `RTLD_NOW | RTLD_LOCAL`, which is what lets two
 /// builds that both define `DB::DataTypeFactory` answer in one process. Cost,
 /// measured: roughly 120 MB resident per loaded version.
 ///
-/// Two shapes, one type:
+/// **Constructing a registry — with a directory or without one — reads
+/// `manifest.json` files and `dlopen`s nothing.** Nothing in this crate opens
+/// an artifact except a request for a specific version
+/// ([`Registry::for_version`]) or an explicit [`RegistryOptions::preload`].
+/// That is true of every constructor: [`Registry::new`], its `from_env*`
+/// variants, [`Registry::with_timezone`], [`Registry::open`] and
+/// [`Registry::from_search_path`].
 ///
-/// * **One directory, eager** — [`Registry::new`], its `from_env*` variants,
-///   [`Registry::with_timezone`] and [`Registry::open`] (which also honors
-///   [`RegistryOptions::verify_checksums`]) scan the directory and load every
-///   artifact in it up front. [`Registry::for_version`] answers from what is
-///   loaded and fails with [`Error::NoSuchVersion`], naming what is loaded.
-/// * **The search path, lazy** — [`Registry::from_search_path`] loads nothing
-///   until a line is asked for, then takes the first directory on the §1
-///   search path that holds it. A line found nowhere is
-///   [`Error::ArtifactMissing`] (§7), or — with autofetch on — is fetched
-///   first.
+/// Two shapes, one type, and the difference is only WHERE a line may come
+/// from:
+///
+/// * **One directory** — [`Registry::open`] and everything routed through it.
+///   The line is taken from that directory or from nowhere.
+/// * **The search path** — [`Registry::from_search_path`]. A line is taken
+///   from the first directory on the §1 search path that holds it, and one
+///   found nowhere is fetched first when autofetch is on.
+///
+/// Either way a line no directory holds is [`Error::ArtifactMissing`] (§7),
+/// naming every directory looked in and the fetch command.
 pub struct Registry {
-    /// Eager: the one directory. Lazy: where fetch writes ([`install_dir`]).
+    /// One directory: itself. Search path: where fetch writes ([`install_dir`]).
     dir: PathBuf,
-    /// Eager: `[dir]`. Lazy: the §1 search path, in order.
+    /// One directory: `[dir]`. Otherwise the §1 search path, in order.
     search: Vec<PathBuf>,
-    lazy: bool,
+    /// Minor line -> the FIRST directory on `search` that holds it, as the
+    /// construction-time manifest scan found it. What [`Registry::versions`]
+    /// answers from, and what makes "no artifact anywhere" and a bad
+    /// `preload` entry decidable at construction without a single `dlopen`.
+    known: Vec<(String, PathBuf)>,
     /// `docs/guides/fetch.md` §1 item 1, kept for autofetch's `dest`.
     #[cfg_attr(not(feature = "fetch"), allow(dead_code))]
     explicit: Option<PathBuf>,
@@ -118,8 +128,8 @@ pub struct Registry {
     #[cfg(feature = "fetch")]
     fetch: crate::fetch::EnsureOptions,
     loaded: RwLock<Loaded>,
-    /// Serializes the lazy open path, so two threads asking for one line load
-    /// it once.
+    /// Serializes the open path, so two threads asking for one line load it
+    /// once.
     opening: Mutex<()>,
 }
 
@@ -191,6 +201,26 @@ pub struct RegistryOptions {
     /// than passed: verification asked for and not possible is not
     /// verification — all four bindings refuse it.
     ///
+    /// It is a policy on the REGISTRY, not a property of
+    /// [`RegistryOptions::preload`]: **a library's checksum is computed
+    /// immediately before that library is `dlopen`ed, and at no other time** —
+    /// at construction for the preloaded lines, at first use for the rest,
+    /// never for a line nobody asks for.
+    ///
+    /// **The `library_bytes` size check above runs at that exact same
+    /// point, unconditionally** (issue #82, decided alongside Go, Python and
+    /// TypeScript, which gained this size check outside of verification in
+    /// the same change): at construction for a preloaded line, at first use
+    /// for the rest, on every load whether or not this option is on. Before
+    /// #50 made loading lazy, that meant this crate's size check ran for
+    /// every artifact in a registry directory at CONSTRUCTION, whether or
+    /// not a caller ever asked for the line — a stronger, eager signal this
+    /// crate no longer gives: it now runs only for a line something actually
+    /// loads, the same scope the checksum has always had. The size check
+    /// stayed unconditional on verification throughout; what changed under
+    /// #50 was its SCOPE (every artifact vs. only the ones loaded), not
+    /// whether verification gates it.
+    ///
     /// [`Registry::new`], its `from_env*` variants and
     /// [`Registry::with_timezone`] take no options — Rust has no default
     /// arguments — so a caller that wants a verified registry over one
@@ -201,6 +231,27 @@ pub struct RegistryOptions {
     /// thing on the search path and every line it serves is verified as it
     /// opens.
     pub verify_checksums: bool,
+    /// Open these lines AT CONSTRUCTION — the one eager path, and the same
+    /// option Go spells `WithPreload(...)`, Python `preload=[...]` and
+    /// TypeScript `{preload: [...]}`. Honored by BOTH
+    /// [`Registry::from_search_path_with`] and [`Registry::open`].
+    ///
+    /// Each entry is a version spelling resolved exactly as
+    /// [`Registry::for_version`] resolves one: a minor line (`"25.8"`) or an
+    /// exact patch (`"25.8.28.1-lts"`), never a path. They are opened in the
+    /// order given, before the constructor returns, and an entry no directory
+    /// holds is [`Error::ArtifactMissing`] — the same §7 error the first
+    /// `for_version` would have returned, returned earlier.
+    ///
+    /// It NEVER fetches, even with autofetch on: autofetch is a first-use
+    /// behavior in all four bindings, and a constructor is a worse place than
+    /// a request to begin a 250 MB download. An empty list is exactly the
+    /// default.
+    ///
+    /// Deliberately a list of lines rather than "everything in the directory":
+    /// a registry directory is whatever a fetch left behind, and each open
+    /// costs about 120 MB resident.
+    pub preload: Vec<String>,
     /// How an autofetch fetches — source, tag, lock, trust policy. Its `dest`
     /// is overridden by [`RegistryOptions::dir`], so the fetched line lands
     /// where this registry looks first.
@@ -210,25 +261,66 @@ pub struct RegistryOptions {
 
 impl Registry {
     /// A registry over the `docs/guides/fetch.md` §1 search path for this host, with
-    /// the defaults of [`RegistryOptions`]. Nothing is loaded until
+    /// the defaults of [`RegistryOptions`]. Nothing is `dlopen`ed until
     /// [`Registry::for_version`] asks for a line; see the type docs.
-    pub fn from_search_path() -> Registry {
+    ///
+    /// # Errors
+    ///
+    /// As [`Registry::from_search_path_with`]. **This became fallible in
+    /// 0.3.0**: the manifest scan it now runs can fail on an unreadable
+    /// directory, and "no directory on the path holds an artifact" is a
+    /// construction error in the other three bindings. Leaving it infallible
+    /// would have made Rust the one binding that discovers an empty machine at
+    /// first use.
+    pub fn from_search_path() -> Result<Registry> {
         Registry::from_search_path_with(RegistryOptions::default())
     }
 
-    /// [`Registry::from_search_path`] with an explicit directory, timezone or
-    /// autofetch setting. Infallible: the search path is a list of places to
-    /// look, and a missing line is reported when it is asked for.
-    pub fn from_search_path_with(opts: RegistryOptions) -> Registry {
+    /// [`Registry::from_search_path`] with an explicit directory, timezone,
+    /// autofetch setting, verification policy or preload list.
+    ///
+    /// # Errors
+    ///
+    /// Construction fails only for what manifests can decide:
+    ///
+    /// * [`Error::Registry`] — [`RegistryOptions::dir`] was NAMED and does not
+    ///   exist or cannot be read (suppressed when autofetch is on, where it is
+    ///   the destination the first fetch creates).
+    /// * [`Error::EmptyRegistry`] — no directory on the search path holds a
+    ///   readable `<minor>/manifest.json` (likewise suppressed by autofetch).
+    /// * [`Error::ArtifactMissing`] — a [`RegistryOptions::preload`] entry no
+    ///   directory holds.
+    /// * Everything [`Registry::for_version`] can return, for a preloaded
+    ///   line, because preloading IS opening it.
+    pub fn from_search_path_with(opts: RegistryOptions) -> Result<Registry> {
         let autofetch = opts.autofetch.unwrap_or_else(|| {
             std::env::var(AUTOFETCH_ENV)
                 .map(|v| v == "1")
                 .unwrap_or(false)
         });
-        Registry {
+        // A directory somebody NAMED and cannot be read is a configuration
+        // mistake named now, and it is the typo guard: /var/lib/chtyeps fails
+        // here rather than three calls later. It costs a directory listing and
+        // no dlopen.
+        if let Some(dir) = opts.dir.as_deref() {
+            if !autofetch {
+                std::fs::read_dir(dir).map_err(|source| Error::Registry {
+                    dir: dir.to_path_buf(),
+                    source,
+                })?;
+            }
+        }
+        let search = registry_search_path(opts.dir.as_deref());
+        let known = installed_lines(&search);
+        if known.is_empty() && !autofetch {
+            return Err(Error::EmptyRegistry {
+                looked_in: search.clone(),
+            });
+        }
+        let registry = Registry {
             dir: install_dir(opts.dir.as_deref()),
-            search: registry_search_path(opts.dir.as_deref()),
-            lazy: true,
+            search,
+            known,
             explicit: opts.dir,
             timezone: opts
                 .timezone
@@ -239,16 +331,19 @@ impl Registry {
             fetch: opts.fetch,
             loaded: RwLock::new(Loaded::default()),
             opening: Mutex::new(()),
-        }
+        };
+        registry.preload(&opts.preload)?;
+        Ok(registry)
     }
 
-    /// Load every artifact under `dir`, with the `UTC` server timezone the spec
-    /// requires. See [`Registry::with_timezone`] for the errors.
+    /// A registry over `dir`, with the `UTC` server timezone the spec
+    /// requires. Reads the manifests under it and `dlopen`s nothing. See
+    /// [`Registry::with_timezone`] for the errors.
     pub fn new(dir: impl AsRef<Path>) -> Result<Registry> {
         Registry::with_timezone(dir, DEFAULT_TIMEZONE)
     }
 
-    /// Load every artifact under `$CHTYPES_REGISTRY`.
+    /// A registry over `$CHTYPES_REGISTRY`.
     ///
     /// # Errors
     ///
@@ -258,6 +353,29 @@ impl Registry {
         let dir =
             std::env::var_os(REGISTRY_ENV).ok_or(Error::NoRegistryEnv { var: REGISTRY_ENV })?;
         Registry::new(PathBuf::from(dir))
+    }
+
+    /// Open one `preload` entry at a time, before the constructor returns,
+    /// without fetching. Resolution is [`Registry::for_version`]'s minus the
+    /// fetch, and so is the failure.
+    fn preload(&self, lines: &[String]) -> Result<()> {
+        for version in lines {
+            if version.is_empty() {
+                return Err(Error::Registry {
+                    dir: self.dir.clone(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "RegistryOptions.preload: an empty version does not mean 'pick one'",
+                    ),
+                });
+            }
+            let minor = minor_of(version);
+            match self.resolve_without_fetch(version, &minor)? {
+                Some(_) => {}
+                None => return Err(self.missing(&minor)),
+            }
+        }
+        Ok(())
     }
 
     /// [`Registry::from_env_or`] with [`default_registry_dir`] as the fallback:
@@ -296,12 +414,20 @@ impl Registry {
         )
     }
 
-    /// Load every artifact under `dir` eagerly, honoring the two
-    /// [`RegistryOptions`] that mean something for a single directory —
-    /// [`RegistryOptions::timezone`] (`UTC` when `None`) and
-    /// [`RegistryOptions::verify_checksums`] — so a caller no longer has to
-    /// switch to [`Registry::from_search_path_with`] to get a verified
-    /// registry over one explicit directory (issue #35).
+    /// A registry over one directory, honoring the [`RegistryOptions`] that
+    /// mean something for a single directory — [`RegistryOptions::timezone`]
+    /// (`UTC` when `None`), [`RegistryOptions::verify_checksums`] and
+    /// [`RegistryOptions::preload`] — so a caller no longer has to switch to
+    /// [`Registry::from_search_path_with`] to get a verified registry over one
+    /// explicit directory (issue #35).
+    ///
+    /// **What it opens is the REGISTRY, not the artifacts.** It reads the
+    /// manifests under `dir` and `dlopen`s nothing; the first
+    /// [`Registry::for_version`] opens the line it is asked for, and
+    /// `preload` is how to open a named set up front. The name is unchanged
+    /// and so is the signature: eagerness was inherited from the constructor
+    /// this was factored out of, not the capability #35 asked for, which was
+    /// verification without being forced onto the search path.
     ///
     /// The fields that only make sense on the §1 search path —
     /// [`RegistryOptions::dir`], [`RegistryOptions::autofetch`] and, with the
@@ -311,11 +437,12 @@ impl Registry {
     /// fetch policy means anything without a search path to fall back on.
     /// That refusal happens FIRST, before anything on disk is touched.
     ///
-    /// Otherwise this scans `dir` exactly as [`Registry::with_timezone`]
-    /// always has: a subdirectory without a readable `manifest.json` is
-    /// skipped silently (a registry may hold scratch directories); a
-    /// directory that HAS a manifest and then fails to load is broken, not
-    /// absent, and aborts the scan with an error.
+    /// Otherwise this scans `dir` for `<minor>/manifest.json`: a subdirectory
+    /// without a readable one is skipped silently (a registry may hold scratch
+    /// directories), and a directory holding none at all is
+    /// [`Error::EmptyRegistry`]. A directory that HAS a manifest and then
+    /// fails to LOAD is broken, not absent — and that is reported by the call
+    /// that opens it, which is the preload here or the first `for_version`.
     ///
     /// ```no_run
     /// use chtypes::{Registry, RegistryOptions};
@@ -336,20 +463,19 @@ impl Registry {
     ///   `opts.dir`, `opts.autofetch` or (with the `fetch` feature)
     ///   `opts.fetch` was not at its default; the message names the field and
     ///   [`Registry::from_search_path_with`], which does honor it.
-    /// * [`Error::Registry`] — the registry directory itself could not be
-    ///   read, or — with [`RegistryOptions::verify_checksums`] — a manifest
-    ///   carries no `library_sha256`.
-    /// * [`Error::LibraryRead`] — a manifested library file could not be read
-    ///   (its size, or its bytes while verifying).
-    /// * [`Error::CorruptArtifact`] — a library's size on disk disagrees with
-    ///   its manifest's `library_bytes`.
-    /// * [`Error::ChecksumMismatch`] — with [`RegistryOptions::verify_checksums`],
-    ///   a library's hash disagrees with its manifest's `library_sha256`.
-    /// * [`Error::VersionMismatch`] — `chs_clickhouse_version()` disagrees
-    ///   with the manifest's `clickhouse_version`.
-    /// * [`Error::EmptyRegistry`] — the directory held no loadable artifact;
-    ///   an empty registry is a configuration mistake, not an empty result.
-    /// * Everything [`Library::load`] can return, per artifact.
+    /// * [`Error::Registry`] — the registry directory itself could not be read.
+    /// * [`Error::EmptyRegistry`] — the directory held no readable
+    ///   `<minor>/manifest.json`; an empty registry is a configuration
+    ///   mistake, not an empty result.
+    /// * [`Error::ArtifactMissing`] — a [`RegistryOptions::preload`] entry the
+    ///   directory does not hold.
+    /// * For a PRELOADED line, everything [`Registry::for_version`] can
+    ///   return, because preloading is opening: [`Error::LibraryRead`],
+    ///   [`Error::CorruptArtifact`], [`Error::ChecksumMismatch`],
+    ///   [`Error::VersionMismatch`], [`Error::Registry`] for a manifest with
+    ///   no `library_sha256` under verification, and everything
+    ///   [`Library::load`] can return. Without a preload list those arrive
+    ///   from the first `for_version` instead.
     pub fn open(dir: impl AsRef<Path>, opts: RegistryOptions) -> Result<Registry> {
         let dir = dir.as_ref().to_path_buf();
 
@@ -391,45 +517,33 @@ impl Registry {
             .unwrap_or_else(|| DEFAULT_TIMEZONE.to_string());
         let verify = opts.verify_checksums;
 
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
-            .map_err(|source| Error::Registry {
-                dir: dir.clone(),
-                source,
-            })?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .collect();
-        entries.sort();
-
-        let mut loaded = Loaded::default();
-        for sub in entries {
-            if !sub.is_dir() {
-                continue;
-            }
-            if let Some(library) = load_artifact_dir(&sub, &timezone, verify)? {
-                loaded.insert(library);
-            }
+        // The named directory must be readable — this is the typo guard, and
+        // it costs a directory listing and no dlopen.
+        std::fs::read_dir(&dir).map_err(|source| Error::Registry {
+            dir: dir.clone(),
+            source,
+        })?;
+        let search = vec![dir.clone()];
+        let known = installed_lines(&search);
+        if known.is_empty() {
+            return Err(Error::EmptyRegistry { looked_in: search });
         }
 
-        if loaded.libraries.is_empty() {
-            return Err(Error::EmptyRegistry { dir });
-        }
-        Ok(Registry {
-            search: vec![dir.clone()],
+        let registry = Registry {
+            search,
             dir,
-            lazy: false,
+            known,
             explicit: None,
             timezone,
             autofetch: false,
-            // So a lazy open later on THIS registry, if any is ever added,
-            // verifies too — there is one code path, and this is what
-            // opts.verify_checksums means for it.
             verify,
             #[cfg(feature = "fetch")]
             fetch: crate::fetch::EnsureOptions::default(),
-            loaded: RwLock::new(loaded),
+            loaded: RwLock::new(Loaded::default()),
             opening: Mutex::new(()),
-        })
+        };
+        registry.preload(&opts.preload)?;
+        Ok(registry)
     }
 
     /// The directory this registry was loaded from — for a search-path
@@ -450,10 +564,16 @@ impl Registry {
         self.autofetch
     }
 
-    /// The ClickHouse minor lines this registry can answer for, ordered
-    /// numerically — `25.10` is a *later* line than `25.8`, so lexical order would
-    /// be wrong. For a search-path registry: every line installed somewhere on
-    /// the path (loaded or not), each answered from its first directory.
+    /// Every ClickHouse minor line this registry CAN ANSWER FOR, ordered
+    /// numerically — `25.10` is a *later* line than `25.8`, so lexical order
+    /// would be wrong. The ones it has OPENED plus the ones its
+    /// construction-time manifest scan discovered, each answered from its
+    /// first directory.
+    ///
+    /// That is one meaning in all four bindings, and it is the meaning that
+    /// survives lazy loading: "the lines that happen to be open" would read as
+    /// an empty registry until the first [`Registry::for_version`]. It opens
+    /// nothing, which is what keeps `Debug` from costing 120 MB a line.
     pub fn versions(&self) -> Vec<String> {
         let mut out: Vec<String> = self
             .loaded()
@@ -461,17 +581,19 @@ impl Registry {
             .iter()
             .map(|l| l.minor().to_string())
             .collect();
-        if self.lazy {
-            out.extend(installed_lines(&self.search).into_iter().map(|(m, _)| m));
-        }
+        out.extend(self.known.iter().map(|(m, _)| m.clone()));
         out.sort_by_key(|m| minor_order(m));
         out.dedup();
         out
     }
 
-    /// Every loaded library, in release order (oldest minor line first —
-    /// `25.10` after `25.8`, whatever the directory listing said). A
-    /// search-path registry lists what has been opened so far.
+    /// The libraries this registry has OPENED, in release order (oldest minor
+    /// line first — `25.10` after `25.8`, whatever the directory listing
+    /// said).
+    ///
+    /// What is open right now, never what could be: a discovered line that no
+    /// `for_version` and no [`RegistryOptions::preload`] has opened appears in
+    /// [`Registry::versions`] and not here. It opens nothing.
     pub fn libraries(&self) -> Vec<Arc<Library>> {
         self.loaded().libraries.clone()
     }
@@ -480,50 +602,76 @@ impl Registry {
         self.loaded.read().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// Resolve a version to its library. A minor line (`"25.8"`) or an exact patch
-    /// (`"25.8.28.1-lts"`) both work, and a *drifted* patch resolves to its minor
-    /// line — asking for `"25.8.30.16"` finds the loaded `25.8`.
+    /// Resolve a version to its library, **opening it if it is not open yet**.
+    /// A minor line (`"25.8"`) or an exact patch (`"25.8.28.1-lts"`) both
+    /// work, and a *drifted* patch resolves to its minor line — asking for
+    /// `"25.8.30.16"` finds the loaded `25.8`.
     ///
-    /// Failure names what is loaded and never falls back to the nearest version:
-    /// answering 26.7 semantics from a 25.8 artifact would be a lie, and version
-    /// behavior is not monotonic (25.10 rejects a mixed-type DEFAULT that 25.8
-    /// and 26.6 both accept).
+    /// This is what opens an artifact; construction does not. The line is
+    /// taken from the first directory on this registry's path that holds
+    /// `<minor>/manifest.json` (`docs/guides/fetch.md` §1) and that one
+    /// artifact is loaded, once, however many threads ask at the same time.
+    ///
+    /// Resolution never falls back to the nearest version: answering 26.7
+    /// semantics from a 25.8 artifact would be a lie, and version behavior is
+    /// not monotonic (25.10 rejects a mixed-type DEFAULT that 25.8 and 26.6
+    /// both accept).
     ///
     /// # Errors
     ///
-    /// * [`Error::NoSuchVersion`] — no loaded artifact answers for `version`;
-    ///   the message names the minor lines that are loaded.
+    /// * [`Error::ArtifactMissing`] — no directory holds the line; the message
+    ///   names every directory looked in and the fetch command. With autofetch
+    ///   on it is fetched first through [`crate::ensure`] (once per process
+    ///   per line, under one process-wide lock, so concurrent opens fetch
+    ///   once) and the fetch's own error surfaces when that fails.
     ///
-    /// A search-path registry resolves a line it has not loaded yet by taking
-    /// the first directory on its path that holds `<minor>/manifest.json`
-    /// (`docs/guides/fetch.md` §1) and loading that one artifact. A line found
-    /// nowhere is [`Error::ArtifactMissing`] — or, with autofetch on, is
-    /// fetched first through [`crate::ensure`] (once per process per line,
-    /// under one process-wide lock, so concurrent opens fetch once) and the
-    /// fetch's own error surfaces when that fails.
+    ///   A one-directory registry answers this too, where it used to answer
+    ///   [`Error::NoSuchVersion`]: under lazy loading "what IS loaded" is
+    ///   "nothing", so naming the directory, the platform and the fetch
+    ///   command is the useful answer, and it is what the other three give.
+    /// * [`Error::LibraryRead`], [`Error::CorruptArtifact`],
+    ///   [`Error::ChecksumMismatch`], [`Error::VersionMismatch`],
+    ///   [`Error::Registry`], and everything [`Library::load`] can return —
+    ///   the directory holds the line and the artifact is bad. These moved
+    ///   here from the constructor when loading did.
     pub fn for_version(&self, version: &str) -> Result<Arc<Library>> {
         if let Some(l) = self.loaded().get(version) {
             return Ok(l);
         }
-        if !self.lazy {
-            return Err(Error::NoSuchVersion {
-                requested: version.to_string(),
-                loaded: self.versions().join(", "),
-            });
-        }
+        let minor = minor_of(version);
         let _opening = self.opening.lock().unwrap_or_else(|p| p.into_inner());
         // Another thread may have opened it while this one waited.
         if let Some(l) = self.loaded().get(version) {
             return Ok(l);
         }
-        let minor = minor_of(version);
-        let dir = match locate_in(&self.search, &minor) {
-            Some(dir) => dir,
-            None => self.autofetch_or_missing(&minor)?,
-        };
-        let library = load_artifact_dir(&dir, &self.timezone, self.verify)?.ok_or_else(|| {
+        if let Some(l) = self.resolve_without_fetch(version, &minor)? {
+            return Ok(l);
+        }
+        let dir = self.autofetch_or_missing(&minor)?;
+        self.load_into(&dir)
+    }
+
+    /// Resolution minus the fetch: what is already open, then the first
+    /// directory on this registry's path that holds the line. `Ok(None)` means
+    /// no directory holds it — a fetch's cue on the [`Registry::for_version`]
+    /// path and [`Error::ArtifactMissing`] on the preload path. Preload never
+    /// fetches, and this is the one function that makes those two paths
+    /// identical in everything else.
+    fn resolve_without_fetch(&self, version: &str, minor: &str) -> Result<Option<Arc<Library>>> {
+        if let Some(l) = self.loaded().get(version) {
+            return Ok(Some(l));
+        }
+        match locate_in(&self.search, minor) {
+            Some(dir) => self.load_into(&dir).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// `dlopen` the one artifact in `dir`, cross-check it, and index it.
+    fn load_into(&self, dir: &Path) -> Result<Arc<Library>> {
+        let library = load_artifact_dir(dir, &self.timezone, self.verify)?.ok_or_else(|| {
             Error::Registry {
-                dir: dir.clone(),
+                dir: dir.to_path_buf(),
                 source: std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "manifest.json is present but names no library",
@@ -868,7 +1016,8 @@ mod tests {
             dir: Some(dir.to_path_buf()),
             verify_checksums: true,
             ..RegistryOptions::default()
-        });
+        })
+        .expect("the directory holds a manifest, so construction must succeed");
         reg.for_version("25.8")
             .expect_err("a text file cannot dlopen; the open must fail")
     }
@@ -888,12 +1037,68 @@ mod tests {
         let reg = Registry::from_search_path_with(RegistryOptions {
             dir: Some(dir.clone()),
             ..RegistryOptions::default()
-        });
+        })
+        .expect("the directory holds a manifest, so construction must succeed");
         let err = reg.for_version("25.8").unwrap_err();
         assert!(
             !matches!(err, Error::ChecksumMismatch { .. }),
             "without verify_checksums the hash must not be consulted; got {err:?}"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Issue #82's parity claim, made explicit: the manifest's `library_bytes`
+    /// size check is UNCONDITIONAL, unlike the hash the test above exercises.
+    /// `fake_artifact` always writes `library_bytes` matching the real body, so
+    /// this hand-writes a manifest with a WRONG size instead, and asserts the
+    /// load is refused with no `verify_checksums` anywhere in sight — this
+    /// crate has made this check unconditionally since before #50's lazy
+    /// loading moved it from construction to first use, and this pins the
+    /// mismatch case specifically (the existing
+    /// `a_missing_library_file_is_library_read_at_the_size_check` only proves
+    /// the check runs at all, via an absent file).
+    #[test]
+    fn library_bytes_mismatch_refuses_without_verify_checksums() {
+        let body = b"not a shared library";
+        let dir = std::env::temp_dir().join(format!(
+            "chtypes-rs-bytes-unconditional-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let sub = dir.join("25.8");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("libchtypes.so"), body).unwrap();
+        // Wrong size, and deliberately NO library_sha256: if the load reached
+        // the hash check at all, this manifest could not satisfy it either,
+        // so refusing the size check name specifically proves it ran FIRST,
+        // unconditionally.
+        std::fs::write(
+            sub.join("manifest.json"),
+            format!(
+                r#"{{"library":"libchtypes.so","library_bytes":{},
+                    "clickhouse_version":"25.8.1.1","clickhouse_minor":"25.8"}}"#,
+                body.len() + 1
+            ),
+        )
+        .unwrap();
+
+        let reg = Registry::from_search_path_with(RegistryOptions {
+            dir: Some(dir.clone()),
+            ..RegistryOptions::default()
+        })
+        .expect("the directory holds a manifest, so construction must succeed");
+        let err = reg
+            .for_version("25.8")
+            .expect_err("a size mismatch must refuse even with verify_checksums off");
+        match &err {
+            Error::CorruptArtifact {
+                expected, actual, ..
+            } => {
+                assert_eq!(*expected, body.len() as u64 + 1);
+                assert_eq!(*actual, body.len() as u64);
+            }
+            other => panic!("want Error::CorruptArtifact naming both sizes, got {other:?}"),
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -969,7 +1174,8 @@ mod tests {
         let reg = Registry::from_search_path_with(RegistryOptions {
             dir: Some(dir.clone()),
             ..RegistryOptions::default()
-        });
+        })
+        .expect("the directory holds a manifest, so construction must succeed");
         let err = reg
             .for_version("25.8")
             .expect_err("the manifested library file does not exist");
@@ -1099,13 +1305,14 @@ mod tests {
             &dir,
             RegistryOptions {
                 verify_checksums: true,
+                preload: vec!["25.8".into()],
                 ..RegistryOptions::default()
             },
         )
         .expect_err("a text file's hash cannot match the manifest's fabricated one");
         assert!(
             matches!(err, Error::ChecksumMismatch { .. }),
-            "want the checksum refusal AT CONSTRUCTION (open is eager), got {err:?}"
+            "want the checksum refusal AT CONSTRUCTION, which is where a preloaded line opens, got {err:?}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1117,6 +1324,7 @@ mod tests {
             &dir,
             RegistryOptions {
                 verify_checksums: true,
+                preload: vec!["25.8".into()],
                 ..RegistryOptions::default()
             },
         )
@@ -1143,6 +1351,7 @@ mod tests {
             &dir,
             RegistryOptions {
                 verify_checksums: true,
+                preload: vec!["25.8".into()],
                 ..RegistryOptions::default()
             },
         )

@@ -117,6 +117,12 @@ export function classify(c: ColumnDoc): Transform[] {
     case 'default_expr_unsupported':
     case 'default_volatile_unresolved':
     case 'default_pending':
+    // Source.EphemeralInput (issue #97): a listed EPHEMERAL column's value
+    // is read but never stored, so — like 'skipped' — there is no stored
+    // value to have silently changed. NOT Source.MaterializedInput: under
+    // insert_allow_materialized_columns=1 that value IS stored, replacing
+    // the column's expression, and must still be classified.
+    case 'ephemeral_input':
       return [];
     default:
       break;

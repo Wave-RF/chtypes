@@ -88,5 +88,11 @@ def library(registry: chtypes.Registry) -> Callable[[str], chtypes.Library]:
 
 @pytest.fixture(scope="session")
 def newest(registry: chtypes.Registry) -> chtypes.Library:
-    """The newest loaded library, for behavior that is not version-specific."""
-    return registry.libraries()[-1]
+    """The newest library this registry can answer for, OPENED.
+
+    Off `versions()`, not off `libraries()`: construction opens nothing, so
+    `libraries()` holds only what something has already asked for — which on a
+    fresh session is nothing, and `[-1]` of nothing is an IndexError rather
+    than a loud skip.
+    """
+    return registry.for_version(registry.versions()[-1])

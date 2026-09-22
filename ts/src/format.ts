@@ -3,15 +3,17 @@
  * `Schema#row` / `Schema#rows`. These numbers are part of the C ABI
  * (the C ABI contract §Types and schemas) and MUST NOT be renumbered.
  *
- * Name-addressed: `JSONEachRow`. Positional (the k-th field lands in the k-th
- * insertable column; MATERIALIZED / ALIAS / EPHEMERAL occupy no position):
- * `CSV`, `TSV`, `Values`, `JSONCompactEachRow`, the RowBinary family, and
- * `Buffers`. `Native` is column-oriented and name-addressed.
+ * Name-addressed: `JSONEachRow`, and `CSVWithNames` / `TSVWithNames` through
+ * their header row. Positional (the k-th field lands in the k-th insertable
+ * column; MATERIALIZED / ALIAS / EPHEMERAL occupy no position): `CSV`, `TSV`,
+ * `Values`, `JSONCompactEachRow`, the RowBinary family, and `Buffers`.
+ * `Native` is column-oriented and name-addressed.
  *
- * The RowBinary family, `Native` and `Buffers` depend on when the loaded
- * ARTIFACT was linked, not on this package's version — probe the artifact
- * (feed it one payload) rather than assuming (docs/reference/bindings.md §Values a
- * binding must accept and reject).
+ * The RowBinary family, `Native`, `Buffers`, `CSVWithNames` and
+ * `TSVWithNames` depend on when the loaded ARTIFACT was linked, not on this
+ * package's version — probe the artifact (feed it one payload) rather than
+ * assuming (docs/reference/bindings.md §Values a binding must accept and
+ * reject).
  */
 export const Format = {
   /** One JSON object per line, fields matched to columns by name. */
@@ -59,6 +61,23 @@ export const Format = {
    * package's version.
    */
   Buffers: 9,
+  /**
+   * CSV whose first row is a header naming the columns, so the data is
+   * addressed by NAME. With a column list as well (`columns`), the list decides
+   * the block and the header decides the layout. Header names match EXACTLY
+   * through ClickHouse 26.4 and case-insensitively from 26.5, exactly as those
+   * servers do. It joined `enum chs_format` inside ABI revision 5, so a
+   * revision-5 artifact built before it existed does not know it — the
+   * revision check cannot tell. Probe it, do not assume it from this package's
+   * version.
+   */
+  CSVWithNames: 10,
+  /**
+   * TSV whose first row is a header naming the columns. Everything
+   * `CSVWithNames` says about the header, a column list, header matching and
+   * probing the artifact applies unchanged.
+   */
+  TSVWithNames: 11,
 } as const;
 
 /** One of the `chs_format` integer codes — see the `Format` constant object. */

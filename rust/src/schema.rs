@@ -41,6 +41,61 @@ pub const SETTING_DEFAULT_EVAL_MEMORY_BYTES: &str = "chtypes_default_eval_memory
 /// Admission ceiling on DEFAULT/TTL evaluation wall time. Process-wide, as above.
 pub const SETTING_DEFAULT_EVAL_WALL_NANOS: &str = "chtypes_default_eval_wall_nanos";
 
+/// The revision-5 per-call options for [`Schema::row_with_options`],
+/// [`Schema::rows_with_options`], [`Schema::rows_export_with_options`] and
+/// [`Schema::parse_block_with_options`] — the settings map every one of
+/// those already took, plus the new INSERT column list. Follows
+/// [`crate::RegistryOptions`]'s own precedent: `#[derive(Default)]`, public
+/// documented fields, `..RowOptions::default()` for "everything but this
+/// one field."
+///
+/// ```no_run
+/// use chtypes::{Format, Registry, RowOptions, NO_SETTINGS};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let lib = Registry::from_env_or_default()?.for_version("25.8")?;
+/// // id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1
+/// let schema = lib.compile("id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1").compile()?;
+///
+/// // e is read, feeds d's DEFAULT (d = 6), and is itself never stored.
+/// let opts = RowOptions {
+///     columns: Some(vec!["id".to_string(), "e".to_string()]),
+///     ..RowOptions::default()
+/// };
+/// let row = schema.row_with_options(Format::JsonEachRow, br#"{"id":3,"e":5}"#, &opts)?;
+/// assert_eq!(row.values.iter().find(|v| v.column == "d").unwrap().text, "6");
+/// # let _ = NO_SETTINGS;
+/// # Ok(()) }
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct RowOptions {
+    /// Per-call ClickHouse format settings — the same key/value shape
+    /// [`Schema::row_with_settings`] and [`Schema::rows`] already take
+    /// positionally (see [`NO_SETTINGS`]). Owned, rather than the generic
+    /// `&[(K, V)]` those take: a struct field cannot be generic over a
+    /// trait bound the way a function parameter can.
+    pub settings: Vec<(String, String)>,
+    /// The INSERT column list (revision 5): the data supplies exactly these
+    /// columns — k-th field to k-th listed column in the positional formats,
+    /// keys matched against the listed set in the JSON family — and the
+    /// server computes the rest, with the listed values in scope for their
+    /// DEFAULT expressions.
+    ///
+    /// `None` — or `Some(vec![])` — is the no-list behavior of every
+    /// revision before 5, where the data supplies every plain column;
+    /// **never** rendered as an empty `()`, which is a syntax error (code
+    /// 62) on every ClickHouse line, so this crate sends a NULL pointer for
+    /// both cases rather than a JSON `"[]"` string.
+    ///
+    /// **EPHEMERAL rule**: a listed `EPHEMERAL` column's value IS read and
+    /// is in scope for the DEFAULTs referencing it, and is still never
+    /// stored and never exported ([`Schema::rows_export_with_options`]'s
+    /// payload never carries it). A name that is unknown, an `ALIAS`, or
+    /// repeated is refused with the server's own code (16, 16, 15
+    /// respectively) — this crate does no local validation of the list.
+    pub columns: Option<Vec<String>>,
+}
+
 /// A schema compiled inside one specific version's library.
 ///
 /// # Thread-safety
@@ -184,37 +239,77 @@ impl Schema {
         self.row_with_settings(format, raw, NO_SETTINGS)
     }
 
-    /// Validate and coerce one row.
-    ///
-    /// `raw` is passed counted, never as text: binary formats contain NUL bytes
-    /// and text rows can carry invalid UTF-8 on purpose. Settings values cross as
-    /// strings — see [`SETTING_NOW_EPOCH_NANOS`].
-    ///
-    /// **The verdict is in the `Ok` value, not the `Err`.** A row the server
-    /// would reject comes back `Ok` with [`crate::Outcome::Rejected`] and
-    /// ClickHouse's code in [`RowResult::err_code`]; a decline is
-    /// [`crate::Outcome::Unsupported`]; an unknown setting name rejects the
-    /// call with the server's own `115` — also in the result, not the `Err`.
-    /// The `Err` arm is reserved for the machinery failing to ask at all.
-    ///
-    /// # Errors
-    ///
-    /// * [`crate::Error::PredatesFeature`] — the artifact predates `chs_row`.
-    /// * [`crate::Error::BadDocument`] — the result document could not be
-    ///   read exactly, even after the bare-denormal repair.
-    /// * [`crate::Error::Nul`] — a setting contained an interior NUL byte.
+    /// [`Schema::row`] under a per-request settings map —
+    /// [`Schema::row_with_options`] with [`RowOptions::columns`] absent.
+    /// Same errors.
     pub fn row_with_settings<K: AsRef<str>, V: AsRef<str>>(
         &self,
         format: Format,
         raw: &[u8],
         settings: &[(K, V)],
     ) -> Result<RowResult> {
-        let json = settings_json(settings)?;
+        self.row_with_options(
+            format,
+            raw,
+            &RowOptions {
+                settings: owned_pairs(settings),
+                columns: None,
+            },
+        )
+    }
+
+    /// Validate and coerce one row — [`Schema::row`] and
+    /// [`Schema::row_with_settings`] are both single invocations of this,
+    /// the ONE `chs_row` call site.
+    ///
+    /// `raw` is passed counted, never as text: binary formats contain NUL bytes
+    /// and text rows can carry invalid UTF-8 on purpose. Settings values cross as
+    /// strings — see [`SETTING_NOW_EPOCH_NANOS`].
+    ///
+    /// # The INSERT column list (revision 5)
+    ///
+    /// [`RowOptions::columns`] is the `chs_row` `columns_json` argument — see
+    /// its docs for the EPHEMERAL rule and the empty-list-is-no-list
+    /// distinction. A listed column's per-column document entry reports the
+    /// value the server read (a listed `EPHEMERAL` column included) under
+    /// whatever `src` the artifact names; this crate does not special-case
+    /// it, so a listed `EPHEMERAL` column simply appears in
+    /// [`RowResult::values`] alongside the plain ones.
+    ///
+    /// **The verdict is in the `Ok` value, not the `Err`.** A row the server
+    /// would reject comes back `Ok` with [`crate::Outcome::Rejected`] and
+    /// ClickHouse's code in [`RowResult::err_code`]; a decline is
+    /// [`crate::Outcome::Unsupported`]; an unknown setting name rejects the
+    /// call with the server's own `115` — also in the result, not the `Err`.
+    /// An unknown/`ALIAS`/duplicate listed column name is likewise a
+    /// SERVER refusal, in the result: codes 16, 16 and 15 respectively,
+    /// never validated locally. The `Err` arm is reserved for the machinery
+    /// failing to ask at all.
+    ///
+    /// # Errors
+    ///
+    /// * [`crate::Error::PredatesFeature`] — the artifact predates `chs_row`.
+    /// * [`crate::Error::BadDocument`] — the result document could not be
+    ///   read exactly, even after the bare-denormal repair.
+    /// * [`crate::Error::Nul`] — a setting or column name contained an
+    ///   interior NUL byte.
+    pub fn row_with_options(
+        &self,
+        format: Format,
+        raw: &[u8],
+        options: &RowOptions,
+    ) -> Result<RowResult> {
+        let json = settings_json(&options.settings)?;
+        let cols = columns_json(&options.columns)?;
         let doc: RowDoc = {
             let _guard = self.lib.lock();
             // SAFETY: our own handle, under the library lock; the byte slice
             // outlives the call.
-            let out = unsafe { self.lib.api().row(self.handle, format.code(), raw, &json)? };
+            let out = unsafe {
+                self.lib
+                    .api()
+                    .row(self.handle, format.code(), raw, &json, cols.as_deref())?
+            };
             parse_row_doc(&out)?
         };
         Ok(row_result_of(doc))
@@ -250,8 +345,32 @@ impl Schema {
         settings: &[(K, V)],
     ) -> Result<BatchResult> {
         // export off, all document groups on: the revision-3 pass-through
-        // that keeps rows() byte-identical to revision 2.
-        self.rows_through(format, body, settings, EXPORT_NONE, DocFlags::ALL)
+        // that keeps rows() byte-identical to revision 2; no column list:
+        // the revision-5 pass-through that keeps it byte-identical still.
+        self.rows_through(
+            format,
+            body,
+            &RowOptions {
+                settings: owned_pairs(settings),
+                columns: None,
+            },
+            EXPORT_NONE,
+            DocFlags::ALL,
+        )
+    }
+
+    /// [`Schema::rows`] with the revision-5 INSERT column list exposed —
+    /// [`Schema::rows_export_with_options`] with export off and every
+    /// document group on. See [`RowOptions::columns`] for the EPHEMERAL
+    /// rule and the empty-list-is-no-list distinction. Same errors as
+    /// [`Schema::rows`].
+    pub fn rows_with_options(
+        &self,
+        format: Format,
+        body: &[u8],
+        options: &RowOptions,
+    ) -> Result<BatchResult> {
+        self.rows_through(format, body, options, EXPORT_NONE, DocFlags::ALL)
     }
 
     /// [`Schema::rows`] with the revision-3 export and document-flag channels
@@ -288,24 +407,77 @@ impl Schema {
         doc_flags: DocFlags,
     ) -> Result<BatchResult> {
         let export_code = export.map_or(EXPORT_NONE, Format::code);
-        self.rows_through(format, body, settings, export_code, doc_flags)
+        self.rows_through(
+            format,
+            body,
+            &RowOptions {
+                settings: owned_pairs(settings),
+                columns: None,
+            },
+            export_code,
+            doc_flags,
+        )
     }
 
-    /// The ONE `chs_rows` call site — [`Schema::rows`] and
-    /// [`Schema::rows_export`] are both single invocations of it.
-    fn rows_through<K: AsRef<str>, V: AsRef<str>>(
+    /// [`Schema::rows_export`] with the revision-5 INSERT column list
+    /// exposed. The export channel is unchanged by a column list: the
+    /// exported tuple stays the stored columns in declared order — a listed
+    /// `EPHEMERAL` column is read and may feed a DEFAULT but never rides in
+    /// [`BatchResult::payload`]. Same errors as [`Schema::rows_export`].
+    pub fn rows_export_with_options(
         &self,
         format: Format,
         body: &[u8],
-        settings: &[(K, V)],
+        options: &RowOptions,
+        export: Option<Format>,
+        doc_flags: DocFlags,
+    ) -> Result<BatchResult> {
+        let export_code = export.map_or(EXPORT_NONE, Format::code);
+        self.rows_through(format, body, options, export_code, doc_flags)
+    }
+
+    /// The ONE `chs_rows` call site — [`Schema::rows`], [`Schema::rows_export`],
+    /// [`Schema::rows_with_options`], [`Schema::rows_export_with_options`] and
+    /// [`Schema::rows_export_with`] are all single invocations of it.
+    fn rows_through(
+        &self,
+        format: Format,
+        body: &[u8],
+        options: &RowOptions,
         export_code: i32,
         doc_flags: DocFlags,
     ) -> Result<BatchResult> {
-        let json = settings_json(settings)?;
+        self.rows_through_filtered(
+            format,
+            body,
+            options,
+            export_code,
+            doc_flags,
+            std::ptr::null(),
+        )
+    }
+
+    /// [`Schema::rows_through`]'s twin with the attached-filter parameter
+    /// exposed — see [`Schema::rows_export_with`] for the contract. `filter`
+    /// is NULL for every call except that one.
+    fn rows_through_filtered(
+        &self,
+        format: Format,
+        body: &[u8],
+        options: &RowOptions,
+        export_code: i32,
+        doc_flags: DocFlags,
+        filter: *const ChsFilter,
+    ) -> Result<BatchResult> {
+        let json = settings_json(&options.settings)?;
+        let cols = columns_json(&options.columns)?;
         let (doc, payload): (BatchDoc, Option<Vec<u8>>) = {
             let _guard = self.lib.lock();
             // SAFETY: our own handle, under the library lock; the byte slice
-            // outlives the call.
+            // outlives the call. `filter`, when non-null, is the caller's own
+            // (`rows_export_with`'s `# Safety` clause: it comes from this
+            // schema's library, and the borrow of `Filter<'_>` keeps it alive
+            // for at least this call).
             let (out, payload) = unsafe {
                 self.lib.api().rows(
                     self.handle,
@@ -314,6 +486,8 @@ impl Schema {
                     &json,
                     export_code,
                     doc_flags.bits(),
+                    cols.as_deref(),
+                    filter,
                 )?
             };
             (parse_batch_doc(&out)?, payload)
@@ -321,6 +495,70 @@ impl Schema {
         let mut res = batch_result_of(doc);
         res.payload = payload;
         Ok(res)
+    }
+
+    /// [`Schema::rows_export`] with a compiled [`Filter`] attached to the
+    /// export channel (revision 5, second half —
+    /// `docs/guides/filters.md` "Exporting only the rows a filter admits"):
+    /// ONE `chs_rows` parse then answers both the per-row verdict
+    /// ([`RowResult::verdict`]) and, for rows whose verdict is
+    /// [`crate::Verdict::True`], the export bytes.
+    ///
+    /// [`crate::Verdict::Error`] (the predicate threw) and
+    /// [`crate::Verdict::Decline`] (declined — including a row whose own
+    /// parse outcome was not [`crate::Outcome::Accepted`]) are NEVER
+    /// exported and NEVER collapsed into [`crate::Verdict::False`]:
+    /// collapsing either turns fail-closed into fail-open, the leak class
+    /// this surface exists to prevent. A security-enforcing caller must
+    /// treat any row whose [`RowResult::verdict`] is not
+    /// `Some(v) if v.answered()` as a refusal — hide the row or fail the
+    /// request, never export it. [`BatchResult::rows_passed`] and
+    /// [`BatchResult::rows_cut`] join the result;
+    /// `rows_passed + rows_cut` equals the accepted-row count.
+    ///
+    /// `filter` must be compiled over THIS schema: one from a different
+    /// `Schema` of the SAME loaded library rejects the whole call, loudly
+    /// ([`crate::Outcome::Rejected`], code 1002 — the C layer's own answer,
+    /// exactly as [`Filter::eval`] lets it answer for a mismatched
+    /// (filter, block) pair). One from a DIFFERENT loaded library is
+    /// [`crate::Error::CrossLibrarySchema`], refused before any C call — no
+    /// handle ever crosses a `dlopen`'d image boundary. The borrow checker
+    /// enforces the rest structurally: `filter` keeps ITS schema alive for
+    /// at least this call, exactly as every other `Filter` call does — this
+    /// is the SAME lifetime mechanism [`Schema::compile_filter`] already
+    /// gives you, not a second one.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::Error::CrossLibrarySchema`], plus every error
+    /// [`Schema::rows_export`] can return.
+    pub fn rows_export_with<K: AsRef<str>, V: AsRef<str>>(
+        &self,
+        format: Format,
+        body: &[u8],
+        settings: &[(K, V)],
+        export: Option<Format>,
+        doc_flags: DocFlags,
+        filter: &Filter<'_>,
+    ) -> Result<BatchResult> {
+        if !Arc::ptr_eq(&self.lib, &filter.schema.lib) {
+            return Err(Error::CrossLibrarySchema {
+                filter_version: filter.schema.lib.version().to_string(),
+                schema_version: self.lib.version().to_string(),
+            });
+        }
+        let export_code = export.map_or(EXPORT_NONE, Format::code);
+        self.rows_through_filtered(
+            format,
+            body,
+            &RowOptions {
+                settings: owned_pairs(settings),
+                columns: None,
+            },
+            export_code,
+            doc_flags,
+            filter.handle,
+        )
     }
 
     /// Compile one boolean SQL expression over this schema's PHYSICAL columns
@@ -458,7 +696,30 @@ impl Schema {
         body: &[u8],
         settings: &[(K, V)],
     ) -> Result<Block<'_>> {
-        let json = settings_json(settings)?;
+        self.parse_block_with_options(
+            format,
+            body,
+            &RowOptions {
+                settings: owned_pairs(settings),
+                columns: None,
+            },
+        )
+    }
+
+    /// [`Schema::parse_block`] with the revision-5 INSERT column list
+    /// exposed, read exactly as [`Schema::row_with_options`]'s — filters
+    /// still compile over the schema's physical columns and evaluate the
+    /// stored tuple, so a listed `EPHEMERAL` column stays unreferenceable in
+    /// a filter (a compile refusal, as today). Same errors as
+    /// [`Schema::parse_block`].
+    pub fn parse_block_with_options(
+        &self,
+        format: Format,
+        body: &[u8],
+        options: &RowOptions,
+    ) -> Result<Block<'_>> {
+        let json = settings_json(&options.settings)?;
+        let cols = columns_json(&options.columns)?;
         let _guard = self.lib.lock();
         // SAFETY: our own handle, under the library lock; the returned block
         // handle is owned by the Block below, whose borrow of self keeps the
@@ -466,7 +727,7 @@ impl Schema {
         let handle = unsafe {
             self.lib
                 .api()
-                .block_parse(self.handle, format.code(), body, &json)?
+                .block_parse(self.handle, format.code(), body, &json, cols.as_deref())?
         };
         Ok(Block {
             schema: self,
@@ -668,6 +929,41 @@ impl std::fmt::Debug for Schema {
     }
 }
 
+/// Copy a generic `&[(K, V)]` settings slice into the owned shape
+/// [`RowOptions::settings`] holds, so `row_with_settings`/`rows`/
+/// `rows_export`/`parse_block` can build a `RowOptions` and route through
+/// the `_with_options` twin unchanged — ONE code path, per binding.
+fn owned_pairs<K: AsRef<str>, V: AsRef<str>>(pairs: &[(K, V)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string()))
+        .collect()
+}
+
+/// Marshal [`RowOptions::columns`] as the `chs_row`/`chs_rows`/
+/// `chs_block_parse` `columns_json` argument: a JSON array of column-name
+/// strings. `None` or an empty list answers `Ok(None)` — the FFI layer turns
+/// that into a NULL pointer — and **never** `Some("[]")`: `INSERT INTO t ()
+/// FORMAT X` is a syntax error (code 62) on every ClickHouse line, so an
+/// empty array rendered into parentheses is not this ABI's "no list"
+/// spelling. No other validation happens here: an unknown, `ALIAS` or
+/// duplicate name is the server's own refusal, surfaced in the result.
+fn columns_json(columns: &Option<Vec<String>>) -> Result<Option<CString>> {
+    match columns {
+        None => Ok(None),
+        Some(cols) if cols.is_empty() => Ok(None),
+        Some(cols) => {
+            let arr = serde_json::Value::Array(
+                cols.iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            );
+            Ok(Some(cstring(&arr.to_string(), "columns")?))
+        }
+    }
+}
+
 /// Build the `settings_json` object. **Every value crosses as a JSON string**:
 /// `chtypes_now_epoch_nanos` is a 19-digit nanosecond epoch that does not survive
 /// an IEEE double, and as a JSON number it is silently ignored. Nothing here ever
@@ -729,6 +1025,31 @@ mod tests {
         // 1.7000000001234568e18 and the setting would be silently ignored.
         let json = settings_json(&[(SETTING_NOW_EPOCH_NANOS, "1700000000123456789")]).unwrap();
         assert!(json.to_str().unwrap().contains("1700000000123456789"));
+    }
+
+    #[test]
+    fn no_columns_is_a_null_pointer_never_an_empty_array() {
+        // None and Some(vec![]) both answer None here, which the FFI layer
+        // turns into a NULL pointer — never a JSON "[]" string, which would
+        // render as `INSERT INTO t () FORMAT X`, a syntax error (code 62) on
+        // every ClickHouse line.
+        assert!(columns_json(&None).unwrap().is_none());
+        assert!(columns_json(&Some(Vec::new())).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_column_list_is_a_json_array_of_names() {
+        let json = columns_json(&Some(vec!["id".to_string(), "e".to_string()]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(json.to_str().unwrap(), r#"["id","e"]"#);
+    }
+
+    #[test]
+    fn row_options_defaults_to_no_columns_and_no_settings() {
+        let opts = RowOptions::default();
+        assert!(opts.columns.is_none());
+        assert!(opts.settings.is_empty());
     }
 
     #[test]

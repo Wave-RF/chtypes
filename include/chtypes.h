@@ -118,7 +118,34 @@ extern "C" {
  * Impl/BuffersFormat.cpp:88 on 26.5 (:89 on 26.6 and 26.7), reached from
  * registerFormats.cpp:179 / :184 / :185; no tag at 25.10 or earlier contains
  * the string, the reader, or the register function at all. On those lines this
- * library answers 73 UNKNOWN_FORMAT, which is what the server answers. */
+ * library answers 73 UNKNOWN_FORMAT, which is what the server answers.
+ *
+ * CHS_CSV_WITH_NAMES and CHS_TSV_WITH_NAMES are CSVWithNames and
+ * TSVWithNames: CSV and TSV whose first row is a HEADER naming the columns.
+ * The semantics, as the artifact producer measured them on real servers
+ * (chtypes#55: 28 shapes, both spellings, eleven lines):
+ *
+ *   * The header row names the columns, so the data is addressed by NAME,
+ *     not by position.
+ *   * With a column list as well (`columns_json`), the LIST decides the
+ *     block and the HEADER decides the layout. A listed column the header
+ *     omits takes its DEFAULT under input_format_defaults_for_omitted_fields=1
+ *     and the reader's zero under 0; an unlisted column the header names is
+ *     an unknown field; an unlisted column takes its DEFAULT whatever that
+ *     setting says.
+ *   * Header-name matching differs by line: EXACT through 26.4,
+ *     case-insensitive from 26.5. The same header can therefore bind
+ *     differently on either side of that boundary, exactly as the servers do.
+ *   * As an export_format they are the existing loud decline, like every
+ *     format other than CHS_JSON_COMPACT_EACH_ROW.
+ *
+ * Both formats exist on every line that measurement covered, so unlike
+ * CHS_BUFFERS there is no 73 era. They joined this enum inside revision 5,
+ * AFTER the revision number was set (see Revision 5 below), so an artifact
+ * built from a revision-5 header commit that predates them reports revision 5
+ * and does not know 10 or 11. Being in this enum is therefore never proof
+ * that a loaded artifact parses them: ask the artifact
+ * (docs/reference/bindings.md §Values a binding must accept and reject). */
 enum chs_format
 {
     CHS_JSON_EACH_ROW = 0,
@@ -130,7 +157,9 @@ enum chs_format
     CHS_ROW_BINARY_WITH_DEFAULTS = 6,
     CHS_ROW_BINARY_WITH_NAMES_AND_TYPES_AND_DEFAULTS = 7,
     CHS_NATIVE = 8,
-    CHS_BUFFERS = 9
+    CHS_BUFFERS = 9,
+    CHS_CSV_WITH_NAMES = 10,
+    CHS_TSV_WITH_NAMES = 11
 };
 
 /* The ClickHouse release this library was vendored from, e.g. "25.8.28.1". */
@@ -196,7 +225,25 @@ CHS_API const char * chs_clickhouse_version(void);
  *
  * There is no revision 0 artifact — 0 is reserved for "the symbol was absent".
  */
-#define CHS_ABI_REVISION 4
+/* Revision 5 (the explicit INSERT column list): chs_row, chs_rows and
+ * chs_block_parse each gained a trailing `columns_json`; in the same open
+ * window (core#73) chs_rows gained a trailing `const chs_filter * filter`
+ * after it — one revision, because nothing built against 5 had shipped when
+ * the second change landed. A revision-4 artifact has neither, so calling
+ * through these declarations against one is exactly the undefined behavior
+ * the gate above refuses. Still 28 exported functions.
+ *
+ * Later in the same open window, `CHS_CSV_WITH_NAMES = 10` and
+ * `CHS_TSV_WITH_NAMES = 11` were appended to `enum chs_format` (chtypes#55),
+ * again without a bump: additive values inside an unreleased revision are not
+ * a new revision. One consequence, and it is why the comment above
+ * `enum chs_format` says to ask the artifact: an artifact built from a
+ * revision-5 header commit that predates those two values reports revision 5
+ * here, passes the gate above, and does not know format 10 or 11. The
+ * revision gate cannot catch that. The format probe can, which is why a
+ * format is declared only after the loaded artifact has been asked about it,
+ * never from this enum or this number. */
+#define CHS_ABI_REVISION 5
 CHS_API int chs_abi_revision(void);
 
 /* -------------------------------------------------------------------------
@@ -315,6 +362,40 @@ CHS_API void chs_shutdown(void);
  * *out_err. Every out param is optional (may be NULL) — the return value
  * carries the code, so a caller that wants only the verdict needs no slots. */
 CHS_API int chs_validate_type(const char * type_expr, char ** out_canonical, int * out_code, char ** out_err);
+
+/* Spell an identifier, or a string value, the way ClickHouse itself spells it.
+ *
+ * Each of the three is a PASSTHROUGH over the vendored function the server's
+ * own formatter runs and nothing else:
+ *
+ *   chs_quote_identifier            backQuote        — always quotes
+ *   chs_quote_identifier_if_needed  backQuoteIfNeed  — quotes where the build
+ *                                                      itself says it must
+ *   chs_quote_literal               quoteString      — a string value as a
+ *                                                      ClickHouse string literal
+ *
+ * A binding calls these instead of spelling the rule itself. The rule is the
+ * BUILD's, not this header's: which names chs_quote_identifier_if_needed leaves
+ * bare is a property of the vendored ClickHouse tree and differs between them,
+ * so a caller that needs one answer for several versions must ask each library.
+ *
+ * The argument contract, identical for all three:
+ *
+ *   - Inputs are COUNTED, never strlen'd. A literal may carry a NUL byte, and
+ *     every byte the server escapes comes back escaped — so the ANSWER is
+ *     always a NUL-free C string even when the input was not.
+ *   - A NULL pointer with length 0 is the EMPTY input. An empty identifier is
+ *     quoted, never bare.
+ *   - 0 on success, with *out_quoted set to a malloc'd string the caller frees
+ *     with chs_free().
+ *   - 1002 with *out_err set for a NULL pointer with a NONZERO length, or a
+ *     NULL out_quoted. Any other nonzero return is a guarded exception's code,
+ *     with its message in *out_err.
+ *   - out_err is OPTIONAL and may be NULL; the return value carries the code.
+ *   - All three are callable BEFORE chs_init: none of them touches a Context. */
+CHS_API int chs_quote_identifier(const char * name, size_t name_len, char ** out_quoted, char ** out_err);
+CHS_API int chs_quote_identifier_if_needed(const char * name, size_t name_len, char ** out_quoted, char ** out_err);
+CHS_API int chs_quote_literal(const char * text, size_t text_len, char ** out_quoted, char ** out_err);
 
 /* A compiled schema: a ClickHouse column-declaration list, e.g.
  *   "a UInt8, b Nullable(String) DEFAULT 'x', c DateTime MATERIALIZED now()"
@@ -463,7 +544,8 @@ CHS_API int chs_schema_column_default_is_literal(const chs_schema * s, int i);
  *  "code":0,"err":"",
  *  "computed":[{"name":"m","kind":"MATERIALIZED","stored":11}],
  *  "cols":[{"name":"x","type":"UInt8","base":"UInt8","nullable":false,
- *           "src":"input"|"default"|"default_substituted"|"absent"|"skipped",
+ *           "src":"input"|"default"|"default_substituted"|"absent"|"skipped"
+ *                |"ephemeral_input"|"materialized_input",  // revision 5, see columns_json below
  *           "input":"256",
  *           "stored":"0",          // ClickHouse's JSON text of the stored value
  *           "ref":"256",           // same input through a widened reference type
@@ -555,9 +637,29 @@ CHS_API int chs_schema_column_default_is_literal(const chs_schema * s, int i);
  * the schema at read time and not about the row. This library will not present
  * one as a stored value.
  *
- * EPHEMERAL has no value at all (Code 16 in both paths). Its effect is visible
- * only through the DEFAULT columns that reference it, which are computed. */
-CHS_API char * chs_row(const chs_schema * s, int format, const char * raw, size_t raw_len, const char * settings_json);
+ * EPHEMERAL has no value at all (Code 16 in both paths) when no column list
+ * is given. Its effect is visible only through the DEFAULT columns that
+ * reference it, which are computed. A LISTED ephemeral column is different:
+ * see `columns_json` below.
+ *
+ * `columns_json` (revision 5) is the INSERT column list: a JSON array of
+ * column-name strings, e.g. ["id","e"]. NULL — or "[]" — means NO list, the
+ * behavior of every revision before 5, where the data supplies every plain
+ * column. An empty array NEVER renders as `()`: `INSERT INTO t () FORMAT X`
+ * is code 62 SYNTAX_ERROR on every line, so "[]" and NULL are the same input.
+ * With a list, the data supplies exactly the listed columns — k-th field to
+ * k-th listed column in the positional formats, keys matched against the
+ * listed set in the JSON family — and the server computes the rest, with the
+ * listed values in scope for their DEFAULT expressions. A listed EPHEMERAL
+ * column's value IS read and is in scope for the DEFAULTs referencing it,
+ * and is still never stored and never exported — reported in `cols` with
+ * `"src":"ephemeral_input"` so a caller can see what was read. A listed
+ * MATERIALIZED column, under `insert_allow_materialized_columns=1`, has its
+ * supplied value REPLACE the column's expression and IS stored — reported
+ * with `"src":"materialized_input"`. A name that is unknown, an ALIAS, or
+ * repeated is refused with the server's own code. */
+CHS_API char * chs_row(const chs_schema * s, int format, const char * raw, size_t raw_len, const char * settings_json,
+                       const char * columns_json);
 
 /* A counted, library-owned byte buffer: the chs_rows export channel's
  * out-param. `data` is malloc'd by the library — free it with the SAME
@@ -571,6 +673,10 @@ typedef struct chs_bytes
 
 /* export_format sentinel: no export requested; out_bytes may be NULL. */
 #define CHS_EXPORT_NONE (-1)
+
+/* A compiled row filter (chs_filter_compile, §filters below); declared here
+ * because chs_rows takes one — attached, or NULL for no filter. */
+typedef struct chs_filter chs_filter;
 
 /* doc_flags bits — which document GROUPS the per-row documents carry. The
  * verdict channel (batch and per-row outcome/code/err, rows_read,
@@ -631,10 +737,61 @@ typedef struct chs_bytes
  * NULL out_bytes with an export requested answer the WHOLE call
  * {"outcome":"unsupported","code":-2,…} and process nothing — loud, never
  * silent. With export_format = CHS_EXPORT_NONE and doc_flags = CHS_DOC_ALL
- * the document is byte-identical to revision 2's. */
+ * the document is byte-identical to revision 2's.
+ *
+ * `columns_json` (revision 5) is the INSERT column list, read exactly as
+ * chs_row reads it — NULL or "[]" is today's no-list behavior. The export
+ * channel is unchanged by it: an exported row carries the stored columns in
+ * declared order, so it stays directly INSERT-able with no list.
+ *
+ * THE ATTACHED ROW FILTER (revision 5, second half — core#73; the C ABI
+ * contract §Rows, "The attached row filter", is normative). `filter` is a
+ * compiled handle from chs_filter_compile over THIS schema handle, or NULL.
+ * NULL is today's behavior BYTE-FOR-BYTE: no key joins the document and no
+ * code path changes. With a filter attached, ONE parse serves both the
+ * verdicts and the export: every rows[] document gains, as its FIRST key,
+ * "verdict" — one of 't' 'f' 'e' 'd', the same four characters with the same
+ * meanings as chs_filter_rows — evaluated over the row's STORED tuple
+ * (post-DEFAULT, post-coercion, MATERIALIZED filled: the view chs_block_parse
+ * gives a filter), and the export channel emits bytes ONLY for rows whose
+ * verdict is 't'. 'f', 'e' and 'd' CUT the row: no bytes, its row_spans
+ * entry is {0,0}; 'e' and 'd' are not answers, so a security-enforcing
+ * caller gets fail-closed for free. A row whose parse outcome is not
+ * "accepted" (skipped, the aborting row, accepted_poisoned, no stored block)
+ * is 'd', carrying the row's own code/err; an 'e' (the predicate threw the
+ * server's own error) and an eval-time 'd' (the admission envelope) add
+ * "verdict_code" and "verdict_err" beside "verdict". The batch verdict,
+ * rows_read and rows_skipped are the PARSE's and do not move; two counts join
+ * them, "rows_passed" (accepted rows with 't') and "rows_cut" (accepted rows
+ * with any other verdict), so rows_passed + rows_cut is the number of
+ * accepted rows. Engine/TTL previews (engine_rows, storage_transforms) are
+ * over the parsed batch, not the exported subset — as they are today for a
+ * caller that cuts after exporting.
+ *
+ * CONTRACT: for an accepted batch, chs_rows(…, filter) ≡ chs_rows(…, NULL)
+ * → chs_block_parse(out_bytes, JSONCompactEachRow, no list) →
+ * chs_filter_eval(filter) → drop every row whose verdict is not 't' — row
+ * for row (the verdicts) and byte for byte (the surviving spans). Two
+ * consequences a caller MUST know: (1) a batch that is not "accepted"
+ * exports NOTHING, exactly as without a filter (export_declined names the
+ * verdict) — over a CONSTRAINT-bearing schema one violating row rejects the
+ * batch (469) and no passing row's bytes flow, whatever its verdict says;
+ * (2) verdicts here index rows[] — the rows THIS reader consumed, which
+ * stops at an aborting row — whereas chs_filter_rows / chs_block_parse read
+ * every row of the body, so the two verdict strings can differ in LENGTH on
+ * one body (measured: 3 vs 2 on a three-row body with a violator second).
+ * Never zip one call's verdicts against another call's rows.
+ *
+ * A filter attached with export_format = CHS_EXPORT_NONE is legal: verdicts
+ * are answered, no bytes. A filter compiled over a DIFFERENT schema handle
+ * answers the whole call rejected (1002), loudly. Parameters bind at
+ * chs_filter_compile exactly as for chs_filter_rows. A chs_rows call with a
+ * filter is a use of the filter handle too: its thread rule applies. */
 CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, size_t body_len,
                         const char * settings_json,
-                        int export_format, unsigned doc_flags, chs_bytes * out_bytes);
+                        int export_format, unsigned doc_flags, chs_bytes * out_bytes,
+                        const char * columns_json,
+                        const chs_filter * filter);
 
 /* ------------------------------------------------------------------ filters
  * Phase 2 (revision 4): one boolean SQL expression over a compiled schema's
@@ -701,8 +858,8 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * one clock instant per call. NOTHING may enforce read-side security on this
  * API until the WHERE-truth rig gates green (the C ABI contract §Filters) — the
  * twin below is call-shape, not an enforcement opening. */
-typedef struct chs_filter chs_filter;
-
+/* typedef struct chs_filter chs_filter; — declared above chs_rows, which
+ * takes one (revision 5, second half). */
 CHS_API chs_filter * chs_filter_compile(
     const chs_schema * s, const char * expr_sql, const char * params_json,
     int * out_code, char ** out_err);
@@ -749,9 +906,14 @@ CHS_API char * chs_filter_rows(
  * chs_block_parse is a use of the schema handle, like any parse. */
 typedef struct chs_block chs_block;
 
+/* `columns_json` (revision 5) is the INSERT column list, read exactly as
+ * chs_row reads it — NULL or "[]" is today's no-list behavior. Filters still
+ * compile over the schema's physical columns and evaluate the stored tuple,
+ * so a listed EPHEMERAL column stays unreferenceable in a filter. */
 CHS_API chs_block * chs_block_parse(
     const chs_schema * s, int format, const char * body, size_t body_len,
-    const char * settings_json, int * out_code, char ** out_err);
+    const char * settings_json, int * out_code, char ** out_err,
+    const char * columns_json);
 
 CHS_API void chs_block_free(chs_block * b);
 

@@ -7,7 +7,7 @@ parsers below, and then declares what it learned:
 
     profile.version  -> Registry.for_version / the artifact to load
     profile.settings -> compile_ddl(settings=...) (compile-time) and per-call
-    columns          -> reconstruct_ddl -> compile_ddl
+    columns          -> library.reconstruct_ddl -> compile_ddl
 
 The pattern, in full (docs/reference/bindings.md §Discovery):
 
@@ -30,7 +30,7 @@ returns plain errors here for the same reason).
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -43,7 +43,6 @@ __all__ = [
     "parse_changed_settings_result",
     "parse_columns_result",
     "parse_version_result",
-    "reconstruct_ddl",
 ]
 
 # The canonical discovery queries. Each carries its FORMAT clause so the bytes
@@ -207,24 +206,15 @@ def parse_columns_result(body: bytes) -> list[DiscoveredColumn]:
     return out
 
 
-def _backquote_if_needed(name: str) -> str:
-    """Quote an identifier the way ClickHouse DDL requires: plain
-    [A-Za-z_][A-Za-z0-9_]* stays bare, anything else is backticked with
-    backticks doubled. system.columns can return anything — the flattened
-    Nested idiom (`n.a`), spaces, keywords."""
-    plain = bool(name) and not ("0" <= name[0] <= "9")
-    for c in name:
-        if not plain:
-            break
-        if not (c == "_" or "a" <= c <= "z" or "A" <= c <= "Z" or "0" <= c <= "9"):
-            plain = False
-    if plain:
-        return name
-    return "`" + name.replace("`", "``") + "`"
+def _reconstruct_ddl(columns: Sequence[DiscoveredColumn], quote: Callable[[str], str]) -> str:
+    """The body of `Library.reconstruct_ddl`, with the identifier quoting
+    HANDED IN rather than computed here.
 
+    `quote` is the loaded library's own `quote_identifier`. This module used
+    to spell the rule itself and the copy disagreed with the server
+    (issue #52); nothing in this file decides how a name is spelled.
 
-def reconstruct_ddl(columns: Sequence[DiscoveredColumn]) -> str:
-    """Turn QUERY_TABLE_COLUMNS' rows back into the column-declaration list
+    Turns QUERY_TABLE_COLUMNS' rows back into the column-declaration list
     `compile_ddl` takes. A spelling exercise, not a semantic one: types and
     expressions are the server's own text, passed through verbatim, and the
     library's own compile is the judge of the result.
@@ -250,7 +240,7 @@ def reconstruct_ddl(columns: Sequence[DiscoveredColumn]) -> str:
     for i, c in enumerate(columns):
         if not c.name or not c.type:
             raise ValueError(f"chtypes: column {i} has no name/type")
-        decl = f"{_backquote_if_needed(c.name)} {c.type}"
+        decl = f"{quote(c.name)} {c.type}"
         kind = c.default_kind
         if kind == "":
             if c.default_expression:

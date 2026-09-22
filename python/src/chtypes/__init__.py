@@ -54,7 +54,6 @@ from .discover import (
     parse_changed_settings_result,
     parse_columns_result,
     parse_version_result,
-    reconstruct_ddl,
 )
 from .errors import (
     CODE_ARTIFACT_CORRUPT,
@@ -120,6 +119,7 @@ from .results import (
     Outcome,
     Reason,
     RowResult,
+    Source,
     Span,
     Substitution,
     Transform,
@@ -181,6 +181,7 @@ __all__ = [
     "Schema",
     "SchemaError",
     "ServerProfile",
+    "Source",
     "SourceUnreachableError",
     "Span",
     "Substitution",
@@ -199,7 +200,6 @@ __all__ = [
     "parse_version_result",
     "quote_bare_denormals",
     "read_manifest",
-    "reconstruct_ddl",
     "registry_search_path",
     "verify_library",
 ]

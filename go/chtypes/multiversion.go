@@ -37,7 +37,15 @@ typedef void         (*fn_schema_free)(void *);
 // chtypes.h) with the identical layout; the revision gate below is what
 // guarantees the layouts agree before any call is made.
 typedef struct { char * data; size_t len; } chs_lib_bytes;
-typedef char *       (*fn_rows)(const void *, int, const char *, size_t, const char *, int, unsigned, chs_lib_bytes *);
+// Revision 5: chs_rows, chs_row and chs_block_parse each gain a trailing
+// columns_json (the INSERT column list) — NULL for "no list", the
+// unchanged behavior of every earlier revision. In the same open window,
+// chs_rows gains a second trailing parameter, the attached row filter (a
+// `const chs_filter *` in the real header; `const void *` here, as this
+// file never includes chtypes.h) — NULL for "no filter", today's behavior
+// byte for byte. This loader never attaches one; both wrappers below pass
+// NULL.
+typedef char *       (*fn_rows)(const void *, int, const char *, size_t, const char *, int, unsigned, chs_lib_bytes *, const char *, const void *);
 // Revision 3: the filter trio (optional symbols — a revision-0 artifact may
 // predate them; absence degrades to unsupported at call time).
 // Revision 4: chs_filter_compile carries params_json ({name:Type} query
@@ -47,10 +55,10 @@ typedef char *       (*fn_rows)(const void *, int, const char *, size_t, const c
 typedef void *       (*fn_filter_compile)(const void *, const char *, const char *, int *, char **);
 typedef void         (*fn_filter_free)(void *);
 typedef char *       (*fn_filter_rows)(const void *, int, const char *, size_t, const char *);
-typedef void *       (*fn_block_parse)(const void *, int, const char *, size_t, const char *, int *, char **);
+typedef void *       (*fn_block_parse)(const void *, int, const char *, size_t, const char *, int *, char **, const char *);
 typedef void         (*fn_block_free)(void *);
 typedef char *       (*fn_filter_eval)(const void *, const void *);
-typedef char *       (*fn_row)(const void *, int, const char *, size_t, const char *);
+typedef char *       (*fn_row)(const void *, int, const char *, size_t, const char *, const char *);
 typedef int          (*fn_engine)(void *, const char *, const char *, const char *, char **);
 typedef int          (*fn_ttl)(void *, const char *, char **);
 typedef int          (*fn_col_count)(const void *);
@@ -59,6 +67,11 @@ typedef int          (*fn_col_int)(const void *, int);
 typedef int         (*fn_abi_rev)(void);
 typedef char *       (*fn_owned_str0)(void);          // chs_registered_families, chs_function_flags
 typedef char *       (*fn_owned_str1)(const char *);  // chs_reference_type
+// Revision 5, additive: the quoting trio. ONE typedef for all three — they
+// share a signature, and the dlsym casts below are what pair each symbol to
+// it. The input is COUNTED (a literal may carry a NUL byte); the answer is an
+// owned string in *out_quoted, released with THIS library's own chs_free.
+typedef int          (*fn_quote)(const char *, size_t, char **, char **);
 
 typedef struct {
     void *handle;
@@ -88,6 +101,9 @@ typedef struct {
     fn_block_parse    block_parse;         // optional; the revision-4 block twin
     fn_block_free     block_free;
     fn_filter_eval    filter_eval;
+    fn_quote          quote_identifier;           // optional; the quoting trio
+    fn_quote          quote_identifier_if_needed;
+    fn_quote          quote_literal;
 } chs_lib;
 
 static const char * chs_lib_open(const char *path, chs_lib *out) {
@@ -133,6 +149,12 @@ static const char * chs_lib_open(const char *path, chs_lib *out) {
     out->block_parse = (fn_block_parse) dlsym(h, "chs_block_parse");
     out->block_free  = (fn_block_free)  dlsym(h, "chs_block_free");
     out->filter_eval = (fn_filter_eval) dlsym(h, "chs_filter_eval");
+    // Optional: the quoting trio (revision 5, additive). Same degradation
+    // rule — an artifact that predates them answers unsupported at call time
+    // rather than failing to load.
+    out->quote_identifier           = (fn_quote) dlsym(h, "chs_quote_identifier");
+    out->quote_identifier_if_needed = (fn_quote) dlsym(h, "chs_quote_identifier_if_needed");
+    out->quote_literal              = (fn_quote) dlsym(h, "chs_quote_literal");
     // Mandatory = the original core API, exported by every artifact ever
     // shipped: version/init/compile/rows AND free/validate/schema_free. The
     // shims below call the latter three without NULL checks, so admitting a
@@ -161,16 +183,27 @@ static void *       chs_lib_compile(chs_lib *l, const char *s, const char *j, in
     return l->compile(s, j, mode, c, e);
 }
 static void         chs_lib_schema_free(chs_lib *l, void *s)     { l->schema_free(s); }
-static char *       chs_lib_rows(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st) {
+static char *       chs_lib_rows(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st, const char *cols) {
     // -1 = CHS_EXPORT_NONE, 7u = CHS_DOC_ALL, no export buffer — the
     // revision-3 pass-through that keeps Rows() byte-identical to revision 2.
-    return l->rows(s, f, b, n, st, -1, 7u, (chs_lib_bytes *)0);
+    return l->rows(s, f, b, n, st, -1, 7u, (chs_lib_bytes *)0, cols, (const void *)0);
 }
 // The export spelling: RowsExport's one call. ob may be NULL only when
 // ef == -1 (the library initializes *ob to {NULL,0} at entry otherwise).
 static char * chs_lib_rows_export(chs_lib *l, const void *s, int f, const char *b, size_t n,
-                                  const char *st, int ef, unsigned df, chs_lib_bytes *ob) {
-    return l->rows(s, f, b, n, st, ef, df, ob);
+                                  const char *st, int ef, unsigned df, chs_lib_bytes *ob, const char *cols) {
+    return l->rows(s, f, b, n, st, ef, df, ob, cols, (const void *)0);
+}
+// RowsExportWith's one call: the same wrapper as chs_lib_rows_export, with
+// the attached row filter (revision 5, second half) as chs_rows' tenth
+// argument instead of the hardcoded NULL above. fh is the filter handle —
+// the Go side only calls this when WithRowFilter attached one; a call with
+// no filter takes chs_lib_rows_export instead, which keeps that path's
+// NULL-is-unchanged-byte-for-byte contract untouched.
+static char * chs_lib_rows_export_filtered(chs_lib *l, const void *s, int f, const char *b, size_t n,
+                                  const char *st, int ef, unsigned df, chs_lib_bytes *ob, const char *cols,
+                                  const void *fh) {
+    return l->rows(s, f, b, n, st, ef, df, ob, cols, fh);
 }
 // The filter trio. has_filter is all-or-nothing like the introspection
 // checks: the three symbols shipped together at revision 3.
@@ -193,8 +226,8 @@ static int chs_lib_has_block(chs_lib *l) {
     return l->block_parse && l->block_free && l->filter_eval;
 }
 static void * chs_lib_block_parse(chs_lib *l, const void *s, int fmt, const char *b, size_t n,
-                                  const char *st, int *c, char **err) {
-    return l->block_parse(s, fmt, b, n, st, c, err);
+                                  const char *st, int *c, char **err, const char *cols) {
+    return l->block_parse(s, fmt, b, n, st, c, err, cols);
 }
 static void chs_lib_block_free(chs_lib *l, void *b) { l->block_free(b); }
 static char * chs_lib_filter_eval(chs_lib *l, const void *f, const void *b) {
@@ -208,12 +241,26 @@ static int chs_lib_ttl(chs_lib *l, void *s, const char *t, char **err) {
     if (!l->ttl) return -3; // artifact predates chs_schema_ttl
     return l->ttl(s, t, err);
 }
-static char * chs_lib_row(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st) {
+static char * chs_lib_row(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st, const char *cols) {
     if (!l->row) return NULL; // artifact predates chs_row
-    return l->row(s, f, b, n, st);
+    return l->row(s, f, b, n, st, cols);
 }
 static int chs_lib_validate(chs_lib *l, const char *e, char **canon, int *code, char **err) {
     return l->validate(e, canon, code, err);
+}
+// The quoting trio. -3 is the "this artifact predates the symbol" signal the
+// Go side keys on, the same sentinel chs_lib_engine and chs_lib_ttl use.
+static int chs_lib_quote_identifier(chs_lib *l, const char *s, size_t n, char **out, char **err) {
+    if (!l->quote_identifier) return -3;
+    return l->quote_identifier(s, n, out, err);
+}
+static int chs_lib_quote_identifier_if_needed(chs_lib *l, const char *s, size_t n, char **out, char **err) {
+    if (!l->quote_identifier_if_needed) return -3;
+    return l->quote_identifier_if_needed(s, n, out, err);
+}
+static int chs_lib_quote_literal(chs_lib *l, const char *s, size_t n, char **out, char **err) {
+    if (!l->quote_literal) return -3;
+    return l->quote_literal(s, n, out, err);
 }
 // Column introspection is all-or-nothing: an artifact either exports the whole
 // group (they shipped together) or none of it. col_count answering -1 is the
@@ -381,25 +428,30 @@ var (
 // version — the multi-version product path. Safe for concurrent use.
 //
 // Lookup follows the docs/guides/fetch.md §1 search path: the directory given to
-// NewRegistry (loaded eagerly, as it always was), then $CHTYPES_REGISTRY,
-// the per-user cache and the system locations, each consulted lazily by
-// For for a line the loaded set lacks. With AutoFetch (WithAutoFetch, or
-// CHTYPES_AUTOFETCH=1) a line found nowhere is fetched first (Ensure),
-// once per process per line; without it, the miss is ErrArtifactMissing.
-// With WithVerifyChecksums every library is re-hashed against its own
-// manifest.json before it is dlopen'd, whichever path found it.
+// NewRegistry, then $CHTYPES_REGISTRY, the per-user cache and the system
+// locations, each consulted by For for a line the loaded set lacks. With
+// AutoFetch (WithAutoFetch, or CHTYPES_AUTOFETCH=1) a line found nowhere is
+// fetched first (Ensure), once per process per line; without it, the miss is
+// ErrArtifactMissing. With WithVerifyChecksums every library is re-hashed
+// against its own manifest.json before it is dlopen'd, whichever path found it.
+//
+// LOADING IS LAZY, with or without a directory: constructing a Registry reads
+// manifest.json files and dlopens nothing. Nothing in this package opens an
+// artifact except a request for a specific version (For / ForContext / Load)
+// or an explicit WithPreload.
 type Registry struct {
 	mu   sync.RWMutex
 	byID map[string]*Library
 	// known maps a minor line to the artifact directory discovered for it
-	// on the search path at construction (a lazy registry), whether or not
-	// it has been dlopen'd yet. Guarded by mu.
+	// on the search path at construction, whether or not it has been
+	// dlopen'd yet. Guarded by mu.
 	known map[string]string
 
 	explicit  string   // the constructor's directory, "" for the search path alone
 	search    []string // the §1 search path, in order
 	autoFetch bool
-	verify    bool // re-hash each library against its manifest before dlopen
+	verify    bool     // re-hash each library against its manifest before dlopen
+	preload   []string // the lines opened at construction (WithPreload)
 	fetch     FetchOptions
 }
 
@@ -430,26 +482,64 @@ func WithFetchOptions(o FetchOptions) RegistryOption { return func(r *Registry) 
 // a network, where a move that reported success and truncated the library
 // looks identical to one that worked.
 //
-// What it checks, per line, in this order: library_bytes when the manifest
-// carries one, then the sha256 of the library about to be loaded against
-// library_sha256. Either mismatch fails the load naming the path and both
-// values, and nothing is dlopen'd. A manifest that carries NO
+// What it ADDS, per line, is the sha256 of the library about to be loaded
+// compared against library_sha256: a mismatch fails the load naming the path
+// and both values, and nothing is dlopen'd. A manifest that carries NO
 // library_sha256 is REFUSED rather than passed: verification asked for and
-// not possible is not verification — all four bindings refuse it.
+// not possible is not verification — all four bindings refuse it. (The
+// cheaper library_bytes size check that runs just before it is NOT
+// conditional on this option — Load has always made it, every call,
+// checkLibraryBytes above; issue #82.)
+//
+// Timing, read together with that: **a library's checksum is computed
+// immediately before that library is dlopen'ed, and at no other time** — at
+// construction for the WithPreload'ed lines, at first use for the rest,
+// never for a line nobody asks for. The size check runs at that exact same
+// point, for the same reason, whether or not this option is on: Load is the
+// one place both checks live, and neither runs before Load is actually
+// asked to open something.
 func WithVerifyChecksums(on bool) RegistryOption { return func(r *Registry) { r.verify = on } }
 
-// NewRegistry opens a registry. With a directory, every artifact under it
-// is loaded now — one directory per version, each holding the manifest.json
-// the build writes:
+// WithPreload opens these lines AT CONSTRUCTION — the one eager path, and the
+// same option Python spells preload=[…], TypeScript {preload: […]} and Rust
+// RegistryOptions::preload.
+//
+// Each entry is a version spelling resolved exactly as For resolves one: a
+// minor line ("25.8") or an exact patch ("25.8.28.1-lts"), never a path. They
+// are opened in the order given, before NewRegistry returns, and an entry no
+// directory on the §1 search path holds is ErrArtifactMissing — the same §7
+// error the first For would have raised, raised earlier.
+//
+// Preload NEVER fetches, even with AutoFetch on: autofetch is a first-use
+// behavior in all four bindings, and a constructor is a worse place than a
+// request to begin a 250 MB download. An empty list is exactly the default.
+//
+// Preload is a deployment's pinned set, deliberately not "everything in the
+// directory": a registry directory is whatever a fetch left behind, and
+// loading it all costs about 120 MB resident per line.
+func WithPreload(versions ...string) RegistryOption {
+	return func(r *Registry) { r.preload = append(r.preload, versions...) }
+}
+
+// NewRegistry opens a registry. It reads the manifest.json files it can see
+// and DLOPENS NOTHING — one directory per version, each holding the
+// manifest.json the build writes:
 //
 //	dir/25.8/{manifest.json,libchtypes.so}
 //	dir/26.6/{manifest.json,libchtypes.so}
 //
-// — and it is an error for that directory to hold nothing (unless
-// AutoFetch is on, in which case a fetch will populate it). With "" the
-// registry is the §1 search path alone: nothing is dlopen'd until For asks
-// for a line, and it is an error for the whole path to hold nothing
-// (again unless AutoFetch is on).
+// With "" the registry is the §1 search path alone; with a directory, that
+// directory is the head of the same path. Either way the first For for a line
+// is what opens it, and WithPreload is the way to open a named set up front.
+//
+// Construction fails only for what manifests can decide: a directory the
+// CALLER NAMED that does not exist or cannot be read, a search path on which
+// no directory holds a single readable <minor>/manifest.json, and a
+// WithPreload entry no directory holds. Both empty-registry checks are
+// suppressed when AutoFetch is on, because a fetch will populate the path.
+// Everything a bad artifact can be wrong about — truncated bytes, a failed
+// checksum, a refused ABI revision, a manifest that disagrees with the library
+// it names — is reported by the first call that asks for that line.
 func NewRegistry(dir string, opts ...RegistryOption) (*Registry, error) {
 	r := &Registry{byID: map[string]*Library{}, known: map[string]string{}, explicit: dir}
 	for _, o := range opts {
@@ -459,49 +549,42 @@ func NewRegistry(dir string, opts ...RegistryOption) (*Registry, error) {
 		r.autoFetch = true
 	}
 	r.search = RegistrySearchPath(dir)
-	if dir == "" {
-		r.discover()
-		if len(r.known) == 0 && !r.autoFetch {
-			return nil, fmt.Errorf("chtypes: no version artifacts on the registry search path (looked in: %s)", strings.Join(r.search, ", "))
-		}
-		return r, nil
-	}
-	loaded, err := r.loadDir(dir)
-	if err != nil {
-		if !(r.autoFetch && os.IsNotExist(err)) {
+	// A directory somebody NAMED and cannot be read is a configuration
+	// mistake named now, and it is the typo guard: /var/lib/chtyeps fails
+	// here rather than three calls later. It costs a directory listing and
+	// no dlopen. With AutoFetch the directory is the destination-to-be.
+	if dir != "" && !r.autoFetch {
+		if _, err := os.ReadDir(dir); err != nil {
 			return nil, err
 		}
 	}
-	if loaded == 0 && !r.autoFetch {
-		return nil, fmt.Errorf("chtypes: no version artifacts under %s", dir)
+	r.discover()
+	if len(r.known) == 0 && !r.autoFetch {
+		return nil, fmt.Errorf("chtypes: no version artifacts on the registry search path (looked in: %s)", strings.Join(r.search, ", "))
+	}
+	if err := r.preloadLines(); err != nil {
+		return nil, err
 	}
 	return r, nil
 }
 
-// loadDir dlopens every artifact directory under dir and returns how many
-// it loaded. A directory without a readable manifest.json is skipped; one
-// whose library fails to load is an error naming it.
-func (r *Registry) loadDir(dir string) (int, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0, err
+// preloadLines opens WithPreload's lines, in order, before the constructor
+// returns. It goes through the §1 search path and never through the fetch
+// path: preload does not fetch.
+func (r *Registry) preloadLines() error {
+	for _, v := range r.preload {
+		if v == "" {
+			return fmt.Errorf("chtypes: WithPreload: an empty version does not mean 'pick one'")
+		}
+		l, err := r.resolveWithoutFetch(Version(v), minorOf(v))
+		if err != nil {
+			return err
+		}
+		if l == nil {
+			return missingArtifactError(v, HostPlatform(), r.search)
+		}
 	}
-	var loaded int
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		sub := filepath.Join(dir, e.Name())
-		m, ok := readArtifactDir(sub)
-		if !ok {
-			continue
-		}
-		if err := r.Load(filepath.Join(sub, m.Library)); err != nil {
-			return loaded, fmt.Errorf("%s: %w", sub, err)
-		}
-		loaded++
-	}
-	return loaded, nil
+	return nil
 }
 
 // readArtifactDir reads one <minor>/manifest.json; ok is false when the
@@ -525,11 +608,19 @@ func readArtifactDir(sub string) (m struct {
 // Loading the same path twice — into this Registry or another one — reuses the
 // Library that was already initialized for it.
 //
-// With WithVerifyChecksums the library is re-hashed against the manifest.json
-// beside it FIRST, and a mismatch returns before anything is dlopen'd: an
-// image cannot be unmapped, so the check has to happen while refusing is
-// still possible.
+// The manifest.json beside path is consulted TWICE, for two different
+// questions, on two different conditions:
+//
+//   - checkLibraryBytes runs ALWAYS, whether or not WithVerifyChecksums is
+//     on (issue #82): a size mismatch fails the load before dlopen.
+//   - With WithVerifyChecksums the library is ALSO re-hashed against the
+//     manifest.json beside it, and a mismatch likewise returns before
+//     anything is dlopen'd: an image cannot be unmapped, so both checks have
+//     to happen while refusing is still possible.
 func (r *Registry) Load(path string) error {
+	if err := checkLibraryBytes(path); err != nil {
+		return err
+	}
 	if r.verify {
 		if err := verifyArtifactLibrary(path); err != nil {
 			return err
@@ -546,9 +637,49 @@ func (r *Registry) Load(path string) error {
 	return nil
 }
 
+// checkLibraryBytes compares path's file size against its manifest.json's
+// library_bytes — the load-path check that runs on EVERY Load, regardless of
+// WithVerifyChecksums (issue #82, split out of #50's lazy-loading design so
+// the behavior change was not hidden inside it). It is nearly free (one
+// stat, never a re-hash of the library's contents) and it catches the
+// commonest shape of a broken artifact directory: a truncated or
+// partially-written library file. What WithVerifyChecksums adds on top is
+// the sha256 re-hash in verifyArtifactLibrary, unchanged.
+//
+// A manifest.json that cannot be read or parsed, or one that carries no
+// library_bytes (0, its zero value for a manifest predating the field), is
+// silently not asked: this must not become a reason Load fails for a caller
+// who supplies a bare path with no sibling manifest at all, which worked
+// before this check existed and still must. This is deliberately looser
+// than readManifest, which also requires library_sha256 because it exists
+// only for verification — the size check must not require a hash it never
+// touches.
+func checkLibraryBytes(path string) error {
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(path), "manifest.json"))
+	if err != nil {
+		return nil
+	}
+	var m struct {
+		LibraryBytes int64 `json:"library_bytes"`
+	}
+	if err := json.Unmarshal(b, &m); err != nil || m.LibraryBytes <= 0 {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("chtypes: cannot check %s: %w", path, err)
+	}
+	if info.Size() != m.LibraryBytes {
+		return fmt.Errorf("chtypes: %s is %d bytes, manifest says %d", path, info.Size(), m.LibraryBytes)
+	}
+	return nil
+}
+
 // verifyArtifactLibrary re-hashes one shared library against the
-// manifest.json beside it — the load-time check WithVerifyChecksums turns on,
-// and the same predicate VerifyInstalled applies to a whole registry.
+// manifest.json beside it — the load-time check WithVerifyChecksums turns
+// on. checkLibraryBytes above already ran unconditionally before this is
+// ever called, so this function is hash-only; folding the size check back in
+// here too would just re-stat a file this call never needed to.
 //
 // It hashes the file that is ABOUT TO BE LOADED, not the file name the
 // manifest carries: those are the same file in every artifact directory, and
@@ -560,15 +691,6 @@ func verifyArtifactLibrary(path string) error {
 	m, err := readManifest(filepath.Join(filepath.Dir(path), "manifest.json"))
 	if err != nil {
 		return fmt.Errorf("chtypes: cannot verify %s: %w", path, err)
-	}
-	if m.LibraryBytes > 0 {
-		info, err := os.Stat(path)
-		if err != nil {
-			return fmt.Errorf("chtypes: cannot verify %s: %w", path, err)
-		}
-		if info.Size() != m.LibraryBytes {
-			return fmt.Errorf("chtypes: %s is %d bytes, manifest says %d", path, info.Size(), m.LibraryBytes)
-		}
 	}
 	got, err := fileSHA256(path)
 	if err != nil {
@@ -667,9 +789,14 @@ func openLibrary(path string) (*Library, error) {
 	return lib, nil
 }
 
-// Versions lists the ClickHouse minor lines this registry can answer for:
-// every loaded library's line, plus — for a registry opened on the search
-// path alone — every line discovered there at construction.
+// Versions lists the ClickHouse minor lines this registry CAN ANSWER FOR:
+// every loaded library's line, plus every line the construction-time manifest
+// scan discovered on the §1 search path, whether or not it has been opened.
+// That is one meaning in all four bindings, and it is the meaning that
+// survives lazy loading — "the lines that happen to be open" would read as an
+// empty registry until the first For.
+//
+// It opens nothing.
 func (r *Registry) Versions() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -963,6 +1090,98 @@ func (l *Library) ReferenceType(typeExpr string) (string, error) {
 	return s, nil
 }
 
+// ------------------------------------------------------------------ quoting
+//
+// Three passthroughs over the vendored backQuote / backQuoteIfNeed /
+// quoteString. This package spells NONE of the rule itself: it used to, and
+// the copy disagreed with the server (issue #52). The answers are the loaded
+// build's own and differ between builds, which is why they hang off a
+// Library rather than off the package.
+
+// quote is the one call site for all three symbols: counted input, an owned
+// answer released with THIS library's chs_free, an optional error string on
+// the same terms.
+func (l *Library) quote(kind int, s string) (string, error) {
+	// The counted-buffer idiom the row calls use: a real pointer even for an
+	// empty input, so nothing depends on the NULL-plus-zero spelling.
+	var p *C.char
+	if len(s) > 0 {
+		p = (*C.char)(unsafe.Pointer(unsafe.StringData(s)))
+	} else {
+		p = C.CString("")
+		defer C.free(unsafe.Pointer(p))
+	}
+	var cOut, cErr *C.char
+	l.mu.RLock()
+	var rc C.int
+	switch kind {
+	case quoteAlways:
+		rc = C.chs_lib_quote_identifier(&l.lib, p, C.size_t(len(s)), &cOut, &cErr)
+	case quoteIfNeeded:
+		rc = C.chs_lib_quote_identifier_if_needed(&l.lib, p, C.size_t(len(s)), &cOut, &cErr)
+	default:
+		rc = C.chs_lib_quote_literal(&l.lib, p, C.size_t(len(s)), &cOut, &cErr)
+	}
+	// Both out params are taken on EVERY path, success or failure: the
+	// library owns whatever it wrote, and an answer left behind on an error
+	// return is a leak nothing else can reach.
+	out, msg := "", ""
+	if cOut != nil {
+		out = C.GoString(cOut)
+		C.chs_lib_free(&l.lib, cOut)
+	}
+	if cErr != nil {
+		msg = C.GoString(cErr)
+		C.chs_lib_free(&l.lib, cErr)
+	}
+	l.mu.RUnlock()
+	runtime.KeepAlive(s)
+	switch rc {
+	case 0:
+		return out, nil
+	case -3:
+		return "", &UnsupportedError{Msg: "this artifact predates the chs_quote_* trio (rebuild it)"}
+	default:
+		return "", schemaErr(int(rc), msg, "")
+	}
+}
+
+const (
+	quoteAlways = iota
+	quoteIfNeeded
+	quoteValue
+)
+
+// QuoteIdentifier spells name as a back-quoted identifier — ALWAYS quoted,
+// which is the safe default and the one to reach for without thinking
+// (chs_quote_identifier, the vendored backQuote). The bytes are this
+// library's own: an embedded back-quote comes back in the spelling the
+// server's formatter prints, not in a spelling of ours.
+//
+// Use QuoteIdentifierIfNeeded only when the bare spelling matters to
+// something downstream; which names it leaves bare is the loaded build's own
+// rule, so two libraries may answer differently for the same name.
+func (l *Library) QuoteIdentifier(name string) (string, error) { return l.quote(quoteAlways, name) }
+
+// QuoteIdentifierIfNeeded spells name bare where THIS library's ClickHouse
+// says a bare spelling is legal, and back-quotes it otherwise
+// (chs_quote_identifier_if_needed, the vendored backQuoteIfNeed).
+//
+// The set of names it quotes is a property of the vendored build, not of this
+// package, and it CHANGES between builds — ask the library you will compile
+// against rather than caching an answer across versions.
+func (l *Library) QuoteIdentifierIfNeeded(name string) (string, error) {
+	return l.quote(quoteIfNeeded, name)
+}
+
+// QuoteLiteral spells text as a ClickHouse string literal, quotes and escapes
+// included (chs_quote_literal, the vendored quoteString) — the call to reach
+// for when a value is being spliced into DDL, e.g. a DEFAULT expression.
+//
+// text is counted, so a value carrying a NUL byte is quoted correctly; the
+// answer is escaped and therefore NUL-free.
+func (l *Library) QuoteLiteral(text string) (string, error) { return l.quote(quoteValue, text) }
+
 // SetEngine mirrors CompiledSchema.SetEngine for a dlopen'd library,
 // including WithMergeTreeSettings. An artifact built before chs_schema_engine
 // existed reports unsupported rather than failing to load.
@@ -1064,15 +1283,31 @@ func (s *LoadedSchema) Close() {
 	s.handle = nil
 }
 
+// columnsCArgLoaded is the dlopen'd path's twin of the linked path's
+// columnsCArg: a NULL pointer for "no list" (nil/empty), never the empty
+// array "[]" — INSERT INTO t () FORMAT X is a syntax error (code 62) on
+// every server, so this binding never renders one. A non-nil result is a
+// live C.CString the caller must C.free. Named distinctly from the linked
+// path's helper because both files compile together under the
+// chtypes_linked build tag.
+func columnsCArgLoaded(columns []string) *C.char {
+	if len(columns) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(columns) // []string cannot fail to marshal
+	return C.CString(string(b))
+}
+
 // Row validates and coerces a single row body, mirroring CompiledSchema.Row.
-func (s *LoadedSchema) Row(format Format, raw []byte) (RowResult, error) {
-	return s.RowWithSettings(format, raw, nil)
+func (s *LoadedSchema) Row(format Format, raw []byte, opts ...RowOption) (RowResult, error) {
+	return s.RowWithSettings(format, raw, nil, opts...)
 }
 
 // RowWithSettings mirrors CompiledSchema.RowWithSettings for a dlopen'd
 // library. An artifact built before chs_row reports an error rather than
-// guessing at batch semantics.
-func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[string]string) (RowResult, error) {
+// guessing at batch semantics. WithColumns declares the revision-5 INSERT
+// column list; see its doc for the full contract.
+func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[string]string, opts ...RowOption) (RowResult, error) {
 	sj := settingsJSON(settings)
 	csj := C.CString(sj)
 	defer C.free(unsafe.Pointer(csj))
@@ -1085,6 +1320,11 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 		defer C.free(unsafe.Pointer(praw))
 	}
 
+	pcols := columnsCArgLoaded(columnsOf(opts))
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
+	}
+
 	// One critical section for the call, the result read and the free: the
 	// header's "a single handle must not be used from two threads at once".
 	// Distinct handles run this concurrently — that is the whole relaxation.
@@ -1093,7 +1333,7 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 		unlock()
 		return RowResult{}, fmt.Errorf("chtypes: schema is closed")
 	}
-	out := C.chs_lib_row(&s.lib.lib, s.handle, C.int(format), praw, C.size_t(len(raw)), csj)
+	out := C.chs_lib_row(&s.lib.lib, s.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)
 	runtime.KeepAlive(raw)
 	if out == nil {
 		unlock()
@@ -1119,27 +1359,29 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 // CompiledSchema.Rows: same parameters, same settings precedence, same
 // BatchResult contract (the error return is only for a closed schema or a
 // missing symbol, never a ClickHouse verdict).
-func (s *LoadedSchema) Rows(format Format, body []byte, settings map[string]string) (BatchResult, error) {
+func (s *LoadedSchema) Rows(format Format, body []byte, settings map[string]string, opts ...RowOption) (BatchResult, error) {
 	// export off, all document groups on — the same revision-3 pass-through
 	// as the static path, so Rows() is byte-identical to revision 2.
-	return s.rowsThrough(format, body, settings, ExportNone, DocAll)
+	return s.rowsThrough(format, body, settings, ExportNone, DocAll, columnsOf(opts))
 }
 
 // RowsExport mirrors CompiledSchema.RowsExport for a dlopen'd library — the
 // same signature, the same BatchResult Payload/Spans/ExportDeclined contract,
 // one C call. See the static twin for the full doc; the export buffer is
-// copied and freed with THIS library's chs_free before returning.
-func (s *LoadedSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, docFlags ...DocFlags) (BatchResult, error) {
-	var flags DocFlags
-	for _, f := range docFlags {
-		flags |= f
+// copied and freed with THIS library's chs_free before returning. opts
+// accepts DocFlags values and WithColumns (the revision-5 column list) in
+// any mix.
+func (s *LoadedSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...RowsExportOption) (BatchResult, error) {
+	var cfg rowsExportConfig
+	for _, o := range opts {
+		o.applyRowsExport(&cfg)
 	}
-	return s.rowsThrough(format, body, settings, exportFormat, flags)
+	return s.rowsThrough(format, body, settings, exportFormat, cfg.flags, cfg.columns)
 }
 
 // rowsThrough is the ONE chs_rows call site on the dlopen'd path — the
 // static path's twin, with the identical parameter and result contract.
-func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags) (BatchResult, error) {
+func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags, columns []string) (BatchResult, error) {
 	sj := settingsJSON(settings)
 	csj := C.CString(sj)
 	defer C.free(unsafe.Pointer(csj))
@@ -1150,6 +1392,11 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 	} else {
 		pbody = C.CString("")
 		defer C.free(unsafe.Pointer(pbody))
+	}
+
+	pcols := columnsCArgLoaded(columns)
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
 	}
 
 	var ob *C.chs_lib_bytes
@@ -1167,7 +1414,7 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 		return BatchResult{}, fmt.Errorf("chtypes: schema is closed")
 	}
 	out := C.chs_lib_rows_export(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj,
-		C.int(exportFormat), C.uint(flags), ob)
+		C.int(exportFormat), C.uint(flags), ob, pcols)
 	runtime.KeepAlive(body)
 	// Copy-then-free the export buffer inside the critical section (chs_free
 	// pairs with the call that produced the pointer, on the handle lock).
@@ -1188,6 +1435,112 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 		// artifact does not export the function" (the C ABI contract §Rows), and
 		// that is a decline. chs_rows is mandatory on this loader, so today
 		// the branch is unreachable — the type still has to be the honest one.
+		return BatchResult{}, &UnsupportedError{Msg: "this artifact predates chs_rows (rebuild it)"}
+	}
+	js := C.GoString(out)
+	C.chs_lib_free(&s.lib.lib, out)
+	unlock()
+
+	res, err := batchResultOf(js)
+	if err != nil {
+		return res, err
+	}
+	res.Payload = payload
+	return res, nil
+}
+
+// RowsExportWith exports only the rows a compiled filter admits — the
+// row-level-security shape (docs/guides/filters.md "Exporting only the rows
+// a filter admits"). RowsExport's own signature never moves; this is a NEW
+// entry point because RowsExport's variadic parameter is already spent, not
+// an option riding it. WithRowFilter attaches the filter; WithDocFlags
+// selects the document groups. With no WithRowFilter this behaves exactly
+// like RowsExport — same one chs_rows call, same rowsThrough.
+func (s *LoadedSchema) RowsExportWith(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...RowsOption) (BatchResult, error) {
+	var cfg rowsExportWithConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	if cfg.filter == nil {
+		return s.rowsThrough(format, body, settings, exportFormat, cfg.flags, nil)
+	}
+	if cfg.filter.schema.lib != s.lib {
+		return BatchResult{}, fmt.Errorf("chtypes: filter (ClickHouse %s) and schema (ClickHouse %s) come from different libraries", cfg.filter.schema.lib.Version, s.lib.Version)
+	}
+	return s.rowsThroughWithFilter(format, body, settings, exportFormat, cfg.flags, cfg.filter)
+}
+
+// rowsThroughWithFilter is rowsThrough's twin for an attached filter: the
+// same one chs_rows call, with the filter's handle as the tenth argument.
+// Locking mirrors LoadedFilter.Eval's cross-schema case: when the filter's
+// schema is this same handle, one lock covers both (a filter call is a use
+// of its schema handle too, and chs_rows already is one for s); when it
+// differs — same library, different LoadedSchema, the case the C layer
+// answers rejected/1002 for — both handle locks are taken in a fixed global
+// order under the library's shared read lock, exactly as Eval does, so a
+// crossed call cannot deadlock against a concurrent one running the other
+// way.
+func (s *LoadedSchema) rowsThroughWithFilter(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags, f *LoadedFilter) (BatchResult, error) {
+	fs := f.schema
+	sj := settingsJSON(settings)
+	csj := C.CString(sj)
+	defer C.free(unsafe.Pointer(csj))
+
+	var pbody *C.char
+	if len(body) > 0 {
+		pbody = (*C.char)(unsafe.Pointer(&body[0]))
+	} else {
+		pbody = C.CString("")
+		defer C.free(unsafe.Pointer(pbody))
+	}
+
+	var ob *C.chs_lib_bytes
+	var obv C.chs_lib_bytes
+	if exportFormat != ExportNone {
+		ob = &obv
+	}
+
+	var unlock func()
+	if fs == s {
+		unlock = s.lock()
+	} else {
+		first, second := s, fs
+		if uintptr(unsafe.Pointer(first)) > uintptr(unsafe.Pointer(second)) {
+			first, second = second, first
+		}
+		s.lib.mu.RLock()
+		first.mu.Lock()
+		second.mu.Lock()
+		unlock = func() {
+			second.mu.Unlock()
+			first.mu.Unlock()
+			s.lib.mu.RUnlock()
+		}
+	}
+	if s.handle == nil {
+		unlock()
+		return BatchResult{}, fmt.Errorf("chtypes: schema is closed")
+	}
+	if f.handle == nil {
+		unlock()
+		return BatchResult{}, fmt.Errorf("chtypes: filter is closed")
+	}
+	out := C.chs_lib_rows_export_filtered(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj,
+		C.int(exportFormat), C.uint(flags), ob, nil, f.handle)
+	runtime.KeepAlive(body)
+	// Copy-then-free the export buffer inside the critical section, exactly
+	// as rowsThrough does.
+	var payload []byte
+	if ob != nil && obv.data != nil {
+		if obv.len > 0 {
+			payload = C.GoBytes(unsafe.Pointer(obv.data), C.int(obv.len))
+		} else {
+			payload = []byte{}
+		}
+		C.chs_lib_free(&s.lib.lib, obv.data)
+	}
+	if out == nil {
+		unlock()
 		return BatchResult{}, &UnsupportedError{Msg: "this artifact predates chs_rows (rebuild it)"}
 	}
 	js := C.GoString(out)
@@ -1341,7 +1694,11 @@ type LoadedBlock struct {
 // LoadedFilter.Eval. The error return carries the call-level refusal (an
 // unknown setting's 115, a framing or decode fault — no partial block exists
 // on any error), or the decline for an artifact that predates the twin.
-func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[string]string) (*LoadedBlock, error) {
+// WithColumns declares the revision-5 INSERT column list, read exactly as
+// Row/Rows read it — filters still compile over the schema's physical
+// columns and evaluate the stored tuple, so a listed EPHEMERAL column stays
+// unreferenceable in a filter.
+func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[string]string, opts ...RowOption) (*LoadedBlock, error) {
 	if C.chs_lib_has_block(&s.lib.lib) == 0 {
 		return nil, &UnsupportedError{Msg: "this artifact predates chs_block_parse (rebuild it)"}
 	}
@@ -1354,6 +1711,10 @@ func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[strin
 		pbody = C.CString("")
 		defer C.free(unsafe.Pointer(pbody))
 	}
+	pcols := columnsCArgLoaded(columnsOf(opts))
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
+	}
 	var code C.int
 	var cErr *C.char
 	unlock := s.lock()
@@ -1361,7 +1722,7 @@ func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[strin
 		unlock()
 		return nil, fmt.Errorf("chtypes: schema is closed")
 	}
-	h := C.chs_lib_block_parse(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr)
+	h := C.chs_lib_block_parse(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr, pcols)
 	runtime.KeepAlive(body)
 	if h == nil {
 		msg := ""

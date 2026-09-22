@@ -19,7 +19,6 @@ export {
   QUERY_CHANGED_SETTINGS,
   QUERY_SERVER_VERSION,
   QUERY_TABLE_COLUMNS,
-  reconstructDdl,
   type DiscoveredColumn,
   type ServerProfile,
 } from './discover.js';
@@ -117,6 +116,7 @@ export {
   FilterOutcome,
   isAnswer,
   Outcome,
+  Source,
   Verdict,
   type BatchResult,
   type ColumnDoc,
@@ -136,6 +136,7 @@ export {
   type ColumnInfo,
   type CompileFilterOptions,
   type EngineOptions,
+  type RowOptions,
   type RowsOptions,
 } from './schema.js';
 export { encodeSettings, type Settings, type SettingValue } from './settings.js';

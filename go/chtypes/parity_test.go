@@ -295,6 +295,8 @@ var goValues = map[string]any{
 	"RowBinaryWithNamesAndTypesAndDefaults": int(chtypes.RowBinaryWithNamesAndTypesAndDefaults),
 	"Native":                                int(chtypes.Native),
 	"Buffers":                               int(chtypes.Buffers),
+	"CSVWithNames":                          int(chtypes.CSVWithNames),
+	"TSVWithNames":                          int(chtypes.TSVWithNames),
 
 	// The row/batch verdict vocabulary, as the result document spells it.
 	"Accepted":         chtypes.Accepted.String(),
@@ -334,7 +336,7 @@ var goValues = map[string]any{
 	"ReasonIPMangle":            chtypes.ReasonIPMangle,
 	"ReasonFloatPrecision":      chtypes.ReasonFloatPrecision,
 	"ReasonLossyNumeric":        chtypes.ReasonLossyNumeric,
-	"ReasonStringPad":           chtypes.ReasonStringPad,
+	"ReasonFixedStringPad":      chtypes.ReasonFixedStringPad,
 	"ReasonEmptied":             chtypes.ReasonEmptied,
 	"ReasonElementChanged":      chtypes.ReasonElementChanged,
 	"ReasonEnumCoerce":          chtypes.ReasonEnumCoerce,
@@ -347,6 +349,10 @@ var goValues = map[string]any{
 	"ReasonDefaultMaterialized": chtypes.ReasonDefaultMaterialized,
 	"ReasonTTLExpired":          chtypes.ReasonTTLExpired,
 	"ReasonTTLColumnExpired":    chtypes.ReasonTTLColumnExpired,
+
+	// The two revision-5 `src` provenances columns_json introduces (issue #53).
+	"SourceEphemeralInput":    chtypes.SourceEphemeralInput,
+	"SourceMaterializedInput": chtypes.SourceMaterializedInput,
 
 	// ABI identity and the document/compile/export channels.
 	"ABIRevision":     chtypes.ABIRevision,

@@ -77,6 +77,21 @@ pub enum Format {
     /// their servers do; probe the artifact rather than assuming it from this
     /// crate's version.
     Buffers = 9,
+    /// `CSV` whose first row is a header naming the columns, so the data is
+    /// addressed by NAME. With a column list as well
+    /// ([`crate::RowOptions`]), the list decides the block and the header
+    /// decides the layout. Header names match EXACTLY through ClickHouse 26.4
+    /// and case-insensitively from 26.5, exactly as those servers do.
+    ///
+    /// It joined `enum chs_format` inside ABI revision 5, so a revision-5
+    /// artifact built before it existed does not know it — the revision check
+    /// cannot tell. Probe the artifact rather than assuming it from this
+    /// crate's version.
+    CsvWithNames = 10,
+    /// `TSV` whose first row is a header naming the columns. Everything
+    /// [`Format::CsvWithNames`] says about the header, a column list, header
+    /// matching and probing the artifact applies unchanged.
+    TsvWithNames = 11,
 }
 
 impl Format {
@@ -205,6 +220,24 @@ impl Verdict {
             Verdict::Error => 'e',
             Verdict::Decline => 'd',
         }
+    }
+}
+
+/// Map ONE wire verdict character to a [`Verdict`] — the single place that
+/// decision is made, shared by [`filter_result_of`] (`chs_filter_rows`'s /
+/// `chs_block_parse`'s `verdicts` string, one char per row) and
+/// [`row_result_of`] (`chs_rows`'s per-row `verdict` field, the revision-5
+/// attached filter). A second, drifted copy of this match is exactly how
+/// `'e'` or `'d'` could get silently collapsed into `'f'` in one call path
+/// and not the other — the fail-open bug this vocabulary exists to prevent.
+pub(crate) fn verdict_of(c: char) -> Verdict {
+    match c {
+        't' => Verdict::True,
+        'f' => Verdict::False,
+        'e' => Verdict::Error,
+        // 'd', and any character this crate does not know: decline — fail
+        // closed, mirroring the unknown-outcome rule.
+        _ => Verdict::Decline,
     }
 }
 
@@ -383,9 +416,49 @@ pub struct Value {
     pub null: bool,
     /// The `src` string from the result document: `input`, `default`,
     /// `default_substituted`, `absent`, `default_volatile_unresolved`,
-    /// `default_pending`, `default_expr_unsupported`. (`skipped` columns are
-    /// dropped from the stored row.)
+    /// `default_pending`, `default_expr_unsupported`, and — revision 5 — the
+    /// two [`source`] provenances. ([`source::SKIPPED`] columns, and
+    /// [`source::EPHEMERAL_INPUT`] columns, are both dropped from the
+    /// stored row — never seen here; [`source::MATERIALIZED_INPUT`] stays
+    /// in.)
     pub source: String,
+}
+
+/// The two revision-5 `Value::source` provenances `columns_json` introduces
+/// (issue #53), plus the pre-existing `SKIPPED` provenance named alongside
+/// them (issue #90).
+///
+/// Plain `&str` constants, not an enum: `src` is a growing vocabulary
+/// arriving from the C layer, and an unrecognized spelling from a newer
+/// artifact must pass through unchanged, not be rejected.
+pub mod source {
+    /// MATERIALIZED / ALIAS / EPHEMERAL, never read from an input row.
+    /// Predates revision 5 — unlike the two provenances below — but
+    /// `row_result_of` has excluded it from `values` from the start, the
+    /// same exclusion [`EPHEMERAL_INPUT`] was modeled on. Named here, in the
+    /// same idiom, so the exclusion can be keyed on a symbol rather than a
+    /// bare string literal.
+    pub const SKIPPED: &str = "skipped";
+    /// A listed EPHEMERAL column's read value. The server reads it — it is
+    /// in scope for the DEFAULT expressions that reference it — and it is
+    /// never stored and never exported. `row_result_of` excludes it from
+    /// `values` exactly as it already excludes [`SKIPPED`]: a value that is
+    /// never stored must not sit where a caller reads the stored row (a
+    /// hash, a signature).
+    pub const EPHEMERAL_INPUT: &str = "ephemeral_input";
+    /// A listed MATERIALIZED column's supplied value under
+    /// `insert_allow_materialized_columns=1`. The supplied value REPLACES
+    /// the column's expression and IS stored — unlike [`EPHEMERAL_INPUT`],
+    /// it stays IN `values`.
+    pub const MATERIALIZED_INPUT: &str = "materialized_input";
+    /// A VOLATILE DEFAULT (`now()`/`now64(n)`/`today()`/`yesterday()`, or an
+    /// expression over one) this crate resolved locally rather than
+    /// ClickHouse — the caller MUST send it as an explicit column on any
+    /// later INSERT, or the value silently drifts each attempt.
+    /// `row_result_of` has always populated `substituted` for exactly this
+    /// src value; like [`SKIPPED`] before issue #90, it had no named
+    /// constant of its own (issue #122).
+    pub const DEFAULT_SUBSTITUTED: &str = "default_substituted";
 }
 
 /// One silent change: input `256` into `UInt8` stored as `0`.
@@ -507,6 +580,26 @@ pub struct RowResult {
     pub substituted: Vec<Substitution>,
     /// `MATERIALIZED` values — durable, but not part of `SELECT *`.
     pub computed: Vec<Computed>,
+    /// This row's filter verdict from [`crate::Schema::rows_export_with`],
+    /// beside `outcome` above — the two are independent facts, and neither
+    /// replaces the other (`docs/guides/filters.md` "Exporting only the
+    /// rows a filter admits"). `None` from every OTHER row-producing call
+    /// ([`crate::Schema::row`], [`crate::Schema::rows`],
+    /// [`crate::Schema::rows_export`], [`crate::Schema::rows_with_options`],
+    /// [`crate::Schema::rows_export_with_options`]) — `rows_export_with` is
+    /// the only entry point that ever attaches a filter, so it is the only
+    /// one whose rows carry `Some`. A security-enforcing caller MUST fail
+    /// closed — hide the row / fail the request — on a verdict that is
+    /// `None` or `!Verdict::answered`.
+    pub verdict: Option<Verdict>,
+    /// Set beside [`Verdict::Error`] (the predicate threw, ClickHouse's own
+    /// code/message), beside an eval-time [`Verdict::Decline`] (the
+    /// admission envelope), and for a row whose own `outcome` is not
+    /// [`Outcome::Accepted`] (its own parse error, reported as `Decline`).
+    /// `0` otherwise.
+    pub verdict_code: i32,
+    /// The message beside `verdict_code`; empty otherwise.
+    pub verdict_err: String,
 }
 
 /// The outcome of one request body, which may hold many rows.
@@ -578,6 +671,17 @@ pub struct BatchResult {
     /// no export was requested. A decline here is `-2`-class honesty, never a
     /// server verdict.
     pub export_declined: String,
+    /// [`crate::Schema::rows_export_with`] only: accepted rows whose verdict
+    /// is [`Verdict::True`], and accepted rows with any other verdict,
+    /// respectively. `rows_passed + rows_cut` equals the accepted-row
+    /// count. Both `0` when no filter was attached — indistinguishable from
+    /// "filter attached, nothing passed and nothing accepted", so key
+    /// presence on whether `rows_export_with` was called, never on these
+    /// being nonzero.
+    pub rows_passed: usize,
+    /// Accepted rows with any verdict OTHER than [`Verdict::True`]; see
+    /// `rows_passed`.
+    pub rows_cut: usize,
 }
 
 impl BatchResult {
@@ -609,6 +713,13 @@ pub(crate) struct RowDoc {
     pub unsupported_settings: Vec<String>,
     pub cols: Vec<ColDoc>,
     pub computed: Vec<CompDoc>,
+    /// Present exactly when a filter was attached to the call that produced
+    /// this document (revision 5, `chs_rows`'s attached row filter) — `None`
+    /// from every plain Row/Rows document and from `rows_export_with` with
+    /// no filter attached.
+    pub verdict: Option<char>,
+    pub verdict_code: i32,
+    pub verdict_err: String,
 }
 
 #[derive(Debug, Default)]
@@ -693,6 +804,11 @@ pub(crate) struct BatchDoc {
     pub row_spans: Option<Vec<Span>>,
     /// Present exactly when an export was requested and withheld.
     pub export_declined: String,
+    /// [`crate::Schema::rows_export_with`] only: accepted rows whose verdict
+    /// is `'t'`, and accepted rows with any other verdict, respectively.
+    /// `0` when no filter was attached.
+    pub rows_passed: usize,
+    pub rows_cut: usize,
 }
 
 /// The wire document `chs_filter_rows` returns.
@@ -731,7 +847,14 @@ pub(crate) fn row_result_of(doc: RowDoc) -> RowResult {
         res.outcome = Outcome::Unsupported;
     }
     for c in &doc.cols {
-        if c.src == "skipped" {
+        // source::SKIPPED (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
+        // source::EPHEMERAL_INPUT (a LISTED EPHEMERAL column: read, but
+        // never stored — see `Value::source`) are both excluded from
+        // `values`, which is the stored row. source::MATERIALIZED_INPUT
+        // stays IN: under insert_allow_materialized_columns=1 the supplied
+        // value genuinely IS stored, replacing the column's expression
+        // (issue #53).
+        if c.src == source::SKIPPED || c.src == source::EPHEMERAL_INPUT {
             continue;
         }
         res.values.push(Value {
@@ -740,7 +863,7 @@ pub(crate) fn row_result_of(doc: RowDoc) -> RowResult {
             null: c.stored_is_json_null() && !c.poison,
             source: c.src.clone(),
         });
-        if c.src == "default_substituted" {
+        if c.src == source::DEFAULT_SUBSTITUTED {
             res.substituted.push(Substitution {
                 column: c.name.clone(),
                 // For a DEFAULT-sourced column the ABI puts the EXPRESSION in
@@ -758,6 +881,11 @@ pub(crate) fn row_result_of(doc: RowDoc) -> RowResult {
             kind: m.kind,
             text: m.stored.unwrap_or_default(),
         });
+    }
+    if let Some(c) = doc.verdict {
+        res.verdict = Some(verdict_of(c));
+        res.verdict_code = doc.verdict_code;
+        res.verdict_err = doc.verdict_err;
     }
     res
 }
@@ -777,6 +905,8 @@ pub(crate) fn batch_result_of(doc: BatchDoc) -> BatchResult {
         engine_rows_raw: doc.engine_rows,
         spans: doc.row_spans,
         export_declined: doc.export_declined,
+        rows_passed: doc.rows_passed,
+        rows_cut: doc.rows_cut,
         ..Default::default()
     };
     for (i, rd) in doc.rows.into_iter().enumerate() {
@@ -828,16 +958,7 @@ pub(crate) fn filter_result_of(doc: FilterDoc) -> FilterResult {
         // document already promises.
         return res;
     }
-    res.verdicts = doc
-        .verdicts
-        .chars()
-        .map(|c| match c {
-            't' => Verdict::True,
-            'f' => Verdict::False,
-            'e' => Verdict::Error,
-            _ => Verdict::Decline,
-        })
-        .collect();
+    res.verdicts = doc.verdicts.chars().map(verdict_of).collect();
     res.errors = doc.errors;
     res
 }
@@ -850,6 +971,135 @@ mod tests {
     fn parse_row(s: &str) -> RowResult {
         let repaired = quote_bare_denormals(s.as_bytes());
         row_result_of(crate::doc::row_doc(&repaired).unwrap())
+    }
+
+    fn parse_filter(s: &str) -> FilterResult {
+        let repaired = quote_bare_denormals(s.as_bytes());
+        filter_result_of(crate::doc::filter_doc(&repaired).unwrap())
+    }
+
+    // Issue #122: five more results-group rules the four bindings agree on
+    // by construction, declared nowhere in tests/parity/manifest.json until
+    // this change. Every document below is parsed through the same
+    // production path parse_row/parse_filter (row_result_of/filter_result_of)
+    // already use, rather than constructing a result struct by hand.
+
+    #[test]
+    fn unsupported_settings_forces_unsupported_unless_rejected() {
+        // results.unsupported-settings-forces-unsupported: a non-empty
+        // unsupported_settings forces outcome to Unsupported, UNLESS it is
+        // already Rejected — the precedence is part of the rule.
+        let accepted = parse_row(
+            r#"{"outcome":"accepted","unsupported_settings":["some_setting"],"cols":[]}"#,
+        );
+        assert_eq!(
+            accepted.outcome,
+            Outcome::Unsupported,
+            "an accepted row with unsupported_settings must degrade to Unsupported"
+        );
+        let rejected = parse_row(
+            r#"{"outcome":"rejected","unsupported_settings":["some_setting"],"cols":[]}"#,
+        );
+        assert_eq!(
+            rejected.outcome,
+            Outcome::Rejected,
+            "a rejected row with unsupported_settings must stay Rejected — a rejection outranks a mere decline"
+        );
+    }
+
+    #[test]
+    fn unknown_outcome_degrades_to_unsupported() {
+        // results.unknown-outcome-degrades-to-unsupported: an outcome string
+        // this crate does not recognize MUST map to Unsupported, never to
+        // Rejected, for BOTH RowResult and FilterResult.
+        let rr = parse_row(r#"{"outcome":"totally-unknown-future-outcome","cols":[]}"#);
+        assert_eq!(rr.outcome, Outcome::Unsupported);
+
+        let fr = parse_filter(
+            r#"{"outcome":"totally-unknown-future-outcome","verdicts":"","errors":[]}"#,
+        );
+        assert_eq!(fr.outcome, FilterOutcome::Unsupported);
+    }
+
+    #[test]
+    fn unknown_verdict_degrades_to_decline() {
+        // results.unknown-verdict-degrades-to-decline: an unrecognized
+        // verdict character MUST degrade to Decline, never be collapsed
+        // into False (an invented answer).
+        let rr = parse_row(r#"{"outcome":"accepted","cols":[],"verdict":"z"}"#);
+        assert_eq!(rr.verdict, Some(Verdict::Decline));
+
+        let fr = parse_filter(r#"{"outcome":"ok","verdicts":"z","errors":[]}"#);
+        assert_eq!(fr.verdicts, vec![Verdict::Decline]);
+    }
+
+    #[test]
+    fn value_null_false_when_poisoned() {
+        // results.null-false-when-poisoned: Value::null is true only when
+        // the stored text is literally "null" AND the column is not
+        // poisoned — poison silently overrides a textual null.
+        let not_poisoned = parse_row(
+            r#"{"outcome":"accepted","cols":[{"name":"c","type":"UInt8","base":"UInt8","src":"input","input":"","stored":null,"poison":false,"nullable":true}]}"#,
+        );
+        assert_eq!(not_poisoned.values.len(), 1);
+        assert!(
+            not_poisoned.values[0].null,
+            "a genuine stored null (not poisoned) must be null == true"
+        );
+
+        let poisoned = parse_row(
+            r#"{"outcome":"accepted","cols":[{"name":"c","type":"UInt8","base":"UInt8","src":"input","input":"","stored":null,"poison":true,"nullable":true}]}"#,
+        );
+        assert_eq!(poisoned.values.len(), 1);
+        assert!(
+            !poisoned.values[0].null,
+            "a poisoned column reporting textual null must be null == false"
+        );
+    }
+
+    #[test]
+    fn default_substituted_populates_substituted() {
+        // results.default-substituted-populates-substituted: src ==
+        // source::DEFAULT_SUBSTITUTED is the only src value that populates
+        // RowResult::substituted.
+        assert_eq!(source::DEFAULT_SUBSTITUTED, "default_substituted");
+        let rr = parse_row(
+            r#"{"outcome":"accepted","cols":[
+                {"name":"ts","type":"DateTime","base":"DateTime","src":"default_substituted","input":"now()","stored":"2026-09-21 00:00:00","nullable":false},
+                {"name":"in_col","type":"UInt8","base":"UInt8","src":"input","input":"5","stored":5,"nullable":false}
+            ]}"#,
+        );
+        assert_eq!(
+            rr.substituted.len(),
+            1,
+            "substituted must have exactly one entry (only the default_substituted column): {:?}",
+            rr.substituted
+        );
+        assert_eq!(rr.substituted[0].column, "ts");
+        assert_eq!(rr.substituted[0].expr, "now()");
+        assert_eq!(rr.substituted[0].text, "\"2026-09-21 00:00:00\"");
+    }
+
+    #[test]
+    fn non_ok_filter_result_forces_empty_verdicts_and_errors() {
+        // results.non-ok-filter-result-forces-empty: a FilterResult whose
+        // outcome is anything but Ok forces verdicts and errors empty —
+        // no partial answers — even if the wire document carried bytes for
+        // them alongside a non-OK outcome.
+        let fr = parse_filter(
+            r#"{"outcome":"rejected","code":115,"err":"unknown setting","verdicts":"tfed","errors":[{"row":0,"code":27,"err":"boom"}]}"#,
+        );
+        assert_eq!(fr.outcome, FilterOutcome::Rejected);
+        assert!(
+            fr.verdicts.is_empty(),
+            "verdicts must be empty on a non-OK FilterResult: {:?}",
+            fr.verdicts
+        );
+        assert!(
+            fr.errors.is_empty(),
+            "errors must be empty on a non-OK FilterResult: {:?}",
+            fr.errors
+        );
     }
 
     #[test]
@@ -995,5 +1245,110 @@ mod tests {
         assert_eq!(Format::RowBinaryWithNamesAndTypesAndDefaults.code(), 7);
         assert_eq!(Format::Native.code(), 8);
         assert_eq!(Format::Buffers.code(), 9);
+        assert_eq!(Format::CsvWithNames.code(), 10);
+        assert_eq!(Format::TsvWithNames.code(), 11);
+    }
+
+    // ---------------------------------------------- issue #54: rows_export_with
+    //
+    // These cover what can be exercised WITHOUT a loaded artifact: the pure
+    // document-decoding logic (`verdict_of`, `row_result_of`,
+    // `batch_result_of` against a hand-built document shaped exactly as the
+    // C ABI contract §Rows describes chs_rows' attached-filter document).
+    // `Schema::rows_export_with`'s cross-library refusal
+    // (`Error::CrossLibrarySchema`) needs two distinct `dlopen`'d libraries
+    // to construct even a `Schema` — the same limitation
+    // `Filter::eval`'s pre-existing cross-library check has, with no unit
+    // test of its own for the same reason — so it is wired (mirrors
+    // `Filter::eval`'s already-established pattern exactly) but not run
+    // here. No revision-5 artifact exists yet (issue #54's own blocker), so
+    // the end-to-end path — a real filter compiled and evaluated through
+    // `chs_rows` — cannot run either.
+
+    #[test]
+    fn verdict_of_maps_the_four_characters() {
+        // The single source of truth `verdict_of` implements. Fail-closed
+        // lives here: 'e' and 'd' — and anything unrecognized — must never
+        // map to Verdict::False.
+        assert_eq!(verdict_of('t'), Verdict::True);
+        assert_eq!(verdict_of('f'), Verdict::False);
+        assert_eq!(verdict_of('e'), Verdict::Error);
+        assert_eq!(verdict_of('d'), Verdict::Decline);
+        assert_eq!(verdict_of('?'), Verdict::Decline);
+        for c in ['e', 'd', '?'] {
+            assert_ne!(
+                verdict_of(c),
+                Verdict::False,
+                "verdict_of({c:?}) collapsed a non-answer into False — fail-open"
+            );
+        }
+    }
+
+    #[test]
+    fn attached_filter_verdicts_decode_all_four_characters_and_rows_passed_cut() {
+        // A hand-built document shaped as chs_rows answers WITH an attached
+        // filter: four rows exercising all four verdict characters, one of
+        // them ('d') on a row whose own parse outcome is not accepted, plus
+        // rows_passed/rows_cut at the batch level. This is the
+        // acceptance-bar test for property (3) — bytes only for 't', e/d
+        // never collapsed into f — at the decoding layer.
+        let doc = crate::doc::batch_doc(
+            br#"{
+                "outcome":"accepted","code":0,"err":"","rows_read":4,"rows_skipped":0,
+                "rows_passed":1,"rows_cut":3,
+                "rows":[
+                    {"outcome":"accepted","code":0,"err":"","cols":[],"verdict":"t"},
+                    {"outcome":"accepted","code":0,"err":"","cols":[],"verdict":"f"},
+                    {"outcome":"accepted","code":0,"err":"","cols":[],"verdict":"e","verdict_code":386,"verdict_err":"no common type"},
+                    {"outcome":"skipped","code":117,"err":"bad row","cols":[],"verdict":"d","verdict_code":117,"verdict_err":"bad row"}
+                ],
+                "row_spans":[{"off":0,"len":5},{"off":0,"len":0},{"off":0,"len":0},{"off":0,"len":0}]
+            }"#,
+        )
+        .unwrap();
+        let br = batch_result_of(doc);
+
+        assert_eq!(br.rows_passed, 1);
+        assert_eq!(br.rows_cut, 3);
+        assert_eq!(br.rows_passed + br.rows_cut, 4);
+
+        let want = [
+            Verdict::True,
+            Verdict::False,
+            Verdict::Error,
+            Verdict::Decline,
+        ];
+        for (i, w) in want.iter().enumerate() {
+            assert_eq!(br.rows[i].verdict, Some(*w), "row {i}");
+        }
+        // Property (3), directly: neither non-answer decoded as False.
+        assert_ne!(br.rows[2].verdict, Some(Verdict::False));
+        assert_ne!(br.rows[3].verdict, Some(Verdict::False));
+        assert!(!br.rows[2].verdict.unwrap().answered());
+        assert!(!br.rows[3].verdict.unwrap().answered());
+
+        // Row 3's own outcome is not accepted, and it still carries
+        // verdict_code / verdict_err beside verdict, per the contract.
+        assert_eq!(br.rows[3].outcome, Outcome::Skipped);
+        assert_eq!(br.rows[3].verdict_code, 117);
+        assert_eq!(br.rows[3].verdict_err, "bad row");
+        assert_eq!(br.rows[2].verdict_code, 386);
+        assert_eq!(br.rows[2].verdict_err, "no common type");
+    }
+
+    #[test]
+    fn no_filter_leaves_verdict_none_and_rows_passed_cut_at_zero() {
+        // The ordinary Row/Rows/RowsExport document — no "verdict" key at
+        // all — leaves verdict None rather than decoding an absent field
+        // into something that could be mistaken for a real decline.
+        let doc = crate::doc::batch_doc(
+            br#"{"outcome":"accepted","code":0,"err":"","rows_read":1,"rows_skipped":0,
+                "rows":[{"outcome":"accepted","code":0,"err":"","cols":[]}]}"#,
+        )
+        .unwrap();
+        let br = batch_result_of(doc);
+        assert_eq!(br.rows_passed, 0);
+        assert_eq!(br.rows_cut, 0);
+        assert_eq!(br.rows[0].verdict, None);
     }
 }

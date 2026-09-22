@@ -89,7 +89,7 @@ For a table that already exists, `QUERY_TABLE_COLUMNS` plus two parsers gives yo
 
 ```go
 cols, _ := chtypes.ParseColumnsResult(run(chtypes.QueryTableColumns))
-ddl, _ := chtypes.ReconstructDDL(cols)
+ddl, _ := lib.ReconstructDDL(cols)
 schema, _ := lib.CompileDDL(ddl, chtypes.WithCompileSettings(profile.Settings))
 ```
 
@@ -99,7 +99,7 @@ schema, _ := lib.CompileDDL(ddl, chtypes.WithCompileSettings(profile.Settings))
 
 ```python
 cols = chtypes.parse_columns_result(run(chtypes.QUERY_TABLE_COLUMNS))
-schema = library.compile_ddl(chtypes.reconstruct_ddl(cols), settings=profile.settings)
+schema = library.compile_ddl(library.reconstruct_ddl(cols), settings=profile.settings)
 ```
 
 </details>
@@ -108,7 +108,7 @@ schema = library.compile_ddl(chtypes.reconstruct_ddl(cols), settings=profile.set
 
 ```ts
 const cols = parseColumnsResult(await run(QUERY_TABLE_COLUMNS));
-const schema = lib.compileDdl(reconstructDdl(cols), { settings: profile.settings });
+const schema = lib.compileDdl(lib.reconstructDdl(cols), { settings: profile.settings });
 ```
 
 </details>
@@ -117,14 +117,14 @@ const schema = lib.compileDdl(reconstructDdl(cols), { settings: profile.settings
 
 ```rust
 let cols = chtypes::parse_columns_result(&query(chtypes::QUERY_TABLE_COLUMNS)?)?;
-let schema = lib.compile(&chtypes::reconstruct_ddl(&cols)?)
+let schema = lib.compile(&lib.reconstruct_ddl(&cols)?)
 .settings(settings.clone())
 .compile()?;
 ```
 
 </details>
 
-`reconstruct_ddl` carries `default_kind` and `default_expression` through. **Dropping them silently loses DEFAULT and MATERIALIZED semantics** — the columns are still there, they just stop behaving like themselves, and every preview after that is wrong in a way nothing reports. It is the reason the parsers exist rather than a suggestion to read `system.columns` yourself.
+Reconstruction hangs off the **loaded library** in all four bindings — resolve the artifact first — because the one thing it spells, the column name, is spelled by ClickHouse's own identifier quoting rather than by a rule in the binding (`docs/reference/bindings.md` §Quoting). It carries `default_kind` and `default_expression` through. **Dropping them silently loses DEFAULT and MATERIALIZED semantics** — the columns are still there, they just stop behaving like themselves, and every preview after that is wrong in a way nothing reports. It is the reason the parsers exist rather than a suggestion to read `system.columns` yourself.
 
 One thing to know about `system.columns`: it reports the table **as stored**, with nested columns already flattened under `flatten_nested=1`. Reconstruction is therefore shape-faithful exactly when the discovered profile is also declared at the compile. Discover both or neither.
 

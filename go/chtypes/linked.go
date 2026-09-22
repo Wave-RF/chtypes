@@ -251,6 +251,73 @@ func ValidateType(v Version, typeExpr string) (canonical string, err error) {
 	return canonical, nil
 }
 
+// ------------------------------------------------------------------ quoting
+//
+// The statically linked twins of Library.QuoteIdentifier and its two
+// siblings: passthroughs over the vendored backQuote / backQuoteIfNeed /
+// quoteString. Nothing here spells the rule; the answers are this build's.
+
+// quoteLinked is the one call site for all three symbols in the linked path:
+// counted input, an owned answer freed with chs_free, an optional error
+// string on the same terms.
+func quoteLinked(v Version, s string, call func(*C.char, C.size_t, **C.char, **C.char) C.int) (string, error) {
+	if err := checkVersion(v); err != nil {
+		return "", err
+	}
+	var p *C.char
+	if len(s) > 0 {
+		p = (*C.char)(unsafe.Pointer(unsafe.StringData(s)))
+	} else {
+		p = C.CString("")
+		defer C.free(unsafe.Pointer(p))
+	}
+	var cOut, cErr *C.char
+	rc := call(p, C.size_t(len(s)), &cOut, &cErr)
+	// Taken on EVERY path: the library owns whatever it wrote, and an answer
+	// left behind on an error return is a leak nothing else can reach.
+	out, msg := "", ""
+	if cOut != nil {
+		out = C.GoString(cOut)
+		C.chs_free(cOut)
+	}
+	if cErr != nil {
+		msg = C.GoString(cErr)
+		C.chs_free(cErr)
+	}
+	runtime.KeepAlive(s)
+	if rc != 0 {
+		return "", schemaErr(int(rc), msg, "")
+	}
+	return out, nil
+}
+
+// QuoteIdentifier spells name as a back-quoted identifier — ALWAYS quoted
+// (chs_quote_identifier). The linked twin of Library.QuoteIdentifier.
+func QuoteIdentifier(v Version, name string) (string, error) {
+	return quoteLinked(v, name, func(p *C.char, n C.size_t, out, err **C.char) C.int {
+		return C.chs_quote_identifier(p, n, out, err)
+	})
+}
+
+// QuoteIdentifierIfNeeded spells name bare where THIS build says a bare
+// spelling is legal, and back-quotes it otherwise
+// (chs_quote_identifier_if_needed). Which names it leaves bare is the
+// build's own rule and differs between builds.
+func QuoteIdentifierIfNeeded(v Version, name string) (string, error) {
+	return quoteLinked(v, name, func(p *C.char, n C.size_t, out, err **C.char) C.int {
+		return C.chs_quote_identifier_if_needed(p, n, out, err)
+	})
+}
+
+// QuoteLiteral spells text as a ClickHouse string literal, quotes and escapes
+// included (chs_quote_literal). text is counted, so a value carrying a NUL
+// byte is quoted correctly.
+func QuoteLiteral(v Version, text string) (string, error) {
+	return quoteLinked(v, text, func(p *C.char, n C.size_t, out, err **C.char) C.int {
+		return C.chs_quote_literal(p, n, out, err)
+	})
+}
+
 // CompiledSchema is a schema bound to the vendored ClickHouse build — the
 // statically linked twin of LoadedSchema. Columns/Canonical/LiteralDefault
 // mirror the C column-introspection group in ClickHouse's own canonical
@@ -303,7 +370,11 @@ func ParseSchema(v Version, s Schema) (*CompiledSchema, error) {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(QuoteIdentifier(c.Name))
+		quoted, err := QuoteIdentifier(v, c.Name)
+		if err != nil {
+			return nil, err
+		}
+		b.WriteString(quoted)
 		b.WriteByte(' ')
 		b.WriteString(c.Type)
 		if k := c.DefaultKind.String(); k != "" && c.Default != "" {
@@ -690,7 +761,12 @@ type Block struct {
 // ClickHouse's own code — an unknown setting's 115, a framing or decode
 // fault — or an *UnsupportedError for a decline): no partial block exists on
 // any error.
-func (cs *CompiledSchema) ParseBlock(format Format, body []byte, settings map[string]string) (*Block, error) {
+//
+// WithColumns declares the revision-5 INSERT column list, read exactly as
+// Row/Rows read it — filters still compile over the schema's physical
+// columns and evaluate the stored tuple, so a listed EPHEMERAL column stays
+// unreferenceable in a filter.
+func (cs *CompiledSchema) ParseBlock(format Format, body []byte, settings map[string]string, opts ...RowOption) (*Block, error) {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
 	cs.mu.Lock()
@@ -709,9 +785,14 @@ func (cs *CompiledSchema) ParseBlock(format Format, body []byte, settings map[st
 		defer C.free(unsafe.Pointer(pbody))
 	}
 
+	pcols := columnsCArg(columnsOf(opts))
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
+	}
+
 	var code C.int
 	var cErr *C.char
-	h := C.chs_block_parse(cs.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr)
+	h := C.chs_block_parse(cs.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr, pcols)
 	runtime.KeepAlive(body)
 	if h == nil {
 		msg := ""
@@ -832,10 +913,13 @@ func (b *Block) closeLocked() {
 // EngineRows as the stored truth when present, storage TTL effects folded
 // into Transformed); the error return is only for a closed schema or an
 // unreadable result document, never a ClickHouse verdict.
-func (cs *CompiledSchema) Rows(format Format, body []byte, settings map[string]string) (BatchResult, error) {
+//
+// WithColumns declares the revision-5 INSERT column list (see its doc); a
+// nil or empty list is today's no-list behavior, unchanged.
+func (cs *CompiledSchema) Rows(format Format, body []byte, settings map[string]string, opts ...RowOption) (BatchResult, error) {
 	// export off, all document groups on: the revision-3 pass-through that
 	// keeps Rows() byte-identical to revision 2 (docs/reference/bindings.md §Revision 3).
-	return cs.rowsThrough(format, body, settings, ExportNone, DocAll)
+	return cs.rowsThrough(format, body, settings, ExportNone, DocAll, columnsOf(opts))
 }
 
 // RowsExport is Rows with the revision-3 export and document-flag channels
@@ -862,18 +946,23 @@ func (cs *CompiledSchema) Rows(format Format, body []byte, settings map[string]s
 // Payload non-nil-empty versus nil + ExportDeclined (see BatchResult). The
 // C buffer is copied and freed (same library's chs_free) before this
 // returns; no ownership crosses the cgo boundary.
-func (cs *CompiledSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, docFlags ...DocFlags) (BatchResult, error) {
-	var flags DocFlags
-	for _, f := range docFlags {
-		flags |= f
+//
+// opts accepts DocFlags values (as always) and WithColumns (the revision-5
+// column list) in any mix — the export tuple is unchanged by a column list:
+// an exported row still carries the stored columns in declared order, so it
+// stays directly INSERT-able with no list.
+func (cs *CompiledSchema) RowsExport(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...RowsExportOption) (BatchResult, error) {
+	var cfg rowsExportConfig
+	for _, o := range opts {
+		o.applyRowsExport(&cfg)
 	}
-	return cs.rowsThrough(format, body, settings, exportFormat, flags)
+	return cs.rowsThrough(format, body, settings, exportFormat, cfg.flags, cfg.columns)
 }
 
 // rowsThrough is the ONE chs_rows call site on the statically linked path —
 // Rows and RowsExport are both single invocations of it with different
 // parameters, exactly as the proposal requires.
-func (cs *CompiledSchema) rowsThrough(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags) (BatchResult, error) {
+func (cs *CompiledSchema) rowsThrough(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags, columns []string) (BatchResult, error) {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
 	cs.mu.Lock()
@@ -894,6 +983,11 @@ func (cs *CompiledSchema) rowsThrough(format Format, body []byte, settings map[s
 		defer C.free(unsafe.Pointer(pbody))
 	}
 
+	pcols := columnsCArg(columns)
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
+	}
+
 	// The export buffer rides only when an export is requested; Rows()
 	// passes NULL, which is what keeps its document byte-identical to
 	// revision 2 (the C side treats a non-exporting NULL as the old path).
@@ -903,7 +997,7 @@ func (cs *CompiledSchema) rowsThrough(format Format, body []byte, settings map[s
 		ob = &obv
 	}
 	out := C.chs_rows(cs.handle, C.int(format), pbody, C.size_t(len(body)), csj,
-		C.int(exportFormat), C.uint(flags), ob)
+		C.int(exportFormat), C.uint(flags), ob, pcols, nil)
 	runtime.KeepAlive(body)
 	// Copy-then-free the export buffer FIRST, whatever happens to the
 	// document: the bytes are library-owned malloc'd memory and this is the
@@ -943,14 +1037,17 @@ func (cs *CompiledSchema) rowsThrough(format Format, body []byte, settings map[s
 // Unsupported; the error return is only for a closed schema or an unreadable
 // result document. For a multi-row body use Rows, which is not this in a
 // loop.
-func (cs *CompiledSchema) Row(format Format, raw []byte) (RowResult, error) {
-	return cs.RowWithSettings(format, raw, nil)
+//
+// WithColumns declares the revision-5 INSERT column list; see its doc for
+// the full contract.
+func (cs *CompiledSchema) Row(format Format, raw []byte, opts ...RowOption) (RowResult, error) {
+	return cs.RowWithSettings(format, raw, nil, opts...)
 }
 
 // RowWithSettings is Row with per-call ClickHouse settings applied. Values
 // must be strings (see SetDefaultSettings); an unknown setting name rejects
 // the call with the server's own code 115 in the RowResult.
-func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings map[string]string) (RowResult, error) {
+func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings map[string]string, opts ...RowOption) (RowResult, error) {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
 	cs.mu.Lock()
@@ -971,7 +1068,12 @@ func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings ma
 		defer C.free(unsafe.Pointer(praw))
 	}
 
-	out := C.chs_row(cs.handle, C.int(format), praw, C.size_t(len(raw)), csj)
+	pcols := columnsCArg(columnsOf(opts))
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
+	}
+
+	out := C.chs_row(cs.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)
 	runtime.KeepAlive(raw)
 	if out == nil {
 		return RowResult{}, fmt.Errorf("chtypes: chs_row returned null")
@@ -988,6 +1090,20 @@ func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings ma
 }
 
 // ---------------------------------------------------------------- helpers
+
+// columnsCArg renders a resolved column list as chs_row / chs_rows /
+// chs_block_parse's wire columns_json: a NULL pointer for "no list"
+// (nil/empty — the caller passed no WithColumns option, or an empty one),
+// NEVER the empty array "[]" — INSERT INTO t () FORMAT X is a syntax error
+// (code 62) on every server, so this binding never renders one. A non-nil
+// result is a live C.CString the caller must C.free.
+func columnsCArg(columns []string) *C.char {
+	if len(columns) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(columns) // []string cannot fail to marshal
+	return C.CString(string(b))
+}
 
 // SetDefaultSettings seeds the settings every later call starts from
 // (chs_set_default_settings) — the "library defaults" tier of the

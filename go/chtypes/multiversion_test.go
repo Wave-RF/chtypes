@@ -32,11 +32,19 @@ func TestRegistryLoadsAndDispatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("registry versions: %v", r.Versions())
-
-	lib, err := r.For(Version(r.Versions()[0]))
-	if err != nil {
+	// Construction dlopens nothing, so the artifact is opened by an explicit
+	// request. These stand-in directories say "x" in their manifests while the
+	// library names itself something else, and rule 1 is that the LIBRARY
+	// names itself — so the one request that does not go through a line is
+	// Load, and the dispatch below is off what the library reported.
+	if err := r.Load(filepath.Join(dir, "a", "libchtypes"+soext)); err != nil {
 		t.Fatal(err)
 	}
+	libs := r.Libraries()
+	if len(libs) != 1 {
+		t.Fatalf("one explicit Load must open exactly one library, got %d", len(libs))
+	}
+	lib := libs[0]
 	cs, err := lib.CompileDDL("x UInt8")
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +180,7 @@ func TestVerifyChecksumsRefusesBytesTheManifestDoesNotClaim(t *testing.T) {
 		"clickhouse_minor":   "25.8",
 	}, body)
 
-	_, err := NewRegistry(dir, WithVerifyChecksums(true))
+	_, err := NewRegistry(dir, WithVerifyChecksums(true), WithPreload("25.8"))
 	if err == nil {
 		t.Fatal("a library whose bytes do not match its manifest loaded anyway")
 	}
@@ -183,7 +191,7 @@ func TestVerifyChecksumsRefusesBytesTheManifestDoesNotClaim(t *testing.T) {
 	// The same directory without the option: the load gets as far as dlopen,
 	// which is what proves the option — and not merely the broken file —
 	// produced the verdict above.
-	_, err = NewRegistry(dir)
+	_, err = NewRegistry(dir, WithPreload("25.8"))
 	if err == nil || strings.Contains(err.Error(), "does not match manifest") {
 		t.Fatalf("without WithVerifyChecksums the hash must not be consulted; got: %v", err)
 	}
@@ -203,7 +211,7 @@ func TestVerifyChecksumsAcceptsMatchingBytesAndLoadsOn(t *testing.T) {
 	// The hash matches, so verification passes and the load proceeds to dlopen,
 	// which is where a text file dies. A checksum error here would mean the
 	// check refused bytes it had just been told were correct.
-	_, err := NewRegistry(dir, WithVerifyChecksums(true))
+	_, err := NewRegistry(dir, WithVerifyChecksums(true), WithPreload("25.8"))
 	if err == nil {
 		t.Fatal("a text file cannot dlopen; the load must still fail")
 	}
@@ -226,9 +234,58 @@ func TestVerifyChecksumsRefusesAManifestWithNoHash(t *testing.T) {
 
 	// Verification asked for and not possible is not verification: a manifest
 	// carrying no library_sha256 is refused, never passed over in silence.
-	_, err := NewRegistry(dir, WithVerifyChecksums(true))
+	_, err := NewRegistry(dir, WithVerifyChecksums(true), WithPreload("25.8"))
 	if err == nil || !strings.Contains(err.Error(), "cannot verify") {
 		t.Fatalf("want a refusal naming the unverifiable artifact, got: %v", err)
+	}
+}
+
+// TestLoadRefusesBadLibraryBytesWithoutVerification is issue #82's level-up:
+// the size check runs on EVERY Load, whether or not WithVerifyChecksums is
+// on, because it is nearly free (one stat, no re-hash) and it is the
+// commonest shape of a broken artifact directory — a truncated or
+// partially-written library file. Before #82 this registry constructed fine
+// with WithVerifyChecksums off; the whole point of the change is that it
+// no longer does.
+func TestLoadRefusesBadLibraryBytesWithoutVerification(t *testing.T) {
+	body := []byte("not a shared library")
+	dir := t.TempDir()
+	writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"library_bytes":      len(body) + 1,
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+	}, body)
+
+	// No WithVerifyChecksums anywhere in this call.
+	_, err := NewRegistry(dir, WithPreload("25.8"))
+	if err == nil {
+		t.Fatal("a library whose bytes do not match its manifest loaded anyway, with no verification asked for")
+	}
+	if !strings.Contains(err.Error(), "manifest says") {
+		t.Fatalf("want the size refusal naming both counts, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "dlopen") {
+		t.Fatalf("the size check must refuse BEFORE dlopen is ever attempted, got: %v", err)
+	}
+}
+
+// TestLoadIgnoresAbsentLibraryBytesWithoutVerification is the companion
+// case: a manifest that predates the field (library_bytes 0, its zero
+// value) or carries no manifest.json at all must not turn into a new reason
+// Load fails for a caller who never asked for a size to be checked against.
+func TestLoadIgnoresAbsentLibraryBytesWithoutVerification(t *testing.T) {
+	body := []byte("not a shared library")
+	dir := t.TempDir()
+	writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+	}, body)
+
+	_, err := NewRegistry(dir, WithPreload("25.8"))
+	if err == nil || !strings.Contains(err.Error(), "dlopen") {
+		t.Fatalf("want the load to reach (and fail at) dlopen with no library_bytes to check, got: %v", err)
 	}
 }
 
@@ -254,7 +311,7 @@ func TestVerifyChecksumsAgainstARealArtifact(t *testing.T) {
 		}
 	}
 
-	r, err := NewRegistry(dir, WithVerifyChecksums(true))
+	r, err := NewRegistry(dir, WithVerifyChecksums(true), WithPreload(inst.Line))
 	if err != nil {
 		t.Fatalf("a real artifact must survive its own checksum: %v", err)
 	}
@@ -303,7 +360,7 @@ func TestVerifyChecksumsAgainstARealArtifact(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(badSub, "manifest.json"), tampered, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewRegistry(bad, WithVerifyChecksums(true))
+	_, err = NewRegistry(bad, WithVerifyChecksums(true), WithPreload(inst.Line))
 	if err == nil {
 		t.Fatal("a manifest claiming the wrong digest for a real library was accepted")
 	}

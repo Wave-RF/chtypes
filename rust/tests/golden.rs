@@ -89,8 +89,12 @@ fn announce(message: &str) {
 
 #[test]
 fn goldens_hold_on_every_artifact() {
+    // Construction opens nothing, so "holds an artifact" is read off
+    // versions() — which is manifest-derived — and the lines are then ASKED
+    // for below. libraries() would be empty here and this test would skip
+    // against a registry full of artifacts.
     let registry = match Registry::from_env_or_default() {
-        Ok(r) if !r.libraries().is_empty() => r,
+        Ok(r) if !r.versions().is_empty() => r,
         Ok(r) => {
             announce(&format!(
                 "\nSKIP goldens_hold_on_every_artifact: registry {} holds no artifact — fetch one \
@@ -114,6 +118,19 @@ fn goldens_hold_on_every_artifact() {
     let exact = &doc["generated"]["exact"];
     let mut checked = 0usize;
     let mut ran_on = 0usize;
+    // Ask for every line before scoring it: `libraries()` lists what is open,
+    // and construction opens nothing. A line that will not open is the same
+    // LOUD SKIP the constructor used to give when it was the one opening them.
+    for line in registry.versions() {
+        if let Err(e) = registry.for_version(&line) {
+            announce(&format!(
+                "\nSKIP goldens_hold_on_every_artifact: registry {} holds {line} and it did not \
+                 open: {e}\n",
+                registry.dir().display()
+            ));
+            return;
+        }
+    }
     for lib in registry.libraries() {
         // A case is only a golden for the EXACT build it was generated against.
         // The rolling index keeps older patch rows, so a machine can hold a

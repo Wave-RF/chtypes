@@ -96,6 +96,23 @@ function unsupportedIfMissing<T>(err: unknown, message: string): T {
   throw err;
 }
 
+/**
+ * Serialize an INSERT column list to the `columns_json` the C ABI expects
+ * (revision 5; `chtypes.h`'s `chs_row` comment is the normative text). The
+ * header states NULL and `"[]"` are the SAME input — "an empty array NEVER
+ * renders as `()`: `INSERT INTO t () FORMAT X` is code 62 SYNTAX_ERROR on
+ * every line" — so this binding always sends `"[]"` for "no list" rather
+ * than a real C NULL: ffi-rs's `DataType.String` cannot carry one for an
+ * INPUT parameter (probed empirically against ffi-rs 1.3.7 — passing JS
+ * `null`/`undefined` throws before the native call is even made, and there
+ * is no documented, safe way to synthesize a null pointer for a `Str`-typed
+ * argument). `"[]"` is the ABI's own other spelling of "no list" and is
+ * therefore exactly as correct, never a rendered-SQL empty list.
+ */
+function encodeColumns(columns?: readonly string[]): string {
+  return columns === undefined || columns.length === 0 ? '[]' : JSON.stringify(columns);
+}
+
 function asBuffer(bytes: Uint8Array): Buffer {
   if (typeof bytes === 'string') {
     throw new ChtypesError(
@@ -129,6 +146,31 @@ const dropPtrSlot = (s: Slot): void =>
 const dropIntSlot = (s: Slot): void =>
   freePointer({ paramsType: [I32], paramsValue: s, pointerType: PointerType.RsPointer });
 
+/**
+ * A NULL pointer, for an `External` parameter this binding has no value to
+ * supply — today, only `chs_rows`' attached row filter.
+ *
+ * `Str` cannot carry a NULL (see `encodeColumns`), but `External` can, and
+ * this is how: seed an 8-byte slot with 0, read it back as a pointer, and the
+ * value IS the null pointer. That was MEASURED against ffi-rs 1.3.7 rather
+ * than assumed — a C function reporting the address it received answers 0 for
+ * this value and a real address for a live slot — and the value is a copy, so
+ * it outlives the slot it came from and the slot is freed immediately.
+ */
+const NULL_PTR: JsExternal = (() => {
+  const slot = ptrSlot();
+  const p = readPtr(slot);
+  dropPtrSlot(slot);
+  // Checked here rather than believed: a non-null value in this slot would
+  // hand the library a pointer to read a filter out of, and the symptom would
+  // be a crash inside the artifact with nothing pointing back here. Every
+  // import of this module runs the assertion, so no test has to remember it.
+  if (!isNullPointer(p)) {
+    throw new ChtypesError('chtypes: internal — the NULL pointer constant did not come back null');
+  }
+  return p;
+})();
+
 // ------------------------------------------------------------ the symbol table
 
 function declare(library: string) {
@@ -144,7 +186,18 @@ function declare(library: string) {
     // Revision 3: export_format (int), doc_flags (unsigned — I32 carries the
     // three defined bits and any refused ones identically), out_bytes
     // (chs_bytes * — passed as a 16-byte scratch buffer, see `rows`).
-    chs_rows: d(External, [External, I32, U8Array, U64, Str, I32, I32, U8Array]),
+    // Revision 5: chs_rows gains a trailing columns_json (the INSERT column
+    // list) — see `encodeColumns` for why this binding always sends "[]"
+    // rather than a real NULL for "no list" — and then, in the same open
+    // window, the attached row filter LAST: NULL_PTR for "no filter" (every
+    // plain `rows()` call, and `rows()` with no `options.rowFilter`), a real
+    // filter handle when `Schema#rows` was given one (`rows()`'s own
+    // spelling for RowsExportWith — docs/guides/filters.md "Exporting only
+    // the rows a filter admits"). The parameter was DECLARED before any
+    // caller could supply a value, because calling a ten-parameter symbol
+    // through a nine-parameter descriptor leaves the callee reading the
+    // filter slot from whatever happened to occupy it.
+    chs_rows: d(External, [External, I32, U8Array, U64, Str, I32, I32, U8Array, Str, External]),
     // Everything else is optional and degrades to `unsupported` at call time.
     chs_free: d(Void, [External]),
     chs_shutdown: d(Void, []),
@@ -161,8 +214,16 @@ function declare(library: string) {
     chs_schema_column_default_kind: d(Str, [External, I32]),
     chs_schema_column_default_expr: d(Str, [External, I32]),
     chs_schema_column_default_is_literal: d(I32, [External, I32]),
-    chs_row: d(External, [External, I32, U8Array, U64, Str]),
+    // Revision 5: chs_row gains the same trailing columns_json as chs_rows.
+    chs_row: d(External, [External, I32, U8Array, U64, Str, Str]),
     chs_reference_type: d(External, [Str]),
+    // Revision 5, additive: the quoting trio, straight off the vendored
+    // backQuote / backQuoteIfNeed / quoteString. The input is `U8Array`, not
+    // `Str`, for the same reason a row body is: it is COUNTED, and a string
+    // literal may legally carry a NUL byte that `Str` would truncate at.
+    chs_quote_identifier: d(I32, [U8Array, U64, External, External]),
+    chs_quote_identifier_if_needed: d(I32, [U8Array, U64, External, External]),
+    chs_quote_literal: d(I32, [U8Array, U64, External, External]),
     chs_registered_families: d(External, []),
     chs_function_flags: d(External, []),
     // Revision 3: the filter trio. Optional like everything above — a missing
@@ -177,7 +238,8 @@ function declare(library: string) {
     chs_filter_rows: d(External, [External, I32, U8Array, U64, Str]),
     // Revision 4: the block twin (the C ABI contract §Blocks) — parse a body once,
     // evaluate K filters against the block. Optional, same degradation rule.
-    chs_block_parse: d(External, [External, I32, U8Array, U64, Str, External, External]),
+    // Revision 5: chs_block_parse gains the same trailing columns_json.
+    chs_block_parse: d(External, [External, I32, U8Array, U64, Str, External, External, Str]),
     chs_block_free: d(Void, [External]),
     chs_filter_eval: d(External, [External, External]),
     // Reached through the artifact's own dependency graph (it links libc), and
@@ -522,6 +584,48 @@ export class NativeLibrary {
     }
   }
 
+  /**
+   * One of the three `chs_quote_*` symbols. The input is COUNTED — a string
+   * literal may legally carry a NUL byte — so it travels as bytes with an
+   * explicit length, never as a `Str`. The answer is always NUL-free, since
+   * every byte the server escapes comes back escaped.
+   *
+   * Both out-param slots are read and released on EVERY path, success or
+   * failure: the library owns whatever it wrote, and an answer left behind on
+   * an error return is a leak nothing else can reach.
+   */
+  quote(
+    symbol: 'chs_quote_identifier' | 'chs_quote_identifier_if_needed' | 'chs_quote_literal',
+    text: string,
+  ): { quoted: string; code: number; message: string; ok: boolean } {
+    const bytes = Buffer.from(text, 'utf8');
+    // Resolved as three separate properties rather than by indexing with the
+    // union: each descriptor has its own call signature, and indexing would
+    // leave a union of them that cannot be called with one argument list.
+    const fn =
+      symbol === 'chs_quote_identifier'
+        ? this.fns.chs_quote_identifier
+        : symbol === 'chs_quote_identifier_if_needed'
+          ? this.fns.chs_quote_identifier_if_needed
+          : this.fns.chs_quote_literal;
+    const outSlot = ptrSlot();
+    const errSlot = ptrSlot();
+    try {
+      let rc: number;
+      try {
+        rc = this.entered(() => Number(fn([bytes, bytes.length, ...outSlot, ...errSlot])));
+      } catch (err) {
+        return unsupportedIfMissing(err, `this artifact predates ${symbol} (rebuild it)`);
+      }
+      const quoted = this.takeString(readPtr(outSlot)) ?? '';
+      const message = this.takeString(readPtr(errSlot)) ?? '';
+      return { quoted, code: rc, message, ok: rc === 0 };
+    } finally {
+      dropPtrSlot(outSlot);
+      dropPtrSlot(errSlot);
+    }
+  }
+
   registeredFamilies(): string[] {
     let text: string | null;
     try {
@@ -736,13 +840,18 @@ export class NativeLibrary {
   /**
    * `chs_row`: one row body. Returns the raw result document **as bytes** — a
    * stored value can be any byte sequence, so the document can be too.
+   *
+   * `columns` (revision 5) is the INSERT column list — `RowsOptions#columns`,
+   * read exactly as `chs_row` documents it. Absent or empty means no list,
+   * encoded per `encodeColumns`.
    */
-  row(handle: SchemaHandle, format: number, raw: Uint8Array, settingsJson: string): Buffer {
+  row(handle: SchemaHandle, format: number, raw: Uint8Array, settingsJson: string, columns?: readonly string[]): Buffer {
     const body = asBuffer(raw);
+    const columnsJson = encodeColumns(columns);
     let ptr: JsExternal;
     try {
       ptr = this.entered(
-        () => this.fns.chs_row([handle, format, body, body.length, settingsJson]) as JsExternal,
+        () => this.fns.chs_row([handle, format, body, body.length, settingsJson, columnsJson]) as JsExternal,
       );
     } catch (err) {
       return unsupportedIfMissing(err, 'this artifact predates chs_row (rebuild it)');
@@ -794,6 +903,16 @@ export class NativeLibrary {
    * handle as the decline it is. `chs_rows` is one of the mandatory four, so
    * with repo-built artifacts the branch is unreachable — the type still has
    * to be the honest one.
+   *
+   * `columns` (revision 5) is the INSERT column list — `RowsOptions#columns`,
+   * read exactly as `chs_row` documents it; the export channel is unchanged
+   * by it (an exported row still carries the stored columns in declared
+   * order). Absent or empty means no list, encoded per `encodeColumns`.
+   *
+   * `filterHandle` (revision 5, second half) is the attached row filter —
+   * `undefined`/`null` (the default) sends `NULL_PTR`, "no filter" and
+   * today's behavior byte for byte. `Schema#rows`'s `options.rowFilter` is
+   * the only caller that ever supplies one.
    */
   rows(
     handle: SchemaHandle,
@@ -802,8 +921,11 @@ export class NativeLibrary {
     settingsJson: string,
     exportFormat: number = EXPORT_NONE,
     docFlags: number = DOC_ALL,
+    columns?: readonly string[],
+    filterHandle?: FilterHandle | null,
   ): { doc: Buffer; payload: Buffer | null } {
     const buf = asBuffer(body);
+    const columnsJson = encodeColumns(columns);
     // The chs_bytes out-param: {char *data; size_t len}, 16 bytes, zeroed.
     const outBytes = Buffer.alloc(16);
     let ptr: JsExternal;
@@ -819,6 +941,8 @@ export class NativeLibrary {
             exportFormat,
             docFlags,
             outBytes,
+            columnsJson,
+            filterHandle ?? NULL_PTR,
           ]) as JsExternal,
       );
     } catch (err) {
@@ -932,9 +1056,22 @@ export class NativeLibrary {
    * ClickHouse's own code/message — a malformed body yields no block and no
    * partial answers; the sign of the code picks the error class, exactly as
    * `filterCompile`. A missing symbol degrades to the decline type.
+   *
+   * `columns` (revision 5) is the INSERT column list, read exactly as
+   * `chs_row` documents it — filters still compile over the schema's
+   * physical columns and evaluate the stored tuple, so a listed EPHEMERAL
+   * column stays unreferenceable in a filter. Absent or empty means no
+   * list, encoded per `encodeColumns`.
    */
-  blockParse(schema: SchemaHandle, format: number, body: Uint8Array, settingsJson: string): BlockHandle {
+  blockParse(
+    schema: SchemaHandle,
+    format: number,
+    body: Uint8Array,
+    settingsJson: string,
+    columns?: readonly string[],
+  ): BlockHandle {
     const buf = asBuffer(body);
+    const columnsJson = encodeColumns(columns);
     const codeSlot = intSlot();
     const errSlot = ptrSlot();
     try {
@@ -950,6 +1087,7 @@ export class NativeLibrary {
               settingsJson,
               ...codeSlot,
               ...errSlot,
+              columnsJson,
             ]) as JsExternal,
         );
       } catch (err) {

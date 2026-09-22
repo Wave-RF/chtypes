@@ -12,7 +12,7 @@ import json
 import os
 import threading
 import weakref
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
 from types import TracebackType
@@ -22,13 +22,16 @@ from ._document import parse_batch_document, parse_filter_document, parse_row_do
 from ._manifest import (
     Manifest,
     cache_registry_dir,
+    check_library_bytes,
     host_platform,
     minor_of,
     read_manifest,
     verify_library,
 )
 from ._native import NativeLibrary
+from .discover import DiscoveredColumn, _reconstruct_ddl
 from .errors import (
+    FETCH_COMMAND,
     ArtifactMissingError,
     ChtypesError,
     RegistryError,
@@ -59,6 +62,7 @@ __all__ = [
     "Registry",
     "Schema",
     "Settings",
+    "encode_columns",
     "encode_settings",
     "host_platform",
     "minor_of",
@@ -152,6 +156,29 @@ def encode_settings(settings: Settings | None) -> str:
                 "nanosecond epoch, and the setting would be silently ignored"
             )
     return json.dumps(out)
+
+
+def encode_columns(columns: Sequence[str] | None) -> str | None:
+    """Encode the revision-5 INSERT column list the way the C ABI requires:
+    a JSON array of column-name strings (`["id", "e"]`), or `None` for "no
+    list" — the behavior of every revision before 5, where the data supplies
+    every plain column.
+
+    `None` and an EMPTY sequence are the SAME input and both encode to
+    `None`, never to `"[]"`: `INSERT INTO t () FORMAT X` is code 62
+    `SYNTAX_ERROR` on every served line (measured 2026-09-15, core's
+    explicit-column-list measurements), so an implementation that renders an
+    empty list into parentheses sends a statement no ClickHouse has ever
+    accepted.
+
+    No local validation of names — an unknown column, an `ALIAS` column and a
+    repeated name are all refused by the SERVER, with its own codes (16, 16,
+    15 respectively), surfaced exactly as they come back rather than
+    pre-checked here.
+    """
+    if not columns:
+        return None
+    return json.dumps(list(columns))
 
 
 def _as_bytes(raw: object, what: str) -> bytes:
@@ -325,13 +352,34 @@ class Schema:
 
     # -- rows ---------------------------------------------------------------
 
-    def row(self, fmt: Format, raw: bytes, settings: Settings | None = None) -> RowResult:
+    def row(
+        self,
+        fmt: Format,
+        raw: bytes,
+        settings: Settings | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> RowResult:
         """Validate and coerce one row: what would this INSERT do to this value?
 
         `fmt` is a `Format` code, `raw` the row's wire bytes (bytes, never
         text: binary formats contain NULs and text rows may carry invalid
         UTF-8 on purpose), `settings` an optional per-call settings mapping
         (values cross as strings; see `encode_settings`).
+
+        `columns` (revision 5) names the INSERT column list — `INSERT INTO t
+        (id, e) FORMAT ...` rather than `INSERT INTO t FORMAT ...`: the data
+        supplies exactly these columns, in list order for the positional
+        formats (arity = list length), and the server computes the rest with
+        the listed values in scope for their DEFAULT expressions. `None` or
+        an empty sequence is the no-list behavior of every revision before
+        5 — never rendered as `()`, which is a syntax error on every served
+        line (see `encode_columns`). A listed `EPHEMERAL` column's value IS
+        read and is in scope for the DEFAULTs that reference it, and is
+        still never stored and never exported. This binding does not
+        validate names locally: an unknown column, an `ALIAS` column, or a
+        name repeated in the list are refused by the SERVER (codes 16, 16,
+        15), surfaced exactly as it comes back.
 
         Returns a `RowResult` — a verdict, never an exception: a row the
         server would refuse comes back `Outcome.REJECTED` with the server's
@@ -342,7 +390,11 @@ class Schema:
         """
         with self._mu:
             doc = self._library._native.row(
-                self._live(), int(fmt), _as_bytes(raw, "row"), encode_settings(settings)
+                self._live(),
+                int(fmt),
+                _as_bytes(raw, "row"),
+                encode_settings(settings),
+                encode_columns(columns),
             )
         return parse_row_document(doc)
 
@@ -354,6 +406,8 @@ class Schema:
         *,
         export: Format | int | None = None,
         doc_flags: int | None = None,
+        columns: Sequence[str] | None = None,
+        row_filter: Filter | None = None,
     ) -> BatchResult:
         """Validate and coerce a whole request body, which may hold many rows.
 
@@ -391,13 +445,76 @@ class Schema:
         `computed`, `substituted`, `unknown_fields` all come back empty) when
         `export` is given, the proposal's export-spelling default. An
         explicit int always wins, over both.
+
+        `columns` (revision 5) names the INSERT column list, exactly as
+        `Schema.row` reads it — `None` or an empty sequence is today's
+        no-list behavior (see `encode_columns`); the export channel is
+        unchanged by it, and an exported row still carries the stored
+        columns in declared order, directly INSERT-able with no list.
+
+        `row_filter` (revision 5, second half — docs/guides/filters.md
+        "Exporting only the rows a filter admits") attaches a compiled
+        `Filter` to this call's export channel: ONE `chs_rows` parse then
+        answers both the per-row verdict (`RowResult.verdict`,
+        `Verdict.TRUE`/`FALSE`/`ERROR`/`DECLINE`) and, for rows whose
+        verdict is `Verdict.TRUE`, the export bytes. `None` (the default) is
+        today's behavior byte for byte. `Verdict.ERROR` (the predicate
+        threw) and `Verdict.DECLINE` (this library declines — including a
+        row whose own `outcome` was not `Outcome.ACCEPTED`) are NEVER
+        exported and NEVER collapsed into `Verdict.FALSE`: collapsing
+        either turns fail-closed into fail-open, the leak class this
+        surface exists to prevent. A security-enforcing caller must treat
+        any `RowResult.verdict` that is `None` or not `.answered` as a
+        refusal — hide the row or fail the request, never export it.
+        `BatchResult.rows_passed` and `.rows_cut` join the document;
+        `rows_passed + rows_cut` equals the accepted-row count.
+
+        The filter must be compiled over THIS schema: one from a different
+        `Schema` of the SAME library rejects the whole call, loudly
+        (`Outcome.REJECTED`, code 1002 — the same cross-schema rule
+        `Filter.eval` enforces for a (filter, block) pair). One from a
+        DIFFERENT `Library` raises `ChtypesError` here, before any C call —
+        no handle crosses a dlopen'd image boundary. Lifetime is unchanged
+        from `compile_filter` / `Filter.rows`: keep the filter's schema open
+        for as long as the filter is used; this reuses that existing
+        mechanism rather than inventing a second one.
         """
         export_format = EXPORT_NONE if export is None else int(export)
         if doc_flags is None:
             flags = DOC_ALL if export is None else 0
         else:
             flags = int(doc_flags)
-        with self._mu:
+
+        if row_filter is None:
+            with self._mu:
+                doc, payload = self._library._native.rows(
+                    self._live(),
+                    int(fmt),
+                    _as_bytes(body, "body"),
+                    encode_settings(settings),
+                    export_format,
+                    flags,
+                    encode_columns(columns),
+                )
+            return parse_batch_document(doc, payload=payload)
+
+        fs = row_filter._schema
+        if fs._library is not self._library:
+            raise ChtypesError(
+                "chtypes: filter and schema come from different libraries "
+                f"(ClickHouse {fs._library.version} vs {self._library.version})"
+            )
+        # An attached-filter call is a use of BOTH handles. Same schema: one
+        # lock. Two schemas (same library — the C layer answers its
+        # rejected-1002 document): both locks, in a fixed global order so a
+        # crossed call cannot deadlock against a concurrent one running the
+        # other way — the same pattern Filter.eval uses.
+        locks = [self._mu] if fs is self else sorted((self._mu, fs._mu), key=id)
+        with ExitStack() as stack:
+            for mu in locks:
+                stack.enter_context(mu)
+            if row_filter._handle is None:
+                raise ChtypesError("chtypes: filter is closed")
             doc, payload = self._library._native.rows(
                 self._live(),
                 int(fmt),
@@ -405,6 +522,8 @@ class Schema:
                 encode_settings(settings),
                 export_format,
                 flags,
+                encode_columns(columns),
+                filter_handle=row_filter._handle,
             )
         return parse_batch_document(doc, payload=payload)
 
@@ -468,7 +587,14 @@ class Schema:
             self._filters.add(f)
         return f
 
-    def parse_block(self, fmt: Format, body: bytes, settings: Settings | None = None) -> Block:
+    def parse_block(
+        self,
+        fmt: Format,
+        body: bytes,
+        settings: Settings | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> Block:
         """Parse a body ONCE into a `Block` (`chs_block_parse`) — the parse
         half of `Filter.rows`, exported so K filters can evaluate one event
         with no re-parse (`Filter.eval`; the C ABI contract §Blocks). Same formats
@@ -478,6 +604,12 @@ class Schema:
         `filter.eval(schema.parse_block(body))` ≡ `filter.rows(body)` exactly
         when the clock is pinned (`chtypes_now_epoch_nanos`) or the schema
         has no volatile DEFAULT.
+
+        `columns` (revision 5) names the INSERT column list, read exactly as
+        `Schema.row` reads it — `None` or an empty sequence is today's
+        no-list behavior (see `encode_columns`). Filters still compile over
+        the schema's PHYSICAL columns and evaluate the stored tuple, so a
+        listed `EPHEMERAL` column stays unreferenceable in a filter.
 
         A call-level failure — an unknown setting's 115, an unsplittable
         body, a binary decode fault, the deferred JSONEachRow framing verdict
@@ -493,7 +625,11 @@ class Schema:
         """
         with self._mu:
             bhandle, code, err = self._library._native.block_parse(
-                self._live(), int(fmt), _as_bytes(body, "body"), encode_settings(settings)
+                self._live(),
+                int(fmt),
+                _as_bytes(body, "body"),
+                encode_settings(settings),
+                encode_columns(columns),
             )
             if bhandle is None:
                 raise _error_for(code, err or "block parse refused")
@@ -800,6 +936,72 @@ class Library:
         """
         return self._native.reference_type(type_expr)
 
+    # -- quoting ------------------------------------------------------------
+
+    def _quote(self, symbol: str, text: str) -> str:
+        quoted, code, err = self._native.quote(symbol, text.encode())
+        if code != 0:
+            raise _error_for(code, err or f"{symbol} refused the input")
+        return quoted
+
+    def quote_identifier(self, name: str) -> str:
+        """Spell `name` as a back-quoted identifier — ALWAYS quoted, which is
+        the safe default and the one to reach for without thinking
+        (`chs_quote_identifier`, the vendored `backQuote`).
+
+        The bytes are this library's own: an embedded back-quote comes back in
+        the spelling the server's formatter prints, not in a spelling of ours.
+        Reach for `quote_identifier_if_needed` only when the bare spelling
+        matters to something downstream.
+
+        Raises `UnsupportedError` when the artifact predates
+        `chs_quote_identifier`.
+        """
+        return self._quote("chs_quote_identifier", name)
+
+    def quote_identifier_if_needed(self, name: str) -> str:
+        """Spell `name` bare where THIS library's ClickHouse says a bare
+        spelling is legal, and back-quote it otherwise
+        (`chs_quote_identifier_if_needed`, the vendored `backQuoteIfNeed`).
+
+        Which names it leaves bare is a property of the vendored build, not of
+        this package, and it CHANGES between builds — ask the library you will
+        compile against rather than caching an answer across versions.
+
+        Raises `UnsupportedError` when the artifact predates
+        `chs_quote_identifier_if_needed`.
+        """
+        return self._quote("chs_quote_identifier_if_needed", name)
+
+    def quote_literal(self, text: str) -> str:
+        """Spell `text` as a ClickHouse string literal, quotes and escapes
+        included (`chs_quote_literal`, the vendored `quoteString`) — the call
+        to reach for when a value is spliced into DDL, e.g. a DEFAULT
+        expression.
+
+        The input is counted, so a value carrying a NUL byte is quoted
+        correctly; the answer is escaped and therefore NUL-free.
+
+        Raises `UnsupportedError` when the artifact predates
+        `chs_quote_literal`.
+        """
+        return self._quote("chs_quote_literal", text)
+
+    # -- discovery ----------------------------------------------------------
+
+    def reconstruct_ddl(self, columns: Sequence[DiscoveredColumn]) -> str:
+        """Turn QUERY_TABLE_COLUMNS' rows back into the column-declaration
+        list `compile_ddl` takes.
+
+        It hangs off a Library because the one thing it spells — the column
+        NAME — is spelled by this library's own `quote_identifier`; see
+        `chtypes.discover` for what reconstruction does and does not promise.
+
+        Raises `ValueError` for an inconsistent column list, and
+        `UnsupportedError` when the artifact predates `chs_quote_identifier`.
+        """
+        return _reconstruct_ddl(columns, self.quote_identifier)
+
     def registered_families(self) -> list[str]:
         """Every type family in this build's own runtime registry (139 entries
         on the 25.8 artifact) — the answer to "does this build track upstream
@@ -977,12 +1179,44 @@ class Registry:
 
     Loading is lazy and per line: constructing a `Registry` reads manifests
     (cheap) and `dlopen`s nothing; `for_version` loads the one line asked
-    for, once. A line missing from every directory is `ArtifactMissingError`
-    (§7) — unless lazy fetch is on (``autofetch=True`` or
-    ``CHTYPES_AUTOFETCH=1``), in which case `ensure` runs first, under one
-    process-wide lock per line so concurrent opens fetch once. Off by
-    default: a production process must not begin a 250 MB download inside a
-    request.
+    for, once. **Nothing in this library opens an artifact except a request
+    for a specific version, or an explicit ``preload``** — not `versions()`,
+    not `libraries()`, not `in`, not `len()`, not `repr()`. A line missing
+    from every directory is `ArtifactMissingError` (§7) — unless lazy fetch
+    is on (``autofetch=True`` or ``CHTYPES_AUTOFETCH=1``), in which case
+    `ensure` runs first, under one process-wide lock per line so concurrent
+    opens fetch once. Off by default: a production process must not begin a
+    250 MB download inside a request.
+
+    ``preload`` is the one eager path: the lines a deployment pins, opened in
+    order before the constructor returns. An entry no directory on the search
+    path holds is `ArtifactMissingError` — the same §7 error the first
+    `for_version` would have raised, raised earlier — and it never fetches,
+    even with ``autofetch`` on. Deliberately a list of lines rather than
+    "everything in the directory": a registry directory is whatever a fetch
+    left behind, and each line costs about 120 MB resident.
+
+    ``verify_hashes`` is a policy on the registry, not a property of the
+    preload list: **a library's checksum is computed immediately before that
+    library is `dlopen`ed, and at no other time** — at construction for the
+    preloaded lines, at first use for the rest, never for a line nobody asks
+    for.
+
+    **The manifest's ``library_bytes`` size check runs at that same point,
+    every time, whether or not ``verify_hashes`` is on** (issue #82): it is
+    nearly free (one stat, never a re-hash of the library's contents), and it
+    catches the commonest shape of a broken artifact directory — a truncated
+    or partially-written library file. What ``verify_hashes`` adds on top is
+    the sha256 comparison; the size check is not conditional on it.
+
+    Construction fails only for what manifests can decide: a directory the
+    CALLER NAMED that does not exist or cannot be read, a search path on which
+    no directory holds a readable ``<minor>/manifest.json``, and a ``preload``
+    entry no directory holds (the first two are suppressed with ``autofetch``,
+    which will populate the path). Everything a bad artifact can be wrong
+    about — truncated bytes, a failed checksum, a refused ABI revision, a
+    manifest that disagrees with the library it names — is reported by the
+    first call that asks for that line.
 
     `directory` is where fetch writes — the first of the explicit path,
     ``$CHTYPES_REGISTRY`` and the cache; `search_path` is every directory
@@ -1008,6 +1242,7 @@ class Registry:
         timezone: str = DEFAULT_TIMEZONE,
         verify_hashes: bool = False,
         autofetch: bool | None = None,
+        preload: Sequence[str] | None = None,
     ) -> None:
         self.search_path: tuple[Path, ...] = registry_search_path(directory)
         self.directory: Path = fetch_destination(directory)
@@ -1022,17 +1257,26 @@ class Registry:
         self._index: dict[str, Path] = {}
         self._closed = False
         self._mu = threading.RLock()
-        if directory is not None:
-            # An explicit directory that exists but cannot be read is a
-            # configuration mistake, named now. One that does not exist yet
-            # is fine: fetch creates it.
+        if directory is not None and not self._autofetch:
+            # A directory somebody NAMED and cannot be read is a configuration
+            # mistake named now, and it is the typo guard: /var/lib/chtyeps
+            # fails here rather than three calls later. It costs a directory
+            # listing and no dlopen. With autofetch on, the directory is the
+            # destination the first fetch creates.
             try:
                 Path(directory).iterdir()
-            except FileNotFoundError:
-                pass
             except OSError as exc:
                 raise RegistryError(f"chtypes: cannot read registry {directory}: {exc}") from exc
         self._scan()
+        if not self._index and not self._autofetch:
+            looked = ", ".join(str(p) for p in self.search_path)
+            raise RegistryError(
+                f"chtypes: no artifacts in any registry directory. Looked in: {looked}.\n"
+                f"Install one:  {FETCH_COMMAND} <line>\n"
+                "or set CHTYPES_AUTOFETCH=1 to fetch on first use."
+            )
+        for spelling in preload or ():
+            self._preload(spelling)
 
     def __repr__(self) -> str:
         return f"<chtypes.Registry {self.directory} versions={self.versions()}>"
@@ -1064,8 +1308,16 @@ class Registry:
         manifest = read_manifest(entry)
         if manifest is None:
             raise RegistryError(f"chtypes: {entry} no longer holds a usable manifest.json")
+        # check_library_bytes runs UNCONDITIONALLY (issue #82): nearly free
+        # (one stat, never a re-hash), and it catches the commonest shape of
+        # a broken artifact directory -- a truncated or partially-written
+        # library file. verify_library, gated on verify_hashes, checks it
+        # too as part of the fuller hash comparison, so it is not repeated
+        # here when verification is already going to make it.
         if self._verify_hashes:
             verify_library(entry)
+        else:
+            check_library_bytes(entry, manifest)
         # A directory that has a manifest and does not load is broken, not
         # absent: this is an error, naming the path.
         library = Library(str(entry / manifest.library), manifest, self._timezone)
@@ -1082,6 +1334,24 @@ class Registry:
         self._by_id[library.minor] = library
         return library
 
+    def _preload(self, version: str) -> None:
+        """Open one ``preload`` entry, at construction, without fetching.
+
+        Resolution is `for_version`'s, minus the fetch: preload never fetches,
+        even with ``autofetch`` on. A line no directory holds is the same §7
+        `ArtifactMissingError` the first `for_version` would have raised —
+        raised earlier, not a new type.
+        """
+        if not version:
+            raise RegistryError("chtypes: preload: an empty version does not mean 'pick one'")
+        minor = minor_of(version)
+        with self._mu:
+            if version in self._by_id or minor in self._by_id:
+                return
+            if minor not in self._index:
+                raise ArtifactMissingError(minor, host_platform(), self.search_path)
+            self._load(minor, self._index[minor])
+
     def _autofetch_line(self, version: str) -> None:
         key = (str(self.directory), minor_of(version))
         with _autofetch_lock(key):
@@ -1093,17 +1363,27 @@ class Registry:
     # ----------------------------------------------------------- resolution
 
     def versions(self) -> tuple[str, ...]:
-        """The ClickHouse minor lines this registry can answer for, in release order."""
+        """Every ClickHouse minor line this registry CAN ANSWER FOR, in release order.
+
+        Loaded or merely discovered by the manifest scan, which is one meaning
+        in all four bindings and the one that survives lazy loading: "the lines
+        that happen to be open" would read as an empty registry until the first
+        `for_version`. It opens nothing.
+        """
         minors = {lib.minor for lib in self._by_id.values()} | set(self._index)
         return tuple(sorted(minors, key=_minor_sort_key))
 
     def libraries(self) -> tuple[Library, ...]:
-        """One entry per line, loaded, in release order."""
+        """The libraries this registry has LOADED, in release order.
+
+        What is open right now, never what could be: a discovered line that no
+        `for_version` and no ``preload`` has opened appears in `versions` and
+        not here. **This call opens nothing** — opening 120 MB of artifact per
+        line as the side effect of a listing is not something a caller can
+        undo, and it is what Go, TypeScript and Rust have always answered.
+        """
         with self._mu:
-            for minor in list(self._index):
-                if minor not in self._by_id:
-                    self._load(minor, self._index[minor])
-        unique = {id(lib): lib for lib in self._by_id.values()}
+            unique = {id(lib): lib for lib in self._by_id.values()}
         return tuple(sorted(unique.values(), key=lambda lib: _minor_sort_key(lib.minor)))
 
     def for_version(self, version: str) -> Library:
@@ -1145,6 +1425,7 @@ class Registry:
         )
 
     def __iter__(self) -> Iterator[Library]:
+        """Iterate the LOADED libraries. Like `libraries`, it opens nothing."""
         return iter(self.libraries())
 
     def __len__(self) -> int:

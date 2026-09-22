@@ -91,6 +91,43 @@ jobs:
           grep -qE "ABI_REVISION = $rev" ts/src/*.ts
           grep -qE "ABI_REVISION: i32 = $rev" rust/src/*.rs
           echo "ABI revision $rev agreed by the header and four bindings"
+      # An agreed revision NUMBER proves nothing about the declarations it is
+      # supposed to stand for, which is exactly how a nine-parameter typedef
+      # for a ten-parameter symbol passed all twelve required checks. The step
+      # below generates the prototype table from include/chtypes.h and asserts
+      # every binding's own FFI declaration against it — parameter count AND
+      # each parameter's type.
+      #
+      # It belongs in THIS job, not in the artifacts leg: an artifact-gated
+      # check would not have caught this one and will not catch the next,
+      # because while published artifacts are revision 4 the bindings refuse
+      # at load and a wrong declaration is never exercised. This job runs on
+      # every pull request with nothing but a checkout.
+      #
+      # The selftest runs FIRST and in the same job, the precedent
+      # scripts/lint-public.sh set: it plants a wrong arity AND a wrong type in
+      # every binding and requires each to be caught, because a check that has
+      # only ever passed is not known to work.
+      - name: selftest — a wrong arity and a wrong type fire in every binding
+        run: scripts/check-abi-decls.py --selftest
+      - name: every binding's chs_* declaration matches the header's prototype
+        run: scripts/check-abi-decls.py
+      # Every binding used to carry its own copy of ClickHouse's identifier
+      # quoting, and all four were wrong the same way (#52). The copies are
+      # deleted; chs_quote_identifier, chs_quote_identifier_if_needed and
+      # chs_quote_literal are the only source of a quoted spelling here. This
+      # fails if a binding re-grows a local rule, and — the half
+      # check-abi-decls.py deliberately does not cover, since it REPORTS an
+      # undeclared symbol rather than failing on it — if a binding stops wiring
+      # the symbols it must call instead.
+      #
+      # Here rather than in the artifacts leg, for the reason above it: no
+      # revision-5 artifact is published yet, so an artifact-gated check would
+      # not run at all on the branch that introduces this.
+      - name: selftest — a re-grown quoting rule and a dropped declaration fire in every binding
+        run: scripts/check-quoting-passthrough.py --selftest
+      - name: no binding spells a ClickHouse quoting rule of its own
+        run: scripts/check-quoting-passthrough.py
       # go/chtypes shares one package namespace with the artifact producer's
       # overlay tests when they are compiled in with `go test -overlay`, and
       # a top-level name declared on both sides breaks that build (#127) — a
@@ -154,6 +191,28 @@ jobs:
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: build and vet, dlopen-only
         run: cd go && go build ./... && go vet ./...
+      # The OTHER Go build (#118). go/chtypes/linked.go is cgo over
+      # include/chtypes.h, so the compiler type-checks every `C.chs_*` call
+      # site and go/chtypes/linked_abi_check.go pins the frozen ABI numbers to
+      # the header — and until now no job passed `-tags chtypes_linked`, so
+      # neither check had ever run. scripts/check-abi-decls.py covers that file
+      # for ARITY only, on the stated grounds that the compiler has its types.
+      # The compiler was never invoked.
+      #
+      # It belongs HERE, in the no-artifact leg, and why is the finding #118
+      # asked for. The tagged build was believed to need a native library from
+      # the other half of the project: measured, it does not. Type-checking a
+      # non-main cgo package runs the C compiler and only PROBES the link, so
+      # it needs a compiler and the in-repo header and nothing else — which
+      # this job already has, from a bare checkout, with no network. The
+      # artifact-backed job would have bought less coverage at a higher price:
+      # it is red by design on a revision branch, and #105 is the record of
+      # what an expected-red job does to a check placed inside it. Selftest
+      # first, same rule as `abi` and `public`.
+      - name: selftest — a mistyped call site and a drifted header constant fail the linked build
+        run: scripts/check-linked-build.sh --selftest
+      - name: type-check the linked path — cgo against include/chtypes.h, no artifact needed
+        run: scripts/check-linked-build.sh
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
         run: scripts/check-standalone.sh --no-artifacts
       # The census JSON is diagnostic: it is how a failure is READ, never how a

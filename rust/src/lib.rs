@@ -106,7 +106,6 @@ pub use compile::{CompileMode, CompileRequest};
 pub use discover::{
     DiscoveredColumn, QUERY_CHANGED_SETTINGS, QUERY_SERVER_VERSION, QUERY_TABLE_COLUMNS,
     ServerProfile, parse_changed_settings_result, parse_columns_result, parse_version_result,
-    reconstruct_ddl,
 };
 pub use error::{
     ABI_REVISION, CODE_ARTIFACT_CORRUPT, CODE_ARTIFACT_MISSING, CODE_ARTIFACT_PINNED,
@@ -122,12 +121,13 @@ pub use registry::{
     cache_dir_for, default_registry_dir, host_platform, install_dir, install_dir_for,
     installed_lines, locate, locate_in, registry_search_path, search_path_for,
 };
+pub use result::source;
 pub use result::{
     BatchResult, Computed, DocFlags, FilterOutcome, FilterResult, FilterRowError, Format, Outcome,
     RowResult, Span, Substitution, Transform, Value, Verdict,
 };
 pub use schema::{
-    Block, Filter, NO_PARAMS, NO_SETTINGS, SETTING_CLOCK_OFFSET_NANOS,
+    Block, Filter, NO_PARAMS, NO_SETTINGS, RowOptions, SETTING_CLOCK_OFFSET_NANOS,
     SETTING_DEFAULT_EVAL_MEMORY_BYTES, SETTING_DEFAULT_EVAL_WALL_NANOS,
     SETTING_MAX_CLOCK_SKEW_NANOS, SETTING_NOW_EPOCH_NANOS, Schema,
 };

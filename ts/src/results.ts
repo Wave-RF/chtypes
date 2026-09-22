@@ -90,10 +90,59 @@ export interface Value {
   /**
    * Where the value came from: `input` | `default` | `default_substituted` |
    * `absent` | `skipped` | `default_volatile_unresolved` | `default_pending` |
-   * `default_expr_unsupported` (the C ABI contract §`src` values).
+   * `default_expr_unsupported` | `ephemeral_input` | `materialized_input`
+   * (revision 5 — see {@link Source}) (the C ABI contract §`src` values).
+   * `ephemeral_input` is excluded from `RowResult.values`/`values`, like
+   * `skipped`; never seen here. `materialized_input` stays in `values`.
    */
   readonly source: string;
 }
+
+/**
+ * The two revision-5 `source` provenances `columns_json` introduces (issue
+ * #53), plus the pre-existing `Skipped` provenance named alongside them
+ * (issue #90). A plain const object, not a closed union: `source` is a
+ * growing vocabulary arriving from the C layer, and an unrecognized spelling
+ * from a newer artifact must pass through unchanged, not be rejected.
+ */
+export const Source = {
+  /**
+   * MATERIALIZED / ALIAS / EPHEMERAL, never read from an input row.
+   * Predates revision 5 — unlike the two provenances below — but
+   * `rowResultOf` has excluded it from `values` from the start, the same
+   * exclusion `EphemeralInput` was modeled on. Named here, in the same
+   * idiom, so the exclusion can be keyed on a symbol rather than a bare
+   * string literal.
+   */
+  Skipped: 'skipped',
+  /**
+   * A listed EPHEMERAL column's read value. The server reads it — it is in
+   * scope for the DEFAULT expressions that reference it — and it is never
+   * stored and never exported. `rowResultOf` excludes it from `values`
+   * exactly as it already excludes `Source.Skipped`: a value that is never
+   * stored must not sit where a caller reads the stored row (a hash, a
+   * signature).
+   */
+  EphemeralInput: 'ephemeral_input',
+  /**
+   * A listed MATERIALIZED column's supplied value under
+   * `insert_allow_materialized_columns=1`. The supplied value REPLACES the
+   * column's expression and IS stored — unlike `EphemeralInput`, it stays
+   * IN `values`.
+   */
+  MaterializedInput: 'materialized_input',
+  /**
+   * A VOLATILE DEFAULT (`now()`/`now64(n)`/`today()`/`yesterday()`, or an
+   * expression over one) this library resolved locally rather than
+   * ClickHouse — the caller MUST send it as an explicit column on any later
+   * INSERT, or the value silently drifts each attempt. `rowResultOf` has
+   * always populated `substituted` for exactly this src value; like
+   * `Skipped` before issue #90, it had no named constant of its own (issue
+   * #122).
+   */
+  DefaultSubstituted: 'default_substituted',
+} as const;
+export type Source = (typeof Source)[keyof typeof Source];
 
 /** A silent change: input 256 into UInt8 stored as 0. */
 export interface Transform {
@@ -168,6 +217,25 @@ export interface RowResult {
   readonly substituted: Substitution[];
   /** MATERIALIZED values — durable, but not part of `SELECT *`. */
   readonly computed: Computed[];
+  /**
+   * `Schema#rows(..., { rowFilter })` only: this row's filter verdict,
+   * beside `outcome` above — the two are independent facts, and neither
+   * replaces the other (docs/guides/filters.md "Exporting only the rows a
+   * filter admits"). `undefined` when no filter was attached to the call
+   * that produced this row (every plain `row()`/`rows()` call, and `rows()`
+   * with no `rowFilter`). A security-enforcing caller MUST fail closed —
+   * hide the row / fail the request — on a verdict that is `undefined` or
+   * not `isAnswer()`.
+   */
+  readonly verdict: Verdict | undefined;
+  /**
+   * Set beside `'e'` (the predicate threw, ClickHouse's own code/message),
+   * beside an eval-time `'d'` (the admission envelope), and for a row whose
+   * own `outcome` is not `'accepted'` (its own parse error, reported as
+   * `'d'`). 0/`''` otherwise.
+   */
+  readonly verdictCode: number;
+  readonly verdictErr: string;
 }
 
 /**
@@ -246,6 +314,16 @@ export interface BatchResult {
    * server verdict.
    */
   readonly exportDeclined: string | undefined;
+  /**
+   * `rows(..., { rowFilter })` only: accepted rows whose verdict is `'t'`,
+   * and accepted rows with any other verdict, respectively. `rowsPassed +
+   * rowsCut` equals the accepted-row count. Both `0` when no filter was
+   * attached — indistinguishable from "filter attached, nothing passed and
+   * nothing accepted", so key presence on whether `rowFilter` was passed,
+   * never on these being nonzero.
+   */
+  readonly rowsPassed: number;
+  readonly rowsCut: number;
 }
 
 /** One row's byte range inside an export `payload` — see `BatchResult#spans`. */
@@ -311,7 +389,10 @@ function outcomeOf(s: string): Outcome {
   }
 }
 
-function columnDocOf(raw: Json): ColumnDoc {
+// Exported (but not re-exported from index.ts, so the public surface is
+// unchanged) so tests can parse a single `cols[]` entry the way `rowResultOf`
+// does and call `classify()` on it directly — see transform.test.ts, #97.
+export function columnDocOf(raw: Json): ColumnDoc {
   const poison = asBool(field(raw, 'poison'));
   const inputNode = field(raw, 'input');
   const storedNode = field(raw, 'stored');
@@ -358,7 +439,13 @@ export function rowResultOf(doc: Json): RowResult {
 
   for (const rawCol of items(field(doc, 'cols'))) {
     const c = columnDocOf(rawCol);
-    if (c.src === 'skipped') continue;
+    // Source.Skipped (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
+    // Source.EphemeralInput (a LISTED EPHEMERAL column: read, but never
+    // stored — see the `source` doc on `Value`) are both excluded from
+    // `values`, which is the stored row. Source.MaterializedInput stays IN:
+    // under insert_allow_materialized_columns=1 the supplied value genuinely
+    // IS stored, replacing the column's expression (issue #53).
+    if (c.src === Source.Skipped || c.src === Source.EphemeralInput) continue;
     values.push({
       column: c.name,
       text: c.stored,
@@ -366,7 +453,7 @@ export function rowResultOf(doc: Json): RowResult {
       isNull: c.storedIsNull && !c.poison,
       source: c.src,
     });
-    if (c.src === 'default_substituted') {
+    if (c.src === Source.DefaultSubstituted) {
       substituted.push({ column: c.name, expr: c.input, text: c.stored, bytes: c.storedBytes });
     }
     transformed.push(...classify(c));
@@ -379,6 +466,16 @@ export function rowResultOf(doc: Json): RowResult {
     bytes: rawBytes(field(raw, 'stored')),
   }));
 
+  // `verdict` (RowsExportWith's TypeScript spelling: `rows(..., { rowFilter })`)
+  // is present exactly when a filter was attached to the call that produced
+  // this document — absent from every Row/Rows document and from `rows()`
+  // with no `rowFilter`. `verdictOf` degrades an unrecognized character to
+  // `'d'`, never to an invented answer.
+  const verdictNode = field(doc, 'verdict');
+  const verdict: Verdict | undefined = verdictNode === undefined ? undefined : verdictOf(asString(verdictNode));
+  const verdictCode = asInt(field(doc, 'verdict_code'));
+  const verdictErr = asString(field(doc, 'verdict_err'));
+
   return {
     values,
     transformed,
@@ -389,6 +486,9 @@ export function rowResultOf(doc: Json): RowResult {
     unsupportedSettings,
     substituted,
     computed,
+    verdict,
+    verdictCode,
+    verdictErr,
   };
 }
 
@@ -458,6 +558,8 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
     payload: payload ?? undefined,
     spans,
     exportDeclined,
+    rowsPassed: asInt(field(doc, 'rows_passed')),
+    rowsCut: asInt(field(doc, 'rows_cut')),
   };
 }
 
@@ -498,6 +600,30 @@ export type Verdict = (typeof Verdict)[keyof typeof Verdict];
  * or a decline. A security-enforcing caller hides the row when this is false. */
 export function isAnswer(v: Verdict): boolean {
   return v === 't' || v === 'f';
+}
+
+/**
+ * Map ONE wire verdict character to a `Verdict` — the single place that
+ * decision is made, shared by `filterResultOf` (`chs_filter_rows`'s /
+ * `chs_block_parse`'s `verdicts` string, one char per row) and `rowResultOf`
+ * (`chs_rows`'s per-row `verdict` field, the revision-5 attached filter). A
+ * second, drifted copy of this switch is exactly how `'e'` or `'d'` could
+ * get silently collapsed into `'f'` in one call path and not the other —
+ * the fail-open bug this vocabulary exists to prevent.
+ */
+function verdictOf(ch: string): Verdict {
+  switch (ch) {
+    case 't':
+      return 't';
+    case 'f':
+      return 'f';
+    case 'e':
+      return 'e';
+    default:
+      // 'd', and any character this binding does not know: decline — fail
+      // closed, mirroring the unknown-outcome rule.
+      return 'd';
+  }
 }
 
 /**
@@ -579,21 +705,7 @@ export function filterResultOf(doc: Json): FilterResult {
 
   const verdicts: Verdict[] = [];
   for (const ch of asString(field(doc, 'verdicts'))) {
-    switch (ch) {
-      case 't':
-        verdicts.push('t');
-        break;
-      case 'f':
-        verdicts.push('f');
-        break;
-      case 'e':
-        verdicts.push('e');
-        break;
-      default:
-        // 'd', and any character this binding does not know: decline — fail
-        // closed, mirroring the unknown-outcome rule.
-        verdicts.push('d');
-    }
+    verdicts.push(verdictOf(ch));
   }
   const errors: FilterRowError[] = items(field(doc, 'errors')).map((e) => ({
     row: asInt(field(e, 'row')),

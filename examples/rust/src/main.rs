@@ -8,10 +8,10 @@
 //! libraries behind a 22-function C ABI), which is why they are exact rather
 //! than approximately right.
 //!
-//! This file is a tutorial you RUN. Fourteen numbered sections walk the whole
+//! This file is a tutorial you RUN. Seventeen numbered sections walk the whole
 //! public API of the Rust SDK, from loading an artifact to tearing down, each
 //! with a comment saying what it demonstrates, why an ingest pipeline cares,
-//! and what to look at in the output. The same fourteen sections — same
+//! and what to look at in the output. The same seventeen sections — same
 //! numbering, same schemas, same rows — exist in go/main.go, python/demo.py
 //! and ts/demo.mjs, so you can diff two tours and see only the language
 //! idioms differ.
@@ -34,9 +34,9 @@ use std::sync::Arc;
 
 use chtypes::{
     BatchResult, CompileMode, DefaultKind, DocFlags, Error, FilterOutcome, FilterResult, Format,
-    Library, Outcome, Registry, Value, NO_PARAMS, NO_SETTINGS, QUERY_CHANGED_SETTINGS,
-    QUERY_SERVER_VERSION, SETTING_CLOCK_OFFSET_NANOS, SETTING_MAX_CLOCK_SKEW_NANOS,
-    SETTING_NOW_EPOCH_NANOS,
+    Library, Outcome, Registry, RowOptions, Value, NO_PARAMS, NO_SETTINGS,
+    QUERY_CHANGED_SETTINGS, QUERY_SERVER_VERSION, SETTING_CLOCK_OFFSET_NANOS,
+    SETTING_MAX_CLOCK_SKEW_NANOS, SETTING_NOW_EPOCH_NANOS,
 };
 
 // ------------------------------------------------------------- the fixture
@@ -125,6 +125,7 @@ fn main() {
     section14();
     section15(&lib);
     section16(&lib);
+    section17(&lib);
 
     // The teardown section 13 narrates: the LAST thing this process does
     // with the registry. Reopening an artifact after a full shutdown is not
@@ -149,7 +150,7 @@ fn main() {
 // C API: chs_clickhouse_version, chs_abi_revision, chs_init (implicit on
 // load), chs_free (implicit on every returned string).
 // Rust extras: Registry::from_env_or ($CHTYPES_REGISTRY or the fallback),
-// registry.dir(), registry.libraries().
+// registry.dir(), registry.libraries() (what is OPEN, not what is available).
 // ---------------------------------------------------------------------------
 fn section1() -> (Registry, Arc<Library>) {
     section(1, "Load the library and check the ABI");
@@ -165,9 +166,12 @@ fn section1() -> (Registry, Arc<Library>) {
     };
     let versions = registry.versions();
     kv("registry dir", &registry.dir().display().to_string());
-    kv("versions resident", &versions.join("  "));
-    kv("libraries loaded", &registry.libraries().len().to_string());
-    note("one dlopen (RTLD_LOCAL) per version — all live in THIS process at once");
+    kv("versions available", &versions.join("  "));
+    // Construction read the manifests and dlopen'd nothing, so this is 0 here
+    // and one higher after each for_version below. RegistryOptions::preload is
+    // how a deployment opens a pinned set up front instead.
+    kv("libraries open", &registry.libraries().len().to_string());
+    note("one dlopen (RTLD_LOCAL) per version ASKED FOR — ~120 MB resident each");
     if versions.len() == 1 {
         note("only one artifact is built; the tour still runs, and section 12's");
         note("cross-version sweeps will degrade gracefully. More: `scripts/fetch.sh 26.7`");
@@ -1366,17 +1370,19 @@ fn section10(lib: &Arc<Library>) {
 // SECTION 11 — The discovery kit, offline
 //
 // WHAT: the three canonical queries chtypes ships for learning who a
-// deployment is, their typed parsers, and reconstruct_ddl — run here against
+// deployment is, their typed parsers, and Library::reconstruct_ddl — run here against
 // CANNED bytes shaped exactly like a real server's JSONEachRow responses.
 // WHY: chtypes NEVER opens a socket. You run these queries with whatever
 // client you already have; the kit gives you the SQL and parses the results.
 // The payoff is the last step: the server's own version string resolves an
 // artifact, and the discovered settings become the compile profile — so the
 // handle behaves like a table created on THAT deployment.
-// LOOK FOR: the reconstructed DDL (backticks where needed, DEFAULTs carried),
+// LOOK FOR: the reconstructed DDL (the server's own identifier spelling,
+// DEFAULTs carried),
 // and the SAME ROW accepted under the discovered profile but rejected under a
 // stock compile — the measurable reason discovery matters.
-// C API: none until the compile at the end — the kit is pure client-side.
+// C API: chs_quote_identifier for the reconstruction, then the compile — the
+// queries and parsers themselves are pure client-side.
 // (The ONLINE version of this flow, against a real server, is
 // go/ingest-demo/ — the optional demo chplay.sh never runs.)
 // ---------------------------------------------------------------------------
@@ -1436,10 +1442,8 @@ fn section11(registry: &Registry) {
     }
     note("default_kind/default_expression are CARRIED — dropping them would");
     note("silently lose the DEFAULT semantics sections 6 and 8 run on");
-    let ddl = chtypes::reconstruct_ddl(&cols).expect("reconstruct");
-    kv("  reconstruct_ddl", &ddl);
-    note("`reading c` came back BACKTICKED — identifiers are quoted exactly");
-    note("where ClickHouse requires it");
+    note("reconstruction needs the library — the column NAME is spelled by");
+    note("ClickHouse's own quoting, not by a rule in the binding");
     blank();
 
     // The payoff: version -> artifact, settings -> profile, and a measurable
@@ -1464,6 +1468,11 @@ fn section11(registry: &Registry) {
             lib.minor()
         ),
     );
+    let ddl = lib.reconstruct_ddl(&cols).expect("reconstruct");
+    kv("  lib.reconstruct_ddl", &ddl);
+    note("`reading c` came back QUOTED, in the spelling THIS build prints —");
+    note("quote_identifier is the artifact's own backQuote, not a copy here");
+    blank();
     let row = br#"{"ts":"2026-01-15T10:30:00Z","device_id":9,"reading c":21.5}"#;
     kv("the same row, twice", std::str::from_utf8(row).unwrap());
     let pairs: Vec<(&str, &str)> = settings
@@ -2070,6 +2079,122 @@ fn section16(lib: &Arc<Library>) {
     note("over-hide). Until that run of record exists this is a shadow/replay");
     note("surface: log disagreements, enforce with what enforced yesterday —");
     note("the twin is a call shape, not an enforcement opening.");
+}
+
+// ---------------------------------------------------------------------------
+// SECTION 17 — The INSERT column list
+//
+// WHAT: chs_row / chs_rows / chs_block_parse's revision-5 `columns_json`
+// argument (Rust: RowOptions.columns) — the explicit `INSERT INTO t (a, b,
+// …)` shape: the data supplies exactly the listed columns and the server
+// computes the rest, with the listed values in scope for their DEFAULT
+// expressions.
+// WHY: an EPHEMERAL column has NO other way in — it occupies no field
+// position and a bare INSERT cannot address it — so a gateway whose tenant
+// supplies one (WaveHouse's own insert form is every insertable column in
+// declared order, EPHEMERAL included) needs this option to express it at
+// all, rather than silently dropping the value or refusing every such row.
+// LOOK FOR: the listed EPHEMERAL column feeding the DEFAULT it is in scope
+// for (d = 6) while never itself being stored; Some(vec![]) behaving exactly
+// like no list at all (never rendered as `()`, a syntax error everywhere);
+// and the refusal for a name the table does not have (code 16 — the SAME
+// code an ALIAS column gets, by design: neither is in getInsertable()).
+// C API: chs_row (revision 5, columns_json).
+// ---------------------------------------------------------------------------
+fn section17(lib: &Arc<Library>) {
+    section(17, "The INSERT column list");
+
+    // No revision-5 artifact is published yet (core relinks separately from
+    // this ABI/SDK change), so this section degrades LOUDLY rather than
+    // failing the tour on every artifact that exists today.
+    if lib.abi_revision() < 5 {
+        note(&format!(
+            "SKIPPED: section 17 needs a revision-5 artifact (this one reports {})",
+            lib.abi_revision()
+        ));
+        return;
+    }
+
+    // id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1 — the header's own
+    // revision-5 example (include/chtypes.h, the EPHEMERAL columns_json
+    // paragraph): e occupies no field position and a bare INSERT cannot
+    // reach it at all.
+    let schema = lib
+        .compile("id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1")
+        .compile()
+        .expect("compile");
+
+    let opts = RowOptions {
+        columns: Some(vec!["id".to_string(), "e".to_string()]),
+        ..RowOptions::default()
+    };
+    let row = schema
+        .row_with_options(Format::JsonEachRow, br#"{"id":3,"e":5}"#, &opts)
+        .expect("row_with_options");
+    let vals: Vec<String> = row
+        .values
+        .iter()
+        .map(|v| format!("{}={}({})", v.column, text_or(v), v.source))
+        .collect();
+    kv(
+        "columns [id, e]  row {id:3,e:5}",
+        &format!("{}  {}", row.outcome.as_str(), vals.join(" ")),
+    );
+    note("e is READ and is in scope for d's DEFAULT (e + 1 = 6) — e is NEVER");
+    note("stored and never exported; it has no other way in, since it occupies");
+    note("no field position and a bare INSERT cannot address it at all");
+    blank();
+
+    // The empty-list-is-no-list rule: Some(vec![]) behaves EXACTLY like
+    // None, never rendered as `()` — `INSERT INTO t () FORMAT X` is a syntax
+    // error (code 62) on every ClickHouse line.
+    let plain = lib
+        .compile("id UInt32, d UInt8 DEFAULT 9")
+        .compile()
+        .expect("compile");
+    let empty_opts = RowOptions {
+        columns: Some(Vec::new()),
+        ..RowOptions::default()
+    };
+    let row = plain
+        .row_with_options(Format::JsonEachRow, br#"{"id":1}"#, &empty_opts)
+        .expect("row_with_options");
+    kv(
+        "columns Some([])  row {id:1}",
+        &format!(
+            "{}  d={}   (identical to no list — never `()`, a syntax error)",
+            row.outcome.as_str(),
+            row.values
+                .iter()
+                .find(|v| v.column == "d")
+                .map(text_or)
+                .unwrap_or_default()
+        ),
+    );
+    blank();
+
+    // The refusal: a name the table does not have. Code 16 — the SAME code
+    // an ALIAS column gets, because neither is in getInsertable() and the
+    // statement cannot tell them apart from the wire.
+    let bad_opts = RowOptions {
+        columns: Some(vec!["id".to_string(), "nosuch".to_string()]),
+        ..RowOptions::default()
+    };
+    let refused = schema
+        .row_with_options(Format::JsonEachRow, br#"{"id":1,"nosuch":2}"#, &bad_opts)
+        .expect("row_with_options");
+    kv(
+        "columns [id, nosuch]",
+        &format!(
+            "{}  code={}  {}",
+            refused.outcome.as_str(),
+            refused.err_code,
+            truncate(&refused.err_msg, 56)
+        ),
+    );
+    note("the SAME code an ALIAS column gets: neither is in getInsertable(),");
+    note("so the statement cannot tell them apart from the wire — a caller");
+    note("that needs the distinction must read it off the schema it already holds");
 }
 
 /// Render a FilterResult's verdicts as the document's compact t/f/e/d string.

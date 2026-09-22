@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -207,15 +208,22 @@ func TestRegistryFallsThroughTheSearchPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := reg.Versions(); len(v) != 1 || v[0] != small.Line {
-		t.Fatalf("Versions = %v", v)
-	}
 	var other Installed
 	for _, inst := range installed {
 		if inst.Line != small.Line {
 			other = inst
 			break
 		}
+	}
+	// Versions() is every line this registry CAN answer for, loaded or merely
+	// discovered — so the fallthrough line is in it from construction, before
+	// anything is opened. Libraries() is the half that grows.
+	versions := reg.Versions()
+	if !slices.Contains(versions, small.Line) || !slices.Contains(versions, other.Line) {
+		t.Fatalf("Versions = %v, want the explicit line %s and the $%s line %s", versions, small.Line, EnvRegistry, other.Line)
+	}
+	if n := len(reg.Libraries()); n != 0 {
+		t.Fatalf("construction opened %d libraries; it must open none", n)
 	}
 	lib, err := reg.For(Version(other.Line))
 	if err != nil {
@@ -224,8 +232,11 @@ func TestRegistryFallsThroughTheSearchPath(t *testing.T) {
 	if lib.Minor != other.Line || !strings.HasPrefix(lib.Path, root) {
 		t.Fatalf("got %s from %s", lib.Minor, lib.Path)
 	}
-	if v := reg.Versions(); len(v) != 2 {
-		t.Fatalf("Versions after fallthrough = %v", v)
+	if n := len(reg.Libraries()); n != 1 {
+		t.Fatalf("Libraries after one fallthrough open = %d, want 1", n)
+	}
+	if v := reg.Versions(); len(v) != len(versions) {
+		t.Fatalf("Versions moved when a line was opened: %v -> %v", versions, v)
 	}
 	// The explicit line was served from the explicit directory, not the env.
 	first, _ := reg.For(Version(small.Line))

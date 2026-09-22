@@ -32,7 +32,7 @@
       "id": "registry.construct",
       "group": "registry",
       "kind": "ctor",
-      "what": "Open a registry: an explicit artifact directory, or the docs/guides/fetch.md §1 search path when none is given",
+      "what": "Open a registry: an explicit artifact directory, or the docs/guides/fetch.md §1 search path when none is given. Construction reads manifest.json files and dlopens nothing; nothing in a binding opens an artifact except a request for a specific version, or an explicit preload",
       "go": "NewRegistry",
       "python": "Registry",
       "ts": "Registry",
@@ -52,7 +52,7 @@
       "id": "registry.versions",
       "group": "registry",
       "kind": "method",
-      "what": "The loaded minor lines, in numeric release order (§Version selection rule 2)",
+      "what": "Every minor line this registry can answer for — the ones it has LOADED plus the ones its construction-time manifest scan discovered on the search path — in numeric release order (§Version selection rule 2). Opens nothing",
       "go": "Registry.Versions",
       "python": "Registry.versions",
       "ts": "Registry.versions",
@@ -62,7 +62,7 @@
       "id": "registry.libraries",
       "group": "registry",
       "kind": "method",
-      "what": "The loaded Library objects themselves, in the same numeric release order — named by §Version selection rule 2 as an ordered surface a binding exposes",
+      "what": "The Library objects this registry has LOADED — what is open right now, never what could be — in the same numeric release order, named by §Version selection rule 2 as an ordered surface a binding exposes. Opens nothing",
       "go": "Registry.Libraries",
       "python": "Registry.libraries",
       "ts": "Registry.libraries",
@@ -114,6 +114,26 @@
       "kind": "option",
       "what": "Re-hash each library against its manifest's library_sha256 BEFORE dlopen — off by default, SHOULD be on for an artifact that did not come from a local build and MUST be on for one that came over a network (docs/reference/artifact.md §Verification)",
       "go": "WithVerifyChecksums",
+      "python": "Registry.__init__",
+      "ts": "RegistryOptions",
+      "rust": "RegistryOptions"
+    },
+    {
+      "id": "registry.check-library-bytes",
+      "group": "registry",
+      "kind": "rule",
+      "what": "Compare a shared library's on-disk size to its manifest's library_bytes on EVERY load, whether or not the verify-checksums option is on — unlike the sha256 re-hash beside it (registry.verify-checksums), which runs only under verification (issue #82, split out of #50's lazy-loading design so the behavior change was not hidden inside it). It is nearly free (one stat, never a re-hash of the library's contents) and it catches the commonest shape of a broken artifact directory: a truncated or partially-written library file. A manifest carrying no library_bytes (0, its zero value for one that predates the field) is not asked, so a bare path with no sibling manifest is unaffected either way. Timing matches the checksum's own rule stated on registry.verify-checksums: the check runs immediately before dlopen, at construction for a preloaded line and at first use for the rest — never before a line is actually asked for. NO VALUE HERE ON PURPOSE: this is a behavior on the load path, not a literal constant a manifest run can compare across bindings. Go, Python and TypeScript each gained this check in issue #82 and each has a test that is RED against the pre-#82 code and green after (go/chtypes/multiversion_test.go's TestLoadRefusesBadLibraryBytesWithoutVerification, python/tests/test_lazy.py's test_library_bytes_is_checked_on_every_load_without_verify_hashes, ts/test/lazy.test.ts's 'library_bytes is checked on every load, whether or not verifyChecksums is on'). Rust made this check unconditionally since before #50 and needed no fix here — rust/src/registry.rs's library_bytes_mismatch_refuses_without_verify_checksums pins the mismatch case explicitly and was green from the moment it was written.",
+      "go": "Registry.For",
+      "python": "Registry.for_version",
+      "ts": "Registry.for",
+      "rust": "Registry::for_version"
+    },
+    {
+      "id": "registry.preload",
+      "group": "registry",
+      "kind": "option",
+      "what": "Open a NAMED LIST of lines at construction — the one eager path, and a constructor option rather than a method. An entry no directory on the search path holds is the artifact-missing error raised at construction; it never fetches, even with autofetch on. Empty by default: constructing a registry reads manifest.json files and dlopens nothing",
+      "go": "WithPreload",
       "python": "Registry.__init__",
       "ts": "RegistryOptions",
       "rust": "RegistryOptions"
@@ -239,6 +259,24 @@
       "rust": "Library::reference_type"
     },
     {
+      "id": "library.quote-identifier",
+      "group": "library", "kind": "method",
+      "what": "chs_quote_identifier — an identifier spelled the way ClickHouse spells it, ALWAYS quoted; the safe default (§Quoting)",
+      "go": "Library.QuoteIdentifier", "python": "Library.quote_identifier", "ts": "Library.quoteIdentifier", "rust": "Library::quote_identifier"
+    },
+    {
+      "id": "library.quote-identifier-if-needed",
+      "group": "library", "kind": "method",
+      "what": "chs_quote_identifier_if_needed — bare where THIS build says bare is legal, quoted otherwise; which names those are is the build's own rule and differs per line (§Quoting)",
+      "go": "Library.QuoteIdentifierIfNeeded", "python": "Library.quote_identifier_if_needed", "ts": "Library.quoteIdentifierIfNeeded", "rust": "Library::quote_identifier_if_needed"
+    },
+    {
+      "id": "library.quote-literal",
+      "group": "library", "kind": "method",
+      "what": "chs_quote_literal — a string value as a ClickHouse string literal, quotes and escapes included; the call for splicing a value into DDL (§Quoting)",
+      "go": "Library.QuoteLiteral", "python": "Library.quote_literal", "ts": "Library.quoteLiteral", "rust": "Library::quote_literal"
+    },
+    {
       "id": "library.set-default-settings",
       "group": "library",
       "kind": "method",
@@ -339,6 +377,26 @@
       "rust": "Schema::rows_export"
     },
     {
+      "id": "schema.rows-export-with",
+      "group": "schema",
+      "kind": "method",
+      "what": "RowsExport's twin with a compiled filter attached to the export channel (revision 5, second half): ONE chs_rows parse answers both a per-row verdict and, for verdict 't' rows, the export bytes — docs/guides/filters.md \"Exporting only the rows a filter admits\"",
+      "go": "LoadedSchema.RowsExportWith",
+      "python": "Schema.rows",
+      "ts": "Schema.rows",
+      "rust": "Schema::rows_export_with"
+    },
+    {
+      "id": "schema.row-filter-option",
+      "group": "filter",
+      "kind": "option",
+      "what": "Attach the compiled filter to the export channel. Verdicts index THIS call's rows, never another call's; 'e' and 'd' are NEVER exported and NEVER collapsed into 'f' — collapsing either inverts fail-closed into fail-open. A filter compiled over a different schema handle rejects the whole call, loudly (code 1002)",
+      "go": "WithRowFilter",
+      "python": "Schema.rows",
+      "ts": "RowsOptions",
+      "rust": "Schema::rows_export_with"
+    },
+    {
       "id": "schema.close",
       "group": "schema",
       "kind": "method",
@@ -377,6 +435,16 @@
       "python": "Schema.parse_block",
       "ts": "Schema.parseBlock",
       "rust": "Schema::parse_block"
+    },
+    {
+      "id": "schema.columns-option",
+      "group": "schema",
+      "kind": "option",
+      "what": "Name the INSERT column list for a row, rows, rows-export or parse-block call (revision 5): the data supplies exactly these columns, in list order for the positional formats, and the server computes the rest with them in scope. Absent — or an empty list — is the no-list behavior of every earlier revision, never an empty `()`, which is a syntax error on every line. A listed EPHEMERAL column is read and is in scope for the DEFAULTs referencing it, and is still never stored",
+      "go": "WithColumns",
+      "python": "Schema.row",
+      "ts": "RowsOptions",
+      "rust": "RowOptions"
     },
     {
       "id": "filter.rows",
@@ -538,6 +606,86 @@
       "ts": "isAnswer",
       "rust": "Verdict::answered"
     },
+    {
+      "id": "results.ephemeral-input-excluded-from-values",
+      "group": "results",
+      "kind": "rule",
+      "what": "RowResult.Values/values excludes a column reported with src == \"ephemeral_input\", exactly as src == \"skipped\" already is: it was read but is never stored, so it must not sit where a caller reads the stored row (a hash, a signature) — the same leak the release-blocker text warns about for export, one layer up. src == \"materialized_input\" stays IN Values: it IS stored, replacing the column's expression (issue #53). NO VALUE HERE ON PURPOSE, not an oversight (issue #97's audit): this row's four spellings are the SAME symbols vocab.src.ephemeral_input below already value-checks (the constant's string), so a value here would re-check that constant a second time, not this row's own claim — the manifest has no mechanism to run a function against a synthetic document, only to compare a shared constant's value across bindings, so the exclusion BEHAVIOR genuinely cannot be value-checked here. That behavior — ephemeral_input excluded from Values/values and materialized_input not, and classify() (issue #97) reporting no phantom transform for ephemeral_input while still classifying materialized_input — is covered by each binding's own tests instead: go/chtypes/transform_ephemeral_test.go, python/tests/test_transform.py, ts/test/transform.test.ts, rust/src/transform.rs's #[cfg(test)] mod. The pre-existing src == \"skipped\" exclusion this mirrors now has its own row, results.skipped-excluded-from-values (issue #90) — that gap is CLOSED, not still open.",
+      "go": "SourceEphemeralInput",
+      "python": "Source.EPHEMERAL_INPUT",
+      "ts": "Source.EphemeralInput",
+      "rust": "source::EPHEMERAL_INPUT"
+    },
+    {
+      "id": "results.skipped-excluded-from-values",
+      "group": "results",
+      "kind": "rule",
+      "what": "RowResult.Values/values excludes a column reported with src == \"skipped\" (MATERIALIZED / ALIAS / EPHEMERAL, never read from an input row) — the rule results.ephemeral-input-excluded-from-values above was modeled on: a value that is never stored must not sit where a caller reads the stored row (a hash, a signature), the same leak the release-blocker text warns about for export, one layer up. This exclusion predates revision 5 and was correct in all four bindings before this row existed — issue #90 found it held together by construction (four independent implementations that happen to agree) rather than by declaration. Unlike ephemeral_input and materialized_input, \"skipped\" had NO named constant in any binding before issue #90: c.Src/col.src/c.src/c.src was compared against a bare string literal in Go, Python, TypeScript and Rust alike. Naming it, in the same idiom as SourceEphemeralInput/Source.EPHEMERAL_INPUT/Source.EphemeralInput/source::EPHEMERAL_INPUT (added by #53), is part of this row, which is why this row's four spellings are new exported symbols rather than pre-existing ones. NO VALUE HERE ON PURPOSE, not an oversight (mirroring results.ephemeral-input-excluded-from-values and issue #97's audit before it): there is no vocab.src.skipped constant row to value-check the string against — \"skipped\" predates the revision-5 vocab.src.* group and this is its only parity entry — but the manifest still has no mechanism to run a function against a synthetic document, only to compare a shared constant's value across bindings, so the exclusion BEHAVIOR genuinely cannot be value-checked here regardless. That behavior is covered by each binding's own tests instead: go/chtypes/values_skipped_test.go, python/tests/test_transform.py (test_values_excludes_skipped_keeps_input), ts/test/values-skipped.test.ts, rust/src/transform.rs's #[cfg(test)] mod (values_excludes_skipped_keeps_input) — every one of them was already passing on the first run, evidence the behavior was already right, not evidence the test caught a bug.",
+      "go": "SourceSkipped",
+      "python": "Source.SKIPPED",
+      "ts": "Source.Skipped",
+      "rust": "source::SKIPPED"
+    },
+    {
+      "id": "results.unsupported-settings-forces-unsupported",
+      "group": "results",
+      "kind": "rule",
+      "what": "A non-empty UnsupportedSettings/unsupported_settings forces RowResult.Outcome/outcome to Unsupported, UNLESS it is already Rejected — the precedence is part of the rule, and a rejection outranks a mere decline because it already means the whole row failed. Enforced once per row inside rowResultOf/_row_result/rowResultOf/row_result_of, so it also reaches every row folded into a BatchResult/batch (no binding's batch-level document carries its own unsupported_settings; only rows do, and BatchResult.Outcome is read straight off the document's own outcome string, never forced by a row's settings). Identical shape in all four, confirmed by reading each binding's row-assembly function (issue #122): go/chtypes/chtypes.go:1466 `if len(doc.UnsupportedSettings) > 0 && res.Outcome != Rejected { res.Outcome = Unsupported }`, python/src/chtypes/_document.py:147 `if unsupported_settings and outcome is not Outcome.REJECTED: outcome = Outcome.UNSUPPORTED`, ts/src/results.ts:424 `if (unsupportedSettings.length > 0 && outcome !== 'rejected') outcome = 'unsupported';`, rust/src/result.rs:823 `if !res.unsupported_settings.is_empty() && res.outcome != Outcome::Rejected { res.outcome = Outcome::Unsupported; }`. NO VALUE HERE ON PURPOSE: this row's four spellings are the SAME Outcome.Unsupported symbols vocab.outcome.unsupported already value-checks (the constant's string) — this row's own claim is the PRECEDENCE, not the string, and the manifest has no mechanism to run a function against a synthetic document, only to compare a shared constant's value across bindings, so the ordering BEHAVIOR genuinely cannot be value-checked here. Covered by a dedicated test per binding instead: go/chtypes/results_rules_test.go (TestUnsupportedSettingsForcesUnsupportedUnlessRejected), python/tests/test_results_rules.py (test_unsupported_settings_forces_unsupported_unless_rejected), ts/test/results-rules.test.ts ('unsupported_settings forces Unsupported unless already Rejected'), rust/src/result.rs's #[cfg(test)] mod (unsupported_settings_forces_unsupported_unless_rejected).",
+      "go": "Unsupported",
+      "python": "Outcome.UNSUPPORTED",
+      "ts": "Outcome.Unsupported",
+      "rust": "Outcome::Unsupported"
+    },
+    {
+      "id": "results.unknown-outcome-degrades-to-unsupported",
+      "group": "results",
+      "kind": "rule",
+      "what": "An outcome string a binding does not recognize MUST map to Unsupported, never to Rejected — an explicit MUST in docs/reference/bindings.md (§RowResult, rule added 2026-08-26: all four reference bindings previously defaulted the unknown arm to Rejected). This row covers BOTH places that vocabulary is parsed with the identical default-to-Unsupported shape: RowResult/BatchResult's own `outcome` (go/chtypes/chtypes.go outcomeOf, default case returns Unsupported at chtypes.go:1456; python/src/chtypes/results.py Outcome.of, line 241, catches ValueError and returns Outcome.UNSUPPORTED; ts/src/results.ts outcomeOf, line 365, default case returns 'unsupported'; rust/src/result.rs outcome_of, line 365, `_ => Outcome::Unsupported`) and FilterResult's call-level `outcome` (go/chtypes/chtypes.go filterResultOf, default case at chtypes.go:925 sets FilterUnsupported with the comment \"degrade to the decline arm, never the rejection arm\"; python/src/chtypes/results.py FilterOutcome.of, line 184, same shape; ts/src/results.ts filterResultOf, line 681, `rawOutcome === 'ok' ? 'ok' : rawOutcome === 'rejected' ? 'rejected' : 'unsupported'`; rust/src/result.rs filter_result_of, line 919, `_ => FilterOutcome::Unsupported`). A future artifact's new verdict is by definition an answer a binding cannot interpret: Unsupported/FilterUnsupported is the arm never scored as agreement, while defaulting to Rejected manufactures an over-reject — the zero-budget failure — out of pure vocabulary drift. Keyed on FilterOutcome.Unsupported (rather than the plain Outcome.Unsupported the row above already anchors) so the two rows resolve against distinct symbols. NO VALUE HERE ON PURPOSE: reuses the SAME symbols vocab.filter-outcome.unsupported already value-checks; this row's own claim is the DEGRADE-ON-UNKNOWN behavior for both vocabularies, not the string. Covered by go/chtypes/results_rules_test.go (TestUnknownOutcomeDegradesToUnsupported), python/tests/test_results_rules.py (test_unknown_outcome_degrades_to_unsupported), ts/test/results-rules.test.ts ('unknown outcome degrades to Unsupported, never Rejected'), rust/src/result.rs's #[cfg(test)] mod (unknown_outcome_degrades_to_unsupported).",
+      "go": "FilterUnsupported",
+      "python": "FilterOutcome.UNSUPPORTED",
+      "ts": "FilterOutcome.Unsupported",
+      "rust": "FilterOutcome::Unsupported"
+    },
+    {
+      "id": "results.unknown-verdict-degrades-to-decline",
+      "group": "results",
+      "kind": "rule",
+      "what": "An unrecognized verdict character — the per-row 't'/'f'/'e'/'d' answer shared by RowResult/BatchResult's per-row `verdict` (the revision-5 attached filter) and FilterResult's `verdicts` string — MUST degrade to Decline, never be collapsed into an invented answer ('f') and never treated as Rejected: docs/reference/bindings.md §Revision 3 states a binding MUST NOT collapse 'e' or 'd' into false-the-answer, and that unknown characters degrade to the decline state 'mirroring the unknown-outcome rule'. Identical default-to-Decline shape in all four, ONE shared mapping function per binding used by both the row/batch verdict and the filter verdicts string: go/chtypes/chtypes.go verdictOf, default case at chtypes.go:966 returns VerdictDecline; python/src/chtypes/results.py Verdict.of, line 154, catches ValueError and returns Verdict.DECLINE; ts/src/results.ts verdictOf, line 604, default case returns 'd'; rust/src/result.rs verdict_of, line 218, `_ => Verdict::Decline`. Collapsing a decline into false is the measured leak class this vocabulary exists to prevent: under a `NOT`, a decline read as false inverts fail-closed into fail-open. NO VALUE HERE ON PURPOSE: reuses the SAME symbols vocab.verdict.decline already value-checks; this row's own claim is the DEGRADE-ON-UNKNOWN behavior, not the character. Covered by go/chtypes/results_rules_test.go (TestUnknownVerdictDegradesToDecline), python/tests/test_results_rules.py (test_unknown_verdict_degrades_to_decline), ts/test/results-rules.test.ts ('unknown verdict character degrades to Decline'), rust/src/result.rs's #[cfg(test)] mod (unknown_verdict_degrades_to_decline).",
+      "go": "VerdictDecline",
+      "python": "Verdict.DECLINE",
+      "ts": "Verdict.Decline",
+      "rust": "Verdict::Decline"
+    },
+    {
+      "id": "results.null-false-when-poisoned",
+      "group": "results",
+      "kind": "rule",
+      "what": "Value.Null/null is true only when the stored text is literally the JSON `null` AND the column is NOT poisoned — poison silently overrides a textual null, so a poisoned column is always reported Null == false (with an empty Text/text, since there is no renderable value at all, not a null one). Identical `stored == \"null\" && !poison` shape, evaluated at the same call site that builds each Value, in all four: go/chtypes/chtypes.go:1487 `Null: string(c.StoredRaw) == \"null\" && !c.Poison`; python/src/chtypes/_document.py:169 `null=col.stored_raw == \"null\" and not col.poison`; ts/src/results.ts:453 `isNull: c.storedIsNull && !c.poison` (storedIsNull is computed off the parsed JSON node's own `kind === 'null'`, ts/src/results.ts:389 — the same claim in parsed-AST form rather than a raw string compare, since TypeScript's JSON parser already retains that distinction); rust/src/result.rs:840 `null: c.stored_is_json_null() && !c.poison` (stored_is_json_null(), rust/src/result.rs:764, compares the same stored text against the literal \"null\"). docs/reference/bindings.md §Result types states the general rule (\"Null is true only for a genuine stored null — a poisoned column is Null == false with an empty Text\"); this row is what was missing: nothing in the parity manifest keyed the poison-overrides-a-textual-null half of it on a symbol. NO VALUE HERE ON PURPOSE: this is a behavior on the Value-assembly path, not a literal constant a manifest run can compare across bindings, the same reason registry.check-library-bytes carries none — the manifest has no mechanism to run a function against a synthetic document. Covered by go/chtypes/results_rules_test.go (TestValueNullFalseWhenPoisoned), python/tests/test_results_rules.py (test_value_null_false_when_poisoned), ts/test/results-rules.test.ts ('Value.isNull is false when poisoned, even with a textual null'), rust/src/result.rs's #[cfg(test)] mod (value_null_false_when_poisoned).",
+      "go": "Value",
+      "python": "Value",
+      "ts": "Value",
+      "rust": "Value"
+    },
+    {
+      "id": "results.default-substituted-populates-substituted",
+      "group": "results",
+      "kind": "rule",
+      "what": "src == \"default_substituted\" is the ONLY src value that populates RowResult.Substituted/substituted — one entry per column reported with it, carrying the column name, the DEFAULT expression echoed back (Input/input, as Expr/expr) and the resolved value (Stored/stored, as Text/text). A VOLATILE DEFAULT (now()/now64(n)/today()/yesterday(), or an expression over one) is resolved locally rather than by ClickHouse, so the caller MUST send it as an explicit column on any later INSERT or the value silently drifts each attempt — Substituted/substituted is how a binding tells the caller which columns need that. This exclusion predates revision 5 and was already correct in all four bindings before this row existed — the same \"held together by construction\" gap issue #90 found for \"skipped\", for a different src value (issue #122). Unlike \"ephemeral_input\"/\"materialized_input\" (#53) and \"skipped\" (#90, now named SourceSkipped), \"default_substituted\" had NO named constant in any binding before this row: c.Src/col.src/c.src/c.src was compared against a bare string literal at go/chtypes/chtypes.go:1490, python/src/chtypes/_document.py:173, ts/src/results.ts:446 and rust/src/result.rs:843. Naming it, in the same idiom as SourceSkipped / Source.SKIPPED / Source.Skipped / source::SKIPPED, is part of this row, which is why this row's four spellings are new exported symbols rather than pre-existing ones. NO VALUE HERE ON PURPOSE, mirroring results.skipped-excluded-from-values: there is no vocab.src.default_substituted constant row to value-check the string against — \"default_substituted\" predates the revision-5 vocab.src.* group and this is its only parity entry — and regardless the manifest has no mechanism to run a function against a synthetic document, only to compare a shared constant's value across bindings, so the population BEHAVIOR genuinely cannot be value-checked here. Covered by each binding's own test instead: go/chtypes/results_rules_test.go (TestDefaultSubstitutedPopulatesSubstituted), python/tests/test_results_rules.py (test_default_substituted_populates_substituted), ts/test/results-rules.test.ts ('default_substituted populates substituted'), rust/src/result.rs's #[cfg(test)] mod (default_substituted_populates_substituted).",
+      "go": "SourceDefaultSubstituted",
+      "python": "Source.DEFAULT_SUBSTITUTED",
+      "ts": "Source.DefaultSubstituted",
+      "rust": "source::DEFAULT_SUBSTITUTED"
+    },
+    {
+      "id": "results.non-ok-filter-result-forces-empty",
+      "group": "results",
+      "kind": "rule",
+      "what": "A FilterResult whose Outcome/outcome is anything but Ok/ok/OK forces Verdicts/verdicts and Errors/errors empty — \"no partial answers\": a call-level Rejected or Unsupported means the whole call failed or declined, so nothing downstream may read a per-row verdict that was never computed, even if the wire document happened to carry stray verdicts/errors bytes alongside a non-OK outcome. Identical guard, evaluated immediately after the outcome is decided and before either field is populated, in all four: go/chtypes/chtypes.go:927 `if res.Outcome != FilterOK { return res, nil }` (Verdicts/Errors are left at their zero value, an empty slice); python/src/chtypes/_document.py:314 `if outcome is FilterOutcome.OK:` guards the only code that ever assigns to the `verdicts`/`errors` locals, both of which start `()`; ts/src/results.ts:694 `if (outcome !== 'ok') return { ...base, verdicts: [], errors: [] };`; rust/src/result.rs:933 `if res.outcome != FilterOutcome::Ok { return res; }` (using `..Default::default()`, so verdicts/errors are already empty Vecs). The same shape is stated for the sibling `chs_block_parse` surface in docs/guides/filters.md §Blocks (\"A call-level failure yields no block at all, and no partial answers\"); this row is FilterResult's own declaration of it. NO VALUE HERE ON PURPOSE: this is a behavior on the FilterResult-assembly path, not a literal constant a manifest run can compare across bindings — the manifest has no mechanism to run a function against a synthetic document. Covered by go/chtypes/results_rules_test.go (TestNonOkFilterResultForcesEmptyVerdictsAndErrors), python/tests/test_results_rules.py (test_non_ok_filter_result_forces_empty_verdicts_and_errors), ts/test/results-rules.test.ts ('a non-OK FilterResult forces verdicts and errors empty'), rust/src/result.rs's #[cfg(test)] mod (non_ok_filter_result_forces_empty_verdicts_and_errors).",
+      "go": "FilterResult",
+      "python": "FilterResult",
+      "ts": "FilterResult",
+      "rust": "FilterResult"
+    },
 
     {
       "id": "vocab.format.json-each-row",
@@ -603,6 +751,18 @@
       "group": "vocabulary", "kind": "constant", "value": 9,
       "what": "chs_format Buffers — 26.5+; 73 proves the decoder is present and 117 proves it absent (§Values a binding must accept and reject)",
       "go": "Buffers", "python": "Format.BUFFERS", "ts": "Format.Buffers", "rust": "Format::Buffers"
+    },
+    {
+      "id": "vocab.format.csv-with-names",
+      "group": "vocabulary", "kind": "constant", "value": 10,
+      "what": "chs_format CSVWithNames — joined inside revision 5, so a revision-5 artifact built before it does not know it and the revision check cannot tell; ask the ARTIFACT before declaring it (§Values a binding must accept and reject)",
+      "go": "CSVWithNames", "python": "Format.CSV_WITH_NAMES", "ts": "Format.CSVWithNames", "rust": "Format::CsvWithNames"
+    },
+    {
+      "id": "vocab.format.tsv-with-names",
+      "group": "vocabulary", "kind": "constant", "value": 11,
+      "what": "chs_format TSVWithNames — joined inside revision 5 with CSVWithNames; the same probe rule applies (§Values a binding must accept and reject)",
+      "go": "TSVWithNames", "python": "Format.TSV_WITH_NAMES", "ts": "Format.TSVWithNames", "rust": "Format::TsvWithNames"
     },
 
     {
@@ -781,7 +941,7 @@
       "id": "vocab.reason.fixedstring_pad",
       "group": "vocabulary", "kind": "constant", "value": "fixedstring_pad",
       "what": "A FixedString padded or truncated to its declared width",
-      "go": "ReasonStringPad", "python": "Reason.FIXEDSTRING_PAD", "ts": "Reason.FixedStringPad", "rust": "reason::FIXEDSTRING_PAD"
+      "go": "ReasonFixedStringPad", "python": "Reason.FIXEDSTRING_PAD", "ts": "Reason.FixedStringPad", "rust": "reason::FIXEDSTRING_PAD"
     },
     {
       "id": "vocab.reason.emptied",
@@ -857,8 +1017,21 @@
     },
 
     {
+      "id": "vocab.src.ephemeral_input",
+      "group": "vocabulary", "kind": "constant", "value": "ephemeral_input",
+      "what": "columns_json (revision 5): a listed EPHEMERAL column's read value — reported in the column results, never stored, never exported (issue #53)",
+      "go": "SourceEphemeralInput", "python": "Source.EPHEMERAL_INPUT", "ts": "Source.EphemeralInput", "rust": "source::EPHEMERAL_INPUT"
+    },
+    {
+      "id": "vocab.src.materialized_input",
+      "group": "vocabulary", "kind": "constant", "value": "materialized_input",
+      "what": "columns_json (revision 5): a listed MATERIALIZED column's supplied value under insert_allow_materialized_columns=1 — replaces the column's expression and IS stored (issue #53)",
+      "go": "SourceMaterializedInput", "python": "Source.MATERIALIZED_INPUT", "ts": "Source.MaterializedInput", "rust": "source::MATERIALIZED_INPUT"
+    },
+
+    {
       "id": "const.abi-revision",
-      "group": "vocabulary", "kind": "constant", "value": 4,
+      "group": "vocabulary", "kind": "constant", "value": 5,
       "what": "The chs_* ABI revision this binding was written against; a different nonzero artifact revision is refused at load (§The object model)",
       "go": "ABIRevision", "python": "ABI_REVISION", "ts": "ABI_REVISION", "rust": "ABI_REVISION"
     },
@@ -1073,9 +1246,9 @@
     },
     {
       "id": "discovery.reconstruct-ddl",
-      "group": "discovery", "kind": "function",
-      "what": "The DDL-reconstruction helper — a spelling exercise only; the library's own compile is the judge (§Discovery)",
-      "go": "ReconstructDDL", "python": "reconstruct_ddl", "ts": "reconstructDdl", "rust": "reconstruct_ddl"
+      "group": "discovery", "kind": "method",
+      "what": "The DDL-reconstruction helper — a spelling exercise only; the column NAME is spelled by the library's own identifier quoting, and the library's own compile is the judge (§Discovery)",
+      "go": "Library.ReconstructDDL", "python": "Library.reconstruct_ddl", "ts": "Library.reconstructDdl", "rust": "Library::reconstruct_ddl"
     },
     {
       "id": "discovery.server-profile",
@@ -1249,6 +1422,10 @@
       "CompileOption": "Functional option carrier.",
       "EngineOption": "Functional option carrier.",
       "FilterOption": "Functional option carrier.",
+      "RowOption": "Functional option carrier.",
+      "RowsExportOption": "Functional option carrier; exported (unlike a plain option type) because a caller migrating off RowsExport's old ...DocFlags variadic needs a nameable type to build a []RowsExportOption.",
+      "RowsOption": "Functional option carrier for RowsExportWith — a distinct type from RowsExportOption because RowsExportWith is a new entry point with its own opts, not an added option on RowsExport.",
+      "WithDocFlags": "RowsExportWith's own spelling of the pre-existing DocFlags document-group selection (schema.rows-export already covers the capability) — a function rather than a bare DocFlags value because RowsExportWith's opts are RowsOption, not DocFlags.",
       "WithAutoFetch": "Registry option; Python/TS/Rust spell it as a constructor field.",
       "WithFetchOptions": "Registry option; Python/TS/Rust spell it as a constructor field.",
       "FetchOptions": "The fetch option struct; every binding has one, shaped its own way.",
@@ -1280,7 +1457,6 @@
       "SystemRegistryDirs": "The two system roots of docs/guides/fetch.md §1.",
       "DefaultRegistryDirFor": "The per-user cache for another platform.",
       "ValidPlatform": "Platform-key validation.",
-      "QuoteIdentifier": "Backtick-quoting for reconstruct; the others keep it private.",
       "Timezone": "The package-level server timezone; see registry.timezone-option.",
       "Outcome.String": "Stringer.",
       "Verdict.String": "Stringer.",
@@ -1345,6 +1521,7 @@
       "RELEASE_PUBLIC_KEY": "Release key hex."
     },
     "ts": {
+      "RowOptions": "The revision-5 column-list option's own type, split off RowsOptions (schema.columns-option) so row() and parseBlock() do not advertise the exportFormat and docFlags they ignore; RowsOptions extends it and still carries the capability.",
       "Registry.open": "The async resolve, TS's own idiom for what Go spells as ForContext.",
       "Registry.has": "Membership test, as Python's __contains__.",
       "Registry.dir": "The primary registry directory.",
@@ -1457,6 +1634,7 @@
       "Error::Nul": "An interior NUL in a string crossing the boundary.",
       "Error::Discovery": "A discovery body that did not parse.",
       "Error::CrossLibrary": "The §Revision 4 cross-library refusal, as a typed error.",
+      "Error::CrossLibrarySchema": "Schema::rows_export_with's cross-library refusal (a filter and the schema it is attached to come from two different loaded libraries), the same shape as Error::CrossLibrary for a (filter, block) pair.",
       "Error::Fetch": "Fetch-layer error.",
       "Result": "The crate's Result alias.",
       "RawText": "Bytes with a fallible UTF-8 view — never a String carrying invented U+FFFD.",

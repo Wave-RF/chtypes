@@ -283,8 +283,13 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
   const lib = (): Library => registry.for(preferred);
 
   beforeAll(() => {
-    registry = new Registry(REGISTRY ?? undefined);
-    versions = registry.versions();
+    // Construction reads manifests and dlopens nothing, so "the registry
+    // loads" has to be ASKED FOR — `preload` is that request, and it is what
+    // construction used to do on its own. Without it a registry that cannot
+    // open (a refused ABI revision, say) fails every test below with the same
+    // message instead of failing here, once.
+    versions = new Registry(REGISTRY ?? undefined).versions();
+    registry = new Registry(REGISTRY ?? undefined, { preload: versions });
     newest = versions[versions.length - 1]!;
     preferred = registry.has('25.8') ? '25.8' : newest;
   });
@@ -885,8 +890,14 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       const tmp = mkdtempSync(path.join(tmpdir(), 'chtypes-reg-'));
       try {
         symlinkSync(path.join(registry.dir, preferred), path.join(tmp, preferred), 'dir');
-        const verified = new Registry(tmp, { verifyChecksums: true });
-        expect(verified.versions()).toEqual([preferred]);
+        const verified = new Registry(tmp, { verifyChecksums: true, preload: [preferred] });
+        // versions() lists every line this registry can ANSWER FOR, which since
+        // #50 includes lines discovered further along the search path — naming a
+        // directory prepends to it, it does not replace it, so $CHTYPES_REGISTRY
+        // is still on the path here. What this test assembled is the one
+        // symlinked line, so assert on what it LOADED.
+        expect(verified.libraries().map((l) => l.minor)).toEqual([preferred]);
+        expect(verified.versions()).toContain(preferred);
         // dlopen is refcounted, so the same artifact must resolve to the same
         // loaded library rather than being initialized a second time.
         expect(verified.for(preferred).version).toBe(registry.for(preferred).version);
@@ -914,7 +925,12 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
         // before anything is dlopen'd, so no real load happens here.
         writeFileSync(path.join(dst, manifest['library'] as string), 'not a shared library');
         writeFileSync(path.join(dst, 'manifest.json'), JSON.stringify(manifest));
-        expect(() => new Registry(tmp, { verifyChecksums: true })).toThrow(/sha256 .* does not match manifest/);
+        // A preloaded line is hashed at construction, which is where this
+        // verdict has always come from; a lazily-opened one is hashed too, and
+        // `test/fetch.test.ts` pins that half.
+        expect(() => new Registry(tmp, { verifyChecksums: true, preload: [preferred] })).toThrow(
+          /sha256 .* does not match manifest/,
+        );
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }

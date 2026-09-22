@@ -270,7 +270,8 @@ func parseDefaultKind(s string) DefaultKind {
 //
 // CSV, TSV, Values and JSONCompactEachRow are POSITIONAL: the k-th field
 // addresses the k-th insertable column (MATERIALIZED/ALIAS/EPHEMERAL occupy
-// no position). JSONEachRow and Native address columns by NAME. The RowBinary
+// no position). JSONEachRow and Native address columns by NAME, and so do
+// CSVWithNames and TSVWithNames, through their header row. The RowBinary
 // family, Native and Buffers are binary and all-or-nothing per batch.
 type Format int
 
@@ -335,6 +336,21 @@ const (
 	// do. Requires an artifact built at or after the Buffers exposure; older
 	// ones reject with "unknown format".
 	Buffers
+	// CSVWithNames is CSV whose first row is a header naming the columns, so
+	// the data is addressed by NAME. With a column list as well (WithColumns),
+	// the list decides the block and the header decides the layout. Header
+	// names match EXACTLY through ClickHouse 26.4 and case-insensitively from
+	// 26.5, exactly as those servers do.
+	//
+	// It joined enum chs_format inside ABI revision 5, so a revision-5
+	// artifact built before it existed does not know it and rejects with
+	// "unknown format" — the revision check cannot tell. Probe the artifact
+	// rather than assuming it from this package's version.
+	CSVWithNames
+	// TSVWithNames is TSV whose first row is a header naming the columns;
+	// everything CSVWithNames says about the header, a column list, header
+	// matching and probing the artifact applies unchanged.
+	TSVWithNames
 )
 
 // ExportNone is RowsExport's "no export requested" sentinel — the C ABI's
@@ -459,12 +475,64 @@ type Value struct {
 	//                          it as an explicit column; see RowResult.Substituted
 	//   "absent"               the type's own default, no DEFAULT declared
 	//   "skipped"              MATERIALIZED / ALIAS / EPHEMERAL, never read
-	//                          from an input row
+	//                          from an input row (see SourceSkipped) —
+	//                          EXCLUDED from RowResult.Values
+	//   "ephemeral_input"      revision 5: a LISTED EPHEMERAL column's read
+	//                          value (see SourceEphemeralInput) — never stored,
+	//                          never exported, and — like "skipped" — EXCLUDED
+	//                          from RowResult.Values; never seen on a Value
+	//                          returned from this package
+	//   "materialized_input"   revision 5: a LISTED MATERIALIZED column's
+	//                          supplied value under
+	//                          insert_allow_materialized_columns=1 (see
+	//                          SourceMaterializedInput) — stored, replacing the
+	//                          column's expression, and INCLUDED in
+	//                          RowResult.Values
 	Source string
 }
 
 // String returns Text — ClickHouse's own JSON rendering of the stored value.
 func (v Value) String() string { return v.Text }
+
+// The two revision-5 Value.Source provenances columns_json introduces
+// (issue #53). Bare string constants, matching the Reason* shape above: `src`
+// is a growing vocabulary a binding must pass through verbatim, so these name
+// two of its spellings rather than wrapping it in a closed type.
+const (
+	// SourceEphemeralInput: a listed EPHEMERAL column's read value. The
+	// server reads it — it is in scope for the DEFAULT expressions that
+	// reference it — and it is never stored and never exported. rowResultOf
+	// excludes it from RowResult.Values exactly as it already excludes
+	// "skipped": a value that is never stored must not sit where a caller
+	// reads the stored row (a hash, a signature) or it leaks a column the
+	// table never held, one layer above the export channel.
+	SourceEphemeralInput = "ephemeral_input"
+	// SourceMaterializedInput: a listed MATERIALIZED column's supplied value
+	// under insert_allow_materialized_columns=1. The supplied value REPLACES
+	// the column's expression and IS stored — unlike SourceEphemeralInput,
+	// it stays IN RowResult.Values.
+	SourceMaterializedInput = "materialized_input"
+)
+
+// SourceSkipped names the "skipped" Value.Source provenance: MATERIALIZED /
+// ALIAS / EPHEMERAL, never read from an input row. Predates revision 5 — it
+// is not one of the two provenances above — but rowResultOf has excluded it
+// from RowResult.Values from the start, the same exclusion
+// SourceEphemeralInput was modeled on. Named here, in the same idiom as
+// SourceEphemeralInput and SourceMaterializedInput, so the exclusion can be
+// keyed on a symbol rather than a bare string literal (issue #90).
+const SourceSkipped = "skipped"
+
+// SourceDefaultSubstituted names the "default_substituted" Value.Source
+// provenance: a VOLATILE DEFAULT (now()/now64(n)/today()/yesterday(), or an
+// expression over one) that this library resolved locally rather than
+// ClickHouse — the caller MUST send it as an explicit column on any later
+// INSERT, or the value silently drifts each attempt. rowResultOf has always
+// populated RowResult.Substituted for exactly this src value; like
+// SourceSkipped before issue #90, it had no named constant of its own.
+// Named here, in the same idiom, so the population rule can be keyed on a
+// symbol rather than a bare string literal (issue #122).
+const SourceDefaultSubstituted = "default_substituted"
 
 // Transform records a silent change ClickHouse made on the way to storage:
 // input 256 into UInt8 stored as 0, reason "overflow_wrap". Reason is one of
@@ -531,6 +599,22 @@ type RowResult struct {
 	// present one as a stored value. A caller that wants to show it must ask
 	// the server, and must label it computed-at-read.
 	Computed []Computed
+	// Verdict is this row's filter verdict from RowsExportWith's attached
+	// filter (docs/guides/filters.md "Exporting only the rows a filter
+	// admits"): nil when no filter was attached to the call that produced
+	// this row (Row, Rows, RowsExport, and RowsExportWith with no
+	// WithRowFilter) — never treat a nil Verdict as an answer. Beside
+	// Outcome, not instead of it: the two are independent facts. A
+	// security-enforcing caller MUST fail closed — hide the row / fail the
+	// request — on any Verdict that is nil or !Answered().
+	Verdict *Verdict
+	// VerdictCode and VerdictErr carry the row's own error beside a
+	// non-answer verdict: set for VerdictError (the predicate threw,
+	// ClickHouse's own code/message), for an eval-time VerdictDecline (the
+	// admission envelope), and for a row whose own Outcome is not Accepted
+	// (its own parse error, reported as VerdictDecline). Zero/"" otherwise.
+	VerdictCode int
+	VerdictErr  string
 }
 
 // Computed is one MATERIALIZED column's value for a row: stored at insert,
@@ -649,7 +733,7 @@ var Timezone = "UTC"
 // The artifact reports its own with chs_abi_revision(); see the C ABI contract
 // §ABI identity. A dlopen'd Library reports the loaded artifact's revision
 // through Library.ABIRevision, which is 0 when the artifact predates the probe.
-const ABIRevision = 4
+const ABIRevision = 5
 
 // CompileMode selects how a settings profile handed to CompileDDL relates to
 // the settings this build compiles under. Numeric values are part of the
@@ -872,21 +956,33 @@ func filterResultOf(js string) (FilterResult, error) {
 	}
 	res.Verdicts = make([]Verdict, 0, len(doc.Verdicts))
 	for _, c := range doc.Verdicts {
-		switch c {
-		case 't':
-			res.Verdicts = append(res.Verdicts, VerdictTrue)
-		case 'f':
-			res.Verdicts = append(res.Verdicts, VerdictFalse)
-		case 'e':
-			res.Verdicts = append(res.Verdicts, VerdictError)
-		default:
-			// 'd', and any character this binding does not know: decline —
-			// fail closed, mirroring the unknown-outcome rule.
-			res.Verdicts = append(res.Verdicts, VerdictDecline)
-		}
+		res.Verdicts = append(res.Verdicts, verdictOf(c))
 	}
 	res.Errors = doc.Errors
 	return res, nil
+}
+
+// verdictOf maps ONE wire verdict character to a Verdict — the single place
+// that decision is made, shared by filterResultOf (chs_filter_rows' /
+// chs_block_parse's "verdicts" string, one char per row) and rowResultOf
+// (chs_rows' per-row "verdict" field, the revision-5 attached filter). A
+// second, drifted copy of this switch is exactly how 'e' or 'd' could get
+// silently collapsed into VerdictFalse in one call path and not the other —
+// the fail-open bug this vocabulary exists to prevent
+// (docs/guides/filters.md "Four verdicts, two of which are not answers").
+func verdictOf(c rune) Verdict {
+	switch c {
+	case 't':
+		return VerdictTrue
+	case 'f':
+		return VerdictFalse
+	case 'e':
+		return VerdictError
+	default:
+		// 'd', and any character this binding does not know: decline — fail
+		// closed, mirroring the unknown-outcome rule.
+		return VerdictDecline
+	}
 }
 
 // FilterOption configures CompileFilter — the same variadic functional-option
@@ -929,6 +1025,155 @@ type filterConfig struct {
 // DoS.
 func WithFilterParams(params map[string]string) FilterOption {
 	return func(c *filterConfig) { c.params = params }
+}
+
+// ----------------------------------------------------- filtered row export
+
+// rowsExportWithConfig is RowsExportWith's assembled options: DocFlags plus
+// an attached row filter. A separate carrier from rowsExportConfig
+// (RowsExport's own) because this call's growth slot carries a schema-bound
+// filter handle that RowsExport's option set never needed.
+type rowsExportWithConfig struct {
+	flags  DocFlags
+	filter *LoadedFilter
+}
+
+// RowsOption configures RowsExportWith — a new entry point rather than an
+// option added to RowsExport, because RowsExport's own variadic parameter
+// was already spent (docs/guides/filters.md "Exporting only the rows a
+// filter admits"; the decision is issue #54's own). WithRowFilter and
+// WithDocFlags are its two options.
+type RowsOption func(*rowsExportWithConfig)
+
+// WithRowFilter attaches a compiled filter to RowsExportWith's export
+// channel: ONE chs_rows parse then answers both the per-row verdict
+// ('t'/'f'/'e'/'d', RowResult.Verdict) and, for rows whose verdict is 't',
+// the export bytes. Omitting it is legal and behaves exactly like
+// RowsExport — the header's own NULL-is-unchanged-byte-for-byte contract.
+//
+// 'e' (the predicate threw) and 'd' (declined — including a row whose own
+// parse Outcome was not Accepted) are NEVER exported and NEVER collapsed
+// into 'f': collapsing either turns fail-closed into fail-open, the leak
+// class this surface exists to prevent. A security-enforcing caller must
+// treat any RowResult.Verdict that is nil or !Answered() as a refusal —
+// hide the row or fail the request, never export it.
+//
+// The filter must be compiled over THIS call's own schema handle; one from
+// a different LoadedSchema of the SAME loaded library rejects the whole
+// call, loudly (BatchResult.Outcome == Rejected, ErrCode 1002 — the
+// existing cross-schema rule LoadedFilter.Eval already enforces for a
+// (filter, block) pair). One from a DIFFERENT loaded library is refused
+// before any C call, since no handle crosses a dlopen'd image boundary.
+//
+// Lifetime: unchanged from CompileFilter / f.Rows — the filter's schema
+// must stay open for as long as the filter is used, and the schema's Close
+// frees open filters first. RowsExportWith reuses that existing mechanism;
+// it does not invent a second one.
+func WithRowFilter(f *LoadedFilter) RowsOption {
+	return func(c *rowsExportWithConfig) { c.filter = f }
+}
+
+// WithDocFlags selects which document groups RowsExportWith's per-row
+// documents carry — RowsExportWith's own spelling of the DocFlags option,
+// named as a function (rather than passing a bare DocFlags, as RowsExport
+// accepts) because RowsExportWith's opts are RowsOption values. Repeated
+// calls OR their bits together, exactly as RowsExport's DocFlags args do.
+func WithDocFlags(flags DocFlags) RowsOption {
+	return func(c *rowsExportWithConfig) { c.flags |= flags }
+}
+
+// -------------------------------------------------------------- row options
+
+// rowConfig is Row / RowWithSettings / Rows / RowsExport / ParseBlock's
+// assembled options — today just the revision-5 INSERT column list.
+type rowConfig struct {
+	columns []string
+}
+
+// RowOption configures a row-level call, the same variadic functional-option
+// shape CompileDDL/CompileFilter use (WithCompileSettings, WithFilterParams).
+// Exported, like every sibling option type (CompileOption, FilterOption,
+// EngineOption) — revive's unexported-return check (WithColumns returned the
+// unexported rowOption) caught this one as the odd one out, and it carries
+// its own entry in tests/parity/manifest.json's `unlisted` table for the same
+// reason the others do: WithColumns is the one capability the parity contract
+// names for this option group (schema.columns-option), and the carrier type
+// itself needs no capability entry of its own.
+type RowOption func(*rowConfig)
+
+// WithColumns declares the INSERT column list (ABI revision 5) for Row,
+// RowWithSettings, Rows, RowsExport and ParseBlock — the
+// `INSERT INTO t (a, b, …)` shape. The data then supplies exactly the listed
+// columns — k-th field to k-th listed column in the positional formats (CSV,
+// TSV, Values, JSONCompactEachRow, the binary family), keys matched against
+// the listed set in the JSON family — and the server computes every unlisted
+// column, with the listed values in scope for their DEFAULT expressions. A
+// listed EPHEMERAL column's value is read and is in scope for the DEFAULTs
+// referencing it, and is still never stored and never exported.
+//
+// A nil or empty slice is IDENTICAL to omitting the option: today's no-list
+// behavior, where the data supplies every plain column. This binding NEVER
+// renders that as `INSERT INTO t () …` — that statement is a syntax error,
+// code 62, on every server — so absent and empty both mean "send no list at
+// all", never an empty one.
+//
+// Names are not validated here: an unknown column, an ALIAS column (refused
+// with the SAME code and message as unknown — the two are indistinguishable
+// from the wire), and a repeated name are each refused with the server's own
+// code (16, 16, 15 respectively), surfaced exactly as they come back. This
+// package never reimplements a ClickHouse rule.
+func WithColumns(columns []string) RowOption {
+	return func(c *rowConfig) { c.columns = columns }
+}
+
+// columnsOf resolves a RowOption slice to the declared column list, or nil
+// for "no list" — the one assembly step shared by the linked and dlopen'd
+// paths, each of which renders it into the wire columns_json (or passes a
+// NULL pointer) at its own cgo boundary.
+func columnsOf(opts []RowOption) []string {
+	var c rowConfig
+	for _, o := range opts {
+		o(&c)
+	}
+	if len(c.columns) == 0 {
+		return nil
+	}
+	return c.columns
+}
+
+// rowsExportConfig is RowsExport's assembled options: the pre-existing
+// DocFlags document-group selection plus the revision-5 column list.
+type rowsExportConfig struct {
+	flags   DocFlags
+	columns []string
+}
+
+// RowsExportOption is what RowsExport's variadic parameter accepts. It
+// unifies RowsExport's pre-existing DocFlags-only surface with RowOption
+// (WithColumns) so the new option can ride the same call without breaking
+// any existing DocFlags-only call site — Go permits only one variadic
+// parameter, and DocFlags already occupied it.
+//
+// Exported, not just for consistency with RowOption/CompileOption/FilterOption/
+// EngineOption: a caller cannot declare or build a slice of an unexported
+// interface type, and RowsExport's variadic parameter changed from ...DocFlags
+// to this type in the same revision-5 change — a caller migrating off a built
+// []DocFlags needs a nameable type to migrate to.
+type RowsExportOption interface {
+	applyRowsExport(*rowsExportConfig)
+}
+
+// applyRowsExport lets a bare DocFlags value keep working exactly as every
+// existing RowsExport(..., chtypes.DocAll) call site already does.
+func (d DocFlags) applyRowsExport(c *rowsExportConfig) { c.flags |= d }
+
+// applyRowsExport lets a RowOption (WithColumns) ride the same call.
+func (o RowOption) applyRowsExport(c *rowsExportConfig) {
+	var rc rowConfig
+	o(&rc)
+	if len(rc.columns) > 0 {
+		c.columns = rc.columns
+	}
 }
 
 // BatchResult is the outcome of one request body, which may hold many rows.
@@ -985,6 +1230,14 @@ type BatchResult struct {
 	// or no export was requested. A decline here is -2-class honesty, never a
 	// server verdict.
 	ExportDeclined string
+	// RowsPassed and RowsCut (RowsExportWith only): accepted rows whose
+	// verdict is 't', and accepted rows with any other verdict, respectively.
+	// RowsPassed + RowsCut == the accepted-row count. Both zero when no
+	// filter was attached — indistinguishable from "filter attached, nothing
+	// passed and nothing accepted", so a caller keys presence on whether it
+	// called RowsExportWith with WithRowFilter, never on these being nonzero.
+	RowsPassed int
+	RowsCut    int
 }
 
 type batchDoc struct {
@@ -1012,6 +1265,10 @@ type batchDoc struct {
 	// ExportDeclined: present exactly when an export was requested and
 	// withheld, carrying the reason; absent otherwise.
 	ExportDeclined string `json:"export_declined"`
+	// RowsPassed/RowsCut: present exactly when a filter was attached
+	// (RowsExportWith), absent (zero) otherwise.
+	RowsPassed int `json:"rows_passed"`
+	RowsCut    int `json:"rows_cut"`
 }
 
 type storageTransformDoc struct {
@@ -1030,6 +1287,13 @@ type rowDoc struct {
 	UnsupportedSettings []string  `json:"unsupported_settings"`
 	Cols                []colDoc  `json:"cols"`
 	Computed            []compDoc `json:"computed"`
+	// Verdict/VerdictCode/VerdictErr (RowsExportWith only): present exactly
+	// when a filter was attached to the call that produced this document —
+	// absent (Verdict == "") from every Row/Rows/RowsExport document and
+	// from RowsExportWith with no filter attached.
+	Verdict     string `json:"verdict"`
+	VerdictCode int    `json:"verdict_code"`
+	VerdictErr  string `json:"verdict_err"`
 }
 
 type compDoc struct {
@@ -1177,6 +1441,7 @@ func batchResultOf(js string) (BatchResult, error) {
 		RowsRead: doc.RowsRead, RowsSkipped: doc.RowsSkipped,
 		EngineRows: doc.EngineRows,
 		Spans:      doc.RowSpans, ExportDeclined: doc.ExportDeclined,
+		RowsPassed: doc.RowsPassed, RowsCut: doc.RowsCut,
 	}
 	for i, rd := range doc.Rows {
 		rr := rowResultOf(rd)
@@ -1228,8 +1493,20 @@ func rowResultOf(doc rowDoc) RowResult {
 	if len(doc.UnsupportedSettings) > 0 && res.Outcome != Rejected {
 		res.Outcome = Unsupported
 	}
+	if doc.Verdict != "" {
+		v := verdictOf([]rune(doc.Verdict)[0])
+		res.Verdict = &v
+		res.VerdictCode = doc.VerdictCode
+		res.VerdictErr = doc.VerdictErr
+	}
 	for _, c := range doc.Cols {
-		if c.Src == "skipped" {
+		// SourceSkipped (MATERIALIZED/ALIAS/EPHEMERAL, never read) and
+		// SourceEphemeralInput (a LISTED EPHEMERAL column: read, but never
+		// stored — see Value.Source) are both excluded from Values, which is
+		// the stored row. SourceMaterializedInput stays IN: under
+		// insert_allow_materialized_columns=1 the supplied value genuinely IS
+		// stored, replacing the column's expression (issue #53).
+		if c.Src == SourceSkipped || c.Src == SourceEphemeralInput {
 			continue
 		}
 		res.Values = append(res.Values, Value{
@@ -1237,7 +1514,7 @@ func rowResultOf(doc rowDoc) RowResult {
 			Null:   string(c.StoredRaw) == "null" && !c.Poison,
 			Source: c.Src,
 		})
-		if c.Src == "default_substituted" {
+		if c.Src == SourceDefaultSubstituted {
 			res.Substituted = append(res.Substituted, Substitution{
 				Column: c.Name, Expr: c.Input, Text: c.Stored(),
 			})
