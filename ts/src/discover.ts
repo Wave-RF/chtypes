@@ -314,8 +314,7 @@ export function reconstructDdlWith(
         if (c.defaultExpression !== '') decl += ` ${c.defaultExpression}`;
         break;
       default:
-        // PLANT(issue #119 item 1): should throw on an unknown default_kind
-        break;
+        throw new ChtypesError(`chtypes: column ${c.name} has unknown default_kind ${JSON.stringify(c.defaultKind)}`);
     }
     parts.push(decl);
   }

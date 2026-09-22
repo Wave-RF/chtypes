@@ -258,6 +258,6 @@ def _reconstruct_ddl(columns: Sequence[DiscoveredColumn], quote: Callable[[str],
             if c.default_expression:
                 decl += f" {c.default_expression}"
         else:
-            pass  # PLANT(issue #119 item 1): should raise on an unknown default_kind
+            raise ValueError(f"chtypes: column {c.name} has unknown default_kind {kind!r}")
         parts.append(decl)
     return ", ".join(parts)
