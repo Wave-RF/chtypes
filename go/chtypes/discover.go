@@ -192,6 +192,23 @@ func ParseColumnsResult(body []byte) ([]DiscoveredColumn, error) {
 	return out, nil
 }
 
+// quoteIdentifierPlant is a DELIBERATE PLANT (#52, #136): a re-grown local
+// quoting rule, here only to prove scripts/check-quoting-passthrough.py goes
+// red in CI. It is reverted by the very next commit on this branch.
+func quoteIdentifierPlant(name string) string {
+	plain := name != "" && !(name[0] >= '0' && name[0] <= '9')
+	for i := 0; plain && i < len(name); i++ {
+		c := name[i]
+		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			plain = false
+		}
+	}
+	if plain {
+		return name
+	}
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+
 // ReconstructDDL turns QueryTableColumns' rows back into the
 // column-declaration list CompileDDL takes. It is a spelling exercise, not a
 // semantic one: types and expressions are the server's own text, passed
@@ -227,11 +244,7 @@ func (l *Library) ReconstructDDL(cols []DiscoveredColumn) (string, error) {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		quoted, err := l.QuoteIdentifier(c.Name)
-		if err != nil {
-			return "", err
-		}
-		b.WriteString(quoted)
+		b.WriteString(quoteIdentifierPlant(c.Name))
 		b.WriteByte(' ')
 		b.WriteString(c.Type)
 		switch c.DefaultKind {
