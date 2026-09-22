@@ -434,7 +434,7 @@ jobs:
           echo "abi-fixtures: all four bindings refused the wrong revision and loaded the matching one"
 
   artifacts:
-    name: "artifacts — two published lines, linux-amd64, every suite runs its goldens"
+    name: "artifacts — three published lines, linux-amd64, every suite runs its goldens"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [abi, go, python, ts, rust]
@@ -460,7 +460,16 @@ jobs:
       CHTYPES_ARTIFACTS_TAG: ${{ vars.CHTYPES_ARTIFACTS_TAG }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: the newest -lts and -stable lines the release publishes (live index.json)
+      # THREE lines, not two. The newest -lts and the newest -stable come from
+      # the live index; 24.8 is pinned on top because it is the OLDEST line the
+      # release publishes and the per-line boundaries are only observable with
+      # something below them. Both dynamic lines sit ABOVE every boundary the
+      # SDK documents — `select` back-quoted from 26.3, `from`/`values` from
+      # 26.5, header-name matching going case-insensitive at 26.5 — so with two
+      # lines a boundary case cannot be measured at all, only asserted. 24.8
+      # also exercises the path with no show_create_query_identifier_quoting_rule
+      # setting, which 25.3 onward has and it does not.
+      - name: the newest -lts and -stable lines the release publishes (live index.json), plus 24.8
         id: lines
         run: |
           tag_args=()
@@ -474,7 +483,7 @@ jobs:
         run: |
           tag_args=()
           [ -n "$CHTYPES_ARTIFACTS_TAG" ] && tag_args=(--tag "$CHTYPES_ARTIFACTS_TAG")
-          for line in ${{ steps.lines.outputs.lines }}; do
+          for line in ${{ steps.lines.outputs.lines }} 24.8; do
             scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY" "${tag_args[@]}"
           done
           ls -la "$CHTYPES_REGISTRY"
