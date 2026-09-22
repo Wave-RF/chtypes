@@ -1136,10 +1136,10 @@ func (l *Library) quote(kind int, s string) (string, error) {
 	}
 	l.mu.RUnlock()
 	runtime.KeepAlive(s)
-	switch {
-	case rc == 0:
+	switch rc {
+	case 0:
 		return out, nil
-	case rc == -3:
+	case -3:
 		return "", &UnsupportedError{Msg: "this artifact predates the chs_quote_* trio (rebuild it)"}
 	default:
 		return "", schemaErr(int(rc), msg, "")
