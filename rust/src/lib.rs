@@ -106,7 +106,6 @@ pub use compile::{CompileMode, CompileRequest};
 pub use discover::{
     DiscoveredColumn, QUERY_CHANGED_SETTINGS, QUERY_SERVER_VERSION, QUERY_TABLE_COLUMNS,
     ServerProfile, parse_changed_settings_result, parse_columns_result, parse_version_result,
-    reconstruct_ddl,
 };
 pub use error::{
     ABI_REVISION, CODE_ARTIFACT_CORRUPT, CODE_ARTIFACT_MISSING, CODE_ARTIFACT_PINNED,

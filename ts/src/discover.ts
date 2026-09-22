@@ -8,7 +8,7 @@
  *
  *   profile.version  -> Registry#for / the artifact to load
  *   profile.settings -> compileDdl({ settings }) (compile-time) and per-call settings
- *   columns          -> reconstructDdl -> compileDdl
+ *   columns          -> Library#reconstructDdl -> compileDdl
  *
  * The pattern, in full (docs/reference/bindings.md §Discovery):
  *
@@ -213,7 +213,7 @@ export function parseChangedSettingsResult(body: Uint8Array | string): Record<st
  *
  * @param body - the query result bytes (or text) as the server sent them.
  * @returns one `DiscoveredColumn` per row, in the query's position order —
- *   feed `reconstructDdl`.
+ *   feed `Library#reconstructDdl`.
  * @throws {ChtypesError} when a row is malformed, lacks `name`/`type`, or the
  *   body holds no rows at all (wrong database/table, or no access).
  */
@@ -247,18 +247,14 @@ export function parseColumnsResult(body: Uint8Array | string): DiscoveredColumn[
 }
 
 /**
- * Quote an identifier the way ClickHouse DDL requires: plain
- * `[A-Za-z_][A-Za-z0-9_]*` stays bare, anything else is backticked with
- * backticks doubled. `system.columns` can return anything — the flattened
- * Nested idiom (`n.a`), spaces, keywords.
- */
-function backquoteIfNeeded(name: string): string {
-  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return name;
-  return '`' + name.replaceAll('`', '``') + '`';
-}
-
-/**
- * Turn `QUERY_TABLE_COLUMNS`' rows back into the column-declaration list
+ * The body of `Library#reconstructDdl`, with the identifier quoting HANDED IN
+ * rather than computed here.
+ *
+ * `quote` is the loaded library's own `quoteIdentifier`. This module used to
+ * spell the rule itself and the copy disagreed with the server (issue #52);
+ * nothing in this file decides how a name is spelled.
+ *
+ * Turns `QUERY_TABLE_COLUMNS`' rows back into the column-declaration list
  * `compileDdl` takes. It is a spelling exercise, not a semantic one: types
  * and expressions are the server's own text, passed through verbatim, and the
  * library's own compile is the judge of the result.
@@ -279,12 +275,16 @@ function backquoteIfNeeded(name: string): string {
  *    EPHEMERAL column may legitimately have an empty `default_expression`.
  *
  * @param cols - the discovered columns, e.g. from `parseColumnsResult`.
+ * @param quote - the library's own `quoteIdentifier`.
  * @returns the column-declaration list for `Library#compileDdl`.
  * @throws {ChtypesError} when a column is inconsistent: no name/type, a
  *   `default_expression` with no kind, a DEFAULT/MATERIALIZED/ALIAS kind with
  *   no expression, an unknown kind, or no columns at all.
  */
-export function reconstructDdl(cols: readonly DiscoveredColumn[]): string {
+export function reconstructDdlWith(
+  cols: readonly DiscoveredColumn[],
+  quote: (name: string) => string,
+): string {
   if (cols.length === 0) {
     throw new ChtypesError('chtypes: no columns to reconstruct');
   }
@@ -294,7 +294,7 @@ export function reconstructDdl(cols: readonly DiscoveredColumn[]): string {
     if (c.name === '' || c.type === '') {
       throw new ChtypesError(`chtypes: column ${i} has no name/type`);
     }
-    let decl = `${backquoteIfNeeded(c.name)} ${c.type}`;
+    let decl = `${quote(c.name)} ${c.type}`;
     switch (c.defaultKind) {
       case '':
         if (c.defaultExpression !== '') {

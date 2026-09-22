@@ -112,6 +112,22 @@ jobs:
         run: scripts/check-abi-decls.py --selftest
       - name: every binding's chs_* declaration matches the header's prototype
         run: scripts/check-abi-decls.py
+      # Every binding used to carry its own copy of ClickHouse's identifier
+      # quoting, and all four were wrong the same way (#52). The copies are
+      # deleted; chs_quote_identifier, chs_quote_identifier_if_needed and
+      # chs_quote_literal are the only source of a quoted spelling here. This
+      # fails if a binding re-grows a local rule, and — the half
+      # check-abi-decls.py deliberately does not cover, since it REPORTS an
+      # undeclared symbol rather than failing on it — if a binding stops wiring
+      # the symbols it must call instead.
+      #
+      # Here rather than in the artifacts leg, for the reason above it: no
+      # revision-5 artifact is published yet, so an artifact-gated check would
+      # not run at all on the branch that introduces this.
+      - name: selftest — a re-grown quoting rule and a dropped declaration fire in every binding
+        run: scripts/check-quoting-passthrough.py --selftest
+      - name: no binding spells a ClickHouse quoting rule of its own
+        run: scripts/check-quoting-passthrough.py
       # go/chtypes shares one package namespace with the artifact producer's
       # overlay tests when they are compiled in with `go test -overlay`, and
       # a top-level name declared on both sides breaks that build (#127) — a

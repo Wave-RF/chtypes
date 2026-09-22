@@ -19,7 +19,6 @@ export {
   QUERY_CHANGED_SETTINGS,
   QUERY_SERVER_VERSION,
   QUERY_TABLE_COLUMNS,
-  reconstructDdl,
   type DiscoveredColumn,
   type ServerProfile,
 } from './discover.js';

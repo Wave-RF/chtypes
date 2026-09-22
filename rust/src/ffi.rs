@@ -166,6 +166,14 @@ type FnColCount = unsafe extern "C" fn(*const ChsSchema) -> c_int;
 type FnColStr = unsafe extern "C" fn(*const ChsSchema, c_int) -> *const c_char;
 type FnColInt = unsafe extern "C" fn(*const ChsSchema, c_int) -> c_int;
 type FnReferenceType = unsafe extern "C" fn(*const c_char) -> *mut c_char;
+/// Revision 5, additive: the quoting trio — `chs_quote_identifier`,
+/// `chs_quote_identifier_if_needed` and `chs_quote_literal`, straight off the
+/// vendored `backQuote` / `backQuoteIfNeed` / `quoteString`. One alias for all
+/// three: they share a signature, and the `optional` calls below are what pair
+/// each symbol to it. The input is COUNTED — a string literal may carry a NUL
+/// byte, so the length is the contract and `strlen` is not.
+type FnQuote =
+    unsafe extern "C" fn(*const c_char, usize, *mut *mut c_char, *mut *mut c_char) -> c_int;
 
 /// The column-introspection group. It shipped as a unit, so it is resolved as a
 /// unit: any missing member means the whole group is absent and a schema's
@@ -205,6 +213,12 @@ pub(crate) struct Api {
     f_engine: Option<Symbol<FnEngine>>,
     f_ttl: Option<Symbol<FnTtl>>,
     f_reference_type: Option<Symbol<FnReferenceType>>,
+    // The quoting trio (revision 5, additive). Resolved individually like
+    // everything else optional, so an artifact that predates them loads and
+    // declines at call time.
+    f_quote_identifier: Option<Symbol<FnQuote>>,
+    f_quote_identifier_if_needed: Option<Symbol<FnQuote>>,
+    f_quote_literal: Option<Symbol<FnQuote>>,
     f_registered_families: Option<Symbol<FnStr>>,
     f_function_flags: Option<Symbol<FnStr>>,
     // The revision-3 filter trio shipped as a unit; each is still resolved
@@ -297,6 +311,9 @@ impl Api {
                 f_engine: optional(&lib, b"chs_schema_engine\0"),
                 f_ttl: optional(&lib, b"chs_schema_ttl\0"),
                 f_reference_type: optional(&lib, b"chs_reference_type\0"),
+                f_quote_identifier: optional(&lib, b"chs_quote_identifier\0"),
+                f_quote_identifier_if_needed: optional(&lib, b"chs_quote_identifier_if_needed\0"),
+                f_quote_literal: optional(&lib, b"chs_quote_literal\0"),
                 f_registered_families: optional(&lib, b"chs_registered_families\0"),
                 f_function_flags: optional(&lib, b"chs_function_flags\0"),
                 f_filter_compile: optional(&lib, b"chs_filter_compile\0"),
@@ -946,6 +963,64 @@ impl Api {
         let out = unsafe { self.take(f(type_expr.as_ptr())) };
         let s = string_of(out);
         Ok((!s.is_empty()).then_some(s))
+    }
+
+    /// One of the three `chs_quote_*` symbols, named by the field this `Api`
+    /// resolved it into.
+    ///
+    /// The input is COUNTED, so it travels as bytes with an explicit length: a
+    /// string literal may legally carry a NUL byte and a `CString` would
+    /// refuse it. The ANSWER is always NUL-free — every byte the server
+    /// escapes comes back escaped — which is what makes `take` exact here.
+    fn quote_with(
+        &self,
+        f: Option<&Symbol<FnQuote>>,
+        feature: &'static str,
+        text: &[u8],
+    ) -> Result<String> {
+        let Some(f) = f else {
+            return Err(Error::PredatesFeature { feature });
+        };
+        let mut quoted: *mut c_char = std::ptr::null_mut();
+        let mut err: *mut c_char = std::ptr::null_mut();
+        // SAFETY: counted_ptr yields a readable pointer for any slice,
+        // including an empty one; both out-params are live for the call, and
+        // BOTH returned strings go through take() on every path — the library
+        // owns whatever it wrote, and an answer left behind on an error
+        // return is a leak nothing else can reach.
+        unsafe {
+            let rc = f(counted_ptr(text), text.len(), &mut quoted, &mut err);
+            let out = self.take(quoted);
+            let message = self.take(err);
+            if rc == 0 {
+                Ok(string_of(out))
+            } else {
+                Err(Error::from_code(rc, string_of(message)))
+            }
+        }
+    }
+
+    /// `chs_quote_identifier` — the vendored `backQuote`, always quotes.
+    pub(crate) fn quote_identifier(&self, text: &[u8]) -> Result<String> {
+        self.quote_with(
+            self.f_quote_identifier.as_ref(),
+            "chs_quote_identifier",
+            text,
+        )
+    }
+
+    /// `chs_quote_identifier_if_needed` — the vendored `backQuoteIfNeed`.
+    pub(crate) fn quote_identifier_if_needed(&self, text: &[u8]) -> Result<String> {
+        self.quote_with(
+            self.f_quote_identifier_if_needed.as_ref(),
+            "chs_quote_identifier_if_needed",
+            text,
+        )
+    }
+
+    /// `chs_quote_literal` — the vendored `quoteString`.
+    pub(crate) fn quote_literal(&self, text: &[u8]) -> Result<String> {
+        self.quote_with(self.f_quote_literal.as_ref(), "chs_quote_literal", text)
     }
 
     /// Newline-separated list of every type family in this build's runtime

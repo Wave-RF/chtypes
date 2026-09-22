@@ -1,6 +1,6 @@
 # chtypes (SDK repository) — orientation for Claude sessions
 
-This is the **SDK half** of chtypes, Apache 2.0, public: `go/ python/ ts/ rust/` over the frozen `chs_*` C ABI (`include/chtypes.h`, ABI revision 5, 28 functions), the normative `docs/reference/`, and four side-by-side `examples/` tours, which CI runs. The bindings contain no ClickHouse code; they `dlopen` per-version artifacts and speak the ABI.
+This is the **SDK half** of chtypes, Apache 2.0, public: `go/ python/ ts/ rust/` over the frozen `chs_*` C ABI (`include/chtypes.h`, ABI revision 5, 31 functions), the normative `docs/reference/`, and four side-by-side `examples/` tours, which CI runs. The bindings contain no ClickHouse code; they `dlopen` per-version artifacts and speak the ABI.
 
 The other half is the sibling core repository — private: the wrapper, the build, the artifacts, and the rigs and corpus that score every SDK. The artifacts it publishes are under the Elastic License 2.0 and this repository is Apache 2.0; `NOTICE` is the statement of that split. The rules from that half which bind here:
 

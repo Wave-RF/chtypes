@@ -29,6 +29,7 @@ from ._manifest import (
     verify_library,
 )
 from ._native import NativeLibrary
+from .discover import DiscoveredColumn, _reconstruct_ddl
 from .errors import (
     FETCH_COMMAND,
     ArtifactMissingError,
@@ -934,6 +935,72 @@ class Library:
         `chs_reference_type`.
         """
         return self._native.reference_type(type_expr)
+
+    # -- quoting ------------------------------------------------------------
+
+    def _quote(self, symbol: str, text: str) -> str:
+        quoted, code, err = self._native.quote(symbol, text.encode())
+        if code != 0:
+            raise _error_for(code, err or f"{symbol} refused the input")
+        return quoted
+
+    def quote_identifier(self, name: str) -> str:
+        """Spell `name` as a back-quoted identifier — ALWAYS quoted, which is
+        the safe default and the one to reach for without thinking
+        (`chs_quote_identifier`, the vendored `backQuote`).
+
+        The bytes are this library's own: an embedded back-quote comes back in
+        the spelling the server's formatter prints, not in a spelling of ours.
+        Reach for `quote_identifier_if_needed` only when the bare spelling
+        matters to something downstream.
+
+        Raises `UnsupportedError` when the artifact predates
+        `chs_quote_identifier`.
+        """
+        return self._quote("chs_quote_identifier", name)
+
+    def quote_identifier_if_needed(self, name: str) -> str:
+        """Spell `name` bare where THIS library's ClickHouse says a bare
+        spelling is legal, and back-quote it otherwise
+        (`chs_quote_identifier_if_needed`, the vendored `backQuoteIfNeed`).
+
+        Which names it leaves bare is a property of the vendored build, not of
+        this package, and it CHANGES between builds — ask the library you will
+        compile against rather than caching an answer across versions.
+
+        Raises `UnsupportedError` when the artifact predates
+        `chs_quote_identifier_if_needed`.
+        """
+        return self._quote("chs_quote_identifier_if_needed", name)
+
+    def quote_literal(self, text: str) -> str:
+        """Spell `text` as a ClickHouse string literal, quotes and escapes
+        included (`chs_quote_literal`, the vendored `quoteString`) — the call
+        to reach for when a value is spliced into DDL, e.g. a DEFAULT
+        expression.
+
+        The input is counted, so a value carrying a NUL byte is quoted
+        correctly; the answer is escaped and therefore NUL-free.
+
+        Raises `UnsupportedError` when the artifact predates
+        `chs_quote_literal`.
+        """
+        return self._quote("chs_quote_literal", text)
+
+    # -- discovery ----------------------------------------------------------
+
+    def reconstruct_ddl(self, columns: Sequence[DiscoveredColumn]) -> str:
+        """Turn QUERY_TABLE_COLUMNS' rows back into the column-declaration
+        list `compile_ddl` takes.
+
+        It hangs off a Library because the one thing it spells — the column
+        NAME — is spelled by this library's own `quote_identifier`; see
+        `chtypes.discover` for what reconstruction does and does not promise.
+
+        Raises `ValueError` for an inconsistent column list, and
+        `UnsupportedError` when the artifact predates `chs_quote_identifier`.
+        """
+        return _reconstruct_ddl(columns, self.quote_identifier)
 
     def registered_families(self) -> list[str]:
         """Every type family in this build's own runtime registry (139 entries
