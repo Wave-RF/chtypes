@@ -4,7 +4,7 @@ All notable changes to the rust binding. The format is [Keep a Changelog](https:
 
 The four bindings in this repository are released together and give one answer, so an entry here has a counterpart in the other three.
 
-## [Unreleased]
+## [0.3.0] — 2026-09-22
 
 ### Added
 
