@@ -583,18 +583,18 @@ def section6(lib: chtypes.Library) -> None:
 # ---------------------------------------------------------------------------
 # SECTION 7 — One schema, every format
 #
-# WHAT: the same three-column schema fed in all ten chs_format encodings —
-# accept and reject for each text format, then the binary tier with
-# hand-built bytes.
+# WHAT: the same three-column schema fed in all twelve chs_format encodings
+# — accept and reject for each text format, the two header formats, then the
+# binary tier with hand-built bytes.
 # WHY: format is not cosmetic. Each format has signature behaviors (CSV's
 # bare-vs-quoted empty field, RBWD's marker byte, Native's silent CAST,
 # Buffers' silent reinterpret) that change what the table ends up holding.
 # LOOK FOR: the same logical row giving format-specific verdicts, and the
 # byte-level payloads in the comments — every binary payload is explained.
-# C API: chs_rows with format codes 0..9 (frozen integers: JSON_EACH_ROW=0,
+# C API: chs_rows with format codes 0..11 (frozen integers: JSON_EACH_ROW=0,
 # CSV=1, TSV=2, VALUES=3, JSON_COMPACT_EACH_ROW=4, ROW_BINARY=5,
 # ROW_BINARY_WITH_DEFAULTS=6, ROW_BINARY_WITH_NAMES_AND_TYPES_AND_DEFAULTS=7,
-# NATIVE=8, BUFFERS=9).
+# NATIVE=8, BUFFERS=9, CSV_WITH_NAMES=10, TSV_WITH_NAMES=11).
 # ---------------------------------------------------------------------------
 def section7(lib: chtypes.Library, registry: Registry) -> None:
     section(7, "One schema, every format")
@@ -622,6 +622,26 @@ def section7(lib: chtypes.Library, registry: Registry) -> None:
         kv("CSV empty-field rule", "bare empty takes the DEFAULT; quoted empty is ''")
         feed(schema, "CSV   bare   2,7,", Format.CSV, b"2,7,")
         feed(schema, 'CSV   quoted 3,7,""', Format.CSV, b'3,7,""')
+        blank()
+
+        group("header formats (the first row NAMES the columns)")
+        feed(schema, "CSVWithNames accept", Format.CSV_WITH_NAMES, b"device_id,seq,label\n1,7,ok")
+        feed(schema, "CSVWithNames reorder", Format.CSV_WITH_NAMES, b"label,device_id,seq\nok,1,7")
+        feed(
+            schema,
+            "TSVWithNames accept",
+            Format.TSV_WITH_NAMES,
+            b"device_id\tseq\tlabel\n1\t7\tok",
+        )
+        note("the reordered header stores the SAME row: the data is addressed by")
+        note("NAME, so wire order is the producer's business, not the table's")
+        feed(schema, "CSVWithNames CASE", Format.CSV_WITH_NAMES, b"DEVICE_ID,seq,label\n1,7,ok")
+        note("header-name matching is EXACT through 26.4 and case-insensitive from")
+        note("26.5, so DEVICE_ID binds on one line and is an unknown field on the")
+        note("other — the artifact's answer, not this SDK's")
+        note("10 and 11 joined chs_format INSIDE ABI revision 5 without bumping")
+        note("it, so an artifact linked before them reports revision 5 and answers")
+        note('117 "unknown format 10": ask the artifact, never the enum')
         blank()
 
         group("binary formats (bytes, COUNTED — never NUL-terminated)")
