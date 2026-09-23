@@ -125,10 +125,18 @@ macro_rules! registry {
 }
 
 /// A library to run single-version assertions against: `25.8` when present (the
-/// version every observation in `docs/reference/` was captured on), else the first loaded.
+/// version every observation in `docs/reference/` was captured on), else the
+/// newest loaded line — not the oldest, which would silently retarget every
+/// single-version assertion onto a different ClickHouse each time the fetched
+/// set grows, exactly as adding a third CI line, 24.8, did.
 fn primary(reg: &Registry) -> Arc<chtypes::Library> {
-    reg.for_version("25.8")
-        .unwrap_or_else(|_| Arc::clone(&reg.libraries()[0]))
+    reg.for_version("25.8").unwrap_or_else(|_| {
+        let libs = reg.libraries();
+        Arc::clone(
+            libs.last()
+                .expect("registry!() already asserted at least one loaded library"),
+        )
+    })
 }
 
 fn stored(schema: &Schema, format: Format, body: &[u8]) -> chtypes::BatchResult {
