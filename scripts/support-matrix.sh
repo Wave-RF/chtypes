@@ -247,7 +247,7 @@ for v in sorted(version_revision, key=version_key):
 w("")
 w("### Which artifact build satisfies each revision, per ClickHouse line and platform")
 w("")
-w("Read from the live index: revision %d is whichever revision the served `abi_revision` field never names (see above); every other revision listed is read directly off that field. A cell reads **not published** when the index carries no row at all for that (line, platform, revision) combination — never a guess at what the build number would be." % implicit_revision)
+w("Read from the live index: revision %d is whichever revision the served `abi_revision` field never names (see above); every other revision listed is read directly off that field. A cell reads **not published** when the index carries no row at all for that (line, platform, revision) combination at a revision the index writes explicitly — a gap a consumer already on that revision cannot work around. A cell in the Revision %d column reads **—** instead: the index carries no row there either, but some lines predate that baseline revision and some postdate it, and this script does not read build timestamps to guess which — it reports only that there is no such build, never a guess at what the build number would be or at why one is missing." % (implicit_revision, implicit_revision))
 w("")
 
 per_combo = {}
@@ -273,6 +273,11 @@ excluded_pairs = set()
 for e in doc.get("unbuildable", []):
     excluded_pairs.add((e["clickhouse_minor"], "%s-%s" % (e["os"], e["arch"])))
 
+# Cells set while walking the table, purely so the closing summary below can
+# describe what it saw without recomputing it — never used to decide what a
+# cell itself renders.
+dash_cells = []
+
 def newest_build_cell(candidates, minor=None, plat=None, r=None):
     if candidates:
         with_build = [a for a in candidates if isinstance(a.get("build"), int)]
@@ -294,6 +299,20 @@ def newest_build_cell(candidates, minor=None, plat=None, r=None):
         if other_oses:
             return "*(%s only, by design)*" % "/".join(other_oses)
         return "*(excluded by design — no platform in this table has a build at this revision for this line)*"
+    if r is not None and r == implicit_revision:
+        # No row at all for this (line, platform) at the baseline revision,
+        # and not an excluded pairing either. chtypes#165: this is NOT the
+        # same as a real gap (below) — a real gap is a revision the index
+        # writes explicitly, where "no row" means a consumer on that revision
+        # is stuck. Here, at the one revision the index never names, "no row"
+        # is equally consistent with the line predating this baseline (never
+        # rebuilt for it) or postdating it (never existed under it), and nothing
+        # the index states says which. "not published" would assert the former
+        # is coming; this script does not know that, and does not guess from
+        # build timestamps (the trap chtypes#165 named) — so it says only that
+        # there is nothing here.
+        dash_cells.append((minor, plat))
+        return "—"
     return "not published"
 
 header_cells = ["Line", "Platform"] + ["Revision %d" % r for r in all_revisions]
@@ -329,10 +348,16 @@ if gaps:
     for r, missing in gaps:
         names = ", ".join("`%s` on `%s`" % (minor, p) for minor, p in missing)
         w("- **Revision %d**: no build for %s." % (r, names))
-elif excluded_pairs:
-    w("Every line/platform pairing above either has a build for every revision in this table, or is excluded by design (marked above) rather than merely not yet built.")
 else:
-    w("Every line/platform pairing above has a build for every revision in this table.")
+    reasons = []
+    if excluded_pairs:
+        reasons.append("is excluded by design (marked above)")
+    if dash_cells:
+        reasons.append("reads **—** at revision %d, where the index carries no row for it at all and this script does not guess why (see above)" % implicit_revision)
+    if reasons:
+        w("Every line/platform pairing above either has a build for every revision the index writes explicitly, or " + ", or ".join(reasons) + " — never merely \"not yet published\" without one of those reasons.")
+    else:
+        w("Every line/platform pairing above has a build for every revision in this table.")
 
 block = "\n".join(out)
 BEGIN = "<!-- BEGIN GENERATED — scripts/support-matrix.sh; do not edit by hand -->"
