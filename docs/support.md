@@ -45,6 +45,68 @@ One artifact per ClickHouse line, each carrying that release's own C++. A line i
 
 Ask for a line, never a nearest match: `for("25.8")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.
 
+## ABI revisions
+
+An SDK build speaks exactly one ABI revision and refuses, at load, any artifact reporting a different one — naming both numbers. **Both revisions can be served on the same rolling channel at once**, including during a cutover, so which artifact build an installed SDK version actually needs is not always "whatever `for()` resolves to" any more; the two tables below answer that.
+
+### Which ABI revision an SDK version speaks
+
+Read from this repository's own release tags and `include/chtypes.h` as it stood at each — not typed here. All four bindings tag the same version number together and were checked to agree on the revision at every tag that exists for all four.
+
+| SDK version | Speaks ABI revision |
+|---|---|
+| `0.1.0` | 4 |
+| `0.1.1` | 4 |
+| `0.1.2` | 4 |
+| `0.2.0` | 4 |
+| `0.2.1` | 4 |
+| `0.2.2` | 4 |
+| `0.3.0` | 5 |
+
+### Which artifact build satisfies each revision, per ClickHouse line and platform
+
+Read from the live index: revision 4 is whichever revision the served `abi_revision` field never names (see above); every other revision listed is read directly off that field. A cell reads **not published** when the index carries no row at all for that (line, platform, revision) combination — never a guess at what the build number would be.
+
+| Line | Platform | Revision 4 | Revision 5 |
+|---|---|---|---|
+| `24.8` | `darwin-arm64` | *(pre-relink, no build number)* | not published |
+| `24.8` | `linux-amd64` | `1790098946` | `1790127820` |
+| `24.8` | `linux-arm64` | `1790098946` | `1790127820` |
+| `25.3` | `darwin-arm64` | `1790097827` | `1790127820` |
+| `25.3` | `linux-amd64` | `1790098946` | `1790127820` |
+| `25.3` | `linux-arm64` | `1790098946` | `1790127820` |
+| `25.8` | `darwin-arm64` | `1790097827` | `1790127820` |
+| `25.8` | `linux-amd64` | `1790098946` | `1790127820` |
+| `25.8` | `linux-arm64` | `1790098946` | `1790127820` |
+| `25.10` | `darwin-arm64` | `1790098946` | `1790127820` |
+| `25.10` | `linux-amd64` | `1790098946` | `1790127820` |
+| `25.10` | `linux-arm64` | `1790098946` | `1790127820` |
+| `26.2` | `darwin-arm64` | `1790098946` | `1790127820` |
+| `26.2` | `linux-amd64` | `1790098946` | `1790127820` |
+| `26.2` | `linux-arm64` | `1790098946` | `1790127820` |
+| `26.3` | `darwin-arm64` | `1790098946` | `1790127820` |
+| `26.3` | `linux-amd64` | `1790098946` | `1790127820` |
+| `26.3` | `linux-arm64` | `1790098946` | `1790127820` |
+| `26.4` | `darwin-arm64` | `1790098946` | `1790127820` |
+| `26.4` | `linux-amd64` | `1790098946` | `1790127820` |
+| `26.4` | `linux-arm64` | `1790098946` | `1790127820` |
+| `26.5` | `darwin-arm64` | `1790098946` | `1790127820` |
+| `26.5` | `linux-amd64` | `1790098946` | `1790127820` |
+| `26.5` | `linux-arm64` | `1790098946` | `1790127820` |
+| `26.6` | `darwin-arm64` | `1790098946` | `1790127820` |
+| `26.6` | `linux-amd64` | `1790098946` | `1790127820` |
+| `26.6` | `linux-arm64` | `1790098946` | `1790127820` |
+| `26.7` | `darwin-arm64` | `1790098946` | `1790127820` |
+| `26.7` | `linux-amd64` | `1790098946` | `1790127820` |
+| `26.7` | `linux-arm64` | `1790098946` | `1790127820` |
+| `26.8` | `darwin-arm64` | `1790098946` | `1790127820` |
+| `26.8` | `linux-amd64` | `1790098946` | `1790127820` |
+| `26.8` | `linux-arm64` | `1790098946` | `1790127820` |
+
+⚠️ Not every line/platform pairing above has a build for every revision. A gap here means a consumer already on that revision cannot load that line on that platform at all — pinning a different build will not help, because the index carries no such build:
+
+- **Revision 5**: no build for `24.8` on `darwin-arm64`.
+
 <!-- END GENERATED -->
 
 ## Why the ClickHouse list is not a promise about the future
@@ -75,4 +137,4 @@ The darwin artifacts exist so you can develop and run the suites on a laptop. Th
 
 ## Pre-1.0
 
-Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen. A function's exact signature is not one of those things: pre-1.0, a signature change rides an ABI revision instead, and that revision is what a caller can actually rely on — an SDK refuses to load an artifact whose revision it does not speak, naming both numbers, and that refusal is shipped and run by every binding's own suite, not merely documented. See [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) for where that match happens; what a given revision covers is maintained in the core repository. This tree speaks ABI revision 5 (`include/chtypes.h`) — revision 5, the INSERT column list, is the first signature change since the first tag. Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list.
+Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen. A function's exact signature is not one of those things: pre-1.0, a signature change rides an ABI revision instead, and that revision is what a caller can actually rely on — an SDK refuses to load an artifact whose revision it does not speak, naming both numbers, and that refusal is shipped and run by every binding's own suite, not merely documented. See [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) for where that match happens; what a given revision covers is maintained in the core repository. This tree speaks ABI revision 5 (`include/chtypes.h`) — revision 5, the INSERT column list, is the first signature change since the first tag. Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list. If a refusal is the reason you are reading this, [ABI revisions](#abi-revisions) above maps your installed SDK version to the revision it speaks and the artifact build that satisfies it.
