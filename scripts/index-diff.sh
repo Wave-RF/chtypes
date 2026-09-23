@@ -5,7 +5,7 @@
 # and scripts/support-matrix.sh both read index.json). It exists because the
 # artifact producer's only vehicle for regenerating that listing today is a
 # hand operation with no diff and no log anyone else can read afterwards, and
-# two real gaps have already been found in it:
+# three real gaps have already been found in it:
 #
 #   * a regeneration step that OVERWROTE the live index instead of unioning
 #     with it, which would silently drop rows;
@@ -16,13 +16,21 @@
 #     in SHA256SUMS, and it is what every one of this repository's four
 #     bindings' fetch suites run their ABI-revision and fetch-fixture tests
 #     against.
+#   * a regeneration that republished an existing asset's BYTES — same
+#     filename, same row set, same SHA256SUMS line count, only the hash
+#     different (issue #173). Neither the row-set diff nor the line-count
+#     check can see that at all. The golden set in particular is served, not
+#     tracked: every binding's golden test reads it from the registry at run
+#     time, so that kind of republish changes what all four suites assert
+#     against with no commit in this repository.
 #
-# This script is the independent check that guards against both.
+# This script is the independent check that guards against all three.
 #
 #   scripts/index-diff.sh --snapshot [path]   fetch the served index AND
-#                                              SHA256SUMS, save both as one
-#                                              baseline (default path:
-#                                              ./index-snapshot.json)
+#                                              SHA256SUMS, save both — every
+#                                              entry's hash included, verbatim
+#                                              — as one baseline (default
+#                                              path: ./index-snapshot.json)
 #   scripts/index-diff.sh --compare <baseline> [--show-reasons]
 #                                              fetch the CURRENT index and
 #                                              SHA256SUMS, report them
@@ -70,6 +78,16 @@
 #     HARD FAILURE, at the same tier as a true-dropped row, named on its own
 #     line. SHA256SUMS's total line count is also reported before/after, but
 #     a line-count change alone is information, not a failure.
+#   - every OTHER line SHA256SUMS carries, by filename: assets ADDED (a new
+#     filename), REMOVED (a filename no longer served), and HASH-CHANGED
+#     (same filename, different hash — the bytes behind it were
+#     republished). A changed hash is reported PROMINENTLY, named, and is
+#     NOT a failure — republishing is routine, and it is exactly the third
+#     gap named at the top of this file: the one way a suite's expectations
+#     can change with no commit in this repository. Only
+#     sdk-fetch-fixtures.tar.gz going missing (above) is a hard stop; a bare
+#     add/remove/hash-change anywhere else is reported the same way
+#     everything else here is — information, never failure.
 #   - abi_revision coverage, before and after, broken down by build: how many
 #     of that build's rows carry an abi_revision.
 #   - the top-level "unbuildable" array: presence and contents, before and
@@ -121,8 +139,9 @@
 #
 # A baseline taken by an older copy of this script (or any bare index.json,
 # such as a document saved some other way) still works with --compare for
-# the row-level checks; it simply has no "before" SHA256SUMS reading, which
-# is reported as unavailable rather than assumed.
+# the row-level checks; it simply has no "before" SHA256SUMS reading, so both
+# the line-count check and the per-asset hash diff report the before side as
+# unavailable rather than assumed.
 #
 # Environment:
 #   CHTYPES_ARTIFACTS_URL  the artifacts host (default https://artifacts.wavehouse.dev)
@@ -141,7 +160,7 @@ SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$SCRIPTS/$(basename "${BASH_SOURCE[0]}")"
 die()  { echo "index-diff: $*" >&2; exit 1; }
 say()  { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
-usage() { sed -n '2,137p' "$SELF"; exit 2; }
+usage() { sed -n '2,156p' "$SELF"; exit 2; }
 
 command -v curl >/dev/null 2>&1 || die "curl is not on PATH"
 command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH"
@@ -434,8 +453,44 @@ def sums_has(lines, name):
     return False
 
 
+def parse_sums(lines):
+    # {published filename: hex hash}, stripping the optional binary-mode "*"
+    # prefix sha256sum puts in front of the filename — the same "name or
+    # *name" equivalence sums_has() above already treats as one asset. A
+    # later line for the same filename wins, matching how a manifest is
+    # actually read (the last line for a name is the live one).
+    out = {}
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        name = parts[1][1:] if parts[1].startswith("*") else parts[1]
+        out[name] = parts[0]
+    return out
+
+
 fixtures_before = sums_has(before_sums, FIXTURES_ASSET) if before_sums is not None else None
 fixtures_after = sums_has(after_sums, FIXTURES_ASSET)
+
+# Per-asset hash diff over the WHOLE manifest — not just the fixtures asset
+# above. This is the check issue #173 asked for: a regeneration can replace
+# an asset's bytes (a goldens or fixtures republish) while the row set, the
+# line count, and even the fixtures-presence check above all stay identical.
+# Only reading the hash column catches it. before_assets is None exactly
+# when before_sums is (a baseline predating SHA256SUMS capture): reported as
+# unavailable, never guessed — the same fallback the line-count check above
+# already uses, kept to one style rather than inventing a second.
+before_assets = parse_sums(before_sums) if before_sums is not None else None
+after_assets = parse_sums(after_sums)
+if before_assets is not None:
+    assets_added = sorted(set(after_assets) - set(before_assets))
+    assets_removed = sorted(set(before_assets) - set(after_assets))
+    assets_hash_changed = sorted(
+        name for name in (set(before_assets) & set(after_assets))
+        if before_assets[name] != after_assets[name]
+    )
+else:
+    assets_added = assets_removed = assets_hash_changed = None
 
 print("index-diff: %s (before) vs %s (after)" % (baseline_path, current_index_path))
 print("  generated_at: before=%s  after=%s" % (before.get("generated_at", "(none)"), after.get("generated_at", "(none)")))
@@ -475,6 +530,19 @@ print("  %s row: before=%s  after=%s" % (
     ("present" if fixtures_before else "MISSING") if fixtures_before is not None else "(unknown)",
     "present" if fixtures_after else "MISSING",
 ))
+
+if before_assets is None:
+    print("  SHA256SUMS per-asset diff: (unavailable — this baseline predates SHA256SUMS capture)")
+else:
+    print("  SHA256SUMS assets added (new filename): %d" % len(assets_added))
+    for name in assets_added:
+        print("    + %s" % name)
+    print("  SHA256SUMS assets removed (filename no longer served): %d" % len(assets_removed))
+    for name in assets_removed:
+        print("    - %s" % name)
+    print("  SHA256SUMS assets HASH-CHANGED (same filename, different bytes — republished, NOT a failure): %d" % len(assets_hash_changed))
+    for name in assets_hash_changed:
+        print("    HASH-CHANGED %s" % name)
 
 problems = []
 if true_drops:
@@ -556,7 +624,8 @@ if [ "$ACTION" = selftest ]; then
     "$tmp/regen-dropped/artifacts" \
     "$tmp/regen-reshaped/artifacts" \
     "$tmp/regen-fixtures-dropped/artifacts" \
-    "$tmp/regen-unbuildable-reason/artifacts"
+    "$tmp/regen-unbuildable-reason/artifacts" \
+    "$tmp/regen-hash-changed/artifacts"
 
   # The needle for the elision selftest below comes from scripts/lint-public.sh
   # --print-rules, FETCHED LIVE — never a hand-written list (issue #159
@@ -617,11 +686,11 @@ def write(rel, d):
         json.dump(d, f)
 
 
-def write_sums(rel, rows, include_fixtures=True):
+def write_sums(rel, rows, include_fixtures=True, goldens_hash=None, fixtures_hash=None):
     lines = ["%s  %s" % ("2" * 64, r["file"]) for r in rows]
-    lines.append("%s  sdk-goldens.json" % ("3" * 64))
+    lines.append("%s  sdk-goldens.json" % (goldens_hash or "3" * 64))
     if include_fixtures:
-        lines.append("%s  sdk-fetch-fixtures.tar.gz" % ("4" * 64))
+        lines.append("%s  sdk-fetch-fixtures.tar.gz" % (fixtures_hash or "4" * 64))
     with open(os.path.join(tmp, rel), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
@@ -680,6 +749,17 @@ write("regen-unbuildable-reason/artifacts/index.json", doc(
     }],
 ))
 write_sums("regen-unbuildable-reason/artifacts/SHA256SUMS", ROWS)
+
+# regen-hash-changed: the exact gap issue #173 reported — the row set AND the
+# SHA256SUMS line count are both UNCHANGED; only two assets' BYTES differ
+# (new hash, same filename), the shape a routine goldens/fixtures republish
+# takes. Neither the row-set diff nor the line-count check can see this at
+# all; only reading the hash column can.
+write("regen-hash-changed/artifacts/index.json", doc(ROWS, "2026-01-02T00:00:00Z"))
+write_sums(
+    "regen-hash-changed/artifacts/SHA256SUMS", ROWS,
+    goldens_hash="9" * 64, fixtures_hash="8" * 64,
+)
 PY
 
   fail() { echo "SELFTEST FAILED: $1" >&2; [ -z "${2:-}" ] || echo "$2" >&2; exit 1; }
@@ -798,6 +878,43 @@ PY
   must_not_contain "$out_shown" "<elided, " "--show-reasons still elided the reason field"
   echo "  --show-reasons: the full reason text is printed, needle present, same exit code"
 
-  echo "index-diff: selftest ok — unchanged/union/reshaped channels pass, a true triplet drop is caught by name, a missing SHA256SUMS fixtures row is caught by name, and a served unbuildable reason is elided by default and shown only with --show-reasons"
+  # 8) --compare against a channel where the row set AND the SHA256SUMS line
+  #    count are both UNCHANGED — only two assets' hashes differ (same
+  #    filename, new bytes): the exact gap issue #173 reported, which a
+  #    row-set diff and a line-count check both miss entirely. Must exit 0 (a
+  #    changed hash alone is never a failure) and must NAME each asset, and
+  #    must not be reported as added, removed, or a TRUE DROP of any kind.
+  rc=0
+  out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-hash-changed" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] || fail "an asset hash change alone was reported as a failure (exit $rc)" "$out"
+  case "$out" in
+    *"SHA256SUMS assets HASH-CHANGED (same filename, different bytes — republished, NOT a failure): 2"*) ;;
+    *) fail "the hash-changed count was not reported as 2" "$out" ;;
+  esac
+  case "$out" in
+    *"    HASH-CHANGED sdk-goldens.json"*) ;;
+    *) fail "the changed sdk-goldens.json hash was not named" "$out" ;;
+  esac
+  case "$out" in
+    *"    HASH-CHANGED sdk-fetch-fixtures.tar.gz"*) ;;
+    *) fail "the changed sdk-fetch-fixtures.tar.gz hash was not named" "$out" ;;
+  esac
+  case "$out" in
+    *"SHA256SUMS assets added (new filename): 0"*) ;;
+    *) fail "a hash-only change was also reported as an asset addition" "$out" ;;
+  esac
+  case "$out" in
+    *"SHA256SUMS assets removed (filename no longer served): 0"*) ;;
+    *) fail "a hash-only change was also reported as an asset removal" "$out" ;;
+  esac
+  must_not_contain "$out" "TRUE DROP " "an asset hash change alone was also reported as a TRUE DROP"
+  must_not_contain "$out" "MISSING SHA256SUMS row" "an asset hash change alone was also reported as a missing SHA256SUMS row"
+  case "$out" in
+    *"nothing was dropped"*) ;;
+    *) fail "an asset hash change alone did not read as a clean verdict" "$out" ;;
+  esac
+  echo "  SHA256SUMS asset hash changed, row set and line count unchanged (sdk-goldens.json, sdk-fetch-fixtures.tar.gz): exit 0, both named HASH-CHANGED, not added/removed/dropped"
+
+  echo "index-diff: selftest ok — unchanged/union/reshaped channels pass, a true triplet drop is caught by name, a missing SHA256SUMS fixtures row is caught by name, a served unbuildable reason is elided by default and shown only with --show-reasons, and a same-filename hash change is named without being treated as a failure"
   exit 0
 fi
