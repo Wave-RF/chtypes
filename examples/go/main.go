@@ -466,8 +466,8 @@ func section5(lib *chtypes.Library) {
 	note("unsupported means 'a real server MIGHT WELL accept this; I will not")
 	note("guess'. Do not 400 the producer (that manufactures an over-reject),")
 	note("do not publish (that manufactures an over-accept): send it to the")
-	note("real server unpreviewed and let it decide. Both mistake classes are")
-	note("budgeted at zero in this repo.")
+	note("real server unpreviewed and let it decide. Both mistake classes")
+	note("have no budget in this repo: nothing non-zero passes quietly.")
 	blank()
 
 	// POISON — the fourth verdict. The INSERT genuinely succeeds and every
