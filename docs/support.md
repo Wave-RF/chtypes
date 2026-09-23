@@ -42,6 +42,7 @@ One artifact per ClickHouse line, each carrying that release's own C++. A line i
 | `26.6` | `26.6.8.7-stable` | all |
 | `26.7` | `26.7.13.12-stable` | all |
 | `26.8` | `26.8.10.6-lts` | all |
+| `26.9` | `26.9.1.1629-stable` | all |
 
 Ask for a line, never a nearest match: `for("25.8")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.
 
@@ -102,6 +103,9 @@ Read from the live index: revision 4 is whichever revision the served `abi_revis
 | `26.8` | `darwin-arm64` | `1790001762` | `1790127820` |
 | `26.8` | `linux-amd64` | `1790001762` | `1790127820` |
 | `26.8` | `linux-arm64` | `1790001762` | `1790127820` |
+| `26.9` | `darwin-arm64` | not published | `1790175662` |
+| `26.9` | `linux-amd64` | not published | `1790175662` |
+| `26.9` | `linux-arm64` | not published | `1790175662` |
 
 Every line/platform pairing above either has a build for every revision in this table, or is excluded by design (marked above) rather than merely not yet built.
 
