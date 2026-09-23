@@ -354,6 +354,12 @@ jobs:
     name: "abi-fixtures — the ABI-revision refusal, all four bindings, no published artifact"
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # TEMPORARY — #182 proof-of-fix only, reverted before this PR lands.
+      # Deliberately unreachable (RFC 2606 .invalid) so fetch.sh exits 3
+      # (CHTYPES_SOURCE_UNREACHABLE) and this job's verdict can be read off
+      # a genuinely failing run instead of asserted.
+      CHTYPES_ARTIFACTS_URL: https://chtypes-ci182-deliberately-unreachable.invalid
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # id + continue-on-error so a source outage (fetch.sh exit 3,
@@ -514,7 +520,11 @@ jobs:
       # whose channel is set but empty of content is NOT skipped: the steps
       # below still run, and published-lines.sh/fetch.sh refuse loudly —
       # honestly red — exactly as they would for any other unpublished line.
-      CHTYPES_ARTIFACTS_URL: ${{ vars.CHTYPES_ARTIFACTS_URL }}
+      # TEMPORARY — #182 proof-of-fix only, reverted before this PR lands.
+      # Overrides the repo variable with a deliberately unreachable host
+      # (RFC 2606 .invalid) so fetch.sh exits 3 (CHTYPES_SOURCE_UNREACHABLE)
+      # and this job's verdict can be read off a genuinely failing run.
+      CHTYPES_ARTIFACTS_URL: https://chtypes-ci182-deliberately-unreachable.invalid
       CHTYPES_ARTIFACTS_TAG: ${{ vars.CHTYPES_ARTIFACTS_TAG }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
