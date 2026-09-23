@@ -1027,7 +1027,14 @@ function section12(registry) {
 
   kv('(a) a mixed-type DEFAULT', "a UInt8, x Int64 DEFAULT if(1,2,'a')");
   for (const v of versions) {
-    const lib = registry.for(v);
+    let lib;
+    try {
+      lib = registry.for(v);
+    } catch (err) {
+      if (!(err instanceof RegistryError)) throw err;
+      kv(`  ${v}`, `SKIPPED  ${err.message}`);
+      continue;
+    }
     try {
       const schema = lib.compileDdl("a UInt8, x Int64 DEFAULT if(1,2,'a')");
       const col = schema.columns[1];
@@ -1045,7 +1052,14 @@ function section12(registry) {
   kv("(b) a format's arrival", 'Buffers (code 9), added in ClickHouse 26.5');
   kv('  payload', '1 column, 1 row, 4 bytes ff ff ff ff, declared x Int32');
   for (const v of versions) {
-    const lib = registry.for(v);
+    let lib;
+    try {
+      lib = registry.for(v);
+    } catch (err) {
+      if (!(err instanceof RegistryError)) throw err;
+      kv(`  ${v}`, `SKIPPED  ${err.message}`);
+      continue;
+    }
     withSchema(lib, 'x Int32', (schema) => {
       const batch = schema.rows(Format.Buffers, unhex(BUFFERS_OK));
       if (batch.outcome === 'accepted' && batch.rows.length) {

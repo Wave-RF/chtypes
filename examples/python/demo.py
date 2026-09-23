@@ -850,7 +850,7 @@ def section9(lib: chtypes.Library) -> None:
 # subclass is retired (docs/reference/bindings.md rule 12) — so a bare `except
 # SchemaError` can never swallow a decline again: forgetting the decline arm
 # now raises past the handler (loud) instead of silently converting declines
-# into rejections (a manufactured over-reject, budgeted at zero).
+# into rejections (a manufactured over-reject, which has no budget).
 # LOOK FOR: the two-arm except idiom, the issubclass line printing False, and
 # the reminder that ROW verdicts are data (RowResult.outcome), not raised.
 # ---------------------------------------------------------------------------
@@ -995,7 +995,11 @@ def section12(registry: Registry) -> None:
 
     kv("(a) a mixed-type DEFAULT", "a UInt8, x Int64 DEFAULT if(1,2,'a')")
     for v in versions:
-        lib = registry.for_version(v)
+        try:
+            lib = registry.for_version(v)
+        except chtypes.RegistryError as err:
+            kv(f"  {v}", f"SKIPPED  {err}")
+            continue
         try:
             with lib.compile_ddl("a UInt8, x Int64 DEFAULT if(1,2,'a')") as schema:
                 col = schema.columns[1]
@@ -1009,7 +1013,11 @@ def section12(registry: Registry) -> None:
     kv("(b) a format's arrival", "Buffers (code 9), added in ClickHouse 26.5")
     kv("  payload", "1 column, 1 row, 4 bytes ff ff ff ff, declared x Int32")
     for v in versions:
-        lib = registry.for_version(v)
+        try:
+            lib = registry.for_version(v)
+        except chtypes.RegistryError as err:
+            kv(f"  {v}", f"SKIPPED  {err}")
+            continue
         with lib.compile_ddl("x Int32") as schema:
             batch = schema.rows(Format.BUFFERS, bytes.fromhex(BUFFERS_OK))
             if batch.outcome is chtypes.Outcome.ACCEPTED and batch.rows:

@@ -1067,6 +1067,7 @@ func section12(reg *chtypes.Registry) {
 	for _, v := range versions {
 		lib, err := reg.For(chtypes.Version(v))
 		if err != nil {
+			kv("  "+v, "SKIPPED  "+errStr(err))
 			continue
 		}
 		s, err := lib.CompileDDL("a UInt8, x Int64 DEFAULT if(1,2,'a')")
@@ -1091,6 +1092,7 @@ func section12(reg *chtypes.Registry) {
 	for _, v := range versions {
 		lib, err := reg.For(chtypes.Version(v))
 		if err != nil {
+			kv("  "+v, "SKIPPED  "+errStr(err))
 			continue
 		}
 		s, err := lib.CompileDDL("x Int32")
