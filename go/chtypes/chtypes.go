@@ -1326,7 +1326,7 @@ type colDoc struct {
 	// so the precise detector could not run. The classifier must then treat a
 	// visible change as lossy, never as `reformat` — over-reporting is noise,
 	// under-reporting hides a loss (audit F4). Absent (false) from every
-	// artifact whose build gate ran; see lib/tools/gen_reference_ladder.py.
+	// artifact whose build gate ran; enforced by the build's reference-ladder generator.
 	RefUnclassified bool `json:"ref_unclassified"`
 	// Wire: the stored value written back out in the FIELD'S OWN text
 	// vocabulary by ClickHouse's own serializer, emitted only where `Input` is

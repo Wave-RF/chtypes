@@ -379,7 +379,7 @@ import (
 // ClickHouse makes. The header asserts chs_row is safe on distinct handles and
 // that is the contract this package implements. A source audit could not
 // upgrade that assertion to a proof, and Go's -race detector does not see
-// inside C — so tests/tsan/ holds the instrument that can: a SANITIZE=thread
+// inside C — so a dedicated thread-sanitizer harness holds the instrument that can: a SANITIZE=thread
 // build of the vendored tree plus the unmodified wrapper, statically linked
 // into a TSan-compiled stress driver that mirrors these tests' workload
 // (steady distinct handles + compile/engine churn + validate, DEFAULT/TTL
