@@ -258,14 +258,43 @@ for a in rows:
 def revision_of(a):
     return a["abi_revision"] if "abi_revision" in a else implicit_revision
 
-def newest_build_cell(candidates):
-    if not candidates:
-        return "not published"
-    with_build = [a for a in candidates if isinstance(a.get("build"), int)]
-    if with_build:
-        newest = max(with_build, key=lambda a: a["build"])
-        return "`%d`" % newest["build"]
-    return "*(pre-relink, no build number)*"
+# index.json's top-level `unbuildable` array (chtypes#150, chtypes#73) names
+# every (os, arch, clickhouse_minor) pairing the artifact producer has
+# decided will NEVER get a build — a permanent, by-design gap, not one a
+# later regeneration fills. Only the FACT of exclusion is taken from it —
+# which (line, platform) pairs — never its `reason` field: that string names
+# internal issues in the private sibling repository and core repository's own
+# infrastructure, and this repository is public. scripts/lint-public.sh
+# cannot catch every possible spelling of that leak, so the rule is: do not
+# read `reason` here, ever, for any purpose, and do not "fix" this to pass it
+# through — the wording below is this script's own, derived only from which
+# pairings are excluded.
+excluded_pairs = set()
+for e in doc.get("unbuildable", []):
+    excluded_pairs.add((e["clickhouse_minor"], "%s-%s" % (e["os"], e["arch"])))
+
+def newest_build_cell(candidates, minor=None, plat=None, r=None):
+    if candidates:
+        with_build = [a for a in candidates if isinstance(a.get("build"), int)]
+        if with_build:
+            newest = max(with_build, key=lambda a: a["build"])
+            return "`%d`" % newest["build"]
+        return "*(pre-relink, no build number)*"
+    if minor is not None and (minor, plat) in excluded_pairs:
+        # A designed exclusion, not a gap that regenerating the index could
+        # ever fill. Named by which OTHER platforms of this same line and
+        # revision DO have a build — computed from the table's own data, not
+        # a hardcoded "linux" — so this stays true if the excluded platform
+        # or the surviving ones ever change.
+        other_oses = sorted({
+            pp.split("-", 1)[0] for pp in plat_order if pp != plat
+            and (minor, pp) not in excluded_pairs
+            and any(revision_of(a) == r for a in per_combo.get((minor, pp), []))
+        })
+        if other_oses:
+            return "*(%s only, by design)*" % "/".join(other_oses)
+        return "*(excluded by design — no platform in this table has a build at this revision for this line)*"
+    return "not published"
 
 header_cells = ["Line", "Platform"] + ["Revision %d" % r for r in all_revisions]
 w("| " + " | ".join(header_cells) + " |")
@@ -273,7 +302,7 @@ w("|" + "---|" * len(header_cells))
 for minor in sorted(lines, key=order):
     for p in plat_order:
         group = per_combo.get((minor, p), [])
-        cells = [newest_build_cell([a for a in group if revision_of(a) == r]) for r in all_revisions]
+        cells = [newest_build_cell([a for a in group if revision_of(a) == r], minor, p, r) for r in all_revisions]
         w("| `%s` | `%s` | %s |" % (minor, p, " | ".join(cells)))
 w("")
 
@@ -282,13 +311,15 @@ w("")
 # around — call it out explicitly rather than let the table's "not published"
 # cells speak for themselves. Computed from the same data as the table, not
 # a name typed here: which pairing this is can and does change release to
-# release.
+# release. A pairing excluded BY DESIGN (above) already reads that way in its
+# own cell and is never listed here too — this section is only for a gap
+# nobody has explained.
 gaps = []
 for r in all_revisions:
     if r == implicit_revision:
         continue
     missing = [(minor, p) for minor in sorted(lines, key=order) for p in plat_order
-               if newest_build_cell([a for a in per_combo.get((minor, p), []) if revision_of(a) == r]) == "not published"]
+               if newest_build_cell([a for a in per_combo.get((minor, p), []) if revision_of(a) == r], minor, p, r) == "not published"]
     if missing:
         gaps.append((r, missing))
 
@@ -298,6 +329,8 @@ if gaps:
     for r, missing in gaps:
         names = ", ".join("`%s` on `%s`" % (minor, p) for minor, p in missing)
         w("- **Revision %d**: no build for %s." % (r, names))
+elif excluded_pairs:
+    w("Every line/platform pairing above either has a build for every revision in this table, or is excluded by design (marked above) rather than merely not yet built.")
 else:
     w("Every line/platform pairing above has a build for every revision in this table.")
 

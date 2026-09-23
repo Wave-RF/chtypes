@@ -69,43 +69,41 @@ Read from the live index: revision 4 is whichever revision the served `abi_revis
 
 | Line | Platform | Revision 4 | Revision 5 |
 |---|---|---|---|
-| `24.8` | `darwin-arm64` | *(pre-relink, no build number)* | not published |
-| `24.8` | `linux-amd64` | `1790098946` | `1790127820` |
-| `24.8` | `linux-arm64` | `1790098946` | `1790127820` |
-| `25.3` | `darwin-arm64` | `1790097827` | `1790127820` |
-| `25.3` | `linux-amd64` | `1790098946` | `1790127820` |
-| `25.3` | `linux-arm64` | `1790098946` | `1790127820` |
-| `25.8` | `darwin-arm64` | `1790097827` | `1790127820` |
-| `25.8` | `linux-amd64` | `1790098946` | `1790127820` |
-| `25.8` | `linux-arm64` | `1790098946` | `1790127820` |
-| `25.10` | `darwin-arm64` | `1790098946` | `1790127820` |
-| `25.10` | `linux-amd64` | `1790098946` | `1790127820` |
-| `25.10` | `linux-arm64` | `1790098946` | `1790127820` |
-| `26.2` | `darwin-arm64` | `1790098946` | `1790127820` |
-| `26.2` | `linux-amd64` | `1790098946` | `1790127820` |
-| `26.2` | `linux-arm64` | `1790098946` | `1790127820` |
-| `26.3` | `darwin-arm64` | `1790098946` | `1790127820` |
-| `26.3` | `linux-amd64` | `1790098946` | `1790127820` |
-| `26.3` | `linux-arm64` | `1790098946` | `1790127820` |
-| `26.4` | `darwin-arm64` | `1790098946` | `1790127820` |
-| `26.4` | `linux-amd64` | `1790098946` | `1790127820` |
-| `26.4` | `linux-arm64` | `1790098946` | `1790127820` |
-| `26.5` | `darwin-arm64` | `1790098946` | `1790127820` |
-| `26.5` | `linux-amd64` | `1790098946` | `1790127820` |
-| `26.5` | `linux-arm64` | `1790098946` | `1790127820` |
-| `26.6` | `darwin-arm64` | `1790098946` | `1790127820` |
-| `26.6` | `linux-amd64` | `1790098946` | `1790127820` |
-| `26.6` | `linux-arm64` | `1790098946` | `1790127820` |
-| `26.7` | `darwin-arm64` | `1790098946` | `1790127820` |
-| `26.7` | `linux-amd64` | `1790098946` | `1790127820` |
-| `26.7` | `linux-arm64` | `1790098946` | `1790127820` |
-| `26.8` | `darwin-arm64` | `1790098946` | `1790127820` |
-| `26.8` | `linux-amd64` | `1790098946` | `1790127820` |
-| `26.8` | `linux-arm64` | `1790098946` | `1790127820` |
+| `24.8` | `darwin-arm64` | `0` | *(linux only, by design)* |
+| `24.8` | `linux-amd64` | not published | `1790127820` |
+| `24.8` | `linux-arm64` | not published | `1790127820` |
+| `25.3` | `darwin-arm64` | not published | `1790127820` |
+| `25.3` | `linux-amd64` | not published | `1790127820` |
+| `25.3` | `linux-arm64` | not published | `1790127820` |
+| `25.8` | `darwin-arm64` | `0` | `1790127820` |
+| `25.8` | `linux-amd64` | `0` | `1790127820` |
+| `25.8` | `linux-arm64` | `0` | `1790127820` |
+| `25.10` | `darwin-arm64` | not published | `1790127820` |
+| `25.10` | `linux-amd64` | not published | `1790127820` |
+| `25.10` | `linux-arm64` | not published | `1790127820` |
+| `26.2` | `darwin-arm64` | not published | `1790127820` |
+| `26.2` | `linux-amd64` | not published | `1790127820` |
+| `26.2` | `linux-arm64` | not published | `1790127820` |
+| `26.3` | `darwin-arm64` | not published | `1790127820` |
+| `26.3` | `linux-amd64` | not published | `1790127820` |
+| `26.3` | `linux-arm64` | not published | `1790127820` |
+| `26.4` | `darwin-arm64` | not published | `1790127820` |
+| `26.4` | `linux-amd64` | not published | `1790127820` |
+| `26.4` | `linux-arm64` | not published | `1790127820` |
+| `26.5` | `darwin-arm64` | `0` | `1790127820` |
+| `26.5` | `linux-amd64` | `0` | `1790127820` |
+| `26.5` | `linux-arm64` | `0` | `1790127820` |
+| `26.6` | `darwin-arm64` | `1789482654` | `1790127820` |
+| `26.6` | `linux-amd64` | `1789482654` | `1790127820` |
+| `26.6` | `linux-arm64` | `1789482654` | `1790127820` |
+| `26.7` | `darwin-arm64` | `1789830374` | `1790127820` |
+| `26.7` | `linux-amd64` | `1789830374` | `1790127820` |
+| `26.7` | `linux-arm64` | `1789830374` | `1790127820` |
+| `26.8` | `darwin-arm64` | `1790001762` | `1790127820` |
+| `26.8` | `linux-amd64` | `1790001762` | `1790127820` |
+| `26.8` | `linux-arm64` | `1790001762` | `1790127820` |
 
-⚠️ Not every line/platform pairing above has a build for every revision. A gap here means a consumer already on that revision cannot load that line on that platform at all — pinning a different build will not help, because the index carries no such build:
-
-- **Revision 5**: no build for `24.8` on `darwin-arm64`.
+Every line/platform pairing above either has a build for every revision in this table, or is excluded by design (marked above) rather than merely not yet built.
 
 <!-- END GENERATED -->
 

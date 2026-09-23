@@ -108,7 +108,20 @@ func TestGoldens(t *testing.T) {
 	g := loadGoldens(t, dir)
 	r := testRegistry(t)
 	checked := 0
+	excluded := unbuildableByDesign()
 	for _, v := range r.Versions() {
+		// A line the release will never build past this SDK's ABI revision
+		// (chtypes#150) is named here, as its own sub-test, rather than
+		// handed to r.For — which would fail this whole test on a gap that
+		// is not this test's finding to make.
+		if excluded[HostPlatform()+"/"+v] {
+			t.Run(v, func(t *testing.T) {
+				t.Skipf("chtypes#150: %s on %s is excluded by design, per the release's own "+
+					"served exclusion list — no build past this SDK's ABI revision will ever "+
+					"exist for it", v, HostPlatform())
+			})
+			continue
+		}
 		lib, err := r.For(Version(v))
 		if err != nil {
 			t.Fatal(err)
