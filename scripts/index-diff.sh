@@ -23,9 +23,24 @@
 #                                              SHA256SUMS, save both as one
 #                                              baseline (default path:
 #                                              ./index-snapshot.json)
-#   scripts/index-diff.sh --compare <baseline> fetch the CURRENT index and
+#   scripts/index-diff.sh --compare <baseline> [--show-reasons]
+#                                              fetch the CURRENT index and
 #                                              SHA256SUMS, report them
-#                                              against <baseline>
+#                                              against <baseline>. By default,
+#                                              any served string field that is
+#                                              not one of the known
+#                                              structural keys (os, arch,
+#                                              clickhouse_minor) is printed
+#                                              ELIDED -- e.g.
+#                                              "reason: <elided, 42 chars>" --
+#                                              because that prose is written
+#                                              by the artifact producer, this
+#                                              repository does not control
+#                                              it, and this report is exactly
+#                                              what gets pasted onto a public
+#                                              issue. --show-reasons prints
+#                                              served string fields in full,
+#                                              for someone reading locally.
 #   scripts/index-diff.sh --selftest          prove every hard-stop rule
 #                                              below actually fires, and that
 #                                              a build-only reshape does NOT,
@@ -58,7 +73,17 @@
 #   - abi_revision coverage, before and after, broken down by build: how many
 #     of that build's rows carry an abi_revision.
 #   - the top-level "unbuildable" array: presence and contents, before and
-#     after.
+#     after. Each entry's STRUCTURAL fields (os, arch, clickhouse_minor) are
+#     reported plainly -- that is everything the diff itself needs. Any other
+#     served string field on an entry -- "reason" today, or whatever
+#     free-text field the producer adds next -- is elided by default (e.g.
+#     "reason: <elided, 42 chars>"), by SHAPE rather than by name: this
+#     script does not enumerate "reason" and call it done, it elides every
+#     string field it does not recognize as structural, so a future free-text
+#     field lands in the same elided output the first one did. That prose
+#     belongs to the artifact producer, not this repository, and this report
+#     is exactly what gets pasted onto a public issue. --show-reasons prints
+#     it in full, for someone reading locally.
 #   - each document's own generated_at.
 #
 # A hard failure (a true-dropped row, or a missing fixtures manifest row) is
@@ -116,13 +141,14 @@ SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$SCRIPTS/$(basename "${BASH_SOURCE[0]}")"
 die()  { echo "index-diff: $*" >&2; exit 1; }
 say()  { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
-usage() { sed -n '2,112p' "$SELF"; exit 2; }
+usage() { sed -n '2,137p' "$SELF"; exit 2; }
 
 command -v curl >/dev/null 2>&1 || die "curl is not on PATH"
 command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH"
 
 ACTION=""
 ARG=""
+SHOW_REASONS=0
 case "${1:-}" in
   --snapshot)
     ACTION=snapshot
@@ -138,6 +164,13 @@ case "${1:-}" in
     shift
     [ $# -ge 1 ] || die "--compare needs a baseline file path"
     ARG="$1"; shift
+    # --show-reasons is OPTIONAL and only meaningful for --compare: opt IN to
+    # printing served free-text fields (e.g. "unbuildable"[].reason) in full.
+    # Never the default — see the header comment.
+    if [ "${1:-}" = "--show-reasons" ]; then
+      SHOW_REASONS=1
+      shift
+    fi
     ;;
   --selftest)
     ACTION=selftest
@@ -147,7 +180,7 @@ case "${1:-}" in
     usage
     ;;
   *)
-    die "unknown argument: $1 (expected --snapshot [path], --compare <baseline>, or --selftest)"
+    die "unknown argument: $1 (expected --snapshot [path], --compare <baseline> [--show-reasons], or --selftest)"
     ;;
 esac
 [ $# -eq 0 ] || die "unexpected extra argument(s): $*"
@@ -174,14 +207,15 @@ fetch_sums() {
     || die "could not fetch $url (CHTYPES_ARTIFACTS_URL overrides the host; scripts/fetch.sh reads the same variable)"
 }
 
-# run_compare <baseline-file> <current-index-file> <current-sums-file> —
+# run_compare <baseline-file> <current-index-file> <current-sums-file> <show-reasons 0|1> —
 # prints the full report to stdout; its own exit code (0 clean, 1 a hard
 # failure fired) is the caller's verdict.
 run_compare() {
-  python3 - "$1" "$2" "$3" <<'PY'
+  python3 - "$1" "$2" "$3" "$4" <<'PY'
 import json, sys
 
 baseline_path, current_index_path, current_sums_path = sys.argv[1:4]
+show_reasons = sys.argv[4] == "1"
 
 # The one release-level asset this script checks for by name: never an
 # artifacts[] row, so the row-set diff below cannot see it at all — it is
@@ -321,15 +355,75 @@ before_cov, after_cov = abi_coverage(before), abi_coverage(after)
 all_builds = sorted(set(before_cov) | set(after_cov), key=build_sort_key)
 
 
-def describe_unbuildable(doc):
+# The "unbuildable" array is written by the artifact producer, and this
+# report is exactly what gets pasted onto a public issue — so any served
+# STRING field on an entry that this script does not itself need is never
+# printed verbatim. Elided BY SHAPE, not by name: only the fields the diff
+# actually needs (os, arch, clickhouse_minor) are known structural keys, and
+# everything else that turns out to be a string is redacted to its length —
+# whether it is "reason" (the one that already leaked two internal tracker
+# references) or a free-text field the producer adds next. --show-reasons
+# opts back into the full text, for someone reading locally.
+UNBUILDABLE_STRUCTURAL_KEYS = ("os", "arch", "clickhouse_minor")
+
+
+def is_json_scalar(v):
+    return v is None or isinstance(v, (str, int, float, bool))
+
+
+def describe_shape(v):
+    # A safe, content-free description of a value this script does not
+    # otherwise know how to elide field-by-field — used for a whole
+    # "unbuildable" entry (or the whole array) that is not the documented
+    # dict/list shape. Never returns the value's own text.
+    if isinstance(v, str):
+        return "<elided, %d chars>" % len(v)
+    if isinstance(v, list):
+        return "<list, %d item%s>" % (len(v), "" if len(v) == 1 else "s")
+    if isinstance(v, dict):
+        return "<object, %d field%s>" % (len(v), "" if len(v) == 1 else "s")
+    if is_json_scalar(v):
+        return json.dumps(v)
+    return "<%s>" % type(v).__name__
+
+
+def format_unbuildable_field(key, value, show_reasons):
+    if key in UNBUILDABLE_STRUCTURAL_KEYS and is_json_scalar(value):
+        # A known structural field: exactly what the diff needs, printed
+        # plainly. (If a producer ever puts a list/dict under one of these
+        # key names, that is not actually structural — it falls through to
+        # the generic, shape-only handling below instead of being trusted.)
+        return "%s=%s" % (key, value)
+    if isinstance(value, str):
+        if show_reasons:
+            return "%s=%s" % (key, value)
+        return "%s: <elided, %d chars>" % (key, len(value))
+    # A non-string, non-structural field: not free text, so its shape (not
+    # its content) is safe to report either way.
+    return "%s: %s" % (key, describe_shape(value))
+
+
+def describe_unbuildable_entry(entry, show_reasons):
+    if isinstance(entry, dict):
+        return ", ".join(
+            format_unbuildable_field(k, entry[k], show_reasons) for k in sorted(entry)
+        )
+    # Not the documented shape (a dict) at all — never echo it raw.
+    return describe_shape(entry)
+
+
+def describe_unbuildable(doc, show_reasons):
     if "unbuildable" not in doc:
         return "(key absent)"
     arr = doc["unbuildable"]
     if not isinstance(arr, list):
-        return "present but not a list: %r" % (arr,)
+        return "present but not a list: %s" % describe_shape(arr)
     if not arr:
         return "present, empty"
-    return "%d entr%s: %s" % (len(arr), "y" if len(arr) == 1 else "ies", json.dumps(arr, sort_keys=True))
+    lines = ["%d entr%s:" % (len(arr), "y" if len(arr) == 1 else "ies")]
+    for entry in arr:
+        lines.append("      - %s" % describe_unbuildable_entry(entry, show_reasons))
+    return "\n".join(lines)
 
 
 def sums_has(lines, name):
@@ -369,8 +463,8 @@ for b in all_builds:
     ah, at = after_cov.get(b, (0, 0))
     print("    build=%s: before %d/%d  after %d/%d" % (b, bh, bt, ah, at))
 
-print("  unbuildable: before=%s" % describe_unbuildable(before))
-print("               after=%s" % describe_unbuildable(after))
+print("  unbuildable: before=%s" % describe_unbuildable(before, show_reasons))
+print("               after=%s" % describe_unbuildable(after, show_reasons))
 
 print("  SHA256SUMS lines: before=%s  after=%d" % (
     str(len(before_sums)) if before_sums is not None else "(unavailable — this baseline predates SHA256SUMS capture)",
@@ -443,7 +537,7 @@ if [ "$ACTION" = compare ]; then
   fetch_index "$WORK/current-index.json"
   fetch_sums "$WORK/current-SHA256SUMS"
   rc=0
-  run_compare "$BASELINE" "$WORK/current-index.json" "$WORK/current-SHA256SUMS" || rc=$?
+  run_compare "$BASELINE" "$WORK/current-index.json" "$WORK/current-SHA256SUMS" "$SHOW_REASONS" || rc=$?
   exit "$rc"
 fi
 
@@ -461,12 +555,21 @@ if [ "$ACTION" = selftest ]; then
     "$tmp/regen-ok/artifacts" \
     "$tmp/regen-dropped/artifacts" \
     "$tmp/regen-reshaped/artifacts" \
-    "$tmp/regen-fixtures-dropped/artifacts"
+    "$tmp/regen-fixtures-dropped/artifacts" \
+    "$tmp/regen-unbuildable-reason/artifacts"
 
-  python3 - "$tmp" <<'PY'
+  # The needle for the elision selftest below comes from scripts/lint-public.sh
+  # --print-rules, FETCHED LIVE — never a hand-written list (issue #159
+  # recorded what hand-copied needles cost: four invented patterns, two of
+  # which were not needles at all).
+  NEEDLE="$("$SCRIPTS/lint-public.sh" --print-rules | awk -F'\t' '$1 == "LITERAL" { print $2; exit }')"
+  [ -n "$NEEDLE" ] || die "could not obtain a needle from scripts/lint-public.sh --print-rules"
+
+  NEEDLE="$NEEDLE" python3 - "$tmp" <<'PY'
 import json, os, sys
 
 tmp = sys.argv[1]
+needle = os.environ["NEEDLE"]
 
 
 def row(minor, os_, arch, build=None, abi=None):
@@ -560,6 +663,23 @@ write_sums("regen-reshaped/artifacts/SHA256SUMS", regen_reshaped_rows)
 # SHA256SUMS guard from the row-level checks entirely.
 write("regen-fixtures-dropped/artifacts/index.json", doc(ROWS, "2026-01-02T00:00:00Z"))
 write_sums("regen-fixtures-dropped/artifacts/SHA256SUMS", ROWS, include_fixtures=False)
+
+# regen-unbuildable-reason: every index row is UNCHANGED — only a new
+# "unbuildable" entry appears, whose free-text "reason" carries a needle from
+# scripts/lint-public.sh --print-rules (the same shape as the two internal
+# tracker references that were about to reach a public issue verbatim). Its
+# structural fields (os, arch, clickhouse_minor) are set too, so the default
+# output can be checked to still carry THOSE while eliding the reason.
+write("regen-unbuildable-reason/artifacts/index.json", doc(
+    ROWS, "2026-01-02T00:00:00Z",
+    unbuildable=[{
+        "clickhouse_minor": "88.1",
+        "os": "linux",
+        "arch": "amd64",
+        "reason": "blocked pending %s cleanup" % needle,
+    }],
+))
+write_sums("regen-unbuildable-reason/artifacts/SHA256SUMS", ROWS)
 PY
 
   fail() { echo "SELFTEST FAILED: $1" >&2; [ -z "${2:-}" ] || echo "$2" >&2; exit 1; }
@@ -587,7 +707,10 @@ PY
 
   # 3) --compare against a channel that correctly UNIONED (kept every old row
   #    and added one): still exit 0, the new row is reported as added, and
-  #    the unbuildable array's contents are reported.
+  #    the unbuildable array's structural fields are reported — but its
+  #    free-text "reason" is ELIDED by default, never the raw producer prose
+  #    (that is the whole point of this issue; see check 7 below for the
+  #    dedicated elision proof against a live-fetched needle).
   rc=0
   out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-ok" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] || fail "a correct union regeneration was reported as a failure (exit $rc)" "$out"
@@ -596,10 +719,11 @@ PY
     *) fail "the added row was not reported" "$out" ;;
   esac
   case "$out" in
-    *"99.9"*"no LTS build yet"*) ;;
-    *) fail "the unbuildable array's contents were not reported" "$out" ;;
+    *"clickhouse_minor=99.9"*) ;;
+    *) fail "the unbuildable array's structural field was not reported" "$out" ;;
   esac
-  echo "  correct union regeneration: exit 0, the added row and the unbuildable array are both reported"
+  must_not_contain "$out" "no LTS build yet" "the unbuildable array's free-text reason was reported VERBATIM by default (must be elided)"
+  echo "  correct union regeneration: exit 0, the added row and the unbuildable array's structural fields are reported, reason elided"
 
   # 4) --compare against a channel that RESHAPED one row (same triplet, only
   #    the build key changed — exactly the transition the 13 build-less rows
@@ -643,6 +767,37 @@ PY
   must_not_contain "$out" "TRUE DROP " "a fixtures-only failure was also reported as a row-level TRUE DROP"
   echo "  SHA256SUMS fixtures row (sdk-fetch-fixtures.tar.gz) missing: caught, exit $rc, asset named, isolated from row-level checks"
 
-  echo "index-diff: selftest ok — unchanged/union/reshaped channels pass, a true triplet drop is caught by name, and a missing SHA256SUMS fixtures row is caught by name"
+  # 7) --compare against a channel whose only change is a new "unbuildable"
+  #    entry with a "reason" carrying a needle from
+  #    scripts/lint-public.sh --print-rules: the DEFAULT output must not
+  #    carry the needle anywhere, must still report the entry's structural
+  #    fields plainly, and must say the reason was elided (by length); with
+  #    --show-reasons the needle must appear in full. Exit 0 either way — an
+  #    unbuildable entry is information, never a hard failure.
+  rc=0
+  out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-unbuildable-reason" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] || fail "a new unbuildable entry alone was reported as a failure (exit $rc)" "$out"
+  case "$out" in
+    *"arch=amd64, clickhouse_minor=88.1, os=linux"*) ;;
+    *) fail "the unbuildable entry's structural fields were not reported plainly" "$out" ;;
+  esac
+  case "$out" in
+    *"reason: <elided, "*) ;;
+    *) fail "the unbuildable entry's reason was not reported as elided" "$out" ;;
+  esac
+  must_not_contain "$out" "$NEEDLE" "the DEFAULT --compare output carried a served free-text field's needle verbatim: $NEEDLE"
+  echo "  unbuildable reason (needle \"$NEEDLE\" from lint-public.sh --print-rules): elided by default, structural fields (os, arch, clickhouse_minor) shown plainly"
+
+  rc=0
+  out_shown="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-unbuildable-reason" "$SELF" --compare "$tmp/baseline.json" --show-reasons 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] || fail "--show-reasons changed the exit code for the same channel (exit $rc)" "$out_shown"
+  case "$out_shown" in
+    *"$NEEDLE"*) ;;
+    *) fail "--show-reasons did not print the full served reason text (needle: $NEEDLE)" "$out_shown" ;;
+  esac
+  must_not_contain "$out_shown" "<elided, " "--show-reasons still elided the reason field"
+  echo "  --show-reasons: the full reason text is printed, needle present, same exit code"
+
+  echo "index-diff: selftest ok — unchanged/union/reshaped channels pass, a true triplet drop is caught by name, a missing SHA256SUMS fixtures row is caught by name, and a served unbuildable reason is elided by default and shown only with --show-reasons"
   exit 0
 fi
