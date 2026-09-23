@@ -95,6 +95,23 @@ Both sides agree on every other published line: the server refuses the comment o
 
 Remove the trailing comment from the body if you need a pre-flight answer you can rely on for those two lines.
 
+### A JSON object into a `Dynamic` column, with `allow_experimental_object_type` on
+
+**Over-reject.** This library rejects a row a real server accepts and stores, so a gateway using it as a pre-flight check tells a tenant their row is wrong when it is not.
+
+The input is a JSON object arriving in a `Dynamic` column, on ClickHouse **25.3**, **25.8** or **25.10**, with `allow_experimental_object_type=1` in the settings. A schema of `x Dynamic` and a body of `{"x": {}}` is enough to reach it:
+
+|               |                                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------- |
+| this library  | rejected, code **48** — `DataTypeObject doesn't support serialization with position independent encoding` |
+| a real server | `accepted`, and the row is stored                                                                         |
+
+That one gate is the whole condition: with it off, every line accepts. A `JSON` column is unaffected, and so is every line from 26.2 on.
+
+**Measured**: this library's answer, in this repository, against the published artifacts on 25.3, 25.8 and 25.10. The server's answer, against pinned servers, by the differential proof the artifacts are built from — not measured here. 24.8 carries the same behaviour on that same measurement and could not be checked here, because no darwin build of that line is published.
+
+If you do not need `allow_experimental_object_type`, leaving it off avoids this entirely.
+
 ## Pre-1.0
 
 What is already frozen before 1.0, and how an artifact and the SDK opening it are matched, is in [`support.md`](support.md#pre-10).
