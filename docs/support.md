@@ -66,31 +66,31 @@ Read from this repository's own release tags and `include/chtypes.h` as it stood
 
 ### Which artifact build satisfies each revision, per ClickHouse line and platform
 
-Read from the live index: revision 4 is whichever revision the served `abi_revision` field never names (see above); every other revision listed is read directly off that field. A cell reads **not published** when the index carries no row at all for that (line, platform, revision) combination — never a guess at what the build number would be.
+Read from the live index: revision 4 is whichever revision the served `abi_revision` field never names (see above); every other revision listed is read directly off that field. A cell reads **not published** when the index carries no row at all for that (line, platform, revision) combination at a revision the index writes explicitly — a gap a consumer already on that revision cannot work around. A cell in the Revision 4 column reads **—** instead: the index carries no row there either, but some lines predate that baseline revision and some postdate it, and this script does not read build timestamps to guess which — it reports only that there is no such build, never a guess at what the build number would be or at why one is missing.
 
 | Line | Platform | Revision 4 | Revision 5 |
 |---|---|---|---|
 | `24.8` | `darwin-arm64` | `0` | *(linux only, by design)* |
-| `24.8` | `linux-amd64` | not published | `1790127820` |
-| `24.8` | `linux-arm64` | not published | `1790127820` |
-| `25.3` | `darwin-arm64` | not published | `1790127820` |
-| `25.3` | `linux-amd64` | not published | `1790127820` |
-| `25.3` | `linux-arm64` | not published | `1790127820` |
+| `24.8` | `linux-amd64` | — | `1790127820` |
+| `24.8` | `linux-arm64` | — | `1790127820` |
+| `25.3` | `darwin-arm64` | — | `1790127820` |
+| `25.3` | `linux-amd64` | — | `1790127820` |
+| `25.3` | `linux-arm64` | — | `1790127820` |
 | `25.8` | `darwin-arm64` | `0` | `1790127820` |
 | `25.8` | `linux-amd64` | `0` | `1790127820` |
 | `25.8` | `linux-arm64` | `0` | `1790127820` |
-| `25.10` | `darwin-arm64` | not published | `1790127820` |
-| `25.10` | `linux-amd64` | not published | `1790127820` |
-| `25.10` | `linux-arm64` | not published | `1790127820` |
-| `26.2` | `darwin-arm64` | not published | `1790127820` |
-| `26.2` | `linux-amd64` | not published | `1790127820` |
-| `26.2` | `linux-arm64` | not published | `1790127820` |
-| `26.3` | `darwin-arm64` | not published | `1790127820` |
-| `26.3` | `linux-amd64` | not published | `1790127820` |
-| `26.3` | `linux-arm64` | not published | `1790127820` |
-| `26.4` | `darwin-arm64` | not published | `1790127820` |
-| `26.4` | `linux-amd64` | not published | `1790127820` |
-| `26.4` | `linux-arm64` | not published | `1790127820` |
+| `25.10` | `darwin-arm64` | — | `1790127820` |
+| `25.10` | `linux-amd64` | — | `1790127820` |
+| `25.10` | `linux-arm64` | — | `1790127820` |
+| `26.2` | `darwin-arm64` | — | `1790127820` |
+| `26.2` | `linux-amd64` | — | `1790127820` |
+| `26.2` | `linux-arm64` | — | `1790127820` |
+| `26.3` | `darwin-arm64` | — | `1790127820` |
+| `26.3` | `linux-amd64` | — | `1790127820` |
+| `26.3` | `linux-arm64` | — | `1790127820` |
+| `26.4` | `darwin-arm64` | — | `1790127820` |
+| `26.4` | `linux-amd64` | — | `1790127820` |
+| `26.4` | `linux-arm64` | — | `1790127820` |
 | `26.5` | `darwin-arm64` | `0` | `1790127820` |
 | `26.5` | `linux-amd64` | `0` | `1790127820` |
 | `26.5` | `linux-arm64` | `0` | `1790127820` |
@@ -103,11 +103,11 @@ Read from the live index: revision 4 is whichever revision the served `abi_revis
 | `26.8` | `darwin-arm64` | `1790001762` | `1790127820` |
 | `26.8` | `linux-amd64` | `1790001762` | `1790127820` |
 | `26.8` | `linux-arm64` | `1790001762` | `1790127820` |
-| `26.9` | `darwin-arm64` | not published | `1790175662` |
-| `26.9` | `linux-amd64` | not published | `1790175662` |
-| `26.9` | `linux-arm64` | not published | `1790175662` |
+| `26.9` | `darwin-arm64` | — | `1790175662` |
+| `26.9` | `linux-amd64` | — | `1790175662` |
+| `26.9` | `linux-arm64` | — | `1790175662` |
 
-Every line/platform pairing above either has a build for every revision in this table, or is excluded by design (marked above) rather than merely not yet built.
+Every line/platform pairing above either has a build for every revision the index writes explicitly, or is excluded by design (marked above), or reads **—** at revision 4, where the index carries no row for it at all and this script does not guess why (see above) — never merely "not yet published" without one of those reasons.
 
 <!-- END GENERATED -->
 
