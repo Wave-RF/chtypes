@@ -1,9 +1,10 @@
 {
  "artifacts": [
   {
+   "abi_revision": 5,
    "arch": "arm64",
    "build": 0,
-   "bytes": 461,
+   "bytes": 472,
    "clickhouse_minor": "25.8",
    "clickhouse_version": "25.8.28.1-lts",
    "core_commit": "unknown",
@@ -14,9 +15,10 @@
    "sha256": "700d38de569ed1e1691626c87a7a84ae4284e12faf9292f6c500deaa55895c24"
   },
   {
+   "abi_revision": 5,
    "arch": "arm64",
    "build": 0,
-   "bytes": 463,
+   "bytes": 472,
    "clickhouse_minor": "26.7",
    "clickhouse_version": "26.7.3.19-stable",
    "core_commit": "unknown",
@@ -27,9 +29,10 @@
    "sha256": "afea1de97c9e3064a6c03a54ad0f0ab3cafe26cbbca35cfdc8f93cbdb89033d6"
   },
   {
+   "abi_revision": 5,
    "arch": "amd64",
    "build": 0,
-   "bytes": 458,
+   "bytes": 465,
    "clickhouse_minor": "25.8",
    "clickhouse_version": "25.8.28.1-lts",
    "core_commit": "unknown",
@@ -40,9 +43,10 @@
    "sha256": "23f7e5bf9872dd16d2d20c57dbbc05f71995920c0fcab7e5fec86e37cad80849"
   },
   {
+   "abi_revision": 5,
    "arch": "amd64",
    "build": 0,
-   "bytes": 459,
+   "bytes": 469,
    "clickhouse_minor": "26.7",
    "clickhouse_version": "26.7.3.19-stable",
    "core_commit": "unknown",
@@ -53,9 +57,10 @@
    "sha256": "01c8910a3abc3aaf2e102ab396218d75104c09d6a9bc37a0b07a1a117467ebbb"
   },
   {
+   "abi_revision": 5,
    "arch": "arm64",
    "build": 0,
-   "bytes": 457,
+   "bytes": 467,
    "clickhouse_minor": "25.8",
    "clickhouse_version": "25.8.28.1-lts",
    "core_commit": "unknown",
@@ -66,9 +71,10 @@
    "sha256": "e014cf9b32c21ea40728f270d7a041df7879a7fa9f6146415cddaf91083a3cf0"
   },
   {
+   "abi_revision": 5,
    "arch": "arm64",
    "build": 0,
-   "bytes": 458,
+   "bytes": 471,
    "clickhouse_minor": "26.7",
    "clickhouse_version": "26.7.3.19-stable",
    "core_commit": "unknown",
@@ -83,5 +89,13 @@
  "license": "Elastic-2.0",
  "license_url": "https://www.elastic.co/licensing/elastic-license",
  "release_tag": "fixtures",
- "schema": 1
+ "schema": 1,
+ "unbuildable": [
+  {
+   "arch": "arm64",
+   "clickhouse_minor": "24.8",
+   "os": "darwin",
+   "reason": "24.8's vendored abseil-cpp does not compile under clang-18 against the AWS Mac pool's macOS SDK ('AllocList' does not refer to a value); the darwin artifact at the pinned version is served and stands."
+  }
+ ]
 }

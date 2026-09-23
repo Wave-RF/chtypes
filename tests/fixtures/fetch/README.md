@@ -18,7 +18,8 @@ Signed with the TEST key in `test-key/` (`d1251e468f9156ef`), never the release 
 Platforms `linux-arm64`, `linux-amd64`, `darwin-arm64`; lines `25.8` → `25.8.28.1-lts`, `26.7` → `26.7.3.19-stable`; release tag `fixtures`.
 Not published anywhere: platform `darwin-amd64`, line `24.8`, patch `25.8.99.1-lts` (→ `CHTYPES_ARTIFACT_UNPUBLISHED`, exit 4).
 
-Every `index.json` row carries exactly these fields: `arch`, `build`, `bytes`, `clickhouse_minor`, `clickhouse_version`, `core_commit`, `file`, `library`, `library_sha256`, `os`, `sha256`.
+Every `index.json` document carries exactly these top-level keys: `artifacts`, `generated_at`, `license`, `license_url`, `release_tag`, `schema`, `unbuildable`.
+Every `index.json` row carries exactly these fields: `abi_revision`, `arch`, `build`, `bytes`, `clickhouse_minor`, `clickhouse_version`, `core_commit`, `file`, `library`, `library_sha256`, `os`, `sha256`.
 Files in every release directory: `index.json`, `SHA256SUMS`, `SHA256SUMS.sig`
 (absent in `unsigned/`), `LICENSE`, `NOTICE`, `RELEASE_NOTES.md`, and one
 `chtypes-<version>-<os>-<arch>[-b<build>].tar.gz` per row, each holding
@@ -77,13 +78,36 @@ table.
 Both rows are genuine, signed and hash-correct: a fetcher that installs the
 superseded one passes every check in §3 and is still wrong.
 
+## `abi-revision/` — a GENERATOR, not a release
+
+Every directory above is a miniature release for testing a FETCHER, and the
+"libraries" inside their tarballs are a few bytes of text. `abi-revision/` is the
+one thing this set cannot carry as bytes: a real shared object for testing a
+**LOADER**. `docs/reference/artifact.md` step 5 — an artifact answering an
+unexpected `chs_abi_revision()` MUST be refused, naming both numbers — is the one
+rule standing between a changed `chs_*` signature and undefined behavior
+(chtypes-core#42, #40).
+
+```sh
+python3 abi-revision/gen.py build --out <dir> --header <sdk>/include/chtypes.h
+```
+
+- `at-revision` — the negative control, answering CHS_ABI_REVISION — MUST load, reporting that revision; without it a binding whose own ABI_REVISION had drifted would refuse everything and pass the refusal case for the wrong reason
+- `fixture.json` — both numbers, DERIVED from the header handed to the generator: `abi_revision` and `mismatch_revision`. A test that hard-codes either cannot catch a binding whose constant has drifted.
+- `wrong-revision` — a registry whose artifact answers CHS_ABI_REVISION + 1 — MUST be refused at load, the error naming BOTH numbers (docs/reference/artifact.md step 5)
+
+The artifacts it builds report ClickHouse `0.0.0.0-chtypes-abi-fixture` on line `0.0`, which is not a release
+and not a line, so no resolver asked for a real one can pick them. This directory
+carries **no** `index.json`, `SHA256SUMS` or tarball: no fetcher can mistake it for
+a release. It is a generator rather than a prebuilt artifact because a `cc -shared` output is not reproducible across hosts, and this set is checked by regenerating it elsewhere and diffing byte-for-byte; the stub builds in under a second for the platform that will dlopen it.
+
 ## The rows in `signed/index.json`
 
 | ClickHouse | platform | file | bytes | library | library_sha256 |
 |---|---|---|---|---|---|
-| 25.8.28.1-lts | darwin-arm64 | `chtypes-25.8.28.1-lts-darwin-arm64.tar.gz` | 461 | `libchtypes.dylib` | `d6ea1048c42b91f4…` |
-| 26.7.3.19-stable | darwin-arm64 | `chtypes-26.7.3.19-stable-darwin-arm64.tar.gz` | 463 | `libchtypes.dylib` | `600af8fe8d14ed19…` |
-| 25.8.28.1-lts | linux-amd64 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 458 | `libchtypes.so` | `bacc23d5e886c7b2…` |
-| 26.7.3.19-stable | linux-amd64 | `chtypes-26.7.3.19-stable-linux-amd64.tar.gz` | 459 | `libchtypes.so` | `e52e911f681ebb6c…` |
-| 25.8.28.1-lts | linux-arm64 | `chtypes-25.8.28.1-lts-linux-arm64.tar.gz` | 457 | `libchtypes.so` | `829d44597c8252ff…` |
-| 26.7.3.19-stable | linux-arm64 | `chtypes-26.7.3.19-stable-linux-arm64.tar.gz` | 458 | `libchtypes.so` | `bb9f9e21e0a01f42…` |
+| 25.8.28.1-lts | darwin-arm64 | `chtypes-25.8.28.1-lts-darwin-arm64.tar.gz` | 472 | `libchtypes.dylib` | `d6ea1048c42b91f4…` |
+| 26.7.3.19-stable | darwin-arm64 | `chtypes-26.7.3.19-stable-darwin-arm64.tar.gz` | 472 | `libchtypes.dylib` | `600af8fe8d14ed19…` |
+| 25.8.28.1-lts | linux-amd64 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 465 | `libchtypes.so` | `bacc23d5e886c7b2…` |
+| 26.7.3.19-stable | linux-amd64 | `chtypes-26.7.3.19-stable-linux-amd64.tar.gz` | 469 | `libchtypes.so` | `e52e911f681ebb6c…` |
+| 25.8.28.1-lts | linux-arm64 | `chtypes-25.8.28.1-lts-linux-arm64.tar.gz` | 467 | `libchtypes.so` | `829d44597c8252ff…` |
+| 26.7.3.19-stable | linux-arm64 | `chtypes-26.7.3.19-stable-linux-arm64.tar.gz` | 471 | `libchtypes.so` | `bb9f9e21e0a01f42…` |
