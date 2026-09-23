@@ -295,25 +295,36 @@ if [ "${1:-}" = "--selftest" ]; then
   #     enumerated by the artifact producer. One planted (must fire) and one
   #     legal, words-only (must not fire) case per needle, same shape as the
   #     #96 pairs above. ---
-  printf 'baseline scores regenerate from tests/wherefilter/golden.json\n' > "$tmp/planted-wherefilter.md"
+  # NOTE: every tests/* and docs/* fixture below plants a BARE directory
+  # prefix (a trailing slash followed by prose, never a filename with an
+  # extension) — same shape as the tests/acceptance/ and docs/proposals/
+  # fixtures above. lint-paths.sh (a separate gate; see scripts/lint-paths.sh)
+  # flags any tracked citation of a docs|examples|scripts|include|goldens|
+  # spec|tests path that ends in a real extension and does not resolve to a
+  # file in this repository, and it does not exempt this file the way it
+  # exempts itself — a planted filename under one of those top-level
+  # directories would trip that check, since no such file exists. A bare
+  # prefix proves the needle fires just as well and stays invisible to
+  # lint-paths.sh's extension test.
+  printf 'baseline scores regenerate under tests/wherefilter/ on every run\n' > "$tmp/planted-wherefilter.md"
   printf 'the wherefilter rig scores predicate pushdown, same idea as the arbiter\n' > "$tmp/legal-wherefilter-word.md"
 
   printf 'new cases land in tests/conformance/ before anything else\n' > "$tmp/planted-conformance.md"
   printf 'the conformance suite gates every release line\n' > "$tmp/legal-conformance-word.md"
 
-  printf 'crash inputs are archived under tests/fuzz/corpus\n' > "$tmp/planted-fuzz.md"
+  printf 'crash inputs are archived under tests/fuzz/ from the last run\n' > "$tmp/planted-fuzz.md"
   printf 'the fuzzing harness found the boundary case overnight\n' > "$tmp/legal-fuzz-word.md"
 
-  printf 'wire the new check into tests/harness/runner.py\n' > "$tmp/planted-harness.md"
+  printf 'wire the new check into tests/harness/ before merging\n' > "$tmp/planted-harness.md"
   printf 'the test harness retries a flaky case twice before failing it\n' > "$tmp/legal-harness-word.md"
 
-  printf 'baseline numbers come from tests/perf/results.json\n' > "$tmp/planted-perf.md"
+  printf 'baseline numbers come from tests/perf/ on every run\n' > "$tmp/planted-perf.md"
   printf 'the performance suite flags a five percent regression\n' > "$tmp/legal-perf-word.md"
 
-  printf 'races only reproduce from tests/tsan/output on the nightly run\n' > "$tmp/planted-tsan.md"
+  printf 'races only reproduce under tests/tsan/ on the nightly run\n' > "$tmp/planted-tsan.md"
   printf 'a SANITIZE=thread build catches the same race\n' > "$tmp/legal-tsan-word.md"
 
-  printf 'the server-truth suites run from tests/sdk/python against this checkout\n' > "$tmp/planted-sdk.md"
+  printf 'the server-truth suites run from tests/sdk/ against this checkout\n' > "$tmp/planted-sdk.md"
   printf "this repository's own SDK tests live under go/, python/, ts/ and rust/\n" > "$tmp/legal-sdk-word.md"
 
   printf 'the tunable is passed by lib/tools/oracle-linux.sh for old images\n' > "$tmp/planted-libtools.md"
@@ -331,7 +342,7 @@ if [ "${1:-}" = "--selftest" ]; then
   printf 'the check reads dist/linux-verify/summary.txt\n' > "$tmp/planted-distlinuxverify.md"
   printf 'the Linux verification output confirmed the checksum\n' > "$tmp/legal-distlinuxverify-word.md"
 
-  printf 'the raw numbers are archived in docs/measurements/2026-09.csv\n' > "$tmp/planted-docsmeasurements.md"
+  printf 'the raw numbers are archived under docs/measurements/ from the last release\n' > "$tmp/planted-docsmeasurements.md"
   printf 'the internal measurements directory tracks throughput over time\n' > "$tmp/legal-docsmeasurements-word.md"
 
   printf 'the failure only reproduced under Wave-RF/software/chtypes/wt-goblin-3\n' > "$tmp/planted-housing.md"
