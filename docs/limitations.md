@@ -108,7 +108,7 @@ The input is a JSON object arriving in a `Dynamic` column, on ClickHouse **25.3*
 
 That one gate is the whole condition: with it off, every line accepts. A `JSON` column is unaffected, and so is every line from 26.2 on.
 
-**Measured**: this library's answer, in this repository, against the published artifacts on 25.3, 25.8 and 25.10. The server's answer, against pinned servers, by the differential proof the artifacts are built from — not measured here. 24.8 carries the same behaviour on that same measurement and could not be checked here, because no darwin build of that line is published.
+**Measured**: this library's answer, in this repository, against the published artifacts on 25.3, 25.8 and 25.10. The server's answer, against pinned servers, by the differential proof the artifacts are built from — not measured here. 24.8 carries the same behavior on that same measurement and could not be checked here, because no darwin build of that line is published.
 
 If you do not need `allow_experimental_object_type`, leaving it off avoids this entirely.
 
