@@ -146,8 +146,16 @@ NOTE_FILE_WHY='a private working note filename from the housing folder one level
 # and those stay legal; a segment naming an actual account does not. Scoped
 # to a full path (a trailing "/" — more segments follow), not a bare mention
 # of the word "Users" or "home".
+#
+# `runner` (issue #168) is not a placeholder stand-in like the others — it is
+# GitHub Actions' actual, fixed account name on every hosted Ubuntu runner,
+# so /home/runner/… is platform boilerplate, not a person's machine. It names
+# no one and nothing private, and it is unavoidable: any pasted Actions log
+# or CI step output brings it along. It stays narrow the same way the rest of
+# this allowlist does — only the exact segment "runner" is exempt; any other
+# /home/<name>/… still fires, selftest proves both directions below.
 LOCAL_PATH_PATTERN='(?<![A-Za-z0-9_])/(?:Users|home)/([A-Za-z0-9_.-]+)/'
-LOCAL_PATH_PLACEHOLDERS='me,you,user,username,u'
+LOCAL_PATH_PLACEHOLDERS='me,you,user,username,u,runner'
 LOCAL_PATH_WHY='a local absolute path — a developer machine home directory. It tells a public reader nothing useful and leaks a filesystem layout; use a relative path, $HOME or ~.'
 
 tracked() {
@@ -291,6 +299,16 @@ if [ "${1:-}" = "--selftest" ]; then
   # --- new needle: a local absolute path naming an actual account ---
   printf 'backup restored from /Users/quinn/Downloads/chtypes-dump\n' > "$tmp/planted-path.md"
 
+  # --- issue #168: /home/runner/… is GitHub Actions' own fixed account name
+  #     on every hosted runner, not a developer's machine — must NOT fire.
+  #     Pasted straight from a CI log, the shape this actually recurs in. ---
+  printf '==> wrote /home/runner/work/_temp/abi-fixtures: wrong-revision reports 5\n' > "$tmp/legal-runner-path.md"
+
+  # --- issue #168, the half that matters more: allowlisting "runner" must
+  #     NOT widen into "any /home/<name>/… passes". A DIFFERENT real account
+  #     name under /home/ — not "runner" — must still fire exactly as before.
+  printf 'reproduced only on /home/eric/work/_temp/abi-fixtures, nowhere else\n' > "$tmp/planted-home-eric.md"
+
   # --- issue #171: the private repository's remaining top-level directories,
   #     enumerated by the artifact producer. One planted (must fire) and one
   #     legal, words-only (must not fire) case per needle, same shape as the
@@ -364,6 +382,7 @@ if [ "${1:-}" = "--selftest" ]; then
   for want in planted-1.md planted-2.md planted-case-1.md planted-case-2.md \
               planted-csrc.md planted-arbiter.md planted-acceptance.md \
               planted-cisteps.md planted-proposals.md planted-note.md planted-path.md \
+              planted-home-eric.md \
               planted-wherefilter.md planted-conformance.md planted-fuzz.md \
               planted-harness.md planted-perf.md planted-tsan.md planted-sdk.md \
               planted-libtools.md planted-libharness.md planted-distdocker.md \
@@ -375,6 +394,7 @@ if [ "${1:-}" = "--selftest" ]; then
   for clean in legal.md legal-arbiter-word.md legal-acceptance-word.md \
                legal-inrepo-path.md legal-path-placeholder.md \
                legal-home-placeholder.md legal-allcaps-filenames.md \
+               legal-runner-path.md \
                legal-wherefilter-word.md legal-conformance-word.md legal-fuzz-word.md \
                legal-harness-word.md legal-perf-word.md legal-tsan-word.md legal-sdk-word.md \
                legal-libtools-word.md legal-libharness-word.md legal-distdocker-word.md \
