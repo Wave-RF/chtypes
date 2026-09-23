@@ -356,9 +356,27 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # id + continue-on-error so a source outage (fetch.sh exit 3,
+      # CHTYPES_SOURCE_UNREACHABLE) can be told apart from every other way
+      # this step can fail, in the verdict step below — without either, the
+      # job still went red on an outage, but said a binding had not proven
+      # its refusal, which is false: no binding ever ran (#182). The step
+      # writes its own exit code (never `outcome`, which continue-on-error
+      # would already have rewritten to "success") plus the source URL it
+      # tried, as outputs, then re-raises so this step's own result is still
+      # `failure` and the four bindings below — gated on `outcome ==
+      # 'success'` — do not run when there is no fixture for them to use.
       - name: the wrong-revision ABI fixture, built from this header — no published artifact
+        id: fixture
+        continue-on-error: true
         run: |
-          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
+          ec=0
+          scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures" || ec=$?
+          echo "exit_code=$ec" >> "$GITHUB_OUTPUT"
+          echo "source_url=${CHTYPES_ARTIFACTS_URL:-https://artifacts.wavehouse.dev}" >> "$GITHUB_OUTPUT"
+          if [ "$ec" -ne 0 ]; then
+            exit "$ec"
+          fi
           echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -367,12 +385,14 @@ jobs:
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: go — TestABIRevisionMismatchIsRefused and TestABIRevisionControlLoads must both pass
         id: abi-go
+        if: steps.fixture.outcome == 'success'
         continue-on-error: true
         run: scripts/check-standalone.sh --no-artifacts
 
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: python — test_wrong_revision_is_refused and test_matching_revision_loads must both pass
         id: abi-python
+        if: steps.fixture.outcome == 'success'
         continue-on-error: true
         run: cd python && uv sync --locked --group dev && cd .. && scripts/check-suite.sh --no-artifacts python
 
@@ -389,12 +409,14 @@ jobs:
           cache-dependency-path: ts/pnpm-lock.yaml
       - name: ts — both cases under `abi revision fixture` must pass
         id: abi-ts
+        if: steps.fixture.outcome == 'success'
         continue-on-error: true
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && cd .. && scripts/check-suite.sh --no-artifacts ts
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: rust — wrong_revision_is_refused and matching_revision_loads must both pass
         id: abi-rust
+        if: steps.fixture.outcome == 'success'
         continue-on-error: true
         run: scripts/check-suite.sh --no-artifacts rust
 
@@ -405,14 +427,44 @@ jobs:
       # measured, not assumed; it is visible on this repository's own planted
       # run for #105. `skipped` is a failure too: it means the fixture build
       # or a toolchain setup stopped the binding from being checked at all.
+      # Three-way, keyed on the fixture step's own exit code (#182) — never on
+      # log text. fetch.sh exits exactly 3 for CHTYPES_SOURCE_UNREACHABLE, so
+      # that case is told apart from every other way the fixture step can
+      # fail without parsing anything:
+      #
+      #   exit 3        → the artifact source was unreachable; no binding ran.
+      #   other nonzero → the fixture generator itself failed; no binding ran.
+      #   success       → the four outcomes below decide it, as before.
+      #
+      # A source outage or a generator failure is reported here directly and
+      # never reaches the per-binding table — go/python/ts/rust are gated on
+      # `steps.fixture.outcome == 'success'` above and genuinely did not run,
+      # so a table of "skipped" would add nothing this text doesn't already
+      # say.
       - name: verdict — all four bindings' results, and this job is red if any is not a pass
         if: always()
         env:
+          FIXTURE_OUTCOME: ${{ steps.fixture.outcome }}
+          FIXTURE_EXIT_CODE: ${{ steps.fixture.outputs.exit_code }}
+          FIXTURE_SOURCE_URL: ${{ steps.fixture.outputs.source_url }}
           GO_OUTCOME: ${{ steps.abi-go.outcome }}
           PYTHON_OUTCOME: ${{ steps.abi-python.outcome }}
           TS_OUTCOME: ${{ steps.abi-ts.outcome }}
           RUST_OUTCOME: ${{ steps.abi-rust.outcome }}
         run: |
+          if [ "$FIXTURE_OUTCOME" != "success" ]; then
+            echo "### abi-fixtures — the fixture never built; no binding was exercised" >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+            if [ "$FIXTURE_EXIT_CODE" = "3" ]; then
+              echo "**The artifact source was unreachable** (\`scripts/abi-fixtures.sh\` exited 3, CHTYPES_SOURCE_UNREACHABLE, fetching the fixture generator from ${FIXTURE_SOURCE_URL:-the artifacts host}). go, python, ts and rust did not run — none of the four proved anything about its ABI-revision refusal." >> "$GITHUB_STEP_SUMMARY"
+              echo "abi-fixtures: the artifact source (${FIXTURE_SOURCE_URL:-the artifacts host}) was unreachable while fetching the fixture generator — no binding was exercised" >&2
+            else
+              echo "**The fixture generator itself failed** (\`scripts/abi-fixtures.sh\` exited ${FIXTURE_EXIT_CODE:-non-zero}, not a source outage). go, python, ts and rust did not run — none of the four proved anything about its ABI-revision refusal." >> "$GITHUB_STEP_SUMMARY"
+              echo "abi-fixtures: the fixture generator itself failed (exit ${FIXTURE_EXIT_CODE:-non-zero}) — no binding was exercised" >&2
+            fi
+            exit 1
+          fi
+
           failed=0
           {
             echo "### abi-fixtures — the ABI-revision refusal, per binding"
@@ -485,16 +537,44 @@ jobs:
         with:
           path: .artifacts
           key: chtypes-artifacts-linux-amd64-${{ steps.lines.outputs.key }}
+      # id + continue-on-error, same reasoning as the abi-fixtures job's
+      # fixture step (#182): a source outage here (fetch.sh exit 3,
+      # CHTYPES_SOURCE_UNREACHABLE) used to fail this step fast and skip
+      # every suite below, whose `always()` verdict then reported the
+      # suites and the goldens as not having passed — attributing an
+      # infrastructure outage to five results that never ran. This step now
+      # records its own exit code (never `outcome`) and the source URL it
+      # tried, then re-raises so it still fails fast — nothing below it is
+      # gated separately because every step that follows is either cheap
+      # toolchain setup or itself fails fast on the same outage before any
+      # suite runs, and the verdict below reads this step's exit code first
+      # regardless of what, if anything, ran after it.
       - name: fetch, verified — an already-installed line is re-hashed and not downloaded
+        id: fetch
+        continue-on-error: true
         run: |
           tag_args=()
           [ -n "$CHTYPES_ARTIFACTS_TAG" ] && tag_args=(--tag "$CHTYPES_ARTIFACTS_TAG")
+          ec=0
           for line in ${{ steps.lines.outputs.lines }} 24.8; do
-            scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY" "${tag_args[@]}"
+            scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY" "${tag_args[@]}" || { ec=$?; break; }
           done
+          echo "exit_code=$ec" >> "$GITHUB_OUTPUT"
+          echo "source_url=${CHTYPES_ARTIFACTS_URL:-https://artifacts.wavehouse.dev}" >> "$GITHUB_OUTPUT"
+          if [ "$ec" -ne 0 ]; then
+            exit "$ec"
+          fi
           ls -la "$CHTYPES_REGISTRY"
           cat "$CHTYPES_REGISTRY"/*/manifest.json
+      # Gated on the fetch step's own outcome (#182), same as the five below
+      # — the fetch step now carries continue-on-error, so nothing after it
+      # skips by default the way it used to on a fail-fast failure there;
+      # without this `if:` a source outage would still leave this step (and
+      # the five after it) to actually run, against whatever the fetch step
+      # managed to put in $CHTYPES_REGISTRY before failing, which is exactly
+      # the kind of self-report this fix exists to stop making.
       - name: the wrong-revision ABI fixture, built from this header — every suite must refuse it (#36)
+        if: steps.fetch.outcome == 'success'
         run: |
           scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
           echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
@@ -517,16 +597,24 @@ jobs:
       # `conclusion`: `conclusion` is what continue-on-error rewrote the
       # result to (`success`), `outcome` is what the step actually did.
       #
-      # ⚠️ The steps BEFORE these five deliberately stay fail-fast: if the
-      # fetch or the fixture build did not happen, running the suites proves
-      # nothing. The verdict below then reports those five as `skipped`,
-      # which it also counts as a failure.
+      # ⚠️ If the fetch or the fixture build did not happen, running the
+      # suites proves nothing, so they must not run. The fixture-build step
+      # and these five are each gated `if: steps.fetch.outcome == 'success'`
+      # (#182) rather than left to fail-fast on their own: `fetch, verified`
+      # now carries continue-on-error too, so nothing downstream skips by
+      # default the way it used to when that step failed outright, and an
+      # explicit gate is what keeps "the suites did not run" true on a
+      # source outage instead of merely usual. Skipped this way, the verdict
+      # below still reports those five as `skipped`, which it also counts as
+      # a failure — but on a fetch failure it never reads them at all; see
+      # the verdict's own comment.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: go — standalone check with the registry; TestGoldens must run
         id: suite-go
+        if: steps.fetch.outcome == 'success'
         continue-on-error: true
         run: scripts/check-standalone.sh --registry "$CHTYPES_REGISTRY" --require-artifacts
       # Diagnostic, and must not fail this required job — see the `go` job above.
@@ -542,6 +630,7 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: python — suite with the registry; the golden set must run
         id: suite-python
+        if: steps.fetch.outcome == 'success'
         continue-on-error: true
         run: cd python && uv sync --locked --group dev && cd .. && scripts/check-suite.sh --require-artifacts python
 
@@ -558,12 +647,14 @@ jobs:
           cache-dependency-path: ts/pnpm-lock.yaml
       - name: ts — suite with the registry; the golden set must run
         id: suite-ts
+        if: steps.fetch.outcome == 'success'
         continue-on-error: true
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && cd .. && scripts/check-suite.sh --require-artifacts ts
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: rust — suite with the registry; the golden test must run
         id: suite-rust
+        if: steps.fetch.outcome == 'success'
         continue-on-error: true
         run: scripts/check-suite.sh --require-artifacts rust
 
@@ -582,6 +673,7 @@ jobs:
       # drift back into the lock: --locked exits 1, unlocked exits 0.
       - name: examples — the four tours actually run, on their committed lockfiles
         id: tours
+        if: steps.fetch.outcome == 'success'
         continue-on-error: true
         run: examples/chplay.sh --require-all --locked
 
@@ -605,15 +697,39 @@ jobs:
       # of in the checks list, which is why this writes them to the run's
       # step summary as well as its log: nobody should have to open a
       # 30-minute job to find out whether the tours ran.
+      # Same three-way branch as the abi-fixtures job's verdict, and for the
+      # same reason (#182), keyed on the `fetch, verified` step above rather
+      # than on any of the five results below: a source outage or a fetch
+      # failure there means none of the five ran, and a message that reads
+      # the five and reports "not a pass" would be attributing the outage to
+      # them. This branch is checked first and, on a non-success fetch,
+      # reports and exits before the five are ever read — whatever they
+      # individually did, that fetch failure is the reason, not them.
       - name: verdict — all five results, and this job is red if any of them is not a pass
         if: always()
         env:
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+          FETCH_EXIT_CODE: ${{ steps.fetch.outputs.exit_code }}
+          FETCH_SOURCE_URL: ${{ steps.fetch.outputs.source_url }}
           GO_OUTCOME: ${{ steps.suite-go.outcome }}
           PYTHON_OUTCOME: ${{ steps.suite-python.outcome }}
           TS_OUTCOME: ${{ steps.suite-ts.outcome }}
           RUST_OUTCOME: ${{ steps.suite-rust.outcome }}
           TOURS_OUTCOME: ${{ steps.tours.outcome }}
         run: |
+          if [ "$FETCH_OUTCOME" != "success" ]; then
+            echo "### artifacts — the fetch itself did not complete; nothing below ran" >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+            if [ "$FETCH_EXIT_CODE" = "3" ]; then
+              echo "**The artifact source was unreachable** (\`scripts/fetch.sh\` exited 3, CHTYPES_SOURCE_UNREACHABLE, fetching the published lines from ${FETCH_SOURCE_URL:-the artifacts host}). No suite and no example tour was exercised." >> "$GITHUB_STEP_SUMMARY"
+              echo "artifacts: the artifact source (${FETCH_SOURCE_URL:-the artifacts host}) was unreachable while fetching the published lines — no suite or example tour was exercised" >&2
+            else
+              echo "**\`scripts/fetch.sh\` itself failed** (exit ${FETCH_EXIT_CODE:-non-zero}, not a source outage). No suite and no example tour was exercised." >> "$GITHUB_STEP_SUMMARY"
+              echo "artifacts: fetch itself failed (exit ${FETCH_EXIT_CODE:-non-zero}) — no suite or example tour was exercised" >&2
+            fi
+            exit 1
+          fi
+
           failed=0
           {
             echo "### artifacts — five results, reported whatever any one of them did"
