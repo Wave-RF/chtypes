@@ -1568,8 +1568,12 @@ fn section12(registry: &Registry) {
         "a UInt8, x Int64 DEFAULT if(1,2,'a')",
     );
     for v in &versions {
-        let Ok(lib) = registry.for_version(v) else {
-            continue;
+        let lib = match registry.for_version(v) {
+            Ok(lib) => lib,
+            Err(err) => {
+                kv(&format!("  {v}"), &format!("SKIPPED  {err}"));
+                continue;
+            }
         };
         match lib
             .compile("a UInt8, x Int64 DEFAULT if(1,2,'a')")
@@ -1605,8 +1609,12 @@ fn section12(registry: &Registry) {
     );
     let payload = unhex(BUFFERS_OK);
     for v in &versions {
-        let Ok(lib) = registry.for_version(v) else {
-            continue;
+        let lib = match registry.for_version(v) {
+            Ok(lib) => lib,
+            Err(err) => {
+                kv(&format!("  {v}"), &format!("SKIPPED  {err}"));
+                continue;
+            }
         };
         let Ok(schema) = lib.compile("x Int32").compile() else {
             continue;
