@@ -192,14 +192,19 @@ func ParseColumnsResult(body []byte) ([]DiscoveredColumn, error) {
 	return out, nil
 }
 
-// ReconstructDDL turns QueryTableColumns' rows back into the
-// column-declaration list CompileDDL takes. It is a spelling exercise, not a
-// semantic one: types and expressions are the server's own text, passed
-// through verbatim.
+// reconstructDDLWith is the body of Library.ReconstructDDL, with the
+// identifier quoting HANDED IN rather than computed here.
 //
-// It hangs off a Library because the one thing it does spell — the column
-// NAME — is spelled by the library's own QuoteIdentifier. This package used
-// to compute that itself and the copy disagreed with the server (issue #52).
+// quote is the loaded library's own QuoteIdentifier. This package used to
+// compute the spelling itself and the copy disagreed with the server (issue
+// #52); nothing in this file decides how a name is spelled. Mirrors Python's
+// _reconstruct_ddl, TypeScript's reconstructDdlWith and Rust's
+// reconstruct_ddl_with — the seam exists so a test can supply a marker
+// quoter, not so a binding can choose one.
+//
+// Turns QueryTableColumns' rows back into the column-declaration list
+// CompileDDL takes. It is a spelling exercise, not a semantic one: types and
+// expressions are the server's own text, passed through verbatim.
 //
 // Two facts a caller must know, both properties of the server rather than of
 // this function:
@@ -215,7 +220,7 @@ func ParseColumnsResult(body []byte) ([]DiscoveredColumn, error) {
 //     carries.
 //   - a MATERIALIZED/ALIAS column reconstructs with its expression; an
 //     EPHEMERAL column may legitimately have an empty default_expression.
-func (l *Library) ReconstructDDL(cols []DiscoveredColumn) (string, error) {
+func reconstructDDLWith(cols []DiscoveredColumn, quote func(string) (string, error)) (string, error) {
 	if len(cols) == 0 {
 		return "", fmt.Errorf("chtypes: no columns to reconstruct")
 	}
@@ -227,7 +232,7 @@ func (l *Library) ReconstructDDL(cols []DiscoveredColumn) (string, error) {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		quoted, err := l.QuoteIdentifier(c.Name)
+		quoted, err := quote(c.Name)
 		if err != nil {
 			return "", err
 		}
@@ -258,6 +263,18 @@ func (l *Library) ReconstructDDL(cols []DiscoveredColumn) (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// ReconstructDDL turns QueryTableColumns' rows back into the
+// column-declaration list CompileDDL takes. It is a spelling exercise, not a
+// semantic one: types and expressions are the server's own text, passed
+// through verbatim.
+//
+// It hangs off a Library because the one thing it does spell — the column
+// NAME — is spelled by the library's own QuoteIdentifier. This package used
+// to compute that itself and the copy disagreed with the server (issue #52).
+func (l *Library) ReconstructDDL(cols []DiscoveredColumn) (string, error) {
+	return reconstructDDLWith(cols, l.QuoteIdentifier)
 }
 
 // DefaultRegistryDir is the per-user artifact cache for this host:
