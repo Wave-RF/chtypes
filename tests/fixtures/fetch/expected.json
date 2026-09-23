@@ -1,4 +1,17 @@
 {
+ "abi_revision": {
+  "build": "python3 abi-revision/gen.py build --out <dir> --header <sdk>/include/chtypes.h",
+  "clickhouse_minor": "0.0",
+  "clickhouse_version": "0.0.0.0-chtypes-abi-fixture",
+  "dir": "abi-revision",
+  "kind": "generator",
+  "note": "a generator rather than a prebuilt artifact because a `cc -shared` output is not reproducible across hosts, and this set is checked by regenerating it elsewhere and diffing byte-for-byte; the stub builds in under a second for the platform that will dlopen it",
+  "writes": {
+   "at-revision": "the negative control, answering CHS_ABI_REVISION \u2014 MUST load, reporting that revision; without it a binding whose own ABI_REVISION had drifted would refuse everything and pass the refusal case for the wrong reason",
+   "fixture.json": "both numbers, DERIVED from the header handed to the generator: `abi_revision` and `mismatch_revision`. A test that hard-codes either cannot catch a binding whose constant has drifted.",
+   "wrong-revision": "a registry whose artifact answers CHS_ABI_REVISION + 1 \u2014 MUST be refused at load, the error naming BOTH numbers (docs/reference/artifact.md step 5)"
+  }
+ },
  "builds": {
   "cases": [
    {
@@ -6,14 +19,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz",
-     "sha256": "3050fd2aaee25f9565082db6e2716cf106c973f4b61a165c1a9da21beff2f4b7"
+     "sha256": "c1e6a7f9862ec62b2337a2defa0b3cda48e6d9f4a438b8d854490abb176fba2b"
     },
     "line": "25.8",
     "platform": "linux-arm64",
     "superseded": {
      "build": 0,
      "file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz",
-     "sha256": "bc9e4a6dc263c10dae14cf5f0c51ebeb0d051b30140e2d1f766467a5ca847f65"
+     "sha256": "b785b07663e65972585441178c50de1873e27798bd5441bc6959995544158beb"
     }
    },
    {
@@ -21,14 +34,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz",
-     "sha256": "7b396fad28f284a6355bbe054e1649a33f2443cefe87d01751076bacc6c925ae"
+     "sha256": "f9c7f11bfcfcdd57287d912b7cf954212ddcd965a58ee910eaef338d79f7c1eb"
     },
     "line": "26.7",
     "platform": "linux-arm64",
     "superseded": {
      "build": 105,
      "file": "chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz",
-     "sha256": "d9fc01833306dc4a74d1cde3c0654177745d8ce3dbed21d30825efb78890599d"
+     "sha256": "39fdbe5035d0a11cf5edf6345e86b94d766339f68550889ce24506aba6d8a0a5"
     }
    },
    {
@@ -36,14 +49,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz",
-     "sha256": "99c92709908883e0d58d0d7b5e6d0db86fceb14eaaa095d24d3bd1576a11eff2"
+     "sha256": "84d79f7e543c160006478252d5a170d4bb57322881ffcb8157a25da82dce3763"
     },
     "line": "25.8",
     "platform": "linux-amd64",
     "superseded": {
      "build": 0,
      "file": "chtypes-25.8.28.1-lts-linux-amd64.tar.gz",
-     "sha256": "cf3ca37b702f55fe110d8b5db860429b5d9ab6849fb0dedbacbd364ff8015770"
+     "sha256": "7ba41cc435771fa4c408378a3499fc0576c6f561072b87b17aa3bbed7a6094d1"
     }
    },
    {
@@ -51,14 +64,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz",
-     "sha256": "eb99d8e1f04204bab2b192878c6ca58447ea0ff3a25db460925e6944af386e15"
+     "sha256": "e110a2d15cfebe7ef14a0f86cf3855e4757d50fc90e3e76327c68dd795ddd149"
     },
     "line": "26.7",
     "platform": "linux-amd64",
     "superseded": {
      "build": 105,
      "file": "chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz",
-     "sha256": "2bfb55d0f56ce21de2555916176ece5af1c5dcf757c81d845171aeb9aff53f7c"
+     "sha256": "4e19dcb5d32e739f2d305b42595641fc7295b71a9c07f59d1cf1783ce6a01c5d"
     }
    },
    {
@@ -66,14 +79,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz",
-     "sha256": "1bd8c9ff792ceaa4b7fb47bfb2955c711e90577ef7e5c55a5f52058af80753c1"
+     "sha256": "ac0fe6821c4f6ca4cb6fabc60023f8fc0f9c5e0c1c97f00d2ce4dfc754eec3b6"
     },
     "line": "25.8",
     "platform": "darwin-arm64",
     "superseded": {
      "build": 0,
      "file": "chtypes-25.8.28.1-lts-darwin-arm64.tar.gz",
-     "sha256": "cf44a7cd7d4ac47ba5db3a38826be2ca4a58d7c28a64faad42f16f853c4a7f66"
+     "sha256": "5ba330165a6fbd6f51103fe9754cde0e24c0c9b3b85ec4134a12b5c104f9cf38"
     }
    },
    {
@@ -81,14 +94,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz",
-     "sha256": "64fdf2d4b8492743a41df38e64b78f8b60704fe778f022b016e4d789bf4b67e7"
+     "sha256": "296ce0d42ac941efea2c050f6bc2bd197018fbd88a43a20ec30d3b8699c60bfd"
     },
     "line": "26.7",
     "platform": "darwin-arm64",
     "superseded": {
      "build": 105,
      "file": "chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz",
-     "sha256": "ee93e5790f1c92dc7c5e920278c970514ae759ec8e8a833ea4cdc48ea51737ff"
+     "sha256": "698cd565667724a053cbef9e2a0c70540ba4877ed29abbf43470c996f7406700"
     }
    }
   ],
@@ -102,7 +115,17 @@
   ]
  },
  "generated_by": "chtypes-core tests/sdk/fetch-fixtures/gen.py \u2014 never edit by hand",
+ "index_doc_keys": [
+  "artifacts",
+  "generated_at",
+  "license",
+  "license_url",
+  "release_tag",
+  "schema",
+  "unbuildable"
+ ],
  "index_row_fields": [
+  "abi_revision",
   "arch",
   "build",
   "bytes",
