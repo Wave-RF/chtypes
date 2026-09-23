@@ -1,0 +1,92 @@
+# sweep-public-mentions — scheduled, non-blocking run of
+# scripts/sweep-public-mentions.py, which applies scripts/lint-public.sh's
+# needles to every issue body, pull request body, conversation comment and
+# PR review (inline) comment in this repository (issue #96, cadence issue
+# #159).
+#
+# WHY THIS EXISTS. scripts/lint-public.sh gates the tracked tree; it cannot
+# gate GitHub conversation text, because a comment can be posted long after
+# the PR that added it has already gone green — that is the gap
+# scripts/sweep-public-mentions.py closes (its own header has the full
+# argument). That script already existed before this workflow — the gap was
+# never coverage, it was that nothing SCHEDULED it, so it sat unrun and 73
+# occurrences accumulated unseen before anyone looked (#159). A by-hand
+# periodic tool nobody schedules is indistinguishable from an absent one.
+# The script's own header states monthly is reasonable for this
+# repository's comment volume, so that is the cadence below.
+#
+# WHY NON-BLOCKING. Same reasoning the `docs` job in ci.yml already
+# establishes for its own out-of-band signal (read its comment there before
+# changing this one) — this job reports on the state of every issue and PR
+# ever posted to the repository, not on the diff of one commit, so a fresh
+# needle hit posted by anyone at any time must never redden main on
+# somebody else's commit. Concretely: this workflow is not `on:
+# pull_request` and is not a required check, so it has nothing to gate in
+# the first place; `continue-on-error: true` on the job additionally means
+# a run with findings still shows red in ITS OWN log (nobody has to trust a
+# summary line instead of the real signal) without that red reaching the
+# commit's overall status. Same shape and reasoning as `docs`, not a new
+# pattern.
+#
+# PERMISSIONS. scripts/sweep-public-mentions.py reads exactly three `gh api`
+# endpoints: repos/{repo}/issues, repos/{repo}/issues/comments and
+# repos/{repo}/pulls/comments — nothing writes anything. `contents: read` is
+# for the checkout (to run the scripts); `issues: read` and
+# `pull-requests: read` are the two read scopes those endpoints need. That
+# is the complete grant; there is no write of any kind here.
+#
+# CADENCE: monthly, 1st of the month, off both the hour and the half-hour
+# (every scheduled job on the planet lands on :00/:30 on GitHub's shared
+# scheduler; this one does not queue behind them).
+name: sweep-public-mentions
+
+on:
+  schedule:
+    - cron: "41 7 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: sweep-public-mentions
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    name: "sweep — every issue/PR body and comment against lint-public.sh's needles (report only)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # NON-BLOCKING, on purpose — see this file's own header above, same
+    # reasoning as the `docs` job in ci.yml. This job reports; it never gates
+    # a pull request and it is not a required check.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The selftest runs FIRST and in the same job, same discipline as
+      # `lint-public.sh --selftest` and every other checker in this
+      # repository's CI: a check that has only ever passed is not known to
+      # work.
+      - name: selftest — the exemption-marker logic, before trusting the sweep's own verdict
+        run: scripts/sweep-public-mentions.py --selftest
+      - name: sweep every issue/PR body and comment for lint-public.sh's needles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          scripts/sweep-public-mentions.py >/tmp/sweep-output.txt 2>&1
+          status=$?
+          set -e
+          cat /tmp/sweep-output.txt
+          summary_line="$(grep -E '^sweep-public-mentions: (ok|[0-9]+ finding)' /tmp/sweep-output.txt | tail -n1)"
+          {
+            echo "### sweep-public-mentions"
+            echo
+            echo "\`${summary_line:-sweep-public-mentions: no summary line produced — see the step log}\`"
+            echo
+            echo "Report-only: this workflow is scheduled and non-blocking (see its own header) and never gates a pull request."
+            echo "Full per-occurrence detail (URL, needle, matching line, and exemption reason where one applies) is in this step's log."
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$status"
