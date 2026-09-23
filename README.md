@@ -153,7 +153,7 @@ A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying
 ## The guarantees every binding is held to
 
 - **`Transformed` is the product.** ClickHouse never says _"I changed your value"_; chtypes derives that report (`overflow_wrap`, `date_clamp`, `poisoned`, `ttl_expired`, …) and it is not optional.
-- **Over-accepts and over-rejects are both budgeted at zero** — the guarantee and what backs it: [`docs/limitations.md`](docs/limitations.md#the-error-model-is-normative).
+- **Over-accepts and over-rejects have no budget** — a non-zero count is refused unless a person has named that case and recorded why, with a tracking reference. Known cases exist and are registered individually rather than absorbed into an allowance; what that does and does not promise: [`docs/limitations.md`](docs/limitations.md#the-error-model-is-normative).
 - **`unsupported` is an answer, never a guess.** A binding surfaces the library's decline; it never papers over one.
 - **The four bindings give one answer.** The golden set is run by all of them, and each is scored against real ClickHouse servers at the same agreement as the reference.
 

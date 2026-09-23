@@ -43,7 +43,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 
 ## The guarantees behind the answers
 
-- **Over-accepts and over-rejects are both budgeted at zero** — the guarantee and what backs it: [`limitations.md`](limitations.md#the-error-model-is-normative).
+- **Over-accepts and over-rejects have no budget** — a non-zero count is refused unless a person has named that case and recorded why, with a tracking reference. Known cases exist and are registered individually rather than absorbed into an allowance; what that does and does not promise: [`limitations.md`](limitations.md#the-error-model-is-normative).
 - **`unsupported` is an answer, never a guess.** A binding surfaces the library's decline and never papers over one.
 - **The four bindings give one answer.** They run the same golden set, and each is scored as its own column against real ClickHouse servers. A behavior change lands in all four in one cycle.
 - **A version is never a nearest match.** Version behavior is not monotonic — 25.10 rejects a DEFAULT that both 25.8 and 26.6 accept — so asking for a line you do not have fails loudly rather than answering from a neighbor.
