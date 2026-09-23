@@ -71,15 +71,12 @@ def _probe(minor: str, library: chtypes.Library) -> bool:
 def withnames_lines(registry: chtypes.Registry) -> list[Line]:
     """Every line this build can open, each asked about formats 10 and 11.
 
-    Three outcomes, deliberately different:
-
-    * nothing on the registry this build can open: a loud SKIP by name, the
-      same verdict every other artifact test here reaches. A refused ABI
-      revision is `test_abi_revision.py`'s subject, not this file's.
-    * lines opened, none of which knows format 10 or 11: a FAILURE. A registry
-      of pre-value artifacts is a real finding, and a suite that skipped past
-      it would look exactly like one that proved these formats work.
-    * at least one line knows them: the cases below run.
+    Nothing on the registry this build can open is a loud SKIP by name — the
+    same verdict every other artifact test here reaches; a refused ABI revision
+    is `test_abi_revision.py`'s subject, not this file's. A line that opens but
+    does not know the two formats is reported and kept, because the export
+    decline below needs no probe; `supported_lines` is where an empty probe
+    result becomes a failure.
     """
     lines: list[Line] = []
     opened = 0
@@ -105,21 +102,26 @@ def withnames_lines(registry: chtypes.Registry) -> list[Line]:
             f"no line on the registry {registry.directory} opened in this build — "
             f"fetch a current one with `scripts/fetch.sh 26.8`"
         )
-    if not any(line.supported for line in lines):
-        pytest.fail(
-            f"no artifact in {registry.directory} knows chs_format 10 or 11: {opened} line(s) "
-            f"opened and every one of them refused the CSVWithNames/TSVWithNames probe. These "
-            f"formats joined enum chs_format inside ABI revision 5 without bumping it, so an "
-            f"artifact built from an earlier revision-5 header reports 5 and still does not know "
-            f"them — fetch a current line (scripts/fetch.sh 26.8)"
-        )
     return lines
 
 
 @pytest.fixture(scope="session")
-def supported_lines(withnames_lines: list[Line]) -> list[Line]:
-    """The subset the format cases run against."""
-    return [line for line in withnames_lines if line.supported]
+def supported_lines(registry: chtypes.Registry, withnames_lines: list[Line]) -> list[Line]:
+    """The subset the format cases run against — and a FAILURE when it is
+    empty. A registry of pre-value artifacts is a real finding, and a suite
+    that skipped past it would look exactly like one that proved these formats
+    work."""
+    supported = [line for line in withnames_lines if line.supported]
+    if not supported:
+        pytest.fail(
+            f"no artifact in {registry.directory} knows chs_format 10 or 11: "
+            f"{len(withnames_lines)} line(s) opened and every one of them refused the "
+            f"CSVWithNames/TSVWithNames probe. These formats joined enum chs_format inside ABI "
+            f"revision 5 without bumping it, so an artifact built from an earlier revision-5 "
+            f"header reports 5 and still does not know them — fetch a current line "
+            f"(scripts/fetch.sh 26.8)"
+        )
+    return supported
 
 
 def header_matching_is_exact(minor: str) -> bool:

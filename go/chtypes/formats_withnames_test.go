@@ -51,15 +51,12 @@ type withNamesLine struct {
 // withNamesLines resolves the registry the other artifact tests use and asks
 // every line it can open about formats 10 and 11.
 //
-// Three outcomes, deliberately different:
-//
-//   - no registry, or nothing on it this build can open: a loud SKIP by name,
-//     the same verdict every other artifact test here reaches. A refused ABI
-//     revision is abi_revision_test.go's subject, not this file's.
-//   - lines opened, none of which knows format 10 or 11: a FAILURE. A registry
-//     of pre-value artifacts is a real finding, and a suite that skipped past
-//     it would look exactly like one that proved these formats work.
-//   - at least one line knows them: the cases below run.
+// No registry, or nothing on it this build can open, is a loud SKIP by name —
+// the same verdict every other artifact test here reaches; a refused ABI
+// revision is abi_revision_test.go's subject, not this file's. A line that
+// opens but does not know the two formats is reported and kept, because the
+// export decline below needs no probe; supportedWithNamesLines is where an
+// empty probe result becomes a failure.
 func withNamesLines(t *testing.T) []withNamesLine {
 	t.Helper()
 	dir := testRegistryDir(t)
@@ -72,7 +69,7 @@ func withNamesLines(t *testing.T) []withNamesLine {
 		skipNoArtifacts(t, dir, "the registry discovered no versions")
 	}
 	var lines []withNamesLine
-	opened, supported := 0, 0
+	opened := 0
 	for _, v := range versions {
 		lib, err := r.For(Version(v))
 		if err != nil {
@@ -83,9 +80,7 @@ func withNamesLines(t *testing.T) []withNamesLine {
 		}
 		opened++
 		ok := probeWithNames(t, v, lib)
-		if ok {
-			supported++
-		} else {
+		if !ok {
 			t.Logf("line %s (ClickHouse %s) does not answer the CSVWithNames/TSVWithNames probe: "+
 				"a pre-value artifact, not measured for the format cases", v, lib.Version)
 		}
@@ -93,13 +88,6 @@ func withNamesLines(t *testing.T) []withNamesLine {
 	}
 	if opened == 0 {
 		skipNoArtifacts(t, dir, "no line on it opened in this build")
-	}
-	if supported == 0 {
-		t.Fatalf("no artifact in %s knows chs_format 10 or 11: %d line(s) opened and every one of them "+
-			"refused the CSVWithNames/TSVWithNames probe. These formats joined enum chs_format inside "+
-			"ABI revision 5 without bumping it, so an artifact built from an earlier revision-5 header "+
-			"reports 5 and still does not know them — fetch a current line (scripts/fetch.sh 26.8) or "+
-			"point $CHTYPES_REGISTRY at a registry holding one", dir, opened)
 	}
 	return lines
 }
@@ -134,14 +122,25 @@ func probeWithNames(t *testing.T, minor string, lib *Library) bool {
 	return true
 }
 
-// supportedWithNamesLines is the subset the format cases run against.
+// supportedWithNamesLines is the subset the format cases run against — and a
+// FAILURE when it is empty. A registry of pre-value artifacts is a real
+// finding, and a suite that skipped past it would look exactly like one that
+// proved these formats work.
 func supportedWithNamesLines(t *testing.T) []withNamesLine {
 	t.Helper()
+	lines := withNamesLines(t)
 	var out []withNamesLine
-	for _, ln := range withNamesLines(t) {
+	for _, ln := range lines {
 		if ln.supported {
 			out = append(out, ln)
 		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("no artifact in %s knows chs_format 10 or 11: %d line(s) opened and every one of them "+
+			"refused the CSVWithNames/TSVWithNames probe. These formats joined enum chs_format inside "+
+			"ABI revision 5 without bumping it, so an artifact built from an earlier revision-5 header "+
+			"reports 5 and still does not know them — fetch a current line (scripts/fetch.sh 26.8) or "+
+			"point $CHTYPES_REGISTRY at a registry holding one", testRegistryDir(t), len(lines))
 	}
 	return out
 }
@@ -150,19 +149,19 @@ func supportedWithNamesLines(t *testing.T) []withNamesLine {
 // EXACTLY: true through 26.4, false from 26.5, exactly as those servers do.
 func headerMatchingIsExact(t *testing.T, minor string) bool {
 	t.Helper()
-	major, feature, ok := strings.Cut(minor, ".")
+	majorText, featureText, ok := strings.Cut(minor, ".")
 	if !ok {
 		t.Fatalf("minor line %q is not <major>.<minor>", minor)
 	}
-	maj, err := strconv.Atoi(major)
+	major, err := strconv.Atoi(majorText)
 	if err != nil {
 		t.Fatalf("minor line %q: %v", minor, err)
 	}
-	min, err := strconv.Atoi(feature)
+	feature, err := strconv.Atoi(featureText)
 	if err != nil {
 		t.Fatalf("minor line %q: %v", minor, err)
 	}
-	return maj < 26 || (maj == 26 && min <= 4)
+	return major < 26 || (major == 26 && feature <= 4)
 }
 
 // valueOf finds one column's value in a row, or fails naming what was there.
