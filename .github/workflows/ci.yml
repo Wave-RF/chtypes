@@ -163,6 +163,12 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # full history AND all tags — the SDK-version -> ABI-revision half of
+          # the support matrix reads include/chtypes.h at each binding's own
+          # release tag (git show <tag>:include/chtypes.h), and the default
+          # single-commit checkout carries neither.
+          fetch-depth: 0
       - name: docs/support.md matches the manifests and the live index
         run: |
           if ! scripts/support-matrix.sh --check; then

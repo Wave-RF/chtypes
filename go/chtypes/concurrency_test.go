@@ -100,6 +100,13 @@ func testRegistry(t *testing.T) *Registry {
 	if len(versions) == 0 {
 		skipNoArtifacts(t, dir, "the registry discovered no versions")
 	}
+	// A line the release will never build past this SDK's ABI revision
+	// (chtypes#150) must not be asked to preload — that eager open would
+	// fail the whole registry, not just the one line.
+	versions = filterUnbuildableVersions(t, versions)
+	if len(versions) == 0 {
+		skipNoArtifacts(t, dir, "every discovered version is excluded by design (chtypes#150)")
+	}
 	if r, err = NewRegistry(dir, WithPreload(versions...)); err != nil {
 		skipNoArtifacts(t, dir, "the registry did not load: "+err.Error())
 	}
@@ -111,7 +118,7 @@ func testRegistry(t *testing.T) *Registry {
 // Rows at once. Answers must match the single-threaded baseline exactly.
 func TestConcurrentDistinctHandles(t *testing.T) {
 	r := testRegistry(t)
-	versions := r.Versions()
+	versions := usableVersions(t, r)
 	t.Logf("versions in one process: %v", versions)
 
 	// Baseline first, strictly single-threaded: version -> case -> answer.
@@ -211,7 +218,7 @@ func TestConcurrentDistinctHandles(t *testing.T) {
 // that the C library tolerates it. Answers must still be exact.
 func TestConcurrentSharedHandle(t *testing.T) {
 	r := testRegistry(t)
-	v := r.Versions()[0]
+	v := usableVersions(t, r)[0]
 	lib, err := r.For(Version(v))
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +271,7 @@ func TestConcurrentSharedHandle(t *testing.T) {
 // READ lock, so this is the test that the read lock is not optimistic.
 func TestConcurrentCompileAndRow(t *testing.T) {
 	r := testRegistry(t)
-	versions := r.Versions()
+	versions := usableVersions(t, r)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -366,7 +373,7 @@ func TestConcurrentCompileAndRow(t *testing.T) {
 // handle never leaks into another's answer.
 func TestConcurrentSetEngineIsExclusive(t *testing.T) {
 	r := testRegistry(t)
-	v := r.Versions()[0]
+	v := usableVersions(t, r)[0]
 	lib, err := r.For(Version(v))
 	if err != nil {
 		t.Fatal(err)
@@ -468,7 +475,7 @@ func TestConcurrentSetEngineIsExclusive(t *testing.T) {
 // must not produce two.
 func TestArtifactIsInitialisedOnce(t *testing.T) {
 	r := testRegistry(t)
-	v := r.Versions()[0]
+	v := usableVersions(t, r)[0]
 	first, err := r.For(Version(v))
 	if err != nil {
 		t.Fatal(err)
@@ -520,7 +527,7 @@ func TestArtifactIsInitialisedOnce(t *testing.T) {
 // outcome is one of the two legal ones and the process survives.
 func TestConcurrentCloseIsSafe(t *testing.T) {
 	r := testRegistry(t)
-	lib, err := r.For(Version(r.Versions()[0]))
+	lib, err := r.For(Version(usableVersions(t, r)[0]))
 	if err != nil {
 		t.Fatal(err)
 	}

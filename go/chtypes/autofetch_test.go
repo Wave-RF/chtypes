@@ -37,6 +37,10 @@ func smallestInstalled(t *testing.T) Installed {
 		}
 		skipNoArtifacts(t, root, detail)
 	}
+	installed = excludeUnbuildable(t, installed)
+	if len(installed) == 0 {
+		skipNoArtifacts(t, root, "every installed line is excluded by design (chtypes#150)")
+	}
 	best, bestSize := installed[0], int64(-1)
 	for _, inst := range installed {
 		fi, err := os.Stat(filepath.Join(inst.Dir, inst.Library))
@@ -186,6 +190,9 @@ func TestRegistryFallsThroughTheSearchPath(t *testing.T) {
 	// loading the second lazily, and Versions() grows as it does.
 	root := testRegistryDir(t)
 	installed, err := ListInstalled(root)
+	if err == nil {
+		installed = excludeUnbuildable(t, installed)
+	}
 	if err != nil || len(installed) < 2 {
 		t.Skipf("need two installed lines under %s, have %d", root, len(installed))
 	}
@@ -239,7 +246,12 @@ func TestRegistryFallsThroughTheSearchPath(t *testing.T) {
 		t.Fatalf("Versions moved when a line was opened: %v -> %v", versions, v)
 	}
 	// The explicit line was served from the explicit directory, not the env.
-	first, _ := reg.For(Version(small.Line))
+	// The error is checked (not discarded): a line that cannot open must fail
+	// this test loudly, never crash the whole binary on a nil *Library.
+	first, err := reg.For(Version(small.Line))
+	if err != nil {
+		t.Fatalf("open explicit line %s: %v", small.Line, err)
+	}
 	if !strings.HasPrefix(first.Path, explicit) {
 		t.Fatalf("explicit line served from %s", first.Path)
 	}

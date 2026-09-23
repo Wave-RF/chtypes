@@ -112,13 +112,38 @@ else
   say "go test ./... (untagged, NO artifact registry at $REG — the registry tests will SKIP by name; -json into $LOG)"
   note "scripts/fetch.sh <line> installs one; --registry or CHTYPES_REGISTRY point at one"
 fi
+# A (line, platform) pairing the release will NEVER build past this SDK's ABI
+# revision (chtypes#150 — darwin-arm64/24.8 today) must not read as this
+# checkout's failure: its only served artifact correctly refuses to load, and
+# no fetch or retry fixes that. The registry tests name it and skip it,
+# rather than let it redden the whole run, but ONLY when it is on the
+# release's own SERVED exclusion list (index.json's top-level `unbuildable`
+# array) — never a list typed here, and never inferred from a line this
+# registry simply does not have. That needs the registry to exist at all, so
+# this is skipped in --no-artifacts mode, where every registry test skips for
+# want of a registry before it would ever matter.
+CHTYPES_UNBUILDABLE=""
+if [ "$HAVE_REG" -eq 1 ]; then
+  UNBUILDABLE_URL="${CHTYPES_ARTIFACTS_URL:-https://artifacts.wavehouse.dev}"
+  UNBUILDABLE_URL="${UNBUILDABLE_URL%/}/artifacts/index.json"
+  UNBUILDABLE_JSON="$(curl -fsSL --retry 3 --max-time 30 "$UNBUILDABLE_URL")" \
+    || die "could not fetch $UNBUILDABLE_URL to read the served 'unbuildable' exclusion list (chtypes#150) — without it a by-design gap cannot be told apart from a real failure, so this refuses rather than guess"
+  CHTYPES_UNBUILDABLE="$(printf '%s' "$UNBUILDABLE_JSON" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+print(",".join("%s-%s/%s" % (e["os"], e["arch"], e["clickhouse_minor"]) for e in doc.get("unbuildable", [])))
+')" || die "could not read 'unbuildable' out of $UNBUILDABLE_URL"
+  if [ -n "$CHTYPES_UNBUILDABLE" ]; then
+    note "excluded by design, per $UNBUILDABLE_URL: $CHTYPES_UNBUILDABLE"
+  fi
+fi
 rc=0
 # The golden set is SERVED, and a fetch installs it at <registry>/sdk-goldens.json
 # — so the bare copy needs no path for it, only the registry it already gets.
 # The fetch fixtures are different: they live in this repository
 # (tests/fixtures/fetch, docs/guides/fetch.md §9), so the fetch suite is told where they
 # are through CHTYPES_FETCH_FIXTURES and skips loudly without them.
-( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_FETCH_FIXTURES="$ROOT/tests/fixtures/fetch" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
+( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_FETCH_FIXTURES="$ROOT/tests/fixtures/fetch" CHTYPES_UNBUILDABLE="$CHTYPES_UNBUILDABLE" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
 [ -s "$LOG" ] || die "go test produced no -json output (rc=$rc)"
 set +e
 python3 - "$LOG" "$rc" "$HAVE_REG" "$REQUIRE" <<'PY'

@@ -113,8 +113,15 @@ func testRegistryLibrary(t *testing.T) (path, ext string) {
 	if err != nil {
 		t.Skipf("registry %s unreadable: %v", root, err)
 	}
+	bad := unbuildableByDesign()
 	for _, e := range entries {
 		if !e.IsDir() {
+			continue
+		}
+		if bad[HostPlatform()+"/"+e.Name()] {
+			t.Logf("chtypes#150: excluding %s on %s from this run — the release's own served "+
+				"exclusion list says no build past this SDK's ABI revision will ever exist for "+
+				"this pairing", e.Name(), HostPlatform())
 			continue
 		}
 		blob, err := os.ReadFile(filepath.Join(root, e.Name(), "manifest.json"))
