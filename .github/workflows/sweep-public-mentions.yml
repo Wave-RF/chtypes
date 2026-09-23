@@ -35,14 +35,25 @@
 # `pull-requests: read` are the two read scopes those endpoints need. That
 # is the complete grant; there is no write of any kind here.
 #
-# CADENCE: monthly, 1st of the month, off both the hour and the half-hour
-# (every scheduled job on the planet lands on :00/:30 on GitHub's shared
-# scheduler; this one does not queue behind them).
+# CADENCE: WEEKLY, Mondays, off both the hour and the half-hour (every
+# scheduled job on the planet lands on :00/:30 on GitHub's shared scheduler;
+# this one does not queue behind them).
+#
+# ⚠️ The script's own header recommends MONTHLY for this repository's comment
+# volume, and this deliberately runs more often than that. Do not "correct" it
+# back to match the header. Three separate leaks were introduced and caught by
+# hand in a single afternoon (2026-09-23); at monthly, each would have sat
+# public for weeks before the sweep named it. Weekly is a temporary posture
+# while the backlog is worked, not a disagreement with the header.
+#
+# REVERT WHEN: the outstanding findings are triaged to zero AND a full month
+# passes with no new finding. At that point monthly is the right cadence again
+# and this comment should go with it.
 name: sweep-public-mentions
 
 on:
   schedule:
-    - cron: "41 7 1 * *"
+    - cron: "41 7 * * 1"
   workflow_dispatch:
 
 permissions:
