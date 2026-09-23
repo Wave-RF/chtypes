@@ -60,7 +60,13 @@ The parse-once block twin does not change that — it is a performance shape, no
 
 `unsupported` (`CODE_UNSUPPORTED`, the wire sentinel `-2`) is neither an acceptance nor a rejection, and treating it as either is the most expensive mistake available here.
 
-Over-accepts and over-rejects are both **budgeted at zero** in the differential proof the artifacts are built from: a row accepted here and rejected by the server ships before the insert fails, and a row rejected here and accepted by the server is silent data loss. Neither is acceptable, so neither has a budget. A decline is how the system stays honest about the cases it cannot reach that bar on.
+Over-accepts and over-rejects have **no budget** in the differential proof the artifacts are built from: a row accepted here and rejected by the server ships before the insert fails, and a row rejected here and accepted by the server is silent data loss. Neither is acceptable, so neither gets an allowance. A decline is how the system stays honest about the cases it cannot reach that bar on.
+
+**No budget is a rule about process, not a claim about state.** A non-zero count, in either direction, on any binding against any ClickHouse line, is refused unless a person has named that case and recorded why, with a tracking reference attached. Nothing non-zero passes quietly, and no threshold waves anything through.
+
+**So it does not mean there are none.** Known cases exist in both directions today, and each is registered by name rather than absorbed into an allowance. The register records that a case is known and bounded; it is not an explanation of it, and it does not yet name the inputs involved. What the guarantee gives you is therefore narrower than it reads, and still worth having: a disagreement between this library and a real server is either absent or on the record by name.
+
+Those cases have not been investigated one at a time yet, which is why this page names no shape for them. A count nobody has looked at cannot be described honestly, and describing it anyway would be a disclaimer rather than documentation. When the investigation lands, the cases a caller can reach get their own entry here — which direction they fail in, what they look like, and what it costs you. This page is where that will appear.
 
 In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather than a subclass, so `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both. The subtype was retired precisely because catching one and getting the other is a silent misclassification.
 
