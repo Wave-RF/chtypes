@@ -1187,7 +1187,7 @@ func RegisteredFamilies() ([]string, error) {
 // tab-separated fields — name, deterministic, deterministic_in_query,
 // server_constant, stateful, resolver_error_code. These are ClickHouse's own
 // answers off this build's own registry, and they are the input to the
-// statelessness gate (lib/tools/gen_function_flags.py fails the build unless
+// statelessness gate (the build's function-flags generator fails the build unless
 // the admitted volatile set is exactly the four clock reads).
 //
 // One of the three-question introspection surface every SDK exposes

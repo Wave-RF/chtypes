@@ -322,7 +322,7 @@ export class Library {
    * tab-separated fields — `name`, `deterministic`, `deterministic_in_query`,
    * `server_constant`, `stateful`, `resolver_error_code`. ClickHouse's own
    * answers off this build's own registry, and the input to the statelessness
-   * gate (`lib/tools/gen_function_flags.py`). Part of the three-question
+   * gate (the build's function-flags generator). Part of the three-question
    * introspection surface every SDK exposes (docs/reference/bindings.md
    * §Introspection).
    *

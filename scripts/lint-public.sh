@@ -31,6 +31,31 @@
 # rule below has a selftest case proving it fires, and the negative cases
 # prove the legal prose above still passes — see --selftest.
 #
+# WIDENED AGAIN 2026-09-23 (issue #171). The private repository's top-level
+# layout has more directories than the seven path literals above knew about;
+# the artifact producer enumerated their actual tree, and the chtypes lead
+# ruled that a directory PREFIX may be encoded here in the open — a detector
+# cannot hide what it detects, five prefixes were already sitting in this
+# file, and a bare prefix is the accepted cost of catching the full paths
+# that matter (a comment pasted with the file appended, a stack trace, a
+# copied shell transcript). Added: the private repository's remaining
+# `tests/*`, `lib/*`, `dist/*` and `docs/*` top-level directories, plus one
+# STRUCTURAL needle, `Wave-RF/software/chtypes/` — the housing path under
+# which every private build worktree lives. Worktree names are chosen fresh
+# daily and cannot be enumerated without going stale; the housing path they
+# all sit under does not change, so it is the one thing worth matching
+# structurally rather than by name.
+#
+# ⚠️ `tests/sdk/` is a KNOWN, ACCEPTED false-positive risk, not an oversight.
+# It names the private repository's per-language server-truth suites — but a
+# legitimate public sentence about THIS repository's own SDKs can contain the
+# same four characters in the same order ("the go/python/ts/rust tests for
+# the SDK"), and nothing about the substring match can tell the two apart.
+# It stays in the needle set anyway: a needle that fires on a legitimate
+# string costs one triage pass to dismiss; a needle that is missing costs a
+# leak nobody ever sees. Do not "fix" this by narrowing or dropping the rule
+# — that was tried mentally and rejected in #171 for exactly this reason.
+#
 #   scripts/lint-public.sh               check every tracked file
 #   scripts/lint-public.sh --selftest    prove every rule fires, and that
 #                                         legitimate prose does not
@@ -63,6 +88,20 @@ RULES=(
   'tests/acceptance/'
   'ci/steps/'
   'docs/proposals/'
+  'tests/wherefilter/'
+  'tests/conformance/'
+  'tests/fuzz/'
+  'tests/harness/'
+  'tests/perf/'
+  'tests/tsan/'
+  'tests/sdk/'
+  'lib/tools/'
+  'lib/harness/'
+  'dist/docker/'
+  'dist/integration/'
+  'dist/linux-verify/'
+  'docs/measurements/'
+  'Wave-RF/software/chtypes/'
 )
 WHYS=(
   'the private repository by name. A reader cannot open it; say what the thing IS, not where it lives.'
@@ -72,6 +111,20 @@ WHYS=(
   "the private repository's other scoring rig. Same reasoning: say \"the acceptance rig\" in words, never its path."
   "the private repository's CI step directory. A reader cannot open it; describe the step, not where it lives."
   "the private repository's design-proposal directory. A reader cannot open it; describe the proposal, not where it lives."
+  "the private repository's wherefilter scoring rig. A reader cannot open it; describe what it scores, not its path."
+  "the private repository's conformance suite. A reader cannot open it; say what it conforms to, not its path."
+  "the private repository's fuzzing harness. A reader cannot open it; describe the coverage, not its path."
+  "the private repository's test harness. A reader cannot open it; say \"the harness\" in words, not its path."
+  "the private repository's performance-test suite. A reader cannot open it; cite the result, not its path."
+  "the private repository's thread-sanitizer suite. A reader cannot open it; say \"a SANITIZE=thread build\", not its path."
+  "the private repository's per-language SDK server-truth suites. A reader cannot open it — KNOWINGLY AMBIGUOUS, see the header note above: kept anyway because a missed leak costs more than a triage pass."
+  "the private repository's internal tooling directory. A reader cannot open it; name the tool by what it does, not its path."
+  "the private repository's harness library. A reader cannot open it; describe it, not its path."
+  "the private repository's Docker build output. A reader cannot open it; describe the image, not its path."
+  "the private repository's integration-build output. A reader cannot open it; describe it, not its path."
+  "the private repository's Linux verification output. A reader cannot open it; describe the check, not its path."
+  "the private repository's internal measurements directory. A reader cannot open it; cite the number, not its path."
+  "the housing path under which every private build worktree lives. Worktree names change daily and cannot be enumerated; this structural prefix does not go stale the way a name list would."
 )
 
 # Private working-note filenames — the housing folder that sits one directory
@@ -238,6 +291,52 @@ if [ "${1:-}" = "--selftest" ]; then
   # --- new needle: a local absolute path naming an actual account ---
   printf 'backup restored from /Users/quinn/Downloads/chtypes-dump\n' > "$tmp/planted-path.md"
 
+  # --- issue #171: the private repository's remaining top-level directories,
+  #     enumerated by the artifact producer. One planted (must fire) and one
+  #     legal, words-only (must not fire) case per needle, same shape as the
+  #     #96 pairs above. ---
+  printf 'baseline scores regenerate from tests/wherefilter/golden.json\n' > "$tmp/planted-wherefilter.md"
+  printf 'the wherefilter rig scores predicate pushdown, same idea as the arbiter\n' > "$tmp/legal-wherefilter-word.md"
+
+  printf 'new cases land in tests/conformance/ before anything else\n' > "$tmp/planted-conformance.md"
+  printf 'the conformance suite gates every release line\n' > "$tmp/legal-conformance-word.md"
+
+  printf 'crash inputs are archived under tests/fuzz/corpus\n' > "$tmp/planted-fuzz.md"
+  printf 'the fuzzing harness found the boundary case overnight\n' > "$tmp/legal-fuzz-word.md"
+
+  printf 'wire the new check into tests/harness/runner.py\n' > "$tmp/planted-harness.md"
+  printf 'the test harness retries a flaky case twice before failing it\n' > "$tmp/legal-harness-word.md"
+
+  printf 'baseline numbers come from tests/perf/results.json\n' > "$tmp/planted-perf.md"
+  printf 'the performance suite flags a five percent regression\n' > "$tmp/legal-perf-word.md"
+
+  printf 'races only reproduce from tests/tsan/output on the nightly run\n' > "$tmp/planted-tsan.md"
+  printf 'a SANITIZE=thread build catches the same race\n' > "$tmp/legal-tsan-word.md"
+
+  printf 'the server-truth suites run from tests/sdk/python against this checkout\n' > "$tmp/planted-sdk.md"
+  printf "this repository's own SDK tests live under go/, python/, ts/ and rust/\n" > "$tmp/legal-sdk-word.md"
+
+  printf 'the tunable is passed by lib/tools/oracle-linux.sh for old images\n' > "$tmp/planted-libtools.md"
+  printf 'the internal tooling directory carries this environment tunable\n' > "$tmp/legal-libtools-word.md"
+
+  printf 'shared fixtures live in lib/harness/fixtures.py\n' > "$tmp/planted-libharness.md"
+  printf 'the harness library shares fixtures across every rig\n' > "$tmp/legal-libharness-word.md"
+
+  printf 'the image build script is dist/docker/build.sh\n' > "$tmp/planted-distdocker.md"
+  printf 'the Docker build output ships the same artifact\n' > "$tmp/legal-distdocker-word.md"
+
+  printf 'nightly output lands in dist/integration/report.json\n' > "$tmp/planted-distintegration.md"
+  printf 'the integration-build output confirmed the fix\n' > "$tmp/legal-distintegration-word.md"
+
+  printf 'the check reads dist/linux-verify/summary.txt\n' > "$tmp/planted-distlinuxverify.md"
+  printf 'the Linux verification output confirmed the checksum\n' > "$tmp/legal-distlinuxverify-word.md"
+
+  printf 'the raw numbers are archived in docs/measurements/2026-09.csv\n' > "$tmp/planted-docsmeasurements.md"
+  printf 'the internal measurements directory tracks throughput over time\n' > "$tmp/legal-docsmeasurements-word.md"
+
+  printf 'the failure only reproduced under Wave-RF/software/chtypes/wt-goblin-3\n' > "$tmp/planted-housing.md"
+  printf 'the housing folder holds both repositories side by side\n' > "$tmp/legal-housing-word.md"
+
   # --- legal: describing the split in words, an in-repo path, and the
   #     generic placeholder path spellings this repository already ships ---
   printf 'the other half is the core repository, under its own license\n' > "$tmp/legal.md"
@@ -253,13 +352,23 @@ if [ "${1:-}" = "--selftest" ]; then
 
   for want in planted-1.md planted-2.md planted-case-1.md planted-case-2.md \
               planted-csrc.md planted-arbiter.md planted-acceptance.md \
-              planted-cisteps.md planted-proposals.md planted-note.md planted-path.md; do
+              planted-cisteps.md planted-proposals.md planted-note.md planted-path.md \
+              planted-wherefilter.md planted-conformance.md planted-fuzz.md \
+              planted-harness.md planted-perf.md planted-tsan.md planted-sdk.md \
+              planted-libtools.md planted-libharness.md planted-distdocker.md \
+              planted-distintegration.md planted-distlinuxverify.md \
+              planted-docsmeasurements.md planted-housing.md; do
     printf '%s\n' "$out" | grep -q "$want" || { echo "SELFTEST FAILED: rule did not fire on $want" >&2; exit 1; }
   done
 
   for clean in legal.md legal-arbiter-word.md legal-acceptance-word.md \
                legal-inrepo-path.md legal-path-placeholder.md \
-               legal-home-placeholder.md legal-allcaps-filenames.md; do
+               legal-home-placeholder.md legal-allcaps-filenames.md \
+               legal-wherefilter-word.md legal-conformance-word.md legal-fuzz-word.md \
+               legal-harness-word.md legal-perf-word.md legal-tsan-word.md legal-sdk-word.md \
+               legal-libtools-word.md legal-libharness-word.md legal-distdocker-word.md \
+               legal-distintegration-word.md legal-distlinuxverify-word.md \
+               legal-docsmeasurements-word.md legal-housing-word.md; do
     printf '%s\n' "$out" | grep -q "$clean" && { echo "SELFTEST FAILED: a legal prose mention was flagged ($clean)" >&2; exit 1; }
   done
 
