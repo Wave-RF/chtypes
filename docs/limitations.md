@@ -93,7 +93,7 @@ Both sides agree on every other published line: the server refuses the comment o
 
 **Measured**: this library's answer, in this repository, against the published artifacts. The server's answer, against pinned servers, by the differential proof the artifacts are built from — not measured here.
 
-Remove the trailing comment from the body if you need a pre-flight answer you can rely on on those two lines.
+Remove the trailing comment from the body if you need a pre-flight answer you can rely on for those two lines.
 
 ## Pre-1.0
 
