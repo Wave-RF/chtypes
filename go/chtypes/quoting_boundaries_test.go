@@ -18,12 +18,12 @@ package chtypes
 //     off a library rather than off the package, and one library cannot show
 //     it.
 //  5. ReconstructDDL spells the kinds, the expressions and the refusals, and
-//     leaves every NAME to the library. The other three bindings pin that
-//     with a no-artifact marker quoter, because reconstruction there has a
-//     seam that takes the quoter as an argument; this package's
-//     ReconstructDDL calls l.QuoteIdentifier inline and has none, so the same
-//     properties are pinned against a real library, with the expected
-//     spelling asked of that same library rather than written down.
+//     leaves every NAME to the library. reconstructDDLWith
+//     (discover_reconstruct_test.go) pins that no-artifact with a marker
+//     quoter, the same way the other three bindings do; the test here
+//     confirms the real wrapper — ReconstructDDL calling l.QuoteIdentifier —
+//     with the expected spelling asked of that same library rather than
+//     written down.
 //
 // HOW A SPELLING IS NEVER WRITTEN DOWN HERE. Every expectation is stated as
 // one of the library's OWN two answers: QuoteIdentifier always quotes, so it
@@ -324,12 +324,13 @@ func TestQuoteIdentifierIfNeededAcrossTwoLibraries(t *testing.T) {
 	t.Logf("%d interleaved calls over %s and %s, %d names documented as divergent", ran, older.line, newer.line, divergent)
 }
 
-// TestReconstructDDLSpellsKindsThroughTheLibrary is this package's stand-in
-// for the marker-quoter unit tests the other three bindings carry. Those drive
-// a seam that takes the quoter as an argument, which this package's
-// ReconstructDDL does not have; so the same properties — the kinds, the
-// expressions and the refusals — are pinned against a loaded library, with
-// every expected NAME asked of that same library rather than written down.
+// TestReconstructDDLSpellsKindsThroughTheLibrary confirms the real
+// ReconstructDDL wrapper — reconstructDDLWith fed l.QuoteIdentifier — against
+// a loaded library, with every expected NAME asked of that same library
+// rather than written down. discover_reconstruct_test.go pins the same
+// properties — the kinds, the expressions and the refusals — no-artifact,
+// against reconstructDDLWith directly with a marker quoter, the way the other
+// three bindings' unit tests do.
 func TestReconstructDDLSpellsKindsThroughTheLibrary(t *testing.T) {
 	loaded := loadedLines(t)
 	lib := loaded[len(loaded)-1].lib
