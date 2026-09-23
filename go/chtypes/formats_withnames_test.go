@@ -164,8 +164,8 @@ func headerMatchingIsExact(t *testing.T, minor string) bool {
 	return major < 26 || (major == 26 && feature <= 4)
 }
 
-// valueOf finds one column's value in a row, or fails naming what was there.
-func valueOf(t *testing.T, row RowResult, column string) Value {
+// withNamesValueOf finds one column's value in a row, or fails naming what was there.
+func withNamesValueOf(t *testing.T, row RowResult, column string) Value {
 	t.Helper()
 	for _, v := range row.Values {
 		if v.Column == column {
@@ -180,10 +180,10 @@ func valueOf(t *testing.T, row RowResult, column string) Value {
 	return Value{}
 }
 
-// rowShape renders the parts of a row this file compares — verdict, values and
+// withNamesRowShape renders the parts of a row this file compares — verdict, values and
 // unknown fields, never ClickHouse's message text, which the CSV reader change
 // warns consumers not to pin.
-func rowShape(row RowResult) string {
+func withNamesRowShape(row RowResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "outcome=%s code=%d values=[", row.Outcome, row.ErrCode)
 	for i, v := range row.Values {
@@ -203,8 +203,8 @@ func rowShape(row RowResult) string {
 	return b.String()
 }
 
-// sameVerdicts asserts two batches answered identically, field by field.
-func sameVerdicts(t *testing.T, got, want BatchResult, gotName, wantName string) {
+// withNamesSameVerdicts asserts two batches answered identically, field by field.
+func withNamesSameVerdicts(t *testing.T, got, want BatchResult, gotName, wantName string) {
 	t.Helper()
 	if got.Outcome != want.Outcome || got.ErrCode != want.ErrCode {
 		t.Fatalf("%s answered %s/%d, %s answered %s/%d", gotName, got.Outcome, got.ErrCode, wantName, want.Outcome, want.ErrCode)
@@ -217,8 +217,8 @@ func sameVerdicts(t *testing.T, got, want BatchResult, gotName, wantName string)
 		t.Fatalf("%s produced %d row result(s), %s produced %d", gotName, len(got.Rows), wantName, len(want.Rows))
 	}
 	for i := range got.Rows {
-		if rowShape(got.Rows[i]) != rowShape(want.Rows[i]) {
-			t.Fatalf("row %d differs:\n  %s: %s\n  %s: %s", i, gotName, rowShape(got.Rows[i]), wantName, rowShape(want.Rows[i]))
+		if withNamesRowShape(got.Rows[i]) != withNamesRowShape(want.Rows[i]) {
+			t.Fatalf("row %d differs:\n  %s: %s\n  %s: %s", i, gotName, withNamesRowShape(got.Rows[i]), wantName, withNamesRowShape(want.Rows[i]))
 		}
 	}
 }
@@ -258,14 +258,14 @@ func TestWithNamesRoundTripMatchesHeaderless(t *testing.T) {
 					t.Fatalf("rows(format %d): %v", int(c.headerless), err)
 				}
 				// Assert the pair is not vacuously equal: two identical
-				// failures would satisfy sameVerdicts and prove nothing.
+				// failures would satisfy withNamesSameVerdicts and prove nothing.
 				if plain.Outcome != Accepted || len(plain.Rows) != 2 {
 					t.Fatalf("the headerless control did not accept two rows: %s/%d, %d row(s)", plain.Outcome, plain.ErrCode, len(plain.Rows))
 				}
 				if named.Outcome != Accepted || len(named.Rows) != 2 {
 					t.Fatalf("format %d did not accept two rows: %s/%d, %d row(s)", int(c.withNames), named.Outcome, named.ErrCode, len(named.Rows))
 				}
-				sameVerdicts(t, named, plain, fmt.Sprintf("format %d", int(c.withNames)), fmt.Sprintf("format %d", int(c.headerless)))
+				withNamesSameVerdicts(t, named, plain, fmt.Sprintf("format %d", int(c.withNames)), fmt.Sprintf("format %d", int(c.headerless)))
 			})
 			cases++
 		}
@@ -322,27 +322,27 @@ func TestWithNamesHeaderCaseBoundary(t *testing.T) {
 					t.Fatalf("batch = %s/%d with %d row(s); want one accepted row", res.Outcome, res.ErrCode, len(res.Rows))
 				}
 				row := res.Rows[0]
-				id := valueOf(t, row, "id")
+				id := withNamesValueOf(t, row, "id")
 				unknown := strings.Join(row.UnknownFields, " ")
 				if exact {
 					if id.Source == "input" {
-						t.Fatalf("ClickHouse %s matches header names exactly (through 26.4), so `ID` must not bind to `id`; got %s", ln.lib.Version, rowShape(row))
+						t.Fatalf("ClickHouse %s matches header names exactly (through 26.4), so `ID` must not bind to `id`; got %s", ln.lib.Version, withNamesRowShape(row))
 					}
 					if id.Text != "0" {
-						t.Fatalf("ClickHouse %s: `id` was named by no header column, so it takes the reader's zero; got %s", ln.lib.Version, rowShape(row))
+						t.Fatalf("ClickHouse %s: `id` was named by no header column, so it takes the reader's zero; got %s", ln.lib.Version, withNamesRowShape(row))
 					}
 					if unknown != "ID" {
-						t.Fatalf("ClickHouse %s: `ID` names no column through 26.4 and must be reported as an unknown field; got %s", ln.lib.Version, rowShape(row))
+						t.Fatalf("ClickHouse %s: `ID` names no column through 26.4 and must be reported as an unknown field; got %s", ln.lib.Version, withNamesRowShape(row))
 					}
 				} else {
 					if id.Source != "input" || id.Text != "1" {
-						t.Fatalf("ClickHouse %s matches header names case-insensitively (from 26.5), so `ID` must bind to `id`; got %s", ln.lib.Version, rowShape(row))
+						t.Fatalf("ClickHouse %s matches header names case-insensitively (from 26.5), so `ID` must bind to `id`; got %s", ln.lib.Version, withNamesRowShape(row))
 					}
 					if unknown != "" {
-						t.Fatalf("ClickHouse %s: `ID` binds to `id` from 26.5, so there is no unknown field; got %s", ln.lib.Version, rowShape(row))
+						t.Fatalf("ClickHouse %s: `ID` binds to `id` from 26.5, so there is no unknown field; got %s", ln.lib.Version, withNamesRowShape(row))
 					}
 				}
-				t.Logf("ClickHouse %s: %s", ln.lib.Version, rowShape(row))
+				t.Logf("ClickHouse %s: %s", ln.lib.Version, withNamesRowShape(row))
 			})
 			if exact {
 				below++
@@ -415,10 +415,10 @@ func TestWithNamesColumnListInterplay(t *testing.T) {
 				if res.Outcome != Accepted || len(res.Rows) != 1 {
 					t.Fatalf("batch = %s/%d with %d row(s); want one accepted row", res.Outcome, res.ErrCode, len(res.Rows))
 				}
-				p := valueOf(t, res.Rows[0], "p")
+				p := withNamesValueOf(t, res.Rows[0], "p")
 				if p.Text != c.wantText || p.Source != c.wantSource {
 					t.Fatalf("`p` is listed and the header omits it: under input_format_defaults_for_omitted_fields=%s it must be %s/%s; got %s",
-						c.defaults, c.wantText, c.wantSource, rowShape(res.Rows[0]))
+						c.defaults, c.wantText, c.wantSource, withNamesRowShape(res.Rows[0]))
 				}
 			})
 			omitted++
@@ -444,11 +444,11 @@ func TestWithNamesColumnListInterplay(t *testing.T) {
 				}
 				row := res.Rows[0]
 				if strings.Join(row.UnknownFields, " ") != "p" {
-					t.Fatalf("`p` is not in the column list, so the header naming it is an unknown field; got %s", rowShape(row))
+					t.Fatalf("`p` is not in the column list, so the header naming it is an unknown field; got %s", withNamesRowShape(row))
 				}
-				p := valueOf(t, row, "p")
+				p := withNamesValueOf(t, row, "p")
 				if p.Text != "7" || p.Source != "default" {
-					t.Fatalf("`p` is unlisted, so it takes its DEFAULT 7; got %s", rowShape(row))
+					t.Fatalf("`p` is unlisted, so it takes its DEFAULT 7; got %s", withNamesRowShape(row))
 				}
 			})
 			unknown++
@@ -482,11 +482,11 @@ func TestWithNamesColumnListInterplay(t *testing.T) {
 				}
 				row := res.Rows[0]
 				for _, want := range []struct{ column, text string }{{"p", "7"}, {"q", "9"}} {
-					v := valueOf(t, row, want.column)
+					v := withNamesValueOf(t, row, want.column)
 					if v.Text != want.text || v.Source != "default" {
 						t.Fatalf("`%s` is not in the column list, so it takes its DEFAULT %s whatever "+
 							"input_format_defaults_for_omitted_fields says (here %s); got %s",
-							want.column, want.text, c.defaults, rowShape(row))
+							want.column, want.text, c.defaults, withNamesRowShape(row))
 					}
 				}
 			})
