@@ -4,12 +4,16 @@ checked against loaded artifacts (chtypes#185).
 
 WHY THIS EXISTS. That section makes falsifiable claims about this library's
 own behavior — "this library answers `accepted` for a row a real server
-refuses, on 26.2 and 26.3", "this library rejects a row a real server
-accepts, on 25.3/25.8/25.10" — and until now nothing in this repository
-asserted either one. When the artifact producer fixes a divergence, every
-existing suite stays green and the page silently becomes wrong: the repository's
-own recorded failure mode, "a claim in a document is not a check", one entry
-short of being closed for this page.
+refuses, on 26.2 and 26.3" — and until now nothing in this repository
+asserted them. When the artifact producer fixes a divergence, every existing
+suite stays green and the page silently becomes wrong: the repository's own
+recorded failure mode, "a claim in a document is not a check", one entry
+short of being closed for this page. (A second entry was proposed alongside
+this one and withdrawn before landing — a re-measurement against a real
+MergeTree table, rather than the Memory-engine table the original measurement
+used, found no divergence there at all. That is exactly the failure mode this
+script exists to catch, one level up: an unchecked claim about the library
+was wrong from the day it was written, not merely stale.)
 
 This is NOT a differential suite. It never asks what a real server does —
 that answer is not measured here and never will be (there is no ClickHouse
