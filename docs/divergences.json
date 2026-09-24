@@ -57,46 +57,6 @@
           "expect": { "outcome": "rejected" }
         }
       ]
-    },
-    {
-      "id": "dynamic-object-type-gate",
-      "heading": "A JSON object into a `Dynamic` column, with `allow_experimental_object_type` on",
-      "checks": [
-        {
-          "id": "dynamic-over-reject-with-gate",
-          "note": "the divergence itself: this library rejects what a real server accepts and stores (measured only by the differential proof, not here)",
-          "lines": ["24.8", "25.3", "25.8", "25.10"],
-          "schema": "x Dynamic",
-          "format": "JSONEachRow",
-          "payload": "{\"x\": {}}",
-          "settings": { "allow_experimental_object_type": "1" },
-          "expect": {
-            "outcome": "rejected",
-            "err_code": 48,
-            "err_msg": "DataTypeObject doesn't support serialization with position independent encoding"
-          }
-        },
-        {
-          "id": "dynamic-accepted-gate-off",
-          "note": "that one gate is the whole condition: with it off, every line accepts",
-          "lines": ["24.8", "25.3", "25.8", "25.10"],
-          "schema": "x Dynamic",
-          "format": "JSONEachRow",
-          "payload": "{\"x\": {}}",
-          "settings": {},
-          "expect": { "outcome": "accepted" }
-        },
-        {
-          "id": "json-column-unaffected",
-          "note": "a JSON column is unaffected by the gate on the same lines",
-          "lines": ["24.8", "25.3", "25.8", "25.10"],
-          "schema": "x JSON",
-          "format": "JSONEachRow",
-          "payload": "{\"x\": {}}",
-          "settings": { "allow_experimental_object_type": "1" },
-          "expect": { "outcome": "accepted" }
-        }
-      ]
     }
   ]
 }

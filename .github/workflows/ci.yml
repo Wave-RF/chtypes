@@ -209,12 +209,13 @@ jobs:
       - name: selftest — a claim that no longer holds, and a heading/entry mismatch, are both caught
         run: scripts/check-divergences.py --selftest
       # Exactly the lines docs/divergences.json names, on linux-amd64 — never
-      # the `artifacts` job's newest -lts / -stable / 24.8: neither documented
-      # entry's version range is covered by that job (its own comment says
-      # why it fetches what it fetches — see .github/workflows/ci.yml above),
-      # so bolting on there would silently check nothing for either entry.
-      # --print-lines reads the same docs/divergences.json the reality check
-      # itself drives, so the two can never name a different set.
+      # the `artifacts` job's newest -lts / -stable / 24.8: the documented
+      # entry's version range (26.2/26.3, plus its 25.10/26.4 contrast lines)
+      # is not covered by that job (its own comment says why it fetches what
+      # it fetches — see .github/workflows/ci.yml above), so bolting on there
+      # would silently check nothing. --print-lines reads the same
+      # docs/divergences.json the reality check itself drives, so the two
+      # can never name a different set.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .divergences-artifacts
