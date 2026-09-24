@@ -76,7 +76,9 @@ The ABI header is the full contract.
 
 Each entry here is a case where this library and a real ClickHouse server give different answers, and a caller can reach it. Every entry names the direction, the input, both answers, and **which half of the comparison was measured where** — there is no ClickHouse server in this repository, so the server half always comes from the differential proof the artifacts are built from.
 
-An entry disappears when an artifact stops diverging. Pin nothing to this list.
+An entry disappears when an artifact stops diverging, or when the disagreement turns out to have been a property of how it was measured rather than of the library. Pin nothing to this list.
+
+⚠️ **"A real server" means a real table engine** — a MergeTree table, the kind a tenant writes to. A `CREATE TEMPORARY TABLE` is `ENGINE=Memory`, has no parts, and accepts values that every ordinary table refuses at part-write time. If you reproduce an entry against a temporary table you will not get the answer recorded here, and the temporary table is the one that is wrong about your production write.
 
 ### A trailing `-- comment` in a Values body, on 26.2 and 26.3
 
@@ -94,23 +96,6 @@ Both sides agree on every other published line: the server refuses the comment o
 **Measured**: this library's answer, in this repository, against the published artifacts. The server's answer, against pinned servers, by the differential proof the artifacts are built from — not measured here.
 
 Remove the trailing comment from the body if you need a pre-flight answer you can rely on for those two lines.
-
-### A JSON object into a `Dynamic` column, with `allow_experimental_object_type` on
-
-**Over-reject.** This library rejects a row a real server accepts and stores, so a gateway using it as a pre-flight check tells a tenant their row is wrong when it is not.
-
-The input is a JSON object arriving in a `Dynamic` column, on ClickHouse **25.3**, **25.8** or **25.10**, with `allow_experimental_object_type=1` in the settings. A schema of `x Dynamic` and a body of `{"x": {}}` is enough to reach it:
-
-|               |                                                                                                           |
-| ------------- | --------------------------------------------------------------------------------------------------------- |
-| this library  | rejected, code **48** — `DataTypeObject doesn't support serialization with position independent encoding` |
-| a real server | `accepted`, and the row is stored                                                                         |
-
-That one gate is the whole condition: with it off, every line accepts. A `JSON` column is unaffected, and so is every line from 26.2 on.
-
-**Measured**: this library's answer, in this repository, against the published artifacts on 25.3, 25.8 and 25.10. The server's answer, against pinned servers, by the differential proof the artifacts are built from — not measured here. 24.8 carries the same behavior on that same measurement and could not be checked here, because no darwin build of that line is published.
-
-If you do not need `allow_experimental_object_type`, leaving it off avoids this entirely.
 
 ## Pre-1.0
 
