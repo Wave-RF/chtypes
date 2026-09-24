@@ -151,8 +151,10 @@ enum chs_format
     CHS_JSON_EACH_ROW = 0,
     CHS_CSV = 1,
     CHS_TSV = 2,
-    /* CHS_VALUES reads the whole body as ONE block, the way a server's
-     * INSERT ... FORMAT Values does, and its verdict is the body's:
+    /* CHS_VALUES reads the body the way a server's INSERT ... FORMAT Values
+     * does — in blocks of max_insert_block_size rows (from the call's
+     * settings), so any ordinary body is one block — and its verdict is
+     * the body's:
      *   - an ACCEPTED body is unchanged: one `rows` entry per row, in input
      *     order, and rows_read == len(rows);
      *   - a body that FAILS is one verdict, the statement's: outcome
