@@ -185,6 +185,49 @@ jobs:
             exit 1
           fi
 
+  divergences:
+    name: "divergences — docs/limitations.md's Known-divergences claims, against loaded artifacts"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # NON-BLOCKING, on purpose — the identical reasoning as the `docs` job
+    # just above, not a separate judgment call (chtypes#185). The artifact
+    # producer fixing a documented divergence is a cross-repo event this
+    # repository cannot prevent, and reddening main on somebody else's
+    # correct work is the trade `docs` and scripts/support-matrix.sh already
+    # declined, for the same reason fetch-fixtures-check did. A red here
+    # means "update docs/limitations.md", never "the library regressed" —
+    # scripts/check-divergences.py's own message says which direction.
+    continue-on-error: true
+    env:
+      CHTYPES_REGISTRY: ${{ github.workspace }}/.divergences-artifacts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Selftest first, same discipline as `abi` and `public`: a checker
+      # nobody has seen fail is not a checker. Needs no network and no
+      # registry — it drives the coverage rule and the outcome/err_code/
+      # err_msg comparison directly, against fabricated inputs.
+      - name: selftest — a claim that no longer holds, and a heading/entry mismatch, are both caught
+        run: scripts/check-divergences.py --selftest
+      # Exactly the lines docs/divergences.json names, on linux-amd64 — never
+      # the `artifacts` job's newest -lts / -stable / 24.8: the documented
+      # entry's version range (26.2/26.3, plus its 25.10/26.4 contrast lines)
+      # is not covered by that job (its own comment says why it fetches what
+      # it fetches — see .github/workflows/ci.yml above), so bolting on there
+      # would silently check nothing. --print-lines reads the same
+      # docs/divergences.json the reality check itself drives, so the two
+      # can never name a different set.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .divergences-artifacts
+          key: chtypes-divergences-linux-amd64-${{ hashFiles('docs/divergences.json') }}
+      - name: fetch exactly what docs/divergences.json names
+        run: |
+          for line in $(scripts/check-divergences.py --print-lines); do
+            scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY"
+          done
+      - name: docs/limitations.md's Known-divergences claims still hold against the loaded artifacts
+        run: scripts/check-divergences.py --registry "$CHTYPES_REGISTRY"
+
   go:
     name: "go — build, vet, standalone check (no artifacts)"
     runs-on: ubuntu-latest
