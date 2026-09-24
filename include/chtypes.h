@@ -151,6 +151,20 @@ enum chs_format
     CHS_JSON_EACH_ROW = 0,
     CHS_CSV = 1,
     CHS_TSV = 2,
+    /* CHS_VALUES reads the whole body as ONE block, the way a server's
+     * INSERT ... FORMAT Values does, and its verdict is the body's:
+     *   - an ACCEPTED body is unchanged: one `rows` entry per row, in input
+     *     order, and rows_read == len(rows);
+     *   - a body that FAILS is one verdict, the statement's: outcome
+     *     `rejected`, the server's code and err, rows: [], rows_read: 0,
+     *     rows_skipped: 0. No row is attributed and there are no per-row
+     *     verdicts; a server names no row for an evaluation error, and only
+     *     code 27 carries "at row N", inside the message, passed verbatim;
+     *   - a body this library DECLINES is the body's too: outcome
+     *     `unsupported` (-2), rows: [], rows_read: 0, with the declined row
+     *     named in the message.
+     * This is the whole-batch shape docs/guides/batches.md documents for a
+     * CHECK violation: one statement, one verdict, nothing stored. */
     CHS_VALUES = 3,
     CHS_JSON_COMPACT_EACH_ROW = 4,
     CHS_ROW_BINARY = 5,
