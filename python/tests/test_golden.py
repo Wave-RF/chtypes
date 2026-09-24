@@ -123,8 +123,12 @@ def test_golden(registry: chtypes.Registry, case: dict) -> None:
             br = schema.rows(fmt, body, settings)
             assert br.outcome == Outcome(expect["outcome"]), (lib.version, br.outcome, br.err_msg)
             assert br.err_code == expect.get("err_code", 0), (lib.version, br.err_code, br.err_msg)
-            assert len(br.rows) == len(expect["rows"]), (lib.version, br)
-            for i, (row, want) in enumerate(zip(br.rows, expect["rows"], strict=True)):
+            # A golden may carry no `rows` at all: a failed or declined Values body answers one
+            # verdict for the whole body with no per-row detail. Go, TypeScript and Rust already
+            # read a missing `rows` as empty; this reads it the same way, so the four agree.
+            want_rows = expect.get("rows", [])
+            assert len(br.rows) == len(want_rows), (lib.version, br)
+            for i, (row, want) in enumerate(zip(br.rows, want_rows, strict=True)):
                 got = (lib.version, i, row.outcome, row.err_msg)
                 assert row.outcome == Outcome(want["outcome"]), got
                 if want["outcome"] in ("rejected", "skipped"):
