@@ -75,6 +75,19 @@ whose (platform, line) pair is on the release's own SERVED `unbuildable`
 list (index.json's top-level array) is a by-design gap, not a failure of
 this checker or a finding about the library — it is skipped, loudly, by
 name, exactly as scripts/check-standalone.sh already treats that list.
+
+AN EMPTIED REGISTER IS A VALID END STATE, NOT A ZERO-RUN. docs/limitations.md
+says, in its own words, "An entry disappears when an artifact stops
+diverging" — the register is expected to reach zero entries one day, and
+this script must survive that (chtypes#185's own defect: it used to die on
+"names no entries" regardless of why the count was zero). Zero entries in
+docs/divergences.json AND zero `###` headings under "## Known divergences"
+in docs/limitations.md means the page and the data agree there is nothing
+to check, which is not the same shape as the zero-run refusal above — it
+passes, loudly, saying so, and needs no registry to do it. Zero of both
+with the section heading itself missing or renamed is a different, real
+failure: indistinguishable from the valid case without checking for the
+heading text directly, so that refuses rather than guess.
 """
 
 from __future__ import annotations
@@ -83,6 +96,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -146,6 +160,42 @@ def parse_divergence_headings(doc_text: str) -> list[str]:
         if in_section and line.startswith("### "):
             headings.append(line[len("### ") :].strip())
     return headings
+
+
+def has_divergences_section(doc_text: str) -> bool:
+    """Whether SECTION_HEADING itself appears in the doc, verbatim, as a
+    line of its own — independent of whether anything is inside it.
+    parse_divergence_headings() cannot make this distinction: a section
+    that exists but is empty and a section that was renamed or deleted
+    both come back as headings == []."""
+    return any(line.rstrip() == SECTION_HEADING for line in doc_text.splitlines())
+
+
+def classify_register(entries: list[dict[str, Any]], headings: list[str], section_present: bool) -> str:
+    """Classify the Known-divergences register before anything that needs a
+    registry or the network runs. Three states, not two, because the
+    obvious two-way split (entries-or-headings vs. not) cannot tell an
+    intentionally emptied register apart from a doc whose section heading
+    itself got renamed or removed — both produce zero entries AND zero
+    headings, and only one of those is the valid end state
+    docs/limitations.md's own text describes ("An entry disappears when an
+    artifact stops diverging").
+
+      "active"  — at least one entry or one heading exists; the ordinary
+                  coverage + reality path applies, unchanged.
+      "empty"   — no entries, no headings, and the section heading is still
+                  present in the doc: a valid, intentionally empty
+                  register.
+      "missing" — no entries, no headings, and the section heading itself
+                  is gone too: a real error, not an empty register.
+
+    Pure and dependency-free, like coverage_problems() and compare(), so
+    --selftest proves all three without a doc file, a data file, a
+    registry, or the network.
+    """
+    if entries or headings:
+        return "active"
+    return "empty" if section_present else "missing"
 
 
 def coverage_problems(headings: list[str], entries: list[dict[str, Any]], data_rel: str, doc_rel: str) -> list[str]:
@@ -336,6 +386,25 @@ def reality_problems(
     return problems, checked, skips
 
 
+def zero_run_problems(reality_probs: list[str], checked: int, data_rel: str, registry_dir: str) -> list[str]:
+    """The house-rule zero-run refusal — scripts/check-suite.sh and
+    scripts/check-standalone.sh both refuse a run that checked nothing, and
+    the reality check is no exception: entries were named but not one of
+    them could actually be driven (no registry, or every line they name
+    absent from it), and reporting that as a pass would be the exact
+    failure this script exists to prevent one level up. Pure, like
+    compare(), so --selftest proves it fires without a registry or the
+    network."""
+    if checked != 0:
+        return reality_probs
+    return [
+        *reality_probs,
+        f"no check ran at all — every line named in {data_rel} was either absent from "
+        f"{registry_dir} or on the served 'unbuildable' list. That proves nothing, so this is a "
+        "failure, not a pass.",
+    ]
+
+
 # =================================================================== main ===
 
 
@@ -349,8 +418,8 @@ def load_data(path: Path) -> dict[str, Any]:
     if doc.get("schema") != 1:
         die(f"{path}: schema {doc.get('schema')!r} is not 1 — this script reads schema 1")
     entries = doc.get("entries")
-    if not entries:
-        die(f"{path} names no entries")
+    if not isinstance(entries, list):
+        die(f"{path}: 'entries' must be a list (an empty list means an intentionally empty register) — got {entries!r}")
     for e in entries:
         for key in ("id", "heading", "checks"):
             if key not in e:
@@ -389,11 +458,32 @@ def run(registry_dir: str | None, data_path: Path, doc_path: Path) -> int:
     data = load_data(data_path)
     doc_text = doc_path.read_text(encoding="utf-8")
     headings = parse_divergence_headings(doc_text)
-    if not headings:
-        die(f"{rel(doc_path)} has no ### headings under {SECTION_HEADING!r} — did the section move or get renamed?")
+    entries = data["entries"]
 
-    problems = coverage_problems(headings, data["entries"], rel(data_path), rel(doc_path))
-    say(f"coverage: {len(headings)} heading(s) in {rel(doc_path)}, {len(data['entries'])} entr{'y' if len(data['entries']) == 1 else 'ies'} in {rel(data_path)}")
+    state = classify_register(entries, headings, has_divergences_section(doc_text))
+    if state == "missing":
+        die(
+            f"{rel(doc_path)} has no {SECTION_HEADING!r} section at all, and {rel(data_path)} names no "
+            "entries either — an intentionally empty register still needs the section heading present; "
+            "did it move or get renamed?"
+        )
+    if state == "empty":
+        print(
+            f"check-divergences: ok — the Known-divergences register is empty (0 entries in {rel(data_path)}, "
+            f"0 headings under {SECTION_HEADING!r} in {rel(doc_path)}); that is a valid end state "
+            "(docs/limitations.md's own words: \"An entry disappears when an artifact stops diverging\"), "
+            "not a skipped run."
+        )
+        return 0
+
+    if not headings:
+        die(
+            f"{rel(doc_path)} has no ### headings under {SECTION_HEADING!r}, but {rel(data_path)} names "
+            f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'} — did the section move or get renamed?"
+        )
+
+    problems = coverage_problems(headings, entries, rel(data_path), rel(doc_path))
+    say(f"coverage: {len(headings)} heading(s) in {rel(doc_path)}, {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} in {rel(data_path)}")
     for p in problems:
         print(p, file=sys.stderr)
     if not problems:
@@ -414,17 +504,11 @@ def run(registry_dir: str | None, data_path: Path, doc_path: Path) -> int:
 
     artifacts_url = os.environ.get("CHTYPES_ARTIFACTS_URL", "https://artifacts.wavehouse.dev")
     say(f"reality: driving every check in {rel(data_path)} against {registry_dir}")
-    reality_probs, checked, skips = reality_problems(data["entries"], registry_dir, chtypes, artifacts_url)
+    reality_probs, checked, skips = reality_problems(entries, registry_dir, chtypes, artifacts_url)
     for s in skips:
         note(f"skip: {s}")
-    if checked == 0:
-        reality_probs = [
-            *reality_probs,
-            "no check ran at all — every line named in docs/divergences.json was either absent from "
-            f"{registry_dir} or on the served 'unbuildable' list. That proves nothing, so this is a "
-            "failure, not a pass.",
-        ]
-    else:
+    reality_probs = zero_run_problems(reality_probs, checked, rel(data_path), registry_dir)
+    if checked:
         note(f"{checked} case(s) checked, {len(reality_probs)} problem(s)")
     for p in reality_probs:
         print(p, file=sys.stderr)
@@ -603,6 +687,103 @@ def selftest() -> int:
     check(status == "problem" and "code 115" in msg and "the page and the artifacts disagree" not in msg,
           "a code-115 unknown-setting failure was not distinguished from a real disagreement")
 
+    # ---- classify_register: the three states, pure — chtypes#185's fix.
+    check(classify_register([], [], True) == "empty", "an empty register with its section present was not classified 'empty'")
+    check(classify_register([], [], False) == "missing", "an empty register with no section heading was not classified 'missing'")
+    check(classify_register([], ["H1"], True) == "active", "headings with no entries were classified as empty, not active")
+    check(classify_register([{"heading": "H1"}], [], True) == "active", "entries with no headings were classified as empty, not active")
+    check(classify_register([{"heading": "H1"}], ["H1"], True) == "active", "a normal populated register was not classified 'active'")
+
+    # ---- has_divergences_section: the heading line itself, independent of
+    # whether anything is inside it.
+    check(has_divergences_section("# X\n\n## Known divergences\n\n## Pre-1.0\n"), "an empty but present section was not detected")
+    check(not has_divergences_section("# X\n\n## Known Divergences (renamed)\n\n## Pre-1.0\n"), "a renamed section heading was reported as present")
+
+    # ---- zero_run_problems: the deeper form of "entries exist but nothing
+    # could be driven" — a registry IS present but every line it names was
+    # absent (checked stays 0). Pure, so this is proven without a real
+    # registry or the network.
+    probs = zero_run_problems([], 0, "docs/divergences.json", "/some/registry")
+    check(len(probs) == 1 and "no check ran at all" in probs[0], "checked == 0 did not produce the zero-run refusal message")
+    check(
+        zero_run_problems(["existing problem"], 3, "docs/divergences.json", "/some/registry") == ["existing problem"],
+        "checked > 0 wrongly appended the zero-run refusal message",
+    )
+
+    # ---- run(), end to end, offline (no registry, no network): the two
+    # cases run() itself must now distinguish.
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+
+        # THE central positive: zero entries and zero headings, with the
+        # section heading present, is a valid end state and must PASS —
+        # this is the exact shape docs/limitations.md's own text describes
+        # ("An entry disappears when an artifact stops diverging") and the
+        # one the old "names no entries" die() could not survive.
+        doc_empty = tmp_path / "limitations-empty.md"
+        doc_empty.write_text(
+            "# Known limitations\n\n## Known divergences\n\nNothing currently diverges.\n\n## Pre-1.0\n\nmore text\n",
+            encoding="utf-8",
+        )
+        data_empty = tmp_path / "divergences-empty.json"
+        data_empty.write_text(json.dumps({"schema": 1, "entries": []}), encoding="utf-8")
+        rc = run(None, data_empty, doc_empty)
+        check(rc == 0, f"an intentionally empty register (0 entries, 0 headings, section present) did not pass: rc={rc}")
+
+        # The same zero/zero shape, but the section heading itself is gone
+        # — must NOT be swallowed by the new empty-register pass path.
+        doc_missing = tmp_path / "limitations-missing.md"
+        doc_missing.write_text(
+            "# Known limitations\n\n## Known Divergences (renamed)\n\nNothing currently diverges.\n\n## Pre-1.0\n",
+            encoding="utf-8",
+        )
+        try:
+            run(None, data_empty, doc_missing)
+            check(False, "a renamed/missing section heading with zero entries was not caught — it must not silently pass as an empty register")
+        except SystemExit as exc:
+            check(exc.code == 1, f"a renamed/missing section heading did not exit 1: {exc.code}")
+
+        # THE central negative: entries exist but nothing could be driven
+        # (no registry named) — the existing zero-run refusal must still
+        # fire, unweakened, now that load_data() no longer dies on an empty
+        # list by itself.
+        doc_active = tmp_path / "limitations-active.md"
+        doc_active.write_text(
+            "# Known limitations\n\n## Known divergences\n\n### A fake divergence\n\nbody\n\n## Pre-1.0\n",
+            encoding="utf-8",
+        )
+        data_active = tmp_path / "divergences-active.json"
+        data_active.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "entries": [
+                        {
+                            "id": "fake",
+                            "heading": "A fake divergence",
+                            "checks": [
+                                {
+                                    "id": "c1",
+                                    "lines": ["99.9"],
+                                    "schema": "x UInt8",
+                                    "format": "JSONEachRow",
+                                    "payload": "{}",
+                                    "settings": {},
+                                    "expect": {"outcome": "accepted"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        try:
+            run(None, data_active, doc_active)
+            check(False, "entries with no registry named did not refuse — the zero-run house rule was weakened")
+        except SystemExit as exc:
+            check(exc.code == 1, f"entries with no registry named did not exit 1: {exc.code}")
+
     if failures:
         for f in failures:
             print(f"SELFTEST FAILED: {f}", file=sys.stderr)
@@ -612,7 +793,10 @@ def selftest() -> int:
         "heading, and a duplicate; compare() catches an outcome/err_code/err_msg mismatch and passes an "
         "exact match; resolve_case reports ok/skip/problem correctly for a match, a claim that no longer "
         "holds, an unfetched line, an unbuildable (platform, line) pair, an inexplicable load failure, "
-        "and a code-115 unknown setting"
+        "and a code-115 unknown setting; classify_register and has_divergences_section tell an "
+        "intentionally empty register apart from a renamed/missing section; zero_run_problems and run() "
+        "itself both still refuse when entries exist but nothing could be driven, and run() passes end "
+        "to end, offline, when the register is genuinely empty"
     )
     return 0
 
