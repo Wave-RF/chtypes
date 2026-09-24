@@ -80,6 +80,8 @@ An entry disappears when an artifact stops diverging, or when the disagreement t
 
 ⚠️ **"A real server" means a real table engine** — a MergeTree table, the kind a tenant writes to. A `CREATE TEMPORARY TABLE` is `ENGINE=Memory`, has no parts, and accepts values that every ordinary table refuses at part-write time. If you reproduce an entry against a temporary table you will not get the answer recorded here, and the temporary table is the one that is wrong about your production write.
 
+Every entry below has a machine-checkable twin in [`docs/divergences.json`](divergences.json): `scripts/check-divergences.py` drives each one against loaded artifacts and, non-blocking in CI (the same volume as `scripts/support-matrix.sh`, for the same reason — see `.github/workflows/ci.yml`'s `docs` job), flags an entry the artifacts no longer support. A red there means "update this page", not "the library regressed" — read the check's own message before assuming either.
+
 ### A trailing `-- comment` in a Values body, on 26.2 and 26.3
 
 **Over-accept.** This library answers `accepted` for a row a real server refuses, so a gateway using it as a pre-flight check forwards the row and the insert then fails.
