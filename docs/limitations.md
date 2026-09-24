@@ -66,7 +66,7 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 **So it does not mean there are none.** Known cases exist in both directions today, and each is registered by name rather than absorbed into an allowance. The register records that a case is known and bounded; it is not an explanation of it, and it does not yet name the inputs involved. What the guarantee gives you is therefore narrower than it reads, and still worth having: a disagreement between this library and a real server is either absent or on the record by name.
 
-Those cases have now been investigated one at a time, and most of them turned out not to be something a caller can reach — in some the answer this library gives is the correct one, and the disagreement was a property of how the comparison itself was run. The ones a caller **can** reach are listed under [Known divergences](#known-divergences) below.
+Those cases have now been investigated one at a time, and most of them turned out not to be something a caller can reach — in some the answer this library gives is the correct one, and the disagreement was a property of how the comparison itself was run. Any that a caller **can** reach are listed under [Known divergences](#known-divergences) below.
 
 In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather than a subclass, so `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both. The subtype was retired precisely because catching one and getting the other is a silent misclassification.
 
@@ -82,22 +82,7 @@ An entry disappears when an artifact stops diverging, or when the disagreement t
 
 Every entry below has a machine-checkable twin in [`docs/divergences.json`](divergences.json): `scripts/check-divergences.py` drives each one against loaded artifacts and, non-blocking in CI (the same volume as `scripts/support-matrix.sh`, for the same reason — see `.github/workflows/ci.yml`'s `docs` job), flags an entry the artifacts no longer support. A red there means "update this page", not "the library regressed" — read the check's own message before assuming either.
 
-### A trailing `-- comment` in a Values body, on 26.2 and 26.3
-
-**Over-accept.** This library answers `accepted` for a row a real server refuses, so a gateway using it as a pre-flight check forwards the row and the insert then fails.
-
-The input is a `Values` body whose row is followed by a SQL line comment — `(42) -- trailing comment` — into a numeric, `Date` or `DateTime` column, on ClickHouse **26.2** or **26.3**:
-
-|               |                                                               |
-| ------------- | ------------------------------------------------------------- |
-| this library  | `accepted`                                                    |
-| a real server | rejected, code **27** (`CANNOT_PARSE_INPUT_ASSERTION_FAILED`) |
-
-Both sides agree on every other published line: the server refuses the comment on 25.10 and below, where this library refuses it too, and accepts it from 26.4, where this library accepts it too. A `String` column answers `unsupported` rather than accepting, and a `UUID` column refuses on every line — neither is affected.
-
-**Measured**: this library's answer, in this repository, against the published artifacts. The server's answer, against pinned servers, by the differential proof the artifacts are built from — not measured here.
-
-Remove the trailing comment from the body if you need a pre-flight answer you can rely on for those two lines.
+**There is no entry on the register at the moment.** The one it held was retired when a relink stopped the artifacts diverging — which is the line above working, not an oversight. ⚠️ **An empty register is not a claim that nothing diverges.** It means nothing is currently known, named and checked here, and the limits stated above — including that the server half of any comparison is never measured in this repository — apply to that emptiness exactly as they applied to the entry.
 
 ## Pre-1.0
 
