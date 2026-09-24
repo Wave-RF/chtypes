@@ -307,8 +307,16 @@ def reality_problems(
     registry = chtypes_mod.Registry(registry_dir)
     platform = chtypes_mod.host_platform()
     unbuildable = load_unbuildable(artifacts_url)
-    if unbuildable:
-        note(f"excluded by design, per the release's own index: {sorted(unbuildable)}")
+    # Report only the pairs that can actually exclude something HERE. The
+    # served list covers every platform, so printing it whole made a
+    # linux-amd64 runner announce a darwin-arm64 exclusion and read as though
+    # a case had been skipped when none had (#182's lesson, one repo over: a
+    # report that names the wrong cause is worse than no report).
+    mine = sorted(line for plat, line in unbuildable if plat == platform)
+    if mine:
+        note(f"excluded by design on {platform}, per the release's own index: {', '.join(mine)}")
+    else:
+        note(f"no line is on the release's served 'unbuildable' list for {platform} ({len(unbuildable)} pair(s) listed, none here)")
 
     problems: list[str] = []
     skips: list[str] = []
