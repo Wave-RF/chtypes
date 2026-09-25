@@ -68,7 +68,7 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 ⚠️ **Zero in both directions is a statement about the verdict, not about the value or the error.** There are two other ways to disagree: both sides accept a row and **store different values**, or both refuse it and **report different codes**. Neither is an accept-or-reject disagreement, so the no-budget rule above does not cover them.
 
-They are measured all the same, and as of the current published artifacts **both are also at zero on every line, for every binding**. That's `measured` by the same differential proof, not by this repository, and it's the same kind of statement as the one above: a state of what the proof covers, not a promise about every input. Getting there meant investigating the cases one at a time. Some were fixed in the library. Others turned out not to be something a caller can reach, because the disagreement was a property of how the comparison itself was run. Any that a caller **can** reach are listed under [Known divergences](#known-divergences) below.
+They are measured all the same, and as of the current published artifacts **both are also at zero on every line, for every binding**. That's `measured` by the same differential proof, not by this repository, and it's the same kind of statement as the one above: a state of what the proof covers, not a promise about every input. A case outside that coverage can still disagree, and one is known: it's listed under [Known divergences](#known-divergences). Getting there meant investigating the cases one at a time. Some were fixed in the library. Others turned out not to be something a caller can reach, because the disagreement was a property of how the comparison itself was run. Any that a caller **can** reach are listed under [Known divergences](#known-divergences) below.
 
 In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather than a subclass, so `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both. The subtype was retired precisely because catching one and getting the other is a silent misclassification.
 
@@ -88,7 +88,28 @@ An entry disappears when an artifact stops diverging, or when the disagreement t
 
 Every entry below has a machine-checkable twin in [`docs/divergences.json`](divergences.json): `scripts/check-divergences.py` drives each one against loaded artifacts and, non-blocking in CI (the same volume as `scripts/support-matrix.sh`, for the same reason — see `.github/workflows/ci.yml`'s `docs` job), flags an entry the artifacts no longer support. A red there means "update this page", not "the library regressed" — read the check's own message before assuming either.
 
-**There is no entry on the register at the moment.** The one it held was retired when a relink stopped the artifacts diverging — which is the line above working, not an oversight. ⚠️ **An empty register is not a claim that nothing diverges.** It means nothing is currently known, named and checked here, and the limits stated above — including that the server half of any comparison is never measured in this repository — apply to that emptiness exactly as they applied to the entry.
+### A CHECK-failing row before a malformed row, with no error budget
+
+**Same verdict, different code.** Both sides refuse the body, so nothing is over-accepted and nothing is lost, but the code a caller receives isn't the server's.
+
+The input is a text-format body (`JSONEachRow` or `CSV` measured) into a table with a `CHECK` constraint, where a row that violates the constraint comes **before** a row that doesn't parse, sent with no error budget (`input_format_allow_errors_num` 0, the default). For example, with `k UInt8, s String, CONSTRAINT c CHECK k < 5`, this `JSONEachRow` body:
+
+```text
+{"k":9,"s":"a"}
+{"k":"x","s":"b"}
+{"k":1,"s":"c"}
+```
+
+|               |                                                                             |
+| ------------- | --------------------------------------------------------------------------- |
+| this library  | rejected, code **469** (`VIOLATED_CONSTRAINT`), at the first row            |
+| a real server | rejected, code **27** (`CANNOT_PARSE_INPUT_ASSERTION_FAILED`), at the parse |
+
+A server reads the whole body before it checks constraints, so the later parse error wins. This library checks each row as it goes and stops at the first `CHECK` failure. It happens on every published line. Both sides answer the same when the error budget is non-zero (both **469**), when the malformed row comes first (both **27**), and for a `Values` body (both **6**, for the whole body).
+
+**Measured**: this library's answer, in this repository, against the published artifacts on 25.10, 26.3 and 26.9. The artifact producer measured it on 24.8 too. The server's answer, against pinned servers on 24.8, 25.10 and 26.3, by the artifact producer, not measured here.
+
+Branch on the outcome, not the code. If a rejected body's code is **469**, don't take it as proof that the rest of the body parses.
 
 ## Pre-1.0
 
