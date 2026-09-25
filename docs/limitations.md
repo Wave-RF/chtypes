@@ -36,6 +36,7 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 - **MergeTree settings declared at a non-default value.** An unknown _name_ is the server's own 115, a rejection; a known name at a value this build does not model is a decline, never a silent ignore.
 - **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
 - **Blocking DEFAULTs**, such as anything calling `sleep`.
+- **A multi-row `Values` body into a deprecated `Object('json')` column that a server would commit in parts** (24.8–25.10). That happens only when the call's `max_insert_block_size` splits the body and `min_insert_block_size_rows` / `_bytes` keep the INSERT's squashing step from joining the pieces back. A server then writes several parts, each typed separately, and what the table reads back depends on the parts, not on the body.
 - **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md).
 
 ## Constants are not payloads
@@ -76,7 +77,7 @@ The ABI header is the full contract.
 
 ## An out-of-domain Enum DEFAULT answers differently by line
 
-This is by design, because the server does too. On 24.8–25.10 such a schema compiles, and a row relying on the default is `accepted_poisoned`. On 26.x, compiling refuses it (`691`, or `70`). The poisoned row's code is the server's readback code, which also differs by line. The conformance suite verifies the outcome class but not the code value. The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
+This is by design, because the server does too. On 24.8–25.10 such a schema compiles, and a row relying on the default is `accepted_poisoned`. On 26.x, compiling refuses it (`691`, or `70`). The poisoned row's code is the server's readback code, which also differs by line. The conformance suite compares that code on every line and binding, and finds no mismatch. The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
 
 ## Known divergences
 
