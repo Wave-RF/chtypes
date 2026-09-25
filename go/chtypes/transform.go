@@ -83,7 +83,7 @@ const (
 	// (ref_unclassified) or a text-format wire round-trip differs.
 	ReasonValueChanged = "value_changed"
 	// ReasonPoisoned: ClickHouse stored a value it cannot read back; every
-	// later SELECT fails with code 691. Still an ACCEPTED insert.
+	// later SELECT fails (usually code 691). Still an ACCEPTED insert.
 	ReasonPoisoned = "poisoned"
 	// ReasonDuplicateKeyDropped: the row supplied this column twice and
 	// ClickHouse kept the FIRST value, silently discarding the later one.

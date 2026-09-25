@@ -87,6 +87,16 @@ The lossy ones, by what they are about:
 
 **`poisoned` is the one to wire an alert to.** It means the stored value is not merely different but meaningless — the row was accepted and what landed cannot be read back as what was sent. A batch carrying one gets the outcome `accepted_poisoned` rather than `accepted`, which exists precisely so a caller can branch on it without scanning the reasons.
 
+## An out-of-domain Enum DEFAULT follows the server
+
+An `Enum` column whose literal `DEFAULT` is outside the Enum's domain (for example `x Enum8('a' = 1) DEFAULT 7.5`) follows the server. Compiling the schema mirrors the server's `CREATE`, and a row answer mirrors the server's `INSERT` plus readback:
+
+- **Where the server accepts the table** (24.8, 25.3, 25.8, 25.10), the schema compiles. A row that relies on the default is answered `accepted_poisoned`, carrying the code the server's readback raises (`691` on the 25.x lines, `36` on 24.8). The row goes in, and any later read of it fails, which is what a server does.
+- **Where the server refuses the table at `CREATE`** (26.x), compiling refuses with the same code: `691`, or `70` for a literal out of the Enum's integer range (such as `300`).
+- **A row that supplies its own in-domain value is unaffected.**
+
+Branch on the outcome, never on the code: which code a poisoned row carries is the server's, and it differs by line. The code values above were measured by probing the published artifacts directly. The conformance suite checks the outcome class but not yet the code value itself.
+
 ## Substituted DEFAULTs, and the mistake they exist to prevent
 
 A column with a volatile DEFAULT — `now()`, `now64(n)`, `today()`, `yesterday()` — has no value until something evaluates it. chtypes evaluates it **here**, once per batch, so the preview it gives you is a complete row.

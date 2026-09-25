@@ -402,8 +402,11 @@ func ParseSchema(v Version, s Schema) (*CompiledSchema, error) {
 // Errors: a *SchemaError when ClickHouse refuses the DDL (Code is the
 // server's own — including 115 for an unknown setting name in the profile,
 // where nothing is compiled; type-gate codes 455/44 when the profile
-// declares a gate at a refusing value; the schema-level Enum-DEFAULT
-// poisoning refusal, code 691). An *UnsupportedError when this build
+// declares a gate at a refusing value; an Enum DEFAULT outside the declared
+// domain wherever that server's CREATE refuses it — 691, or 70 for an
+// out-of-range literal, on 26.x; on 24.8–25.10 the server takes the table, so
+// it compiles and a row relying on the default answers AcceptedPoisoned).
+// An *UnsupportedError when this build
 // declines — a DEFAULT past the admission budget
 // (chtypes_default_eval_memory_bytes / _wall_nanos), or a mode other than
 // CompileDeclared. Callers distinguish the two with errors.As; the decline

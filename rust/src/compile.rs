@@ -99,9 +99,11 @@ impl<'a> CompileRequest<'a> {
     ///   a type gate DECLARED at a refusing value fails here exactly as that
     ///   server's `CREATE` would (`455`, `44`); an invalid type or DEFAULT is
     ///   the server's own code (`50`, `386`, …); an
-    ///   `Enum … DEFAULT <out-of-domain integer>` is refused with `691` on
-    ///   every line, because older servers accept the DDL and then poison the
-    ///   table (the C ABI contract §Appendix).
+    ///   `Enum … DEFAULT <out-of-domain literal>` follows that server's
+    ///   `CREATE`: refused with `691` (or `70` for an out-of-range literal)
+    ///   where the server refuses the table (26.x), and compiled where it
+    ///   takes it (24.8–25.10) — a row relying on that default then answers
+    ///   [`crate::Outcome::AcceptedPoisoned`].
     /// * [`crate::Error::Unsupported`] — **this build declines**
     ///   ([`crate::CODE_UNSUPPORTED`]): a DEFAULT that is a property of the
     ///   server or session (`hostName()`, `currentUser()`), one that would

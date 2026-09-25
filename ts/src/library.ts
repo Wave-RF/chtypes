@@ -151,8 +151,10 @@ export class Library {
    *   unknown setting name in `options.settings` carries the server's own 115
    *   (with its did-you-mean hint), and nothing is compiled; a type gate
    *   declared at a refusing value fails with the server's own 455/44, exactly
-   *   as that server's CREATE; an Enum DEFAULT outside the declared domain is
-   *   691 (schema-level poisoning, refused on every version by design).
+   *   as that server's CREATE; an Enum DEFAULT outside the declared domain
+   *   follows that server's CREATE too — 691 (or 70 for an out-of-range
+   *   literal) where it refuses the table (26.x); on 24.8–25.10 it compiles,
+   *   and a row relying on the default answers `accepted_poisoned`.
    * @throws {UnsupportedError} when this build DECLINES rather than guesses —
    *   a `mode` other than `CompileMode.Declared`, or a DEFAULT it refuses to
    *   evaluate (server-property functions like `hostName()`, `sleep`, an
