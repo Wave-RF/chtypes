@@ -36,6 +36,11 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 - **MergeTree settings declared at a non-default value.** An unknown _name_ is the server's own 115, a rejection; a known name at a value this build does not model is a decline, never a silent ignore.
 - **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
 - **Blocking DEFAULTs**, such as anything calling `sleep`.
+- **A multi-row body into a deprecated `Object('json')` column whose stored values depend on how a server splits it** (24.8–25.10; `Values`, `JSONEachRow`, `JSONCompactEachRow`, `CSV`, `TSV`). There are two ways this happens:
+  - **Committed in parts.** The call's `max_insert_block_size` splits the body, and `min_insert_block_size_rows` / `_bytes` keep the INSERT's squashing step from joining the pieces back, so a server writes several parts, each typed separately.
+  - **A parallel-parsing segment cut mid-chunk** (text formats only). With `input_format_parallel_parsing` on, a segment of `min_chunk_bytes_for_parallel_parsing` ends inside a `max_insert_block_size` chunk. At the default chunk size, a four-row `CSV` body at `max_insert_block_size` 2 is enough.
+
+  In both cases what the table reads back depends on where the body was cut, not only on the body, so this build declines rather than guess. The first needs non-default settings. The second can happen at the defaults for a text body larger than `min_chunk_bytes_for_parallel_parsing`, because parallel parsing is on by default.
 - **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md).
 
 ## Constants are not payloads
@@ -76,7 +81,7 @@ The ABI header is the full contract.
 
 ## An out-of-domain Enum DEFAULT answers differently by line
 
-This is by design, because the server does too. On 24.8–25.10 such a schema compiles, and a row relying on the default is `accepted_poisoned`. On 26.x, compiling refuses it (`691`, or `70`). The poisoned row's code is the server's readback code, which also differs by line. The conformance suite verifies the outcome class but not the code value. The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
+This is by design, because the server does too. On 24.8–25.10 such a schema compiles, and a row relying on the default is `accepted_poisoned`. On 26.x, compiling refuses it (`691`, or `70`). The poisoned row's code is the server's readback code, which also differs by line. The conformance suite compares that code on every line and binding, and finds no mismatch. The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
 
 ## Known divergences
 

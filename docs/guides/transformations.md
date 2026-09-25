@@ -95,7 +95,7 @@ An `Enum` column whose literal `DEFAULT` is outside the Enum's domain (for examp
 - **Where the server refuses the table at `CREATE`** (26.x), compiling refuses with the same code: `691`, or `70` for a literal out of the Enum's integer range (such as `300`).
 - **A row that supplies its own in-domain value is unaffected.**
 
-Branch on the outcome, never on the code: which code a poisoned row carries is the server's, and it differs by line. The code values above were measured by probing the published artifacts directly. The conformance suite checks the outcome class but not yet the code value itself.
+Branch on the outcome, never on the code: which code a poisoned row carries is the server's, and it differs by line. The conformance suite compares the poisoned row's code as well as its outcome, and it reads no mismatch on any line or binding (`measured` by the artifact producer).
 
 ## Substituted DEFAULTs, and the mistake they exist to prevent
 

@@ -874,8 +874,9 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * decode fault, and a body the server cannot form a block from — a failed
  * or declined Values body (the CHS_VALUES whole-body rule), and a multi-row
  * body whose deprecated Object('json') rows cannot be finalized together
- * (122 ambiguous paths, 645 dimension mismatch; the lines that have the
- * type). A block that cannot exist has no per-row truth. Evaluation runs under the
+ * (122 ambiguous paths, 645 dimension mismatch — 53 when a small
+ * max_insert_block_size splits the rows across blocks, as a server answers;
+ * the lines that have the type). A block that cannot exist has no per-row truth. Evaluation runs under the
  * DEFAULT-evaluation admission budgets; volatile DEFAULTs resolve against
  * one clock instant per call. NOTHING may enforce read-side security on this
  * API until the WHERE-truth rig gates green (the C ABI contract §Filters) — the
@@ -911,7 +912,7 @@ CHS_API char * chs_filter_rows(
  * A call-level failure (settings 115, framing, binary decode fault, the
  * deferred JSONEachRow suffix verdict, and a body the server cannot form a
  * block from — the same two chs_filter_rows names: a failed or declined
- * Values body, a multi-row Object('json') body failing 122/645) returns NULL
+ * Values body, a multi-row Object('json') body failing 122/645/53) returns NULL
  * with the code/message in *out_code / *out_err (both optional; chs_free the
  * message): a malformed body yields no block and no partial answers. `settings_json` is the
  * PARSE-side map; evaluation takes none — it is a pure function of
