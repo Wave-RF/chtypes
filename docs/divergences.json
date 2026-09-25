@@ -1,5 +1,84 @@
 {
- "schema": 1,
- "//": "The machine-checkable half of docs/limitations.md's '## Known divergences' section (chtypes#185). The prose is authored there; this file carries only what scripts/check-divergences.py can drive against loaded artifacts. Every '###' heading under that section must have exactly one entry here (by 'heading', matched verbatim, prefix stripped) and every entry here must match a heading — scripts/check-divergences.py's coverage check refuses either side existing alone. Each check's 'settings' are a compile-time profile (a type gate binds at compile, docs/guides/settings.md 'The one exception'); 'err_code' and 'err_msg' are asserted only where docs/limitations.md itself states them — a code without a quoted message means the page named the code alone.",
- "entries": []
+  "schema": 1,
+  "//": "The machine-checkable half of docs/limitations.md's '## Known divergences' section (chtypes#185). The prose is authored there; this file carries only what scripts/check-divergences.py can drive against loaded artifacts. Every '###' heading under that section must have exactly one entry here (by 'heading', matched verbatim, prefix stripped) and every entry here must match a heading — scripts/check-divergences.py's coverage check refuses either side existing alone. Each check's 'settings' are a compile-time profile (a type gate binds at compile, docs/guides/settings.md 'The one exception'); 'err_code' and 'err_msg' are asserted only where docs/limitations.md itself states them — a code without a quoted message means the page named the code alone.",
+  "entries": [
+    {
+      "id": "check-before-parse-error",
+      "heading": "A CHECK-failing row before a malformed row, with no error budget",
+      "checks": [
+        {
+          "id": "jsoneachrow-469-no-budget",
+          "note": "the divergence itself: this library answers the CHECK row's 469 where a real server's parse fails first with 27 (server half measured by the artifact producer, not here)",
+          "lines": [
+            "24.8",
+            "25.10",
+            "26.3",
+            "26.9"
+          ],
+          "schema": "k UInt8, s String, CONSTRAINT c CHECK k < 5",
+          "format": "JSONEachRow",
+          "payload": "{\"k\":9,\"s\":\"a\"}\n{\"k\":\"x\",\"s\":\"b\"}\n{\"k\":1,\"s\":\"c\"}",
+          "settings": {},
+          "expect": {
+            "outcome": "rejected",
+            "err_code": 469
+          }
+        },
+        {
+          "id": "csv-469-no-budget",
+          "note": "the same divergence in CSV",
+          "lines": [
+            "24.8",
+            "25.10",
+            "26.3",
+            "26.9"
+          ],
+          "schema": "k UInt8, s String, CONSTRAINT c CHECK k < 5",
+          "format": "CSV",
+          "payload": "9,a\nx,b\n1,c\n",
+          "settings": {},
+          "expect": {
+            "outcome": "rejected",
+            "err_code": 469
+          }
+        },
+        {
+          "id": "malformed-first-27",
+          "note": "contrast: with the malformed row first, both sides answer 27",
+          "lines": [
+            "24.8",
+            "25.10",
+            "26.3",
+            "26.9"
+          ],
+          "schema": "k UInt8, s String, CONSTRAINT c CHECK k < 5",
+          "format": "JSONEachRow",
+          "payload": "{\"k\":\"x\",\"s\":\"b\"}\n{\"k\":9,\"s\":\"a\"}",
+          "settings": {},
+          "expect": {
+            "outcome": "rejected",
+            "err_code": 27
+          }
+        },
+        {
+          "id": "values-whole-body-6",
+          "note": "contrast: a Values body answers 6 for the whole body on both sides",
+          "lines": [
+            "24.8",
+            "25.10",
+            "26.3",
+            "26.9"
+          ],
+          "schema": "k UInt8, s String, CONSTRAINT c CHECK k < 5",
+          "format": "Values",
+          "payload": "(9,'a'),('x','b'),(1,'c')",
+          "settings": {},
+          "expect": {
+            "outcome": "rejected",
+            "err_code": 6
+          }
+        }
+      ]
+    }
+  ]
 }
