@@ -74,6 +74,10 @@ In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather
 
 The ABI header is the full contract.
 
+## An out-of-domain Enum DEFAULT answers differently by line
+
+This is by design, because the server does too. On 24.8–25.10 such a schema compiles, and a row relying on the default is `accepted_poisoned`. On 26.x, compiling refuses it (`691`, or `70`). The poisoned row's code is the server's readback code, which also differs by line. The conformance suite verifies the outcome class but not the code value. The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
+
 ## Known divergences
 
 Each entry here is a case where this library and a real ClickHouse server give different answers, and a caller can reach it. Every entry names the direction, the input, both answers, and **which half of the comparison was measured where** — there is no ClickHouse server in this repository, so the server half always comes from the differential proof the artifacts are built from.

@@ -76,7 +76,7 @@ pub mod reason {
     /// The value changed and none of the more specific reasons applies.
     pub const VALUE_CHANGED: &str = "value_changed";
     /// ClickHouse accepted the insert and stored a value it cannot read back:
-    /// every later `SELECT` fails with code 691.
+    /// every later `SELECT` fails (usually code 691).
     pub const POISONED: &str = "poisoned";
     /// The row supplied this column twice and ClickHouse kept the **first**
     /// value, silently discarding the later one — the opposite of what most

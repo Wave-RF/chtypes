@@ -46,7 +46,8 @@ import { classify, isLossyReason } from './transform.js';
  * - `'rejected'` — the server itself would refuse; `errCode` is ClickHouse's
  *   own code (27, 117, 455, …) and `errMsg` its own message. Tell the tenant.
  * - `'accepted_poisoned'` — the insert is ACCEPTED (rc = 0) but the stored
- *   value can never be read back (`errCode` 691). Never report it as a
+ *   value can never be read back (`errCode` is the readback's code, usually
+ *   691). Never report it as a
  *   rejection.
  * - `'unsupported'` — chtypes declines to answer ("a real server might well
  *   have accepted this; I will not guess"). NOT a rejection: fall back to the
@@ -195,7 +196,9 @@ export interface RowResult {
   /** The row verdict — see `Outcome` for the four arms and their obligations. */
   readonly outcome: Outcome;
   /**
-   * ClickHouse's own code when `rejected`; 691 when `accepted_poisoned`; 0 when
+   * ClickHouse's own code when `rejected`; the code the server's readback
+   * raises when `accepted_poisoned` (usually 691, but the server's, and it
+   * varies by line: an out-of-domain Enum DEFAULT reads back as 36 on 24.8); 0 when
    * `accepted`. NOT a reliable sentinel for `unsupported`: a row-level decline
    * carries the document's code verbatim, which is 0 for e.g. a
    * `DEFAULT hostName()` decline and -2 only on the clock-skew decline — key on

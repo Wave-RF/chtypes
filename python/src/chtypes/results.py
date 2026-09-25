@@ -235,7 +235,7 @@ class Outcome(StrEnum):
 
     ACCEPTED = "accepted"
     REJECTED = "rejected"
-    # The insert returns rc=0 and every later SELECT fails with code 691. This
+    # The insert returns rc=0 and every later SELECT fails (usually 691). This
     # is an ACCEPTED insert, and reporting it as a rejection is wrong.
     ACCEPTED_POISONED = "accepted_poisoned"
     # This build declines to answer. Never scored as agreement.
@@ -500,7 +500,7 @@ class RowResult:
 
     @property
     def poisoned(self) -> bool:
-        """Whether ClickHouse stored a value it cannot read back (code 691).
+        """Whether ClickHouse stored a value it cannot read back (usually 691).
 
         A poisoned row IS an accepted insert; every later SELECT on it fails.
         """

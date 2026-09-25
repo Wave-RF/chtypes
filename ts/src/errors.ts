@@ -4,7 +4,7 @@
  *
  *   - ClickHouse rejects        -> a real ClickHouse error code
  *   - this build refuses        -> CODE_UNSUPPORTED (-2), never a ClickHouse code
- *   - ClickHouse accepts but the value cannot be read back -> code 691, and it
+ *   - ClickHouse accepts but the value cannot be read back -> usually code 691; it
  *     is an ACCEPTED insert, surfaced through the row outcome rather than here.
  *
  * Mapping `unsupported` onto a rejection manufactures an over-reject the product

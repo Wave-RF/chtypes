@@ -333,7 +333,7 @@ pub enum Outcome {
     /// ClickHouse would reject it, with its own error code.
     Rejected,
     /// ClickHouse accepts the insert and the stored value cannot be read back —
-    /// every later `SELECT` fails with code 691. This is an **accepted** insert
+    /// every later `SELECT` fails (usually code 691). This is an **accepted** insert
     /// and must never be reported as a rejection.
     AcceptedPoisoned,
     /// This build refuses to answer. Never scored as agreement, and never
@@ -565,8 +565,10 @@ pub struct RowResult {
     pub transformed: Vec<Transform>,
     /// The verdict on this row.
     pub outcome: Outcome,
-    /// ClickHouse's code when rejected, `-2` when unsupported, `691` when
-    /// poisoned.
+    /// ClickHouse's code when rejected, `-2` when unsupported, and the code the
+    /// server's readback raises when poisoned — usually `691`, but it is the
+    /// server's and varies by line (an out-of-domain Enum DEFAULT reads back as
+    /// `36` on 24.8). Key on [`Self::outcome`], not on the code.
     pub err_code: i32,
     /// ClickHouse's own message, empty when there is none.
     pub err_msg: String,

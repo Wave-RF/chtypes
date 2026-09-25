@@ -25,7 +25,7 @@
 //     library-resolved volatile DEFAULTs (RowResult.Substituted — the caller
 //     MUST send those columns explicitly), and MATERIALIZED values
 //     (RowResult.Computed). AcceptedPoisoned is still an ACCEPTED insert,
-//     whose stored value no later SELECT can read back (code 691).
+//     whose stored value no later SELECT can read back (usually code 691).
 //
 // The one thing ClickHouse does not provide is Transformed: it never reports
 // "I silently changed your value". That is derived here, from a second parse of
@@ -422,7 +422,7 @@ const (
 	Rejected
 	// AcceptedPoisoned: ClickHouse accepts the insert but the stored value
 	// cannot be read back — the null-into-Enum8 class, where every later
-	// SELECT fails with code 691.
+	// SELECT fails (usually code 691; the code is the server's).
 	AcceptedPoisoned
 	// Unsupported is a chtypes extension to the spec, and is deliberate: a case
 	// this build refuses to answer must never be scored as agreement. It is
@@ -559,8 +559,10 @@ type RowResult struct {
 	Values      []Value     // canonical coerced values, positional
 	Transformed []Transform // values ClickHouse would silently change
 	Outcome     Outcome
-	// ErrCode is ClickHouse's own code when Rejected, and 691 when
-	// AcceptedPoisoned. Key on Outcome, never on the code alone: a row-level
+	// ErrCode is ClickHouse's own code when Rejected, and the code the
+	// server's readback raises when AcceptedPoisoned — usually 691, but it is
+	// the server's and varies by line (an out-of-domain Enum DEFAULT reads
+	// back as 36 on 24.8). Key on Outcome, never on the code alone: a row-level
 	// Unsupported carries ErrCode 0 (the sentinel is the Outcome itself).
 	ErrCode int
 	ErrMsg  string // ClickHouse error message when Rejected
