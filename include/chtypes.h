@@ -867,9 +867,15 @@ CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, siz
  * here; a security-enforcing caller MUST fail closed), 'd' this library
  * declines (row unparseable under the schema, poisoned, or the admission
  * envelope tripped — fail closed here too). Rows are evaluated
- * independently (no INSERT to abort; allow_errors does not apply); a
- * call-level failure (settings 115, framing, binary decode fault) answers
- * outcome rejected/unsupported with "verdicts":"". Evaluation runs under the
+ * independently (no INSERT to abort; allow_errors does not apply) — for a
+ * body the server would take as ONE block. A call-level failure answers
+ * outcome rejected/unsupported with the server's code, "rows_read":0 and
+ * "verdicts":"", and attributes no row: settings 115, framing, a binary
+ * decode fault, and a body the server cannot form a block from — a failed
+ * or declined Values body (the CHS_VALUES whole-body rule), and a multi-row
+ * body whose deprecated Object('json') rows cannot be finalized together
+ * (122 ambiguous paths, 645 dimension mismatch; the lines that have the
+ * type). A block that cannot exist has no per-row truth. Evaluation runs under the
  * DEFAULT-evaluation admission budgets; volatile DEFAULTs resolve against
  * one clock instant per call. NOTHING may enforce read-side security on this
  * API until the WHERE-truth rig gates green (the C ABI contract §Filters) — the
@@ -903,9 +909,11 @@ CHS_API char * chs_filter_rows(
  * filters against the block with no re-parse.
  *
  * A call-level failure (settings 115, framing, binary decode fault, the
- * deferred JSONEachRow suffix verdict) returns NULL with the code/message in
- * *out_code / *out_err (both optional; chs_free the message): a malformed
- * body yields no block and no partial answers. `settings_json` is the
+ * deferred JSONEachRow suffix verdict, and a body the server cannot form a
+ * block from — the same two chs_filter_rows names: a failed or declined
+ * Values body, a multi-row Object('json') body failing 122/645) returns NULL
+ * with the code/message in *out_code / *out_err (both optional; chs_free the
+ * message): a malformed body yields no block and no partial answers. `settings_json` is the
  * PARSE-side map; evaluation takes none — it is a pure function of
  * (filter, block).
  *

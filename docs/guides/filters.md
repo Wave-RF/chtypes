@@ -213,7 +213,7 @@ The equivalence is normative: `eval(parse_block(body))` ≡ `rows(body)` for eve
 
 Evaluation is a pure function of (filter, block). It takes no settings, and it never consumes or mutates the block — that is what makes K evaluations over one block safe.
 
-Per-row parse failures live **inside** the block and answer `decline`. A call-level failure yields no block at all, and no partial answers.
+Per-row parse failures live **inside** the block and answer `decline`. A call-level failure yields no block at all, and no partial answers. That includes a body the server cannot form a block from: a failed or declined `Values` body, or a multi-row body whose deprecated `Object('json')` rows cannot be finalized together (`122`, `645`). `rows` answers such a body `rejected` with the server's code, `rows_read` 0 and no verdicts, and `parse_block` raises with that code. Rows are evaluated independently only when the server would take the body as one block, because a block that cannot exist has no per-row truth.
 
 ## Exporting only the rows a filter admits
 
