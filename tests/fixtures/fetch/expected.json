@@ -109,7 +109,7 @@
   "low_build": 105,
   "note": "line 25.8 carries an UNSUFFIXED artifact from before wrapper builds existed (read as build 0) beside its rebuild; line 26.7 carries two explicitly suffixed builds. Both resolve to build 214.",
   "rebuild": 214,
-  "rule": "filter to os/arch and the requested line, take the newest clickhouse_version, then the HIGHEST build; a row with no `build` (and a file name with no -b<N>) is build 0 (docs/distribution.md \u00a73a, sdk/docs/fetch.md \u00a73a)",
+  "rule": "filter to os/arch and the requested line, take the newest clickhouse_version, then the HIGHEST build; a row with no `build` (and a file name with no -b<N>) is build 0 (docs/guides/fetch.md \u00a72)",
   "unsuffixed_lines": [
    "25.8"
   ]
