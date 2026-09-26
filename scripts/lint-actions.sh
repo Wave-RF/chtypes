@@ -12,7 +12,7 @@
 # install it yourself (`brew install shellcheck` / your distro's package) if
 # `command -v shellcheck` fails below. actionlint is pure Go, so it is
 # `go install`'d on demand into .bin/, pinned, the same way
-# scripts/lint-prose.sh handles misspell.
+# scripts/lint-spelling.sh handles misspell.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
