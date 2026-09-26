@@ -166,10 +166,9 @@ def encode_columns(columns: Sequence[str] | None) -> str | None:
 
     `None` and an EMPTY sequence are the SAME input and both encode to
     `None`, never to `"[]"`: `INSERT INTO t () FORMAT X` is code 62
-    `SYNTAX_ERROR` on every served line (measured 2026-09-15, core's
-    explicit-column-list measurements), so an implementation that renders an
-    empty list into parentheses sends a statement no ClickHouse has ever
-    accepted.
+    `SYNTAX_ERROR` on every served line (measured 2026-09-15 against explicit
+    column lists), so an implementation that renders an empty list into
+    parentheses sends a statement no ClickHouse has ever accepted.
 
     No local validation of names — an unknown column, an `ALIAS` column and a
     repeated name are all refused by the SERVER, with its own codes (16, 16,

@@ -32,7 +32,20 @@ TOP = r"(?:docs|examples|scripts|include|goldens|spec|tests)"
 # A real extension is required: a bare word after a slash is a glob or prose.
 PAT = re.compile(r"(?<![A-Za-z0-9_./-])(" + TOP + r"/[A-Za-z0-9_./-]*\.[A-Za-z][A-Za-z0-9]{1,4})\b")
 # Skipped, each for a reason rather than to make the check pass:
-#   fixtures      generated upstream and verified byte-identical there
+#   fixtures      generated upstream, by a generator that predates this
+#                 repository docs/ reorganization (docs/fetch.md moved under
+#                 guides/, same as the dead citation this script was written
+#                 for) and that also documents cross-repository rule text
+#                 (docs/distribution.md is the private repository own doc,
+#                 cited from the other side of a shared rule). Neither path
+#                 will ever resolve HERE, and hand-editing them would only
+#                 drift from the next regeneration. This exemption is scoped
+#                 to EXISTENCE only, never to naming: it does not (and could
+#                 not, by construction, since this script has no needle for
+#                 the private repository name) excuse a leak of the private
+#                 repository NAME or an internal path of its own; that is
+#                 lint-public.sh job, and as of issue #224 that script does
+#                 not exempt this directory: a name leak here is caught there.
 #   .gitignore    holds patterns, not paths
 #   Cargo.toml    its paths are crate-relative by definition
 #   CHANGELOG.md  deliberately names things that were removed

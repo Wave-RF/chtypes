@@ -75,6 +75,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Every run: step uses bash with -eo pipefail. GitHub's default for a step
+# with no shell: is `bash -e {0}`, WITHOUT pipefail, so a failing command on
+# the left of a pipe was hidden by the exit status of the one on the right.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   abi:
     name: "abi — the header and every binding agree"
@@ -535,7 +542,7 @@ jobs:
           echo "abi-fixtures: all four bindings refused the wrong revision and loaded the matching one"
 
   artifacts:
-    name: "artifacts — three published lines, linux-amd64, every suite runs its goldens"
+    name: "artifacts — published lines, linux-amd64, every suite runs the golden set"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [abi, go, python, ts, rust]
@@ -872,7 +879,7 @@ jobs:
         run: scripts/lint-actions.sh
 
   misspell:
-    name: "misspell — American spelling, whole tree (scripts/lint-prose.sh)"
+    name: "misspell — American spelling, whole tree (scripts/lint-spelling.sh)"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Covers every tracked file (all four SDKs' source, docs, examples,
@@ -882,8 +889,8 @@ jobs:
     # `misspell -locale US` and a from-scratch grep pass — because misspell's
     # own dictionary matcher has been shown to silently miss specific words
     # even when they're present in its built-in list; see the long comment
-    # at the top of scripts/lint-prose.sh for the proof, and run
-    # `scripts/lint-prose.sh --selftest` to re-verify it locally.
+    # at the top of scripts/lint-spelling.sh for the proof, and run
+    # `scripts/lint-spelling.sh --selftest` to re-verify it locally.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -891,9 +898,9 @@ jobs:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: prove the check itself catches what misspell alone misses
-        run: scripts/lint-prose.sh --selftest
+        run: scripts/lint-spelling.sh --selftest
       - name: misspell -locale US + wordlist grep, whole tree
-        run: scripts/lint-prose.sh
+        run: scripts/lint-spelling.sh
 
   public:
     # BLOCKING, and a pure function of the diff. This repository is public; a
