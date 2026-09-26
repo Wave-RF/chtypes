@@ -252,6 +252,20 @@ jobs:
           done
       - name: docs/limitations.md's Known-divergences claims still hold against the loaded artifacts
         run: scripts/check-divergences.py --registry "$CHTYPES_REGISTRY"
+      # A second, unrelated, equally non-blocking claim about the same served
+      # release (chtypes#188): not whether a divergence still holds, but
+      # whether the golden set's own SHAPE still has nowhere for a server
+      # message to hide. Selftest first, same discipline as the check above.
+      - name: selftest — an unknown field, an err_msg-shaped key, and a hardcoded (never source-read) vocabulary are all caught
+        run: scripts/check-goldens-shape.py --selftest
+      # The registry this job already populated above has no release-level
+      # file in it yet (only per-line artifact directories) — sdk-goldens.json
+      # is fetched separately, into the SAME directory, so it rides the same
+      # cache entry rather than opening a second one.
+      - name: fetch the served golden set
+        run: scripts/fetch.sh --release-file sdk-goldens.json --dest "$CHTYPES_REGISTRY"
+      - name: the served golden set has not grown a field this repository never reviewed
+        run: scripts/check-goldens-shape.py --registry "$CHTYPES_REGISTRY"
 
   go:
     name: "go — build, vet, standalone check (no artifacts)"
