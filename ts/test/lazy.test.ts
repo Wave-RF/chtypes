@@ -112,7 +112,7 @@ describe('lazy loading', () => {
     expect(new Registry(dir, { preload: [] }).libraries()).toEqual([]);
   });
 
-  it('a preload entry no directory holds is the §7 error, at construction', () => {
+  it('a preload entry no directory holds is the missing-artifact error, at construction', () => {
     const dir = standInRegistry(['25.8']);
     let thrown: unknown;
     try {

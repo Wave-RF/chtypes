@@ -19,7 +19,7 @@ function filter(js: string) {
   return filterResultOf(parseDocument(Buffer.from(js, 'utf8')));
 }
 
-describe('#122: results.unsupported-settings-forces-unsupported', () => {
+describe('results.unsupported-settings-forces-unsupported', () => {
   it.each([
     ['accepted', Outcome.Unsupported],
     ['rejected', Outcome.Rejected],
@@ -31,7 +31,7 @@ describe('#122: results.unsupported-settings-forces-unsupported', () => {
   });
 });
 
-describe('#122: results.unknown-outcome-degrades-to-unsupported', () => {
+describe('results.unknown-outcome-degrades-to-unsupported', () => {
   it('RowResult.outcome degrades to Unsupported, never Rejected', () => {
     const res = row('{"outcome": "totally-unknown-future-outcome", "cols": []}');
     expect(res.outcome).toBe(Outcome.Unsupported);
@@ -42,7 +42,7 @@ describe('#122: results.unknown-outcome-degrades-to-unsupported', () => {
   });
 });
 
-describe('#122: results.unknown-verdict-degrades-to-decline', () => {
+describe('results.unknown-verdict-degrades-to-decline', () => {
   it('row-level verdict degrades to Decline, never an invented answer', () => {
     const res = row('{"outcome": "accepted", "cols": [], "verdict": "z"}');
     expect(res.verdict).toBe(Verdict.Decline);
@@ -53,7 +53,7 @@ describe('#122: results.unknown-verdict-degrades-to-decline', () => {
   });
 });
 
-describe('#122: results.null-false-when-poisoned', () => {
+describe('results.null-false-when-poisoned', () => {
   it.each([
     ['false', true],
     ['true', false],
@@ -67,7 +67,7 @@ describe('#122: results.null-false-when-poisoned', () => {
   });
 });
 
-describe('#122: results.default-substituted-populates-substituted', () => {
+describe('results.default-substituted-populates-substituted', () => {
   it('default_substituted populates substituted, and only that src does', () => {
     expect(Source.DefaultSubstituted).toBe('default_substituted');
     const res = row(`{
@@ -91,7 +91,7 @@ describe('#122: results.default-substituted-populates-substituted', () => {
   });
 });
 
-describe('#122: results.non-ok-filter-result-forces-empty', () => {
+describe('results.non-ok-filter-result-forces-empty', () => {
   it('a non-OK FilterResult forces verdicts and errors empty', () => {
     const res = filter(
       '{"outcome": "rejected", "code": 115, "err": "unknown setting", ' +

@@ -2,7 +2,7 @@
  * Issue #90: `rowResultOf`'s `values` excludes a column reported with
  * `Source.Skipped` (MATERIALIZED / ALIAS / EPHEMERAL, never read from an
  * input row) — the rule `Source.EphemeralInput`'s exclusion (#97, see
- * transform.test.ts) was modeled on. That exclusion is real and has been
+ * transform-ephemeral.test.ts) was modeled on. That exclusion is real and has been
  * correct all along; it simply had no test of its own, like the
  * ephemeral_input exclusion before #97's test. This test is expected to PASS
  * immediately — it is coverage for existing behavior, not a regression fix.
@@ -26,7 +26,7 @@ const DOC_JSON = `{
   ]
 }`;
 
-describe('#90: skipped excluded from values, keeps input', () => {
+describe('skipped excluded from values, keeps input', () => {
   it('excludes skipped from values, keeps an ordinary input column', () => {
     expect(Source.Skipped).toBe('skipped');
     const res = rowResultOf(parseDocument(Buffer.from(DOC_JSON, 'utf8')));

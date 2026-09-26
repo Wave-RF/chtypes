@@ -26,7 +26,7 @@ function fakeNative(): NativeLibrary {
   return { columns: () => [] } as unknown as NativeLibrary;
 }
 
-describe('issue #54: rows(..., { rowFilter }) verdict decoding', () => {
+describe('rows(..., { rowFilter }) verdict decoding', () => {
   it('decodes all four verdict characters plus rows_passed/rows_cut from a hand-built document', () => {
     // Four rows exercising all four verdict characters, one of them ('d')
     // on a row whose own parse outcome is not accepted, plus rows_passed/
@@ -78,7 +78,7 @@ describe('issue #54: rows(..., { rowFilter }) verdict decoding', () => {
   });
 });
 
-describe('issue #54: Schema#rows cross-library filter refusal', () => {
+describe('Schema#rows cross-library filter refusal', () => {
   it('throws before any C call when the filter comes from a different loaded library', () => {
     // Property (8)'s TypeScript-level half: a filter from a DIFFERENT
     // loaded library is refused before any C call — no handle crosses a
