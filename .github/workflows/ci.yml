@@ -1045,16 +1045,19 @@ jobs:
             echo "| --- | --- |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          failed=()
+          # Red unless EVERY scanner's outcome is exactly `success`. A scanner can
+          # read `skipped` (a setup step before it broke) or be stopped mid-run, and
+          # neither of those is a clean scan.
+          not_ok=()
           for i in "${!names[@]}"; do
-            printf '| %s | %s |\n' "${names[$i]}" "${outcomes[$i]}" >> "$GITHUB_STEP_SUMMARY"
-            if [ "${outcomes[$i]}" = "failure" ]; then
-              failed+=("${names[$i]}")
+            printf '| %s | %s |\n' "${names[$i]}" "${outcomes[$i]:-<empty>}" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${outcomes[$i]}" != "success" ]; then
+              not_ok+=("${names[$i]}=${outcomes[$i]:-<empty>}")
             fi
           done
 
-          if [ "${#failed[@]}" -gt 0 ]; then
-            echo "security: scanner(s) failed: ${failed[*]}" >&2
+          if [ "${#not_ok[@]}" -gt 0 ]; then
+            echo "security: not every scanner succeeded: ${not_ok[*]}" >&2
             exit 1
           fi
-          echo "security: all four scanners ran; no failures"
+          echo "security: all four scanners ran and succeeded"
