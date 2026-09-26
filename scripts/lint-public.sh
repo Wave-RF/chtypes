@@ -192,6 +192,39 @@ LOCAL_PATH_WHY='a local absolute path — a developer machine home directory. It
 CI_INFRA_PATH_PATTERN='(?<![A-Za-z0-9_])(?:ci|infra)/'
 CI_INFRA_PATH_WHY="a path inside the private repository's CI or infrastructure tree. A reader cannot open it; describe the step or the change, not its path."
 
+# WIDENED AGAIN 2026-09-26. Two things reached the public tree past every rule
+# above, both through generated fixture prose.
+#
+# (1) A shell script under the private repository's `dist/` directory: its
+# release script, and its copy of the fetch script (`dist/<name>.sh`). The
+# three `dist/*/` literals in RULES name subdirectories and could not see a
+# file sitting directly in `dist/`. `dist/` alone cannot be a needle: this
+# repository has its own `dist/` build outputs (ts/dist/, python/dist/,
+# `./dist/index.js` in package.json, `**/dist/**` in lint configs), so the
+# shape here is narrower: `dist/` starting a path, not preceded by a path
+# character (so `ts/dist/`, `./dist/` and `**/dist/` never match), followed by
+# a `.sh` file. This repository's own dist/ never holds a shell script. Its
+# fetch script is scripts/fetch.sh.
+#
+# (2) A sentence that says WHERE a signing key's private half is kept, naming
+# the secrets store. No literal needle is used for the store's name, on
+# purpose: the needles in this file are public (see --print-rules), so a
+# literal would publish the very fact it exists to keep out. The shape is
+# the sentence instead: a key phrase ("private half", "private key", "signing
+# key", "release key"), then within the same clause a verb of keeping ("lives",
+# "stored", "kept", "held", "sits", "resides"), then "in" and a CAPITALIZED
+# name, which is how a product reads. A lowercase or article-led place ("in
+# the release pipeline", "in this repository", "held offline") stays legal,
+# because that describes the arrangement without naming a vendor. The
+# capital is matched case-sensitively with a scoped (?-i:…) group, so it stays
+# case-sensitive in scripts/sweep-public-mentions.py too, which compiles every
+# REGEX rule with IGNORECASE. It runs over each file's whole text, not line by
+# line, because the sentence it has to catch was wrapped across two lines.
+DIST_SCRIPT_PATTERN='(?<![A-Za-z0-9_./*-])dist/[A-Za-z0-9_.-]+\.sh\b'
+DIST_SCRIPT_WHY="a shell script in the private repository's dist/ directory. A reader cannot open it; say what the step does, or cite this repository's own scripts/fetch.sh."
+KEY_LOCATION_PATTERN='\b(?:private\s+half|private\s+key|signing\s+key|release\s+key)\b[^.;]{0,80}?\b(?:lives|lived|stored|kept|held|sits|resides)(?:\s+only)?\s+in\s+(?!(?:the|a|an|this|that|its|their|our|your|one|memory)\b)(?-i:[A-Z])'
+KEY_LOCATION_WHY="a sentence naming where a signing key's private half is kept. Where the key lives is operational detail a public reader has no use for; say it is held offline by the release pipeline, and name no product."
+
 tracked() {
   git ls-files -z \
     | tr '\0' '\n' \
@@ -313,6 +346,47 @@ if bad:
     rc=1
   fi
 
+  # The two 2026-09-26 rules. Whole-text matching (not per line), because the
+  # key-location sentence it was written for wraps; the line reported is the
+  # one the match starts on.
+  local wide_hits label pattern why
+  for label in dist keyloc; do
+    case "$label" in
+      dist)   pattern="$DIST_SCRIPT_PATTERN";  why="$DIST_SCRIPT_WHY" ;;
+      keyloc) pattern="$KEY_LOCATION_PATTERN"; why="$KEY_LOCATION_WHY" ;;
+    esac
+    wide_hits="$( (cd "$root" && tracked | tr '\n' '\0' | LINT_WIDE_PATTERN="$pattern" python3 -c '
+import os, re, sys
+
+pat = re.compile(os.environ["LINT_WIDE_PATTERN"], re.IGNORECASE)
+bad = []
+for f in sys.stdin.read().split("\0"):
+    if not f:
+        continue
+    try:
+        text = open(f, encoding="utf-8", errors="ignore").read()
+    except OSError:
+        continue
+    for m in pat.finditer(text):
+        i = text.count("\n", 0, m.start()) + 1
+        bad.append((f, i, " ".join(m.group(0).split())))
+for f, i, hit in bad:
+    print(f"{f}:{i}:{hit}")
+if bad:
+    sys.exit(1)
+' 2>/dev/null) || true)"
+    if [ -n "$wide_hits" ]; then
+      n=$(printf '%s\n' "$wide_hits" | wc -l | tr -d ' ')
+      case "$label" in
+        dist)   printf 'lint-public: %s occurrence(s) of %s\n' "$n" "a shell script under the private repository's dist/" >&2 ;;
+        keyloc) printf 'lint-public: %s occurrence(s) of %s\n' "$n" "a named place a signing key is kept" >&2 ;;
+      esac
+      printf '  %s\n' "$why" >&2
+      printf '%s\n' "$wide_hits" | sed 's/^/    /' >&2
+      rc=1
+    fi
+  done
+
   return $rc
 }
 
@@ -326,6 +400,8 @@ if [ "${1:-}" = "--print-rules" ]; then
   done
   printf 'REGEX\t%s\n' "$NOTE_FILE_PATTERN"
   printf 'REGEX\t%s\n' "$CI_INFRA_PATH_PATTERN"
+  printf 'REGEX\t%s\n' "$DIST_SCRIPT_PATTERN"
+  printf 'REGEX\t%s\n' "$KEY_LOCATION_PATTERN"
   printf 'LOCALPATH\t%s\t%s\n' "$LOCAL_PATH_PATTERN" "$LOCAL_PATH_PLACEHOLDERS"
   exit 0
 fi
@@ -446,6 +522,23 @@ if [ "${1:-}" = "--selftest" ]; then
   mkdir -p "$tmp/tests/fixtures/fetch"
   printf 'generated by chtypes-core, never edit by hand\n' > "$tmp/tests/fixtures/fetch/README.md"
 
+  # --- 2026-09-26: a shell script directly under the private dist/, and a
+  #     sentence naming where a key's private half is kept. The store name
+  #     planted here is invented; a real one would itself be a leak. The
+  #     key-location plant is WRAPPED across two lines on purpose: that is the
+  #     shape it reached this repository in. Legal controls: this repository's
+  #     own dist/ build-output spellings, and the offline/in-the-pipeline
+  #     phrasings its own docs use. ---
+  printf 'the generator hands a fake cache to `dist/publish.sh\n--dry-run`\n' > "$tmp/planted-dist-publish.md"
+  printf 'or let `dist/fetch.sh` do it, which verifies the chain\n' > "$tmp/planted-dist-fetch.md"
+  printf 'build `dist/` first: package.json serves ./dist/index.js and bin dist/cli.js; ignore **/dist/** and ts/dist/\n' > "$tmp/legal-own-dist.md"
+  printf 'its public half is in the fetch guide and its private half lives only in\nKeystash; no SDK embeds it\n' > "$tmp/planted-keyloc-wrapped.md"
+  printf 'the release key is stored in Keystash under the ops project\n' > "$tmp/planted-keyloc-release.md"
+  printf 'the private half is held offline and never leaves the release pipeline\n' > "$tmp/legal-keyloc-offline.md"
+  printf 'a key whose private half is not in this repository, so it cannot sign\n' > "$tmp/legal-keyloc-notin.md"
+  printf 'the signing key is kept in the release pipeline, never on a laptop\n' > "$tmp/legal-keyloc-inthe.md"
+  printf 'the release key is kept in hardware, offline, and is never exported\n' > "$tmp/legal-keyloc-lowercase.md"
+
   # --- legal: describing the split in words, an in-repo path, and the
   #     generic placeholder path spellings this repository already ships ---
   printf 'the other half is the core repository, under its own license\n' > "$tmp/legal.md"
@@ -469,7 +562,9 @@ if [ "${1:-}" = "--selftest" ]; then
               planted-distintegration.md planted-distlinuxverify.md \
               planted-docsmeasurements.md planted-housing.md \
               planted-ci-path.md planted-infra-path.md \
-              tests/fixtures/fetch/README.md; do
+              tests/fixtures/fetch/README.md \
+              planted-dist-publish.md planted-dist-fetch.md \
+              planted-keyloc-wrapped.md planted-keyloc-release.md; do
     printf '%s\n' "$out" | grep -q "$want" || { echo "SELFTEST FAILED: rule did not fire on $want" >&2; exit 1; }
   done
 
@@ -481,7 +576,9 @@ if [ "${1:-}" = "--selftest" ]; then
                legal-harness-word.md legal-perf-word.md legal-tsan-word.md legal-sdk-word.md \
                legal-libtools-word.md legal-libharness-word.md legal-distdocker-word.md \
                legal-distintegration-word.md legal-distlinuxverify-word.md \
-               legal-docsmeasurements-word.md legal-housing-word.md legal-golangci-word.md; do
+               legal-docsmeasurements-word.md legal-housing-word.md legal-golangci-word.md \
+               legal-own-dist.md legal-keyloc-offline.md legal-keyloc-notin.md \
+               legal-keyloc-inthe.md legal-keyloc-lowercase.md; do
     printf '%s\n' "$out" | grep -q "$clean" && { echo "SELFTEST FAILED: a legal prose mention was flagged ($clean)" >&2; exit 1; }
   done
 
