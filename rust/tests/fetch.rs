@@ -22,10 +22,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use base64::Engine as _;
 use chtypes::fetch::{
     self, Action, EnsureOptions, LockFile, RELEASE_PUBLIC_KEY_HEX, lock_key, sha256_file,
 };
 use chtypes::{Error, Registry, RegistryOptions};
+use ed25519_dalek::{Signer, SigningKey};
 use serde_json::Value as Json;
 
 /// A platform this Mac (or any dev host) has no real artifacts for, so the
@@ -1347,4 +1349,375 @@ fn a_rebuild_installs_the_highest_build() {
             "{ctx}: the SUPERSEDED build {ob} is what landed"
         );
     }
+}
+
+// -------------------------------------------- the golden-set publish window
+//
+// docs/guides/fetch.md §3a: a release-level file (`sdk-goldens.json`) whose hash
+// disagrees with its `SHA256SUMS` row is retried like the signature and
+// `index.json` symptoms, and a retry re-reads the WHOLE consistent set. Built
+// here as a self-signed synthetic release — an ed25519-dalek key generated
+// deterministically from a fixed seed, no RNG dependency needed — because
+// this suite's shared fixtures under `tests/fixtures/fetch/` are signed with a
+// key whose private half is not in this repository, so a new row could never
+// be added to their `SHA256SUMS` and re-signed.
+//
+// The retry delay is a `pub(crate)` internal this external test crate cannot
+// reach directly; `CHTYPES_FETCH_TEST_RETRY_DELAY_MS` is the crate's own
+// undocumented test hook for it (never part of the public §6 contract), and —
+// like every other `CHTYPES_*` mutation in this suite — it is only ever set in
+// `rerun`'s re-exec'd child, never in this process, so `cargo test`'s
+// parallelism cannot race it against another test's environment.
+
+/// Any 32-byte seed derives a valid key (RFC 8032); fixed so the signature
+/// this suite produces never changes between runs.
+fn golden_window_key() -> SigningKey {
+    SigningKey::from_bytes(&[0x42; 32])
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn sha256_hex_of(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    to_hex(&Sha256::digest(bytes))
+}
+
+/// One gzipped ustar archive holding exactly `entries`, flat at its root —
+/// what `unpack_flat` (`docs/guides/fetch.md` §3 step 4) expects.
+fn gzip_tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut out = Vec::new();
+    {
+        let enc = flate2::write::GzEncoder::new(&mut out, flate2::Compression::default());
+        let mut builder = tar::Builder::new(enc);
+        for (name, data) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_path(name).unwrap();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder.append(&header, *data).unwrap();
+        }
+        let enc = builder.into_inner().unwrap();
+        enc.finish().unwrap();
+    }
+    out
+}
+
+fn write_sums_and_signature(dir: &Path, sums: &str) {
+    std::fs::write(dir.join("SHA256SUMS"), sums).unwrap();
+    let signature = golden_window_key().sign(sums.as_bytes());
+    // The comment's key id is untrusted and never checked (`TrustPolicy::verify`
+    // tries every trusted key regardless of what it says), so any text does.
+    let body = format!(
+        "untrusted comment: chtypes test release\n{}\n",
+        base64::engine::general_purpose::STANDARD.encode(signature.to_bytes())
+    );
+    std::fs::write(dir.join("SHA256SUMS.sig"), body).unwrap();
+}
+
+/// Writes a miniature, self-signed release: one fake artifact for `platform`,
+/// `index.json`, `SHA256SUMS`, `SHA256SUMS.sig`. Returns the trusted-key hex
+/// to fetch it with.
+fn write_golden_window_release(dir: &Path, platform: &str) -> String {
+    std::fs::create_dir_all(dir).unwrap();
+    let (os, arch) = platform.split_once('-').unwrap();
+    let library = if os == "darwin" {
+        "libchtypes.dylib"
+    } else {
+        "libchtypes.so"
+    };
+    let version = "25.8.28.1-lts";
+    let minor = "25.8";
+    let content = b"fake chtypes library for the golden-set window test\n".to_vec();
+    let library_sha256 = sha256_hex_of(&content);
+    let manifest = serde_json::json!({
+        "library": library,
+        "library_bytes": content.len(),
+        "library_sha256": library_sha256,
+        "clickhouse_version": version,
+        "clickhouse_minor": minor,
+        "os": os,
+        "arch": arch,
+    });
+    let tarball = gzip_tar(&[
+        ("manifest.json", &serde_json::to_vec(&manifest).unwrap()),
+        (library, &content),
+    ]);
+    let file_name = format!("chtypes-{version}-{os}-{arch}.tar.gz");
+    std::fs::write(dir.join(&file_name), &tarball).unwrap();
+    let tarball_sha256 = sha256_hex_of(&tarball);
+    let index = serde_json::json!({
+        "schema": 1,
+        "generated_at": "2026-09-26T00:00:00Z",
+        "release_tag": "test",
+        "artifacts": [{
+            "os": os, "arch": arch, "file": file_name, "sha256": tarball_sha256,
+            "bytes": tarball.len(), "clickhouse_version": version,
+            "clickhouse_minor": minor, "library": library, "library_sha256": library_sha256,
+        }],
+    });
+    std::fs::write(dir.join("index.json"), serde_json::to_vec(&index).unwrap()).unwrap();
+    write_sums_and_signature(dir, &format!("{tarball_sha256}  {file_name}\n"));
+    to_hex(&golden_window_key().verifying_key().to_bytes())
+}
+
+/// Adds one release-level file (like `sdk-goldens.json`) to an already-written
+/// release: writes its bytes, appends its row to `SHA256SUMS`, and re-signs —
+/// exactly what a real publish of a release-level file does.
+fn add_release_file(dir: &Path, name: &str, content: &[u8]) {
+    std::fs::write(dir.join(name), content).unwrap();
+    let mut sums = std::fs::read_to_string(dir.join("SHA256SUMS")).unwrap();
+    sums.push_str(&format!("{}  {name}\n", sha256_hex_of(content)));
+    write_sums_and_signature(dir, &sums);
+}
+
+struct GoldenServer {
+    url: String,
+    hits: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+}
+
+fn read_request_name(stream: &std::net::TcpStream) -> Option<String> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(stream.try_clone().ok()?);
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).ok()? == 0 {
+        return None;
+    }
+    let path = request_line.split_whitespace().nth(1)?.to_string();
+    // Drain the request headers; nothing here reads them.
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) if line == "\r\n" || line == "\n" => break,
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+    }
+    Some(path.trim_start_matches('/').to_string())
+}
+
+fn respond_with_file(stream: &std::net::TcpStream, path: &Path) {
+    use std::io::Write;
+    let mut stream = match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    match std::fs::read(path) {
+        Ok(body) => {
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(&body);
+        }
+        Err(_) => {
+            let body: &[u8] = b"not found";
+            let _ = write!(
+                stream,
+                "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(body);
+        }
+    }
+    let _ = stream.flush();
+}
+
+/// Serves `dir` over real HTTP, one connection at a time — all `ensure`'s own
+/// synchronous fetches ever make — counting requests by name and running
+/// `hooks[name]` once, right after that name's FIRST request has been
+/// answered. Not a wall-clock guess at when that read happens: the same
+/// after-first-serve technique the Go, Python and TypeScript suites use.
+fn serve_golden_window(
+    dir: PathBuf,
+    mut hooks: std::collections::HashMap<String, Box<dyn FnMut() + Send>>,
+) -> GoldenServer {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let hits = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::<
+        String,
+        usize,
+    >::new()));
+    let counted = std::sync::Arc::clone(&hits);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            let Some(name) = read_request_name(&stream) else {
+                continue;
+            };
+            let n = {
+                let mut h = counted.lock().unwrap();
+                let e = h.entry(name.clone()).or_insert(0);
+                *e += 1;
+                *e
+            };
+            respond_with_file(&stream, &dir.join(&name));
+            if n == 1 {
+                if let Some(hook) = hooks.get_mut(&name) {
+                    hook();
+                }
+            }
+        }
+    });
+    GoldenServer { url, hits }
+}
+
+/// The GOOD golden set: content that hashes to what a healthy `SHA256SUMS`
+/// row for it says. `stale_golden_content` is a different, equally valid
+/// JSON document — the point is only that its hash disagrees.
+fn good_golden_content() -> Vec<u8> {
+    br#"{"generated":{"at":"2026-09-26T00:00:00Z"},"cases":[]}"#.to_vec()
+}
+fn stale_golden_content() -> Vec<u8> {
+    br#"{"generated":{"at":"2026-09-01T00:00:00Z"},"cases":[]}"#.to_vec()
+}
+
+/// The window: `SHA256SUMS`, its signature and `index.json` all agree
+/// throughout — the served GOLDEN SET is what is stale, exactly what an edge
+/// cache does to a release-level file just after a republish. `ensure` must
+/// re-read the whole set (never just re-fetch the golden file against a
+/// stale first look) and heal once the source catches up.
+#[test]
+fn golden_window_retries_a_stale_edge_cache_pairing_then_installs() {
+    let dir = tmp("golden-heal-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let good = good_golden_content();
+    add_release_file(&dir, "sdk-goldens.json", &good);
+    let goldens_path = dir.join("sdk-goldens.json");
+    std::fs::write(&goldens_path, stale_golden_content()).unwrap();
+
+    let good_for_hook = good.clone();
+    let mut hooks: std::collections::HashMap<String, Box<dyn FnMut() + Send>> =
+        std::collections::HashMap::new();
+    hooks.insert(
+        "sdk-goldens.json".to_string(),
+        Box::new(move || std::fs::write(&goldens_path, &good_for_hook).unwrap()),
+    );
+    let server = serve_golden_window(dir.clone(), hooks);
+    let dest = tmp("golden-heal-dest");
+
+    let r = rerun(
+        "inner_golden_window_heals",
+        &[
+            ("CHTYPES_TEST_RELEASE_URL", server.url.as_str()),
+            ("CHTYPES_TEST_KEY", key.as_str()),
+            ("CHTYPES_TEST_DEST", dest.to_str().unwrap()),
+            ("CHTYPES_TEST_PLATFORM", foreign()),
+            ("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "20"),
+        ],
+    );
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(r.stdout.contains("INNER-OK golden-heal"), "{}", r.stdout);
+
+    let installed = std::fs::read(dest.join("sdk-goldens.json")).expect("golden set installed");
+    assert_eq!(
+        installed, good,
+        "the installed golden set is the healed one"
+    );
+    let hits = server.hits.lock().unwrap();
+    assert!(
+        *hits.get("sdk-goldens.json").unwrap_or(&0) >= 2,
+        "the retry did not happen: {hits:?}"
+    );
+    drop(hits);
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+#[test]
+fn inner_golden_window_heals() {
+    if !inner() {
+        return;
+    }
+    let opts = EnsureOptions {
+        dest: Some(PathBuf::from(std::env::var("CHTYPES_TEST_DEST").unwrap())),
+        platform: Some(std::env::var("CHTYPES_TEST_PLATFORM").unwrap()),
+        url: Some(std::env::var("CHTYPES_TEST_RELEASE_URL").unwrap()),
+        trusted_keys: Some(vec![std::env::var("CHTYPES_TEST_KEY").unwrap()]),
+        allow_unsigned: Some(false),
+        ..Default::default()
+    };
+    let installed = fetch::ensure("25.8", &opts)
+        .expect("a healing golden-set window must still install the artifact");
+    assert_eq!(installed.version, "25.8.28.1-lts");
+    println!("INNER-OK golden-heal");
+}
+
+/// The same window, but it never closes: `sdk-goldens.json` keeps hashing to
+/// something `SHA256SUMS` does not say, on every attempt. `ensure` must still
+/// install the artifact it was asked for — a release-level file is
+/// best-effort and never blocks it — retry through every attempt, and leave
+/// the golden set uninstalled.
+#[test]
+fn golden_window_that_never_heals_skips_it_without_failing_the_fetch() {
+    let dir = tmp("golden-never-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let good = good_golden_content();
+    add_release_file(&dir, "sdk-goldens.json", &good);
+    std::fs::write(dir.join("sdk-goldens.json"), stale_golden_content()).unwrap(); // never becomes `good`
+
+    let hooks: std::collections::HashMap<String, Box<dyn FnMut() + Send>> =
+        std::collections::HashMap::new();
+    let server = serve_golden_window(dir.clone(), hooks);
+    let dest = tmp("golden-never-dest");
+
+    let r = rerun(
+        "inner_golden_window_never_heals",
+        &[
+            ("CHTYPES_TEST_RELEASE_URL", server.url.as_str()),
+            ("CHTYPES_TEST_KEY", key.as_str()),
+            ("CHTYPES_TEST_DEST", dest.to_str().unwrap()),
+            ("CHTYPES_TEST_PLATFORM", foreign()),
+            ("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "5"),
+        ],
+    );
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(
+        r.stdout.contains("INNER-OK golden-never-heals"),
+        "{}",
+        r.stdout
+    );
+
+    assert!(
+        !dest.join("sdk-goldens.json").exists(),
+        "a window that never heals must not install the golden set"
+    );
+    let hits = server.hits.lock().unwrap();
+    // Mirrors release::RELEASE_LOAD_ATTEMPTS (a pub(crate) constant this
+    // external test crate cannot name directly): every attempt reads the
+    // golden set once, whether via the cheap first look or a full reread.
+    assert_eq!(
+        *hits.get("sdk-goldens.json").unwrap_or(&0),
+        5,
+        "want exactly 5 reads (one per attempt): {hits:?}"
+    );
+    drop(hits);
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+#[test]
+fn inner_golden_window_never_heals() {
+    if !inner() {
+        return;
+    }
+    let opts = EnsureOptions {
+        dest: Some(PathBuf::from(std::env::var("CHTYPES_TEST_DEST").unwrap())),
+        platform: Some(std::env::var("CHTYPES_TEST_PLATFORM").unwrap()),
+        url: Some(std::env::var("CHTYPES_TEST_RELEASE_URL").unwrap()),
+        trusted_keys: Some(vec![std::env::var("CHTYPES_TEST_KEY").unwrap()]),
+        allow_unsigned: Some(false),
+        ..Default::default()
+    };
+    let installed =
+        fetch::ensure("25.8", &opts).expect("a golden-set-only window must not fail ensure");
+    assert_eq!(installed.version, "25.8.28.1-lts");
+    println!("INNER-OK golden-never-heals");
 }

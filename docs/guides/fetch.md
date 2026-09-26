@@ -46,22 +46,33 @@ Nothing is a verdict but the chain; no exit code, no `Content-Length`, no "downl
 
 The install is atomic: unpack into a temporary sibling, rename into place. An already-installed line that hashes what `SHA256SUMS` says is reported as installed and nothing is downloaded (`--force` re-downloads).
 
-### 3a. The publish window, and the only thing that retries
+### 3a. The publish window, an edge cache widens it, and what retries
 
-A publish into the rolling release is **three objects** — `SHA256SUMS`, `SHA256SUMS.sig`, `index.json` — and object storage cannot swap them atomically. They are uploaded in that order, so an old `index.json` read against new sums still cross-checks at step 2; the only genuinely unsafe window is between the sums and the signature that covers them. One small object wide, seconds long.
+A publish into the rolling release is **three objects** — `SHA256SUMS`, `SHA256SUMS.sig`, `index.json` — plus, when a release-level file is being installed (`sdk-goldens.json`, or `--release-file`), a **fourth**. Object storage cannot swap any of them atomically. They are uploaded in that order, so an old `index.json` read against new sums still cross-checks at step 2; the narrowest unsafe window is between the sums and the signature that covers them — one small object, seconds long.
 
-Exactly **two** of the failures above are symptoms of reading inside that window, and both are retried — three attempts about four seconds apart, roughly ten seconds in all:
+An edge cache in front of the artifacts host widens that window from "between two uploads" to "as long as any one object can still be served stale from cache". `measured` 2026-09-26: `SHA256SUMS`, `SHA256SUMS.sig`, `index.json` and `sdk-goldens.json` are all served `Cache-Control: public, max-age=60`, their names never change between publishes, and a republished `sdk-goldens.json` paired with the previous `SHA256SUMS` refused `CHTYPES_ARTIFACT_CORRUPT` a full minute later.
 
-| symptom                                             | code                         |
-| --------------------------------------------------- | ---------------------------- |
-| step 0: the signature verifies under no trusted key | `CHTYPES_ARTIFACT_UNTRUSTED` |
-| step 2: `index.json` and `SHA256SUMS` disagree      | `CHTYPES_ARTIFACT_CORRUPT`   |
+**Three** of the failures above are symptoms of reading inside that window, and all three are retried:
 
-Nothing else retries. A tarball whose hash is wrong (step 3) is the release lying about a byte, not a half-finished upload, and refuses at once — as do the two above once the attempts run out, with the same code and the same exit status they have always had. **A retry buys ten seconds; it never converts a refusal into an install.**
+| symptom                                                                                                                         | code                         |
+| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| step 0: the signature verifies under no trusted key                                                                             | `CHTYPES_ARTIFACT_UNTRUSTED` |
+| step 2: `index.json` and `SHA256SUMS` disagree                                                                                  | `CHTYPES_ARTIFACT_CORRUPT`   |
+| a release-level file's hash disagrees with its own `SHA256SUMS` row, or the sums list it but the source does not (yet) serve it | `CHTYPES_ARTIFACT_CORRUPT`   |
+
+The third symptom covers `sdk-goldens.json` (§2, checked after the requested artifact installs, since it is best-effort and never blocks that install) and any `--release-file`. "The sums list it but the source does not serve it" is its own half: a new `SHA256SUMS` row can be visible before the file it describes is. The reverse — a file already visible whose row has not landed in `SHA256SUMS` yet — is not covered; that release-level file is read as simply not published yet, exactly as an older release that predates it reads.
+
+**On every retry the WHOLE consistent set is re-read from scratch** — `SHA256SUMS`, its signature, `index.json`, and the release-level file being installed, together — never one freshly re-fetched object checked against another attempt's stale one. A stale `SHA256SUMS` paired with a fresh `sdk-goldens.json` and a fresh `SHA256SUMS` paired with a stale `sdk-goldens.json` are the same window, read the same way.
+
+**The budget: 5 attempts, delays doubling from 4s — 4, 8, 16, 32 — 60 seconds of sleep, roughly 70 seconds of wall time with network latency.** That is chosen to outlast the edge cache's observed 60-second TTL plus margin, while a genuine few-second mid-publish window still clears on the second attempt. (A fixed doubling schedule was chosen over parsing the response's own `Cache-Control` header for the TTL: identical to implement across five languages, and it does not depend on the header continuing to say 60.)
+
+Nothing else retries. A tarball whose hash is wrong (step 3) is the release lying about a byte, not a half-finished upload, and refuses at once — as do the three above once the attempts run out, with the same code and the same exit status they have always had. **A retry buys time; it never converts a refusal into an install.**
 
 Step 2 is therefore checked twice: once for the whole release as soon as the three objects are read — so a disagreement is seen while re-reading can still fix it — and again for the asset actually being installed.
 
 Only an `http(s)` source can be mid-publish. A `file://` URL or a plain directory is read exactly once and refuses on the first look, which is also why the `tests/fixtures/fetch` suites stay instant.
+
+`scripts/fetch.sh` keeps its two env overrides, with a clarified meaning: `CHTYPES_METADATA_ATTEMPTS` is still the attempt count (default 5); `CHTYPES_METADATA_RETRY_DELAY` is now the **base** delay in seconds — each later attempt doubles it, where before it was the constant gap between every attempt. A test that wants every sleep near-instant sets it to `0`. The four in-package bindings expose the equivalent knobs internally to their own test suites, not as part of this public contract.
 
 **Not covered, by design, and said out loud:** freshness. A host serving an older _signed_ release is accepted; §5 pins are how a consumer refuses that. Build provenance (which workflow built which commit) is a later, separate layer (Sigstore attestations, once every build runs in CI).
 

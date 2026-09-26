@@ -66,6 +66,10 @@ import {
   type EnsureOptions,
   type FetchEvent,
 } from '../src/index.js';
+// RELEASE_RETRY is an internal, test-only knob (not re-exported from
+// index.js): a mutable object so the publish-window retry delay can be
+// shrunk to near zero here without a real wait.
+import { RELEASE_RETRY } from '../src/fetch.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC_FIXTURES = path.resolve(HERE, '..', '..', 'tests', 'fixtures', 'fetch');
@@ -237,17 +241,30 @@ function makeRelease(spec: ReleaseSpec): BuiltRelease {
   return { dir, url: pathToFileURL(dir).href, files };
 }
 
-/** A static file server over a release directory that counts every request. */
-async function serve(dir: string): Promise<{ url: string; hits: Map<string, number>; close: () => Promise<void> }> {
+/**
+ * A static file server over a release directory that counts every request.
+ *
+ * `hooks` (name -> callback) fires once per name, right after that name's
+ * FIRST response has finished writing — not on a wall-clock guess at when
+ * that read will have happened. That is what lets a test heal a file the
+ * instant the bad version has actually been served, exactly as the Go and
+ * Python suites' own after-first-serve hooks do.
+ */
+async function serve(dir: string, hooks: ReadonlyMap<string, () => void> = new Map()): Promise<{ url: string; hits: Map<string, number>; close: () => Promise<void> }> {
   const hits = new Map<string, number>();
   const server: Server = createServer((req, res) => {
     const name = decodeURIComponent((req.url ?? '/').replace(/^\/+/, '').split('?')[0]!);
-    hits.set(name, (hits.get(name) ?? 0) + 1);
+    const n = (hits.get(name) ?? 0) + 1;
+    hits.set(name, n);
     const file = path.join(dir, name);
     if (name === '' || name.includes('..') || !existsSync(file) || !statSync(file).isFile()) {
       res.statusCode = 404;
       res.end('not found');
       return;
+    }
+    if (n === 1) {
+      const hook = hooks.get(name);
+      if (hook !== undefined) res.on('finish', hook);
     }
     res.setHeader('content-type', 'application/octet-stream');
     createReadStream(file).pipe(res);
@@ -263,6 +280,20 @@ async function serve(dir: string): Promise<{ url: string; hits: Map<string, numb
         server.close(() => resolve());
       }),
   };
+}
+
+/**
+ * Adds one release-level file (like `sdk-goldens.json`) to an already-built
+ * release: writes its bytes, appends its row to SHA256SUMS, and re-signs with
+ * `KEY` — exactly what a real publish of a release-level file does.
+ */
+function addReleaseFile(release: BuiltRelease, name: string, content: Buffer): void {
+  writeFileSync(path.join(release.dir, name), content);
+  const sumsPath = path.join(release.dir, 'SHA256SUMS');
+  const sums = Buffer.concat([readFileSync(sumsPath), Buffer.from(`${sha256(content)}  ${name}\n`)]);
+  writeFileSync(sumsPath, sums);
+  const sig = signRaw(null, sums, KEY.privateKey);
+  writeFileSync(path.join(release.dir, 'SHA256SUMS.sig'), `untrusted comment: chtypes test release, ed25519 key ${keyId(KEY.hex)}\n${sig.toString('base64')}\n`);
 }
 
 const tmpDirs: string[] = [];
@@ -701,6 +732,59 @@ describe('the verification chain against a synthetic release (docs/guides/fetch.
     const offline = await listArtifacts(opts(good, dest, { offline: true }));
     expect(offline.offered).toBeNull();
     expect(offline.installed).toHaveLength(1);
+  });
+});
+
+// -------------------------------------------------- the golden-set window
+
+describe('the golden-set publish window (docs/guides/fetch.md §3a)', () => {
+  const savedRetry = { ...RELEASE_RETRY };
+  afterEach(() => {
+    RELEASE_RETRY.attempts = savedRetry.attempts;
+    RELEASE_RETRY.delayMs = savedRetry.delayMs;
+  });
+
+  const goodGoldens = Buffer.from(JSON.stringify({ generated: { at: '2026-09-26T00:00:00Z' }, cases: [] }));
+  const staleGoldens = Buffer.from(JSON.stringify({ generated: { at: '2026-09-01T00:00:00Z' }, cases: [] }));
+
+  it('retries a stale edge-cache pairing of sdk-goldens.json, then installs', async () => {
+    RELEASE_RETRY.delayMs = 20;
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }] });
+    addReleaseFile(release, 'sdk-goldens.json', goodGoldens);
+    const goldensPath = path.join(release.dir, 'sdk-goldens.json');
+    writeFileSync(goldensPath, staleGoldens); // the sums already agree with goodGoldens; the SERVED bytes are stale
+
+    const server = await serve(release.dir, new Map([['sdk-goldens.json', () => writeFileSync(goldensPath, goodGoldens)]]));
+    const dest = scratch('goldens-heal');
+    try {
+      const result = await ensure('25.8', opts({ ...release, url: server.url }, dest));
+      expect(result.installed).toBe(true); // the artifact itself never waits on the golden set
+      expect(readFileSync(path.join(dest, 'sdk-goldens.json')).equals(goodGoldens)).toBe(true);
+      expect(server.hits.get('sdk-goldens.json')).toBeGreaterThanOrEqual(2);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a golden-set window that never heals skips it, loudly, without failing the fetch', async () => {
+    RELEASE_RETRY.delayMs = 5;
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }] });
+    addReleaseFile(release, 'sdk-goldens.json', goodGoldens);
+    writeFileSync(path.join(release.dir, 'sdk-goldens.json'), staleGoldens); // never becomes goodGoldens
+
+    const server = await serve(release.dir);
+    const dest = scratch('goldens-never-heals');
+    const events: FetchEvent[] = [];
+    try {
+      const result = await ensure('25.8', opts({ ...release, url: server.url }, dest, { onProgress: (e) => events.push(e) }));
+      expect(result.installed).toBe(true);
+      expect(existsSync(path.join(dest, 'sdk-goldens.json'))).toBe(false);
+      expect(server.hits.get('sdk-goldens.json')).toBe(RELEASE_RETRY.attempts);
+      expect(events.some((e) => e.type === 'status' && /hashes to/.test(e.message) && /SHA256SUMS says/.test(e.message))).toBe(true);
+      expect(events.some((e) => e.type === 'status' && /the golden tests will skip/.test(e.message))).toBe(true);
+    } finally {
+      await server.close();
+    }
   });
 });
 
