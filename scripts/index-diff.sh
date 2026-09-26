@@ -612,7 +612,7 @@ fi
 if [ "$ACTION" = selftest ]; then
   # Fixture channels this script builds itself, never anything read off the
   # real (or any earlier) index.json or SHA256SUMS — the negative-control
-  # discipline of scripts/lint-prose.sh --selftest and
+  # discipline of scripts/lint-spelling.sh --selftest and
   # scripts/check-abi-decls.py --selftest: prove the checker fires on a
   # planted fault, using input it constructed, not input it was handed the
   # answer for.
