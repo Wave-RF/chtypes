@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-09-26
+
+Speaks ABI revision 5, unchanged from 0.3.0: every artifact 0.3.0 loads, this release loads.
+
 ### Changed
 
 - **The publish-window retry (`docs/guides/fetch.md` §3a) now also covers a release-level file whose hash disagrees with its `SHA256SUMS` row** — `sdk-goldens.json`, checked after the requested artifact has already installed, since it is best-effort and never blocks that install — and the retry budget widened from 3 attempts ~10s apart to 5 attempts with delays doubling from 4s (4/8/16/32s, ~60s of sleep, ~70s of wall time with network latency). The artifacts host's edge cache can hold a stale pairing of `SHA256SUMS`, its signature, `index.json` or `sdk-goldens.json` for up to its measured 60-second `Cache-Control: max-age`, wider than the original ~10s budget covered. Every retry now re-reads the WHOLE consistent set fresh — never one freshly re-fetched object checked against another attempt's stale one. A release-level file mismatch that never heals still leaves the golden tests skipping loudly, exactly as before, and never fails the fetch that asked for the artifact (issue #223).
