@@ -979,13 +979,25 @@ jobs:
         with:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
+      # Each of the four scanner steps below carries its own `id:` and
+      # `continue-on-error: true` (#226): without them, the first ecosystem
+      # to fail ended the job right there and the other three never even
+      # ran, so a single stale advisory in one ecosystem silently hid the
+      # other three's results. The verdict step at the end of this job reads
+      # every step's own `outcome` (never `conclusion`, which
+      # continue-on-error rewrites a failed step's result to `success`) and
+      # fails on any `failure`, so all four report on every run.
       - name: govulncheck (go)
+        id: govulncheck
+        continue-on-error: true
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           cd go && "$(go env GOPATH)/bin/govulncheck" ./...
 
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: "pip-audit (python) — python 3.12, pinned: pip-audit's own venv bootstrap is flaky on very new interpreters"
+        id: pip-audit
+        continue-on-error: true
         run: |
           cd python
           uv export --no-hashes --group dev | grep -v '^-e ' > /tmp/requirements-audit.txt
@@ -1003,10 +1015,46 @@ jobs:
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       - name: pnpm audit (ts)
+        id: pnpm-audit
+        continue-on-error: true
         run: cd ts && pnpm install --frozen-lockfile && pnpm audit
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: cargo audit (rust)
+        id: cargo-audit
+        continue-on-error: true
         run: |
           cargo install cargo-audit --locked
           cd rust && "$HOME/.cargo/bin/cargo-audit" audit
+
+      - name: verdict — all four scanners' outcomes, and this step is red if any is `failure`
+        if: always()
+        env:
+          GO_OUTCOME: ${{ steps.govulncheck.outcome }}
+          PYTHON_OUTCOME: ${{ steps.pip-audit.outcome }}
+          TS_OUTCOME: ${{ steps.pnpm-audit.outcome }}
+          RUST_OUTCOME: ${{ steps.cargo-audit.outcome }}
+        run: |
+          names=("govulncheck (go)" "pip-audit (python)" "pnpm audit (ts)" "cargo audit (rust)")
+          outcomes=("$GO_OUTCOME" "$PYTHON_OUTCOME" "$TS_OUTCOME" "$RUST_OUTCOME")
+
+          {
+            echo "### security — dependency vulnerability scan, per ecosystem"
+            echo
+            echo "| scanner | outcome |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          failed=()
+          for i in "${!names[@]}"; do
+            printf '| %s | %s |\n' "${names[$i]}" "${outcomes[$i]}" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${outcomes[$i]}" = "failure" ]; then
+              failed+=("${names[$i]}")
+            fi
+          done
+
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "security: scanner(s) failed: ${failed[*]}" >&2
+            exit 1
+          fi
+          echo "security: all four scanners ran; no failures"
