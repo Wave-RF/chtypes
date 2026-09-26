@@ -133,7 +133,7 @@ WHYS=(
 # 2026-09-18 (issue #96); case-insensitive, since a lower-cased or
 # URL-slugged citation is still a citation of a file a public reader cannot
 # open. A citation of one is exactly as dead an end as a path into the
-# private repository itself, and lint-paths.sh will not catch it, because the
+# private repository itself, and lint-cited-paths.sh will not catch it, because the
 # file is not IN this repository for that script to check for existence.
 NOTE_FILE_PATTERN='\b(?:AUDIT|HANDOFF|NOTE|PROMPT|REVIEW)-[A-Za-z0-9-]+\.md\b'
 NOTE_FILE_WHY='a private working note filename from the housing folder one level above this repository. A reader cannot open it; say what it concluded, not its filename.'
@@ -186,7 +186,7 @@ scan() {
 
   # These two need actual pattern matching and (for the path rule) a
   # contextual exclusion list, not a fixed string — so python3 rather than
-  # grep -F, the same reason scripts/lint-paths.sh reaches for it. The
+  # grep -F, the same reason scripts/lint-cited-paths.sh reaches for it. The
   # patterns and placeholder list live in the bash variables above and are
   # handed over by environment so nothing is duplicated between the check
   # itself and --print-rules below.
@@ -316,14 +316,14 @@ if [ "${1:-}" = "--selftest" ]; then
   # NOTE: every tests/* and docs/* fixture below plants a BARE directory
   # prefix (a trailing slash followed by prose, never a filename with an
   # extension) — same shape as the tests/acceptance/ and docs/proposals/
-  # fixtures above. lint-paths.sh (a separate gate; see scripts/lint-paths.sh)
+  # fixtures above. lint-cited-paths.sh (a separate gate; see scripts/lint-cited-paths.sh)
   # flags any tracked citation of a docs|examples|scripts|include|goldens|
   # spec|tests path that ends in a real extension and does not resolve to a
   # file in this repository, and it does not exempt this file the way it
   # exempts itself — a planted filename under one of those top-level
   # directories would trip that check, since no such file exists. A bare
   # prefix proves the needle fires just as well and stays invisible to
-  # lint-paths.sh's extension test.
+  # lint-cited-paths.sh's extension test.
   printf 'baseline scores regenerate under tests/wherefilter/ on every run\n' > "$tmp/planted-wherefilter.md"
   printf 'the wherefilter rig scores predicate pushdown, same idea as the arbiter\n' > "$tmp/legal-wherefilter-word.md"
 

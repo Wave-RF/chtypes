@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lint-paths.sh — no tracked file may cite a repository path that does not exist.
+# lint-cited-paths.sh — no tracked file may cite a repository path that does not exist.
 #
 # WHY THIS EXISTS. A `rows-export.md` design proposal's path was cited six
 # times — in include/chtypes.h and in all four bindings' source, every one of
@@ -18,8 +18,8 @@
 # a path that simply is not there. Between them a sweep that "removed" a
 # pointer by changing its shape cannot pass quietly again.
 #
-#   scripts/lint-paths.sh             check every tracked file
-#   scripts/lint-paths.sh --selftest  prove the rule fires, and does not overfire
+#   scripts/lint-cited-paths.sh             check every tracked file
+#   scripts/lint-cited-paths.sh --selftest  prove the rule fires, and does not overfire
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -40,7 +40,7 @@ PAT = re.compile(r"(?<![A-Za-z0-9_./-])(" + TOP + r"/[A-Za-z0-9_./-]*\.[A-Za-z][
 def skipped(f):
     b = os.path.basename(f)
     return (f.startswith("tests/fixtures/fetch/") or b in
-            (".gitignore", "Cargo.toml", "CHANGELOG.md", "lint-paths.sh"))
+            (".gitignore", "Cargo.toml", "CHANGELOG.md", "lint-cited-paths.sh"))
 
 # This repository is four sibling packages, and a cited path may be relative to
 # any of their roots rather than to the repository — a doc-comment inside rust/
@@ -61,7 +61,7 @@ for f in sys.stdin.read().split("\0"):
 for f, i, p in bad:
     print(f"    {f}:{i}: {p}", file=sys.stderr)
 if bad:
-    print(f"lint-paths: {len(bad)} citation(s) of a path that is not in this repository", file=sys.stderr)
+    print(f"lint-cited-paths: {len(bad)} citation(s) of a path that is not in this repository", file=sys.stderr)
     print("  A reader cannot follow it. Cite something that exists, or say what the thing IS.", file=sys.stderr)
     sys.exit(1)
 ' )
@@ -85,9 +85,9 @@ if [ "${1:-}" = "--selftest" ]; then
   printf '%s\n' "$out" | grep -q 'planted.md' || { echo "SELFTEST FAILED: rule did not fire on planted.md" >&2; exit 1; }
   printf '%s\n' "$out" | grep -q 'live.md'    && { echo "SELFTEST FAILED: a path that exists was flagged" >&2; exit 1; }
   printf '%s\n' "$out" | grep -q 'rust/lib.rs' && { echo "SELFTEST FAILED: a crate-relative path was flagged" >&2; exit 1; }
-  echo "lint-paths: selftest ok — fires on a dead path, silent on live and crate-relative ones"
+  echo "lint-cited-paths: selftest ok — fires on a dead path, silent on live and crate-relative ones"
   exit 0
 fi
 
 scan "$HERE"
-echo "lint-paths: ok — every cited repository path exists"
+echo "lint-cited-paths: ok — every cited repository path exists"
