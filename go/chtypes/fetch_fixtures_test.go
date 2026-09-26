@@ -93,7 +93,7 @@ func fixtureDir(t *testing.T) (string, *fixtureExpectations) {
 	return abs, &exp
 }
 
-func TestFixturesTestKey(t *testing.T) {
+func TestFetchFixturesTestKeyMatchesExpectedKeyID(t *testing.T) {
 	dir, exp := fixtureDir(t)
 	pubHex, err := os.ReadFile(filepath.Join(dir, "test-key", "public.hex"))
 	if err != nil {
@@ -114,7 +114,7 @@ func TestFixturesTestKey(t *testing.T) {
 	}
 }
 
-func TestFixturesVerdicts(t *testing.T) {
+func TestFetchFixturesEveryVerdictMatchesExpected(t *testing.T) {
 	dir, exp := fixtureDir(t)
 	for _, v := range exp.Verdicts {
 		v := v
@@ -177,7 +177,7 @@ func TestFixturesVerdicts(t *testing.T) {
 	}
 }
 
-func TestFixturesUnpublished(t *testing.T) {
+func TestFetchFixturesUnpublishedPlatformLineAndPatchAreRefused(t *testing.T) {
 	dir, exp := fixtureDir(t)
 	isolateEnv(t)
 	t.Setenv(envTrustedKeys, strings.Join(exp.TrustedKeys, ","))
@@ -210,7 +210,7 @@ func TestFixturesUnpublished(t *testing.T) {
 	}
 }
 
-func TestFixturesLock(t *testing.T) {
+func TestFetchFixturesLockRecordsAndFrozenRefusesDrift(t *testing.T) {
 	dir, exp := fixtureDir(t)
 	isolateEnv(t)
 	t.Setenv(envTrustedKeys, strings.Join(exp.TrustedKeys, ","))
@@ -280,7 +280,7 @@ func TestFixturesLock(t *testing.T) {
 	noArtifactDirs(t, dest)
 }
 
-// TestFixturesRebuildInstallsTheHighestBuild walks expected.json's builds.cases
+// TestFetchFixturesRebuildInstallsTheHighestBuild walks expected.json's builds.cases
 // against the two-builds/ fixture, where one ClickHouse version is published
 // twice — the shape a rebuild leaves behind, and the shape the live release has
 // carried since builds existed.
@@ -295,7 +295,7 @@ func TestFixturesLock(t *testing.T) {
 // library_sha256 differs, and the installed file is hashed in place. An
 // implementation that took the first matching row, or the older build, fails
 // here instead of passing quietly.
-func TestFixturesRebuildInstallsTheHighestBuild(t *testing.T) {
+func TestFetchFixturesRebuildInstallsTheHighestBuild(t *testing.T) {
 	dir, exp := fixtureDir(t)
 	if len(exp.Builds.Cases) == 0 {
 		t.Skip("expected.json carries no builds.cases — regenerate the fixtures from the release pipeline")
