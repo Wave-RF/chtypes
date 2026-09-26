@@ -1148,6 +1148,117 @@ func TestLoadReleaseStopsRetryingAndRefuses(t *testing.T) {
 	}
 }
 
+// addReleaseFile adds one release-level file (like sdk-goldens.json) to an
+// already-written release: writes its bytes, appends its row to SHA256SUMS,
+// and re-signs — exactly what a real publish of a release-level file does.
+func addReleaseFile(t *testing.T, dir string, priv ed25519.PrivateKey, name string, content []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sums, err := os.ReadFile(filepath.Join(dir, "SHA256SUMS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sums = append(sums, []byte(fmt.Sprintf("%s  %s\n", sha256Hex(content), name))...)
+	if err := os.WriteFile(filepath.Join(dir, "SHA256SUMS"), sums, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sig := ed25519.Sign(priv, sums)
+	body := "untrusted comment: chtypes artifacts, ed25519 key " + KeyID(priv.Public().(ed25519.PublicKey)) + "\n" +
+		base64.StdEncoding.EncodeToString(sig) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SHA256SUMS.sig"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestInstallGoldensWindowHealsAndInstalls is the new
+// window symptom (docs/guides/fetch.md §3a): SHA256SUMS, its signature and
+// index.json all agree throughout — the served GOLDEN SET is what is stale,
+// exactly what an edge cache does to a release-level file just after a
+// republish. installGoldens must re-read the whole set (never just re-fetch
+// the golden file against its first look's by-then-stale f.sums) and heal
+// once the source catches up.
+func TestInstallGoldensWindowHealsAndInstalls(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = 20 * time.Millisecond
+
+	rel, _, priv := signedRelease(t, "25.8.28.1-lts")
+	good := []byte(`{"generated":{"at":"2026-09-26T00:00:00Z"},"cases":[]}` + "\n")
+	stale := []byte(`{"generated":{"at":"2026-09-01T00:00:00Z"},"cases":[]}` + "\n")
+	addReleaseFile(t, rel, priv, goldensAsset, good)
+	goldenPath := filepath.Join(rel, goldensAsset)
+	if err := os.WriteFile(goldenPath, stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := serveRelease(t, rel)
+	dest := filepath.Join(t.TempDir(), "reg")
+	srv.afterFirstServe(goldensAsset, func() {
+		_ = os.WriteFile(goldenPath, good, 0o644)
+	})
+
+	inst, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	if err != nil {
+		t.Fatalf("a healing golden-set window must still install the artifact, got %v", err)
+	}
+	if inst.Version != "25.8.28.1-lts" {
+		t.Fatalf("Version = %s", inst.Version)
+	}
+	got, err := os.ReadFile(filepath.Join(dest, goldensAsset))
+	if err != nil {
+		t.Fatalf("golden set was not installed: %v", err)
+	}
+	if !bytes.Equal(got, good) {
+		t.Fatalf("installed golden set = %q, want the healed %q", got, good)
+	}
+	if n := srv.count(goldensAsset); n < 2 {
+		t.Fatalf("%s read %d time(s), want >= 2 (the retry did not happen)", goldensAsset, n)
+	}
+}
+
+// TestInstallGoldensWindowThatNeverHealsSkipsWithoutFailingTheFetch is the
+// same window, but it never closes: the golden set never hashes to what
+// SHA256SUMS says. installGoldens must retry through every attempt, then give
+// up loudly WITHOUT failing Ensure — a release-level file is best-effort, and
+// the artifact the caller asked for is already installed by the time this
+// runs.
+func TestInstallGoldensWindowThatNeverHealsSkipsWithoutFailingTheFetch(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = 5 * time.Millisecond
+
+	rel, _, priv := signedRelease(t, "25.8.28.1-lts")
+	good := []byte(`{"generated":{"at":"2026-09-26T00:00:00Z"},"cases":[]}` + "\n")
+	stale := []byte(`{"generated":{"at":"2026-09-01T00:00:00Z"},"cases":[]}` + "\n") // never becomes `good`
+	addReleaseFile(t, rel, priv, goldensAsset, good)
+	if err := os.WriteFile(filepath.Join(rel, goldensAsset), stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := serveRelease(t, rel)
+	dest := filepath.Join(t.TempDir(), "reg")
+	var buf bytes.Buffer
+	opts := FetchOptions{URL: srv.URL, Dest: dest, Progress: &buf}
+	inst, err := Ensure(context.Background(), "25.8", opts)
+	if err != nil {
+		t.Fatalf("a golden-set-only window must not fail Ensure, got %v", err)
+	}
+	if inst.Version != "25.8.28.1-lts" {
+		t.Fatalf("Version = %s", inst.Version)
+	}
+	if _, err := os.Stat(filepath.Join(dest, goldensAsset)); err == nil {
+		t.Fatal("the never-healed golden set must not be installed")
+	}
+	if n := srv.count(goldensAsset); n != releaseLoadAttempts {
+		t.Fatalf("%s read %d time(s), want exactly %d", goldensAsset, n, releaseLoadAttempts)
+	}
+	if out := buf.String(); !strings.Contains(out, "hashes to") || !strings.Contains(out, "the golden tests will skip") {
+		t.Fatalf("progress did not mention the refusal:\n%s", out)
+	}
+}
+
 // mangleSignature flips one byte of the base64 signature, leaving the two-line
 // shape intact. It must not touch the "untrusted comment:" line: that line is
 // not covered by the signature — which is the whole point of its name — so

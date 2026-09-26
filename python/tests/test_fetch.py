@@ -10,6 +10,7 @@ bytes of text; nothing here dlopens.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import http.server
 import io
@@ -454,6 +455,159 @@ def test_http_source_goes_through_the_same_chain(
             dest=dest,
             trusted_keys=_test_keys(),
         )
+
+
+class _CountingHandler(http.server.SimpleHTTPRequestHandler):
+    """Serves a directory like ``SimpleHTTPRequestHandler``, counting each
+    path's requests and — once a name has been served for the FIRST time —
+    running a registered hook synchronously, right after those response bytes
+    are written. That is what lets a test heal a file the instant the bad
+    version has actually been read, instead of guessing at wall-clock timing
+    (the same technique the Go suite's ``afterFirstServe`` uses)."""
+
+    def log_message(self, *a: object, **k: object) -> None:
+        pass
+
+    def do_GET(self) -> None:  # noqa: N802 (stdlib's naming)
+        name = self.path.lstrip("/")
+        hits: dict[str, int] = self.server.hits  # type: ignore[attr-defined]
+        hits[name] = hits.get(name, 0) + 1
+        first = hits[name] == 1
+        super().do_GET()
+        if first:
+            hook = self.server.hooks.get(name)  # type: ignore[attr-defined]
+            if hook is not None:
+                hook()
+
+
+@contextlib.contextmanager
+def _hooked_release_server(root: Path) -> Iterator[tuple[str, dict[str, int], dict]]:
+    """A release directory served over real HTTP, with per-path hit counts and
+    an after-first-serve hook: the mid-publish window, made real."""
+
+    def factory(*args: object, **kwargs: object) -> _CountingHandler:
+        return _CountingHandler(*args, directory=str(root), **kwargs)  # type: ignore[arg-type]
+
+    with socketserver.TCPServer(("127.0.0.1", 0), factory) as server:
+        server.hits = {}  # type: ignore[attr-defined]
+        server.hooks = {}  # type: ignore[attr-defined]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield (
+                f"http://127.0.0.1:{server.server_address[1]}",
+                server.hits,  # type: ignore[attr-defined]
+                server.hooks,  # type: ignore[attr-defined]
+            )
+        finally:
+            server.shutdown()
+
+
+# ---------------------------------------------- the golden-set publish window
+#
+# A fixed, offline-generated ed25519 keypair and signature — not the shared
+# fixtures' test key (its private half is not in this repository) and never
+# the release key. Generated once with
+# `openssl genpkey -algorithm ed25519` + `openssl pkeyutl -sign -rawin`
+# over the exact SHA256SUMS bytes below;
+# test_fetch_golden_window_fixture_is_internally_consistent pins that it still
+# verifies under `chtypes._ed25519.verify`.
+_GOLDEN_WINDOW_PUBKEY = "49102573bd3fe2d0a90e05bf91f79fc7a27c5bebc529ef6f57546f543f2a8bf4"
+_GOLDEN_WINDOW_KEYID = "f5886bc874cb68e4"
+_GOLDEN_WINDOW_GOOD = b'{"generated":{"at":"2026-09-26T00:00:00Z"},"cases":[]}\n'
+_GOLDEN_WINDOW_STALE = b'{"generated":{"at":"2026-09-01T00:00:00Z"},"cases":[]}\n'
+# SHA256SUMS lists only the golden set's hash; nothing in these tests installs
+# an artifact, so index.json publishes none.
+_GOLDEN_WINDOW_SUMS = (
+    hashlib.sha256(_GOLDEN_WINDOW_GOOD).hexdigest() + "  sdk-goldens.json\n"
+).encode()
+_GOLDEN_WINDOW_SIG = (
+    f"untrusted comment: chtypes artifacts, ed25519 key {_GOLDEN_WINDOW_KEYID}\n"
+    "eZhX7upf/FMnvDeDN8p1kCKf4wP2U8dDupfjCMQVM6xitL/UYgwDY2yyFtbbBk9UBeIAymGRyMaiE86L0WIMDg==\n"
+).encode()
+
+
+def test_fetch_golden_window_fixture_is_internally_consistent() -> None:
+    """Pins the offline-generated fixture above: the signature really does
+    verify over SHA256SUMS under the embedded public key. A failure here means
+    the fixture was hand-edited inconsistently — regenerate it, don't patch it."""
+    from chtypes._ed25519 import verify
+
+    _, sig = fetch_module.parse_signature_file(_GOLDEN_WINDOW_SIG)
+    assert verify(bytes.fromhex(_GOLDEN_WINDOW_PUBKEY), _GOLDEN_WINDOW_SUMS, sig)
+
+
+def _write_golden_window_release(root: Path, goldens: bytes) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "index.json").write_bytes(b'{"schema": 1, "artifacts": []}')
+    (root / "SHA256SUMS").write_bytes(_GOLDEN_WINDOW_SUMS)
+    (root / "SHA256SUMS.sig").write_bytes(_GOLDEN_WINDOW_SIG)
+    (root / "sdk-goldens.json").write_bytes(goldens)
+
+
+def test_fetch_goldens_retries_a_stale_edge_cache_pairing_then_installs(
+    dest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The new window symptom (docs/guides/fetch.md §3a): SHA256SUMS, its
+    signature and index.json all agree throughout, but the bytes actually
+    SERVED for the golden set are stale on the first read — exactly what an
+    edge cache does to a release-level file just after a republish.
+    `install_goldens` must re-read the whole set (not just re-fetch the
+    goldens file against the first read's now-stale SHA256SUMS) and heal once
+    the source catches up."""
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 0.01)
+    root = tmp_path / "release"
+    _write_golden_window_release(root, _GOLDEN_WINDOW_STALE)
+
+    with _hooked_release_server(root) as (url, hits, hooks):
+        hooks["sdk-goldens.json"] = lambda: (root / "sdk-goldens.json").write_bytes(
+            _GOLDEN_WINDOW_GOOD
+        )
+        lines: list[str] = []
+        f = Fetcher(
+            platform=PLATFORM,
+            url=url,
+            dest=dest,
+            trusted_keys=[_GOLDEN_WINDOW_PUBKEY],
+            progress=lines.append,
+        )
+        f.release()  # the base metadata only; nothing to install here
+        path = f.install_goldens()
+
+    assert path == dest / "sdk-goldens.json"
+    assert path is not None and path.read_bytes() == _GOLDEN_WINDOW_GOOD
+    assert hits["sdk-goldens.json"] >= 2, "the retry did not happen"
+    assert any("attempt 1" in ln for ln in lines)
+
+
+def test_fetch_goldens_window_that_never_heals_leaves_golden_tests_skipping(
+    dest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same window, but it never closes: `sdk-goldens.json` keeps hashing
+    to something SHA256SUMS does not say, on every attempt. `install_goldens`
+    must still never raise — a release-level file is best-effort — must not
+    install anything, and must actually have retried through every attempt
+    rather than refusing once and giving up silently."""
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 0.01)
+    root = tmp_path / "release"
+    _write_golden_window_release(root, _GOLDEN_WINDOW_STALE)  # never becomes GOOD
+
+    with _hooked_release_server(root) as (url, hits, _hooks):
+        lines: list[str] = []
+        f = Fetcher(
+            platform=PLATFORM,
+            url=url,
+            dest=dest,
+            trusted_keys=[_GOLDEN_WINDOW_PUBKEY],
+            progress=lines.append,
+        )
+        f.release()
+        path = f.install_goldens()
+
+    assert path is None
+    assert not (dest / "sdk-goldens.json").exists()
+    assert hits["sdk-goldens.json"] == fetch_module.RELEASE_LOAD_ATTEMPTS
+    assert any("hashes to" in ln and "SHA256SUMS says" in ln for ln in lines)
 
 
 def test_unreachable_host_is_source_unreachable(

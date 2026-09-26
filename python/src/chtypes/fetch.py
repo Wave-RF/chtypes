@@ -40,7 +40,7 @@ import warnings
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Final
+from typing import Any, Final, TypeVar
 
 from ._ed25519 import verify as _ed25519_verify
 from ._manifest import (
@@ -96,9 +96,13 @@ ENV_AUTOFETCH: Final = "CHTYPES_AUTOFETCH"
 ENV_REGISTRY: Final = "CHTYPES_REGISTRY"
 
 #: How many times `Fetcher.release` reads an ``http(s)`` release before giving
-#: up, and the wait between reads: three attempts span about ten seconds, which
-#: comfortably outlasts a one-object publish window.
-RELEASE_LOAD_ATTEMPTS: Final = 3
+#: up, and the BASE delay before the first retry — each later retry doubles it,
+#: so the default 5 attempts sleep 4+8+16+32 = 60s (~70s wall with network
+#: time). That is chosen to outlast the artifacts host's edge cache (observed
+#: ``Cache-Control: max-age=60`` on the mutable release objects, so a stale
+#: pairing of any of them can persist up to 60s), while a genuine few-second
+#: mid-publish window still clears on the second attempt.
+RELEASE_LOAD_ATTEMPTS: Final = 5
 RELEASE_RETRY_DELAY: Final = 4
 
 #: The served golden set: a release-level file, and a row in the signed
@@ -128,6 +132,8 @@ DEFAULT_LOCK_FILE: Final = "chtypes.lock"
 _USER_AGENT = "chtypes-python (+https://github.com/wave-rf/chtypes)"
 _HTTP_ATTEMPTS = 3
 _HTTP_TIMEOUT = 60.0
+
+_T = TypeVar("_T")
 _CHUNK = 1 << 20
 
 log = logging.getLogger("chtypes.fetch")
@@ -752,45 +758,86 @@ class Fetcher:
 
     # ------------------------------------------------------------ the release
 
-    def release(self) -> Release:
-        """Steps 0–1, retried through a publish window.
+    def _retry_publish_window(self, load: Callable[[], _T]) -> _T:
+        """Runs ``load`` through the publish-window retry: on every attempt but
+        the last, an `ArtifactUntrustedError` or `ArtifactCorruptError` is
+        logged and slept off before trying again; any other exception, or the
+        last attempt's, propagates immediately.
 
         A publish into the rolling release is three objects — ``SHA256SUMS``,
-        ``SHA256SUMS.sig``, ``index.json`` — and object storage cannot swap them
-        atomically. They go up in that order, so an old index read against new
-        sums still cross-checks; the unsafe window is between the sums and the
-        signature that covers them, one small object wide and seconds long.
+        ``SHA256SUMS.sig``, ``index.json`` — plus, when ``load`` also reads it,
+        the served golden set — and object storage cannot swap them atomically.
+        The artifacts host's edge cache widens that window from "between two
+        uploads" to "as long as any one object can still be served stale from
+        cache" (observed ``Cache-Control: max-age=60`` on all four).
 
-        The two symptoms of reading inside it — a signature under no trusted key
-        (`ArtifactUntrustedError`) and an index that disagrees with the sums
-        (`ArtifactCorruptError`) — are retried. Nothing else is, and neither are
-        these once the attempts run out: the same exception surfaces, with the
-        same exit code, as it did before. A tarball whose hash is wrong is never
-        retried; that is the release lying about a byte, not a half-finished
-        upload.
+        Three symptoms of reading inside it are retried: a signature under no
+        trusted key, an index that disagrees with the sums, and a release-level
+        file whose hash disagrees with its own SHA256SUMS row (or that the sums
+        list but the source does not yet serve). Each retry calls ``load``
+        again from scratch — the whole consistent set is re-read together,
+        never one freshly re-fetched object checked against another attempt's
+        stale one. Nothing else is retried, and neither are these three once
+        the attempts run out: the same exception surfaces, with the same exit
+        code, as it did before. A tarball whose hash is wrong is never retried;
+        that is the release lying about a byte, not a half-finished upload.
 
         Only an ``http(s)`` source can be mid-publish, so a ``file://`` or
-        directory source is read exactly once. Read once per `Fetcher`."""
-        if self._release is not None:
-            return self._release
+        directory source runs ``load`` exactly once."""
         attempts = RELEASE_LOAD_ATTEMPTS if self.source.kind == "http" else 1
+        delay = RELEASE_RETRY_DELAY
         for attempt in range(1, attempts + 1):
             try:
-                self._release = self._load_release()
-                return self._release
+                return load()
             except (ArtifactUntrustedError, ArtifactCorruptError) as exc:
                 if attempt >= attempts:
                     raise
                 self._say(
                     f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
-                    f"published looks like from outside; retrying in {RELEASE_RETRY_DELAY}s"
+                    f"published looks like from outside; retrying in {delay}s"
                 )
-                time.sleep(RELEASE_RETRY_DELAY)
+                time.sleep(delay)
+                delay *= 2
         raise AssertionError("unreachable")  # pragma: no cover
 
-    def _load_release(self) -> Release:
-        """One read of the release's three small files. Never memoizes: the
-        caller does that, and only on success."""
+    def release(self) -> Release:
+        """Steps 0–1, retried through a publish window (`_retry_publish_window`).
+        Read once per `Fetcher`: a second call returns the memoized result."""
+        if self._release is not None:
+            return self._release
+        self._release, _, _ = self._retry_publish_window(lambda: self._load_release())
+        return self._release
+
+    def _read_goldens_or_raise(self, want: str) -> bytes:
+        """One read of ``sdk-goldens.json``, verified against ``want`` (its row
+        in an already-verified SHA256SUMS). Raises `ArtifactCorruptError` for
+        either half of the new window symptom — a hash mismatch, or the sums
+        listing it while the source does not (yet) serve it — and
+        `SourceUnreachableError` for a plain I/O fault."""
+        src = str(self.source)
+        try:
+            blob = self.source.read(GOLDENS_ASSET)
+        except OSError as exc:
+            raise SourceUnreachableError(
+                f"chtypes: could not read {GOLDENS_ASSET} from {src}: {exc}"
+            ) from exc
+        if blob is None:
+            raise ArtifactCorruptError(
+                f"chtypes: SHA256SUMS lists {GOLDENS_ASSET} but {src} does not serve it "
+                f"— the release disagrees with itself; not installing it"
+            )
+        got = hashlib.sha256(blob).hexdigest()
+        if got != want:
+            raise ArtifactCorruptError(
+                f"chtypes: {GOLDENS_ASSET} hashes to {got} but the signed SHA256SUMS "
+                f"says {want} — not installing it"
+            )
+        return blob
+
+    def _load_release(self, *, want_goldens: bool = False) -> tuple[Release, bytes | None, bool]:
+        """One read of the release's three small files, plus — when
+        ``want_goldens`` — the served golden set, as part of the SAME read.
+        Never memoizes: the caller does that, and only on success."""
         if self.offline:
             raise SourceUnreachableError(
                 f"chtypes: offline — not reading the release at {self.source}"
@@ -826,11 +873,12 @@ class Fetcher:
         if index_raw is None:
             raise SourceUnreachableError(f"chtypes: no index.json at {src} — not a chtypes release")
         entries, tag, license_, license_url = _parse_index(index_raw, src)
+        sums = _parse_sums(sums_raw)
         release = Release(
             source=src,
             tag=tag or self.tag,
             entries=tuple(entries),
-            sums=_parse_sums(sums_raw),
+            sums=sums,
             signed_by=signed_by,
             license=license_,
             license_url=license_url,
@@ -845,12 +893,25 @@ class Fetcher:
                     f"chtypes: index.json says {entry.file} is {entry.sha256} but SHA256SUMS "
                     f"says {listed} — the release disagrees with itself; not installing it"
                 )
+        # The served golden set, read as part of the SAME set as the three
+        # objects above: it is a row in SHA256SUMS exactly like a tarball, so a
+        # stale pairing of it against the sums (or against nothing, if the sums
+        # row landed before the file itself is visible) is the same publish
+        # window, not a separate failure mode. A release that never lists it
+        # simply predates the served set — not a window symptom, so not raised.
+        goldens_blob: bytes | None = None
+        goldens_listed = False
+        if want_goldens:
+            want = sums.get(GOLDENS_ASSET)
+            goldens_listed = want is not None
+            if want is not None:
+                goldens_blob = self._read_goldens_or_raise(want)
         if license_:
             self._say(
                 f"artifacts are licensed under {license_}{' ' + license_url if license_url else ''}"
                 f" — LICENSE and NOTICE ship beside them"
             )
-        return release
+        return release, goldens_blob, goldens_listed
 
     # --------------------------------------------------------------- ensure
 
@@ -883,37 +944,53 @@ class Fetcher:
         the same chain and lands beside the artifacts, where every binding's
         golden test reads it offline.
 
+        The first look reuses `release`'s already-verified sums — cheap, and
+        right on the overwhelmingly common case that nothing is mid-publish.
+        Only a disagreement (a hash mismatch, or the sums listing it while the
+        source does not yet serve it) is retried, and a retry re-reads the
+        WHOLE consistent set fresh — SHA256SUMS, its signature, index.json and
+        the golden set together — never the golden set alone against the first
+        look's by-then possibly-stale sums.
+
         Never raises: a release with no such row simply predates the served set,
-        and a set that cannot be written leaves the golden tests skipping
-        loudly, which is their job when there is nothing to read. What it will
-        not do is install bytes the signed ``SHA256SUMS`` does not describe.
+        a mismatch that never heals leaves the golden tests skipping loudly —
+        which is their job when there is nothing trustworthy to read — and a
+        set that cannot be written does the same. What it will not do is
+        install bytes the signed ``SHA256SUMS`` does not describe.
         """
-        release = self.release()
-        want = release.sums.get(GOLDENS_ASSET)
-        if want is None:
+        attempts = RELEASE_LOAD_ATTEMPTS if self.source.kind == "http" else 1
+        delay = RELEASE_RETRY_DELAY
+        sums = self.release().sums
+        listed = False
+        blob: bytes | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                if attempt == 1:
+                    want = sums.get(GOLDENS_ASSET)
+                    listed = want is not None
+                    blob = self._read_goldens_or_raise(want) if want is not None else None
+                else:
+                    # A retry: the earlier `sums` may itself be stale by now, so
+                    # this re-reads everything, not just the golden set.
+                    _, blob, listed = self._load_release(want_goldens=True)
+                break
+            except (ArtifactUntrustedError, ArtifactCorruptError, SourceUnreachableError) as exc:
+                if attempt >= attempts:
+                    self._say(f"{exc} — the golden tests will skip")
+                    return None
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
+                    f"published looks like from outside; retrying in {delay}s"
+                )
+                time.sleep(delay)
+                delay *= 2
+        if not listed:
             self._say(
                 f"this release does not publish {GOLDENS_ASSET} "
                 f"(the SDKs' golden tests will skip until it does)"
             )
             return None
-        try:
-            blob = self.source.read(GOLDENS_ASSET)
-        except OSError as exc:
-            self._say(f"could not read {GOLDENS_ASSET}: {exc} — the golden tests will skip")
-            return None
-        if blob is None:
-            self._say(
-                f"SHA256SUMS lists {GOLDENS_ASSET} but {self.source} does not serve it "
-                f"— NOT installing it"
-            )
-            return None
-        got = hashlib.sha256(blob).hexdigest()
-        if got != want:
-            self._say(
-                f"NOT installing {GOLDENS_ASSET}: it hashes to {got} but the signed "
-                f"SHA256SUMS says {want}"
-            )
-            return None
+        assert blob is not None  # listed and no exception implies bytes were read
         try:
             self.dest.mkdir(parents=True, exist_ok=True)
             path = self.dest / GOLDENS_ASSET
