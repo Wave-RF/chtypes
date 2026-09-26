@@ -32,7 +32,12 @@ const GOLDENS =
   process.env['CHTYPES_GOLDENS'] ?? (REGISTRY === null ? null : path.join(REGISTRY, 'sdk-goldens.json'));
 
 interface GoldenRow {
-  outcome: string;
+  // Optional on the wire, same as every other field here: the served
+  // document omits `outcome` only on a malformed golden, never legitimately,
+  // so the type says so and requireRowOutcome() below rejects an absent one
+  // loudly instead of the type-checker's `string` masking a runtime
+  // `undefined` (chtypes#199).
+  outcome?: string;
   err_code?: number;
   values?: Record<string, string>;
   nulls?: string[];
@@ -69,6 +74,53 @@ const FORMATS: Record<string, number> = {
   Values: Format.Values,
   JSONCompactEachRow: Format.JSONCompactEachRow,
 };
+
+// The served document omits every optional field when it is empty: an absent
+// key means empty or zero (chtypes#199). These read a case/row exactly the
+// way the per-case `it()` below needs to, so the offline describe block at
+// the bottom of this file can pin the same behavior with no registry.
+function requireCaseOutcome(c: GoldenCase): string {
+  // "" (here, `undefined`) is not a valid outcome. Omitting the key is legal
+  // only on a compile-error case, which returns before this is ever called;
+  // anywhere else a missing outcome is a malformed golden.
+  if (c.expect.outcome === undefined) {
+    throw new Error(`golden case ${c.id} has no outcome and is not a compile-error case`);
+  }
+  return c.expect.outcome;
+}
+function requireRowOutcome(caseId: string, i: number, row: GoldenRow): string {
+  if (row.outcome === undefined) {
+    throw new Error(`golden case ${caseId} row ${i} has no outcome`);
+  }
+  return row.outcome;
+}
+function expectedVerdicts(c: GoldenCase): string[] {
+  return c.expect.verdicts ?? [];
+}
+function expectedRows(c: GoldenCase): GoldenRow[] {
+  return c.expect.rows ?? [];
+}
+function expectedErrCode(c: GoldenCase): number {
+  return c.expect.err_code ?? 0;
+}
+function rowErrCode(row: GoldenRow): number {
+  return row.err_code ?? 0;
+}
+function rowValues(row: GoldenRow): Record<string, string> {
+  return row.values ?? {};
+}
+function rowNulls(row: GoldenRow): string[] {
+  return row.nulls ?? [];
+}
+function rowTransformed(row: GoldenRow): { column: string; reason: string }[] {
+  return row.transformed ?? [];
+}
+function rowSubstituted(row: GoldenRow): string[] {
+  return row.substituted ?? [];
+}
+function rowComputed(row: GoldenRow): Record<string, string> {
+  return row.computed ?? {};
+}
 
 // A registry fetched before core started serving the set has no file. That is a
 // loud skip, not an exception that takes the whole module down.
@@ -153,35 +205,36 @@ describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
             try {
               const fr = filter.rows(format as never, body, c.settings);
               expect(fr.outcome).toBe('ok');
-              expect(c.expect.outcome).toBe('ok');
-              expect(fr.verdicts.map((v) => VERDICT_NAMES[v])).toEqual(c.expect.verdicts);
+              expect(requireCaseOutcome(c)).toBe('ok');
+              expect(fr.verdicts.map((v) => VERDICT_NAMES[v])).toEqual(expectedVerdicts(c));
             } finally {
               filter.close();
             }
             return;
           }
           const br = schema.rows(format as never, body, c.settings);
-          expect(br.outcome, br.errMsg).toBe(c.expect.outcome);
-          expect(br.errCode, br.errMsg).toBe(c.expect.err_code ?? 0);
-          const rows = c.expect.rows ?? [];
+          expect(br.outcome, br.errMsg).toBe(requireCaseOutcome(c));
+          expect(br.errCode, br.errMsg).toBe(expectedErrCode(c));
+          const rows = expectedRows(c);
           expect(br.rows.length).toBe(rows.length);
           br.rows.forEach((row, i) => {
             const want = rows[i]!;
-            expect(row.outcome, `row ${i}: ${row.errMsg}`).toBe(want.outcome);
-            if (want.outcome === 'rejected' || want.outcome === 'skipped') {
-              expect(row.errCode, `row ${i}: ${row.errMsg}`).toBe(want.err_code ?? 0);
+            const wantOutcome = requireRowOutcome(c.id, i, want);
+            expect(row.outcome, `row ${i}: ${row.errMsg}`).toBe(wantOutcome);
+            if (wantOutcome === 'rejected' || wantOutcome === 'skipped') {
+              expect(row.errCode, `row ${i}: ${row.errMsg}`).toBe(rowErrCode(want));
               return;
             }
             const values = Object.fromEntries(row.values.map((v) => [v.column, v.text]));
-            expect(values).toEqual(want.values ?? {});
+            expect(values).toEqual(rowValues(want));
             const nulls = row.values.filter((v) => v.isNull).map((v) => v.column).sort();
-            expect(nulls).toEqual(want.nulls ?? []);
+            expect(nulls).toEqual(rowNulls(want));
             const tr = row.transformed.map((t) => `${t.column}:${t.reason}`).sort();
-            expect(tr).toEqual((want.transformed ?? []).map((t) => `${t.column}:${t.reason}`).sort());
+            expect(tr).toEqual(rowTransformed(want).map((t) => `${t.column}:${t.reason}`).sort());
             const sub = row.substituted.map((s) => s.column).sort();
-            expect(sub).toEqual(want.substituted ?? []);
+            expect(sub).toEqual(rowSubstituted(want));
             const comp = Object.fromEntries(row.computed.map((k) => [k.column, k.text]));
-            expect(comp).toEqual(want.computed ?? {});
+            expect(comp).toEqual(rowComputed(want));
           });
         } finally {
           schema.close();
@@ -189,4 +242,45 @@ describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
       });
     }
   }
+});
+
+// Pins the served document's omit-when-empty shape rule (chtypes#199): a key
+// absent from a case or a row means empty or zero, never a crash on a
+// required read. This needs no artifact or registry — it calls the same
+// helpers the per-case test above does, so a future unconditional
+// `c.expect.x` (or `row.x`) creeping back into one of them fails here
+// immediately.
+describe('golden reading — omitted optional fields', () => {
+  it('reads an omitted case-level verdicts as empty', () => {
+    const c: GoldenCase = { id: 'synthetic-filter', ddl: '', format: 'CSV', body: '', expect: { outcome: 'ok' } };
+    expect(expectedVerdicts(c)).toEqual([]);
+  });
+
+  it('reads an omitted case-level rows and err_code as empty/zero', () => {
+    const c: GoldenCase = { id: 'synthetic-batch', ddl: '', format: 'CSV', body: '', expect: { outcome: 'ok' } };
+    expect(expectedRows(c)).toEqual([]);
+    expect(expectedErrCode(c)).toBe(0);
+  });
+
+  it('reads every omitted row-level field as empty/zero', () => {
+    const row: GoldenRow = { outcome: 'accepted' };
+    expect(rowErrCode(row)).toBe(0);
+    expect(rowValues(row)).toEqual({});
+    expect(rowNulls(row)).toEqual([]);
+    expect(rowTransformed(row)).toEqual([]);
+    expect(rowSubstituted(row)).toEqual([]);
+    expect(rowComputed(row)).toEqual({});
+  });
+
+  it('requires outcome on a case unless it is a compile-error case', () => {
+    const c: GoldenCase = { id: 'synthetic-no-outcome', ddl: '', format: 'CSV', body: '', expect: {} };
+    expect(() => requireCaseOutcome(c)).toThrow(/synthetic-no-outcome has no outcome and is not a compile-error case/);
+  });
+
+  it('requires outcome on every row', () => {
+    const row: GoldenRow = {};
+    expect(() => requireRowOutcome('synthetic-no-outcome', 0, row)).toThrow(
+      /synthetic-no-outcome row 0 has no outcome/,
+    );
+  });
 });

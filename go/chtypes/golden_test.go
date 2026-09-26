@@ -2,6 +2,7 @@ package chtypes
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -36,6 +37,21 @@ type goldenHeader struct {
 	Refused    []string          `json:"refused"`
 }
 
+// goldenRow is a row's own expectation. Every field here is optional on the
+// wire: the served document omits each one when it is empty, so a Go zero
+// value (nil slice/map, 0) IS the "absent means empty" reading already —
+// except Outcome, whose zero value "" is not a valid outcome and whose
+// absence is never legal on a row (chtypes#199): see outcomeOrErr.
+type goldenRow struct {
+	Outcome     string              `json:"outcome"`
+	ErrCode     int                 `json:"err_code"`
+	Values      map[string]string   `json:"values"`
+	Nulls       []string            `json:"nulls"`
+	Transformed []map[string]string `json:"transformed"`
+	Substituted []string            `json:"substituted"`
+	Computed    map[string]string   `json:"computed"`
+}
+
 type goldenCase struct {
 	ID       string            `json:"id"`
 	DDL      string            `json:"ddl"`
@@ -44,20 +60,27 @@ type goldenCase struct {
 	Settings map[string]string `json:"settings"`
 	Filter   string            `json:"filter"`
 	Expect   struct {
-		CompileErrorCode int    `json:"compile_error_code"`
-		Outcome          string `json:"outcome"`
-		ErrCode          int    `json:"err_code"`
-		Rows             []struct {
-			Outcome     string              `json:"outcome"`
-			ErrCode     int                 `json:"err_code"`
-			Values      map[string]string   `json:"values"`
-			Nulls       []string            `json:"nulls"`
-			Transformed []map[string]string `json:"transformed"`
-			Substituted []string            `json:"substituted"`
-			Computed    map[string]string   `json:"computed"`
-		} `json:"rows"`
-		Verdicts []string `json:"verdicts"`
+		CompileErrorCode int         `json:"compile_error_code"`
+		Outcome          string      `json:"outcome"`
+		ErrCode          int         `json:"err_code"`
+		Rows             []goldenRow `json:"rows"`
+		Verdicts         []string    `json:"verdicts"`
 	} `json:"expect"`
+}
+
+// errNoOutcome flags an empty (absent) outcome. "" is not a valid outcome to
+// default to: the served document's omit-when-empty rule makes it legal to
+// omit `outcome` only on a compile-error case, and every call site here is
+// reached only once that has already branched away — so an empty outcome
+// anywhere else is a malformed golden, and callers turn this into a t.Fatalf
+// with a message naming which case (and row) it was (chtypes#199).
+var errNoOutcome = errors.New("no outcome")
+
+func outcomeOrErr(outcome string) (string, error) {
+	if outcome == "" {
+		return "", errNoOutcome
+	}
+	return outcome, nil
 }
 
 var goldenFormats = map[string]Format{
@@ -173,8 +196,12 @@ func TestGoldens(t *testing.T) {
 					if err != nil {
 						t.Fatalf("filter rows: %v", err)
 					}
-					if fr.Outcome != FilterOK || c.Expect.Outcome != "ok" {
-						t.Fatalf("filter outcome = %v, want %s", fr.Outcome, c.Expect.Outcome)
+					wantOutcome, err := outcomeOrErr(c.Expect.Outcome)
+					if err != nil {
+						t.Fatalf("golden case %s has no outcome and is not a compile-error case", c.ID)
+					}
+					if fr.Outcome != FilterOK || wantOutcome != "ok" {
+						t.Fatalf("filter outcome = %v, want %s", fr.Outcome, wantOutcome)
 					}
 					got := make([]string, 0, len(fr.Verdicts))
 					for _, vd := range fr.Verdicts {
@@ -189,18 +216,26 @@ func TestGoldens(t *testing.T) {
 				if err != nil {
 					t.Fatalf("rows: %v", err)
 				}
-				if br.Outcome.String() != c.Expect.Outcome || br.ErrCode != c.Expect.ErrCode {
-					t.Fatalf("batch = %s/%d, want %s/%d (%s)", br.Outcome, br.ErrCode, c.Expect.Outcome, c.Expect.ErrCode, br.ErrMsg)
+				wantOutcome, err := outcomeOrErr(c.Expect.Outcome)
+				if err != nil {
+					t.Fatalf("golden case %s has no outcome and is not a compile-error case", c.ID)
+				}
+				if br.Outcome.String() != wantOutcome || br.ErrCode != c.Expect.ErrCode {
+					t.Fatalf("batch = %s/%d, want %s/%d (%s)", br.Outcome, br.ErrCode, wantOutcome, c.Expect.ErrCode, br.ErrMsg)
 				}
 				if len(br.Rows) != len(c.Expect.Rows) {
 					t.Fatalf("%d row(s), want %d", len(br.Rows), len(c.Expect.Rows))
 				}
 				for i, row := range br.Rows {
 					want := c.Expect.Rows[i]
-					if row.Outcome.String() != want.Outcome {
-						t.Fatalf("row %d outcome = %s, want %s (%s)", i, row.Outcome, want.Outcome, row.ErrMsg)
+					wantRowOutcome, err := outcomeOrErr(want.Outcome)
+					if err != nil {
+						t.Fatalf("golden case %s row %d has no outcome", c.ID, i)
 					}
-					if want.Outcome == "rejected" || want.Outcome == "skipped" {
+					if row.Outcome.String() != wantRowOutcome {
+						t.Fatalf("row %d outcome = %s, want %s (%s)", i, row.Outcome, wantRowOutcome, row.ErrMsg)
+					}
+					if wantRowOutcome == "rejected" || wantRowOutcome == "skipped" {
 						if row.ErrCode != want.ErrCode {
 							t.Fatalf("row %d code = %d, want %d (%s)", i, row.ErrCode, want.ErrCode, row.ErrMsg)
 						}
@@ -273,4 +308,73 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestGoldenOptionalFieldsOmittedAreEmpty pins the served document's
+// omit-when-empty shape rule (chtypes#199): decoding JSON that omits an
+// optional key must leave the Go zero value (nil slice/map, 0), which reads
+// as empty everywhere this file compares it. Needs no artifact or registry —
+// it is pure JSON decoding — so it runs in the no-artifact CI job.
+func TestGoldenOptionalFieldsOmittedAreEmpty(t *testing.T) {
+	var filterCase goldenCase
+	if err := json.Unmarshal([]byte(`{"id":"synthetic-filter","expect":{"outcome":"ok"}}`), &filterCase); err != nil {
+		t.Fatalf("synthetic filter case does not parse: %v", err)
+	}
+	if len(filterCase.Expect.Verdicts) != 0 {
+		t.Fatalf("verdicts = %v, want empty", filterCase.Expect.Verdicts)
+	}
+
+	var batchCase goldenCase
+	if err := json.Unmarshal([]byte(`{"id":"synthetic-batch","expect":{"outcome":"ok"}}`), &batchCase); err != nil {
+		t.Fatalf("synthetic batch case does not parse: %v", err)
+	}
+	if len(batchCase.Expect.Rows) != 0 {
+		t.Fatalf("rows = %v, want empty", batchCase.Expect.Rows)
+	}
+	if batchCase.Expect.ErrCode != 0 {
+		t.Fatalf("err_code = %d, want 0", batchCase.Expect.ErrCode)
+	}
+
+	var row goldenRow
+	if err := json.Unmarshal([]byte(`{"outcome":"accepted"}`), &row); err != nil {
+		t.Fatalf("synthetic row does not parse: %v", err)
+	}
+	if row.ErrCode != 0 {
+		t.Fatalf("row err_code = %d, want 0", row.ErrCode)
+	}
+	if len(row.Values) != 0 {
+		t.Fatalf("row values = %v, want empty", row.Values)
+	}
+	if len(row.Nulls) != 0 {
+		t.Fatalf("row nulls = %v, want empty", row.Nulls)
+	}
+	if len(row.Transformed) != 0 {
+		t.Fatalf("row transformed = %v, want empty", row.Transformed)
+	}
+	if len(row.Substituted) != 0 {
+		t.Fatalf("row substituted = %v, want empty", row.Substituted)
+	}
+	if len(row.Computed) != 0 {
+		t.Fatalf("row computed = %v, want empty", row.Computed)
+	}
+
+	if got, err := outcomeOrErr(filterCase.Expect.Outcome); err != nil || got != "ok" {
+		t.Fatalf("outcomeOrErr(%q) = %q, %v; want %q, nil", filterCase.Expect.Outcome, got, err, "ok")
+	}
+	if got, err := outcomeOrErr(row.Outcome); err != nil || got != "accepted" {
+		t.Fatalf("outcomeOrErr(%q) = %q, %v; want %q, nil", row.Outcome, got, err, "accepted")
+	}
+}
+
+// TestGoldenOutcomeRequiredUnlessCompileError pins the exception to the
+// omit-when-empty rule: an absent `outcome` is legal only on a
+// compile-error case, so a missing outcome anywhere else must be rejected
+// rather than defaulted to "" (chtypes#199).
+func TestGoldenOutcomeRequiredUnlessCompileError(t *testing.T) {
+	if _, err := outcomeOrErr(""); err == nil {
+		t.Fatal("outcomeOrErr(\"\") = nil error, want one")
+	}
+	if got, err := outcomeOrErr("ok"); err != nil || got != "ok" {
+		t.Fatalf("outcomeOrErr(%q) = %q, %v; want %q, nil", "ok", got, err, "ok")
+	}
 }
