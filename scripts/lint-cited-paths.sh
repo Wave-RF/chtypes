@@ -32,28 +32,13 @@ TOP = r"(?:docs|examples|scripts|include|goldens|spec|tests)"
 # A real extension is required: a bare word after a slash is a glob or prose.
 PAT = re.compile(r"(?<![A-Za-z0-9_./-])(" + TOP + r"/[A-Za-z0-9_./-]*\.[A-Za-z][A-Za-z0-9]{1,4})\b")
 # Skipped, each for a reason rather than to make the check pass:
-#   fixtures      generated upstream, by a generator that predates this
-#                 repository docs/ reorganization (docs/fetch.md moved under
-#                 guides/, same as the dead citation this script was written
-#                 for) and that also documents cross-repository rule text
-#                 (docs/distribution.md is the private repository own doc,
-#                 cited from the other side of a shared rule). Neither path
-#                 will ever resolve HERE, and hand-editing them would only
-#                 drift from the next regeneration. This exemption is scoped
-#                 to EXISTENCE only, never to naming: it does not (and could
-#                 not, by construction, since this script has no needle for
-#                 the private repository name) excuse a leak of the private
-#                 repository NAME or an internal path of its own; that is
-#                 lint-public.sh job, and as of issue #224 that script does
-#                 not exempt this directory: a name leak here is caught there.
 #   .gitignore    holds patterns, not paths
 #   Cargo.toml    its paths are crate-relative by definition
 #   CHANGELOG.md  deliberately names things that were removed
 #   this script   it quotes the shapes it looks for
 def skipped(f):
     b = os.path.basename(f)
-    return (f.startswith("tests/fixtures/fetch/") or b in
-            (".gitignore", "Cargo.toml", "CHANGELOG.md", "lint-cited-paths.sh"))
+    return b in (".gitignore", "Cargo.toml", "CHANGELOG.md", "lint-cited-paths.sh")
 
 # This repository is four sibling packages, and a cited path may be relative to
 # any of their roots rather than to the repository — a doc-comment inside rust/
@@ -86,19 +71,24 @@ if [ "${1:-}" = "--selftest" ]; then
   # this script exists to prevent, so prove all three.
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   git init -q "$tmp"
-  mkdir -p "$tmp/docs/guides" "$tmp/rust/tests" "$tmp/go"
+  mkdir -p "$tmp/docs/guides" "$tmp/rust/tests" "$tmp/go" "$tmp/tests/fixtures/fetch"
   printf 'ok\n'                       > "$tmp/docs/guides/fetch.md"
   printf 'ok\n'                       > "$tmp/rust/tests/integration.rs"
   printf 'see docs/gone/missing.md\n' > "$tmp/planted.md"
   printf 'see docs/guides/fetch.md\n' > "$tmp/live.md"
   printf '// see tests/integration.rs\n' > "$tmp/rust/lib.rs"
   printf 'run pytest tests/integration.rs from rust/\n' > "$tmp/sibling.md"
+  # The fetch fixtures were exempt until their generator stopped citing paths
+  # that do not exist here (#224, then the regeneration that removed the
+  # exemption). A dead path planted there must be caught like anywhere else.
+  printf 'the rule is docs/fetch.md, section 3a\n' > "$tmp/tests/fixtures/fetch/README.md"
   git -C "$tmp" add -A
   out="$(scan "$tmp" 2>&1)" && { echo "SELFTEST FAILED: the planted dead path was not caught" >&2; exit 1; }
   printf '%s\n' "$out" | grep -q 'planted.md' || { echo "SELFTEST FAILED: rule did not fire on planted.md" >&2; exit 1; }
+  printf '%s\n' "$out" | grep -q 'tests/fixtures/fetch/README.md' || { echo "SELFTEST FAILED: rule did not fire inside tests/fixtures/fetch/" >&2; exit 1; }
   printf '%s\n' "$out" | grep -q 'live.md'    && { echo "SELFTEST FAILED: a path that exists was flagged" >&2; exit 1; }
   printf '%s\n' "$out" | grep -q 'rust/lib.rs' && { echo "SELFTEST FAILED: a crate-relative path was flagged" >&2; exit 1; }
-  echo "lint-cited-paths: selftest ok — fires on a dead path, silent on live and crate-relative ones"
+  echo "lint-cited-paths: selftest ok — fires on a dead path (fixtures included), silent on live and crate-relative ones"
   exit 0
 fi
 
