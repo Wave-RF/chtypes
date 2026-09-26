@@ -8,6 +8,13 @@ on:
     tags: ["python/v*"]
 permissions:
   contents: read
+# Every run: step uses bash with -eo pipefail. GitHub's default for a step
+# with no shell: is `bash -e {0}`, WITHOUT pipefail, so a failing command on
+# the left of a pipe was hidden by the exit status of the one on the right.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     runs-on: ubuntu-latest
