@@ -1,7 +1,7 @@
 version: "2"
 
 # A curated allowlist (`default: none` + explicit `enable:`), adapted from
-# Wave-RF/WaveHouse's .golangci.yml. Kept STRICT-BUT-GREEN: every linter and
+# another Wave RF Go repository's .golangci.yml. Kept STRICT-BUT-GREEN: every linter and
 # sub-check below already passes on go/chtypes and go/cmd/chtypes with zero
 # findings. Nothing here was made to pass by editing source — a rule that
 # would need a source change to satisfy is left off (or its one offending

@@ -114,7 +114,7 @@
    "25.8"
   ]
  },
- "generated_by": "chtypes-core tests/sdk/fetch-fixtures/gen.py \u2014 never edit by hand",
+ "generated_by": "the artifact producer's fixture generator \u2014 never edit by hand",
  "index_doc_keys": [
   "artifacts",
   "generated_at",
