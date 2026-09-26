@@ -206,15 +206,39 @@ pub(crate) struct Release {
     pub(crate) origin: String,
 }
 
-/// How many times [`Release::load`] reads an HTTP release before giving up.
-const RELEASE_LOAD_ATTEMPTS: u32 = 3;
-/// The wait between those reads: three attempts span about ten seconds, which
-/// comfortably outlasts a one-object publish window.
-const RELEASE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(4);
+/// How many times [`Release::load`] (and `install_goldens`'s own retry, in
+/// `super::install_goldens`) reads an HTTP release before giving up.
+pub(crate) const RELEASE_LOAD_ATTEMPTS: u32 = 5;
+
+/// The BASE delay before the first retry — each later retry doubles it, so
+/// the default 5 attempts sleep 4+8+16+32 = 60s (~70s wall with network
+/// time). That is chosen to outlast the artifacts host's edge cache (observed
+/// `Cache-Control: max-age=60` on the mutable release objects, so a stale
+/// pairing of any of them can persist up to 60s), while a genuine few-second
+/// mid-publish window still clears on the second attempt.
+///
+/// `CHTYPES_FETCH_TEST_RETRY_DELAY_MS` overrides it, in milliseconds — an
+/// internal, undocumented test hook, never part of the public contract
+/// (`docs/guides/fetch.md` documents no such variable for this crate). It exists
+/// because `tests/fetch.rs` is a separate crate that cannot reach this
+/// `pub(crate)` constant directly to shrink it; `rerun`'s isolated child
+/// environment sets it instead of mutating this process's own environment,
+/// which `cargo test`'s parallelism would make racy.
+pub(crate) fn release_retry_delay() -> std::time::Duration {
+    if let Ok(raw) = std::env::var("CHTYPES_FETCH_TEST_RETRY_DELAY_MS") {
+        if let Ok(ms) = raw.parse::<u64>() {
+            return std::time::Duration::from_millis(ms);
+        }
+    }
+    std::time::Duration::from_secs(4)
+}
 
 /// Is this error a symptom of reading a release mid-publish, and therefore
-/// worth reading again? Exactly two are.
-fn is_publish_window(err: &Error) -> bool {
+/// worth reading again? Three are: a signature under no trusted key, an index
+/// that disagrees with the sums, and (checked by `super::install_goldens`,
+/// which reuses this) a release-level file whose hash disagrees with its own
+/// SHA256SUMS row — both raise `Error::ArtifactCorrupt`.
+pub(crate) fn is_publish_window(err: &Error) -> bool {
     matches!(
         err,
         Error::ArtifactUntrusted { .. } | Error::ArtifactCorrupt { .. }
@@ -231,7 +255,16 @@ impl Release {
     /// * [`Error::ArtifactUntrusted`] — no `SHA256SUMS`, no `SHA256SUMS.sig`
     ///   (unless allowed), or a signature under no trusted key.
     /// * [`Error::Fetch`] — no `index.json`, or one this reader cannot use.
-    fn load_once(source: &Source, policy: &TrustPolicy, progress: bool) -> Result<Release> {
+    ///
+    /// `pub(crate)`, not just `load`'s private helper: `super::install_goldens`
+    /// calls it directly for its OWN retry, to re-read the whole consistent set
+    /// fresh on a golden-set window symptom without going through `load`'s
+    /// nested retry loop.
+    pub(crate) fn load_once(
+        source: &Source,
+        policy: &TrustPolicy,
+        progress: bool,
+    ) -> Result<Release> {
         let origin = source.describe().to_string();
         let untrusted = |reason: String| Error::ArtifactUntrusted {
             origin: origin.clone(),
@@ -327,16 +360,23 @@ impl Release {
     /// [`Release::load_once`], retried through a publish window.
     ///
     /// A publish into the rolling release is three objects — `SHA256SUMS`,
-    /// `SHA256SUMS.sig`, `index.json` — and object storage cannot swap them
-    /// atomically. They go up in that order, so an old index read against new
-    /// sums still cross-checks; the unsafe window is between the sums and the
-    /// signature that covers them, one small object wide and seconds long.
+    /// `SHA256SUMS.sig`, `index.json` — plus, in `super::install_goldens`'s own
+    /// retry, a fourth release-level file. Object storage cannot swap any of
+    /// these atomically, and the edge cache in front of the artifacts host
+    /// widens the unsafe window from "between two uploads" to "as long as any
+    /// one object can still be served stale from cache", which measures the
+    /// same as its `Cache-Control` max-age.
     ///
-    /// The two symptoms of reading inside it — a signature that does not verify,
-    /// and an index that disagrees with the sums — are retried. Nothing else is,
-    /// and neither are these once the attempts run out: the same error surfaces,
-    /// with the same exit code, as it did before. A tarball whose hash is wrong
-    /// is never retried; that is the release lying about a byte.
+    /// Three symptoms of reading inside that window are retried: a signature
+    /// that does not verify, an index that disagrees with the sums, and (via
+    /// [`Release::read_goldens`]) a release-level file whose hash disagrees
+    /// with its own SHA256SUMS row, or that the sums list but the source does
+    /// not yet serve. Every retry re-reads the WHOLE set from scratch — never
+    /// one freshly re-fetched object checked against another attempt's stale
+    /// one. Nothing else is retried, and neither are these three once the
+    /// attempts run out: the same error surfaces, with the same exit code, as
+    /// it did before. A tarball whose hash is wrong is never retried; that is
+    /// the release lying about a byte.
     ///
     /// Only an HTTP source can be mid-publish, so a `file://` or directory
     /// source is read exactly once.
@@ -346,6 +386,7 @@ impl Release {
         } else {
             1
         };
+        let mut delay = release_retry_delay();
         let mut attempt = 1;
         loop {
             match Release::load_once(source, policy, progress) {
@@ -353,9 +394,10 @@ impl Release {
                     eprintln!(
                         "chtypes: {err} (attempt {attempt}/{attempts}) — this is what a release \
                          being published looks like from outside; retrying in {}s",
-                        RELEASE_RETRY_DELAY.as_secs()
+                        delay.as_secs()
                     );
-                    std::thread::sleep(RELEASE_RETRY_DELAY);
+                    std::thread::sleep(delay);
+                    delay *= 2;
                     attempt += 1;
                 }
                 other => return other,
@@ -452,6 +494,45 @@ impl Release {
     /// Used for `sdk-goldens.json`, which is a row like any tarball.
     pub(crate) fn sum_for(&self, name: &str) -> Option<&str> {
         self.sums.get(name).map(String::as_str)
+    }
+
+    /// One look at a release-level file (`sdk-goldens.json`) against THIS
+    /// release's own, already-verified sums. `Ok(None)` when the release
+    /// simply does not list `name` at all — not an error, and not a window
+    /// symptom. A hash mismatch, or the sums listing it while `source` does
+    /// not (yet) serve it, raises `Error::ArtifactCorrupt` — exactly what
+    /// [`is_publish_window`] recognizes, so `super::install_goldens` can retry
+    /// it the same way [`Release::load`] retries the signature and the index.
+    pub(crate) fn read_goldens(&self, source: &Source, name: &str) -> Result<Option<Vec<u8>>> {
+        let Some(want) = self.sum_for(name) else {
+            return Ok(None);
+        };
+        let want = want.to_string();
+        match source.read(name)? {
+            None => Err(Error::ArtifactCorrupt {
+                subject: format!(
+                    "SHA256SUMS lists {name} but {} does not serve it — the release disagrees \
+                     with itself; not installing it",
+                    source.describe()
+                ),
+                expected: want,
+                actual: "absent".into(),
+            }),
+            Some(blob) => {
+                let got = super::trust::sha256_hex(&blob);
+                if got == want {
+                    Ok(Some(blob))
+                } else {
+                    Err(Error::ArtifactCorrupt {
+                        subject: format!(
+                            "{name} disagrees with the signed SHA256SUMS — not installing it"
+                        ),
+                        expected: want,
+                        actual: got,
+                    })
+                }
+            }
+        }
     }
 
     /// Step 2: the signed `SHA256SUMS` must list the asset with the index's

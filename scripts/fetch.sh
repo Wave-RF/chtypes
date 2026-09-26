@@ -381,36 +381,66 @@ fetch_release_file() { # fetch_release_file <name>: a release-level file the sou
     *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $1 from $SOURCE_DESC" ;;
   esac
 }
-# ------------------------------------- the release metadata, and the one retry
+# ------------------------------------- the release metadata, and the retries
 #
 # A publish into the rolling release is THREE objects — SHA256SUMS,
-# SHA256SUMS.sig, index.json — and object storage gives no way to swap them
-# atomically. They are uploaded in that order, so an old index read against new
-# sums still cross-checks; the only genuinely unsafe window is between the sums
-# and the signature that covers them, one small object wide and seconds long.
+# SHA256SUMS.sig, index.json — plus, when a release-level file is being
+# installed (sdk-goldens.json, or --release-file), a fourth. Object storage
+# gives no way to swap any of them atomically. The edge cache in front of the
+# artifacts host widens the unsafe window further, from "between two uploads"
+# to "as long as any one object can still be served stale from cache" —
+# measured: `SHA256SUMS`, `SHA256SUMS.sig`, `index.json` and `sdk-goldens.json`
+# are all served `Cache-Control: public, max-age=60`, and a new sdk-goldens.json
+# paired with the previous SHA256SUMS refused CORRUPT a full minute after a
+# republish.
 #
-# Exactly two symptoms fall in that window: the signature does not verify, and
-# index.json disagrees with SHA256SUMS. Both are retried, because a moment later
-# the publish has landed and the three agree. Nothing else is: a tarball whose
-# hash is wrong (below) is the release lying about a byte, not a half-finished
-# upload, and it refuses at once. When the attempts run out these refuse exactly
-# as loudly as they did before, with the same code — a retry buys ten seconds,
-# it never converts a refusal into an install.
+# Three symptoms fall in that window, and all three are retried: the signature
+# does not verify, index.json disagrees with SHA256SUMS, and a release-level
+# file's hash disagrees with its own SHA256SUMS row (or SHA256SUMS lists it
+# but the source does not yet serve it — a new row can land before the file it
+# describes is visible). On every retry the WHOLE set is re-read from
+# scratch — never one freshly re-fetched object checked against another
+# attempt's stale one. Nothing else is retried, and neither are these three
+# once the attempts run out: the same refusal, the same code, as always. A
+# tarball whose hash is wrong (below) is the release lying about a byte, not a
+# half-finished upload, and it refuses at once.
+#
+# The budget: 5 attempts, delays 4/8/16/32s doubling (60s of sleep, ~70s wall
+# with network time) — chosen to outlast the observed 60s edge-cache TTL plus
+# margin, while a genuine few-second mid-publish window still clears on the
+# second attempt. CHTYPES_METADATA_ATTEMPTS overrides the attempt count;
+# CHTYPES_METADATA_RETRY_DELAY overrides the BASE delay in seconds (each later
+# retry still doubles it) — both existed before this change, and
+# CHTYPES_METADATA_RETRY_DELAY's meaning changed from "the constant delay
+# between all attempts" to "the first delay, which then doubles"; a test that
+# wants every sleep near-instant sets it to 0.
+#
 # Only a real HTTP source can be mid-publish. A file:// fixture or a directory
 # is whatever it is, so it refuses on the first look, exactly as it always has —
 # which is also why the tests/fixtures/fetch suites stay instant.
-METADATA_ATTEMPTS="${CHTYPES_METADATA_ATTEMPTS:-3}"
+METADATA_ATTEMPTS="${CHTYPES_METADATA_ATTEMPTS:-5}"
 METADATA_RETRY_DELAY="${CHTYPES_METADATA_RETRY_DELAY:-4}"
 case "$BASE_URL" in
   http://*|https://*) ;;
   *) METADATA_ATTEMPTS=1 ;;
 esac
 
-# Prints nothing and returns 0 when the three objects agree; on a window
-# symptom, sets WINDOW_CODE/WINDOW_MSG and returns 1. A non-window failure
-# still calls fail() and exits from inside here.
+# try_metadata reads SHA256SUMS, its signature and index.json, and — when
+# WATCH_FILE is set — one release-level file, ALL as one attempt: prints
+# nothing and returns 0 when everything agrees (the verified release-level
+# file's bytes are left at $WORK/$WATCH_FILE), or sets WINDOW_CODE/WINDOW_MSG
+# and returns 1 on a window symptom. A non-window failure still calls fail()
+# and exits from inside here — including WATCH_FILE being required but not
+# listed at all, which is "never published", not a window symptom, and is
+# never retried.
+#
+# WATCH_LISTED is set whenever WATCH_FILE is non-empty: 1 iff the SHA256SUMS
+# this attempt read names it. A release that simply predates a release-level
+# file is not an error and not retried; the caller decides what "not listed"
+# means (unpublished, for a required --release-file; "skip the golden tests
+# quietly", for the always-optional sdk-goldens.json).
 try_metadata() {
-  WINDOW_CODE=""; WINDOW_MSG=""
+  WINDOW_CODE=""; WINDOW_MSG=""; WATCH_LISTED=0
   fetch_release_file SHA256SUMS
   SIG_STATUS=""
   if [ "${CHTYPES_ALLOW_UNSIGNED:-}" = 1 ]; then
@@ -467,48 +497,74 @@ PY_XCHECK
     WINDOW_MSG="$disagreement — the release disagrees with itself; not installing it"
     return 1
   fi
+
+  # The release-level file this attempt is also watching, read as part of the
+  # SAME set as the three objects above: it is a row in SHA256SUMS exactly
+  # like a tarball, so a stale pairing of it against the sums (or against
+  # nothing, if the sums row landed before the file itself is visible) is the
+  # same publish window, not a separate failure mode.
+  if [ -n "$WATCH_FILE" ]; then
+    local want got rc=0
+    want="$(awk -v f="$WATCH_FILE" '$2 == f || $2 == "*" f {print $1}' "$WORK/SHA256SUMS" | head -1)"
+    if [ -z "$want" ]; then
+      [ "$WATCH_REQUIRED" != 1 ] || fail CHTYPES_ARTIFACT_UNPUBLISHED "the signed SHA256SUMS at $SOURCE_DESC does not list $WATCH_FILE"
+      return 0
+    fi
+    WATCH_LISTED=1
+    get_file "$WATCH_FILE" "$WORK/$WATCH_FILE" || rc=$?
+    case "$rc" in
+      0) ;;
+      1) WINDOW_CODE=CHTYPES_ARTIFACT_CORRUPT
+         WINDOW_MSG="SHA256SUMS lists $WATCH_FILE but $SOURCE_DESC does not serve it — the release disagrees with itself; not installing it"
+         return 1 ;;
+      *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $WATCH_FILE from $SOURCE_DESC" ;;
+    esac
+    got="$(sha256_of "$WORK/$WATCH_FILE")"
+    if [ "$got" != "$want" ]; then
+      WINDOW_CODE=CHTYPES_ARTIFACT_CORRUPT
+      WINDOW_MSG="$WATCH_FILE hashes to $got but the signed SHA256SUMS says $want — not installing it"
+      return 1
+    fi
+  fi
 }
 
-attempt=1
-while :; do
-  try_metadata && break
-  if [ "$attempt" -ge "$METADATA_ATTEMPTS" ]; then
-    fail "$WINDOW_CODE" "$WINDOW_MSG"
-  fi
-  echo "fetch.sh: $WINDOW_CODE on attempt $attempt/$METADATA_ATTEMPTS — this is what a release" >&2
-  echo "          being published looks like from outside; retrying in ${METADATA_RETRY_DELAY}s" >&2
-  sleep "$METADATA_RETRY_DELAY"
-  attempt=$((attempt + 1))
-done
-
-# install_release_file <name> <label> <required: 0|1> — a release-level file
-# that is a row in the signed SHA256SUMS, verified through the same chain as a
-# tarball: the signature covers the sums, the sums name its sha256, and the
-# bytes on disk must hash to it before it moves into <dest>. Absent from the
-# sums: a refusal when required, otherwise return 1 and let the caller say why.
-install_release_file() {
-  local name="$1" label="$2" required="$3" want got rc=0
-  want="$(awk -v f="$name" '$2 == f || $2 == "*" f {print $1}' "$WORK/SHA256SUMS" | head -1)"
-  if [ -z "$want" ]; then
-    [ "$required" != 1 ] || fail CHTYPES_ARTIFACT_UNPUBLISHED "the signed SHA256SUMS at $SOURCE_DESC does not list $name"
-    return 1
-  fi
-  get_file "$name" "$WORK/$name" || rc=$?
-  case "$rc" in
-    0) ;;
-    1) fail CHTYPES_ARTIFACT_CORRUPT "SHA256SUMS lists $name but $SOURCE_DESC does not serve it — the release disagrees with itself; not installing it" ;;
-    *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $name from $SOURCE_DESC" ;;
-  esac
-  got="$(sha256_of "$WORK/$name")"
-  [ "$got" = "$want" ] \
-    || fail CHTYPES_ARTIFACT_CORRUPT "$name hashes to $got but the signed SHA256SUMS says $want — not installing it"
-  mkdir -p "$DEST"
-  mv -f "$WORK/$name" "$DEST/$name"
-  say "$label verified and installed: $DEST/$name"
+# metadata_retry_loop runs try_metadata (WATCH_FILE/WATCH_REQUIRED already
+# set by the caller) through the publish-window retry above, doubling the
+# delay each time; on exhausted attempts it fails exactly as try_metadata's
+# own fail() calls always have — same code, same exit status.
+metadata_retry_loop() {
+  local attempt=1 delay="$METADATA_RETRY_DELAY"
+  while :; do
+    try_metadata && return 0
+    if [ "$attempt" -ge "$METADATA_ATTEMPTS" ]; then
+      fail "$WINDOW_CODE" "$WINDOW_MSG"
+    fi
+    echo "fetch.sh: $WINDOW_CODE on attempt $attempt/$METADATA_ATTEMPTS — this is what a release" >&2
+    echo "          being published looks like from outside; retrying in ${delay}s" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
 }
+
+# The initial read: --release-file watches itself (required — a name the
+# release never published at all is unpublished, not a window symptom); the
+# main flow watches nothing yet, because the artifact(s) below are selected
+# from THIS read and sdk-goldens.json is best-effort, checked only after they
+# install (§3b).
+if [ -n "$RELEASE_FILE" ]; then
+  WATCH_FILE="$RELEASE_FILE"; WATCH_REQUIRED=1
+else
+  WATCH_FILE=""; WATCH_REQUIRED=0
+fi
+metadata_retry_loop
 
 if [ -n "$RELEASE_FILE" ]; then
-  install_release_file "$RELEASE_FILE" "$RELEASE_FILE" 1
+  # Already fetched and verified inside try_metadata's own retry, above —
+  # nothing left to do but move the bytes into place.
+  mkdir -p "$DEST"
+  mv -f "$WORK/$RELEASE_FILE" "$DEST/$RELEASE_FILE"
+  say "$RELEASE_FILE verified and installed: $DEST/$RELEASE_FILE"
   exit 0
 fi
 
@@ -725,9 +781,66 @@ if [ "$ALL" = 1 ]; then say "$INSTALLED version(s) installed into $DEST"; fi
 # the pipeline that builds the artifacts, and an older release simply predates
 # it. Say so once and carry on — a missing golden set makes the golden tests
 # skip, which they already do loudly.
+#
+# The first look reuses $WORK/SHA256SUMS from the metadata read at the top of
+# this script — cheap, and right on the overwhelmingly common case that
+# nothing is mid-publish (the artifact(s) above have already installed by the
+# time this runs, so that read may by now be a little old, but a disagreement
+# here is still the SAME publish window, not a new failure mode). Only a
+# disagreement is retried, and a retry re-reads the WHOLE consistent set
+# fresh through try_metadata — SHA256SUMS, its signature, index.json AND the
+# golden set together — never the golden set alone checked against this
+# call's by-then possibly-stale SHA256SUMS. When the attempts run out this
+# fails exactly as it always has: the same code, the same exit status.
 install_goldens() {
-  install_release_file sdk-goldens.json "golden set" 0 && return 0
-  echo "fetch.sh: this release does not publish sdk-goldens.json (an older release predates the served" >&2
-  echo "          golden set); the SDKs' golden tests will skip until it does" >&2
+  local attempt=1 delay="$METADATA_RETRY_DELAY" want got rc=0
+  while :; do
+    if [ "$attempt" -eq 1 ]; then
+      want="$(awk -v f="sdk-goldens.json" '$2 == f || $2 == "*" f {print $1}' "$WORK/SHA256SUMS" | head -1)"
+      if [ -z "$want" ]; then
+        echo "fetch.sh: this release does not publish sdk-goldens.json (an older release predates the served" >&2
+        echo "          golden set); the SDKs' golden tests will skip until it does" >&2
+        return 0
+      fi
+      rc=0; get_file sdk-goldens.json "$WORK/sdk-goldens.json" || rc=$?
+      if [ "$rc" = 0 ]; then
+        got="$(sha256_of "$WORK/sdk-goldens.json")"
+        if [ "$got" = "$want" ]; then
+          mkdir -p "$DEST"
+          mv -f "$WORK/sdk-goldens.json" "$DEST/sdk-goldens.json"
+          say "golden set verified and installed: $DEST/sdk-goldens.json"
+          return 0
+        fi
+        WINDOW_CODE=CHTYPES_ARTIFACT_CORRUPT
+        WINDOW_MSG="sdk-goldens.json hashes to $got but the signed SHA256SUMS says $want — not installing it"
+      elif [ "$rc" = 1 ]; then
+        WINDOW_CODE=CHTYPES_ARTIFACT_CORRUPT
+        WINDOW_MSG="SHA256SUMS lists sdk-goldens.json but $SOURCE_DESC does not serve it — the release disagrees with itself; not installing it"
+      else
+        fail CHTYPES_SOURCE_UNREACHABLE "could not fetch sdk-goldens.json from $SOURCE_DESC"
+      fi
+    else
+      WATCH_FILE="sdk-goldens.json"; WATCH_REQUIRED=0
+      if try_metadata; then
+        if [ "$WATCH_LISTED" = 1 ]; then
+          mkdir -p "$DEST"
+          mv -f "$WORK/sdk-goldens.json" "$DEST/sdk-goldens.json"
+          say "golden set verified and installed: $DEST/sdk-goldens.json"
+        else
+          echo "fetch.sh: this release does not publish sdk-goldens.json (an older release predates the served" >&2
+          echo "          golden set); the SDKs' golden tests will skip until it does" >&2
+        fi
+        return 0
+      fi
+    fi
+    if [ "$attempt" -ge "$METADATA_ATTEMPTS" ]; then
+      fail "$WINDOW_CODE" "$WINDOW_MSG"
+    fi
+    echo "fetch.sh: $WINDOW_CODE on attempt $attempt/$METADATA_ATTEMPTS — this is what a release" >&2
+    echo "          being published looks like from outside; retrying in ${delay}s" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
 }
 install_goldens

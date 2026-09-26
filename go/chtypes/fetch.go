@@ -243,26 +243,90 @@ func Ensure(ctx context.Context, spelling string, opts FetchOptions) (*Installed
 // where every binding's golden test reads it offline.
 const goldensAsset = "sdk-goldens.json"
 
-// installGoldens fetches the served golden set, if this release publishes one.
-//
-// It never fails a fetch. A release with no such row simply predates the served
-// set, and a golden set that cannot be written leaves the golden tests skipping
-// loudly — which is their job when there is nothing to read. What it will not do
-// is install bytes the signed SHA256SUMS does not describe.
-func (f *fetcher) installGoldens(ctx context.Context) {
-	want, listed := f.sums[goldensAsset]
+// readGoldensOnce is one look at the served golden set against sums — the
+// release's own, already-verified SHA256SUMS map, or a fresh one a retry just
+// re-read. Returns (blob, listed, err); err is an *ArtifactError (from
+// f.fail, so isPublishWindow recognizes it) for either half of the window
+// symptom: a hash mismatch, or sums listing the file while the source does
+// not (yet) serve it. listed is true whenever sums names goldensAsset at all,
+// independent of err, since a caller reports "not published" only when it is
+// false AND there is no error.
+func (f *fetcher) readGoldensOnce(ctx context.Context, sums map[string]string) (blob []byte, listed bool, err error) {
+	want, listed := sums[goldensAsset]
 	if !listed {
-		f.say("this release does not publish %s (the SDKs' golden tests will skip until it does)", goldensAsset)
-		return
+		return nil, false, nil
 	}
-	blob, err := f.src.readAll(ctx, goldensAsset, 8<<20)
+	blob, err = f.src.readAll(ctx, goldensAsset, 8<<20)
 	if err != nil {
-		f.say("could not read %s from %s: %v — the golden tests will skip", goldensAsset, f.src, err)
-		return
+		if errors.Is(err, errAssetNotFound) {
+			return nil, true, f.fail(CodeArtifactCorrupt, "", err,
+				"SHA256SUMS lists %s but %s does not serve it — the release disagrees with itself; not installing it", goldensAsset, f.src)
+		}
+		return nil, true, f.fail(CodeSourceUnreachable, "", err, "could not read %s from %s: %v", goldensAsset, f.src, err)
 	}
 	sum := sha256.Sum256(blob)
 	if got := hex.EncodeToString(sum[:]); got != want {
-		f.say("NOT installing %s: it hashes to %s but the signed SHA256SUMS says %s", goldensAsset, got, want)
+		return nil, true, f.fail(CodeArtifactCorrupt, "", nil,
+			"%s hashes to %s but the signed SHA256SUMS says %s — not installing it", goldensAsset, got, want)
+	}
+	return blob, true, nil
+}
+
+// installGoldens installs the served golden set, if this release publishes
+// one, and never fails the fetch that called it: a release-level file here is
+// best-effort.
+//
+// The first look reuses f.sums — the sums loadRelease already verified —
+// which is cheap and right on the overwhelmingly common case that nothing is
+// mid-publish. Only a disagreement is retried (the same publish-window
+// symptom as the signature and index.json: docs/guides/fetch.md §3a), and a retry
+// re-reads the WHOLE consistent set fresh through loadReleaseOnce — SHA256SUMS,
+// its signature, index.json AND the golden set together — never the golden
+// set alone checked against this call's by-then possibly-stale f.sums.
+//
+// A release with no such row simply predates the served set, and a mismatch
+// that never heals — or a golden set that cannot be written — leaves the
+// golden tests skipping loudly, which is their job when there is nothing
+// trustworthy to read.
+func (f *fetcher) installGoldens(ctx context.Context) {
+	attempts := 1
+	if f.src.remote {
+		attempts = releaseLoadAttempts
+	}
+	delay := releaseRetryDelay
+	var blob []byte
+	var listed bool
+	for attempt := 1; ; attempt++ {
+		var err error
+		if attempt == 1 {
+			blob, listed, err = f.readGoldensOnce(ctx, f.sums)
+		} else {
+			// A stale first look: re-verify everything from scratch, not just
+			// the golden set against sums that may themselves have moved on.
+			f.wantGoldens = true
+			f.loaded = false
+			err = f.loadReleaseOnce(ctx, "")
+			blob, listed = f.goldensBlob, f.goldensListed
+		}
+		if err == nil {
+			break
+		}
+		if attempt >= attempts || !isPublishWindow(err) {
+			f.say("%v — the golden tests will skip", err)
+			return
+		}
+		f.say("%v (attempt %d/%d) — this is what a release being published looks like from outside; retrying in %s",
+			err, attempt, attempts, delay)
+		select {
+		case <-ctx.Done():
+			f.say("%v — the golden tests will skip", err)
+			return
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
+	if !listed {
+		f.say("this release does not publish %s (the SDKs' golden tests will skip until it does)", goldensAsset)
 		return
 	}
 	if err := os.MkdirAll(f.dest, 0o755); err != nil {
@@ -529,6 +593,17 @@ type fetcher struct {
 	index    *ReleaseIndex
 	sums     map[string]string // asset file -> sha256, from the verified SHA256SUMS
 	signedBy string
+
+	// wantGoldens asks loadReleaseOnce to read and verify the served golden
+	// set (goldensAsset) as part of the SAME fresh read as the signature and
+	// index.json. installGoldens sets it only when its OWN cheap first look
+	// (against the already-verified f.sums) disagreed and it needs a full
+	// reread on retry — never on the initial Ensure/FetchAll load, and never
+	// for ListRelease, so the common case pays for exactly one read of the
+	// release, not two.
+	wantGoldens   bool
+	goldensListed bool   // true iff the verified SHA256SUMS lists goldensAsset
+	goldensBlob   []byte // the verified bytes, once loadRelease has succeeded
 }
 
 func newFetcher(opts FetchOptions) (*fetcher, error) {
@@ -635,6 +710,8 @@ func (f *fetcher) loadReleaseOnce(ctx context.Context, line string) error {
 	if f.loaded {
 		return nil
 	}
+	f.goldensListed = false
+	f.goldensBlob = nil
 	f.say("source %s", f.src)
 	// Reachability first: a source with no index.json is not a release at
 	// all, and saying "unsigned" about an empty directory would mislead.
@@ -697,31 +774,63 @@ func (f *fetcher) loadReleaseOnce(ctx context.Context, line string) error {
 				"index.json says %s is %s but SHA256SUMS says %s — the release disagrees with itself; not installing it", a.File, a.SHA256, sumsSHA)
 		}
 	}
+	// The served golden set, read as part of the SAME set as the three
+	// objects above — only when installGoldens asked for a fresh reread
+	// (f.wantGoldens), which it does on a retry, never on its own first,
+	// cheap look at the already-verified f.sums. It is a row in SHA256SUMS
+	// exactly like a tarball, so a stale pairing of it against the sums (or
+	// against nothing, if the sums row landed before the file itself is
+	// visible) is the same publish window here too, and readGoldensOnce
+	// raises the same *ArtifactError codes isPublishWindow already knows.
+	if f.wantGoldens {
+		blob, listed, err := f.readGoldensOnce(ctx, f.sums)
+		f.goldensListed = listed
+		f.goldensBlob = blob
+		if err != nil {
+			f.loaded = false
+			return err
+		}
+	}
 	return nil
 }
 
 // How many times loadRelease reads a remote release before giving up, and the
-// wait between reads: three attempts span about ten seconds. A var, not a
-// const, so the retry test can exercise a real window without a real wait.
+// base delay before the first retry: each subsequent retry doubles it, so the
+// default 5 attempts sleep 4+8+16+32 = 60s (~70s wall with network time) —
+// enough to outlast the artifacts host's edge cache (observed max-age=60 on
+// the mutable release objects, so a stale pairing can persist up to 60s),
+// while a genuine few-second mid-publish window still clears on the second
+// attempt. Vars, not consts, so the retry tests can exercise a real window
+// without a real wait.
 var (
-	releaseLoadAttempts = 3
+	releaseLoadAttempts = 5
 	releaseRetryDelay   = 4 * time.Second
 )
 
-// loadRelease is loadReleaseOnce, retried through a publish window.
+// loadRelease is loadReleaseOnce, retried through a publish window. It is the
+// only caller during Ensure/FetchAll's initial load (wantGoldens unset —
+// that is the cheap, common case); installGoldens runs the SAME loop shape
+// itself, directly around loadReleaseOnce, only when its own first look
+// disagreed and wantGoldens needs to be set for the reread.
 //
 // A publish into the rolling release is three objects — SHA256SUMS,
-// SHA256SUMS.sig, index.json — and object storage cannot swap them atomically.
-// They go up in that order, so an old index read against new sums still
-// cross-checks; the unsafe window is between the sums and the signature that
-// covers them, one small object wide and seconds long.
+// SHA256SUMS.sig, index.json — plus, on a goldens reread, a fourth
+// release-level file (the golden set) — and object storage cannot swap them
+// atomically. The edge cache in front of the artifacts host widens the unsafe
+// window from "between two uploads" to "as long as any one object can still
+// be served stale from cache", which measures the same as its Cache-Control
+// max-age.
 //
-// The two symptoms of reading inside it — a signature that verifies under no
-// trusted key, and an index that disagrees with the sums — are retried. Nothing
-// else is, and neither are these once the attempts run out: the same error
-// surfaces with the same code and exit status as before. A tarball whose hash is
-// wrong is never retried; that is the release lying about a byte, not a
-// half-finished upload.
+// Three symptoms of reading inside that window are retried: a signature that
+// verifies under no trusted key, an index that disagrees with the sums, and a
+// release-level file whose hash disagrees with its own SHA256SUMS row (or that
+// the sums list but the source does not yet serve — a new row can land before
+// the file it describes is visible). On every retry the WHOLE set is read
+// again from scratch — never one freshly re-fetched object checked against
+// another attempt's stale one. Nothing else is retried, and neither are these
+// three once the attempts run out: the same error surfaces with the same code
+// and exit status as before. A tarball whose hash is wrong is never retried;
+// that is the release lying about a byte, not a half-finished upload.
 //
 // Only a remote source can be mid-publish, so a directory or file:// source is
 // read exactly once and refuses on the first look.
@@ -730,22 +839,24 @@ func (f *fetcher) loadRelease(ctx context.Context, line string) error {
 	if f.src.remote {
 		attempts = releaseLoadAttempts
 	}
+	delay := releaseRetryDelay
 	for attempt := 1; ; attempt++ {
 		err := f.loadReleaseOnce(ctx, line)
 		if err == nil || attempt >= attempts || !isPublishWindow(err) {
 			return err
 		}
 		f.say("%v (attempt %d/%d) — this is what a release being published looks like from outside; retrying in %s",
-			err, attempt, attempts, releaseRetryDelay)
+			err, attempt, attempts, delay)
 		select {
 		case <-ctx.Done():
 			return err
-		case <-time.After(releaseRetryDelay):
+		case <-time.After(delay):
 		}
+		delay *= 2
 	}
 }
 
-// isPublishWindow reports whether err is one of the two symptoms of reading a
+// isPublishWindow reports whether err is one of the symptoms of reading a
 // release mid-publish, and so worth reading again.
 func isPublishWindow(err error) bool {
 	var ae *ArtifactError

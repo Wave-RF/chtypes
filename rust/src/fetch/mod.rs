@@ -254,7 +254,7 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
 
     let installed = install::fetch_and_install(&source, row, &dest, &platform, opts.progress)?;
     record(lock.as_mut(), opts, &key, row)?;
-    install_goldens(&source, &release, &dest, opts.progress);
+    install_goldens(&source, &release, &policy, &dest, opts.progress);
     Ok(installed)
 }
 
@@ -264,49 +264,75 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
 /// every binding's golden test reads it offline.
 const GOLDENS_ASSET: &str = "sdk-goldens.json";
 
-/// Install the served golden set, if this release publishes one.
+/// Install the served golden set, if this release publishes one, and never
+/// fail the fetch that called it: a release-level file here is best-effort.
 ///
-/// Never fails a fetch. A release with no such row simply predates the served
-/// set, and a set that cannot be written leaves the golden tests skipping
-/// loudly, which is their job when there is nothing to read. What it will not do
-/// is install bytes the signed `SHA256SUMS` does not describe.
-fn install_goldens(source: &Source, release: &Release, dest: &std::path::Path, progress: bool) {
+/// The first look reuses `release`'s already-verified sums ([`Release::sum_for`]
+/// via [`Release::read_goldens`]) — cheap, and right on the overwhelmingly
+/// common case that nothing is mid-publish. Only a disagreement is retried
+/// (the same publish-window symptom as the signature and index.json:
+/// `docs/guides/fetch.md` §3a), and a retry re-reads the WHOLE consistent set
+/// fresh through [`Release::load_once`] — `SHA256SUMS`, its signature,
+/// `index.json` AND the golden set together — never the golden set alone
+/// checked against this call's by-then possibly-stale `release`.
+///
+/// A release with no such row simply predates the served set, and a mismatch
+/// that never heals — or a set that cannot be written — leaves the golden
+/// tests skipping loudly, which is their job when there is nothing
+/// trustworthy to read.
+fn install_goldens(
+    source: &Source,
+    release: &Release,
+    policy: &TrustPolicy,
+    dest: &std::path::Path,
+    progress: bool,
+) {
     let note = |msg: String| {
         if progress {
             eprintln!("chtypes: {msg}");
         }
     };
-    let Some(want) = release.sum_for(GOLDENS_ASSET) else {
+    let attempts = if matches!(source, Source::Http { .. }) {
+        release::RELEASE_LOAD_ATTEMPTS
+    } else {
+        1
+    };
+    let mut delay = release::release_retry_delay();
+    let mut attempt = 1;
+    let blob = loop {
+        let result = if attempt == 1 {
+            release.read_goldens(source, GOLDENS_ASSET)
+        } else {
+            // A stale first look: re-verify everything from scratch, not just
+            // the golden set against sums that may themselves have moved on.
+            Release::load_once(source, policy, progress)
+                .and_then(|fresh| fresh.read_goldens(source, GOLDENS_ASSET))
+        };
+        match result {
+            Ok(blob) => break blob,
+            Err(err) if attempt < attempts && release::is_publish_window(&err) => {
+                note(format!(
+                    "{err} (attempt {attempt}/{attempts}) — this is what a release being \
+                     published looks like from outside; retrying in {}s",
+                    delay.as_secs()
+                ));
+                std::thread::sleep(delay);
+                delay *= 2;
+                attempt += 1;
+            }
+            Err(err) => {
+                note(format!("{err} — the golden tests will skip"));
+                return;
+            }
+        }
+    };
+    let Some(blob) = blob else {
         note(format!(
             "this release does not publish {GOLDENS_ASSET} (the SDKs' golden tests will skip \
              until it does)"
         ));
         return;
     };
-    let blob = match source.read(GOLDENS_ASSET) {
-        Ok(Some(b)) => b,
-        Ok(None) => {
-            note(format!(
-                "SHA256SUMS lists {GOLDENS_ASSET} but {} does not serve it — NOT installing it",
-                source.describe()
-            ));
-            return;
-        }
-        Err(e) => {
-            note(format!(
-                "could not read {GOLDENS_ASSET}: {e} — the golden tests will skip"
-            ));
-            return;
-        }
-    };
-    let got = super::fetch::trust::sha256_hex(&blob);
-    if got != want {
-        note(format!(
-            "NOT installing {GOLDENS_ASSET}: it hashes to {got} but the signed SHA256SUMS says \
-             {want}"
-        ));
-        return;
-    }
     let out = dest.join(GOLDENS_ASSET);
     if let Err(e) = std::fs::create_dir_all(dest).and_then(|()| std::fs::write(&out, &blob)) {
         note(format!(
@@ -390,7 +416,7 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
         record(lock.as_mut(), opts, &key, row)?;
         out.push(installed);
     }
-    install_goldens(&source, &release, &dest, opts.progress);
+    install_goldens(&source, &release, &policy, &dest, opts.progress);
     Ok(out)
 }
 

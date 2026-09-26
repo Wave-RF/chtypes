@@ -516,31 +516,50 @@ async function loadReleaseOnce(source: Source, options: EnsureOptions, emit: (e:
   return release;
 }
 
-/** How many times {@link loadRelease} reads an HTTP release before giving up. */
-const RELEASE_LOAD_ATTEMPTS = 3;
-/** The wait between those reads: three attempts span about ten seconds. */
-const RELEASE_RETRY_DELAY_MS = 4_000;
+/**
+ * How many times {@link loadRelease} (and {@link installGoldens}'s own retry)
+ * reads an HTTP release before giving up, and the BASE delay (ms) before the
+ * first retry — each later retry doubles it, so the default 5 attempts sleep
+ * 4+8+16+32 = 60s (~70s wall with network time). That is chosen to outlast
+ * the artifacts host's edge cache (observed `Cache-Control: max-age=60` on
+ * the mutable release objects, so a stale pairing of any of them can persist
+ * up to 60s), while a genuine few-second mid-publish window still clears on
+ * the second attempt.
+ *
+ * A mutable object, not two `const`s: an ES module's imported bindings are
+ * read-only, so a plain exported `let` could not be reassigned from outside,
+ * and the fetch test suite needs to shrink `delayMs` to near zero. Not
+ * re-exported from `index.ts` — internal to this module and its test suite.
+ */
+export const RELEASE_RETRY: { attempts: number; delayMs: number } = { attempts: 5, delayMs: 4_000 };
 
 /**
  * {@link loadReleaseOnce}, retried through a publish window.
  *
  * A publish into the rolling release is three objects — `SHA256SUMS`,
  * `SHA256SUMS.sig`, `index.json` — and object storage cannot swap them
- * atomically. They go up in that order, so an old index read against new sums
- * still cross-checks; the unsafe window is between the sums and the signature
- * that covers them, one small object wide and seconds long.
+ * atomically. The edge cache in front of the artifacts host widens the unsafe
+ * window from "between two uploads" to "as long as any one object can still be
+ * served stale from cache", which measures the same as its `Cache-Control`
+ * max-age.
  *
- * The two symptoms of reading inside it — a signature under no trusted key and
- * an index that disagrees with the sums — are retried. Nothing else is, and
- * neither are these once the attempts run out: the same error surfaces, with the
- * same code, as it did before. A tarball whose hash is wrong is never retried;
- * that is the release lying about a byte, not a half-finished upload.
+ * Three symptoms of reading inside that window are retried: a signature under
+ * no trusted key, an index that disagrees with the sums, and (in
+ * {@link installGoldens}) a release-level file whose hash disagrees with its
+ * own SHA256SUMS row, or that the sums list but the source does not yet serve.
+ * Every retry re-reads the WHOLE set from scratch — never one freshly
+ * re-fetched object checked against another attempt's stale one. Nothing else
+ * is retried, and neither are these three once the attempts run out: the same
+ * error surfaces, with the same code, as it did before. A tarball whose hash
+ * is wrong is never retried; that is the release lying about a byte, not a
+ * half-finished upload.
  *
  * Only an HTTP source can be mid-publish, so a `file://` or directory source is
  * read exactly once and refuses on the first look.
  */
 async function loadRelease(source: Source, options: EnsureOptions, emit: (e: FetchEvent) => void): Promise<Release> {
-  const attempts = source instanceof HttpSource ? RELEASE_LOAD_ATTEMPTS : 1;
+  const attempts = source instanceof HttpSource ? RELEASE_RETRY.attempts : 1;
+  let delayMs = RELEASE_RETRY.delayMs;
   for (let attempt = 1; ; attempt++) {
     try {
       return await loadReleaseOnce(source, options, emit);
@@ -551,9 +570,10 @@ async function loadRelease(source: Source, options: EnsureOptions, emit: (e: Fet
         type: 'status',
         message:
           `${String(err)} (attempt ${attempt}/${attempts}) — this is what a release being ` +
-          `published looks like from outside; retrying in ${RELEASE_RETRY_DELAY_MS / 1000}s`,
+          `published looks like from outside; retrying in ${delayMs / 1000}s`,
       });
-      await new Promise((resolve) => setTimeout(resolve, RELEASE_RETRY_DELAY_MS));
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs *= 2;
     }
   }
 }
@@ -749,7 +769,7 @@ export async function ensureAll(options: EnsureOptions = {}): Promise<EnsureResu
   const release = await loadRelease(source, options, emit);
   const out: EnsureResult[] = [];
   for (const art of selectAll(release.index, platform)) out.push(await installOne(release, art, ctx));
-  await installGoldens(release, ctx);
+  await installGoldens(release, ctx, options);
   return out;
 }
 
@@ -762,27 +782,79 @@ export async function ensureAll(options: EnsureOptions = {}): Promise<EnsureResu
 const GOLDENS_ASSET = 'sdk-goldens.json';
 
 /**
- * Install the served golden set, if this release publishes one.
- *
- * Never throws. A release with no such row simply predates the served set, and a
- * set that cannot be written leaves the golden tests skipping loudly, which is
- * their job when there is nothing to read. What it will not do is install bytes
- * the signed `SHA256SUMS` does not describe.
+ * One look at the served golden set against an already-verified `sums` map.
+ * Resolves `null` when the release simply does not list it (not an error).
+ * Throws `ArtifactCorruptError`/`SourceUnreachableError` for the new window
+ * symptom — a hash mismatch, or the sums listing it while the source does not
+ * (yet) serve it — matching the codes {@link loadRelease}'s own retry
+ * recognizes, so {@link installGoldens} can reuse the same retryable check.
  */
-async function installGoldens(release: Release, ctx: InstallContext): Promise<void> {
-  const want = release.sums.get(GOLDENS_ASSET);
-  if (want === undefined) {
-    ctx.emit({ type: 'status', message: `this release does not publish ${GOLDENS_ASSET} (the SDKs' golden tests will skip until it does)` });
-    return;
-  }
-  const blob = await release.source.get(GOLDENS_ASSET);
+async function readGoldensOnce(source: Source, sums: ReadonlyMap<string, string>): Promise<Buffer | null> {
+  const want = sums.get(GOLDENS_ASSET);
+  if (want === undefined) return null;
+  const blob = await source.get(GOLDENS_ASSET);
   if (blob === null) {
-    ctx.emit({ type: 'status', message: `SHA256SUMS lists ${GOLDENS_ASSET} but ${release.source.description} does not serve it — NOT installing it` });
-    return;
+    throw new ArtifactCorruptError(
+      `chtypes: SHA256SUMS lists ${GOLDENS_ASSET} but ${source.description} does not serve it — the release disagrees with itself; not installing it`,
+    );
   }
   const got = createHash('sha256').update(blob).digest('hex');
   if (got !== want) {
-    ctx.emit({ type: 'status', message: `NOT installing ${GOLDENS_ASSET}: it hashes to ${got} but the signed SHA256SUMS says ${want}` });
+    throw new ArtifactCorruptError(`chtypes: ${GOLDENS_ASSET} hashes to ${got} but the signed SHA256SUMS says ${want} — not installing it`);
+  }
+  return blob;
+}
+
+/**
+ * Install the served golden set, if this release publishes one, and never
+ * fail the fetch that called it: a release-level file here is best-effort.
+ *
+ * The first look reuses `release.sums` — already verified by {@link loadRelease}
+ * — which is cheap and right on the overwhelmingly common case that nothing is
+ * mid-publish. Only a disagreement is retried (the same publish-window symptom
+ * as the signature and index.json), and a retry re-reads the WHOLE consistent
+ * set fresh through {@link loadReleaseOnce} — SHA256SUMS, its signature,
+ * index.json AND the golden set together — never the golden set alone checked
+ * against this call's by-then possibly-stale `release.sums`.
+ *
+ * Never throws. A release with no such row simply predates the served set, and a
+ * mismatch that never heals — or a set that cannot be written — leaves the
+ * golden tests skipping loudly, which is their job when there is nothing
+ * trustworthy to read.
+ */
+async function installGoldens(release: Release, ctx: InstallContext, options: EnsureOptions): Promise<void> {
+  const attempts = release.source instanceof HttpSource ? RELEASE_RETRY.attempts : 1;
+  let delayMs = RELEASE_RETRY.delayMs;
+  let blob: Buffer | null = null;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      if (attempt === 1) {
+        blob = await readGoldensOnce(release.source, release.sums);
+      } else {
+        // A stale first look: re-verify everything from scratch, not just the
+        // golden set against sums that may themselves have moved on.
+        const fresh = await loadReleaseOnce(release.source, options, ctx.emit);
+        blob = await readGoldensOnce(fresh.source, fresh.sums);
+      }
+      break;
+    } catch (err) {
+      const retryable = err instanceof ArtifactUntrustedError || err instanceof ArtifactCorruptError;
+      if (!retryable || attempt >= attempts) {
+        ctx.emit({ type: 'status', message: `${String(err)} — the golden tests will skip` });
+        return;
+      }
+      ctx.emit({
+        type: 'status',
+        message:
+          `${String(err)} (attempt ${attempt}/${attempts}) — this is what a release being ` +
+          `published looks like from outside; retrying in ${delayMs / 1000}s`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs *= 2;
+    }
+  }
+  if (blob === null) {
+    ctx.emit({ type: 'status', message: `this release does not publish ${GOLDENS_ASSET} (the SDKs' golden tests will skip until it does)` });
     return;
   }
   const out = path.join(ctx.dest, GOLDENS_ASSET);
@@ -869,7 +941,7 @@ async function ensureUncached(req: VersionRequest, platform: string, dest: strin
   const release = await loadRelease(source, options, ctx.emit);
   const art = selectArtifact(release.index, platform, req);
   const installed = await installOne(release, art, ctx);
-  await installGoldens(release, ctx);
+  await installGoldens(release, ctx, options);
   return installed;
 }
 
