@@ -252,9 +252,9 @@ def test_golden_reader_treats_omitted_optional_fields_as_empty() -> None:
 
 
 def test_golden_reader_requires_outcome_unless_compile_error() -> None:
-    """``""`` is not a valid outcome. Omitting the key is legal only on a
-    compile-error case; anywhere else it is a malformed golden and must fail
-    loudly rather than default."""
+    """The empty string is not a valid outcome. Omitting the key is legal
+    only on a compile-error case; anywhere else it is a malformed golden and
+    must fail loudly rather than default."""
     case = {"id": "synthetic-no-outcome"}
     with pytest.raises(AssertionError, match="synthetic-no-outcome.*has no outcome"):
         _case_outcome(case, {})
