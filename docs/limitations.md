@@ -4,9 +4,11 @@ Every item here is a deliberate decline or a stated boundary, not a bug queue. T
 
 When you get one, fall back to the server: validate cautiously, forward the row unpreviewed, and never tell a user they are wrong on the strength of a decline.
 
-## macOS is a development floor, not an oracle
+<a id="macos-is-a-development-floor-not-an-oracle"></a>
 
-The darwin artifacts exist so you can develop and run the suites on a laptop. They are not an oracle.
+## macOS artifacts are for development; Linux is the reference
+
+The darwin artifacts exist so you can develop and run the suites on a laptop. They are not the reference for what a server does; Linux artifacts and live servers are.
 
 macOS's `long double` is 53-bit, so some float parses diverge from a real server. Measured: on Linux the float corpus matches in full; on macOS none of it does. That is not a near miss to be tolerated — it is a systematic difference in a whole class of values.
 
@@ -49,7 +51,7 @@ Everything on the row path is **insert-side** coercion. Never reuse it to fold a
 
 The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 256` over that column promotes and is false for every row. Refuse an operand outside the column type's domain instead — or use [`guides/filters.md`](guides/filters.md), which is the surface that answers comparison questions with ClickHouse's own comparison functions.
 
-## Filters are shadow-only for now
+## Filters are for comparison, not enforcement, for now
 
 No read-side security may be enforced on the filter surface until a release explicitly lifts this limitation — the CHANGELOG will say so, and until it does, assume it has not. Until then the surface is for shadow and replay: run it beside your existing enforcement and compare, do not replace.
 

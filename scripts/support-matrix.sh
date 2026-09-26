@@ -192,7 +192,7 @@ w("")
 w("The artifact is native code, so a platform is supported only if the release publishes a build for it. Today that is:")
 w("")
 for p in plat_order:
-    note = " — see [macOS is a development floor, not an oracle](limitations.md#macos-is-a-development-floor-not-an-oracle)" \
+    note = " — see [macOS artifacts are for development; Linux is the reference](limitations.md#macos-artifacts-are-for-development-linux-is-the-reference)" \
            if p.startswith("darwin") else ""
     w("- `%s`%s" % (p, note))
 w("")
@@ -200,7 +200,7 @@ w("Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Wi
 w("")
 w("## ClickHouse lines")
 w("")
-w("One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has a committed run of record in the core repository and the release publishes it:")
+w("One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has passed the artifact producer's comparison against a real server and the release publishes it:")
 w("")
 w("| Line | Exact version | Platforms |")
 w("|---|---|---|")

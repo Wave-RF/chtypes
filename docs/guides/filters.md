@@ -1,8 +1,8 @@
 # Filters, query parameters and the block twin
 
-A filter compiles **one boolean expression** against a schema's physical columns and answers it per row, using ClickHouse's own comparison functions. It is the read-side twin of the insert path: same rows, same artifact, different question.
+A filter compiles **one boolean expression** against a schema's physical columns and answers it per row, using ClickHouse's own comparison functions. It is the read-side twin of the insert path: same rows, same artifact, different question. The **block twin** is its parse-once variant: parse a body into a block once, then evaluate several filters against that same block.
 
-> **Enforcement gate.** No read-side security may be enforced on this surface until the WHERE-truth rig gates green. Until then a filter is shadow and replay only — compare it against your existing enforcement, do not replace it.
+> **Enforcement gate.** No read-side security may be enforced on this surface until a release explicitly lifts this limitation — the CHANGELOG will say so. Until then a filter is for comparison, not enforcement — compare it against your existing enforcement, do not replace it.
 
 ## WHERE-side semantics, which are not insert-side semantics
 
@@ -217,7 +217,7 @@ Per-row parse failures live **inside** the block and answer `decline`. A call-le
 
 ## Exporting only the rows a filter admits
 
-Attach a compiled filter to `rows`'s export channel ([`batches.md` → Exporting the accepted rows as wire bytes](batches.md#exporting-the-accepted-rows-as-wire-bytes)) and one parse answers both questions at once: the same four verdicts as above, one per row, and — for the rows whose verdict is `t` — the exported bytes. This is the row-level-security shape: compile a tenant's predicate once, reuse the handle across batches, and export only the rows it admits. It is still under the enforcement gate at the top of this page: shadow and replay, not a replacement for existing enforcement, until the WHERE-truth rig gates green.
+Attach a compiled filter to `rows`'s export channel ([`batches.md` → Exporting the accepted rows as wire bytes](batches.md#exporting-the-accepted-rows-as-wire-bytes)) and one parse answers both questions at once: the same four verdicts as above, one per row, and — for the rows whose verdict is `t` — the exported bytes. This is the row-level-security shape: compile a tenant's predicate once, reuse the handle across batches, and export only the rows it admits. It is still under the enforcement gate at the top of this page: for comparison, not a replacement for existing enforcement, until a release explicitly lifts this limitation.
 
 <details open><summary><b>Go</b></summary>
 

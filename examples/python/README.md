@@ -30,4 +30,4 @@ Everything in the tour is the same _concept_ in all four SDKs; these are the pla
 - **Context managers.** `with lib.compile_ddl(...) as schema:` frees the handle; `Registry` is a context manager too.
 - **Peer error types.** `UnsupportedError` is a PEER of `SchemaError` (`docs/reference/bindings.md` rule 12; the grandfathered subclass was retired 2026-08-26) — `except SchemaError` never catches a decline, and forgetting the decline arm raises loudly instead of silently converting declines into rejections. Section 10 demonstrates the two-arm idiom.
 - **Convenience predicates.** `RowResult.accepted` / `.poisoned` (section 5).
-- The introspection trio is complete here too: `Library.reference_type`, `Library.registered_families()`, `Library.function_flags()` (`docs/reference/bindings.md` §Introspection).
+- The three introspection functions are complete here too: `Library.reference_type`, `Library.registered_families()`, `Library.function_flags()` (`docs/reference/bindings.md` §Introspection).

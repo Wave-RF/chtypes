@@ -12,7 +12,7 @@ row + schema + ClickHouse version  ─▶  accepted / rejected / unsupported
 
 The library never connects to ClickHouse. It is a local, offline answer about what a server would do.
 
-## Two things, always
+## Two things to install: the binding and the artifact
 
 Using chtypes means installing two things, and keeping them straight is most of what there is to learn.
 
