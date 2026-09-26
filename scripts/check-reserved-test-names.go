@@ -1,4 +1,4 @@
-// check-truth-namespace.go — go/chtypes never declares a top-level identifier
+// check-reserved-test-names.go — go/chtypes never declares a top-level identifier
 // in the name range reserved for the artifact producer's overlay tests.
 //
 // WHY THIS EXISTS. The artifact producer's server-truth tests are compiled
@@ -38,8 +38,8 @@
 // not occupy the package namespace the overlay shares, so it cannot collide
 // with an overlay-declared name and is not checked here.
 //
-//	scripts/check-truth-namespace.sh              check go/chtypes/*.go
-//	scripts/check-truth-namespace.sh --selftest   plant reserved names into a
+//	scripts/check-reserved-test-names.sh              check go/chtypes/*.go
+//	scripts/check-reserved-test-names.sh --selftest   plant reserved names into a
 //	                                              temporary copy and prove
 //	                                              each one is caught
 package main
@@ -165,7 +165,7 @@ func printFindings(w io.Writer, findings []Finding) {
 		fmt.Fprintln(w, f.String())
 	}
 	fmt.Fprintf(w, `
-check-truth-namespace: %d identifier(s) declared in go/chtypes fall in the
+check-reserved-test-names: %d identifier(s) declared in go/chtypes fall in the
   range reserved for the artifact producer's overlay tests
   (^[Tt]ruth or ^(Test|Benchmark|Fuzz|Example)Truth). go/chtypes and that
   overlay share one package namespace when it is compiled in with
@@ -181,14 +181,14 @@ check-truth-namespace: %d identifier(s) declared in go/chtypes fall in the
 func runCheck() int {
 	findings, err := checkDir(targetDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "check-truth-namespace: %v\n", err)
+		fmt.Fprintf(os.Stderr, "check-reserved-test-names: %v\n", err)
 		return 2
 	}
 	if len(findings) > 0 {
 		printFindings(os.Stderr, findings)
 		return 1
 	}
-	fmt.Println("check-truth-namespace: ok — go/chtypes declares no identifier in the artifact producer's reserved Truth range")
+	fmt.Println("check-reserved-test-names: ok — go/chtypes declares no identifier in the artifact producer's reserved Truth range")
 	return 0
 }
 
@@ -307,7 +307,7 @@ func runSelftest() int {
 		return 1
 	}
 
-	tmp, err := os.MkdirTemp("", "check-truth-namespace-selftest-")
+	tmp, err := os.MkdirTemp("", "check-reserved-test-names-selftest-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "SELFTEST FAILED: %v\n", err)
 		return 1
@@ -399,7 +399,7 @@ func runSelftest() int {
 	}
 
 	fmt.Println(strings.Repeat("-", 78))
-	fmt.Printf("check-truth-namespace: selftest ok — %d plant(s) caught, %d negative control(s) stayed clean\n",
+	fmt.Printf("check-reserved-test-names: selftest ok — %d plant(s) caught, %d negative control(s) stayed clean\n",
 		countWant(true), countWant(false))
 	return 0
 }

@@ -133,7 +133,7 @@ jobs:
       # a top-level name declared on both sides breaks that build (#127) — a
       # collision neither repository's own CI can see coming, since this one
       # cannot read the overlay's files and the overlay only meets a new name
-      # once the header pin moves to point at it. check-truth-namespace.go
+      # once the header pin moves to point at it. check-reserved-test-names.go
       # statically parses go/chtypes/*.go with Go's own syntax parser (no
       # build, no test, no artifact, no network — see its own header) and
       # fails on any top-level func/type/var/const identifier — including
@@ -146,9 +146,9 @@ jobs:
           go-version-file: go/go.mod
           cache: false          # the module is stdlib-only: there is no go.sum to cache
       - name: go/chtypes never declares an identifier in the artifact producer's reserved Truth range (selftest)
-        run: scripts/check-truth-namespace.sh --selftest
+        run: scripts/check-reserved-test-names.sh --selftest
       - name: go/chtypes never declares an identifier in the artifact producer's reserved Truth range
-        run: scripts/check-truth-namespace.sh
+        run: scripts/check-reserved-test-names.sh
 
   docs:
     name: "docs — the support matrix still matches what the release serves"
@@ -899,7 +899,7 @@ jobs:
     # BLOCKING, and a pure function of the diff. This repository is public; a
     # pointer into the private core repository is a dead end for every reader
     # who is not us, and so is a path that is not in this repository at all.
-    # lint-public's rules are two literal strings with no allowlist; lint-paths
+    # lint-public's rules are two literal strings with no allowlist; lint-cited-paths
     # resolves every cited repository path and fails on the ones that are not
     # there. Each script's header says why it exists and what to write instead.
     name: "public — no pointers into the private repository"
@@ -913,13 +913,13 @@ jobs:
       - run: scripts/lint-public.sh --selftest
       - run: scripts/lint-public.sh
       # The other half of the same failure. lint-public catches the private
-      # repository by NAME; lint-paths catches a citation of a path that is
+      # repository by NAME; lint-cited-paths catches a citation of a path that is
       # simply not here — which is how one proposals document that this
       # repository does not contain was cited six times, from the C header and
       # all four bindings' source, every one of which ships inside a published
       # package. Selftest first, same reason.
-      - run: scripts/lint-paths.sh --selftest
-      - run: scripts/lint-paths.sh
+      - run: scripts/lint-cited-paths.sh --selftest
+      - run: scripts/lint-cited-paths.sh
 
   prose:
     # BLOCKING. It was report-only while the tree was still hard-wrapped, which
