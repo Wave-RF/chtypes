@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lint-prose.sh — American-spelling enforcement over this entire repository
+# lint-spelling.sh — American-spelling enforcement over this entire repository
 # (every tracked file except the two exclusions below), via two independent
 # checks that must both pass:
 #
@@ -34,12 +34,12 @@
 # family of words proven to slip past misspell's matcher, so this script's
 # guarantee does not depend on trusting an opaque third-party trie.
 #
-#   scripts/lint-prose.sh              check the whole tree (see excludes)
-#   scripts/lint-prose.sh --fix        apply misspell's own corrections
+#   scripts/lint-spelling.sh              check the whole tree (see excludes)
+#   scripts/lint-spelling.sh --fix        apply misspell's own corrections
 #                                       (the WORDLIST grep has no --fix;
 #                                       those hits need a hand edit — see
 #                                       the "fix" column below)
-#   scripts/lint-prose.sh --selftest   prove WORDLIST actually fires: builds
+#   scripts/lint-spelling.sh --selftest   prove WORDLIST actually fires: builds
 #                                       a temp file of known-bad words, runs
 #                                       both checks against it, and fails
 #                                       loudly if either one comes back
@@ -144,7 +144,7 @@ list_files() {
   # exceptions — see the CHANGELOG entries, which were reworded rather than
   # excused, precisely so this stayed the only one.
   git ls-files | grep -v '/fixtures/fetch/' | grep -vE '(^|/)LICENSE$' \
-               | grep -v '^scripts/lint-prose\.sh$'
+               | grep -v '^scripts/lint-spelling\.sh$'
 }
 
 run_misspell() {
@@ -152,7 +152,7 @@ run_misspell() {
   local files=()
   mapfile -t files < <(list_files)
   if [ "${#files[@]}" -eq 0 ]; then
-    echo "lint-prose.sh: git ls-files returned nothing to check" >&2
+    echo "lint-spelling.sh: git ls-files returned nothing to check" >&2
     return 1
   fi
   if [ "$mode" = "fix" ]; then
