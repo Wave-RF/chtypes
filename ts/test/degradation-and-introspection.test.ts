@@ -20,7 +20,7 @@ const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
 if (!HAVE_REGISTRY) {
   console.warn(
-    '[chtypes] sdkfix tests against a real registry are SKIPPED: no artifact on the search path — scripts/fetch.sh 25.8 installs one (docs/guides/fetch.md)',
+    '[chtypes] degradation-and-introspection tests against a real registry are SKIPPED: no artifact on the search path — scripts/fetch.sh 25.8 installs one (docs/guides/fetch.md)',
   );
 }
 

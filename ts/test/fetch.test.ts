@@ -767,7 +767,7 @@ describe('the tar reader: files only, confined to the destination', () => {
 
 // ------------------------------------------------------------- errors
 
-describe('ArtifactError: one catchable type for all six artifact conditions (chtypes-sdk#13 A3)', () => {
+describe('ArtifactError: one catchable type for all six artifact conditions', () => {
   it('every artifact error is an ArtifactError and a RegistryError; the five verdicts stay FetchErrors too', () => {
     const missing = new ArtifactMissingError('25.8', 'linux-arm64', ['/a']);
     const verdicts = [
@@ -791,7 +791,7 @@ describe('ArtifactError: one catchable type for all six artifact conditions (cht
 
 // ------------------------------------------------------------ registry
 
-describe('the registry: the search path, the §7 error and autofetch', () => {
+describe('the registry: the search path, the missing-artifact error and autofetch', () => {
   it('spells the one error verbatim', () => {
     expect(artifactMissingMessage('25.8', 'linux-arm64', ['/a', '/b'])).toBe(
       'chtypes: no artifact for ClickHouse 25.8 (linux-arm64). Looked in: /a, /b.\n' +

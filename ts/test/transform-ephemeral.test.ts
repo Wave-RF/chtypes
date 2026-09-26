@@ -51,7 +51,7 @@ function parsedCols(): Map<string, ColumnDoc> {
   return out;
 }
 
-describe('#97: ephemeral_input vs materialized_input', () => {
+describe('ephemeral_input vs materialized_input', () => {
   it('excludes ephemeral_input from values, keeps materialized_input', () => {
     // rowResultOf's own column loop already special-cases Source.EphemeralInput
     // the same way it special-cases 'skipped' (and that loop `continue`s
