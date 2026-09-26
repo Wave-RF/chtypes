@@ -164,12 +164,11 @@ for a in rows:
     plat = "%s-%s" % (a["os"], a["arch"])
     platforms.add(plat)
     minor = a["clickhouse_minor"]
-    entry = lines.setdefault(minor, {"exact": a["clickhouse_version"], "platforms": set()})
-    entry["platforms"].add(plat)
-    # The index keeps every patch row ever published; the newest one names the line.
-    if tuple(int(p) for p in re.findall(r"\d+", a["clickhouse_version"])) > \
-       tuple(int(p) for p in re.findall(r"\d+", entry["exact"])):
-        entry["exact"] = a["clickhouse_version"]
+    # The exact patch is deliberately not tracked here: it changes on every
+    # upstream patch release, and a column of it made this generated page churn
+    # without anything a reader acts on changing. It lives in each artifact's
+    # manifest.json and in the served index.json (`clickhouse_version`).
+    lines.setdefault(minor, {"platforms": set()})["platforms"].add(plat)
 
 def order(minor):
     return tuple(int(p) for p in minor.split("."))
@@ -202,14 +201,15 @@ w("## ClickHouse lines")
 w("")
 w("One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has passed the artifact producer's comparison against a real server and the release publishes it:")
 w("")
-w("| Line | Exact version | Platforms |")
-w("|---|---|---|")
+w("| Line | Platforms |")
+w("|---|---|")
 for minor in sorted(lines, key=order):
     e = lines[minor]
     have = [p for p in plat_order if p in e["platforms"]]
     marks = "all" if len(have) == len(plat_order) else ", ".join("`%s`" % p for p in have)
-    w("| `%s` | `%s` | %s |" % (minor, e["exact"], marks))
+    w("| `%s` | %s |" % (minor, marks))
 w("")
+w("The exact ClickHouse patch each line is built from is in its artifact's `manifest.json` and in the served `index.json` (`clickhouse_version`); it moves with every upstream patch release, so it is not repeated here.")
 w("Ask for a line, never a nearest match: `for(\"25.8\")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.")
 w("")
 w("## ABI revisions")
