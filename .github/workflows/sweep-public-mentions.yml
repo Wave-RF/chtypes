@@ -65,6 +65,13 @@ concurrency:
   group: sweep-public-mentions
   cancel-in-progress: true
 
+# Every run: step uses bash with -eo pipefail. GitHub's default for a step
+# with no shell: is `bash -e {0}`, WITHOUT pipefail, so a failing command on
+# the left of a pipe was hidden by the exit status of the one on the right.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   sweep:
     name: "sweep — every issue/PR body and comment against lint-public.sh's needles (report only)"
@@ -91,7 +98,7 @@ jobs:
           status=$?
           set -e
           cat /tmp/sweep-output.txt
-          summary_line="$(grep -E '^sweep-public-mentions: (ok|[0-9]+ finding)' /tmp/sweep-output.txt | tail -n1)"
+          summary_line="$(grep -E '^sweep-public-mentions: (ok|[0-9]+ finding)' /tmp/sweep-output.txt | tail -n1 || true)"
           {
             echo "### sweep-public-mentions"
             echo
