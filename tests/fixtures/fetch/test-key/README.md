@@ -14,5 +14,5 @@ fixtures, so anyone can reproduce it and nothing about it is secret.
 
 It is **never the release key**. The release key's public half is in
 `docs/guides/fetch.md` §4 (`deb275922dbff76e`) and its private half lives only in
-Phase; no SDK embeds this test key, and a release signed with it is refused by
+a secrets store; no SDK embeds this test key, and a release signed with it is refused by
 every consumer that does not set `CHTYPES_TRUSTED_KEYS`.

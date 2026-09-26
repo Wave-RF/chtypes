@@ -4,7 +4,7 @@ Licensed under the Elastic License 2.0 (LICENSE, NOTICE beside this file).
 
 One tarball per (ClickHouse version, platform). Unpack into
 `<registry-dir>/<clickhouse_minor>/` — the layout `chtypes.NewRegistry` loads —
-or let `dist/fetch.sh` do it, which verifies the chain for you.
+or let the SDK's `scripts/fetch.sh` do it, which verifies the chain for you.
 
 | ClickHouse | platform | build | asset | bytes | library |
 |---|---|---|---|---|---|
