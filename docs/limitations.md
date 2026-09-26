@@ -75,7 +75,7 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 ⚠️ **Zero in both directions is a statement about the verdict, not about the value or the error.** There are two other ways to disagree: both sides accept a row and **store different values**, or both refuse it and **report different codes**. Neither is an accept-or-reject disagreement, so the no-budget rule above does not cover them.
 
-They are measured all the same, and as of the current published artifacts **both are also at zero on every line, for every binding**. That's `measured` by the same differential proof, not by this repository, and it's the same kind of statement as the one above: a state of what the proof covers, not a promise about every input. A case outside that coverage can still disagree, and any that's known is listed under [Known divergences](#known-divergences). Getting there meant investigating the cases one at a time. Some were fixed in the library. Others turned out not to be something a caller can reach, because the disagreement was a property of how the comparison itself was run. Any that a caller **can** reach are listed under [Known divergences](#known-divergences) below.
+They are measured all the same, and as of the current published artifacts **both are at zero on every line, for every binding, except one known value divergence, listed below**. That's `measured` by the same differential proof, not by this repository, and it's the same kind of statement as the one above: a state of what the proof covers, not a promise about every input. A case outside that coverage can still disagree, and any that's known is listed under [Known divergences](#known-divergences). Getting there meant investigating the cases one at a time. Some were fixed in the library. Others turned out not to be something a caller can reach, because the disagreement was a property of how the comparison itself was run. Any that a caller **can** reach are listed under [Known divergences](#known-divergences) below.
 
 In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather than a subclass, so `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both. The subtype was retired precisely because catching one and getting the other is a silent misclassification.
 
@@ -97,7 +97,42 @@ Every entry below has a machine-checkable twin in [`docs/divergences.json`](dive
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
 
-**There is no entry on the register at the moment.** The one it held was retired when a relink stopped the artifacts diverging — which is the line above working, not an oversight. ⚠️ **An empty register is not a claim that nothing diverges.** It means nothing is currently known, named and checked here, and the limits stated above — including that the server half of any comparison is never measured in this repository — apply to that emptiness exactly as they applied to the entry.
+### A later row's Dynamic value in a multi-row text body, typed without the earlier rows
+
+**Same accept, different stored value.** Both sides accept the row — nothing is over-accepted and nothing is rejected — but what a later row stores does not match.
+
+The input is a multi-row `TSV`, `JSONEachRow` or `JSONCompactEachRow` body into a table with a `Dynamic` column (or a `JSON` column's dynamic path), where an earlier row's value settles a variant — Float64, Int64, Bool, or an Array type — and a later row's own value is incomplete on its own: an empty array `[]`, an array holding only `NULL` (`[NULL]`), or, in the JSON formats, an integer literal too big for any integer type. For example, with `d Dynamic`, this `TSV` body:
+
+```text
+7
+[]
+```
+
+|               |                                                                            |
+| ------------- | -------------------------------------------------------------------------- |
+| this library  | row 2 stored as **String** `"[]"`                                          |
+| a real server | row 2 stored as **Int64** `0` — the earlier row's variant, applied to `[]` |
+
+A server resolves a `Dynamic`/`JSON` variant across the whole chunk it is writing: a later row whose own value cannot fully determine a type reuses the first earlier row in that chunk that CAN parse it, and falls back to String only when no earlier variant can. This library types every row on its own and never looks at an earlier row, so it answers String whenever a row is shaped this way. Only rows after the first are affected; each `max_insert_block_size` chunk restarts the reuse from empty; a single-row insert always agrees, because there is no earlier row to disagree about.
+
+The same shape reproduces across several bodies:
+
+- `TSV` `7` then `[]`, or `7` then `[NULL]`: server **Int64** `0`, library **String** — every published line.
+- `TSV` `3.14` then `[]`, or `3.14` then `[NULL]`: server **Float64** `0`, library **String** — 24.8–26.6.
+- `TSV` `[[1]]` then `[]`: server **Array(Array(Int64))** `[]`, library **String** `"[]"` — every published line.
+- `TSV` `[[1]]` then `[NULL]`: server `[[]]`, library **String** — every published line.
+- `TSV` `Array(Dynamic)` `[3.14]` then `[[]]`: server `[0]`, library `["[]"]` — 24.8–26.6.
+- `JSONEachRow`/`JSONCompactEachRow` `3.14` then `1180591620717411303424` (too big for any integer): server **Float64** `1.18e21`, library **String** — 24.8–26.7.
+- the same with `true` first: server **Bool** `true`, library **String** — 24.8–26.7.
+- a `JSON` column, `JSONEachRow` and `TSV`, `{"a":[[1]]}` then `{"a":[null]}`: server `{"a":[[]]}`, library `{"a":[null]}` — every published line.
+
+No divergence: `CSV` and `Values` bodies; a sequence starting from `Bool`, `String` or `Date`; a `Tuple` field, a `Map` value, or a `Variant` column; a `JSONEachRow` row of `[]`, `{}` or `null` following any variant.
+
+**Measured**: this library's answer, in this repository, against the published artifacts on 25.10 and 26.9 (build 1790372645) — row 2's stored text, above, for the `TSV` `7`/`[]`, `TSV` `[[1]]`/`[]`, and `JSON`-column shapes. This library types every row independently of the loaded ClickHouse version, so the same answer holds on every other published line. The server's answer, against MergeTree servers pinned to each artifact's exact patch, by the artifact producer, not measured here; default settings throughout, except the setting that enables `Dynamic`/`JSON` at all on 24.8, where both types are still experimental. Its differential proof found 24 such diverging cases on 24.8–26.6, 19 on 26.7, and 13 on 26.8–26.9: upstream ClickHouse's own fix for the too-large-integer shapes lands at 26.8 (the range above, 24.8–26.7, is where those two still diverge), and the float shapes converge one release earlier, at 26.7 (diverging through 26.6 only).
+
+Treat a stored `Dynamic`/`JSON` value from a multi-row `TSV`, `JSONEachRow` or `JSONCompactEachRow` body as unconfirmed for any row after one that created a numeric, Bool or Array variant.
+
+⚠️ **An empty register is not a claim that nothing diverges** — the state above, when this list last held zero, wasn't a promise that it would stay that way. It means nothing was known, named and checked here at the time, and the limits stated above — including that the server half of any comparison is never measured in this repository — apply to a future emptiness exactly as they applied then.
 
 ## Pre-1.0
 

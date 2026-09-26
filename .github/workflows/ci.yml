@@ -156,6 +156,18 @@ jobs:
         run: scripts/check-reserved-test-names.sh --selftest
       - name: go/chtypes never declares an identifier in the artifact producer's reserved Truth range
         run: scripts/check-reserved-test-names.sh
+      # scripts/abi-channel.sh is what decides whether the `artifacts` job
+      # below reads the served channel or the artifact producer's candidate
+      # one for a pending revision (chtypes#232) — get its own derivation
+      # wrong and that job either fails red on an equal revision forever, or
+      # silently keeps reading the served channel while the header has moved
+      # on. Needs no network and no artifact: every case is driven from a
+      # fixture index.json and a temp header this script writes itself, never
+      # a hand-set derived value, so this runs here rather than in the
+      # `artifacts` job and gates every pull request regardless of what any
+      # channel currently serves.
+      - name: selftest — abi-channel.sh's channel derivation (equal, ahead, behind, disagreeing, missing, explicit override)
+        run: scripts/abi-channel.sh --selftest
 
   docs:
     name: "docs — the support matrix still matches what the release serves"
@@ -227,6 +239,12 @@ jobs:
         with:
           path: .divergences-artifacts
           key: chtypes-divergences-linux-amd64-${{ hashFiles('docs/divergences.json') }}
+      # Deliberately never reads scripts/abi-channel.sh (chtypes#232, point
+      # 7 of its own spec): this job stays on the served channel always. It
+      # asserts documented claims about a library revision that is already
+      # served, and a pending candidate revision has nothing to say about
+      # that — there would be no artifact_revision-matching row to check
+      # divergences against on a candidate channel in the first place.
       - name: fetch exactly what docs/divergences.json names
         run: |
           for line in $(scripts/check-divergences.py --print-lines); do
@@ -563,20 +581,39 @@ jobs:
       # says why): the day a branch's own channel has content, this job must
       # go green with no workflow edit, nothing to switch back on, nothing to
       # remember (#85). Both variables are optional and both default to
-      # empty, which published-lines.sh and fetch.sh already treat exactly
-      # like unset — falling back to their own built-in default, the rolling
-      # `artifacts` release at https://artifacts.wavehouse.dev — so on `main`,
-      # where neither is set, this job's resolved channel is byte-for-byte
-      # what it was before this existed. They are plain repository
-      # variables, not secrets: non-sensitive config, visible to a fork's
-      # pull_request run same as everything else in this workflow. A branch
-      # whose channel is set but empty of content is NOT skipped: the steps
-      # below still run, and published-lines.sh/fetch.sh refuse loudly —
-      # honestly red — exactly as they would for any other unpublished line.
+      # empty. They are plain repository variables, not secrets:
+      # non-sensitive config, visible to a fork's pull_request run same as
+      # everything else in this workflow.
+      #
+      # CHTYPES_ARTIFACTS_TAG in particular is no longer read directly by the
+      # steps below (chtypes#232) — scripts/abi-channel.sh reads it (an
+      # explicit value here still wins outright, unconditionally) and is
+      # otherwise the one place that decides the tag, from
+      # include/chtypes.h's own CHS_ABI_REVISION against what the served
+      # channel's index.json actually carries, never a value stored here. A
+      # branch whose channel is set but empty of content is NOT skipped: the
+      # steps below still run, and published-lines.sh/fetch.sh refuse
+      # loudly — honestly red — exactly as they would for any other
+      # unpublished line.
       CHTYPES_ARTIFACTS_URL: ${{ vars.CHTYPES_ARTIFACTS_URL }}
       CHTYPES_ARTIFACTS_TAG: ${{ vars.CHTYPES_ARTIFACTS_TAG }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # This run's channel (chtypes#232): equal to the served channel's own
+      # ABI revision, use the default channel exactly as before; the header
+      # AHEAD of it, read the artifact producer's signed candidate build for
+      # that revision instead — never fail red against a served channel that
+      # is refusing the new revision on purpose, which is what happened to
+      # every ABI-revision PR before this existed. BEHIND the served
+      # channel, or the served channel's own rows disagreeing about their
+      # revision, is refused rather than guessed. See scripts/abi-channel.sh's
+      # own header for the full decision table; its one log line here says
+      # which channel THIS run picked and why — including the ordinary case,
+      # header == served, so a green run here is evidence revision 5 was
+      # actually checked against revision 5, not merely unexercised.
+      - name: this run's artifact channel — the header's ABI revision decides it, never a stored variable
+        id: channel
+        run: scripts/abi-channel.sh --platform linux-amd64 | tee -a "$GITHUB_OUTPUT"
       # THREE lines, not two. The newest -lts and the newest -stable come from
       # the live index; 24.8 is pinned on top because it is the OLDEST line the
       # release publishes and the per-line boundaries are only observable with
@@ -590,7 +627,8 @@ jobs:
         id: lines
         run: |
           tag_args=()
-          [ -n "$CHTYPES_ARTIFACTS_TAG" ] && tag_args=(--tag "$CHTYPES_ARTIFACTS_TAG")
+          tag="${{ steps.channel.outputs.tag }}"
+          [ -n "$tag" ] && tag_args=(--tag "$tag")
           scripts/published-lines.sh --platform linux-amd64 "${tag_args[@]}" | tee -a "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -613,7 +651,8 @@ jobs:
         continue-on-error: true
         run: |
           tag_args=()
-          [ -n "$CHTYPES_ARTIFACTS_TAG" ] && tag_args=(--tag "$CHTYPES_ARTIFACTS_TAG")
+          tag="${{ steps.channel.outputs.tag }}"
+          [ -n "$tag" ] && tag_args=(--tag "$tag")
           ec=0
           for line in ${{ steps.lines.outputs.lines }} 24.8; do
             scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY" "${tag_args[@]}" || { ec=$?; break; }
@@ -770,6 +809,9 @@ jobs:
           FETCH_OUTCOME: ${{ steps.fetch.outcome }}
           FETCH_EXIT_CODE: ${{ steps.fetch.outputs.exit_code }}
           FETCH_SOURCE_URL: ${{ steps.fetch.outputs.source_url }}
+          CHANNEL_MODE: ${{ steps.channel.outputs.mode }}
+          CHANNEL_TAG: ${{ steps.channel.outputs.tag }}
+          CHANNEL_REVISION: ${{ steps.channel.outputs.revision }}
           GO_OUTCOME: ${{ steps.suite-go.outcome }}
           PYTHON_OUTCOME: ${{ steps.suite-python.outcome }}
           TS_OUTCOME: ${{ steps.suite-ts.outcome }}
@@ -779,7 +821,23 @@ jobs:
           if [ "$FETCH_OUTCOME" != "success" ]; then
             echo "### artifacts — the fetch itself did not complete; nothing below ran" >> "$GITHUB_STEP_SUMMARY"
             echo >> "$GITHUB_STEP_SUMMARY"
-            if [ "$FETCH_EXIT_CODE" = "3" ]; then
+            # chtypes#232: on the candidate channel, exit 3
+            # (CHTYPES_SOURCE_UNREACHABLE) and exit 4
+            # (CHTYPES_ARTIFACT_UNPUBLISHED) both mean the SAME thing here —
+            # the artifact producer has not (yet) published a candidate for
+            # this header's revision. That is a DIFFERENT red from the one
+            # this mechanism exists to remove (every served library
+            # correctly refusing a revision it doesn't speak, which is why a
+            # revision-ahead PR used to be expected-red for its whole life).
+            # This one must still fail, loudly, naming the tag and the
+            # revision: never skip, never fall back to the served channel —
+            # a silent fallback there is exactly the kind of masking that let
+            # a broken refusal hide once already (the abi-fixtures job's own
+            # header, #105).
+            if [ "$CHANNEL_MODE" = "candidate" ] && { [ "$FETCH_EXIT_CODE" = "3" ] || [ "$FETCH_EXIT_CODE" = "4" ]; }; then
+              echo "**No candidate build for revision $CHANNEL_REVISION** — \`scripts/fetch.sh\` exited $FETCH_EXIT_CODE reading the \`$CHANNEL_TAG\` channel (source: ${FETCH_SOURCE_URL:-the artifacts host}). The artifact producer has not published a candidate for revision $CHANNEL_REVISION yet. No suite and no example tour was exercised — this does not fall back to the served channel." >> "$GITHUB_STEP_SUMMARY"
+              echo "artifacts: the artifact producer has not published a candidate for revision $CHANNEL_REVISION (\`$CHANNEL_TAG\`, fetch.sh exit $FETCH_EXIT_CODE) — no suite or example tour was exercised, and this never falls back to the served channel" >&2
+            elif [ "$FETCH_EXIT_CODE" = "3" ]; then
               echo "**The artifact source was unreachable** (\`scripts/fetch.sh\` exited 3, CHTYPES_SOURCE_UNREACHABLE, fetching the published lines from ${FETCH_SOURCE_URL:-the artifacts host}). No suite and no example tour was exercised." >> "$GITHUB_STEP_SUMMARY"
               echo "artifacts: the artifact source (${FETCH_SOURCE_URL:-the artifacts host}) was unreachable while fetching the published lines — no suite or example tour was exercised" >&2
             else
