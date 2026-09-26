@@ -26,6 +26,8 @@ So never reuse insert-side coercion to fold a `WHERE` constant. The filter surfa
 
 **`error` and `decline` are not answers, and an enforcing caller must fail closed on both.** Collapsing either into "false" is the bug this vocabulary exists to prevent: "the predicate blew up" and "the predicate is false" lead to opposite decisions when the predicate is a security boundary.
 
+**When several rows throw, the server reports the first one.** A server fails the query with the error of the first throwing row in the body's row order. A caller who needs the server's error reads it from the first `error` row's entry in the result's `errors` list. The artifact producer measured this rule on `toInt64(x) > N` over a `String` column, where rows throw 6 and 32: 17 cases on 12 lines, each against a server pinned to that line's exact version, and all 204 agreed. It holds for a body the server takes as one block, which is the only kind the per-row verdicts describe.
+
 Each binding gives you the distinction as a predicate rather than making you remember it:
 
 <details open><summary><b>Go</b></summary>
