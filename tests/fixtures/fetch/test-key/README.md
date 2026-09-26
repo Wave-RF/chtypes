@@ -4,7 +4,7 @@ This is a **TEST key**. It exists so the four SDKs' fetch suites can verify
 `../signed/` and friends with `CHTYPES_TRUSTED_KEYS=78da216574a56c57f6bef3054c2d234dc36936e6b8edbc2e340cc81ffb7d173d`.
 Both halves are committed on purpose: the private half is derived from a
 public seed, `sha256("chtypes spec/fixtures/fetch TEST key: derived from this public label, never the release key")`, by
-chtypes-core's `tests/sdk/fetch-fixtures/gen.py`, so anyone can reproduce it
+the artifact producer's fixture generator, so anyone can reproduce it
 and nothing about it is secret.
 
 | | |

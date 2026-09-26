@@ -178,11 +178,13 @@ esac
 if [ "$ALL" = 1 ]; then
   # Nothing to resolve: index.json is the list.
   WANT_LINE="every published line"; STRICT_EXACT=0
-elif command -v uv >/dev/null 2>&1 && [ -f "${CHTYPES_CORE_DIR:-$ROOT/../core}/ci/resolve-version.py" ]; then
+elif command -v uv >/dev/null 2>&1 && CORE_RESOLVER="$(find "${CHTYPES_CORE_DIR:-$ROOT/../core}" -maxdepth 3 -name resolve-version.py -print -quit 2>/dev/null)" && [ -n "$CORE_RESOLVER" ]; then
   # A developer with the core repository beside this one gets its full
   # version resolver (Docker digests, moving tags); a consumer without it gets
   # the local normalization below, and index.json is the authority either way.
-  RESOLVED="$(uv run --no-project python "${CHTYPES_CORE_DIR:-$ROOT/../core}/ci/resolve-version.py" "$SPELLING" 2>/dev/null || true)"
+  # Found by name rather than a hardcoded relative path, so this script does
+  # not need to know (or say) where inside that tree the resolver lives.
+  RESOLVED="$(uv run --no-project python "$CORE_RESOLVER" "$SPELLING" 2>/dev/null || true)"
   if [ -n "$RESOLVED" ]; then
     IFS='|' read -r WANT_LINE WANT_EXACT <<EOF
 $(printf '%s' "$RESOLVED" | python3 -c 'import json,sys
