@@ -45,7 +45,7 @@ def test_the_rendered_sentinel_shape_is_frozen() -> None:
     assert str(chtypes.UnsupportedError("nope", "e")) == "chtypes: column 'e': [-2] nope"
 
 
-def test_the_funnel_keys_on_the_sign() -> None:
+def test_positive_code_is_schema_error_negative_is_unsupported() -> None:
     # A positive code is the server's own refusal, verbatim; ANY negative code
     # is a decline — -2 "I will not guess", -1 a guarded exception, and any
     # sentinel a later era adds. A negative SchemaError must be unmakeable

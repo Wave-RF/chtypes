@@ -539,7 +539,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn from_code_keys_on_the_sign() {
+    fn from_code_positive_is_schema_negative_is_unsupported() {
         // A positive code is the server's own refusal, verbatim; ANY negative
         // code is a decline — -2 "I will not guess", -1 a guarded exception,
         // and any sentinel a later era adds. A negative Error::Schema must be
