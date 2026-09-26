@@ -126,7 +126,7 @@ The parsers read the `JSONEachRow` bytes through this package's own byte-exact r
 
 **Options** — `EngineOptions`, `CompileOptions`, `CompileFilterOptions`, `RowsOptions`, `RegistryOptions`, `Settings`, `SettingValue`.
 
-**Constants** — `Format` (the `chs_format` integers 0–9, frozen), `CompileMode.Declared` (= 0), `CODE_UNSUPPORTED` (`-2`, the wire sentinel, carried by results and never by an error object), `ABI_REVISION`, `DOC_VALUES` / `DOC_TRANSFORMS` / `DOC_DEFAULTS` / `DOC_ALL`, `EXPORT_NONE`.
+**Constants** — `Format` (the `chs_format` integers 0–11, each frozen once assigned), `CompileMode.Declared` (= 0), `CODE_UNSUPPORTED` (`-2`, the wire sentinel, carried by results and never by an error object), `ABI_REVISION`, `DOC_VALUES` / `DOC_TRANSFORMS` / `DOC_DEFAULTS` / `DOC_ALL`, `EXPORT_NONE`.
 
 **Helpers** — `formatName(f)`, `minorOf(v)`, `compareMinor(a, b)`, `encodeSettings(s?)`, `isLossyReason(reason)`, `Reason`, `nativeStats()`.
 

@@ -29,21 +29,22 @@ Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Windo
 
 One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has passed the artifact producer's comparison against a real server and the release publishes it:
 
-| Line | Exact version | Platforms |
-|---|---|---|
-| `24.8` | `24.8.14.39-lts` | all |
-| `25.3` | `25.3.14.14-lts` | all |
-| `25.8` | `25.8.33.6-lts` | all |
-| `25.10` | `25.10.7.6-stable` | all |
-| `26.2` | `26.2.19.43-stable` | all |
-| `26.3` | `26.3.33.24-lts` | all |
-| `26.4` | `26.4.5.143-stable` | all |
-| `26.5` | `26.5.7.64-stable` | all |
-| `26.6` | `26.6.8.7-stable` | all |
-| `26.7` | `26.7.13.12-stable` | all |
-| `26.8` | `26.8.10.6-lts` | all |
-| `26.9` | `26.9.1.1629-stable` | all |
+| Line | Platforms |
+|---|---|
+| `24.8` | all |
+| `25.3` | all |
+| `25.8` | all |
+| `25.10` | all |
+| `26.2` | all |
+| `26.3` | all |
+| `26.4` | all |
+| `26.5` | all |
+| `26.6` | all |
+| `26.7` | all |
+| `26.8` | all |
+| `26.9` | all |
 
+The exact ClickHouse patch each line is built from is in its artifact's `manifest.json` and in the served `index.json` (`clickhouse_version`); it moves with every upstream patch release, so it is not repeated here.
 Ask for a line, never a nearest match: `for("25.8")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.
 
 ## ABI revisions

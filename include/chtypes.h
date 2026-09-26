@@ -247,7 +247,10 @@ CHS_API const char * chs_clickhouse_version(void);
  * after it — one revision, because nothing built against 5 had shipped when
  * the second change landed. A revision-4 artifact has neither, so calling
  * through these declarations against one is exactly the undefined behavior
- * the gate above refuses. Still 28 exported functions.
+ * the gate above refuses. Revision 5 itself added no function (28 exported
+ * functions). The three chs_quote_* functions came afterwards without a
+ * bump, because an added symbol is optional: a binding answers unsupported
+ * when an artifact lacks it. The header declares 31 today.
  *
  * Later in the same open window, `CHS_CSV_WITH_NAMES = 10` and
  * `CHS_TSV_WITH_NAMES = 11` were appended to `enum chs_format` (chtypes#55),
