@@ -92,6 +92,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # full history AND all tags, same as ci.yml's `docs` job: the
+          # SDK-version -> ABI-revision table reads include/chtypes.h at each
+          # binding's release tag. Without them support-matrix.sh refuses
+          # ("no <lang>/vX.Y.Z release tags"), and every night from
+          # 2026-09-24 to 09-26 this job went red on that refusal rather than
+          # on a stale matrix.
+          fetch-depth: 0
       - name: regenerate and compare against what is committed
         id: regen
         run: |
