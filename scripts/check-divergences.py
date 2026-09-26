@@ -271,6 +271,26 @@ def compare(expect: dict[str, Any], actual: dict[str, Any]) -> str | None:
         return f"expected err_code {expect['err_code']!r}, the artifact answered {actual.get('err_code')!r}"
     if "err_msg" in expect and actual.get("err_msg") != expect["err_msg"]:
         return f"expected err_msg {expect['err_msg']!r}, the artifact answered {actual.get('err_msg')!r}"
+    if "stored" in expect:
+        # A value-level claim ("row 2 stores String, not the earlier row's
+        # variant") rather than a verdict-level one — checked only when the
+        # entry states one, same as err_code/err_msg above. `actual["rows"]`
+        # is a list of {column: text} maps, one per row the batch produced
+        # (run_check() below builds it from BatchResult.rows[i].values; the
+        # selftest fakes build it the same shape so this one comparison
+        # serves both).
+        rows = actual.get("rows")
+        if rows is None:
+            return "expected a 'stored' row value but the actual result carries no row data at all"
+        for spec in expect["stored"]:
+            idx, col, want_text = spec["row"], spec["column"], spec["text"]
+            if idx >= len(rows):
+                return f"expected row {idx} for a 'stored' check, but the batch produced only {len(rows)} row(s)"
+            if col not in rows[idx]:
+                return f"expected column {col!r} in row {idx} for a 'stored' check, but that row has no such column"
+            got_text = rows[idx][col]
+            if got_text != want_text:
+                return f"expected row {idx} column {col!r} to store {want_text!r}, the artifact answered {got_text!r}"
     return None
 
 
@@ -290,7 +310,12 @@ def run_check(library: Any, chk: dict[str, Any], chtypes_mod: Any) -> dict[str, 
     settings = chk.get("settings") or None
     with library.compile_ddl(chk["schema"], settings=settings) as schema:
         br = schema.rows(fmt, body, None)
-    return {"outcome": br.outcome, "err_code": br.err_code, "err_msg": br.err_msg}
+    # One {column: text} map per row the batch produced, in input order —
+    # only ever read by compare()'s optional "stored" check, above, so a
+    # check that names no "stored" expectation never pays for it and never
+    # notices when a row carries no values (a rejected batch, say).
+    rows = [{v.column: v.text for v in getattr(row, "values", ())} for row in getattr(br, "rows", ())]
+    return {"outcome": br.outcome, "err_code": br.err_code, "err_msg": br.err_msg, "rows": rows}
 
 
 def resolve_case(
@@ -530,9 +555,20 @@ def run(registry_dir: str | None, data_path: Path, doc_path: Path) -> int:
 # ================================================================ selftest ===
 
 
+class _FakeValue:
+    def __init__(self, column: str, text: str):
+        self.column, self.text = column, text
+
+
+class _FakeRow:
+    def __init__(self, values: dict[str, str]):
+        self.values = [_FakeValue(c, t) for c, t in values.items()]
+
+
 class _FakeSchema:
-    def __init__(self, outcome: str, err_code: int = 0, err_msg: str = ""):
+    def __init__(self, outcome: str, err_code: int = 0, err_msg: str = "", rows_values: list[dict[str, str]] | None = None):
         self._outcome, self._err_code, self._err_msg = outcome, err_code, err_msg
+        self._rows_values = rows_values or []
 
     def __enter__(self) -> "_FakeSchema":
         return self
@@ -546,6 +582,7 @@ class _FakeSchema:
 
         br = _BR()
         br.outcome, br.err_code, br.err_msg = self._outcome, self._err_code, self._err_msg
+        br.rows = [_FakeRow(v) for v in self._rows_values]
         return br
 
 
@@ -555,16 +592,25 @@ class _FakeLibrary:
     artifact — the boundary --selftest replaces so resolve_case's own
     decision logic is proven with no registry and no network."""
 
-    def __init__(self, chtypes_mod: Any, outcome: str = "accepted", err_code: int = 0, err_msg: str = "", raise_schema_error: tuple[int, str] | None = None):
+    def __init__(
+        self,
+        chtypes_mod: Any,
+        outcome: str = "accepted",
+        err_code: int = 0,
+        err_msg: str = "",
+        raise_schema_error: tuple[int, str] | None = None,
+        rows_values: list[dict[str, str]] | None = None,
+    ):
         self._chtypes = chtypes_mod
         self._outcome, self._err_code, self._err_msg = outcome, err_code, err_msg
         self._raise = raise_schema_error
+        self._rows_values = rows_values
 
     def compile_ddl(self, ddl: str, *, settings: object = None, mode: int = 0) -> _FakeSchema:
         if self._raise is not None:
             code, msg = self._raise
             raise self._chtypes.SchemaError(code, msg)
-        return _FakeSchema(self._outcome, self._err_code, self._err_msg)
+        return _FakeSchema(self._outcome, self._err_code, self._err_msg, self._rows_values)
 
 
 class _FakeRegistry:
@@ -637,6 +683,24 @@ def selftest() -> int:
     m = compare({"outcome": "rejected", "err_msg": "want"}, {"outcome": "rejected", "err_code": 0, "err_msg": "got"})
     check(m is not None and "want" in m and "got" in m, "an err_msg mismatch was not caught")
 
+    # ---- compare(): a matching 'stored' row value passes.
+    expect_stored = {"outcome": "accepted", "stored": [{"row": 1, "column": "d", "text": '"[]"'}]}
+    actual_stored_ok = {"outcome": "accepted", "rows": [{"d": "7"}, {"d": '"[]"'}]}
+    check(compare(expect_stored, actual_stored_ok) is None, "a matching 'stored' row value was reported as a mismatch")
+
+    # ---- compare(): a wrong 'stored' row value is caught, naming both texts.
+    actual_stored_wrong = {"outcome": "accepted", "rows": [{"d": "7"}, {"d": "0"}]}
+    m = compare(expect_stored, actual_stored_wrong)
+    check(m is not None and "[]" in m and "0" in m, "a wrong 'stored' row value was not caught")
+
+    # ---- compare(): 'stored' is checked ONLY when the entry states one — an
+    # entry with no 'stored' key must ignore however the rows actually came
+    # out, exactly like err_code/err_msg above.
+    check(
+        compare({"outcome": "accepted"}, {"outcome": "accepted", "rows": [{"d": "anything"}]}) is None,
+        "'stored' was checked although the entry did not state one",
+    )
+
     # ---- resolve_case: the driver's own decision, end to end, against fakes
     # — no registry, no network, and no re-implemented copy of the logic
     # the real run uses.
@@ -655,6 +719,19 @@ def selftest() -> int:
     check("the page and the artifacts disagree" in msg, "the required failure phrase is missing")
     check("docs/limitations.md" in msg, "the failure message does not point at docs/limitations.md")
     check("no longer have" in msg or "diverge differently" in msg, "the failure message does not say which direction")
+
+    # ---- resolve_case with a 'stored' expectation, end to end through the
+    # same fakes: a matching row value is ok, a wrong one is a problem naming
+    # docs/limitations.md, exactly like an outcome mismatch above.
+    chk_stored = {**chk_ok, "expect": {"outcome": "accepted", "stored": [{"row": 1, "column": "d", "text": '"[]"'}]}}
+    reg_stored_ok = _FakeRegistry(chtypes, {"25.8": _FakeLibrary(chtypes, outcome="accepted", rows_values=[{"d": "7"}, {"d": '"[]"'}])})
+    status, msg = resolve_case(chk_stored, "25.8", reg_stored_ok, "linux-amd64", set(), chtypes)
+    check(status == "ok", f"a matching 'stored' expectation was not reported ok: {status} {msg}")
+
+    reg_stored_wrong = _FakeRegistry(chtypes, {"25.8": _FakeLibrary(chtypes, outcome="accepted", rows_values=[{"d": "7"}, {"d": "0"}])})
+    status, msg = resolve_case(chk_stored, "25.8", reg_stored_wrong, "linux-amd64", set(), chtypes)
+    check(status == "problem", "a 'stored' expectation that no longer holds was not reported as a problem")
+    check("the page and the artifacts disagree" in msg, "the 'stored' mismatch message is missing the required phrase")
 
     # A line absent from the registry: skip, loudly, never a problem.
     status, msg = resolve_case(chk_ok, "99.9", reg, "linux-amd64", set(), chtypes)
@@ -790,13 +867,14 @@ def selftest() -> int:
         return 1
     print(
         "check-divergences: selftest ok — coverage catches a heading with no entry, an entry with no "
-        "heading, and a duplicate; compare() catches an outcome/err_code/err_msg mismatch and passes an "
-        "exact match; resolve_case reports ok/skip/problem correctly for a match, a claim that no longer "
-        "holds, an unfetched line, an unbuildable (platform, line) pair, an inexplicable load failure, "
-        "and a code-115 unknown setting; classify_register and has_divergences_section tell an "
-        "intentionally empty register apart from a renamed/missing section; zero_run_problems and run() "
-        "itself both still refuse when entries exist but nothing could be driven, and run() passes end "
-        "to end, offline, when the register is genuinely empty"
+        "heading, and a duplicate; compare() catches an outcome/err_code/err_msg/stored mismatch and "
+        "passes an exact match, and 'stored' is checked only when an entry states one; resolve_case "
+        "reports ok/skip/problem correctly for a match, a 'stored' row value that matches or no longer "
+        "holds, a claim that no longer holds, an unfetched line, an unbuildable (platform, line) pair, "
+        "an inexplicable load failure, and a code-115 unknown setting; classify_register and "
+        "has_divergences_section tell an intentionally empty register apart from a renamed/missing "
+        "section; zero_run_problems and run() itself both still refuse when entries exist but nothing "
+        "could be driven, and run() passes end to end, offline, when the register is genuinely empty"
     )
     return 0
 
