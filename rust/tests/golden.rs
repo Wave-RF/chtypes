@@ -78,6 +78,26 @@ fn str_list(v: &Json) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The case-level `outcome`. `""` (here, JSON `null` from a missing key) is
+/// not a valid outcome, and omitting it is legal only on a compile-error
+/// case — every call site here is reached only once that has already
+/// branched away, so a missing outcome anywhere else is a malformed golden
+/// and must fail loudly rather than let `.as_str().unwrap()` panic with an
+/// unhelpful message, or let `assert_eq!` compare against `null` silently
+/// (chtypes#199).
+fn require_case_outcome<'a>(id: &str, expect: &'a Json) -> &'a str {
+    expect["outcome"].as_str().unwrap_or_else(|| {
+        panic!("golden case {id} has no outcome and is not a compile-error case")
+    })
+}
+
+/// The same rule for a row: a row with no `outcome` is a malformed golden.
+fn require_row_outcome<'a>(id: &str, i: usize, want: &'a Json) -> &'a str {
+    want["outcome"]
+        .as_str()
+        .unwrap_or_else(|| panic!("golden case {id} row {i} has no outcome"))
+}
+
 /// Announce a skip on the *real* stderr: `eprintln!` is captured by libtest
 /// for a passing test, so a skip printed with it is invisible — the one way a
 /// suite that tested nothing looks exactly like one that passed.
@@ -186,7 +206,7 @@ fn goldens_hold_on_every_artifact() {
                     .rows(format, body, &settings)
                     .unwrap_or_else(|e| panic!("{ctx}: {e}"));
                 assert_eq!(fr.outcome, FilterOutcome::Ok, "{ctx}: filter outcome");
-                assert_eq!(expect["outcome"], "ok", "{ctx}");
+                assert_eq!(require_case_outcome(id, expect), "ok", "{ctx}");
                 let got: Vec<&str> = fr.verdicts.iter().map(|v| verdict_name(*v)).collect();
                 assert_eq!(got, str_list(&expect["verdicts"]), "{ctx}: verdicts");
                 checked += 1;
@@ -197,7 +217,7 @@ fn goldens_hold_on_every_artifact() {
                 .unwrap_or_else(|e| panic!("{ctx}: {e}"));
             assert_eq!(
                 br.outcome.as_str(),
-                expect["outcome"].as_str().unwrap(),
+                require_case_outcome(id, expect),
                 "{ctx}: batch outcome"
             );
             assert_eq!(
@@ -208,7 +228,7 @@ fn goldens_hold_on_every_artifact() {
             let want_rows = expect["rows"].as_array().cloned().unwrap_or_default();
             assert_eq!(br.rows.len(), want_rows.len(), "{ctx}: row count");
             for (i, (row, want)) in br.rows.iter().zip(want_rows.iter()).enumerate() {
-                let want_outcome = want["outcome"].as_str().unwrap();
+                let want_outcome = require_row_outcome(id, i, want);
                 assert_eq!(
                     row.outcome.as_str(),
                     want_outcome,
@@ -295,4 +315,59 @@ fn goldens_hold_on_every_artifact() {
         return;
     }
     eprintln!("\n{checked} golden checks across {ran_on} artifact(s)\n");
+}
+
+/// Pins the served document's omit-when-empty shape rule (chtypes#199): a
+/// key absent from a case or a row means empty or zero, not a panic. This is
+/// pure `serde_json`, no artifact or registry, so it runs in the no-artifact
+/// CI job — a future unconditional `expect["x"].unwrap()` (bypassing
+/// `str_list`/`str_map`/`unwrap_or_default`) fails here immediately.
+#[test]
+fn optional_fields_omitted_are_read_as_empty() {
+    let filter_case: Json = serde_json::json!({"outcome": "ok"});
+    assert!(str_list(&filter_case["verdicts"]).is_empty());
+
+    let batch_case: Json = serde_json::json!({"outcome": "ok"});
+    assert!(
+        batch_case["rows"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .is_empty()
+    );
+    assert_eq!(batch_case["err_code"].as_i64().unwrap_or(0), 0);
+
+    let bare_row: Json = serde_json::json!({"outcome": "accepted"});
+    assert_eq!(bare_row["err_code"].as_i64().unwrap_or(0), 0);
+    assert!(str_map(&bare_row["values"]).is_empty());
+    assert!(str_list(&bare_row["nulls"]).is_empty());
+    assert!(
+        bare_row["transformed"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .is_empty()
+    );
+    assert!(str_list(&bare_row["substituted"]).is_empty());
+    assert!(str_map(&bare_row["computed"]).is_empty());
+
+    assert_eq!(require_case_outcome("synthetic", &filter_case), "ok");
+    assert_eq!(require_row_outcome("synthetic", 0, &bare_row), "accepted");
+}
+
+/// The exception to the omit-when-empty rule: an absent `outcome` is legal
+/// only on a compile-error case, so a missing outcome anywhere else must be
+/// rejected loudly rather than defaulted (chtypes#199).
+#[test]
+#[should_panic(expected = "has no outcome and is not a compile-error case")]
+fn case_outcome_required_unless_compile_error() {
+    let case: Json = serde_json::json!({});
+    require_case_outcome("synthetic-no-outcome", &case);
+}
+
+#[test]
+#[should_panic(expected = "golden case synthetic-no-outcome row 0 has no outcome")]
+fn row_outcome_required() {
+    let row: Json = serde_json::json!({});
+    require_row_outcome("synthetic-no-outcome", 0, &row);
 }
