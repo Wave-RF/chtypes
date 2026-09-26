@@ -19,7 +19,7 @@ The table below is **generated** from this tree's four manifests and from the re
 
 The artifact is native code, so a platform is supported only if the release publishes a build for it. Today that is:
 
-- `darwin-arm64` — see [macOS is a development floor, not an oracle](limitations.md#macos-is-a-development-floor-not-an-oracle)
+- `darwin-arm64` — see [macOS artifacts are for development; Linux is the reference](limitations.md#macos-artifacts-are-for-development-linux-is-the-reference)
 - `linux-amd64`
 - `linux-arm64`
 
@@ -27,7 +27,7 @@ Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Windo
 
 ## ClickHouse lines
 
-One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has a committed run of record in the core repository and the release publishes it:
+One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has passed the artifact producer's comparison against a real server and the release publishes it:
 
 | Line | Exact version | Platforms |
 |---|---|---|
@@ -113,7 +113,7 @@ Every line/platform pairing above either has a build for every revision the inde
 
 ## Why the ClickHouse list is not a promise about the future
 
-A line appears above once core has a committed run of record for it and the release publishes the artifact. Lines are added as core certifies them, so this page is a snapshot of a moving list — `curl -s https://artifacts.wavehouse.dev/artifacts/index.json` is always the live answer, and `scripts/fetch.sh --all` reads it rather than restating it.
+A line appears above once it has passed the artifact producer's comparison against a real server and the release publishes the artifact. Lines are added as they pass it, so this page is a snapshot of a moving list — `curl -s https://artifacts.wavehouse.dev/artifacts/index.json` is always the live answer, and `scripts/fetch.sh --all` reads it rather than restating it.
 
 Nothing is removed to make room. The index keeps every patch row ever published, so a machine holding an older patch keeps working.
 
@@ -131,12 +131,12 @@ chtypes verify                  # re-hash every installed line against its manif
 
 The public golden set is generated per line and gates itself on the **exact** patch version, not the line. A case runs against an artifact only when that artifact's exact version equals the one its expectations were produced on, and skips loudly by name otherwise — an expectation produced on one build says nothing about another.
 
-This is also why the golden set shrinks as lines are added: a case the lines answer differently is refused by the generator rather than recorded twice. Version-dependent truth lives in the core repository, per line. **The SDK asserts a version-specific answer nowhere.**
+This is also why the golden set shrinks as lines are added: a case the lines answer differently is refused by the generator rather than recorded twice. Version-dependent truth lives with the artifact producer, per line. **The SDK asserts a version-specific answer nowhere.**
 
-## macOS is a development floor
+## macOS artifacts are for development; Linux is the reference
 
-The darwin artifacts exist so you can develop and run the suites on a laptop. They are not an oracle — see [Known limitations → macOS is a development floor, not an oracle](limitations.md#macos-is-a-development-floor-not-an-oracle) for why.
+The darwin artifacts exist so you can develop and run the suites on a laptop. They are not the reference for what a server does — see [Known limitations → macOS artifacts are for development; Linux is the reference](limitations.md#macos-artifacts-are-for-development-linux-is-the-reference) for why.
 
 ## Pre-1.0
 
-Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen. A function's exact signature is not one of those things: pre-1.0, a signature change rides an ABI revision instead, and that revision is what a caller can actually rely on — an SDK refuses to load an artifact whose revision it does not speak, naming both numbers, and that refusal is shipped and run by every binding's own suite, not merely documented. See [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) for where that match happens; what a given revision covers is maintained in the core repository. This tree speaks ABI revision 5 (`include/chtypes.h`) — revision 5, the INSERT column list, is the first signature change since the first tag. Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list. If a refusal is the reason you are reading this, [ABI revisions](#abi-revisions) above maps your installed SDK version to the revision it speaks and the artifact build that satisfies it.
+Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen. A function's exact signature is not one of those things: pre-1.0, a signature change rides an ABI revision instead, and that revision is what a caller can actually rely on — an SDK refuses to load an artifact whose revision it does not speak, naming both numbers, and that refusal is shipped and run by every binding's own suite, not merely documented. See [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) for where that match happens; what a given revision covers is maintained by the artifact producer. This tree speaks ABI revision 5 (`include/chtypes.h`) — revision 5, the INSERT column list, is the first signature change since the first tag. Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list. If a refusal is the reason you are reading this, [ABI revisions](#abi-revisions) above maps your installed SDK version to the revision it speaks and the artifact build that satisfies it.

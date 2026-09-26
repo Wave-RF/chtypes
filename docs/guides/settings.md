@@ -19,7 +19,7 @@ per-call map  >  handle compile profile  >  library defaults  >  ClickHouse's ow
 | library defaults    | `set_default_settings`               | the whole process, per loaded artifact |
 | ClickHouse defaults | the vendored build                   | everything                             |
 
-**Go reaches only three of them.** `SetDefaultSettings` replaces a process-global that the row path reads _by reference_, so the ABI requires it to exclude every other call on the same artifact. Go's dlopen'd `Library` therefore does not carry the symbol in its function-pointer table at all — the call is structurally unavailable rather than merely discouraged, and `chtypes.SetDefaultSettings` exists only on the statically linked build (`-tags chtypes_linked`), which is a development and rig instrument. Put the settings a Go consumer needs in the compile profile and the per-call map, which is where they belong anyway.
+**Go reaches only three of them.** `SetDefaultSettings` replaces a process-global that the row path reads _by reference_, so the ABI requires it to exclude every other call on the same artifact. Go's dlopen'd `Library` therefore does not carry the symbol in its function-pointer table at all — the call is structurally unavailable rather than merely discouraged, and `chtypes.SetDefaultSettings` exists only on the statically linked build (`-tags chtypes_linked`), which is a development and testing instrument. Put the settings a Go consumer needs in the compile profile and the per-call map, which is where they belong anyway.
 
 <details open><summary><b>Go</b></summary>
 

@@ -22,10 +22,10 @@ The default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but lin
 
 ```sh
 go build ./...                        # dlopen-only: what a consumer gets
-go build -tags chtypes_linked ./...   # + the linked path (needs a core build tree via CGO_LDFLAGS)
+go build -tags chtypes_linked ./...   # + the linked path (needs the artifact producer's build tree via CGO_LDFLAGS)
 ```
 
-The `chtypes_linked` tag adds a statically linked path — package-level `CompileDDL`, `ValidateType`, `ParseSchema`, `BuiltVersion`, `SetDefaultSettings` — which answers for exactly one artifact and is a development and rig instrument, not a consumer path. `undefined: chtypes.CompileDDL` means the tag is missing.
+The `chtypes_linked` tag adds a statically linked path — package-level `CompileDDL`, `ValidateType`, `ParseSchema`, `BuiltVersion`, `SetDefaultSettings` — which answers for exactly one artifact and is a development and testing instrument, not a consumer path. `undefined: chtypes.CompileDDL` means the tag is missing.
 
 The frozen numbers the default build hardcodes (`Format`, `DocFlags`, `CodeUnsupported`, `ExportNone`, `ABIRevision`) are pinned to `chtypes.h` by compile-time assertions the tagged build sees, so drift is caught before a consumer could meet it.
 
@@ -46,8 +46,8 @@ The frozen numbers the default build hardcodes (`Format`, `DocFlags`, `CodeUnsup
 | ---------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `Library.CompileDDL(ddl, opts...)`                                                 | `chs_schema_compile` + `chs_schema_column_*` | a column list, not a `CREATE TABLE` (+ `WithCompileSettings`, `WithCompileMode`) → `*LoadedSchema`                                                                                        | S (incl. 115 unknown setting, 455/44 declared gates), U (admission budget, mode ≠ 0), E                        |
 | `Library.ValidateType(expr)`                                                       | `chs_validate_type`                          | type expression → canonical spelling                                                                                                                                                      | S, U, E                                                                                                        |
-| `Library.{RegisteredFamilies, FunctionFlags, ReferenceType}`                       | the introspection trio                       | family names / the volatility TSV audit, verbatim / the widened reference type (`""` if none)                                                                                             | U (artifact predates the symbol)                                                                               |
-| `Library.{QuoteIdentifier, QuoteIdentifierIfNeeded, QuoteLiteral}`                 | the quoting trio                             | ClickHouse's own `backQuote` (always quotes) / `backQuoteIfNeed` (bare where this build says bare is legal) / `quoteString` (a value as a string literal). Never a rule of this binding's | U (artifact predates the symbol), S (a guarded exception's code)                                               |
+| `Library.{RegisteredFamilies, FunctionFlags, ReferenceType}`                       | the three introspection functions            | family names / the volatility TSV audit, verbatim / the widened reference type (`""` if none)                                                                                             | U (artifact predates the symbol)                                                                               |
+| `Library.{QuoteIdentifier, QuoteIdentifierIfNeeded, QuoteLiteral}`                 | the three quoting functions                  | ClickHouse's own `backQuote` (always quotes) / `backQuoteIfNeed` (bare where this build says bare is legal) / `quoteString` (a value as a string literal). Never a rule of this binding's | U (artifact predates the symbol), S (a guarded exception's code)                                               |
 | `LoadedSchema.Columns`                                                             | read at compile                              | `[]Column`, canonicalized, declaration order                                                                                                                                              | —                                                                                                              |
 | `LoadedSchema.SetEngine(e, orderBy, opts...)`                                      | `chs_schema_engine`                          | engine + sorting key (+ `WithMergeTreeSettings`)                                                                                                                                          | S when rc > 0 (server refusal, e.g. 115), U when rc < 0 (unmodeled engine or key, non-default MergeTree value) |
 | `LoadedSchema.SetTTL(ttl)`                                                         | `chs_schema_ttl`                             | a table rows-TTL expression                                                                                                                                                               | U (every refusal), E                                                                                           |
@@ -123,6 +123,6 @@ The implementation is stdlib only — `crypto/ed25519`, `crypto/sha256`, `archiv
 
 `SetDefaultSettings` is **only** there. It replaces a process-global that the row path reads by reference, so the ABI requires it to exclude everything else on the image — and a dlopen'd `Library` deliberately does not carry the symbol in its function-pointer table. A Go consumer puts those settings in the compile profile and the per-call map instead; see [settings](../guides/settings.md).
 
-## Deeper
+## See also
 
 - [`bindings.md`](bindings.md) — the normative shape all four bindings implement.

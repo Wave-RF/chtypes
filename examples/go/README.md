@@ -14,7 +14,7 @@ go run .            # 16/16 sections, dlopen-only — what a public clone runs
 ## Prerequisites
 
 - **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/<os>-<arch>/`) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
-- **cgo — optional, and not available to a public clone.** Sections 9 and 14 (the statically linked shape) need a core build tree on `CGO_LDFLAGS` plus the `chtypes_linked` tag. That tree is not public: adding the tag without one fails at link time with `library 'chtypes' not found`, which is why it is not in the command above. Without the tag those two sections say so and skip, and the other fourteen run against the registry. `chplay.sh go` adds the tag only when `CHTYPES_CORE_DIR` or `CHTYPES_LIB_BUILD` points at such a tree.
+- **cgo — optional, and not available to a public clone.** Sections 9 and 14 (the statically linked shape) need the artifact producer's build tree on `CGO_LDFLAGS` plus the `chtypes_linked` tag. That tree is not public: adding the tag without one fails at link time with `library 'chtypes' not found`, which is why it is not in the command above. Without the tag those two sections say so and skip, and the other fourteen run against the registry. `chplay.sh go` adds the tag only when `CHTYPES_CORE_DIR` or `CHTYPES_LIB_BUILD` points at such a tree.
 - Go 1.27+.
 
 ## Knobs

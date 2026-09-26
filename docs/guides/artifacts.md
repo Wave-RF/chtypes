@@ -178,7 +178,7 @@ where `<clickhouse_version>` is the manifest's own `clickhouse_version`, channel
 
 Two version axes meet here, and conflating them is the mistake to avoid. **The ClickHouse version** is a property of an artifact: it is in the asset name, in `manifest.json`, in `CH_VERSION`, and the library reports it itself. **The release tag** is a snapshot of this repository's code packaged with the set of ClickHouse artifacts current when it was cut. So one release carries N ClickHouse versions × M platforms.
 
-There are two kinds of release and only one of them is a version. The rolling `artifacts` release is a staging area whose membership changes as core certifies lines; a versioned `v*` tag says "these are the ones". **Pin the versioned one** — pointing CI at the rolling release is how a pipeline starts silently testing something new. A published `(tag, asset name)` never changes bytes: adding a line, adding a platform or rebuilding an artifact means a new tag, which is what keeps a consumer's recorded hash meaningful.
+There are two kinds of release and only one of them is a version. The rolling `artifacts` release is a staging area whose membership changes as lines pass the artifact producer's comparison against a real server; a versioned `v*` tag says "these are the ones". **Pin the versioned one** — pointing CI at the rolling release is how a pipeline starts silently testing something new. A published `(tag, asset name)` never changes bytes: adding a line, adding a platform or rebuilding an artifact means a new tag, which is what keeps a consumer's recorded hash meaningful.
 
 Which lines exist is a question [`index.json`](https://artifacts.wavehouse.dev/artifacts/index.json) answers, and `fetch --all` reads it rather than restating a list. [`../support.md`](../support.md) renders the current answer, generated rather than typed.
 
@@ -188,6 +188,6 @@ Artifacts are **Elastic License 2.0** — a different license from the Apache 2.
 
 ## Two notes about platforms
 
-**macOS is a development floor, not an oracle.** The darwin artifacts exist so you can develop and run the suites on a laptop. Their `long double` is 53-bit, which makes some float parses diverge from a real server, so a float expectation is taken from Linux or from a live ClickHouse, never from a Mac. See [`../limitations.md`](../limitations.md).
+**macOS artifacts are for development; Linux is the reference.** The darwin artifacts exist so you can develop and run the suites on a laptop. Their `long double` is 53-bit, which makes some float parses diverge from a real server, so a float expectation is taken from Linux or from a live ClickHouse, never from a Mac. See [`../limitations.md`](../limitations.md).
 
 **Linux holds as many versions as you like.** An artifact needs no static thread-local storage, so a process may `dlopen` as many as it wants on glibc with no tunable set — the producer proves it per build. One historical exception, for anyone holding old files: the 24.8 and 25.3 artifacts published before 2026-09-10 carried one initial-exec TLS access and failed on the third load with `cannot allocate memory in static TLS block`. Re-fetch them.
