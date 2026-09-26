@@ -287,6 +287,15 @@ jobs:
         run: scripts/check-linked-build.sh --selftest
       - name: type-check the linked path — cgo against include/chtypes.h, no artifact needed
         run: scripts/check-linked-build.sh
+      # Selftest first, same rule as everywhere else in this job: needs no
+      # registry and no `go` on PATH — it drives scripts/lib/standalone_census.py
+      # directly against synthetic go-test -json logs — so it belongs in this
+      # no-artifact leg and gates every pull request. Covers the zero-checked
+      # guard (chtypes#225): a parent test (TestGoldens) that itself PASSED
+      # while every subtest under it SKIPPED must be refused under
+      # --require-artifacts, not read as "TestGoldens ran".
+      - name: selftest — the standalone census refuses a golden pass that checked zero cases
+        run: scripts/check-standalone.sh --selftest
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
         run: scripts/check-standalone.sh --no-artifacts
       # The census JSON is diagnostic: it is how a failure is READ, never how a

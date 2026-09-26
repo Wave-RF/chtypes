@@ -3,6 +3,7 @@ package chtypes
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -296,6 +297,34 @@ func TestGoldens(t *testing.T) {
 		}
 	}
 	t.Logf("%d golden checks across %d version(s)", checked, len(r.Versions()))
+	assertAtLeastOneGoldenChecked(t, checked, len(r.Versions()))
+}
+
+// goldenChecksAssertable is the minimal *testing.T surface
+// assertAtLeastOneGoldenChecked needs, so the zero-checked guard (chtypes#225)
+// can be pinned with a fake and run in the no-artifact CI job: no registry
+// necessary to prove the guard itself still fires.
+type goldenChecksAssertable interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
+// assertAtLeastOneGoldenChecked is TestGoldens' zero-checked guard (chtypes#225).
+// A registry and golden set can both be present while every discovered
+// version is skipped (excluded by design, not generated on that line, or a
+// patch mismatch) — the loop then never enters a single per-case t.Run, and
+// without this call TestGoldens finishes having checked nothing and still
+// reads as an ordinary green pass. This must never fire when there is no
+// registry at all: that path returns out of testRegistry/testRegistryDir via
+// t.Skipf before TestGoldens ever reaches this line, which is what keeps the
+// no-artifact CI job's loud skip intact.
+func assertAtLeastOneGoldenChecked(t goldenChecksAssertable, checked, versions int) {
+	t.Helper()
+	if checked == 0 {
+		t.Fatalf("checked zero golden cases across %d version(s) in the registry — every version was "+
+			"skipped (see the skipped sub-tests above for why); a golden run must never pass having "+
+			"checked nothing", versions)
+	}
 }
 
 func equalStrings(a, b []string) bool {
@@ -376,5 +405,45 @@ func TestGoldenOutcomeRequiredUnlessCompileError(t *testing.T) {
 	}
 	if got, err := outcomeOrErr("ok"); err != nil || got != "ok" {
 		t.Fatalf("outcomeOrErr(%q) = %q, %v; want %q, nil", "ok", got, err, "ok")
+	}
+}
+
+// fakeGoldenT is a goldenChecksAssertable that records whether Fatalf was
+// called, so the zero-checked guard can be driven directly without a real
+// *testing.T (which cannot be asked "did you fail" from inside the same
+// test) and without a registry.
+type fakeGoldenT struct {
+	fatalCalled bool
+	fatalMsg    string
+}
+
+func (f *fakeGoldenT) Helper() {}
+func (f *fakeGoldenT) Fatalf(format string, args ...any) {
+	f.fatalCalled = true
+	f.fatalMsg = fmt.Sprintf(format, args...)
+}
+
+// TestGoldensGuardFailsOnZeroChecked pins the zero-checked guard (chtypes#225):
+// a registry and golden set present but every version skipped must FAIL the
+// run, not pass silently having checked nothing. Needs no registry — it
+// drives assertAtLeastOneGoldenChecked through a fake — so it runs in the
+// no-artifact CI job and fails immediately if the guard is ever removed or
+// bypassed.
+func TestGoldensGuardFailsOnZeroChecked(t *testing.T) {
+	fake := &fakeGoldenT{}
+	assertAtLeastOneGoldenChecked(fake, 0, 3)
+	if !fake.fatalCalled {
+		t.Fatal("assertAtLeastOneGoldenChecked(checked=0, versions=3) did not call Fatalf — the " +
+			"zero-checked guard (chtypes#225) has been removed or bypassed")
+	}
+}
+
+// TestGoldensGuardPassesWhenChecked is the guard's negative control: at least
+// one checked case must never be refused. Needs no registry, same as above.
+func TestGoldensGuardPassesWhenChecked(t *testing.T) {
+	fake := &fakeGoldenT{}
+	assertAtLeastOneGoldenChecked(fake, 1, 3)
+	if fake.fatalCalled {
+		t.Fatalf("assertAtLeastOneGoldenChecked(checked=1, versions=3) called Fatalf unexpectedly: %s", fake.fatalMsg)
 	}
 }

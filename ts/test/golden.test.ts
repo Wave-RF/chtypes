@@ -154,6 +154,27 @@ if (!HAVE_REGISTRY) {
   );
 }
 
+/**
+ * The zero-checked guard (chtypes#225). A registry and golden set can both be
+ * present while every open library's line is excluded from the set — never
+ * generated on it, or a patch mismatch — and the describe block below used to
+ * have no test that noticed: `libraries.length > 0` says an artifact was
+ * open, never that a single CASE was compared, and vitest's own summary line
+ * still reads as a pass with every per-case `it()` skipped. `registeredCount`
+ * is the SAME count the per-case loop below just produced — never a second,
+ * independently guessed number — so this fails exactly when that loop
+ * generated nothing to run; `ranCount` catches a registered case that for any
+ * reason never executed.
+ *
+ * Extracted so it can be pinned directly, with no registry, below.
+ */
+function assertGoldenChecksComplete(ranCount: number, registeredCount: number, haveRegistry: boolean): void {
+  expect(ranCount).toBe(registeredCount);
+  if (haveRegistry) {
+    expect(registeredCount).toBeGreaterThan(0);
+  }
+}
+
 describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
   // A skipped describe still evaluates its body, so the registry is opened
   // only when there is one. Without it no per-case test is generated and the
@@ -169,6 +190,8 @@ describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
     expect(libraries.length).toBeGreaterThan(0);
   });
   const exact = doc?.generated?.exact ?? {};
+  let registeredCaseCount = 0;
+  let ranCaseCount = 0;
   for (const lib of libraries) {
     // A case is only a golden for the EXACT build it was generated against. The
     // rolling index keeps older patch rows, so a machine can hold a patch the
@@ -183,7 +206,9 @@ describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
       continue;
     }
     for (const c of doc!.cases) {
+      registeredCaseCount++;
       it(`${lib.version}/${c.id}`, () => {
+        ranCaseCount++;
         const format = FORMATS[c.format];
         if (format === undefined) throw new Error(`${c.id}: unknown format ${c.format}`);
         const body = Buffer.from(c.body, 'utf8');
@@ -242,6 +267,14 @@ describe.skipIf(!HAVE_REGISTRY)('goldens', () => {
       });
     }
   }
+  // Runs LAST within this describe (vitest runs `it()`s in registration
+  // order), after every per-case test above has already executed — so by the
+  // time this body runs, `ranCaseCount` reflects everything that happened in
+  // the loop. chtypes#225: this is what actually closes the gap the "has at
+  // least one artifact" sentinel above left open.
+  it('checked at least one golden case, and none vanished (chtypes#225)', () => {
+    assertGoldenChecksComplete(ranCaseCount, registeredCaseCount, HAVE_REGISTRY);
+  });
 });
 
 // Pins the served document's omit-when-empty shape rule (chtypes#199): a key
@@ -282,5 +315,27 @@ describe('golden reading — omitted optional fields', () => {
     expect(() => requireRowOutcome('synthetic-no-outcome', 0, row)).toThrow(
       /synthetic-no-outcome row 0 has no outcome/,
     );
+  });
+});
+
+// Pins the zero-checked guard (chtypes#225) directly, with no artifact or
+// registry, so it runs in the no-artifact CI job: a future change that
+// deletes or loosens assertGoldenChecksComplete fails here immediately,
+// rather than waiting on a registry shaped exactly right to expose it.
+describe('golden zero-checked guard (chtypes#225)', () => {
+  it('refuses a registry present but zero cases registered', () => {
+    expect(() => assertGoldenChecksComplete(0, 0, true)).toThrow();
+  });
+
+  it('refuses a registered case that never ran', () => {
+    expect(() => assertGoldenChecksComplete(2, 3, true)).toThrow();
+  });
+
+  it('accepts zero registered cases when there is no registry at all', () => {
+    expect(() => assertGoldenChecksComplete(0, 0, false)).not.toThrow();
+  });
+
+  it('accepts every registered case having run', () => {
+    expect(() => assertGoldenChecksComplete(3, 3, true)).not.toThrow();
   });
 });

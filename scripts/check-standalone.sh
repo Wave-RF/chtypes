@@ -5,6 +5,7 @@
 # `go get` produces.
 #
 #   scripts/check-standalone.sh [--registry <dir>] [--no-artifacts | --require-artifacts]
+#   scripts/check-standalone.sh --selftest
 #
 # WHY. The package once linked -lchtypes out of a build tree at compile time
 # even for a caller that only dlopens artifacts, so it was unbuildable outside
@@ -33,6 +34,19 @@ ROOT="$(dirname "$SCRIPTS")"
 die()  { printf 'check-standalone: %s\n' "$*" >&2; exit 1; }
 say()  { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
 note() { printf '    %s\n' "$*" >&2; }
+
+# --selftest drives the census logic (scripts/lib/standalone_census.py)
+# directly against synthetic go-test -json logs, needing no registry and no
+# `go` on PATH: it proves the --require-artifacts verdict itself, including
+# the zero-checked guard (chtypes#225) — "a parent test whose subtests ALL
+# skipped" must be refused, not read as "TestGoldens ran". Same discipline as
+# check-suite.sh's own --selftest: a checker nobody has seen fail is not a
+# checker.
+if [ "${1:-}" = "--selftest" ]; then
+  command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH; the selftest cannot run"
+  python3 "$SCRIPTS/lib/standalone_census.py" --selftest || exit 1
+  exit 0
+fi
 
 REG="${CHTYPES_REGISTRY:-}"
 NO_ARTIFACTS=0; REQUIRE=0
@@ -159,74 +173,11 @@ rc=0
 # are through CHTYPES_FETCH_FIXTURES and skips loudly without them.
 ( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_FETCH_FIXTURES="$ROOT/tests/fixtures/fetch" CHTYPES_UNBUILDABLE="$CHTYPES_UNBUILDABLE" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
 [ -s "$LOG" ] || die "go test produced no -json output (rc=$rc)"
+# The verdict logic lives in scripts/lib/standalone_census.py, not here, so
+# `--selftest` above can drive it directly against a synthetic log — the
+# zero-checked guard (chtypes#225) in particular is exercised there, offline.
 set +e
-python3 - "$LOG" "$rc" "$HAVE_REG" "$REQUIRE" <<'PY'
-import json, os, sys
-log, rc, have_reg, require = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1", sys.argv[4] == "1"
-# The parity contract (tests/parity/manifest.json) is checked by each language's
-# own suite, and Go's runs here — from the bare copy, off the manifest it embeds,
-# needing no artifact and no repository root. These names must have PASSED: a
-# parity check that was deleted, renamed or skipped would otherwise leave the
-# census looking exactly as healthy as one that ran.
-PARITY = [
-    "TestParityManifestMeetsItsOwnFloors",
-    "TestParityManifestIsFullyDeclared",
-    "TestGoExposesEveryCapabilityTheContractAssignsIt",
-    "TestGoAnswersTheSameValuesAsTheOtherBindings",
-    "TestGoCLIOffersEveryContractSubcommand",
-    "TestNoGoPublicNameEscapesTheContract",
-    "TestGoUnlistedAllowlistHasNotRotted",
-]
-ran = skip = fail = 0; skips = []; noise = []; failed = []; output = {}; passed = set()
-for line in open(log, encoding="utf-8", errors="replace"):
-    line = line.strip()
-    if not line.startswith("{"):
-        if line: noise.append(line)
-        continue
-    try: ev = json.loads(line)
-    except ValueError: noise.append(line); continue
-    t, a = ev.get("Test"), ev.get("Action")
-    if not t: continue
-    if a == "output": output.setdefault(t, []).append(ev.get("Output", "").rstrip("\n")); continue
-    if a == "pass": ran += 1; passed.add(t)
-    elif a == "fail": ran += 1; fail += 1; failed.append(t)
-    elif a == "skip": skip += 1; skips.append(t)
-print("  standalone census — %d ran, %d skipped, %d failed" % (ran, skip, fail))
-for t in skips: print("    SKIPPED", t)
-# A failure is named, and its own last words are quoted — a count alone sends
-# whoever reads the log to fetch the -json file, which CI does not keep.
-for t in failed:
-    print("    FAILED", t)
-    tail = [l for l in output.get(t, []) if l.strip() and not l.startswith("=== RUN") and not l.startswith("--- FAIL")][-12:]
-    for l in tail: print("      | " + l[:200])
-for n in noise[:20]: print("    " + n[:160])
-problems = []
-if fail: problems.append("%d test(s) failed" % fail)
-if ran == 0: problems.append("zero tests ran — the untagged suite asserted nothing")
-absent = [t for t in PARITY if t not in passed]
-if absent:
-    problems.append("the binding parity contract was not proven here: %s did not pass. It needs no "
-                    "artifact and no repository root, so there is no state in which it may be absent "
-                    "(tests/parity/manifest.json, docs/reference/bindings.md)" % ", ".join(absent))
-if rc != 0 and not problems: problems.append("go test exited %d with no failing record; read %s" % (rc, log))
-if require:
-    # The artifact-backed run's rule, read off the same census: the golden
-    # set ran, and no test skipped for the one reason artifacts remove.
-    if "TestGoldens" not in passed: problems.append("TestGoldens did not pass with artifacts required")
-    starved = [t for t in skips if any("no chtypes artifacts under" in l for l in output.get(t, []))]
-    if starved: problems.append("%d test(s) skipped for want of a registry with artifacts required: %s" % (len(starved), ", ".join(starved)))
-# The ABI-revision handshake (#36). When $CHTYPES_ABI_FIXTURES names a
-# wrong-revision fixture set (scripts/abi-fixtures.sh), both halves must have
-# PASSED: a skipped or absent case reads exactly like a working handshake.
-if os.environ.get("CHTYPES_ABI_FIXTURES"):
-    for t in ("TestABIRevisionMismatchIsRefused", "TestABIRevisionControlLoads"):
-        if t not in passed:
-            problems.append("%s did not pass although $CHTYPES_ABI_FIXTURES is set" % t)
-if problems:
-    print("  VERDICT: NOT a pass —"); [print("    * " + p) for p in problems]; sys.exit(1)
-mode = "" if have_reg else " (no artifact registry: %d test(s) skipped by name above)" % skip
-print("  VERDICT: pass — the dlopen-only SDK built, vetted and ran %d assertions from a bare copy%s" % (ran, mode))
-PY
+python3 "$SCRIPTS/lib/standalone_census.py" "$LOG" "$rc" "$HAVE_REG" "$REQUIRE"
 census_rc=$?
 set -e
 [ "$census_rc" -eq 0 ] || die "the standalone suite did not pass its census (go test rc=$rc); see $LOG"

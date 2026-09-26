@@ -431,7 +431,18 @@ here: python collected ${PARITY_N:-0} of at least $PARITY_MIN parity tests (test
     [ "${PARITY_N:-0}" -ge "$PARITY_MIN" ] || PROBLEMS+=("the binding parity contract was not proven \
 here: ts ran ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/parity/manifest.json)")
     if [ "$REQUIRE" -eq 1 ]; then
-      grep -qF '✓ test/golden.test.ts >' "$PLAIN" || PROBLEMS+=("no golden case RAN with artifacts required")
+      # (chtypes#225) NOT a generic '✓ test/golden.test.ts >' grep: that shape
+      # is satisfied by the "has at least one artifact to run against"
+      # sentinel's OWN passing line even when every real per-case test below
+      # it was skipped (a registry can hold artifacts whose lines the golden
+      # set simply does not cover) — a census that reads "a golden case RAN"
+      # off nothing more than a helper assertion is the exact zero-checked
+      # bug this issue is about. The test named here is the one that actually
+      # counts real per-case checks against the same enumeration the suite
+      # itself drives, and fails when that count is zero or when a registered
+      # case never ran.
+      grep -qE '✓.*checked at least one golden case, and none vanished \(chtypes#225\)' "$PLAIN" \
+        || PROBLEMS+=("the golden zero-checked guard (chtypes#225) did not pass with artifacts required — a registry and golden set can be present while every case is skipped")
       # A per-line skip is EXPECTED and not a problem: a case is only a golden
       # for the exact ClickHouse build it was generated on, so a registry holding
       # an older patch skips that line by name (the core repository's golden-set documentation). What must not
