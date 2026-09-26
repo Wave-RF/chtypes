@@ -13,7 +13,7 @@ A registry is a directory holding `<minor>/manifest.json` entries. Lookup tries,
 3. `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>` — the per-user cache, where fetch installs;
 4. `/usr/local/share/chtypes/artifacts/<os>-<arch>` and then `/opt/chtypes/artifacts/<os>-<arch>` — system locations, empty today, reserved for the deferred system packages (§8) and for images that bake artifacts in.
 
-Fetch **writes** to the first of (1), (2), (3) that is set; never to (4). `<os>` is `linux` or `darwin`, `<arch>` is `arm64` or `amd64`, in those spellings. One machine set up once therefore serves all four bindings, and a core build lands in the same place.
+Fetch **writes** to the first of (1), (2), (3) that is set; never to (4). `<os>` is `linux` or `darwin`, `<arch>` is `arm64` or `amd64`, in those spellings. One machine set up once therefore serves all four bindings, and a locally built artifact lands in the same place.
 
 Once resolved, an artifact and the SDK opening it are matched by ABI revision: a mismatch is refused at load, naming both numbers.
 

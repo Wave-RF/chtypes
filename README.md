@@ -155,13 +155,13 @@ A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying
 - **`Transformed` is the product.** ClickHouse never says _"I changed your value"_; chtypes derives that report (`overflow_wrap`, `date_clamp`, `poisoned`, `ttl_expired`, …) and it is not optional.
 - **Over-accepts and over-rejects have no budget** — a non-zero count is refused unless a person has named that case and recorded why, with a tracking reference. Known cases exist and are registered individually rather than absorbed into an allowance; what that does and does not promise: [`docs/limitations.md`](docs/limitations.md#the-error-model-is-normative).
 - **`unsupported` is an answer, never a guess.** A binding surfaces the library's decline; it never papers over one.
-- **The four bindings give one answer.** The golden set is run by all of them, and each is scored against real ClickHouse servers at the same agreement as the reference.
+- **The four bindings give one answer.** The golden set — a published file of expected answers every binding must reproduce — is run by all of them, and each is scored against real ClickHouse servers at the same agreement as the reference.
 
 ## What is supported
 
 Three axes — the language you call from, the platform you run on, and the ClickHouse line you want answers for. **[docs/support.md](docs/support.md)** carries the full matrix, generated from this tree's manifests and the release's own index so it cannot drift from what actually ships.
 
-The short version: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64` and `darwin-arm64` (Unix only — both loaders are `dlopen`); and every ClickHouse line with a committed run of record, today spanning 24.8 through 26.8 and growing as releases are certified.
+The short version: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64` and `darwin-arm64` (Unix only — both loaders are `dlopen`); and every ClickHouse line that has passed the artifact producer's comparison against a real server, today spanning 24.8 through 26.8 and growing as new releases pass it.
 
 ## Documentation
 
@@ -177,7 +177,7 @@ The short version: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64`
 
 Pre-1.0, and published to all four registries — the badges above read the live version from each. What is already frozen before 1.0 is in [`docs/support.md`](docs/support.md#pre-10).
 
-This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the artifacts themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — is the core repository, under its own license. The bindings here contain no ClickHouse code: they load an artifact and speak the ABI. Artifacts carry their own license; see the `LICENSE` inside each release.
+This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the artifacts themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — belongs to the artifact producer, under its own license. The bindings here contain no ClickHouse code: they load an artifact and speak the ABI. Artifacts carry their own license; see the `LICENSE` inside each release.
 
 ## Contributing
 

@@ -336,7 +336,7 @@ func TestParseSignatureFile(t *testing.T) {
 
 // ---------------------------------------------------------------- §2
 
-func TestParseSpelling(t *testing.T) {
+func TestParseVersionSpellingIntoLineOrExactPatch(t *testing.T) {
 	cases := []struct{ in, line, exact string }{
 		{"25.8", "25.8", ""}, {"v25.8", "25.8", ""}, {"25.10", "25.10", ""},
 		{"25.8.28.1", "25.8", "25.8.28.1"}, {"v25.8.28.1-lts", "25.8", "25.8.28.1-lts"},
@@ -453,7 +453,7 @@ func TestFetchSignedRelease(t *testing.T) {
 	}
 }
 
-func TestFetchBadSignature(t *testing.T) {
+func TestFetchRefusesAFlippedSignatureByte(t *testing.T) {
 	isolateEnv(t)
 	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
 	rewrite(t, filepath.Join(rel, "SHA256SUMS.sig"), func(b []byte) []byte {
@@ -548,7 +548,7 @@ func TestFetchTamperedTarball(t *testing.T) {
 	noArtifactDirs(t, dest)
 }
 
-func TestFetchTamperedInside(t *testing.T) {
+func TestFetchRefusesAManifestThatDisagreesWithTheIndex(t *testing.T) {
 	// The tarball hashes right (the index and sums were built from it) but
 	// its manifest disagrees with the index: a release built from a
 	// different artifact than it lists.

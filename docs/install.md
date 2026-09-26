@@ -174,7 +174,7 @@ chtypes = { path = "../chtypes/rust" }
 
 </details>
 
-An artifact built in the core repository lands in the same per-user cache, so a local build and a fetched release are interchangeable to every binding.
+An artifact built locally by the artifact producer's pipeline lands in the same per-user cache, so a local build and a fetched release are interchangeable to every binding.
 
 ## Next
 

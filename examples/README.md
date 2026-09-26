@@ -23,7 +23,7 @@ chtypes answers one question — _"if this row were inserted into this table on 
 
 All four read `$CHTYPES_REGISTRY` (default: the per-user cache) and honor `$CHTYPES_VERSION` (any spelling: `25.8`, `25.8.28.1-lts`; default: the newest line held). No artifacts yet? `../scripts/fetch.sh 25.8`. With only one version built, everything still runs — the cross-version sweeps in section 12 degrade gracefully and say so.
 
-These are examples, not tests. The real suites live inside each binding (`../{go,python,ts,rust}/`) and the rigs (core: `tests/`). If a tour and a binding's test suite disagree, believe the test suite — then file the tour bug.
+These are examples, not tests. The real suites live inside each binding (`../{go,python,ts,rust}/`) and the artifact producer's server-comparison suites. If a tour and a binding's test suite disagree, believe the test suite — then file the tour bug.
 
 ## The sixteen sections
 
@@ -44,7 +44,7 @@ Read any tour top to bottom as a tutorial; every section carries a comment block
 13. **Teardown** — what to release and when, per SDK (and why Go's Registry deliberately has no teardown).
 14. **The static path (Go only)** — the cgo-linked single-version shape only Go has; the other three tours print a stub saying why.
 15. **Export: bytes + spans** — the same `chs_rows` call serializing the batch's accepted rows to wire bytes (JSONCompactEachRow), addressed per row by index-aligned spans; the lean document flags; the fail-closed export declines (a poisoned batch emits nothing, and says why); and emitted-empty versus declined. Degrades with a note on an artifact that predates ABI revision 3.
-16. **Filters: WHERE semantics at the edge** — one boolean expression compiled against the schema and evaluated per row: `x = 256` over UInt8 PROMOTING (never wrapping), NULL-is-not-true, the compiles-then-throws 'e' class, clock reads refused at compile (an UNBOUND `{p:Type}` is the server's own 456 since ABI revision 4), and the enforcement gate (shadow/replay until the WHERE-truth rig gates green). Two revision-4 sub-demos: **query parameters** (a tenant filter compiled once per (schema, expr, params) — values are strings, and a hostile `' OR 1=1 --` value is printed comparing as exactly that literal, no escaping anywhere) and **the block twin** (one 3-row event parsed ONCE, two role filters evaluated against the same block — eval(parse) ≡ rows, the live-SSE call shape). Degrades with the same note on an artifact that predates each surface.
+16. **Filters: WHERE semantics at the edge** — one boolean expression compiled against the schema and evaluated per row: `x = 256` over UInt8 PROMOTING (never wrapping), NULL-is-not-true, the compiles-then-throws 'e' class, clock reads refused at compile (an UNBOUND `{p:Type}` is the server's own 456 since ABI revision 4), and the enforcement gate (for comparison, not enforcement, until a release explicitly lifts this limitation). Two revision-4 sub-demos: **query parameters** (a tenant filter compiled once per (schema, expr, params) — values are strings, and a hostile `' OR 1=1 --` value is printed comparing as exactly that literal, no escaping anywhere) and **the block twin** (one 3-row event parsed ONCE, two role filters evaluated against the same block — eval(parse) ≡ rows, the live-SSE call shape). Degrades with the same note on an artifact that predates each surface.
 17. **The INSERT column list** — the revision-5 `columns` argument: a list naming an `EPHEMERAL` column, whose value is read, feeds the DEFAULT that references it (`d = 6`) and is never stored; then one refusal, a list naming a column the table does not have. Degrades loudly on an artifact that predates the surface.
 
 ## Where the SDKs deliberately differ
@@ -52,7 +52,7 @@ Read any tour top to bottom as a tutorial; every section carries a comment block
 The tours print these differences rather than hiding them:
 
 - **Loaders.** Go alone adds a statically linked path (section 14); Python (ctypes), TS (ffi-rs) and Rust (libloading) always dlopen. Optional by `docs/reference/bindings.md`.
-- **Introspection.** All four SDKs expose the full trio per `Library` — `reference_type`, `registered_families`, `function_flags` — since the 2026-08-26 parity cycle (`docs/reference/bindings.md` §Introspection); Go's static path mirrors them as package-level functions.
+- **Introspection.** All four SDKs expose all three introspection functions per `Library` — `reference_type`, `registered_families`, `function_flags` — since the 2026-08-26 parity cycle (`docs/reference/bindings.md` §Introspection); Go's static path mirrors them as package-level functions.
 - **Error shapes.** Peer types everywhere: Go and TS peer classes, Rust sibling enum variants, Python peer exceptions (its grandfathered `UnsupportedError(SchemaError)` subtype was retired 2026-08-26). Section 10 of each tour is the local idiom.
 - **Compile mode.** Rust's `CompileMode` has one variant, so the invalid mode the other three pass through (and get the library's `-2` decline for) does not typecheck there.
 - **Teardown.** Python `close()`/context manager, TS `close()`/ `Symbol.dispose`, Rust `shutdown()`/`Drop`, Go deliberately nothing (`docs/reference/bindings.md` §Teardown).

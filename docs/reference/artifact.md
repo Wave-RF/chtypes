@@ -27,7 +27,7 @@ Platform-keyed, one tree per target:
 ~/.cache/chtypes/artifacts/<os>-<arch>/<minor>/…
 ```
 
-`<os>` is the lowercased OS name (`linux`, `darwin`) and `<arch>` is normalized (`aarch64 → arm64`, `x86_64 → amd64`). Current keys: **`linux-arm64`** (the shipping platform) and **`darwin-arm64`** (a development floor, never an oracle). `linux-amd64` is a build target, not a built artifact, on the current host.
+`<os>` is the lowercased OS name (`linux`, `darwin`) and `<arch>` is normalized (`aarch64 → arm64`, `x86_64 → amd64`). Current keys: **`linux-arm64`** (the shipping platform) and **`darwin-arm64`** (for development; Linux is the reference). `linux-amd64` is a build target, not a built artifact, on the current host.
 
 **A loader MUST follow symlinks and MUST NOT assume the registry is inside any repository.** Build trees commonly symlink their output directories into `~/.cache/chtypes/` so that deleting a checkout cannot destroy hours of C++ compute, which means the path a loader is handed may be a link and the bytes may live anywhere.
 
@@ -69,7 +69,7 @@ Additive changes to this file are allowed. A loader MUST ignore fields it does n
 
 **A loader MUST resolve the shared-library file name from `manifest.json`'s `library` field.** Not from a hard-coded `libchtypes.so`, not from a glob, not from the platform.
 
-Historically the Linux artifacts carried the name **`libchtypes_s1.so`** (built 2026-08-04, from the era when two implementations were being compared) while darwin shipped `libchtypes.dylib` — so on 2026-08-17 a loader that hard-coded `libchtypes.so` found nothing on the shipping platform. The current matrix is `libchtypes.dylib` / `libchtypes.so` on all seven versions × two platforms as of the 2026-08-26 relink, but old builds outlive a rename and third-party artifacts need not follow ours: artifacts with the historic name still load correctly because the reference implementation does `dlopen(filepath.Join(sub, m.Library))` — the manifest's name, never a constructed one.
+Historically the Linux artifacts carried the name **`libchtypes_s1.so`** (built 2026-08-04, when two implementations were being compared) while darwin shipped `libchtypes.dylib` — so on 2026-08-17 a loader that hard-coded `libchtypes.so` found nothing on the shipping platform. The current matrix is `libchtypes.dylib` / `libchtypes.so` on all seven versions × two platforms as of the 2026-08-26 relink, but old builds outlive a rename and third-party artifacts need not follow ours: artifacts with the historic name still load correctly because the reference implementation does `dlopen(filepath.Join(sub, m.Library))` — the manifest's name, never a constructed one.
 
 The **base name** `libchtypes` and the symbol prefix `chs_` are frozen for new builds; the point of this rule is that _old_ builds outlive a rename, and rebuilding the matrix is hours of C++ compute per version.
 
@@ -93,7 +93,7 @@ The reference algorithm (`chtypes.NewRegistry` in `go/chtypes/multiversion.go`):
 
 ### Discovery, for tools
 
-The reference oracle also falls back to discovery when its linked build cannot answer for the requested version, checked in order: `$CHTYPES_REGISTRY`, then `dist/out` at several depths relative to the executable, then relative to the working directory. Crucially, **only a registry that actually has the requested version wins**, so a stale directory cannot shadow a correct startup error. A binding MAY implement the same fallback; if it does, it MUST keep that rule.
+The reference implementation also falls back to discovery when its linked build cannot answer for the requested version, checked in order: `$CHTYPES_REGISTRY`, then `dist/out` at several depths relative to the executable, then relative to the working directory. Crucially, **only a registry that actually has the requested version wins**, so a stale directory cannot shadow a correct startup error. A binding MAY implement the same fallback; if it does, it MUST keep that rule.
 
 ## Verification
 
@@ -107,7 +107,7 @@ A loader SHOULD verify the hash before `dlopen` when the artifact came from anyw
 - **glibc floor 2.17** on `linux-arm64`, measured. Verify before shipping into an older base image.
 - **Static-TLS exhaustion.** With the full seven-version registry on glibc, the **third** artifact fails to load with `cannot allocate memory in static TLS block`. The fix is `GLIBC_TUNABLES=glibc.rtld.optional_static_tls=131072`, baked into the artifact image and passed by the artifact build tooling for images that predate it. A loader that dlopens three or more versions on glibc MUST either run in an environment that sets this or surface the error with the remedy, because the raw message names nothing actionable.
 - **rpath.** A shipped binary needs an rpath relative to itself or its RUNPATH points at the builder's filesystem. Linux is the shipping target and cgo accepts `$ORIGIN`; a relocatable darwin binary needs `-ldflags "-r @loader_path"` because cgo's flag validator rejects `@loader_path`.
-- **macOS is a development floor, not an oracle.** Its `long double` is 53-bit, so float parses diverge from a real server — the float corpus matches 395/395 on Linux and 0/395 on macOS. Float expectations MUST come from a Linux artifact or a live server. Additionally, the mandatory `new_delete` archive that routes plain `operator new` into ClickHouse's `MemoryTracker` cannot be linked on macOS, so the DEFAULT-evaluation memory ceiling is weaker there.
+- **macOS artifacts are for development; Linux is the reference.** Its `long double` is 53-bit, so float parses diverge from a real server — the float corpus matches 395/395 on Linux and 0/395 on macOS. Float expectations MUST come from a Linux artifact or a live server. Additionally, the mandatory `new_delete` archive that routes plain `operator new` into ClickHouse's `MemoryTracker` cannot be linked on macOS, so the DEFAULT-evaluation memory ceiling is weaker there.
 
 ## The one failure mode to design against
 

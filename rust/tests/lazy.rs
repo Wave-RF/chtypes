@@ -158,7 +158,7 @@ fn preload_opens_exactly_the_named_lines_at_construction() {
 }
 
 #[test]
-fn a_preload_entry_no_directory_holds_is_the_section_7_error() {
+fn a_preload_entry_no_directory_holds_is_the_missing_artifact_error() {
     let dir = stand_in_registry("preload-missing", &["25.8"]);
     let err = Registry::open(
         &dir,
