@@ -175,15 +175,29 @@ STRICT_EXACT=0
 case "$(printf '%s' "${SPELLING#v}" | sed -E 's/-(lts|stable|prestable|testing)$//')" in
   *.*.*.*) STRICT_EXACT=1 ;;
 esac
+# The optional developer resolver: found by name, not a spelled-out path, so
+# this script does not describe that tree's layout. Exact, not first-found: two
+# levels deep, and more than one match is an error rather than a guess, so a
+# stray copy can never silently win.
+CORE_RESOLVER=""
+CORE_ROOT="${CHTYPES_CORE_DIR:-$ROOT/../core}"
+if [ "$ALL" != 1 ] && [ -d "$CORE_ROOT" ] && command -v uv >/dev/null 2>&1; then
+  resolver_matches="$(find "$CORE_ROOT" -maxdepth 2 -type f -name resolve-version.py 2>/dev/null || true)"
+  resolver_count="$(printf '%s' "$resolver_matches" | grep -c . || true)"
+  if [ "$resolver_count" -gt 1 ]; then
+    die "found $resolver_count copies of resolve-version.py within two levels of $CORE_ROOT; expected at most one:
+$resolver_matches
+Set CHTYPES_CORE_DIR to the checkout you mean, or remove the stray copy."
+  fi
+  CORE_RESOLVER="$resolver_matches"
+fi
 if [ "$ALL" = 1 ]; then
   # Nothing to resolve: index.json is the list.
   WANT_LINE="every published line"; STRICT_EXACT=0
-elif command -v uv >/dev/null 2>&1 && CORE_RESOLVER="$(find "${CHTYPES_CORE_DIR:-$ROOT/../core}" -maxdepth 3 -name resolve-version.py -print -quit 2>/dev/null)" && [ -n "$CORE_RESOLVER" ]; then
+elif [ -n "$CORE_RESOLVER" ]; then
   # A developer with the core repository beside this one gets its full
   # version resolver (Docker digests, moving tags); a consumer without it gets
   # the local normalization below, and index.json is the authority either way.
-  # Found by name rather than a hardcoded relative path, so this script does
-  # not need to know (or say) where inside that tree the resolver lives.
   RESOLVED="$(uv run --no-project python "$CORE_RESOLVER" "$SPELLING" 2>/dev/null || true)"
   if [ -n "$RESOLVED" ]; then
     IFS='|' read -r WANT_LINE WANT_EXACT <<EOF
