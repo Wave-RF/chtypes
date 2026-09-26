@@ -48,7 +48,7 @@ func exec(t *testing.T, args ...string) (rc int, stdout, stderr string) {
 	return rc, out.String(), errb.String()
 }
 
-func TestUsageAndWhere(t *testing.T) {
+func TestCLIUsageErrorsAndWhereOutput(t *testing.T) {
 	cache := isolate(t)
 	for _, args := range [][]string{{}, {"bogus"}, {"fetch"}, {"fetch", "--all", "25.8"}, {"fetch", "25.8", "--tag", "v1", "--url", "x"},
 		{"fetch", "25.8", "--platform", "windows-amd64"}, {"fetch", "25.8", "--nope"}, {"where", "extra"}, {"verify", "extra"}, {"list", "extra"}} {
