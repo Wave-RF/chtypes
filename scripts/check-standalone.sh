@@ -68,6 +68,20 @@ if [ -z "$REG" ]; then
   REG="${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/$_os-$_arch"
 fi
 
+# A registry PATH is not a fingerprint: the same path holds different builds
+# on different days, and a machine that also builds artifacts can hold
+# several producer commits worth at once (chtypes#190). Before anything
+# runs, say what is actually in the registry this run will use — one line
+# per artifact line's manifest fields, the goldens file's identity, and a
+# loud (never fatal) WARNING when a line's ABI revision does not match this
+# binding's own header.
+command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH; provenance cannot be printed"
+if [ "$NO_ARTIFACTS" -eq 1 ]; then
+  python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
+else
+  python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h" --registry "$REG"
+fi
+
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/chtypes-standalone.XXXXXX")"
 trap 'rm -rf "$TMP" "${SCRATCH_CACHE:-}"' EXIT
 DEST="$TMP/go"

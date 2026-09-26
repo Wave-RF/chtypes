@@ -274,7 +274,18 @@ if [ "${1:-}" = "--selftest" ]; then
   python_abi_case_failed test_matching_revision_loads "$tmp/pyabi-control-failed.log" \
     || { echo "SELFTEST FAILED: the matching_revision_loads control's own FAILED line was not recognized" >&2; exit 1; }
 
-  echo "check-suite: selftest ok — the ABI-fixture matcher stays strict on all three #66 interleave shapes and a genuine non-run, still reads a clean line as RUN, the parity census matcher (#77) stays strict on the same three shapes, counts a clean line, and still fails its threshold on an undercount, and the python ABI-revision FAILED-line matcher (#112) names a case that ran and failed without tripping on a clean run, a skip, an unrelated failure, or a same-prefixed neighbor"
+  # scripts/lib/provenance.py (chtypes#190) — the registry provenance printer
+  # both this script and check-standalone.sh call before running a suite.
+  # Its own --selftest builds a fake registry (a matching-revision manifest,
+  # a mismatched one, and a manifest-less scratch directory) and, critically,
+  # rewrites a TEMP COPY of the header's CHS_ABI_REVISION and re-asserts that
+  # the WARNING moves with it — so a version of the printer that hard-codes
+  # the pinned revision instead of reading the header fails this, not just a
+  # missing feature.
+  python3 "$SCRIPTS/lib/provenance.py" --selftest \
+    || { echo "SELFTEST FAILED: scripts/lib/provenance.py --selftest" >&2; exit 1; }
+
+  echo "check-suite: selftest ok — the ABI-fixture matcher stays strict on all three #66 interleave shapes and a genuine non-run, still reads a clean line as RUN, the parity census matcher (#77) stays strict on the same three shapes, counts a clean line, and still fails its threshold on an undercount, the python ABI-revision FAILED-line matcher (#112) names a case that ran and failed without tripping on a clean run, a skip, an unrelated failure, or a same-prefixed neighbor, and scripts/lib/provenance.py's own selftest passed (#190)"
   exit 0
 fi
 
@@ -303,6 +314,28 @@ if [ "$NO_ARTIFACTS" -eq 1 ]; then
   done
 fi
 [ "$REQUIRE" -eq 0 ] || say "--require-artifacts: CHTYPES_REGISTRY=${CHTYPES_REGISTRY:-<unset — the search path>}; the golden set must run"
+
+# A registry PATH is not a fingerprint: the same path holds different builds
+# on different days, and a machine that also builds artifacts can hold
+# several producer commits worth at once (chtypes#190). Before the suite
+# runs, say what is actually in the registry it will use — one line per
+# artifact line's manifest fields, the goldens file's identity, and a loud
+# (never fatal) WARNING when a line's ABI revision does not match this
+# binding's own header. Mirrors the first entry of the documented registry
+# search path (docs/guides/artifacts.md), same as check-standalone.sh: an
+# explicit $CHTYPES_REGISTRY if set, else the per-user cache.
+command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH; provenance cannot be printed"
+if [ "$NO_ARTIFACTS" -eq 1 ]; then
+  python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
+else
+  REG="${CHTYPES_REGISTRY:-}"
+  if [ -z "$REG" ]; then
+    _os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    case "$(uname -m)" in x86_64|amd64) _arch=amd64 ;; arm64|aarch64) _arch=arm64 ;; *) _arch="$(uname -m)" ;; esac
+    REG="${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/$_os-$_arch"
+  fi
+  python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h" --registry "$REG"
+fi
 
 # The binding parity contract (tests/parity/manifest.json, docs/reference/bindings.md) is
 # checked by each language's OWN suite. It needs no artifact and no registry, so
