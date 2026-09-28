@@ -227,7 +227,7 @@ KEY_LOCATION_WHY="a sentence naming where a signing key's private half is kept. 
 
 # WIDENED AGAIN 2026-09-28. The private repository's issues are cited as
 # `core#NNN` (its own shorthand), and two generated fetch-fixture files
-# reached a published release carrying one, "core#426", past every rule
+# reached a published release carrying one past every rule
 # above: none of them matches an issue reference, only names and paths. A
 # public reader cannot open it. The shape is the shorthand itself, `core#`
 # followed by digits, starting a word, so this repository's own `chtypes#55`
@@ -554,11 +554,13 @@ if [ "${1:-}" = "--selftest" ]; then
   printf 'the release key is kept in hardware, offline, and is never exported\n' > "$tmp/legal-keyloc-lowercase.md"
 
   # --- 2026-09-28: a private-repository issue reference, the `core#NNN`
-  #     shorthand, as it reached generated fixture prose. Legal controls:
+  #     shorthand, as it reached generated fixture prose. The numbers planted
+  #     here are invented (0 is never an issue number; 99999 is far past any
+  #     real one); a real one would itself be a leak. Legal controls:
   #     this repository's own issue spellings, and a word that merely ends in
   #     "core" before a '#'. ---
-  printf 'the rule is the revision filter (the ABI-revision filter, core#426 section B)\n' > "$tmp/planted-issueref.md"
-  printf 'decided in core#73, same window\n' > "$tmp/planted-issueref-2.md"
+  printf 'the rule is the revision filter (the ABI-revision filter, core#99999 section B)\n' > "$tmp/planted-issueref.md"
+  printf 'decided in core#0, same window\n' > "$tmp/planted-issueref-2.md"
   printf 'see chtypes#55 and Wave-RF/chtypes#123 for the history\n' > "$tmp/legal-issueref-own.md"
   printf 'the encore#1 build and a hardcore#2 fan\n' > "$tmp/legal-issueref-word.md"
 
