@@ -76,10 +76,10 @@ ENV_REGISTRY: Final = "CHTYPES_REGISTRY"
 
 def default_registry_dir() -> str:
     """The per-user artifact cache for this host — ``${XDG_CACHE_HOME:-~/.cache}/
-    chtypes/artifacts/<os>-<arch>`` with ``<arch>`` spelled the artifact way
-    (``amd64``/``arm64``). Where ``chtypes fetch`` installs, where a core-repo
-    build lands, and slot 3 of the registry search path every SDK walks
-    (docs/guides/fetch.md §1). A path, not a promise: it need not exist yet."""
+    chtypes/artifacts/abi<R>/<os>-<arch>`` with R this binding's `ABI_REVISION`
+    and ``<arch>`` spelled the artifact way (``amd64``/``arm64``). Where
+    ``chtypes fetch`` installs, and slot 3 of the registry search path every SDK
+    walks (docs/guides/fetch.md §1). A path, not a promise: it need not exist yet."""
     return cache_registry_dir()
 
 

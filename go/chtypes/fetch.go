@@ -6,7 +6,8 @@ package chtypes
 //
 //	0. SHA256SUMS.sig verifies over the exact bytes of SHA256SUMS under a
 //	   trusted ed25519 key — or nothing proceeds (CHTYPES_ARTIFACT_UNTRUSTED).
-//	1. index.json names the asset for the line/platform and its sha256.
+//	1. index.json names the asset for the line/platform and its sha256 — only
+//	   ever a row at this package's own ABIRevision (docs/guides/fetch.md §2).
 //	2. SHA256SUMS — now known-authentic — must list the same file with the
 //	   same sha256; a disagreement is a broken release, reported, not repaired.
 //	3. The tarball is hashed BEFORE it is unpacked and must equal that sha256.
@@ -24,6 +25,7 @@ package chtypes
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/ed25519"
@@ -41,6 +43,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
 
 // FetchOptions configures Ensure, FetchAll and ListRelease. The zero value
@@ -123,6 +127,39 @@ type ReleaseArtifact struct {
 	Build int `json:"build,omitempty"`
 	// CoreCommit is the core commit the wrapper was built from; "" on an old row.
 	CoreCommit string `json:"core_commit,omitempty"`
+	// ABIRevision is the chs_* ABI revision the artifact was built from, or
+	// nil when the row declares none — or declares something that is not an
+	// integer, which is read as none rather than failing the whole listing.
+	// The artifact producer writes the field from the revision that
+	// introduced it onward, so a row without it is an older revision. Fetch
+	// installs only a row whose ABIRevision is this package's own
+	// (docs/guides/fetch.md §2): any other would be refused at load.
+	ABIRevision *int `json:"abi_revision,omitempty"`
+}
+
+// UnmarshalJSON reads a row as encoding/json would, except that an
+// abi_revision which is not a JSON integer is read as absent (nil) instead of
+// failing the whole index.json: such a row can never be selected, which is
+// the verdict every other binding and scripts/fetch.sh reach for it too.
+func (a *ReleaseArtifact) UnmarshalJSON(b []byte) error {
+	type plain ReleaseArtifact
+	aux := struct {
+		*plain
+		ABIRevision json.RawMessage `json:"abi_revision"`
+	}{plain: (*plain)(a)}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	a.ABIRevision = nil
+	if n, err := strconv.Atoi(string(bytes.TrimSpace(aux.ABIRevision))); err == nil {
+		a.ABIRevision = &n
+	}
+	return nil
+}
+
+// atRevision reports whether a row declares exactly ABI revision rev.
+func (a ReleaseArtifact) atRevision(rev int) bool {
+	return a.ABIRevision != nil && *a.ABIRevision == rev
 }
 
 // buildSuffix reads the -b<N> a current artifact file name ends with. A name
@@ -340,10 +377,13 @@ func (f *fetcher) installGoldens(ctx context.Context) {
 	f.say("golden set verified and installed: %s", filepath.Join(f.dest, goldensAsset))
 }
 
-// FetchAll installs every line the release publishes for the platform —
-// which lines exist is a question index.json answers, so a caller never
-// restates the list. Lines are installed in numeric order; the first
-// failure stops the run and is returned with what was installed so far.
+// FetchAll installs every line the release publishes for the platform at
+// this package's ABI revision — which lines exist is a question index.json
+// answers, so a caller never restates the list. A line the release has only
+// at another revision is not installed and is named in one loud warning
+// line (docs/guides/fetch.md §2); the rest go on. Lines are installed in
+// numeric order; the first failure stops the run and is returned with what
+// was installed so far.
 func FetchAll(ctx context.Context, opts FetchOptions) ([]*Installed, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -364,6 +404,11 @@ func FetchAll(ctx context.Context, opts FetchOptions) ([]*Installed, error) {
 	rows, err := f.selectAll()
 	if err != nil {
 		return nil, err
+	}
+	// A line the release has only at another ABI revision is not installed —
+	// and never silently: one loud line per such line, then the rest go on.
+	for _, msg := range f.skippedLines(f.rowsForPlatform()) {
+		f.warn("%s", msg)
 	}
 	var out []*Installed
 	for i := range rows {
@@ -588,6 +633,9 @@ type fetcher struct {
 	keys          []ed25519.PublicKey
 	keysFrom      string
 	allowUnsigned bool
+	// abiRevision is the one ABI revision whose rows may be installed:
+	// ABIRevision, or the test-only override (go/internal/testhook).
+	abiRevision int
 
 	loaded   bool
 	index    *ReleaseIndex
@@ -607,7 +655,7 @@ type fetcher struct {
 }
 
 func newFetcher(opts FetchOptions) (*fetcher, error) {
-	f := &fetcher{opts: opts}
+	f := &fetcher{opts: opts, abiRevision: fetchABIRevision()}
 	f.platform = opts.Platform
 	if f.platform == "" {
 		f.platform = os.Getenv(envTarget)
@@ -879,6 +927,15 @@ func parseSums(b []byte) map[string]string {
 	return out
 }
 
+// fetchABIRevision is the revision fetch selects rows at: this package's own
+// ABIRevision, unless a fetch-fixture suite set the test-only override.
+func fetchABIRevision() int {
+	if n := testhook.FetchABIRevision; n != 0 {
+		return n
+	}
+	return ABIRevision
+}
+
 func (f *fetcher) rowsForPlatform() []ReleaseArtifact {
 	var rows []ReleaseArtifact
 	for _, a := range f.index.Artifacts {
@@ -887,6 +944,86 @@ func (f *fetcher) rowsForPlatform() []ReleaseArtifact {
 		}
 	}
 	return rows
+}
+
+// atRevision keeps only the rows at the fetcher's ABI revision. This is the
+// FIRST rule of selection (docs/guides/fetch.md §2): a row of any other
+// revision, or one that declares none, is never installed and never a
+// fallback — the loader would refuse it.
+func (f *fetcher) atRevision(rows []ReleaseArtifact) []ReleaseArtifact {
+	var out []ReleaseArtifact
+	for _, a := range rows {
+		if a.atRevision(f.abiRevision) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// noRecordedRevision names rows that carry no abi_revision, and why: the
+// artifact producer records the field from the revision that introduced it
+// onward. Every unpublished message, --all warning and list note says this
+// in these words rather than that the release serves "none".
+const noRecordedRevision = "rows that record no ABI revision (built before revisions were recorded)"
+
+// servedRevisions says, for an unpublished message, what the release DOES
+// have for noun: the ABI revision(s) its rows carry, or nothing at all.
+func servedRevisions(rows []ReleaseArtifact, noun string) string {
+	if len(rows) == 0 {
+		return "the release does not have " + noun + " at any ABI revision"
+	}
+	seen := map[int]bool{}
+	var revs []int
+	undeclared := false
+	for _, a := range rows {
+		if a.ABIRevision == nil {
+			undeclared = true
+			continue
+		}
+		if !seen[*a.ABIRevision] {
+			seen[*a.ABIRevision] = true
+			revs = append(revs, *a.ABIRevision)
+		}
+	}
+	if len(revs) == 0 {
+		return "the release has " + noun + " only in " + noRecordedRevision
+	}
+	sort.Ints(revs)
+	said := "ABI revision " + strconv.Itoa(revs[0])
+	if len(revs) > 1 {
+		parts := make([]string, len(revs))
+		for i, r := range revs {
+			parts[i] = strconv.Itoa(r)
+		}
+		said = "ABI revisions " + strings.Join(parts, ", ")
+	}
+	if undeclared {
+		said += " and in " + noRecordedRevision
+	}
+	return "the release has " + noun + " only at " + said
+}
+
+// skippedLines names every line the release has for the platform only at
+// another ABI revision, or only in rows that record none — the lines --all
+// installs nothing for — one message each, in numeric line order.
+func (f *fetcher) skippedLines(all []ReleaseArtifact) []string {
+	byLine := map[string][]ReleaseArtifact{}
+	for _, a := range all {
+		byLine[a.ClickHouseMinor] = append(byLine[a.ClickHouseMinor], a)
+	}
+	var lines []string
+	for line, rows := range byLine {
+		if len(f.atRevision(rows)) == 0 {
+			lines = append(lines, line)
+		}
+	}
+	sort.Slice(lines, func(i, j int) bool { return lessMinor(lines[i], lines[j]) })
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, fmt.Sprintf("ClickHouse line %s on %s is not installed: %s, and this SDK speaks ABI revision %d",
+			line, f.platform, servedRevisions(byLine[line], "that line for "+f.platform), f.abiRevision))
+	}
+	return out
 }
 
 func (f *fetcher) platformsOffered() string {
@@ -909,6 +1046,9 @@ func versionsOf(rows []ReleaseArtifact) string {
 	var out []string
 	for _, a := range rows {
 		out = append(out, a.ClickHouseVersion)
+	}
+	if len(out) == 0 {
+		return "nothing"
 	}
 	return strings.Join(out, ", ")
 }
@@ -933,34 +1073,46 @@ func checkRow(a *ReleaseArtifact) error {
 	return nil
 }
 
-// selectArtifact picks the one row for (platform, line|exact).
+// selectArtifact picks the one row for (platform, line|exact): first the rows
+// at the fetcher's ABI revision, then among those the newest version and the
+// highest build (docs/guides/fetch.md §2).
 func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact, error) {
-	rows := f.rowsForPlatform()
-	if len(rows) == 0 {
+	all := f.rowsForPlatform()
+	if len(all) == 0 {
 		return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
 			"the release at %s has nothing for %s (it has: %s)", f.src, f.platform, f.platformsOffered())
 	}
-	var hits []ReleaseArtifact
+	rows := f.atRevision(all)
+	var hits, anyRevision []ReleaseArtifact
 	if exact != "" {
-		for _, a := range rows {
+		for _, a := range all {
 			if exactMatches(a.ClickHouseVersion, exact) {
-				hits = append(hits, a)
+				anyRevision = append(anyRevision, a)
+				if a.atRevision(f.abiRevision) {
+					hits = append(hits, a)
+				}
 			}
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"you asked for exactly ClickHouse %s on %s and the release at %s does not publish it (it has: %s). Ask for the line (%s) to take what was published",
-				exact, f.platform, f.src, versionsOf(rows), line)
+				"you asked for exactly ClickHouse %s on %s at ABI revision %d (this SDK's) and the release at %s does not publish it at that revision: %s; at ABI revision %d the release has: %s. Ask for the line (%s) to take what was published",
+				exact, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that patch for "+f.platform),
+				f.abiRevision, versionsOf(rows), line)
 		}
 	} else {
-		for _, a := range rows {
+		for _, a := range all {
 			if a.ClickHouseMinor == line {
-				hits = append(hits, a)
+				anyRevision = append(anyRevision, a)
+				if a.atRevision(f.abiRevision) {
+					hits = append(hits, a)
+				}
 			}
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"no artifact for ClickHouse line %s on %s at %s (it has: %s)", line, f.platform, f.src, versionsOf(rows))
+				"no artifact for ClickHouse line %s on %s at ABI revision %d (this SDK's) at %s: %s; at ABI revision %d the release has: %s",
+				line, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that line for "+f.platform),
+				f.abiRevision, versionsOf(rows))
 		}
 	}
 	// A line can carry more than one row: two patches, or the same patch built
@@ -976,13 +1128,20 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 	return &a, nil
 }
 
-// selectAll picks one row per minor line for the platform, newest patch
-// per line, in numeric line order.
+// selectAll picks one row per minor line for the platform, among the rows at
+// the fetcher's ABI revision: newest patch, then highest build, per line, in
+// numeric line order.
 func (f *fetcher) selectAll() ([]ReleaseArtifact, error) {
-	rows := f.rowsForPlatform()
-	if len(rows) == 0 {
+	all := f.rowsForPlatform()
+	if len(all) == 0 {
 		return nil, f.fail(CodeArtifactUnpublished, "--all", nil,
 			"the release at %s has nothing for %s (it has: %s)", f.src, f.platform, f.platformsOffered())
+	}
+	rows := f.atRevision(all)
+	if len(rows) == 0 {
+		return nil, f.fail(CodeArtifactUnpublished, "--all", nil,
+			"the release at %s has nothing for %s at ABI revision %d (this SDK's): %s",
+			f.src, f.platform, f.abiRevision, servedRevisions(all, "rows for "+f.platform))
 	}
 	best := map[string]ReleaseArtifact{}
 	for _, a := range rows {

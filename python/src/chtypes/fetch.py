@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tarfile
 import tempfile
 import time
@@ -51,6 +52,7 @@ from ._manifest import (
     read_manifest,
     verify_library,
 )
+from ._native import ABI_REVISION
 from .errors import (
     ArtifactCorruptError,
     ArtifactPinnedError,
@@ -143,6 +145,90 @@ Progress = Callable[[str], None]
 
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+#: TEST-ONLY. When set, the ABI revision fetch selects release rows at, in place
+#: of `ABI_REVISION` (docs/guides/fetch.md §2). Not part of the public contract:
+#: the fetch-fixture suites set it to the revision their fixture release carries
+#: — derived from that release's own ``index.json`` — so a binding whose own
+#: revision has moved ahead of the fixtures still exercises the whole chain.
+#: It changes WHICH rows are eligible and nothing else: the default registry
+#: directory stays ``abi<ABI_REVISION>/``, and the loader still refuses an
+#: artifact of another revision.
+_ABI_REVISION_OVERRIDE: int | None = None
+
+
+def _fetch_abi_revision() -> int:
+    """The one ABI revision whose rows fetch may install: this binding's own."""
+    return ABI_REVISION if _ABI_REVISION_OVERRIDE is None else _ABI_REVISION_OVERRIDE
+
+
+def _revision_of(value: object) -> int | None:
+    """A row's ``abi_revision`` when it is a JSON integer, else None. The artifact
+    producer writes the field from the revision that introduced it onward, so a
+    row without one is an older revision; a value that is not an integer is
+    read the same way rather than failing the whole listing."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+#: Rows that carry no ``abi_revision``, named with the reason: the artifact
+#: producer records the field from the revision that introduced it onward. Every
+#: unpublished message, ``--all`` warning and ``list`` note says this in these
+#: words rather than that the release serves "none".
+_BUILT_BEFORE: Final = "(built before revisions were recorded)"
+_NO_RECORDED_REVISION: Final = f"rows that record no ABI revision {_BUILT_BEFORE}"
+
+
+def _served(entries: Sequence[ReleaseEntry], noun: str) -> str:
+    """What the release DOES have for ``noun``, for an unpublished message: the
+    ABI revision(s) its rows carry, or that it has none at any revision."""
+    if not entries:
+        return f"the release does not have {noun} at any ABI revision"
+    revs = sorted({e.abi_revision for e in entries if e.abi_revision is not None})
+    if not revs:
+        return f"the release has {noun} only in {_NO_RECORDED_REVISION}"
+    said = (
+        f"ABI revision {revs[0]}"
+        if len(revs) == 1
+        else "ABI revisions " + ", ".join(str(r) for r in revs)
+    )
+    if any(e.abi_revision is None for e in entries):
+        said += f" and in {_NO_RECORDED_REVISION}"
+    return f"the release has {noun} only at {said}"
+
+
+def _skipped_lines(on_platform: Sequence[ReleaseEntry], platform: str, rev: int) -> list[str]:
+    """One message per line the release has for ``platform`` only at another ABI
+    revision, or only in rows that record none — the lines ``--all`` installs
+    nothing for — in numeric line order."""
+    by_line: dict[str, list[ReleaseEntry]] = {}
+    for e in on_platform:
+        by_line.setdefault(e.minor, []).append(e)
+    return [
+        f"ClickHouse line {line} on {platform} is not installed: "
+        f"{_served(rows, f'that line for {platform}')}, and this SDK speaks ABI revision {rev}"
+        for line, rows in sorted(by_line.items(), key=lambda kv: _minor_key(kv[0]))
+        if not any(e.abi_revision == rev for e in rows)
+    ]
+
+
+def _not_shown(on_platform: Sequence[ReleaseEntry], rev: int) -> str | None:
+    """``list``'s one line naming the platform's rows at another ABI revision,
+    which it does not show (docs/guides/fetch.md §6); None when none were
+    hidden. Rows that carry no ``abi_revision`` are named for what they are —
+    built before revisions were recorded — never as a revision called "none"."""
+    hidden = [e for e in on_platform if e.abi_revision != rev]
+    if not hidden:
+        return None
+    declared = [e.abi_revision for e in hidden if e.abi_revision is not None]
+    undeclared = len(hidden) - len(declared)
+    parts = []
+    if declared:
+        revs = ", ".join(str(r) for r in sorted(set(declared)))
+        parts.append(f"{len(declared)} row(s) at ABI revision(s) {revs}")
+    if undeclared:
+        parts.append(f"{undeclared} row(s) that record no ABI revision " + _BUILT_BEFORE)
+    return f"{' and '.join(parts)} not shown; this SDK speaks {rev}"
 
 
 # ------------------------------------------------------------------ §1 paths
@@ -372,6 +458,11 @@ class ReleaseEntry:
     build: int = 0
     #: The core commit the wrapper was built from; ``""`` on an old row.
     core_commit: str = ""
+    #: The chs_* ABI revision the artifact was built from, or None when the row
+    #: declares none (or declares something that is not an integer). Fetch
+    #: installs only a row at this binding's own `ABI_REVISION`
+    #: (docs/guides/fetch.md §2): any other would be refused at load.
+    abi_revision: int | None = None
 
     @property
     def platform(self) -> str:
@@ -411,10 +502,14 @@ class Release:
     license_url: str = ""
 
     def offered(self, platform: str) -> list[ReleaseEntry]:
-        """Every line published for a platform, newest patch per line, release order."""
+        """Every line published for a platform at this binding's ABI revision,
+        newest patch per line (then highest build), release order. Rows of any
+        other revision, and rows that record none, are not offered: fetch never
+        installs them (docs/guides/fetch.md §2)."""
+        rev = _fetch_abi_revision()
         best: dict[str, ReleaseEntry] = {}
         for e in self.entries:
-            if e.platform != platform:
+            if e.platform != platform or e.abi_revision != rev:
                 continue
             cur = best.get(e.minor)
             if cur is None or e.rank > cur.rank:
@@ -426,42 +521,49 @@ class Release:
 
     def select(self, spelling: str, platform: str) -> ReleaseEntry:
         """A line (``25.8``) resolves to the one patch published for it; an
-        exact patch (``25.8.28.1-lts``) is a hard requirement (§2)."""
+        exact patch (``25.8.28.1-lts``) is a hard requirement (§2). Either way,
+        only rows at this binding's ABI revision are considered, FIRST: nothing
+        at that revision is `ArtifactUnpublishedError`, never another
+        revision's row."""
         line, exact = parse_spelling(spelling)
-        offered = self.offered(platform)
-        if not offered:
+        rev = _fetch_abi_revision()
+        on_platform = [e for e in self.entries if e.platform == platform]
+        if not on_platform:
             raise ArtifactUnpublishedError(
                 f"chtypes: {self.source} publishes nothing for {platform} "
                 f"(it has: {', '.join(self.platforms()) or 'nothing'})"
             )
+        have = ", ".join(e.clickhouse_version for e in on_platform if e.abi_revision == rev)
         if exact is not None:
             bare = exact.split("-", 1)[0]
             # A rebuild publishes the same clickhouse_version twice, so an exact
             # request can match more than one row: take the highest build, never
             # whichever the index happens to list first.
-            hits = [
+            any_revision = [
                 e
-                for e in self.entries
-                if e.platform == platform
-                and (
-                    e.clickhouse_version == exact
-                    or ("-" not in exact and e.clickhouse_version.split("-", 1)[0] == bare)
-                )
+                for e in on_platform
+                if e.clickhouse_version == exact
+                or ("-" not in exact and e.clickhouse_version.split("-", 1)[0] == bare)
             ]
+            hits = [e for e in any_revision if e.abi_revision == rev]
             if hits:
                 return max(hits, key=lambda e: e.rank)
             raise ArtifactUnpublishedError(
-                f"chtypes: you asked for exactly ClickHouse {exact} on {platform} and "
-                f"{self.source} does not publish it (it has: "
-                f"{', '.join(e.clickhouse_version for e in offered)}). "
+                f"chtypes: you asked for exactly ClickHouse {exact} on {platform} at ABI "
+                f"revision {rev} (this SDK's) and {self.source} does not publish it at that "
+                f"revision: {_served(any_revision, f'that patch for {platform}')}; at ABI "
+                f"revision {rev} the release has: {have or 'nothing'}. "
                 f"Ask for the line ({line}) to take what was published."
             )
-        for e in offered:
+        for e in self.offered(platform):
             if e.minor == line:
                 return e
+        any_revision = [e for e in on_platform if e.minor == line]
         raise ArtifactUnpublishedError(
-            f"chtypes: no artifact for ClickHouse line {line} on {platform} at {self.source} "
-            f"(it has: {', '.join(e.clickhouse_version for e in offered)})"
+            f"chtypes: no artifact for ClickHouse line {line} on {platform} at ABI revision "
+            f"{rev} (this SDK's) at {self.source}: "
+            f"{_served(any_revision, f'that line for {platform}')}"
+            f"; at ABI revision {rev} the release has: {have or 'nothing'}"
         )
 
 
@@ -509,6 +611,7 @@ def _parse_index(raw: bytes, source: str) -> tuple[list[ReleaseEntry], str, str,
                     arch=str(row["arch"]),
                     build=int(row.get("build") or 0),
                     core_commit=str(row.get("core_commit") or ""),
+                    abi_revision=_revision_of(row.get("abi_revision")),
                 )
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -725,6 +828,7 @@ class Fetcher:
         host = (os.environ.get(ENV_ARTIFACTS_URL) or DEFAULT_ARTIFACTS_URL).rstrip("/")
         base = url or f"{host}/{self.tag}"
         self.progress: Progress = progress or (lambda line: None)
+        self._progress_given = progress is not None
         self.source = _Source(base, self._say)
         self.lock = Path(lock) if lock is not None else None
         self.frozen = frozen
@@ -742,6 +846,19 @@ class Fetcher:
     def _say(self, line: str) -> None:
         log.info("%s", line)
         self.progress(line)
+
+    def _warn(self, message: str) -> None:
+        """A loud line, never silent: through ``progress`` when the caller gave
+        one (the CLI does), else straight to stderr."""
+        line = f"chtypes: WARNING: {message}"
+        # Not log.warning: logging's last-resort handler would print it a
+        # second time on stderr for a process that configured no logging.
+        log.info("%s", line)
+        if self._progress_given:
+            self.progress(line)
+        else:
+            sys.stderr.write(line + "\n")
+            sys.stderr.flush()
 
     def _lock_pins(self) -> dict[str, dict[str, str]]:
         if self._pins is None:
@@ -926,12 +1043,21 @@ class Fetcher:
         return installed
 
     def ensure_all(self) -> list[Path]:
-        """Every line the release publishes for the platform."""
-        offered = self.release().offered(self.platform)
+        """Every line the release publishes for the platform at this binding's
+        ABI revision. A line it has only at another revision is not installed,
+        and is named in one loud warning line; the rest go on."""
+        release = self.release()
+        offered = release.offered(self.platform)
+        rev = _fetch_abi_revision()
+        on_platform = [e for e in release.entries if e.platform == self.platform]
         if not offered:
             raise ArtifactUnpublishedError(
-                f"chtypes: {self.release().source} publishes nothing for {self.platform}"
+                f"chtypes: {release.source} publishes nothing for {self.platform} at ABI "
+                f"revision {rev} (this SDK's): "
+                f"{_served(on_platform, f'rows for {self.platform}')}"
             )
+        for message in _skipped_lines(on_platform, self.platform, rev):
+            self._warn(message)
         out = [self.install(entry) for entry in offered]
         self.install_goldens()
         return out

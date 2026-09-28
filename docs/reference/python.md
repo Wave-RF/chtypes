@@ -78,6 +78,8 @@ The export channel is keyword-only on `rows`: `export=Format.JSON_COMPACT_EACH_R
 | `RELEASE_PUBLIC_KEY`, `RELEASE_KEY_ID`, `ENV_AUTOFETCH`, `ENV_REGISTRY`                                                                                                     | the embedded release key and its id; the variable names                     | —                                                                                                                                                                               |
 | `Manifest`, `read_manifest`, `verify_library`, `minor_of`                                                                                                                   | loader helpers                                                              | `RegistryError` from `verify_library`                                                                                                                                           |
 
+`ensure`, `fetch_lines` and the command install only index rows whose `abi_revision` is this binding's `ABI_REVISION` (`chtypes.fetch.ReleaseEntry.abi_revision`, `None` when a row declares none, never matches): nothing at that revision is `ArtifactUnpublishedError`, naming the revision(s) the release does serve ([`guides/fetch.md`](../guides/fetch.md) §2). `default_registry_dir()` is `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<ABI_REVISION>/<os>-<arch>`.
+
 The command:
 
 ```sh

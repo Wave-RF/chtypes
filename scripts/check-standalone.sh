@@ -79,7 +79,11 @@ SRC="$ROOT/go"
 if [ -z "$REG" ]; then
   _os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$(uname -m)" in x86_64|amd64) _arch=amd64 ;; arm64|aarch64) _arch=arm64 ;; *) _arch="$(uname -m)" ;; esac
-  REG="${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/$_os-$_arch"
+  # The per-user cache is keyed by the ABI revision the SDK speaks — this
+  # tree's own header, the number every binding's default follows.
+  _abi="$(sed -n 's/^#define CHS_ABI_REVISION \([0-9][0-9]*\)$/\1/p' "$ROOT/include/chtypes.h")"
+  case "$_abi" in ''|*[!0-9]*) die "cannot read one CHS_ABI_REVISION from $ROOT/include/chtypes.h" ;; esac
+  REG="${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/abi$_abi/$_os-$_arch"
 fi
 
 # A registry PATH is not a fingerprint: the same path holds different builds

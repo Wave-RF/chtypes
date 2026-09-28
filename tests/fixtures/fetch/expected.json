@@ -109,11 +109,12 @@
   "low_build": 105,
   "note": "line 25.8 carries an UNSUFFIXED artifact from before wrapper builds existed (read as build 0) beside its rebuild; line 26.7 carries two explicitly suffixed builds. Both resolve to build 214.",
   "rebuild": 214,
-  "rule": "filter to os/arch and the requested line, take the newest clickhouse_version, then the HIGHEST build; a row with no `build` (and a file name with no -b<N>) is build 0 (docs/guides/fetch.md \u00a72)",
+  "rule": "FIRST filter to os/arch, the requested line and (the ABI-revision filter, docs/guides/fetch.md \u00a72) the binding's own abi_revision \u2014 a row with none never matches a specific revision; THEN take the newest clickhouse_version, then the HIGHEST build; a row with no `build` (and a file name with no -b<N>) is build 0 (docs/guides/fetch.md \u00a72). Every row in two-builds/ carries the SAME abi_revision (fixtures_abi_revision above), so the filter is a no-op here and this fixture still pins only the build tie-break; two-revisions/ below is what pins the filter itself, by making it the deciding factor.",
   "unsuffixed_lines": [
    "25.8"
   ]
  },
+ "fixtures_abi_revision": 5,
  "generated_by": "the artifact producer's fixture generator \u2014 never edit by hand",
  "index_doc_keys": [
   "artifacts",
@@ -154,6 +155,169 @@
   "darwin-arm64"
  ],
  "release_tag": "fixtures",
+ "revisions": {
+  "cases": [
+   {
+    "at_high_revision": {
+     "abi_revision": 6,
+     "build": 214,
+     "file": "chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz",
+     "sha256": "134c0482031dc45b67fb7c805ad5dc6bed506dcec3a545aff597810ce534fbad"
+    },
+    "at_low_revision": {
+     "abi_revision": 5,
+     "build": 105,
+     "file": "chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz",
+     "sha256": "39fdbe5035d0a11cf5edf6345e86b94d766339f68550889ce24506aba6d8a0a5"
+    },
+    "line": "26.7",
+    "platform": "linux-arm64",
+    "unfiltered": {
+     "abi_revision": 6,
+     "build": 214,
+     "file": "chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz",
+     "sha256": "134c0482031dc45b67fb7c805ad5dc6bed506dcec3a545aff597810ce534fbad"
+    }
+   },
+   {
+    "at_high_revision": {
+     "abi_revision": 6,
+     "build": 214,
+     "file": "chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz",
+     "sha256": "a18e127e472c7674b0c73407df61b47c574e85e615277012b9f47fb4521d5317"
+    },
+    "at_low_revision": {
+     "abi_revision": 5,
+     "build": 105,
+     "file": "chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz",
+     "sha256": "4e19dcb5d32e739f2d305b42595641fc7295b71a9c07f59d1cf1783ce6a01c5d"
+    },
+    "line": "26.7",
+    "platform": "linux-amd64",
+    "unfiltered": {
+     "abi_revision": 6,
+     "build": 214,
+     "file": "chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz",
+     "sha256": "a18e127e472c7674b0c73407df61b47c574e85e615277012b9f47fb4521d5317"
+    }
+   },
+   {
+    "at_high_revision": {
+     "abi_revision": 6,
+     "build": 214,
+     "file": "chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz",
+     "sha256": "2b2978a55b541ff026c335f7e14d845bf40c7d370e46fe6ad037e9005bacfe0e"
+    },
+    "at_low_revision": {
+     "abi_revision": 5,
+     "build": 105,
+     "file": "chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz",
+     "sha256": "698cd565667724a053cbef9e2a0c70540ba4877ed29abbf43470c996f7406700"
+    },
+    "line": "26.7",
+    "platform": "darwin-arm64",
+    "unfiltered": {
+     "abi_revision": 6,
+     "build": 214,
+     "file": "chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz",
+     "sha256": "2b2978a55b541ff026c335f7e14d845bf40c7d370e46fe6ad037e9005bacfe0e"
+    }
+   },
+   {
+    "at_high_revision": {
+     "abi_revision": 6,
+     "build": 105,
+     "file": "chtypes-25.8.28.1-lts-linux-arm64-b105.tar.gz",
+     "sha256": "0109f69d7aa9fc94a916a829ba7e79c836be98e7554a9727246a44866a9e6625"
+    },
+    "at_low_revision": {
+     "abi_revision": 5,
+     "build": 214,
+     "file": "chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz",
+     "sha256": "c1e6a7f9862ec62b2337a2defa0b3cda48e6d9f4a438b8d854490abb176fba2b"
+    },
+    "line": "25.8",
+    "platform": "linux-arm64",
+    "unfiltered": {
+     "abi_revision": 5,
+     "build": 214,
+     "file": "chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz",
+     "sha256": "c1e6a7f9862ec62b2337a2defa0b3cda48e6d9f4a438b8d854490abb176fba2b"
+    }
+   },
+   {
+    "at_high_revision": {
+     "abi_revision": 6,
+     "build": 105,
+     "file": "chtypes-25.8.28.1-lts-linux-amd64-b105.tar.gz",
+     "sha256": "a0a9eb4cd9cc958b2177271cc44b096cb56720734e028a78cc3748a9f5c3f939"
+    },
+    "at_low_revision": {
+     "abi_revision": 5,
+     "build": 214,
+     "file": "chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz",
+     "sha256": "84d79f7e543c160006478252d5a170d4bb57322881ffcb8157a25da82dce3763"
+    },
+    "line": "25.8",
+    "platform": "linux-amd64",
+    "unfiltered": {
+     "abi_revision": 5,
+     "build": 214,
+     "file": "chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz",
+     "sha256": "84d79f7e543c160006478252d5a170d4bb57322881ffcb8157a25da82dce3763"
+    }
+   },
+   {
+    "at_high_revision": {
+     "abi_revision": 6,
+     "build": 105,
+     "file": "chtypes-25.8.28.1-lts-darwin-arm64-b105.tar.gz",
+     "sha256": "ed4fb63d189cfecbdfb0058be83425f4b1dbd1203fee252dfd3e771fd2aecc14"
+    },
+    "at_low_revision": {
+     "abi_revision": 5,
+     "build": 214,
+     "file": "chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz",
+     "sha256": "ac0fe6821c4f6ca4cb6fabc60023f8fc0f9c5e0c1c97f00d2ce4dfc754eec3b6"
+    },
+    "line": "25.8",
+    "platform": "darwin-arm64",
+    "unfiltered": {
+     "abi_revision": 5,
+     "build": 214,
+     "file": "chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz",
+     "sha256": "ac0fe6821c4f6ca4cb6fabc60023f8fc0f9c5e0c1c97f00d2ce4dfc754eec3b6"
+    }
+   }
+  ],
+  "discriminating_lines": [
+   {
+    "line": "26.7",
+    "revision": 5
+   },
+   {
+    "line": "25.8",
+    "revision": 6
+   }
+  ],
+  "fixture": "two-revisions",
+  "high_revision": 6,
+  "lines": {
+   "25.8": {
+    "build_at_high_revision": 105,
+    "build_at_low_revision": 214,
+    "clickhouse_version": "25.8.28.1-lts"
+   },
+   "26.7": {
+    "build_at_high_revision": 214,
+    "build_at_low_revision": 105,
+    "clickhouse_version": "26.7.3.19-stable"
+   }
+  },
+  "low_revision": 5,
+  "note": "an UNFILTERED resolve (today's binding behavior, before the ABI-revision filter) skips the first half and installs the higher-build row regardless of its revision \u2014 the two-SDK-versions-on-one-machine collision the filter exists to stop. On `26.7` the higher build sits on the high revision, so filtering to the LOW revision is what differs from unfiltered; on `25.8`, the mirror, the higher build sits on the low revision, so filtering to the HIGH revision is what differs. Every case records the unfiltered row too, under `unfiltered`, so a suite can prove both halves: that filtering resists the higher build at whichever revision this line pins, and that an unfiltered call still behaves exactly as it does today.",
+  "rule": "filter candidate rows to the binding's own abi_revision FIRST \u2014 a row with none never matches \u2014 THEN apply builds.rule's newest-version/highest-build tie-break. A revision this release does not serve is a loud, named refusal (CHTYPES_ARTIFACT_UNPUBLISHED-shaped: \"no artifact at ABI revision R for line L on P\"), never a silent fall-through to another revision's row."
+ },
  "schema": 1,
  "source_date_epoch": 1788912000,
  "trusted_keys": [

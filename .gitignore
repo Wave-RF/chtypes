@@ -1,6 +1,7 @@
 # chtypes SDK — the four bindings, the header, the spec, the playgrounds.
 # Artifacts are never here: they live in the per-user cache
-# (~/.cache/chtypes/artifacts/<os>-<arch>) or wherever CHTYPES_REGISTRY says.
+# (~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>, R the SDK's ABI revision)
+# or wherever CHTYPES_REGISTRY says.
 
 # Go
 **/*.test

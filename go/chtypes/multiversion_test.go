@@ -64,8 +64,8 @@ func TestRegistryLoadsAndDispatches(t *testing.T) {
 
 // testRegistryDir resolves the artifact registry the registry-path tests
 // load: $CHTYPES_REGISTRY when set, else the per-user artifact cache for this
-// host — ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>, where
-// scripts/fetch.sh installs and where a core-repo build lands (that is the
+// host — ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>, R
+// this package's ABIRevision, where scripts/fetch.sh installs (that is the
 // one directory every SDK, playground and test here agrees on). When that
 // directory holds no installed line — absent, empty, or pointed somewhere
 // wrong — the test skips through skipNoArtifacts: loudly, by name, saying

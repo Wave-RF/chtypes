@@ -43,6 +43,7 @@ func writeReleaseWithGoldens(t *testing.T, dir string, priv ed25519.PrivateKey, 
 			"os": a.os, "arch": a.arch, "file": file, "sha256": sha256Hex(tb), "bytes": len(tb),
 			"clickhouse_version": a.version, "clickhouse_minor": a.minor,
 			"library": a.library, "library_sha256": sha256Hex(a.content),
+			"abi_revision": fetchABIRevision(),
 		})
 		fmt.Fprintf(&sums, "%s  %s\n", sha256Hex(tb), file)
 	}

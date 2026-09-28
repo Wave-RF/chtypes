@@ -100,6 +100,8 @@ An unknown name, an `ALIAS` column, or a repeated name is the server's own refus
 
 `EnsureOptions`: `dest`, `platform`, `tag`, `url`, `lock`, `frozen`, `force`, `offline`, `trustedKeys`, `allowUnsigned`, `onProgress`, `signal`. Concurrent `ensure`s of one line in one process share a single fetch.
 
+`selectArtifact`, `selectAll`, `ensure`, `ensureAll` and the command consider only index rows whose `abi_revision` is this binding's `ABI_REVISION` (the optional `IndexArtifact.abi_revision`, absent when a row declares none, never matches; `listArtifacts`' `notShown` names the rows it leaves out): nothing at that revision is `ArtifactUnpublishedError`, naming the revision(s) the release does serve ([`guides/fetch.md`](../guides/fetch.md) §2). `cacheRegistryDir()` and `defaultRegistryDir()` are `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<ABI_REVISION>/<os>-<arch>`.
+
 The command is `bin: chtypes`:
 
 ```sh

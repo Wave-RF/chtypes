@@ -66,8 +66,11 @@
 //! command (`cargo install chtypes` → `chtypes fetch 25.8`) or from Rust with
 //! [`ensure`] — the `docs/guides/fetch.md` contract, behind the default-on `fetch`
 //! feature; `scripts/fetch.sh` is the reference implementation of the same
-//! chain. A local build lands in the same per-user cache
-//! (`~/.cache/chtypes/artifacts/<os>-<arch>`). [`Registry::from_search_path`]
+//! chain. Both install into the per-user cache,
+//! `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>` — R is this crate's
+//! [`ABI_REVISION`], and fetch selects only artifacts built at it, so two SDK
+//! versions at different revisions never share a directory.
+//! [`Registry::from_search_path`]
 //! looks there, in `$CHTYPES_REGISTRY` and in the system locations, and names
 //! every place it looked when a line is missing ([`Error::ArtifactMissing`]);
 //! [`Registry::new`] loads one explicit directory.

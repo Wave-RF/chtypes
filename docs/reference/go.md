@@ -86,6 +86,8 @@ The frozen numbers the default build hardcodes (`Format`, `DocFlags`, `CodeUnsup
 | `RegistrySearchPath(explicit)`, `FetchRegistryDir(explicit)`, `DefaultRegistryDir()`, `DefaultRegistryDirFor(p)`, `SystemRegistryDirs(p)`, `HostPlatform()`, `ValidPlatform(p)` | the search path, where a fetch writes, the platform key                                                                                                                   | —                   |
 | `GoFetchCommand`, `DefaultArtifactsURL`, `DefaultReleaseTag`, `DefaultLockFile`, `LockSchema`                                                                                   | the spellings the contract fixes                                                                                                                                          | —                   |
 
+`Ensure`, `FetchAll` and the command install only index rows whose `abi_revision` is this package's `ABIRevision` (`ReleaseArtifact.ABIRevision`, `nil` when a row declares none, never matches): nothing at that revision is `ErrArtifactUnpublished`, naming the revision(s) the release does serve ([`guides/fetch.md`](../guides/fetch.md) §2). `DefaultRegistryDir()` is `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<ABIRevision>/<os>-<arch>`.
+
 The command is `go/cmd/chtypes`, runnable without installing anything:
 
 ```sh

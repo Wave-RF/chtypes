@@ -89,6 +89,8 @@ A `Filter` and a `Block` **borrow** their `Schema`, so dropping the schema first
 
 `EnsureOptions` carries the flags (`dest`, `platform`, `url` / `tag`, `lock`, `frozen`, `force`, `offline`, `progress`) and the trust policy (`trusted_keys`, `allow_unsigned`; `None` reads the environment). `Action` is `AlreadyInstalled`, `Installed` or `Replaced`.
 
+`ensure`, `fetch::ensure_all` and the command install only index rows whose `abi_revision` is this crate's `ABI_REVISION` (`IndexRow::abi_revision`, `None` when a row declares none, never matches): nothing at that revision is `Error::ArtifactUnpublished`, naming the revision(s) the release does serve ([`guides/fetch.md`](../guides/fetch.md) §2). `cache_dir_for(platform)` and `default_registry_dir()` are `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<ABI_REVISION>/<os>-<arch>`.
+
 With an explicit `--dest`, "already installed" means installed _in that directory_: a container build's `--dest /opt/chtypes/artifacts` is never satisfied by the builder's own cache.
 
 ```sh

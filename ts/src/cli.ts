@@ -56,9 +56,10 @@ const USAGE = `usage: chtypes <command> [options]
   chtypes where  [--dest <dir>] [--platform <os-arch>]
 
   <line>      a ClickHouse line (25.8) or an exact patch (25.8.28.1-lts, a hard requirement)
-  --all       every line the release publishes for the platform
+  --all       every line the release publishes for the platform at this SDK's ABI revision
   --platform  <os>-<arch> (linux|darwin)-(arm64|amd64); default: this host
-  --dest      the registry directory; default: CHTYPES_REGISTRY, else the per-user cache
+  --dest      the registry directory; default: CHTYPES_REGISTRY, else the per-user cache,
+              \${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch> (R: this SDK's ABI revision)
   --tag       a release tag on the artifacts host (default: the rolling "artifacts")
   --url       any other base: https://…, file://…, or a directory
   --lock      record what was installed into this lock file (default with --frozen: chtypes.lock)
@@ -226,6 +227,9 @@ async function cmdList(rest: readonly string[], values: Values, io: CliIo): Prom
     for (const a of listing.offered) {
       io.stdout(`  ${a.clickhouse_minor.padEnd(6)} ${a.clickhouse_version.padEnd(18)} b${String(a.build).padEnd(3)} ${a.file}  ${a.bytes} bytes${have.has(a.clickhouse_version) ? '  (installed)' : ''}\n`);
     }
+    // Only this SDK's own ABI revision is offered (docs/guides/fetch.md §2), and
+    // one line names what that hid.
+    if (listing.notShown !== undefined) io.stdout(`  ${listing.notShown}\n`);
   }
   return EXIT.ok;
 }

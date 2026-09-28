@@ -9,12 +9,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/wave-rf/chtypes/go/chtypes"
+	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
 
 func isolate(t *testing.T) string {
@@ -38,6 +41,17 @@ func fixtures(t *testing.T) (dir, key string) {
 	if err != nil {
 		t.Skipf("shared fetch fixtures not found: %v (set CHTYPES_FETCH_FIXTURES to tests/fixtures/fetch)", err)
 	}
+	// Fetch installs only rows at the binding's own ABI revision; the fixtures
+	// carry whatever revision they were generated at and declare it in
+	// expected.json (fixtures_abi_revision) — never typed here — and this test
+	// selects at it.
+	rev, err := testhook.FixturesABIRevision(abs)
+	if err != nil {
+		t.Fatalf("fetch fixtures: %v", err)
+	}
+	prev := testhook.FetchABIRevision
+	testhook.FetchABIRevision = rev
+	t.Cleanup(func() { testhook.FetchABIRevision = prev })
 	return abs, strings.TrimSpace(string(b))
 }
 
@@ -67,7 +81,7 @@ func TestCLIUsageErrorsAndWhereOutput(t *testing.T) {
 	// served golden set, which is the other half of "what is in my registry".
 	firstLine := func(s string) string { return strings.SplitN(strings.TrimSpace(s), "\n", 2)[0] }
 	rc, out, _ = exec(t, "where")
-	if rc != 0 || firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", host) {
+	if rc != 0 || firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(chtypes.ABIRevision), host) {
 		t.Fatalf("where: rc=%d %q", rc, out)
 	}
 	if !strings.Contains(out, "sdk-goldens.json") {
@@ -82,7 +96,7 @@ func TestCLIUsageErrorsAndWhereOutput(t *testing.T) {
 	if host == other {
 		other = "linux-arm64"
 	}
-	if _, out, _ = exec(t, "where", "--platform", other); firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", other) {
+	if _, out, _ = exec(t, "where", "--platform", other); firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(chtypes.ABIRevision), other) {
 		t.Fatalf("where --platform: %q", out)
 	}
 	// verify/list on an empty registry: honest, exit 0.
@@ -126,6 +140,19 @@ func TestFetchVerifyListAgainstFixtures(t *testing.T) {
 	rc, out, _ = exec(t, "list", "--dest", dest, "--url", signed)
 	if rc != 0 || !strings.Contains(out, "installed ("+dest+")") || !strings.Contains(out, "(installed)") || !strings.Contains(out, "signed by key") {
 		t.Fatalf("list: rc=%d %q", rc, out)
+	}
+	if strings.Contains(out, "not shown") {
+		t.Fatalf("list hid rows when every row is at the SDK's revision: %q", out)
+	}
+	// One revision past the fixtures' own, list shows none of their rows and
+	// says so in one line naming what it hid (docs/guides/fetch.md §6).
+	rev := testhook.FetchABIRevision
+	testhook.FetchABIRevision = rev + 1
+	rc, out, _ = exec(t, "list", "--dest", dest, "--url", signed)
+	testhook.FetchABIRevision = rev
+	want := fmt.Sprintf("  2 row(s) at ABI revision(s) %d not shown; this SDK speaks %d\n", rev, rev+1)
+	if rc != 0 || !strings.Contains(out, "(nothing for ") || !strings.Contains(out, want) {
+		t.Fatalf("list at another revision: rc=%d %q (want %q)", rc, out, want)
 	}
 	// A rotted install: verify says so and exits 1.
 	inst, _ := chtypes.ListInstalled(dest)
@@ -191,5 +218,26 @@ func TestFetchVerifyListAgainstFixtures(t *testing.T) {
 	rc, _, errs = exec(t, "fetch", "25.8", "--url", signed, "--dest", filepath.Join(t.TempDir(), "x"))
 	if rc != 1 || !strings.Contains(errs, "CHTYPES_ARTIFACT_UNTRUSTED") {
 		t.Fatalf("embedded key only: rc=%d %q", rc, errs)
+	}
+}
+
+// list's note names rows with no recorded revision for what they are — built
+// before revisions were recorded — never as a revision called "none".
+func TestListNoteNamesRowsThatRecordNoRevision(t *testing.T) {
+	rev := chtypes.ABIRevision
+	other := rev + 1
+	rows := []chtypes.ReleaseArtifact{{ABIRevision: &other}, {}, {}}
+	for _, tc := range []struct {
+		hidden []chtypes.ReleaseArtifact
+		want   string
+	}{
+		{nil, ""},
+		{rows[:1], fmt.Sprintf("1 row(s) at ABI revision(s) %d not shown; this SDK speaks %d", other, rev)},
+		{rows[1:], fmt.Sprintf("2 row(s) that record no ABI revision (built before revisions were recorded) not shown; this SDK speaks %d", rev)},
+		{rows, fmt.Sprintf("1 row(s) at ABI revision(s) %d and 2 row(s) that record no ABI revision (built before revisions were recorded) not shown; this SDK speaks %d", other, rev)},
+	} {
+		if got := notShown(tc.hidden, rev); got != tc.want {
+			t.Fatalf("notShown(%d rows) = %q, want %q", len(tc.hidden), got, tc.want)
+		}
 	}
 }

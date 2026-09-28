@@ -31,10 +31,19 @@ set -u -o pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The registry: $CHTYPES_REGISTRY, else the per-user artifact cache every SDK
-# here defaults to (scripts/fetch.sh installs there; a core-repo build lands
-# there too). <arch> is spelled the artifact way.
+# here defaults to (scripts/fetch.sh installs there), keyed by the ABI
+# revision the SDKs speak — this tree's own include/chtypes.h — and then by
+# platform, <arch> spelled the artifact way.
 _arch="$(uname -m)"; case "$_arch" in x86_64|amd64) _arch=amd64 ;; arm64|aarch64) _arch=arm64 ;; esac
-REGISTRY="${CHTYPES_REGISTRY:-${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/$(uname -s | tr '[:upper:]' '[:lower:]')-$_arch}"
+_abi="$(sed -n 's/^#define CHS_ABI_REVISION \([0-9][0-9]*\)$/\1/p' "$HERE/../include/chtypes.h" 2>/dev/null)"
+case "$_abi" in
+  ''|*[!0-9]*)
+    if [ -z "${CHTYPES_REGISTRY:-}" ]; then
+      printf 'chplay: cannot read one CHS_ABI_REVISION from %s; set CHTYPES_REGISTRY\n' "$HERE/../include/chtypes.h" >&2
+      exit 2
+    fi ;;
+esac
+REGISTRY="${CHTYPES_REGISTRY:-${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/abi$_abi/$(uname -s | tr '[:upper:]' '[:lower:]')-$_arch}"
 ALL_LANGS=(go python ts rust)
 
 # Both default off: the interactive run is the forgiving one.

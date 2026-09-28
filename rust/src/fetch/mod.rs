@@ -32,6 +32,68 @@ use crate::registry::{Manifest, host_platform, install_dir_for, locate_in, searc
 use release::{Release, Request};
 use source::Source;
 
+thread_local! {
+    /// The test-only override of the ABI revision fetch selects rows at, for
+    /// the calling thread; see [`__set_fetch_abi_revision_for_tests`].
+    static ABI_REVISION_OVERRIDE: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
+}
+
+/// For this crate's tests only; not a supported API. An artifact at another
+/// revision still refuses to load.
+///
+/// The environment variable the test-only override is also read from, for a
+/// process the test suite spawns (the `chtypes` binary, a re-executed test) —
+/// an internal, undocumented test hook exactly like
+/// `CHTYPES_FETCH_TEST_RETRY_DELAY_MS`, never part of the public contract
+/// (`docs/guides/fetch.md` documents no such variable).
+const ABI_REVISION_TEST_ENV: &str = "CHTYPES_FETCH_TEST_ABI_REVISION";
+
+/// For this crate's tests only; not a supported API. An artifact at another
+/// revision still refuses to load.
+///
+/// Hidden from the docs, exempt from any stability promise, and meant for this
+/// crate's own fetch-fixture suite and nothing else.
+///
+/// Sets, for the calling thread, the ABI revision fetch selects release rows
+/// at in place of [`crate::ABI_REVISION`] (`docs/guides/fetch.md` §2), and
+/// returns the previous override. The fixture suite sets it to the revision
+/// its fixture release carries — derived from that release's own
+/// `index.json` — so a crate whose own revision has moved ahead of the
+/// fixtures still exercises the whole chain. It changes WHICH rows are
+/// eligible and nothing else: the default registry directory stays
+/// `abi<ABI_REVISION>/`, and the loader still refuses an artifact of another
+/// revision. `pub` only because `tests/fetch.rs` is a separate crate that
+/// cannot reach a `pub(crate)` item.
+#[doc(hidden)]
+pub fn __set_fetch_abi_revision_for_tests(revision: Option<i32>) -> Option<i32> {
+    ABI_REVISION_OVERRIDE.with(|cell| cell.replace(revision))
+}
+
+/// Not part of the public API — hidden from the docs, exempt from any
+/// stability promise — and here only because the `chtypes` binary is a
+/// separate crate: the revision fetch selects at, and `list`'s one line naming
+/// the platform's rows at another revision (`None` when none), which `list`
+/// does not show (`docs/guides/fetch.md` §6).
+#[doc(hidden)]
+pub fn __list_revision(rows: &[IndexRow], platform: &str) -> (i32, Option<String>) {
+    let revision = fetch_abi_revision();
+    (revision, release::not_shown(rows, platform, revision))
+}
+
+/// The one ABI revision whose rows fetch may install: this crate's own,
+/// unless the test-only override above names another.
+pub(crate) fn fetch_abi_revision() -> i32 {
+    if let Some(revision) = ABI_REVISION_OVERRIDE.with(std::cell::Cell::get) {
+        return revision;
+    }
+    // CHTYPES_FETCH_TEST_ABI_REVISION: for this crate's tests only; not a
+    // supported API. An artifact at another revision still refuses to load.
+    std::env::var(ABI_REVISION_TEST_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse().ok())
+        .unwrap_or(crate::ABI_REVISION)
+}
+
 /// How [`ensure`] fetches. `Default` is what `chtypes fetch <line>` does with
 /// no flags: this host's platform, the artifacts host's rolling release, the
 /// environment's trust policy, no lock, quiet.
@@ -359,6 +421,11 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
     let release = Release::load(&source, &policy, opts.progress)?;
     let rows = release.all(&platform);
     if rows.is_empty() {
+        let on_platform: Vec<&IndexRow> = release
+            .rows()
+            .iter()
+            .filter(|r| r.platform() == platform)
+            .collect();
         let mut platforms: Vec<String> = release.rows().iter().map(|r| r.platform()).collect();
         platforms.sort();
         platforms.dedup();
@@ -366,12 +433,25 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
             requested: "every line".into(),
             platform: platform.clone(),
             origin: release.origin.clone(),
-            offered: if platforms.is_empty() {
-                "nothing".into()
+            offered: if !on_platform.is_empty() {
+                // The platform has rows, just none at this crate's revision.
+                release::unpublished_at_revision(
+                    &[],
+                    &on_platform,
+                    fetch_abi_revision(),
+                    &format!("rows for {platform}"),
+                )
+            } else if platforms.is_empty() {
+                "it has nothing".into()
             } else {
-                format!("platforms {}", platforms.join(", "))
+                format!("it has platforms {}", platforms.join(", "))
             },
         });
+    }
+    // A line the release has only at another ABI revision is not installed —
+    // and never silently: one loud line per such line, then the rest go on.
+    for message in release::skipped_lines(release.rows(), &platform, fetch_abi_revision()) {
+        eprintln!("chtypes: WARNING: {message}");
     }
     let mut lock = lock_of(opts)?;
     let mut out = Vec::with_capacity(rows.len());

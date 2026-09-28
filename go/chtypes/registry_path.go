@@ -9,8 +9,9 @@ package chtypes
 //
 //  1. a path given explicitly to the registry constructor;
 //  2. CHTYPES_REGISTRY;
-//  3. ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch> — the
-//     per-user cache, where fetch installs;
+//  3. ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch> — the
+//     per-user cache, where fetch installs; R is this package's ABIRevision,
+//     so two SDK versions at different revisions never share it;
 //  4. /usr/local/share/chtypes/artifacts/<os>-<arch>, then
 //     /opt/chtypes/artifacts/<os>-<arch> — system locations, reserved for
 //     the deferred system packages and for images that bake artifacts in.
@@ -22,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 )
 
 // EnvRegistry is the environment variable naming an explicit registry
@@ -53,9 +55,10 @@ var platformKey = regexp.MustCompile(`^(linux|darwin)-(arm64|amd64)$`)
 func ValidPlatform(p string) bool { return platformKey.MatchString(p) }
 
 // DefaultRegistryDirFor is DefaultRegistryDir for an arbitrary platform key:
-// ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<platform>. A fetch for
-// another platform (Linux artifacts on a Mac, for a container) lands there.
-// Empty when no home directory can be determined.
+// ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<platform>, R this
+// package's ABIRevision. A fetch for another platform (Linux artifacts on a
+// Mac, for a container) lands there. Empty when no home directory can be
+// determined.
 func DefaultRegistryDirFor(platform string) string {
 	base := os.Getenv("XDG_CACHE_HOME")
 	if base == "" {
@@ -65,8 +68,15 @@ func DefaultRegistryDirFor(platform string) string {
 		}
 		base = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(base, "chtypes", "artifacts", platform)
+	return filepath.Join(base, "chtypes", "artifacts", abiDirName(), platform)
 }
+
+// abiDirName is the per-revision level of the per-user cache, "abi<R>": each
+// ABI revision gets its own directory, so an SDK at one revision never
+// overwrites (or loads) another revision's artifacts. It follows this
+// package's own ABIRevision, never the fetch test override — the override
+// changes which rows are eligible, not where the SDK looks.
+func abiDirName() string { return "abi" + strconv.Itoa(ABIRevision) }
 
 // SystemRegistryDirs are the §1 item-4 locations for a platform: read by the
 // loader, never written by a fetch.

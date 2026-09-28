@@ -19,10 +19,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
 
 type fixtureExpectations struct {
@@ -66,6 +70,35 @@ type fixtureExpectations struct {
 			} `json:"superseded"`
 		} `json:"cases"`
 	} `json:"builds"`
+	Revisions struct {
+		Fixture             string `json:"fixture"`
+		LowRevision         int    `json:"low_revision"`
+		HighRevision        int    `json:"high_revision"`
+		DiscriminatingLines []struct {
+			Revision int    `json:"revision"`
+			Line     string `json:"line"`
+		} `json:"discriminating_lines"`
+		Cases []revisionCase `json:"cases"`
+	} `json:"revisions"`
+}
+
+// revisionPick is one row of two-revisions/, as expected.json names it.
+type revisionPick struct {
+	File        string `json:"file"`
+	SHA256      string `json:"sha256"`
+	Build       int    `json:"build"`
+	ABIRevision int    `json:"abi_revision"`
+}
+
+// revisionCase is one (platform, line) of expected.json's revisions.cases:
+// the row fetch must install at the low and at the high revision, and the row
+// an unfiltered resolve would take.
+type revisionCase struct {
+	Platform   string       `json:"platform"`
+	Line       string       `json:"line"`
+	AtLow      revisionPick `json:"at_low_revision"`
+	AtHigh     revisionPick `json:"at_high_revision"`
+	Unfiltered revisionPick `json:"unfiltered"`
 }
 
 // fixtureDir locates tests/fixtures/fetch or skips loudly.
@@ -90,7 +123,55 @@ func fixtureDir(t *testing.T) (string, *fixtureExpectations) {
 	if len(exp.Verdicts) == 0 || len(exp.Platforms) == 0 || len(exp.Lines) == 0 || len(exp.TrustedKeys) == 0 {
 		t.Fatalf("expected.json is missing verdicts/platforms/lines/keys: %+v", exp)
 	}
+	useFixtureRevision(t, abs)
 	return abs, &exp
+}
+
+// useFixtureRevision points fetch's row selection at the ABI revision the
+// fixture releases under dir carry, for the rest of the test. Fetch installs
+// only rows at the binding's own revision (docs/guides/fetch.md §2), and the
+// fixtures are generated at whatever revision the artifact producer was at —
+// so the suite reads the revision they declare (testhook.FixturesABIRevision:
+// expected.json's fixtures_abi_revision, which fails when it is missing)
+// instead of assuming it equals ABIRevision, and never types it.
+func useFixtureRevision(t *testing.T, dir string) int {
+	t.Helper()
+	rev, err := testhook.FixturesABIRevision(dir)
+	if err != nil {
+		t.Fatalf("fetch fixtures: %v", err)
+	}
+	prev := testhook.FetchABIRevision
+	testhook.FetchABIRevision = rev
+	t.Cleanup(func() { testhook.FetchABIRevision = prev })
+	return rev
+}
+
+// TestFetchFixturesAreFetchedAtTheirOwnRevision proves the override above is
+// wired to the declared revision: the fetcher selects at the fixtures' revision, and one
+// revision past it the same release refuses UNPUBLISHED, naming both — the
+// fixtures have nothing at any other revision.
+func TestFetchFixturesAreFetchedAtTheirOwnRevision(t *testing.T) {
+	dir, exp := fixtureDir(t)
+	rev, err := testhook.FixturesABIRevision(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fetchABIRevision(); got != rev {
+		t.Fatalf("fetch selects at ABI revision %d, the fixtures carry %d", got, rev)
+	}
+	isolateEnv(t)
+	t.Setenv(envTrustedKeys, strings.Join(exp.TrustedKeys, ","))
+	src := "file://" + filepath.Join(dir, "signed")
+	testhook.FetchABIRevision = rev + 1
+	dest := filepath.Join(t.TempDir(), "reg")
+	_, err = Ensure(context.Background(), "25.8", FetchOptions{URL: src, Dest: dest, Platform: exp.Platforms[0]})
+	ae := wantCode(t, err, CodeArtifactUnpublished)
+	for _, want := range []string{"ABI revision " + strconv.Itoa(rev+1), "only at ABI revision " + strconv.Itoa(rev)} {
+		if !strings.Contains(ae.Msg, want) {
+			t.Fatalf("message does not name %q: %s", want, ae.Msg)
+		}
+	}
+	noArtifactDirs(t, dest)
 }
 
 func TestFetchFixturesTestKeyMatchesExpectedKeyID(t *testing.T) {
@@ -356,4 +437,131 @@ func TestFetchFixturesRebuildInstallsTheHighestBuild(t *testing.T) {
 			}
 		})
 	}
+}
+
+// twoRevisions loads expected.json's revisions block and the two-revisions/
+// fixture's own index rows by file, failing when either is absent.
+func twoRevisions(t *testing.T) (string, *fixtureExpectations, map[string]ReleaseArtifact) {
+	t.Helper()
+	dir, exp := fixtureDir(t)
+	r := exp.Revisions
+	if r.Fixture == "" || len(r.Cases) == 0 || len(r.DiscriminatingLines) == 0 || r.HighRevision <= r.LowRevision {
+		t.Fatalf("expected.json carries no usable revisions block (%+v) — regenerate the fixtures", r)
+	}
+	var index struct {
+		Artifacts []ReleaseArtifact `json:"artifacts"`
+	}
+	blob, err := os.ReadFile(filepath.Join(dir, r.Fixture, "index.json"))
+	if err != nil {
+		t.Fatalf("%s/index.json: %v", r.Fixture, err)
+	}
+	if err := json.Unmarshal(blob, &index); err != nil {
+		t.Fatalf("%s/index.json: %v", r.Fixture, err)
+	}
+	byFile := map[string]ReleaseArtifact{}
+	for _, a := range index.Artifacts {
+		byFile[a.File] = a
+	}
+	isolateEnv(t)
+	t.Setenv(envTrustedKeys, strings.Join(exp.TrustedKeys, ","))
+	return dir, exp, byFile
+}
+
+// fetchAtRevision fetches one line of two-revisions/ with fetch selecting at
+// revision rev, and checks that what landed is want: the file, its sha256,
+// the row's own build and abi_revision, and the installed library's bytes.
+func fetchAtRevision(t *testing.T, dir string, exp *fixtureExpectations, byFile map[string]ReleaseArtifact,
+	c revisionCase, rev int, want revisionPick) {
+	t.Helper()
+	testhook.FetchABIRevision = rev
+	inst, err := Ensure(context.Background(), c.Line, FetchOptions{
+		URL: "file://" + filepath.Join(dir, exp.Revisions.Fixture), Dest: t.TempDir(), Platform: c.Platform,
+	})
+	if err != nil {
+		t.Fatalf("%s %s at ABI revision %d: %v", c.Platform, c.Line, rev, err)
+	}
+	if inst.File != want.File || inst.SHA256 != want.SHA256 {
+		t.Fatalf("%s %s at ABI revision %d installed %s (%s), want %s (%s)", c.Platform, c.Line, rev, inst.File, inst.SHA256, want.File, want.SHA256)
+	}
+	row, ok := byFile[want.File]
+	if !ok || row.BuildNumber() != want.Build || !row.atRevision(want.ABIRevision) || want.ABIRevision != rev {
+		t.Fatalf("%s: index row %+v disagrees with expected.json's build %d / abi_revision %d at revision %d", want.File, row, want.Build, want.ABIRevision, rev)
+	}
+	got, err := fileSHA256(filepath.Join(inst.Dir, inst.Library))
+	if err != nil || got != row.LibrarySHA256 {
+		t.Fatalf("%s: installed library hashes %s (%v), the row says %s", want.File, got, err, row.LibrarySHA256)
+	}
+}
+
+// TestFetchFixturesTwoRevisionsPickTheRowAtEachRevision drives every case of
+// expected.json's revisions against two-revisions/: at the low revision the
+// pick is at_low_revision, at the high revision it is at_high_revision — the
+// file, sha256, build and revision all read from expected.json.
+func TestFetchFixturesTwoRevisionsPickTheRowAtEachRevision(t *testing.T) {
+	dir, exp, byFile := twoRevisions(t)
+	r := exp.Revisions
+	for _, c := range r.Cases {
+		for _, at := range []struct {
+			rev  int
+			want revisionPick
+		}{{r.LowRevision, c.AtLow}, {r.HighRevision, c.AtHigh}} {
+			t.Run(fmt.Sprintf("%s/%s/abi%d", c.Platform, c.Line, at.rev), func(t *testing.T) {
+				fetchAtRevision(t, dir, exp, byFile, c, at.rev, at.want)
+			})
+		}
+	}
+}
+
+// TestFetchFixturesTwoRevisionsFilterChangesTheAnswer asserts the
+// discriminating lines expected.json names: at that revision, on that line,
+// the pick DIFFERS from the unfiltered one — so the filter decided it, not
+// two rules that happened to agree.
+func TestFetchFixturesTwoRevisionsFilterChangesTheAnswer(t *testing.T) {
+	dir, exp, byFile := twoRevisions(t)
+	r := exp.Revisions
+	for _, d := range r.DiscriminatingLines {
+		t.Run(fmt.Sprintf("abi%d/%s", d.Revision, d.Line), func(t *testing.T) {
+			checked := 0
+			for _, c := range r.Cases {
+				if c.Line != d.Line {
+					continue
+				}
+				var want revisionPick
+				switch d.Revision {
+				case r.LowRevision:
+					want = c.AtLow
+				case r.HighRevision:
+					want = c.AtHigh
+				default:
+					t.Fatalf("discriminating revision %d is neither low (%d) nor high (%d)", d.Revision, r.LowRevision, r.HighRevision)
+				}
+				if want.File == c.Unfiltered.File {
+					t.Fatalf("%s %s: expected.json's pick at ABI revision %d is the unfiltered one — this line does not discriminate", c.Platform, c.Line, d.Revision)
+				}
+				fetchAtRevision(t, dir, exp, byFile, c, d.Revision, want)
+				checked++
+			}
+			if checked == 0 {
+				t.Fatalf("no case for discriminating line %s", d.Line)
+			}
+		})
+	}
+}
+
+// TestFetchFixturesTwoRevisionsOnePastTheHighRevisionIsUnpublished is the
+// negative control: the release serves nothing at high_revision + 1.
+func TestFetchFixturesTwoRevisionsOnePastTheHighRevisionIsUnpublished(t *testing.T) {
+	dir, exp, _ := twoRevisions(t)
+	r := exp.Revisions
+	c := r.Cases[0]
+	testhook.FetchABIRevision = r.HighRevision + 1
+	dest := filepath.Join(t.TempDir(), "reg")
+	_, err := Ensure(context.Background(), c.Line, FetchOptions{
+		URL: "file://" + filepath.Join(dir, r.Fixture), Dest: dest, Platform: c.Platform,
+	})
+	ae := wantCode(t, err, CodeArtifactUnpublished)
+	if !strings.Contains(ae.Msg, fmt.Sprintf("ABI revision %d (this SDK's)", r.HighRevision+1)) {
+		t.Fatalf("message: %s", ae.Msg)
+	}
+	noArtifactDirs(t, dest)
 }

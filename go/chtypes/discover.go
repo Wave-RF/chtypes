@@ -278,12 +278,13 @@ func (l *Library) ReconstructDDL(cols []DiscoveredColumn) (string, error) {
 }
 
 // DefaultRegistryDir is the per-user artifact cache for this host:
-// ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>, with <arch>
-// spelled the artifact way (amd64, arm64). It is where scripts/fetch.sh and
-// the in-package fetch (Ensure, `chtypes fetch`) install, where a
-// core-repository build lands, and what every SDK's tests and playgrounds
-// fall back to when CHTYPES_REGISTRY is unset — one directory the four SDKs
-// agree on, so a machine set up once serves all of them. It is item 3 of the
+// ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>, with R
+// this package's ABIRevision and <arch> spelled the artifact way (amd64,
+// arm64). It is where scripts/fetch.sh and the in-package fetch (Ensure,
+// `chtypes fetch`) install, and what every SDK's tests and playgrounds fall
+// back to when CHTYPES_REGISTRY is unset — one directory the four SDKs at
+// the same ABI revision agree on, so a machine set up once serves all of
+// them, and an SDK at another revision keeps its own. It is item 3 of the
 // docs/guides/fetch.md §1 search path (RegistrySearchPath is the whole list).
 // It is a PATH, not a promise: NewRegistry still errors if nothing is there.
 func DefaultRegistryDir() string {

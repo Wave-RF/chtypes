@@ -6,6 +6,18 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`ReleaseArtifact.ABIRevision`** (`*int`): the row's `abi_revision`, `nil` when the row declares none. `ReleaseArtifact` also gains an `UnmarshalJSON` method, so an `abi_revision` that is not a JSON integer reads as `nil` instead of failing the whole `index.json`.
+
+### Changed
+
+- **Installs move to a per-revision directory, so the first fetch after upgrading downloads again.** The per-user cache `DefaultRegistryDir()` is now `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>`, `<R>` this binding's own `ABIRevision`, where it was `…/chtypes/artifacts/<os>-<arch>`. Two SDK versions that speak different ABI revisions on one machine no longer overwrite each other's artifacts. Nothing is migrated: the old directory is simply no longer read, and can be deleted once nothing older uses it. `CHTYPES_REGISTRY` and an explicit directory are taken exactly as before.
+- **Fetch now selects only artifacts built at this binding's own ABI revision** (`docs/guides/fetch.md` §2). The release's rows are narrowed to those whose `abi_revision` is `ABIRevision` before the newest-version, highest-build rule applies; a row that declares no revision never matches. Nothing at that revision for the line and platform is `ErrArtifactUnpublished` (`CHTYPES_ARTIFACT_UNPUBLISHED`, exit 4), naming the revision(s) the release does serve — never a fallback to another revision's build, which the loader would refuse anyway. Across a revision cutover the grace this gives an older binding is temporary: an older-revision build stays fetchable only until that line's next publish evicts it under retention, which keeps two builds per version.
+- **`FetchAll` and `chtypes fetch --all` no longer skip a line silently.** A line the release has for the platform only at another ABI revision, or only in rows that record none (built before revisions were recorded), is not installed, and one loud warning line (through `FetchOptions.Progress` when set, else on stderr) names the line, the platform, what the release does serve and this binding's revision; every other line still installs, and the exit status stays 0 when they all do.
+- **`list` shows only the release's rows at this binding's ABI revision** — what a fetch could install — and, when that hides any of the platform's rows, adds one line naming them: `<N> row(s) at ABI revision(s) <S> not shown; this SDK speaks <R>`, or, for rows that record none, `<M> row(s) that record no ABI revision (built before revisions were recorded) not shown; this SDK speaks <R>`. Nothing is added when nothing was hidden.
+- **On darwin-arm64, fetching line 24.8 now fails at fetch time** with `CHTYPES_ARTIFACT_UNPUBLISHED` (exit 4) instead of installing an artifact the loader then refuses: the release's only 24.8 rows for that platform record no ABI revision, because they were built before revisions were recorded, and the message says exactly that rather than that the release serves none.
+
 ## [0.3.1] — 2026-09-26
 
 Speaks ABI revision 5, unchanged from 0.3.0: every artifact 0.3.0 loads, this release loads.

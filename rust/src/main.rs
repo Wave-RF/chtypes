@@ -33,9 +33,12 @@ chtypes — fetch, verify and list ClickHouse artifacts for the chtypes SDKs
   chtypes where                        the registry directory fetch would write to
 
 A <line> is a ClickHouse minor line (25.8) or an exact patch (25.8.28.1-lts, a
-hard requirement). --all installs every line the release publishes for the
-platform. Progress prints on stderr; `fetch` prints each installed directory
-alone on stdout.
+hard requirement). Only artifacts built at this SDK's ABI revision are ever
+installed. --all installs every line the release publishes for the platform at
+that revision. Without --dest (or CHTYPES_REGISTRY), fetch installs into the
+per-user cache, ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>,
+R that revision. Progress prints on stderr; `fetch` prints each installed
+directory alone on stdout.
 
 Environment: CHTYPES_REGISTRY (where to install and look), CHTYPES_ARTIFACTS_URL
 (the artifacts host), CHTYPES_TRUSTED_KEYS (hex keys replacing the release key),
@@ -322,8 +325,15 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
                     None => "UNVERIFIED — CHTYPES_ALLOW_UNSIGNED=1".to_string(),
                 }
             );
+            // Only the rows this SDK can fetch — its own ABI revision
+            // (docs/guides/fetch.md §2) — and one line naming what that hid.
+            let (revision, not_shown) = fetch::__list_revision(&info.artifacts, &platform);
             let mut any = false;
-            for row in info.artifacts.iter().filter(|r| r.platform() == platform) {
+            for row in info
+                .artifacts
+                .iter()
+                .filter(|r| r.platform() == platform && r.abi_revision == Some(revision))
+            {
                 any = true;
                 let have = installed.iter().any(|(l, _)| l == &row.clickhouse_minor);
                 println!(
@@ -338,6 +348,9 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
             }
             if !any {
                 println!("  (nothing for {platform})");
+            }
+            if let Some(note) = not_shown {
+                println!("  {note}");
             }
             Ok(0)
         }

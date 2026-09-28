@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -102,6 +103,7 @@ func writeRealRelease(t *testing.T, dir string, inst Installed, priv ed25519.Pri
 		"os": m.OS, "arch": m.Arch, "file": file, "sha256": sum, "bytes": fi.Size(),
 		"clickhouse_version": m.ClickHouseVersion, "clickhouse_minor": m.minor(),
 		"library": m.Library, "library_sha256": m.LibrarySHA256,
+		"abi_revision": fetchABIRevision(),
 	}}})
 	os.WriteFile(filepath.Join(dir, "index.json"), index, 0o644)
 	sums := sum + "  " + file + "\n"
@@ -153,7 +155,7 @@ func TestAutoFetchOpensOnceAndDispatches(t *testing.T) {
 	if got := srv.count(file); got != 1 {
 		t.Fatalf("the tarball was downloaded %d times, want 1\n%s", got, progress.String())
 	}
-	want := filepath.Join(cache, "chtypes", "artifacts", HostPlatform(), inst.Line)
+	want := filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(ABIRevision), HostPlatform(), inst.Line)
 	if libs[0].Path != filepath.Join(want, inst.Library) || libs[0].Minor != inst.Line {
 		t.Fatalf("library %s (%s), want under %s", libs[0].Path, libs[0].Minor, want)
 	}

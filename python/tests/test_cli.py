@@ -35,10 +35,24 @@ def _keys() -> str:
 
 
 @pytest.fixture
-def env(isolated_search_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def env(
+    isolated_search_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Path:
     if EXPECTED_FILE.is_file():
         monkeypatch.setenv("CHTYPES_TRUSTED_KEYS", _keys())
+        # Fetch at the ABI revision the fixtures carry, read off their own rows.
+        request.getfixturevalue("at_fixture_revision")
     return isolated_search_path
+
+
+# `python -m chtypes`, exactly — runpy runs chtypes/__main__.py as __main__,
+# which is all `-m` does — with fetch's test-only revision override set first
+# (the child cannot inherit the parent's monkeypatch). argv[1] is the revision.
+_MODULE_AT_REVISION = (
+    "import runpy, sys; import chtypes.fetch as f; "
+    "f._ABI_REVISION_OVERRIDE = int(sys.argv.pop(1)); "
+    "runpy.run_module('chtypes', run_name='__main__', alter_sys=True)"
+)
 
 
 def test_where_prints_the_write_directory(env: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -80,7 +94,11 @@ def test_usage_errors_exit_2(env: Path, capsys: pytest.CaptureFixture[str]) -> N
     ),
 )
 def test_fetch_exit_codes_and_streams(
-    verdict: dict, env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    verdict: dict,
+    env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    at_fixture_revision: int,
 ) -> None:
     """Every fixture verdict through the real entry point, in a subprocess:
     the spec's exit code, the code on stderr, and stdout empty or exactly
@@ -99,8 +117,9 @@ def test_fetch_exit_codes_and_streams(
     proc = subprocess.run(
         [
             sys.executable,
-            "-m",
-            "chtypes",
+            "-c",
+            _MODULE_AT_REVISION,
+            str(at_fixture_revision),
             "fetch",
             "25.8",
             "--platform",
@@ -174,6 +193,19 @@ def test_verify_and_list(env: Path, tmp_path: Path, capsys: pytest.CaptureFixtur
     out = capsys.readouterr().out
     assert "installed (" in out and "[installed]" in out and "signed by key" in out
     assert "[not installed]" not in out
+    assert "not shown" not in out  # every row is at the revision fetch selects at
+
+    # One revision past the fixtures' own, list shows none of their rows and
+    # says so in one line naming what it hid (docs/guides/fetch.md §6).
+    from chtypes import fetch as fetch_module
+
+    rev = fetch_module._fetch_abi_revision()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(fetch_module, "_ABI_REVISION_OVERRIDE", rev + 1)
+        assert main(["list", "--platform", PLATFORM, "--url", signed, "--dest", str(dest)]) == 0
+    out = capsys.readouterr().out
+    assert f"  2 row(s) at ABI revision(s) {rev} not shown; this SDK speaks {rev + 1}\n" in out
+    assert "[installed]" not in out
 
     # Corrupt one library: verify says so, exits 1, and names the line.
     (dest / "26.7" / "libchtypes.so").write_bytes(b"corrupt")

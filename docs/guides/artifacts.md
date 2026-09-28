@@ -142,7 +142,7 @@ npx @wavehouse/chtypes fetch 25.8 --frozen              # refuse anything the lo
 
 `--frozen` without `--lock` reads `./chtypes.lock`. A lock file that does not exist under `--frozen` is `CHTYPES_ARTIFACT_PINNED`: nothing is pinned, so nothing is installed.
 
-A pin survives a rebuild on purpose. The same ClickHouse version can be published more than once, each with a higher build number, and a line resolves to its newest version and then to the **highest build** of that version. Because a lock pins a file name and a hash rather than a line, a rebuild does not silently become what you install.
+A pin survives a rebuild on purpose. The same ClickHouse version can be published more than once, each with a higher build number, and a line resolves — among the artifacts built at the ABI revision your SDK speaks, the only ones a fetch ever installs ([`fetch.md`](fetch.md) §2) — to its newest version and then to the **highest build** of that version. Because a lock pins a file name and a hash rather than a line, a rebuild does not silently become what you install.
 
 ## Lazy fetch is opt-in
 
@@ -157,7 +157,7 @@ In TypeScript the split is in the method names rather than a flag: `registry.for
 A line no directory on the search path holds is one identifiable error in every binding — Go's `ErrArtifactMissing` (which works with `errors.Is`), Python's and TypeScript's `ArtifactMissingError`, Rust's `Error::ArtifactMissing` — carrying the same message everywhere apart from the bracketed parts:
 
 ```text
-chtypes: no artifact for ClickHouse 25.8 (darwin-arm64). Looked in: /Users/me/.cache/chtypes/artifacts/darwin-arm64, /usr/local/share/chtypes/artifacts/darwin-arm64, /opt/chtypes/artifacts/darwin-arm64.
+chtypes: no artifact for ClickHouse 25.8 (darwin-arm64). Looked in: /Users/me/.cache/chtypes/artifacts/abi<R>/darwin-arm64, /usr/local/share/chtypes/artifacts/darwin-arm64, /opt/chtypes/artifacts/darwin-arm64.
 Install it:  python -m chtypes fetch 25.8
 or set CHTYPES_AUTOFETCH=1 to fetch on first use.
 ```

@@ -72,7 +72,7 @@ npx @wavehouse/chtypes fetch 25.8                                    # TypeScrip
 cargo install chtypes && chtypes fetch 25.8                          # Rust
 ```
 
-That installs into `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>/25.8/` — the per-user cache every binding reads by default, so **one machine set up once serves all four**. `$CHTYPES_REGISTRY` overrides where it goes and where it is looked for.
+That installs into `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>/25.8/` — the per-user cache every binding reads by default, so **one machine set up once serves all four**. `<R>` is the ABI revision the SDK speaks: fetch installs only artifacts built at it, and each revision gets its own directory, so two SDK versions at different revisions never overwrite each other's artifacts (an install from before this layout is not migrated; the first fetch after upgrading downloads again). `$CHTYPES_REGISTRY` overrides where it goes and where it is looked for.
 
 Before anything lands, the command checks an ed25519 signature over the release and the sha256 of every byte. `fetch --all` takes every line the release publishes for this platform; `verify`, `list` and `where` are the other three subcommands. [`guides/artifacts.md`](guides/artifacts.md) has the whole story, including pinning for CI.
 
@@ -174,7 +174,7 @@ chtypes = { path = "../chtypes/rust" }
 
 </details>
 
-An artifact built locally by the artifact producer's pipeline lands in the same per-user cache, so a local build and a fetched release are interchangeable to every binding.
+An artifact built locally by the artifact producer's pipeline and placed in the same per-user cache directory (`abi<R>/<os>-<arch>`, or wherever `$CHTYPES_REGISTRY` points) is interchangeable with a fetched release to every binding at that revision.
 
 ## Next
 

@@ -15,6 +15,7 @@ import platform as _platform
 from dataclasses import dataclass, fields
 from pathlib import Path
 
+from ._native import ABI_REVISION
 from .errors import RegistryError
 
 __all__ = [
@@ -38,11 +39,15 @@ def host_platform() -> str:
 
 def cache_registry_dir(platform: str | None = None) -> str:
     """The per-user artifact cache for a platform — ``${XDG_CACHE_HOME:-~/.cache}/
-    chtypes/artifacts/<os>-<arch>``, this host's by default. Where fetch installs,
-    where a core-repository build lands, and slot 3 of the registry search path
-    (docs/guides/fetch.md §1). A path, not a promise: it need not exist yet."""
+    chtypes/artifacts/abi<R>/<os>-<arch>``, R this binding's `ABI_REVISION`, this
+    host's platform by default. Where fetch installs, and slot 3 of the registry
+    search path (docs/guides/fetch.md §1); keyed by revision so two SDK versions
+    at different revisions never share it. A path, not a promise: it need not
+    exist yet."""
     base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
-    return os.path.join(base, "chtypes", "artifacts", platform or host_platform())
+    return os.path.join(
+        base, "chtypes", "artifacts", f"abi{ABI_REVISION}", platform or host_platform()
+    )
 
 
 @dataclass(frozen=True, slots=True)
