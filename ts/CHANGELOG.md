@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-09-28
+
+Speaks ABI revision 5, unchanged from 0.3.1: every artifact 0.3.1 loads, this release loads.
+
 ### Added
 
 - **`IndexArtifact.abi_revision`**, optional (`abi_revision?: number`): the row's `abi_revision`, absent when the row declares none or declares something that is not an integer.

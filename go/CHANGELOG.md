@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-09-28
+
+Speaks ABI revision 5, unchanged from 0.3.1: every artifact 0.3.1 loads, this release loads.
+
 ### Added
 
 - **`ReleaseArtifact.ABIRevision`** (`*int`): the row's `abi_revision`, `nil` when the row declares none. `ReleaseArtifact` also gains an `UnmarshalJSON` method, so an `abi_revision` that is not a JSON integer reads as `nil` instead of failing the whole `index.json`.
