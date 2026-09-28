@@ -32,9 +32,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/wave-rf/chtypes/go/chtypes"
+	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
 
 const usageText = `usage:
@@ -296,9 +299,17 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		signed = "signed by key " + index.SignedBy
 	}
 	fmt.Fprintf(stdout, "release (%s, %s, %s):\n", index.Source, platform, signed)
+	// Only the rows this SDK can fetch — its own ABI revision
+	// (docs/guides/fetch.md §2) — and one line naming what that hid.
+	rev := listABIRevision()
 	n := 0
+	var hidden []chtypes.ReleaseArtifact
 	for _, a := range index.Artifacts {
 		if a.Platform() != platform {
+			continue
+		}
+		if a.ABIRevision == nil || *a.ABIRevision != rev {
+			hidden = append(hidden, a)
 			continue
 		}
 		n++
@@ -315,7 +326,51 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if n == 0 {
 		fmt.Fprintf(stdout, "  (nothing for %s)\n", platform)
 	}
+	if note := notShown(hidden, rev); note != "" {
+		fmt.Fprintf(stdout, "  %s\n", note)
+	}
 	return nil
+}
+
+// listABIRevision is the revision `list` shows rows for: the one fetch
+// selects at — the package's ABIRevision, or the fetch-fixture suites'
+// test-only override.
+func listABIRevision() int {
+	if n := testhook.FetchABIRevision; n != 0 {
+		return n
+	}
+	return chtypes.ABIRevision
+}
+
+// notShown is list's one line naming the platform's rows at another ABI
+// revision, which it does not show (docs/guides/fetch.md §6); "" when none
+// were hidden. "none" stands for rows that declare no revision.
+func notShown(hidden []chtypes.ReleaseArtifact, rev int) string {
+	if len(hidden) == 0 {
+		return ""
+	}
+	seen := map[int]bool{}
+	var revs []int
+	undeclared := false
+	for _, a := range hidden {
+		if a.ABIRevision == nil {
+			undeclared = true
+			continue
+		}
+		if !seen[*a.ABIRevision] {
+			seen[*a.ABIRevision] = true
+			revs = append(revs, *a.ABIRevision)
+		}
+	}
+	sort.Ints(revs)
+	var parts []string
+	for _, r := range revs {
+		parts = append(parts, strconv.Itoa(r))
+	}
+	if undeclared {
+		parts = append(parts, "none")
+	}
+	return fmt.Sprintf("%d row(s) at ABI revision(s) %s not shown; this SDK speaks %d", len(hidden), strings.Join(parts, ", "), rev)
 }
 
 func cmdWhere(args []string, stdout, stderr io.Writer) error {

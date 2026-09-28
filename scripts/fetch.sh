@@ -695,6 +695,17 @@ if want_all:
     if not arts:
         sys.exit("unpublished: the release has nothing for %s-%s at %s: %s"
                  % (os_, arch, at, served(on_platform, "rows for %s-%s" % (os_, arch))))
+    # A line the release has only at another ABI revision (or only in rows that
+    # declare none) is not installed — and never silently: one loud line each,
+    # then the rest go on. Printed by the caller once this selection succeeds.
+    by_line = {}
+    for a in on_platform:
+        by_line.setdefault(a["clickhouse_minor"], []).append(a)
+    for minor in sorted(by_line, key=lambda m: [int(p) for p in m.split(".")]):
+        if not any(revision_of(a) == own for a in by_line[minor]):
+            sys.stderr.write("fetch.sh: WARNING: ClickHouse line %s on %s-%s is not installed: %s, and this "
+                             "SDK speaks ABI revision %d\n"
+                             % (minor, os_, arch, served(by_line[minor], "that line for %s-%s" % (os_, arch)), own))
     # One per minor line — a release should not carry two patches of a line, but
     # if it does, the newer one is the one to install.
     best = {}
@@ -743,6 +754,9 @@ PY
   esac
 }
 [ -n "$SELECTED" ] || fail CHTYPES_ARTIFACT_UNPUBLISHED "index.json selected nothing for this request"
+# On success the selector writes to stderr only the --all lines it could not
+# install at this ABI revision — loud, never silent.
+if [ -s "$WORK/.select.err" ]; then cat "$WORK/.select.err" >&2; fi
 
 # install_one <row> — one index.json row, from the release to <dest>/<minor>/.
 install_one() {

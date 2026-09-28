@@ -64,6 +64,17 @@ pub fn __set_fetch_abi_revision_for_tests(revision: Option<i32>) -> Option<i32> 
     ABI_REVISION_OVERRIDE.with(|cell| cell.replace(revision))
 }
 
+/// Not part of the public API — hidden from the docs, exempt from any
+/// stability promise — and here only because the `chtypes` binary is a
+/// separate crate: the revision fetch selects at, and `list`'s one line naming
+/// the platform's rows at another revision (`None` when none), which `list`
+/// does not show (`docs/guides/fetch.md` §6).
+#[doc(hidden)]
+pub fn __list_revision(rows: &[IndexRow], platform: &str) -> (i32, Option<String>) {
+    let revision = fetch_abi_revision();
+    (revision, release::not_shown(rows, platform, revision))
+}
+
 /// The one ABI revision whose rows fetch may install: this crate's own,
 /// unless the test-only override above names another.
 pub(crate) fn fetch_abi_revision() -> i32 {
@@ -429,6 +440,11 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
                 format!("platforms {}", platforms.join(", "))
             },
         });
+    }
+    // A line the release has only at another ABI revision is not installed —
+    // and never silently: one loud line per such line, then the rest go on.
+    for message in release::skipped_lines(release.rows(), &platform, fetch_abi_revision()) {
+        eprintln!("chtypes: WARNING: {message}");
     }
     let mut lock = lock_of(opts)?;
     let mut out = Vec::with_capacity(rows.len());

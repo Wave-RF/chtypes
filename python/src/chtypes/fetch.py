@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tarfile
 import tempfile
 import time
@@ -186,6 +187,37 @@ def _served(entries: Sequence[ReleaseEntry], noun: str) -> str:
     if any(e.abi_revision is None for e in entries):
         said += " and in rows that declare no ABI revision"
     return f"the release has {noun} only at {said}"
+
+
+def _skipped_lines(on_platform: Sequence[ReleaseEntry], platform: str, rev: int) -> list[str]:
+    """One message per line the release has for ``platform`` only at another ABI
+    revision, or only in rows that declare none — the lines ``--all`` installs
+    nothing for — in numeric line order."""
+    by_line: dict[str, list[ReleaseEntry]] = {}
+    for e in on_platform:
+        by_line.setdefault(e.minor, []).append(e)
+    return [
+        f"ClickHouse line {line} on {platform} is not installed: "
+        f"{_served(rows, f'that line for {platform}')}, and this SDK speaks ABI revision {rev}"
+        for line, rows in sorted(by_line.items(), key=lambda kv: _minor_key(kv[0]))
+        if not any(e.abi_revision == rev for e in rows)
+    ]
+
+
+def _not_shown(on_platform: Sequence[ReleaseEntry], rev: int) -> str | None:
+    """``list``'s one line naming the platform's rows at another ABI revision,
+    which it does not show (docs/guides/fetch.md §6); None when none were
+    hidden. ``none`` stands for rows that declare no revision."""
+    hidden = [e for e in on_platform if e.abi_revision != rev]
+    if not hidden:
+        return None
+    parts = [str(r) for r in sorted({e.abi_revision for e in hidden if e.abi_revision is not None})]
+    if any(e.abi_revision is None for e in hidden):
+        parts.append("none")
+    return (
+        f"{len(hidden)} row(s) at ABI revision(s) {', '.join(parts)} not shown; "
+        f"this SDK speaks {rev}"
+    )
 
 
 # ------------------------------------------------------------------ §1 paths
@@ -785,6 +817,7 @@ class Fetcher:
         host = (os.environ.get(ENV_ARTIFACTS_URL) or DEFAULT_ARTIFACTS_URL).rstrip("/")
         base = url or f"{host}/{self.tag}"
         self.progress: Progress = progress or (lambda line: None)
+        self._progress_given = progress is not None
         self.source = _Source(base, self._say)
         self.lock = Path(lock) if lock is not None else None
         self.frozen = frozen
@@ -802,6 +835,19 @@ class Fetcher:
     def _say(self, line: str) -> None:
         log.info("%s", line)
         self.progress(line)
+
+    def _warn(self, message: str) -> None:
+        """A loud line, never silent: through ``progress`` when the caller gave
+        one (the CLI does), else straight to stderr."""
+        line = f"chtypes: WARNING: {message}"
+        # Not log.warning: logging's last-resort handler would print it a
+        # second time on stderr for a process that configured no logging.
+        log.info("%s", line)
+        if self._progress_given:
+            self.progress(line)
+        else:
+            sys.stderr.write(line + "\n")
+            sys.stderr.flush()
 
     def _lock_pins(self) -> dict[str, dict[str, str]]:
         if self._pins is None:
@@ -986,17 +1032,21 @@ class Fetcher:
         return installed
 
     def ensure_all(self) -> list[Path]:
-        """Every line the release publishes for the platform."""
+        """Every line the release publishes for the platform at this binding's
+        ABI revision. A line it has only at another revision is not installed,
+        and is named in one loud warning line; the rest go on."""
         release = self.release()
         offered = release.offered(self.platform)
+        rev = _fetch_abi_revision()
+        on_platform = [e for e in release.entries if e.platform == self.platform]
         if not offered:
-            rev = _fetch_abi_revision()
-            on_platform = [e for e in release.entries if e.platform == self.platform]
             raise ArtifactUnpublishedError(
                 f"chtypes: {release.source} publishes nothing for {self.platform} at ABI "
                 f"revision {rev} (this SDK's): "
                 f"{_served(on_platform, f'rows for {self.platform}')}"
             )
+        for message in _skipped_lines(on_platform, self.platform, rev):
+            self._warn(message)
         out = [self.install(entry) for entry in offered]
         self.install_goldens()
         return out

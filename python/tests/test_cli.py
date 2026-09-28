@@ -193,6 +193,19 @@ def test_verify_and_list(env: Path, tmp_path: Path, capsys: pytest.CaptureFixtur
     out = capsys.readouterr().out
     assert "installed (" in out and "[installed]" in out and "signed by key" in out
     assert "[not installed]" not in out
+    assert "not shown" not in out  # every row is at the revision fetch selects at
+
+    # One revision past the fixtures' own, list shows none of their rows and
+    # says so in one line naming what it hid (docs/guides/fetch.md §6).
+    from chtypes import fetch as fetch_module
+
+    rev = fetch_module._fetch_abi_revision()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(fetch_module, "_ABI_REVISION_OVERRIDE", rev + 1)
+        assert main(["list", "--platform", PLATFORM, "--url", signed, "--dest", str(dest)]) == 0
+    out = capsys.readouterr().out
+    assert f"  2 row(s) at ABI revision(s) {rev} not shown; this SDK speaks {rev + 1}\n" in out
+    assert "[installed]" not in out
 
     # Corrupt one library: verify says so, exits 1, and names the line.
     (dest / "26.7" / "libchtypes.so").write_bytes(b"corrupt")

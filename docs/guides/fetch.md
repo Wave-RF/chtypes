@@ -36,6 +36,14 @@ A release holds four kinds of file:
 
 **Only the SDK's own ABI revision is ever selected, and that comes first.** Before any other rule, the rows for the platform are narrowed to those whose `abi_revision` is the SDK's own revision, compared as integers. A row that carries no `abi_revision` never matches: the artifact producer writes the field from the revision that introduced it onward, so a row without one is an older revision. Every rule below then applies within the rows that remain. Nothing left for the line, patch or platform is `CHTYPES_ARTIFACT_UNPUBLISHED` (exit 4, §7), naming the revision(s) the release does serve for it. A fetch never falls back to another revision's row: the SDK would refuse it at load anyway (§1). At a revision cutover, an older revision's build stays fetchable only until that line's next publish evicts it under the retention rule below.
 
+`--all` installs every line the release has at the SDK's revision and never skips one silently. For each line the platform has only at another revision, or only in rows that declare none, it prints one loud warning line on stderr, then goes on:
+
+```text
+WARNING: ClickHouse line <L> on <os>-<arch> is not installed: the release has that line for <os>-<arch> only at ABI revision <S>, and this SDK speaks ABI revision <R>
+```
+
+The exit status stays 0 when every line it could install did. Only a platform with nothing at all at the SDK's revision is `CHTYPES_ARTIFACT_UNPUBLISHED` (exit 4).
+
 **Rebuilds are new rows, never swaps.** The same ClickHouse version can be published more than once, each with a higher `build`, and the release keeps the two highest per version and platform. A line therefore resolves — among the rows at the SDK's ABI revision — to its newest ClickHouse version and then to the **highest build** of that version — the row's `build` field when it has one, else the `-b<N>` in the name, else 0. A lock file pins a file name and sha256, which is exactly what keeps a pin valid across a rebuild.
 
 ## 3. The verification chain, in order
@@ -115,6 +123,8 @@ Reference vector (openssl, `-rawin`): message `68656c6c6f0a` ("hello\n") signs u
 
 That is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, and CI fails on drift.
 
+**Current behavior across an ABI revision change.** A lock records a file and its sha256, not a revision, and `--frozen` checks the pin after §2 has chosen the row at the SDK's own revision. After you upgrade to an SDK at a new revision, `--frozen` with a lock written by the old one fails with `CHTYPES_ARTIFACT_PINNED` when the release has a row at the new revision, and with `CHTYPES_ARTIFACT_UNPUBLISHED` when it has none. The fix is to re-lock: fetch once with `--lock` and without `--frozen`, and commit the new lock.
+
 ## 6. The commands and the function
 
 One CLI surface, spelled identically:
@@ -136,6 +146,14 @@ chtypes where                        the registry directory fetch would write to
 | Go         | `go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8`   | `chtypes.Ensure(ctx, "25.8", opts)` |
 
 `ensure` is idempotent: installed-and-verified is a no-op, otherwise it fetches through §3. Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source unreachable · 4 not published for this platform/line.
+
+`list` shows, of what the release offers, only the rows at the SDK's own ABI revision — what a fetch could install (§2). When that hides any of the platform's rows, it adds one line naming them, in all four SDKs the same:
+
+```text
+<N> row(s) at ABI revision(s) <S>[, <S>…][, none] not shown; this SDK speaks <R>
+```
+
+`none` stands for rows that declare no ABI revision. When nothing was hidden, the line is not printed.
 
 **Lazy fetch on first open** is opt-in: the registry constructor's `autofetch` option, or `CHTYPES_AUTOFETCH=1`. Off, a missing line is the error in §7. On, opening a missing line runs `ensure` first (one process-wide lock so concurrent opens fetch once). Off by default because a production process must not begin a 250 MB download inside a request.
 

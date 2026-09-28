@@ -26,7 +26,9 @@ import (
 //
 // The fetch-fixture suites set it to FixtureABIRevision's answer for their
 // fixture set, so a binding whose own revision has moved ahead of the
-// fixtures still exercises the whole chain. Nothing else may set it.
+// fixtures still exercises the whole chain. Nothing else may set it; the
+// command's `list` reads it too, so what it shows agrees with what fetch
+// would install.
 var FetchABIRevision int
 
 // FixtureABIRevision reads every fixture release under dir — the

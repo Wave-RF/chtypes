@@ -93,14 +93,14 @@ export interface IndexArtifact {
   /** The core commit the wrapper was built from; `''` on an old row. */
   readonly core_commit: string;
   /**
-   * The chs_* ABI revision the artifact was built from, or `null` when the row
-   * declares none (or declares something that is not an integer). The artifact
-   * producer writes the field from the revision that introduced it onward, so
-   * a row without it is an older revision. Fetch installs only a row at this
-   * binding's own `ABI_REVISION` (docs/guides/fetch.md §2): any other would be
-   * refused at load.
+   * The chs_* ABI revision the artifact was built from; absent when the row
+   * declares none (or declares something that is not an integer), as many
+   * served rows do. The artifact producer writes the field from the revision
+   * that introduced it onward, so a row without it is an older revision. Fetch
+   * installs only a row at this binding's own `ABI_REVISION`
+   * (docs/guides/fetch.md §2): any other would be refused at load.
    */
-  readonly abi_revision: number | null;
+  readonly abi_revision?: number;
 }
 
 /** A release's `index.json`, schema 1. */
@@ -199,9 +199,15 @@ export interface ListResult {
   readonly registry: string;
   readonly platform: string;
   readonly installed: readonly InstalledArtifact[];
-  /** null when offline. */
+  /** null when offline. Only rows at this binding's ABI revision (docs/guides/fetch.md §2). */
   readonly offered: readonly IndexArtifact[] | null;
   readonly source: string | null;
+  /**
+   * One line naming the platform's rows at another ABI revision, which
+   * `offered` leaves out (docs/guides/fetch.md §6); absent when none were left
+   * out, or offline.
+   */
+  readonly notShown?: string;
 }
 
 // -------------------------------------------------------------- versions
@@ -640,16 +646,17 @@ function indexArtifact(row: unknown, i: number): IndexArtifact {
     library_sha256: str('library_sha256').toLowerCase(),
     build: buildOf(r['build'], file),
     core_commit: typeof r['core_commit'] === 'string' ? r['core_commit'] : '',
-    abi_revision: revisionOf(r['abi_revision']),
+    ...revisionOf(r['abi_revision']),
   };
 }
 
 /**
- * A row's `abi_revision` when it is an integer, else `null` — read as "declares
- * none", which never matches, rather than failing the whole listing.
+ * A row's `abi_revision` when it is an integer; otherwise the row is read as
+ * declaring none — the field is left out, and never matches — rather than
+ * failing the whole listing.
  */
-function revisionOf(field: unknown): number | null {
-  return typeof field === 'number' && Number.isSafeInteger(field) ? field : null;
+function revisionOf(field: unknown): { abi_revision?: number } {
+  return typeof field === 'number' && Number.isSafeInteger(field) ? { abi_revision: field } : {};
 }
 
 /**
@@ -679,11 +686,56 @@ function fetchAbiRevision(): number {
  */
 function served(rows: readonly IndexArtifact[], noun: string): string {
   if (rows.length === 0) return `the release does not have ${noun} at any ABI revision`;
-  const revs = [...new Set(rows.flatMap((a) => (a.abi_revision === null ? [] : [a.abi_revision])))].sort((a, b) => a - b);
+  const revs = declaredRevisions(rows);
   if (revs.length === 0) return `the release has ${noun} only in rows that declare no ABI revision`;
   let said = revs.length === 1 ? `ABI revision ${revs[0]}` : `ABI revisions ${revs.join(', ')}`;
-  if (rows.some((a) => a.abi_revision === null)) said += ' and in rows that declare no ABI revision';
+  if (rows.some((a) => a.abi_revision === undefined)) said += ' and in rows that declare no ABI revision';
   return `the release has ${noun} only at ${said}`;
+}
+
+/** The distinct revisions rows declare, ascending. */
+function declaredRevisions(rows: readonly IndexArtifact[]): number[] {
+  return [...new Set(rows.flatMap((a) => (a.abi_revision === undefined ? [] : [a.abi_revision])))].sort((a, b) => a - b);
+}
+
+/**
+ * One message per line the release has for `platform` only at another ABI
+ * revision, or only in rows that declare none — the lines `ensureAll` installs
+ * nothing for — oldest line first. Exported for the test suite only; not
+ * re-exported from `index.ts`.
+ */
+export function skippedLines(index: ReleaseIndex, platform: string): string[] {
+  const [os, arch] = platform.split('-');
+  const rev = fetchAbiRevision();
+  const byLine = new Map<string, IndexArtifact[]>();
+  for (const a of index.artifacts) {
+    if (a.os !== os || a.arch !== arch) continue;
+    byLine.set(a.clickhouse_minor, [...(byLine.get(a.clickhouse_minor) ?? []), a]);
+  }
+  return [...byLine.entries()]
+    .filter(([, rows]) => !rows.some((a) => a.abi_revision === rev))
+    .sort(([a], [b]) => compareVersions(a, b))
+    .map(
+      ([line, rows]) =>
+        `ClickHouse line ${line} on ${platform} is not installed: ${served(rows, `that line for ${platform}`)}, ` +
+        `and this SDK speaks ABI revision ${rev}`,
+    );
+}
+
+/**
+ * `list`'s one line naming the platform's rows at another ABI revision, which it
+ * does not show (docs/guides/fetch.md §6); `undefined` when none were hidden.
+ * `none` stands for rows that declare no revision. Exported for the test suite
+ * only; not re-exported from `index.ts`.
+ */
+export function notShown(index: ReleaseIndex, platform: string): string | undefined {
+  const [os, arch] = platform.split('-');
+  const rev = fetchAbiRevision();
+  const hidden = index.artifacts.filter((a) => a.os === os && a.arch === arch && a.abi_revision !== rev);
+  if (hidden.length === 0) return undefined;
+  const parts = declaredRevisions(hidden).map(String);
+  if (hidden.some((a) => a.abi_revision === undefined)) parts.push('none');
+  return `${hidden.length} row(s) at ABI revision(s) ${parts.join(', ')} not shown; this SDK speaks ${rev}`;
 }
 
 /**
@@ -830,7 +882,12 @@ export async function ensure(spelling: string, options: EnsureOptions = {}): Pro
   return p;
 }
 
-/** `fetch --all`: every line the release publishes for the platform, each through `ensure`'s chain. */
+/**
+ * `fetch --all`: every line the release publishes for the platform at this
+ * binding's ABI revision, each through `ensure`'s chain. A line it has only at
+ * another revision is not installed and is named in one loud stderr line; the
+ * rest go on.
+ */
 export async function ensureAll(options: EnsureOptions = {}): Promise<EnsureResult[]> {
   const platform = resolvePlatform(options.platform);
   const dest = fetchDestination(options.dest, platform);
@@ -841,8 +898,12 @@ export async function ensureAll(options: EnsureOptions = {}): Promise<EnsureResu
   emit({ type: 'status', message: `every published ClickHouse line, ${platform} -> ${dest}` });
   emit({ type: 'status', message: `source ${source.description}` });
   const release = await loadRelease(source, options, emit);
+  const rows = selectAll(release.index, platform);
+  // A line the release has only at another ABI revision is not installed —
+  // and never silently: one loud line per such line, then the rest go on.
+  for (const message of skippedLines(release.index, platform)) warn(`chtypes: WARNING: ${message}`);
   const out: EnsureResult[] = [];
-  for (const art of selectAll(release.index, platform)) out.push(await installOne(release, art, ctx));
+  for (const art of rows) out.push(await installOne(release, art, ctx));
   await installGoldens(release, ctx, options);
   return out;
 }
@@ -1198,7 +1259,8 @@ export async function listArtifacts(options: EnsureOptions = {}): Promise<ListRe
     if (!(err instanceof ArtifactUnpublishedError)) throw err;
     offered = [];
   }
-  return { registry: dir, platform, installed, offered, source: source.description };
+  const note = notShown(release.index, platform);
+  return { registry: dir, platform, installed, offered, source: source.description, ...(note !== undefined ? { notShown: note } : {}) };
 }
 
 // ------------------------------------------------------------ the lock

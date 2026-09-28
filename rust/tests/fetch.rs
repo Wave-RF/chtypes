@@ -1156,6 +1156,29 @@ fn the_binary_s_other_exit_codes_and_commands() {
         r.stdout
     );
     assert!(r.stdout.contains("(installed)"), "{}", r.stdout);
+    assert!(!r.stdout.contains("not shown"), "{}", r.stdout);
+    // One revision past the fixtures' own, list shows none of their rows and
+    // says so in one line naming what it hid (docs/guides/fetch.md §6).
+    let rev = fixture_revision(&fx);
+    let mut c = bin();
+    c.args(["list", "--platform", platform, "--dest"])
+        .arg(&dest)
+        .arg("--url")
+        .arg(&signed)
+        .env("CHTYPES_TRUSTED_KEYS", &key)
+        .env("XDG_CACHE_HOME", &cache)
+        .env(FIXTURE_REVISION_ENV, (rev + 1).to_string());
+    let r = run(c);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(
+        r.stdout.contains(&format!(
+            "  2 row(s) at ABI revision(s) {rev} not shown; this SDK speaks {}\n",
+            rev + 1
+        )),
+        "{}",
+        r.stdout
+    );
+    assert!(!r.stdout.contains("(installed)"), "{}", r.stdout);
     // list refuses an untrusted listing exactly as fetch would.
     let mut c = bin();
     c.args(["list", "--platform", platform, "--dest"])

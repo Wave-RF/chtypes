@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -138,6 +139,19 @@ func TestFetchVerifyListAgainstFixtures(t *testing.T) {
 	rc, out, _ = exec(t, "list", "--dest", dest, "--url", signed)
 	if rc != 0 || !strings.Contains(out, "installed ("+dest+")") || !strings.Contains(out, "(installed)") || !strings.Contains(out, "signed by key") {
 		t.Fatalf("list: rc=%d %q", rc, out)
+	}
+	if strings.Contains(out, "not shown") {
+		t.Fatalf("list hid rows when every row is at the SDK's revision: %q", out)
+	}
+	// One revision past the fixtures' own, list shows none of their rows and
+	// says so in one line naming what it hid (docs/guides/fetch.md §6).
+	rev := testhook.FetchABIRevision
+	testhook.FetchABIRevision = rev + 1
+	rc, out, _ = exec(t, "list", "--dest", dest, "--url", signed)
+	testhook.FetchABIRevision = rev
+	want := fmt.Sprintf("  2 row(s) at ABI revision(s) %d not shown; this SDK speaks %d\n", rev, rev+1)
+	if rc != 0 || !strings.Contains(out, "(nothing for ") || !strings.Contains(out, want) {
+		t.Fatalf("list at another revision: rc=%d %q (want %q)", rc, out, want)
 	}
 	// A rotted install: verify says so and exits 1.
 	inst, _ := chtypes.ListInstalled(dest)

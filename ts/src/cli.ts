@@ -227,6 +227,9 @@ async function cmdList(rest: readonly string[], values: Values, io: CliIo): Prom
     for (const a of listing.offered) {
       io.stdout(`  ${a.clickhouse_minor.padEnd(6)} ${a.clickhouse_version.padEnd(18)} b${String(a.build).padEnd(3)} ${a.file}  ${a.bytes} bytes${have.has(a.clickhouse_version) ? '  (installed)' : ''}\n`);
     }
+    // Only this SDK's own ABI revision is offered (docs/guides/fetch.md §2), and
+    // one line names what that hid.
+    if (listing.notShown !== undefined) io.stdout(`  ${listing.notShown}\n`);
   }
   return EXIT.ok;
 }

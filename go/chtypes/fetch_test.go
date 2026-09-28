@@ -69,6 +69,10 @@ func trustKey(t *testing.T, pub ed25519.PublicKey) {
 type testArtifact struct {
 	os, arch, version, minor, library string
 	content                           []byte
+	// revision is the row's abi_revision; 0 is the revision fetch selects at
+	// (fetchABIRevision). undeclared writes no abi_revision at all.
+	revision   int
+	undeclared bool
 }
 
 func fakeArtifact(platform, version string) testArtifact {
@@ -141,14 +145,21 @@ func writeRelease(t *testing.T, dir string, priv ed25519.PrivateKey, arts ...tes
 		if err := os.WriteFile(filepath.Join(dir, file), tb, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		rows = append(rows, map[string]any{
+		row := map[string]any{
 			"os": a.os, "arch": a.arch, "file": file, "sha256": sha256Hex(tb), "bytes": len(tb),
 			"clickhouse_version": a.version, "clickhouse_minor": a.minor,
 			"library": a.library, "library_sha256": sha256Hex(a.content),
+		}
+		switch {
+		case a.undeclared:
+		case a.revision != 0:
+			row["abi_revision"] = a.revision
+		default:
 			// The revision fetch is selecting at: the package's own, or the
 			// shared fixtures' while their suite runs.
-			"abi_revision": fetchABIRevision(),
-		})
+			row["abi_revision"] = fetchABIRevision()
+		}
+		rows = append(rows, row)
 		fmt.Fprintf(&sums, "%s  %s\n", sha256Hex(tb), file)
 	}
 	index, _ := json.MarshalIndent(map[string]any{
@@ -1466,6 +1477,47 @@ func TestSelectionNeverTakesARowWithoutAnABIRevision(t *testing.T) {
 	var absent ReleaseArtifact
 	if err := json.Unmarshal([]byte(`{"os":"linux","arch":"amd64","file":"x.tar.gz"}`), &absent); err != nil || absent.ABIRevision != nil {
 		t.Fatalf("absent abi_revision: %+v %v", absent, err)
+	}
+}
+
+// --all never skips a line silently: a line the release has only at another
+// revision, or only in rows that declare none, is named in one loud line —
+// line, platform, the SDK's revision and what the release does serve — and
+// every line at the SDK's revision still installs, with no error.
+func TestFetchAllNamesEveryLineServedOnlyAtAnotherRevision(t *testing.T) {
+	isolateEnv(t)
+	pub, priv := newTestKey(t)
+	trustKey(t, pub)
+	rel := filepath.Join(t.TempDir(), "release")
+	own := fakeArtifact(HostPlatform(), "25.8.28.1-lts")
+	elsewhere := fakeArtifact(HostPlatform(), "26.7.3.19-stable")
+	elsewhere.revision = ABIRevision + 1
+	undeclared := fakeArtifact(HostPlatform(), "24.8.14.39-lts")
+	undeclared.undeclared = true
+	writeRelease(t, rel, priv, own, elsewhere, undeclared)
+	dest := filepath.Join(t.TempDir(), "reg")
+	var progress bytes.Buffer
+	got, err := FetchAll(context.Background(), FetchOptions{URL: "file://" + rel, Dest: dest, Progress: &progress})
+	if err != nil {
+		t.Fatalf("FetchAll: %v\n%s", err, progress.String())
+	}
+	if len(got) != 1 || got[0].Line != "25.8" {
+		t.Fatalf("installed %+v, want only 25.8", got)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("chtypes: WARNING: ClickHouse line 24.8 on %s is not installed: the release has that line for %s only in rows that declare no ABI revision, and this SDK speaks ABI revision %d\n",
+			HostPlatform(), HostPlatform(), ABIRevision),
+		fmt.Sprintf("chtypes: WARNING: ClickHouse line 26.7 on %s is not installed: the release has that line for %s only at ABI revision %d, and this SDK speaks ABI revision %d\n",
+			HostPlatform(), HostPlatform(), ABIRevision+1, ABIRevision),
+	} {
+		if !strings.Contains(progress.String(), want) {
+			t.Fatalf("no loud line %q in:\n%s", want, progress.String())
+		}
+	}
+	for _, line := range []string{"24.8", "26.7"} {
+		if _, err := os.Stat(filepath.Join(dest, line)); err == nil {
+			t.Fatalf("%s was installed", line)
+		}
 	}
 }
 

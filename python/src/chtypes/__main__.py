@@ -196,7 +196,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    from .fetch import Fetcher, fetch_destination, host_platform, installed_lines
+    from .fetch import (
+        Fetcher,
+        _fetch_abi_revision,
+        _not_shown,
+        fetch_destination,
+        host_platform,
+        installed_lines,
+    )
 
     platform = args.platform or host_platform()
     registry = fetch_destination(args.dest, platform=platform)
@@ -221,6 +228,11 @@ def _cmd_list(args: argparse.Namespace) -> int:
             f"  {entry.minor:<8} {entry.clickhouse_version:<18} b{entry.build_number:<3} "
             f"{entry.file}  [{state}]\n"
         )
+    # Only this SDK's own ABI revision is offered (docs/guides/fetch.md §2), and
+    # one line names what that hid.
+    note = _not_shown([e for e in release.entries if e.platform == platform], _fetch_abi_revision())
+    if note is not None:
+        sys.stdout.write(f"  {note}\n")
     sys.stdout.flush()
     return EXIT_OK
 

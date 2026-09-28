@@ -377,10 +377,13 @@ func (f *fetcher) installGoldens(ctx context.Context) {
 	f.say("golden set verified and installed: %s", filepath.Join(f.dest, goldensAsset))
 }
 
-// FetchAll installs every line the release publishes for the platform —
-// which lines exist is a question index.json answers, so a caller never
-// restates the list. Lines are installed in numeric order; the first
-// failure stops the run and is returned with what was installed so far.
+// FetchAll installs every line the release publishes for the platform at
+// this package's ABI revision — which lines exist is a question index.json
+// answers, so a caller never restates the list. A line the release has only
+// at another revision is not installed and is named in one loud warning
+// line (docs/guides/fetch.md §2); the rest go on. Lines are installed in
+// numeric order; the first failure stops the run and is returned with what
+// was installed so far.
 func FetchAll(ctx context.Context, opts FetchOptions) ([]*Installed, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -401,6 +404,11 @@ func FetchAll(ctx context.Context, opts FetchOptions) ([]*Installed, error) {
 	rows, err := f.selectAll()
 	if err != nil {
 		return nil, err
+	}
+	// A line the release has only at another ABI revision is not installed —
+	// and never silently: one loud line per such line, then the rest go on.
+	for _, msg := range f.skippedLines(f.rowsForPlatform()) {
+		f.warn("%s", msg)
 	}
 	var out []*Installed
 	for i := range rows {
@@ -987,6 +995,29 @@ func servedRevisions(rows []ReleaseArtifact, noun string) string {
 		said += " and in rows that declare no ABI revision"
 	}
 	return "the release has " + noun + " only at " + said
+}
+
+// skippedLines names every line the release has for the platform only at
+// another ABI revision, or only in rows that declare none — the lines --all
+// installs nothing for — one message each, in numeric line order.
+func (f *fetcher) skippedLines(all []ReleaseArtifact) []string {
+	byLine := map[string][]ReleaseArtifact{}
+	for _, a := range all {
+		byLine[a.ClickHouseMinor] = append(byLine[a.ClickHouseMinor], a)
+	}
+	var lines []string
+	for line, rows := range byLine {
+		if len(f.atRevision(rows)) == 0 {
+			lines = append(lines, line)
+		}
+	}
+	sort.Slice(lines, func(i, j int) bool { return lessMinor(lines[i], lines[j]) })
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, fmt.Sprintf("ClickHouse line %s on %s is not installed: %s, and this SDK speaks ABI revision %d",
+			line, f.platform, servedRevisions(byLine[line], "that line for "+f.platform), f.abiRevision))
+	}
+	return out
 }
 
 func (f *fetcher) platformsOffered() string {

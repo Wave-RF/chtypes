@@ -25,9 +25,10 @@ import {
   type IndexArtifact,
   type ReleaseIndex,
 } from '../src/index.js';
-// FETCH_ABI_REVISION is the internal, test-only override (not re-exported from
-// index.js); these tests assert it is unset and that it never moves the cache.
-import { FETCH_ABI_REVISION } from '../src/fetch.js';
+// FETCH_ABI_REVISION is the internal, test-only override, and skippedLines /
+// notShown the internal helpers behind --all's and list's lines (none of them
+// re-exported from index.js).
+import { FETCH_ABI_REVISION, notShown, skippedLines } from '../src/fetch.js';
 import { fixtureAbiRevision } from './fixture-revision.js';
 
 const OWN = ABI_REVISION;
@@ -47,7 +48,8 @@ function row(version: string, build: number, revision: number | null): IndexArti
     library_sha256: 'b'.repeat(64),
     build,
     core_commit: '',
-    abi_revision: revision,
+    // A row that declares no revision simply has no such field.
+    ...(revision === null ? {} : { abi_revision: revision }),
   };
 }
 
@@ -106,6 +108,26 @@ describe('fetch selects only the binding’s own ABI revision (docs/guides/fetch
     expect(() => selectArtifact(undeclared, PLATFORM, parseVersionSpelling('25.8'))).toThrow(ArtifactUnpublishedError);
     expect(() => selectArtifact(undeclared, PLATFORM, parseVersionSpelling('25.8'))).toThrow(/declare no ABI revision/);
     expect(() => selectAll(undeclared, PLATFORM)).toThrow(ArtifactUnpublishedError);
+  });
+
+  it('--all names every line served only at another revision, in one loud line each, oldest first', () => {
+    const release = index(row('25.8.28.1-lts', 1, OWN), row('26.7.3.19-stable', 1, OTHER), row('24.8.14.39-lts', 1, null));
+    expect(selectAll(release, PLATFORM).map((a) => a.clickhouse_minor)).toEqual(['25.8']);
+    expect(skippedLines(release, PLATFORM)).toEqual([
+      `ClickHouse line 24.8 on ${PLATFORM} is not installed: the release has that line for ${PLATFORM} only in rows that declare no ABI revision, and this SDK speaks ABI revision ${OWN}`,
+      `ClickHouse line 26.7 on ${PLATFORM} is not installed: the release has that line for ${PLATFORM} only at ABI revision ${OTHER}, and this SDK speaks ABI revision ${OWN}`,
+    ]);
+    expect(skippedLines(index(row('25.8.28.1-lts', 1, OWN)), PLATFORM)).toEqual([]);
+  });
+
+  it('list names what it hides in one line, and says nothing when it hid nothing', () => {
+    expect(notShown(index(row('25.8.28.1-lts', 1, OWN)), PLATFORM)).toBeUndefined();
+    expect(notShown(index(row('25.8.28.1-lts', 1, OWN), row('26.7.3.19-stable', 1, OTHER)), PLATFORM)).toBe(
+      `1 row(s) at ABI revision(s) ${OTHER} not shown; this SDK speaks ${OWN}`,
+    );
+    expect(
+      notShown(index(row('25.8.28.1-lts', 1, OWN), row('26.7.3.19-stable', 1, OTHER), row('24.8.14.39-lts', 1, null)), PLATFORM),
+    ).toBe(`2 row(s) at ABI revision(s) ${OTHER}, none not shown; this SDK speaks ${OWN}`);
   });
 
   it('the per-user cache is abi<R>/, R the binding’s own constant — and the fetch override does not move it', () => {

@@ -127,6 +127,53 @@ def test_a_row_without_an_abi_revision_is_never_selected() -> None:
     assert entry.abi_revision is None
 
 
+def test_all_names_every_line_served_only_at_another_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--all never skips a line silently: a line the release has only at another
+    revision, or only in rows that declare none, is named in one loud line —
+    line, platform, the SDK's revision and what the release serves — and every
+    line at the SDK's revision still installs, with no error."""
+    release = _release(
+        _row("25.8.28.1-lts", 1, OWN),
+        _row("26.7.3.19-stable", 1, OTHER),
+        _row("24.8.14.39-lts", 1, None),
+    )
+    fetcher = Fetcher(dest=tmp_path, platform=PLATFORM, url=str(tmp_path))
+    fetcher._release = release
+    installed: list[str] = []
+    monkeypatch.setattr(fetcher, "install", lambda e: installed.append(e.minor) or tmp_path)
+    monkeypatch.setattr(fetcher, "install_goldens", lambda: None)
+    fetcher.ensure_all()
+    assert installed == ["25.8"]
+    err = capsys.readouterr().err
+    assert (
+        f"chtypes: WARNING: ClickHouse line 24.8 on {PLATFORM} is not installed: the release "
+        f"has that line for {PLATFORM} only in rows that declare no ABI revision, and this SDK "
+        f"speaks ABI revision {OWN}\n"
+    ) in err
+    assert (
+        f"chtypes: WARNING: ClickHouse line 26.7 on {PLATFORM} is not installed: the release "
+        f"has that line for {PLATFORM} only at ABI revision {OTHER}, and this SDK speaks ABI "
+        f"revision {OWN}\n"
+    ) in err
+    assert err.index("line 24.8") < err.index("line 26.7")  # numeric line order
+
+
+def test_list_names_what_it_hides_and_nothing_else() -> None:
+    """list's one line: how many rows at which revision(s) it did not show;
+    nothing when it hid nothing."""
+    rows = [_row("25.8.28.1-lts", 1, OWN), _row("26.7.3.19-stable", 1, OTHER)]
+    assert fetch_module._not_shown(rows[:1], OWN) is None
+    assert fetch_module._not_shown(rows, OWN) == (
+        f"1 row(s) at ABI revision(s) {OTHER} not shown; this SDK speaks {OWN}"
+    )
+    rows.append(_row("24.8.14.39-lts", 1, None))
+    assert fetch_module._not_shown(rows, OWN) == (
+        f"2 row(s) at ABI revision(s) {OTHER}, none not shown; this SDK speaks {OWN}"
+    )
+
+
 def test_the_per_user_cache_is_keyed_by_the_abi_revision(
     isolated_search_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

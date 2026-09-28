@@ -1158,6 +1158,7 @@ describe('the CLI (docs/guides/fetch.md §6)', () => {
     expect(listed.out).toMatch(/installed in .*:\n  25\.8 /);
     expect(listed.out).toMatch(/offers for .*:\n  25\.8 .*\(installed\)/);
     expect(listed.out).toMatch(/26\.7 .*tar\.gz {2}\d+ bytes/);
+    expect(listed.out).not.toContain('not shown'); // every row is at the SDK's revision
     const offline = await run(['list', '--dest', dest, '--offline']);
     expect(offline.out).not.toMatch(/offers/);
   });
@@ -1384,6 +1385,12 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
       expect((err as Error).message).toContain(`ABI revision ${fixtureRevision + 1}`);
       expect((err as Error).message).toContain(`only at ABI revision ${fixtureRevision}`);
       expect(readdirSync(dest)).toEqual([]);
+      // list shows none of the fixtures' rows then, and says so in one line
+      // naming what it hid (docs/guides/fetch.md §6).
+      const io = cliIo();
+      const url = pathToFileURL(path.join(SPEC_FIXTURES, 'signed')).href;
+      expect(await runCli(['list', '--platform', fixturePlatform, '--url', url, '--dest', dest], io)).toBe(EXIT.ok);
+      expect(io.out.join('')).toContain(`  2 row(s) at ABI revision(s) ${fixtureRevision} not shown; this SDK speaks ${fixtureRevision + 1}\n`);
     } finally {
       FETCH_ABI_REVISION.override = fixtureRevision;
     }

@@ -325,8 +325,15 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
                     None => "UNVERIFIED — CHTYPES_ALLOW_UNSIGNED=1".to_string(),
                 }
             );
+            // Only the rows this SDK can fetch — its own ABI revision
+            // (docs/guides/fetch.md §2) — and one line naming what that hid.
+            let (revision, not_shown) = fetch::__list_revision(&info.artifacts, &platform);
             let mut any = false;
-            for row in info.artifacts.iter().filter(|r| r.platform() == platform) {
+            for row in info
+                .artifacts
+                .iter()
+                .filter(|r| r.platform() == platform && r.abi_revision == Some(revision))
+            {
                 any = true;
                 let have = installed.iter().any(|(l, _)| l == &row.clickhouse_minor);
                 println!(
@@ -341,6 +348,9 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
             }
             if !any {
                 println!("  (nothing for {platform})");
+            }
+            if let Some(note) = not_shown {
+                println!("  {note}");
             }
             Ok(0)
         }

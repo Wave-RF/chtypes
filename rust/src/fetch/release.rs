@@ -92,6 +92,56 @@ fn served(rows: &[&IndexRow], noun: &str) -> String {
     format!("the release has {noun} only at {said}")
 }
 
+/// One message per line the release has for `platform` only at another ABI
+/// revision, or only in rows that declare none — the lines `--all` installs
+/// nothing for — in numeric line order.
+pub(crate) fn skipped_lines(rows: &[IndexRow], platform: &str, revision: i32) -> Vec<String> {
+    let mut by_line: BTreeMap<(u64, u64), (String, Vec<&IndexRow>)> = BTreeMap::new();
+    for row in rows.iter().filter(|r| r.platform() == platform) {
+        by_line
+            .entry(minor_key(&row.clickhouse_minor))
+            .or_insert_with(|| (row.clickhouse_minor.clone(), Vec::new()))
+            .1
+            .push(row);
+    }
+    by_line
+        .into_values()
+        .filter(|(_, rows)| !rows.iter().any(|r| r.abi_revision == Some(revision)))
+        .map(|(line, rows)| {
+            format!(
+                "ClickHouse line {line} on {platform} is not installed: {}, and this SDK speaks \
+                 ABI revision {revision}",
+                served(&rows, &format!("that line for {platform}"))
+            )
+        })
+        .collect()
+}
+
+/// `list`'s one line naming the platform's rows at another ABI revision, which
+/// it does not show (`docs/guides/fetch.md` §6); `None` when none were hidden.
+/// `none` stands for rows that declare no revision.
+pub(crate) fn not_shown(rows: &[IndexRow], platform: &str, revision: i32) -> Option<String> {
+    let hidden: Vec<&IndexRow> = rows
+        .iter()
+        .filter(|r| r.platform() == platform && r.abi_revision != Some(revision))
+        .collect();
+    if hidden.is_empty() {
+        return None;
+    }
+    let mut revisions: Vec<i32> = hidden.iter().filter_map(|r| r.abi_revision).collect();
+    revisions.sort_unstable();
+    revisions.dedup();
+    let mut parts: Vec<String> = revisions.iter().map(ToString::to_string).collect();
+    if hidden.iter().any(|r| r.abi_revision.is_none()) {
+        parts.push("none".into());
+    }
+    Some(format!(
+        "{} row(s) at ABI revision(s) {} not shown; this SDK speaks {revision}",
+        hidden.len(),
+        parts.join(", ")
+    ))
+}
+
 /// The `offered` half of an [`Error::ArtifactUnpublished`] that the ABI
 /// revision decided: what the release has at `revision`, then what it has
 /// for the request at any other.
@@ -868,6 +918,62 @@ mod revision_tests {
             );
         }
         assert!(rel.all(PLATFORM).is_empty());
+    }
+
+    /// --all never skips a line silently: every line the release has only at
+    /// another revision, or only in rows that declare none, gets one message —
+    /// line, platform, what the release serves, the crate's revision — oldest
+    /// line first; a line with a row at the crate's revision gets none.
+    #[test]
+    fn every_line_served_only_at_another_revision_is_named() {
+        let own = crate::ABI_REVISION;
+        let rows = vec![
+            row("26.7.3.19-stable", 1, Some(own + 1)),
+            row("25.8.28.1-lts", 1, Some(own)),
+            row("24.8.14.39-lts", 1, None),
+        ];
+        assert_eq!(
+            skipped_lines(&rows, PLATFORM, own),
+            vec![
+                format!(
+                    "ClickHouse line 24.8 on {PLATFORM} is not installed: the release has that \
+                     line for {PLATFORM} only in rows that declare no ABI revision, and this SDK \
+                     speaks ABI revision {own}"
+                ),
+                format!(
+                    "ClickHouse line 26.7 on {PLATFORM} is not installed: the release has that \
+                     line for {PLATFORM} only at ABI revision {}, and this SDK speaks ABI \
+                     revision {own}",
+                    own + 1
+                ),
+            ]
+        );
+        assert!(skipped_lines(&rows[1..2], PLATFORM, own).is_empty());
+    }
+
+    /// list's one line: how many rows at which revision(s) it did not show;
+    /// nothing when it hid nothing.
+    #[test]
+    fn list_names_what_it_hides_and_nothing_else() {
+        let own = crate::ABI_REVISION;
+        let mut rows = vec![row("25.8.28.1-lts", 1, Some(own))];
+        assert_eq!(not_shown(&rows, PLATFORM, own), None);
+        rows.push(row("26.7.3.19-stable", 1, Some(own + 1)));
+        assert_eq!(
+            not_shown(&rows, PLATFORM, own),
+            Some(format!(
+                "1 row(s) at ABI revision(s) {} not shown; this SDK speaks {own}",
+                own + 1
+            ))
+        );
+        rows.push(row("24.8.14.39-lts", 1, None));
+        assert_eq!(
+            not_shown(&rows, PLATFORM, own),
+            Some(format!(
+                "2 row(s) at ABI revision(s) {}, none not shown; this SDK speaks {own}",
+                own + 1
+            ))
+        );
     }
 
     /// (c) A row with no `abi_revision` — absent, or not an integer — is never
