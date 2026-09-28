@@ -235,6 +235,14 @@ KEY_LOCATION_WHY="a sentence naming where a signing key's private half is kept. 
 # match. Say what the issue decided instead of citing it.
 PRIVATE_ISSUE_REF_PATTERN='(?<![A-Za-z0-9_])core#[0-9]+'
 PRIVATE_ISSUE_REF_WHY="an issue number in the private repository. A reader cannot open it; say what it decided, not where it was decided."
+# This script is excluded from every scan above, because it has to quote the
+# shapes it looks for. That exclusion once let it quote real private issue
+# numbers in its own comment and plants, unseen. So for THIS rule alone, the
+# script is scanned too, and the only issue references it may contain are
+# these placeholders: 0 is never an issue number, and 99999 is far past any
+# real one. A selftest that needs another number builds it at runtime, so
+# the literal never appears in this file.
+ISSUE_REF_PLACEHOLDERS='core#0,core#99999'
 
 tracked() {
   git ls-files -z \
@@ -399,6 +407,33 @@ if bad:
       rc=1
     fi
   done
+
+  # This script itself, for private issue references only (see
+  # ISSUE_REF_PLACEHOLDERS above).
+  local self_hits
+  self_hits="$( (cd "$root" && [ -f scripts/lint-public.sh ] && LINT_SELF_PATTERN="$PRIVATE_ISSUE_REF_PATTERN" LINT_SELF_ALLOW="$ISSUE_REF_PLACEHOLDERS" python3 -c '
+import os, re, sys
+
+pat = re.compile(os.environ["LINT_SELF_PATTERN"], re.IGNORECASE)
+allow = {a.lower() for a in os.environ["LINT_SELF_ALLOW"].split(",") if a}
+text = open("scripts/lint-public.sh", encoding="utf-8", errors="ignore").read()
+bad = []
+for i, line in enumerate(text.splitlines(), 1):
+    for m in pat.finditer(line):
+        if m.group(0).lower() not in allow:
+            bad.append((i, m.group(0)))
+for i, hit in bad:
+    print(f"scripts/lint-public.sh:{i}:{hit}")
+if bad:
+    sys.exit(1)
+' 2>/dev/null) || true)"
+  if [ -n "$self_hits" ]; then
+    n=$(printf '%s\n' "$self_hits" | wc -l | tr -d ' ')
+    printf 'lint-public: %s occurrence(s) of %s\n' "$n" "a private-repository issue reference in this script itself (only the ISSUE_REF_PLACEHOLDERS are allowed)" >&2
+    printf '  %s\n' "$PRIVATE_ISSUE_REF_WHY" >&2
+    printf '%s\n' "$self_hits" | sed 's/^/    /' >&2
+    rc=1
+  fi
 
   return $rc
 }
@@ -574,8 +609,16 @@ if [ "${1:-}" = "--selftest" ]; then
   printf 'PathBuf::from("/home/u/.cache/chtypes/artifacts/linux-arm64")\n' > "$tmp/legal-home-placeholder.md"
   printf 'CLAUDE.md and README.md explain the split; so does NOTICE\n' > "$tmp/legal-allcaps-filenames.md"
 
+  # --- the self-scan: a stand-in for this script under the temp repo, holding
+  #     one allowed placeholder and one number that is not. The second is built
+  #     at runtime so the literal never appears in this file. ---
+  mkdir -p "$tmp/scripts"
+  selfnum=$((40 + 2))
+  printf '# placeholder: core#0 is allowed\n# quoted: core#%s is not\n' "$selfnum" > "$tmp/scripts/lint-public.sh"
   git -C "$tmp" add -A
   out="$(scan "$tmp" 2>&1)" && { echo "SELFTEST FAILED: planted violations were not caught" >&2; exit 1; }
+  printf '%s\n' "$out" | grep -q "scripts/lint-public.sh:2:core#$selfnum" || { echo "SELFTEST FAILED: the self-scan did not fire on a non-placeholder issue reference" >&2; exit 1; }
+  printf '%s\n' "$out" | grep -q 'scripts/lint-public.sh:1:core#0' && { echo "SELFTEST FAILED: the self-scan flagged an allowed placeholder" >&2; exit 1; }
 
   for want in planted-1.md planted-2.md planted-case-1.md planted-case-2.md \
               planted-csrc.md planted-arbiter.md planted-acceptance.md \
