@@ -243,7 +243,7 @@ CHS_API const char * chs_clickhouse_version(void);
  */
 /* Revision 5 (the explicit INSERT column list): chs_row, chs_rows and
  * chs_block_parse each gained a trailing `columns_json`; in the same open
- * window (core#73) chs_rows gained a trailing `const chs_filter * filter`
+ * window chs_rows gained a trailing `const chs_filter * filter`
  * after it — one revision, because nothing built against 5 had shipped when
  * the second change landed. A revision-4 artifact has neither, so calling
  * through these declarations against one is exactly the undefined behavior
@@ -763,8 +763,8 @@ typedef struct chs_filter chs_filter;
  * channel is unchanged by it: an exported row carries the stored columns in
  * declared order, so it stays directly INSERT-able with no list.
  *
- * THE ATTACHED ROW FILTER (revision 5, second half — core#73; the C ABI
- * contract §Rows, "The attached row filter", is normative). `filter` is a
+ * THE ATTACHED ROW FILTER (revision 5, second half; the C ABI contract
+ * §Rows, "The attached row filter", is normative). `filter` is a
  * compiled handle from chs_filter_compile over THIS schema handle, or NULL.
  * NULL is today's behavior BYTE-FOR-BYTE: no key joins the document and no
  * code path changes. With a filter attached, ONE parse serves both the
