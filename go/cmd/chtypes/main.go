@@ -344,19 +344,21 @@ func listABIRevision() int {
 
 // notShown is list's one line naming the platform's rows at another ABI
 // revision, which it does not show (docs/guides/fetch.md §6); "" when none
-// were hidden. "none" stands for rows that declare no revision.
+// were hidden. Rows that carry no abi_revision are named for what they are —
+// built before revisions were recorded — never as a revision called "none".
 func notShown(hidden []chtypes.ReleaseArtifact, rev int) string {
 	if len(hidden) == 0 {
 		return ""
 	}
 	seen := map[int]bool{}
 	var revs []int
-	undeclared := false
+	declared, undeclared := 0, 0
 	for _, a := range hidden {
 		if a.ABIRevision == nil {
-			undeclared = true
+			undeclared++
 			continue
 		}
+		declared++
 		if !seen[*a.ABIRevision] {
 			seen[*a.ABIRevision] = true
 			revs = append(revs, *a.ABIRevision)
@@ -364,13 +366,17 @@ func notShown(hidden []chtypes.ReleaseArtifact, rev int) string {
 	}
 	sort.Ints(revs)
 	var parts []string
-	for _, r := range revs {
-		parts = append(parts, strconv.Itoa(r))
+	if declared > 0 {
+		list := make([]string, len(revs))
+		for i, r := range revs {
+			list[i] = strconv.Itoa(r)
+		}
+		parts = append(parts, fmt.Sprintf("%d row(s) at ABI revision(s) %s", declared, strings.Join(list, ", ")))
 	}
-	if undeclared {
-		parts = append(parts, "none")
+	if undeclared > 0 {
+		parts = append(parts, fmt.Sprintf("%d row(s) that record no ABI revision (built before revisions were recorded)", undeclared))
 	}
-	return fmt.Sprintf("%d row(s) at ABI revision(s) %s not shown; this SDK speaks %d", len(hidden), strings.Join(parts, ", "), rev)
+	return fmt.Sprintf("%s not shown; this SDK speaks %d", strings.Join(parts, " and "), rev)
 }
 
 func cmdWhere(args []string, stdout, stderr io.Writer) error {

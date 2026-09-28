@@ -653,6 +653,12 @@ def revision_of(a):
     r = a.get("abi_revision")
     return r if isinstance(r, int) and not isinstance(r, bool) else None
 
+# Rows that carry no abi_revision, named with the reason: the artifact producer
+# records the field from the revision that introduced it onward. Every
+# unpublished message and --all warning says this in these words rather than
+# that the release serves "none".
+NO_RECORDED = "rows that record no ABI revision (built before revisions were recorded)"
+
 def served(rows, noun):
     # What the release DOES have, for an unpublished message: the revision(s)
     # its rows for the request carry, or that it has none at any revision.
@@ -661,10 +667,10 @@ def served(rows, noun):
     if not rows:
         return "the release does not have %s at any ABI revision" % noun
     if not revs:
-        return "the release has %s only in rows that declare no ABI revision" % noun
+        return "the release has %s only in %s" % (noun, NO_RECORDED)
     said = ("ABI revision %d" % revs[0]) if len(revs) == 1 else ("ABI revisions " + ", ".join(map(str, revs)))
     if undeclared:
-        said += " and in rows that declare no ABI revision"
+        said += " and in " + NO_RECORDED
     return "the release has %s only at %s" % (noun, said)
 
 # FIRST the revision: only rows this SDK can load (docs/guides/fetch.md §2).
@@ -696,7 +702,7 @@ if want_all:
         sys.exit("unpublished: the release has nothing for %s-%s at %s: %s"
                  % (os_, arch, at, served(on_platform, "rows for %s-%s" % (os_, arch))))
     # A line the release has only at another ABI revision (or only in rows that
-    # declare none) is not installed — and never silently: one loud line each,
+    # record none) is not installed — and never silently: one loud line each,
     # then the rest go on. Printed by the caller once this selection succeeds.
     by_line = {}
     for a in on_platform:

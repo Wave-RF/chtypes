@@ -684,12 +684,21 @@ function fetchAbiRevision(): number {
  * What the release DOES have for `noun`, for an unpublished message: the ABI
  * revision(s) its rows carry, or that it has none at any revision.
  */
+/**
+ * Rows that carry no `abi_revision`, named with the reason: the artifact
+ * producer records the field from the revision that introduced it onward. Every
+ * unpublished message, `ensureAll` warning and `list` note says this in these
+ * words rather than that the release serves "none".
+ */
+const BUILT_BEFORE = '(built before revisions were recorded)';
+const NO_RECORDED_REVISION = `rows that record no ABI revision ${BUILT_BEFORE}`;
+
 function served(rows: readonly IndexArtifact[], noun: string): string {
   if (rows.length === 0) return `the release does not have ${noun} at any ABI revision`;
   const revs = declaredRevisions(rows);
-  if (revs.length === 0) return `the release has ${noun} only in rows that declare no ABI revision`;
+  if (revs.length === 0) return `the release has ${noun} only in ${NO_RECORDED_REVISION}`;
   let said = revs.length === 1 ? `ABI revision ${revs[0]}` : `ABI revisions ${revs.join(', ')}`;
-  if (rows.some((a) => a.abi_revision === undefined)) said += ' and in rows that declare no ABI revision';
+  if (rows.some((a) => a.abi_revision === undefined)) said += ` and in ${NO_RECORDED_REVISION}`;
   return `the release has ${noun} only at ${said}`;
 }
 
@@ -700,7 +709,7 @@ function declaredRevisions(rows: readonly IndexArtifact[]): number[] {
 
 /**
  * One message per line the release has for `platform` only at another ABI
- * revision, or only in rows that declare none — the lines `ensureAll` installs
+ * revision, or only in rows that record none — the lines `ensureAll` installs
  * nothing for — oldest line first. Exported for the test suite only; not
  * re-exported from `index.ts`.
  */
@@ -725,17 +734,21 @@ export function skippedLines(index: ReleaseIndex, platform: string): string[] {
 /**
  * `list`'s one line naming the platform's rows at another ABI revision, which it
  * does not show (docs/guides/fetch.md §6); `undefined` when none were hidden.
- * `none` stands for rows that declare no revision. Exported for the test suite
- * only; not re-exported from `index.ts`.
+ * Rows that carry no `abi_revision` are named for what they are — built before
+ * revisions were recorded — never as a revision called "none". Exported for the
+ * test suite only; not re-exported from `index.ts`.
  */
 export function notShown(index: ReleaseIndex, platform: string): string | undefined {
   const [os, arch] = platform.split('-');
   const rev = fetchAbiRevision();
   const hidden = index.artifacts.filter((a) => a.os === os && a.arch === arch && a.abi_revision !== rev);
   if (hidden.length === 0) return undefined;
-  const parts = declaredRevisions(hidden).map(String);
-  if (hidden.some((a) => a.abi_revision === undefined)) parts.push('none');
-  return `${hidden.length} row(s) at ABI revision(s) ${parts.join(', ')} not shown; this SDK speaks ${rev}`;
+  const undeclared = hidden.filter((a) => a.abi_revision === undefined).length;
+  const declared = hidden.length - undeclared;
+  const parts: string[] = [];
+  if (declared > 0) parts.push(`${declared} row(s) at ABI revision(s) ${declaredRevisions(hidden).join(', ')}`);
+  if (undeclared > 0) parts.push(`${undeclared} row(s) that record no ABI revision ${BUILT_BEFORE}`);
+  return `${parts.join(' and ')} not shown; this SDK speaks ${rev}`;
 }
 
 /**

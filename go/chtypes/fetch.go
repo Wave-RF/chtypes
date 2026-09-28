@@ -960,6 +960,12 @@ func (f *fetcher) atRevision(rows []ReleaseArtifact) []ReleaseArtifact {
 	return out
 }
 
+// noRecordedRevision names rows that carry no abi_revision, and why: the
+// artifact producer records the field from the revision that introduced it
+// onward. Every unpublished message, --all warning and list note says this
+// in these words rather than that the release serves "none".
+const noRecordedRevision = "rows that record no ABI revision (built before revisions were recorded)"
+
 // servedRevisions says, for an unpublished message, what the release DOES
 // have for noun: the ABI revision(s) its rows carry, or nothing at all.
 func servedRevisions(rows []ReleaseArtifact, noun string) string {
@@ -980,7 +986,7 @@ func servedRevisions(rows []ReleaseArtifact, noun string) string {
 		}
 	}
 	if len(revs) == 0 {
-		return "the release has " + noun + " only in rows that declare no ABI revision"
+		return "the release has " + noun + " only in " + noRecordedRevision
 	}
 	sort.Ints(revs)
 	said := "ABI revision " + strconv.Itoa(revs[0])
@@ -992,13 +998,13 @@ func servedRevisions(rows []ReleaseArtifact, noun string) string {
 		said = "ABI revisions " + strings.Join(parts, ", ")
 	}
 	if undeclared {
-		said += " and in rows that declare no ABI revision"
+		said += " and in " + noRecordedRevision
 	}
 	return "the release has " + noun + " only at " + said
 }
 
 // skippedLines names every line the release has for the platform only at
-// another ABI revision, or only in rows that declare none — the lines --all
+// another ABI revision, or only in rows that record none — the lines --all
 // installs nothing for — one message each, in numeric line order.
 func (f *fetcher) skippedLines(all []ReleaseArtifact) []string {
 	byLine := map[string][]ReleaseArtifact{}

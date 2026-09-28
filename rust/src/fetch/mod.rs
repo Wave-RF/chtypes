@@ -38,6 +38,9 @@ thread_local! {
     static ABI_REVISION_OVERRIDE: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
 }
 
+/// For this crate's tests only; not a supported API. An artifact at another
+/// revision still refuses to load.
+///
 /// The environment variable the test-only override is also read from, for a
 /// process the test suite spawns (the `chtypes` binary, a re-executed test) —
 /// an internal, undocumented test hook exactly like
@@ -45,9 +48,11 @@ thread_local! {
 /// (`docs/guides/fetch.md` documents no such variable).
 const ABI_REVISION_TEST_ENV: &str = "CHTYPES_FETCH_TEST_ABI_REVISION";
 
-/// TEST-ONLY, and not part of the public API: hidden from the docs, exempt
-/// from any stability promise, and meant for this crate's own fetch-fixture
-/// suite and nothing else.
+/// For this crate's tests only; not a supported API. An artifact at another
+/// revision still refuses to load.
+///
+/// Hidden from the docs, exempt from any stability promise, and meant for this
+/// crate's own fetch-fixture suite and nothing else.
 ///
 /// Sets, for the calling thread, the ABI revision fetch selects release rows
 /// at in place of [`crate::ABI_REVISION`] (`docs/guides/fetch.md` §2), and
@@ -81,6 +86,8 @@ pub(crate) fn fetch_abi_revision() -> i32 {
     if let Some(revision) = ABI_REVISION_OVERRIDE.with(std::cell::Cell::get) {
         return revision;
     }
+    // CHTYPES_FETCH_TEST_ABI_REVISION: for this crate's tests only; not a
+    // supported API. An artifact at another revision still refuses to load.
     std::env::var(ABI_REVISION_TEST_ENV)
         .ok()
         .and_then(|raw| raw.trim().parse().ok())

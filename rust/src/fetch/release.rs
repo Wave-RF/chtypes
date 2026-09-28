@@ -68,6 +68,13 @@ where
     Ok(value.as_i64().and_then(|n| i32::try_from(n).ok()))
 }
 
+/// Rows that carry no `abi_revision`, named with the reason: the artifact
+/// producer records the field from the revision that introduced it onward.
+/// Every unpublished message, `--all` warning and `list` note says this in
+/// these words rather than that the release serves "none".
+const NO_RECORDED_REVISION: &str =
+    "rows that record no ABI revision (built before revisions were recorded)";
+
 /// What the release DOES have for `noun`, for an unpublished message: the ABI
 /// revision(s) its rows carry, or that it has none at any revision.
 fn served(rows: &[&IndexRow], noun: &str) -> String {
@@ -78,7 +85,7 @@ fn served(rows: &[&IndexRow], noun: &str) -> String {
     revisions.sort_unstable();
     revisions.dedup();
     if revisions.is_empty() {
-        return format!("the release has {noun} only in rows that declare no ABI revision");
+        return format!("the release has {noun} only in {NO_RECORDED_REVISION}");
     }
     let mut said = if revisions.len() == 1 {
         format!("ABI revision {}", revisions[0])
@@ -87,13 +94,14 @@ fn served(rows: &[&IndexRow], noun: &str) -> String {
         format!("ABI revisions {}", list.join(", "))
     };
     if rows.iter().any(|r| r.abi_revision.is_none()) {
-        said.push_str(" and in rows that declare no ABI revision");
+        said.push_str(" and in ");
+        said.push_str(NO_RECORDED_REVISION);
     }
     format!("the release has {noun} only at {said}")
 }
 
 /// One message per line the release has for `platform` only at another ABI
-/// revision, or only in rows that declare none — the lines `--all` installs
+/// revision, or only in rows that record none — the lines `--all` installs
 /// nothing for — in numeric line order.
 pub(crate) fn skipped_lines(rows: &[IndexRow], platform: &str, revision: i32) -> Vec<String> {
     let mut by_line: BTreeMap<(u64, u64), (String, Vec<&IndexRow>)> = BTreeMap::new();
@@ -119,7 +127,8 @@ pub(crate) fn skipped_lines(rows: &[IndexRow], platform: &str, revision: i32) ->
 
 /// `list`'s one line naming the platform's rows at another ABI revision, which
 /// it does not show (`docs/guides/fetch.md` §6); `None` when none were hidden.
-/// `none` stands for rows that declare no revision.
+/// Rows that carry no `abi_revision` are named for what they are — built before
+/// revisions were recorded — never as a revision called "none".
 pub(crate) fn not_shown(rows: &[IndexRow], platform: &str, revision: i32) -> Option<String> {
     let hidden: Vec<&IndexRow> = rows
         .iter()
@@ -129,16 +138,26 @@ pub(crate) fn not_shown(rows: &[IndexRow], platform: &str, revision: i32) -> Opt
         return None;
     }
     let mut revisions: Vec<i32> = hidden.iter().filter_map(|r| r.abi_revision).collect();
+    let declared = revisions.len();
+    let undeclared = hidden.len() - declared;
     revisions.sort_unstable();
     revisions.dedup();
-    let mut parts: Vec<String> = revisions.iter().map(ToString::to_string).collect();
-    if hidden.iter().any(|r| r.abi_revision.is_none()) {
-        parts.push("none".into());
+    let mut parts: Vec<String> = Vec::new();
+    if declared > 0 {
+        let list: Vec<String> = revisions.iter().map(ToString::to_string).collect();
+        parts.push(format!(
+            "{declared} row(s) at ABI revision(s) {}",
+            list.join(", ")
+        ));
+    }
+    if undeclared > 0 {
+        parts.push(format!(
+            "{undeclared} row(s) that record no ABI revision (built before revisions were recorded)"
+        ));
     }
     Some(format!(
-        "{} row(s) at ABI revision(s) {} not shown; this SDK speaks {revision}",
-        hidden.len(),
-        parts.join(", ")
+        "{} not shown; this SDK speaks {revision}",
+        parts.join(" and ")
     ))
 }
 
@@ -528,7 +547,7 @@ impl Release {
 
     /// Every row for a platform at this crate's ABI revision, newest patch
     /// (then highest build) per minor line, in release order. Rows of any
-    /// other revision, and rows that declare none, are never offered
+    /// other revision, and rows that record none, are never offered
     /// (`docs/guides/fetch.md` §2).
     pub(crate) fn all(&self, platform: &str) -> Vec<&IndexRow> {
         let revision = super::fetch_abi_revision();
@@ -921,7 +940,7 @@ mod revision_tests {
     }
 
     /// --all never skips a line silently: every line the release has only at
-    /// another revision, or only in rows that declare none, gets one message —
+    /// another revision, or only in rows that record none, gets one message —
     /// line, platform, what the release serves, the crate's revision — oldest
     /// line first; a line with a row at the crate's revision gets none.
     #[test]
@@ -937,8 +956,8 @@ mod revision_tests {
             vec![
                 format!(
                     "ClickHouse line 24.8 on {PLATFORM} is not installed: the release has that \
-                     line for {PLATFORM} only in rows that declare no ABI revision, and this SDK \
-                     speaks ABI revision {own}"
+                     line for {PLATFORM} only in rows that record no ABI revision (built before \
+                     revisions were recorded), and this SDK speaks ABI revision {own}"
                 ),
                 format!(
                     "ClickHouse line 26.7 on {PLATFORM} is not installed: the release has that \
@@ -970,7 +989,8 @@ mod revision_tests {
         assert_eq!(
             not_shown(&rows, PLATFORM, own),
             Some(format!(
-                "2 row(s) at ABI revision(s) {}, none not shown; this SDK speaks {own}",
+                "1 row(s) at ABI revision(s) {} and 1 row(s) that record no ABI revision \
+                 (built before revisions were recorded) not shown; this SDK speaks {own}",
                 own + 1
             ))
         );
@@ -983,7 +1003,24 @@ mod revision_tests {
         let rel = release(vec![row("25.8.28.1-lts", 0, None)]);
         let err = rel.select(&request("25.8"), PLATFORM).unwrap_err();
         assert_eq!(err.artifact_code(), Some("CHTYPES_ARTIFACT_UNPUBLISHED"));
-        assert!(err.to_string().contains("declare no ABI revision"), "{err}");
+        // The reason is named — rows built before revisions were recorded —
+        // never that the release serves "none".
+        let message = err.to_string();
+        assert!(
+            message.contains(&format!(
+                "the release has that line for {PLATFORM} only in rows that record no ABI \
+                 revision (built before revisions were recorded)"
+            )),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!(
+                "ABI revision {} (this SDK's)",
+                crate::ABI_REVISION
+            )),
+            "{message}"
+        );
+        assert!(!message.contains("none"), "{message}");
         assert!(rel.all(PLATFORM).is_empty());
 
         // What index.json can carry: the revision as a JSON integer is one; as

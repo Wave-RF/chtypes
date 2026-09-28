@@ -1455,7 +1455,10 @@ func TestSelectionNeverTakesARowWithoutAnABIRevision(t *testing.T) {
 	_, allErr := f.selectAll()
 	for _, err := range []error{lineErr, allErr} {
 		ae := wantCode(t, err, CodeArtifactUnpublished)
-		if !strings.Contains(ae.Msg, "declare no ABI revision") || !strings.Contains(ae.Msg, "ABI revision "+strconv.Itoa(ABIRevision)) {
+		// The reason is named — rows built before revisions were recorded —
+		// never that the release serves "none".
+		if !strings.Contains(ae.Msg, "for linux-amd64 only in rows that record no ABI revision (built before revisions were recorded)") ||
+			!strings.Contains(ae.Msg, "ABI revision "+strconv.Itoa(ABIRevision)+" (this SDK's)") || strings.Contains(ae.Msg, "none") {
 			t.Fatalf("message: %s", ae.Msg)
 		}
 	}
@@ -1481,7 +1484,7 @@ func TestSelectionNeverTakesARowWithoutAnABIRevision(t *testing.T) {
 }
 
 // --all never skips a line silently: a line the release has only at another
-// revision, or only in rows that declare none, is named in one loud line —
+// revision, or only in rows that record none, is named in one loud line —
 // line, platform, the SDK's revision and what the release does serve — and
 // every line at the SDK's revision still installs, with no error.
 func TestFetchAllNamesEveryLineServedOnlyAtAnotherRevision(t *testing.T) {
@@ -1505,7 +1508,7 @@ func TestFetchAllNamesEveryLineServedOnlyAtAnotherRevision(t *testing.T) {
 		t.Fatalf("installed %+v, want only 25.8", got)
 	}
 	for _, want := range []string{
-		fmt.Sprintf("chtypes: WARNING: ClickHouse line 24.8 on %s is not installed: the release has that line for %s only in rows that declare no ABI revision, and this SDK speaks ABI revision %d\n",
+		fmt.Sprintf("chtypes: WARNING: ClickHouse line 24.8 on %s is not installed: the release has that line for %s only in rows that record no ABI revision (built before revisions were recorded), and this SDK speaks ABI revision %d\n",
 			HostPlatform(), HostPlatform(), ABIRevision),
 		fmt.Sprintf("chtypes: WARNING: ClickHouse line 26.7 on %s is not installed: the release has that line for %s only at ABI revision %d, and this SDK speaks ABI revision %d\n",
 			HostPlatform(), HostPlatform(), ABIRevision+1, ABIRevision),

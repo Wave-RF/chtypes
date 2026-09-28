@@ -219,3 +219,24 @@ func TestFetchVerifyListAgainstFixtures(t *testing.T) {
 		t.Fatalf("embedded key only: rc=%d %q", rc, errs)
 	}
 }
+
+// list's note names rows with no recorded revision for what they are — built
+// before revisions were recorded — never as a revision called "none".
+func TestListNoteNamesRowsThatRecordNoRevision(t *testing.T) {
+	rev := chtypes.ABIRevision
+	other := rev + 1
+	rows := []chtypes.ReleaseArtifact{{ABIRevision: &other}, {}, {}}
+	for _, tc := range []struct {
+		hidden []chtypes.ReleaseArtifact
+		want   string
+	}{
+		{nil, ""},
+		{rows[:1], fmt.Sprintf("1 row(s) at ABI revision(s) %d not shown; this SDK speaks %d", other, rev)},
+		{rows[1:], fmt.Sprintf("2 row(s) that record no ABI revision (built before revisions were recorded) not shown; this SDK speaks %d", rev)},
+		{rows, fmt.Sprintf("1 row(s) at ABI revision(s) %d and 2 row(s) that record no ABI revision (built before revisions were recorded) not shown; this SDK speaks %d", other, rev)},
+	} {
+		if got := notShown(tc.hidden, rev); got != tc.want {
+			t.Fatalf("notShown(%d rows) = %q, want %q", len(tc.hidden), got, tc.want)
+		}
+	}
+}

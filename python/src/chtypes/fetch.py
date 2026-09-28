@@ -171,6 +171,14 @@ def _revision_of(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+#: Rows that carry no ``abi_revision``, named with the reason: the artifact
+#: producer records the field from the revision that introduced it onward. Every
+#: unpublished message, ``--all`` warning and ``list`` note says this in these
+#: words rather than that the release serves "none".
+_BUILT_BEFORE: Final = "(built before revisions were recorded)"
+_NO_RECORDED_REVISION: Final = f"rows that record no ABI revision {_BUILT_BEFORE}"
+
+
 def _served(entries: Sequence[ReleaseEntry], noun: str) -> str:
     """What the release DOES have for ``noun``, for an unpublished message: the
     ABI revision(s) its rows carry, or that it has none at any revision."""
@@ -178,20 +186,20 @@ def _served(entries: Sequence[ReleaseEntry], noun: str) -> str:
         return f"the release does not have {noun} at any ABI revision"
     revs = sorted({e.abi_revision for e in entries if e.abi_revision is not None})
     if not revs:
-        return f"the release has {noun} only in rows that declare no ABI revision"
+        return f"the release has {noun} only in {_NO_RECORDED_REVISION}"
     said = (
         f"ABI revision {revs[0]}"
         if len(revs) == 1
         else "ABI revisions " + ", ".join(str(r) for r in revs)
     )
     if any(e.abi_revision is None for e in entries):
-        said += " and in rows that declare no ABI revision"
+        said += f" and in {_NO_RECORDED_REVISION}"
     return f"the release has {noun} only at {said}"
 
 
 def _skipped_lines(on_platform: Sequence[ReleaseEntry], platform: str, rev: int) -> list[str]:
     """One message per line the release has for ``platform`` only at another ABI
-    revision, or only in rows that declare none — the lines ``--all`` installs
+    revision, or only in rows that record none — the lines ``--all`` installs
     nothing for — in numeric line order."""
     by_line: dict[str, list[ReleaseEntry]] = {}
     for e in on_platform:
@@ -207,17 +215,20 @@ def _skipped_lines(on_platform: Sequence[ReleaseEntry], platform: str, rev: int)
 def _not_shown(on_platform: Sequence[ReleaseEntry], rev: int) -> str | None:
     """``list``'s one line naming the platform's rows at another ABI revision,
     which it does not show (docs/guides/fetch.md §6); None when none were
-    hidden. ``none`` stands for rows that declare no revision."""
+    hidden. Rows that carry no ``abi_revision`` are named for what they are —
+    built before revisions were recorded — never as a revision called "none"."""
     hidden = [e for e in on_platform if e.abi_revision != rev]
     if not hidden:
         return None
-    parts = [str(r) for r in sorted({e.abi_revision for e in hidden if e.abi_revision is not None})]
-    if any(e.abi_revision is None for e in hidden):
-        parts.append("none")
-    return (
-        f"{len(hidden)} row(s) at ABI revision(s) {', '.join(parts)} not shown; "
-        f"this SDK speaks {rev}"
-    )
+    declared = [e.abi_revision for e in hidden if e.abi_revision is not None]
+    undeclared = len(hidden) - len(declared)
+    parts = []
+    if declared:
+        revs = ", ".join(str(r) for r in sorted(set(declared)))
+        parts.append(f"{len(declared)} row(s) at ABI revision(s) {revs}")
+    if undeclared:
+        parts.append(f"{undeclared} row(s) that record no ABI revision " + _BUILT_BEFORE)
+    return f"{' and '.join(parts)} not shown; this SDK speaks {rev}"
 
 
 # ------------------------------------------------------------------ §1 paths
@@ -493,7 +504,7 @@ class Release:
     def offered(self, platform: str) -> list[ReleaseEntry]:
         """Every line published for a platform at this binding's ABI revision,
         newest patch per line (then highest build), release order. Rows of any
-        other revision, and rows that declare none, are not offered: fetch never
+        other revision, and rows that record none, are not offered: fetch never
         installs them (docs/guides/fetch.md §2)."""
         rev = _fetch_abi_revision()
         best: dict[str, ReleaseEntry] = {}

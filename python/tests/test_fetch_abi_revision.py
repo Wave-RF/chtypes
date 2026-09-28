@@ -93,7 +93,13 @@ def test_a_row_without_an_abi_revision_is_never_selected() -> None:
     release = _release(_row("25.8.28.1-lts", 0, None))
     with pytest.raises(ArtifactUnpublishedError) as err:
         release.select("25.8", PLATFORM)
-    assert "declare no ABI revision" in str(err.value)
+    # The reason is named — rows built before revisions were recorded — never
+    # that the release serves "none".
+    assert (
+        f"the release has that line for {PLATFORM} only in rows that record no ABI revision "
+        f"(built before revisions were recorded)"
+    ) in str(err.value)
+    assert "none" not in str(err.value)
     assert f"ABI revision {OWN}" in str(err.value)
     assert release.offered(PLATFORM) == []
 
@@ -131,7 +137,7 @@ def test_all_names_every_line_served_only_at_another_revision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """--all never skips a line silently: a line the release has only at another
-    revision, or only in rows that declare none, is named in one loud line —
+    revision, or only in rows that record none, is named in one loud line —
     line, platform, the SDK's revision and what the release serves — and every
     line at the SDK's revision still installs, with no error."""
     release = _release(
@@ -149,8 +155,8 @@ def test_all_names_every_line_served_only_at_another_revision(
     err = capsys.readouterr().err
     assert (
         f"chtypes: WARNING: ClickHouse line 24.8 on {PLATFORM} is not installed: the release "
-        f"has that line for {PLATFORM} only in rows that declare no ABI revision, and this SDK "
-        f"speaks ABI revision {OWN}\n"
+        f"has that line for {PLATFORM} only in rows that record no ABI revision (built before "
+        f"revisions were recorded), and this SDK speaks ABI revision {OWN}\n"
     ) in err
     assert (
         f"chtypes: WARNING: ClickHouse line 26.7 on {PLATFORM} is not installed: the release "
@@ -170,7 +176,8 @@ def test_list_names_what_it_hides_and_nothing_else() -> None:
     )
     rows.append(_row("24.8.14.39-lts", 1, None))
     assert fetch_module._not_shown(rows, OWN) == (
-        f"2 row(s) at ABI revision(s) {OTHER}, none not shown; this SDK speaks {OWN}"
+        f"1 row(s) at ABI revision(s) {OTHER} and 1 row(s) that record no ABI revision "
+        f"(built before revisions were recorded) not shown; this SDK speaks {OWN}"
     )
 
 

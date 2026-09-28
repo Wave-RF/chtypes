@@ -106,7 +106,19 @@ describe('fetch selects only the binding’s own ABI revision (docs/guides/fetch
   it('(c) a row without an abi_revision is never selected, even when it is the only one', () => {
     const undeclared = index(row('25.8.28.1-lts', 0, null));
     expect(() => selectArtifact(undeclared, PLATFORM, parseVersionSpelling('25.8'))).toThrow(ArtifactUnpublishedError);
-    expect(() => selectArtifact(undeclared, PLATFORM, parseVersionSpelling('25.8'))).toThrow(/declare no ABI revision/);
+    // The reason is named — rows built before revisions were recorded — never
+    // that the release serves "none".
+    let err: unknown;
+    try {
+      selectArtifact(undeclared, PLATFORM, parseVersionSpelling('25.8'));
+    } catch (e) {
+      err = e;
+    }
+    expect((err as Error).message).toContain(
+      `the release has that line for ${PLATFORM} only in rows that record no ABI revision (built before revisions were recorded)`,
+    );
+    expect((err as Error).message).toContain(`ABI revision ${OWN} (this SDK's)`);
+    expect((err as Error).message).not.toContain('none');
     expect(() => selectAll(undeclared, PLATFORM)).toThrow(ArtifactUnpublishedError);
   });
 
@@ -114,7 +126,7 @@ describe('fetch selects only the binding’s own ABI revision (docs/guides/fetch
     const release = index(row('25.8.28.1-lts', 1, OWN), row('26.7.3.19-stable', 1, OTHER), row('24.8.14.39-lts', 1, null));
     expect(selectAll(release, PLATFORM).map((a) => a.clickhouse_minor)).toEqual(['25.8']);
     expect(skippedLines(release, PLATFORM)).toEqual([
-      `ClickHouse line 24.8 on ${PLATFORM} is not installed: the release has that line for ${PLATFORM} only in rows that declare no ABI revision, and this SDK speaks ABI revision ${OWN}`,
+      `ClickHouse line 24.8 on ${PLATFORM} is not installed: the release has that line for ${PLATFORM} only in rows that record no ABI revision (built before revisions were recorded), and this SDK speaks ABI revision ${OWN}`,
       `ClickHouse line 26.7 on ${PLATFORM} is not installed: the release has that line for ${PLATFORM} only at ABI revision ${OTHER}, and this SDK speaks ABI revision ${OWN}`,
     ]);
     expect(skippedLines(index(row('25.8.28.1-lts', 1, OWN)), PLATFORM)).toEqual([]);
@@ -127,7 +139,9 @@ describe('fetch selects only the binding’s own ABI revision (docs/guides/fetch
     );
     expect(
       notShown(index(row('25.8.28.1-lts', 1, OWN), row('26.7.3.19-stable', 1, OTHER), row('24.8.14.39-lts', 1, null)), PLATFORM),
-    ).toBe(`2 row(s) at ABI revision(s) ${OTHER}, none not shown; this SDK speaks ${OWN}`);
+    ).toBe(
+      `1 row(s) at ABI revision(s) ${OTHER} and 1 row(s) that record no ABI revision (built before revisions were recorded) not shown; this SDK speaks ${OWN}`,
+    );
   });
 
   it('the per-user cache is abi<R>/, R the binding’s own constant — and the fetch override does not move it', () => {
