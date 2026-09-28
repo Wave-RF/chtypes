@@ -225,6 +225,17 @@ DIST_SCRIPT_WHY="a shell script in the private repository's dist/ directory. A r
 KEY_LOCATION_PATTERN='\b(?:private\s+half|private\s+key|signing\s+key|release\s+key)\b[^.;]{0,80}?\b(?:lives|lived|stored|kept|held|sits|resides)(?:\s+only)?\s+in\s+(?!(?:the|a|an|this|that|its|their|our|your|one|memory)\b)(?-i:[A-Z])'
 KEY_LOCATION_WHY="a sentence naming where a signing key's private half is kept. Where the key lives is operational detail a public reader has no use for; say it is held offline by the release pipeline, and name no product."
 
+# WIDENED AGAIN 2026-09-28. The private repository's issues are cited as
+# `core#NNN` (its own shorthand), and two generated fetch-fixture files
+# reached a published release carrying one, "core#426", past every rule
+# above: none of them matches an issue reference, only names and paths. A
+# public reader cannot open it. The shape is the shorthand itself, `core#`
+# followed by digits, starting a word, so this repository's own `chtypes#55`
+# and `Wave-RF/chtypes#123` spellings and words merely ending in "core" never
+# match. Say what the issue decided instead of citing it.
+PRIVATE_ISSUE_REF_PATTERN='(?<![A-Za-z0-9_])core#[0-9]+'
+PRIVATE_ISSUE_REF_WHY="an issue number in the private repository. A reader cannot open it; say what it decided, not where it was decided."
+
 tracked() {
   git ls-files -z \
     | tr '\0' '\n' \
@@ -350,10 +361,11 @@ if bad:
   # key-location sentence it was written for wraps; the line reported is the
   # one the match starts on.
   local wide_hits label pattern why
-  for label in dist keyloc; do
+  for label in dist keyloc issueref; do
     case "$label" in
-      dist)   pattern="$DIST_SCRIPT_PATTERN";  why="$DIST_SCRIPT_WHY" ;;
-      keyloc) pattern="$KEY_LOCATION_PATTERN"; why="$KEY_LOCATION_WHY" ;;
+      dist)     pattern="$DIST_SCRIPT_PATTERN";       why="$DIST_SCRIPT_WHY" ;;
+      keyloc)   pattern="$KEY_LOCATION_PATTERN";      why="$KEY_LOCATION_WHY" ;;
+      issueref) pattern="$PRIVATE_ISSUE_REF_PATTERN"; why="$PRIVATE_ISSUE_REF_WHY" ;;
     esac
     wide_hits="$( (cd "$root" && tracked | tr '\n' '\0' | LINT_WIDE_PATTERN="$pattern" python3 -c '
 import os, re, sys
@@ -380,6 +392,7 @@ if bad:
       case "$label" in
         dist)   printf 'lint-public: %s occurrence(s) of %s\n' "$n" "a shell script under the private repository's dist/" >&2 ;;
         keyloc) printf 'lint-public: %s occurrence(s) of %s\n' "$n" "a named place a signing key is kept" >&2 ;;
+        issueref) printf 'lint-public: %s occurrence(s) of %s\n' "$n" "a private-repository issue reference" >&2 ;;
       esac
       printf '  %s\n' "$why" >&2
       printf '%s\n' "$wide_hits" | sed 's/^/    /' >&2
@@ -402,6 +415,7 @@ if [ "${1:-}" = "--print-rules" ]; then
   printf 'REGEX\t%s\n' "$CI_INFRA_PATH_PATTERN"
   printf 'REGEX\t%s\n' "$DIST_SCRIPT_PATTERN"
   printf 'REGEX\t%s\n' "$KEY_LOCATION_PATTERN"
+  printf 'REGEX\t%s\n' "$PRIVATE_ISSUE_REF_PATTERN"
   printf 'LOCALPATH\t%s\t%s\n' "$LOCAL_PATH_PATTERN" "$LOCAL_PATH_PLACEHOLDERS"
   exit 0
 fi
@@ -539,6 +553,15 @@ if [ "${1:-}" = "--selftest" ]; then
   printf 'the signing key is kept in the release pipeline, never on a laptop\n' > "$tmp/legal-keyloc-inthe.md"
   printf 'the release key is kept in hardware, offline, and is never exported\n' > "$tmp/legal-keyloc-lowercase.md"
 
+  # --- 2026-09-28: a private-repository issue reference, the `core#NNN`
+  #     shorthand, as it reached generated fixture prose. Legal controls:
+  #     this repository's own issue spellings, and a word that merely ends in
+  #     "core" before a '#'. ---
+  printf 'the rule is the revision filter (the ABI-revision filter, core#426 section B)\n' > "$tmp/planted-issueref.md"
+  printf 'decided in core#73, same window\n' > "$tmp/planted-issueref-2.md"
+  printf 'see chtypes#55 and Wave-RF/chtypes#123 for the history\n' > "$tmp/legal-issueref-own.md"
+  printf 'the encore#1 build and a hardcore#2 fan\n' > "$tmp/legal-issueref-word.md"
+
   # --- legal: describing the split in words, an in-repo path, and the
   #     generic placeholder path spellings this repository already ships ---
   printf 'the other half is the core repository, under its own license\n' > "$tmp/legal.md"
@@ -564,7 +587,8 @@ if [ "${1:-}" = "--selftest" ]; then
               planted-ci-path.md planted-infra-path.md \
               tests/fixtures/fetch/README.md \
               planted-dist-publish.md planted-dist-fetch.md \
-              planted-keyloc-wrapped.md planted-keyloc-release.md; do
+              planted-keyloc-wrapped.md planted-keyloc-release.md \
+              planted-issueref.md planted-issueref-2.md; do
     printf '%s\n' "$out" | grep -q "$want" || { echo "SELFTEST FAILED: rule did not fire on $want" >&2; exit 1; }
   done
 
@@ -578,7 +602,8 @@ if [ "${1:-}" = "--selftest" ]; then
                legal-distintegration-word.md legal-distlinuxverify-word.md \
                legal-docsmeasurements-word.md legal-housing-word.md legal-golangci-word.md \
                legal-own-dist.md legal-keyloc-offline.md legal-keyloc-notin.md \
-               legal-keyloc-inthe.md legal-keyloc-lowercase.md; do
+               legal-keyloc-inthe.md legal-keyloc-lowercase.md \
+               legal-issueref-own.md legal-issueref-word.md; do
     printf '%s\n' "$out" | grep -q "$clean" && { echo "SELFTEST FAILED: a legal prose mention was flagged ($clean)" >&2; exit 1; }
   done
 
