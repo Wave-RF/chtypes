@@ -510,12 +510,12 @@ export function resolveRegistryDir(explicit?: string): string | null {
 
 /**
  * The per-user artifact cache for this host —
- * `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>`, `<arch>` spelled
- * the artifact way (`amd64`, `arm64`). Where `chtypes fetch` and
- * `scripts/fetch.sh` install, where a core-repository build lands, and what
+ * `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>`, R this
+ * binding's `ABI_REVISION` and `<arch>` spelled the artifact way (`amd64`,
+ * `arm64`). Where `chtypes fetch` and `scripts/fetch.sh` install, and what
  * every SDK's tests and playgrounds fall back to when `CHTYPES_REGISTRY` is
- * unset — one directory the four SDKs agree on. A path, not a promise:
- * `Registry` still throws if nothing is there.
+ * unset — one directory the four SDKs at the same revision agree on. A path,
+ * not a promise: `Registry` still throws if nothing is there.
  */
 export function defaultRegistryDir(): string {
   return cacheRegistryDir(hostPlatform());

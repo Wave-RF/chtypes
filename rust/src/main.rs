@@ -33,9 +33,12 @@ chtypes — fetch, verify and list ClickHouse artifacts for the chtypes SDKs
   chtypes where                        the registry directory fetch would write to
 
 A <line> is a ClickHouse minor line (25.8) or an exact patch (25.8.28.1-lts, a
-hard requirement). --all installs every line the release publishes for the
-platform. Progress prints on stderr; `fetch` prints each installed directory
-alone on stdout.
+hard requirement). Only artifacts built at this SDK's ABI revision are ever
+installed. --all installs every line the release publishes for the platform at
+that revision. Without --dest (or CHTYPES_REGISTRY), fetch installs into the
+per-user cache, ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>,
+R that revision. Progress prints on stderr; `fetch` prints each installed
+directory alone on stdout.
 
 Environment: CHTYPES_REGISTRY (where to install and look), CHTYPES_ARTIFACTS_URL
 (the artifacts host), CHTYPES_TRUSTED_KEYS (hex keys replacing the release key),

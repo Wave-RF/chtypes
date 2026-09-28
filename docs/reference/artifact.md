@@ -21,10 +21,10 @@ One directory per **ClickHouse minor line**, each self-contained:
   26.7/   …
 ```
 
-Platform-keyed, one tree per target:
+ABI-revision- and platform-keyed, one tree per revision and target — `<R>` is the ABI revision the SDK speaks, so SDKs at different revisions never share a tree (`docs/guides/fetch.md` §1):
 
 ```text
-~/.cache/chtypes/artifacts/<os>-<arch>/<minor>/…
+~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/<minor>/…
 ```
 
 `<os>` is the lowercased OS name (`linux`, `darwin`) and `<arch>` is normalized (`aarch64 → arm64`, `x86_64 → amd64`). Current keys: **`linux-arm64`** (the shipping platform) and **`darwin-arm64`** (for development; Linux is the reference). `linux-amd64` is a build target, not a built artifact, on the current host.

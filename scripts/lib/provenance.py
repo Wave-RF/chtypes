@@ -5,7 +5,7 @@ suite runs against it.
 WHY THIS EXISTS. `scripts/check-standalone.sh` and `scripts/check-suite.sh`
 printed the registry PATH they used (`CHTYPES_REGISTRY=$REG`) and never what
 was IN it. A path is not a fingerprint: the per-user cache
-`~/.cache/chtypes/artifacts/<os>-<arch>/` is the default registry for every
+`~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/` is the default registry for every
 binding, and on a machine that also builds artifacts it is not a copy of what
 is published — it can hold newer builds, older ABI revisions, or lines from
 several different producer commits at once (chtypes#190). A green local run

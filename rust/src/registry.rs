@@ -845,24 +845,30 @@ pub fn host_platform() -> String {
 }
 
 /// The per-user artifact cache for one platform —
-/// `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<platform>` (`docs/guides/fetch.md`
-/// §1 item 3). Where fetch installs, where a core-repository build lands.
+/// `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<platform>`, R this
+/// crate's [`crate::ABI_REVISION`] (`docs/guides/fetch.md` §1 item 3). Where fetch
+/// installs; keyed by revision so two SDK versions at different revisions never
+/// share it.
 pub fn cache_dir_for(platform: &str) -> PathBuf {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
         .unwrap_or_else(|| PathBuf::from(".cache"));
-    base.join("chtypes").join("artifacts").join(platform)
+    base.join("chtypes")
+        .join("artifacts")
+        .join(format!("abi{}", crate::error::ABI_REVISION))
+        .join(platform)
 }
 
 /// The per-user artifact cache for this host —
-/// `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>`, `<arch>`
-/// spelled the artifact way (`amd64`, `arm64`). Where `scripts/fetch.sh` and
-/// [`crate::ensure`] install, where a core-repository build lands, and what
-/// every SDK's tests and playgrounds fall back to when `$CHTYPES_REGISTRY` is
-/// unset — one directory the four SDKs agree on. A path, not a promise:
-/// [`Registry::new`] still errors if nothing is there.
+/// `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>`, R this
+/// crate's [`crate::ABI_REVISION`] and `<arch>` spelled the artifact way
+/// (`amd64`, `arm64`). Where `scripts/fetch.sh` and [`crate::ensure`] install,
+/// and what every SDK's tests and playgrounds fall back to when
+/// `$CHTYPES_REGISTRY` is unset — one directory the four SDKs at the same
+/// revision agree on. A path, not a promise: [`Registry::new`] still errors if
+/// nothing is there.
 pub fn default_registry_dir() -> PathBuf {
     cache_dir_for(&host_platform())
 }
@@ -958,6 +964,40 @@ pub fn installed_lines(dirs: &[PathBuf]) -> Vec<(String, PathBuf)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The per-user cache is keyed by the crate's own ABI revision — read off
+    /// [`crate::ABI_REVISION`], never typed — and the fetch test override does
+    /// not move it. Suffix checks, so no environment is touched.
+    #[test]
+    fn the_per_user_cache_is_keyed_by_the_abi_revision() {
+        let abi = format!("abi{}", crate::ABI_REVISION);
+        let tail = |platform: &str| {
+            Path::new("chtypes")
+                .join("artifacts")
+                .join(&abi)
+                .join(platform)
+        };
+        let foreign = cache_dir_for("linux-amd64");
+        assert!(
+            foreign.ends_with(tail("linux-amd64")),
+            "{}",
+            foreign.display()
+        );
+        let host = default_registry_dir();
+        assert!(
+            host.ends_with(tail(host_platform().as_str())),
+            "{}",
+            host.display()
+        );
+        #[cfg(feature = "fetch")]
+        {
+            let previous =
+                crate::fetch::__set_fetch_abi_revision_for_tests(Some(crate::ABI_REVISION + 1));
+            let moved = default_registry_dir();
+            crate::fetch::__set_fetch_abi_revision_for_tests(previous);
+            assert_eq!(moved, host, "the fetch override moved the registry");
+        }
+    }
 
     #[test]
     fn a_manifest_parses_and_tolerates_new_fields() {

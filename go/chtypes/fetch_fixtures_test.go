@@ -21,8 +21,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
 
 type fixtureExpectations struct {
@@ -90,7 +93,55 @@ func fixtureDir(t *testing.T) (string, *fixtureExpectations) {
 	if len(exp.Verdicts) == 0 || len(exp.Platforms) == 0 || len(exp.Lines) == 0 || len(exp.TrustedKeys) == 0 {
 		t.Fatalf("expected.json is missing verdicts/platforms/lines/keys: %+v", exp)
 	}
+	useFixtureRevision(t, abs)
 	return abs, &exp
+}
+
+// useFixtureRevision points fetch's row selection at the ABI revision the
+// fixture releases under dir carry, for the rest of the test. Fetch installs
+// only rows at the binding's own revision (docs/guides/fetch.md §2), and the
+// fixtures are generated at whatever revision the artifact producer was at —
+// so the suite reads that revision off the fixtures' own index.json rows
+// (testhook.FixtureABIRevision, which fails on any disagreement) instead of
+// assuming it equals ABIRevision, and never types it.
+func useFixtureRevision(t *testing.T, dir string) int {
+	t.Helper()
+	rev, err := testhook.FixtureABIRevision(dir)
+	if err != nil {
+		t.Fatalf("fetch fixtures: %v", err)
+	}
+	prev := testhook.FetchABIRevision
+	testhook.FetchABIRevision = rev
+	t.Cleanup(func() { testhook.FetchABIRevision = prev })
+	return rev
+}
+
+// TestFetchFixturesAreFetchedAtTheirOwnRevision proves the override above is
+// wired and derived: the fetcher selects at the fixtures' revision, and one
+// revision past it the same release refuses UNPUBLISHED, naming both — the
+// fixtures have nothing at any other revision.
+func TestFetchFixturesAreFetchedAtTheirOwnRevision(t *testing.T) {
+	dir, exp := fixtureDir(t)
+	rev, err := testhook.FixtureABIRevision(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fetchABIRevision(); got != rev {
+		t.Fatalf("fetch selects at ABI revision %d, the fixtures carry %d", got, rev)
+	}
+	isolateEnv(t)
+	t.Setenv(envTrustedKeys, strings.Join(exp.TrustedKeys, ","))
+	src := "file://" + filepath.Join(dir, "signed")
+	testhook.FetchABIRevision = rev + 1
+	dest := filepath.Join(t.TempDir(), "reg")
+	_, err = Ensure(context.Background(), "25.8", FetchOptions{URL: src, Dest: dest, Platform: exp.Platforms[0]})
+	ae := wantCode(t, err, CodeArtifactUnpublished)
+	for _, want := range []string{"ABI revision " + strconv.Itoa(rev+1), "only at ABI revision " + strconv.Itoa(rev)} {
+		if !strings.Contains(ae.Msg, want) {
+			t.Fatalf("message does not name %q: %s", want, ae.Msg)
+		}
+	}
+	noArtifactDirs(t, dest)
 }
 
 func TestFetchFixturesTestKeyMatchesExpectedKeyID(t *testing.T) {

@@ -170,6 +170,7 @@ mod tests {
             library_sha256: "ff".into(),
             build: 0,
             core_commit: String::new(),
+            abi_revision: Some(crate::ABI_REVISION),
         }
     }
 

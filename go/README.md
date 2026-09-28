@@ -11,7 +11,7 @@ go get github.com/wave-rf/chtypes/go
 go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8
 ```
 
-The fetch lands in `~/.cache/chtypes/artifacts/<os>-<arch>/25.8/` — the per-user cache every chtypes binding reads by default — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
+The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/25.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
 
 The default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing, includes no header and needs no build tree. That is what `go get` gives you.
 

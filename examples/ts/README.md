@@ -10,7 +10,7 @@ pnpm install && pnpm demo    # or, with prerequisite checks: ../chplay.sh ts
 
 ## Prerequisites
 
-- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/<os>-<arch>/`) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
+- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/`, `<R>` the SDK's ABI revision) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
 - **A built binding.** This package depends on `ts` via `file:`, and that package's entry point is `dist/index.js`. If it is missing or stale:
 
   ```bash
@@ -21,10 +21,10 @@ pnpm install && pnpm demo    # or, with prerequisite checks: ../chplay.sh ts
 
 ## Knobs
 
-| variable           | effect                                                                                        |
-| ------------------ | --------------------------------------------------------------------------------------------- |
-| `CHTYPES_VERSION`  | which artifact the tour uses (`25.8`, `25.8.28.1-lts`, …). Default: the newest line held      |
-| `CHTYPES_REGISTRY` | the artifact directory. Default: the per-user cache, `~/.cache/chtypes/artifacts/<os>-<arch>` |
+| variable           | effect                                                                                               |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| `CHTYPES_VERSION`  | which artifact the tour uses (`25.8`, `25.8.28.1-lts`, …). Default: the newest line held             |
+| `CHTYPES_REGISTRY` | the artifact directory. Default: the per-user cache, `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>` |
 
 ## What is TypeScript-specific here
 

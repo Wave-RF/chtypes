@@ -39,13 +39,18 @@ from chtypes.fetch import (
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "fetch"
 EXPECTED_FILE = FIXTURES / "expected.json"
 
-pytestmark = pytest.mark.skipif(
-    not EXPECTED_FILE.is_file(),
-    reason=(
-        f"no fetch fixtures at {FIXTURES}: tests/fixtures/fetch is generated in the core "
-        f"repository (docs/guides/fetch.md §9) and must be present for the fetch suite to run"
+pytestmark = [
+    pytest.mark.skipif(
+        not EXPECTED_FILE.is_file(),
+        reason=(
+            f"no fetch fixtures at {FIXTURES}: tests/fixtures/fetch is generated in the core "
+            f"repository (docs/guides/fetch.md §9) and must be present for the fetch suite to run"
+        ),
     ),
-)
+    # Fetch selects only rows at the binding's own ABI revision; every test here
+    # fetches at the revision the fixtures carry, read off their own index.json.
+    pytest.mark.usefixtures("at_fixture_revision"),
+]
 
 
 def _expected() -> dict:

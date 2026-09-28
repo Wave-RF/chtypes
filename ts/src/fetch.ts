@@ -9,7 +9,8 @@
  *
  *   0. `SHA256SUMS.sig` — ed25519 over the exact bytes of `SHA256SUMS`, with a
  *      trusted key. Failure stops everything; nothing is downloaded around it.
- *   1. `index.json` names the asset for the line/platform and its sha256.
+ *   1. `index.json` names the asset for the line/platform and its sha256 — only
+ *      ever a row at this binding's own `ABI_REVISION` (docs/guides/fetch.md §2).
  *   2. `SHA256SUMS` — now known-authentic — must list the same file with the
  *      same sha256; a disagreement is a broken release, reported, not repaired.
  *   3. The tarball is hashed BEFORE it is unpacked.
@@ -36,6 +37,7 @@ import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import {
+  ABI_REVISION,
   ArtifactCorruptError,
   ArtifactPinnedError,
   ArtifactUnpublishedError,
@@ -90,6 +92,15 @@ export interface IndexArtifact {
   readonly build: number;
   /** The core commit the wrapper was built from; `''` on an old row. */
   readonly core_commit: string;
+  /**
+   * The chs_* ABI revision the artifact was built from, or `null` when the row
+   * declares none (or declares something that is not an integer). The artifact
+   * producer writes the field from the revision that introduced it onward, so
+   * a row without it is an older revision. Fetch installs only a row at this
+   * binding's own `ABI_REVISION` (docs/guides/fetch.md §2): any other would be
+   * refused at load.
+   */
+  readonly abi_revision: number | null;
 }
 
 /** A release's `index.json`, schema 1. */
@@ -629,7 +640,50 @@ function indexArtifact(row: unknown, i: number): IndexArtifact {
     library_sha256: str('library_sha256').toLowerCase(),
     build: buildOf(r['build'], file),
     core_commit: typeof r['core_commit'] === 'string' ? r['core_commit'] : '',
+    abi_revision: revisionOf(r['abi_revision']),
   };
+}
+
+/**
+ * A row's `abi_revision` when it is an integer, else `null` — read as "declares
+ * none", which never matches, rather than failing the whole listing.
+ */
+function revisionOf(field: unknown): number | null {
+  return typeof field === 'number' && Number.isSafeInteger(field) ? field : null;
+}
+
+/**
+ * TEST-ONLY. When `override` is set, the ABI revision fetch selects release rows
+ * at, in place of `ABI_REVISION` (docs/guides/fetch.md §2). The fetch-fixture
+ * suite sets it to the revision its fixture release carries — derived from that
+ * release's own `index.json` — so a binding whose own revision has moved ahead
+ * of the fixtures still exercises the whole chain. It changes WHICH rows are
+ * eligible and nothing else: the default registry directory stays
+ * `abi<ABI_REVISION>/`, and the loader still refuses an artifact of another
+ * revision.
+ *
+ * A mutable object for the same reason as {@link RELEASE_RETRY}: an imported
+ * binding is read-only. Not re-exported from `index.ts` — internal to this
+ * module and its test suite, never part of the public contract.
+ */
+export const FETCH_ABI_REVISION: { override: number | null } = { override: null };
+
+/** The one ABI revision whose rows fetch may install: this binding's own. */
+function fetchAbiRevision(): number {
+  return FETCH_ABI_REVISION.override ?? ABI_REVISION;
+}
+
+/**
+ * What the release DOES have for `noun`, for an unpublished message: the ABI
+ * revision(s) its rows carry, or that it has none at any revision.
+ */
+function served(rows: readonly IndexArtifact[], noun: string): string {
+  if (rows.length === 0) return `the release does not have ${noun} at any ABI revision`;
+  const revs = [...new Set(rows.flatMap((a) => (a.abi_revision === null ? [] : [a.abi_revision])))].sort((a, b) => a - b);
+  if (revs.length === 0) return `the release has ${noun} only in rows that declare no ABI revision`;
+  let said = revs.length === 1 ? `ABI revision ${revs[0]}` : `ABI revisions ${revs.join(', ')}`;
+  if (rows.some((a) => a.abi_revision === null)) said += ' and in rows that declare no ABI revision';
+  return `the release has ${noun} only at ${said}`;
 }
 
 /**
@@ -658,28 +712,35 @@ function minorOfVersion(version: string): string {
   return parts.length < 2 ? version : `${parts[0]}.${parts[1]}`;
 }
 
-/** The one row for a request, or `CHTYPES_ARTIFACT_UNPUBLISHED` naming what the release does have. */
+/**
+ * The one row for a request, or `CHTYPES_ARTIFACT_UNPUBLISHED` naming what the
+ * release does have. Only rows at this binding's ABI revision are considered,
+ * FIRST (docs/guides/fetch.md §2): nothing at that revision is unpublished, never
+ * another revision's row.
+ */
 export function selectArtifact(index: ReleaseIndex, platform: string, req: VersionRequest): IndexArtifact {
-  const rows = forPlatform(index, platform);
-  let hit: IndexArtifact[];
+  const all = forPlatform(index, platform);
+  const rev = fetchAbiRevision();
+  const have = all.filter((a) => a.abi_revision === rev).map((a) => a.clickhouse_version).join(', ') || 'nothing';
+  let anyRevision: IndexArtifact[];
   if (req.exact !== null) {
     const typedChannel = CHANNEL.test(req.exact);
-    hit = rows.filter(
+    anyRevision = all.filter(
       (a) => a.clickhouse_version === req.exact || (!typedChannel && a.clickhouse_version.replace(CHANNEL, '') === req.bare),
     );
-    if (hit.length === 0) {
-      throw new ArtifactUnpublishedError(
-        `chtypes: you asked for exactly ClickHouse ${req.exact} on ${platform} and this release does not publish it ` +
-          `(it has: ${rows.map((a) => a.clickhouse_version).join(', ')}). Ask for the line (${req.line}) to take what was published.`,
-      );
-    }
   } else {
-    hit = rows.filter((a) => a.clickhouse_minor === req.line);
-    if (hit.length === 0) {
-      throw new ArtifactUnpublishedError(
-        `chtypes: no artifact for ClickHouse line ${req.line} on ${platform} (it has: ${rows.map((a) => a.clickhouse_version).join(', ')})`,
-      );
-    }
+    anyRevision = all.filter((a) => a.clickhouse_minor === req.line);
+  }
+  const hit = anyRevision.filter((a) => a.abi_revision === rev);
+  if (hit.length === 0) {
+    throw new ArtifactUnpublishedError(
+      req.exact !== null
+        ? `chtypes: you asked for exactly ClickHouse ${req.exact} on ${platform} at ABI revision ${rev} (this SDK's) and this ` +
+            `release does not publish it at that revision: ${served(anyRevision, `that patch for ${platform}`)} ` +
+            `(at ABI revision ${rev} it has: ${have}). Ask for the line (${req.line}) to take what was published.`
+        : `chtypes: no artifact for ClickHouse line ${req.line} on ${platform} at ABI revision ${rev} (this SDK's): ` +
+            `${served(anyRevision, `that line for ${platform}`)} (at ABI revision ${rev} it has: ${have})`,
+    );
   }
   // A line can carry more than one row: two patches, or the same patch built
   // twice (a release keeps the two highest builds per version). Take the newest
@@ -700,10 +761,23 @@ function newerRow(a: IndexArtifact, b: IndexArtifact): boolean {
   return byVersion !== 0 ? byVersion > 0 : a.build > b.build;
 }
 
-/** Every line the release publishes for the platform, newest patch per line, oldest line first. */
+/**
+ * Every line the release publishes for the platform at this binding's ABI
+ * revision, newest patch (then highest build) per line, oldest line first.
+ * Nothing at that revision is `CHTYPES_ARTIFACT_UNPUBLISHED`, naming the
+ * revision(s) the release does serve (docs/guides/fetch.md §2).
+ */
 export function selectAll(index: ReleaseIndex, platform: string): IndexArtifact[] {
+  const all = forPlatform(index, platform);
+  const rev = fetchAbiRevision();
+  const rows = all.filter((a) => a.abi_revision === rev);
+  if (rows.length === 0) {
+    throw new ArtifactUnpublishedError(
+      `chtypes: the release has nothing for ${platform} at ABI revision ${rev} (this SDK's): ${served(all, `rows for ${platform}`)}`,
+    );
+  }
   const best = new Map<string, IndexArtifact>();
-  for (const a of forPlatform(index, platform)) {
+  for (const a of rows) {
     const cur = best.get(a.clickhouse_minor);
     if (cur === undefined || newerRow(a, cur)) best.set(a.clickhouse_minor, a);
   }

@@ -605,23 +605,27 @@ mod tests {
     fn the_artifact_missing_message_is_the_spec_s_verbatim() {
         // docs/guides/fetch.md §7: one message in every SDK, verbatim apart from the
         // bracketed parts; the "Install it:" line names THIS SDK's command.
+        // The per-user cache as the search path spells it: abi<R>/<os>-<arch>.
+        let cache = format!("/home/u/.cache/chtypes/artifacts/abi{ABI_REVISION}/linux-arm64");
         let err = Error::ArtifactMissing {
             line: "25.8".into(),
             platform: "linux-arm64".into(),
             looked_in: vec![
-                PathBuf::from("/home/u/.cache/chtypes/artifacts/linux-arm64"),
+                PathBuf::from(&cache),
                 PathBuf::from("/usr/local/share/chtypes/artifacts/linux-arm64"),
                 PathBuf::from("/opt/chtypes/artifacts/linux-arm64"),
             ],
         };
         assert_eq!(
             err.to_string(),
-            "chtypes: no artifact for ClickHouse 25.8 (linux-arm64). Looked in: \
-             /home/u/.cache/chtypes/artifacts/linux-arm64, \
-             /usr/local/share/chtypes/artifacts/linux-arm64, \
-             /opt/chtypes/artifacts/linux-arm64.\n\
-             Install it:  cargo install chtypes && chtypes fetch 25.8\n\
-             or set CHTYPES_AUTOFETCH=1 to fetch on first use."
+            format!(
+                "chtypes: no artifact for ClickHouse 25.8 (linux-arm64). Looked in: \
+                 {cache}, \
+                 /usr/local/share/chtypes/artifacts/linux-arm64, \
+                 /opt/chtypes/artifacts/linux-arm64.\n\
+                 Install it:  cargo install chtypes && chtypes fetch 25.8\n\
+                 or set CHTYPES_AUTOFETCH=1 to fetch on first use."
+            )
         );
         assert_eq!(err.artifact_code(), Some("CHTYPES_ARTIFACT_MISSING"));
         // The ClickHouse-code accessor stays what it was: no verdict here.

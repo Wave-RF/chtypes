@@ -31,6 +31,7 @@ import { gzipSync } from 'node:zlib';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EXIT, runCli, type CliIo } from '../src/cli.js';
 import {
+  ABI_REVISION,
   ArtifactCorruptError,
   ArtifactError,
   ArtifactMissingError,
@@ -66,10 +67,12 @@ import {
   type EnsureOptions,
   type FetchEvent,
 } from '../src/index.js';
-// RELEASE_RETRY is an internal, test-only knob (not re-exported from
-// index.js): a mutable object so the publish-window retry delay can be
-// shrunk to near zero here without a real wait.
-import { RELEASE_RETRY } from '../src/fetch.js';
+// RELEASE_RETRY and FETCH_ABI_REVISION are internal, test-only knobs (not
+// re-exported from index.js): mutable objects, so the publish-window retry
+// delay can be shrunk to near zero here without a real wait, and the shared
+// fixtures can be fetched at the ABI revision they carry.
+import { FETCH_ABI_REVISION, RELEASE_RETRY } from '../src/fetch.js';
+import { fixtureAbiRevision } from './fixture-revision.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC_FIXTURES = path.resolve(HERE, '..', '..', 'tests', 'fixtures', 'fetch');
@@ -202,6 +205,9 @@ function makeRelease(spec: ReleaseSpec): BuiltRelease {
       library_sha256: manifest.library_sha256,
       os,
       sha256: sha256(tgz),
+      // The revision fetch is selecting at: the binding's own, or the shared
+      // fixtures' while their suite runs — a synthetic release is built for it.
+      abi_revision: FETCH_ABI_REVISION.override ?? ABI_REVISION,
     };
     rows.push(row);
     sums.push(`${row.sha256}  ${file}`);
@@ -420,15 +426,15 @@ describe('version spellings and the search path', () => {
     expect(registrySearchPath('/tmp/explicit', 'linux-arm64')).toEqual([
       '/tmp/explicit',
       '/tmp/env-reg',
-      '/tmp/xdg/chtypes/artifacts/linux-arm64',
+      `/tmp/xdg/chtypes/artifacts/abi${ABI_REVISION}/linux-arm64`,
       '/usr/local/share/chtypes/artifacts/linux-arm64',
       '/opt/chtypes/artifacts/linux-arm64',
     ]);
     expect(registrySearchPath('/tmp/env-reg', 'linux-arm64')[0]).toBe('/tmp/env-reg');
     expect(registrySearchPath('/tmp/env-reg', 'linux-arm64')).toHaveLength(4);
     delete process.env['CHTYPES_REGISTRY'];
-    expect(registrySearchPath(undefined, 'darwin-arm64')[0]).toBe('/tmp/xdg/chtypes/artifacts/darwin-arm64');
-    expect(cacheRegistryDir('darwin-amd64')).toBe('/tmp/xdg/chtypes/artifacts/darwin-amd64');
+    expect(registrySearchPath(undefined, 'darwin-arm64')[0]).toBe(`/tmp/xdg/chtypes/artifacts/abi${ABI_REVISION}/darwin-arm64`);
+    expect(cacheRegistryDir('darwin-amd64')).toBe(`/tmp/xdg/chtypes/artifacts/abi${ABI_REVISION}/darwin-amd64`);
   });
 
   it('fetch writes to the first of explicit, CHTYPES_REGISTRY, the cache — never a system location', () => {
@@ -438,9 +444,9 @@ describe('version spellings and the search path', () => {
     expect(fetchDestination(undefined, PLATFORM)).toBe('/tmp/env-reg');
     // CHTYPES_REGISTRY is this host's registry: a foreign platform goes to the cache keyed by it.
     const foreign = PLATFORM === 'linux-arm64' ? 'darwin-arm64' : 'linux-arm64';
-    expect(fetchDestination(undefined, foreign)).toBe(`/tmp/xdg/chtypes/artifacts/${foreign}`);
+    expect(fetchDestination(undefined, foreign)).toBe(`/tmp/xdg/chtypes/artifacts/abi${ABI_REVISION}/${foreign}`);
     delete process.env['CHTYPES_REGISTRY'];
-    expect(fetchDestination(undefined, PLATFORM)).toBe(`/tmp/xdg/chtypes/artifacts/${PLATFORM}`);
+    expect(fetchDestination(undefined, PLATFORM)).toBe(`/tmp/xdg/chtypes/artifacts/abi${ABI_REVISION}/${PLATFORM}`);
   });
 });
 
@@ -1057,7 +1063,7 @@ describe('the CLI (docs/guides/fetch.md §6)', () => {
     const r = await run(['where']);
     expect(r.code).toBe(0);
     expect(r.err).toBe('');
-    expect(first(r.out)).toBe(`/tmp/xdg/chtypes/artifacts/${PLATFORM}`);
+    expect(first(r.out)).toBe(`/tmp/xdg/chtypes/artifacts/abi${ABI_REVISION}/${PLATFORM}`);
     expect(r.out).toContain('sdk-goldens.json');
     expect(first((await run(['where', '--dest', '/somewhere'])).out)).toBe('/somewhere');
     process.env['CHTYPES_REGISTRY'] = '/tmp/env-reg';
@@ -1209,6 +1215,17 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
   let key: string;
   let fixturePlatform: string;
   let fixtureLine: string;
+  // Fetch selects only rows at the binding's own ABI revision; the fixtures
+  // carry whatever revision they were generated at. Fetch them at THAT one,
+  // read off their own index.json rows (fixtureAbiRevision) — never typed.
+  let fixtureRevision: number;
+  beforeAll(() => {
+    fixtureRevision = fixtureAbiRevision(SPEC_FIXTURES);
+    FETCH_ABI_REVISION.override = fixtureRevision;
+  });
+  afterAll(() => {
+    FETCH_ABI_REVISION.override = null;
+  });
   beforeAll(() => {
     key = fixtureKey();
     const index = JSON.parse(readFileSync(path.join(SPEC_FIXTURES, 'signed', 'index.json'), 'utf8')) as {
@@ -1352,5 +1369,23 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     const other = makeRelease({ artifacts: [{ minor: line, version: r.version, os: fixturePlatform.split('-')[0], arch: fixturePlatform.split('-')[1] }], seed: 'not the pinned one' });
     const pinned = await ensure(line, fixture('signed', scratch('fixture-dest2'), { url: other.url, lock: copy, frozen: true, trustedKeys: [KEY.hex] })).catch((e: unknown) => e);
     expect(pinned).toBeInstanceOf(ArtifactPinnedError);
+  });
+
+  it('is fetched at the revision its rows carry, and at no other (docs/guides/fetch.md §2)', async () => {
+    // The override above is wired and derived: one revision past the fixtures'
+    // own, the same release refuses UNPUBLISHED, naming both, installing nothing.
+    process.env['CHTYPES_TRUSTED_KEYS'] = key;
+    expect(FETCH_ABI_REVISION.override).toBe(fixtureRevision);
+    FETCH_ABI_REVISION.override = fixtureRevision + 1;
+    try {
+      const dest = scratch('fixture-dest');
+      const err = await ensure(fixtureLine, fixture('signed', dest)).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ArtifactUnpublishedError);
+      expect((err as Error).message).toContain(`ABI revision ${fixtureRevision + 1}`);
+      expect((err as Error).message).toContain(`only at ABI revision ${fixtureRevision}`);
+      expect(readdirSync(dest)).toEqual([]);
+    } finally {
+      FETCH_ABI_REVISION.override = fixtureRevision;
+    }
   });
 });

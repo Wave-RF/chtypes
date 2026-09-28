@@ -10,12 +10,14 @@ A registry is a directory holding `<minor>/manifest.json` entries. Lookup tries,
 
 1. a path given explicitly to the registry constructor;
 2. `CHTYPES_REGISTRY`;
-3. `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>` — the per-user cache, where fetch installs;
+3. `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>` — the per-user cache, where fetch installs. `<R>` is the SDK's own ABI revision: each binding's pinned constant, and for `scripts/fetch.sh` the `CHS_ABI_REVISION` of its own tree's `include/chtypes.h` (or `--abi-revision N`);
 4. `/usr/local/share/chtypes/artifacts/<os>-<arch>` and then `/opt/chtypes/artifacts/<os>-<arch>` — system locations, empty today, reserved for the deferred system packages (§8) and for images that bake artifacts in.
 
-Fetch **writes** to the first of (1), (2), (3) that is set; never to (4). `<os>` is `linux` or `darwin`, `<arch>` is `arm64` or `amd64`, in those spellings. One machine set up once therefore serves all four bindings, and a locally built artifact lands in the same place.
+Fetch **writes** to the first of (1), (2), (3) that is set; never to (4). `<os>` is `linux` or `darwin`, `<arch>` is `arm64` or `amd64`, in those spellings. One machine set up once therefore serves all four bindings at the same ABI revision, and a locally built artifact belongs in the same `abi<R>/<os>-<arch>` directory.
 
-Once resolved, an artifact and the SDK opening it are matched by ABI revision: a mismatch is refused at load, naming both numbers.
+**Each ABI revision has its own per-user cache.** Two SDK versions on one machine that speak different revisions never overwrite each other's artifacts, and neither ever finds the other's. An install from before this layout, directly under `…/chtypes/artifacts/<os>-<arch>/`, is neither read nor migrated: the first fetch after upgrading downloads again, and the old directory is simply unused. `CHTYPES_REGISTRY` and an explicit directory are taken exactly as given — the revision is added to the default only.
+
+Once resolved, an artifact and the SDK opening it are matched by ABI revision: a mismatch is refused at load, naming both numbers. Fetch never installs a mismatched one in the first place (§2); the load check is what still protects a directory filled some other way.
 
 ## 2. Where artifacts come from
 
@@ -32,7 +34,9 @@ A release holds four kinds of file:
 
 `sdk-goldens.json` is a row in `SHA256SUMS` like any tarball, so it verifies through the same chain, and a fetch installs it at `<registry>/sdk-goldens.json` — beside the artifacts, where every binding's golden test reads it offline ( `CHTYPES_GOLDENS` overrides the path). A release that does not publish one predates the served set: that is a note, not a failure, and the golden tests skip loudly until it does.
 
-**Rebuilds are new rows, never swaps.** The same ClickHouse version can be published more than once, each with a higher `build`, and the release keeps the two highest per version and platform. A line therefore resolves to its newest ClickHouse version and then to the **highest build** of that version — the row's `build` field when it has one, else the `-b<N>` in the name, else 0. A lock file pins a file name and sha256, which is exactly what keeps a pin valid across a rebuild.
+**Only the SDK's own ABI revision is ever selected, and that comes first.** Before any other rule, the rows for the platform are narrowed to those whose `abi_revision` is the SDK's own revision, compared as integers. A row that carries no `abi_revision` never matches: the artifact producer writes the field from the revision that introduced it onward, so a row without one is an older revision. Every rule below then applies within the rows that remain. Nothing left for the line, patch or platform is `CHTYPES_ARTIFACT_UNPUBLISHED` (exit 4, §7), naming the revision(s) the release does serve for it. A fetch never falls back to another revision's row: the SDK would refuse it at load anyway (§1). At a revision cutover, an older revision's build stays fetchable only until that line's next publish evicts it under the retention rule below.
+
+**Rebuilds are new rows, never swaps.** The same ClickHouse version can be published more than once, each with a higher `build`, and the release keeps the two highest per version and platform. A line therefore resolves — among the rows at the SDK's ABI revision — to its newest ClickHouse version and then to the **highest build** of that version — the row's `build` field when it has one, else the `-b<N>` in the name, else 0. A lock file pins a file name and sha256, which is exactly what keeps a pin valid across a rebuild.
 
 ## 3. The verification chain, in order
 
@@ -141,6 +145,14 @@ The message a missing artifact produces, the directories it names and the rule t
 
 Codes, shared: `CHTYPES_ARTIFACT_MISSING`, `CHTYPES_ARTIFACT_UNTRUSTED`, `CHTYPES_ARTIFACT_CORRUPT` (any hash mismatch), `CHTYPES_ARTIFACT_PINNED`, `CHTYPES_ARTIFACT_UNPUBLISHED`, `CHTYPES_SOURCE_UNREACHABLE`.
 
+`CHTYPES_ARTIFACT_UNPUBLISHED` for a line, an exact patch or `--all` that the release has only at another ABI revision (§2) names the line or patch, the platform, the SDK's own revision, and what the release does serve for it — the revision(s) its rows carry, that its rows declare none, or that it has none at any revision — for example, from an SDK at revision `<R>` against a release that has the line only at `<S>`:
+
+```text
+chtypes: no artifact for ClickHouse line 25.8 on linux-arm64 at ABI revision <R> (this SDK's) at <source>: the release has that line for linux-arm64 only at ABI revision <S> (at ABI revision <R> it has: nothing) [CHTYPES_ARTIFACT_UNPUBLISHED]
+```
+
+The wording differs a little per binding (Rust folds the same facts into its `offered` field); the facts it names do not.
+
 ## 8. Deferred: system packages (brew, apt)
 
 A `brew install chtypes` or a Debian package would pre-seed the system locations in §1 and keep them updated by the package manager's own mechanism, and would carry the fetch command as a standalone tool. Deferred on 2026-09-09 until the four in-package commands exist; nothing in §1–§7 needs to change to add it — the search path already has its slots.
@@ -151,13 +163,15 @@ A `brew install chtypes` or a Debian package would pre-seed the system locations
 
 `two-builds/` is the rebuild case: one ClickHouse version published twice for each platform, so resolving a line exercises the build tie-break rather than the version alone. `expected.json` records it under `builds.cases` — deliberately apart from `verdicts`, which name one asset per line — and each case says which build must install and which it supersedes. The proof is the installed library's bytes: both rows share a `clickhouse_version`, so only `library_sha256` can tell them apart. They are generated by the build tooling and never edited by hand. An SDK's fetch suite must pass all of them with the same verdicts and codes.
 
+The fixtures carry whatever ABI revision they were generated at, which is not always the SDK's own: during a revision cutover the SDK moves first. So each suite reads that revision off the fixtures' own `index.json` rows — they must all agree, or the suite fails — and selects at it through an internal, test-only override, never a typed number and never part of this contract. The override changes which rows are eligible and nothing else; the default directory stays `abi<R>/` for the SDK's own revision. `scripts/fetch.sh` needs no override: `--abi-revision N` is its documented flag.
+
 ## 10. Decisions (2026-09-09, when the four implementations merged)
 
 Where the four implementations diverged, one rule was chosen and the odd ones out were changed the same day; where reconciling would have cost more than it is worth today, the difference is recorded here instead of hidden. These bind §1–§7.
 
 1. **`--frozen` without `--lock` reads `./chtypes.lock`** (relative to the working directory), in the library call as well as the CLI. A lock file that does not exist under `--frozen` is `CHTYPES_ARTIFACT_PINNED` (exit 1): nothing is pinned, so nothing is installed — the same verdict as a line the lock does not pin. It is decided after the release loads, so an untrusted or unreachable source is reported ahead of it. (Python refused `--frozen` without `--lock` as a usage error, TypeScript's library call did too, and Rust's missing-lock error carried no code; all three changed.)
 2. **An explicit destination is the only place "already installed" is looked for.** `--dest <dir>` / the `dest` option means that directory; an install elsewhere on the §1 path does not satisfy it (a container build's `--dest /opt/chtypes/artifacts` must not be satisfied by the builder's own cache). All four did this. _Known difference, not reconciled:_ without a `dest`, Rust also accepts an install anywhere on the §1 search path (what a registry would find); Go, Python and TypeScript look only in the directory fetch would write to. It shows only when a line sits in a later slot than the write directory — the system slots are empty today.
-3. **A fetch for another platform never writes into `CHTYPES_REGISTRY`.** That variable names a directory this host dlopens from, so it is on the search path for the host's platform only; `fetch --platform <other>` writes to that platform's own per-user cache (`…/chtypes/artifacts/<os>-<arch>`), and `--dest` still wins. (Python wrote into `CHTYPES_REGISTRY`; changed.) _Known difference:_ Go and TypeScript also read `CHTYPES_TARGET` as the default `--platform` (see [`artifacts.md`](artifacts.md)); Python and Rust take `--platform` only.
+3. **A fetch for another platform never writes into `CHTYPES_REGISTRY`.** That variable names a directory this host dlopens from, so it is on the search path for the host's platform only; `fetch --platform <other>` writes to that platform's own per-user cache (`…/chtypes/artifacts/abi<R>/<os>-<arch>`), and `--dest` still wins. (Python wrote into `CHTYPES_REGISTRY`; changed.) _Known difference:_ Go and TypeScript also read `CHTYPES_TARGET` as the default `--platform` (see [`artifacts.md`](artifacts.md)); Python and Rust take `--platform` only.
 4. **An explicit registry directory that lacks a line falls through** to the rest of the §1 path, in every SDK's search-path constructor. In Rust that constructor is `Registry::from_search_path()` / `Registry::from_search_path_with(RegistryOptions { dir, .. })`; `Registry::new(dir)` stays the single-directory loader (that directory only, `Error::ArtifactMissing` for a line it lacks), by design. **A named directory that does not exist is refused at construction in all four**, unless autofetch is on, in which case it is the destination-to-be. Construction reads manifests and `dlopen`s nothing everywhere; see [`multi-version.md`](multi-version.md#how-it-works-and-what-it-costs).
 5. **`CHTYPES_ALLOW_UNSIGNED=1` skips step 0 entirely**: `SHA256SUMS.sig` is not even fetched, so a present-but-wrong signature installs, behind the one loud warning naming the source. `SHA256SUMS` itself is still required and steps 1–4 still run — a tampered tarball is still refused. All four agree.
 6. **"Installed" is decided against the signed release.** A plain `ensure` / `fetch` of an installed line reads `SHA256SUMS`, its signature and `index.json` — never the tarball — and reports installed when the library in place hashes what that listing says (§3). `--offline` is the one path that reads no source: an installed line that hashes what its own `manifest.json` says is the answer; anything else is `CHTYPES_SOURCE_UNREACHABLE` (a damaged install, `CHTYPES_ARTIFACT_CORRUPT`). (Rust's plain `ensure` was local-only; changed.)

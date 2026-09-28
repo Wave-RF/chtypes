@@ -11,10 +11,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/wave-rf/chtypes/go/chtypes"
+	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
 
 func isolate(t *testing.T) string {
@@ -38,6 +40,16 @@ func fixtures(t *testing.T) (dir, key string) {
 	if err != nil {
 		t.Skipf("shared fetch fixtures not found: %v (set CHTYPES_FETCH_FIXTURES to tests/fixtures/fetch)", err)
 	}
+	// Fetch installs only rows at the binding's own ABI revision; the fixtures
+	// carry whatever revision they were generated at. Read it off their own
+	// index.json rows — never typed — and select at it for this test.
+	rev, err := testhook.FixtureABIRevision(abs)
+	if err != nil {
+		t.Fatalf("fetch fixtures: %v", err)
+	}
+	prev := testhook.FetchABIRevision
+	testhook.FetchABIRevision = rev
+	t.Cleanup(func() { testhook.FetchABIRevision = prev })
 	return abs, strings.TrimSpace(string(b))
 }
 
@@ -67,7 +79,7 @@ func TestCLIUsageErrorsAndWhereOutput(t *testing.T) {
 	// served golden set, which is the other half of "what is in my registry".
 	firstLine := func(s string) string { return strings.SplitN(strings.TrimSpace(s), "\n", 2)[0] }
 	rc, out, _ = exec(t, "where")
-	if rc != 0 || firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", host) {
+	if rc != 0 || firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(chtypes.ABIRevision), host) {
 		t.Fatalf("where: rc=%d %q", rc, out)
 	}
 	if !strings.Contains(out, "sdk-goldens.json") {
@@ -82,7 +94,7 @@ func TestCLIUsageErrorsAndWhereOutput(t *testing.T) {
 	if host == other {
 		other = "linux-arm64"
 	}
-	if _, out, _ = exec(t, "where", "--platform", other); firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", other) {
+	if _, out, _ = exec(t, "where", "--platform", other); firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(chtypes.ABIRevision), other) {
 		t.Fatalf("where --platform: %q", out)
 	}
 	// verify/list on an empty registry: honest, exit 0.

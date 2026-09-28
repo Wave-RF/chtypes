@@ -10,6 +10,8 @@
 #   scripts/fetch.sh 25.8 --url https://…/download/x   any base URL (or a local dir)
 #   scripts/fetch.sh 25.8 --repo owner/name            a GitHub Releases source instead
 #   scripts/fetch.sh --release-file NAME --dest DIR    one release-level file, e.g. sdk-fetch-fixtures.tar.gz
+#   scripts/fetch.sh 25.8 --abi-revision N             artifacts for an SDK at ABI revision N
+#                                                      (default: this tree's include/chtypes.h)
 #
 # (--out is an alias for --dest, and --all takes every line the release
 # publishes for the platform; both are the spellings .github/workflows use.
@@ -22,6 +24,16 @@
 # chtypes.NewRegistry scans: one directory per version, each holding the
 # manifest.json that names the library to dlopen. Point a Registry at <dest>
 # after this and the version is live.
+#
+# Only rows at ONE ABI revision are ever considered (docs/guides/fetch.md §2):
+# the CHS_ABI_REVISION of this tree's own include/chtypes.h, or --abi-revision
+# N. A row whose abi_revision is another number, or which carries none (the
+# artifact producer writes the field from the revision that introduced it
+# onward, so an absent one is older), is never installed — the SDK would
+# refuse it at load anyway. Nothing at that revision for the line and platform
+# is CHTYPES_ARTIFACT_UNPUBLISHED, naming the revision(s) the release does
+# serve; it never falls back to another revision's row. The newest version,
+# then the highest build, is chosen among the rows that remain.
 #
 # The verification chain, in order, because a fetch that installs a corrupted
 # 300 MB library and reports success is the worst outcome available here:
@@ -42,12 +54,14 @@
 #   platform/line (CHTYPES_ARTIFACT_UNPUBLISHED).
 #
 # This script is the SDK's, and stands alone: no cache directories need to
-# exist, nothing else in this repository is required, `gh` is optional (plain
-# curl against the release URL is the fallback), and the release's own
-# index.json is the authority on what exists. It installs into the per-user
-# artifact cache every SDK here defaults to —
-# ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>/<minor>/ — which is
-# also where a core-repository build lands, so one directory serves both.
+# exist, nothing else in this repository is required but include/chtypes.h
+# (for the ABI revision; --abi-revision names one without it), `gh` is
+# optional (plain curl against the release URL is the fallback), and the
+# release's own index.json is the authority on what exists. It installs into
+# the per-user artifact cache every SDK here defaults to —
+# ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>/<minor>/,
+# R the ABI revision above — so two SDK versions at different revisions on
+# one machine never overwrite each other's artifacts.
 #
 # Where it fetches from, by default: https://artifacts.wavehouse.dev/<tag>/ —
 # the public artifacts host, where <tag> is a release tag or the rolling
@@ -73,7 +87,7 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPTS")"
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/chtypes"
 
-usage() { sed -n '2,13p' "$0"; exit 2; }
+usage() { sed -n '2,15p' "$0"; exit 2; }
 die()   { echo "fetch.sh: $*" >&2; exit 1; }
 bad_usage() { echo "fetch.sh: $*" >&2; exit 2; }
 # fail <CHTYPES_…> <message> — every failure names its §7 code and exits with
@@ -91,7 +105,7 @@ fail() {
 say()   { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
 
 # ------------------------------------------------------------------ arguments
-SPELLING=""; PLATFORM=""; DEST=""; TAG=""; BASE_URL=""
+SPELLING=""; PLATFORM=""; DEST=""; TAG=""; BASE_URL=""; ABI_REVISION=""
 REPO="${CHTYPES_RELEASE_REPO:-}"; FORCE=0; ALL=0; RELEASE_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -103,6 +117,7 @@ while [ $# -gt 0 ]; do
     --url)      [ $# -ge 2 ] || bad_usage "--url needs a value";      BASE_URL="$2"; shift ;;
     --repo)     [ $# -ge 2 ] || bad_usage "--repo needs a value";     REPO="$2"; shift ;;
     --release-file) [ $# -ge 2 ] || bad_usage "--release-file needs a file name"; RELEASE_FILE="$2"; shift ;;
+    --abi-revision) [ $# -ge 2 ] || bad_usage "--abi-revision needs a value"; ABI_REVISION="$2"; shift ;;
     --all)      ALL=1 ;;
     --force)    FORCE=1 ;;
     -h|--help)  usage ;;
@@ -125,6 +140,30 @@ else
   [ -n "$SPELLING" ] || { echo "fetch.sh: a ClickHouse version spelling is required (or --all)" >&2; usage; }
 fi
 [ -n "$BASE_URL" ] && [ -n "$TAG" ] && bad_usage "--url names a full base; --tag selects a release on the artifacts host (or in --repo) — pass one"
+
+# ------------------------------------------------------------- ABI revision
+# The one revision whose rows this fetch may install, and the abi<R>/ of the
+# default destination: --abi-revision, else CHS_ABI_REVISION in this tree's
+# own include/chtypes.h — the header the SDK beside this script speaks. A
+# release-level file (--release-file) is not an artifact row and needs none.
+ABI_REVISION_FROM=""
+if [ -z "$RELEASE_FILE" ]; then
+  if [ -n "$ABI_REVISION" ]; then
+    case "$ABI_REVISION" in
+      ''|*[!0-9]*) bad_usage "--abi-revision takes a non-negative integer: $ABI_REVISION" ;;
+    esac
+    ABI_REVISION="$((10#$ABI_REVISION))"
+    ABI_REVISION_FROM="--abi-revision"
+  else
+    HEADER="$ROOT/include/chtypes.h"
+    [ -f "$HEADER" ] || bad_usage "no $HEADER to read the ABI revision from — pass --abi-revision N"
+    ABI_REVISION="$(sed -n 's/^#define CHS_ABI_REVISION \([0-9][0-9]*\)$/\1/p' "$HEADER")"
+    case "$ABI_REVISION" in
+      ''|*[!0-9]*) bad_usage "$HEADER defines no single '#define CHS_ABI_REVISION <n>' — pass --abi-revision N" ;;
+    esac
+    ABI_REVISION_FROM="include/chtypes.h"
+  fi
+fi
 
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
@@ -151,9 +190,10 @@ if [ "${PLATFORM%%-*}" != "$HOST_OS" ]; then
   echo "          Pass --platform $HOST_OS-$HOST_ARCH for a library this host can dlopen." >&2
 fi
 
-# The per-user cache, keyed by platform — the one directory every SDK's
-# NewRegistry / Registry / default_registry_dir agrees on.
-[ -n "$DEST" ] || DEST="$CACHE_ROOT/artifacts/$PLATFORM"
+# The per-user cache, keyed by ABI revision and then platform — the one
+# directory every SDK's NewRegistry / Registry / default_registry_dir at that
+# revision agrees on. (--release-file always names its --dest.)
+[ -n "$DEST" ] || DEST="$CACHE_ROOT/artifacts/abi$ABI_REVISION/$PLATFORM"
 mkdir -p "$DEST"
 
 # ------------------------------------------------------- resolve the version
@@ -292,8 +332,8 @@ get_file() { # get_file <asset-name> <destination>  ->  0 fetched · 1 absent (4
 SOURCE_DESC="$BASE_URL"
 [ "$SOURCE_KIND" = url ] || SOURCE_DESC="$REPO@${TAG:-latest} (via $SOURCE_KIND)"
 if [ -n "$RELEASE_FILE" ]; then say "release-level file $RELEASE_FILE -> $DEST"
-elif [ "$ALL" = 1 ]; then say "every published ClickHouse line, $PLATFORM -> $DEST"
-else say "ClickHouse $SPELLING -> line $WANT_LINE${WANT_EXACT:+ (exact $WANT_EXACT)}, $PLATFORM"; fi
+elif [ "$ALL" = 1 ]; then say "every published ClickHouse line, $PLATFORM, ABI revision $ABI_REVISION -> $DEST"
+else say "ClickHouse $SPELLING -> line $WANT_LINE${WANT_EXACT:+ (exact $WANT_EXACT)}, $PLATFORM, ABI revision $ABI_REVISION"; fi
 say "source $SOURCE_DESC"
 
 # --------------------------------------------------------- step 0: the signature
@@ -593,18 +633,45 @@ LIC="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("l
 # feeds `read`: a here-doc nested inside a command substitution inside a
 # here-doc parses, but it hides python's own error message, and that message is
 # the useful half when a release simply has no artifact for what was asked.
-SELECTED="$(python3 - "$WORK/index.json" "${PLATFORM%%-*}" "${PLATFORM##*-}" "$WANT_LINE" "$WANT_EXACT" "$STRICT_EXACT" "$ALL" 2>"$WORK/.select.err" <<'PY'
+SELECTED="$(python3 - "$WORK/index.json" "${PLATFORM%%-*}" "${PLATFORM##*-}" "$WANT_LINE" "$WANT_EXACT" "$STRICT_EXACT" "$ALL" "$ABI_REVISION" "$ABI_REVISION_FROM" 2>"$WORK/.select.err" <<'PY'
 import json, re, sys
-path, os_, arch, line, exact, strict, want_all = sys.argv[1:]
-strict, want_all = strict == "1", want_all == "1"
+path, os_, arch, line, exact, strict, want_all, own, own_from = sys.argv[1:]
+strict, want_all, own = strict == "1", want_all == "1", int(own)
 doc = json.load(open(path))
 if doc.get("schema") != 1:
     sys.exit("corrupt: index.json schema %r is not 1 — this fetch.sh cannot read it" % doc.get("schema"))
-arts = [a for a in doc["artifacts"] if a["os"] == os_ and a["arch"] == arch]
-if not arts:
+on_platform = [a for a in doc["artifacts"] if a["os"] == os_ and a["arch"] == arch]
+if not on_platform:
     sys.exit("unpublished: the release has nothing for %s-%s (it has: %s)"
              % (os_, arch, ", ".join(sorted({"%s-%s" % (a["os"], a["arch"])
                                              for a in doc["artifacts"]})) or "nothing"))
+
+def revision_of(a):
+    # The row's ABI revision when it declares one as an integer, else None. The
+    # artifact producer writes the field from the revision that introduced it
+    # onward, so a row without it is an older revision: it never matches.
+    r = a.get("abi_revision")
+    return r if isinstance(r, int) and not isinstance(r, bool) else None
+
+def served(rows, noun):
+    # What the release DOES have, for an unpublished message: the revision(s)
+    # its rows for the request carry, or that it has none at any revision.
+    revs = sorted({r for r in map(revision_of, rows) if r is not None})
+    undeclared = any(revision_of(a) is None for a in rows)
+    if not rows:
+        return "the release does not have %s at any ABI revision" % noun
+    if not revs:
+        return "the release has %s only in rows that declare no ABI revision" % noun
+    said = ("ABI revision %d" % revs[0]) if len(revs) == 1 else ("ABI revisions " + ", ".join(map(str, revs)))
+    if undeclared:
+        said += " and in rows that declare no ABI revision"
+    return "the release has %s only at %s" % (noun, said)
+
+# FIRST the revision: only rows this SDK can load (docs/guides/fetch.md §2).
+# Never a fallback to another revision's row — the loader would refuse it.
+arts = [a for a in on_platform if revision_of(a) == own]
+have = ", ".join(a["clickhouse_version"] for a in arts) or "nothing"
+at = "ABI revision %d (from %s)" % (own, own_from)
 
 def vkey(a):
     return [int(p) for p in a["clickhouse_version"].split("-")[0].split(".")]
@@ -625,6 +692,9 @@ def rank(a):
     return (vkey(a), build_of(a))
 
 if want_all:
+    if not arts:
+        sys.exit("unpublished: the release has nothing for %s-%s at %s: %s"
+                 % (os_, arch, at, served(on_platform, "rows for %s-%s" % (os_, arch))))
     # One per minor line — a release should not carry two patches of a line, but
     # if it does, the newer one is the one to install.
     best = {}
@@ -636,15 +706,22 @@ if want_all:
 else:
     hit = [a for a in arts if exact and a["clickhouse_version"] == exact]
     if strict and not hit:
-        sys.exit("unpublished: you asked for exactly ClickHouse %s on %s-%s and this release does "
-                 "not publish it (it has: %s).\n"
+        sys.exit("unpublished: you asked for exactly ClickHouse %s on %s-%s at %s and this release does "
+                 "not publish it at that revision: %s (at ABI revision %d it has: %s).\n"
                  "          Ask for the line (%s) to take what was published."
-                 % (exact, os_, arch, ", ".join(a["clickhouse_version"] for a in arts), line))
+                 % (exact, os_, arch, at,
+                    served([a for a in on_platform if a["clickhouse_version"] == exact],
+                           "that patch for %s-%s" % (os_, arch)),
+                    own, have, line))
     if not hit:
         hit = [a for a in arts if a["clickhouse_minor"] == line]
     if not hit:
-        sys.exit("unpublished: no artifact for ClickHouse line %s on %s-%s (it has: %s)"
-                 % (line, os_, arch, ", ".join(a["clickhouse_version"] for a in arts)))
+        sys.exit("unpublished: no artifact for ClickHouse line %s on %s-%s at %s: %s "
+                 "(at ABI revision %d it has: %s)"
+                 % (line, os_, arch, at,
+                    served([a for a in on_platform if a["clickhouse_minor"] == line],
+                           "that line for %s-%s" % (os_, arch)),
+                    own, have))
     # A line can carry more than one row: two patches, or the same patch built
     # twice (core keeps the two highest builds per version). Take the newest by
     # version and then by build, never by list order.

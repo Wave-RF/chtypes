@@ -48,6 +48,72 @@ pub struct IndexRow {
     /// The core commit the wrapper was built from; empty on an old row.
     #[serde(default)]
     pub core_commit: String,
+    /// The `chs_*` ABI revision the artifact was built from, or `None` when the
+    /// row declares none — or declares something that is not an integer, which
+    /// is read as none rather than failing the whole listing. The artifact
+    /// producer writes the field from the revision that introduced it onward,
+    /// so a row without it is an older revision. Fetch installs only a row at
+    /// this crate's own [`crate::ABI_REVISION`] (`docs/guides/fetch.md` §2): any
+    /// other would be refused at load.
+    #[serde(default, deserialize_with = "lenient_revision")]
+    pub abi_revision: Option<i32>,
+}
+
+/// `abi_revision` as an `i32` when it is a JSON integer, else `None`.
+fn lenient_revision<'de, D>(deserializer: D) -> std::result::Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_i64().and_then(|n| i32::try_from(n).ok()))
+}
+
+/// What the release DOES have for `noun`, for an unpublished message: the ABI
+/// revision(s) its rows carry, or that it has none at any revision.
+fn served(rows: &[&IndexRow], noun: &str) -> String {
+    if rows.is_empty() {
+        return format!("the release does not have {noun} at any ABI revision");
+    }
+    let mut revisions: Vec<i32> = rows.iter().filter_map(|r| r.abi_revision).collect();
+    revisions.sort_unstable();
+    revisions.dedup();
+    if revisions.is_empty() {
+        return format!("the release has {noun} only in rows that declare no ABI revision");
+    }
+    let mut said = if revisions.len() == 1 {
+        format!("ABI revision {}", revisions[0])
+    } else {
+        let list: Vec<String> = revisions.iter().map(ToString::to_string).collect();
+        format!("ABI revisions {}", list.join(", "))
+    };
+    if rows.iter().any(|r| r.abi_revision.is_none()) {
+        said.push_str(" and in rows that declare no ABI revision");
+    }
+    format!("the release has {noun} only at {said}")
+}
+
+/// The `offered` half of an [`Error::ArtifactUnpublished`] that the ABI
+/// revision decided: what the release has at `revision`, then what it has
+/// for the request at any other.
+pub(crate) fn unpublished_at_revision(
+    at_revision: &[&IndexRow],
+    any_revision: &[&IndexRow],
+    revision: i32,
+    noun: &str,
+) -> String {
+    let have: Vec<&str> = at_revision
+        .iter()
+        .map(|r| r.clickhouse_version.as_str())
+        .collect();
+    let have = if have.is_empty() {
+        "nothing".to_string()
+    } else {
+        have.join(", ")
+    };
+    format!(
+        "{have} at ABI revision {revision} (this SDK's); {}",
+        served(any_revision, noun)
+    )
 }
 
 impl IndexRow {
@@ -410,14 +476,18 @@ impl Release {
         (&self.index.license, &self.index.license_url)
     }
 
-    /// Every row for a platform, newest patch per minor line, in release order.
+    /// Every row for a platform at this crate's ABI revision, newest patch
+    /// (then highest build) per minor line, in release order. Rows of any
+    /// other revision, and rows that declare none, are never offered
+    /// (`docs/guides/fetch.md` §2).
     pub(crate) fn all(&self, platform: &str) -> Vec<&IndexRow> {
+        let revision = super::fetch_abi_revision();
         let mut best: BTreeMap<(u64, u64), &IndexRow> = BTreeMap::new();
         for row in self
             .index
             .artifacts
             .iter()
-            .filter(|r| r.platform() == platform)
+            .filter(|r| r.platform() == platform && r.abi_revision == Some(revision))
         {
             let key = minor_key(&row.clickhouse_minor);
             match best.get(&key) {
@@ -436,12 +506,14 @@ impl Release {
     }
 
     /// The one row for a request on a platform (`docs/guides/fetch.md` §2), complete
-    /// and agreeing with `SHA256SUMS` (§3 step 2).
+    /// and agreeing with `SHA256SUMS` (§3 step 2). Only rows at this crate's
+    /// ABI revision are considered, FIRST; the newest version, then the highest
+    /// build, is taken among them — never another revision's row.
     ///
     /// # Errors
     ///
     /// * [`Error::ArtifactUnpublished`] — nothing for the platform, the line,
-    ///   or the exact patch.
+    ///   or the exact patch at this crate's ABI revision.
     /// * [`Error::Fetch`] — the row is missing a field.
     /// * [`Error::ArtifactCorrupt`] — `index.json` and `SHA256SUMS` disagree
     ///   about the asset, or `SHA256SUMS` has no line for it.
@@ -469,22 +541,35 @@ impl Release {
                 format!("platforms {}", platforms.join(", "))
             }));
         }
-        let versions = || {
-            on_platform
-                .iter()
-                .map(|r| r.clickhouse_version.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let hits: Vec<&IndexRow> = on_platform
+        let revision = super::fetch_abi_revision();
+        let at_revision: Vec<&IndexRow> = on_platform
+            .iter()
+            .copied()
+            .filter(|r| r.abi_revision == Some(revision))
+            .collect();
+        let any_revision: Vec<&IndexRow> = on_platform
             .iter()
             .copied()
             .filter(|r| request.accepts(&r.clickhouse_version))
             .collect();
-        let row = hits
-            .into_iter()
+        let row = any_revision
+            .iter()
+            .copied()
+            .filter(|r| r.abi_revision == Some(revision))
             .max_by_key(|r| r.rank())
-            .ok_or_else(|| unpublished(versions()))?;
+            .ok_or_else(|| {
+                let noun = if request.exact.is_some() {
+                    format!("that patch for {platform}")
+                } else {
+                    format!("that line for {platform}")
+                };
+                unpublished(unpublished_at_revision(
+                    &at_revision,
+                    &any_revision,
+                    revision,
+                    &noun,
+                ))
+            })?;
         row.check_complete()?;
         self.cross_check(row)?;
         Ok(row)
@@ -647,6 +732,7 @@ mod build_tests {
             library_sha256: "bb".into(),
             build,
             core_commit: String::new(),
+            abi_revision: Some(crate::ABI_REVISION),
         }
     }
 
@@ -669,5 +755,151 @@ mod build_tests {
         let newer_version = row("25.8.33.6-lts", "b.tar.gz", 0);
         assert!(newer_build.rank() > older.rank());
         assert!(newer_version.rank() > newer_build.rank());
+    }
+}
+
+/// `docs/guides/fetch.md` §2: only rows at the crate's own ABI revision are ever
+/// selected, FIRST. The revision under test is always [`crate::ABI_REVISION`]
+/// itself (or one past it), never a typed number.
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+
+    const PLATFORM: &str = "linux-amd64";
+
+    fn row(version: &str, build: u32, abi_revision: Option<i32>) -> IndexRow {
+        IndexRow {
+            file: format!("chtypes-{version}-{PLATFORM}-b{build}.tar.gz"),
+            sha256: "a".repeat(64),
+            bytes: 1,
+            clickhouse_version: version.into(),
+            clickhouse_minor: super::super::minor_of(version),
+            os: "linux".into(),
+            arch: "amd64".into(),
+            library: "libchtypes.so".into(),
+            library_sha256: "b".repeat(64),
+            build,
+            core_commit: String::new(),
+            abi_revision,
+        }
+    }
+
+    /// A release over exactly these rows, each one listed in its signed sums.
+    fn release(rows: Vec<IndexRow>) -> Release {
+        let sums = rows
+            .iter()
+            .map(|r| (r.file.clone(), r.sha256.clone()))
+            .collect();
+        Release {
+            index: Index {
+                schema: 1,
+                license: String::new(),
+                license_url: String::new(),
+                artifacts: rows,
+            },
+            sums,
+            signed_by: None,
+            origin: "synthetic".into(),
+        }
+    }
+
+    fn request(spelling: &str) -> Request {
+        Request::parse(spelling).unwrap()
+    }
+
+    /// (a) Another revision's row with a HIGHER build, and a NEWER version in a
+    /// row that declares none, both lose to the one row at the crate's own
+    /// revision — in every listing order, for a line, an exact patch and --all.
+    #[test]
+    fn a_higher_build_at_another_revision_never_beats_the_own_revision() {
+        let own = crate::ABI_REVISION;
+        let mine = row("25.8.28.1-lts", 10, Some(own));
+        let higher_build_elsewhere = row("25.8.28.1-lts", 20, Some(own + 1));
+        let newer_undeclared = row("25.8.33.6-lts", 30, None);
+        for order in [
+            vec![
+                mine.clone(),
+                higher_build_elsewhere.clone(),
+                newer_undeclared.clone(),
+            ],
+            vec![
+                newer_undeclared.clone(),
+                higher_build_elsewhere.clone(),
+                mine.clone(),
+            ],
+            vec![
+                higher_build_elsewhere.clone(),
+                mine.clone(),
+                newer_undeclared.clone(),
+            ],
+        ] {
+            let rel = release(order);
+            for spelling in ["25.8", "25.8.28.1-lts", "25.8.28.1"] {
+                let got = rel.select(&request(spelling), PLATFORM).unwrap();
+                assert_eq!(got.file, mine.file, "{spelling}");
+            }
+            let all = rel.all(PLATFORM);
+            let files: Vec<&str> = all.iter().map(|r| r.file.as_str()).collect();
+            assert_eq!(files, vec![mine.file.as_str()]);
+        }
+    }
+
+    /// (b) Only another revision served: `CHTYPES_ARTIFACT_UNPUBLISHED` (exit 4),
+    /// never a fallback, naming the crate's revision and the served one.
+    #[test]
+    fn only_another_revision_served_is_unpublished_naming_both() {
+        let own = crate::ABI_REVISION;
+        let other = own + 1;
+        let rel = release(vec![
+            row("25.8.28.1-lts", 20, Some(other)),
+            row("26.7.3.19-stable", 20, Some(other)),
+        ]);
+        for spelling in ["25.8", "25.8.28.1-lts"] {
+            let err = rel.select(&request(spelling), PLATFORM).unwrap_err();
+            assert_eq!(err.artifact_code(), Some("CHTYPES_ARTIFACT_UNPUBLISHED"));
+            let message = err.to_string();
+            assert!(
+                message.contains(&format!("ABI revision {own} (this SDK's)")),
+                "{message}"
+            );
+            assert!(
+                message.contains(&format!("only at ABI revision {other}")),
+                "{message}"
+            );
+        }
+        assert!(rel.all(PLATFORM).is_empty());
+    }
+
+    /// (c) A row with no `abi_revision` — absent, or not an integer — is never
+    /// selected, even when it is the only row there is.
+    #[test]
+    fn a_row_without_an_abi_revision_is_never_selected() {
+        let rel = release(vec![row("25.8.28.1-lts", 0, None)]);
+        let err = rel.select(&request("25.8"), PLATFORM).unwrap_err();
+        assert_eq!(err.artifact_code(), Some("CHTYPES_ARTIFACT_UNPUBLISHED"));
+        assert!(err.to_string().contains("declare no ABI revision"), "{err}");
+        assert!(rel.all(PLATFORM).is_empty());
+
+        // What index.json can carry: the revision as a JSON integer is one; as
+        // a string, a float, null or a bool it is not — and none of them fails
+        // the rest of the row.
+        let own = crate::ABI_REVISION;
+        for (raw, want) in [
+            (serde_json::json!(own), Some(own)),
+            (serde_json::json!(own.to_string()), None),
+            (serde_json::json!(f64::from(own)), None),
+            (serde_json::Value::Null, None),
+            (serde_json::json!(true), None),
+        ] {
+            let parsed: IndexRow = serde_json::from_value(
+                serde_json::json!({"file": "x.tar.gz", "abi_revision": raw}),
+            )
+            .unwrap();
+            assert_eq!(parsed.abi_revision, want);
+            assert_eq!(parsed.file, "x.tar.gz");
+        }
+        let absent: IndexRow =
+            serde_json::from_value(serde_json::json!({"file": "x.tar.gz"})).unwrap();
+        assert_eq!(absent.abi_revision, None);
     }
 }

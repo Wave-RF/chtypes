@@ -27,11 +27,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
 
 // isolateEnv points every environment knob the fetch reads at nothing (or
@@ -142,6 +145,9 @@ func writeRelease(t *testing.T, dir string, priv ed25519.PrivateKey, arts ...tes
 			"os": a.os, "arch": a.arch, "file": file, "sha256": sha256Hex(tb), "bytes": len(tb),
 			"clickhouse_version": a.version, "clickhouse_minor": a.minor,
 			"library": a.library, "library_sha256": sha256Hex(a.content),
+			// The revision fetch is selecting at: the package's own, or the
+			// shared fixtures' while their suite runs.
+			"abi_revision": fetchABIRevision(),
 		})
 		fmt.Fprintf(&sums, "%s  %s\n", sha256Hex(tb), file)
 	}
@@ -908,7 +914,7 @@ func TestFetchCrossPlatformDest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(cache, "chtypes", "artifacts", other, "25.8")
+	want := filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(ABIRevision), other, "25.8")
 	if inst.Dir != want || inst.Platform != other {
 		t.Fatalf("Dir = %s, want %s (%+v)", inst.Dir, want, inst)
 	}
@@ -954,7 +960,7 @@ func TestUntarRefusesEscapes(t *testing.T) {
 func TestRegistrySearchPathOrder(t *testing.T) {
 	cache := isolateEnv(t)
 	host := HostPlatform()
-	cacheDir := filepath.Join(cache, "chtypes", "artifacts", host)
+	cacheDir := filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(ABIRevision), host)
 	sys := SystemRegistryDirs(host)
 	got := RegistrySearchPath("")
 	want := append([]string{cacheDir}, sys...)
@@ -997,7 +1003,7 @@ func TestMissingArtifactErrorVerbatim(t *testing.T) {
 	// construction succeed and a miss for another line reach §7.
 	cache := isolateEnv(t)
 	host := HostPlatform()
-	cacheDir := filepath.Join(cache, "chtypes", "artifacts", host)
+	cacheDir := filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(ABIRevision), host)
 	fake := fakeArtifact(host, "25.8.28.1-lts")
 	sub := filepath.Join(cacheDir, "25.8")
 	os.MkdirAll(sub, 0o755)
@@ -1282,11 +1288,13 @@ func mangleSignature(b []byte) []byte {
 // wrapper build. Getting the sort backwards would silently install an older
 // build, so the ordering is asserted directly and through selection.
 func TestBuildNumberOrdering(t *testing.T) {
+	rev := ABIRevision
 	row := func(version, file string, build int) ReleaseArtifact {
 		return ReleaseArtifact{
 			OS: "linux", Arch: "amd64", File: file, SHA256: strings.Repeat("a", 64),
 			Bytes: 1, ClickHouseVersion: version, ClickHouseMinor: minorOf(version),
 			Library: "libchtypes.so", LibrarySHA256: strings.Repeat("b", 64), Build: build,
+			ABIRevision: &rev,
 		}
 	}
 
@@ -1327,7 +1335,7 @@ func TestBuildNumberOrdering(t *testing.T) {
 		{older, newerBuild},
 		{newerBuild, older},
 	} {
-		f := &fetcher{platform: "linux-amd64", index: &ReleaseIndex{Schema: 1, Artifacts: order}}
+		f := &fetcher{platform: "linux-amd64", abiRevision: ABIRevision, index: &ReleaseIndex{Schema: 1, Artifacts: order}}
 		got, err := f.selectAll()
 		if err != nil {
 			t.Fatal(err)
@@ -1335,5 +1343,197 @@ func TestBuildNumberOrdering(t *testing.T) {
 		if len(got) != 1 || got[0].BuildNumber() != 2 {
 			t.Fatalf("selectAll picked %+v, want the build-2 row", got)
 		}
+	}
+}
+
+// ---------------------------------------------------------------- §2: the ABI revision
+
+// revisionRow is a synthetic index row for linux-amd64 at ABI revision rev
+// (nil: the row declares none).
+func revisionRow(version, file string, build int, rev *int) ReleaseArtifact {
+	return ReleaseArtifact{
+		OS: "linux", Arch: "amd64", File: file, SHA256: strings.Repeat("a", 64),
+		Bytes: 1, ClickHouseVersion: version, ClickHouseMinor: minorOf(version),
+		Library: "libchtypes.so", LibrarySHA256: strings.Repeat("b", 64), Build: build,
+		ABIRevision: rev,
+	}
+}
+
+// revisionFetcher selects over rows exactly as Ensure/FetchAll would, at this
+// package's own ABIRevision — the value a consumer's fetch uses.
+func revisionFetcher(t *testing.T, rows ...ReleaseArtifact) *fetcher {
+	t.Helper()
+	src, err := newSource("file://"+t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &fetcher{platform: "linux-amd64", abiRevision: ABIRevision, src: src,
+		index: &ReleaseIndex{Schema: 1, Artifacts: rows}}
+}
+
+// (a) A row at another revision with a HIGHER build, and a NEWER version in a
+// row that declares no revision, both lose to the one row at the binding's own
+// revision — in every listing order, for a line, an exact patch and --all.
+func TestSelectionTakesOnlyTheBindingsOwnABIRevision(t *testing.T) {
+	own, other := ABIRevision, ABIRevision+1
+	mine := revisionRow("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64-b10.tar.gz", 10, &own)
+	higherBuildElsewhere := revisionRow("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64-b20.tar.gz", 20, &other)
+	newerUndeclared := revisionRow("25.8.33.6-lts", "chtypes-25.8.33.6-lts-linux-amd64-b30.tar.gz", 30, nil)
+	for _, order := range [][]ReleaseArtifact{
+		{mine, higherBuildElsewhere, newerUndeclared},
+		{newerUndeclared, higherBuildElsewhere, mine},
+		{higherBuildElsewhere, mine, newerUndeclared},
+	} {
+		f := revisionFetcher(t, order...)
+		for _, req := range []struct{ spelling, line, exact string }{
+			{"25.8", "25.8", ""},
+			{"25.8.28.1-lts", "25.8", "25.8.28.1-lts"},
+			{"25.8.28.1", "25.8", "25.8.28.1"},
+		} {
+			got, err := f.selectArtifact(req.spelling, req.line, req.exact)
+			if err != nil {
+				t.Fatalf("%s: %v", req.spelling, err)
+			}
+			if got.File != mine.File {
+				t.Fatalf("%s: selected %s, want %s (the row at ABI revision %d)", req.spelling, got.File, mine.File, own)
+			}
+		}
+		all, err := f.selectAll()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(all) != 1 || all[0].File != mine.File {
+			t.Fatalf("selectAll = %+v, want only %s", all, mine.File)
+		}
+	}
+}
+
+// (b) Only other-revision rows: CHTYPES_ARTIFACT_UNPUBLISHED (exit 4), never a
+// fallback, and the message names the binding's revision and the served one.
+func TestSelectionRefusesWhenOnlyAnotherRevisionIsServed(t *testing.T) {
+	own, other := ABIRevision, ABIRevision+1
+	f := revisionFetcher(t,
+		revisionRow("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64-b20.tar.gz", 20, &other),
+		revisionRow("26.7.3.19-stable", "chtypes-26.7.3.19-stable-linux-amd64-b20.tar.gz", 20, &other))
+	names := []string{"ABI revision " + strconv.Itoa(own) + " (this SDK's)", "only at ABI revision " + strconv.Itoa(other)}
+	check := func(what string, err error) {
+		t.Helper()
+		ae := wantCode(t, err, CodeArtifactUnpublished)
+		if ExitCode(err) != 4 {
+			t.Fatalf("%s: exit %d, want 4", what, ExitCode(err))
+		}
+		for _, n := range names {
+			if !strings.Contains(ae.Msg, n) {
+				t.Fatalf("%s: message does not name %q: %s", what, n, ae.Msg)
+			}
+		}
+	}
+	_, err := f.selectArtifact("25.8", "25.8", "")
+	check("line", err)
+	_, err = f.selectArtifact("25.8.28.1-lts", "25.8", "25.8.28.1-lts")
+	check("exact", err)
+	_, err = f.selectAll()
+	check("--all", err)
+}
+
+// (c) A row with no abi_revision is never selected — whether the field is
+// absent or not an integer — even when it is the only row there is.
+func TestSelectionNeverTakesARowWithoutAnABIRevision(t *testing.T) {
+	f := revisionFetcher(t, revisionRow("25.8.28.1-lts", "chtypes-25.8.28.1-lts-linux-amd64.tar.gz", 0, nil))
+	_, lineErr := f.selectArtifact("25.8", "25.8", "")
+	_, allErr := f.selectAll()
+	for _, err := range []error{lineErr, allErr} {
+		ae := wantCode(t, err, CodeArtifactUnpublished)
+		if !strings.Contains(ae.Msg, "declare no ABI revision") || !strings.Contains(ae.Msg, "ABI revision "+strconv.Itoa(ABIRevision)) {
+			t.Fatalf("message: %s", ae.Msg)
+		}
+	}
+	// What index.json can actually carry: the binding's revision as a number
+	// is a revision; the same digits as a string, a float, null or a bool are
+	// not — and none of them fails the rest of the row.
+	own := strconv.Itoa(ABIRevision)
+	for raw, want := range map[string]bool{
+		own: true, `"` + own + `"`: false, own + ".0": false, "null": false, "true": false,
+	} {
+		var a ReleaseArtifact
+		if err := json.Unmarshal([]byte(`{"os":"linux","arch":"amd64","file":"x.tar.gz","abi_revision":`+raw+`}`), &a); err != nil {
+			t.Fatalf("abi_revision %s failed the whole row: %v", raw, err)
+		}
+		if got := a.atRevision(ABIRevision); got != want || a.File != "x.tar.gz" {
+			t.Fatalf("abi_revision %s: at revision %d = %v (file %q), want %v", raw, ABIRevision, got, a.File, want)
+		}
+	}
+	var absent ReleaseArtifact
+	if err := json.Unmarshal([]byte(`{"os":"linux","arch":"amd64","file":"x.tar.gz"}`), &absent); err != nil || absent.ABIRevision != nil {
+		t.Fatalf("absent abi_revision: %+v %v", absent, err)
+	}
+}
+
+// The per-user cache is keyed by the binding's own ABI revision — read off
+// ABIRevision, never typed — and the fetch test override does not move it.
+func TestDefaultRegistryDirIsKeyedByTheABIRevision(t *testing.T) {
+	cache := isolateEnv(t)
+	abi := "abi" + strconv.Itoa(ABIRevision)
+	want := filepath.Join(cache, "chtypes", "artifacts", abi, HostPlatform())
+	if DefaultRegistryDir() != want || FetchRegistryDir("") != want || RegistrySearchPath("")[0] != want {
+		t.Fatalf("DefaultRegistryDir = %s, FetchRegistryDir = %s, want %s", DefaultRegistryDir(), FetchRegistryDir(""), want)
+	}
+	if got := DefaultRegistryDirFor("linux-amd64"); got != filepath.Join(cache, "chtypes", "artifacts", abi, "linux-amd64") {
+		t.Fatalf("DefaultRegistryDirFor = %s", got)
+	}
+	f, err := newFetcher(FetchOptions{Platform: HostPlatform()})
+	if err != nil || f.dest != want || f.abiRevision != ABIRevision {
+		t.Fatalf("fetch selects at %d and writes to %s (%v), want %d and %s", f.abiRevision, f.dest, err, ABIRevision, want)
+	}
+	prev := testhook.FetchABIRevision
+	testhook.FetchABIRevision = ABIRevision + 1
+	t.Cleanup(func() { testhook.FetchABIRevision = prev })
+	if DefaultRegistryDir() != want {
+		t.Fatalf("the fetch override moved the registry: %s", DefaultRegistryDir())
+	}
+	if f, _ := newFetcher(FetchOptions{Platform: HostPlatform()}); f.abiRevision != ABIRevision+1 || f.dest != want {
+		t.Fatalf("override: fetcher selects at %d and writes to %s", f.abiRevision, f.dest)
+	}
+}
+
+// The fixture suites' override is derived, never typed, so the derivation
+// itself is pinned: one agreed revision is the answer; disagreement, a row
+// without one, or no release at all is an error.
+func TestFixtureABIRevisionIsDerivedFromTheFixtures(t *testing.T) {
+	write := func(dir, release string, revs ...any) {
+		t.Helper()
+		var rows []map[string]any
+		for _, r := range revs {
+			row := map[string]any{"file": "x.tar.gz"}
+			if r != nil {
+				row["abi_revision"] = r
+			}
+			rows = append(rows, row)
+		}
+		b, _ := json.Marshal(map[string]any{"schema": 1, "artifacts": rows})
+		if err := os.MkdirAll(filepath.Join(dir, release), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, release, "index.json"), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	if _, err := testhook.FixtureABIRevision(dir); err == nil {
+		t.Fatal("no release at all was an answer")
+	}
+	write(dir, "one", 7, 7)
+	write(dir, "two", 7)
+	if n, err := testhook.FixtureABIRevision(dir); err != nil || n != 7 {
+		t.Fatalf("agreeing fixtures = %d, %v; want 7", n, err)
+	}
+	write(dir, "three", 8)
+	if _, err := testhook.FixtureABIRevision(dir); err == nil || !strings.Contains(err.Error(), "disagree") {
+		t.Fatalf("disagreeing fixtures: %v", err)
+	}
+	dir = t.TempDir()
+	write(dir, "one", 7, nil)
+	if _, err := testhook.FixtureABIRevision(dir); err == nil || !strings.Contains(err.Error(), "no integer abi_revision") {
+		t.Fatalf("a row without abi_revision: %v", err)
 	}
 }

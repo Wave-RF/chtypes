@@ -8,8 +8,9 @@
  *
  *   1. a path given explicitly to the registry constructor
  *   2. `CHTYPES_REGISTRY`
- *   3. `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/<os>-<arch>` — the
- *      per-user cache, where fetch installs
+ *   3. `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>` — the
+ *      per-user cache, where fetch installs; R is this binding's `ABI_REVISION`,
+ *      so two SDK versions at different revisions never share it
  *   4. `/usr/local/share/chtypes/artifacts/<os>-<arch>`, then
  *      `/opt/chtypes/artifacts/<os>-<arch>` — system locations, reserved
  *
@@ -18,6 +19,7 @@
 
 import os from 'node:os';
 import path from 'node:path';
+import { ABI_REVISION } from './errors.js';
 
 /** The environment variable naming an explicit registry (§1 item 2). */
 export const ENV_REGISTRY = 'CHTYPES_REGISTRY';
@@ -46,9 +48,12 @@ export function cacheRoot(): string {
   return path.join(base, 'chtypes');
 }
 
-/** The per-user artifact cache for one platform — search-path slot (3). */
+/**
+ * The per-user artifact cache for one platform — search-path slot (3):
+ * `<cacheRoot>/artifacts/abi<R>/<platform>`, R this binding's `ABI_REVISION`.
+ */
 export function cacheRegistryDir(platform: string = hostPlatform()): string {
-  return path.join(cacheRoot(), 'artifacts', platform);
+  return path.join(cacheRoot(), 'artifacts', `abi${ABI_REVISION}`, platform);
 }
 
 /** The reserved system locations — search-path slot (4), never written by fetch. */
