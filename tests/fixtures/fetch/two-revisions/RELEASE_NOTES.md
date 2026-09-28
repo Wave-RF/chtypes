@@ -1,0 +1,32 @@
+chtypes native artifacts — `fixtures`
+
+Licensed under the Elastic License 2.0 (LICENSE, NOTICE beside this file).
+
+One tarball per (ClickHouse version, platform). Unpack into
+`<registry-dir>/<clickhouse_minor>/` — the layout `chtypes.NewRegistry` loads —
+or let the SDK's `scripts/fetch.sh` do it, which verifies the chain for you.
+
+| ClickHouse | platform | build | asset | bytes | library |
+|---|---|---|---|---|---|
+| 25.8.28.1-lts | darwin-arm64 | 105 | `chtypes-25.8.28.1-lts-darwin-arm64-b105.tar.gz` | 527 | `libchtypes.dylib` |
+| 25.8.28.1-lts | darwin-arm64 | 214 | `chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz` | 527 | `libchtypes.dylib` |
+| 26.7.3.19-stable | darwin-arm64 | 105 | `chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz` | 530 | `libchtypes.dylib` |
+| 26.7.3.19-stable | darwin-arm64 | 214 | `chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz` | 530 | `libchtypes.dylib` |
+| 25.8.28.1-lts | linux-amd64 | 105 | `chtypes-25.8.28.1-lts-linux-amd64-b105.tar.gz` | 523 | `libchtypes.so` |
+| 25.8.28.1-lts | linux-amd64 | 214 | `chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz` | 524 | `libchtypes.so` |
+| 26.7.3.19-stable | linux-amd64 | 105 | `chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz` | 525 | `libchtypes.so` |
+| 26.7.3.19-stable | linux-amd64 | 214 | `chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz` | 526 | `libchtypes.so` |
+| 25.8.28.1-lts | linux-arm64 | 105 | `chtypes-25.8.28.1-lts-linux-arm64-b105.tar.gz` | 522 | `libchtypes.so` |
+| 25.8.28.1-lts | linux-arm64 | 214 | `chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz` | 524 | `libchtypes.so` |
+| 26.7.3.19-stable | linux-arm64 | 105 | `chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz` | 525 | `libchtypes.so` |
+| 26.7.3.19-stable | linux-arm64 | 214 | `chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz` | 527 | `libchtypes.so` |
+
+`build` is the chtypes wrapper build (core's commit count). Rows of the
+same ClickHouse version and platform differ only in the wrapper linked
+into them; take the highest build. The listing keeps the two highest.
+
+Verification: `SHA256SUMS` covers every tarball; each tarball's
+`manifest.json` carries `library_sha256` for the library inside it.
+`SHA256SUMS.sig` is an ed25519 signature over the bytes of `SHA256SUMS`, key id
+`d1251e468f9156ef`; every SDK's fetch verifies it before reading anything else.
+`index.json` (schema 1) is the machine-readable listing.

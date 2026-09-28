@@ -11,7 +11,10 @@ file is the machine-readable form of the tables below.
 Each fixture directory is one release: `--url file://<absolute path>/<fixture>`
 (a `--url` base already names the release, so no tag is appended). The
 "libraries" inside the tarballs are a few bytes of text — nothing here dlopens.
-Signed with the TEST key in `test-key/` (`d1251e468f9156ef`), never the release key.
+Signed with the TEST key in `test-key/` (`d1251e468f9156ef`), never the release key. Every row in
+this set carries `abi_revision` 5 (`fixtures_abi_revision` in `expected.json`),
+read from the header rather than typed here, EXCEPT the rows inside `two-revisions/`,
+which deliberately span both revisions — see that section below.
 
 ## What each fixture publishes
 
@@ -24,9 +27,10 @@ Files in every release directory: `index.json`, `SHA256SUMS`, `SHA256SUMS.sig`
 (absent in `unsigned/`), `LICENSE`, `NOTICE`, `RELEASE_NOTES.md`, and one
 `chtypes-<version>-<os>-<arch>[-b<build>].tar.gz` per row, each holding
 `manifest.json`, the library it names, `CH_VERSION` and `unsafe_families.txt`.
-Every fixture but `two-builds/` carries ONE row per (platform, line), under the
-unsuffixed name an artifact built before 2026-09-10 has, which every consumer
-reads as build 0; `two-builds/` carries two, and is what pins the rule below.
+Every fixture but `two-builds/` and `two-revisions/` carries ONE row per (platform,
+line), under the unsuffixed name an artifact built before 2026-09-10 has, which
+every consumer reads as build 0; `two-builds/` and `two-revisions/` each carry two,
+and are what pin the rules below.
 
 ## Verdicts (`fetch 25.8 --platform linux-arm64`, or any published row)
 
@@ -55,7 +59,7 @@ Every fixture above answers *may this release be installed at all*. This one
 answers *which of its rows*, and it is the only place the 2026-09-10 wrapper-build
 rule is pinned by evidence rather than by prose:
 
-> filter to os/arch and the requested line, take the newest clickhouse_version, then the HIGHEST build; a row with no `build` (and a file name with no -b<N>) is build 0 (docs/guides/fetch.md §2)
+> FIRST filter to os/arch, the requested line and (the ABI-revision filter, docs/guides/fetch.md §2) the binding's own abi_revision — a row with none never matches a specific revision; THEN take the newest clickhouse_version, then the HIGHEST build; a row with no `build` (and a file name with no -b<N>) is build 0 (docs/guides/fetch.md §2). Every row in two-builds/ carries the SAME abi_revision (fixtures_abi_revision above), so the filter is a no-op here and this fixture still pins only the build tie-break; two-revisions/ below is what pins the filter itself, by making it the deciding factor.
 
 line 25.8 carries an UNSUFFIXED artifact from before wrapper builds existed (read as build 0) beside its rebuild; line 26.7 carries two explicitly suffixed builds. Both resolve to build 214.
 
@@ -77,6 +81,42 @@ table.
 
 Both rows are genuine, signed and hash-correct: a fetcher that installs the
 superseded one passes every check in §3 and is still wrong.
+
+## `two-revisions/` — WHICH row, once `abi_revision` is in play
+
+`two-builds/` above carries one `abi_revision` throughout (`fixtures_abi_revision`),
+so the build tie-break is the only thing deciding a row there. This fixture carries
+TWO lines, `25.8` and `26.7`, whose build/revision pairing is MIRRORED between them: on one
+the higher build sits on the high revision, on the other it sits on the low revision.
+ONE line is not enough — it only discriminates a real filter from a missing one at the
+revision where the higher build is NOT: at the other revision, filtered and unfiltered
+happen to agree, so a broken filter would pass by accident. Between the two lines,
+EVERY revision has (at least) one line where they genuinely diverge:
+
+> filter candidate rows to the binding's own abi_revision FIRST — a row with none never matches — THEN apply builds.rule's newest-version/highest-build tie-break. A revision this release does not serve is a loud, named refusal (CHTYPES_ARTIFACT_UNPUBLISHED-shaped: "no artifact at ABI revision R for line L on P"), never a silent fall-through to another revision's row.
+
+an UNFILTERED resolve (today's binding behavior, before the ABI-revision filter) skips the first half and installs the higher-build row regardless of its revision — the two-SDK-versions-on-one-machine collision the filter exists to stop. On `26.7` the higher build sits on the high revision, so filtering to the LOW revision is what differs from unfiltered; on `25.8`, the mirror, the higher build sits on the low revision, so filtering to the HIGH revision is what differs. Every case records the unfiltered row too, under `unfiltered`, so a suite can prove both halves: that filtering resists the higher build at whichever revision this line pins, and that an unfiltered call still behaves exactly as it does today.
+
+| revision | discriminating line (filtered ≠ unfiltered here) |
+|---|---|
+| 5 | `26.7` |
+| 6 | `25.8` |
+
+| platform | line | `--abi-revision 5` installs | build | `--abi-revision 6` installs | build | unfiltered installs | build |
+|---|---|---|---|---|---|---|---|
+| linux-arm64 | 26.7 | `chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz` | 105 | `chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz` | 214 | `chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz` | 214 |
+| linux-amd64 | 26.7 | `chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz` | 105 | `chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz` | 214 | `chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz` | 214 |
+| darwin-arm64 | 26.7 | `chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz` | 105 | `chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz` | 214 | `chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz` | 214 |
+| linux-arm64 | 25.8 | `chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz` | 214 | `chtypes-25.8.28.1-lts-linux-arm64-b105.tar.gz` | 105 | `chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz` | 214 |
+| linux-amd64 | 25.8 | `chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz` | 214 | `chtypes-25.8.28.1-lts-linux-amd64-b105.tar.gz` | 105 | `chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz` | 214 |
+| darwin-arm64 | 25.8 | `chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz` | 214 | `chtypes-25.8.28.1-lts-darwin-arm64-b105.tar.gz` | 105 | `chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz` | 214 |
+
+On `26.7`, filtering to abi_revision 5 must install the LOWER build despite the higher
+one being right there in the same release, signed and hash-correct; on `25.8`, the
+mirror, filtering to abi_revision 6 does the same. A binding that resolves by build
+alone, ignoring the filter, gets ONE of the two lines wrong at whichever revision it
+runs at — never both, which is why both lines exist. `expected.json`'s
+`revisions.cases` is the machine-readable form of this table.
 
 ## `abi-revision/` — a GENERATOR, not a release
 
