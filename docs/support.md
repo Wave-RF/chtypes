@@ -103,12 +103,12 @@ Read from the live index: revision 4 is whichever revision the served `abi_revis
 | `26.7` | `darwin-arm64` | `1789830374` | `1790618314` |
 | `26.7` | `linux-amd64` | `1789830374` | `1790618314` |
 | `26.7` | `linux-arm64` | `1789830374` | `1790618314` |
-| `26.8` | `darwin-arm64` | `1790001762` | `1790604462` |
-| `26.8` | `linux-amd64` | `1790001762` | `1790604462` |
-| `26.8` | `linux-arm64` | `1790001762` | `1790604462` |
-| `26.9` | `darwin-arm64` | — | `1790604462` |
-| `26.9` | `linux-amd64` | — | `1790604462` |
-| `26.9` | `linux-arm64` | — | `1790604462` |
+| `26.8` | `darwin-arm64` | `1790001762` | `1790632171` |
+| `26.8` | `linux-amd64` | `1790001762` | `1790632171` |
+| `26.8` | `linux-arm64` | `1790001762` | `1790632171` |
+| `26.9` | `darwin-arm64` | — | `1790632171` |
+| `26.9` | `linux-amd64` | — | `1790632171` |
+| `26.9` | `linux-arm64` | — | `1790632171` |
 
 Every line/platform pairing above either has a build for every revision the index writes explicitly, or is excluded by design (marked above), or reads **—** at revision 4, where the index carries no row for it at all and this script does not guess why (see above) — never merely "not yet published" without one of those reasons.
 
