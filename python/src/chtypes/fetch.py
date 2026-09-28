@@ -551,8 +551,8 @@ class Release:
             raise ArtifactUnpublishedError(
                 f"chtypes: you asked for exactly ClickHouse {exact} on {platform} at ABI "
                 f"revision {rev} (this SDK's) and {self.source} does not publish it at that "
-                f"revision: {_served(any_revision, f'that patch for {platform}')} (at ABI "
-                f"revision {rev} it has: {have or 'nothing'}). "
+                f"revision: {_served(any_revision, f'that patch for {platform}')}; at ABI "
+                f"revision {rev} the release has: {have or 'nothing'}. "
                 f"Ask for the line ({line}) to take what was published."
             )
         for e in self.offered(platform):
@@ -562,8 +562,8 @@ class Release:
         raise ArtifactUnpublishedError(
             f"chtypes: no artifact for ClickHouse line {line} on {platform} at ABI revision "
             f"{rev} (this SDK's) at {self.source}: "
-            f"{_served(any_revision, f'that line for {platform}')} "
-            f"(at ABI revision {rev} it has: {have or 'nothing'})"
+            f"{_served(any_revision, f'that line for {platform}')}"
+            f"; at ABI revision {rev} the release has: {have or 'nothing'}"
         )
 
 

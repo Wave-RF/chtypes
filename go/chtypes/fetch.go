@@ -1095,7 +1095,7 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"you asked for exactly ClickHouse %s on %s at ABI revision %d (this SDK's) and the release at %s does not publish it at that revision: %s (at ABI revision %d it has: %s). Ask for the line (%s) to take what was published",
+				"you asked for exactly ClickHouse %s on %s at ABI revision %d (this SDK's) and the release at %s does not publish it at that revision: %s; at ABI revision %d the release has: %s. Ask for the line (%s) to take what was published",
 				exact, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that patch for "+f.platform),
 				f.abiRevision, versionsOf(rows), line)
 		}
@@ -1110,7 +1110,7 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"no artifact for ClickHouse line %s on %s at ABI revision %d (this SDK's) at %s: %s (at ABI revision %d it has: %s)",
+				"no artifact for ClickHouse line %s on %s at ABI revision %d (this SDK's) at %s: %s; at ABI revision %d the release has: %s",
 				line, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that line for "+f.platform),
 				f.abiRevision, versionsOf(rows))
 		}

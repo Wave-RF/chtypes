@@ -199,30 +199,25 @@ def test_the_per_user_cache_is_keyed_by_the_abi_revision(
     assert fetch_module._fetch_abi_revision() == OTHER
 
 
-def test_the_fixture_revision_is_derived_never_typed(
+def test_the_fixture_revision_is_the_declared_field(
     tmp_path: Path, derive_fixture_abi_revision: Callable[[Path], int]
 ) -> None:
-    """The fetch-fixture suites' override is read off the fixtures, so the
-    derivation itself is pinned: one agreed revision is the answer;
-    disagreement, a row without one, or no release at all is an error."""
+    """The fetch-fixture suites' override is the fixtures' own declaration:
+    expected.json's fixtures_abi_revision is the answer, and a set that does not
+    declare one — or declares something that is not an integer — is an error."""
 
-    def write(root: Path, release: str, *revisions: int | None) -> None:
-        rows = [{"file": "x"} | ({} if r is None else {"abi_revision": r}) for r in revisions]
-        (root / release).mkdir(parents=True, exist_ok=True)
-        (root / release / "index.json").write_text(json.dumps({"schema": 1, "artifacts": rows}))
+    def at(body: dict) -> Path:
+        root = tmp_path / str(len(list(tmp_path.iterdir())))
+        root.mkdir()
+        (root / "expected.json").write_text(json.dumps(body))
+        return root
 
-    with pytest.raises(AssertionError):
-        derive_fixture_abi_revision(tmp_path)
-    write(tmp_path, "one", 7, 7)
-    write(tmp_path, "two", 7)
-    assert derive_fixture_abi_revision(tmp_path) == 7
-    write(tmp_path, "three", 8)
-    with pytest.raises(AssertionError, match="disagree"):
-        derive_fixture_abi_revision(tmp_path)
-    other = tmp_path / "other"
-    write(other, "one", 7, None)
-    with pytest.raises(AssertionError, match="no integer abi_revision"):
-        derive_fixture_abi_revision(other)
+    assert derive_fixture_abi_revision(at({"schema": 1, "fixtures_abi_revision": 7})) == 7
+    with pytest.raises(AssertionError, match="declares no fixtures_abi_revision"):
+        derive_fixture_abi_revision(at({"schema": 1}))
+    for bad in ("7", 7.5, True, None):
+        with pytest.raises(AssertionError, match="not an integer"):
+            derive_fixture_abi_revision(at({"schema": 1, "fixtures_abi_revision": bad}))
 
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "fetch"

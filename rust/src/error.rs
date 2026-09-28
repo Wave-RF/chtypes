@@ -413,7 +413,7 @@ pub enum Error {
     /// a hard requirement) on this platform (`docs/guides/fetch.md` §2). Code
     /// [`CODE_ARTIFACT_UNPUBLISHED`].
     #[error(
-        "chtypes: {origin} publishes no artifact for ClickHouse {requested} on {platform} (it has: {offered})"
+        "chtypes: {origin} publishes no artifact for ClickHouse {requested} on {platform}: {offered}"
     )]
     ArtifactUnpublished {
         /// The line or exact patch that was asked for.
@@ -422,7 +422,9 @@ pub enum Error {
         platform: String,
         /// The source that was consulted.
         origin: String,
-        /// What the release does publish, for the message.
+        /// What the release does publish, as a clause for the message — `it
+        /// has …`, or, when the ABI revision decided it, what the release has
+        /// for the request and what it has at this crate's revision.
         offered: String,
     },
 

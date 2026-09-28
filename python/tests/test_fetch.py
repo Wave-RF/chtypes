@@ -141,6 +141,111 @@ def test_a_rebuild_installs_the_highest_build(case: dict, dest: Path) -> None:
     assert hashlib.sha256(library.read_bytes()).hexdigest() != other["library_sha256"]
 
 
+# ------------------------------------------- §2: two-revisions/, the filter itself
+
+
+def _revisions() -> dict:
+    return (_expected().get("revisions") or {}) if EXPECTED_FILE.is_file() else {}
+
+
+def _pick_at(revisions: dict, case: dict, rev: int) -> dict:
+    """expected.json's row for ``case`` at revision ``rev``: low or high."""
+    if rev == revisions["low_revision"]:
+        return case["at_low_revision"]
+    if rev == revisions["high_revision"]:
+        return case["at_high_revision"]
+    raise AssertionError(f"revision {rev} is neither low nor high in expected.json")
+
+
+def _fetch_at_revision(
+    revisions: dict, case: dict, rev: int, dest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fetch one line of two-revisions/ with fetch selecting at ``rev``, and check
+    that what was chosen and what landed is expected.json's row for it: the
+    file, its sha256, the row's own build and abi_revision, the library bytes."""
+    want = _pick_at(revisions, case, rev)
+    monkeypatch.setattr(fetch_module, "_ABI_REVISION_OVERRIDE", rev)
+    fetcher = Fetcher(
+        dest=dest,
+        platform=case["platform"],
+        url=_url(revisions["fixture"]),
+        trusted_keys=_test_keys(),
+    )
+    entry = fetcher.release().select(case["line"], case["platform"])
+    assert (entry.file, entry.sha256, entry.build_number, entry.abi_revision) == (
+        want["file"],
+        want["sha256"],
+        want["build"],
+        want["abi_revision"],
+    ), (case["platform"], case["line"], rev)
+    assert want["abi_revision"] == rev
+    installed = fetcher.ensure(case["line"])
+    index = json.loads((FIXTURES / revisions["fixture"] / "index.json").read_text())
+    (row,) = [a for a in index["artifacts"] if a["file"] == want["file"]]
+    _assert_installed(installed, row)
+
+
+@pytest.mark.parametrize(
+    ("case", "which"),
+    [(c, w) for c in _revisions().get("cases", []) for w in ("low_revision", "high_revision")],
+    ids=lambda v: (
+        v if isinstance(v, str) else f"{v['platform']}-{v['line']}"  # (case, which) halves
+    ),
+)
+def test_two_revisions_pick_the_row_at_each_revision(
+    case: dict, which: str, dest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every case of expected.json's revisions, at the low and at the high
+    revision: the pick is at_low_revision / at_high_revision — every expected
+    value read from expected.json."""
+    revisions = _revisions()
+    _fetch_at_revision(revisions, case, revisions[which], dest, monkeypatch)
+
+
+@pytest.mark.parametrize(
+    "discriminating",
+    _revisions().get("discriminating_lines", []),
+    ids=lambda d: f"abi{d['revision']}-{d['line']}",
+)
+def test_two_revisions_filter_changes_the_answer(
+    discriminating: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On the discriminating lines expected.json names, the pick at that
+    revision DIFFERS from the unfiltered one: the filter decided it, not two
+    rules that happened to agree."""
+    revisions = _revisions()
+    cases = [c for c in revisions["cases"] if c["line"] == discriminating["line"]]
+    assert cases, f"no case for discriminating line {discriminating['line']}"
+    for i, case in enumerate(cases):
+        want = _pick_at(revisions, case, discriminating["revision"])
+        assert want["file"] != case["unfiltered"]["file"], (
+            f"{case['platform']} {case['line']}: expected.json's pick is the unfiltered one"
+        )
+        _fetch_at_revision(
+            revisions, case, discriminating["revision"], tmp_path / str(i), monkeypatch
+        )
+
+
+def test_two_revisions_one_past_the_high_revision_is_unpublished(
+    dest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The negative control: nothing is served at high_revision + 1."""
+    revisions = _revisions()
+    assert revisions.get("cases"), "expected.json carries no revisions cases"
+    case = revisions["cases"][0]
+    monkeypatch.setattr(fetch_module, "_ABI_REVISION_OVERRIDE", revisions["high_revision"] + 1)
+    with pytest.raises(chtypes.ArtifactUnpublishedError) as err:
+        ensure(
+            case["line"],
+            platform=case["platform"],
+            url=_url(revisions["fixture"]),
+            dest=dest,
+            trusted_keys=_test_keys(),
+        )
+    assert f"ABI revision {revisions['high_revision'] + 1} (this SDK's)" in str(err.value)
+    assert not (dest / case["line"]).exists()
+
+
 @pytest.mark.parametrize(
     "verdict",
     _expected()["verdicts"] if EXPECTED_FILE.is_file() else [],

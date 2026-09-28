@@ -157,25 +157,23 @@ describe('fetch selects only the binding’s own ABI revision (docs/guides/fetch
   });
 });
 
-describe('the fixture revision is derived from the fixtures, never typed', () => {
-  const write = (root: string, release: string, ...revisions: (number | null)[]): void => {
-    mkdirSync(path.join(root, release), { recursive: true });
-    const artifacts = revisions.map((r) => (r === null ? { file: 'x' } : { file: 'x', abi_revision: r }));
-    writeFileSync(path.join(root, release, 'index.json'), JSON.stringify({ schema: 1, artifacts }));
+describe('the fixture revision is the fixtures’ own declaration, never typed', () => {
+  const at = (root: string, name: string, body: unknown): string => {
+    const dir = path.join(root, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'expected.json'), JSON.stringify(body));
+    return dir;
   };
 
-  it('one agreed revision is the answer; disagreement, a missing one, or no release is an error', () => {
+  it('expected.json’s fixtures_abi_revision is the answer; missing or not an integer is an error', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'chtypes-fixture-rev-'));
     try {
-      expect(() => fixtureAbiRevision(root)).toThrow();
-      write(root, 'one', 7, 7);
-      write(root, 'two', 7);
-      expect(fixtureAbiRevision(root)).toBe(7);
-      write(root, 'three', 8);
-      expect(() => fixtureAbiRevision(root)).toThrow(/disagree/);
-      const other = path.join(root, 'other');
-      write(other, 'one', 7, null);
-      expect(() => fixtureAbiRevision(other)).toThrow(/no integer abi_revision/);
+      expect(fixtureAbiRevision(at(root, 'ok', { schema: 1, fixtures_abi_revision: 7 }))).toBe(7);
+      expect(() => fixtureAbiRevision(at(root, 'missing', { schema: 1 }))).toThrow(/declares no fixtures_abi_revision/);
+      for (const [i, bad] of ['7', 7.5, true, null].entries()) {
+        expect(() => fixtureAbiRevision(at(root, `bad${i}`, { schema: 1, fixtures_abi_revision: bad }))).toThrow(/not an integer/);
+      }
+      expect(() => fixtureAbiRevision(path.join(root, 'absent'))).toThrow();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

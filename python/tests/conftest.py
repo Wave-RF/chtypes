@@ -28,40 +28,29 @@ FETCH_FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "f
 
 
 def _fixture_abi_revision(fixtures: Path) -> int:
-    """The one ``abi_revision`` every row of every fixture release under
-    ``fixtures`` carries (one release per subdirectory with an ``index.json``).
+    """The ABI revision the fixture set under ``fixtures`` DECLARES, as
+    ``expected.json``'s ``fixtures_abi_revision``: the revision every fixture's
+    rows carry except ``two-revisions/``'s, which deliberately spans two.
 
-    DERIVED from the fixtures' own bytes, never typed into a test: a suite that
-    hand-set it would be testing its author's belief about the fixtures, not
-    the fetch. Anything short of one unambiguous answer — no release, a row
-    without an integer ``abi_revision``, rows that disagree — raises."""
-    indexes = sorted(fixtures.glob("*/index.json"))
-    if not indexes:
-        raise AssertionError(f"no <release>/index.json under {fixtures}")
-    seen: dict[int, list[str]] = {}
-    for index in indexes:
-        rows = json.loads(index.read_text()).get("artifacts") or []
-        if not rows:
-            raise AssertionError(f"{index} lists no artifacts")
-        for i, row in enumerate(rows):
-            rev = row.get("abi_revision")
-            if not isinstance(rev, int) or isinstance(rev, bool):
-                raise AssertionError(f"{index}: row {i} carries no integer abi_revision ({rev!r})")
-            releases = seen.setdefault(rev, [])
-            if index.parent.name not in releases:
-                releases.append(index.parent.name)
-    if len(seen) != 1:
-        parts = "; ".join(f"{rev} in {', '.join(names)}" for rev, names in sorted(seen.items()))
+    Read from the fixtures' own declaration, never typed into a test: a suite
+    that hand-set it would be testing its author's belief about the fixtures,
+    not the fetch. A missing or non-integer field raises."""
+    expected = fixtures / "expected.json"
+    doc = json.loads(expected.read_text())
+    if "fixtures_abi_revision" not in doc:
         raise AssertionError(
-            f"the fixture releases under {fixtures} disagree on abi_revision ({parts}); "
-            f"there is no one revision to fetch them at"
+            f"{expected} declares no fixtures_abi_revision — regenerate the fixtures from the "
+            f"artifact producer's current set"
         )
-    return next(iter(seen))
+    rev = doc["fixtures_abi_revision"]
+    if not isinstance(rev, int) or isinstance(rev, bool):
+        raise AssertionError(f"{expected}: fixtures_abi_revision is {rev!r}, not an integer")
+    return rev
 
 
 @pytest.fixture
 def derive_fixture_abi_revision() -> Callable[[Path], int]:
-    """The derivation itself, for the test that pins it."""
+    """The declared-field reader itself, for the test that pins it."""
     return _fixture_abi_revision
 
 
@@ -69,8 +58,8 @@ def derive_fixture_abi_revision() -> Callable[[Path], int]:
 def at_fixture_revision(monkeypatch: pytest.MonkeyPatch) -> int:
     """Fetch selects only rows at the binding's own ABI revision
     (docs/guides/fetch.md §2); the fixtures carry whatever revision they were
-    generated at. Point the test-only override at THAT revision — read off
-    the fixtures' own index.json rows — for this test, and return it."""
+    generated at, and declare it. Point the test-only override at THAT revision —
+    read from expected.json's ``fixtures_abi_revision`` — for this test, and return it."""
     from chtypes import fetch as fetch_module
 
     rev = _fixture_abi_revision(FETCH_FIXTURES)

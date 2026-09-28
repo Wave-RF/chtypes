@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -24,69 +23,39 @@ import (
 // directory stays abi<ABIRevision>/, and the loader still refuses an artifact
 // of another revision.
 //
-// The fetch-fixture suites set it to FixtureABIRevision's answer for their
+// The fetch-fixture suites set it to FixturesABIRevision's answer for their
 // fixture set, so a binding whose own revision has moved ahead of the
-// fixtures still exercises the whole chain. Nothing else may set it; the
-// command's `list` reads it too, so what it shows agrees with what fetch
-// would install.
+// fixtures still exercises the whole chain, and to the two-revisions/
+// fixture's low and high revisions to pin the filter itself. Nothing else may
+// set it; the command's `list` reads it too, so what it shows agrees with
+// what fetch would install.
 var FetchABIRevision int
 
-// FixtureABIRevision reads every fixture release under dir — the
-// tests/fixtures/fetch tree, one release per subdirectory holding an
-// index.json — and returns the one abi_revision all of their rows carry.
+// FixturesABIRevision is the ABI revision the fixture set under dir (the
+// tests/fixtures/fetch tree) DECLARES in its expected.json, as
+// `fixtures_abi_revision`: the revision every fixture's rows carry except
+// two-revisions/, which deliberately spans two.
 //
-// The revision is DERIVED from the fixtures' own bytes, never typed into a
-// test: a suite that hand-set it would be testing its author's belief about
-// the fixtures, not the fetch. So anything short of one unambiguous answer is
-// an error — no release found, a row with no integer abi_revision, or rows
-// that disagree.
-func FixtureABIRevision(dir string) (int, error) {
-	indexes, err := filepath.Glob(filepath.Join(dir, "*", "index.json"))
+// It is read from the fixtures' own declaration, never typed into a test: a
+// suite that hand-set it would be testing its author's belief about the
+// fixtures, not the fetch. A missing or non-integer field is an error.
+func FixturesABIRevision(dir string) (int, error) {
+	path := filepath.Join(dir, "expected.json")
+	blob, err := os.ReadFile(path)
 	if err != nil {
 		return 0, err
 	}
-	sort.Strings(indexes)
-	if len(indexes) == 0 {
-		return 0, fmt.Errorf("no <release>/index.json under %s", dir)
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(blob, &doc); err != nil {
+		return 0, fmt.Errorf("%s: %w", path, err)
 	}
-	seen := map[int][]string{}
-	for _, path := range indexes {
-		blob, err := os.ReadFile(path)
-		if err != nil {
-			return 0, err
-		}
-		var doc struct {
-			Artifacts []map[string]json.RawMessage `json:"artifacts"`
-		}
-		if err := json.Unmarshal(blob, &doc); err != nil {
-			return 0, fmt.Errorf("%s: %w", path, err)
-		}
-		if len(doc.Artifacts) == 0 {
-			return 0, fmt.Errorf("%s lists no artifacts", path)
-		}
-		for i, row := range doc.Artifacts {
-			raw, ok := row["abi_revision"]
-			n, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-			if !ok || err != nil {
-				return 0, fmt.Errorf("%s: row %d carries no integer abi_revision (%s)", path, i, raw)
-			}
-			rel, _ := filepath.Rel(dir, path)
-			if list := seen[n]; len(list) == 0 || list[len(list)-1] != rel {
-				seen[n] = append(list, rel)
-			}
-		}
+	raw, ok := doc["fixtures_abi_revision"]
+	if !ok {
+		return 0, fmt.Errorf("%s declares no fixtures_abi_revision — regenerate the fixtures from the artifact producer's current set", path)
 	}
-	if len(seen) != 1 {
-		var parts []string
-		for n, files := range seen {
-			parts = append(parts, fmt.Sprintf("%d in %s", n, strings.Join(files, ", ")))
-		}
-		sort.Strings(parts)
-		return 0, fmt.Errorf("the fixture releases under %s disagree on abi_revision (%s); there is no one revision to fetch them at",
-			dir, strings.Join(parts, "; "))
+	n, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return 0, fmt.Errorf("%s: fixtures_abi_revision is %s, not an integer", path, raw)
 	}
-	for n := range seen {
-		return n, nil
-	}
-	panic("unreachable")
+	return n, nil
 }

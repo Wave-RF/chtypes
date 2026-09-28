@@ -60,68 +60,37 @@ fn fixtures_path() -> PathBuf {
     dir.canonicalize().unwrap_or(dir)
 }
 
-/// The one `abi_revision` every row of every fixture release under `fx`
-/// carries (one release per subdirectory holding an `index.json`).
+/// The ABI revision the fixture set under `fx` DECLARES, as `expected.json`'s
+/// `fixtures_abi_revision`: the revision every fixture's rows carry except
+/// `two-revisions/`'s, which deliberately spans two.
 ///
 /// Fetch selects only rows at the crate's own ABI revision
 /// (`docs/guides/fetch.md` §2), and the fixtures are generated at whatever
 /// revision the artifact producer was at — so this suite fetches them at THIS
-/// revision, through the crate's test-only override. DERIVED from the fixtures'
-/// own bytes, never typed: a suite that hand-set it would be testing its
-/// author's belief about the fixtures, not the fetch. Anything short of one
-/// unambiguous answer — no release, a row without an integer `abi_revision`,
-/// rows that disagree — is an error.
+/// revision, through the crate's test-only override. Read from the fixtures'
+/// own declaration, never typed: a suite that hand-set it would be testing its
+/// author's belief about the fixtures, not the fetch. A missing or non-integer
+/// field is an error.
 fn fixture_abi_revision(fx: &Path) -> Result<i32, String> {
-    let mut releases: Vec<PathBuf> = std::fs::read_dir(fx)
-        .map_err(|e| format!("{}: {e}", fx.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path().join("index.json")))
-        .filter(|p| p.is_file())
-        .collect();
-    releases.sort();
-    if releases.is_empty() {
-        return Err(format!("no <release>/index.json under {}", fx.display()));
-    }
-    let mut seen: std::collections::BTreeMap<i64, Vec<String>> = Default::default();
-    for index in &releases {
-        let doc: Json = serde_json::from_slice(&std::fs::read(index).map_err(|e| e.to_string())?)
-            .map_err(|e| format!("{}: {e}", index.display()))?;
-        let rows = doc["artifacts"].as_array().cloned().unwrap_or_default();
-        if rows.is_empty() {
-            return Err(format!("{} lists no artifacts", index.display()));
-        }
-        let release = index
-            .parent()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        for (i, row) in rows.iter().enumerate() {
-            let Some(rev) = row["abi_revision"].as_i64() else {
-                return Err(format!(
-                    "{}: row {i} carries no integer abi_revision ({})",
-                    index.display(),
-                    row["abi_revision"]
-                ));
-            };
-            let names = seen.entry(rev).or_default();
-            if !names.contains(&release) {
-                names.push(release.clone());
-            }
-        }
-    }
-    if seen.len() != 1 {
-        let parts: Vec<String> = seen
-            .iter()
-            .map(|(rev, names)| format!("{rev} in {}", names.join(", ")))
-            .collect();
+    let path = fx.join("expected.json");
+    let text = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let doc: Json =
+        serde_json::from_slice(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let Some(raw) = doc.get("fixtures_abi_revision") else {
         return Err(format!(
-            "the fixture releases under {} disagree on abi_revision ({}); there is no one \
-             revision to fetch them at",
-            fx.display(),
-            parts.join("; ")
+            "{} declares no fixtures_abi_revision — regenerate the fixtures from the artifact \
+             producer's current set",
+            path.display()
         ));
-    }
-    let rev = *seen.keys().next().expect("one revision");
-    i32::try_from(rev).map_err(|_| format!("abi_revision {rev} is not an i32"))
+    };
+    raw.as_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .ok_or_else(|| {
+            format!(
+                "{}: fixtures_abi_revision is {raw}, not an integer",
+                path.display()
+            )
+        })
 }
 
 /// [`fixture_abi_revision`], or a loud failure.
@@ -1882,40 +1851,234 @@ fn the_fixtures_are_fetched_at_their_own_revision_and_no_other() {
     }
 }
 
-/// The fixture revision is derived, never typed, so the derivation itself is
-/// pinned: one agreed revision is the answer; disagreement, a row without one,
-/// or no release at all is an error.
+/// The fixture revision is the fixtures' own declaration, never typed:
+/// `expected.json`'s `fixtures_abi_revision` is the answer, and a set that does
+/// not declare one — or declares something that is not an integer — is an
+/// error.
 #[test]
-fn the_fixture_revision_is_derived_never_typed() {
-    fn write(root: &Path, release: &str, revisions: &[Option<i64>]) {
-        std::fs::create_dir_all(root.join(release)).unwrap();
-        let artifacts: Vec<Json> = revisions
-            .iter()
-            .map(|r| match r {
-                Some(r) => serde_json::json!({"file": "x", "abi_revision": r}),
-                None => serde_json::json!({"file": "x"}),
-            })
-            .collect();
-        let doc = serde_json::json!({"schema": 1, "artifacts": artifacts});
+fn the_fixture_revision_is_the_declared_field() {
+    fn at(root: &Path, name: &str, body: Json) -> PathBuf {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
-            root.join(release).join("index.json"),
-            serde_json::to_vec(&doc).unwrap(),
+            dir.join("expected.json"),
+            serde_json::to_vec(&body).unwrap(),
         )
         .unwrap();
+        dir
     }
     let root = tmp("fixture-revision");
-    assert!(fixture_abi_revision(&root).is_err(), "no release at all");
-    write(&root, "one", &[Some(7), Some(7)]);
-    write(&root, "two", &[Some(7)]);
-    assert_eq!(fixture_abi_revision(&root), Ok(7));
-    write(&root, "three", &[Some(8)]);
-    let err = fixture_abi_revision(&root).unwrap_err();
-    assert!(err.contains("disagree"), "{err}");
-    let other = tmp("fixture-revision-other");
-    write(&other, "one", &[Some(7), None]);
-    let err = fixture_abi_revision(&other).unwrap_err();
-    assert!(err.contains("no integer abi_revision"), "{err}");
-    for d in [root, other] {
-        std::fs::remove_dir_all(&d).ok();
+    let ok = at(
+        &root,
+        "ok",
+        serde_json::json!({"schema": 1, "fixtures_abi_revision": 7}),
+    );
+    assert_eq!(fixture_abi_revision(&ok), Ok(7));
+    let missing = at(&root, "missing", serde_json::json!({"schema": 1}));
+    let err = fixture_abi_revision(&missing).unwrap_err();
+    assert!(err.contains("declares no fixtures_abi_revision"), "{err}");
+    for (i, bad) in [
+        serde_json::json!("7"),
+        serde_json::json!(7.5),
+        serde_json::json!(true),
+        Json::Null,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let dir = at(
+            &root,
+            &format!("bad{i}"),
+            serde_json::json!({"schema": 1, "fixtures_abi_revision": bad}),
+        );
+        let err = fixture_abi_revision(&dir).unwrap_err();
+        assert!(err.contains("not an integer"), "{err}");
     }
+    assert!(fixture_abi_revision(&root.join("absent")).is_err());
+    std::fs::remove_dir_all(&root).ok();
+}
+
+// ------------------------------------------ two-revisions/: the filter itself
+
+/// `expected.json`'s pick for one case at one revision: low or high.
+fn pick_at<'a>(revisions: &Json, case: &'a Json, revision: i64) -> &'a Json {
+    if revision == revisions["low_revision"].as_i64().unwrap() {
+        &case["at_low_revision"]
+    } else if revision == revisions["high_revision"].as_i64().unwrap() {
+        &case["at_high_revision"]
+    } else {
+        panic!("revision {revision} is neither low nor high in expected.json")
+    }
+}
+
+/// Fetch one line of `two-revisions/` with fetch selecting at `revision`, and
+/// check what was chosen and what landed is `expected.json`'s row: the file,
+/// its sha256, the row's own build and `abi_revision`, and the library bytes.
+/// Announces each case on the real stderr, so a log shows what ran.
+fn fetch_at_revision(fx: &Path, revisions: &Json, case: &Json, revision: i64, scratch: &str) {
+    let want = pick_at(revisions, case, revision);
+    assert_eq!(want["abi_revision"].as_i64(), Some(revision));
+    let fixture = revisions["fixture"].as_str().unwrap();
+    let platform = case["platform"].as_str().unwrap();
+    let line = case["line"].as_str().unwrap();
+    let dest = tmp(scratch);
+    let rev = i32::try_from(revision).unwrap();
+    let previous = fetch::__set_fetch_abi_revision_for_tests(Some(rev));
+    let result = fetch::ensure(
+        line,
+        &EnsureOptions {
+            dest: Some(dest.clone()),
+            platform: Some(platform.into()),
+            url: Some(file_url(fx, fixture)),
+            trusted_keys: Some(vec![test_key(fx)]),
+            allow_unsigned: Some(false),
+            ..Default::default()
+        },
+    );
+    fetch::__set_fetch_abi_revision_for_tests(previous);
+    let installed =
+        result.unwrap_or_else(|e| panic!("{platform} {line} at ABI revision {revision}: {e}"));
+    let (file, sha) = installed
+        .asset
+        .clone()
+        .expect("a release-backed install names its asset");
+    assert_eq!(
+        (file.as_str(), sha.as_str()),
+        (
+            want["file"].as_str().unwrap(),
+            want["sha256"].as_str().unwrap()
+        ),
+        "{platform} {line} at ABI revision {revision}"
+    );
+    let index: Json =
+        serde_json::from_slice(&std::fs::read(fx.join(fixture).join("index.json")).unwrap())
+            .unwrap();
+    let row = index["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["file"] == want["file"])
+        .unwrap_or_else(|| panic!("{fixture}/index.json has no row {}", want["file"]));
+    assert_eq!(row["build"], want["build"]);
+    assert_eq!(row["abi_revision"], want["abi_revision"]);
+    assert_eq!(
+        sha256_file(&installed.library).unwrap(),
+        row["library_sha256"].as_str().unwrap()
+    );
+    announce(&format!(
+        "two-revisions: {platform} {line} at ABI revision {revision} installed {file} (build {})\n",
+        want["build"]
+    ));
+    std::fs::remove_dir_all(&dest).ok();
+}
+
+/// Every case of `expected.json`'s `revisions`, at the low and at the high
+/// revision: the pick is `at_low_revision` / `at_high_revision`.
+#[test]
+fn two_revisions_pick_the_row_at_each_revision() {
+    let fx = fixtures!();
+    let doc = expected(&fx);
+    let revisions = &doc["revisions"];
+    let cases = revisions["cases"]
+        .as_array()
+        .expect("expected.json carries revisions.cases");
+    assert!(
+        !cases.is_empty(),
+        "expected.json carries no revisions cases"
+    );
+    let mut checked = 0;
+    for (i, case) in cases.iter().enumerate() {
+        for which in ["low_revision", "high_revision"] {
+            let revision = revisions[which].as_i64().unwrap();
+            fetch_at_revision(
+                &fx,
+                revisions,
+                case,
+                revision,
+                &format!("two-rev-{i}-{which}"),
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, cases.len() * 2);
+}
+
+/// On the discriminating lines `expected.json` names, the pick at that
+/// revision DIFFERS from the unfiltered one: the filter decided it, not two
+/// rules that happened to agree.
+#[test]
+fn two_revisions_filter_changes_the_answer_on_the_discriminating_lines() {
+    let fx = fixtures!();
+    let doc = expected(&fx);
+    let revisions = &doc["revisions"];
+    let discriminating = revisions["discriminating_lines"]
+        .as_array()
+        .expect("expected.json carries revisions.discriminating_lines");
+    assert!(!discriminating.is_empty());
+    for d in discriminating {
+        let revision = d["revision"].as_i64().unwrap();
+        let line = d["line"].as_str().unwrap();
+        let cases: Vec<&Json> = revisions["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["line"] == line)
+            .collect();
+        assert!(!cases.is_empty(), "no case for discriminating line {line}");
+        for (i, case) in cases.into_iter().enumerate() {
+            assert_ne!(
+                pick_at(revisions, case, revision)["file"],
+                case["unfiltered"]["file"],
+                "{} {line}: expected.json's pick at ABI revision {revision} is the unfiltered one",
+                case["platform"]
+            );
+            fetch_at_revision(
+                &fx,
+                revisions,
+                case,
+                revision,
+                &format!("two-rev-d{revision}-{i}"),
+            );
+        }
+        announce(&format!(
+            "two-revisions: discriminating line {line} at ABI revision {revision} differs from unfiltered\n"
+        ));
+    }
+}
+
+/// The negative control: nothing is served at `high_revision + 1`.
+#[test]
+fn two_revisions_one_past_the_high_revision_is_unpublished() {
+    let fx = fixtures!();
+    let doc = expected(&fx);
+    let revisions = &doc["revisions"];
+    let case = &revisions["cases"][0];
+    let past = i32::try_from(revisions["high_revision"].as_i64().unwrap() + 1).unwrap();
+    let dest = tmp("two-rev-none");
+    let previous = fetch::__set_fetch_abi_revision_for_tests(Some(past));
+    let result = fetch::ensure(
+        case["line"].as_str().unwrap(),
+        &EnsureOptions {
+            dest: Some(dest.clone()),
+            platform: Some(case["platform"].as_str().unwrap().into()),
+            url: Some(file_url(&fx, revisions["fixture"].as_str().unwrap())),
+            trusted_keys: Some(vec![test_key(&fx)]),
+            allow_unsigned: Some(false),
+            ..Default::default()
+        },
+    );
+    fetch::__set_fetch_abi_revision_for_tests(previous);
+    let err = result.expect_err("two-revisions/ serves nothing one past its high revision");
+    assert_eq!(
+        err.artifact_code(),
+        Some("CHTYPES_ARTIFACT_UNPUBLISHED"),
+        "{err}"
+    );
+    assert!(
+        err.to_string()
+            .contains(&format!("ABI revision {past} (this SDK's)")),
+        "{err}"
+    );
+    assert!(!dest.join(case["line"].as_str().unwrap()).exists());
+    std::fs::remove_dir_all(&dest).ok();
 }

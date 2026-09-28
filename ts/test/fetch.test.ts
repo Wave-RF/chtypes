@@ -1212,6 +1212,41 @@ function fixtureKey(): string {
   throw new Error(`no public key found under ${dir}: ${candidates.join(', ')}`);
 }
 
+/** One row of two-revisions/, as expected.json names it. */
+interface RevisionPick {
+  file: string;
+  sha256: string;
+  build: number;
+  abi_revision: number;
+}
+interface RevisionCase {
+  platform: string;
+  line: string;
+  at_low_revision: RevisionPick;
+  at_high_revision: RevisionPick;
+  unfiltered: RevisionPick;
+}
+interface Revisions {
+  fixture: string;
+  low_revision: number;
+  high_revision: number;
+  discriminating_lines: { revision: number; line: string }[];
+  cases: RevisionCase[];
+}
+/** expected.json's `revisions` block — read at collection, so each case is its own named test. */
+const REVISIONS: Revisions | undefined = HAVE_FIXTURES
+  ? (JSON.parse(readFileSync(path.join(SPEC_FIXTURES, 'expected.json'), 'utf8')) as { revisions?: Revisions }).revisions
+  : undefined;
+const REVISION_CASES: [string, RevisionCase, 'low_revision' | 'high_revision'][] = (REVISIONS?.cases ?? []).flatMap((c) =>
+  (['low_revision', 'high_revision'] as const).map((w): [string, RevisionCase, 'low_revision' | 'high_revision'] => [`${c.platform} ${c.line} ${w}`, c, w]),
+);
+/** expected.json's pick for a case at a revision: the low or the high one. */
+function pickAt(revisions: Revisions, c: RevisionCase, rev: number): RevisionPick {
+  if (rev === revisions.low_revision) return c.at_low_revision;
+  if (rev === revisions.high_revision) return c.at_high_revision;
+  throw new Error(`revision ${rev} is neither low nor high in expected.json`);
+}
+
 describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (docs/guides/fetch.md §9)', () => {
   let key: string;
   let fixturePlatform: string;
@@ -1391,6 +1426,60 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
       const url = pathToFileURL(path.join(SPEC_FIXTURES, 'signed')).href;
       expect(await runCli(['list', '--platform', fixturePlatform, '--url', url, '--dest', dest], io)).toBe(EXIT.ok);
       expect(io.out.join('')).toContain(`  2 row(s) at ABI revision(s) ${fixtureRevision} not shown; this SDK speaks ${fixtureRevision + 1}\n`);
+    } finally {
+      FETCH_ABI_REVISION.override = fixtureRevision;
+    }
+  });
+
+  // two-revisions/: the filter itself (docs/guides/fetch.md §2, §9). Every
+  // expected value is read from expected.json's revisions block.
+  const fetchAtRevision = async (c: RevisionCase, rev: number): Promise<void> => {
+    const revisions = REVISIONS!;
+    const want = pickAt(revisions, c, rev);
+    expect(want.abi_revision).toBe(rev);
+    process.env['CHTYPES_TRUSTED_KEYS'] = key;
+    FETCH_ABI_REVISION.override = rev;
+    try {
+      const dest = scratch('two-revisions');
+      const r = await ensure(c.line, fixture(revisions.fixture, dest, { platform: c.platform }));
+      expect([r.file, r.sha256]).toEqual([want.file, want.sha256]);
+      const index = JSON.parse(readFileSync(path.join(SPEC_FIXTURES, revisions.fixture, 'index.json'), 'utf8')) as {
+        artifacts: { file: string; build: number; abi_revision: number; library: string; library_sha256: string }[];
+      };
+      const row = index.artifacts.find((a) => a.file === want.file);
+      expect(row, `${revisions.fixture}/index.json has no row ${want.file}`).toBeDefined();
+      expect([row!.build, row!.abi_revision]).toEqual([want.build, want.abi_revision]);
+      expect(await sha256File(path.join(r.dir, row!.library))).toBe(row!.library_sha256);
+    } finally {
+      FETCH_ABI_REVISION.override = fixtureRevision;
+    }
+  };
+
+  it.each(REVISION_CASES)('two-revisions: %s installs that revision’s row', async (_name, c, which) => {
+    await fetchAtRevision(c, REVISIONS![which]);
+  });
+
+  it.each(REVISIONS?.discriminating_lines ?? [])('two-revisions: at ABI revision $revision, line $line differs from the unfiltered pick', async (d) => {
+    const cases = REVISIONS!.cases.filter((c) => c.line === d.line);
+    expect(cases.length, `no case for discriminating line ${d.line}`).toBeGreaterThan(0);
+    for (const c of cases) {
+      expect(pickAt(REVISIONS!, c, d.revision).file).not.toBe(c.unfiltered.file);
+      await fetchAtRevision(c, d.revision);
+    }
+  });
+
+  it('two-revisions: one revision past the high one is CHTYPES_ARTIFACT_UNPUBLISHED', async () => {
+    const revisions = REVISIONS!;
+    expect(revisions.cases.length).toBeGreaterThan(0);
+    const c = revisions.cases[0]!;
+    process.env['CHTYPES_TRUSTED_KEYS'] = key;
+    FETCH_ABI_REVISION.override = revisions.high_revision + 1;
+    try {
+      const dest = scratch('two-revisions-none');
+      const err = await ensure(c.line, fixture(revisions.fixture, dest, { platform: c.platform })).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ArtifactUnpublishedError);
+      expect((err as Error).message).toContain(`ABI revision ${revisions.high_revision + 1} (this SDK's)`);
+      expect(readdirSync(dest)).toEqual([]);
     } finally {
       FETCH_ABI_REVISION.override = fixtureRevision;
     }

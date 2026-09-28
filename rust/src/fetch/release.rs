@@ -162,8 +162,8 @@ pub(crate) fn not_shown(rows: &[IndexRow], platform: &str, revision: i32) -> Opt
 }
 
 /// The `offered` half of an [`Error::ArtifactUnpublished`] that the ABI
-/// revision decided: what the release has at `revision`, then what it has
-/// for the request at any other.
+/// revision decided: what the release has for the request, then what it has
+/// at `revision`, this crate's.
 pub(crate) fn unpublished_at_revision(
     at_revision: &[&IndexRow],
     any_revision: &[&IndexRow],
@@ -180,7 +180,7 @@ pub(crate) fn unpublished_at_revision(
         have.join(", ")
     };
     format!(
-        "{have} at ABI revision {revision} (this SDK's); {}",
+        "{}; at ABI revision {revision} (this SDK's) the release has: {have}",
         served(any_revision, noun)
     )
 }
@@ -605,9 +605,9 @@ impl Release {
             platforms.sort();
             platforms.dedup();
             return Err(unpublished(if platforms.is_empty() {
-                "nothing".into()
+                "it has nothing".into()
             } else {
-                format!("platforms {}", platforms.join(", "))
+                format!("it has platforms {}", platforms.join(", "))
             }));
         }
         let revision = super::fetch_abi_revision();

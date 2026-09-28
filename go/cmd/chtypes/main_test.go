@@ -42,9 +42,10 @@ func fixtures(t *testing.T) (dir, key string) {
 		t.Skipf("shared fetch fixtures not found: %v (set CHTYPES_FETCH_FIXTURES to tests/fixtures/fetch)", err)
 	}
 	// Fetch installs only rows at the binding's own ABI revision; the fixtures
-	// carry whatever revision they were generated at. Read it off their own
-	// index.json rows — never typed — and select at it for this test.
-	rev, err := testhook.FixtureABIRevision(abs)
+	// carry whatever revision they were generated at and declare it in
+	// expected.json (fixtures_abi_revision) — never typed here — and this test
+	// selects at it.
+	rev, err := testhook.FixturesABIRevision(abs)
 	if err != nil {
 		t.Fatalf("fetch fixtures: %v", err)
 	}

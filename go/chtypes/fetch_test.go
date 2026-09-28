@@ -1551,44 +1551,31 @@ func TestDefaultRegistryDirIsKeyedByTheABIRevision(t *testing.T) {
 	}
 }
 
-// The fixture suites' override is derived, never typed, so the derivation
-// itself is pinned: one agreed revision is the answer; disagreement, a row
-// without one, or no release at all is an error.
-func TestFixtureABIRevisionIsDerivedFromTheFixtures(t *testing.T) {
-	write := func(dir, release string, revs ...any) {
+// The fixture suites' override is the fixtures' own declaration, never typed:
+// expected.json's fixtures_abi_revision is the answer, and a set that does not
+// declare one — or declares something that is not an integer — is an error.
+func TestFixturesABIRevisionIsTheDeclaredField(t *testing.T) {
+	write := func(t *testing.T, body string) string {
 		t.Helper()
-		var rows []map[string]any
-		for _, r := range revs {
-			row := map[string]any{"file": "x.tar.gz"}
-			if r != nil {
-				row["abi_revision"] = r
-			}
-			rows = append(rows, row)
-		}
-		b, _ := json.Marshal(map[string]any{"schema": 1, "artifacts": rows})
-		if err := os.MkdirAll(filepath.Join(dir, release), 0o755); err != nil {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "expected.json"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, release, "index.json"), b, 0o644); err != nil {
-			t.Fatal(err)
+		return dir
+	}
+	if n, err := testhook.FixturesABIRevision(write(t, `{"schema": 1, "fixtures_abi_revision": 7}`)); err != nil || n != 7 {
+		t.Fatalf("declared 7: got %d, %v", n, err)
+	}
+	for body, want := range map[string]string{
+		`{"schema": 1}`: "declares no fixtures_abi_revision",
+		`{"schema": 1, "fixtures_abi_revision": "7"}`: "not an integer",
+		`{"schema": 1, "fixtures_abi_revision": 7.5}`: "not an integer",
+	} {
+		if _, err := testhook.FixturesABIRevision(write(t, body)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: err = %v, want %q", body, err, want)
 		}
 	}
-	dir := t.TempDir()
-	if _, err := testhook.FixtureABIRevision(dir); err == nil {
-		t.Fatal("no release at all was an answer")
-	}
-	write(dir, "one", 7, 7)
-	write(dir, "two", 7)
-	if n, err := testhook.FixtureABIRevision(dir); err != nil || n != 7 {
-		t.Fatalf("agreeing fixtures = %d, %v; want 7", n, err)
-	}
-	write(dir, "three", 8)
-	if _, err := testhook.FixtureABIRevision(dir); err == nil || !strings.Contains(err.Error(), "disagree") {
-		t.Fatalf("disagreeing fixtures: %v", err)
-	}
-	dir = t.TempDir()
-	write(dir, "one", 7, nil)
-	if _, err := testhook.FixtureABIRevision(dir); err == nil || !strings.Contains(err.Error(), "no integer abi_revision") {
-		t.Fatalf("a row without abi_revision: %v", err)
+	if _, err := testhook.FixturesABIRevision(t.TempDir()); err == nil {
+		t.Fatal("no expected.json at all was an answer")
 	}
 }

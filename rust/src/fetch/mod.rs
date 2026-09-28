@@ -442,9 +442,9 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
                     &format!("rows for {platform}"),
                 )
             } else if platforms.is_empty() {
-                "nothing".into()
+                "it has nothing".into()
             } else {
-                format!("platforms {}", platforms.join(", "))
+                format!("it has platforms {}", platforms.join(", "))
             },
         });
     }

@@ -724,7 +724,7 @@ else:
     hit = [a for a in arts if exact and a["clickhouse_version"] == exact]
     if strict and not hit:
         sys.exit("unpublished: you asked for exactly ClickHouse %s on %s-%s at %s and this release does "
-                 "not publish it at that revision: %s (at ABI revision %d it has: %s).\n"
+                 "not publish it at that revision: %s; at ABI revision %d the release has: %s.\n"
                  "          Ask for the line (%s) to take what was published."
                  % (exact, os_, arch, at,
                     served([a for a in on_platform if a["clickhouse_version"] == exact],
@@ -733,8 +733,8 @@ else:
     if not hit:
         hit = [a for a in arts if a["clickhouse_minor"] == line]
     if not hit:
-        sys.exit("unpublished: no artifact for ClickHouse line %s on %s-%s at %s: %s "
-                 "(at ABI revision %d it has: %s)"
+        sys.exit("unpublished: no artifact for ClickHouse line %s on %s-%s at %s: %s"
+                 "; at ABI revision %d the release has: %s"
                  % (line, os_, arch, at,
                     served([a for a in on_platform if a["clickhouse_minor"] == line],
                            "that line for %s-%s" % (os_, arch)),

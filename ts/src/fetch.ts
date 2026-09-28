@@ -801,10 +801,10 @@ export function selectArtifact(index: ReleaseIndex, platform: string, req: Versi
     throw new ArtifactUnpublishedError(
       req.exact !== null
         ? `chtypes: you asked for exactly ClickHouse ${req.exact} on ${platform} at ABI revision ${rev} (this SDK's) and this ` +
-            `release does not publish it at that revision: ${served(anyRevision, `that patch for ${platform}`)} ` +
-            `(at ABI revision ${rev} it has: ${have}). Ask for the line (${req.line}) to take what was published.`
+            `release does not publish it at that revision: ${served(anyRevision, `that patch for ${platform}`)}` +
+            `; at ABI revision ${rev} the release has: ${have}. Ask for the line (${req.line}) to take what was published.`
         : `chtypes: no artifact for ClickHouse line ${req.line} on ${platform} at ABI revision ${rev} (this SDK's): ` +
-            `${served(anyRevision, `that line for ${platform}`)} (at ABI revision ${rev} it has: ${have})`,
+            `${served(anyRevision, `that line for ${platform}`)}; at ABI revision ${rev} the release has: ${have}`,
     );
   }
   // A line can carry more than one row: two patches, or the same patch built
