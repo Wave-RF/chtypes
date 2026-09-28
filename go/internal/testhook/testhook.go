@@ -18,8 +18,8 @@ import (
 	"strings"
 )
 
-// FetchABIRevision, when non-zero, replaces chtypes.ABIRevision as the ABI
-// revision fetch selects release rows at (docs/guides/fetch.md §2). It
+// FetchABIRevision is the ABI revision fetch selects release rows at in place
+// of chtypes.ABIRevision, when it is non-zero (docs/guides/fetch.md §2). It
 // changes WHICH rows are eligible and nothing else: the default registry
 // directory stays abi<ABIRevision>/, and the loader still refuses an artifact
 // of another revision.
