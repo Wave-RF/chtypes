@@ -336,7 +336,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: ruff, and the package imports
         # ONE COMMAND PER LINE, deliberately. These were a single `&&` chain
         # followed by a second line, and `bash -e` does NOT exit when a command
@@ -480,7 +480,7 @@ jobs:
         continue-on-error: true
         run: scripts/check-standalone.sh --no-artifacts
 
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: python — test_wrong_revision_is_refused and test_matching_revision_loads must both pass
         id: abi-python
         if: steps.fixture.outcome == 'success'
@@ -739,7 +739,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: python — suite with the registry; the golden set must run
         id: suite-python
         if: steps.fetch.outcome == 'success'
@@ -1075,7 +1075,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           cd go && "$(go env GOPATH)/bin/govulncheck" ./...
 
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: "pip-audit (python) — python 3.12, pinned: pip-audit's own venv bootstrap is flaky on very new interpreters"
         id: pip-audit
         continue-on-error: true
