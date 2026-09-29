@@ -61,6 +61,13 @@
 # When the tree is already current, it says so and exits 0. Quiet stays
 # quiet.
 #
+# THE MERGE HALF is .github/workflows/regen-automerge.yml. Once a pull request
+# whose only change is this regenerated docs/support.md is open from a branch
+# of this repository, that workflow merges it after `ci` passes, if main's own
+# scripts/support-matrix.sh reproduces the file byte for byte. It merges with
+# the built-in token, which the toggle above does not govern, so nothing above
+# changes: this workflow still opens no pull request.
+#
 # CADENCE: daily (17 minutes past the hour — off the hour, so this run does
 # not queue behind every other repository's :00 cron on GitHub's shared
 # scheduler infrastructure). The producer has published a new build on
