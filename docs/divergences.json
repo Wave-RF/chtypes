@@ -137,6 +137,127 @@
           }
         }
       ]
+    },
+    {
+      "id": "introspection-function-default-over-accept",
+      "heading": "A DEFAULT over an introspection function admits what a real server refuses to create",
+      "checks": [
+        {
+          "id": "demangle-admitted-default-settings",
+          "note": "the divergence itself, on every line: allow_introspection_functions defaults to disabled, and a real server refuses the CREATE TABLE with 446 (FUNCTION_NOT_ALLOWED) at that default; this library never consults the setting, so it compiles the schema and stores demangle's answer regardless (server half measured by the artifact producer, not here)",
+          "lines": [
+            "24.8",
+            "25.10",
+            "26.3",
+            "26.8",
+            "26.9"
+          ],
+          "schema": "s String, v String DEFAULT demangle(s)",
+          "format": "JSONEachRow",
+          "payload": "{\"s\":\"_ZN2DB4testEv\"}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "accepted",
+            "stored": [
+              {
+                "row": 0,
+                "column": "v",
+                "text": "\"DB::test()\""
+              }
+            ]
+          }
+        },
+        {
+          "id": "addresstoline-admitted-default-settings",
+          "note": "the divergence itself: a real server refuses the CREATE TABLE with 446 at the default setting; this library compiles it and admits the row instead (never asserts the stored value here, a filesystem path from the machine running the library, not a meaningful answer; server half measured by the artifact producer, not here)",
+          "lines": [
+            "24.8",
+            "26.3",
+            "26.8"
+          ],
+          "schema": "id UInt64, v String DEFAULT addressToLine(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "id": "addresstolinewithinlines-admitted-default-settings",
+          "note": "the same divergence with addressToLineWithInlines (server half measured by the artifact producer, not here)",
+          "lines": [
+            "24.8",
+            "26.3",
+            "26.8"
+          ],
+          "schema": "id UInt64, v String DEFAULT addressToLineWithInlines(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "id": "addresstosymbol-admitted-default-settings",
+          "note": "the same divergence with addressToSymbol (server half measured by the artifact producer, not here)",
+          "lines": [
+            "24.8",
+            "26.3",
+            "26.8"
+          ],
+          "schema": "id UInt64, v String DEFAULT addressToSymbol(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "id": "addresstoline-declined-26_9",
+          "note": "contrast: on 26.9 this library declines addressToLine as a DEFAULT outright at insert time (an unrelated rule, the same at either allow_introspection_functions value), so the over-accept above does not reproduce there. This library refusing the same CREATE with 446 on every line, rather than declining only some of them at insert time, is the retirement signal for this entry — check-divergences.py already reports any outcome or error-code change here as a problem, not a pass",
+          "lines": [
+            "26.9"
+          ],
+          "schema": "id UInt64, v String DEFAULT addressToLine(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "unsupported"
+          }
+        },
+        {
+          "id": "addresstolinewithinlines-declined-26_9",
+          "note": "contrast: the same 26.9 decline for addressToLineWithInlines",
+          "lines": [
+            "26.9"
+          ],
+          "schema": "id UInt64, v String DEFAULT addressToLineWithInlines(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "unsupported"
+          }
+        },
+        {
+          "id": "addresstosymbol-declined-26_9",
+          "note": "contrast: the same 26.9 decline for addressToSymbol",
+          "lines": [
+            "26.9"
+          ],
+          "schema": "id UInt64, v String DEFAULT addressToSymbol(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "unsupported"
+          }
+        }
+      ]
     }
   ]
 }

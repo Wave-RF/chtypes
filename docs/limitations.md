@@ -71,7 +71,7 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 **No budget is a rule about process, not a claim about state.** A non-zero count, in either direction, on any binding against any ClickHouse line, is refused unless a person has named that case and recorded why, with a tracking reference attached. Nothing non-zero passes quietly, and no threshold waves anything through.
 
-**So it does not mean there are none.** What is true today is narrower, and worth stating exactly: **no case is currently known in which this library and a real server disagree about whether to accept a row.** Both directions are at zero across every line the artifacts are proved against — `measured` by the differential proof those artifacts are built from, not by this repository, and a state rather than a promise: it is what the rule has produced so far, not something the rule guarantees will hold tomorrow.
+**So it does not mean there are none.** What is true today is narrower, and worth stating exactly: **one case is currently known in which this library and a real server disagree about whether to accept a row — an over-accept, listed under [Known divergences](#known-divergences) below.** Every other direction is at zero across every line the artifacts are proved against — `measured` by the differential proof those artifacts are built from, not by this repository, and a state rather than a promise: it is what the rule has produced so far, not something the rule guarantees will hold tomorrow.
 
 ⚠️ **Zero in both directions is a statement about the verdict, not about the value or the error.** There are two other ways to disagree: both sides accept a row and **store different values**, or both refuse it and **report different codes**. Neither is an accept-or-reject disagreement, so the no-budget rule above does not cover them.
 
@@ -134,6 +134,23 @@ This library previews a DEFAULT by running it once over a one-row probe, which i
 Checked and found not to diverge: `toColumnTypeName`, `isConstant`, `lowCardinalityIndices`, `lowCardinalityKeys`.
 
 Treat a stored value from `dumpColumnStructure` or `blockSerializedSize` as unconfirmed on every line from 24.8 through 26.3; supply the column explicitly rather than relying on what either side previews.
+
+### A DEFAULT over an introspection function admits what a real server refuses to create
+
+**Over-accept.** This library compiles a schema, and admits a row against it, that a real server refuses to create in the first place.
+
+`allow_introspection_functions` defaults to disabled and is read from `system.settings`. At that default, a real server refuses a `CREATE TABLE` containing a `DEFAULT` over `addressToLine`, `addressToLineWithInlines`, `addressToSymbol` or `demangle` with error 446 (`FUNCTION_NOT_ALLOWED`). This library never consults the setting, so it compiles the same schema and evaluates the same DEFAULT identically at either value. For example, `s String, v String DEFAULT demangle(s)`, with a body that never supplies `v`:
+
+|               |                                                                               |
+| ------------- | ----------------------------------------------------------------------------- |
+| this library  | compiles the schema and stores the function's answer, at either setting value |
+| a real server | refuses the `CREATE TABLE` itself, error 446, at the default setting          |
+
+`demangle`'s DEFAULT is admitted and evaluated this way on every line. The three address functions are admitted the same way on most lines, but on 26.9 an unrelated rule declines them at insert time (`unsupported`) instead — the same decline at either value of the setting, so it is not the setting check reappearing, just a different reason the over-accept does not reach that one line. When an address function's DEFAULT is admitted, it stores a filesystem path from the machine running the library, not a meaningful answer; never rely on it. This entry retires on the relink that makes the library refuse the same `CREATE TABLE` with 446 on every line.
+
+**Measured**: this library's own answer, in this repository, against the served darwin-arm64 artifacts on 25.10, 26.3, 26.8 and 26.9. 24.8 has no darwin-arm64 artifact, so it is measured on CI's linux-amd64 leg instead. `demangle`'s DEFAULT compiles and is evaluated on all four darwin lines, storing the demangled name for a mangled input. The three address functions compile and are admitted on 26.3 and 26.8; on 26.9 they compile but the insert itself declines (`outcome: unsupported`), matching the line above. On 25.10's darwin-arm64 artifact specifically, none of the three address functions are registered at all: compiling any of them is refused outright, a schema-level error distinct from both the divergence and the 26.9 decline, so that (line, platform) pair sits outside the claim rather than confirming it — narrower than treating 24.8 through 26.8 as one uniform group. The server half — refusing every one of the four functions' `CREATE TABLE`s with 446 at the default setting, across all 12 lines — was measured by the artifact producer's differential proof against stock ClickHouse servers pinned to each line's exact patch, not measured here.
+
+Treat any value stored by these four DEFAULTs as unconfirmed at default settings; a table that must hold at `allow_introspection_functions=0` should refuse the schema outright rather than trust what either function stores.
 
 ## Pre-1.0
 
