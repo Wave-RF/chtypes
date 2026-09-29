@@ -171,10 +171,10 @@ fn byte_offset(doc: &[u8], line: usize, column: usize) -> usize {
 /// transient by definition — so it is [`Error::NoDocument`] and is NOT
 /// remembered: the next call asks again. A missing symbol
 /// ([`Error::PredatesFeature`]) is not remembered either.
-pub(crate) fn cached<'a>(
-    cell: &'a OnceLock<ErrorCodeTable>,
+pub(crate) fn cached(
+    cell: &OnceLock<ErrorCodeTable>,
     fetch: impl FnOnce() -> Result<Option<Vec<u8>>>,
-) -> Result<&'a ErrorCodeTable> {
+) -> Result<&ErrorCodeTable> {
     if let Some(table) = cell.get() {
         return Ok(table);
     }
