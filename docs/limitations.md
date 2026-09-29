@@ -75,7 +75,7 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 ⚠️ **Zero in both directions is a statement about the verdict, not about the value or the error.** There are two other ways to disagree: both sides accept a row and **store different values**, or both refuse it and **report different codes**. Neither is an accept-or-reject disagreement, so the no-budget rule above does not cover them.
 
-They are measured all the same, and as of the current published artifacts **both are also at zero on every line, for every binding**. That's `measured` by the same differential proof, not by this repository, and it's the same kind of statement as the one above: a state of what the proof covers, not a promise about every input. A case outside that coverage can still disagree, and any that's known is listed under [Known divergences](#known-divergences). Getting there meant investigating the cases one at a time. Some were fixed in the library. Others turned out not to be something a caller can reach, because the disagreement was a property of how the comparison itself was run. Any that a caller **can** reach are listed under [Known divergences](#known-divergences) below.
+They are measured all the same, and as of the current published artifacts **both are at zero on every line, for every binding, except two known value divergences, listed below**. That's `measured` by the same differential proof, not by this repository, and it's the same kind of statement as the one above: a state of what the proof covers, not a promise about every input. A case outside that coverage can still disagree, and any that's known is listed under [Known divergences](#known-divergences). Getting there meant investigating the cases one at a time. Some were fixed in the library. Others turned out not to be something a caller can reach, because the disagreement was a property of how the comparison itself was run. Any that a caller **can** reach are listed under [Known divergences](#known-divergences) below.
 
 In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather than a subclass, so `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both. The subtype was retired precisely because catching one and getting the other is a silent misclassification.
 
@@ -97,7 +97,43 @@ Every entry below has a machine-checkable twin in [`docs/divergences.json`](dive
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
 
-**There is no entry on the register at the moment.** The one it held was retired when a relink stopped the artifacts diverging — which is the line above working, not an oversight. ⚠️ **An empty register is not a claim that nothing diverges.** It means nothing is currently known, named and checked here, and the limits stated above — including that the server half of any comparison is never measured in this repository — apply to that emptiness exactly as they applied to the entry.
+### A random-array DEFAULT is computed once, not per insert or per row
+
+**Same accept, different stored value.** Both sides accept the row — nothing is over-accepted and nothing is rejected — but the value a row stores does not match, because the two sides settle it at a different granularity.
+
+The input is a schema whose DEFAULT expression calls `arrayRandomSample(arr, k)`, `arrayShuffle(arr)` or `arrayPartialShuffle(arr, k)`, with a multi-row insert that never supplies the column so every row relies on the DEFAULT. For example, `v Array(UInt8) DEFAULT arrayShuffle([1,2,3,4,5,6,7,8,9,10])`, with a three-row `JSONEachRow` body supplying only `id`:
+
+|               |                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------- |
+| this library  | one shuffled array, computed once, stored in **every row of every insert**          |
+| a real server | its own shuffled array per **INSERT** (24.8–25.10), or per **ROW** (26.2 and later) |
+
+This library admits the DEFAULT and computes its value once, not per row and not per insert, so every row it stores, across any number of separate inserts against the same compiled schema, carries the identical value. A real server re-evaluates a non-deterministic DEFAULT: once per INSERT through 24.8–25.10 (each insert gets its own array, but every row inside one insert shares it), and once per ROW from 26.2 on (even rows in the same insert differ). Neither granularity is the one this library reproduces.
+
+**Measured**: this library's own answer, in this repository, against the published artifacts on 24.8, 25.10 and 26.3 — the identical array in every row of a three-row insert, and again, unchanged, on a second insert against the same compiled schema. 24.8 is measured on linux-amd64 only, because no darwin artifact is published for that line. The server's answer — one array per INSERT on 24.8–25.10, one per ROW from 26.2 on — was measured by the artifact producer's differential proof against MergeTree servers pinned to each artifact's exact patch, not measured here. Lines that diverge: 24.8, 25.3, 25.8, 25.10, 26.2, 26.3. From 26.4 on this library declines the DEFAULT outright (`unsupported`) rather than preview a value it cannot promise, so there is no divergence there.
+
+Checked and found not to diverge: `arrayPartialSort`, `arrayPartialReverseSort`, and `connectionId`/`connection_id` (a server-session property, which this library declines from 26.2).
+
+Treat a stored value from a random-array DEFAULT as unconfirmed on every line from 24.8 through 26.3; supply the column explicitly rather than relying on what either side previews.
+
+### A block-shape DEFAULT reflects a one-row probe, not the real insert
+
+**Same accept, different stored value.** Both sides accept the row, and the disagreement is again about the value, not the verdict.
+
+`dumpColumnStructure(x)` and `blockSerializedSize(x)` describe the shape of the block their argument arrived in, not the argument's own value. With `v String DEFAULT dumpColumnStructure(id)` or `v UInt64 DEFAULT blockSerializedSize(id)`, and a three-row insert that never supplies `v`:
+
+|               |                                                                                    |
+| ------------- | ---------------------------------------------------------------------------------- |
+| this library  | reflects a synthetic **one-row** probe block, whatever the insert's real row count |
+| a real server | reflects the **actual** insert block — three rows here, not one                    |
+
+This library previews a DEFAULT by running it once over a one-row probe, which is invisible for a value-only expression but is exactly what these two functions report on. A real server evaluates the DEFAULT against the block it is actually writing, so its answer scales with the insert's real size.
+
+**Measured**: this library's own answer, in this repository, against the published artifacts on 24.8 and 26.3 — `dumpColumnStructure(id)` answers `"UInt32, UInt32(size = 1)"` and `blockSerializedSize(id)` answers `4`, identically on every row of a three-row insert. 24.8 is measured on linux-amd64 only, as above. The server's answer — the same two functions reflecting the real three-row block — was measured by the artifact producer, not here. Lines that diverge: 24.8, 25.3, 25.8, 25.10, 26.2, 26.3. From 26.4 on this library declines both DEFAULTs outright: the whole insert's `outcome` answers `unsupported` (the schema still compiles; the decline is at insert time, not compile time), measured here on 26.4.
+
+Checked and found not to diverge: `toColumnTypeName`, `isConstant`, `lowCardinalityIndices`, `lowCardinalityKeys`.
+
+Treat a stored value from `dumpColumnStructure` or `blockSerializedSize` as unconfirmed on every line from 24.8 through 26.3; supply the column explicitly rather than relying on what either side previews.
 
 ## Pre-1.0
 
