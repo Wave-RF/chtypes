@@ -692,7 +692,19 @@ if [ "$ACTION" = selftest ]; then
   # --print-rules, FETCHED LIVE — never a hand-written list (issue #159
   # recorded what hand-copied needles cost: four invented patterns, two of
   # which were not needles at all).
-  NEEDLE="$("$SCRIPTS/lint-public.sh" --print-rules | awk -F'\t' '$1 == "LITERAL" { print $2; exit }')"
+  #
+  # Captured to a variable FIRST, then filtered — never piped straight into
+  # `awk '{...; exit}'`. awk's own `exit` closes its end of the pipe as soon
+  # as it has the one line it wants, and --print-rules keeps writing more
+  # lines after that; under set -e a later printf inside lint-public.sh that
+  # lands on that closed pipe fails with SIGPIPE ("Broken pipe"), which set
+  # -e treats as this whole NEEDLE assignment failing. Passed locally every
+  # time (the write finishes before the pipe closes there); failed on a
+  # hosted Linux runner the first time this selftest actually ran in CI. A
+  # command substitution captures everything regardless of what happens to
+  # it afterward, so there is no live pipe here for awk to close early.
+  RULES_OUT="$("$SCRIPTS/lint-public.sh" --print-rules)"
+  NEEDLE="$(printf '%s\n' "$RULES_OUT" | awk -F'\t' '$1 == "LITERAL" { print $2; exit }')"
   [ -n "$NEEDLE" ] || die "could not obtain a needle from scripts/lint-public.sh --print-rules"
 
   NEEDLE="$NEEDLE" python3 - "$tmp" <<'PY'
