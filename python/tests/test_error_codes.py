@@ -91,11 +91,21 @@ def test_absent_keys_are_an_empty_table(doc: bytes) -> None:
 
 @pytest.mark.parametrize(
     "doc",
+    # The same list every binding's bad-document test runs: a truncated
+    # document, a top-level value that is not an object, error_codes that is not
+    # an array, an entry that is not an object, and a field of the wrong type.
     [
         b'{"error_codes":[',
         b"[]",
+        b"null",
+        b"42",
+        b'"x"',
         b'{"error_codes":{}}',
+        b'{"error_codes":[null]}',
+        b'{"error_codes":[[252,"X"]]}',
         b'{"error_codes":[{"code":"252","name":"X"}]}',
+        b'{"error_codes":[{"code":252.5,"name":"X"}]}',
+        b'{"error_codes":[{"code":1,"name":5}]}',
     ],
 )
 def test_a_bad_document_is_the_general_error(doc: bytes) -> None:

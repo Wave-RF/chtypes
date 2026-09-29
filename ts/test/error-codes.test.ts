@@ -92,7 +92,22 @@ describe('the error-code table (no artifact)', () => {
     },
   );
 
-  it.each(['{"error_codes":[', '[]', '{"error_codes":{}}', '{"error_codes":[{"code":"252","name":"X"}]}'])(
+  // The same list every binding's bad-document test runs: a truncated
+  // document, a top-level value that is not an object, error_codes that is not
+  // an array, an entry that is not an object, and a field of the wrong type.
+  it.each([
+    '{"error_codes":[',
+    '[]',
+    'null',
+    '42',
+    '"x"',
+    '{"error_codes":{}}',
+    '{"error_codes":[null]}',
+    '{"error_codes":[[252,"X"]]}',
+    '{"error_codes":[{"code":"252","name":"X"}]}',
+    '{"error_codes":[{"code":252.5,"name":"X"}]}',
+    '{"error_codes":[{"code":1,"name":5}]}',
+  ])(
     'refuses %s with the general error',
     (doc) => {
       let caught: unknown;

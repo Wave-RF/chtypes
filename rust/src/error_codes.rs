@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use serde::Deserialize;
+use serde_json::Value;
 
 use crate::error::{Error, Result};
 
@@ -115,41 +115,54 @@ impl<'a> IntoIterator for &'a ErrorCodeTable {
     }
 }
 
-/// The `chs_error_codes` document. Unknown keys are ignored, and an absent (or
-/// `null`) key is its default, like every document this ABI hands back; a
-/// value of the wrong type is a bad document, never a guess. `serde_json` is
-/// the right reader here, unlike for the row documents: this one carries no
-/// stored value, only the build's own ASCII names.
-#[derive(Deserialize)]
-struct Doc {
-    #[serde(default)]
-    error_codes: Option<Vec<EntryDoc>>,
-}
-
-#[derive(Deserialize)]
-struct EntryDoc {
-    #[serde(default)]
-    code: Option<i32>,
-    #[serde(default)]
-    name: Option<String>,
-}
-
 /// Build a table from a `chs_error_codes` document,
 /// `{"error_codes":[{"code":N,"name":"…"}, …]}`.
+///
+/// Unknown keys are ignored, and an absent (or `null`) key is its default,
+/// like every document this ABI hands back; anything else of the wrong SHAPE
+/// is a bad document, never a guess. The shape is checked by hand rather than
+/// by a serde derive, because a derived struct also deserializes from a JSON
+/// ARRAY — a top-level `[]` would read as an empty table and `[252, "X"]` as an
+/// entry — which no other binding accepts. `serde_json` is still the right
+/// reader here, unlike for the row documents: this one carries no stored
+/// value, only the build's own ASCII names.
 pub(crate) fn parse(doc: &[u8]) -> Result<ErrorCodeTable> {
-    let d: Doc = serde_json::from_slice(doc).map_err(|e| Error::BadDocument {
+    let v: Value = serde_json::from_slice(doc).map_err(|e| Error::BadDocument {
         message: format!("chs_error_codes: {e}"),
         offset: byte_offset(doc, e.line(), e.column()),
     })?;
-    let entries = d
-        .error_codes
-        .unwrap_or_default()
-        .into_iter()
-        .map(|e| ErrorCodeEntry {
-            code: e.code.unwrap_or(0),
-            name: e.name.unwrap_or_default(),
-        })
-        .collect();
+    let bad = |why: String| Error::BadDocument {
+        message: format!("chs_error_codes: {why}"),
+        offset: 0,
+    };
+    let Some(top) = v.as_object() else {
+        return Err(bad("the document is not a JSON object".to_string()));
+    };
+    let no_rows: Vec<Value> = Vec::new();
+    let rows: &[Value] = match top.get("error_codes") {
+        None | Some(Value::Null) => no_rows.as_slice(),
+        Some(Value::Array(rows)) => rows.as_slice(),
+        Some(other) => return Err(bad(format!("error_codes is not an array: {other}"))),
+    };
+    let mut entries = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(entry) = row.as_object() else {
+            return Err(bad(format!("an entry is not an object: {row}")));
+        };
+        let code = match entry.get("code") {
+            None | Some(Value::Null) => 0,
+            Some(c) => c
+                .as_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| bad(format!("an entry's code is not an integer: {row}")))?,
+        };
+        let name = match entry.get("name") {
+            None | Some(Value::Null) => String::new(),
+            Some(Value::String(n)) => n.clone(),
+            Some(_) => return Err(bad(format!("an entry's name is not a string: {row}"))),
+        };
+        entries.push(ErrorCodeEntry { code, name });
+    }
     Ok(ErrorCodeTable::from_entries(entries))
 }
 
@@ -273,11 +286,22 @@ mod tests {
 
     #[test]
     fn a_bad_document_is_bad_document() {
-        let docs: [&[u8]; 4] = [
+        // The same list every binding's bad-document test runs: a truncated
+        // document, a top-level value that is not an object, error_codes that
+        // is not an array, an entry that is not an object, and a field of the
+        // wrong type.
+        let docs: [&[u8]; 11] = [
             br#"{"error_codes":["#,
             br#"[]"#,
+            br#"null"#,
+            br#"42"#,
+            br#""x""#,
             br#"{"error_codes":{}}"#,
+            br#"{"error_codes":[null]}"#,
+            br#"{"error_codes":[[252,"X"]]}"#,
             br#"{"error_codes":[{"code":"252","name":"X"}]}"#,
+            br#"{"error_codes":[{"code":252.5,"name":"X"}]}"#,
+            br#"{"error_codes":[{"code":1,"name":5}]}"#,
         ];
         for doc in docs {
             match parse(doc) {

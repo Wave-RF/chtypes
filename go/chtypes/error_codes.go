@@ -72,13 +72,31 @@ func (t *ErrorCodeTable) All() []ErrorCodeEntry {
 }
 
 // errorCodesDoc mirrors the document chs_error_codes returns. Unknown keys are
-// ignored and an absent key is its zero value, like every document this ABI
-// hands back.
+// ignored and an absent (or null) key is its zero value, like every document
+// this ABI hands back. The entries stay raw until each is checked to be an
+// object: encoding/json would read a null entry as a zero-valued one, and a
+// null document as an empty table, which no other binding accepts.
 type errorCodesDoc struct {
-	ErrorCodes []struct {
-		Code int    `json:"code"`
-		Name string `json:"name"`
-	} `json:"error_codes"`
+	ErrorCodes []json.RawMessage `json:"error_codes"`
+}
+
+type errorCodeEntryDoc struct {
+	Code int    `json:"code"`
+	Name string `json:"name"`
+}
+
+// isJSONObject reports whether raw is a JSON object — its first byte past
+// JSON's own whitespace is '{'. A syntax error inside is json.Unmarshal's to
+// find; this decides only the SHAPE a document or an entry must have.
+func isJSONObject(raw []byte) bool {
+	for _, b := range raw {
+		switch b {
+		case ' ', '\t', '\n', '\r':
+			continue
+		}
+		return b == '{'
+	}
+	return false
 }
 
 // errorCodeTableOf builds a table from a chs_error_codes document. It keeps
@@ -92,8 +110,18 @@ func errorCodeTableOf(doc []byte) (*ErrorCodeTable, error) {
 	if err := json.Unmarshal(doc, &d); err != nil {
 		return nil, fmt.Errorf("chtypes: bad chs_error_codes document: %w", err)
 	}
+	if !isJSONObject(doc) {
+		return nil, errors.New("chtypes: bad chs_error_codes document: not a JSON object")
+	}
 	t := &ErrorCodeTable{byCode: map[int]string{}, byName: map[string]int{}}
-	for _, e := range d.ErrorCodes {
+	for _, raw := range d.ErrorCodes {
+		if !isJSONObject(raw) {
+			return nil, fmt.Errorf("chtypes: bad chs_error_codes document: an entry is not an object: %s", raw)
+		}
+		var e errorCodeEntryDoc
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("chtypes: bad chs_error_codes document: entry %s: %w", raw, err)
+		}
 		if e.Name == "" || e.Code < 0 {
 			continue
 		}
@@ -105,7 +133,7 @@ func errorCodeTableOf(doc []byte) (*ErrorCodeTable, error) {
 		}
 		t.byCode[e.Code] = e.Name
 		t.byName[e.Name] = e.Code
-		t.entries = append(t.entries, ErrorCodeEntry{Code: e.Code, Name: e.Name})
+		t.entries = append(t.entries, ErrorCodeEntry(e))
 	}
 	sort.SliceStable(t.entries, func(i, j int) bool { return t.entries[i].Code < t.entries[j].Code })
 	return t, nil

@@ -112,8 +112,36 @@ func TestErrorCodeTableAbsentKeysAreEmpty(t *testing.T) {
 			t.Errorf("%s: Name(0) answered from an empty table", doc)
 		}
 	}
-	if _, err := errorCodeTableOf([]byte(`{"error_codes":[`)); err == nil {
-		t.Fatal("a truncated document parsed")
+}
+
+// The same list every binding's bad-document test runs: a truncated document,
+// a top-level value that is not an object, error_codes that is not an array,
+// an entry that is not an object, and a field of the wrong type. Each is the
+// plain error — never a refusal, never a decline — and never an empty table.
+func TestErrorCodeTableRefusesABadDocument(t *testing.T) {
+	for _, doc := range []string{
+		`{"error_codes":[`,
+		`[]`,
+		`null`,
+		`42`,
+		`"x"`,
+		`{"error_codes":{}}`,
+		`{"error_codes":[null]}`,
+		`{"error_codes":[[252,"X"]]}`,
+		`{"error_codes":[{"code":"252","name":"X"}]}`,
+		`{"error_codes":[{"code":252.5,"name":"X"}]}`,
+		`{"error_codes":[{"code":1,"name":5}]}`,
+	} {
+		tbl, err := errorCodeTableOf([]byte(doc))
+		if err == nil {
+			t.Errorf("%s: parsed to a table of %d entries; want an error", doc, len(tbl.All()))
+			continue
+		}
+		var ue *UnsupportedError
+		var se *SchemaError
+		if errors.As(err, &ue) || errors.As(err, &se) {
+			t.Errorf("%s: %v is a refusal or a decline; a bad document is neither", doc, err)
+		}
 	}
 }
 
