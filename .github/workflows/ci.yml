@@ -182,6 +182,21 @@ jobs:
       # channel currently serves.
       - name: selftest — abi-channel.sh's channel derivation (equal, ahead, behind, disagreeing, missing, explicit override)
         run: scripts/abi-channel.sh --selftest
+      # .github/workflows/regen-automerge.yml merges a pull request that only
+      # regenerates docs/support.md, and scripts/regen-automerge-check.py is
+      # its whole decision. Selftest first: each refusal (a second file, one
+      # byte, a missing, failing or pending required check, a fork, a stale
+      # head) must fire and an all-good input must pass. Then its pinned
+      # REQUIRED_CHECKS must name exactly the jobs in THIS file that carry no
+      # job-level `continue-on-error: true`, derived from this file's text:
+      # the built-in token cannot read branch protection, so that list is
+      # pinned, and renaming or adding a blocking job here without updating
+      # it fails here rather than leaving the automerge judging a stale list.
+      # No network, no artifact.
+      - name: selftest — every automerge refusal fires, and an all-good regeneration passes
+        run: scripts/regen-automerge-check.py --selftest
+      - name: the automerge's pinned required checks are exactly this file's blocking jobs
+        run: scripts/regen-automerge-check.py --check-ci-names
 
   docs:
     name: "docs — the support matrix still matches what the release serves"
