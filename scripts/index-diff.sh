@@ -31,7 +31,7 @@
 #                                              entry's hash included, verbatim
 #                                              — as one baseline (default
 #                                              path: ./index-snapshot.json)
-#   scripts/index-diff.sh --compare <baseline> [--show-reasons]
+#   scripts/index-diff.sh --compare <baseline> [--show-reasons] [--keep-current <path>]
 #                                              fetch the CURRENT index and
 #                                              SHA256SUMS, report them
 #                                              against <baseline>. By default,
@@ -49,6 +49,30 @@
 #                                              issue. --show-reasons prints
 #                                              served string fields in full,
 #                                              for someone reading locally.
+#                                              --keep-current <path> writes the
+#                                              CURRENT side that was just
+#                                              fetched and compared -- index
+#                                              and SHA256SUMS together, in the
+#                                              exact envelope --snapshot
+#                                              writes -- to <path>. A caller
+#                                              that wants to advance its
+#                                              baseline to what this run just
+#                                              saw should save THAT file, not
+#                                              take a second, separate
+#                                              --snapshot fetch: the served
+#                                              index can regenerate between two
+#                                              fetches, so a second fetch is
+#                                              not guaranteed to be the same
+#                                              document this run diffed, and a
+#                                              baseline taken that way could
+#                                              silently skip whatever changed
+#                                              in between. Written whether this
+#                                              run's own verdict is clean or a
+#                                              hard failure -- it is always a
+#                                              faithful record of what was
+#                                              actually compared, never a
+#                                              claim about what the comparison
+#                                              found.
 #   scripts/index-diff.sh --selftest          prove every hard-stop rule
 #                                              below actually fires, and that
 #                                              a build-only reshape does NOT,
@@ -160,7 +184,7 @@ SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$SCRIPTS/$(basename "${BASH_SOURCE[0]}")"
 die()  { echo "index-diff: $*" >&2; exit 1; }
 say()  { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
-usage() { sed -n '2,156p' "$SELF"; exit 2; }
+usage() { sed -n '2,180p' "$SELF"; exit 2; }
 
 command -v curl >/dev/null 2>&1 || die "curl is not on PATH"
 command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH"
@@ -168,6 +192,7 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH"
 ACTION=""
 ARG=""
 SHOW_REASONS=0
+KEEP_CURRENT=""
 case "${1:-}" in
   --snapshot)
     ACTION=snapshot
@@ -183,13 +208,30 @@ case "${1:-}" in
     shift
     [ $# -ge 1 ] || die "--compare needs a baseline file path"
     ARG="$1"; shift
-    # --show-reasons is OPTIONAL and only meaningful for --compare: opt IN to
-    # printing served free-text fields (e.g. "unbuildable"[].reason) in full.
-    # Never the default — see the header comment.
-    if [ "${1:-}" = "--show-reasons" ]; then
-      SHOW_REASONS=1
-      shift
-    fi
+    # --show-reasons and --keep-current <path> are OPTIONAL, in either order,
+    # and only meaningful for --compare. --show-reasons opts IN to printing
+    # served free-text fields (e.g. "unbuildable"[].reason) in full — never
+    # the default, see the header comment. --keep-current writes the CURRENT
+    # side this run fetched and compared to <path>, in the same envelope
+    # --snapshot writes — see the header comment for why a caller should save
+    # that file rather than take a second, separate --snapshot fetch.
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --show-reasons)
+          SHOW_REASONS=1
+          shift
+          ;;
+        --keep-current)
+          shift
+          [ $# -ge 1 ] || die "--keep-current needs a path"
+          KEEP_CURRENT="$1"
+          shift
+          ;;
+        *)
+          break
+          ;;
+      esac
+    done
     ;;
   --selftest)
     ACTION=selftest
@@ -199,7 +241,7 @@ case "${1:-}" in
     usage
     ;;
   *)
-    die "unknown argument: $1 (expected --snapshot [path], --compare <baseline> [--show-reasons], or --selftest)"
+    die "unknown argument: $1 (expected --snapshot [path], --compare <baseline> [--show-reasons] [--keep-current <path>], or --selftest)"
     ;;
 esac
 [ $# -eq 0 ] || die "unexpected extra argument(s): $*"
@@ -604,6 +646,25 @@ if [ "$ACTION" = compare ]; then
   say "fetching the current index and SHA256SUMS"
   fetch_index "$WORK/current-index.json"
   fetch_sums "$WORK/current-SHA256SUMS"
+  if [ -n "$KEEP_CURRENT" ]; then
+    # Exactly the CURRENT side just fetched above — the same document
+    # run_compare below reads as "after" — written in the same envelope
+    # --snapshot writes, so a caller can hand this straight back in as a
+    # baseline. Written unconditionally, before the verdict: a faithful
+    # record of what was compared, whether the comparison itself turns out
+    # clean or a hard failure.
+    python3 - "$WORK/current-index.json" "$WORK/current-SHA256SUMS" "$KEEP_CURRENT" <<'PY'
+import json, sys
+
+index_path, sums_path, dest_path = sys.argv[1:4]
+doc = json.load(open(index_path, encoding="utf-8"))
+sums_lines = [line.rstrip("\n") for line in open(sums_path, encoding="utf-8") if line.strip()]
+
+with open(dest_path, "w", encoding="utf-8") as f:
+    json.dump({"format": 2, "index": doc, "sha256sums": sums_lines}, f)
+PY
+    say "kept the current side (as compared) -> $KEEP_CURRENT"
+  fi
   rc=0
   run_compare "$BASELINE" "$WORK/current-index.json" "$WORK/current-SHA256SUMS" "$SHOW_REASONS" || rc=$?
   exit "$rc"
@@ -915,6 +976,31 @@ PY
   esac
   echo "  SHA256SUMS asset hash changed, row set and line count unchanged (sdk-goldens.json, sdk-fetch-fixtures.tar.gz): exit 0, both named HASH-CHANGED, not added/removed/dropped"
 
-  echo "index-diff: selftest ok — unchanged/union/reshaped channels pass, a true triplet drop is caught by name, a missing SHA256SUMS fixtures row is caught by name, a served unbuildable reason is elided by default and shown only with --show-reasons, and a same-filename hash change is named without being treated as a failure"
+  # 9) --keep-current: compare against regen-ok (check 3 above — a correct
+  #    union regeneration, six rows added relative to baseline.json) with
+  #    --keep-current writing the CURRENT (after) side to a file. That file
+  #    must be a valid baseline on its own, AND it must genuinely be the
+  #    AFTER document rather than the original baseline echoed back: a SECOND
+  #    --compare of the kept file against the SAME regen-ok channel must
+  #    report nothing changed. Proving that (rather than testing against an
+  #    already-unchanged channel) is what rules out "wrote the wrong side".
+  rc=0
+  out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-ok" "$SELF" --compare "$tmp/baseline.json" --keep-current "$tmp/kept-current.json" 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] || fail "a compare with --keep-current against a correct union regeneration was reported as a failure (exit $rc)" "$out"
+  [ -f "$tmp/kept-current.json" ] || fail "--keep-current did not write $tmp/kept-current.json" "$out"
+  case "$out" in
+    *"kept the current side (as compared) -> $tmp/kept-current.json"*) ;;
+    *) fail "--keep-current did not say where it wrote the kept file" "$out" ;;
+  esac
+  rc=0
+  out2="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-ok" "$SELF" --compare "$tmp/kept-current.json" 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] || fail "a second --compare using the kept-current file as its OWN baseline, against the same channel, was not clean (exit $rc)" "$out2"
+  case "$out2" in
+    *"nothing was dropped"*) ;;
+    *) fail "a second --compare using the kept-current file as its OWN baseline did not read as unchanged" "$out2" ;;
+  esac
+  echo "  --keep-current: the file kept from a compare against regen-ok is a valid baseline, and IS the after-side (a second --compare against the same channel reports nothing changed)"
+
+  echo "index-diff: selftest ok — unchanged/union/reshaped channels pass, a true triplet drop is caught by name, a missing SHA256SUMS fixtures row is caught by name, a served unbuildable reason is elided by default and shown only with --show-reasons, a same-filename hash change is named without being treated as a failure, and --keep-current writes a valid, genuinely-current baseline"
   exit 0
 fi
