@@ -50,8 +50,8 @@ form below is the exact shape an existing script in this tree uses today
 
 Before matching, every FULL-LINE comment (a line whose stripped text starts
 with `#` for .sh/.py, `//` for .go) is dropped from the file's text first —
-so a usage line like `#   scripts/foo.sh --selftest   prove ...` never counts
-as a declaration, no matter how closely it resembles one. A trailing comment
+so a usage line like `#   scripts/<name>.sh --selftest   prove ...` never
+counts as a declaration, no matter how closely it resembles one. A trailing comment
 on an otherwise-real code line is not stripped, but none of the patterns above
 can be satisfied by comment text alone, so this is enough without a real
 parser for any of the three languages.
@@ -148,7 +148,7 @@ def strip_full_comment_lines(text: str, ext: str) -> str:
     comment on a real code line is left alone — none of SELFTEST_PATTERNS can
     be satisfied by comment text alone, so this is enough without a real
     parser, and it is what keeps a usage-doc line like
-    `#   scripts/foo.sh --selftest   prove ...` from ever counting."""
+    `#   scripts/<name>.sh --selftest   prove ...` from ever counting."""
     marker = _comment_marker(ext)
     if marker is None:
         return text
@@ -275,6 +275,29 @@ def run_check(root: Path, called_by: dict[str, str]) -> tuple[list[tuple[str, st
     return results, any_unwired
 
 
+# --------------------------------------------------------------- fixtures
+#
+# --selftest below builds fabricated trees to exercise the wiring logic
+# against paths that must not exist in the real repository. Every one of
+# those paths is assembled here at RUNTIME and never spelled as one
+# contiguous literal string anywhere in this file's own text, including a
+# comment: this repository's sibling gate, the path-citation checker beside
+# this one, reads exactly a bare-directory-name-slash-filename shape as a
+# citation of a real repository path, and this repository deliberately
+# removes exemptions rather than adding them (a prior fixtures exemption was
+# deleted outright; the public-pointer checker's own selftest already builds
+# its planted value this same way, at runtime, for the identical reason). An
+# exempted file could cite a genuinely dead path and never be caught.
+FIXTURE_SCRIPTS_DIR = "scripts"
+
+
+def fake_path(*parts: str) -> str:
+    """Join a fabricated fixture path under the bare fixture directory name,
+    at runtime — see FIXTURE_SCRIPTS_DIR's comment for why this is never one
+    contiguous literal in this file's source instead."""
+    return "/".join((FIXTURE_SCRIPTS_DIR, *parts))
+
+
 # --------------------------------------------------------------- selftest
 
 
@@ -291,20 +314,21 @@ def selftest() -> int:
     #    is reported UNWIRED.
     with tempfile.TemporaryDirectory() as tmp_s:
         tmp = Path(tmp_s)
-        (tmp / "scripts").mkdir(parents=True)
+        (tmp / FIXTURE_SCRIPTS_DIR).mkdir(parents=True)
         (tmp / ".github" / "workflows").mkdir(parents=True)
-        (tmp / "scripts" / "foo.sh").write_text(
+        foo = fake_path("foo.sh")
+        (tmp / FIXTURE_SCRIPTS_DIR / "foo.sh").write_text(
             '#!/usr/bin/env bash\nif [ "${1:-}" = "--selftest" ]; then\n  echo ok\n  exit 0\nfi\necho "real run"\n'
         )
         (tmp / ".github" / "workflows" / "ci.yml").write_text(
-            "name: ci\njobs:\n  x:\n    steps:\n      - run: scripts/foo.sh --not-selftest\n"
+            f"name: ci\njobs:\n  x:\n    steps:\n      - run: {foo} --not-selftest\n"
         )
         results, any_unwired = run_check(tmp, {})
         check(any_unwired, "an unwired script with a real --selftest branch was not flagged")
         statuses = {s: st for s, st, _ in results}
         check(
-            statuses.get("scripts/foo.sh") == "UNWIRED",
-            f"scripts/foo.sh should be UNWIRED, got {statuses.get('scripts/foo.sh')!r}",
+            statuses.get(foo) == "UNWIRED",
+            f"{foo} should be UNWIRED, got {statuses.get(foo)!r}",
         )
 
     # 2. A comment-only mention of --selftest declares NOTHING — it must not
@@ -312,19 +336,21 @@ def selftest() -> int:
     #    (sh #, and a python # usage line, and a go // one).
     with tempfile.TemporaryDirectory() as tmp_s:
         tmp = Path(tmp_s)
-        (tmp / "scripts").mkdir(parents=True)
-        (tmp / "scripts" / "bar.sh").write_text(
+        (tmp / FIXTURE_SCRIPTS_DIR).mkdir(parents=True)
+        bar, baz, qux = fake_path("bar.sh"), fake_path("baz.py"), fake_path("qux.go")
+        (tmp / FIXTURE_SCRIPTS_DIR / "bar.sh").write_text(
             "#!/usr/bin/env bash\n"
-            "#   scripts/bar.sh --selftest   prove the thing below actually fires\n"
+            f"#   {bar} --selftest   prove the thing below actually fires\n"
             'echo "bar, no selftest branch at all"\n'
         )
-        (tmp / "scripts" / "baz.py").write_text(
+        (tmp / FIXTURE_SCRIPTS_DIR / "baz.py").write_text(
             "#!/usr/bin/env python3\n"
-            '# scripts/baz.py --selftest    (usage doc only; argv is never checked)\n'
+            f"# {baz} --selftest    (usage doc only; argv is never checked)\n"
             "print('baz')\n"
         )
-        (tmp / "scripts" / "qux.go").write_text(
-            "package main\n\n// scripts/qux.go --selftest  (mentioned, never checked)\n"
+        (tmp / FIXTURE_SCRIPTS_DIR / "qux.go").write_text(
+            "package main\n\n"
+            f"// {qux} --selftest  (mentioned, never checked)\n"
             'func main() { println("qux") }\n'
         )
         declared = find_declaring_scripts(tmp)
@@ -337,30 +363,30 @@ def selftest() -> int:
     #    --selftest (not by name, not by forwarding) is rejected.
     with tempfile.TemporaryDirectory() as tmp_s:
         tmp = Path(tmp_s)
-        (tmp / "scripts" / "lib").mkdir(parents=True)
+        (tmp / FIXTURE_SCRIPTS_DIR / "lib").mkdir(parents=True)
         (tmp / ".github" / "workflows").mkdir(parents=True)
-        (tmp / "scripts" / "lib" / "helper.py").write_text(
+        helper, wrapper = fake_path("lib", "helper.py"), fake_path("wrapper.sh")
+        (tmp / FIXTURE_SCRIPTS_DIR / "lib" / "helper.py").write_text(
             "#!/usr/bin/env python3\nimport sys\n\n\ndef main(argv):\n"
             '    if "--selftest" in argv:\n        return 0\n    return 1\n\n\n'
             'if __name__ == "__main__":\n    sys.exit(main(sys.argv[1:]))\n'
         )
-        (tmp / "scripts" / "wrapper.sh").write_text(
+        (tmp / FIXTURE_SCRIPTS_DIR / "wrapper.sh").write_text(
             '#!/usr/bin/env bash\necho "wrapper never mentions helper.py at all"\n'
         )
         (tmp / ".github" / "workflows" / "ci.yml").write_text(
-            "name: ci\njobs:\n  x:\n    steps:\n      - run: scripts/wrapper.sh --selftest\n"
+            f"name: ci\njobs:\n  x:\n    steps:\n      - run: {wrapper} --selftest\n"
         )
-        called_by = {"scripts/lib/helper.py": "scripts/wrapper.sh"}
-        ok, reason = verify_called_by(tmp, "scripts/lib/helper.py", "scripts/wrapper.sh")
+        called_by = {helper: wrapper}
+        ok, reason = verify_called_by(tmp, helper, wrapper)
         check(not ok, "verify_called_by accepted a caller that never mentions its callee")
         check(bool(reason), "a rejected CALLED_BY entry gave no reason")
         results, any_unwired = run_check(tmp, called_by)
         statuses = {s: st for s, st, _ in results}
         check(any_unwired, "a bad CALLED_BY mapping was not flagged as unwired")
         check(
-            statuses.get("scripts/lib/helper.py") == "UNWIRED",
-            f"scripts/lib/helper.py should be UNWIRED via a bad CALLED_BY entry, "
-            f"got {statuses.get('scripts/lib/helper.py')!r}",
+            statuses.get(helper) == "UNWIRED",
+            f"{helper} should be UNWIRED via a bad CALLED_BY entry, got {statuses.get(helper)!r}",
         )
 
     # 4. An all-wired tree passes: one script wired directly, one wired only
@@ -369,36 +395,37 @@ def selftest() -> int:
     #    scripts/check-reserved-test-names.go / .sh is in today.
     with tempfile.TemporaryDirectory() as tmp_s:
         tmp = Path(tmp_s)
-        (tmp / "scripts" / "lib").mkdir(parents=True)
+        (tmp / FIXTURE_SCRIPTS_DIR / "lib").mkdir(parents=True)
         (tmp / ".github" / "workflows").mkdir(parents=True)
-        (tmp / "scripts" / "a.sh").write_text(
+        a_sh, b_py, c_sh = fake_path("a.sh"), fake_path("lib", "b.py"), fake_path("c.sh")
+        (tmp / FIXTURE_SCRIPTS_DIR / "a.sh").write_text(
             '#!/usr/bin/env bash\nif [ "${1:-}" = "--selftest" ]; then\n  echo ok\n  exit 0\nfi\n'
         )
-        (tmp / "scripts" / "lib" / "b.py").write_text(
+        (tmp / FIXTURE_SCRIPTS_DIR / "lib" / "b.py").write_text(
             "#!/usr/bin/env python3\nimport sys\n\n\ndef main(argv):\n"
             '    if argv == ["--selftest"]:\n        return 0\n    return 1\n\n\n'
             'if __name__ == "__main__":\n    sys.exit(main(sys.argv[1:]))\n'
         )
-        (tmp / "scripts" / "c.sh").write_text(
+        (tmp / FIXTURE_SCRIPTS_DIR / "c.sh").write_text(
             '#!/usr/bin/env bash\n# forwards every argument, including --selftest, unchanged\n'
             'exec python3 "$(dirname "$0")/lib/b.py" "$@"\n'
         )
         (tmp / ".github" / "workflows" / "ci.yml").write_text(
             "name: ci\njobs:\n  x:\n    steps:\n"
-            "      - run: scripts/a.sh --selftest\n"
-            "      - run: scripts/c.sh --selftest\n"
+            f"      - run: {a_sh} --selftest\n"
+            f"      - run: {c_sh} --selftest\n"
         )
-        called_by = {"scripts/lib/b.py": "scripts/c.sh"}
+        called_by = {b_py: c_sh}
         results, any_unwired = run_check(tmp, called_by)
         statuses = {s: st for s, st, _ in results}
         check(not any_unwired, f"an all-wired tree was flagged unwired: {results}")
         check(
-            statuses.get("scripts/a.sh") == "wired: ci.yml",
-            f"scripts/a.sh should be wired: ci.yml, got {statuses.get('scripts/a.sh')!r}",
+            statuses.get(a_sh) == "wired: ci.yml",
+            f"{a_sh} should be wired: ci.yml, got {statuses.get(a_sh)!r}",
         )
         check(
-            statuses.get("scripts/lib/b.py") == "wired: via scripts/c.sh",
-            f"scripts/lib/b.py should be wired via scripts/c.sh, got {statuses.get('scripts/lib/b.py')!r}",
+            statuses.get(b_py) == f"wired: via {c_sh}",
+            f"{b_py} should be wired via {c_sh}, got {statuses.get(b_py)!r}",
         )
 
     # 5. This script's own real CALLED_BY map, run against the real

@@ -32,18 +32,13 @@ TOP = r"(?:docs|examples|scripts|include|goldens|spec|tests)"
 # A real extension is required: a bare word after a slash is a glob or prose.
 PAT = re.compile(r"(?<![A-Za-z0-9_./-])(" + TOP + r"/[A-Za-z0-9_./-]*\.[A-Za-z][A-Za-z0-9]{1,4})\b")
 # Skipped, each for a reason rather than to make the check pass:
-#   .gitignore                 holds patterns, not paths
-#   Cargo.toml                 its paths are crate-relative by definition
-#   CHANGELOG.md               deliberately names things that were removed
-#   this script                it quotes the shapes it looks for
-#   check-selftests-wired.py   its own --selftest plants a fabricated tree
-#                              (scripts/foo.sh, scripts/lib/helper.py, ...) to
-#                              prove the wiring logic, and none of those
-#                              synthetic scripts/* paths exist in THIS
-#                              repository on purpose (chtypes#268)
+#   .gitignore    holds patterns, not paths
+#   Cargo.toml    its paths are crate-relative by definition
+#   CHANGELOG.md  deliberately names things that were removed
+#   this script   it quotes the shapes it looks for
 def skipped(f):
     b = os.path.basename(f)
-    return b in (".gitignore", "Cargo.toml", "CHANGELOG.md", "lint-cited-paths.sh", "check-selftests-wired.py")
+    return b in (".gitignore", "Cargo.toml", "CHANGELOG.md", "lint-cited-paths.sh")
 
 # This repository is four sibling packages, and a cited path may be relative to
 # any of their roots rather than to the repository — a doc-comment inside rust/
