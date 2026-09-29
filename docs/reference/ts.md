@@ -130,7 +130,7 @@ The parsers read the `JSONEachRow` bytes through this package's own byte-exact r
 
 **The partition key's two fields** (revision 6, [§The partition key](bindings.md#the-partition-key-revision-6)) — `RowResult#partitionId?: string` and `BatchResult#partitionCount?: number`, both absent unless the schema declared a key; a present `0` count is a key with no stored row. A batch over the call's `max_partitions_per_insert_block` is an ordinary `'rejected'` with `errCode` 252.
 
-**Error codes** — `ErrorCodeTable` (from `Library#errorCodes()`) and `ErrorCodeEntry` (`{ code, name }`).
+**Error codes** — `ErrorCodeTable` (from `Library#errorCodes()`) and `ErrorCodeEntry` (`{ code, name }`). One difference from the other three bindings: a table entry whose code is written as `252.0` is read as code 252, because `JSON.parse` cannot tell `252.0` from `252`. Go, Python and Rust refuse that entry as a bad document.
 
 **Options** — `EngineOptions`, `CompileOptions`, `CompileFilterOptions`, `RowsOptions`, `RegistryOptions`, `Settings`, `SettingValue`.
 
