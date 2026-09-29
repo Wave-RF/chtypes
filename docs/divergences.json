@@ -1,5 +1,142 @@
 {
   "schema": 1,
-  "//": "The machine-checkable half of docs/limitations.md's '## Known divergences' section (chtypes#185). The prose is authored there; this file carries only what scripts/check-divergences.py can drive against loaded artifacts. Every '###' heading under that section must have exactly one entry here (by 'heading', matched verbatim, prefix stripped) and every entry here must match a heading — scripts/check-divergences.py's coverage check refuses either side existing alone. Each check's 'settings' are a compile-time profile (a type gate binds at compile, docs/guides/settings.md 'The one exception'); 'err_code' and 'err_msg' are asserted only where docs/limitations.md itself states them — a code without a quoted message means the page named the code alone. 'stored' asserts THIS LIBRARY's current answer for a row's stored text (BatchResult.rows[i].values[column].text) — it is expected to start FAILING the day a relink makes the library match the server, which is the retirement signal for that entry, not a regression.",
-  "entries": []
+  "//": "The machine-checkable half of docs/limitations.md's '## Known divergences' section (chtypes#185). The prose is authored there; this file carries only what scripts/check-divergences.py can drive against loaded artifacts. Every '###' heading under that section must have exactly one entry here (by 'heading', matched verbatim, prefix stripped) and every entry here must match a heading — scripts/check-divergences.py's coverage check refuses either side existing alone. Each check's 'settings' are a compile-time profile (a type gate binds at compile, docs/guides/settings.md 'The one exception'); 'err_code' and 'err_msg' are asserted only where docs/limitations.md itself states them — a code without a quoted message means the page named the code alone. 'stored' asserts THIS LIBRARY's current answer for a row's stored text (BatchResult.rows[i].values[column].text) — it is expected to start FAILING the day a relink makes the library match the server, which is the retirement signal for that entry, not a regression. 'stored_same' asserts that several named rows all store IDENTICAL text for a column, with no fixed text of its own — the shape a value computed once (rather than per row or per insert) produces, for a value (a random DEFAULT's exact bytes) that is not reproducible across processes. A check's top-level 'batches' (default 1) drives its payload through its compiled schema that many times, concatenating rows across calls in order, to reproduce separate INSERTs rather than one larger one.",
+  "entries": [
+    {
+      "id": "random-array-default-computed-once",
+      "heading": "A random-array DEFAULT is computed once, not per insert or per row",
+      "checks": [
+        {
+          "id": "arrayshuffle-two-inserts-same-value",
+          "note": "the divergence itself, 24.8/25.10: a real server gives each INSERT its own shuffled array (rows inside one insert agree with each other, but the two inserts disagree with each other); this library computes the array once and stores the identical value in every row of both inserts (server half measured by the artifact producer, not here)",
+          "lines": [
+            "24.8",
+            "25.10"
+          ],
+          "schema": "id UInt32, v Array(UInt8) DEFAULT arrayShuffle([1,2,3,4,5,6,7,8,9,10])",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n{\"id\":2}\n{\"id\":3}\n",
+          "settings": {},
+          "batches": 2,
+          "expect": {
+            "outcome": "accepted",
+            "stored_same": {
+              "column": "v",
+              "rows": [0, 1, 2, 3, 4, 5]
+            }
+          }
+        },
+        {
+          "id": "arrayshuffle-one-insert-same-value-26_3",
+          "note": "the divergence itself, 26.2/26.3: a real server gives EACH ROW its own shuffled array, even inside one insert; this library still computes the array once per compiled schema and stores the identical value in every row (server half measured by the artifact producer, not here)",
+          "lines": [
+            "26.3"
+          ],
+          "schema": "id UInt32, v Array(UInt8) DEFAULT arrayShuffle([1,2,3,4,5,6,7,8,9,10])",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n{\"id\":2}\n{\"id\":3}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "accepted",
+            "stored_same": {
+              "column": "v",
+              "rows": [0, 1, 2]
+            }
+          }
+        },
+        {
+          "id": "arrayshuffle-declined-26_4",
+          "note": "contrast: from 26.4 this library declines the DEFAULT outright (outcome unsupported) rather than preview a value it cannot promise, so the divergence above does not exist on this line",
+          "lines": [
+            "26.4"
+          ],
+          "schema": "id UInt32, v Array(UInt8) DEFAULT arrayShuffle([1,2,3,4,5,6,7,8,9,10])",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n{\"id\":2}\n{\"id\":3}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "unsupported"
+          }
+        }
+      ]
+    },
+    {
+      "id": "block-shape-default-reflects-probe",
+      "heading": "A block-shape DEFAULT reflects a one-row probe, not the real insert",
+      "checks": [
+        {
+          "id": "dumpcolumnstructure-probe-24_8-26_3",
+          "note": "the divergence itself: this library previews a DEFAULT over a synthetic one-row probe block, so dumpColumnStructure(id) answers the one-row shape on every row of a three-row insert; a real server evaluates it against the real three-row block instead (server half measured by the artifact producer, not here)",
+          "lines": [
+            "24.8",
+            "26.3"
+          ],
+          "schema": "id UInt32, v String DEFAULT dumpColumnStructure(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n{\"id\":2}\n{\"id\":3}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "accepted",
+            "stored": [
+              {
+                "row": 2,
+                "column": "v",
+                "text": "\"UInt32, UInt32(size = 1)\""
+              }
+            ]
+          }
+        },
+        {
+          "id": "blockserializedsize-probe-24_8-26_3",
+          "note": "the same divergence with blockSerializedSize(id): this library answers the one-row probe's serialized size (4 bytes for one UInt32) on every row of a three-row insert; a real server answers the real block's size instead (server half measured by the artifact producer, not here)",
+          "lines": [
+            "24.8",
+            "26.3"
+          ],
+          "schema": "id UInt32, v UInt64 DEFAULT blockSerializedSize(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n{\"id\":2}\n{\"id\":3}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "accepted",
+            "stored": [
+              {
+                "row": 2,
+                "column": "v",
+                "text": "4"
+              }
+            ]
+          }
+        },
+        {
+          "id": "dumpcolumnstructure-declined-26_4",
+          "note": "contrast: from 26.4 this library declines dumpColumnStructure as a DEFAULT outright — the schema still compiles, but the insert's own outcome answers unsupported — so the divergence above does not exist on this line",
+          "lines": [
+            "26.4"
+          ],
+          "schema": "id UInt32, v String DEFAULT dumpColumnStructure(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n{\"id\":2}\n{\"id\":3}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "unsupported"
+          }
+        },
+        {
+          "id": "blockserializedsize-declined-26_4",
+          "note": "contrast: from 26.4 this library declines blockSerializedSize as a DEFAULT outright the same way, so the divergence above does not exist on this line",
+          "lines": [
+            "26.4"
+          ],
+          "schema": "id UInt32, v UInt64 DEFAULT blockSerializedSize(id)",
+          "format": "JSONEachRow",
+          "payload": "{\"id\":1}\n{\"id\":2}\n{\"id\":3}\n",
+          "settings": {},
+          "expect": {
+            "outcome": "unsupported"
+          }
+        }
+      ]
+    }
+  ]
 }
