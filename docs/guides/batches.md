@@ -103,6 +103,8 @@ Under `allow_errors`, NDJSON and a multi-line JSON array resynchronize per recor
 
 A `CHECK` in the compiled DDL is evaluated, and a violation answers ClickHouse's own **code 469**. Like the server, **one violating row rejects the entire batch** — the batch `outcome` is `rejected`, and every row is discarded together — and the export channel declines rather than emitting partial bytes. A caller that assumes per-row rejection here will build a partial-success path that never fires.
 
+The violation's message matches the server's in its code, the constraint's name and the constraint's expression. A real server's message also names its own table (database, table and UUID) and the violating row's column values. This library has no table, so that part of the message differs by design. Match a CHECK violation on the code and the constraint name, never on the whole message text.
+
 ### Too many partitions: a batch-shape 252
 
 A schema that declared its partition key (revision 6: `SetPartitionBy` in Go, `set_partition_by` in Python and Rust, `setPartitionBy` in TypeScript) answers which partition each stored row lands in (`partition_id`) and how many partitions the batch spans (`partition_count`). A body that would split into more partitions than the call's `max_partitions_per_insert_block` allows — `100` unless a setting says otherwise, `0` meaning unlimited — is refused the way the server refuses it: the batch `outcome` is `rejected` with ClickHouse's own **code 252**, and the rows stay itemized, exactly the shape a `CHECK` violation has. Nothing in any row is wrong; the batch is. The remedy is to split the body by partition, and grouping an accepted batch's export spans by `partition_id` gives exactly those per-partition bodies.

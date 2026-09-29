@@ -55,7 +55,13 @@ TWO CHECKS, BOTH REQUIRED, NEITHER A SUBSTITUTE FOR THE OTHER.
   itself, because whoever reads it must not conclude the library regressed
   when it is the page that is now stale (or the reverse — a check newly
   failing to reproduce what it once did is a real regression, and the
-  message says that plainly instead).
+  message says that plainly instead). A check may also assert "stored_same"
+  (named rows must store IDENTICAL text for a column, with no fixed text of
+  its own — a random DEFAULT's exact bytes are not reproducible across
+  processes, but the library computing it exactly once IS a checkable
+  claim) and "batches" (drive the same payload through the same compiled
+  schema that many times, rows concatenated in call order — separate
+  INSERTs, not one bigger one).
 
 NON-BLOCKING BY DESIGN, same reasoning as the `docs` job's own comment in
 .github/workflows/ci.yml and scripts/support-matrix.sh's header: the artifact
@@ -291,31 +297,80 @@ def compare(expect: dict[str, Any], actual: dict[str, Any]) -> str | None:
             got_text = rows[idx][col]
             if got_text != want_text:
                 return f"expected row {idx} column {col!r} to store {want_text!r}, the artifact answered {got_text!r}"
+    if "stored_same" in expect:
+        # A value-level claim about several rows AGREEING, with no fixed text
+        # to name — the shape a value computed once (a random DEFAULT, admitted
+        # rather than declined) produces: every named row must store identical
+        # text for the column, whatever that text is. Checked only when the
+        # entry states one, same as "stored" above.
+        rows = actual.get("rows")
+        if rows is None:
+            return "expected a 'stored_same' row value but the actual result carries no row data at all"
+        spec = expect["stored_same"]
+        idxs, col = spec["rows"], spec["column"]
+        texts: list[str] = []
+        for idx in idxs:
+            if idx >= len(rows):
+                return f"expected row {idx} for a 'stored_same' check, but the batch produced only {len(rows)} row(s)"
+            if col not in rows[idx]:
+                return f"expected column {col!r} in row {idx} for a 'stored_same' check, but that row has no such column"
+            texts.append(rows[idx][col])
+        if len(set(texts)) > 1:
+            detail = ", ".join(f"row {i}={t!r}" for i, t in zip(idxs, texts, strict=True))
+            return (
+                f"expected rows {idxs} of column {col!r} to all store the same text, but they "
+                f"differ: {detail}"
+            )
     return None
 
 
 def run_check(library: Any, chk: dict[str, Any], chtypes_mod: Any) -> dict[str, Any]:
     """Drive one check's schema/format/payload/settings through a loaded
-    Library and return {"outcome", "err_code", "err_msg"}. Settings are
-    compiled as the DECLARED profile (docs/guides/settings.md "The one
+    Library and return {"outcome", "err_code", "err_msg", "rows"}. Settings
+    are compiled as the DECLARED profile (docs/guides/settings.md "The one
     exception: type gates bind at compile") — every entry here gates a
     TYPE (allow_experimental_object_type and the like), never a per-call
     parsing knob, so the compile profile is where a real caller would put
     it too. May raise chtypes.SchemaError (a genuine compile-time rejection
     — including the server's own code 115 for a setting name this artifact
     does not recognize) or chtypes.RegistryError (the line would not load
-    at all); the caller decides what either means."""
+    at all); the caller decides what either means.
+
+    "batches" (default 1) drives the SAME payload through the SAME compiled
+    schema that many times — separate `schema.rows()` calls, each its own
+    clock instant and its own admission decision, reproducing separate
+    INSERTs rather than a single larger one (chk["payload"] already carries
+    however many rows one INSERT holds). Rows from every call are
+    concatenated in call order, so a 3-row payload with "batches": 2 yields
+    rows 0-5 — what a "stored"/"stored_same" expectation addresses. Every
+    batch's own outcome must agree; if it does not (a real finding — this
+    checker's whole job is to say when the library's answer changed), the
+    reported "outcome" is a string naming every distinct answer seen rather
+    than picking one arbitrarily, which compare() then reports as an
+    ordinary outcome mismatch against whatever the entry expects — no
+    separate code path needed for it. Still ONE compile_ddl call, whatever
+    "batches" is: only the row call repeats."""
     fmt = getattr(chtypes_mod.Format, _FORMATS[chk["format"]])
     body = chk["payload"].encode("utf-8")
     settings = chk.get("settings") or None
+    batches = chk.get("batches", 1)
+    rows: list[dict[str, str]] = []
+    outcomes: list[str] = []
+    err_code = 0
+    err_msg = ""
     with library.compile_ddl(chk["schema"], settings=settings) as schema:
-        br = schema.rows(fmt, body, None)
-    # One {column: text} map per row the batch produced, in input order —
-    # only ever read by compare()'s optional "stored" check, above, so a
-    # check that names no "stored" expectation never pays for it and never
-    # notices when a row carries no values (a rejected batch, say).
-    rows = [{v.column: v.text for v in getattr(row, "values", ())} for row in getattr(br, "rows", ())]
-    return {"outcome": br.outcome, "err_code": br.err_code, "err_msg": br.err_msg, "rows": rows}
+        for _ in range(batches):
+            br = schema.rows(fmt, body, None)
+            outcomes.append(str(br.outcome))
+            err_code, err_msg = br.err_code, br.err_msg
+            # One {column: text} map per row the batch produced, in input
+            # order — only ever read by compare()'s optional
+            # "stored"/"stored_same" checks, so a check that names neither
+            # never pays for it and never notices when a row carries no
+            # values (a rejected batch, say).
+            rows.extend({v.column: v.text for v in getattr(row, "values", ())} for row in getattr(br, "rows", ()))
+    outcome = outcomes[0] if len(set(outcomes)) == 1 else f"mixed across {batches} batch(es): {', '.join(outcomes)}"
+    return {"outcome": outcome, "err_code": err_code, "err_msg": err_msg, "rows": rows}
 
 
 def resolve_case(
@@ -566,9 +621,24 @@ class _FakeRow:
 
 
 class _FakeSchema:
-    def __init__(self, outcome: str, err_code: int = 0, err_msg: str = "", rows_values: list[dict[str, str]] | None = None):
+    def __init__(
+        self,
+        outcome: str,
+        err_code: int = 0,
+        err_msg: str = "",
+        rows_values: list[dict[str, str]] | None = None,
+        sequence: list[tuple[str, list[dict[str, str]]]] | None = None,
+    ):
         self._outcome, self._err_code, self._err_msg = outcome, err_code, err_msg
         self._rows_values = rows_values or []
+        # A "batches" selftest needs a call's answer to differ from the
+        # call before it (a fresh random value, or an outcome that changes
+        # between insert-shaped calls) — one canned (outcome, rows_values)
+        # per call, consumed in order and held at the last entry once
+        # exhausted. None (the default) repeats one canned answer forever,
+        # which is all a batches=1 or a "same every call" test needs.
+        self._sequence = list(sequence) if sequence is not None else None
+        self._calls = 0
 
     def __enter__(self) -> "_FakeSchema":
         return self
@@ -577,12 +647,18 @@ class _FakeSchema:
         return None
 
     def rows(self, fmt: object, body: bytes, settings: object) -> Any:
+        if self._sequence is not None:
+            outcome, rows_values = self._sequence[min(self._calls, len(self._sequence) - 1)]
+            self._calls += 1
+        else:
+            outcome, rows_values = self._outcome, self._rows_values
+
         class _BR:
             pass
 
         br = _BR()
-        br.outcome, br.err_code, br.err_msg = self._outcome, self._err_code, self._err_msg
-        br.rows = [_FakeRow(v) for v in self._rows_values]
+        br.outcome, br.err_code, br.err_msg = outcome, self._err_code, self._err_msg
+        br.rows = [_FakeRow(v) for v in rows_values]
         return br
 
 
@@ -600,17 +676,19 @@ class _FakeLibrary:
         err_msg: str = "",
         raise_schema_error: tuple[int, str] | None = None,
         rows_values: list[dict[str, str]] | None = None,
+        sequence: list[tuple[str, list[dict[str, str]]]] | None = None,
     ):
         self._chtypes = chtypes_mod
         self._outcome, self._err_code, self._err_msg = outcome, err_code, err_msg
         self._raise = raise_schema_error
         self._rows_values = rows_values
+        self._sequence = sequence
 
     def compile_ddl(self, ddl: str, *, settings: object = None, mode: int = 0) -> _FakeSchema:
         if self._raise is not None:
             code, msg = self._raise
             raise self._chtypes.SchemaError(code, msg)
-        return _FakeSchema(self._outcome, self._err_code, self._err_msg, self._rows_values)
+        return _FakeSchema(self._outcome, self._err_code, self._err_msg, self._rows_values, self._sequence)
 
 
 class _FakeRegistry:
@@ -701,6 +779,29 @@ def selftest() -> int:
         "'stored' was checked although the entry did not state one",
     )
 
+    # ---- compare(): a matching 'stored_same' set of rows passes — no fixed
+    # text is asserted, only that the named rows agree with EACH OTHER (the
+    # shape a value computed once, rather than per row or per insert,
+    # produces).
+    expect_same = {"outcome": "accepted", "stored_same": {"column": "v", "rows": [0, 1, 2]}}
+    actual_same_ok = {"outcome": "accepted", "rows": [{"v": "[4,1,3]"}, {"v": "[4,1,3]"}, {"v": "[4,1,3]"}]}
+    check(compare(expect_same, actual_same_ok) is None, "a matching 'stored_same' set was reported as a mismatch")
+
+    # ---- compare(): a 'stored_same' mismatch is caught, naming the distinct
+    # texts that disagree.
+    actual_same_wrong = {"outcome": "accepted", "rows": [{"v": "[4,1,3]"}, {"v": "[3,1,4]"}, {"v": "[4,1,3]"}]}
+    m = compare(expect_same, actual_same_wrong)
+    check(
+        m is not None and "[4,1,3]" in m and "[3,1,4]" in m,
+        "a 'stored_same' mismatch was not caught, naming both distinct texts",
+    )
+
+    # ---- compare(): 'stored_same' is checked ONLY when the entry states one.
+    check(
+        compare({"outcome": "accepted"}, {"outcome": "accepted", "rows": [{"v": "a"}, {"v": "b"}]}) is None,
+        "'stored_same' was checked although the entry did not state one",
+    )
+
     # ---- resolve_case: the driver's own decision, end to end, against fakes
     # — no registry, no network, and no re-implemented copy of the logic
     # the real run uses.
@@ -709,6 +810,37 @@ def selftest() -> int:
     reg = _FakeRegistry(chtypes, {"25.8": _FakeLibrary(chtypes, outcome="accepted")})
     status, msg = resolve_case(chk_ok, "25.8", reg, "linux-amd64", set(), chtypes)
     check(status == "ok", f"a case matching its expectation was not reported ok: {status} {msg}")
+
+    # ---- run_check: 'batches' (default 1, unchanged from before this
+    # extension) drives the same payload through the same compiled schema
+    # that many times and concatenates rows in call order.
+    chk_no_batches_key = {**chk_ok}
+    actual = run_check(_FakeLibrary(chtypes, outcome="accepted", rows_values=[{"d": "x"}]), chk_no_batches_key, chtypes)
+    check(len(actual["rows"]) == 1, f"no 'batches' key did not default to exactly one call: {actual['rows']}")
+
+    chk_batches_2 = {**chk_ok, "batches": 2}
+    fake_3rows = _FakeLibrary(chtypes, outcome="accepted", rows_values=[{"d": "a"}, {"d": "b"}, {"d": "c"}])
+    actual = run_check(fake_3rows, chk_batches_2, chtypes)
+    check(
+        [r["d"] for r in actual["rows"]] == ["a", "b", "c", "a", "b", "c"],
+        f"'batches': 2 over a 3-row payload did not concatenate two calls' rows in order: {actual['rows']}",
+    )
+    check(actual["outcome"] == "accepted", "two batches agreeing on 'accepted' were not reported as 'accepted'")
+
+    # An outcome that changes from one batch to the next inside a single
+    # check is a real finding, not something to merge away: run_check must
+    # not report either individual outcome as though the two calls agreed,
+    # and compare() then catches it as an ordinary outcome mismatch against
+    # whatever the entry expects — the same path an outright wrong answer
+    # takes, no separate code needed for it.
+    fake_mixed = _FakeLibrary(chtypes, sequence=[("accepted", [{"d": "a"}]), ("unsupported", [])])
+    actual = run_check(fake_mixed, chk_batches_2, chtypes)
+    check(
+        actual["outcome"] not in ("accepted", "unsupported"),
+        f"an outcome that changed between batches was collapsed into a single real outcome: {actual['outcome']!r}",
+    )
+    m = compare({"outcome": "accepted"}, actual)
+    check(m is not None and "accepted" in m, "a batch-to-batch outcome change did not surface as an outcome mismatch")
 
     # THE central negative: an entry whose claim no longer holds (the
     # producer fixed the divergence) must be reported as a problem, in the
@@ -867,11 +999,14 @@ def selftest() -> int:
         return 1
     print(
         "check-divergences: selftest ok — coverage catches a heading with no entry, an entry with no "
-        "heading, and a duplicate; compare() catches an outcome/err_code/err_msg/stored mismatch and "
-        "passes an exact match, and 'stored' is checked only when an entry states one; resolve_case "
-        "reports ok/skip/problem correctly for a match, a 'stored' row value that matches or no longer "
-        "holds, a claim that no longer holds, an unfetched line, an unbuildable (platform, line) pair, "
-        "an inexplicable load failure, and a code-115 unknown setting; classify_register and "
+        "heading, and a duplicate; compare() catches an outcome/err_code/err_msg/stored/stored_same "
+        "mismatch and passes an exact match, and 'stored'/'stored_same' are each checked only when an "
+        "entry states one; run_check's 'batches' concatenates rows across repeated calls over one "
+        "compiled schema and surfaces a batch-to-batch outcome change as an ordinary mismatch rather "
+        "than merging it away; resolve_case reports ok/skip/problem correctly for a match, a 'stored' "
+        "row value that matches or no longer holds, a claim that no longer holds, an unfetched line, "
+        "an unbuildable (platform, line) pair, an inexplicable load failure, and a code-115 unknown "
+        "setting; classify_register and "
         "has_divergences_section tell an intentionally empty register apart from a renamed/missing "
         "section; zero_run_problems and run() itself both still refuse when entries exist but nothing "
         "could be driven, and run() passes end to end, offline, when the register is genuinely empty"
