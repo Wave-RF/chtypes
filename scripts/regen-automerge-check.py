@@ -545,10 +545,15 @@ def cmd_merge(args: argparse.Namespace) -> int:
         return 2
     number, sha = args.pr, args.head_sha
     facts = gather(args.repo, number, sha)
-    head_bytes = {path: head_file(args.repo, path, sha) for path in ALLOWED_FILES}
-    refusal = decide(repo=args.repo, expected_head_sha=sha, run_head_repo=args.run_head_repo or None,
-                     pr=facts.pr, files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
-                     review_comments=facts.review_comments, head_bytes=head_bytes, regenerated=regenerated)
+    judged = dict(repo=args.repo, expected_head_sha=sha, run_head_repo=args.run_head_repo or None, pr=facts.pr,
+                  files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
+                  review_comments=facts.review_comments)
+    # Every other condition first, fresh: a head that moved or vanished since
+    # the gate is `stale`, never a failed read of its bytes.
+    refusal = decide(**judged)
+    if refusal is None:
+        head_bytes = {path: head_file(args.repo, path, sha) for path in ALLOWED_FILES}
+        refusal = decide(**judged, head_bytes=head_bytes, regenerated=regenerated)
     where = f"PR #{number} at {sha[:12]}"
     if refusal:
         return refuse(refusal, where)
