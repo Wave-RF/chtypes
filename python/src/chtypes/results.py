@@ -492,6 +492,12 @@ class RowResult:
     # parse error, reported as DECLINE). 0/"" otherwise.
     verdict_code: int = 0
     verdict_err: str = ""
+    # Revision 6: the partition this row lands in, as the loaded build's own
+    # MergeTreePartition::getID spells it — present only when the schema
+    # declared a partition key (`Schema.set_partition_by`) and the row would
+    # be stored; None otherwise. Grouping an accepted batch's `spans` by it
+    # gives per-partition bodies, each directly INSERT-able.
+    partition_id: str | None = None
 
     @property
     def accepted(self) -> bool:
@@ -596,6 +602,12 @@ class BatchResult:
     # these being nonzero.
     rows_passed: int = 0
     rows_cut: int = 0
+    # Revision 6: the distinct partitions this batch's stored rows span —
+    # present only when the schema declared a partition key
+    # (`Schema.set_partition_by`); None otherwise. A batch over the call's
+    # max_partitions_per_insert_block is an ordinary REJECTED with err_code
+    # 252 (TOO_MANY_PARTS), the server's own.
+    partition_count: int | None = None
 
     @property
     def lossy_transforms(self) -> tuple[Transform, ...]:

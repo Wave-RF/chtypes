@@ -551,6 +551,34 @@ func (cs *CompiledSchema) SetTTL(ttl string) error {
 	return &UnsupportedError{Msg: msg}
 }
 
+// SetPartitionBy declares the table's partition key (the PARTITION BY clause
+// after the engine, e.g. "toYYYYMM(ts)") — chs_schema_partition_by, revision
+// 6. The linked twin of (*LoadedSchema).SetPartitionBy, with the same
+// contract: a second call replaces the first, "" removes the declaration, and
+// the return follows chs_schema_engine's SIGN rule — a *SchemaError for the
+// server's own CREATE-path refusal (e.g. 36 for a non-deterministic key, 549),
+// an *UnsupportedError for this build's decline (-2, a key the server accepts
+// but this build will not evaluate).
+func (cs *CompiledSchema) SetPartitionBy(expr string) error {
+	defaultSettingsMu.RLock()
+	defer defaultSettingsMu.RUnlock()
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if cs.handle == nil {
+		return fmt.Errorf("chtypes: schema is closed")
+	}
+	cp := C.CString(expr)
+	defer C.free(unsafe.Pointer(cp))
+	var cErr *C.char
+	rc := C.chs_schema_partition_by(cs.handle, cp, &cErr)
+	msg := ""
+	if cErr != nil {
+		msg = C.GoString(cErr)
+		C.chs_free(cErr)
+	}
+	return partitionByError(int(rc), msg)
+}
+
 // Close releases the native schema. Optional: a finalizer does it too. Any
 // Filter or Block still open on this schema is closed FIRST, in the same
 // call — the handles-before-schema free order the C layer requires, enforced
@@ -1207,6 +1235,28 @@ func FunctionFlags() (string, error) {
 	s := C.GoString(c)
 	C.chs_free(c)
 	return s, nil
+}
+
+// ErrorCodes is the linked library's own error-code table (chs_error_codes,
+// revision 6) — the static path's twin of (*Library).ErrorCodes, answering
+// for the one artifact linked at compile time.
+//
+// Built afresh on every call and never kept: a package-level cache would be a
+// package-level table, and there is none anywhere in this package — the table
+// is a property of a build, and the dlopen'd path keeps it per *Library for
+// that reason. A NULL answer (a guarded exception inside the library) is a
+// plain error.
+func ErrorCodes() (*ErrorCodeTable, error) {
+	if err := ensureInit(); err != nil {
+		return nil, err
+	}
+	c := C.chs_error_codes()
+	if c == nil {
+		return nil, errNoErrorCodesDocument
+	}
+	doc := C.GoString(c)
+	C.chs_free(c)
+	return errorCodeTableOf([]byte(doc))
 }
 
 // ReferenceType returns the widened reference type this build compares a type

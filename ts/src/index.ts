@@ -101,6 +101,7 @@ export {
   formatName,
 } from './format.js';
 export { CompileMode, Library, minorOf, type CompileOptions } from './library.js';
+export { ErrorCodeTable, type ErrorCodeEntry } from './error-codes.js';
 export { nativeStats } from './ffi.js';
 export {
   compareMinor,

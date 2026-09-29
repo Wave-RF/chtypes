@@ -277,6 +277,36 @@
       "go": "Library.QuoteLiteral", "python": "Library.quote_literal", "ts": "Library.quoteLiteral", "rust": "Library::quote_literal"
     },
     {
+      "id": "library.error-codes",
+      "group": "library", "kind": "method",
+      "what": "chs_error_codes (revision 6) — THIS build's own error-code table, per Library and never global: one number can name different errors on two lines (903). Built on first call, kept on success only; a NULL answer is a plain error and is never cached, a missing symbol is the decline type (§Error codes)",
+      "go": "Library.ErrorCodes", "python": "Library.error_codes", "ts": "Library.errorCodes", "rust": "Library::error_codes"
+    },
+    {
+      "id": "library.error-codes.name",
+      "group": "library", "kind": "method",
+      "what": "The name this build gives a code — absent (never synthesized) for an unknown code, a negative one, or the ABI's -1/-2 sentinels (§Error codes)",
+      "go": "ErrorCodeTable.Name", "python": "ErrorCodeTable.name", "ts": "ErrorCodeTable.name", "rust": "ErrorCodeTable::name"
+    },
+    {
+      "id": "library.error-codes.code",
+      "group": "library", "kind": "method",
+      "what": "The code this build gives a name — an exact, case-sensitive match; an unknown name is absent (§Error codes)",
+      "go": "ErrorCodeTable.Code", "python": "ErrorCodeTable.code", "ts": "ErrorCodeTable.code", "rust": "ErrorCodeTable::code"
+    },
+    {
+      "id": "library.error-codes.all",
+      "group": "library", "kind": "method",
+      "what": "Every entry of this build's table, in ascending code order (§Error codes)",
+      "go": "ErrorCodeTable.All", "python": "ErrorCodeTable.all", "ts": "ErrorCodeTable.all", "rust": "ErrorCodeTable::iter"
+    },
+    {
+      "id": "library.error-code-entry",
+      "group": "library", "kind": "type",
+      "what": "One entry of a build's error-code table: {code, name}, the same field names in all four (§Error codes)",
+      "go": "ErrorCodeEntry", "python": "ErrorCodeEntry", "ts": "ErrorCodeEntry", "rust": "ErrorCodeEntry"
+    },
+    {
       "id": "library.set-default-settings",
       "group": "library",
       "kind": "method",
@@ -335,6 +365,12 @@
       "python": "Schema.set_ttl",
       "ts": "Schema.setTtl",
       "rust": "Schema::set_ttl"
+    },
+    {
+      "id": "schema.set-partition-by",
+      "group": "schema", "kind": "method",
+      "what": "Declare the table's partition key (chs_schema_partition_by, revision 6); \"\" removes it. The return follows chs_schema_engine's SIGN rule, NOT chs_schema_ttl's: > 0 is the server's own refusal with its code (e.g. 549), < 0 is the decline type (§The partition key)",
+      "go": "LoadedSchema.SetPartitionBy", "python": "Schema.set_partition_by", "ts": "Schema.setPartitionBy", "rust": "Schema::set_partition_by"
     },
     {
       "id": "schema.row",
@@ -585,6 +621,18 @@
       "python": "FilterRowError",
       "ts": "FilterRowError",
       "rust": "FilterRowError"
+    },
+    {
+      "id": "results.partition-id",
+      "group": "results", "kind": "property",
+      "what": "A row's partition_id (revision 6): present only on a schema that declared a partition key, and only for a row that would be stored — the build's own MergeTreePartition::getID spelling. Absent means the default (Go \"\", Python None, TypeScript undefined, Rust None). TypeScript and Rust are spelled at the type: an interface member and a struct field are not symbols their surface checks resolve (§The partition key)",
+      "go": "RowResult.PartitionID", "python": "RowResult.partition_id", "ts": "RowResult", "rust": "RowResult"
+    },
+    {
+      "id": "results.partition-count",
+      "group": "results", "kind": "property",
+      "what": "A batch's partition_count (revision 6): the distinct partitions its stored rows span, present only on a schema that declared a partition key. Absent means the default (Go 0 — which also reads as a key with no stored rows — Python None, TypeScript undefined, Rust None). A batch over max_partitions_per_insert_block is an ordinary rejection with code 252; there is no new vocabulary (§The partition key)",
+      "go": "BatchResult.PartitionCount", "python": "BatchResult.partition_count", "ts": "BatchResult", "rust": "BatchResult"
     },
     {
       "id": "results.transform-lossy",
@@ -1031,7 +1079,7 @@
 
     {
       "id": "const.abi-revision",
-      "group": "vocabulary", "kind": "constant", "value": 5,
+      "group": "vocabulary", "kind": "constant", "value": 6,
       "what": "The chs_* ABI revision this binding was written against; a different nonzero artifact revision is refused at load (§The object model)",
       "go": "ABIRevision", "python": "ABI_REVISION", "ts": "ABI_REVISION", "rust": "ABI_REVISION"
     },
@@ -1632,6 +1680,7 @@
       "Error::PredatesFeature": "A decline arm: the artifact predates the entry point.",
       "Error::BadDocument": "A result document that did not parse.",
       "Error::Nul": "An interior NUL in a string crossing the boundary.",
+      "Error::NoDocument": "An entry point answered NULL where a document was due (chs_error_codes' guarded-exception case): the binding's general error, neither a refusal nor a decline, and never cached.",
       "Error::Discovery": "A discovery body that did not parse.",
       "Error::CrossLibrary": "The §Revision 4 cross-library refusal, as a typed error.",
       "Error::CrossLibrarySchema": "Schema::rows_export_with's cross-library refusal (a filter and the schema it is attached to come from two different loaded libraries), the same shape as Error::CrossLibrary for a (filter, block) pair.",

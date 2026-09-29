@@ -43,8 +43,12 @@ export const CODE_UNSUPPORTED = -2;
  * 9-argument `chs_rows`, or the 8-argument `chs_block_parse`) through a
  * revision-4 artifact's shorter declaration is undefined behavior, which is
  * exactly what the gate exists to prevent.
+ *
+ * Revision 6 (the error-code table and the partition key): `chs_error_codes`
+ * and `chs_schema_partition_by` joined the surface. Purely additive, and still
+ * a new number: this binding speaks 6 and refuses revision-5 artifacts.
  */
-export const ABI_REVISION = 5;
+export const ABI_REVISION = 6;
 
 /** Base class for everything this package throws. */
 export class ChtypesError extends Error {

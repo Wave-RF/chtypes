@@ -233,6 +233,46 @@ impl Schema {
         unsafe { self.lib.api().ttl(self.handle, &t) }
     }
 
+    /// Declare the table's partition key — the `PARTITION BY` clause after the
+    /// engine, e.g. `"toYYYYMM(ts)"` or `"(toDate(ts), tenant)"`
+    /// (`chs_schema_partition_by`, revision 6). The key is built by the
+    /// server's own CREATE-path call over this schema's columns, under the
+    /// handle's compile profile. A second call REPLACES the first; `""`
+    /// removes the declaration, and the schema then answers exactly as one that
+    /// never declared a key.
+    ///
+    /// With a key declared, [`Schema::row`] and [`Schema::rows`] answer
+    /// [`crate::RowResult::partition_id`] for every row that would be stored
+    /// and [`crate::BatchResult::partition_count`] for the batch, and a body
+    /// that would split into more partitions than the call's
+    /// `max_partitions_per_insert_block` allows is an ordinary
+    /// [`crate::Outcome::Rejected`] with `err_code` 252 (`TOO_MANY_PARTS`), the
+    /// server's own — a verdict, never an `Err`.
+    ///
+    /// # Errors
+    ///
+    /// The return follows [`Schema::set_engine`]'s SIGN rule, NOT
+    /// [`Schema::set_ttl`]'s:
+    ///
+    /// * [`crate::Error::Schema`] — positive code: **the server refused** the
+    ///   key on its own CREATE path (e.g. `36` `BAD_ARGUMENTS` for a
+    ///   non-deterministic key, `549` `DATA_TYPE_CANNOT_BE_USED_IN_KEY`), with
+    ///   its own message.
+    /// * [`crate::Error::Unsupported`] — negative code: **this library
+    ///   declined** (`-1` a guarded exception). `-2` is a key the server
+    ///   accepts but this build will not evaluate; a non-deterministic key is
+    ///   the server's own rejection, `36` `BAD_ARGUMENTS`.
+    /// * [`crate::Error::PredatesFeature`] — the artifact predates
+    ///   `chs_schema_partition_by`.
+    /// * [`crate::Error::Nul`] — the expression contained an interior NUL
+    ///   byte.
+    pub fn set_partition_by(&mut self, expr: &str) -> Result<()> {
+        let p = cstring(expr, "partition by")?;
+        let _guard = self.lib.lock();
+        // SAFETY: our own handle, under the library lock.
+        unsafe { self.lib.api().partition_by(self.handle, &p) }
+    }
+
     /// Validate and coerce one row, with no per-request settings —
     /// [`Schema::row_with_settings`] with an empty map. Same errors.
     pub fn row(&self, format: Format, raw: &[u8]) -> Result<RowResult> {

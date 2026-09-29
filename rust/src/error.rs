@@ -29,7 +29,11 @@ pub const CODE_UNSUPPORTED: i32 = -2;
 /// crate therefore speaks 5 and refuses revision-4 artifacts: calling the
 /// 5-argument `chs_filter_compile` against the 4-argument revision-3 artifact
 /// is undefined behavior, which is exactly what this gate exists to refuse.
-pub const ABI_REVISION: i32 = 5;
+///
+/// Revision 6 (the error-code table and the partition key): `chs_error_codes`
+/// and `chs_schema_partition_by` joined the surface. Purely additive, and
+/// still a new number: this crate speaks 6 and refuses revision-5 artifacts.
+pub const ABI_REVISION: i32 = 6;
 
 /// `CHTYPES_ARTIFACT_MISSING` — no installed artifact answers for the line
 /// (`docs/guides/fetch.md` §7). The code every SDK shares for [`Error::ArtifactMissing`].
@@ -300,6 +304,20 @@ pub enum Error {
         message: String,
         /// The byte offset in the (denormal-repaired) document.
         offset: usize,
+    },
+
+    /// An entry point answered `NULL` where a document was due — today only
+    /// `chs_error_codes`, whose `NULL` is a guarded exception inside the
+    /// library. Neither a refusal nor a decline ([`Error::code`] answers
+    /// `None`), and transient: nothing was cached, so asking again is the
+    /// remedy.
+    #[error(
+        "chtypes: {feature} returned no document (a guarded exception inside the library); \
+         nothing was cached, so the next call asks again"
+    )]
+    NoDocument {
+        /// The entry point that answered `NULL`.
+        feature: &'static str,
     },
 
     /// A string argument contained an interior NUL, so it cannot cross the C

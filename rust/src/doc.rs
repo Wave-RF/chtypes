@@ -261,6 +261,16 @@ impl<'a> Rdr<'a> {
                 b"verdict" => d.verdict = r.text()?.chars().next(),
                 b"verdict_code" => d.verdict_code = r.i32_field()?,
                 b"verdict_err" => d.verdict_err = r.text()?,
+                // Revision 6, the partition key: present exactly when the
+                // schema declared one and this row would be stored. A null
+                // reads as absent.
+                b"partition_id" => {
+                    if r.peek() == Some(b'n') {
+                        r.skip()?;
+                    } else {
+                        d.partition_id = Some(r.text()?);
+                    }
+                }
                 _ => return Ok(false),
             }
             Ok(true)
@@ -361,6 +371,15 @@ impl<'a> Rdr<'a> {
                 // Revision 5, the attached row filter — see `row()` above.
                 b"rows_passed" => d.rows_passed = r.usize_field()?,
                 b"rows_cut" => d.rows_cut = r.usize_field()?,
+                // Revision 6, the partition key — see `row()` above. A null
+                // reads as absent, never as a guessed 0.
+                b"partition_count" => {
+                    if r.peek() == Some(b'n') {
+                        r.skip()?;
+                    } else {
+                        d.partition_count = Some(r.int()?.max(0) as u64);
+                    }
+                }
                 _ => return Ok(false),
             }
             Ok(true)

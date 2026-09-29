@@ -135,6 +135,20 @@ jobs:
         run: scripts/check-quoting-passthrough.py --selftest
       - name: no binding spells a ClickHouse quoting rule of its own
         run: scripts/check-quoting-passthrough.py
+      # The same rule, for ClickHouse's error-code table (revision 6). The
+      # table is a property of each build and moves between lines — one
+      # number names two different errors on 25.8 and 26.2 — so every binding
+      # asks the loaded library through chs_error_codes and none may carry a
+      # code -> name table of its own. This fails on a table shape or a known
+      # error name as a literal in binding source (tests excluded), and — the
+      # half check-abi-decls.py deliberately does not cover — on a binding
+      # that stops declaring chs_error_codes. Here, not in the artifacts leg,
+      # for the reason given above: no revision-6 artifact exists on the
+      # branch that introduces it.
+      - name: selftest — a planted error-code table, a name literal and a dropped declaration fire in every binding
+        run: scripts/check-no-error-code-table.py --selftest
+      - name: no binding carries a ClickHouse error-code table of its own
+        run: scripts/check-no-error-code-table.py
       # go/chtypes shares one package namespace with the artifact producer's
       # overlay tests when they are compiled in with `go test -overlay`, and
       # a top-level name declared on both sides breaks that build (#127) — a

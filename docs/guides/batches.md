@@ -105,6 +105,63 @@ A `CHECK` in the compiled DDL is evaluated, and a violation answers ClickHouse's
 
 The violation's message matches the server's in its code, the constraint's name and the constraint's expression. A real server's message also names its own table (database, table and UUID) and the violating row's column values. This library has no table, so that part of the message differs by design. Match a CHECK violation on the code and the constraint name, never on the whole message text.
 
+### Too many partitions: a batch-shape 252
+
+A schema that declared its partition key (revision 6: `SetPartitionBy` in Go, `set_partition_by` in Python and Rust, `setPartitionBy` in TypeScript) answers which partition each stored row lands in (`partition_id`) and how many partitions the batch spans (`partition_count`). A body that would split into more partitions than the call's `max_partitions_per_insert_block` allows — `100` unless a setting says otherwise, `0` meaning unlimited — is refused the way the server refuses it: the batch `outcome` is `rejected` with ClickHouse's own **code 252**, and the rows stay itemized, exactly the shape a `CHECK` violation has. Nothing in any row is wrong; the batch is. The remedy is to split the body by partition, and grouping an accepted batch's export spans by `partition_id` gives exactly those per-partition bodies.
+
+**Branch on code 252, never on the message text.** The message is ClickHouse's own wording and moves between lines; the code is the stable part. And the name a code carries is the loaded build's own, so if you want it for a log line, ask the library rather than writing it down: its error-code table (`lib.ErrorCodes()` in Go, `lib.error_codes()` in Python and Rust, `lib.errorCodes()` in TypeScript) answers the name for 252 on that line ([§Error codes](../reference/bindings.md#error-codes--a-binding-never-carries-clickhouses-code-table-revision-6)).
+
+<details open><summary><b>Go</b></summary>
+
+```go
+if err := schema.SetPartitionBy("toYYYYMM(ts)"); err != nil {
+	return err // *SchemaError: the server refused the key; *UnsupportedError: a decline
+}
+batch, _ := schema.Rows(chtypes.JSONEachRow, body, nil)
+if batch.Outcome == chtypes.Rejected && batch.ErrCode == 252 {
+	// too many partitions for one INSERT — split the body by RowResult.PartitionID
+}
+```
+
+</details>
+
+<details><summary><b>Python</b></summary>
+
+```python
+schema.set_partition_by("toYYYYMM(ts)")
+batch = schema.rows(Format.JSON_EACH_ROW, body)
+if batch.outcome is Outcome.REJECTED and batch.err_code == 252:
+    ...  # too many partitions for one INSERT — split the body by row.partition_id
+```
+
+</details>
+
+<details><summary><b>TypeScript</b></summary>
+
+```ts
+schema.setPartitionBy('toYYYYMM(ts)');
+const batch = schema.rows(Format.JSONEachRow, body);
+if (batch.outcome === Outcome.Rejected && batch.errCode === 252) {
+  // too many partitions for one INSERT — split the body by row.partitionId
+}
+```
+
+</details>
+
+<details><summary><b>Rust</b></summary>
+
+```rust
+schema.set_partition_by("toYYYYMM(ts)")?;
+let batch = schema.rows(Format::JsonEachRow, body, NO_SETTINGS)?;
+if batch.outcome == Outcome::Rejected && batch.err_code == 252 {
+    // too many partitions for one INSERT — split the body by row.partition_id
+}
+```
+
+</details>
+
+The verdict is the one a **synchronous** insert of this body gets. Under `async_insert` the server counts partitions over a coalesced flush of which this body is only a part, so a refusal here means the server refuses too, while an acceptance here does not guarantee the server accepts.
+
 ## The pairing rule for a gateway and a worker
 
 If you validate in one process and INSERT from another, the settings chtypes sees must be the settings the INSERT runs under. `input_format_allow_errors_*` is the one exception, and it matters:

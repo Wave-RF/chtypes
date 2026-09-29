@@ -602,6 +602,13 @@ pub struct RowResult {
     pub verdict_code: i32,
     /// The message beside `verdict_code`; empty otherwise.
     pub verdict_err: String,
+    /// Revision 6: the partition this row lands in, as the loaded build's own
+    /// `MergeTreePartition::getID` spells it — `Some` only when the schema
+    /// declared a partition key ([`crate::Schema::set_partition_by`]) and the
+    /// row would be stored. Grouping an accepted batch's
+    /// [`spans`](BatchResult::spans) by it gives per-partition bodies, each
+    /// directly INSERT-able.
+    pub partition_id: Option<String>,
 }
 
 /// The outcome of one request body, which may hold many rows.
@@ -684,6 +691,13 @@ pub struct BatchResult {
     /// Accepted rows with any verdict OTHER than [`Verdict::True`]; see
     /// `rows_passed`.
     pub rows_cut: usize,
+    /// Revision 6: the distinct partitions this batch's stored rows span —
+    /// `Some` only when the schema declared a partition key
+    /// ([`crate::Schema::set_partition_by`]). A batch over the call's
+    /// `max_partitions_per_insert_block` is an ordinary
+    /// [`Outcome::Rejected`] with `err_code` 252 (`TOO_MANY_PARTS`), the
+    /// server's own.
+    pub partition_count: Option<u64>,
 }
 
 impl BatchResult {
@@ -722,6 +736,9 @@ pub(crate) struct RowDoc {
     pub verdict: Option<char>,
     pub verdict_code: i32,
     pub verdict_err: String,
+    /// Revision 6: present exactly when the schema declared a partition key
+    /// and this row would be stored.
+    pub partition_id: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -811,6 +828,8 @@ pub(crate) struct BatchDoc {
     /// `0` when no filter was attached.
     pub rows_passed: usize,
     pub rows_cut: usize,
+    /// Revision 6: present exactly when the schema declared a partition key.
+    pub partition_count: Option<u64>,
 }
 
 /// The wire document `chs_filter_rows` returns.
@@ -842,6 +861,7 @@ pub(crate) fn row_result_of(doc: RowDoc) -> RowResult {
         err_msg: doc.err,
         unknown_fields: doc.unknown_fields,
         unsupported_settings: doc.unsupported_settings,
+        partition_id: doc.partition_id,
         ..Default::default()
     };
     // A declined setting must never be scored as agreement.
@@ -909,6 +929,7 @@ pub(crate) fn batch_result_of(doc: BatchDoc) -> BatchResult {
         export_declined: doc.export_declined,
         rows_passed: doc.rows_passed,
         rows_cut: doc.rows_cut,
+        partition_count: doc.partition_count,
         ..Default::default()
     };
     for (i, rd) in doc.rows.into_iter().enumerate() {
@@ -1352,5 +1373,58 @@ mod tests {
         assert_eq!(br.rows_passed, 0);
         assert_eq!(br.rows_cut, 0);
         assert_eq!(br.rows[0].verdict, None);
+    }
+
+    // Revision 6, the partition key: the two fields, parsed through the same
+    // path every row/rows call takes. Absent is None, and a null reads as
+    // absent; a present 0 is a real answer (a key, and no stored row).
+
+    fn parse_batch(s: &str) -> BatchResult {
+        let repaired = quote_bare_denormals(s.as_bytes());
+        batch_result_of(crate::doc::batch_doc(&repaired).unwrap())
+    }
+
+    #[test]
+    fn partition_fields_parse() {
+        let b = parse_batch(
+            r#"{"outcome":"accepted","rows_read":3,"partition_count":2,"rows":[
+                {"outcome":"accepted","cols":[],"partition_id":"202601"},
+                {"outcome":"accepted","cols":[],"partition_id":"202602"},
+                {"outcome":"rejected","code":27,"err":"x","cols":[]}]}"#,
+        );
+        assert_eq!(b.partition_count, Some(2));
+        let ids: Vec<Option<&str>> = b.rows.iter().map(|r| r.partition_id.as_deref()).collect();
+        assert_eq!(ids, vec![Some("202601"), Some("202602"), None]);
+    }
+
+    #[test]
+    fn partition_fields_absent_or_null_are_none() {
+        let b = parse_batch(r#"{"outcome":"accepted","rows":[{"outcome":"accepted","cols":[]}]}"#);
+        assert_eq!(b.partition_count, None);
+        assert_eq!(b.rows[0].partition_id, None);
+        let b = parse_batch(
+            r#"{"outcome":"accepted","partition_count":null,"rows":[{"outcome":"accepted","cols":[],"partition_id":null}]}"#,
+        );
+        assert_eq!(b.partition_count, None);
+        assert_eq!(b.rows[0].partition_id, None);
+        assert_eq!(
+            parse_row(r#"{"outcome":"accepted","cols":[],"partition_id":"all"}"#).partition_id,
+            Some("all".to_string())
+        );
+        assert_eq!(
+            parse_batch(r#"{"outcome":"accepted","partition_count":0}"#).partition_count,
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn too_many_parts_is_an_ordinary_rejection() {
+        let b = parse_batch(
+            r#"{"outcome":"rejected","code":252,"err":"Too many partitions for single INSERT block","rows_read":2,
+                "rows":[{"outcome":"accepted","cols":[],"partition_id":"1"},{"outcome":"accepted","cols":[],"partition_id":"2"}]}"#,
+        );
+        assert_eq!(b.outcome, Outcome::Rejected);
+        assert_eq!(b.err_code, 252);
+        assert_eq!(b.rows.len(), 2);
     }
 }

@@ -10,13 +10,16 @@
  * handles; a single handle must not be used from two threads at once.
  *
  * -------------------------------------------------------------------------
- * STABILITY, PRE-1.0. Nothing has published this library yet, so this ABI is
- * NOT additive-only: until the first publish, a deliberate consolidation
- * cycle MAY change any signature, delete any function, or renumber anything
- * that is not marked frozen below. Versioned duplicates (`_v2` names) are
- * explicitly NOT how this ABI evolves — the second shape replaces the first
- * and every artifact is relinked in the same cycle. What IS frozen, because
- * it is identity rather than versioning:
+ * STABILITY. This library has been published since 2026-09-15. Its ABI
+ * changes only through a NUMBERED REVISION (CHS_ABI_REVISION, below): a
+ * revision may add functions, change a signature or retire one, and once a
+ * revision has been published, ANY change to the exported surface — an added
+ * function included — opens the next revision. Every revision relinks every
+ * published artifact, and a binding and an artifact whose revisions differ
+ * refuse each other at load, naming both numbers; nothing degrades silently
+ * across a revision. Versioned duplicates (`_v2` names) are still NOT how
+ * this ABI evolves — the second shape replaces the first in its revision.
+ * What is frozen, because it is identity rather than versioning:
  *
  *   * the library base name `libchtypes` (.so / .dylib);
  *   * the `chs_` symbol prefix, and the rule that NOTHING else is exported;
@@ -25,9 +28,7 @@
  * A loader therefore MUST pair an artifact with the header it was built
  * from: symbol PRESENCE proves a function exists, never that its signature
  * matches this file. (The presence probe stays because a Registry may load a
- * third-party-built artifact; see the C ABI contract §ABI identity.) After the
- * first publish this section is replaced by a compatibility policy and the
- * usual semantic-version rules begin.
+ * third-party-built artifact; see the C ABI contract §ABI identity.)
  * -------------------------------------------------------------------------
  */
 #ifndef CHTYPES_H
@@ -250,7 +251,7 @@ CHS_API const char * chs_clickhouse_version(void);
  * the gate above refuses. Revision 5 itself added no function (28 exported
  * functions). The three chs_quote_* functions came afterwards without a
  * bump, because an added symbol is optional: a binding answers unsupported
- * when an artifact lacks it. The header declares 31 today.
+ * when an artifact lacks it.
  *
  * Later in the same open window, `CHS_CSV_WITH_NAMES = 10` and
  * `CHS_TSV_WITH_NAMES = 11` were appended to `enum chs_format` (chtypes#55),
@@ -262,7 +263,15 @@ CHS_API const char * chs_clickhouse_version(void);
  * revision gate cannot catch that. The format probe can, which is why a
  * format is declared only after the loaded artifact has been asked about it,
  * never from this enum or this number. */
-#define CHS_ABI_REVISION 5
+/* Revision 6 (the error-code table and the partition key):
+ * chs_error_codes and chs_schema_partition_by join the surface. No existing
+ * declaration changed, nothing was deleted or renumbered, and enum
+ * chs_format is untouched: the purely ADDITIVE case, which increments by the
+ * rule above, so a revision-6 binding refuses a revision-5 artifact and the
+ * reverse. chs_row / chs_rows documents gain keys only on a handle that
+ * declared a partition key (chs_schema_partition_by); on every other handle
+ * they are byte-identical to revision 5's. */
+#define CHS_ABI_REVISION 6
 CHS_API int chs_abi_revision(void);
 
 /* -------------------------------------------------------------------------
@@ -354,6 +363,35 @@ CHS_API char * chs_registered_families(void);
  * (build/function_flags.tsv) on every build instead of trusting a list.
  * Requires chs_init. */
 CHS_API char * chs_function_flags(void);
+
+/* ClickHouse's own error-code table, for THIS build (revision 6).
+ * Returns a malloc'd JSON document — free it with THIS library's chs_free():
+ *
+ *   {"error_codes":[{"code":0,"name":"OK"},
+ *                   {"code":1,"name":"UNSUPPORTED_METHOD"}, …]}
+ *
+ * A PASSTHROUGH over the vendored table and nothing else: every code c in
+ * [0, DB::ErrorCodes::end()) for which the vendored DB::ErrorCodes::getName(c)
+ * is non-empty, in ascending code order. That is the enumeration the server's
+ * own system.errors runs, the name its errorCodeToName() answers, and the name
+ * it prints in parentheses after "Code: N." in an exception message — one
+ * table, the build's own.
+ *
+ * The table is a property of the BUILD and moves between ClickHouse lines:
+ * codes join, codes leave, and ONE NUMBER CAN NAME DIFFERENT ERRORS ON TWO
+ * LINES (903 is LICENSE_EXPIRED on 25.3 and 25.8, absent on 25.10, and
+ * DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN on 26.2 through 26.9). A caller that
+ * needs an answer for several lines asks each library; nothing here is valid
+ * for a line other than this artifact's.
+ *
+ * Proven complete at build time: the artifact producer's build compares this
+ * answer with the vendored src/Common/ErrorCodes.cpp and fails on any
+ * difference it cannot name.
+ *
+ * Requires chs_init. Callable any number of times after it; the answer never
+ * changes for a loaded library. NULL only when the document could not be
+ * built (a guarded exception) — never for an ordinary build. */
+CHS_API char * chs_error_codes(void);
 
 /* Distinguished code for "this build refuses to answer" (see chs_init).
  * Never a real ClickHouse error code. */
@@ -545,6 +583,48 @@ CHS_API int chs_schema_engine(chs_schema * s, const char * engine, const char * 
  * server's clock at merge time, which no preview owns. TTL evaluation runs
  * under the same admission budgets as DEFAULT evaluation. */
 CHS_API int chs_schema_ttl(chs_schema * s, const char * ttl_sql, char ** out_err);
+
+/* Declare the table's partition key — the `PARTITION BY` clause after the
+ * engine, e.g. "toYYYYMM(ts)" or "(toDate(ts), tenant)" (revision 6). Built by
+ * the server's own CREATE-path call for that clause,
+ * KeyDescription::getKeyFromAST over the schema's columns, under the handle's
+ * compile profile (as chs_schema_ttl validates its clause). A second call
+ * REPLACES the first. NULL or "" removes the declaration: the handle then
+ * answers exactly as a handle on which this was never called. The string is
+ * read during the call and not retained.
+ *
+ * What a declared key changes, on chs_row and chs_rows only:
+ *   - every row document whose row would be STORED gains "partition_id": the
+ *     partition that row lands in, as the vendored MergeTreePartition::getID
+ *     spells it (the value system.parts.partition_id and the _partition_id
+ *     virtual column show);
+ *   - the batch document gains "partition_count": the distinct partitions its
+ *     stored rows span;
+ *   - the batch is REFUSED with 252 TOO_MANY_PARTS, the server's own
+ *     exception and message, exactly when the vendored
+ *     MergeTreeDataWriter::splitBlockIntoParts throws on the block the server
+ *     would form, under the call's max_partitions_per_insert_block and
+ *     throw_on_max_partitions_per_insert_block (the C ABI contract §Rows,
+ *     "The partition key"); the rows stay itemized, as for a CHECK refusal;
+ *   - a specialized engine (chs_schema_engine) merges each partition's rows
+ *     separately, after the split, as the server's writeTempPart does.
+ * On a handle with no declared key every document is byte-identical to
+ * revision 5's. chs_filter_rows, chs_block_parse and chs_filter_eval are
+ * unaffected.
+ *
+ * Returns, by chs_schema_engine's SIGN rule (a binding keys on the sign):
+ *   0    accepted;
+ *   > 0  the server's own CREATE-path REJECTION, with its own code and
+ *        message — e.g. 36 BAD_ARGUMENTS for a non-deterministic key (a clock
+ *        read, rand()), 549 DATA_TYPE_CANNOT_BE_USED_IN_KEY for a key over a
+ *        type the line will not key on;
+ *   -2   CHS_CODE_UNSUPPORTED — declined: a key the server ACCEPTS but this
+ *        build will not evaluate;
+ *   -1   a guarded exception, or a NULL handle.
+ * *out_err (optional, may be NULL) says why in every nonzero case; free it
+ * with chs_free. The call is a use of the schema handle (it mutates it): never
+ * concurrently with any other use of that handle. */
+CHS_API int chs_schema_partition_by(chs_schema * s, const char * partition_by, char ** out_err);
 
 CHS_API int chs_schema_column_count(const chs_schema * s);
 /* Borrowed pointers, valid until chs_schema_free(). */
@@ -805,7 +885,24 @@ typedef struct chs_filter chs_filter;
  * are answered, no bytes. A filter compiled over a DIFFERENT schema handle
  * answers the whole call rejected (1002), loudly. Parameters bind at
  * chs_filter_compile exactly as for chs_filter_rows. A chs_rows call with a
- * filter is a use of the filter handle too: its thread rule applies. */
+ * filter is a use of the filter handle too: its thread rule applies.
+ *
+ * THE PARTITION KEY (revision 6; the C ABI contract §Rows, "The partition
+ * key", is normative). On a handle that declared one with
+ * chs_schema_partition_by: every rows[] entry whose row is stored carries
+ * "partition_id"; the document carries "partition_count"; and the batch is
+ * rejected with 252 TOO_MANY_PARTS, the server's own message, when the
+ * vendored MergeTreeDataWriter::splitBlockIntoParts refuses the block the
+ * server would form — the rows stay itemized, as for a CHECK refusal. The
+ * limit is the call's max_partitions_per_insert_block (0 = unlimited) under
+ * throw_on_max_partitions_per_insert_block, resolved like every setting
+ * (per call > handle profile > library defaults > the build's own default:
+ * 100 / true on every line as of revision 6). This is the verdict for a
+ * SYNCHRONOUS insert of this body; under async_insert the server counts a
+ * coalesced flush of which this body is a part, so the library's refusal
+ * implies the server's, and its acceptance does not guarantee the server's.
+ * The export channel is unchanged: an accepted batch's row_spans grouped by
+ * partition_id are per-partition bodies, each directly INSERT-able. */
 CHS_API char * chs_rows(const chs_schema * s, int format, const char * body, size_t body_len,
                         const char * settings_json,
                         int export_format, unsigned doc_flags, chs_bytes * out_bytes,

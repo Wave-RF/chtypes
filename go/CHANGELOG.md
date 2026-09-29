@@ -6,6 +6,17 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`(*Library).ErrorCodes()`** — THIS build's own ClickHouse error-code table (`chs_error_codes`), as an `*ErrorCodeTable`: `Name(code) (string, bool)`, `Code(name) (int, bool)` and `All() []ErrorCodeEntry` (ascending). Per `Library` and never package-level, because the table moves between lines — one number names two different errors on 25.8 and 26.2. An unknown or negative code and an unknown name are absent, never synthesized; names match exactly. Built on the first call and kept on success only: a `NULL` answer is a plain error and is never cached; an artifact that predates the symbol answers `*UnsupportedError`. The linked build gains a package-level `ErrorCodes()` that builds its table afresh each call.
+- **`(*LoadedSchema).SetPartitionBy(expr)`** (and the linked `(*CompiledSchema).SetPartitionBy`) — declare the table's partition key; `""` removes it. The return follows `SetEngine`'s sign rule, not `SetTTL`'s: `*SchemaError` for the server's own CREATE-path refusal (e.g. 36 BAD_ARGUMENTS for a non-deterministic key, 549), `*UnsupportedError` for a decline (-2 is a key the server accepts but this build will not evaluate).
+- **`RowResult.PartitionID`** (`""` when absent) and **`BatchResult.PartitionCount`** (`0` when absent — which is also the answer for a key with no stored row). A batch over `max_partitions_per_insert_block` is an ordinary `Rejected` with `ErrCode` 252.
+
+### Changed
+
+- **Speaks ABI revision 6, and refuses revision-5 artifacts** — and a revision-5 binding refuses revision-6 ones. Revision 6 only ADDS `chs_error_codes` and `chs_schema_partition_by`; no existing declaration changed. It is still a new number, so a fetch after upgrading downloads revision-6 artifacts into their own `abi6` cache directory, and a directory holding only revision-5 artifacts is refused at load, naming both revisions. Revision-6 artifacts are published by the artifact producer; until they are, this binding has nothing to load.
+- **A TTL on a schema with a `CHECK` constraint is now evaluated.** `(*LoadedSchema).SetTTL` on such a schema used to answer `*UnsupportedError`; against revision-6 artifacts it answers as on any other schema, accepting the TTL or giving the server's own refusal. That matches a server, whose TTL validation does not read constraints. The change is in the artifacts, so it arrives with them.
+
 ## [0.3.2] — 2026-09-28
 
 Speaks ABI revision 5, unchanged from 0.3.1: every artifact 0.3.1 loads, this release loads.

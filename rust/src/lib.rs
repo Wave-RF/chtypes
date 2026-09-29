@@ -94,6 +94,7 @@ mod digest;
 mod discover;
 mod doc;
 mod error;
+mod error_codes;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 mod ffi;
@@ -115,6 +116,7 @@ pub use error::{
     CODE_ARTIFACT_UNPUBLISHED, CODE_ARTIFACT_UNTRUSTED, CODE_SOURCE_UNREACHABLE, CODE_UNSUPPORTED,
     Error, FETCH_COMMAND, Result,
 };
+pub use error_codes::{ErrorCodeEntry, ErrorCodeTable};
 #[cfg(feature = "fetch")]
 pub use fetch::{Action, EnsureOptions, Installed, ensure};
 pub use library::{Column, DEFAULT_TIMEZONE, DefaultKind, Library};
