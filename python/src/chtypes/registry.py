@@ -19,6 +19,7 @@ from types import TracebackType
 from typing import Final
 
 from ._document import parse_batch_document, parse_filter_document, parse_row_document
+from ._error_codes import ErrorCodeTable, _ErrorCodeCache
 from ._manifest import (
     Manifest,
     cache_registry_dir,
@@ -348,6 +349,35 @@ class Schema:
             rc, err = self._library._native.schema_ttl(self._live(), ttl_sql)
         if rc != 0:
             raise UnsupportedError(err or "TTL form not modeled by this build")
+
+    def set_partition_by(self, expr: str) -> None:
+        """Declare the table's partition key — the `PARTITION BY` clause after
+        the engine, e.g. "toYYYYMM(ts)" or "(toDate(ts), tenant)"
+        (`chs_schema_partition_by`, revision 6).
+
+        The key is built by the server's own CREATE-path call over this
+        schema's columns, under the handle's compile profile. A second call
+        REPLACES the first; "" removes the declaration, and the schema then
+        answers exactly as one that never declared a key.
+
+        With a key declared, `row` and `rows` answer `RowResult.partition_id`
+        for every row that would be stored and `BatchResult.partition_count`
+        for the batch, and a body that would split into more partitions than
+        the call's `max_partitions_per_insert_block` allows is an ordinary
+        `Outcome.REJECTED` with `err_code` 252 (TOO_MANY_PARTS), the server's
+        own — a verdict, never an exception.
+
+        The return follows `set_engine`'s SIGN rule, not `set_ttl`'s: raises
+        `SchemaError` when the server's own CREATE path refuses the key (e.g.
+        549 DATA_TYPE_CANNOT_BE_USED_IN_KEY, with the server's message), and
+        `UnsupportedError` when this build declines (-2, a non-deterministic
+        key; -1, a guarded exception) or the artifact predates the symbol.
+        """
+        with self._mu:
+            rc, err = self._library._native.schema_partition_by(self._live(), expr)
+        if rc == 0:
+            return
+        raise _error_for(rc, err or "partition key refused")
 
     # -- rows ---------------------------------------------------------------
 
@@ -823,6 +853,7 @@ class Library:
 
     __slots__ = (
         "_closed",
+        "_error_codes",
         "_image_key",
         "_native",
         "abi_revision",
@@ -836,6 +867,9 @@ class Library:
         self.path = path
         self.manifest = manifest
         self._closed = False
+        # This library's own error-code table, once built (see error_codes).
+        # Per Library and never shared: the table is a property of the build.
+        self._error_codes = _ErrorCodeCache()
         self._native = NativeLibrary(path)
         # The library names itself; nothing is inferred from the directory or
         # the file name.
@@ -1012,6 +1046,25 @@ class Library:
         artifact predates `chs_registered_families`.
         """
         return [line for line in self._native.registered_families().split("\n") if line]
+
+    def error_codes(self) -> ErrorCodeTable:
+        """THIS library's own error-code table (`chs_error_codes`, revision 6):
+        every code the vendored ClickHouse names, with the name it gives it —
+        the table the server's `system.errors` enumerates and the name it
+        prints after "Code: N." in an exception message.
+
+        The table belongs to the build, not to this package: codes join and
+        leave between lines, and one number can name different errors on two
+        lines (903 differs between 25.8 and 26.2). Ask the library whose line
+        you are answering for; there is no package-level table.
+
+        Built on the first call and kept for this library's life — the answer
+        never changes for a loaded library. Only a table that was actually
+        built is kept: a NULL answer (a guarded exception inside the library)
+        raises `ChtypesError` and the next call asks again. Raises
+        `UnsupportedError` when the artifact predates `chs_error_codes`.
+        """
+        return self._error_codes.get(self._native.error_codes)
 
     def function_flags(self) -> str:
         """TSV audit of every registered function's volatility, VERBATIM: one

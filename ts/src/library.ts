@@ -4,6 +4,7 @@
  */
 
 import { reconstructDdlWith, type DiscoveredColumn } from './discover.js';
+import { ErrorCodeCache, type ErrorCodeTable } from './error-codes.js';
 import { schemaErrorFor } from './errors.js';
 import type { NativeLibrary } from './ffi.js';
 import { Schema } from './schema.js';
@@ -93,6 +94,12 @@ export class Library {
    * §ABI identity).
    */
   readonly abiRevision: number;
+
+  /**
+   * This library's own error-code table, once built (see `errorCodes`). Per
+   * Library and never shared: the table is a property of the build.
+   */
+  private readonly errorCodeCache = new ErrorCodeCache();
 
   /** @internal — obtained from a `Registry`. */
   constructor(private readonly native: NativeLibrary) {
@@ -316,6 +323,30 @@ export class Library {
    */
   registeredFamilies(): string[] {
     return this.native.registeredFamilies();
+  }
+
+  /**
+   * THIS library's own error-code table (`chs_error_codes`, revision 6): every
+   * code the vendored ClickHouse names, with the name it gives it — the table
+   * the server's `system.errors` enumerates and the name it prints after
+   * "Code: N." in an exception message.
+   *
+   * The table belongs to the build, not to this package: codes join and leave
+   * between lines, and one number can name different errors on two lines (903
+   * differs between 25.8 and 26.2). Ask the library whose line you are
+   * answering for; there is no package-level table.
+   *
+   * Built on the first call and kept for this library's life — the answer never
+   * changes for a loaded library. Only a table that was actually built is kept.
+   *
+   * @returns the table; `name(code)` / `code(name)` answer `undefined` for
+   *   anything the build's own table does not hold.
+   * @throws {ChtypesError} when the library could not build the document (a
+   *   guarded exception) — nothing is cached, and the next call asks again.
+   * @throws {UnsupportedError} when the artifact predates `chs_error_codes`.
+   */
+  errorCodes(): ErrorCodeTable {
+    return this.errorCodeCache.get(() => this.native.errorCodes());
   }
 
   /**

@@ -208,6 +208,10 @@ function declare(library: string) {
     // signature, not a separate `_v2` overload.
     chs_schema_engine: d(I32, [External, Str, Str, Str, External]),
     chs_schema_ttl: d(I32, [External, Str, External]),
+    // Revision 6: the partition key — chs_schema_ttl's exact C shape. Its
+    // return follows chs_schema_engine's SIGN rule, not chs_schema_ttl's (see
+    // `schemaPartitionBy`).
+    chs_schema_partition_by: d(I32, [External, Str, External]),
     chs_schema_column_count: d(I32, [External]),
     chs_schema_column_name: d(Str, [External, I32]),
     chs_schema_column_type: d(Str, [External, I32]),
@@ -226,6 +230,11 @@ function declare(library: string) {
     chs_quote_literal: d(I32, [U8Array, U64, External, External]),
     chs_registered_families: d(External, []),
     chs_function_flags: d(External, []),
+    // Revision 6: the build's own error-code table, an owned JSON document.
+    // Optional like everything else here — a missing symbol degrades to
+    // `unsupported` at call time. NULL from a PRESENT symbol is a guarded
+    // exception, which is a different answer (see `errorCodes`).
+    chs_error_codes: d(External, []),
     // Revision 3: the filter trio. Optional like everything above — a missing
     // symbol degrades to `unsupported` at call time.
     // Revision 4: chs_filter_compile carries params_json ({name:Type} query
@@ -636,6 +645,23 @@ export class NativeLibrary {
     return (text ?? '').split('\n').filter((line) => line !== '');
   }
 
+  /**
+   * `chs_error_codes` (revision 6): the build's own error-code table as the
+   * raw JSON document, or `null` when the library could not build it (a
+   * guarded exception — transient, so the caller must not remember it). A
+   * missing symbol throws `UnsupportedError`, which is a different answer: the
+   * artifact predates revision 6.
+   */
+  errorCodes(): Buffer | null {
+    let ptr: JsExternal;
+    try {
+      ptr = this.entered(() => this.fns.chs_error_codes([]) as JsExternal);
+    } catch (err) {
+      return unsupportedIfMissing(err, 'this artifact predates chs_error_codes (rebuild it)');
+    }
+    return this.takeBytes(ptr);
+  }
+
   /** The function-volatility TSV audit, verbatim. Requires `chs_init`. */
   functionFlags(): string {
     try {
@@ -799,6 +825,30 @@ export class NativeLibrary {
       }
       if (rc === 0) return;
       throw new UnsupportedError(this.takeString(readPtr(errSlot)) ?? '');
+    } finally {
+      dropPtrSlot(errSlot);
+    }
+  }
+
+  /**
+   * `chs_schema_partition_by` (revision 6): declare the table's partition key;
+   * `""` removes it. The return follows `schemaEngine`'s SIGN rule, NOT
+   * `schemaTtl`'s: a positive rc is the server's own CREATE-path refusal
+   * (e.g. 549), a `SchemaError` with its code and message; a negative rc is
+   * this library declining, an `UnsupportedError`; a missing symbol degrades
+   * to `UnsupportedError`, never a crash.
+   */
+  schemaPartitionBy(handle: SchemaHandle, partitionBy: string): void {
+    const errSlot = ptrSlot();
+    try {
+      let rc: number;
+      try {
+        rc = this.entered(() => Number(this.fns.chs_schema_partition_by([handle, partitionBy, ...errSlot])));
+      } catch (err) {
+        return unsupportedIfMissing(err, 'this artifact predates chs_schema_partition_by (rebuild it)');
+      }
+      if (rc === 0) return;
+      throw schemaErrorFor(rc, this.takeString(readPtr(errSlot)) ?? '');
     } finally {
       dropPtrSlot(errSlot);
     }

@@ -78,6 +78,11 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
     ),
     "chs_registered_families": (ctypes.c_void_p, []),
     "chs_function_flags": (ctypes.c_void_p, []),
+    # Revision 6: the build's own error-code table, an owned JSON document.
+    # Optional: an artifact that predates it degrades to UnsupportedError at
+    # call time. NULL from a PRESENT symbol is a guarded exception, which is a
+    # different answer — see `error_codes`.
+    "chs_error_codes": (ctypes.c_void_p, []),
     # settings_json + mode compile a column list under a DECLARED settings
     # profile; NULL/"{}" settings_json and mode 0 answer identically to the
     # pre-consolidation, settings-less compile — structurally, not just by
@@ -94,6 +99,9 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
         [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, _c_owned_p],
     ),
     "chs_schema_ttl": (ctypes.c_int, [ctypes.c_void_p, ctypes.c_char_p, _c_owned_p]),
+    # Revision 6: the partition key — chs_schema_ttl's exact C shape. The SIGN
+    # rule its return follows is chs_schema_engine's (see Schema.set_partition_by).
+    "chs_schema_partition_by": (ctypes.c_int, [ctypes.c_void_p, ctypes.c_char_p, _c_owned_p]),
     "chs_schema_column_count": (ctypes.c_int, [ctypes.c_void_p]),
     "chs_schema_column_name": (ctypes.c_char_p, [ctypes.c_void_p, ctypes.c_int]),
     "chs_schema_column_type": (ctypes.c_char_p, [ctypes.c_void_p, ctypes.c_int]),
@@ -189,7 +197,10 @@ _SIGNATURES: Final[dict[str, tuple[object, list[object]]]] = {
 # (chs_block_parse / chs_block_free / chs_filter_eval).
 # 5 = the explicit INSERT column list, 2026-09-15: chs_row, chs_rows and
 # chs_block_parse each gained a trailing columns_json.
-ABI_REVISION: Final = 5
+# 6 = the error-code table and the partition key: chs_error_codes and
+# chs_schema_partition_by joined the surface. Purely additive, and still a
+# new number: a revision-6 binding refuses a revision-5 artifact.
+ABI_REVISION: Final = 6
 
 _MANDATORY: Final = (
     "chs_clickhouse_version",
@@ -217,7 +228,8 @@ class _RWLock:
 
     **Readers** are every call that reaches `chs_row`, `chs_rows`,
     `chs_schema_compile`, `chs_schema_engine`, `chs_schema_ttl`,
-    `chs_validate_type` and the column accessors. The C ABI contract
+    `chs_schema_partition_by`, `chs_validate_type`, `chs_error_codes` and the
+    column accessors. The C ABI contract
     §Thread-safety declares those safe together **on distinct handles**, so
     per-handle serialization is `Schema`'s own lock and not this one.
 
@@ -507,6 +519,16 @@ class NativeLibrary:
             raw = self._take(fn())
         return (raw or b"").decode("utf-8", "surrogateescape")
 
+    def error_codes(self) -> bytes | None:
+        """The build's own error-code table as the raw JSON document, or None
+        when the library could not build it (a guarded exception — transient,
+        so the caller must not remember it). A missing symbol raises
+        `UnsupportedError`, which is a different answer: the artifact predates
+        revision 6."""
+        fn = self._need("chs_error_codes", "this artifact predates chs_error_codes (rebuild it)")
+        with self._lock.read():
+            return self._take(fn())
+
     def function_flags(self) -> str:
         """The function-volatility TSV audit, verbatim. Requires chs_init."""
         fn = self._need(
@@ -574,6 +596,17 @@ class NativeLibrary:
         err = ctypes.c_void_p()
         with self._lock.read():
             rc = int(fn(ctypes.c_void_p(handle), ttl_sql.encode(), ctypes.byref(err)))
+            return rc, self._take_err(err)
+
+    def schema_partition_by(self, handle: int, partition_by: str) -> tuple[int, str]:
+        """(rc, err) from chs_schema_partition_by. The caller maps rc by the
+        SIGN rule chs_schema_engine uses, not chs_schema_ttl's."""
+        fn = self._need(
+            "chs_schema_partition_by", "this artifact predates chs_schema_partition_by (rebuild it)"
+        )
+        err = ctypes.c_void_p()
+        with self._lock.read():
+            rc = int(fn(ctypes.c_void_p(handle), partition_by.encode(), ctypes.byref(err)))
             return rc, self._take_err(err)
 
     def schema_columns(self, handle: int) -> list[tuple[str, str, str, str, bool]]:

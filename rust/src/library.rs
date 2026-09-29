@@ -1,11 +1,12 @@
 //! One loaded ClickHouse build.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::compile::{CompileMode, CompileRequest};
 use crate::discover::{DiscoveredColumn, reconstruct_ddl_with};
 use crate::error::{Error, Result};
+use crate::error_codes::{ErrorCodeTable, cached};
 use crate::ffi::{Api, cstring};
 use crate::schema::settings_json;
 
@@ -97,6 +98,10 @@ pub struct Library {
     api: Api,
     /// Serializes every call into this library. See the type docs.
     lock: Arc<Mutex<()>>,
+    /// This library's own error-code table, once built (see
+    /// [`Library::error_codes`]). Per `Library` and never shared: the table is
+    /// a property of the build.
+    error_codes: OnceLock<ErrorCodeTable>,
 }
 
 /// The one mutex per loaded image, keyed the way `chs_init` is keyed. See
@@ -203,6 +208,7 @@ impl Library {
             path: path.to_path_buf(),
             api,
             lock: image_lock(path),
+            error_codes: OnceLock::new(),
         })
     }
 
@@ -495,6 +501,34 @@ impl Library {
             .filter(|l| !l.is_empty())
             .map(str::to_string)
             .collect())
+    }
+
+    /// THIS library's own error-code table (`chs_error_codes`, revision 6):
+    /// every code the vendored ClickHouse names, with the name it gives it —
+    /// the table the server's `system.errors` enumerates and the name it prints
+    /// after "Code: N." in an exception message.
+    ///
+    /// The table belongs to the build, not to this crate: codes join and leave
+    /// between lines, and one number can name different errors on two lines
+    /// (903 differs between 25.8 and 26.2). Ask the library whose line you are
+    /// answering for; there is no crate-level table.
+    ///
+    /// Built on the first call and kept for this library's life — the answer
+    /// never changes for a loaded library. Only a table that was actually built
+    /// is kept.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::PredatesFeature`] — the artifact does not export
+    ///   `chs_error_codes`.
+    /// * [`Error::NoDocument`] — the library could not build the document (a
+    ///   guarded exception); nothing was cached, and the next call asks again.
+    /// * [`Error::BadDocument`] — the document did not parse.
+    pub fn error_codes(&self) -> Result<&ErrorCodeTable> {
+        cached(&self.error_codes, || {
+            let _guard = self.lock();
+            self.api.error_codes()
+        })
     }
 
     /// TSV audit of every registered function's volatility flags, one per line:

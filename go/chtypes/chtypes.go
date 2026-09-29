@@ -617,6 +617,14 @@ type RowResult struct {
 	// (its own parse error, reported as VerdictDecline). Zero/"" otherwise.
 	VerdictCode int
 	VerdictErr  string
+	// PartitionID is the partition this row lands in, as the loaded build's
+	// own MergeTreePartition::getID spells it — the value system.parts and the
+	// _partition_id virtual column show — present only when the schema
+	// declared a partition key (SetPartitionBy, revision 6) and the row would
+	// be stored. "" otherwise: no key declared, or a row that is not stored.
+	// Grouping an accepted batch's Spans by PartitionID gives per-partition
+	// bodies, each directly INSERT-able.
+	PartitionID string
 }
 
 // Computed is one MATERIALIZED column's value for a row: stored at insert,
@@ -735,7 +743,7 @@ var Timezone = "UTC"
 // The artifact reports its own with chs_abi_revision(); see the C ABI contract
 // §ABI identity. A dlopen'd Library reports the loaded artifact's revision
 // through Library.ABIRevision, which is 0 when the artifact predates the probe.
-const ABIRevision = 5
+const ABIRevision = 6
 
 // CompileMode selects how a settings profile handed to CompileDDL relates to
 // the settings this build compiles under. Numeric values are part of the
@@ -1240,6 +1248,14 @@ type BatchResult struct {
 	// called RowsExportWith with WithRowFilter, never on these being nonzero.
 	RowsPassed int
 	RowsCut    int
+	// PartitionCount is the number of distinct partitions the batch's stored
+	// rows span, present only when the schema declared a partition key
+	// (SetPartitionBy, revision 6). 0 means EITHER no key was declared OR a
+	// key was declared and no row is stored; a caller that needs to tell the
+	// two apart keys on whether it called SetPartitionBy, never on this being
+	// nonzero. A batch over the call's max_partitions_per_insert_block is an
+	// ordinary Rejected with ErrCode 252 (TOO_MANY_PARTS), the server's own.
+	PartitionCount int
 }
 
 type batchDoc struct {
@@ -1271,6 +1287,9 @@ type batchDoc struct {
 	// (RowsExportWith), absent (zero) otherwise.
 	RowsPassed int `json:"rows_passed"`
 	RowsCut    int `json:"rows_cut"`
+	// PartitionCount: present exactly when the schema declared a partition
+	// key (revision 6), absent (zero) otherwise.
+	PartitionCount int `json:"partition_count"`
 }
 
 type storageTransformDoc struct {
@@ -1296,6 +1315,9 @@ type rowDoc struct {
 	Verdict     string `json:"verdict"`
 	VerdictCode int    `json:"verdict_code"`
 	VerdictErr  string `json:"verdict_err"`
+	// PartitionID: present exactly when the schema declared a partition key
+	// (revision 6) and this row would be stored; absent ("") otherwise.
+	PartitionID string `json:"partition_id"`
 }
 
 type compDoc struct {
@@ -1444,6 +1466,7 @@ func batchResultOf(js string) (BatchResult, error) {
 		EngineRows: doc.EngineRows,
 		Spans:      doc.RowSpans, ExportDeclined: doc.ExportDeclined,
 		RowsPassed: doc.RowsPassed, RowsCut: doc.RowsCut,
+		PartitionCount: doc.PartitionCount,
 	}
 	for i, rd := range doc.Rows {
 		rr := rowResultOf(rd)
@@ -1490,7 +1513,8 @@ func rowResultOf(doc rowDoc) RowResult {
 	res := RowResult{
 		ErrCode: doc.Code, ErrMsg: doc.Err,
 		UnknownFields: doc.UnknownFields, UnsupportedSettings: doc.UnsupportedSettings,
-		Outcome: outcomeOf(doc.Outcome),
+		Outcome:     outcomeOf(doc.Outcome),
+		PartitionID: doc.PartitionID,
 	}
 	if len(doc.UnsupportedSettings) > 0 && res.Outcome != Rejected {
 		res.Outcome = Unsupported

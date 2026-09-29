@@ -239,6 +239,14 @@ export interface RowResult {
    */
   readonly verdictCode: number;
   readonly verdictErr: string;
+  /**
+   * Revision 6: the partition this row lands in, as the loaded build's own
+   * `MergeTreePartition::getID` spells it — present only when the schema
+   * declared a partition key (`Schema#setPartitionBy`) and the row would be
+   * stored; absent otherwise. Grouping an accepted batch's `spans` by it gives
+   * per-partition bodies, each directly INSERT-able.
+   */
+  readonly partitionId?: string;
 }
 
 /**
@@ -327,6 +335,14 @@ export interface BatchResult {
    */
   readonly rowsPassed: number;
   readonly rowsCut: number;
+  /**
+   * Revision 6: the distinct partitions this batch's stored rows span —
+   * present only when the schema declared a partition key
+   * (`Schema#setPartitionBy`); absent otherwise. A batch over the call's
+   * `max_partitions_per_insert_block` is an ordinary `'rejected'` with
+   * `errCode` 252 (TOO_MANY_PARTS), the server's own.
+   */
+  readonly partitionCount?: number;
 }
 
 /** One row's byte range inside an export `payload` — see `BatchResult#spans`. */
@@ -478,6 +494,9 @@ export function rowResultOf(doc: Json): RowResult {
   const verdict: Verdict | undefined = verdictNode === undefined ? undefined : verdictOf(asString(verdictNode));
   const verdictCode = asInt(field(doc, 'verdict_code'));
   const verdictErr = asString(field(doc, 'verdict_err'));
+  // `partition_id` (revision 6) is present exactly when the schema declared a
+  // partition key and this row would be stored; absent stays absent.
+  const partitionNode = field(doc, 'partition_id');
 
   return {
     values,
@@ -492,6 +511,7 @@ export function rowResultOf(doc: Json): RowResult {
     verdict,
     verdictCode,
     verdictErr,
+    ...(partitionNode !== undefined && partitionNode.kind === 'string' ? { partitionId: asString(partitionNode) } : {}),
   };
 }
 
@@ -547,6 +567,7 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
       : items(spansNode).map((s) => ({ off: asInt(field(s, 'off')), len: asInt(field(s, 'len')) }));
   const declinedNode = field(doc, 'export_declined');
   const exportDeclined = declinedNode === undefined ? undefined : asString(declinedNode);
+  const partitionCountNode = field(doc, 'partition_count');
 
   return {
     rows,
@@ -563,6 +584,11 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
     exportDeclined,
     rowsPassed: asInt(field(doc, 'rows_passed')),
     rowsCut: asInt(field(doc, 'rows_cut')),
+    // Revision 6: present exactly when the schema declared a partition key;
+    // absent stays absent, never a guessed 0.
+    ...(partitionCountNode !== undefined && partitionCountNode.kind === 'number'
+      ? { partitionCount: asInt(partitionCountNode) }
+      : {}),
   };
 }
 

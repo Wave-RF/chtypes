@@ -43,6 +43,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError as _PackageNotFound
 from importlib.metadata import version as _package_version
 
+from ._error_codes import ErrorCodeEntry, ErrorCodeTable
 from ._native import ABI_REVISION
 from ._rawjson import RawNumber, quote_bare_denormals
 from .discover import (
@@ -165,6 +166,8 @@ __all__ = [
     "Computed",
     "DefaultKind",
     "DiscoveredColumn",
+    "ErrorCodeEntry",
+    "ErrorCodeTable",
     "Filter",
     "FilterOutcome",
     "FilterResult",

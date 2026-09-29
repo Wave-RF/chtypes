@@ -196,6 +196,10 @@ def _row_result(doc: RawObject) -> RowResult:
     verdict_code = _count(doc, "verdict_code")
     verdict_err = _text(doc, "verdict_err")
 
+    # `partition_id` (revision 6) is present exactly when the schema declared
+    # a partition key and this row would be stored; absent is None.
+    partition_id = doc.get("partition_id")
+
     return RowResult(
         outcome=outcome,
         err_code=_count(doc, "code"),
@@ -209,6 +213,7 @@ def _row_result(doc: RawObject) -> RowResult:
         verdict=verdict,
         verdict_code=verdict_code,
         verdict_err=verdict_err,
+        partition_id=partition_id if isinstance(partition_id, str) else None,
     )
 
 
@@ -244,6 +249,7 @@ def parse_batch_document(raw: bytes, payload: bytes | None = None) -> BatchResul
                 verdict=row.verdict,
                 verdict_code=row.verdict_code,
                 verdict_err=row.verdict_err,
+                partition_id=row.partition_id,
             )
         )
         transformed.extend(indexed)
@@ -297,6 +303,11 @@ def parse_batch_document(raw: bytes, payload: bytes | None = None) -> BatchResul
         export_declined=_text(doc, "export_declined"),
         rows_passed=_count(doc, "rows_passed"),
         rows_cut=_count(doc, "rows_cut"),
+        # Revision 6: present exactly when the schema declared a partition
+        # key; absent is None, never a guessed 0.
+        partition_count=_count(doc, "partition_count")
+        if isinstance(doc.get("partition_count"), RawNumber)
+        else None,
     )
 
 

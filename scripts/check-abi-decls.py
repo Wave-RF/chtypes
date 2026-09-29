@@ -725,6 +725,46 @@ PLANTS = (
         "type FnTtl = unsafe extern \"C\" fn(*mut ChsSchema, *const c_char, *mut c_char) -> c_int;",
         "rust: chs_schema_ttl parameter 3 declared charp; the header says charpp",
     ),
+    # The revision-6 pair, symbol by symbol, for the same reason as the
+    # quoting trio above. Both reuse another symbol's declaration (Go's
+    # fn_ttl / fn_owned_str0 typedefs, Rust's FnTtl / FnStr aliases), so the
+    # plants move the PAIRING — the dlsym cast, the Symbol<…> field — rather
+    # than the shared shape, which the plants above already cover.
+    (
+        "go partition_by pairing",
+        "go/chtypes/multiversion.go",
+        "out->partition_by = (fn_ttl)        dlsym(h, \"chs_schema_partition_by\");",
+        "out->partition_by = (fn_engine)     dlsym(h, \"chs_schema_partition_by\");",
+        "go: chs_schema_partition_by declares 5 parameter(s); the header takes 3",
+    ),
+    (
+        "go-linked error_codes arity",
+        "go/chtypes/linked.go",
+        "c := C.chs_error_codes()",
+        "c := C.chs_error_codes(nil)",
+        "go-linked: C.chs_error_codes is called with 1 argument(s); the header takes 0",
+    ),
+    (
+        "python partition_by type",
+        "python/src/chtypes/_native.py",
+        '"chs_schema_partition_by": (ctypes.c_int, [ctypes.c_void_p, ctypes.c_char_p, _c_owned_p]),',
+        '"chs_schema_partition_by": (ctypes.c_int, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]),',
+        "python: chs_schema_partition_by parameter 3 declared cstr; the header says charpp",
+    ),
+    (
+        "ts error_codes return",
+        "ts/src/ffi.ts",
+        "chs_error_codes: d(External, []),",
+        "chs_error_codes: d(Str, []),",
+        "ts: chs_error_codes return declared cstr; the header returns charp",
+    ),
+    (
+        "rust partition_by pairing",
+        "rust/src/ffi.rs",
+        "f_partition_by: Option<Symbol<FnTtl>>,",
+        "f_partition_by: Option<Symbol<FnEngine>>,",
+        "rust: chs_schema_partition_by declares 5 parameter(s); the header takes 3",
+    ),
 )
 
 

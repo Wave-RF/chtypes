@@ -275,6 +275,34 @@ export class Schema {
   }
 
   /**
+   * Declare the table's partition key — the `PARTITION BY` clause after the
+   * engine, e.g. `"toYYYYMM(ts)"` or `"(toDate(ts), tenant)"`
+   * (`chs_schema_partition_by`, revision 6). The key is built by the server's
+   * own CREATE-path call over this schema's columns, under the handle's
+   * compile profile. A second call REPLACES the first; `""` removes the
+   * declaration, and the schema then answers exactly as one that never
+   * declared a key.
+   *
+   * With a key declared, `row` and `rows` answer `RowResult#partitionId` for
+   * every row that would be stored and `BatchResult#partitionCount` for the
+   * batch, and a body that would split into more partitions than the call's
+   * `max_partitions_per_insert_block` allows is an ordinary `'rejected'` with
+   * `errCode` 252 (TOO_MANY_PARTS), the server's own — a verdict, never a
+   * throw.
+   *
+   * @param expr - the partition key expression, or `""` to remove it.
+   * @throws {SchemaError} when the server's own CREATE path refuses the key
+   *   (e.g. 549 DATA_TYPE_CANNOT_BE_USED_IN_KEY) — `setEngine`'s SIGN rule,
+   *   not `setTtl`'s.
+   * @throws {UnsupportedError} when this build declines (-2, a
+   *   non-deterministic key; -1, a guarded exception), or the artifact
+   *   predates `chs_schema_partition_by`.
+   */
+  setPartitionBy(expr: string): void {
+    this.native.schemaPartitionBy(this.live(), expr);
+  }
+
+  /**
    * Validate and coerce ONE row body, answering exactly as this ClickHouse
    * version's insert path would.
    *
@@ -468,7 +496,8 @@ export class Schema {
 
   /**
    * Release the native schema. Idempotent. After it, `row` / `rows` /
-   * `setEngine` / `setTtl` throw `ChtypesError` ("schema is closed").
+   * `setEngine` / `setTtl` / `setPartitionBy` throw `ChtypesError` ("schema
+   * is closed").
    * Any `Filter` or `Block` still open on this schema is closed FIRST, in
    * the same call — the handles-before-schema free order the C layer
    * requires, enforced here so no dispose ordering can get it backwards.

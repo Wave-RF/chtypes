@@ -65,7 +65,7 @@ typedef int          (*fn_col_count)(const void *);
 typedef const char * (*fn_col_str)(const void *, int);
 typedef int          (*fn_col_int)(const void *, int);
 typedef int         (*fn_abi_rev)(void);
-typedef char *       (*fn_owned_str0)(void);          // chs_registered_families, chs_function_flags
+typedef char *       (*fn_owned_str0)(void);          // chs_registered_families, chs_function_flags, chs_error_codes
 typedef char *       (*fn_owned_str1)(const char *);  // chs_reference_type
 // Revision 5, additive: the quoting trio. ONE typedef for all three — they
 // share a signature, and the dlsym casts below are what pair each symbol to
@@ -85,6 +85,7 @@ typedef struct {
     fn_row          row;      // optional: absent from artifacts built before it
     fn_engine       engine;   // optional: absent from artifacts built before it
     fn_ttl          ttl;      // optional, same rule
+    fn_ttl          partition_by; // optional (revision 6): chs_schema_ttl's exact C shape
     fn_col_count    col_count;        // optional; column introspection group
     fn_col_str      col_name;
     fn_col_str      col_type;
@@ -95,6 +96,7 @@ typedef struct {
     fn_owned_str0   registered_families;  // optional; introspection trio
     fn_owned_str0   function_flags;       // optional; introspection trio
     fn_owned_str1   reference_type;       // optional; introspection trio
+    fn_owned_str0   error_codes;          // optional (revision 6): the build's own error-code table
     fn_filter_compile filter_compile;     // optional; the revision-3 filter trio
     fn_filter_free    filter_free;
     fn_filter_rows    filter_rows;
@@ -124,6 +126,10 @@ static const char * chs_lib_open(const char *path, chs_lib *out) {
     // still load; SetEngine on them reports unsupported instead of failing dlopen.
     out->engine      = (fn_engine)      dlsym(h, "chs_schema_engine");
     out->ttl         = (fn_ttl)         dlsym(h, "chs_schema_ttl");
+    // Optional (revision 6): the partition key. The same C shape as
+    // chs_schema_ttl, so the same typedef; the sign rule the Go side applies
+    // to its answer is chs_schema_engine's, not chs_schema_ttl's.
+    out->partition_by = (fn_ttl)        dlsym(h, "chs_schema_partition_by");
     // Optional: single-row entry and column introspection, so a dlopen'd
     // library can serve the same surface as the statically linked one.
     out->row              = (fn_row)       dlsym(h, "chs_row");
@@ -141,6 +147,9 @@ static const char * chs_lib_open(const char *path, chs_lib *out) {
     out->registered_families = (fn_owned_str0) dlsym(h, "chs_registered_families");
     out->function_flags      = (fn_owned_str0) dlsym(h, "chs_function_flags");
     out->reference_type      = (fn_owned_str1) dlsym(h, "chs_reference_type");
+    // Optional (revision 6): the build's own error-code table. Absence
+    // degrades to unsupported at call time, like the trio above.
+    out->error_codes         = (fn_owned_str0) dlsym(h, "chs_error_codes");
     // Optional: the revision-3 filter trio. Same degradation rule.
     out->filter_compile = (fn_filter_compile) dlsym(h, "chs_filter_compile");
     out->filter_free    = (fn_filter_free)    dlsym(h, "chs_filter_free");
@@ -241,6 +250,10 @@ static int chs_lib_ttl(chs_lib *l, void *s, const char *t, char **err) {
     if (!l->ttl) return -3; // artifact predates chs_schema_ttl
     return l->ttl(s, t, err);
 }
+static int chs_lib_partition_by(chs_lib *l, void *s, const char *p, char **err) {
+    if (!l->partition_by) return -3; // artifact predates chs_schema_partition_by
+    return l->partition_by(s, p, err);
+}
 static char * chs_lib_row(chs_lib *l, const void *s, int f, const char *b, size_t n, const char *st, const char *cols) {
     if (!l->row) return NULL; // artifact predates chs_row
     return l->row(s, f, b, n, st, cols);
@@ -284,6 +297,14 @@ static char * chs_lib_function_flags(chs_lib *l) {
 static char * chs_lib_reference_type(chs_lib *l, const char *e) {
     if (!l->reference_type) return NULL;
     return l->reference_type(e);
+}
+// chs_error_codes answers NULL for a guarded exception, so NULL cannot also
+// mean "the symbol is missing" here: -3 is that signal, and *out is written
+// only when the call was made.
+static int chs_lib_error_codes(chs_lib *l, char **out) {
+    if (!l->error_codes) return -3;
+    *out = l->error_codes();
+    return 0;
 }
 static const char * chs_lib_col_name(chs_lib *l, const void *s, int i)         { return l->col_name(s, i); }
 static const char * chs_lib_col_type(chs_lib *l, const void *s, int i)         { return l->col_type(s, i); }
@@ -415,6 +436,10 @@ type Library struct {
 	// mu is a RWMutex over this library's own process-globals: exclusive for
 	// chs_init, shared for every call that reads them. See "locking" above.
 	mu sync.RWMutex
+	// errorCodes holds THIS library's error-code table once it has been
+	// built, and only then (see ErrorCodes). Per Library, never shared: the
+	// table is a property of the build.
+	errorCodes errorCodeCache
 }
 
 // initMu guards dlopen + chs_init and the loadedLibs table below. Held only at
@@ -1090,6 +1115,44 @@ func (l *Library) ReferenceType(typeExpr string) (string, error) {
 	return s, nil
 }
 
+// ErrorCodes is THIS library's own error-code table (chs_error_codes,
+// revision 6): every code the vendored ClickHouse names, with the name it
+// gives it — the table the server's system.errors enumerates and the name it
+// prints after "Code: N." in an exception message.
+//
+// The table belongs to the build, not to this package: codes join and leave
+// between lines, and one number can name different errors on two lines (903
+// is LICENSE_EXPIRED on 25.3/25.8 and DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN from
+// 26.2). Ask the library whose line you are answering for; there is no
+// package-level table, and a binding that carried one would be wrong for
+// every line but one.
+//
+// Built on the first call and kept for this Library's life — the answer never
+// changes for a loaded library. Only a table that was actually built is kept:
+// a NULL answer (a guarded exception inside the library) is a plain error and
+// the next call asks again. An artifact that predates the symbol answers an
+// *UnsupportedError.
+func (l *Library) ErrorCodes() (*ErrorCodeTable, error) {
+	return l.errorCodes.get(func() (*ErrorCodeTable, error) {
+		var c *C.char
+		l.mu.RLock()
+		rc := C.chs_lib_error_codes(&l.lib, &c)
+		doc := ""
+		if c != nil {
+			doc = C.GoString(c)
+			C.chs_lib_free(&l.lib, c)
+		}
+		l.mu.RUnlock()
+		if rc == -3 {
+			return nil, &UnsupportedError{Msg: "this artifact predates chs_error_codes (rebuild it)"}
+		}
+		if c == nil {
+			return nil, errNoErrorCodesDocument
+		}
+		return errorCodeTableOf([]byte(doc))
+	})
+}
+
 // ------------------------------------------------------------------ quoting
 //
 // Three passthroughs over the vendored backQuote / backQuoteIfNeed /
@@ -1259,6 +1322,44 @@ func (s *LoadedSchema) SetTTL(ttl string) error {
 		msg = "this artifact predates TTL support (rebuild it)"
 	}
 	return &UnsupportedError{Msg: msg}
+}
+
+// SetPartitionBy declares the table's partition key — the PARTITION BY clause
+// after the engine, e.g. "toYYYYMM(ts)" or "(toDate(ts), tenant)"
+// (chs_schema_partition_by, revision 6). The key is built by the server's own
+// CREATE-path call over the schema's columns, under the handle's compile
+// profile. A second call REPLACES the first; "" removes the declaration, and
+// the handle then answers exactly as one that never declared a key.
+//
+// With a key declared, Row and Rows answer RowResult.PartitionID for every
+// row that would be stored and BatchResult.PartitionCount for the batch, and
+// a body that would split into more partitions than the call's
+// max_partitions_per_insert_block allows is an ordinary Rejected with ErrCode
+// 252 (TOO_MANY_PARTS), the server's own — a verdict, never a Go error.
+//
+// The return follows chs_schema_engine's SIGN rule, not SetTTL's: a
+// *SchemaError when the server's own CREATE path refuses the key (e.g. 549
+// DATA_TYPE_CANNOT_BE_USED_IN_KEY), an *UnsupportedError when this build
+// declines (-2, a non-deterministic key; -1, a guarded exception) or the
+// artifact predates the symbol.
+func (s *LoadedSchema) SetPartitionBy(expr string) error {
+	cp := C.CString(expr)
+	defer C.free(unsafe.Pointer(cp))
+	var cErr *C.char
+	// A NON-const handle, so a writer, exactly like SetEngine and SetTTL.
+	unlock := s.lock()
+	if s.handle == nil {
+		unlock()
+		return fmt.Errorf("chtypes: schema is closed")
+	}
+	rc := C.chs_lib_partition_by(&s.lib.lib, s.handle, cp, &cErr)
+	msg := ""
+	if cErr != nil {
+		msg = C.GoString(cErr)
+		C.chs_lib_free(&s.lib.lib, cErr)
+	}
+	unlock()
+	return partitionByError(int(rc), msg)
 }
 
 // Close releases the native schema. Idempotent, and safe to race with calls on

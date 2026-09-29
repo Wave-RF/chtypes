@@ -212,6 +212,9 @@ pub(crate) struct Api {
     f_row: Option<Symbol<FnRow>>,
     f_engine: Option<Symbol<FnEngine>>,
     f_ttl: Option<Symbol<FnTtl>>,
+    // Revision 6: the partition key — `chs_schema_ttl`'s exact C shape, so the
+    // same alias. Its return follows `chs_schema_engine`'s SIGN rule.
+    f_partition_by: Option<Symbol<FnTtl>>,
     f_reference_type: Option<Symbol<FnReferenceType>>,
     // The quoting trio (revision 5, additive). Resolved individually like
     // everything else optional, so an artifact that predates them loads and
@@ -221,6 +224,10 @@ pub(crate) struct Api {
     f_quote_literal: Option<Symbol<FnQuote>>,
     f_registered_families: Option<Symbol<FnStr>>,
     f_function_flags: Option<Symbol<FnStr>>,
+    // Revision 6: the build's own error-code table, an owned JSON document —
+    // `chs_registered_families`' shape. NULL from a PRESENT symbol is a
+    // guarded exception, which is a different answer from a missing one.
+    f_error_codes: Option<Symbol<FnStr>>,
     // The revision-3 filter trio shipped as a unit; each is still resolved
     // individually so absence degrades per symbol, never at load.
     f_filter_compile: Option<Symbol<FnFilterCompile>>,
@@ -310,12 +317,14 @@ impl Api {
                 f_row: optional(&lib, b"chs_row\0"),
                 f_engine: optional(&lib, b"chs_schema_engine\0"),
                 f_ttl: optional(&lib, b"chs_schema_ttl\0"),
+                f_partition_by: optional(&lib, b"chs_schema_partition_by\0"),
                 f_reference_type: optional(&lib, b"chs_reference_type\0"),
                 f_quote_identifier: optional(&lib, b"chs_quote_identifier\0"),
                 f_quote_identifier_if_needed: optional(&lib, b"chs_quote_identifier_if_needed\0"),
                 f_quote_literal: optional(&lib, b"chs_quote_literal\0"),
                 f_registered_families: optional(&lib, b"chs_registered_families\0"),
                 f_function_flags: optional(&lib, b"chs_function_flags\0"),
+                f_error_codes: optional(&lib, b"chs_error_codes\0"),
                 f_filter_compile: optional(&lib, b"chs_filter_compile\0"),
                 f_filter_free: optional(&lib, b"chs_filter_free\0"),
                 f_filter_rows: optional(&lib, b"chs_filter_rows\0"),
@@ -583,6 +592,35 @@ impl Api {
             } else {
                 Err(Error::Unsupported { message })
             }
+        }
+    }
+
+    /// `chs_schema_partition_by` (revision 6): declare the table's partition
+    /// key; `""` removes it. The return follows [`Api::engine`]'s SIGN rule,
+    /// NOT [`Api::ttl`]'s: a positive rc is the server's own CREATE-path
+    /// refusal ([`Error::Schema`], e.g. 549); a negative rc is this library
+    /// declining ([`Error::Unsupported`]).
+    ///
+    /// # Safety
+    /// `handle` must come from this library's [`Api::compile`].
+    pub(crate) unsafe fn partition_by(
+        &self,
+        handle: *mut ChsSchema,
+        partition_by: &CStr,
+    ) -> Result<()> {
+        // SAFETY: the caller's `# Safety` clause guarantees `handle` came from
+        // this library's `compile`; `partition_by` is a `&CStr`, so it is
+        // NUL-terminated.
+        unsafe {
+            let Some(f) = self.f_partition_by.as_ref() else {
+                return Err(Error::PredatesFeature {
+                    feature: "chs_schema_partition_by",
+                });
+            };
+            let mut err: *mut c_char = std::ptr::null_mut();
+            let rc = f(handle, partition_by.as_ptr(), &mut err);
+            let message = string_of(self.take(err));
+            partition_by_result(rc, message)
         }
     }
 
@@ -1023,6 +1061,20 @@ impl Api {
         self.quote_with(self.f_quote_literal.as_ref(), "chs_quote_literal", text)
     }
 
+    /// `chs_error_codes` (revision 6): the build's own error-code table as the
+    /// raw JSON document. `Ok(None)` when the library could not build it (a
+    /// guarded exception — transient, so the caller must not remember it);
+    /// [`Error::PredatesFeature`] when the artifact predates the symbol.
+    pub(crate) fn error_codes(&self) -> Result<Option<Vec<u8>>> {
+        let Some(f) = self.f_error_codes.as_ref() else {
+            return Err(Error::PredatesFeature {
+                feature: "chs_error_codes",
+            });
+        };
+        // SAFETY: no arguments; the result goes through take().
+        Ok(unsafe { self.take(f()) })
+    }
+
     /// Newline-separated list of every type family in this build's runtime
     /// registry.
     pub(crate) fn registered_families(&self) -> Result<String> {
@@ -1109,7 +1161,46 @@ fn counted_ptr(bytes: &[u8]) -> *const c_char {
     }
 }
 
+/// `chs_schema_partition_by`'s return, by `chs_schema_engine`'s SIGN rule: `0`
+/// is accepted, a positive code is the server's own refusal with its message
+/// ([`Error::Schema`]), and any negative code is a decline
+/// ([`Error::Unsupported`]) — never `chs_schema_ttl`'s "every nonzero code
+/// declines".
+pub(crate) fn partition_by_result(rc: c_int, message: String) -> Result<()> {
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(Error::from_code(rc, message))
+    }
+}
+
 /// A NUL-terminated copy of `s`, or the interior-NUL error.
 pub(crate) fn cstring(s: &str, what: &'static str) -> Result<CString> {
     CString::new(s).map_err(|_| Error::Nul { what })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `chs_schema_partition_by` follows `chs_schema_engine`'s SIGN rule, not
+    /// `chs_schema_ttl`'s: a positive code is the server's refusal with its
+    /// own message, any negative code a decline.
+    #[test]
+    fn partition_by_follows_the_engine_sign_rule() {
+        assert!(partition_by_result(0, String::new()).is_ok());
+        match partition_by_result(549, "the server's own message".into()) {
+            Err(Error::Schema { code, message, .. }) => {
+                assert_eq!(code, 549);
+                assert_eq!(message, "the server's own message");
+            }
+            other => panic!("rc 549: {other:?}"),
+        }
+        for rc in [-1, -2] {
+            match partition_by_result(rc, "why".into()) {
+                Err(e @ Error::Unsupported { .. }) => assert!(e.is_unsupported()),
+                other => panic!("rc {rc}: {other:?}"),
+            }
+        }
+    }
 }

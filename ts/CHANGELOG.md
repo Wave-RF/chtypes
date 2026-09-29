@@ -6,6 +6,16 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`Library#errorCodes()`** — THIS build's own ClickHouse error-code table (`chs_error_codes`), as an `ErrorCodeTable`: `name(code): string | undefined`, `code(name): number | undefined`, `all(): readonly ErrorCodeEntry[]` (ascending) and iteration. Per `Library` and never package-level, because the table moves between lines — one number names two different errors on 25.8 and 26.2. An unknown or negative code and an unknown name are `undefined`, never synthesized; names match exactly. Built on the first call and kept on success only: a `NULL` answer throws `ChtypesError` and is never cached; an artifact that predates the symbol throws `UnsupportedError`.
+- **`Schema#setPartitionBy(expr)`** — declare the table's partition key; `''` removes it. It follows `setEngine`'s sign rule, not `setTtl`'s: `SchemaError` for the server's own CREATE-path refusal (e.g. 549), `UnsupportedError` for a decline.
+- **`RowResult#partitionId?`** and **`BatchResult#partitionCount?`**, both absent unless the schema declared a key. A batch over `max_partitions_per_insert_block` is an ordinary `'rejected'` with `errCode` 252.
+
+### Changed
+
+- **Speaks ABI revision 6, and refuses revision-5 artifacts** — and a revision-5 binding refuses revision-6 ones. Revision 6 only ADDS `chs_error_codes` and `chs_schema_partition_by`; nothing existing changed. It is still a new number, so a fetch after upgrading downloads revision-6 artifacts into their own `abi6` cache directory, and a directory holding only revision-5 artifacts is refused at load, naming both revisions. Revision-6 artifacts are published by the artifact producer; until they are, this binding has nothing to load.
+
 ## [0.3.2] — 2026-09-28
 
 Speaks ABI revision 5, unchanged from 0.3.1: every artifact 0.3.1 loads, this release loads.
