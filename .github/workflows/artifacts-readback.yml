@@ -1,0 +1,269 @@
+# artifacts-readback — an automated read-back of the served artifacts index
+# (scripts/index-diff.sh), replacing an hourly HAND operation.
+#
+# THE PROBLEM THIS REPLACES. Until now, a person (an agent) ran
+# `scripts/index-diff.sh --compare <stored baseline>` by hand, roughly every
+# hour: read the exit code, and only if it was 1 (something was DROPPED) or
+# the index's own `generated_at` had moved, pasted the output on issue #73 —
+# then, only AFTER posting, re-snapshotted the baseline with
+# `scripts/index-diff.sh --snapshot <path>` for the next round. Every step of
+# that depended on someone remembering to do it, in order, on a cadence
+# nobody enforced. This workflow performs the exact same three-step contract
+# — compare, post-if-it-matters, then-and-only-then advance the baseline —
+# on a schedule, so it happens whether or not anyone is watching.
+#
+# THE STATE MODEL. The last-seen baseline lives in the Actions cache, not in
+# the repository — there is nothing to commit here, and the whole point is
+# that this compares against what was last SEEN, not what is checked in.
+# Restored every run with `actions/cache/restore`, using a key that is
+# unique per save (`artifacts-readback-index-${{ github.run_id }}`) and
+# `restore-keys: artifacts-readback-index-` so the newest entry — whichever
+# run last saved one — wins. GitHub evicts a cache entry after 7 days with
+# no access; a restore itself counts as an access, so restoring every run
+# (even the quiet runs that save nothing new) keeps the baseline alive
+# through weeks with no real change, without ever re-saving identical bytes.
+#
+# ⚠️ THE SAVED BASELINE MUST BE EXACTLY THE DOCUMENT THAT WAS DIFFED. Two
+# separate fetches of the served index are not guaranteed to be the same
+# document — the artifact producer can regenerate it in the gap between
+# them — so a workflow that ran `--compare` and then, separately,
+# `--snapshot` to refresh its baseline could silently skip whatever changed
+# in that gap. `scripts/index-diff.sh --compare ... --keep-current <path>`
+# closes that: it writes the CURRENT side it already fetched and already
+# compared, in the same envelope `--snapshot` writes, so the baseline this
+# workflow saves is provably the document this run actually looked at, not
+# a second, later look.
+#
+# ⚠️ EXIT 1 IS NOT ONE THING, AND ONLY ONE HALF OF IT POSTS. index-diff.sh's
+# `die()` (a fetch failure, an unreadable baseline file, invalid JSON) and
+# its comparison's own hard-failure VERDICT (a row TRUE-DROPPED, or the
+# release-level `sdk-fetch-fixtures.tar.gz` manifest row gone missing) both
+# exit 1 — bash cannot tell them apart by number alone. They ARE told apart
+# here, by what the tool printed: the comparison always prints its own
+# `  generated_at: before=... after=...` line before it can ever reach a
+# hard-failure verdict, while `die()` fires before that line is ever
+# printed. So: exit 1 WITH a `generated_at:` line in the output is a real
+# finding — posted to #73, and the run is FAILED on purpose (a red
+# scheduled run is the alarm, and GitHub notifies repository watchers of
+# it). The baseline is deliberately NOT advanced on that path, so every
+# later run keeps comparing against the same last-known-good state and
+# keeps reporting the same drop — loudly, every ~30 minutes — until a
+# person resolves it. Advancing the baseline here would make the alarm ring
+# once and then go silent while the underlying loss persisted.
+#
+# ⚠️ EVERYTHING ELSE FAILS THE RUN, SILENTLY POSTING NOTHING: exit 1 with NO
+# `generated_at:` line (the served host was unreachable, or the restored
+# baseline file was unreadable), or any exit code that is neither 0 nor 1
+# (a bad argument reaching the tool's own usage error). None of these say
+# anything about whether the index actually changed. Posting a comment in
+# that case would misrepresent an outage as a finding; failing the run
+# without posting is the honest result. An outage must never read as a
+# quiet index.
+#
+# PER-OUTCOME BEHAVIOR:
+#   no cache restored (first run, or the prior baseline aged out)
+#     -> snapshot a fresh baseline, note "seeded" in the job summary,
+#        post nothing, save the baseline, exit 0.
+#   --compare exits 1 WITH a generated_at line (a row true-dropped, or the
+#   fixtures manifest row gone)
+#     -> post to #73, then FAIL the run. Baseline NOT advanced.
+#   --compare exits 0, generated_at MOVED
+#     -> post to #73; only after that post succeeds, advance the baseline
+#        to the --keep-current file. Exit 0.
+#   --compare exits 0, generated_at UNCHANGED
+#     -> post nothing, save nothing, exit 0. Quiet stays quiet.
+#   anything else (exit 1 with NO generated_at line, or any exit code that
+#   is neither 0 nor 1 — a fetch failure or a bad argument)
+#     -> fail the run; post nothing.
+#
+# THE COMMENT ON #73 is posted with the built-in GITHUB_TOKEN alone (no
+# secret, no PAT) via `gh api -X POST repos/${{ github.repository
+# }}/issues/73/comments`, which is why this job's permissions grant exactly
+# `issues: write` and `contents: read` and nothing else. It always carries,
+# in order: a machine-category marker line
+# (`<!-- artifacts-readback: generated_at <after value> -->`) read from the
+# tool's own `generated_at:` line — never a separate hand-parse of the
+# JSON; one sentence stating the verdict, with this run's URL; the tool's
+# own output in a fenced block with ANSI escapes stripped (the default
+# output already elides the artifact producer's free text by shape — see
+# scripts/index-diff.sh's own header — so it is safe to paste publicly;
+# `--show-reasons` is never passed here); and a closing
+# `<!-- to:chtypes-sdk -->` line.
+#
+# CADENCE: twice an hour, at :11 and :41 — off the hour and the half-hour,
+# so this does not queue behind every other repository's :00/:30 cron on
+# GitHub's shared scheduler infrastructure (the same reasoning
+# support-matrix-refresh.yml's own header gives for its own off-the-hour
+# slot). `workflow_dispatch` is also wired in, so the two states below can
+# be exercised on demand after this merges. GitHub's scheduler can run
+# late; that costs nothing here, because every run compares against stored
+# state rather than a wall-clock expectation.
+#
+# EXERCISING THIS AFTER MERGE (scheduled workflows only run from the
+# default branch, so this cannot run before merge): `gh workflow run
+# artifacts-readback.yml`, then read the run's job summary. The first
+# manual run seeds a baseline (nothing to compare against yet); the second
+# is quiet — posts nothing — unless the served index actually moved
+# between the two runs.
+name: artifacts-readback
+
+on:
+  schedule:
+    - cron: "11,41 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: artifacts-readback
+  # A half-finished "posted, about to save" must never be cut off mid-way —
+  # that would leave the comment on #73 without the baseline advance that is
+  # supposed to follow it, and the NEXT scheduled run would then re-report
+  # and re-post the exact same generated_at move. Let every run finish.
+  cancel-in-progress: false
+
+# Every run: step uses bash with -eo pipefail (GitHub's default for an
+# explicit `shell: bash`, unlike the plain `bash -e {0}` a step gets with no
+# `shell:` at all — see ci.yml's own identical comment).
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  readback:
+    name: "readback — compare the served index against the Actions-cache baseline; post to #73 and/or advance the baseline per the outcome"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: restore the last-seen baseline from the Actions cache
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .artifacts-readback/baseline.json
+          key: artifacts-readback-index-${{ github.run_id }}
+          restore-keys: |
+            artifacts-readback-index-
+
+      # cache-matched-key is empty only when NEITHER the exact key NOR any
+      # restore-keys prefix matched anything — a genuine "nothing cached at
+      # all" state (the very first run, or a baseline that aged out after 7
+      # days with no access). A partial (restore-keys) match still populates
+      # cache-matched-key, which is exactly the "newest entry wins" behavior
+      # this is here for.
+      - name: first run (or the prior baseline aged out) — seed a fresh baseline
+        id: seed
+        if: steps.restore.outputs.cache-matched-key == ''
+        run: |
+          mkdir -p .artifacts-readback
+          scripts/index-diff.sh --snapshot .artifacts-readback/baseline.json
+          {
+            echo "### artifacts-readback — seeded"
+            echo
+            echo "No baseline was found in the Actions cache (first run, or the prior baseline aged out past the 7-day no-access eviction window). A fresh baseline was snapshotted from the served index just now and will be saved to the cache at the end of this run. Nothing was posted to #73 — the next run compares against this baseline."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "save=1" >> "$GITHUB_OUTPUT"
+
+      - name: compare the served index against the restored baseline, and post/advance per the outcome
+        id: compare
+        if: steps.restore.outputs.cache-matched-key != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BASELINE=.artifacts-readback/baseline.json
+          KEPT=.artifacts-readback/current.json
+          OUT=.artifacts-readback/compare-output.txt
+
+          # UNPIPED: the exit code below is index-diff.sh's own, never a
+          # pipeline's rightmost command's.
+          ec=0
+          scripts/index-diff.sh --compare "$BASELINE" --keep-current "$KEPT" >"$OUT" 2>&1 || ec=$?
+          cat "$OUT"
+
+          if [ "$ec" -ne 0 ] && [ "$ec" -ne 1 ]; then
+            echo "artifacts-readback: scripts/index-diff.sh exited $ec (neither 0 nor 1) -- a bad argument reaching the tool's own usage error, never a quiet index. Failing without posting." >&2
+            exit 1
+          fi
+
+          # Read before=/after= from the tool's OWN generated_at line -- never
+          # a separate hand-parse of the served JSON. This line ALSO tells
+          # apart the two things exit 1 can mean (see this workflow's own
+          # header): the comparison's own hard-failure verdict always prints
+          # this line first, while die() (a fetch failure, an unreadable
+          # baseline) fires before it is ever printed. No line here, on
+          # EITHER exit code, means the tool did not complete a comparison at
+          # all -- an outage, not a finding -- so this fails without posting.
+          line="$(grep -m1 '^  generated_at:' "$OUT" || true)"
+          if [ -z "$line" ]; then
+            echo "artifacts-readback: no 'generated_at:' line in the tool's output (exit $ec) -- the tool did not complete a comparison (a fetch failure or an unreadable baseline, not a finding). Failing without posting." >&2
+            exit 1
+          fi
+          before="$(printf '%s\n' "$line" | sed -n 's/^  generated_at: before=\(.*\)  after=.*/\1/p')"
+          after="$(printf '%s\n' "$line" | sed -n 's/^  generated_at: before=.*  after=\(.*\)/\1/p')"
+          if [ -z "$before" ] || [ -z "$after" ]; then
+            echo "artifacts-readback: could not parse before=/after= out of: $line" >&2
+            exit 1
+          fi
+
+          if [ "$ec" -eq 0 ] && [ "$before" = "$after" ]; then
+            echo "artifacts-readback: generated_at unchanged ($after) -- quiet stays quiet: nothing posted, nothing saved" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$ec" -eq 1 ]; then
+            verdict="A row was TRUE-DROPPED from the served index, or the sdk-fetch-fixtures.tar.gz manifest row went missing (generated_at $before -> $after) -- see the VERDICT line below."
+          else
+            verdict="generated_at moved from $before to $after; nothing was dropped."
+          fi
+
+          # ANSI escapes stripped before this goes anywhere public -- same
+          # pattern scripts/check-suite.sh already uses to read a colored log
+          # plainly.
+          plain="$(sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$OUT")"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          body_file="$(mktemp)"
+          {
+            echo "<!-- artifacts-readback: generated_at $after -->"
+            echo
+            echo "$verdict Run: $run_url"
+            echo
+            echo '```'
+            printf '%s\n' "$plain"
+            echo '```'
+            echo
+            echo "<!-- to:chtypes-sdk -->"
+          } > "$body_file"
+
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/73/comments" -F body=@"$body_file"
+
+          if [ "$ec" -eq 1 ]; then
+            echo "artifacts-readback: posted; failing the run (exit 1) -- a red scheduled run is the alarm, and the baseline is NOT advanced, so later runs keep reporting this until it is resolved." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # Only now, after the post above has succeeded, does the baseline
+          # advance -- to the CURRENT side --keep-current already wrote,
+          # which is provably the same document just compared and posted,
+          # never a second, later fetch.
+          mv "$KEPT" "$BASELINE"
+          echo "save=1" >> "$GITHUB_OUTPUT"
+          echo "artifacts-readback: posted; generated_at $before -> $after; baseline advanced" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Runs after `seed` (mode: nothing to compare against yet) or after a
+      # `compare` that posted a generated_at move and wants it kept. Neither
+      # `if:` below names success()/failure()/always(), so each is implicitly
+      # ANDed with success() -- meaning a compare step that exited 1 (posted,
+      # then failed on purpose) skips this automatically, which is exactly
+      # how exit 1 avoids ever advancing the baseline: no separate guard is
+      # needed here for that case.
+      - name: save the baseline to the Actions cache
+        if: steps.seed.outputs.save == '1' || steps.compare.outputs.save == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .artifacts-readback/baseline.json
+          key: artifacts-readback-index-${{ github.run_id }}

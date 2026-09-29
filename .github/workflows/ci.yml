@@ -1037,6 +1037,15 @@ jobs:
       # package. Selftest first, same reason.
       - run: scripts/lint-cited-paths.sh --selftest
       - run: scripts/lint-cited-paths.sh
+      # scripts/index-diff.sh (the read-back of the served artifacts index,
+      # .github/workflows/artifacts-readback.yml) has no other CI coverage,
+      # and its own elision selftest reads a live needle from THIS job's own
+      # `scripts/lint-public.sh --print-rules` — never a hand-copied one, the
+      # same discipline that script's header already argues for at length —
+      # so its selftest belongs here rather than in a fifth job. Needs no
+      # network and no artifact: every fixture channel it compares is one it
+      # builds itself, including the --keep-current case.
+      - run: scripts/index-diff.sh --selftest
 
   prose:
     # BLOCKING. It was report-only while the tree was still hard-wrapped, which
