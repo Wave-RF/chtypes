@@ -197,6 +197,37 @@ jobs:
         run: scripts/regen-automerge-check.py --selftest
       - name: the automerge's pinned required checks are exactly this file's blocking jobs
         run: scripts/regen-automerge-check.py --check-ci-names
+      # scripts/check-suite.sh, scripts/lib/provenance.py (called from inside
+      # check-suite.sh's own --selftest) and scripts/published-lines.sh each
+      # had a --selftest mode that no workflow step ever invoked (chtypes#268)
+      # — the exact gap scripts/index-diff.sh was in until #267 wired it here,
+      # whose first CI run then found a latent SIGPIPE race that had never
+      # shown locally. Both pass locally today; that is not the same claim as
+      # "CI has seen them fail," which is the whole reason this repository
+      # runs a selftest before trusting the check it guards. Neither needs an
+      # artifact or the network: check-suite.sh's selftest drives its
+      # ABI-fixture and parity matchers against fabricated logs (and, inside
+      # itself, provenance.py's own selftest against a fabricated registry and
+      # a rewritten temp header); published-lines.sh's selftest drives its
+      # newest-build selection against a planted index.json fixture, never a
+      # curled one. Both need only python3, already on this runner.
+      - name: "selftest — check-suite.sh's census matchers (and, inside it, provenance.py's own selftest)"
+        run: scripts/check-suite.sh --selftest
+      - name: "selftest — published-lines.sh picks the newest BUILD in a line, not list order, not a lexical sort"
+        run: scripts/published-lines.sh --selftest
+      # scripts/check-selftests-wired.py is the static check that catches the
+      # NEXT unwired selftest before it repeats the three above: every script
+      # under scripts/ that declares a --selftest mode must be invoked with it
+      # by some workflow step, directly or through a named, verified caller
+      # (its own header has the full rule). Selftest first, same discipline as
+      # every other check in this job — and it must pass on ITSELF: it is a
+      # --selftest script too, so a version of this step that forgot to wire
+      # its own check would be exactly the regression this file exists to
+      # catch. No network, no artifact.
+      - name: selftest — an unwired script, a comment-only mention, and a bad CALLED_BY entry are all caught, and this file's own CALLED_BY map verifies
+        run: scripts/check-selftests-wired.py --selftest
+      - name: every scripts/* --selftest mode is actually invoked by CI, directly or through a verified caller
+        run: scripts/check-selftests-wired.py
 
   docs:
     name: "docs — the support matrix still matches what the release serves"
