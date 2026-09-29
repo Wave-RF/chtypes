@@ -3,8 +3,9 @@
 //! There is no table in this crate, and there must never be one. The table is
 //! a property of the BUILD: codes join and leave between ClickHouse lines, and
 //! one number can name two different errors on two lines (903 is
-//! `LICENSE_EXPIRED` on 25.3/25.8 and `DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN`
-//! from 26.2). Every answer therefore comes from
+//! `LICENSE_EXPIRED` on 25.3 and 25.8, absent on 25.10, and
+//! `DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN` on 26.2 through 26.9). Every answer
+//! therefore comes from
 //! [`crate::Library::error_codes`], i.e. from `chs_error_codes` of the library
 //! being asked, and `scripts/check-no-error-code-table.py` fails the build if a
 //! literal code → name table appears in any binding.

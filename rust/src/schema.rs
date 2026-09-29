@@ -255,10 +255,13 @@ impl Schema {
     /// [`Schema::set_ttl`]'s:
     ///
     /// * [`crate::Error::Schema`] — positive code: **the server refused** the
-    ///   key on its own CREATE path (e.g. `549`
-    ///   `DATA_TYPE_CANNOT_BE_USED_IN_KEY`), with its own message.
+    ///   key on its own CREATE path (e.g. `36` `BAD_ARGUMENTS` for a
+    ///   non-deterministic key, `549` `DATA_TYPE_CANNOT_BE_USED_IN_KEY`), with
+    ///   its own message.
     /// * [`crate::Error::Unsupported`] — negative code: **this library
-    ///   declined** (`-2` a non-deterministic key, `-1` a guarded exception).
+    ///   declined** (`-1` a guarded exception). `-2` is a key the server
+    ///   accepts but this build will not evaluate; a non-deterministic key is
+    ///   the server's own rejection, `36` `BAD_ARGUMENTS`.
     /// * [`crate::Error::PredatesFeature`] — the artifact predates
     ///   `chs_schema_partition_by`.
     /// * [`crate::Error::Nul`] — the expression contained an interior NUL

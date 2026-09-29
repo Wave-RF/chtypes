@@ -9,7 +9,7 @@ The four bindings in this repository are released together and give one answer, 
 ### Added
 
 - **`Library#errorCodes()`** — THIS build's own ClickHouse error-code table (`chs_error_codes`), as an `ErrorCodeTable`: `name(code): string | undefined`, `code(name): number | undefined`, `all(): readonly ErrorCodeEntry[]` (ascending) and iteration. Per `Library` and never package-level, because the table moves between lines — one number names two different errors on 25.8 and 26.2. An unknown or negative code and an unknown name are `undefined`, never synthesized; names match exactly. Built on the first call and kept on success only: a `NULL` answer throws `ChtypesError` and is never cached; an artifact that predates the symbol throws `UnsupportedError`.
-- **`Schema#setPartitionBy(expr)`** — declare the table's partition key; `''` removes it. It follows `setEngine`'s sign rule, not `setTtl`'s: `SchemaError` for the server's own CREATE-path refusal (e.g. 549), `UnsupportedError` for a decline.
+- **`Schema#setPartitionBy(expr)`** — declare the table's partition key; `''` removes it. It follows `setEngine`'s sign rule, not `setTtl`'s: `SchemaError` for the server's own CREATE-path refusal (e.g. 36 BAD_ARGUMENTS for a non-deterministic key, 549), `UnsupportedError` for a decline (-2 is a key the server accepts but this build will not evaluate).
 - **`RowResult#partitionId?`** and **`BatchResult#partitionCount?`**, both absent unless the schema declared a key. A batch over `max_partitions_per_insert_block` is an ordinary `'rejected'` with `errCode` 252.
 
 ### Changed

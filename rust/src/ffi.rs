@@ -598,8 +598,9 @@ impl Api {
     /// `chs_schema_partition_by` (revision 6): declare the table's partition
     /// key; `""` removes it. The return follows [`Api::engine`]'s SIGN rule,
     /// NOT [`Api::ttl`]'s: a positive rc is the server's own CREATE-path
-    /// refusal ([`Error::Schema`], e.g. 549); a negative rc is this library
-    /// declining ([`Error::Unsupported`]).
+    /// refusal ([`Error::Schema`], e.g. 36 for a non-deterministic key, 549);
+    /// a negative rc is this library declining ([`Error::Unsupported`]; -2 is
+    /// a key the server accepts but this build will not evaluate).
     ///
     /// # Safety
     /// `handle` must come from this library's [`Api::compile`].
@@ -1189,12 +1190,17 @@ mod tests {
     #[test]
     fn partition_by_follows_the_engine_sign_rule() {
         assert!(partition_by_result(0, String::new()).is_ok());
-        match partition_by_result(549, "the server's own message".into()) {
-            Err(Error::Schema { code, message, .. }) => {
-                assert_eq!(code, 549);
-                assert_eq!(message, "the server's own message");
+        // Positive codes are the server's own refusal: 36 BAD_ARGUMENTS is
+        // what a non-deterministic key gets on every served line, 549 a key
+        // over a type the line will not key on.
+        for rc in [36, 549] {
+            match partition_by_result(rc, "the server's own message".into()) {
+                Err(Error::Schema { code, message, .. }) => {
+                    assert_eq!(code, rc);
+                    assert_eq!(message, "the server's own message");
+                }
+                other => panic!("rc {rc}: {other:?}"),
             }
-            other => panic!("rc 549: {other:?}"),
         }
         for rc in [-1, -2] {
             match partition_by_result(rc, "why".into()) {

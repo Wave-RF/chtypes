@@ -243,15 +243,21 @@ describe.skipIf(rev6.length === 0)('the error-code table from a loaded revision-
     }
   });
 
-  it('answers 903 per line, as the header documents', () => {
+  it('answers 903 per line, as the header documents — absent on 25.10', () => {
+    // The producer's measurement of every served line. `null` is ABSENT (the
+    // table answers `undefined`), never a synthesized name. A line not named
+    // here (26.10 and later) has no expectation and is not checked.
+    const want = new Map<string, string | null>([
+      ['25.3', 'LICENSE_EXPIRED'],
+      ['25.8', 'LICENSE_EXPIRED'],
+      ['25.10', null],
+      ...[2, 3, 4, 5, 6, 7, 8, 9].map((m) => [`26.${m}`, 'DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN'] as [string, string]),
+    ]);
     let checked = 0;
     for (const library of rev6) {
-      const [major, minor] = library.minor.split('.').map(Number) as [number, number];
-      let want: string | undefined;
-      if (library.minor === '25.3' || library.minor === '25.8') want = 'LICENSE_EXPIRED';
-      else if (major > 26 || (major === 26 && minor >= 2)) want = 'DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN';
-      if (want === undefined) continue;
-      expect(library.errorCodes().name(903), library.minor).toBe(want);
+      if (!want.has(library.minor)) continue;
+      const expected = want.get(library.minor) ?? undefined;
+      expect(library.errorCodes().name(903), library.minor).toBe(expected);
       checked++;
     }
     if (checked === 0) console.warn('[chtypes] no loaded revision-6 line has a documented expectation for code 903');

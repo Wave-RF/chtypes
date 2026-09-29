@@ -379,18 +379,18 @@ CHS_API char * chs_function_flags(void);
  *
  * The table is a property of the BUILD and moves between ClickHouse lines:
  * codes join, codes leave, and ONE NUMBER CAN NAME DIFFERENT ERRORS ON TWO
- * LINES (903 is LICENSE_EXPIRED on 25.3/25.8 and
- * DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN from 26.2). A caller that needs an
- * answer for several lines asks each library; nothing here is valid for a
- * line other than this artifact's.
+ * LINES (903 is LICENSE_EXPIRED on 25.3 and 25.8, absent on 25.10, and
+ * DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN on 26.2 through 26.9). A caller that
+ * needs an answer for several lines asks each library; nothing here is valid
+ * for a line other than this artifact's.
  *
  * Proven complete at build time: the artifact producer's build compares this
  * answer with the vendored src/Common/ErrorCodes.cpp and fails on any
  * difference it cannot name.
  *
- * Callable any number of times; the answer never changes for a loaded
- * library. NULL only when the document could not be built (a guarded
- * exception) — never for an ordinary build. */
+ * Requires chs_init. Callable any number of times after it; the answer never
+ * changes for a loaded library. NULL only when the document could not be
+ * built (a guarded exception) — never for an ordinary build. */
 CHS_API char * chs_error_codes(void);
 
 /* Distinguished code for "this build refuses to answer" (see chs_init).
@@ -614,11 +614,12 @@ CHS_API int chs_schema_ttl(chs_schema * s, const char * ttl_sql, char ** out_err
  *
  * Returns, by chs_schema_engine's SIGN rule (a binding keys on the sign):
  *   0    accepted;
- *   > 0  the server's own CREATE-path REJECTION, with its own message — e.g.
- *        549 DATA_TYPE_CANNOT_BE_USED_IN_KEY for a key over a type that is
- *        not comparable (every line) or over Variant/Dynamic/JSON (25.8 on);
- *   -2   CHS_CODE_UNSUPPORTED — declined: a key this build will not evaluate
- *        (a non-deterministic key, which the server's CREATE also refuses);
+ *   > 0  the server's own CREATE-path REJECTION, with its own code and
+ *        message — e.g. 36 BAD_ARGUMENTS for a non-deterministic key (a clock
+ *        read, rand()), 549 DATA_TYPE_CANNOT_BE_USED_IN_KEY for a key over a
+ *        type the line will not key on;
+ *   -2   CHS_CODE_UNSUPPORTED — declined: a key the server ACCEPTS but this
+ *        build will not evaluate;
  *   -1   a guarded exception, or a NULL handle.
  * *out_err (optional, may be NULL) says why in every nonzero case; free it
  * with chs_free. The call is a use of the schema handle (it mutates it): never

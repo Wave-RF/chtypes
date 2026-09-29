@@ -556,8 +556,9 @@ func (cs *CompiledSchema) SetTTL(ttl string) error {
 // 6. The linked twin of (*LoadedSchema).SetPartitionBy, with the same
 // contract: a second call replaces the first, "" removes the declaration, and
 // the return follows chs_schema_engine's SIGN rule — a *SchemaError for the
-// server's own CREATE-path refusal (e.g. 549), an *UnsupportedError for this
-// build's decline.
+// server's own CREATE-path refusal (e.g. 36 for a non-deterministic key, 549),
+// an *UnsupportedError for this build's decline (-2, a key the server accepts
+// but this build will not evaluate).
 func (cs *CompiledSchema) SetPartitionBy(expr string) error {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()

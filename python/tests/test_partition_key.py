@@ -88,14 +88,20 @@ def test_set_partition_by_follows_the_engine_sign_rule() -> None:
     _schema_over(ok).set_partition_by("toYYYYMM(ts)")
     assert ok.calls == ["toYYYYMM(ts)"]
 
-    with pytest.raises(chtypes.SchemaError) as refused:
-        _schema_over(_StubNative(549, "the server's own message")).set_partition_by("m")
-    assert refused.value.code == 549
-    assert "the server's own message" in str(refused.value)
+    # Positive codes are the server's own refusal: 36 BAD_ARGUMENTS is what a
+    # non-deterministic key gets on every served line, 549 a key over a type
+    # the line will not key on.
+    for rc, expr in ((36, "rand()"), (549, "m")):
+        with pytest.raises(chtypes.SchemaError) as refused:
+            _schema_over(_StubNative(rc, "the server's own message")).set_partition_by(expr)
+        assert refused.value.code == rc
+        assert "the server's own message" in str(refused.value)
 
+    # Negative codes are declines: -2 a key the server accepts but this build
+    # will not evaluate, -1 a guarded exception.
     for rc in (-1, -2):
         with pytest.raises(chtypes.UnsupportedError) as declined:
-            _schema_over(_StubNative(rc, "why")).set_partition_by("rand()")
+            _schema_over(_StubNative(rc, "why")).set_partition_by("k")
         assert not isinstance(declined.value, chtypes.SchemaError)
 
 
@@ -156,5 +162,8 @@ def test_partition_key_end_to_end(registry: chtypes.Registry) -> None:
             cleared = schema.rows(chtypes.Format.JSON_EACH_ROW, BODY)
             assert cleared.partition_count is None and cleared.rows[0].partition_id is None
 
-            with pytest.raises(chtypes.UnsupportedError):
+            # A non-deterministic key is the server's own rejection — 36
+            # BAD_ARGUMENTS on every served line — not a decline.
+            with pytest.raises(chtypes.SchemaError) as refused:
                 schema.set_partition_by("rand()")
+            assert refused.value.code == 36, lib.minor

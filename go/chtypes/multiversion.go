@@ -1122,8 +1122,8 @@ func (l *Library) ReferenceType(typeExpr string) (string, error) {
 //
 // The table belongs to the build, not to this package: codes join and leave
 // between lines, and one number can name different errors on two lines (903
-// is LICENSE_EXPIRED on 25.3/25.8 and DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN from
-// 26.2). Ask the library whose line you are answering for; there is no
+// is LICENSE_EXPIRED on 25.3 and 25.8, absent on 25.10, and
+// DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN on 26.2 through 26.9). Ask the library whose line you are answering for; there is no
 // package-level table, and a binding that carried one would be wrong for
 // every line but one.
 //
@@ -1338,10 +1338,12 @@ func (s *LoadedSchema) SetTTL(ttl string) error {
 // 252 (TOO_MANY_PARTS), the server's own — a verdict, never a Go error.
 //
 // The return follows chs_schema_engine's SIGN rule, not SetTTL's: a
-// *SchemaError when the server's own CREATE path refuses the key (e.g. 549
+// *SchemaError when the server's own CREATE path refuses the key (e.g. 36
+// BAD_ARGUMENTS for a non-deterministic key, 549
 // DATA_TYPE_CANNOT_BE_USED_IN_KEY), an *UnsupportedError when this build
-// declines (-2, a non-deterministic key; -1, a guarded exception) or the
-// artifact predates the symbol.
+// declines (-1, a guarded exception) or the artifact predates the symbol. -2
+// is a key the server accepts but this build will not evaluate; a
+// non-deterministic key is the server's own rejection, 36 BAD_ARGUMENTS.
 func (s *LoadedSchema) SetPartitionBy(expr string) error {
 	cp := C.CString(expr)
 	defer C.free(unsafe.Pointer(cp))

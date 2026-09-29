@@ -74,9 +74,14 @@ func TestSetPartitionBySignRule(t *testing.T) {
 	if err := partitionByError(0, ""); err != nil {
 		t.Fatalf("rc 0: %v", err)
 	}
+	// Positive codes are the server's own refusal: 36 BAD_ARGUMENTS is what a
+	// non-deterministic key gets on every served line, 549 a key over a type
+	// the line will not key on.
 	var se *SchemaError
-	if err := partitionByError(549, "the server's own message"); !errors.As(err, &se) || se.Code != 549 || se.Msg != "the server's own message" {
-		t.Fatalf("rc 549: %v, want *SchemaError{549, the server's own message}", err)
+	for _, rc := range []int{36, 549} {
+		if err := partitionByError(rc, "the server's own message"); !errors.As(err, &se) || se.Code != rc || se.Msg != "the server's own message" {
+			t.Fatalf("rc %d: %v, want *SchemaError{%d, the server's own message}", rc, err, rc)
+		}
 	}
 	for _, rc := range []int{-1, -2, -3} {
 		err := partitionByError(rc, "why")
@@ -151,10 +156,12 @@ func TestPartitionKeyEndToEnd(t *testing.T) {
 			t.Fatalf("%s: key removed, yet PartitionCount = %d, PartitionID = %q", lib.Minor, res.PartitionCount, res.Rows[0].PartitionID)
 		}
 
-		// A non-deterministic key is declined, never guessed.
-		var ue *UnsupportedError
-		if err := s.SetPartitionBy("rand()"); !errors.As(err, &ue) {
-			t.Fatalf("%s: SetPartitionBy(rand()) = %v, want *UnsupportedError", lib.Minor, err)
+		// A non-deterministic key is the server's own rejection — 36
+		// BAD_ARGUMENTS on every served line — so it is a *SchemaError with
+		// that code, not a decline.
+		var se *SchemaError
+		if err := s.SetPartitionBy("rand()"); !errors.As(err, &se) || se.Code != 36 {
+			t.Fatalf("%s: SetPartitionBy(rand()) = %v, want *SchemaError with code 36", lib.Minor, err)
 		}
 		s.Close()
 	}

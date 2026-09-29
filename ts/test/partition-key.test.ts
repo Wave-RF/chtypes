@@ -63,9 +63,14 @@ describe('the partition fields (no artifact)', () => {
   });
 
   it("maps the setter's return by the engine SIGN rule", () => {
-    const refused = schemaErrorFor(549, "the server's own message");
-    expect(refused).toBeInstanceOf(SchemaError);
-    expect((refused as SchemaError).code).toBe(549);
+    // Positive codes are the server's own refusal: 36 BAD_ARGUMENTS is what a
+    // non-deterministic key gets on every served line, 549 a key over a type
+    // the line will not key on.
+    for (const rc of [36, 549]) {
+      const refused = schemaErrorFor(rc, "the server's own message");
+      expect(refused).toBeInstanceOf(SchemaError);
+      expect((refused as SchemaError).code).toBe(rc);
+    }
     for (const rc of [-1, -2]) {
       const declined = schemaErrorFor(rc, 'why');
       expect(declined).toBeInstanceOf(UnsupportedError);
@@ -111,7 +116,7 @@ const BODY = Buffer.from(
 );
 
 describe.skipIf(rev6.length === 0)('the partition key on a loaded revision-6 library', () => {
-  it('ids, counts, refuses over the limit, clears, and declines a non-deterministic key', () => {
+  it("ids, counts, refuses over the limit, clears, and passes the server's 36 for a non-deterministic key", () => {
     for (const library of rev6) {
       const schema = library.compileDdl('ts DateTime, tenant String');
       try {
@@ -138,7 +143,16 @@ describe.skipIf(rev6.length === 0)('the partition key on a loaded revision-6 lib
         expect(cleared.partitionCount).toBeUndefined();
         expect(cleared.rows[0]!.partitionId).toBeUndefined();
 
-        expect(() => schema.setPartitionBy('rand()')).toThrow(UnsupportedError);
+        // A non-deterministic key is the server's own rejection — 36
+        // BAD_ARGUMENTS on every served line — not a decline.
+        let refused: unknown;
+        try {
+          schema.setPartitionBy('rand()');
+        } catch (err) {
+          refused = err;
+        }
+        expect(refused, library.minor).toBeInstanceOf(SchemaError);
+        expect((refused as SchemaError).code, library.minor).toBe(36);
       } finally {
         schema.close();
       }

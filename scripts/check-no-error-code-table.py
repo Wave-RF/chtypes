@@ -4,8 +4,8 @@
 WHY THIS EXISTS. ClickHouse names its error codes in a table that is a property
 of the BUILD, and it moves between lines: codes join, codes leave, and one
 number can name two different errors on two lines (903 is LICENSE_EXPIRED on
-25.3/25.8 and DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN from 26.2). Revision 6 of the
-C ABI serves each build's own table through `chs_error_codes`, and every binding
+25.3 and 25.8, absent on 25.10, and DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN on 26.2
+through 26.9). Revision 6 of the C ABI serves each build's own table through `chs_error_codes`, and every binding
 reaches it per loaded library — `Library.ErrorCodes()` / `error_codes()` /
 `errorCodes()` / `error_codes()`. A code -> name table written into a binding
 would be right for at most one line and silently wrong for the rest, which is

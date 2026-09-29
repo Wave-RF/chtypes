@@ -227,17 +227,24 @@ def test_error_codes_from_the_loaded_library(registry: chtypes.Registry) -> None
         assert lib.error_codes() is table, f"{lib.minor}: the table was not kept"
 
 
+# The header's own example of one number naming different errors on different
+# lines, per the producer's measurement of every served line. None is ABSENT (on
+# 25.10), never a synthesized name. A line not named here (26.10 and later) has
+# no expectation and is not checked.
+ERROR_CODE_903: dict[str, str | None] = {
+    "25.3": "LICENSE_EXPIRED",
+    "25.8": "LICENSE_EXPIRED",
+    "25.10": None,
+    **{f"26.{m}": "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN" for m in range(2, 10)},
+}
+
+
 def test_code_903_differs_across_lines(registry: chtypes.Registry) -> None:
     checked = 0
     for lib in _rev6_libraries(registry):
-        major, minor = (int(x) for x in lib.minor.split("."))
-        if lib.minor in ("25.3", "25.8"):
-            want = "LICENSE_EXPIRED"
-        elif (major, minor) >= (26, 2):
-            want = "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN"
-        else:
+        if lib.minor not in ERROR_CODE_903:
             continue
-        assert lib.error_codes().name(903) == want, lib.minor
+        assert lib.error_codes().name(903) == ERROR_CODE_903[lib.minor], lib.minor
         checked += 1
     if not checked:
         pytest.skip("no loaded revision-6 line has a documented expectation for code 903")

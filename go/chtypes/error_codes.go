@@ -6,8 +6,8 @@ package chtypes
 // There is no table in this package, and there must never be one. The table
 // is a property of the BUILD: codes join and leave between lines, and one
 // number can name two different errors on two lines (903 is LICENSE_EXPIRED
-// on 25.3/25.8 and DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN from 26.2). A table
-// written down here would be right for at most one line and silently wrong
+// on 25.3 and 25.8, absent on 25.10, and DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN
+// on 26.2 through 26.9). A table written down here would be right for at most one line and silently wrong
 // for the rest, which is why every answer hangs off a *Library and why
 // scripts/check-no-error-code-table.py fails the build if a literal code ->
 // name table appears in any binding.
@@ -174,9 +174,10 @@ var errNoErrorCodesDocument = errors.New("chtypes: chs_error_codes returned no d
 // partitionByError maps chs_schema_partition_by's return code to an error, by
 // chs_schema_engine's SIGN rule — NOT chs_schema_ttl's, which declines on
 // every nonzero code. 0 is accepted; a positive code is the server's own
-// CREATE-path refusal (e.g. 549 DATA_TYPE_CANNOT_BE_USED_IN_KEY), a
-// *SchemaError carrying that code and message; any negative code — -2 a
-// declined key, -1 a guarded exception, -3 this loader's "the artifact
+// CREATE-path refusal (e.g. 36 BAD_ARGUMENTS for a non-deterministic key, 549
+// DATA_TYPE_CANNOT_BE_USED_IN_KEY), a *SchemaError carrying that code and
+// message; any negative code — -2 a key the server accepts but this build
+// will not evaluate, -1 a guarded exception, -3 this loader's "the artifact
 // predates the symbol" — is an *UnsupportedError.
 func partitionByError(rc int, msg string) error {
 	if rc == 0 {

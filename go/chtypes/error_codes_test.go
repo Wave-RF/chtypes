@@ -301,22 +301,32 @@ func TestErrorCodesFromTheLoadedLibrary(t *testing.T) {
 	}
 }
 
-// 903 is the header's own example of one number naming two errors on two
-// lines. Checked per line, for whichever of those lines the registry holds.
+// errorCode903 is the header's own example of one number naming different
+// errors on different lines, per the producer's measurement of every served
+// line: LICENSE_EXPIRED on 25.3 and 25.8, absent on 25.10 (""), and
+// DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN on 26.2 through 26.9. A line not named
+// here (26.10 and later) has no expectation and is not checked.
+var errorCode903 = map[string]string{
+	"25.3":  "LICENSE_EXPIRED",
+	"25.8":  "LICENSE_EXPIRED",
+	"25.10": "",
+	"26.2":  "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN",
+	"26.3":  "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN",
+	"26.4":  "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN",
+	"26.5":  "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN",
+	"26.6":  "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN",
+	"26.7":  "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN",
+	"26.8":  "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN",
+	"26.9":  "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN",
+}
+
+// 903 checked per line, for whichever of the documented lines the registry
+// holds — including 25.10, where it must be ABSENT, not synthesized.
 func TestErrorCode903DiffersAcrossLines(t *testing.T) {
 	libs := rev6Libraries(t)
-	want := map[string]string{
-		"25.3": "LICENSE_EXPIRED",
-		"25.8": "LICENSE_EXPIRED",
-	}
 	checked := 0
 	for _, lib := range libs {
-		expected, known := want[lib.Minor]
-		if !known {
-			if minorSortKey("26.2").before(minorSortKey(lib.Minor)) || lib.Minor == "26.2" {
-				expected, known = "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN", true
-			}
-		}
+		expected, known := errorCode903[lib.Minor]
 		if !known {
 			t.Logf("%s: no documented expectation for code 903; not checked", lib.Minor)
 			continue
@@ -325,12 +335,17 @@ func TestErrorCode903DiffersAcrossLines(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: ErrorCodes: %v", lib.Minor, err)
 		}
-		if got, ok := tbl.Name(903); !ok || got != expected {
+		got, ok := tbl.Name(903)
+		if expected == "" {
+			if ok {
+				t.Errorf("%s: Name(903) = %q; the header documents 903 as absent on this line", lib.Minor, got)
+			}
+		} else if !ok || got != expected {
 			t.Errorf("%s: Name(903) = %q, %v; the header documents %q for this line", lib.Minor, got, ok, expected)
 		}
 		checked++
 	}
 	if checked == 0 {
-		t.Skip("no loaded revision-6 line has a documented expectation for code 903 (25.3, 25.8, or 26.2 on)")
+		t.Skip("no loaded revision-6 line has a documented expectation for code 903 (25.3, 25.8, 25.10, 26.2 through 26.9)")
 	}
 }

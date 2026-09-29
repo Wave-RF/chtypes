@@ -834,9 +834,10 @@ export class NativeLibrary {
    * `chs_schema_partition_by` (revision 6): declare the table's partition key;
    * `""` removes it. The return follows `schemaEngine`'s SIGN rule, NOT
    * `schemaTtl`'s: a positive rc is the server's own CREATE-path refusal
-   * (e.g. 549), a `SchemaError` with its code and message; a negative rc is
-   * this library declining, an `UnsupportedError`; a missing symbol degrades
-   * to `UnsupportedError`, never a crash.
+   * (e.g. 36 for a non-deterministic key, 549), a `SchemaError` with its code
+   * and message; a negative rc is this library declining (-2, a key the
+   * server accepts but this build will not evaluate), an `UnsupportedError`;
+   * a missing symbol degrades to `UnsupportedError`, never a crash.
    */
   schemaPartitionBy(handle: SchemaHandle, partitionBy: string): void {
     const errSlot = ptrSlot();

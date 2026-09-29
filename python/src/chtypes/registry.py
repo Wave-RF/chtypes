@@ -369,9 +369,12 @@ class Schema:
 
         The return follows `set_engine`'s SIGN rule, not `set_ttl`'s: raises
         `SchemaError` when the server's own CREATE path refuses the key (e.g.
-        549 DATA_TYPE_CANNOT_BE_USED_IN_KEY, with the server's message), and
-        `UnsupportedError` when this build declines (-2, a non-deterministic
-        key; -1, a guarded exception) or the artifact predates the symbol.
+        36 BAD_ARGUMENTS for a non-deterministic key, 549
+        DATA_TYPE_CANNOT_BE_USED_IN_KEY, with the server's message), and
+        `UnsupportedError` when this build declines (-1, a guarded exception)
+        or the artifact predates the symbol. -2 is a key the server accepts but
+        this build will not evaluate; a non-deterministic key is the server's
+        own rejection, 36 BAD_ARGUMENTS.
         """
         with self._mu:
             rc, err = self._library._native.schema_partition_by(self._live(), expr)

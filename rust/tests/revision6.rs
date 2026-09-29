@@ -160,6 +160,21 @@ fn error_codes_from_the_loaded_library() {
     }
 }
 
+/// The header's own example of one number naming different errors on
+/// different lines, per the producer's measurement of every served line.
+/// `None` is ABSENT (on 25.10), never a synthesized name. A line not named here
+/// (26.10 and later) has no expectation and is not checked.
+fn error_code_903(line: &str) -> Option<Option<&'static str>> {
+    match line {
+        "25.3" | "25.8" => Some(Some("LICENSE_EXPIRED")),
+        "25.10" => Some(None),
+        "26.2" | "26.3" | "26.4" | "26.5" | "26.6" | "26.7" | "26.8" | "26.9" => {
+            Some(Some("DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN"))
+        }
+        _ => None,
+    }
+}
+
 #[test]
 fn code_903_differs_across_lines() {
     let libs = rev6();
@@ -168,20 +183,12 @@ fn code_903_differs_across_lines() {
     }
     let mut checked = 0;
     for (line, lib) in libs {
-        let (major, minor) = line
-            .split_once('.')
-            .map(|(a, b)| (a.parse::<u32>().unwrap_or(0), b.parse::<u32>().unwrap_or(0)))
-            .unwrap_or((0, 0));
-        let want = if line == "25.3" || line == "25.8" {
-            "LICENSE_EXPIRED"
-        } else if (major, minor) >= (26, 2) {
-            "DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN"
-        } else {
+        let Some(want) = error_code_903(line) else {
             continue;
         };
         assert_eq!(
             lib.error_codes().expect("error_codes").name(903),
-            Some(want),
+            want,
             "{line}"
         );
         checked += 1;
@@ -251,9 +258,11 @@ fn partition_key_end_to_end() {
         assert_eq!(cleared.partition_count, None, "{line}");
         assert_eq!(cleared.rows[0].partition_id, None, "{line}");
 
+        // A non-deterministic key is the server's own rejection — 36
+        // BAD_ARGUMENTS on every served line — not a decline.
         match schema.set_partition_by("rand()") {
-            Err(e @ Error::Unsupported { .. }) => assert!(e.is_unsupported()),
-            other => panic!("{line}: set_partition_by(rand()) = {other:?}"),
+            Err(Error::Schema { code: 36, .. }) => {}
+            other => panic!("{line}: set_partition_by(rand()) = {other:?}, want Error::Schema 36"),
         }
     }
 }

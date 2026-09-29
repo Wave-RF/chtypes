@@ -292,11 +292,13 @@ export class Schema {
    *
    * @param expr - the partition key expression, or `""` to remove it.
    * @throws {SchemaError} when the server's own CREATE path refuses the key
-   *   (e.g. 549 DATA_TYPE_CANNOT_BE_USED_IN_KEY) — `setEngine`'s SIGN rule,
-   *   not `setTtl`'s.
-   * @throws {UnsupportedError} when this build declines (-2, a
-   *   non-deterministic key; -1, a guarded exception), or the artifact
-   *   predates `chs_schema_partition_by`.
+   *   (e.g. 36 BAD_ARGUMENTS for a non-deterministic key, 549
+   *   DATA_TYPE_CANNOT_BE_USED_IN_KEY) — `setEngine`'s SIGN rule, not
+   *   `setTtl`'s.
+   * @throws {UnsupportedError} when this build declines (-1, a guarded
+   *   exception), or the artifact predates `chs_schema_partition_by`. -2 is a
+   *   key the server accepts but this build will not evaluate; a
+   *   non-deterministic key is the server's own rejection, 36 BAD_ARGUMENTS.
    */
   setPartitionBy(expr: string): void {
     this.native.schemaPartitionBy(this.live(), expr);
