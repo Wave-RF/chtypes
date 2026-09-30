@@ -133,7 +133,7 @@ Two environment variables move the trust boundary, and both are deliberate:
 
 ## Pinning, for CI and production
 
-`fetch --lock chtypes.lock` records, per `<os>-<arch>/<minor>`, the asset file and sha256 that were installed. `fetch --frozen` then refuses anything else with `CHTYPES_ARTIFACT_PINNED`. It is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, CI fails on drift.
+`fetch --lock chtypes.lock` records, per `<os>-<arch>/<minor>`, the asset file and sha256 that were installed, and the ABI revision the row carried. `fetch --frozen` then refuses anything else with `CHTYPES_ARTIFACT_PINNED` — checking the revision first, so a lock made for an ABI revision your SDK no longer speaks is named as that ([`fetch.md`](fetch.md) §5). It is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, CI fails on drift.
 
 ```sh
 npx @wavehouse/chtypes fetch 25.8 --lock chtypes.lock   # record
