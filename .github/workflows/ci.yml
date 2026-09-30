@@ -218,6 +218,8 @@ jobs:
         run: scripts/policy-merge-check.py --selftest
       - name: the policy merge's pinned required checks are exactly this file's blocking jobs
         run: scripts/policy-merge-check.py --check-ci-names
+      - name: the merge-bot token mint asks for exactly contents and pull-requests write, inside the merge-bot job
+        run: scripts/policy-merge-check.py --check-mint-scope
       - name: CONTRIBUTING.md's protected-glob block matches PROTECTED_GLOBS exactly
         run: scripts/policy-merge-check.py --check-guide
       # scripts/check-suite.sh, scripts/lib/provenance.py (called from inside

@@ -83,10 +83,9 @@
 # scripts/policy-merge-check.py's module docstring for that call.
 #
 # ⚠️ THE PWN-REQUEST RULE — THE ONE THING THIS FILE MUST NEVER BREAK.
-# `workflow_run` runs this file from the DEFAULT BRANCH with a token that can
-# write to this repository (the job grants contents: write and
-# pull-requests: write), after a `ci` run that anyone can start by opening a
-# pull request from a fork. So nothing from a pull request's head may run
+# `workflow_run` runs this file from the DEFAULT BRANCH after a `ci` run that
+# anyone can start by opening a pull request from a fork, and its `enqueue`
+# job holds an App installation token that can write to this repository. So nothing from a pull request's head may run
 # here. Do not point the checkout at the head SHA or the head branch; do not
 # check out, build, install, source or execute any file of the head; and pass
 # every head-controlled string (a SHA, a repository name, a node id) into a
@@ -95,28 +94,27 @@
 # only code that runs. The head's docs/support.md — read only when it is part
 # of the diff — is read as DATA, through the contents API at the head SHA,
 # and only compared byte for byte with main's regeneration.
-# One step that executed head code here would hand every fork a write token
-# to this repository.
+# The `enqueue` job checks out one file of main and reads nothing of the head
+# at all. One step that executed head code here would hand every fork a write
+# token to this repository.
 #
-# WHAT IT RESPECTS, AND WHY IT NEEDS NO NEW GRANT.
+# WHAT IT RESPECTS, AND THE ONE CREDENTIAL IT HOLDS.
 #   - "Allow GitHub Actions to create and approve pull requests" stays OFF;
-#     support-matrix-refresh.yml's header explains why at length. That
-#     toggle governs creating and approving pull requests. Enqueueing one
-#     with the built-in token is governed by the job's `permissions:` alone,
-#     so this needs no change to the toggle, no secret and no personal token.
+#     support-matrix-refresh.yml's header explains why at length.
 #   - Repository auto-merge (the per-pull-request toggle) stays off; it is a
-#     different mechanism from the merge queue this enqueues into and is
-#     irrelevant to it either way.
+#     different mechanism from the merge queue this enqueues into.
 #   - Branch protection still decides, exactly as for a human (enforce_admins
-#     is on): this job can enqueue only what anyone with write access could,
-#     and the queue merges only what its own required checks pass.
-#   - `contents: write` is kept from the old direct-merge permission set even
-#     though `enqueuePullRequest` does not itself create a commit (the queue
-#     does, later, asynchronously) — UNVERIFIED whether the mutation needs
-#     it, because there is no merge queue on this repository yet to test
-#     against; kept rather than guessed away, since narrowing it wrongly
-#     would only be discovered when an enqueue silently failed. Revisit once
-#     the queue is live and this has actually been exercised.
+#     is on): this can enqueue only what anyone with write access could, and
+#     the queue merges only what its own required checks pass.
+#   - The `automerge` job only reads (contents, pull-requests and checks:
+#     read). The enqueue is made by the merge-bot GitHub App from the
+#     `enqueue` job, because an entry the built-in token enqueues gets no
+#     merge_group run of `ci` and stalls (measured on #289, chtypes#291). The
+#     App's id and key live in the `merge-bot` environment, which deploys
+#     from main only, and nothing but that job reads them. The minted token
+#     is limited to this repository with contents: write and pull-requests:
+#     write, the two permissions the mutation was measured with; whether it
+#     needs contents: write is unverified.
 #
 # TRIGGER. `workflow_run` on `ci` completing, for PULL_REQUEST runs of `ci`
 # only (see THIS WORKFLOW IGNORES `merge_group` RUNS OF `ci`, above): a run
@@ -174,13 +172,17 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # contents: write and pull-requests: write are what the enqueue call
-    # needs (contents: write kept conservatively; see its own note above);
-    # checks: read is the head's check runs. Nothing else is granted.
+    # This job only READS: it judges, and hands the judged head to the
+    # `enqueue` job below. It holds no write permission and no App token.
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+      pull-requests: read
       checks: read
+    outputs:
+      enqueue: ${{ steps.judge.outputs.enqueue }}
+      pr: ${{ steps.judge.outputs.pr }}
+      node_id: ${{ steps.judge.outputs.node_id }}
+      head_sha: ${{ steps.judge.outputs.head_sha }}
     steps:
       # MAIN, never the head: see the pwn-request rule above. fetch-depth: 0
       # for the reason support-matrix-refresh.yml gives: support-matrix.sh
@@ -202,6 +204,7 @@ jobs:
           set -euo pipefail
           scripts/policy-merge-check.py --selftest
           scripts/policy-merge-check.py --check-ci-names
+          scripts/policy-merge-check.py --check-mint-scope
           scripts/policy-merge-check.py --check-guide
       - name: gate — every condition except the docs/support.md byte comparison, from API reads alone
         id: gate
@@ -233,7 +236,8 @@ jobs:
           set -euo pipefail
           cp docs/support.md "$RUNNER_TEMP/support.md"
           scripts/support-matrix.sh --out "$RUNNER_TEMP/support.md"
-      - name: the docs/support.md byte comparison and every other condition again, then the enqueue
+      - name: the docs/support.md byte comparison and every other condition again, then the hand-off
+        id: judge
         if: steps.gate.outputs.candidate == '1'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -253,3 +257,50 @@ jobs:
             args+=(--dry-run)
           fi
           scripts/policy-merge-check.py "${args[@]}"
+
+  # BUILT-IN TOKEN EVENTS START NO WORKFLOW. An entry the built-in token
+  # enqueues gets no merge_group run of `ci` and stalls in the queue (measured
+  # on #289, chtypes#291). So the enqueue is made by the merge-bot GitHub App,
+  # whose events do start workflows. Its id and private key live only in the
+  # `merge-bot` environment, which deploys from main alone. This job is the
+  # only place they are read. It judges nothing: it checks out one file of
+  # MAIN (never the head), mints an installation token scoped to this
+  # repository, and makes the one enqueuePullRequest call, pinned to the head
+  # the `automerge` job judged. A dry run hands nothing on, so this job skips.
+  enqueue:
+    name: "enqueue — the merge-bot App adds the judged pull request to the merge queue"
+    needs: automerge
+    if: needs.automerge.outputs.enqueue == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: merge-bot
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: scripts/policy-merge-check.py
+          sparse-checkout-cone-mode: false
+      # Both values are secrets of the merge-bot environment. The token is
+      # limited to this repository and to exactly the two permissions the
+      # mutation was measured with; the App carries more (Workflows, for the
+      # artifact producer), and `--check-mint-scope` fails if this step ever
+      # asks for anything beyond MINT_PERMISSIONS.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          app-id: ${{ secrets.CHTYPES_BOT_APP_ID }}
+          private-key: ${{ secrets.CHTYPES_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: enqueuePullRequest as the merge-bot App, pinned to the judged head
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR: ${{ needs.automerge.outputs.pr }}
+          NODE_ID: ${{ needs.automerge.outputs.node_id }}
+          HEAD_SHA: ${{ needs.automerge.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          scripts/policy-merge-check.py enqueue-as-bot --pr "$PR" --node-id "$NODE_ID" --head-sha "$HEAD_SHA"
