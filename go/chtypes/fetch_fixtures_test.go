@@ -314,9 +314,13 @@ func TestFetchFixturesLockRecordsAndFrozenRefusesDrift(t *testing.T) {
 		}
 	}
 	// --frozen with the shared lock installs every pinned row of signed/.
+	// The committed lock is schema 1 (platform/LINE); ReadLockFile converts
+	// it to schema 2 (platform/EXACT PATCH) on the way in (docs/guides/fetch.md
+	// §6, #284), so every key below is the patch exp.Lines names, not the
+	// line itself.
 	for _, platform := range exp.Platforms {
-		for line := range exp.Lines {
-			key := LockKey(platform, line)
+		for line, patch := range exp.Lines {
+			key := LockKey(platform, patch)
 			if _, ok := l.Artifacts[key]; !ok {
 				t.Fatalf("lock does not pin %s", key)
 			}
@@ -335,7 +339,7 @@ func TestFetchFixturesLockRecordsAndFrozenRefusesDrift(t *testing.T) {
 	// revision — the one new thing a fresh fetch records (docs/guides/fetch.md §5).
 	mine := filepath.Join(t.TempDir(), "chtypes.lock")
 	for _, platform := range exp.Platforms {
-		for line := range exp.Lines {
+		for line := range exp.Lines { // spelling used to fetch; the map's keys are the lines
 			if _, err := Ensure(context.Background(), line, FetchOptions{URL: src, Dest: filepath.Join(t.TempDir(), platform), Platform: platform, LockFile: mine}); err != nil {
 				t.Fatal(err)
 			}
@@ -359,7 +363,7 @@ func TestFetchFixturesLockRecordsAndFrozenRefusesDrift(t *testing.T) {
 	}
 	// A copy whose sha256 was changed is refused with CHTYPES_ARTIFACT_PINNED.
 	platform, line := exp.Platforms[0], "25.8"
-	key := LockKey(platform, line)
+	key := LockKey(platform, exp.Lines[line])
 	drifted := NewLockFile()
 	for k, e := range l.Artifacts {
 		drifted.Artifacts[k] = e

@@ -260,9 +260,7 @@ func Ensure(ctx context.Context, spelling string, opts FetchOptions) (*Installed
 		return f.ensureOffline(spelling, line, exact)
 	}
 	if f.opts.Frozen {
-		if err := f.checkLockRevisionEarly(spelling, line); err != nil {
-			return nil, err
-		}
+		return f.ensureFrozen(ctx, spelling, line, exact)
 	}
 	if err := f.loadRelease(ctx, spelling); err != nil {
 		return nil, err
@@ -271,7 +269,7 @@ func Ensure(ctx context.Context, spelling string, opts FetchOptions) (*Installed
 	if err != nil {
 		return nil, err
 	}
-	inst, err := f.installOne(ctx, spelling, a)
+	inst, err := f.installOne(ctx, spelling, exact, a)
 	if err != nil {
 		return nil, err
 	}
@@ -403,6 +401,9 @@ func FetchAll(ctx context.Context, opts FetchOptions) ([]*Installed, error) {
 		return nil, artifactErrorf(CodeSourceUnreachable, "--all", f.platform, f.src.String(), nil,
 			"offline: --all needs the release's index.json, and --offline forbids reading %s", f.src)
 	}
+	if f.opts.Frozen {
+		return f.fetchAllFrozen(ctx)
+	}
 	if err := f.loadRelease(ctx, "--all"); err != nil {
 		return nil, err
 	}
@@ -417,7 +418,7 @@ func FetchAll(ctx context.Context, opts FetchOptions) ([]*Installed, error) {
 	}
 	var out []*Installed
 	for i := range rows {
-		inst, err := f.installOne(ctx, rows[i].ClickHouseMinor, &rows[i])
+		inst, err := f.installOne(ctx, rows[i].ClickHouseMinor, "", &rows[i])
 		if err != nil {
 			return out, err
 		}
@@ -451,10 +452,11 @@ func ListRelease(ctx context.Context, opts FetchOptions) (*ReleaseIndex, error) 
 	return f.index, nil
 }
 
-// ListInstalled enumerates the artifact directories under one registry —
-// every <minor>/manifest.json — in numeric line order, without hashing
-// anything (VerifyInstalled does that). A registry that does not exist is
-// simply empty.
+// ListInstalled enumerates every installed PATCH under one registry — the
+// flat line slot (<minor>/manifest.json) and every other patch
+// (patches/<minor>/<exact>/manifest.json, docs/guides/fetch.md §4) — in
+// numeric line, then patch, order, without hashing anything (VerifyInstalled
+// does that). A registry that does not exist is simply empty.
 func ListInstalled(dir string) ([]Installed, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -466,6 +468,14 @@ func ListInstalled(dir string) ([]Installed, error) {
 	var out []Installed
 	for _, e := range entries {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if e.Name() == patchesDirName {
+			patched, err := listInstalledPatches(filepath.Join(dir, e.Name()))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, patched...)
 			continue
 		}
 		sub := filepath.Join(dir, e.Name())
@@ -482,7 +492,54 @@ func ListInstalled(dir string) ([]Installed, error) {
 			LibrarySHA256: m.LibrarySHA256,
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return lessMinor(out[i].Line, out[j].Line) })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Line != out[j].Line {
+			return lessMinor(out[i].Line, out[j].Line)
+		}
+		return lessVersionKey(versionKey(out[i].Version), versionKey(out[j].Version))
+	})
+	return out, nil
+}
+
+// listInstalledPatches reads every patches/<minor>/<exact>/manifest.json
+// under patchesRoot.
+func listInstalledPatches(patchesRoot string) ([]Installed, error) {
+	lineEntries, err := os.ReadDir(patchesRoot)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []Installed
+	for _, le := range lineEntries {
+		if !le.IsDir() || strings.HasPrefix(le.Name(), ".") {
+			continue
+		}
+		lineDir := filepath.Join(patchesRoot, le.Name())
+		exactEntries, err := os.ReadDir(lineDir)
+		if err != nil {
+			continue
+		}
+		for _, ee := range exactEntries {
+			if !ee.IsDir() || strings.HasPrefix(ee.Name(), ".") {
+				continue
+			}
+			sub := filepath.Join(lineDir, ee.Name())
+			m, err := readManifest(filepath.Join(sub, "manifest.json"))
+			if err != nil {
+				continue
+			}
+			out = append(out, Installed{
+				Line:          le.Name(),
+				Version:       m.ClickHouseVersion,
+				Platform:      m.platform(),
+				Dir:           sub,
+				Library:       m.Library,
+				LibrarySHA256: m.LibrarySHA256,
+			})
+		}
+	}
 	return out, nil
 }
 
@@ -726,18 +783,28 @@ func (f *fetcher) fail(code ErrorCode, line string, cause error, format string, 
 	return artifactErrorf(code, line, f.platform, f.src.String(), cause, format, args...)
 }
 
-// ensureOffline is the no-network path: installed and hashing what its
-// own manifest says is an answer; anything else is unreachable.
+// ensureOffline is the no-network path: installed and hashing what its own
+// manifest says is an answer; anything else is unreachable. It never reads
+// the lock, under --frozen or not (docs/guides/fetch.md §6): offline's
+// verdict depends only on what is on disk.
 func (f *fetcher) ensureOffline(spelling, line, exact string) (*Installed, error) {
 	if f.opts.Force {
 		return nil, f.fail(CodeSourceUnreachable, spelling, nil,
 			"offline: --force needs a download, and --offline forbids reading %s", f.src)
 	}
-	dir := filepath.Join(f.dest, line)
-	m, err := readManifest(filepath.Join(dir, "manifest.json"))
-	if err == nil && (exact == "" || exactMatches(m.ClickHouseVersion, exact)) {
+	for _, dir := range f.offlineCandidates(line, exact) {
+		m, err := readManifest(filepath.Join(dir, "manifest.json"))
+		if err != nil {
+			continue
+		}
+		if exact != "" && !exactMatches(m.ClickHouseVersion, exact) {
+			continue
+		}
 		got, herr := fileSHA256(filepath.Join(dir, m.Library))
-		if herr == nil && got == strings.ToLower(m.LibrarySHA256) {
+		if herr != nil {
+			continue
+		}
+		if got == strings.ToLower(m.LibrarySHA256) {
 			f.say("already installed and verified against its manifest (offline): %s", filepath.Join(dir, m.Library))
 			if f.opts.Frozen {
 				f.note("offline: the lock file was not re-checked against a release; the installed manifest verified")
@@ -747,14 +814,41 @@ func (f *fetcher) ensureOffline(spelling, line, exact string) (*Installed, error
 				Library: m.Library, LibrarySHA256: got, AlreadyInstalled: true,
 			}, nil
 		}
-		if herr == nil {
-			return nil, f.fail(CodeArtifactCorrupt, spelling, nil,
-				"offline: installed %s hashes %s, its manifest says %s, and --offline forbids re-fetching it",
-				filepath.Join(dir, m.Library), got, m.LibrarySHA256)
-		}
+		return nil, f.fail(CodeArtifactCorrupt, spelling, nil,
+			"offline: installed %s hashes %s, its manifest says %s, and --offline forbids re-fetching it",
+			filepath.Join(dir, m.Library), got, m.LibrarySHA256)
 	}
 	return nil, f.fail(CodeSourceUnreachable, spelling, nil,
 		"offline: ClickHouse %s is not installed in %s, and --offline forbids reading %s", spelling, f.dest, f.src)
+}
+
+// offlineCandidates is where an offline Ensure looks, in order. Ensure is a
+// hard requirement (R5): a patch spelling is satisfied only by that exact
+// patch (R2) — the flat slot when it happens to hold it, else its own
+// patches/ slot — never by a same-line fallback, which only the Registry's
+// resolution takes. A line spelling is satisfied by the newest patch
+// installed anywhere in f.dest (flat or patches/), since a line request has
+// no "exact" to miss.
+func (f *fetcher) offlineCandidates(line, exact string) []string {
+	all := patchesInDir(f.dest, line)
+	if exact != "" {
+		var dirs []string
+		for _, p := range all {
+			if exactMatches(p.version, exact) {
+				dirs = append(dirs, p.dir)
+			}
+		}
+		return dirs
+	}
+	if len(all) == 0 {
+		return []string{filepath.Join(f.dest, line)}
+	}
+	sort.Slice(all, func(i, j int) bool { return lessVersionKey(versionKey(all[i].version), versionKey(all[j].version)) })
+	dirs := make([]string, len(all))
+	for i, p := range all {
+		dirs[len(all)-1-i] = p.dir
+	}
+	return dirs
 }
 
 // loadReleaseOnce reads the release's three small files once and runs steps 0
@@ -1100,9 +1194,9 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"you asked for exactly ClickHouse %s on %s at ABI revision %d (this SDK's) and the release at %s does not publish it at that revision: %s; at ABI revision %d the release has: %s. Ask for the line (%s) to take what was published.%s",
+				"you asked for exactly ClickHouse %s on %s at ABI revision %d (this SDK's) and the release at %s does not publish it at that revision: %s; at ABI revision %d the release has: %s. Ask for the line (%s) to take what was published.",
 				exact, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that patch for "+f.platform),
-				f.abiRevision, versionsOf(rows), line, f.revisionNote(line))
+				f.abiRevision, versionsOf(rows), line)
 		}
 	} else {
 		for _, a := range all {
@@ -1115,9 +1209,9 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"no artifact for ClickHouse line %s on %s at ABI revision %d (this SDK's) at %s: %s; at ABI revision %d the release has: %s.%s",
+				"no artifact for ClickHouse line %s on %s at ABI revision %d (this SDK's) at %s: %s; at ABI revision %d the release has: %s.",
 				line, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that line for "+f.platform),
-				f.abiRevision, versionsOf(rows), f.revisionNote(line))
+				f.abiRevision, versionsOf(rows))
 		}
 	}
 	// A line can carry more than one row: two patches, or the same patch built
@@ -1175,98 +1269,12 @@ func (f *fetcher) lockPath() string {
 	return DefaultLockFile
 }
 
-// peekLockEntry reads the lock file for one key, without requiring a
-// release to have been loaded. A missing or unparsable file reads as "no
-// entry" here: the authoritative read (and its own error) still happens in
-// checkPin, this is only ever used to decide whether to say more.
-func (f *fetcher) peekLockEntry(line string) (LockEntry, bool) {
-	l, err := ReadLockFile(f.lockPath())
-	if err != nil {
-		return LockEntry{}, false
-	}
-	entry, ok := l.Artifacts[LockKey(f.platform, line)]
-	return entry, ok
-}
-
-// checkLockRevisionEarly fails fast, before any network access, when
-// --frozen's lock already names an ABI revision for this key that is not
-// this binding's own (docs/guides/fetch.md §5). A lock made for one ABI
-// revision does not get a second chance disguised as a drifted pin or an
-// unpublished line once the SDK moves to another: the fix is always the
-// same re-lock, so the message says that directly instead of waiting to
-// see which of the two symptoms selection would have produced.
-func (f *fetcher) checkLockRevisionEarly(spelling, line string) error {
-	entry, ok := f.peekLockEntry(line)
-	if !ok || entry.ABIRevision == nil || *entry.ABIRevision == f.abiRevision {
-		return nil
-	}
-	path := f.lockPath()
-	key := LockKey(f.platform, line)
-	return f.fail(CodeArtifactPinned, spelling, nil,
-		"%s pins %s at ABI revision %d; this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
-		path, key, *entry.ABIRevision, f.abiRevision, GoFetchCommand, spelling, path)
-}
-
-// revisionNote is the one sentence appended to a PINNED or UNPUBLISHED
-// message when, under --frozen, the lock's own entry for this key exists
-// but names no ABI revision at all — written by an SDK before this field
-// existed. Never silently accept that as a pass: it is either a real drift
-// or a stale revision wearing an older lock's shape, and re-locking is the
-// remedy either way. "" when there is nothing to add.
-func (f *fetcher) revisionNote(line string) string {
-	if !f.opts.Frozen {
-		return ""
-	}
-	entry, ok := f.peekLockEntry(line)
-	if !ok || entry.ABIRevision != nil {
-		return ""
-	}
-	path := f.lockPath()
-	return fmt.Sprintf(" %s records no ABI revision (written by an older SDK); this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
-		path, f.abiRevision, GoFetchCommand, line, path)
-}
-
-// checkPin enforces the §5 lock under --frozen. The revision is checked
-// FIRST, before the file/sha256 comparison below it: a lock that names a
-// revision is refused the moment that revision is not this binding's own,
-// never compared byte-for-byte against an artifact it could never have
-// pinned.
-func (f *fetcher) checkPin(spelling string, a *ReleaseArtifact) error {
-	path := f.lockPath()
-	l, err := ReadLockFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return f.fail(CodeArtifactPinned, spelling, err, "--frozen, but there is no lock file at %s", path)
-		}
-		return f.fail(CodeArtifactPinned, spelling, err, "--frozen: %v", err)
-	}
-	key := LockKey(f.platform, a.ClickHouseMinor)
-	entry, ok := l.Artifacts[key]
-	if !ok {
-		return f.fail(CodeArtifactPinned, spelling, nil,
-			"%s does not pin %s; the release offers %s (%s). Refusing an unpinned artifact under --frozen", path, key, a.File, a.SHA256)
-	}
-	if entry.ABIRevision != nil && *entry.ABIRevision != f.abiRevision {
-		return f.fail(CodeArtifactPinned, spelling, nil,
-			"%s pins %s at ABI revision %d; this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
-			path, key, *entry.ABIRevision, f.abiRevision, GoFetchCommand, spelling, path)
-	}
-	if entry.File != a.File || !strings.EqualFold(entry.SHA256, a.SHA256) {
-		msg := fmt.Sprintf("%s pins %s to %s (%s) but the release offers %s (%s). Refusing it under --frozen.", path, key, entry.File, entry.SHA256, a.File, a.SHA256)
-		if entry.ABIRevision == nil {
-			msg += fmt.Sprintf(" %s records no ABI revision (written by an older SDK); this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
-				path, f.abiRevision, GoFetchCommand, spelling, path)
-		}
-		return f.fail(CodeArtifactPinned, spelling, nil, "%s", msg)
-	}
-	f.say("pinned: %s matches %s", key, path)
-	return nil
-}
-
 // recordLock writes the §5 entry when a lock file was asked for (never
-// under --frozen, which is read-only), including the ABI revision the
-// selected row carries — this binding's own, since selection never picks
-// any other (docs/guides/fetch.md §2).
+// under --frozen, which is read-only), keyed by the EXACT patch that
+// installed (schema 2, #284), including the ABI revision the selected row
+// carries — this binding's own, since selection never picks any other
+// (docs/guides/fetch.md §2). It adds or replaces one entry and removes
+// nothing else already in the file.
 func (f *fetcher) recordLock(a *ReleaseArtifact) error {
 	if f.opts.LockFile == "" || f.opts.Frozen {
 		return nil
@@ -1275,7 +1283,7 @@ func (f *fetcher) recordLock(a *ReleaseArtifact) error {
 	if err != nil {
 		return err
 	}
-	key := LockKey(f.platform, a.ClickHouseMinor)
+	key := LockKey(f.platform, a.ClickHouseVersion)
 	rev := f.abiRevision
 	l.Artifacts[key] = LockEntry{File: a.File, SHA256: strings.ToLower(a.SHA256), ABIRevision: &rev}
 	if err := l.Write(f.opts.LockFile); err != nil {
@@ -1285,8 +1293,258 @@ func (f *fetcher) recordLock(a *ReleaseArtifact) error {
 	return nil
 }
 
-// installOne walks steps 2–4 for one selected row.
-func (f *fetcher) installOne(ctx context.Context, spelling string, a *ReleaseArtifact) (*Installed, error) {
+// ------------------------------------------------------------- §6 F1–F7:
+// --frozen selects from the LOCK, never from the release's unpinned rows.
+
+// frozenCandidate is one lock entry that could satisfy a frozen request:
+// its full key, the exact patch it pins, and the pin itself.
+type frozenCandidate struct {
+	key     string
+	version string
+	entry   LockEntry
+}
+
+// revisionNote282 is the one sentence appended to a PINNED or UNPUBLISHED
+// message when the candidate's own lock entry names no ABI revision at all
+// — written by an SDK before #253. Never silently accepted as a pass: it is
+// either a real drift or a stale revision wearing an older lock's shape,
+// and re-locking is the remedy either way. "" when the entry does carry one.
+func (f *fetcher) revisionNote282(lockPath, version string, e LockEntry) string {
+	if e.ABIRevision != nil {
+		return ""
+	}
+	return fmt.Sprintf(" %s records no ABI revision (written by an older SDK); this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
+		lockPath, f.abiRevision, GoFetchCommand, version, lockPath)
+}
+
+// checkCandidateRevision is F2: every candidate's own ABI revision is
+// checked before the release is ever read, so a lock made for a revision
+// this binding no longer speaks is named as that — never as a drifted pin
+// or an unpublished patch once selection runs.
+func (f *fetcher) checkCandidateRevision(lockPath string, c frozenCandidate) error {
+	if c.entry.ABIRevision == nil || *c.entry.ABIRevision == f.abiRevision {
+		return nil
+	}
+	return f.fail(CodeArtifactPinned, c.version, nil,
+		"%s pins %s at ABI revision %d; this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
+		lockPath, c.key, *c.entry.ABIRevision, f.abiRevision, GoFetchCommand, c.version, lockPath)
+}
+
+// newestFrozenCandidate picks the highest-version entry of cands — used
+// both for a single (platform, line) group (the newest patch the lock
+// pins for that line) and, trivially, for an exact-patch match (there is
+// only ever one candidate under R2).
+func newestFrozenCandidate(cands []frozenCandidate) frozenCandidate {
+	best := cands[0]
+	for _, c := range cands[1:] {
+		if lessVersionKey(versionKey(best.version), versionKey(c.version)) {
+			best = c
+		}
+	}
+	return best
+}
+
+// frozenCandidates is F1: the lock's own entries for this platform that
+// could satisfy spelling — every entry whose key's exact patch matches
+// under R2 for a patch spelling, or whose line equals line for a line
+// spelling.
+func (f *fetcher) frozenCandidates(l *LockFile, line, exact string) []frozenCandidate {
+	prefix := f.platform + "/"
+	var out []frozenCandidate
+	for key, entry := range l.Artifacts {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		version := strings.TrimPrefix(key, prefix)
+		if exact != "" {
+			if !exactMatches(version, exact) {
+				continue
+			}
+		} else if minorOf(version) != line {
+			continue
+		}
+		out = append(out, frozenCandidate{key: key, version: version, entry: entry})
+	}
+	return out
+}
+
+// verifyFrozenCandidate is F5: the candidate's own file, looked up in BOTH
+// the platform's index.json rows and the verified SHA256SUMS. The release
+// must already have been loaded (f.loadRelease) before this runs.
+func (f *fetcher) verifyFrozenCandidate(lockPath string, c frozenCandidate) (*ReleaseArtifact, error) {
+	var row *ReleaseArtifact
+	for i := range f.index.Artifacts {
+		a := &f.index.Artifacts[i]
+		if a.Platform() == f.platform && a.File == c.entry.File {
+			row = a
+			break
+		}
+	}
+	sumsSHA, listed := f.sums[c.entry.File]
+	if row == nil || !listed {
+		return nil, f.fail(CodeArtifactUnpublished, c.version, nil,
+			"the release at %s does not list %s, which %s pins for %s.%s",
+			f.src, c.entry.File, lockPath, c.key, f.revisionNote282(lockPath, c.version, c.entry))
+	}
+	if !row.atRevision(f.abiRevision) {
+		return nil, f.fail(CodeArtifactPinned, c.version, nil,
+			"%s pins %s (%s), and the release's row for it is not at ABI revision %d (this SDK's).%s",
+			lockPath, c.key, c.entry.File, f.abiRevision, f.revisionNote282(lockPath, c.version, c.entry))
+	}
+	if sumsSHA != strings.ToLower(row.SHA256) {
+		return nil, f.fail(CodeArtifactCorrupt, c.version, nil,
+			"index.json says %s is %s but SHA256SUMS says %s — the release disagrees with itself; not installing it",
+			c.entry.File, row.SHA256, sumsSHA)
+	}
+	if !strings.EqualFold(c.entry.SHA256, row.SHA256) {
+		return nil, f.fail(CodeArtifactPinned, c.version, nil,
+			"%s pins %s to %s (%s) but the release's row for it is %s. Refusing it under --frozen.%s",
+			lockPath, c.key, c.entry.File, c.entry.SHA256, row.SHA256, f.revisionNote282(lockPath, c.version, c.entry))
+	}
+	return row, nil
+}
+
+// readFrozenLock is F3's lock-not-found half: a missing lock file is
+// CHTYPES_ARTIFACT_PINNED, before the release is ever read.
+func (f *fetcher) readFrozenLock(spelling string) (*LockFile, error) {
+	path := f.lockPath()
+	l, err := ReadLockFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, f.fail(CodeArtifactPinned, spelling, err, "--frozen, but there is no lock file at %s", path)
+		}
+		return nil, f.fail(CodeArtifactPinned, spelling, err, "--frozen: %v", err)
+	}
+	return l, nil
+}
+
+// ensureFrozen is Ensure's --frozen path (F1–F5, F7): the lock is the
+// candidate set in place of the release's rows, its revision is checked
+// before the release is read, and the chosen row installs exactly as
+// pinned — never refused merely because the release now offers something
+// newer.
+func (f *fetcher) ensureFrozen(ctx context.Context, spelling, line, exact string) (*Installed, error) {
+	lockPath := f.lockPath()
+	l, err := f.readFrozenLock(spelling)
+	if err != nil {
+		return nil, err
+	}
+	candidates := f.frozenCandidates(l, line, exact)
+	if len(candidates) == 0 {
+		return nil, f.fail(CodeArtifactPinned, spelling, nil, "%s pins nothing for %s/%s", lockPath, f.platform, spelling)
+	}
+	for _, c := range candidates {
+		if err := f.checkCandidateRevision(lockPath, c); err != nil {
+			return nil, err
+		}
+	}
+	if err := f.loadRelease(ctx, spelling); err != nil {
+		return nil, err
+	}
+	chosen := newestFrozenCandidate(candidates)
+	a, err := f.verifyFrozenCandidate(lockPath, chosen)
+	if err != nil {
+		return nil, err
+	}
+	inst, err := f.installOne(ctx, spelling, exact, a)
+	if err != nil {
+		return nil, err
+	}
+	f.installGoldens(ctx)
+	return inst, nil
+}
+
+// fetchAllFrozen is FetchAll's --frozen path (F6): the newest pinned patch
+// of every line the lock pins for the platform. A line the release has but
+// the lock does not pin is not installed, and is named in one progress
+// note — a new line is not drift in anything that was pinned.
+func (f *fetcher) fetchAllFrozen(ctx context.Context) ([]*Installed, error) {
+	lockPath := f.lockPath()
+	l, err := f.readFrozenLock("--all")
+	if err != nil {
+		return nil, err
+	}
+	prefix := f.platform + "/"
+	byLine := map[string][]frozenCandidate{}
+	for key, entry := range l.Artifacts {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		version := strings.TrimPrefix(key, prefix)
+		line := minorOf(version)
+		byLine[line] = append(byLine[line], frozenCandidate{key: key, version: version, entry: entry})
+	}
+	if len(byLine) == 0 {
+		return nil, f.fail(CodeArtifactPinned, "--all", nil, "%s pins nothing for %s", lockPath, f.platform)
+	}
+	var lines []string
+	for line := range byLine {
+		lines = append(lines, line)
+	}
+	sort.Slice(lines, func(i, j int) bool { return lessMinor(lines[i], lines[j]) })
+	for _, line := range lines {
+		for _, c := range byLine[line] {
+			if err := f.checkCandidateRevision(lockPath, c); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := f.loadRelease(ctx, "--all"); err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, a := range f.rowsForPlatform() {
+		seen[a.ClickHouseMinor] = true
+	}
+	var notPinned []string
+	for line := range seen {
+		if _, ok := byLine[line]; !ok {
+			notPinned = append(notPinned, line)
+		}
+	}
+	sort.Slice(notPinned, func(i, j int) bool { return lessMinor(notPinned[i], notPinned[j]) })
+	for _, line := range notPinned {
+		f.say("%s: the release has it, but %s does not pin it for %s — --all --frozen does not install it", line, lockPath, f.platform)
+	}
+	var out []*Installed
+	for _, line := range lines {
+		chosen := newestFrozenCandidate(byLine[line])
+		a, err := f.verifyFrozenCandidate(lockPath, chosen)
+		if err != nil {
+			return out, err
+		}
+		inst, err := f.installOne(ctx, line, "", a)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, inst)
+	}
+	f.installGoldens(ctx)
+	f.say("%d version(s) installed into %s", len(out), f.dest)
+	return out, nil
+}
+
+// alreadyInstalledAt reports whether dir already holds wantLib, verified
+// against its own manifest — the test the install path ends with, so
+// "already there" is a verified claim, not an assumption from a file name.
+func alreadyInstalledAt(dir, wantLib string) bool {
+	m, err := readManifest(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return false
+	}
+	got, err := fileSHA256(filepath.Join(dir, m.Library))
+	return err == nil && got == wantLib
+}
+
+// installOne walks steps 2–4 for one selected row, installing it at the
+// layout the lead's amendment fixes (docs/guides/fetch.md §4, superseded):
+// the patch a LINE spelling selects (exact=="") installs FLAT at
+// <dest>/<minor>/; any OTHER exact patch (exact!="") installs at
+// <dest>/patches/<minor>/<its clickhouse_version>/, and never touches the
+// flat slot. When a line fetch replaces a DIFFERENT patch that was sitting
+// in the flat slot, the outgoing install is DEMOTED — renamed into
+// patches/, never deleted — before the incoming one takes the slot.
+func (f *fetcher) installOne(ctx context.Context, spelling, exact string, a *ReleaseArtifact) (*Installed, error) {
 	f.say("%s  (%d bytes, ClickHouse %s, library %s)", a.File, a.Bytes, a.ClickHouseVersion, a.Library)
 	wantSHA := strings.ToLower(a.SHA256)
 	wantLib := strings.ToLower(a.LibrarySHA256)
@@ -1300,21 +1558,29 @@ func (f *fetcher) installOne(ctx context.Context, spelling string, a *ReleaseArt
 		return nil, f.fail(CodeArtifactCorrupt, spelling, nil,
 			"index.json says %s is %s but SHA256SUMS says %s — the release disagrees with itself; not installing it", a.File, wantSHA, sumsSHA)
 	}
-	if f.opts.Frozen {
-		if err := f.checkPin(spelling, a); err != nil {
-			return nil, err
-		}
-	}
 
-	installDir := filepath.Join(f.dest, a.ClickHouseMinor)
+	flatDir := filepath.Join(f.dest, a.ClickHouseMinor)
+	installDir := flatDir
+	if exact != "" {
+		installDir = filepath.Join(f.dest, patchesDirName, a.ClickHouseMinor, a.ClickHouseVersion)
+	}
 	result := &Installed{
 		Line: a.ClickHouseMinor, Version: a.ClickHouseVersion, Platform: f.platform, Dir: installDir,
 		Library: a.Library, LibrarySHA256: wantLib, File: a.File, SHA256: wantSHA, SignedBy: f.signedBy,
 	}
 
-	// Already installed and intact? The test is the one the install path
-	// ends with, so "already there" is a verified claim.
 	if !f.opts.Force {
+		// An exact request already sitting in the flat slot needs no
+		// separate patches/ copy — no re-fetch, no duplicated bytes.
+		if exact != "" && alreadyInstalledAt(flatDir, wantLib) {
+			result.Dir = flatDir
+			result.AlreadyInstalled = true
+			f.say("already installed and verified (in the flat line slot): %s", filepath.Join(flatDir, a.Library))
+			if err := f.recordLock(a); err != nil {
+				return nil, err
+			}
+			return result, nil
+		}
 		if _, err := os.Stat(filepath.Join(installDir, "manifest.json")); err == nil {
 			if got, err := fileSHA256(filepath.Join(installDir, a.Library)); err == nil {
 				if got == wantLib {
@@ -1330,8 +1596,21 @@ func (f *fetcher) installOne(ctx context.Context, spelling string, a *ReleaseArt
 		}
 	}
 
+	// A line install that is about to replace a DIFFERENT patch in the flat
+	// slot demotes it FIRST (before the download even starts is fine — the
+	// demotion only has to land before the incoming patch takes the slot,
+	// and computing it early keeps the rest of this function one straight
+	// line). "" when there is nothing to demote (nothing installed, or the
+	// same version already handled above).
+	var demoteOldVersion string
+	if exact == "" {
+		if m, err := readManifest(filepath.Join(flatDir, "manifest.json")); err == nil && m.ClickHouseVersion != a.ClickHouseVersion {
+			demoteOldVersion = m.ClickHouseVersion
+		}
+	}
+
 	// Step 3: the tarball, hashed before it is unpacked.
-	if err := os.MkdirAll(f.dest, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(installDir), 0o755); err != nil {
 		return nil, fmt.Errorf("chtypes: %w", err)
 	}
 	pid := strconv.Itoa(os.Getpid())
@@ -1357,7 +1636,7 @@ func (f *fetcher) installOne(ctx context.Context, spelling string, a *ReleaseArt
 
 	// Step 4: unpack into a temporary sibling, check the artifact's own
 	// claim about itself, rename into place, re-hash in place.
-	incoming, err := os.MkdirTemp(f.dest, "."+a.ClickHouseMinor+".incoming.")
+	incoming, err := os.MkdirTemp(filepath.Dir(installDir), ".incoming.")
 	if err != nil {
 		return nil, fmt.Errorf("chtypes: %w", err)
 	}
@@ -1379,7 +1658,13 @@ func (f *fetcher) installOne(ctx context.Context, spelling string, a *ReleaseArt
 	}
 	os.Remove(partial)
 
-	replaced := filepath.Join(f.dest, "."+a.ClickHouseMinor+".replaced."+pid)
+	if demoteOldVersion != "" {
+		if err := f.demoteFlatInstall(flatDir, a.ClickHouseMinor, demoteOldVersion); err != nil {
+			return nil, err
+		}
+	}
+
+	replaced := filepath.Join(filepath.Dir(installDir), ".replaced."+pid)
 	os.RemoveAll(replaced)
 	hadOld := false
 	if _, err := os.Lstat(installDir); err == nil {
@@ -1410,7 +1695,11 @@ func (f *fetcher) installOne(ctx context.Context, spelling string, a *ReleaseArt
 	f.say("installed and verified")
 	f.note("    %s/", installDir)
 	f.note("    %s sha256 %s", m.Library, final)
-	f.note("    ClickHouse %s — chtypes.NewRegistry(%q) will now serve %s", m.ClickHouseVersion, f.dest, a.ClickHouseMinor)
+	if exact == "" {
+		f.note("    ClickHouse %s — chtypes.NewRegistry(%q) will now serve %s", m.ClickHouseVersion, f.dest, a.ClickHouseMinor)
+	} else {
+		f.note("    ClickHouse %s — resolves exactly from chtypes.NewRegistry(%q)", m.ClickHouseVersion, f.dest)
+	}
 	result.Platform = m.platform()
 	if result.Platform == "" {
 		result.Platform = f.platform
@@ -1419,6 +1708,29 @@ func (f *fetcher) installOne(ctx context.Context, spelling string, a *ReleaseArt
 		return nil, err
 	}
 	return result, nil
+}
+
+// demoteFlatInstall renames the flat slot's CURRENT install — reported to
+// be oldVersion by its own manifest — into
+// patches/<minor>/<oldVersion>/, atomically and on the same filesystem,
+// before the incoming patch takes the flat slot (the lead's amendment:
+// "demote, never delete"). If that destination already holds a patch
+// (installed earlier, directly, as an exact fetch, or by a previous
+// demotion), the two are byte-identical by construction, so the now
+// redundant flat copy is simply removed instead of failing the whole
+// install over a directory that already exists.
+func (f *fetcher) demoteFlatInstall(flatDir, minor, oldVersion string) error {
+	demoteTo := filepath.Join(f.dest, patchesDirName, minor, oldVersion)
+	if _, err := os.Stat(demoteTo); err == nil {
+		return os.RemoveAll(flatDir)
+	}
+	if err := os.MkdirAll(filepath.Dir(demoteTo), 0o755); err != nil {
+		return fmt.Errorf("chtypes: %w", err)
+	}
+	if err := os.Rename(flatDir, demoteTo); err != nil {
+		return fmt.Errorf("chtypes: demoting the outgoing ClickHouse %s (%s) to %s: %w", oldVersion, flatDir, demoteTo, err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------- bytes
