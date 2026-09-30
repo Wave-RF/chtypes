@@ -295,6 +295,11 @@ from dataclasses import dataclass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CI_YML = os.path.join(ROOT, ".github", "workflows", "ci.yml")
+POLICY_YML = os.path.join(ROOT, ".github", "workflows", "policy-merge.yml")
+# The only permissions the merge-bot token may be minted with. The App itself
+# carries more (the artifact producer's branch updates need Workflows); the
+# SDK's mint must never ask for them.
+MINT_PERMISSIONS = {"permission-contents": "write", "permission-pull-requests": "write"}
 GUIDE_PATH = os.path.join(ROOT, "CONTRIBUTING.md")
 
 BASE_BRANCH = "main"
@@ -1042,6 +1047,48 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     return 0
 
 
+def mint_scope_problems(text: str) -> list[str]:
+    """Why policy-merge.yml's App-token mint is not scoped exactly as
+    MINT_PERMISSIONS says, or []. Reads the workflow's text: every
+    create-github-app-token step, its `permission-*` inputs, and that it sits
+    in a job whose environment is merge-bot."""
+    problems: list[str] = []
+    lines = text.splitlines()
+    steps = [i for i, l in enumerate(lines) if "actions/create-github-app-token@" in l]
+    if len(steps) != 1:
+        return [f"expected exactly one create-github-app-token step, found {len(steps)}"]
+    i = steps[0]
+    indent = len(lines[i]) - len(lines[i].lstrip(" -"))
+    found: dict[str, str] = {}
+    for l in lines[i + 1:]:
+        stripped = l.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if len(l) - len(l.lstrip(" ")) <= indent - 2 or stripped.startswith("- "):
+            break
+        m = re.fullmatch(r"(permission-[a-z-]+):\s*(\S+)", stripped)
+        if m:
+            found[m.group(1)] = m.group(2)
+    if found != MINT_PERMISSIONS:
+        problems.append(f"the mint asks for {found}, not exactly {MINT_PERMISSIONS}")
+    job_start = max((j for j in range(i) if re.fullmatch(r"  [a-z][a-z0-9_-]*:", lines[j])), default=None)
+    if job_start is None or not any(lines[k].strip() == "environment: merge-bot" for k in range(job_start, i)):
+        problems.append("the mint is not in a job whose environment is merge-bot")
+    return problems
+
+
+def cmd_check_mint_scope() -> int:
+    with open(POLICY_YML, encoding="utf-8") as f:
+        problems = mint_scope_problems(f.read())
+    if problems:
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
+        print("policy-merge-check: the merge-bot token mint is not scoped as MINT_PERMISSIONS says", file=sys.stderr)
+        return 1
+    print(f"policy-merge-check: ok, the merge-bot mint asks for exactly {MINT_PERMISSIONS} in the merge-bot job")
+    return 0
+
+
 def cmd_check_ci_names() -> int:
     with open(CI_YML, encoding="utf-8") as f:
         text = f.read()
@@ -1295,6 +1342,20 @@ def selftest() -> int:
         failures.append(f"handoff_outputs: did not hand on the judged node_id/head_sha: {handed!r}")
     if bot_args_problem(_good_pr()["node_id"], SHA, "7") is not None:
         failures.append("bot_args_problem: refused a well-formed node id, head sha and number")
+    good_yml = ("jobs:\n  enqueue:\n    environment: merge-bot\n    steps:\n"
+                "      - uses: actions/create-github-app-token@abc # v3\n        id: app\n        with:\n"
+                "          app-id: x\n          permission-contents: write\n          permission-pull-requests: write\n"
+                "      - name: next\n        run: true\n")
+    if mint_scope_problems(good_yml):
+        failures.append(f"mint_scope_problems: refused the exact scope: {mint_scope_problems(good_yml)}")
+    wider = good_yml.replace("          permission-pull-requests: write\n",
+                             "          permission-pull-requests: write\n          permission-workflows: write\n")
+    if not mint_scope_problems(wider):
+        failures.append("mint_scope_problems: accepted a mint that also asks for permission-workflows")
+    if not mint_scope_problems(good_yml.replace("          permission-contents: write\n", "")):
+        failures.append("mint_scope_problems: accepted a mint with no permission list (the App's full set)")
+    if not mint_scope_problems(good_yml.replace("    environment: merge-bot\n", "")):
+        failures.append("mint_scope_problems: accepted a mint outside the merge-bot environment")
     for bad in ((_good_pr()["node_id"], "abc", "7"), (_good_pr()["node_id"], SHA.upper(), "7"),
                 ("", SHA, "7"), ("PR_x y", SHA, "7"), (_good_pr()["node_id"], SHA, "7; rm")):
         if bot_args_problem(*bad) is None:
@@ -1518,7 +1579,8 @@ def selftest() -> int:
           "non-modification, a missing, failing or pending required check, a fork, a stale head, a draft, a "
           "conflict and a review each refuse; an all-good input passes; build_enqueue_plan carries the judged "
           "head sha and node_id and never reaches the mutation on a dry run; the hand-off to the enqueue job carries "
-          "exactly that node id and head sha, and enqueue-as-bot refuses malformed ones; ci.yml's blocking jobs and the "
+          "exactly that node id and head sha, and enqueue-as-bot refuses malformed ones; the merge-bot mint must ask for "
+          "exactly contents and pull-requests write inside the merge-bot job; ci.yml's blocking jobs and the "
           "CONTRIBUTING.md guide block are both derived from their source, never hand-set")
     return 0
 
@@ -1553,6 +1615,8 @@ def main(argv: list[str]) -> int:
         return cmd_print_protected()
     if argv == ["--check-guide"]:
         return cmd_check_guide()
+    if argv == ["--check-mint-scope"]:
+        return cmd_check_mint_scope()
     parser = argparse.ArgumentParser(prog="policy-merge-check.py")
     sub = parser.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("gate", help="every condition but the byte comparison")

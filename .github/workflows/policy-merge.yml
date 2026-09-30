@@ -204,6 +204,7 @@ jobs:
           set -euo pipefail
           scripts/policy-merge-check.py --selftest
           scripts/policy-merge-check.py --check-ci-names
+          scripts/policy-merge-check.py --check-mint-scope
           scripts/policy-merge-check.py --check-guide
       - name: gate — every condition except the docs/support.md byte comparison, from API reads alone
         id: gate
@@ -282,13 +283,15 @@ jobs:
           persist-credentials: false
           sparse-checkout: scripts/policy-merge-check.py
           sparse-checkout-cone-mode: false
-      # The App id may be set in the environment as a variable or a secret;
-      # the private key only as a secret. The token is limited to this
-      # repository and to the two permissions the mutation was measured with.
+      # Both values are secrets of the merge-bot environment. The token is
+      # limited to this repository and to exactly the two permissions the
+      # mutation was measured with; the App carries more (Workflows, for the
+      # artifact producer), and `--check-mint-scope` fails if this step ever
+      # asks for anything beyond MINT_PERMISSIONS.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app
         with:
-          app-id: ${{ vars.CHTYPES_BOT_APP_ID || secrets.CHTYPES_BOT_APP_ID }}
+          app-id: ${{ secrets.CHTYPES_BOT_APP_ID }}
           private-key: ${{ secrets.CHTYPES_BOT_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
