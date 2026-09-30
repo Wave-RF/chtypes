@@ -8,18 +8,22 @@ use std::path::{Component, Path, PathBuf};
 use super::release::IndexRow;
 use super::source::Source;
 use super::trust::{Hashing, sha256_file};
-use super::{Action, Installed};
+use super::{Action, InstallSlot, Installed};
 use crate::error::{Error, Result};
 use crate::registry::Manifest;
 
 /// Download `row.file` into `dest`, hashing as it streams (step 3), unpack it
-/// flat into `<dest>/.<minor>.incoming.<pid>`, rename into `<dest>/<minor>`,
-/// and re-hash the installed library in place (step 4).
+/// flat into a dot-prefixed staging sibling, and seat it at the directory
+/// `slot` names (step 4) — the flat `<dest>/<minor>/` line slot, demoting
+/// whatever patch is there under a DIFFERENT version (THE LAYOUT RULE,
+/// [`seat_flat`]), or `<dest>/patches/<minor>/<version>/` for any other
+/// exact patch — then re-hash the installed library in place.
 pub(crate) fn fetch_and_install(
     source: &Source,
     row: &IndexRow,
     dest: &Path,
     platform: &str,
+    slot: InstallSlot,
     progress: bool,
 ) -> Result<Installed> {
     std::fs::create_dir_all(dest).map_err(|e| Error::Fetch {
@@ -27,9 +31,16 @@ pub(crate) fn fetch_and_install(
     })?;
     let pid = std::process::id();
     let minor = &row.clickhouse_minor;
-    let tarball = dest.join(format!(".{minor}.download.{pid}.tar.gz"));
-    let incoming = dest.join(format!(".{minor}.incoming.{pid}"));
-    let replaced = dest.join(format!(".{minor}.replaced.{pid}"));
+    let version = &row.clickhouse_version;
+    // Staging is namespaced by minor AND version: a concurrent line fetch
+    // and patch fetch of the same line must not collide over one `.incoming`
+    // name.
+    let stage_name = match slot {
+        InstallSlot::Flat => minor.clone(),
+        InstallSlot::Patch => format!("{minor}-{version}"),
+    };
+    let tarball = dest.join(format!(".{stage_name}.download.{pid}.tar.gz"));
+    let incoming = dest.join(format!(".{stage_name}.incoming.{pid}"));
     let cleanup = || {
         std::fs::remove_file(&tarball).ok();
         std::fs::remove_dir_all(&incoming).ok();
@@ -40,9 +51,12 @@ pub(crate) fn fetch_and_install(
         unpack_flat(&tarball, &incoming)?;
         std::fs::remove_file(&tarball).ok();
         // Validated BEFORE it takes the registry's name: a tarball whose
-        // manifest disagrees with the index never becomes `<minor>/`.
+        // manifest disagrees with the index never becomes an installed patch.
         read_manifest(&incoming, row)?;
-        move_into_place(&incoming, &replaced, &dest.join(minor))
+        match slot {
+            InstallSlot::Flat => seat_flat(dest, minor, &incoming),
+            InstallSlot::Patch => seat_patch(dest, minor, version, &incoming),
+        }
     })();
     cleanup();
     let (target, manifest, action) = match result {
@@ -318,27 +332,56 @@ fn read_manifest(dir: &Path, row: &IndexRow) -> Result<Manifest> {
     Ok(manifest)
 }
 
-/// The atomic step: an existing `<minor>/` moves aside, the incoming
-/// directory takes its name, the old one is removed. An interrupted install
-/// never leaves a half-populated `<minor>/` for a registry to `dlopen`.
-fn move_into_place(incoming: &Path, replaced: &Path, target: &Path) -> Result<(PathBuf, Action)> {
+/// The atomic step: an existing occupant of `target` moves aside — to
+/// `demote_to` when one is given (THE LAYOUT RULE's demotion: renamed, never
+/// deleted), otherwise to `replaced` and then removed — the incoming
+/// directory takes `target`'s name, and a failure puts the previous occupant
+/// straight back. An interrupted install never leaves a half-populated
+/// directory for a registry to `dlopen`.
+fn move_into_place(
+    incoming: &Path,
+    replaced: &Path,
+    target: &Path,
+    demote_to: Option<&Path>,
+) -> Result<(PathBuf, Action)> {
     let io = |what: String, e: std::io::Error| Error::Fetch {
         message: format!("{what}: {e}"),
     };
     std::fs::remove_dir_all(replaced).ok();
     let had_previous = target.exists();
     if had_previous {
-        std::fs::rename(target, replaced)
-            .map_err(|e| io(format!("moving {} aside", target.display()), e))?;
+        match demote_to {
+            Some(demote_to) => {
+                if let Some(parent) = demote_to.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| io(format!("creating {}", parent.display()), e))?;
+                }
+                // A stale leftover at the demotion target (a previous,
+                // interrupted demotion) must not make this rename fail.
+                std::fs::remove_dir_all(demote_to).ok();
+                std::fs::rename(target, demote_to).map_err(|e| {
+                    io(
+                        format!("demoting {} to {}", target.display(), demote_to.display()),
+                        e,
+                    )
+                })?;
+            }
+            None => {
+                std::fs::rename(target, replaced)
+                    .map_err(|e| io(format!("moving {} aside", target.display()), e))?;
+            }
+        }
     }
     if let Err(e) = std::fs::rename(incoming, target) {
         if had_previous {
-            // Put the previous install back rather than leave nothing.
-            std::fs::rename(replaced, target).ok();
+            // Put the previous occupant straight back rather than leave
+            // `target` empty.
+            let from = demote_to.unwrap_or(replaced);
+            std::fs::rename(from, target).ok();
         }
         return Err(io(format!("moving into {}", target.display()), e));
     }
-    if had_previous {
+    if had_previous && demote_to.is_none() {
         std::fs::remove_dir_all(replaced).ok();
     }
     Ok((
@@ -349,6 +392,60 @@ fn move_into_place(incoming: &Path, replaced: &Path, target: &Path) -> Result<(P
             Action::Installed
         },
     ))
+}
+
+/// The `clickhouse_version` a directory's own manifest claims — used both
+/// for the CURRENT flat occupant of `<dest>/<minor>/` and for the incoming
+/// directory being seated there — or `None` when there is no manifest, or it
+/// names none.
+fn manifest_version_of(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("manifest.json")).ok()?;
+    let m: Manifest = serde_json::from_str(&text).ok()?;
+    (!m.clickhouse_version.is_empty()).then_some(m.clickhouse_version)
+}
+
+/// Seat `source` (a verified, already-on-disk patch directory — freshly
+/// unpacked, or an existing `patches/<minor>/<version>` being PROMOTED) as
+/// the flat `<dest>/<minor>/` slot. When a DIFFERENT version already
+/// occupies it, that occupant is DEMOTED into
+/// `<dest>/patches/<minor>/<its version>/` first — atomically, on the same
+/// filesystem, and never deleted (THE LAYOUT RULE). Installing the SAME
+/// version again (a rebuild, or `--force`) replaces it in place instead, with
+/// no demotion — there is nothing to demote it FROM.
+///
+/// `source == target` (nothing to seat; already flat) is the one case that
+/// skips `move_into_place` entirely, since renaming a directory onto itself
+/// is not guaranteed to be a no-op everywhere.
+pub(crate) fn seat_flat(dest: &Path, minor: &str, source: &Path) -> Result<(PathBuf, Action)> {
+    let target = dest.join(minor);
+    if source == target {
+        return Ok((target, Action::AlreadyInstalled));
+    }
+    let incoming_version = manifest_version_of(source);
+    let pid = std::process::id();
+    let replaced = dest.join(format!(".{minor}.replaced.{pid}"));
+    let demote_to = manifest_version_of(&target)
+        .filter(|old| Some(old.as_str()) != incoming_version.as_deref())
+        .map(|old| dest.join("patches").join(minor).join(old));
+    move_into_place(source, &replaced, &target, demote_to.as_deref())
+}
+
+/// Seat `source` at `<dest>/patches/<minor>/<version>/` — never a flat
+/// install, and no demotion: each patch directory is keyed by its own exact
+/// version, so installing a patch never displaces another one.
+fn seat_patch(dest: &Path, minor: &str, version: &str, source: &Path) -> Result<(PathBuf, Action)> {
+    let target = dest.join("patches").join(minor).join(version);
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| Error::Fetch {
+            message: format!("creating {}: {e}", parent.display()),
+        })?;
+    }
+    let pid = std::process::id();
+    let replaced = dest
+        .join("patches")
+        .join(minor)
+        .join(format!(".{version}.replaced.{pid}"));
+    move_into_place(source, &replaced, &target, None)
 }
 
 #[cfg(test)]

@@ -459,11 +459,12 @@ fn the_lock_file_records_and_frozen_refuses_drift() {
     };
     let installed = fetch::ensure("25.8", &o).unwrap();
     let lock = LockFile::load(&lock_path, true).unwrap();
-    let key = lock_key(foreign(), "25.8");
+    // Schema 2 (#284): keyed by the exact patch installed, not the line.
+    let key = lock_key(foreign(), &installed.version);
     let (file, sha) = installed.asset.clone().unwrap();
     assert_eq!(lock.artifacts[&key].file, file);
     assert_eq!(lock.artifacts[&key].sha256, sha);
-    assert_eq!(lock.schema, 1);
+    assert_eq!(lock.schema, 2);
     // What it records is the fixtures' own file and sha256 for this row,
     // plus this crate's own ABI revision — the one new thing a fresh fetch
     // now records (docs/guides/fetch.md §5). The committed fixture lock
@@ -571,16 +572,21 @@ fn lock_abi_revision_mismatch_is_named_and_needs_no_source() {
     let rev = fixture_revision(&fx);
     let spec_lock = LockFile::load(&fx.join("chtypes.lock"), true).unwrap();
     let platform = foreign();
+    // Schema 2 (#284): the fixture's schema-1 lock is read and converted, so
+    // its keys are `<platform>/<exact version>`, not `<platform>/25.8`. Find
+    // whichever entry the conversion produced for line 25.8 (every other
+    // assertion in this test fetches "25.8", so that line must be pinned).
+    let key_prefix = format!("{platform}/25.8.");
+    let (_, entry) = spec_lock
+        .artifacts
+        .iter()
+        .find(|(k, _)| k.starts_with(&key_prefix))
+        .map(|(k, e)| (k.clone(), e.clone()))
+        .expect("the fixture lock pins nothing for line 25.8 on this platform");
+    // The synthetic fixtures below are schema 1, so they are keyed by LINE,
+    // as schema 1 always was — converted to the schema-2, version-keyed form
+    // by `LockFile::load` itself when each is read.
     let key = lock_key(platform, "25.8");
-    let entry = spec_lock.artifacts.get(&key).cloned().unwrap_or_else(|| {
-        // Any platform/line the fixture pins will do; find one if 25.8 isn't it.
-        spec_lock
-            .artifacts
-            .iter()
-            .find(|(k, _)| k.starts_with(&format!("{platform}/")))
-            .map(|(_, e)| e.clone())
-            .expect("the fixture lock pins nothing for this platform")
-    });
 
     // (b) A lock entry at a different revision: PINNED, naming both
     // numbers, and — proven by pointing at a source that does not exist —
@@ -662,11 +668,16 @@ fn lock_abi_revision_mismatch_is_named_and_needs_no_source() {
     );
 
     let other_key = lock_key(platform, "24.8");
+    // A schema-1 entry must still name a parseable asset (#284's stricter
+    // read: an entry that does not parse refuses the WHOLE lock) — so this
+    // uses a plausible, if fictitious, 24.8 patch name rather than a bare
+    // placeholder like "x.tar.gz".
+    let fake_24_8_file = format!("chtypes-24.8.14.39-lts-{platform}.tar.gz");
     let no_rev_unpublished = tmp("rev-no-rev-unpublished").join("chtypes.lock");
     std::fs::write(
         &no_rev_unpublished,
         format!(
-            r#"{{"schema":1,"artifacts":{{{other_key:?}:{{"file":"x.tar.gz","sha256":"00"}}}}}}"#
+            r#"{{"schema":1,"artifacts":{{{other_key:?}:{{"file":{fake_24_8_file:?},"sha256":"00"}}}}}}"#
         ),
     )
     .unwrap();
@@ -1218,7 +1229,15 @@ fn the_binary_s_other_exit_codes_and_commands() {
     let written = LockFile::load(&lock, true).unwrap();
     let spec_lock = LockFile::load(&fx.join("chtypes.lock"), true).unwrap();
     for minor in ["25.8", "26.7"] {
-        let k = lock_key(platform, minor);
+        // Schema 2 (#284): keyed by the exact patch, not the line — find
+        // whichever entry the write produced for this line.
+        let prefix = format!("{platform}/{minor}.");
+        let k = written
+            .artifacts
+            .keys()
+            .find(|k| k.starts_with(&prefix))
+            .unwrap_or_else(|| panic!("the written lock pins nothing for {minor} ({prefix})"))
+            .clone();
         // The committed fixture lock predates abi_revision (docs/guides/fetch.md
         // §5); a fresh fetch (a real subprocess, so always this binary's own
         // compiled-in ABI_REVISION) pins the same file and sha256, plus that
@@ -1400,7 +1419,11 @@ fn inner() -> bool {
 /// §6: with `CHTYPES_AUTOFETCH=1` (and, equally, the registry option),
 /// opening a missing line runs `ensure` first. The fixtures' libraries do not
 /// `dlopen`, so success here is `Error::Load` AFTER the line has been
-/// installed — and a refused fetch is attempted once per process per line.
+/// installed — and a SUCCESSFUL fetch is never repeated (the second open
+/// finds it on disk). A TRANSIENT failure (untrusted, corrupt, pinned,
+/// unreachable) is retried on the next open, not remembered forever (#284's
+/// fix); only a definite `CHTYPES_ARTIFACT_UNPUBLISHED` is remembered for the
+/// rest of the process (covered by the fetch-fixture-backed patch tests).
 #[test]
 fn inner_autofetch_runs_ensure_once_per_line() {
     if !inner() {
@@ -1444,7 +1467,11 @@ fn inner_autofetch_runs_ensure_once_per_line() {
     );
 
     // 2. The registry option with explicit fetch options, against a release
-    //    that is refused: the fetch error surfaces once, then the guard.
+    //    that is refused: the fetch error surfaces, and — #284's fix — a
+    //    TRANSIENT failure (untrusted, corrupt, pinned, unreachable) is never
+    //    remembered, so the second open retries and gets the same verdict
+    //    again, rather than a bare MISSING once the process has "given up"
+    //    forever on one flaky read.
     let reg = Registry::from_search_path_with(RegistryOptions {
         dir: Some(dest.clone()),
         autofetch: Some(true),
@@ -1467,8 +1494,8 @@ fn inner_autofetch_runs_ensure_once_per_line() {
     let err = reg.for_version("26.7").unwrap_err();
     assert_eq!(
         err.artifact_code(),
-        Some("CHTYPES_ARTIFACT_MISSING"),
-        "once per process per line: the second open does not fetch again: {err}"
+        Some("CHTYPES_ARTIFACT_UNTRUSTED"),
+        "a transient failure must be retried, not remembered forever (#284's fix): {err}"
     );
 
     // 3. Autofetch off: the §7 error, and nothing fetched.
@@ -2285,4 +2312,663 @@ fn two_revisions_one_past_the_high_revision_is_unpublished() {
     );
     assert!(!dest.join(case["line"].as_str().unwrap()).exists());
     std::fs::remove_dir_all(&dest).ok();
+}
+
+// ---------------------------------------------------------------- #284: exact-patch resolution
+//
+// `two-patches/`: one line (25.8) served as two patches on every fixture
+// platform, `expected.json`'s `patches` block (the common #284 brief's exact
+// fixture). Every case here fails loudly if that block is absent, exactly as
+// `fixture_abi_revision` does — a suite that silently ran zero cases would
+// look exactly like one that passed.
+
+/// `expected.json`'s `patches` block. Panics (loudly, not a skip) when it is
+/// absent: this suite must never quietly test nothing.
+fn patches_doc(fx: &Path) -> Json {
+    let doc = expected(fx);
+    assert!(
+        doc.get("patches").is_some(),
+        "expected.json carries no `patches` block — regenerate the fixtures so \
+         tests/fixtures/fetch/two-patches/ is covered (SDK#284)"
+    );
+    doc["patches"].clone()
+}
+
+fn patches_cases(fx: &Path) -> Vec<Json> {
+    let doc = patches_doc(fx);
+    let cases = doc["cases"].as_array().cloned().unwrap_or_default();
+    assert!(!cases.is_empty(), "expected.json's patches.cases is empty");
+    cases
+}
+
+/// A minimal, hand-built [`chtypes::fetch::IndexRow`] good enough for
+/// [`LockFile::record`], which reads only `file`, `sha256` and
+/// `abi_revision` — everything else is filled in but not asserted on by the
+/// tests that use this.
+fn fake_row(
+    file: &str,
+    sha256: &str,
+    version: &str,
+    minor: &str,
+    platform: &str,
+    revision: i32,
+) -> fetch::IndexRow {
+    let (os, arch) = platform.split_once('-').unwrap();
+    fetch::IndexRow {
+        file: file.to_string(),
+        sha256: sha256.to_string(),
+        bytes: 1,
+        clickhouse_version: version.to_string(),
+        clickhouse_minor: minor.to_string(),
+        os: os.to_string(),
+        arch: arch.to_string(),
+        library: "libchtypes.so".to_string(),
+        library_sha256: String::new(),
+        build: 0,
+        core_commit: String::new(),
+        abi_revision: Some(revision),
+    }
+}
+
+/// `(older, newer)` exact-version spellings for one `patches.cases[i]` entry,
+/// decided from the doc's own `newest` field — never assumed from string
+/// order, which would be an accident of THIS fixture's digits.
+fn older_newer(doc: &Json, case: &Json) -> (String, String) {
+    let newer = doc["newest"].as_str().unwrap().to_string();
+    let patches = case["patches"].as_object().unwrap();
+    let older = patches
+        .keys()
+        .find(|k| *k != &newer)
+        .unwrap_or_else(|| panic!("{case}: only one patch, expected two"))
+        .clone();
+    assert!(patches.contains_key(&newer), "{case}: missing {newer}");
+    (older, newer)
+}
+
+fn opts_two_patches(fx: &Path, platform: &str, dest: &Path) -> EnsureOptions {
+    let mut o = opts(fx, "two-patches", dest);
+    o.platform = Some(platform.to_string());
+    o
+}
+
+/// P1: fetching `older` then `newer` — both exact-patch requests — into one
+/// destination leaves BOTH installed, each hashing its own `library_sha256`;
+/// the second fetch does not touch the first (proven by re-fetching `older`
+/// afterward and finding it AlreadyInstalled, unmoved).
+#[test]
+fn two_patches_p1_independent_exact_fetches_coexist() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, newer) = older_newer(&doc, &case);
+        let patches = case["patches"].as_object().unwrap();
+        let dest = tmp(&format!("p1-{platform}"));
+        let o = opts_two_patches(&fx, platform, &dest);
+
+        let i_older = fetch::ensure(&older, &o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        let i_newer = fetch::ensure(&newer, &o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_ne!(i_older.dir, i_newer.dir, "{platform}");
+        assert_eq!(
+            sha256_file(&i_older.library).unwrap(),
+            patches[&older]["library_sha256"].as_str().unwrap(),
+            "{platform}: fetching {newer} touched {older}'s bytes"
+        );
+        assert_eq!(
+            sha256_file(&i_newer.library).unwrap(),
+            patches[&newer]["library_sha256"].as_str().unwrap(),
+            "{platform}"
+        );
+
+        let again = fetch::ensure(&older, &o).unwrap();
+        assert_eq!(
+            again.action,
+            Action::AlreadyInstalled,
+            "{platform}: the second fetch must not have disturbed {older}"
+        );
+        assert_eq!(again.dir, i_older.dir, "{platform}");
+        std::fs::remove_dir_all(&dest).ok();
+    }
+}
+
+/// P2: `fetch <line>` installs the NEWEST served patch, flat at
+/// `<dest>/<line>/` (THE LAYOUT RULE).
+#[test]
+fn two_patches_p2_line_fetch_installs_newest_flat() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (_, newer) = older_newer(&doc, &case);
+        let dest = tmp(&format!("p2-{platform}"));
+        let o = opts_two_patches(&fx, platform, &dest);
+
+        let installed = fetch::ensure(line, &o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(installed.dir, dest.join(line), "{platform}");
+        assert_eq!(installed.version, newer, "{platform}");
+        assert!(
+            !dest.join("patches").exists(),
+            "{platform}: nothing demoted yet"
+        );
+
+        // The one exception to "an exact request always installs under
+        // patches/": when that exact version ALREADY sits flat and
+        // verifies, an exact request for it is a no-op reporting the FLAT
+        // directory — it is not moved into patches/ just because the
+        // request happened to spell the patch instead of the line.
+        let exact_of_flat = fetch::ensure(&newer, &o).unwrap();
+        assert_eq!(exact_of_flat.action, Action::AlreadyInstalled, "{platform}");
+        assert_eq!(exact_of_flat.dir, dest.join(line), "{platform}");
+        assert!(
+            !dest.join("patches").exists(),
+            "{platform}: an already-flat exact match must not be moved into patches/"
+        );
+        std::fs::remove_dir_all(&dest).ok();
+    }
+}
+
+/// Cross-binding placement rule (Go and Python already match this): an
+/// EXACT-patch spelling ALWAYS installs under `patches/<line>/<version>/`,
+/// even when it names the line's own NEWEST patch and the flat slot is
+/// empty. Only a LINE spelling (or `--all`) ever writes the flat slot.
+#[test]
+fn two_patches_exact_newest_into_empty_dest_lands_under_patches_not_flat() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (_, newer) = older_newer(&doc, &case);
+        let dest = tmp(&format!("exact-newest-{platform}"));
+        let o = opts_two_patches(&fx, platform, &dest);
+
+        let installed = fetch::ensure(&newer, &o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(
+            installed.dir,
+            dest.join("patches").join(line).join(&newer),
+            "{platform}: an exact request always installs under patches/, even for the newest"
+        );
+        assert!(
+            !dest.join(line).exists(),
+            "{platform}: the flat slot must stay absent — only a LINE request writes it"
+        );
+
+        // Re-fetching the SAME exact patch is a no-op that reports the SAME
+        // (patches/) directory — never a promotion to flat on its own.
+        let again = fetch::ensure(&newer, &o).unwrap();
+        assert_eq!(again.action, Action::AlreadyInstalled, "{platform}");
+        assert_eq!(again.dir, installed.dir, "{platform}");
+        assert!(!dest.join(line).exists(), "{platform}");
+        std::fs::remove_dir_all(&dest).ok();
+    }
+}
+
+/// P3: Decision 7 (a channel-less spelling matches that patch on any
+/// channel) and the never-a-fallback rule: `fetch` is a hard requirement, so
+/// a patch strictly between the two served ones is
+/// `CHTYPES_ARTIFACT_UNPUBLISHED`, never the nearest or newest neighbor.
+#[test]
+fn two_patches_p3_decision_7_and_fetch_never_falls_back() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, _newer) = older_newer(&doc, &case);
+        let bare = older.rsplit_once('-').map(|(b, _)| b).unwrap_or(&older);
+        let dest = tmp(&format!("p3-{platform}"));
+        let o = opts_two_patches(&fx, platform, &dest);
+
+        let installed = fetch::ensure(bare, &o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(installed.version, older, "{platform}: Decision 7");
+
+        let miss = case["exact_miss"]["requested"].as_str().unwrap();
+        let err = fetch::ensure(miss, &o).unwrap_err();
+        assert_eq!(
+            err.artifact_code(),
+            Some("CHTYPES_ARTIFACT_UNPUBLISHED"),
+            "{platform}: fetch never falls back, {err}"
+        );
+        std::fs::remove_dir_all(&dest).ok();
+    }
+}
+
+/// P4: `fetch <older> --lock L`, then `fetch <L> --lock L`: `L` ends up
+/// schema 2 with keys for BOTH patches, each carrying `{file, sha256,
+/// abi_revision}`. Nothing already there is removed.
+#[test]
+fn two_patches_p4_lock_records_both_patches() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    let rev = fixture_revision(&fx);
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, newer) = older_newer(&doc, &case);
+        let dest = tmp(&format!("p4-{platform}"));
+        let lock_path = dest.join("chtypes.lock");
+        let mut o = opts_two_patches(&fx, platform, &dest);
+        o.lock = Some(lock_path.clone());
+
+        fetch::ensure(&older, &o).unwrap();
+        fetch::ensure(line, &o).unwrap();
+
+        let lock = LockFile::load(&lock_path, true).unwrap();
+        assert_eq!(lock.schema, 2, "{platform}");
+        let key_older = lock_key(platform, &older);
+        let key_newer = lock_key(platform, &newer);
+        assert_eq!(lock.artifacts.len(), 2, "{platform}: {:?}", lock.artifacts);
+        assert_eq!(
+            lock.artifacts[&key_older].abi_revision,
+            Some(rev),
+            "{platform}"
+        );
+        assert_eq!(
+            lock.artifacts[&key_newer].abi_revision,
+            Some(rev),
+            "{platform}"
+        );
+        std::fs::remove_dir_all(&dest).ok();
+    }
+}
+
+/// P5, THE HEADLINE CASE: with a lock pinning only `older`, `fetch <line>
+/// --frozen` into an EMPTY destination installs `older` while `newer` is
+/// served — never `CHTYPES_ARTIFACT_PINNED` just because something newer
+/// exists (F1/F5).
+#[test]
+fn two_patches_p5_frozen_installs_the_pinned_older_patch() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    let rev = fixture_revision(&fx);
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, newer) = older_newer(&doc, &case);
+        let patches = case["patches"].as_object().unwrap();
+
+        // Build the pinning lock at test time (P5 needs no separate
+        // scratch registry — the pin is all that matters).
+        let lock_dir = tmp(&format!("p5-lock-{platform}"));
+        let lock_path = lock_dir.join("chtypes.lock");
+        let mut lock = LockFile::load(&lock_path, false).unwrap();
+        lock.record(
+            &lock_key(platform, &older),
+            &fake_row(
+                patches[&older]["file"].as_str().unwrap(),
+                patches[&older]["sha256"].as_str().unwrap(),
+                &older,
+                line,
+                platform,
+                rev,
+            ),
+        );
+        lock.save().unwrap();
+
+        let dest = tmp(&format!("p5-dest-{platform}"));
+        let mut o = opts_two_patches(&fx, platform, &dest);
+        o.lock = Some(lock_path);
+        o.frozen = true;
+
+        let installed = fetch::ensure(line, &o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(
+            installed.version, older,
+            "{platform}: pinned patch, not {newer}"
+        );
+        assert_eq!(installed.dir, dest.join(line), "{platform}");
+        std::fs::remove_dir_all(&dest).ok();
+        std::fs::remove_dir_all(&lock_dir).ok();
+    }
+}
+
+/// P6: with `older` pinned and installed, an unpinned exact patch under
+/// `--frozen` is `CHTYPES_ARTIFACT_PINNED` — "pins nothing for it" — and
+/// nothing lands on disk for it.
+#[test]
+fn two_patches_p6_frozen_refuses_an_unpinned_patch() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    let rev = fixture_revision(&fx);
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, newer) = older_newer(&doc, &case);
+        let patches = case["patches"].as_object().unwrap();
+
+        let lock_dir = tmp(&format!("p6-lock-{platform}"));
+        let lock_path = lock_dir.join("chtypes.lock");
+        let mut lock = LockFile::load(&lock_path, false).unwrap();
+        lock.record(
+            &lock_key(platform, &older),
+            &fake_row(
+                patches[&older]["file"].as_str().unwrap(),
+                patches[&older]["sha256"].as_str().unwrap(),
+                &older,
+                line,
+                platform,
+                rev,
+            ),
+        );
+        lock.save().unwrap();
+
+        let dest = tmp(&format!("p6-dest-{platform}"));
+        let mut o = opts_two_patches(&fx, platform, &dest);
+        o.lock = Some(lock_path.clone());
+        o.frozen = true;
+
+        let installed = fetch::ensure(&older, &o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(installed.version, older, "{platform}");
+
+        let err = fetch::ensure(&newer, &o).unwrap_err();
+        assert_eq!(
+            err.artifact_code(),
+            Some("CHTYPES_ARTIFACT_PINNED"),
+            "{platform}: {err}"
+        );
+        assert!(
+            !dest.join("patches").join(line).join(&newer).exists(),
+            "{platform}: nothing installed for the unpinned patch"
+        );
+        std::fs::remove_dir_all(&dest).ok();
+        std::fs::remove_dir_all(&lock_dir).ok();
+    }
+}
+
+/// P7: a schema-1 lock pinning the LINE to `older`'s file installs `older`
+/// under `--frozen`. A later, unfrozen line fetch installs `newer` (a line
+/// request always wants the release's newest) and `--lock` rewrites the file
+/// as schema 2, holding BOTH the converted `older` pin and the new `newer`
+/// one — nothing is dropped.
+#[test]
+fn two_patches_p7_schema_1_lock_upgrades_and_gains_the_newer_pin() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, newer) = older_newer(&doc, &case);
+        let patches = case["patches"].as_object().unwrap();
+
+        let lock_dir = tmp(&format!("p7-lock-{platform}"));
+        let lock_path = lock_dir.join("chtypes.lock");
+        std::fs::write(
+            &lock_path,
+            format!(
+                r#"{{"schema":1,"artifacts":{{{:?}:{{"file":{:?},"sha256":{:?}}}}}}}"#,
+                lock_key(platform, line),
+                patches[&older]["file"].as_str().unwrap(),
+                patches[&older]["sha256"].as_str().unwrap(),
+            ),
+        )
+        .unwrap();
+
+        let dest = tmp(&format!("p7-dest-{platform}"));
+        let mut o = opts_two_patches(&fx, platform, &dest);
+        o.lock = Some(lock_path.clone());
+        o.frozen = true;
+        let installed = fetch::ensure(line, &o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(
+            installed.version, older,
+            "{platform}: schema 1 pinned the line to the OLDER file by name"
+        );
+
+        // Unfrozen, with `--lock`: the line's newest (`newer`) installs,
+        // demoting `older` into patches/, and the lock is rewritten.
+        let mut o2 = opts_two_patches(&fx, platform, &dest);
+        o2.lock = Some(lock_path.clone());
+        let installed2 = fetch::ensure(line, &o2).unwrap();
+        assert_eq!(installed2.version, newer, "{platform}");
+
+        let rewritten = LockFile::load(&lock_path, true).unwrap();
+        assert_eq!(rewritten.schema, 2, "{platform}");
+        assert!(
+            rewritten
+                .artifacts
+                .contains_key(&lock_key(platform, &older)),
+            "{platform}: the converted pin must survive: {:?}",
+            rewritten.artifacts
+        );
+        assert!(
+            rewritten
+                .artifacts
+                .contains_key(&lock_key(platform, &newer)),
+            "{platform}: the new pin must be added: {:?}",
+            rewritten.artifacts
+        );
+        assert!(
+            dest.join("patches").join(line).join(&older).is_dir(),
+            "{platform}: the line fetch must have demoted {older}"
+        );
+        std::fs::remove_dir_all(&dest).ok();
+        std::fs::remove_dir_all(&lock_dir).ok();
+    }
+}
+
+/// P8: `--all --frozen` with a lock pinning only `older` for this line
+/// installs `older` only — the served `newer` is not pinned, so it is not
+/// installed (F6), and nothing about it is an error.
+#[test]
+fn two_patches_p8_all_frozen_installs_only_the_pinned_patch() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    let rev = fixture_revision(&fx);
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, _newer) = older_newer(&doc, &case);
+        let patches = case["patches"].as_object().unwrap();
+
+        let lock_dir = tmp(&format!("p8-lock-{platform}"));
+        let lock_path = lock_dir.join("chtypes.lock");
+        let mut lock = LockFile::load(&lock_path, false).unwrap();
+        lock.record(
+            &lock_key(platform, &older),
+            &fake_row(
+                patches[&older]["file"].as_str().unwrap(),
+                patches[&older]["sha256"].as_str().unwrap(),
+                &older,
+                line,
+                platform,
+                rev,
+            ),
+        );
+        lock.save().unwrap();
+
+        let dest = tmp(&format!("p8-dest-{platform}"));
+        let mut o = opts_two_patches(&fx, platform, &dest);
+        o.lock = Some(lock_path.clone());
+        o.frozen = true;
+
+        let installed = fetch::ensure_all(&o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        let versions: Vec<&str> = installed.iter().map(|i| i.version.as_str()).collect();
+        assert_eq!(versions, vec![older.as_str()], "{platform}");
+        std::fs::remove_dir_all(&dest).ok();
+        std::fs::remove_dir_all(&lock_dir).ok();
+    }
+}
+
+/// P9: offline, after both patches are installed (a LINE fetch has demoted
+/// `older`): `older` spelled without its channel still resolves to `older`;
+/// the line resolves to `newer`; a patch strictly between the two is
+/// `CHTYPES_SOURCE_UNREACHABLE`. `--offline --frozen` with no lock file at
+/// all still succeeds — offline never reads the lock (Decision 6).
+#[test]
+fn two_patches_p9_offline_after_both_installed() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, newer) = older_newer(&doc, &case);
+        let dest = tmp(&format!("p9-{platform}"));
+        let o = opts_two_patches(&fx, platform, &dest);
+        fetch::ensure(&older, &o).unwrap();
+        fetch::ensure(line, &o).unwrap(); // newer, flat; demotes older
+
+        let bare_older = older.rsplit_once('-').map(|(b, _)| b).unwrap_or(&older);
+        let offline = EnsureOptions {
+            offline: true,
+            ..o.clone()
+        };
+        let r_older =
+            fetch::ensure(bare_older, &offline).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(r_older.version, older, "{platform}");
+        let r_line = fetch::ensure(line, &offline).unwrap();
+        assert_eq!(r_line.version, newer, "{platform}");
+
+        let miss = case["exact_miss"]["requested"].as_str().unwrap();
+        let err = fetch::ensure(miss, &offline).unwrap_err();
+        assert_eq!(
+            err.artifact_code(),
+            Some("CHTYPES_SOURCE_UNREACHABLE"),
+            "{platform}: {err}"
+        );
+
+        let scratch = tmp(&format!("p9-frozen-{platform}"));
+        std::fs::create_dir_all(&scratch).ok();
+        let offline_frozen = EnsureOptions {
+            offline: true,
+            frozen: true,
+            lock: Some(scratch.join("nonexistent.lock")),
+            ..o.clone()
+        };
+        let r = fetch::ensure(line, &offline_frozen).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(
+            r.version, newer,
+            "{platform}: offline must never read the lock"
+        );
+        std::fs::remove_dir_all(&dest).ok();
+        std::fs::remove_dir_all(&scratch).ok();
+    }
+}
+
+/// P10: `list` (`installed_patches`) and `verify` (`verify_installed`) each
+/// report BOTH patches — the flat slot and the demoted sibling.
+#[test]
+fn two_patches_p10_list_and_verify_report_both_patches() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, newer) = older_newer(&doc, &case);
+        let dest = tmp(&format!("p10-{platform}"));
+        let o = opts_two_patches(&fx, platform, &dest);
+        fetch::ensure(&older, &o).unwrap();
+        fetch::ensure(line, &o).unwrap();
+
+        let listed = chtypes::installed_patches(std::slice::from_ref(&dest));
+        let mut versions: Vec<&str> = listed.iter().map(|p| p.version.as_str()).collect();
+        versions.sort_unstable();
+        let mut want = vec![older.as_str(), newer.as_str()];
+        want.sort_unstable();
+        assert_eq!(versions, want, "{platform}: list must report BOTH patches");
+        assert_eq!(
+            listed.iter().filter(|p| p.flat).count(),
+            1,
+            "{platform}: exactly one flat slot"
+        );
+        assert_eq!(
+            listed.iter().filter(|p| !p.flat).count(),
+            1,
+            "{platform}: the demoted patch, under patches/"
+        );
+
+        let verified = fetch::verify_installed(&dest);
+        assert_eq!(verified.len(), 2, "{platform}");
+        assert!(
+            verified.iter().all(|v| v.result.is_ok()),
+            "{platform}: {verified:?}"
+        );
+        std::fs::remove_dir_all(&dest).ok();
+    }
+}
+
+/// THE LAYOUT RULE's demotion: when a line fetch moves the flat slot from
+/// `older` to `newer`, `older`'s install is renamed into
+/// `patches/<line>/<older>/`, byte-identical — never deleted — and an exact
+/// request for `older` afterward resolves there through the REGISTRY with no
+/// fetch at all (proven by the dlopen failure naming the DEMOTED path: the
+/// fixtures' "libraries" are text, so the fetch and locate steps succeeding
+/// is exactly what `Error::Load` at that path proves).
+#[test]
+fn two_patches_demotion_preserves_bytes_and_resolves_without_a_fetch() {
+    let fx = fixtures!();
+    let doc = patches_doc(&fx);
+    let line = doc["line"].as_str().unwrap();
+    let rev = fixture_revision(&fx);
+    for case in patches_cases(&fx) {
+        let platform = case["platform"].as_str().unwrap();
+        let (older, newer) = older_newer(&doc, &case);
+        let patches = case["patches"].as_object().unwrap();
+        let dest = tmp(&format!("demote-{platform}"));
+
+        // Seat `older` in the flat slot first, the way a fleet still on the
+        // older patch would have it: a --frozen line fetch pinned to it.
+        let lock_dir = tmp(&format!("demote-lock-{platform}"));
+        let lock_path = lock_dir.join("chtypes.lock");
+        let mut lock = LockFile::load(&lock_path, false).unwrap();
+        lock.record(
+            &lock_key(platform, &older),
+            &fake_row(
+                patches[&older]["file"].as_str().unwrap(),
+                patches[&older]["sha256"].as_str().unwrap(),
+                &older,
+                line,
+                platform,
+                rev,
+            ),
+        );
+        lock.save().unwrap();
+        let mut frozen_o = opts_two_patches(&fx, platform, &dest);
+        frozen_o.lock = Some(lock_path);
+        frozen_o.frozen = true;
+        let seated = fetch::ensure(line, &frozen_o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(seated.dir, dest.join(line), "{platform}");
+        assert_eq!(seated.version, older, "{platform}");
+        let older_bytes_before = std::fs::read(&seated.library).unwrap();
+
+        // An ordinary line fetch: the release's newest, `newer`, takes the
+        // flat slot, and `older` is DEMOTED.
+        let o = opts_two_patches(&fx, platform, &dest);
+        let promoted = fetch::ensure(line, &o).unwrap_or_else(|e| panic!("{platform}: {e}"));
+        assert_eq!(promoted.version, newer, "{platform}");
+        assert_eq!(promoted.dir, dest.join(line), "{platform}");
+
+        let demoted_dir = dest.join("patches").join(line).join(&older);
+        assert!(
+            demoted_dir.is_dir(),
+            "{platform}: {older} must be demoted, not deleted"
+        );
+        let manifest: chtypes::Manifest = serde_json::from_str(
+            &std::fs::read_to_string(demoted_dir.join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        let older_bytes_after = std::fs::read(demoted_dir.join(&manifest.library)).unwrap();
+        assert_eq!(
+            older_bytes_before, older_bytes_after,
+            "{platform}: demotion must be byte-identical"
+        );
+
+        // Resolution, through the registry, with no fetch: the search path
+        // is `dest` alone, and autofetch is off, so any dlopen attempt
+        // proves the LOCATE step found the right directory with no network
+        // ever touched.
+        let reg = Registry::new(&dest).unwrap();
+        let err = reg
+            .resolve(&older)
+            .expect_err("the fixture's library is text, not a real .so");
+        match &err {
+            Error::Load { path, .. } => {
+                assert_eq!(
+                    path.parent().unwrap(),
+                    demoted_dir,
+                    "{platform}: must resolve to the DEMOTED directory, no fetch needed"
+                );
+            }
+            other => panic!("{platform}: expected Error::Load, got {other:?}"),
+        }
+        std::fs::remove_dir_all(&dest).ok();
+        std::fs::remove_dir_all(&lock_dir).ok();
+    }
 }
