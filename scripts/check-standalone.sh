@@ -133,13 +133,19 @@ LOG="$LOG_DIR/check-standalone.json"
 # untagged suite runs. Without one the tests that need an artifact SKIP, by
 # name, in the census below, and the rest still runs. What is never allowed
 # is the third state: a suite that ran nothing and passed.
+# Two levels count as "have a registry" (chtypes#284, "Layout rule"): a
+# line's flat <minor>/manifest.json, or any OTHER exact patch nested at
+# patches/<minor>/<clickhouse_version>/manifest.json — a registry holding
+# only the latter must not read as empty.
 HAVE_REG=0
-if [ -d "$REG" ] && compgen -G "$REG/*/manifest.json" >/dev/null; then HAVE_REG=1; fi
+if [ -d "$REG" ] && { compgen -G "$REG/*/manifest.json" >/dev/null || compgen -G "$REG/patches/*/*/manifest.json" >/dev/null; }; then
+  HAVE_REG=1
+fi
 if [ "$HAVE_REG" -eq 1 ]; then
   say "go test ./... (untagged, CHTYPES_REGISTRY=$REG, -json into $LOG)"
   [ "$REQUIRE" -eq 0 ] || note "--require-artifacts: TestGoldens must run, and nothing may skip for want of a registry"
 elif [ "$REQUIRE" -eq 1 ]; then
-  die "--require-artifacts, but no artifact registry at $REG (no <line>/manifest.json) — run scripts/fetch.sh <line> --dest $REG first"
+  die "--require-artifacts, but no artifact registry at $REG (no <line>/manifest.json, and no patches/<line>/<version>/manifest.json) — run scripts/fetch.sh <line> --dest $REG first"
 else
   say "go test ./... (untagged, NO artifact registry at $REG — the registry tests will SKIP by name; -json into $LOG)"
   note "scripts/fetch.sh <line> installs one; --registry or CHTYPES_REGISTRY point at one"

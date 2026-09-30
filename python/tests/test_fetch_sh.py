@@ -1,4 +1,5 @@
-"""`scripts/fetch.sh`, the reference implementation, against `two-revisions/`.
+"""`scripts/fetch.sh`, the reference implementation, against `two-revisions/`
+and, below, `two-patches/` (chtypes#284).
 
 fetch.sh has no suite of its own, and the four bindings each drive the shared
 fixtures in-process; this file runs the script itself, in a subprocess, over the
@@ -137,3 +138,249 @@ def test_fetch_sh_one_past_the_high_revision_is_unpublished(tmp_path: Path) -> N
     assert f"at ABI revision {revisions['high_revision'] + 1} (from --abi-revision)" in proc.stderr
     assert proc.stdout == ""
     assert not (tmp_path / "reg" / case["line"]).exists()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# two-patches/ (chtypes#284): exact-patch resolution, and the layout rule —
+# the patch a LINE request selects installs FLAT at <dest>/<line>/; any OTHER
+# exact patch installs at <dest>/patches/<line>/<clickhouse_version>/, and a
+# line fetch that changes the flat occupant DEMOTES the outgoing one there,
+# atomically, never deleting it (issue #284, "Layout rule: approved, with one
+# amendment"). fetch.sh itself has no lock support and no registry-style
+# fallback: an exact patch the release does not publish is always
+# CHTYPES_ARTIFACT_UNPUBLISHED (design §7, R5) — never a same-line substitute.
+
+
+def _patches() -> dict:
+    """The `patches` block `tests/fixtures/fetch/two-patches/` publishes to
+    `expected.json`. Fails loudly rather than skip: a suite that quietly ran
+    nothing here would be worse than no suite (chtypes#284's implementer
+    brief)."""
+    doc = _expected()
+    if "patches" not in doc:
+        raise AssertionError(
+            f"{EXPECTED_FILE} carries no 'patches' block — regenerate the fixtures from the "
+            f"artifact producer's current set; chtypes#284's two-patches/ suite has nothing to "
+            f"drive"
+        )
+    return doc["patches"]
+
+
+def _run_fetch_sh(
+    spelling: str,
+    platform: str,
+    dest: Path,
+    *,
+    fixture: str = "two-patches",
+    abi_revision: int | None = None,
+    extra_args: tuple[str, ...] = (),
+) -> subprocess.CompletedProcess[str]:
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("CHTYPES_") and k != "XDG_CACHE_HOME"
+    }
+    env["CHTYPES_TRUSTED_KEYS"] = ",".join(_expected()["trusted_keys"])
+    # Never the optional developer resolver beside a checkout: index.json is
+    # the only authority here.
+    env["CHTYPES_CORE_DIR"] = str(dest / "no-core-here")
+    env["XDG_CACHE_HOME"] = str(dest / "xdg")
+    if abi_revision is None:
+        abi_revision = _patches()["abi_revision"]
+    return subprocess.run(
+        [
+            "bash",
+            str(FETCH_SH),
+            spelling,
+            "--platform",
+            platform,
+            "--url",
+            f"file://{FIXTURES / fixture}",
+            "--dest",
+            str(dest / "reg"),
+            "--abi-revision",
+            str(abi_revision),
+            *extra_args,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        check=False,
+    )
+
+
+def _manifest_version(directory: Path) -> str | None:
+    manifest = directory / "manifest.json"
+    if not manifest.is_file():
+        return None
+    return json.loads(manifest.read_text()).get("clickhouse_version")
+
+
+@pytest.mark.parametrize(
+    "case",
+    _patches().get("cases", []),
+    ids=lambda c: c["platform"],
+)
+def test_fetch_sh_exact_patch_installs_flat_or_nested(case: dict, tmp_path: Path) -> None:
+    """An exact request for the line's newest served patch lands FLAT at
+    <dest>/<line>/; an exact request for the OTHER served patch lands at
+    patches/<line>/<version>/ instead — on an empty destination, so this is
+    about what the release currently serves for the line, not about what
+    happened to be fetched first."""
+    patches = _patches()
+    newest = patches["newest"]
+    rows = case["patches"]
+    for i, (version, row) in enumerate(rows.items()):
+        proc = _run_fetch_sh(version, case["platform"], tmp_path / str(i))
+        assert proc.returncode == 0, proc.stderr
+        installed = Path(proc.stdout.strip())
+        if version == newest:
+            assert installed == tmp_path / str(i) / "reg" / case["line"], (
+                f"the newest served patch {version} must install FLAT: {installed}"
+            )
+        else:
+            assert installed == tmp_path / str(i) / "reg" / "patches" / case["line"] / version, (
+                f"a non-newest patch {version} must install nested under patches/: {installed}"
+            )
+        library = installed / (json.loads((installed / "manifest.json").read_text())["library"])
+        assert hashlib.sha256(library.read_bytes()).hexdigest() == row["library_sha256"]
+
+
+@pytest.mark.parametrize(
+    "case",
+    _patches().get("cases", []),
+    ids=lambda c: c["platform"],
+)
+def test_fetch_sh_channel_less_spelling_matches_the_installed_patch(
+    case: dict, tmp_path: Path
+) -> None:
+    """fetch.md Decision 7: a patch spelled without its channel matches that
+    patch on any channel — `scripts/fetch.sh:724` compared by string equality
+    before chtypes#284 and refused every channel-less spelling with exit 4."""
+    rows = case["patches"]
+    for i, (version, row) in enumerate(rows.items()):
+        bare = version.rsplit("-", 1)[0]
+        assert bare != version, f"fixture patch {version!r} carries no channel to strip"
+        proc = _run_fetch_sh(bare, case["platform"], tmp_path / str(i))
+        assert proc.returncode == 0, proc.stderr
+        installed = Path(proc.stdout.strip())
+        library = installed / (json.loads((installed / "manifest.json").read_text())["library"])
+        assert hashlib.sha256(library.read_bytes()).hexdigest() == row["library_sha256"]
+        # And it is read back as the SAME exact patch it matched, never the
+        # line's other served patch.
+        assert _manifest_version(installed) == version
+
+
+def test_fetch_sh_exact_miss_never_falls_back(tmp_path: Path) -> None:
+    """fetch.sh has no lock support and no registry-style fallback (design
+    §7, R5): `fetch <exact patch>` is always a hard requirement. A miss is
+    CHTYPES_ARTIFACT_UNPUBLISHED, exit 4, and nothing is installed — never a
+    quiet substitute of the line's newest served patch, unlike a registry's
+    `For`/`Ensure`."""
+    patches = _patches()
+    case = patches["cases"][0]
+    requested = patches["exact_miss"]["requested"]
+    proc = _run_fetch_sh(requested, case["platform"], tmp_path)
+    assert proc.returncode == 4, proc.stderr
+    assert "CHTYPES_ARTIFACT_UNPUBLISHED" in proc.stderr
+    assert requested in proc.stderr
+    assert proc.stdout == ""
+    assert not (tmp_path / "reg").exists() or not any((tmp_path / "reg").iterdir())
+
+
+def test_fetch_sh_line_fetch_demotes_the_outgoing_patch(tmp_path: Path) -> None:
+    """The layout rule's demotion (issue #284): when a line fetch changes
+    which patch occupies the flat slot, the outgoing patch is renamed into
+    patches/<line>/<its version>/ — never deleted — before the incoming
+    patch takes the flat slot. Verified: the demoted bytes are byte-identical
+    to a fresh fetch of that same exact patch, and a later exact request for
+    it resolves there with no download (a corrupt/missing tarball URL would
+    fail the fetch if one were attempted)."""
+    patches = _patches()
+    case = patches["cases"][0]
+    newest = patches["newest"]
+    older = next(v for v in case["patches"] if v != newest)
+    older_row = case["patches"][older]
+
+    dest = tmp_path / "reg"
+    # Seed the flat slot with the OLDER patch directly — simulating a state
+    # from before the newer patch was published (or an older SDK's install):
+    # fetching the line always selects the release's newest row, so there is
+    # no sequence of fetch.sh calls against this fixture alone that leaves
+    # the older patch sitting in the flat slot.
+    seed = _run_fetch_sh(older, case["platform"], tmp_path / "seed")
+    assert seed.returncode == 0, seed.stderr
+    seeded_dir = Path(seed.stdout.strip())
+    dest.mkdir(parents=True)
+    line_dir = dest / case["line"]
+    shutil.copytree(seeded_dir, line_dir)
+    assert _manifest_version(line_dir) == older
+
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("CHTYPES_") and k != "XDG_CACHE_HOME"
+    }
+    env["CHTYPES_TRUSTED_KEYS"] = ",".join(_expected()["trusted_keys"])
+    env["CHTYPES_CORE_DIR"] = str(tmp_path / "no-core-here")
+    env["XDG_CACHE_HOME"] = str(tmp_path / "xdg")
+    proc = subprocess.run(
+        [
+            "bash",
+            str(FETCH_SH),
+            case["line"],
+            "--platform",
+            case["platform"],
+            "--url",
+            f"file://{FIXTURES / patches['fixture']}",
+            "--dest",
+            str(dest),
+            "--abi-revision",
+            str(patches["abi_revision"]),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert f"demoting {case['line']}" in proc.stderr, proc.stderr
+
+    installed = Path(proc.stdout.strip())
+    assert installed == line_dir
+    assert _manifest_version(line_dir) == newest
+
+    demoted_dir = dest / "patches" / case["line"] / older
+    assert _manifest_version(demoted_dir) == older
+    demoted_manifest = json.loads((demoted_dir / "manifest.json").read_text())
+    demoted_library = demoted_dir / demoted_manifest["library"]
+    assert hashlib.sha256(demoted_library.read_bytes()).hexdigest() == older_row["library_sha256"]
+
+    # An exact request for the demoted patch resolves there without a fetch:
+    # "already installed and verified" is the same claim the ordinary
+    # already-installed check makes, now made against the demoted directory.
+    again = subprocess.run(
+        [
+            "bash",
+            str(FETCH_SH),
+            older,
+            "--platform",
+            case["platform"],
+            "--url",
+            f"file://{FIXTURES / patches['fixture']}",
+            "--dest",
+            str(dest),
+            "--abi-revision",
+            str(patches["abi_revision"]),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        check=False,
+    )
+    assert again.returncode == 0, again.stderr
+    assert "already installed and verified" in again.stderr, again.stderr
+    assert Path(again.stdout.strip()) == demoted_dir

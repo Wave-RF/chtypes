@@ -4,7 +4,7 @@ An artifact is one ClickHouse release, compiled, wrapped in the `chs_*` C ABI, p
 
 ## Layout
 
-One directory per **ClickHouse minor line**, each self-contained:
+One directory per **ClickHouse minor line** for the patch a LINE request selects, each self-contained, plus a `patches/` sibling tree for any OTHER installed exact patch of a line (chtypes#284, "Layout rule"):
 
 ```text
 <registry>/
@@ -19,12 +19,18 @@ One directory per **ClickHouse minor line**, each self-contained:
   26.5/   …
   26.6/   …
   26.7/   …
+  patches/
+    25.8/
+      25.8.28.1-lts/       any OTHER exact patch of 25.8 — the same four files
 ```
+
+Several patches of one line can be installed at once: the newest sits flat at `<minor>/`, exactly as before this existed; every other one sits nested at `patches/<minor>/<clickhouse_version>/`, a tree released SDKs through 0.4.x neither see nor touch — measured against v0.4.0 of all four bindings and `scripts/fetch.sh`, including `list` and `verify`. A loader reads BOTH levels; a line resolves to the newest patch found in the first directory on the search path that holds any patch of it, flat or nested. When a later fetch changes which patch occupies the flat slot, the outgoing one is DEMOTED into `patches/`, atomically, on the same filesystem, and never deleted. `docs/guides/fetch.md` §1 has the full rule, including what an old SDK sharing this cache does.
 
 ABI-revision- and platform-keyed, one tree per revision and target — `<R>` is the ABI revision the SDK speaks, so SDKs at different revisions never share a tree (`docs/guides/fetch.md` §1):
 
 ```text
-~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/<minor>/…
+~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/<minor>/…                             (flat: a line's newest patch)
+~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/patches/<minor>/<clickhouse_version>/…  (any other exact patch)
 ```
 
 `<os>` is the lowercased OS name (`linux`, `darwin`) and `<arch>` is normalized (`aarch64 → arm64`, `x86_64 → amd64`). Current keys: **`linux-arm64`** (the shipping platform) and **`darwin-arm64`** (for development; Linux is the reference). `linux-amd64` is a build target, not a built artifact, on the current host.

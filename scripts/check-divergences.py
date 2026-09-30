@@ -574,10 +574,16 @@ def run(registry_dir: str | None, data_path: Path, doc_path: Path) -> int:
             "no registry named (--registry / $CHTYPES_REGISTRY) — the reality check needs loaded "
             "artifacts and cannot run without one; refusing to report a pass that checked nothing"
         )
-    if not os.path.isdir(registry_dir) or not any(Path(registry_dir).glob("*/manifest.json")):
+    # Two levels count as "something is fetched" (chtypes#284, "Layout
+    # rule"): a line's flat <minor>/manifest.json, or any OTHER exact patch
+    # nested at patches/<minor>/<clickhouse_version>/manifest.json.
+    has_flat = any(Path(registry_dir).glob("*/manifest.json"))
+    has_nested = any(Path(registry_dir).glob("patches/*/*/manifest.json"))
+    if not os.path.isdir(registry_dir) or not (has_flat or has_nested):
         die(
-            f"{registry_dir} holds no <line>/manifest.json — nothing is fetched there. "
-            f"scripts/fetch.sh <line> --dest {registry_dir} installs one; this script never fetches for itself"
+            f"{registry_dir} holds no <line>/manifest.json and no patches/<line>/<version>/manifest.json "
+            f"— nothing is fetched there. scripts/fetch.sh <line> --dest {registry_dir} installs one; "
+            f"this script never fetches for itself"
         )
 
     import chtypes  # noqa: PLC0415 (sys.path is prepared at module load, above)
