@@ -10,6 +10,10 @@ The four bindings in this repository are released together and give one answer, 
 
 - **`fetch`'s `lock` option now records the artifact's ABI revision** in each lock entry (`LockEntry.abi_revision`, optional and additive — schema stays 1); `frozen` checks it FIRST, before the file/sha256 pin: a lock that names a different revision throws `ArtifactPinnedError`, naming both numbers and the `npx @wavehouse/chtypes fetch` remedy, instead of surfacing as a bare drifted pin or `ArtifactUnpublishedError`. A lock entry with no recorded revision (written by an SDK before this change) keeps today's behavior, with one sentence appended when it ends in one of those two errors. `offline` with `frozen` is unaffected (docs/guides/fetch.md §5, closes #253).
 
+### Changed
+
+- **Every build the release publishes stays fetchable.** 0.3.2 said that an older-revision build stays fetchable only until that line's next publish evicts it under retention. That no longer holds: the release lists every build it has ever published, and selection takes the newest at this SDK's ABI revision (`docs/guides/fetch.md` §2).
+
 ### Fixed
 
 - **`frozen` no longer writes the lock file.** A frozen install that passed its pin check rewrote the lock with the entry it had just verified, re-serialized. Go, Python and Rust never write under `--frozen`.
@@ -25,8 +29,6 @@ Speaks ABI revision 6 and refuses revision-5 artifacts. Revision 6 adds the erro
 - **`RowResult#partitionId?`** and **`BatchResult#partitionCount?`**, both absent unless the schema declared a key. A batch over `max_partitions_per_insert_block` is an ordinary `'rejected'` with `errCode` 252.
 
 ### Changed
-
-- **An older ABI revision stays fetchable until it is explicitly retired.** 0.3.2 said that across a revision cutover an older-revision build stays fetchable only until that line's next publish evicts it under retention. That no longer holds: besides the two highest builds per version and platform, the release keeps the newest build of every ABI revision it still serves, and drops a served revision only when the artifact producer retires it deliberately, with notice (`docs/guides/fetch.md` §2).
 
 - **Speaks ABI revision 6, and refuses revision-5 artifacts** — and a revision-5 binding refuses revision-6 ones. Revision 6 only ADDS `chs_error_codes` and `chs_schema_partition_by`; no existing declaration changed. It is still a new number, so a fetch after upgrading downloads revision-6 artifacts into their own `abi6` cache directory, and a directory holding only revision-5 artifacts is refused at load, naming both revisions. Revision-6 artifacts are published by the artifact producer; until they are, this binding has nothing to load.
 - **A TTL on a schema with a `CHECK` constraint is now evaluated.** `setTtl` on such a schema used to answer `UnsupportedError`; against revision-6 artifacts it answers as on any other schema, accepting the TTL or giving the server's own refusal. That matches a server, whose TTL validation does not read constraints. The change is in the artifacts, so it arrives with them.
