@@ -5,7 +5,7 @@
 # (read its header); this file is the wiring. It does not open pull
 # requests: support-matrix-refresh.yml's header says why nothing here may.
 #
-# THE SIX CONDITIONS. A pull request enqueues only when ALL of these hold:
+# THE SEVEN CONDITIONS. A pull request enqueues only when ALL of these hold:
 #   1. the head is a branch of THIS repository, never a fork;
 #   2. every required check on the head is completed and successful — read
 #      BY NAME from the head's check runs, because the `ci` run's overall
@@ -20,7 +20,15 @@
 #   6. ONLY when docs/support.md is part of the diff: it was MODIFIED, and
 #      scripts/support-matrix.sh, from main's own checkout and against the
 #      live served index, produces a docs/support.md byte-identical to the
-#      pull request head's copy.
+#      pull request head's copy;
+#   7. ONLY when the pull request touches a test or fixture path
+#      (chtypes#285 §1b): no suite's executed-test count, and no
+#      golden-case count, fell below main's last green `ci` push run — read
+#      from each job's own console log (a check run's own `output.summary`
+#      is not populated for a GitHub-Actions-authored job; see
+#      scripts/policy-merge-check.py's module docstring for how that was
+#      verified), naming the suite and both numbers on a drop. A missing or
+#      unparseable count on either side counts as a drop.
 # Plus what an enqueue needs in order to succeed at all: one open, non-draft
 # pull request against main; a head that has not moved since `ci` judged it;
 # no known merge conflict. Anything else is left for a human with ONE
@@ -93,7 +101,13 @@
 # the script text. The checkout below is main, and main's scripts are the
 # only code that runs. The head's docs/support.md — read only when it is part
 # of the diff — is read as DATA, through the contents API at the head SHA,
-# and only compared byte for byte with main's regeneration.
+# and only compared byte for byte with main's regeneration. Condition 7
+# (chtypes#285 §1b) reads more of this shape, never a new kind of risk: up to
+# five job LOGS per side, through the Actions API, matched against a fixed
+# regex for two integers — never executed, sourced or parsed as code. The
+# jobs read are provably main's own, because `protected` (evaluated before
+# both `checks` and `test-counts`) already refuses a pull request that edited
+# `.github/**` or `scripts/**`.
 # The `enqueue` job checks out one file of main and reads nothing of the head
 # at all. One step that executed head code here would hand every fork a write
 # token to this repository.
@@ -106,8 +120,9 @@
 #   - Branch protection still decides, exactly as for a human (enforce_admins
 #     is on): this can enqueue only what anyone with write access could, and
 #     the queue merges only what its own required checks pass.
-#   - The `automerge` job only reads (contents, pull-requests and checks:
-#     read). The enqueue is made by the merge-bot GitHub App from the
+#   - The `automerge` job only reads (contents, pull-requests, checks and —
+#     chtypes#285 §1b, for condition 7's job-log reads only — actions: read).
+#     The enqueue is made by the merge-bot GitHub App from the
 #     `enqueue` job, because an entry the built-in token enqueues gets no
 #     merge_group run of `ci` and stalls (measured on #289, chtypes#291). The
 #     App's id and key live in the `merge-bot` environment, which deploys
@@ -174,10 +189,18 @@ jobs:
     timeout-minutes: 10
     # This job only READS: it judges, and hands the judged head to the
     # `enqueue` job below. It holds no write permission and no App token.
+    # `actions: read` (chtypes#285 §1b) is for the `test-counts` condition
+    # alone: GET .../actions/jobs/{id}/logs and GET .../actions/runs/{id}/jobs,
+    # both read-only, both needed because a check run's own `output.summary`
+    # is NOT populated for a GitHub-Actions-authored job (measured; see
+    # scripts/policy-merge-check.py's module docstring) — the job's console
+    # log is the only place a read-only token can read the chtypes-count
+    # lines scripts/check-suite.sh and scripts/check-standalone.sh print.
     permissions:
       contents: read
       pull-requests: read
       checks: read
+      actions: read
     outputs:
       enqueue: ${{ steps.judge.outputs.enqueue }}
       pr: ${{ steps.judge.outputs.pr }}
