@@ -262,12 +262,11 @@ carry job-level `continue-on-error: true`, and fails if that set and
 REQUIRED_CHECKS differ in either direction. ci.yml marks its deliberately
 non-blocking jobs exactly that way, and every other job in it is meant to be
 required. Branch protection still has the final word at merge time; this list
-only stops the workflow from attempting a merge it already knows would fail.
+only stops the workflow from attempting an enqueue it already knows would fail.
 
-Exit status: 0 for a merge, a dry run or a refusal; 1 for a failed selftest, a
-REQUIRED_CHECKS or guide disagreement, or a merge whose result is not the
-regeneration; 2 for an API failure or anything else unexpected, so it can
-never be mistaken for a quiet refusal.
+Exit status: 0 for an enqueue, a dry run or a refusal; 1 for a failed
+selftest, or a REQUIRED_CHECKS or guide disagreement; 2 for an API failure or
+anything else unexpected, so it can never be mistaken for a quiet refusal.
 """
 
 from __future__ import annotations
