@@ -101,7 +101,7 @@ Under `allow_errors`, NDJSON and a multi-line JSON array resynchronize per recor
 
 ### CHECK constraints are batch-level, not per-row
 
-A `CHECK` in the compiled DDL is evaluated, and a violation answers ClickHouse's own **code 469**. Like the server, **one violating row rejects the entire batch** — the batch `outcome` is `rejected`, and every row is discarded together — and the export channel declines rather than emitting partial bytes. A caller that assumes per-row rejection here will build a partial-success path that never fires.
+A `CHECK` in the compiled DDL is evaluated, and a violation answers ClickHouse's own **code 469**. Like the server, **one violating row rejects the entire batch** — the batch `outcome` is `rejected`, and every row is discarded together — and the export channel declines rather than emitting partial bytes. A caller that assumes per-row rejection here will build a partial-success path that never fires. `input_format_allow_errors_*` does not rescue this: it skips a row the parser itself cannot read, and a CHECK violation is not a parse failure — it is evaluated against a row the parser read successfully — so `allow_errors` and a CHECK violation are orthogonal, and the batch still rejects whole.
 
 The violation's message matches the server's in its code, the constraint's name and the constraint's expression. A real server's message also names its own table (database, table and UUID) and the violating row's column values. This library has no table, so that part of the message differs by design. Match a CHECK violation on the code and the constraint name, never on the whole message text.
 
