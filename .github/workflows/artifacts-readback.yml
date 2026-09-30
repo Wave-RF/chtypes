@@ -60,16 +60,46 @@
 # without posting is the honest result. An outage must never read as a
 # quiet index.
 #
+# ⚠️ A PERSISTENT DROP USED TO RE-POST ON EVERY RUN (chtypes#270). Not
+# advancing the baseline on exit 1 is right — it keeps the run red until
+# someone resolves the drop — but nothing told a BRAND NEW drop apart from
+# the SAME drop still sitting there three runs later, so a long outage put
+# one identical comment on #73 per scheduled run. A second, independent
+# piece of state now closes that: the `generated_at` the LAST POSTED drop
+# comment named, restored/saved from its OWN Actions-cache entry
+# (`artifacts-readback-lastdrop-`, same newest-first restore-keys shape as
+# the baseline, never mixed into the baseline entry — see
+# scripts/readback-decide.sh's own header for the full decision). On exit 1
+# this repository now posts only when the served `after` differs from that
+# recorded value; every exit-1 run still FAILS regardless, and the baseline
+# is still never advanced. The lastdrop value is written to its cache entry
+# only once a post has actually succeeded, and a quiet exit-0 run leaves it
+# alone — a stale value there is harmless: it only suppresses a repost of
+# the exact state already reported.
+#
+# The compare step's own post-or-skip / advance-or-not decision is no longer
+# inline shell: `scripts/readback-decide.sh <ec> <out-file> [<last-drop-file>]`
+# is the pure function (parses the tool's own `generated_at:` line the same
+# way this step always did, and is exercised locally, with no network, by its
+# own `--selftest`), and this step only acts on the `outcome=` it prints.
+#
 # PER-OUTCOME BEHAVIOR:
 #   no cache restored (first run, or the prior baseline aged out)
 #     -> snapshot a fresh baseline, note "seeded" in the job summary,
 #        post nothing, save the baseline, exit 0.
-#   --compare exits 1 WITH a generated_at line (a row true-dropped, or the
-#   fixtures manifest row gone)
-#     -> post to #73, then FAIL the run. Baseline NOT advanced.
+#   --compare exits 1 WITH a generated_at line, and `after` differs from the
+#   last POSTED drop's recorded value (a new drop, or none on record)
+#     -> post to #73; only once that succeeds, record `after` as the new
+#        last-posted-drop value. Then FAIL the run. Baseline NOT advanced.
+#   --compare exits 1 WITH a generated_at line, and `after` EQUALS the last
+#   POSTED drop's recorded value (the identical drop already reported)
+#     -> post nothing; the job summary says so. Still FAIL the run — the
+#        drop has not gone away. Baseline NOT advanced; the recorded value
+#        is left as-is.
 #   --compare exits 0, generated_at MOVED
 #     -> post to #73; only after that post succeeds, advance the baseline
-#        to the --keep-current file. Exit 0.
+#        to the --keep-current file. Exit 0. The last-posted-drop value is
+#        not touched either way.
 #   --compare exits 0, generated_at UNCHANGED
 #     -> post nothing, save nothing, exit 0. Quiet stays quiet.
 #   anything else (exit 1 with NO generated_at line, or any exit code that
@@ -149,6 +179,23 @@ jobs:
           restore-keys: |
             artifacts-readback-index-
 
+      # A SEPARATE cache entry (distinct key prefix, same newest-first
+      # restore-keys shape) for the generated_at the last POSTED drop comment
+      # named — chtypes#270. Never the baseline entry above: mixing the two
+      # would either advance the baseline on exit 1 (never allowed) or lose
+      # dedup state on an exit-0 run (which never touches this file at all).
+      # A miss here (first run ever, or 7 days with no exit-1 at all) leaves
+      # nothing on disk, which scripts/readback-decide.sh treats exactly like
+      # "no prior drop on record" — the next drop posts.
+      - name: restore the last-posted drop's generated_at from the Actions cache
+        id: restore-lastdrop
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .artifacts-readback/lastdrop.txt
+          key: artifacts-readback-lastdrop-${{ github.run_id }}
+          restore-keys: |
+            artifacts-readback-lastdrop-
+
       # cache-matched-key is empty only when NEITHER the exact key NOR any
       # restore-keys prefix matched anything — a genuine "nothing cached at
       # all" state (the very first run, or a baseline that aged out after 7
@@ -177,6 +224,7 @@ jobs:
           BASELINE=.artifacts-readback/baseline.json
           KEPT=.artifacts-readback/current.json
           OUT=.artifacts-readback/compare-output.txt
+          LASTDROP=.artifacts-readback/lastdrop.txt
 
           # UNPIPED: the exit code below is index-diff.sh's own, never a
           # pipeline's rightmost command's.
@@ -184,37 +232,44 @@ jobs:
           scripts/index-diff.sh --compare "$BASELINE" --keep-current "$KEPT" >"$OUT" 2>&1 || ec=$?
           cat "$OUT"
 
-          if [ "$ec" -ne 0 ] && [ "$ec" -ne 1 ]; then
-            echo "artifacts-readback: scripts/index-diff.sh exited $ec (neither 0 nor 1) -- a bad argument reaching the tool's own usage error, never a quiet index. Failing without posting." >&2
+          # The post-or-skip / advance-or-not decision itself is
+          # scripts/readback-decide.sh (chtypes#270) -- a pure function of
+          # this run's exit code, its captured output, and the last-posted
+          # drop's cache file, exercised locally with no network by its own
+          # --selftest. This step only acts on the outcome= it prints.
+          decision="$(scripts/readback-decide.sh "$ec" "$OUT" "$LASTDROP")"
+          outcome="$(printf '%s\n' "$decision" | sed -n 's/^outcome=//p')"
+          before="$(printf '%s\n' "$decision" | sed -n 's/^before=//p')"
+          after="$(printf '%s\n' "$decision" | sed -n 's/^after=//p')"
+          reason="$(printf '%s\n' "$decision" | sed -n 's/^reason=//p')"
+
+          if [ "$outcome" = fail-no-post ]; then
+            case "$reason" in
+              bad-ec)
+                echo "artifacts-readback: scripts/index-diff.sh exited $ec (neither 0 nor 1) -- a bad argument reaching the tool's own usage error, never a quiet index. Failing without posting." >&2
+                ;;
+              unparseable)
+                echo "artifacts-readback: found a 'generated_at:' line but could not parse before=/after= out of it (exit $ec). Failing without posting." >&2
+                ;;
+              *)
+                echo "artifacts-readback: no 'generated_at:' line in the tool's output (exit $ec) -- the tool did not complete a comparison (a fetch failure or an unreadable baseline, not a finding). Failing without posting." >&2
+                ;;
+            esac
             exit 1
           fi
 
-          # Read before=/after= from the tool's OWN generated_at line -- never
-          # a separate hand-parse of the served JSON. This line ALSO tells
-          # apart the two things exit 1 can mean (see this workflow's own
-          # header): the comparison's own hard-failure verdict always prints
-          # this line first, while die() (a fetch failure, an unreadable
-          # baseline) fires before it is ever printed. No line here, on
-          # EITHER exit code, means the tool did not complete a comparison at
-          # all -- an outage, not a finding -- so this fails without posting.
-          line="$(grep -m1 '^  generated_at:' "$OUT" || true)"
-          if [ -z "$line" ]; then
-            echo "artifacts-readback: no 'generated_at:' line in the tool's output (exit $ec) -- the tool did not complete a comparison (a fetch failure or an unreadable baseline, not a finding). Failing without posting." >&2
-            exit 1
-          fi
-          before="$(printf '%s\n' "$line" | sed -n 's/^  generated_at: before=\(.*\)  after=.*/\1/p')"
-          after="$(printf '%s\n' "$line" | sed -n 's/^  generated_at: before=.*  after=\(.*\)/\1/p')"
-          if [ -z "$before" ] || [ -z "$after" ]; then
-            echo "artifacts-readback: could not parse before=/after= out of: $line" >&2
-            exit 1
-          fi
-
-          if [ "$ec" -eq 0 ] && [ "$before" = "$after" ]; then
+          if [ "$outcome" = quiet ]; then
             echo "artifacts-readback: generated_at unchanged ($after) -- quiet stays quiet: nothing posted, nothing saved" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          if [ "$ec" -eq 1 ]; then
+          if [ "$outcome" = skip-fail ]; then
+            echo "artifacts-readback: generated_at ($after) is the same drop already posted on #73 -- skipping a repeat post. Still failing the run (exit 1): the drop has not gone away, and the baseline is NOT advanced." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # Only post-advance and post-fail reach here.
+          if [ "$outcome" = post-fail ]; then
             verdict="A row was TRUE-DROPPED from the served index, or the sdk-fetch-fixtures.tar.gz manifest row went missing (generated_at $before -> $after) -- see the VERDICT line below."
           else
             verdict="generated_at moved from $before to $after; nothing was dropped."
@@ -241,15 +296,20 @@ jobs:
 
           gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/73/comments" -F body=@"$body_file"
 
-          if [ "$ec" -eq 1 ]; then
-            echo "artifacts-readback: posted; failing the run (exit 1) -- a red scheduled run is the alarm, and the baseline is NOT advanced, so later runs keep reporting this until it is resolved." | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$outcome" = post-fail ]; then
+            # Only now, after the post above has succeeded, is the
+            # last-posted-drop value recorded -- never before a post is known
+            # to have gone through.
+            printf '%s' "$after" > "$LASTDROP"
+            echo "save_lastdrop=1" >> "$GITHUB_OUTPUT"
+            echo "artifacts-readback: posted a new drop; failing the run (exit 1) -- a red scheduled run is the alarm, and the baseline is NOT advanced, so later runs keep reporting this (without re-posting) until it is resolved." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
-          # Only now, after the post above has succeeded, does the baseline
-          # advance -- to the CURRENT side --keep-current already wrote,
-          # which is provably the same document just compared and posted,
-          # never a second, later fetch.
+          # post-advance: only now, after the post above has succeeded, does
+          # the baseline advance -- to the CURRENT side --keep-current
+          # already wrote, which is provably the same document just compared
+          # and posted, never a second, later fetch.
           mv "$KEPT" "$BASELINE"
           echo "save=1" >> "$GITHUB_OUTPUT"
           echo "artifacts-readback: posted; generated_at $before -> $after; baseline advanced" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -267,3 +327,18 @@ jobs:
         with:
           path: .artifacts-readback/baseline.json
           key: artifacts-readback-index-${{ github.run_id }}
+
+      # The ONE step that must still run after `compare` has deliberately
+      # FAILED (the post-fail outcome: posted a new drop, then exit 1) --
+      # `always()` overrides the implicit success() every other `if:` above
+      # gets, and `steps.compare.outputs.save_lastdrop == '1'` is only ever
+      # set on that exact path, so this is a no-op on every other outcome
+      # (skip-fail, fail-no-post, quiet, post-advance, or `compare` never
+      # having run at all). This is the ONLY place the lastdrop cache entry
+      # is ever written, and only once the post it records already succeeded.
+      - name: save the last-posted drop's generated_at to the Actions cache
+        if: always() && steps.compare.outputs.save_lastdrop == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .artifacts-readback/lastdrop.txt
+          key: artifacts-readback-lastdrop-${{ github.run_id }}
