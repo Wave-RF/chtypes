@@ -1018,10 +1018,15 @@ type filterConfig struct {
 // brace type's own reader, which WRAPS an out-of-domain integer — {p:UInt8}
 // given "256" binds 0 and matches every genuine zero (measured, uniform
 // 24.8-26.7, server-matched) — while the same constant written as a literal
-// PROMOTES (x = 256 over UInt8 is simply never true). A too-narrow
-// parameter type silently matches the wrong rows: size the type for the
-// tenant-supplied domain ({p:UInt64}, {p:String}) or validate the value
-// before binding it. Malformed spellings refuse loudly (the server's 457
+// PROMOTES (x = 256 over UInt8 is simply never true). Sizing the brace type
+// WIDER does not remove this: the same wrap reappears at 2^64 on every
+// integer width once the bound value reaches it, and [U]Int128/[U]Int256
+// wrap at their own width instead of at 2^64 — there is no brace type that
+// is safe against an untrusted value's magnitude by size alone. For a value
+// you cannot already validate as in-domain and canonical, bind {p:String}
+// and use the round-trip strict-cast form instead of picking a wider brace
+// type (docs/guides/filters.md "The round-trip form — the recipe for an
+// untrusted value"). Malformed spellings refuse loudly (the server's 457
 // for "-1"/"+7"/"007" as UInt8; 32 for ""). A name bound twice at the C
 // boundary takes the LAST binding — the server's own insert_or_assign rule
 // (unreachable through this map, stated for completeness).
