@@ -53,10 +53,10 @@ cargo add chtypes                        # Rust
 Then fetch an artifact — verified, into the per-user cache every binding reads by default. Each binding ships the same command, so you need nothing from this repository:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8
-python -m chtypes fetch 25.8
-npx @wavehouse/chtypes fetch 25.8
-cargo install chtypes && chtypes fetch 25.8
+go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
+python -m chtypes fetch 26.8
+npx @wavehouse/chtypes fetch 26.8
+cargo install chtypes && chtypes fetch 26.8
 ```
 
 An ed25519 signature over the release and the sha256 of every byte are checked before anything lands.
@@ -71,7 +71,7 @@ One artifact, one schema, one row — the same program in each language. The row
 
 ```go
 reg, _ := chtypes.NewRegistry(chtypes.DefaultRegistryDir())
-lib, _ := reg.For("25.8")                      // a line or an exact patch; never a nearest match
+lib, _ := reg.For("26.8")                      // a line or an exact patch; never a nearest match
 cs, _ := lib.CompileDDL("x UInt8, ts DateTime DEFAULT now()")
 defer cs.Close()
 
@@ -89,7 +89,7 @@ fmt.Println(r.Substituted)            // ts: send it explicitly, or preview != s
 from chtypes import Format, Registry
 
 registry = Registry()
-library = registry.for_version("25.8")
+library = registry.for_version("26.8")
 
 with library.compile_ddl("x UInt8, ts DateTime DEFAULT now()") as schema:
     r = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n')
@@ -108,7 +108,7 @@ r.rows[0].substituted         # ts: send it explicitly, or preview != stored
 import { Format, Registry } from '@wavehouse/chtypes';
 
 const registry = new Registry();
-const lib = registry.for('25.8');
+const lib = registry.for('26.8');
 const schema = lib.compileDdl('x UInt8, ts DateTime DEFAULT now()');
 
 const r = schema.row(Format.JSONEachRow, Buffer.from('{"x":256}'));
@@ -126,7 +126,7 @@ schema.close();                         // or `using schema = …` on Node >= 24
 use chtypes::{Format, Registry, NO_SETTINGS};
 
 let registry = Registry::from_search_path();
-let lib = registry.for_version("25.8")?;
+let lib = registry.for_version("26.8")?;
 let schema = lib.compile("x UInt8, ts DateTime DEFAULT now()").compile()?;
 
 let r = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, NO_SETTINGS)?;

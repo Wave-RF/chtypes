@@ -146,6 +146,18 @@ pre-enqueue byte comparison against the head's own diff and does not attempt
 a post-hoc re-verification — a real gap versus the old guarantee, accepted
 because there is no synchronous moment left at which to make it.
 
+BUILT-IN TOKEN EVENTS START NO WORKFLOW. An entry enqueued with the
+workflow's built-in token gets no merge_group run of `ci`: GitHub starts no
+workflow for an event that token causes, so the entry waits at
+AWAITING_CHECKS until the queue's timeout (measured on #289; the same entry
+re-enqueued with a user token got its run 13 seconds later; chtypes#291).
+So `enqueue` here only JUDGES and hands the judged node id and head sha on as
+step outputs (handoff_outputs), with read-only permissions. The workflow's
+`enqueue` job, the only holder of the merge-bot App's token, then runs
+`enqueue-as-bot`, which validates those two values (bot_args_problem) and
+makes the one enqueuePullRequest call. An entry the App enqueues does get its
+merge_group run.
+
 MANUAL MERGES GO THROUGH THE QUEUE TOO. A protected-class pull request (left
 for a human by condition 5) is enqueued by hand with the same
 `enqueuePullRequest` mutation this file uses, pinned to the reviewed head
@@ -283,6 +295,11 @@ from dataclasses import dataclass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CI_YML = os.path.join(ROOT, ".github", "workflows", "ci.yml")
+POLICY_YML = os.path.join(ROOT, ".github", "workflows", "policy-merge.yml")
+# The only permissions the merge-bot token may be minted with. The App itself
+# carries more (the artifact producer's branch updates need Workflows); the
+# SDK's mint must never ask for them.
+MINT_PERMISSIONS = {"permission-contents": "write", "permission-pull-requests": "write"}
 GUIDE_PATH = os.path.join(ROOT, "CONTRIBUTING.md")
 
 BASE_BRANCH = "main"
@@ -843,6 +860,32 @@ def build_enqueue_plan(pr: dict, head_sha: str, dry_run: bool) -> EnqueuePlan:
     return EnqueuePlan(node_id=node_id, head_sha=head_sha, dry_run=dry_run)
 
 
+def handoff_outputs(plan: EnqueuePlan, number: int) -> dict[str, str]:
+    """The step outputs that hand a judged pull request to the `enqueue` job,
+    which holds the App token and does nothing else (BUILT-IN TOKEN EVENTS
+    START NO WORKFLOW, below). A pure function, so --selftest proves the
+    judged node id and head sha are what is handed on."""
+    return {"enqueue": "1", "pr": str(number), "node_id": plan.node_id, "head_sha": plan.head_sha}
+
+
+_SHA40 = re.compile(r"[0-9a-f]{40}")
+_NODE_ID = re.compile(r"[A-Za-z0-9_=-]{1,200}")
+
+
+def bot_args_problem(node_id: str, head_sha: str, pr: str) -> str | None:
+    """Why `enqueue-as-bot`'s arguments cannot be what the judging job
+    handed on, or None. They arrive through job outputs; anything that is not
+    a node id, a 40-hex head sha and a pull request number is refused before
+    the App token is used."""
+    if not _NODE_ID.fullmatch(node_id or ""):
+        return f"--node-id {node_id!r} is not a GraphQL node id"
+    if not _SHA40.fullmatch(head_sha or ""):
+        return f"--head-sha {head_sha!r} is not a 40-hex commit sha"
+    if not (pr or "").isdigit():
+        return f"--pr {pr!r} is not a pull request number"
+    return None
+
+
 def enqueue_pull_request(node_id: str, head_sha: str) -> dict:
     """Adds the pull request to main's merge queue: the enqueuePullRequest
     GraphQL mutation, passing expectedHeadOid=head_sha so GitHub itself
@@ -989,25 +1032,60 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         extra = f" (regenerated from main at {main_sha[:12]})" if touched_guarded else ""
         summary(f"policy-merge: DRY RUN. {where}: every condition holds{extra}; enqueuePullRequest was not called")
         return 0
-    try:
-        result = enqueue_pull_request(plan.node_id, plan.head_sha)
-    except ApiError:
-        # Deliberately not decoded into a friendly `stale` refusal here — see
-        # enqueue_pull_request()'s own docstring for why, and the module
-        # docstring's ENQUEUE, NOT MERGE section for what does catch a moved
-        # head (decide()'s `stale` condition, just above, already fresh).
-        raise
-    entry = ((result.get("data") or {}).get("enqueuePullRequest") or {}).get("mergeQueueEntry")
-    if not entry:
-        print(f"policy-merge-check: the enqueue mutation returned {result!r}", file=sys.stderr)
-        return 2
+    # The judging job never enqueues: an entry the built-in token enqueues
+    # gets no merge_group run of `ci` and stalls (BUILT-IN TOKEN EVENTS START
+    # NO WORKFLOW, above). It hands the judged node id and head sha to the
+    # `enqueue` job, which mints the App token and calls the mutation.
+    output(**handoff_outputs(plan, number))
     if touched_guarded:
-        summary(f"policy-merge: enqueued PR #{number} (head {sha}); {', '.join(touched_guarded)} at the head "
-                f"matched main's regeneration (main at {main_sha[:12]}) byte for byte before enqueueing — the "
-                "queue's own test of the merged combination is what happens next, not a re-check by this workflow")
+        summary(f"policy-merge: every condition holds for PR #{number} (head {sha}); {', '.join(touched_guarded)} at "
+                f"the head matched main's regeneration (main at {main_sha[:12]}) byte for byte; handed to the "
+                "enqueue job")
     else:
-        summary(f"policy-merge: enqueued PR #{number} (head {sha}); no guarded generated file was touched, so no "
-                "byte comparison was needed")
+        summary(f"policy-merge: every condition holds for PR #{number} (head {sha}); no guarded generated file was "
+                "touched; handed to the enqueue job")
+    return 0
+
+
+def mint_scope_problems(text: str) -> list[str]:
+    """Why policy-merge.yml's App-token mint is not scoped exactly as
+    MINT_PERMISSIONS says, or []. Reads the workflow's text: every
+    create-github-app-token step, its `permission-*` inputs, and that it sits
+    in a job whose environment is merge-bot."""
+    problems: list[str] = []
+    lines = text.splitlines()
+    steps = [i for i, l in enumerate(lines) if "actions/create-github-app-token@" in l]
+    if len(steps) != 1:
+        return [f"expected exactly one create-github-app-token step, found {len(steps)}"]
+    i = steps[0]
+    indent = len(lines[i]) - len(lines[i].lstrip(" -"))
+    found: dict[str, str] = {}
+    for l in lines[i + 1:]:
+        stripped = l.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if len(l) - len(l.lstrip(" ")) <= indent - 2 or stripped.startswith("- "):
+            break
+        m = re.fullmatch(r"(permission-[a-z-]+):\s*(\S+)", stripped)
+        if m:
+            found[m.group(1)] = m.group(2)
+    if found != MINT_PERMISSIONS:
+        problems.append(f"the mint asks for {found}, not exactly {MINT_PERMISSIONS}")
+    job_start = max((j for j in range(i) if re.fullmatch(r"  [a-z][a-z0-9_-]*:", lines[j])), default=None)
+    if job_start is None or not any(lines[k].strip() == "environment: merge-bot" for k in range(job_start, i)):
+        problems.append("the mint is not in a job whose environment is merge-bot")
+    return problems
+
+
+def cmd_check_mint_scope() -> int:
+    with open(POLICY_YML, encoding="utf-8") as f:
+        problems = mint_scope_problems(f.read())
+    if problems:
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
+        print("policy-merge-check: the merge-bot token mint is not scoped as MINT_PERMISSIONS says", file=sys.stderr)
+        return 1
+    print(f"policy-merge-check: ok, the merge-bot mint asks for exactly {MINT_PERMISSIONS} in the merge-bot job")
     return 0
 
 
@@ -1256,6 +1334,32 @@ def selftest() -> int:
         failures.append("build_enqueue_plan: a pull request object with no node_id was accepted")
     except ValueError:
         pass
+    # The hand-off to the App-token job carries exactly the judged node id
+    # and head sha, and enqueue-as-bot refuses anything else before the App
+    # token is used.
+    handed = handoff_outputs(plan, 7)
+    if handed != {"enqueue": "1", "pr": "7", "node_id": _good_pr()["node_id"], "head_sha": SHA}:
+        failures.append(f"handoff_outputs: did not hand on the judged node_id/head_sha: {handed!r}")
+    if bot_args_problem(_good_pr()["node_id"], SHA, "7") is not None:
+        failures.append("bot_args_problem: refused a well-formed node id, head sha and number")
+    good_yml = ("jobs:\n  enqueue:\n    environment: merge-bot\n    steps:\n"
+                "      - uses: actions/create-github-app-token@abc # v3\n        id: app\n        with:\n"
+                "          app-id: x\n          permission-contents: write\n          permission-pull-requests: write\n"
+                "      - name: next\n        run: true\n")
+    if mint_scope_problems(good_yml):
+        failures.append(f"mint_scope_problems: refused the exact scope: {mint_scope_problems(good_yml)}")
+    wider = good_yml.replace("          permission-pull-requests: write\n",
+                             "          permission-pull-requests: write\n          permission-workflows: write\n")
+    if not mint_scope_problems(wider):
+        failures.append("mint_scope_problems: accepted a mint that also asks for permission-workflows")
+    if not mint_scope_problems(good_yml.replace("          permission-contents: write\n", "")):
+        failures.append("mint_scope_problems: accepted a mint with no permission list (the App's full set)")
+    if not mint_scope_problems(good_yml.replace("    environment: merge-bot\n", "")):
+        failures.append("mint_scope_problems: accepted a mint outside the merge-bot environment")
+    for bad in ((_good_pr()["node_id"], "abc", "7"), (_good_pr()["node_id"], SHA.upper(), "7"),
+                ("", SHA, "7"), ("PR_x y", SHA, "7"), (_good_pr()["node_id"], SHA, "7; rm")):
+        if bot_args_problem(*bad) is None:
+            failures.append(f"bot_args_problem: accepted {bad!r}")
     # cmd_enqueue's own control flow is what makes "dry run never calls the
     # mutation" and "a moved head refuses before the mutation" true: the
     # dry-run branch returns before enqueue_pull_request() is ever
@@ -1474,12 +1578,32 @@ def selftest() -> int:
           "a deletion, and ts/biome.json by name), docs/support.md's byte guard refuses a mismatch and a "
           "non-modification, a missing, failing or pending required check, a fork, a stale head, a draft, a "
           "conflict and a review each refuse; an all-good input passes; build_enqueue_plan carries the judged "
-          "head sha and node_id and never reaches the mutation on a dry run; ci.yml's blocking jobs and the "
+          "head sha and node_id and never reaches the mutation on a dry run; the hand-off to the enqueue job carries "
+          "exactly that node id and head sha, and enqueue-as-bot refuses malformed ones; the merge-bot mint must ask for "
+          "exactly contents and pull-requests write inside the merge-bot job; ci.yml's blocking jobs and the "
           "CONTRIBUTING.md guide block are both derived from their source, never hand-set")
     return 0
 
 
 # ----------------------------------------------------------------------- main
+
+
+def cmd_enqueue_as_bot(args: argparse.Namespace) -> int:
+    """The `enqueue` job's one call: enqueuePullRequest with the App
+    installation token in GH_TOKEN, pinned to the judged head. It reads no
+    repository file and judges nothing; the judging job already did."""
+    problem = bot_args_problem(args.node_id, args.head_sha, args.pr)
+    if problem:
+        print(f"policy-merge-check: {problem}", file=sys.stderr)
+        return 2
+    result = enqueue_pull_request(args.node_id, args.head_sha)
+    entry = ((result.get("data") or {}).get("enqueuePullRequest") or {}).get("mergeQueueEntry")
+    if not entry:
+        print(f"policy-merge-check: the enqueue mutation returned {result!r}", file=sys.stderr)
+        return 2
+    summary(f"policy-merge: enqueued PR #{args.pr} (head {args.head_sha}) as the merge-bot App; the queue's "
+            "merge_group run of ci is what happens next")
+    return 0
 
 
 def main(argv: list[str]) -> int:
@@ -1491,6 +1615,8 @@ def main(argv: list[str]) -> int:
         return cmd_print_protected()
     if argv == ["--check-guide"]:
         return cmd_check_guide()
+    if argv == ["--check-mint-scope"]:
+        return cmd_check_mint_scope()
     parser = argparse.ArgumentParser(prog="policy-merge-check.py")
     sub = parser.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("gate", help="every condition but the byte comparison")
@@ -1498,13 +1624,17 @@ def main(argv: list[str]) -> int:
     g.add_argument("--pr", type=int)
     g.add_argument("--run-head-sha")
     g.add_argument("--run-head-repo")
-    m = sub.add_parser("enqueue", help="every condition, then enqueuePullRequest")
+    m = sub.add_parser("enqueue", help="every condition, then hand the judged head to the enqueue job")
     m.add_argument("--repo", required=True)
     m.add_argument("--pr", type=int, required=True)
     m.add_argument("--head-sha", required=True)
     m.add_argument("--run-head-repo", default="")
     m.add_argument("--regenerated", action="append", default=[], metavar="PATH=FILE")
     m.add_argument("--dry-run", action="store_true")
+    q = sub.add_parser("enqueue-as-bot", help="enqueuePullRequest with the App token in GH_TOKEN")
+    q.add_argument("--pr", required=True)
+    q.add_argument("--node-id", required=True)
+    q.add_argument("--head-sha", required=True)
     args = parser.parse_args(argv)
     if args.cmd == "gate":
         if (args.pr is None) == (args.run_head_sha is None):
@@ -1512,7 +1642,11 @@ def main(argv: list[str]) -> int:
         if args.run_head_sha is not None and args.run_head_repo is None:
             parser.error("--run-head-sha needs --run-head-repo")
     try:
-        return cmd_gate(args) if args.cmd == "gate" else cmd_enqueue(args)
+        if args.cmd == "gate":
+            return cmd_gate(args)
+        if args.cmd == "enqueue-as-bot":
+            return cmd_enqueue_as_bot(args)
+        return cmd_enqueue(args)
     except Exception as e:  # noqa: BLE001 — every unexpected failure must read as one, never as a refusal
         print(f"policy-merge-check: {type(e).__name__}: {e}", file=sys.stderr)
         summary(f"policy-merge: ERROR ({type(e).__name__}), nothing was merged: {e}")
