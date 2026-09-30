@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-30
+
+Speaks ABI revision 6 and refuses revision-5 artifacts. Revision 6 adds the error-code table and the partition key; revision-6 artifacts are published for every ClickHouse line this SDK supports, beside the revision-5 builds that 0.3.x keeps loading.
+
 ### Added
 
 - **`Library::error_codes()`** — THIS build's own ClickHouse error-code table (`chs_error_codes`), as a `&ErrorCodeTable`: `name(i32) -> Option<&str>`, `code(&str) -> Option<i32>` and `iter()` (ascending; `&ErrorCodeTable` is `IntoIterator`), over `ErrorCodeEntry { code, name }`. Per `Library` and never crate-level, because the table moves between lines — one number names two different errors on 25.8 and 26.2. An unknown or negative code and an unknown name are `None`, never synthesized; names match exactly. Built on the first call and kept on success only: a `NULL` answer is the new `Error::NoDocument` and is never cached; an artifact that predates the symbol is `Error::PredatesFeature`.
