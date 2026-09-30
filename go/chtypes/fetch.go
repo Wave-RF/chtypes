@@ -259,6 +259,11 @@ func Ensure(ctx context.Context, spelling string, opts FetchOptions) (*Installed
 	if f.opts.Offline {
 		return f.ensureOffline(spelling, line, exact)
 	}
+	if f.opts.Frozen {
+		if err := f.checkLockRevisionEarly(spelling, line); err != nil {
+			return nil, err
+		}
+	}
 	if err := f.loadRelease(ctx, spelling); err != nil {
 		return nil, err
 	}
@@ -1095,9 +1100,9 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"you asked for exactly ClickHouse %s on %s at ABI revision %d (this SDK's) and the release at %s does not publish it at that revision: %s; at ABI revision %d the release has: %s. Ask for the line (%s) to take what was published",
+				"you asked for exactly ClickHouse %s on %s at ABI revision %d (this SDK's) and the release at %s does not publish it at that revision: %s; at ABI revision %d the release has: %s. Ask for the line (%s) to take what was published.%s",
 				exact, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that patch for "+f.platform),
-				f.abiRevision, versionsOf(rows), line)
+				f.abiRevision, versionsOf(rows), line, f.revisionNote(line))
 		}
 	} else {
 		for _, a := range all {
@@ -1110,9 +1115,9 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"no artifact for ClickHouse line %s on %s at ABI revision %d (this SDK's) at %s: %s; at ABI revision %d the release has: %s",
+				"no artifact for ClickHouse line %s on %s at ABI revision %d (this SDK's) at %s: %s; at ABI revision %d the release has: %s.%s",
 				line, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that line for "+f.platform),
-				f.abiRevision, versionsOf(rows))
+				f.abiRevision, versionsOf(rows), f.revisionNote(line))
 		}
 	}
 	// A line can carry more than one row: two patches, or the same patch built
@@ -1161,12 +1166,73 @@ func (f *fetcher) selectAll() ([]ReleaseArtifact, error) {
 	return out, nil
 }
 
-// checkPin enforces the §5 lock under --frozen.
-func (f *fetcher) checkPin(spelling string, a *ReleaseArtifact) error {
-	path := f.opts.LockFile
-	if path == "" {
-		path = DefaultLockFile
+// lockPath is the file --frozen enforces or a plain fetch records into:
+// LockFile, or DefaultLockFile when none was given.
+func (f *fetcher) lockPath() string {
+	if f.opts.LockFile != "" {
+		return f.opts.LockFile
 	}
+	return DefaultLockFile
+}
+
+// peekLockEntry reads the lock file for one key, without requiring a
+// release to have been loaded. A missing or unparsable file reads as "no
+// entry" here: the authoritative read (and its own error) still happens in
+// checkPin, this is only ever used to decide whether to say more.
+func (f *fetcher) peekLockEntry(line string) (LockEntry, bool) {
+	l, err := ReadLockFile(f.lockPath())
+	if err != nil {
+		return LockEntry{}, false
+	}
+	entry, ok := l.Artifacts[LockKey(f.platform, line)]
+	return entry, ok
+}
+
+// checkLockRevisionEarly fails fast, before any network access, when
+// --frozen's lock already names an ABI revision for this key that is not
+// this binding's own (docs/guides/fetch.md §5). A lock made for one ABI
+// revision does not get a second chance disguised as a drifted pin or an
+// unpublished line once the SDK moves to another: the fix is always the
+// same re-lock, so the message says that directly instead of waiting to
+// see which of the two symptoms selection would have produced.
+func (f *fetcher) checkLockRevisionEarly(spelling, line string) error {
+	entry, ok := f.peekLockEntry(line)
+	if !ok || entry.ABIRevision == nil || *entry.ABIRevision == f.abiRevision {
+		return nil
+	}
+	path := f.lockPath()
+	key := LockKey(f.platform, line)
+	return f.fail(CodeArtifactPinned, spelling, nil,
+		"%s pins %s at ABI revision %d; this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
+		path, key, *entry.ABIRevision, f.abiRevision, GoFetchCommand, spelling, path)
+}
+
+// revisionNote is the one sentence appended to a PINNED or UNPUBLISHED
+// message when, under --frozen, the lock's own entry for this key exists
+// but names no ABI revision at all — written by an SDK before this field
+// existed. Never silently accept that as a pass: it is either a real drift
+// or a stale revision wearing an older lock's shape, and re-locking is the
+// remedy either way. "" when there is nothing to add.
+func (f *fetcher) revisionNote(line string) string {
+	if !f.opts.Frozen {
+		return ""
+	}
+	entry, ok := f.peekLockEntry(line)
+	if !ok || entry.ABIRevision != nil {
+		return ""
+	}
+	path := f.lockPath()
+	return fmt.Sprintf(" %s records no ABI revision (written by an older SDK); this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
+		path, f.abiRevision, GoFetchCommand, line, path)
+}
+
+// checkPin enforces the §5 lock under --frozen. The revision is checked
+// FIRST, before the file/sha256 comparison below it: a lock that names a
+// revision is refused the moment that revision is not this binding's own,
+// never compared byte-for-byte against an artifact it could never have
+// pinned.
+func (f *fetcher) checkPin(spelling string, a *ReleaseArtifact) error {
+	path := f.lockPath()
 	l, err := ReadLockFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -1180,16 +1246,27 @@ func (f *fetcher) checkPin(spelling string, a *ReleaseArtifact) error {
 		return f.fail(CodeArtifactPinned, spelling, nil,
 			"%s does not pin %s; the release offers %s (%s). Refusing an unpinned artifact under --frozen", path, key, a.File, a.SHA256)
 	}
-	if entry.File != a.File || !strings.EqualFold(entry.SHA256, a.SHA256) {
+	if entry.ABIRevision != nil && *entry.ABIRevision != f.abiRevision {
 		return f.fail(CodeArtifactPinned, spelling, nil,
-			"%s pins %s to %s (%s) but the release offers %s (%s). Refusing it under --frozen", path, key, entry.File, entry.SHA256, a.File, a.SHA256)
+			"%s pins %s at ABI revision %d; this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
+			path, key, *entry.ABIRevision, f.abiRevision, GoFetchCommand, spelling, path)
+	}
+	if entry.File != a.File || !strings.EqualFold(entry.SHA256, a.SHA256) {
+		msg := fmt.Sprintf("%s pins %s to %s (%s) but the release offers %s (%s). Refusing it under --frozen.", path, key, entry.File, entry.SHA256, a.File, a.SHA256)
+		if entry.ABIRevision == nil {
+			msg += fmt.Sprintf(" %s records no ABI revision (written by an older SDK); this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
+				path, f.abiRevision, GoFetchCommand, spelling, path)
+		}
+		return f.fail(CodeArtifactPinned, spelling, nil, "%s", msg)
 	}
 	f.say("pinned: %s matches %s", key, path)
 	return nil
 }
 
 // recordLock writes the §5 entry when a lock file was asked for (never
-// under --frozen, which is read-only).
+// under --frozen, which is read-only), including the ABI revision the
+// selected row carries — this binding's own, since selection never picks
+// any other (docs/guides/fetch.md §2).
 func (f *fetcher) recordLock(a *ReleaseArtifact) error {
 	if f.opts.LockFile == "" || f.opts.Frozen {
 		return nil
@@ -1199,11 +1276,12 @@ func (f *fetcher) recordLock(a *ReleaseArtifact) error {
 		return err
 	}
 	key := LockKey(f.platform, a.ClickHouseMinor)
-	l.Artifacts[key] = LockEntry{File: a.File, SHA256: strings.ToLower(a.SHA256)}
+	rev := f.abiRevision
+	l.Artifacts[key] = LockEntry{File: a.File, SHA256: strings.ToLower(a.SHA256), ABIRevision: &rev}
 	if err := l.Write(f.opts.LockFile); err != nil {
 		return fmt.Errorf("chtypes: writing %s: %w", f.opts.LockFile, err)
 	}
-	f.say("pinned %s -> %s in %s", key, a.File, f.opts.LockFile)
+	f.say("pinned %s -> %s (ABI revision %d) in %s", key, a.File, rev, f.opts.LockFile)
 	return nil
 }
 

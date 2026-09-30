@@ -293,6 +293,10 @@ func TestFetchFixturesUnpublishedPlatformLineAndPatchAreRefused(t *testing.T) {
 
 func TestFetchFixturesLockRecordsAndFrozenRefusesDrift(t *testing.T) {
 	dir, exp := fixtureDir(t)
+	rev, err := testhook.FixturesABIRevision(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	isolateEnv(t)
 	t.Setenv(envTrustedKeys, strings.Join(exp.TrustedKeys, ","))
 	lock := filepath.Join(dir, exp.Lock.File)
@@ -300,6 +304,14 @@ func TestFetchFixturesLockRecordsAndFrozenRefusesDrift(t *testing.T) {
 	l, err := ReadLockFile(lock)
 	if err != nil || l.Schema != LockSchema {
 		t.Fatalf("lock: %+v %v", l, err)
+	}
+	// The committed fixture lock predates abi_revision (docs/guides/fetch.md
+	// §5): its entries carry none, and --frozen against it still installs —
+	// the no-abi_revision path is the old behavior, unchanged.
+	for _, e := range l.Artifacts {
+		if e.ABIRevision != nil {
+			t.Fatalf("the committed fixture lock should carry no abi_revision: %+v", e)
+		}
 	}
 	// --frozen with the shared lock installs every pinned row of signed/.
 	for _, platform := range exp.Platforms {
@@ -318,7 +330,9 @@ func TestFetchFixturesLockRecordsAndFrozenRefusesDrift(t *testing.T) {
 			}
 		}
 	}
-	// The lock this SDK writes from a fresh fetch is the shared lock, entry for entry.
+	// The lock this SDK writes from a fresh fetch pins the shared lock's own
+	// file and sha256, entry for entry, and now also the fixtures' own ABI
+	// revision — the one new thing a fresh fetch records (docs/guides/fetch.md §5).
 	mine := filepath.Join(t.TempDir(), "chtypes.lock")
 	for _, platform := range exp.Platforms {
 		for line := range exp.Lines {
@@ -335,8 +349,12 @@ func TestFetchFixturesLockRecordsAndFrozenRefusesDrift(t *testing.T) {
 		t.Fatalf("wrote %d entries, the shared lock has %d", len(written.Artifacts), len(l.Artifacts))
 	}
 	for k, e := range l.Artifacts {
-		if written.Artifacts[k] != e {
-			t.Fatalf("%s: wrote %+v, shared %+v", k, written.Artifacts[k], e)
+		w := written.Artifacts[k]
+		if w.File != e.File || w.SHA256 != e.SHA256 {
+			t.Fatalf("%s: wrote %+v, shared %+v", k, w, e)
+		}
+		if w.ABIRevision == nil || *w.ABIRevision != rev {
+			t.Fatalf("%s: wrote abi_revision %v, want %d", k, w.ABIRevision, rev)
 		}
 	}
 	// A copy whose sha256 was changed is refused with CHTYPES_ARTIFACT_PINNED.
