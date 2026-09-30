@@ -139,6 +139,54 @@
       "rust": "RegistryOptions"
     },
     {
+      "id": "registry.resolve",
+      "group": "registry",
+      "kind": "method",
+      "what": "Resolve a minor line or an exact patch to a Resolution — the loaded Library plus what was requested, what actually loaded, and whether it was exact. For/for_version/for/open run the same resolution and hand back only the Library (§Version selection)",
+      "go": "Registry.Resolve",
+      "python": "Registry.resolve",
+      "ts": "Registry.resolve",
+      "rust": "Registry::resolve"
+    },
+    {
+      "id": "registry.resolution",
+      "group": "registry",
+      "kind": "type",
+      "what": "The result a resolve call hands back: library, requested, version, exact (§Version selection)",
+      "go": "Resolution",
+      "python": "Resolution",
+      "ts": "Resolution",
+      "rust": "Resolution"
+    },
+    {
+      "id": "registry.resolution-library",
+      "group": "registry",
+      "kind": "property",
+      "what": "The Library a resolve call loaded",
+      "go": "Resolution.Library", "python": "Resolution.library", "ts": "Resolution", "rust": "Resolution"
+    },
+    {
+      "id": "registry.resolution-requested",
+      "group": "registry",
+      "kind": "property",
+      "what": "The caller's spelling, trimmed",
+      "go": "Resolution.Requested", "python": "Resolution.requested", "ts": "Resolution", "rust": "Resolution"
+    },
+    {
+      "id": "registry.resolution-version",
+      "group": "registry",
+      "kind": "property",
+      "what": "The loaded library's own version — what actually loaded, never what was requested",
+      "go": "Resolution.Version", "python": "Resolution.version", "ts": "Resolution", "rust": "Resolution"
+    },
+    {
+      "id": "registry.resolution-exact",
+      "group": "registry",
+      "kind": "property",
+      "what": "True for a line request. For a patch request, true only when the loaded version matches the requested patch under the shared matching rule — false means the fallback within the line was taken (§Version selection)",
+      "go": "Resolution.Exact", "python": "Resolution.exact", "ts": "Resolution", "rust": "Resolution"
+    },
+    {
       "id": "library.version",
       "group": "library",
       "kind": "property",
@@ -1326,8 +1374,8 @@
     {
       "id": "fetch.list-installed",
       "group": "fetch", "kind": "function",
-      "what": "What is installed, per line, on the search path",
-      "go": "ListInstalled", "python": "fetch.installed_lines", "ts": "listArtifacts", "rust": "installed_lines"
+      "what": "What is installed, per installed PATCH, on the search path — the flat line install at <minor>/ and every other installed patch at patches/<minor>/<clickhouse_version>/ all report (docs/guides/fetch.md §4)",
+      "go": "ListInstalled", "python": "fetch.installed_patches", "ts": "listArtifacts", "rust": "installed_patches"
     },
     {
       "id": "fetch.verify-installed",
@@ -1409,7 +1457,7 @@
     },
     {
       "id": "fetch.lock-schema",
-      "group": "fetch", "kind": "constant", "value": 1,
+      "group": "fetch", "kind": "constant", "value": 2,
       "what": "The lock file schema every SDK reads and writes",
       "go": "LockSchema", "python": "fetch.LOCK_SCHEMA", "ts": "LOCK_SCHEMA", "rust": "fetch::LOCK_SCHEMA"
     },
@@ -1465,6 +1513,7 @@
       "Version": "A named string type for a version spelling; the other three take plain strings.",
       "Schema": "The Go-only alias for a column-list string.",
       "Registry.ForContext": "Context-aware resolve, Go's own idiom for what TS spells as the async Registry#open.",
+      "Registry.ResolveContext": "Context-aware resolve, Go's own idiom for what TS spells as the async Registry#openResolution — like ForContext alongside For.",
       "Registry.Load": "Load one explicit artifact path into an existing registry.",
       "RegistryOption": "The functional-option carrier §One compile function's table names for Go.",
       "CompileOption": "Functional option carrier.",
@@ -1491,7 +1540,7 @@
       "LockEntry": "One lock pin.",
       "LockFile.Write": "Write a lock file.",
       "NewLockFile": "Construct a lock file.",
-      "LockKey": "The platform/line key a pin is stored under.",
+      "LockKey": "The platform/patch key a pin is stored under.",
       "ExitCode": "Map an error to the docs/guides/fetch.md §6 exit status; the other CLIs map it internally.",
       "ErrorCode": "The artifact error code as a named string type.",
       "ErrorCode.ExitCode": "Accessor.",
@@ -1546,6 +1595,8 @@
       "RegistryError": "Registry-layer error.",
       "ArtifactError": "The base every artifact error descends from.",
       "UnsignedArtifactWarning": "The loud warning --allow-unsigned raises.",
+      "PatchFallbackWarning": "The loud warning a patch request's fallback to the newest installed/published patch of its line raises, alongside UnsignedArtifactWarning.",
+      "fetch.installed_lines": "The patch a line request loads, one per line — superseded as the fetch-level listing by fetch.list-installed's per-patch fetch.installed_patches, which lists every installed patch.",
       "LOSSLESS_REASONS": "The four non-lossy reasons as a set; TS has isLossyReason, Go and Rust a Lossy predicate.",
       "Reason": "The reason namespace itself.",
       "Format": "The format enum type itself.",
@@ -1571,6 +1622,7 @@
     "ts": {
       "RowOptions": "The revision-5 column-list option's own type, split off RowsOptions (schema.columns-option) so row() and parseBlock() do not advertise the exportFormat and docFlags they ignore; RowsOptions extends it and still carries the capability.",
       "Registry.open": "The async resolve, TS's own idiom for what Go spells as ForContext.",
+      "Registry.openResolution": "The async resolve that may fetch, TS's own idiom for what Go spells as ResolveContext — like open alongside the synchronous resolve.",
       "Registry.has": "Membership test, as Python's __contains__.",
       "Registry.dir": "The primary registry directory.",
       "Schema.forgetFilter": "Bookkeeping a caller needs when it closes a filter itself.",
@@ -1708,6 +1760,7 @@
       "search_path_for": "The search path for another platform.",
       "locate": "Find a line on the search path.",
       "locate_in": "Find a line in given directories.",
+      "installed_lines": "The patch a line request loads, one per line — superseded as the fetch-level listing by fetch.list-installed's per-patch installed_patches, which lists every installed patch.",
       "reason": "The reason module itself."
     }
   }
