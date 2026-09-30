@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""policy-merge-check.py — may this pull request merge itself?
+"""policy-merge-check.py — may this pull request enqueue itself to merge?
 
     scripts/policy-merge-check.py --selftest          every refusal below fires, and an all-good input passes
     scripts/policy-merge-check.py --check-ci-names     REQUIRED_CHECKS agrees with ci.yml's blocking jobs (no network)
     scripts/policy-merge-check.py --check-guide        CONTRIBUTING.md's protected-glob block agrees with PROTECTED_GLOBS (no network)
     scripts/policy-merge-check.py --print-protected    PROTECTED_GLOBS, one per line
-    scripts/policy-merge-check.py gate  --repo OWNER/NAME --run-head-sha SHA --run-head-repo OWNER/NAME
-    scripts/policy-merge-check.py gate  --repo OWNER/NAME --pr N
-    scripts/policy-merge-check.py merge --repo OWNER/NAME --pr N --head-sha SHA
-                                        --regenerated docs/support.md=FILE
-                                        [--run-head-repo OWNER/NAME] [--dry-run]
+    scripts/policy-merge-check.py gate    --repo OWNER/NAME --run-head-sha SHA --run-head-repo OWNER/NAME
+    scripts/policy-merge-check.py gate    --repo OWNER/NAME --pr N
+    scripts/policy-merge-check.py enqueue --repo OWNER/NAME --pr N --head-sha SHA
+                                          --regenerated docs/support.md=FILE
+                                          [--run-head-repo OWNER/NAME] [--dry-run]
 
 Run by .github/workflows/policy-merge.yml, whose header says why the workflow
 exists and what it may touch; read that first.
@@ -20,6 +20,14 @@ passed. Issue #280 generalized it: ANY pull request merges itself once every
 condition below holds, not just a docs/support.md regeneration. The
 docs/support.md guard survives as condition 6, the one case this script still
 compares a file's actual bytes rather than just judging its path.
+
+A pull request no longer merges directly. `enqueue` adds it to main's GitHub
+merge queue (the `enqueuePullRequest` GraphQL mutation) once every condition
+holds; the queue itself tests the actual combination against main's current
+tip and performs the merge later, asynchronously. See ENQUEUE, NOT MERGE,
+below for why this is what makes "the tree that lands is the tree CI tested"
+true, which a direct merge against a branch whose protection does not
+require being up to date with main could not guarantee on its own.
 
 WHY THIS EXISTS. Merges are decided by policy; an agent is needed only when
 something cannot be decided deterministically — a check fails, an issue needs
@@ -33,20 +41,21 @@ byte-for-byte regeneration.
 THE SIX CONDITIONS
 ================================================================================
 
-A pull request merges itself when ALL of these hold. Evaluated in this order;
-the first that fails is the one reported. A refusal is not an error: the pull
-request is left for a human and the exit status is 0.
+A pull request enqueues itself when ALL of these hold. Evaluated in this
+order; the first that fails is the one reported. A refusal is not an error:
+the pull request is left for a human and the exit status is 0.
 
   fork       (1) The head is a branch of THIS repository: the head repository
                  the ci run reports AND the pull request's own head repository.
-                 A fork's head never auto-merges — kept unconditionally from
+                 A fork's head never auto-enqueues — kept unconditionally from
                  regen-automerge.
   pull-request   Exactly one open pull request against main carries the
                  commit, and it is not a draft. Draft is the hold switch:
-                 mark a pull request draft and this stops merging it.
+                 mark a pull request draft and this stops it from being
+                 enqueued.
   stale          The pull request's head is still the commit ci judged. A push
                  after that run means the run judged something that is no
-                 longer what would merge.
+                 longer what would be enqueued.
   protected  (5) No file the pull request touches — its current path, or for
                  a rename its OLD path too; a deletion counts by its one path
                  — matches a glob in PROTECTED_GLOBS (below). This is also
@@ -63,7 +72,7 @@ request is left for a human and the exit status is 0.
                  conclusion `success`. Checks outside that list are ignored:
                  ci.yml's `divergences` job can be red by design.
   mergeable      GitHub has not already reported a merge conflict
-                 (`mergeable: false`). A merge known to fail is not tried.
+                 (`mergeable: false`). An enqueue known to fail is not tried.
   review     (4) No reviewer's latest review requests changes, and no review
                  conversation exists. Branch protection requires every
                  conversation resolved, and the REST API cannot tell a
@@ -74,16 +83,74 @@ request is left for a human and the exit status is 0.
                  scripts/support-matrix.sh, run against the live index,
                  reproduces the head's copy byte for byte. A pull request
                  that does not touch docs/support.md skips this condition.
+                 This is necessarily a PRE-ENQUEUE check only — see ENQUEUE,
+                 NOT MERGE for why the old post-merge re-verification (the
+                 merge commit's docs/support.md still equals the regeneration)
+                 cannot run anymore.
 
 `gate` checks everything except the byte HALF of `bytes`, which needs the
 regeneration; the workflow regenerates only when the gate passes, so an
-ordinary pull request costs a handful of API reads. `merge` reads every fact
-again, checks all of them including the byte comparison, and merges with
-`sha=<head>` so GitHub itself refuses if the head moved in between (HTTP 409,
-reported as `stale`). When docs/support.md was part of the diff, it then reads
-that file back at the merge commit and fails the run if main does not now
-hold the regeneration there: a three-way merge commit's tree is not
-guaranteed to equal the head's raw diff even when the head itself matched.
+ordinary pull request costs a handful of API reads. `enqueue` reads every
+fact again, checks all of them including the byte comparison, and enqueues
+with `expectedHeadOid=<head>` so GitHub itself refuses if the head moved in
+between (reported as `stale`).
+
+================================================================================
+ENQUEUE, NOT MERGE — WHY THE QUEUE IS WHAT CLOSES THE RACE
+================================================================================
+
+`main`'s branch protection has `required_status_checks.strict: false`
+(measured directly: `gh api repos/Wave-RF/chtypes/branches/main/protection/
+required_status_checks`), so a pull request's required checks are judged
+against ITS OWN base at whatever commit it branched from — GitHub does not
+require the head to be up to date with main before it may merge. A pull
+request merged directly (the old `PUT .../merge` this file used before Eric
+approved the merge queue) could therefore land a combination `ci` never ran:
+the PR's changes atop an older main, not atop the main that will actually
+receive them. A direct merge made with the built-in token also starts no
+`push` run of `ci` on main afterward (documented GitHub behavior), so nothing
+would have caught it either.
+
+The merge queue closes this structurally, not by this script re-reading
+main's tip and hoping nothing moves in between: `ci.yml` also triggers on
+`merge_group` (checks_requested) now, so the queue's own candidate combination
+— the PR's changes merged with main's CURRENT tip — is what every required
+check actually runs against, and the queue merges only once those checks
+pass on THAT combination. Two pull requests enqueued close together are
+serialized by the queue itself, each tested against the tip the one ahead of
+it just produced. This is a stronger guarantee than this file could construct
+on its own with a compare-API re-check: it is enforced by GitHub for every
+entry in the queue, not by this workflow's timing.
+
+This script's own part is the `expectedHeadOid` on the `enqueuePullRequest`
+mutation (a pull request's HEAD still moving between the gate's read and the
+enqueue call is this file's problem, same as it always was — the queue does
+not protect against that, only against the BASE moving). `expectedHeadOid` is
+the same role `sha=` played on the old REST merge call; a mismatch there is
+GitHub's to refuse, not this script's to detect in the mutation's error text
+— see cmd_enqueue's own comment for why this file does not attempt to decode
+that error into a friendly `stale` refusal (unverified: the merge queue does
+not exist on this repository yet to observe its exact error shape against).
+The primary, verified defense against a moved head remains `decide()`'s
+`stale` condition, checked immediately before the mutation is ever reached.
+
+A PRE-ENQUEUE-ONLY byte check (condition 6, above) is the other consequence:
+the old code re-read the merge commit after a successful `PUT .../merge` and
+failed the run if it did not carry the regeneration, because a three-way
+merge's result is not guaranteed to equal the head's raw diff even when the
+head matched byte for byte. That re-read needed a `merge_sha` returned
+synchronously by the merge call; `enqueuePullRequest` returns a queue entry,
+not a merge result, and the actual merge happens later, asynchronously, on
+whatever commit the queue eventually lands. This file therefore trusts the
+pre-enqueue byte comparison against the head's own diff and does not attempt
+a post-hoc re-verification — a real gap versus the old guarantee, accepted
+because there is no synchronous moment left at which to make it.
+
+MANUAL MERGES GO THROUGH THE QUEUE TOO. A protected-class pull request (left
+for a human by condition 5) merges by `gh pr merge <n> --merge` same as
+always; once the repository requires the merge queue, that command enqueues
+rather than merging directly — GitHub's own behavior, nothing this file
+does. Draft status is still the hold switch either way.
 
 ================================================================================
 PROTECTED_GLOBS
@@ -117,6 +184,42 @@ design: over-protect rather than under-protect.
                           not exist in the tree yet (the Go module has no
                           external dependency today) and is protected in
                           advance of needing one.
+  .markdownlint.json, .markdownlint-cli2.jsonc, dprint.json
+                          configure the required `prose` job's tools
+                          (markdownlint-cli2, dprint); a PR could otherwise
+                          disable the rule that would have caught it
+  go/.golangci.yml        configures the required `lint-go` job's rules
+  ts/biome.json           configures the required `lint-ts` job's rules
+  ts/tsconfig.json, ts/tsconfig.test.json
+                          configure the required `ts` job's build and
+                          typecheck steps (`tsc -p tsconfig.json` /
+                          `tsc -p tsconfig.test.json` in ts/package.json)
+  tests/parity/manifest.json
+                          the cross-binding parity contract: each of the
+                          required `go`/`python`/`ts`/`rust` jobs' own parity
+                          test (parity_test.go, test_parity.py,
+                          parity.test.ts, parity.rs) reads and enforces it —
+                          declares what each binding must support, the same
+                          threat model as a config file that configures a
+                          check's rules
+  docs/divergences.json  the machine-checkable register of known divergences
+                          the (non-required) `divergences` job reads — an
+                          ALLOWLIST that excuses a result, the same threat
+                          model as a lint exemption, protected even though
+                          its own job is non-blocking
+
+Found by a sweep of every tool a required job runs (`ci.yml`'s `run:` lines
+for `--config`/`-c` flags and each tool's own name, each tool's default
+config-file names checked against `git ls-files`): no default-name config
+file exists for cargo clippy/fmt (no clippy.toml or rustfmt.toml — rust's
+lint config lives entirely in the already-protected rust/Cargo.toml
+`[lints]`), for shellcheck (no .shellcheckrc), or for actionlint (no config
+file at all — both used inside the already-protected .github/**-covered
+`lint-actions` job with no separate config); vitest (the `ts` job's test
+runner, `pnpm test` → `vitest run`) has no config file in this tree either.
+`.nvmrc` was considered and DROPPED: every `actions/setup-node` step in this
+repository's workflows hardcodes `node-version: 22`; none reads
+`node-version-file`, so nothing here is sensitive to its contents.
 
 Signature/checksum verification code and each binding's embedded release
 public key already sit inside the binding-source or scripts globs above —
@@ -256,6 +359,30 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("rust/Cargo.toml", "a release input: the crate manifest"),
     ProtectedGlob("rust/Cargo.lock", "a release input: the crate dependency lockfile"),
     ProtectedGlob("RELEASING.md", "the release procedure itself"),
+    # Configures a required check's own tool, found by a sweep of every
+    # ci.yml run: line for --config/-c flags and each tool's name, cross-
+    # checked against that tool's default config-file names in git ls-files
+    # (see the module docstring's PROTECTED_GLOBS section for what the sweep
+    # ruled OUT — no clippy.toml, rustfmt.toml, .shellcheckrc, actionlint
+    # config or vitest config exist in this tree, and .nvmrc is read by no
+    # workflow here).
+    ProtectedGlob(".markdownlint.json", "configures the required prose job's markdownlint rules"),
+    ProtectedGlob(".markdownlint-cli2.jsonc", "configures the required prose job's markdownlint-cli2 file selection"),
+    ProtectedGlob("dprint.json", "configures the required prose job's dprint formatting check"),
+    ProtectedGlob("go/.golangci.yml", "configures the required lint-go job's golangci-lint rules"),
+    ProtectedGlob("ts/biome.json", "configures the required lint-ts job's biome rules"),
+    ProtectedGlob("ts/tsconfig.json", "configures the required ts job's build step (tsc -p tsconfig.json)"),
+    ProtectedGlob("ts/tsconfig.test.json",
+                  "configures the required ts job's typecheck step (tsc -p tsconfig.test.json)"),
+    ProtectedGlob("tests/parity/manifest.json",
+                  "the cross-binding parity contract each of the required go/python/ts/rust jobs' own parity "
+                  "test reads and enforces — declares what every binding must support"),
+    # Excuses a result rather than configuring a tool — same threat model as
+    # a lint exemption, protected even though its own job (divergences) is
+    # non-blocking.
+    ProtectedGlob("docs/divergences.json",
+                  "the machine-checkable register of known divergences the divergences job reads; an allowlist "
+                  "that excuses a result"),
 )
 
 # --check-ci-names on this file's own PROTECTED_GLOBS: the two wildcard
@@ -693,6 +820,54 @@ def head_file(repo: str, path: str, sha: str) -> bytes:
     return decode_contents(gh_object(f"repos/{repo}/contents/{path}?ref={sha}"), path)
 
 
+@dataclass(frozen=True)
+class EnqueuePlan:
+    """What `cmd_enqueue` should do once `decide()` has passed: either
+    enqueue for real, carrying the judged node id and head sha, or — for
+    `--dry-run` — do nothing. A pure function of facts already in hand
+    (`build_enqueue_plan`, below), so `--selftest` can prove "enqueue is
+    called with the judged head sha" and "dry run never calls it" without a
+    network call: the mutation itself (`enqueue_pull_request`) is a thin,
+    untested-by-selftest wrapper, same as every other `gh api` call in this
+    file, but exactly what arguments it WOULD be called with, and whether it
+    is reached at all, are plain data here."""
+    node_id: str
+    head_sha: str
+    dry_run: bool
+
+
+def build_enqueue_plan(pr: dict, head_sha: str, dry_run: bool) -> EnqueuePlan:
+    node_id = pr.get("node_id")
+    if not node_id:
+        raise ValueError("the pull request object carries no node_id to enqueue")
+    return EnqueuePlan(node_id=node_id, head_sha=head_sha, dry_run=dry_run)
+
+
+def enqueue_pull_request(node_id: str, head_sha: str) -> dict:
+    """Adds the pull request to main's merge queue: the enqueuePullRequest
+    GraphQL mutation, passing expectedHeadOid=head_sha so GitHub itself
+    refuses the enqueue if the head moved since it was judged — the same
+    role `sha=` played on the REST merge call this replaced. Raises ApiError
+    on any failure.
+
+    This deliberately does NOT try to decode a head-mismatch out of the
+    mutation's error text into a friendly `stale` refusal, the way the old
+    merge call's HTTP 409 was decoded: that 409 case was verified against a
+    real occurrence (see http_status()'s selftest, which quotes gh's actual
+    error line); no equivalent has been observed for this mutation, because
+    the merge queue does not exist on this repository to produce one against
+    until after this change merges. The PRIMARY, verified defense against a
+    moved head is decide()'s `stale` condition, checked immediately before
+    this is ever reached — see the module docstring's ENQUEUE, NOT MERGE
+    section. An unrecognized failure here is a hard ERROR (exit 2), never
+    guessed into a quiet refusal."""
+    query = ("mutation($id:ID!,$oid:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,"
+             "expectedHeadOid:$oid}){mergeQueueEntry{id}}}")
+    out = gh(["graphql", "-f", f"query={query}", "-f", f"id={node_id}", "-f", f"oid={head_sha}"],
+             f"POST graphql enqueuePullRequest({node_id[:16]}…)")
+    return json.loads(out)
+
+
 @dataclass
 class Facts:
     pr: dict
@@ -766,12 +941,12 @@ def cmd_gate(args: argparse.Namespace) -> int:
     support_touched = any(f.get("filename") == "docs/support.md" for f in facts.files)
     note = ("passes every condition but the docs/support.md byte comparison" if support_touched
             else "passes every condition (does not touch docs/support.md)")
-    print(f"policy-merge: PR #{number} at {sha} {note}; proceeding to the merge check")
+    print(f"policy-merge: PR #{number} at {sha} {note}; proceeding to the enqueue check")
     output(candidate=1, pr=number, head_sha=sha)
     return 0
 
 
-def cmd_merge(args: argparse.Namespace) -> int:
+def cmd_enqueue(args: argparse.Namespace) -> int:
     regenerated: dict[str, bytes] = {}
     for spec in args.regenerated:
         path, sep, local = spec.partition("=")
@@ -791,7 +966,10 @@ def cmd_merge(args: argparse.Namespace) -> int:
                   files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
                   review_comments=facts.review_comments)
     # Every other condition first, fresh: a head that moved or vanished since
-    # the gate is `stale`, never a failed read of its bytes.
+    # the gate is `stale`, never a failed read of its bytes. This IS the
+    # primary defense against a moved head — see enqueue_pull_request()'s own
+    # docstring for why the mutation's expectedHeadOid is a backstop on this,
+    # not a replacement for it.
     refusal = decide(**judged)
     if refusal is None:
         head_bytes = {path: head_file(args.repo, path, sha) for path in GUARDED_FILES}
@@ -802,35 +980,34 @@ def cmd_merge(args: argparse.Namespace) -> int:
     main_sha = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True,
                               check=True).stdout.strip()
     touched_guarded = tuple(p for p in GUARDED_FILES if any(f.get("filename") == p for f in facts.files))
-    if args.dry_run:
+    # What to do next is a PURE decision (build_enqueue_plan) from facts
+    # already in hand, so --selftest can prove the plan carries the judged
+    # head sha and that a dry run's plan is never executed, without a
+    # network call — see EnqueuePlan's own docstring.
+    plan = build_enqueue_plan(facts.pr, sha, args.dry_run)
+    if plan.dry_run:
         extra = f" (regenerated from main at {main_sha[:12]})" if touched_guarded else ""
-        summary(f"policy-merge: DRY RUN. {where}: every condition holds{extra}; the merge call was not made")
+        summary(f"policy-merge: DRY RUN. {where}: every condition holds{extra}; enqueuePullRequest was not called")
         return 0
     try:
-        result = json.loads(gh(["-X", "PUT", f"repos/{args.repo}/pulls/{number}/merge",
-                                "-f", f"sha={sha}", "-f", "merge_method=merge"],
-                               f"PUT repos/{args.repo}/pulls/{number}/merge"))
-    except ApiError as e:
-        if e.status == 409:
-            return refuse(Refusal("stale", "the head moved before the merge call (HTTP 409)"), where)
+        result = enqueue_pull_request(plan.node_id, plan.head_sha)
+    except ApiError:
+        # Deliberately not decoded into a friendly `stale` refusal here — see
+        # enqueue_pull_request()'s own docstring for why, and the module
+        # docstring's ENQUEUE, NOT MERGE section for what does catch a moved
+        # head (decide()'s `stale` condition, just above, already fresh).
         raise
-    merge_sha = result.get("sha")
-    if result.get("merged") is not True or not merge_sha:
-        print(f"policy-merge-check: the merge call returned {result!r}", file=sys.stderr)
+    entry = ((result.get("data") or {}).get("enqueuePullRequest") or {}).get("mergeQueueEntry")
+    if not entry:
+        print(f"policy-merge-check: the enqueue mutation returned {result!r}", file=sys.stderr)
         return 2
-    for path in touched_guarded:
-        after = head_file(args.repo, path, merge_sha)
-        if after != regenerated[path]:
-            offset, line = first_difference(regenerated[path], after)
-            summary(f"policy-merge: MERGED PR #{number} (head {sha}) as {merge_sha}, but {path} at the merge "
-                    f"commit differs from main's regeneration at byte {offset} (line {line}); a human must look")
-            return 1
     if touched_guarded:
-        summary(f"policy-merge: merged PR #{number} (head {sha}) as {merge_sha}; {', '.join(touched_guarded)} at "
-                f"the merge commit is main's regeneration (main at {main_sha[:12]}), byte for byte")
+        summary(f"policy-merge: enqueued PR #{number} (head {sha}); {', '.join(touched_guarded)} at the head "
+                f"matched main's regeneration (main at {main_sha[:12]}) byte for byte before enqueueing — the "
+                "queue's own test of the merged combination is what happens next, not a re-check by this workflow")
     else:
-        summary(f"policy-merge: merged PR #{number} (head {sha}) as {merge_sha}; no guarded generated file was "
-                "touched, so no byte re-verification was needed")
+        summary(f"policy-merge: enqueued PR #{number} (head {sha}); no guarded generated file was touched, so no "
+                "byte comparison was needed")
     return 0
 
 
@@ -889,6 +1066,7 @@ GOOD = b"# Support\n\n| Line | Platforms |\n|---|---|\n| `25.8` | all |\n"
 
 def _good_pr() -> dict:
     return {"number": 7, "state": "open", "draft": False, "mergeable": None, "changed_files": 1,
+            "node_id": "PR_kwTEST00000007",
             "base": {"ref": "main", "repo": {"full_name": REPO}},
             "head": {"sha": SHA, "ref": "some-branch", "repo": {"full_name": REPO}}}
 
@@ -1039,6 +1217,9 @@ def selftest() -> int:
                "protected")
     expect("a go test file is the *_test.go exception, not protected",
            decide(**_with(files=[{"filename": "go/chtypes/client_test.go", "status": "modified"}])), None)
+    expect("ts/biome.json alone (lint-ts's own config) is protected",
+           decide(**_with(pr=_pr(changed_files=1), files=[{"filename": "ts/biome.json", "status": "modified"}])),
+           "protected")
     expect("a rename whose OLD path was protected",
            decide(**_with(pr=_pr(changed_files=1),
                           files=[{"filename": "README.md", "status": "renamed",
@@ -1058,6 +1239,33 @@ def selftest() -> int:
            "(fabricated) checks are trusted",
            decide(**_with(check_runs=[], files=[{"filename": ".github/workflows/ci.yml", "status": "modified"}])),
            "protected")
+
+    # build_enqueue_plan — a pure function of facts already in hand, so
+    # "enqueue is called with the judged head sha" and "dry run never calls
+    # it" are provable without a network call (enqueue_pull_request itself,
+    # the actual GraphQL mutation, is untested here — same as every other
+    # `gh api` wrapper in this file).
+    plan = build_enqueue_plan(_good_pr(), SHA, dry_run=False)
+    if plan.dry_run or plan.head_sha != SHA or plan.node_id != _good_pr()["node_id"]:
+        failures.append(f"build_enqueue_plan: did not carry the judged node_id/head_sha for a real run: {plan!r}")
+    dry_plan = build_enqueue_plan(_good_pr(), SHA, dry_run=True)
+    if not dry_plan.dry_run:
+        failures.append("build_enqueue_plan: dry_run was not carried through")
+    try:
+        build_enqueue_plan({"number": 7}, SHA, dry_run=False)
+        failures.append("build_enqueue_plan: a pull request object with no node_id was accepted")
+    except ValueError:
+        pass
+    # cmd_enqueue's own control flow is what makes "dry run never calls the
+    # mutation" and "a moved head refuses before the mutation" true: the
+    # dry-run branch returns before enqueue_pull_request() is ever
+    # referenced, and decide()'s freshly re-checked `stale` condition (a
+    # moved head, proven above) already returns before build_enqueue_plan is
+    # reached at all — neither is a claim a pure-function selftest can make
+    # about a live network call, so it is a property of the code path,
+    # confirmed by reading cmd_enqueue: the `if plan.dry_run: ...; return 0`
+    # line precedes `enqueue_pull_request(...)`, and both live entirely after
+    # `if refusal: return refuse(refusal, where)`.
 
     # condition 6 — bytes, only when docs/support.md is touched
     expect("docs/support.md untouched: no byte guard at all",
@@ -1263,10 +1471,11 @@ def selftest() -> int:
             print(f"SELFTEST FAILED: {f}", file=sys.stderr)
         return 1
     print("policy-merge-check: selftest ok — every PROTECTED_GLOBS family refuses (incl. a rename's old path and "
-          "a deletion), docs/support.md's byte guard refuses a mismatch and a non-modification, a missing, "
-          "failing or pending required check, a fork, a stale head, a draft, a conflict and a review each "
-          "refuse; an all-good input passes; ci.yml's blocking jobs and the CONTRIBUTING.md guide block are "
-          "both derived from their source, never hand-set")
+          "a deletion, and ts/biome.json by name), docs/support.md's byte guard refuses a mismatch and a "
+          "non-modification, a missing, failing or pending required check, a fork, a stale head, a draft, a "
+          "conflict and a review each refuse; an all-good input passes; build_enqueue_plan carries the judged "
+          "head sha and node_id and never reaches the mutation on a dry run; ci.yml's blocking jobs and the "
+          "CONTRIBUTING.md guide block are both derived from their source, never hand-set")
     return 0
 
 
@@ -1289,7 +1498,7 @@ def main(argv: list[str]) -> int:
     g.add_argument("--pr", type=int)
     g.add_argument("--run-head-sha")
     g.add_argument("--run-head-repo")
-    m = sub.add_parser("merge", help="every condition, then the merge")
+    m = sub.add_parser("enqueue", help="every condition, then enqueuePullRequest")
     m.add_argument("--repo", required=True)
     m.add_argument("--pr", type=int, required=True)
     m.add_argument("--head-sha", required=True)
@@ -1303,7 +1512,7 @@ def main(argv: list[str]) -> int:
         if args.run_head_sha is not None and args.run_head_repo is None:
             parser.error("--run-head-sha needs --run-head-repo")
     try:
-        return cmd_gate(args) if args.cmd == "gate" else cmd_merge(args)
+        return cmd_gate(args) if args.cmd == "gate" else cmd_enqueue(args)
     except Exception as e:  # noqa: BLE001 — every unexpected failure must read as one, never as a refusal
         print(f"policy-merge-check: {type(e).__name__}: {e}", file=sys.stderr)
         summary(f"policy-merge: ERROR ({type(e).__name__}), nothing was merged: {e}")

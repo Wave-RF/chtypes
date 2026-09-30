@@ -62,8 +62,23 @@
 # or a test runner whose own output is the answer.
 name: ci
 
+# merge_group (checks_requested): the merge queue's own candidate combination
+# — a pull request's changes merged with main's CURRENT tip, not the
+# possibly-older main its own pull_request run tested — must run and
+# conclude every required job here or the queue waits forever. No job below
+# reads github.event.pull_request.*, github.base_ref or github.head_ref (the
+# only github.ref use is the concurrency group below, which is unique per
+# merge_group entry same as it is per pull request), so nothing needed a
+# merge_group-specific branch; this audit is recorded in
+# .github/workflows/policy-merge.yml's header and in scripts/policy-merge-
+# check.py's module docstring (ENQUEUE, NOT MERGE), which also explains why
+# it exists. .github/workflows/policy-merge.yml explicitly ignores a
+# merge_group-triggered run of this workflow — it is the queue's own test,
+# not something that workflow enqueues again.
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
   workflow_dispatch:
@@ -182,10 +197,10 @@ jobs:
       # channel currently serves.
       - name: selftest — abi-channel.sh's channel derivation (equal, ahead, behind, disagreeing, missing, explicit override)
         run: scripts/abi-channel.sh --selftest
-      # .github/workflows/policy-merge.yml merges a pull request itself once
-      # every condition holds, and scripts/policy-merge-check.py is its whole
-      # decision (chtypes#280 generalized this from the old regen-automerge,
-      # which only handled a docs/support.md regeneration — see that script's
+      # .github/workflows/policy-merge.yml enqueues a pull request to merge
+      # itself once every condition holds, and scripts/policy-merge-check.py
+      # is its whole decision (chtypes#280 generalized this from the old
+      # regen-automerge, which only handled a docs/support.md regeneration — see that script's
       # own header for the six conditions and PROTECTED_GLOBS). Selftest
       # first: each refusal (every PROTECTED_GLOBS family, a docs/support.md
       # byte mismatch or non-modification, a missing, failing or pending

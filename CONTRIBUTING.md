@@ -28,16 +28,18 @@ Run any of these locally with the same command CI uses; each job's step name in 
 
 ## Policy merge
 
-A pull request merges itself once every condition below holds — `.github/workflows/policy-merge.yml`, whose decision is entirely `scripts/policy-merge-check.py` (chtypes#280). An agent, or a maintainer, is needed only when a condition fails: a check is red, or the pull request touches a file in a protected class.
+A pull request enqueues itself to main's merge queue once every condition below holds — `.github/workflows/policy-merge.yml`, whose decision is entirely `scripts/policy-merge-check.py` (chtypes#280). An agent, or a maintainer, is needed only when a condition fails: a check is red, or the pull request touches a file in a protected class.
 
 **The six conditions.** ALL must hold:
 
-1. the head is a branch of **this** repository — a fork's head never auto-merges;
+1. the head is a branch of **this** repository — a fork's head never auto-enqueues;
 2. every required check is green on the head, read by name;
 3. the head has not moved since the checks ran;
 4. GitHub reports no merge conflict, and no review conversation — no requested changes, no open review comment — exists;
 5. no file the pull request touches (its current path, or for a rename its old path too; a deletion counts) matches a **protected glob**, below;
 6. only when `docs/support.md` is part of the diff: it was modified (not added, deleted or renamed), and `scripts/support-matrix.sh`, run from main against the live served index, reproduces the head's copy byte for byte.
+
+**It enqueues, it does not merge.** Once every condition holds, the workflow calls the `enqueuePullRequest` GraphQL mutation (`expectedHeadOid` = the judged head sha, so a moved head still refuses) rather than merging directly. The merge queue itself then tests the actual combination — the pull request's changes merged with main's current tip — and merges only once that combination's checks pass; `ci.yml` triggers on `merge_group` as well as `pull_request` so those checks run. This is what makes "the tree that lands is the tree CI tested" true for every pull request, including ones enqueued moments apart, without this workflow re-reading main's tip and hoping nothing moved in between — see `.github/workflows/policy-merge.yml`'s own header for why a direct merge could not have guaranteed that on its own (`main`'s branch protection does not require a head to be up to date with main before merging). A manual merge of a protected-class pull request (`gh pr merge <n> --merge`) enqueues the same way once the repository requires the queue — GitHub's own behavior, not something this script does differently.
 
 **Draft is the hold switch.** Mark a pull request draft and this stops merging it — condition 2 above (`pull-request`, in the checker's terms). To stop the mechanism outright for every pull request: `gh workflow disable policy-merge`.
 
@@ -62,9 +64,20 @@ A pull request merges itself once every condition below holds — `.github/workf
 - `rust/Cargo.toml` — a release input: the crate manifest
 - `rust/Cargo.lock` — a release input: the crate dependency lockfile
 - `RELEASING.md` — the release procedure itself
+- `.markdownlint.json` — configures the required prose job's markdownlint rules
+- `.markdownlint-cli2.jsonc` — configures the required prose job's markdownlint-cli2 file selection
+- `dprint.json` — configures the required prose job's dprint formatting check
+- `go/.golangci.yml` — configures the required lint-go job's golangci-lint rules
+- `ts/biome.json` — configures the required lint-ts job's biome rules
+- `ts/tsconfig.json` — configures the required ts job's build step (tsc -p tsconfig.json)
+- `ts/tsconfig.test.json` — configures the required ts job's typecheck step (tsc -p tsconfig.test.json)
+- `tests/parity/manifest.json` — the cross-binding parity contract each of the required go/python/ts/rust jobs' own parity test reads and enforces — declares what every binding must support
+- `docs/divergences.json` — the machine-checkable register of known divergences the divergences job reads; an allowlist that excuses a result
 
 <!-- END policy-merge protected globs -->
 
 `go/**/*.go` (except `*_test.go`), `python/src/**`, `ts/src/**` and `rust/src/**` protect each binding's **whole** non-test source tree rather than a computed export list — Go has no export list, and Python/Rust export by visibility, not by anything a path rule can read. A follow-up could narrow this with committed API snapshots; none exist today. Tests, fixtures, examples, docs (`docs/support.md` alone excepted, as condition 6 above) and CHANGELOGs are deliberately **not** protected — the protected gates (condition 2) judge them, so nothing about loosening what they judge weakens the judge itself.
+
+The `.markdownlint.json`/`.markdownlint-cli2.jsonc`/`dprint.json`/`go/.golangci.yml`/`ts/biome.json`/`ts/tsconfig*.json` entries configure a required check's own tool — the same "must not weaken its own judge" reasoning as `.github/**` and `scripts/**`, one level down at the tool-config layer. `tests/parity/manifest.json` and `docs/divergences.json` are data a check reads to reach its verdict rather than code: the parity manifest declares what every binding must support, and the divergences register is an allowlist that excuses a result, the same threat model as a lint exemption — protected even though the `divergences` job itself is non-blocking. This list was produced by a sweep of every `ci.yml` `run:` line for a tool's config flags and name, cross-checked against each tool's default config-file name in `git ls-files`; it found no config file for cargo clippy/fmt, shellcheck, actionlint or vitest, and confirmed `.nvmrc` is read by no workflow here (every `setup-node` step hardcodes `node-version: 22`), so none of those needed adding.
 
 Signature/checksum verification code and each binding's embedded release public key already sit inside the globs above — confirmed by reading each: `go/chtypes/fetch_sign.go`, `python/src/chtypes/_ed25519.py`, `python/src/chtypes/fetch.py`, `ts/src/fetch.ts`, `rust/src/fetch/mod.rs`, `rust/src/fetch/release.rs`, `rust/src/fetch/trust.rs`. `scripts/lint-public.sh`'s one exemption (the literal `runner` segment in its local-path allowlist) lives inside the script itself, so `scripts/**` already covers it.

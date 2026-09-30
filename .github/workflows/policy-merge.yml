@@ -1,11 +1,11 @@
-# policy-merge — a pull request merges itself once every condition holds.
-# Generalized by chtypes#280 from the old regen-automerge, which only
-# handled a pull request that regenerated docs/support.md; every condition
-# and the decision itself live in scripts/policy-merge-check.py (read its
-# header); this file is the wiring. It does not open pull requests:
-# support-matrix-refresh.yml's header says why nothing here may.
+# policy-merge — a pull request enqueues itself to merge once every
+# condition holds. Generalized by chtypes#280 from the old regen-automerge,
+# which only handled a pull request that regenerated docs/support.md; every
+# condition and the decision itself live in scripts/policy-merge-check.py
+# (read its header); this file is the wiring. It does not open pull
+# requests: support-matrix-refresh.yml's header says why nothing here may.
 #
-# THE SIX CONDITIONS. A pull request merges only when ALL of these hold:
+# THE SIX CONDITIONS. A pull request enqueues only when ALL of these hold:
 #   1. the head is a branch of THIS repository, never a fork;
 #   2. every required check on the head is completed and successful — read
 #      BY NAME from the head's check runs, because the `ci` run's overall
@@ -21,16 +21,16 @@
 #      scripts/support-matrix.sh, from main's own checkout and against the
 #      live served index, produces a docs/support.md byte-identical to the
 #      pull request head's copy.
-# Plus what a merge needs in order to succeed at all: one open, non-draft
+# Plus what an enqueue needs in order to succeed at all: one open, non-draft
 # pull request against main; a head that has not moved since `ci` judged it;
 # no known merge conflict. Anything else is left for a human with ONE
 # job-summary line naming the condition that failed, and the run stays
-# green: most `ci` runs are not candidates for a self-merge, and a refusal
+# green: most `ci` runs are not candidates for a self-enqueue, and a refusal
 # is not an error.
 #
-# DRAFT IS THE HOLD SWITCH. Marking a pull request draft stops this merging
-# it — condition (pull-request) above. To stop the mechanism outright for
-# every pull request: `gh workflow disable policy-merge`.
+# DRAFT IS THE HOLD SWITCH. Marking a pull request draft stops this
+# enqueueing it — condition (pull-request) above. To stop the mechanism
+# outright for every pull request: `gh workflow disable policy-merge`.
 #
 # Condition 5 is also what makes condition 2 mean anything. A `pull_request`
 # run of `ci` uses the pull request's own copy of ci.yml, so a pull request
@@ -40,6 +40,46 @@
 # scripts/policy-merge-check.py's `decide()` evaluates `protected` before
 # `checks` for exactly this reason.
 #
+# ⚠️ ENQUEUE, NOT MERGE — AND WHY THAT IS WHAT CLOSES THE RACE. Eric approved
+# GitHub's merge queue for this repository (to be enabled on main once this
+# workflow is ready for it — a repository setting, not something this file
+# or script touches). Once every condition above holds, the final step below
+# calls the `enqueuePullRequest` GraphQL mutation instead of the REST
+# `PUT .../merge` this file used before: it passes `expectedHeadOid` = the
+# judged head sha, so GitHub itself refuses the enqueue if the head moved —
+# the same role `sha=` played on the old merge call. What happens next is
+# the queue's job, not this workflow's: GitHub tests the PULL REQUEST'S
+# CHANGES MERGED WITH MAIN'S CURRENT TIP — not the possibly-older main the
+# pull request's own `ci` run happened to test — and merges only once every
+# required check passes on THAT combination. `ci.yml` triggers on
+# `merge_group` (checks_requested) for exactly this: every required job also
+# runs, and must conclude, on the queue's own candidate commit, or the queue
+# waits forever. This is what makes "the tree that lands is the tree CI
+# tested" true even for two pull requests enqueued moments apart — the queue
+# serializes them, testing the second against the tip the first just
+# produced — without this workflow re-reading main's tip itself and hoping
+# nothing moves in between a read and an enqueue call of its own. See
+# scripts/policy-merge-check.py's own module docstring (ENQUEUE, NOT MERGE)
+# for the full reasoning, including why `main`'s branch protection
+# (`required_status_checks.strict: false`, measured) could not have given
+# this guarantee under a direct merge.
+#
+# A manual merge of a protected-class pull request (`gh pr merge <n>
+# --merge`) enqueues the same way, once the repository requires the queue —
+# GitHub's own behavior. Draft status is still the hold switch either way.
+#
+# THIS WORKFLOW IGNORES `merge_group` RUNS OF `ci`. The job's `if:` below
+# (`github.event.workflow_run.event == 'pull_request'`) already filtered out
+# everything but a `pull_request`-triggered `ci` run before `ci.yml` ever
+# gained a `merge_group` trigger, and that condition did not change: a
+# `merge_group` run of `ci` is the QUEUE testing its own candidate
+# combination, which this workflow has no business reacting to — the pull
+# request it came from is already enqueued, and the queue (not this
+# workflow) decides what happens with that run's result. Confirmed by
+# reading the `if:` below, not just asserted here; chtypes#280 considered a
+# dedicated selftest for this and chose a pinned comment instead; see
+# scripts/policy-merge-check.py's module docstring for that call.
+#
 # ⚠️ THE PWN-REQUEST RULE — THE ONE THING THIS FILE MUST NEVER BREAK.
 # `workflow_run` runs this file from the DEFAULT BRANCH with a token that can
 # write to this repository (the job grants contents: write and
@@ -47,43 +87,46 @@
 # pull request from a fork. So nothing from a pull request's head may run
 # here. Do not point the checkout at the head SHA or the head branch; do not
 # check out, build, install, source or execute any file of the head; and pass
-# every head-controlled string (a SHA, a repository name) into a `run:` block
-# only through `env:`, as quoted data, never by expanding it into the script
-# text. The checkout below is main, and main's scripts are the only code that
-# runs. The head's docs/support.md — read only when it is part of the diff —
-# is read as DATA, through the contents API at the head SHA, and only
-# compared byte for byte with main's regeneration.
+# every head-controlled string (a SHA, a repository name, a node id) into a
+# `run:` block only through `env:`, as quoted data, never by expanding it into
+# the script text. The checkout below is main, and main's scripts are the
+# only code that runs. The head's docs/support.md — read only when it is part
+# of the diff — is read as DATA, through the contents API at the head SHA,
+# and only compared byte for byte with main's regeneration.
 # One step that executed head code here would hand every fork a write token
 # to this repository.
 #
 # WHAT IT RESPECTS, AND WHY IT NEEDS NO NEW GRANT.
 #   - "Allow GitHub Actions to create and approve pull requests" stays OFF;
 #     support-matrix-refresh.yml's header explains why at length. That
-#     toggle governs creating and approving pull requests. Merging one with
-#     the built-in token is governed by the job's `permissions:` alone, so
-#     this needs no change to the toggle, no secret and no personal token.
-#   - Repository auto-merge stays off. The job merges through the REST API
-#     itself (PUT .../pulls/{n}/merge with merge_method=merge, the merge
-#     commit this repository's humans make) and passes sha=<the judged head>,
-#     so GitHub refuses the merge if the head moved.
+#     toggle governs creating and approving pull requests. Enqueueing one
+#     with the built-in token is governed by the job's `permissions:` alone,
+#     so this needs no change to the toggle, no secret and no personal token.
+#   - Repository auto-merge (the per-pull-request toggle) stays off; it is a
+#     different mechanism from the merge queue this enqueues into and is
+#     irrelevant to it either way.
 #   - Branch protection still decides, exactly as for a human (enforce_admins
-#     is on): this job can merge only what anyone with write access could.
-#   - GitHub starts no workflow run for an event made with the built-in token
-#     (documented behavior), so the merge commit this job makes gets no
-#     `push` run of `ci` on main. The pull request's own run covered the
-#     head; the next push to main runs `ci` as usual.
+#     is on): this job can enqueue only what anyone with write access could,
+#     and the queue merges only what its own required checks pass.
+#   - `contents: write` is kept from the old direct-merge permission set even
+#     though `enqueuePullRequest` does not itself create a commit (the queue
+#     does, later, asynchronously) — UNVERIFIED whether the mutation needs
+#     it, because there is no merge queue on this repository yet to test
+#     against; kept rather than guessed away, since narrowing it wrongly
+#     would only be discovered when an enqueue silently failed. Revisit once
+#     the queue is live and this has actually been exercised.
 #
-# TRIGGER. `workflow_run` on `ci` completing, for pull_request runs only: a
-# run on main has no pull request to judge. `workflow_dispatch` re-checks one
-# pull request by number; with dry_run it does everything except the merge
-# call and says so in the job summary, which is how to watch it judge a real
-# pull request without letting it merge. (A `workflow_run` workflow runs only
-# from the default branch, so neither path exists before this file is on
-# main.)
+# TRIGGER. `workflow_run` on `ci` completing, for PULL_REQUEST runs of `ci`
+# only (see THIS WORKFLOW IGNORES `merge_group` RUNS OF `ci`, above): a run
+# on main has no pull request to judge, and a `merge_group` run is the
+# queue's own business. `workflow_dispatch` re-checks one pull request by
+# number; with dry_run it does everything except the enqueue call and says
+# so in the job summary, which is how to watch it judge a real pull request
+# without letting it enqueue. (A `workflow_run` workflow runs only from the
+# default branch, so neither path exists before this file is on main.)
 #
-# EXIT. A merge, a dry run and a refusal are green. An API failure, or
-# anything else unexpected, is red, so it can never pass for a quiet refusal;
-# so is a merge after which a touched docs/support.md is not the regeneration.
+# EXIT. An enqueue, a dry run and a refusal are green. An API failure, or
+# anything else unexpected, is red, so it can never pass for a quiet refusal.
 name: policy-merge
 
 on:
@@ -97,7 +140,7 @@ on:
         required: true
         type: number
       dry_run:
-        description: "Do everything except the merge call"
+        description: "Do everything except the enqueue call"
         required: false
         type: boolean
         default: false
@@ -105,9 +148,9 @@ on:
 # Nothing at the top level: the one job asks for exactly what it uses.
 permissions: {}
 
-# One judgment per head commit at a time, never canceled mid-merge: a second
-# `ci` completion for the same commit (a re-run) waits, then finds the pull
-# request already merged and refuses quietly.
+# One judgment per head commit at a time, never canceled mid-enqueue: a
+# second `ci` completion for the same commit (a re-run) waits, then finds the
+# pull request already enqueued and refuses quietly.
 concurrency:
   group: policy-merge-${{ github.event.workflow_run.head_sha || format('pr-{0}', inputs.pr) }}
   cancel-in-progress: false
@@ -121,11 +164,16 @@ defaults:
 
 jobs:
   automerge:
-    name: "policy-merge — a pull request merges itself once every condition holds"
+    name: "policy-merge — a pull request enqueues itself to merge once every condition holds"
+    # See THIS WORKFLOW IGNORES `merge_group` RUNS OF `ci`, above: a
+    # workflow_run whose underlying `ci` run fired on `merge_group` reports
+    # github.event.workflow_run.event == 'merge_group' here, which this
+    # condition already excludes — unchanged by ci.yml gaining that trigger.
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # contents: write and pull-requests: write are what the merge call needs;
+    # contents: write and pull-requests: write are what the enqueue call
+    # needs (contents: write kept conservatively; see its own note above);
     # checks: read is the head's check runs. Nothing else is granted.
     permissions:
       contents: write
@@ -144,7 +192,7 @@ jobs:
       # Selftest first, the house rule for every checker: a refusal nobody has
       # seen fire is not known to work. Then the pinned required-check list
       # must still name exactly ci.yml's blocking jobs, and the
-      # CONTRIBUTING.md guide must still match PROTECTED_GLOBS, or a merge
+      # CONTRIBUTING.md guide must still match PROTECTED_GLOBS, or an enqueue
       # could be judged against the wrong list, or a contributor could read a
       # stale guide. None of the three needs the network.
       - name: selftest, the pinned required checks, and the CONTRIBUTING.md guide all still agree with the code
@@ -171,7 +219,7 @@ jobs:
           fi
       # Regenerated unconditionally once the gate passes, whether or not this
       # pull request happens to touch docs/support.md — it is cheap, and
-      # `merge` (below) only USES it when the diff actually touches that
+      # `enqueue` (below) only USES it when the diff actually touches that
       # file. The regeneration is main's script over main's docs/support.md
       # (whose hand-written text the generated block sits inside), against
       # the default served index, the same one `docs` and
@@ -183,7 +231,7 @@ jobs:
           set -euo pipefail
           cp docs/support.md "$RUNNER_TEMP/support.md"
           scripts/support-matrix.sh --out "$RUNNER_TEMP/support.md"
-      - name: the docs/support.md byte comparison and every other condition again, then the merge
+      - name: the docs/support.md byte comparison and every other condition again, then the enqueue
         if: steps.gate.outputs.candidate == '1'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -194,7 +242,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          args=(merge --repo "$REPO" --pr "$PR" --head-sha "$HEAD_SHA"
+          args=(enqueue --repo "$REPO" --pr "$PR" --head-sha "$HEAD_SHA"
                 --regenerated "docs/support.md=$RUNNER_TEMP/support.md")
           if [ -n "$RUN_HEAD_REPO" ]; then
             args+=(--run-head-repo "$RUN_HEAD_REPO")
