@@ -740,7 +740,8 @@ else:
                            "that line for %s-%s" % (os_, arch)),
                     own, have))
     # A line can carry more than one row: two patches, or the same patch built
-    # twice (core keeps the two highest builds per version). Take the newest by
+    # twice (core keeps the two highest builds per version, plus the newest of
+    # each ABI revision it still serves). Take the newest by
     # version and then by build, never by list order.
     hit = [sorted(hit, key=rank)[-1]]
 

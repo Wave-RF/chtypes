@@ -118,7 +118,7 @@ Every line/platform pairing above either has a build for every revision the inde
 
 A line appears above once it has passed the artifact producer's comparison against a real server and the release publishes the artifact. Lines are added as they pass it, so this page is a snapshot of a moving list — `curl -s https://artifacts.wavehouse.dev/artifacts/index.json` is always the live answer, and `scripts/fetch.sh --all` reads it rather than restating it.
 
-Nothing is removed to make room. The index keeps every patch row ever published, so a machine holding an older patch keeps working.
+A new line or patch never pushes an older one out. The index keeps every ClickHouse patch version ever published, so a machine holding an older patch keeps working. What it does not keep is every *build* of a patch: per platform it keeps the two highest builds, plus the newest build of every ABI revision it still serves, and retires older builds from the listing. So an ABI revision the release serves is never dropped by that: an older revision stays fetchable until the artifact producer retires it explicitly, with notice.
 
 ## Checking from your own machine
 

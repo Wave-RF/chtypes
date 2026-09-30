@@ -14,6 +14,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **An older ABI revision stays fetchable until it is explicitly retired.** 0.3.2 said that across a revision cutover an older-revision build stays fetchable only until that line's next publish evicts it under retention. That no longer holds: besides the two highest builds per version and platform, the release keeps the newest build of every ABI revision it still serves, and drops a served revision only when the artifact producer retires it deliberately, with notice (`docs/guides/fetch.md` §2).
+
 - **Speaks ABI revision 6, and refuses revision-5 artifacts** — and a revision-5 binding refuses revision-6 ones. Revision 6 only ADDS `chs_error_codes` and `chs_schema_partition_by`; no existing declaration changed. It is still a new number, so a fetch after upgrading downloads revision-6 artifacts into their own `abi6` cache directory, and a directory holding only revision-5 artifacts is refused at load, naming both revisions. Revision-6 artifacts are published by the artifact producer; until they are, this binding has nothing to load.
 - **A TTL on a schema with a `CHECK` constraint is now evaluated.** `Schema.set_ttl` on such a schema used to answer `UnsupportedError`; against revision-6 artifacts it answers as on any other schema, accepting the TTL or giving the server's own refusal. That matches a server, whose TTL validation does not read constraints. The change is in the artifacts, so it arrives with them.
 
