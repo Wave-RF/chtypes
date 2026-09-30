@@ -1077,6 +1077,12 @@ jobs:
       # network and no artifact: every fixture channel it compares is one it
       # builds itself, including the --keep-current case.
       - run: scripts/index-diff.sh --selftest
+      # scripts/readback-decide.sh (the same workflow's post-or-skip /
+      # advance-or-not decision, chtypes#270) is a pure function of an exit
+      # code and two small text files — no network, no artifact — so it
+      # belongs beside index-diff.sh's own selftest above rather than in a
+      # fifth job.
+      - run: scripts/readback-decide.sh --selftest
 
   prose:
     # BLOCKING. It was report-only while the tree was still hard-wrapped, which
