@@ -10,7 +10,7 @@ or let the SDK's `scripts/fetch.sh` do it, which verifies the chain for you.
 |---|---|---|---|---|---|
 | 25.8.28.1-lts | darwin-arm64 | 0 | `chtypes-25.8.28.1-lts-darwin-arm64.tar.gz` | 472 | `libchtypes.dylib` |
 | 26.7.3.19-stable | darwin-arm64 | 0 | `chtypes-26.7.3.19-stable-darwin-arm64.tar.gz` | 472 | `libchtypes.dylib` |
-| 25.8.28.1-lts | linux-amd64 | 0 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 465 | `libchtypes.so` |
+| 25.8.28.1-lts | linux-amd64 | 0 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 466 | `libchtypes.so` |
 | 26.7.3.19-stable | linux-amd64 | 0 | `chtypes-26.7.3.19-stable-linux-amd64.tar.gz` | 469 | `libchtypes.so` |
 | 25.8.28.1-lts | linux-arm64 | 0 | `chtypes-25.8.28.1-lts-linux-arm64.tar.gz` | 467 | `libchtypes.so` |
 | 26.7.3.19-stable | linux-arm64 | 0 | `chtypes-26.7.3.19-stable-linux-arm64.tar.gz` | 471 | `libchtypes.so` |

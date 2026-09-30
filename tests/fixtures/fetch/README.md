@@ -12,7 +12,7 @@ Each fixture directory is one release: `--url file://<absolute path>/<fixture>`
 (a `--url` base already names the release, so no tag is appended). The
 "libraries" inside the tarballs are a few bytes of text — nothing here dlopens.
 Signed with the TEST key in `test-key/` (`d1251e468f9156ef`), never the release key. Every row in
-this set carries `abi_revision` 5 (`fixtures_abi_revision` in `expected.json`),
+this set carries `abi_revision` 6 (`fixtures_abi_revision` in `expected.json`),
 read from the header rather than typed here, EXCEPT the rows inside `two-revisions/`,
 which deliberately span both revisions — see that section below.
 
@@ -99,10 +99,10 @@ an UNFILTERED resolve (today's binding behavior, before the ABI-revision filter)
 
 | revision | discriminating line (filtered ≠ unfiltered here) |
 |---|---|
-| 5 | `26.7` |
-| 6 | `25.8` |
+| 6 | `26.7` |
+| 7 | `25.8` |
 
-| platform | line | `--abi-revision 5` installs | build | `--abi-revision 6` installs | build | unfiltered installs | build |
+| platform | line | `--abi-revision 6` installs | build | `--abi-revision 7` installs | build | unfiltered installs | build |
 |---|---|---|---|---|---|---|---|
 | linux-arm64 | 26.7 | `chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz` | 105 | `chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz` | 214 | `chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz` | 214 |
 | linux-amd64 | 26.7 | `chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz` | 105 | `chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz` | 214 | `chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz` | 214 |
@@ -111,9 +111,9 @@ an UNFILTERED resolve (today's binding behavior, before the ABI-revision filter)
 | linux-amd64 | 25.8 | `chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz` | 214 | `chtypes-25.8.28.1-lts-linux-amd64-b105.tar.gz` | 105 | `chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz` | 214 |
 | darwin-arm64 | 25.8 | `chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz` | 214 | `chtypes-25.8.28.1-lts-darwin-arm64-b105.tar.gz` | 105 | `chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz` | 214 |
 
-On `26.7`, filtering to abi_revision 5 must install the LOWER build despite the higher
+On `26.7`, filtering to abi_revision 6 must install the LOWER build despite the higher
 one being right there in the same release, signed and hash-correct; on `25.8`, the
-mirror, filtering to abi_revision 6 does the same. A binding that resolves by build
+mirror, filtering to abi_revision 7 does the same. A binding that resolves by build
 alone, ignoring the filter, gets ONE of the two lines wrong at whichever revision it
 runs at — never both, which is why both lines exist. `expected.json`'s
 `revisions.cases` is the machine-readable form of this table.
@@ -146,7 +146,7 @@ a release. It is a generator rather than a prebuilt artifact because a `cc -shar
 |---|---|---|---|---|---|
 | 25.8.28.1-lts | darwin-arm64 | `chtypes-25.8.28.1-lts-darwin-arm64.tar.gz` | 472 | `libchtypes.dylib` | `d6ea1048c42b91f4…` |
 | 26.7.3.19-stable | darwin-arm64 | `chtypes-26.7.3.19-stable-darwin-arm64.tar.gz` | 472 | `libchtypes.dylib` | `600af8fe8d14ed19…` |
-| 25.8.28.1-lts | linux-amd64 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 465 | `libchtypes.so` | `bacc23d5e886c7b2…` |
+| 25.8.28.1-lts | linux-amd64 | `chtypes-25.8.28.1-lts-linux-amd64.tar.gz` | 466 | `libchtypes.so` | `bacc23d5e886c7b2…` |
 | 26.7.3.19-stable | linux-amd64 | `chtypes-26.7.3.19-stable-linux-amd64.tar.gz` | 469 | `libchtypes.so` | `e52e911f681ebb6c…` |
 | 25.8.28.1-lts | linux-arm64 | `chtypes-25.8.28.1-lts-linux-arm64.tar.gz` | 467 | `libchtypes.so` | `829d44597c8252ff…` |
 | 26.7.3.19-stable | linux-arm64 | `chtypes-26.7.3.19-stable-linux-arm64.tar.gz` | 471 | `libchtypes.so` | `bb9f9e21e0a01f42…` |
