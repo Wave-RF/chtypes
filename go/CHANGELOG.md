@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`fetch --lock` now records the artifact's ABI revision** in each lock entry (`abi_revision`, optional and additive — schema stays 1); `--frozen` checks it FIRST, before the file/sha256 pin: a lock that names a different revision is `CHTYPES_ARTIFACT_PINNED`, naming both numbers and the `fetch --lock` remedy, instead of surfacing as a bare drifted pin or `CHTYPES_ARTIFACT_UNPUBLISHED`. A lock entry with no recorded revision (written by an SDK before this change) keeps today's behavior, with one sentence appended when it ends in `CHTYPES_ARTIFACT_PINNED` or `CHTYPES_ARTIFACT_UNPUBLISHED`. `--offline --frozen` is unaffected (docs/guides/fetch.md §5, closes #253).
+
 ## [0.4.0] — 2026-09-30
 
 Speaks ABI revision 6 and refuses revision-5 artifacts. Revision 6 adds the error-code table and the partition key; revision-6 artifacts are published for every ClickHouse line this SDK supports, beside the revision-5 builds that 0.3.x keeps loading.

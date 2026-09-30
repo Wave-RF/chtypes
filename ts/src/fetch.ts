@@ -43,6 +43,7 @@ import {
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
   ChtypesError,
+  FETCH_COMMAND,
   SourceUnreachableError,
 } from './errors.js';
 import { fetchDestination, hostPlatform, isPlatformKey } from './paths.js';
@@ -117,9 +118,16 @@ export interface ReleaseIndex {
 export interface LockEntry {
   readonly file: string;
   readonly sha256: string;
+  /**
+   * The ABI revision the pinned row carried when this entry was written.
+   * Optional and additive (docs/guides/fetch.md §5): an entry written before
+   * this SDK recorded it simply has none, absent exactly as `IndexArtifact.abi_revision`
+   * is absent on a row built before revisions were recorded.
+   */
+  readonly abi_revision?: number;
 }
 
-/** `chtypes.lock` (docs/guides/fetch.md §5): `{"schema": 1, "artifacts": {"<os>-<arch>/<minor>": {file, sha256}}}`. */
+/** `chtypes.lock` (docs/guides/fetch.md §5): `{"schema": 1, "artifacts": {"<os>-<arch>/<minor>": {file, sha256, abi_revision?}}}`. */
 export interface LockFile {
   readonly schema: number;
   readonly artifacts: Record<string, LockEntry>;
@@ -1044,6 +1052,47 @@ function installContext(platform: string, dest: string, options: EnsureOptions):
   return { platform, dest, lockPath, lock, frozen, force: options.force ?? false, emit: options.onProgress ?? noop };
 }
 
+/** The lock's own entry for `<platform>/<minor>`, or `undefined`. */
+function lockEntryFor(ctx: InstallContext, minor: string): LockEntry | undefined {
+  return ctx.lock?.artifacts[`${ctx.platform}/${minor}`];
+}
+
+/**
+ * Fails fast, before any network access, when `frozen`'s lock already names
+ * an ABI revision for this key that is not this binding's own
+ * (docs/guides/fetch.md §5). A lock made for one ABI revision does not get a
+ * second chance disguised as a drifted pin or an unpublished line once the
+ * SDK moves to another: the fix is always the same re-lock, so the message
+ * says that directly instead of waiting to see which of the two symptoms
+ * selection would have produced.
+ */
+function checkLockRevisionEarly(ctx: InstallContext, req: VersionRequest): void {
+  if (!ctx.frozen) return;
+  const entry = lockEntryFor(ctx, req.line);
+  if (entry === undefined || entry.abi_revision === undefined || entry.abi_revision === fetchAbiRevision()) return;
+  const key = `${ctx.platform}/${req.line}`;
+  throw new ArtifactPinnedError(
+    `chtypes: ${ctx.lockPath} pins ${key} at ABI revision ${entry.abi_revision}; this SDK speaks ABI revision ` +
+      `${fetchAbiRevision()} — re-lock with: ${FETCH_COMMAND} ${req.spelling} --lock ${ctx.lockPath}`,
+  );
+}
+
+/**
+ * The one sentence appended to a PINNED or UNPUBLISHED message when, under
+ * `frozen`, the lock's own entry for this key exists but names no ABI
+ * revision at all — written by an SDK before this field existed. `''` when
+ * there is nothing to add.
+ */
+function revisionNote(ctx: InstallContext, minor: string): string {
+  if (!ctx.frozen) return '';
+  const entry = lockEntryFor(ctx, minor);
+  if (entry === undefined || entry.abi_revision !== undefined) return '';
+  return (
+    ` ${ctx.lockPath} records no ABI revision (written by an older SDK); this SDK speaks ABI revision ` +
+    `${fetchAbiRevision()} — re-lock with: ${FETCH_COMMAND} ${minor} --lock ${ctx.lockPath}`
+  );
+}
+
 async function ensureUncached(req: VersionRequest, platform: string, dest: string, options: EnsureOptions): Promise<EnsureResult> {
   const ctx = installContext(platform, dest, options);
   const install = path.join(dest, req.line);
@@ -1080,6 +1129,8 @@ async function ensureUncached(req: VersionRequest, platform: string, dest: strin
     );
   }
 
+  checkLockRevisionEarly(ctx, req);
+
   const source = openSource(options);
   ctx.emit({
     type: 'status',
@@ -1087,7 +1138,14 @@ async function ensureUncached(req: VersionRequest, platform: string, dest: strin
   });
   ctx.emit({ type: 'status', message: `source ${source.description}` });
   const release = await loadRelease(source, options, ctx.emit);
-  const art = selectArtifact(release.index, platform, req);
+  let art: IndexArtifact;
+  try {
+    art = selectArtifact(release.index, platform, req);
+  } catch (err) {
+    if (!(err instanceof ArtifactUnpublishedError)) throw err;
+    const note = revisionNote(ctx, req.line);
+    throw note ? new ArtifactUnpublishedError(`${err.message}${note}`) : err;
+  }
   const installed = await installOne(release, art, ctx);
   await installGoldens(release, ctx, options);
   return installed;
@@ -1110,15 +1168,26 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
     );
   }
 
-  // §5: a frozen lock refuses anything but what it pins.
+  // §5: a frozen lock refuses anything but what it pins. The revision is
+  // checked FIRST, before the file/sha256 comparison below it: a lock that
+  // names a revision is refused the moment that revision is not this
+  // binding's own, never compared byte-for-byte against an artifact it
+  // could never have pinned.
   if (ctx.frozen && ctx.lock !== null) {
     const pin = ctx.lock.artifacts[lockKey];
     if (pin === undefined) {
       throw new ArtifactPinnedError(`chtypes: ${ctx.lockPath} pins nothing for ${lockKey}, and frozen refuses anything it does not pin`);
     }
-    if (pin.file !== art.file || pin.sha256.toLowerCase() !== art.sha256) {
+    if (pin.abi_revision !== undefined && pin.abi_revision !== fetchAbiRevision()) {
       throw new ArtifactPinnedError(
-        `chtypes: ${ctx.lockPath} pins ${lockKey} to ${pin.file} (${pin.sha256}) but the release offers ${art.file} (${art.sha256}); frozen refuses it`,
+        `chtypes: ${ctx.lockPath} pins ${lockKey} at ABI revision ${pin.abi_revision}; this SDK speaks ABI revision ` +
+          `${fetchAbiRevision()} — re-lock with: ${FETCH_COMMAND} ${minor} --lock ${ctx.lockPath}`,
+      );
+    }
+    if (pin.file !== art.file || pin.sha256.toLowerCase() !== art.sha256) {
+      const note = pin.abi_revision === undefined ? revisionNote(ctx, minor) : '';
+      throw new ArtifactPinnedError(
+        `chtypes: ${ctx.lockPath} pins ${lockKey} to ${pin.file} (${pin.sha256}) but the release offers ${art.file} (${art.sha256}); frozen refuses it${note}`,
       );
     }
   }
@@ -1147,7 +1216,7 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
       const have = await sha256File(libPath);
       if (have === art.library_sha256) {
         emit({ type: 'status', message: `already installed and verified: ${libPath}` });
-        if (ctx.lockPath !== undefined) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256 });
+        if (ctx.lockPath !== undefined) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256, abi_revision: fetchAbiRevision() });
         return result(false);
       }
       emit({ type: 'status', message: `${libPath} is present but hashes ${have} (want ${art.library_sha256}) — replacing` });
@@ -1217,7 +1286,7 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
       );
     }
     emit({ type: 'status', message: `installed and verified: ${install} (${manifest.library} sha256 ${finalSha})` });
-    if (ctx.lockPath !== undefined) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256 });
+    if (ctx.lockPath !== undefined) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256, abi_revision: fetchAbiRevision() });
     return result(true);
   } finally {
     await rm(tarball, { force: true });
@@ -1302,7 +1371,13 @@ export function readLock(file: string): LockFile | null {
     for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
       if (typeof v !== 'object' || v === null) continue;
       const e = v as Record<string, unknown>;
-      if (typeof e['file'] === 'string' && typeof e['sha256'] === 'string') artifacts[k] = { file: e['file'], sha256: e['sha256'] };
+      if (typeof e['file'] === 'string' && typeof e['sha256'] === 'string') {
+        // abi_revision is optional and additive (docs/guides/fetch.md §5): an
+        // entry written before this SDK recorded it simply has none, read the
+        // same way an index row that carries none is — never a typed number
+        // (TS cannot tell 5.0 from 5, so anything not a safe integer is absent).
+        artifacts[k] = { file: e['file'], sha256: e['sha256'], ...revisionOf(e['abi_revision']) };
+      }
     }
   }
   return { schema: LOCK_SCHEMA, artifacts };

@@ -26,7 +26,7 @@ pub use trust::{
     sha256_hex, verify_signature,
 };
 
-use crate::error::{Error, Result};
+use crate::error::{Error, FETCH_COMMAND, Result};
 pub(crate) use crate::library::minor_of;
 use crate::registry::{Manifest, host_platform, install_dir_for, locate_in, search_path_for};
 use release::{Release, Request};
@@ -267,10 +267,14 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
         }
     }
 
+    check_lock_revision_early(opts, &platform, &request)?;
+
     let source = Source::resolve(opts.url.as_deref(), opts.tag.as_deref(), opts.offline)?;
     let policy = policy_of(opts)?;
     let release = Release::load(&source, &policy, opts.progress)?;
-    let row = release.select(&request, &platform)?;
+    let row = release
+        .select(&request, &platform)
+        .map_err(|e| annotate_unpublished(e, opts, &platform, &request.minor))?;
     let key = lock_key(&platform, &row.clickhouse_minor);
     let mut lock = lock_of(opts)?;
     if opts.frozen {
@@ -631,10 +635,125 @@ fn record(
     if let Some(lock) = lock {
         if !opts.frozen && lock.record(key, row) {
             lock.save()?;
-            say(opts, &format!("pinned {key} in {}", lock.path().display()));
+            say(
+                opts,
+                &format!(
+                    "pinned {key} -> {} (ABI revision {}) in {}",
+                    row.file,
+                    row.abi_revision.unwrap_or_else(fetch_abi_revision),
+                    lock.path().display()
+                ),
+            );
         }
     }
     Ok(())
+}
+
+/// The lock's own entry for `key`, read straight off disk with no release
+/// access — used only to decide whether to say more about an ABI revision.
+/// The authoritative read stays [`lock_of`], called from [`ensure`] and
+/// [`ensure_all`], which raises its own error for a lock that cannot be
+/// read at all; any error here (a missing or unparsable file) reads as "no
+/// entry".
+fn peek_lock_entry(opts: &EnsureOptions, key: &str) -> Option<LockEntry> {
+    let path = opts
+        .lock
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCK_FILE));
+    let lock = LockFile::load(&path, false).ok()?;
+    lock.artifacts.get(key).cloned()
+}
+
+/// Fails fast, before any network access, when `frozen`'s lock already
+/// names an ABI revision for this key that is not this crate's own
+/// (`docs/guides/fetch.md` §5). A lock made for one ABI revision does not
+/// get a second chance disguised as a drifted pin or an unpublished line
+/// once the crate moves to another: the fix is always the same re-lock, so
+/// the message says that directly instead of waiting to see which of the
+/// two symptoms selection would have produced.
+fn check_lock_revision_early(
+    opts: &EnsureOptions,
+    platform: &str,
+    request: &Request,
+) -> Result<()> {
+    if !opts.frozen {
+        return Ok(());
+    }
+    let key = lock_key(platform, &request.minor);
+    let Some(entry) = peek_lock_entry(opts, &key) else {
+        return Ok(());
+    };
+    let Some(pinned_rev) = entry.abi_revision else {
+        return Ok(());
+    };
+    let rev = fetch_abi_revision();
+    if pinned_rev == rev {
+        return Ok(());
+    }
+    let path = opts
+        .lock
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCK_FILE));
+    Err(Error::ArtifactPinned {
+        key: key.clone(),
+        message: format!(
+            "{} pins {key} at ABI revision {pinned_rev}; this SDK speaks ABI revision {rev} — \
+             re-lock with: {FETCH_COMMAND} {} --lock {}",
+            path.display(),
+            request.spelling,
+            path.display()
+        ),
+    })
+}
+
+/// The one sentence appended to a PINNED or UNPUBLISHED message when, under
+/// `frozen`, the lock's own entry for this key exists but names no ABI
+/// revision at all — written by an SDK before this field existed. `""`
+/// when there is nothing to add.
+fn revision_note(opts: &EnsureOptions, platform: &str, minor: &str) -> String {
+    if !opts.frozen {
+        return String::new();
+    }
+    let key = lock_key(platform, minor);
+    let Some(entry) = peek_lock_entry(opts, &key) else {
+        return String::new();
+    };
+    if entry.abi_revision.is_some() {
+        return String::new();
+    }
+    let path = opts
+        .lock
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCK_FILE));
+    format!(
+        " {} records no ABI revision (written by an older SDK); this SDK speaks ABI revision {} \
+         — re-lock with: {FETCH_COMMAND} {minor} --lock {}",
+        path.display(),
+        fetch_abi_revision(),
+        path.display()
+    )
+}
+
+/// Appends [`revision_note`] to an [`Error::ArtifactUnpublished`]'s
+/// `offered` clause; any other error passes through unchanged.
+fn annotate_unpublished(err: Error, opts: &EnsureOptions, platform: &str, minor: &str) -> Error {
+    match err {
+        Error::ArtifactUnpublished {
+            requested,
+            platform: p,
+            origin,
+            offered,
+        } => {
+            let note = revision_note(opts, platform, minor);
+            Error::ArtifactUnpublished {
+                requested,
+                platform: p,
+                origin,
+                offered: format!("{offered}{note}"),
+            }
+        }
+        other => other,
+    }
 }
 
 fn row_complete(row: &IndexRow) -> Result<()> {

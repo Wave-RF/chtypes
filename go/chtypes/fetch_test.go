@@ -858,6 +858,92 @@ func TestFetchLockAndFrozen(t *testing.T) {
 	}
 }
 
+// TestFetchLockRecordsABIRevisionAndFrozenNamesAMismatch is issue #253: a
+// lock written by an SDK at one ABI revision must not be silently accepted,
+// or surface as a bare drifted-pin or unpublished-line error, once the SDK
+// speaks another.
+func TestFetchLockRecordsABIRevisionAndFrozenNamesAMismatch(t *testing.T) {
+	isolateEnv(t)
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	dest := filepath.Join(t.TempDir(), "reg")
+	lock := filepath.Join(t.TempDir(), "chtypes.lock")
+	key := LockKey(HostPlatform(), "25.8")
+
+	// (a) --lock records the row's abi_revision, this package's own.
+	if _, err := Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Dest: dest, LockFile: lock}); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ReadLockFile(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := l.Artifacts[key]
+	if entry.ABIRevision == nil || *entry.ABIRevision != ABIRevision {
+		t.Fatalf("lock entry %+v, want abi_revision %d", entry, ABIRevision)
+	}
+	raw, _ := os.ReadFile(lock)
+	if !strings.Contains(string(raw), fmt.Sprintf(`"abi_revision": %d`, ABIRevision)) {
+		t.Fatalf("lock bytes carry no abi_revision:\n%s", raw)
+	}
+
+	// (b) A lock entry at a different revision: PINNED, naming both
+	// numbers, and — proven by pointing at a source that does not exist —
+	// refused WITHOUT ever reading a release.
+	mismatched := *l
+	mismatched.Artifacts = map[string]LockEntry{}
+	for k, v := range l.Artifacts {
+		mismatched.Artifacts[k] = v
+	}
+	other := ABIRevision + 1
+	mismatched.Artifacts[key] = LockEntry{File: entry.File, SHA256: entry.SHA256, ABIRevision: &other}
+	mismatchedLock := filepath.Join(t.TempDir(), "mismatched.lock")
+	if err := mismatched.Write(mismatchedLock); err != nil {
+		t.Fatal(err)
+	}
+	unreachable := filepath.Join(t.TempDir(), "does-not-exist")
+	_, err = Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + unreachable, Dest: filepath.Join(t.TempDir(), "reg2"), LockFile: mismatchedLock, Frozen: true})
+	ae := wantCode(t, err, CodeArtifactPinned)
+	if !strings.Contains(ae.Msg, fmt.Sprintf("ABI revision %d", other)) || !strings.Contains(ae.Msg, fmt.Sprintf("ABI revision %d", ABIRevision)) || !strings.Contains(ae.Msg, "re-lock with:") {
+		t.Fatalf("message does not name both revisions and the remedy: %s", ae.Msg)
+	}
+
+	// (c) A lock entry with no abi_revision at all (an older SDK's lock):
+	// the old path, plus one appended sentence, for both PINNED (a real
+	// drift) and UNPUBLISHED (the line is not offered at this revision).
+	noRevLock := filepath.Join(t.TempDir(), "no-rev.lock")
+	os.WriteFile(noRevLock, []byte(fmt.Sprintf(`{"schema": 1, "artifacts": {%q: {"file": "not-the-file.tar.gz", "sha256": "00"}}}`, key)), 0o644)
+	_, err = Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Dest: filepath.Join(t.TempDir(), "reg3"), LockFile: noRevLock, Frozen: true})
+	ae = wantCode(t, err, CodeArtifactPinned)
+	if !strings.Contains(ae.Msg, "records no ABI revision") || !strings.Contains(ae.Msg, "older SDK") || !strings.Contains(ae.Msg, fmt.Sprintf("ABI revision %d", ABIRevision)) {
+		t.Fatalf("drift message carries no old-lock sentence: %s", ae.Msg)
+	}
+
+	noRevLock2 := filepath.Join(t.TempDir(), "no-rev2.lock")
+	otherKey := LockKey(HostPlatform(), "26.7")
+	os.WriteFile(noRevLock2, []byte(fmt.Sprintf(`{"schema": 1, "artifacts": {%q: {"file": "x.tar.gz", "sha256": "00"}}}`, otherKey)), 0o644)
+	_, err = Ensure(context.Background(), "26.7", FetchOptions{URL: "file://" + rel, Dest: filepath.Join(t.TempDir(), "reg4"), LockFile: noRevLock2, Frozen: true})
+	ae = wantCode(t, err, CodeArtifactUnpublished)
+	if !strings.Contains(ae.Msg, "records no ABI revision") || !strings.Contains(ae.Msg, "older SDK") {
+		t.Fatalf("unpublished message carries no old-lock sentence: %s", ae.Msg)
+	}
+
+	// (d) A lock entry at the SDK's own (matching) revision installs
+	// exactly as before — no sentence, no different code.
+	if _, err := Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Dest: filepath.Join(t.TempDir(), "reg5"), LockFile: lock, Frozen: true}); err != nil {
+		t.Fatalf("frozen, matching revision: %v", err)
+	}
+
+	// (e) --offline --frozen stays unaffected: no source is ever read, so a
+	// mismatched-revision lock is simply not consulted against one.
+	offlineDest := filepath.Join(t.TempDir(), "reg6")
+	if _, err := Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Dest: offlineDest, LockFile: lock}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ensure(context.Background(), "25.8", FetchOptions{Dest: offlineDest, LockFile: mismatchedLock, Frozen: true, Offline: true}); err != nil {
+		t.Fatalf("offline+frozen should read only the installed manifest: %v", err)
+	}
+}
+
 func TestFetchAllAndListRelease(t *testing.T) {
 	isolateEnv(t)
 	pub, priv := newTestKey(t)

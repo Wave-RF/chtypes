@@ -3,10 +3,14 @@ package chtypes
 // fetch_lock.go — pinning (docs/guides/fetch.md §5).
 //
 // `fetch --lock chtypes.lock` records, per <os>-<arch>/<minor>, the asset
-// file and sha256 that were installed; `fetch --frozen` refuses anything
-// else with CHTYPES_ARTIFACT_PINNED. Schema 1, JSON:
+// file and sha256 that were installed, and the ABI revision that row
+// carried; `fetch --frozen` refuses anything else with
+// CHTYPES_ARTIFACT_PINNED — checking the revision FIRST, so a lock made for
+// an ABI revision this binding no longer speaks is named as that, not as a
+// drifted pin or an unpublished line. Schema stays 1: abi_revision is
+// optional and additive. JSON:
 //
-//	{"schema": 1, "artifacts": {"linux-arm64/25.8": {"file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz", "sha256": "…"}}}
+//	{"schema": 1, "artifacts": {"linux-arm64/25.8": {"file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz", "sha256": "…", "abi_revision": 6}}}
 
 import (
 	"encoding/json"
@@ -23,9 +27,21 @@ const LockSchema = 1
 const DefaultLockFile = "chtypes.lock"
 
 // LockEntry pins one platform/line to one release asset.
+//
+// ABIRevision is the ABI revision the pinned asset's row carried when this
+// entry was written — optional and additive (docs/guides/fetch.md §5): an
+// older SDK that has never heard of it writes and reads entries without it,
+// and this one does not reject a lock that lacks it. A nil ABIRevision
+// means either "this entry predates the field" or "the file was hand
+// edited" — the two are indistinguishable, and both are treated the same
+// way: the file/sha256 pin still enforces exactly as before.
 type LockEntry struct {
 	File   string `json:"file"`
 	SHA256 string `json:"sha256"`
+	// ABIRevision is omitted entirely when nil, never written as null, so a
+	// reader that has never heard of the field sees exactly what it always
+	// has.
+	ABIRevision *int `json:"abi_revision,omitempty"`
 }
 
 // LockFile is the §5 document.

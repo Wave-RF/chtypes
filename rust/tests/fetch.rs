@@ -464,9 +464,21 @@ fn the_lock_file_records_and_frozen_refuses_drift() {
     assert_eq!(lock.artifacts[&key].file, file);
     assert_eq!(lock.artifacts[&key].sha256, sha);
     assert_eq!(lock.schema, 1);
-    // What it records is exactly the fixtures' own lock for this row.
+    // What it records is the fixtures' own file and sha256 for this row,
+    // plus this crate's own ABI revision — the one new thing a fresh fetch
+    // now records (docs/guides/fetch.md §5). The committed fixture lock
+    // predates the field, so its entry carries none.
     let spec_lock = LockFile::load(&fx.join("chtypes.lock"), true).unwrap();
-    assert_eq!(spec_lock.artifacts[&key], lock.artifacts[&key]);
+    assert_eq!(spec_lock.artifacts[&key].abi_revision, None);
+    assert_eq!(spec_lock.artifacts[&key].file, lock.artifacts[&key].file);
+    assert_eq!(
+        spec_lock.artifacts[&key].sha256,
+        lock.artifacts[&key].sha256
+    );
+    assert_eq!(
+        lock.artifacts[&key].abi_revision,
+        Some(fixture_revision(&fx))
+    );
 
     // Frozen with the fixtures' lock: installs (here: already installed, and
     // the release is consulted so the pin is checked).
@@ -549,6 +561,165 @@ fn the_lock_file_records_and_frozen_refuses_drift() {
     for d in [dest, fresh, scratch] {
         std::fs::remove_dir_all(&d).ok();
     }
+}
+
+/// Issue #253: a lock entry records the ABI revision, and `--frozen` names
+/// a mismatch instead of a bare PINNED or UNPUBLISHED.
+#[test]
+fn lock_abi_revision_mismatch_is_named_and_needs_no_source() {
+    let fx = fixtures!();
+    let rev = fixture_revision(&fx);
+    let spec_lock = LockFile::load(&fx.join("chtypes.lock"), true).unwrap();
+    let platform = foreign();
+    let key = lock_key(platform, "25.8");
+    let entry = spec_lock.artifacts.get(&key).cloned().unwrap_or_else(|| {
+        // Any platform/line the fixture pins will do; find one if 25.8 isn't it.
+        spec_lock
+            .artifacts
+            .iter()
+            .find(|(k, _)| k.starts_with(&format!("{platform}/")))
+            .map(|(_, e)| e.clone())
+            .expect("the fixture lock pins nothing for this platform")
+    });
+
+    // (b) A lock entry at a different revision: PINNED, naming both
+    // numbers, and — proven by pointing at a source that does not exist —
+    // refused WITHOUT ever reading a release.
+    let other = rev + 1;
+    let mismatched = tmp("rev-mismatched").join("chtypes.lock");
+    std::fs::write(
+        &mismatched,
+        format!(
+            r#"{{"schema":1,"artifacts":{{{key:?}:{{"file":{file:?},"sha256":{sha:?},"abi_revision":{other}}}}}}}"#,
+            key = key,
+            file = entry.file,
+            sha = entry.sha256,
+        ),
+    )
+    .unwrap();
+    let err = fetch::ensure(
+        "25.8",
+        &EnsureOptions {
+            dest: Some(tmp("rev-mismatched-dest")),
+            platform: Some(platform.into()),
+            url: Some("file:///does/not/exist".into()),
+            lock: Some(mismatched.clone()),
+            frozen: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.artifact_code(),
+        Some("CHTYPES_ARTIFACT_PINNED"),
+        "{err}"
+    );
+    let msg = err.to_string();
+    assert!(msg.contains(&format!("ABI revision {other}")), "{msg}");
+    assert!(msg.contains(&format!("ABI revision {rev}")), "{msg}");
+    assert!(msg.contains("re-lock with:"), "{msg}");
+
+    // (c) A lock entry with no abi_revision at all (an older SDK's lock):
+    // the old path, plus one appended sentence — for a real drift (PINNED)
+    // and for a line the release does not offer at this revision
+    // (UNPUBLISHED; 24.8 is not among signed/'s published lines).
+    let no_rev_drift = tmp("rev-no-rev-drift").join("chtypes.lock");
+    std::fs::write(
+        &no_rev_drift,
+        format!(
+            r#"{{"schema":1,"artifacts":{{{key:?}:{{"file":{file:?},"sha256":"{zeros}"}}}}}}"#,
+            key = key,
+            file = entry.file,
+            zeros = "0".repeat(64),
+        ),
+    )
+    .unwrap();
+    let err = fetch::ensure(
+        "25.8",
+        &EnsureOptions {
+            lock: Some(no_rev_drift),
+            frozen: true,
+            ..opts(&fx, "signed", &tmp("rev-no-rev-drift-dest"))
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.artifact_code(),
+        Some("CHTYPES_ARTIFACT_PINNED"),
+        "{err}"
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("records no ABI revision"), "{msg}");
+    assert!(msg.contains("older SDK"), "{msg}");
+
+    let other_key = lock_key(platform, "24.8");
+    let no_rev_unpublished = tmp("rev-no-rev-unpublished").join("chtypes.lock");
+    std::fs::write(
+        &no_rev_unpublished,
+        format!(
+            r#"{{"schema":1,"artifacts":{{{other_key:?}:{{"file":"x.tar.gz","sha256":"00"}}}}}}"#
+        ),
+    )
+    .unwrap();
+    let err = fetch::ensure(
+        "24.8",
+        &EnsureOptions {
+            lock: Some(no_rev_unpublished),
+            frozen: true,
+            ..opts(&fx, "signed", &tmp("rev-no-rev-unpublished-dest"))
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.artifact_code(),
+        Some("CHTYPES_ARTIFACT_UNPUBLISHED"),
+        "{err}"
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("records no ABI revision"), "{msg}");
+    assert!(msg.contains("older SDK"), "{msg}");
+
+    // (d) A lock entry at the SDK's own (matching) revision installs
+    // exactly as before.
+    let matching = tmp("rev-matching").join("chtypes.lock");
+    std::fs::write(
+        &matching,
+        format!(
+            r#"{{"schema":1,"artifacts":{{{key:?}:{{"file":{file:?},"sha256":{sha:?},"abi_revision":{rev}}}}}}}"#,
+            key = key,
+            file = entry.file,
+            sha = entry.sha256,
+        ),
+    )
+    .unwrap();
+    let ok = fetch::ensure(
+        "25.8",
+        &EnsureOptions {
+            lock: Some(matching),
+            frozen: true,
+            ..opts(&fx, "signed", &tmp("rev-matching-dest"))
+        },
+    )
+    .unwrap();
+    assert_eq!(ok.asset.as_ref().unwrap().0, entry.file);
+
+    // (e) --offline --frozen stays unaffected: no source is ever read, so a
+    // mismatched-revision lock is simply not consulted against one.
+    let offline_dest = tmp("rev-offline-dest");
+    fetch::ensure("25.8", &opts(&fx, "signed", &offline_dest)).unwrap();
+    let offline = fetch::ensure(
+        "25.8",
+        &EnsureOptions {
+            dest: Some(offline_dest.clone()),
+            platform: Some(platform.into()),
+            lock: Some(mismatched),
+            frozen: true,
+            offline: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(offline.dir, offline_dest.join("25.8"));
 }
 
 /// `--offline` answers SOURCE_UNREACHABLE before any connection is attempted:
@@ -1032,7 +1203,24 @@ fn the_binary_s_other_exit_codes_and_commands() {
     let spec_lock = LockFile::load(&fx.join("chtypes.lock"), true).unwrap();
     for minor in ["25.8", "26.7"] {
         let k = lock_key(platform, minor);
-        assert_eq!(written.artifacts[&k], spec_lock.artifacts[&k], "{k}");
+        // The committed fixture lock predates abi_revision (docs/guides/fetch.md
+        // §5); a fresh fetch (a real subprocess, so always this binary's own
+        // compiled-in ABI_REVISION) pins the same file and sha256, plus that
+        // revision — the one new thing it now records.
+        assert_eq!(spec_lock.artifacts[&k].abi_revision, None, "{k}");
+        assert_eq!(
+            written.artifacts[&k].file, spec_lock.artifacts[&k].file,
+            "{k}"
+        );
+        assert_eq!(
+            written.artifacts[&k].sha256, spec_lock.artifacts[&k].sha256,
+            "{k}"
+        );
+        assert_eq!(
+            written.artifacts[&k].abi_revision,
+            Some(chtypes::ABI_REVISION),
+            "{k}"
+        );
     }
     let mut c = bin();
     c.args(["fetch", "--all", "--platform", platform, "--dest"])
