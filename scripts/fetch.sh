@@ -738,18 +738,23 @@ def patch_matches(version, spelling):
     return strip_channel(version) == spelling
 
 # The newest published patch of each line, among the rows this SDK can load —
-# the layout rule's flat slot (chtypes#284, "Layout rule"): a LINE request
-# always installs this row at <minor>/, and every OTHER row of that line is
-# compared against it to decide flat vs. nested patches/<minor>/<version>/.
+# what a LINE request (or --all) installs at <minor>/.
 best_by_minor = {}
 for a in arts:
     cur = best_by_minor.get(a["clickhouse_minor"])
     if cur is None or rank(a) > rank(cur):
         best_by_minor[a["clickhouse_minor"]] = a
 
-def is_flat(a):
-    best = best_by_minor.get(a["clickhouse_minor"])
-    return best is not None and best["clickhouse_version"] == a["clickhouse_version"] and build_of(best) == build_of(a)
+# The layout rule's flat slot is decided by REQUEST TYPE, never by whether a
+# row happens to be a line's newest (chtypes#284, cross-binding placement
+# rule, matching Go and Python): ONLY a line spelling or --all writes
+# <minor>/. An exact-patch spelling ALWAYS installs at
+# patches/<minor>/<clickhouse_version>/ -- even when it is the line's newest
+# published patch and the flat slot is empty. The one exception is not a
+# write at all: when that exact version already sits in the flat slot and
+# verifies, install_one() below reports it as already installed there,
+# rather than duplicating it into patches/.
+IS_FLAT = want_all or not strict
 
 if want_all:
     if not arts:
@@ -803,7 +808,7 @@ for a in hit:
             sys.exit("corrupt: index.json entry for %s is missing %s" % (a.get("file"), k))
     print("|".join([a["file"], a["sha256"], str(a["bytes"]), a["clickhouse_version"],
                     a["clickhouse_minor"], a["library"], a["library_sha256"],
-                    "1" if is_flat(a) else "0"]))
+                    "1" if IS_FLAT else "0"]))
 PY
 )" || {
   # The selector's own message is the useful half; its first word is the code.
@@ -840,13 +845,14 @@ EOF
     fi
   fi
 
-  # The layout rule (chtypes#284, "Layout rule"): the patch a LINE request
-  # would select — the newest published patch of the line at this ABI
-  # revision, which is exactly what the selector above marked A_FLAT=1 —
-  # installs FLAT at <minor>/, exactly as every SDK through 0.4.x reads and
-  # writes. Any OTHER exact patch installs nested at
-  # patches/<minor>/<clickhouse_version>/, a sibling tree released SDKs
-  # neither see nor touch.
+  # The layout rule (chtypes#284, cross-binding placement rule, matching Go
+  # and Python): A_FLAT=1 (set by the selector above) means this row came
+  # from a LINE spelling or --all -- NEVER from whether it happens to be the
+  # line's newest patch -- and installs FLAT at <minor>/, exactly as every
+  # SDK through 0.4.x reads and writes. An EXACT-patch spelling is always
+  # A_FLAT=0 and installs nested at patches/<minor>/<clickhouse_version>/,
+  # even when it is the line's newest and the flat slot is empty -- a sibling
+  # tree released SDKs neither see nor touch.
   local FLAT_DIR="$DEST/$A_MINOR" INSTALL
   if [ "$A_FLAT" = "1" ]; then
     INSTALL="$FLAT_DIR"

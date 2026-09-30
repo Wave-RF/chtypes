@@ -222,29 +222,83 @@ def _manifest_version(directory: Path) -> str | None:
     _patches().get("cases", []),
     ids=lambda c: c["platform"],
 )
-def test_fetch_sh_exact_patch_installs_flat_or_nested(case: dict, tmp_path: Path) -> None:
-    """An exact request for the line's newest served patch lands FLAT at
-    <dest>/<line>/; an exact request for the OTHER served patch lands at
-    patches/<line>/<version>/ instead — on an empty destination, so this is
-    about what the release currently serves for the line, not about what
-    happened to be fetched first."""
-    patches = _patches()
-    newest = patches["newest"]
+def test_fetch_sh_exact_patch_always_installs_nested(case: dict, tmp_path: Path) -> None:
+    """ONLY a line spelling (or --all) writes the flat <dest>/<line>/ slot
+    (chtypes#284, cross-binding placement rule, matching Go and Python). An
+    exact-patch spelling ALWAYS installs at patches/<line>/<version>/ instead
+    — on an empty destination, for EVERY served patch of the line, including
+    the one that happens to be newest. See
+    test_fetch_sh_exact_newest_patch_never_writes_the_empty_flat_slot below
+    for that case asserted on its own, with the flat slot's absence checked
+    explicitly."""
     rows = case["patches"]
     for i, (version, row) in enumerate(rows.items()):
         proc = _run_fetch_sh(version, case["platform"], tmp_path / str(i))
         assert proc.returncode == 0, proc.stderr
         installed = Path(proc.stdout.strip())
-        if version == newest:
-            assert installed == tmp_path / str(i) / "reg" / case["line"], (
-                f"the newest served patch {version} must install FLAT: {installed}"
-            )
-        else:
-            assert installed == tmp_path / str(i) / "reg" / "patches" / case["line"] / version, (
-                f"a non-newest patch {version} must install nested under patches/: {installed}"
-            )
+        assert installed == tmp_path / str(i) / "reg" / "patches" / case["line"] / version, (
+            f"an exact request for {version} must install nested under patches/, "
+            f"never the flat slot, whether or not it is the line's newest: {installed}"
+        )
         library = installed / (json.loads((installed / "manifest.json").read_text())["library"])
         assert hashlib.sha256(library.read_bytes()).hexdigest() == row["library_sha256"]
+
+
+def test_fetch_sh_exact_newest_patch_never_writes_the_empty_flat_slot(tmp_path: Path) -> None:
+    """The headline case of the cross-binding placement rule: an exact
+    request for the line's newest served patch, into a destination with
+    NOTHING installed yet, still installs at patches/<line>/<version>/ — the
+    flat slot stays absent rather than being created. Only a line spelling
+    or --all ever writes it."""
+    patches = _patches()
+    case = patches["cases"][0]
+    newest = patches["newest"]
+    proc = _run_fetch_sh(newest, case["platform"], tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    installed = Path(proc.stdout.strip())
+    assert installed == tmp_path / "reg" / "patches" / case["line"] / newest
+    assert not (tmp_path / "reg" / case["line"]).exists(), (
+        "the flat slot must not exist after an EXACT request, even for the line's "
+        "newest patch into an empty destination"
+    )
+    library = installed / (json.loads((installed / "manifest.json").read_text())["library"])
+    assert (
+        hashlib.sha256(library.read_bytes()).hexdigest()
+        == case["patches"][newest]["library_sha256"]
+    )
+
+
+def test_fetch_sh_exact_request_is_a_noop_when_already_flat(tmp_path: Path) -> None:
+    """The one exception to 'only a line spelling writes the flat slot': it
+    is not a write at all. When the requested exact patch ALREADY sits in
+    the flat slot and verifies — as a line fetch, or an older SDK, would
+    have left it — the exact request is a no-op that reports the flat
+    directory, never a second copy under patches/."""
+    patches = _patches()
+    case = patches["cases"][0]
+    newest = patches["newest"]
+    dest = tmp_path / "reg"
+
+    # Seed the flat slot directly with the newest patch, exactly as a LINE
+    # fetch would have left it (fetch.sh's own line-spelling path is exactly
+    # what does this in practice; seeding it directly keeps this test's
+    # assertion about the EXACT-request path independent of that one).
+    seed = _run_fetch_sh(newest, case["platform"], tmp_path / "seed")
+    assert seed.returncode == 0, seed.stderr
+    seeded_dir = Path(seed.stdout.strip())
+    line_dir = dest / case["line"]
+    dest.mkdir(parents=True)
+    shutil.copytree(seeded_dir, line_dir)
+    assert _manifest_version(line_dir) == newest
+
+    proc = _run_fetch_sh(newest, case["platform"], tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert "already installed and verified" in proc.stderr, proc.stderr
+    installed = Path(proc.stdout.strip())
+    assert installed == line_dir, (
+        "an exact request already satisfied by the flat slot must report it, not patches/"
+    )
+    assert not (dest / "patches").exists(), "the no-op must not create patches/ at all"
 
 
 @pytest.mark.parametrize(

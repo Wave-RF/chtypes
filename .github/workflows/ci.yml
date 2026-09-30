@@ -769,15 +769,21 @@ jobs:
             cat "$CHTYPES_REGISTRY"/patches/*/*/manifest.json
           fi
       # Best-effort, additive, never gates the job (chtypes#284, design §8,
-      # "P18 in CI"): a second real patch of one already-fetched line, so
-      # each binding's "load a newer patch without restarting" case has two
-      # real artifacts to drive instead of skipping by name. `--release-file
-      # index.json` re-verifies the release's own listing through the full
-      # chain (signature, then index-vs-SHA256SUMS) without installing an
-      # artifact, so no new trust surface is added here. Left unset — never
-      # failing this job — when this run's channel has no line with two
-      # patches at its own ABI revision (a revision cutover, a candidate
-      # channel that has not yet built a second patch of anything).
+      # "P18 in CI"): two real patches of one line the channel publishes
+      # twice, so each binding's "load a newer patch without restarting"
+      # case has real artifacts to drive instead of skipping by name. Both
+      # are fetched by EXACT spelling, so both land under patches/<line>/
+      # (the cross-binding placement rule: only a line spelling or --all
+      # writes the flat slot) unless one happens to already be flat from the
+      # per-line fetch above -- a registry's own resolution reads both
+      # levels regardless, so this is not a special case for the suites that
+      # consume CHTYPES_TWO_PATCHES. `--release-file index.json` re-verifies
+      # the release's own listing through the full chain (signature, then
+      # index-vs-SHA256SUMS) without installing an artifact, so no new trust
+      # surface is added here. Left unset -- never failing this job -- when
+      # this run's channel has no line with two patches at its own ABI
+      # revision (a revision cutover, a candidate channel that has not yet
+      # built a second patch of anything).
       - name: two real patches of one line, for the "load without restarting" cases
         id: two-patches
         if: steps.fetch.outcome == 'success'
