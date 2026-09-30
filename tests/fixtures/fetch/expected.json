@@ -149,6 +149,96 @@
   "note": "--frozen with it installs signed/; a lock whose sha256 differs -> CHTYPES_ARTIFACT_PINNED (exit 1)",
   "pins": "signed"
  },
+ "patches": {
+  "abi_revision": 6,
+  "cases": [
+   {
+    "exact_miss": {
+     "requested": "25.8.30.2-lts",
+     "resolves_to": {
+      "clickhouse_version": "25.8.33.5-lts",
+      "file": "chtypes-25.8.33.5-lts-linux-arm64.tar.gz",
+      "sha256": "3665fdd0c37addd3cbda408c260ee47fae1d8c1518404bbabca77e8b4e7ef734"
+     }
+    },
+    "line": "25.8",
+    "patches": {
+     "25.8.28.1-lts": {
+      "file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz",
+      "library_sha256": "829d44597c8252ff9f28323cedf1af3bdb512bdca6c7b54d6b76eddb783428d8",
+      "sha256": "0fa52f4711834df0f4cd8ddb646333832c2357cc865aea1a86403468c543e89c"
+     },
+     "25.8.33.5-lts": {
+      "file": "chtypes-25.8.33.5-lts-linux-arm64.tar.gz",
+      "library_sha256": "9587511f5e94c734a85819a7bd2e1d861603575f7decfe142adf4f258df54136",
+      "sha256": "3665fdd0c37addd3cbda408c260ee47fae1d8c1518404bbabca77e8b4e7ef734"
+     }
+    },
+    "platform": "linux-arm64"
+   },
+   {
+    "exact_miss": {
+     "requested": "25.8.30.2-lts",
+     "resolves_to": {
+      "clickhouse_version": "25.8.33.5-lts",
+      "file": "chtypes-25.8.33.5-lts-linux-amd64.tar.gz",
+      "sha256": "6fb2558f55b42c74e29f0bcc87ebe6447789ac858b2b16d16a9e2bb0c032f150"
+     }
+    },
+    "line": "25.8",
+    "patches": {
+     "25.8.28.1-lts": {
+      "file": "chtypes-25.8.28.1-lts-linux-amd64.tar.gz",
+      "library_sha256": "bacc23d5e886c7b2c007479e731474e1f6a723c9304c0eeab829aa2b88376a49",
+      "sha256": "335b6d1b8511c8f2e0f30aebb9d9c71713d72dde40fc881c3b9e9c5e5a836097"
+     },
+     "25.8.33.5-lts": {
+      "file": "chtypes-25.8.33.5-lts-linux-amd64.tar.gz",
+      "library_sha256": "0f2a96fc9d02c8779b41f446aaba89b6d281ec69b7d7bcaee43ad6a392358d23",
+      "sha256": "6fb2558f55b42c74e29f0bcc87ebe6447789ac858b2b16d16a9e2bb0c032f150"
+     }
+    },
+    "platform": "linux-amd64"
+   },
+   {
+    "exact_miss": {
+     "requested": "25.8.30.2-lts",
+     "resolves_to": {
+      "clickhouse_version": "25.8.33.5-lts",
+      "file": "chtypes-25.8.33.5-lts-darwin-arm64.tar.gz",
+      "sha256": "aa08bf9cd33b5b53d1026f4cac66422a4ce2a7bc86ff51927a924efb28f1eb5a"
+     }
+    },
+    "line": "25.8",
+    "patches": {
+     "25.8.28.1-lts": {
+      "file": "chtypes-25.8.28.1-lts-darwin-arm64.tar.gz",
+      "library_sha256": "d6ea1048c42b91f40c62bef79fc7bc1686d9e4b6a780d599d5fba6f52a420ccc",
+      "sha256": "5316b7fa9509b0790f85687e02c9a43c0566c66518dfbdb827e2be797d9122a7"
+     },
+     "25.8.33.5-lts": {
+      "file": "chtypes-25.8.33.5-lts-darwin-arm64.tar.gz",
+      "library_sha256": "e71517b2a72ebfebc2cbc9192d54161ca1b87ce98e877b37e5eddedba222f3b2",
+      "sha256": "aa08bf9cd33b5b53d1026f4cac66422a4ce2a7bc86ff51927a924efb28f1eb5a"
+     }
+    },
+    "platform": "darwin-arm64"
+   }
+  ],
+  "exact_miss": {
+   "note": "strictly BETWEEN the two served patches in patch number (25.8.28.1-lts < 25.8.30.2-lts < 25.8.33.5-lts), not merely above both \u2014 proves the fallback resolves to the newest served patch, not the numerically closest one.",
+   "requested": "25.8.30.2-lts"
+  },
+  "fixture": "two-patches",
+  "line": "25.8",
+  "newest": "25.8.33.5-lts",
+  "note": "each patch carries its OWN library_sha256 (the version string flows into both the manifest and the fixture \"library\" bytes), so a suite can tell which one actually installed without any wrapper-build bookkeeping. A consumer wanting to prove '--frozen fetches the pinned file even though a newer patch is also served' builds its own lock from `cases[*].patches` \u2014 this fixture is one release serving both rows, not a lock file itself.",
+  "rule": "an EXACT (os, arch, line, patch) hit installs that row. Otherwise, the NEWEST served patch of the SAME line \u2014 never the numerically nearest served patch, and never a different line (that refusal is unchanged). A binding that falls back MUST warn once per (requested, actual) pair and carry an `Exact bool`-shaped flag plus both versions on the resolved library (SDK#284).",
+  "served": [
+   "25.8.28.1-lts",
+   "25.8.33.5-lts"
+  ]
+ },
  "platforms": [
   "linux-arm64",
   "linux-amd64",

@@ -118,6 +118,39 @@ alone, ignoring the filter, gets ONE of the two lines wrong at whichever revisio
 runs at — never both, which is why both lines exist. `expected.json`'s
 `revisions.cases` is the machine-readable form of this table.
 
+## `two-patches/` — WHICH row, once individual PATCHES of one line are distinguished
+
+`two-builds/` and `two-revisions/` above each vary an axis orthogonal to
+`clickhouse_version` itself (the wrapper build, then `abi_revision`). This fixture
+varies the patch directly: line `25.8` published TWICE, at exact patches `25.8.28.1-lts` and
+`25.8.33.5-lts`, both at the SAME `abi_revision` (6) — the SDK's exact-patch loading, whose
+owning model is that every upstream patch is its own immutable build, locked and
+required by consumers.
+
+> an EXACT (os, arch, line, patch) hit installs that row. Otherwise, the NEWEST served patch of the SAME line — never the numerically nearest served patch, and never a different line (that refusal is unchanged). A binding that falls back MUST warn once per (requested, actual) pair and carry an `Exact bool`-shaped flag plus both versions on the resolved library (SDK#284).
+
+each patch carries its OWN library_sha256 (the version string flows into both the manifest and the fixture "library" bytes), so a suite can tell which one actually installed without any wrapper-build bookkeeping. A consumer wanting to prove '--frozen fetches the pinned file even though a newer patch is also served' builds its own lock from `cases[*].patches` — this fixture is one release serving both rows, not a lock file itself.
+
+| platform | line | served patches | library_sha256 (per patch) |
+|---|---|---|---|
+| linux-arm64 | 25.8 | `25.8.28.1-lts`, `25.8.33.5-lts` | `829d44597c8252ff…`, `9587511f5e94c734…` |
+| linux-amd64 | 25.8 | `25.8.28.1-lts`, `25.8.33.5-lts` | `bacc23d5e886c7b2…`, `0f2a96fc9d02c877…` |
+| darwin-arm64 | 25.8 | `25.8.28.1-lts`, `25.8.33.5-lts` | `d6ea1048c42b91f4…`, `e71517b2a72ebfeb…` |
+
+Requesting the patch `25.8.30.2-lts` — strictly BETWEEN the two served patches in patch number (25.8.28.1-lts < 25.8.30.2-lts < 25.8.33.5-lts), not merely above both — proves the fallback resolves to the newest served patch, not the numerically closest one.
+
+| platform | requested (unserved) | resolves to | file |
+|---|---|---|---|
+| linux-arm64 | `25.8.30.2-lts` | `25.8.33.5-lts` | `chtypes-25.8.33.5-lts-linux-arm64.tar.gz` |
+| linux-amd64 | `25.8.30.2-lts` | `25.8.33.5-lts` | `chtypes-25.8.33.5-lts-linux-amd64.tar.gz` |
+| darwin-arm64 | `25.8.30.2-lts` | `25.8.33.5-lts` | `chtypes-25.8.33.5-lts-darwin-arm64.tar.gz` |
+
+Both served rows are genuine, signed and hash-correct, with DIFFERENT `library_sha256`
+values, so a suite can tell which one a fetch actually installed; the exact-miss row
+proves the fallback lands on the newest SERVED patch, not the one numerically closest
+to what was requested. `expected.json`'s `patches.cases` is the machine-readable form
+of both tables above.
+
 ## `abi-revision/` — a GENERATOR, not a release
 
 Every directory above is a miniature release for testing a FETCHER, and the
