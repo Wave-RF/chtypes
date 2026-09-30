@@ -180,7 +180,7 @@ pub(crate) fn unpublished_at_revision(
         have.join(", ")
     };
     format!(
-        "{}; at ABI revision {revision} (this SDK's) the release has: {have}",
+        "{}; at ABI revision {revision} (this SDK's) the release has: {have}.",
         served(any_revision, noun)
     )
 }
@@ -605,9 +605,9 @@ impl Release {
             platforms.sort();
             platforms.dedup();
             return Err(unpublished(if platforms.is_empty() {
-                "it has nothing".into()
+                "it has nothing.".into()
             } else {
-                format!("it has platforms {}", platforms.join(", "))
+                format!("it has platforms {}.", platforms.join(", "))
             }));
         }
         let revision = super::fetch_abi_revision();

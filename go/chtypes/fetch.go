@@ -1100,7 +1100,7 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"you asked for exactly ClickHouse %s on %s at ABI revision %d (this SDK's) and the release at %s does not publish it at that revision: %s; at ABI revision %d the release has: %s. Ask for the line (%s) to take what was published%s",
+				"you asked for exactly ClickHouse %s on %s at ABI revision %d (this SDK's) and the release at %s does not publish it at that revision: %s; at ABI revision %d the release has: %s. Ask for the line (%s) to take what was published.%s",
 				exact, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that patch for "+f.platform),
 				f.abiRevision, versionsOf(rows), line, f.revisionNote(line))
 		}
@@ -1115,7 +1115,7 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 		}
 		if len(hits) == 0 {
 			return nil, f.fail(CodeArtifactUnpublished, spelling, nil,
-				"no artifact for ClickHouse line %s on %s at ABI revision %d (this SDK's) at %s: %s; at ABI revision %d the release has: %s%s",
+				"no artifact for ClickHouse line %s on %s at ABI revision %d (this SDK's) at %s: %s; at ABI revision %d the release has: %s.%s",
 				line, f.platform, f.abiRevision, f.src, servedRevisions(anyRevision, "that line for "+f.platform),
 				f.abiRevision, versionsOf(rows), f.revisionNote(line))
 		}
@@ -1252,7 +1252,7 @@ func (f *fetcher) checkPin(spelling string, a *ReleaseArtifact) error {
 			path, key, *entry.ABIRevision, f.abiRevision, GoFetchCommand, spelling, path)
 	}
 	if entry.File != a.File || !strings.EqualFold(entry.SHA256, a.SHA256) {
-		msg := fmt.Sprintf("%s pins %s to %s (%s) but the release offers %s (%s). Refusing it under --frozen", path, key, entry.File, entry.SHA256, a.File, a.SHA256)
+		msg := fmt.Sprintf("%s pins %s to %s (%s) but the release offers %s (%s). Refusing it under --frozen.", path, key, entry.File, entry.SHA256, a.File, a.SHA256)
 		if entry.ABIRevision == nil {
 			msg += fmt.Sprintf(" %s records no ABI revision (written by an older SDK); this SDK speaks ABI revision %d — re-lock with: %s %s --lock %s",
 				path, f.abiRevision, GoFetchCommand, spelling, path)

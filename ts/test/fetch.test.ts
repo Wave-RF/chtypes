@@ -1448,6 +1448,9 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     expect(drift).toBeInstanceOf(ArtifactPinnedError);
     expect((drift as Error).message).toContain('records no ABI revision');
     expect((drift as Error).message).toContain('older SDK');
+    // The appended sentence starts its own sentence — never glued onto the
+    // one before it with no punctuation between them.
+    expect((drift as Error).message).toContain(`frozen refuses it. ${noRevDrift} records no ABI revision`);
 
     const otherKey = `${fixturePlatform}/24.8`;
     const noRevUnpublished = path.join(scratch('no-rev-unpublished'), 'chtypes.lock');
@@ -1456,13 +1459,24 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     expect(unpublished).toBeInstanceOf(ArtifactUnpublishedError);
     expect((unpublished as Error).message).toContain('records no ABI revision');
     expect((unpublished as Error).message).toContain('older SDK');
+    expect((unpublished as Error).message).toContain(`. ${noRevUnpublished} records no ABI revision`);
 
     // (d) A lock entry at the SDK's own (matching) revision installs
-    // exactly as before.
+    // exactly as before, and --frozen never writes to the lock — not even
+    // to add abi_revision to an entry that matched without it.
     const matching = path.join(scratch('matching'), 'chtypes.lock');
-    writeFileSync(matching, JSON.stringify({ schema: 1, artifacts: { [pinKey]: { ...entry, abi_revision: fixtureRevision } } }));
+    const matchingBytes = JSON.stringify({ schema: 1, artifacts: { [pinKey]: { ...entry, abi_revision: fixtureRevision } } });
+    writeFileSync(matching, matchingBytes);
     const ok = await ensure(line, fixture('signed', scratch('reg5'), { lock: matching, frozen: true }));
     expect(ok.file).toBe(entry.file);
+    expect(readFileSync(matching, 'utf8')).toBe(matchingBytes);
+
+    const noRevMatchDest = scratch('reg5b');
+    const noRevMatch = path.join(scratch('no-rev-match'), 'chtypes.lock');
+    const noRevMatchBytes = JSON.stringify({ schema: 1, artifacts: { [pinKey]: { file: entry.file, sha256: entry.sha256 } } });
+    writeFileSync(noRevMatch, noRevMatchBytes);
+    await ensure(line, fixture('signed', noRevMatchDest, { lock: noRevMatch, frozen: true }));
+    expect(readFileSync(noRevMatch, 'utf8')).toBe(noRevMatchBytes);
 
     // (e) --offline --frozen stays unaffected: no source is ever read, so a
     // mismatched-revision lock is simply not consulted against one.

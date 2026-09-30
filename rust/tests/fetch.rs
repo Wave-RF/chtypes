@@ -637,7 +637,7 @@ fn lock_abi_revision_mismatch_is_named_and_needs_no_source() {
     let err = fetch::ensure(
         "25.8",
         &EnsureOptions {
-            lock: Some(no_rev_drift),
+            lock: Some(no_rev_drift.clone()),
             frozen: true,
             ..opts(&fx, "signed", &tmp("rev-no-rev-drift-dest"))
         },
@@ -651,6 +651,15 @@ fn lock_abi_revision_mismatch_is_named_and_needs_no_source() {
     let msg = err.to_string();
     assert!(msg.contains("records no ABI revision"), "{msg}");
     assert!(msg.contains("older SDK"), "{msg}");
+    // The appended sentence starts its own sentence — never glued onto the
+    // one before it with no punctuation between them.
+    assert!(
+        msg.contains(&format!(
+            ". {} records no ABI revision",
+            no_rev_drift.display()
+        )),
+        "{msg}"
+    );
 
     let other_key = lock_key(platform, "24.8");
     let no_rev_unpublished = tmp("rev-no-rev-unpublished").join("chtypes.lock");
@@ -664,7 +673,7 @@ fn lock_abi_revision_mismatch_is_named_and_needs_no_source() {
     let err = fetch::ensure(
         "24.8",
         &EnsureOptions {
-            lock: Some(no_rev_unpublished),
+            lock: Some(no_rev_unpublished.clone()),
             frozen: true,
             ..opts(&fx, "signed", &tmp("rev-no-rev-unpublished-dest"))
         },
@@ -678,6 +687,13 @@ fn lock_abi_revision_mismatch_is_named_and_needs_no_source() {
     let msg = err.to_string();
     assert!(msg.contains("records no ABI revision"), "{msg}");
     assert!(msg.contains("older SDK"), "{msg}");
+    assert!(
+        msg.contains(&format!(
+            ". {} records no ABI revision",
+            no_rev_unpublished.display()
+        )),
+        "{msg}"
+    );
 
     // (d) A lock entry at the SDK's own (matching) revision installs
     // exactly as before.

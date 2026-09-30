@@ -185,7 +185,7 @@ Codes, shared: `CHTYPES_ARTIFACT_MISSING`, `CHTYPES_ARTIFACT_UNTRUSTED`, `CHTYPE
 `CHTYPES_ARTIFACT_UNPUBLISHED` for a line, an exact patch or `--all` that the release has only at another ABI revision (§2) names the line or patch, the platform, the SDK's own revision, and what the release does serve for it — the revision(s) its rows carry, that its rows record no ABI revision (built before revisions were recorded), or that it has no row for it at all — for example, from an SDK at revision `<R>` against a release that has the line only at `<S>`:
 
 ```text
-chtypes: no artifact for ClickHouse line 25.8 on linux-arm64 at ABI revision <R> (this SDK's) at <source>: the release has that line for linux-arm64 only at ABI revision <S>; at ABI revision <R> the release has: nothing [CHTYPES_ARTIFACT_UNPUBLISHED]
+chtypes: no artifact for ClickHouse line 25.8 on linux-arm64 at ABI revision <R> (this SDK's) at <source>: the release has that line for linux-arm64 only at ABI revision <S>; at ABI revision <R> the release has: nothing. [CHTYPES_ARTIFACT_UNPUBLISHED]
 ```
 
 and, when the line's only rows record no revision at all — darwin-arm64 24.8 on the rolling release today:

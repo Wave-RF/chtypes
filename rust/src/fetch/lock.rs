@@ -151,7 +151,7 @@ impl LockFile {
             return Err(Error::ArtifactPinned {
                 key: key.to_string(),
                 message: format!(
-                    "{} pins {} {} but the release offers {} {}{note}",
+                    "{} pins {} {} but the release offers {} {}.{note}",
                     self.path.display(),
                     pinned.file,
                     pinned.sha256,
@@ -316,6 +316,12 @@ mod tests {
         let drift_msg = drift.to_string();
         assert!(drift_msg.contains("records no ABI revision"));
         assert!(drift_msg.contains("older SDK"));
+        // The appended sentence starts its own sentence — never glued onto
+        // the one before it with no punctuation between them.
+        assert!(
+            drift_msg.contains("offers a.tar.gz aa. chtypes.lock records no ABI revision"),
+            "{drift_msg}"
+        );
 
         // A pin with no recorded revision that DOES match installs cleanly
         // — no sentence needed for a success.

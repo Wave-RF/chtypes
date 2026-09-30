@@ -917,6 +917,12 @@ func TestFetchLockRecordsABIRevisionAndFrozenNamesAMismatch(t *testing.T) {
 	if !strings.Contains(ae.Msg, "records no ABI revision") || !strings.Contains(ae.Msg, "older SDK") || !strings.Contains(ae.Msg, fmt.Sprintf("ABI revision %d", ABIRevision)) {
 		t.Fatalf("drift message carries no old-lock sentence: %s", ae.Msg)
 	}
+	// The appended sentence starts its own sentence: "--frozen." then a
+	// space then the lock path, never "--frozen <path>" as though the path
+	// were an argument to --frozen.
+	if !strings.Contains(ae.Msg, "--frozen. "+noRevLock+" records no ABI revision") {
+		t.Fatalf("missing sentence separator before the appended note: %s", ae.Msg)
+	}
 
 	noRevLock2 := filepath.Join(t.TempDir(), "no-rev2.lock")
 	otherKey := LockKey(HostPlatform(), "26.7")
@@ -925,6 +931,9 @@ func TestFetchLockRecordsABIRevisionAndFrozenNamesAMismatch(t *testing.T) {
 	ae = wantCode(t, err, CodeArtifactUnpublished)
 	if !strings.Contains(ae.Msg, "records no ABI revision") || !strings.Contains(ae.Msg, "older SDK") {
 		t.Fatalf("unpublished message carries no old-lock sentence: %s", ae.Msg)
+	}
+	if !strings.Contains(ae.Msg, ". "+noRevLock2+" records no ABI revision") {
+		t.Fatalf("missing sentence separator before the appended note: %s", ae.Msg)
 	}
 
 	// (d) A lock entry at the SDK's own (matching) revision installs

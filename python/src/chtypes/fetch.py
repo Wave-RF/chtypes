@@ -539,7 +539,7 @@ class Release:
         if not on_platform:
             raise ArtifactUnpublishedError(
                 f"chtypes: {self.source} publishes nothing for {platform} "
-                f"(it has: {', '.join(self.platforms()) or 'nothing'})"
+                f"(it has: {', '.join(self.platforms()) or 'nothing'})."
             )
         have = ", ".join(e.clickhouse_version for e in on_platform if e.abi_revision == rev)
         if exact is not None:
@@ -571,7 +571,7 @@ class Release:
             f"chtypes: no artifact for ClickHouse line {line} on {platform} at ABI revision "
             f"{rev} (this SDK's) at {self.source}: "
             f"{_served(any_revision, f'that line for {platform}')}"
-            f"; at ABI revision {rev} the release has: {have or 'nothing'}"
+            f"; at ABI revision {rev} the release has: {have or 'nothing'}."
         )
 
 

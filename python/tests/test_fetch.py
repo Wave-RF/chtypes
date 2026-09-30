@@ -543,6 +543,9 @@ def test_lock_abi_revision_mismatch_is_named_and_needs_no_source(
     assert "records no ABI revision" in msg
     assert "older SDK" in msg
     assert f"ABI revision {at_fixture_revision}" in msg
+    # The appended sentence starts its own sentence — never glued onto the
+    # one before it with no punctuation between them.
+    assert f"deliberately. {no_rev_drift} records no ABI revision" in msg
 
     # 24.8 is not among signed/'s published lines (expected.json's "lines"
     # names only 25.8 and 26.7), so this is a genuine UNPUBLISHED.
@@ -557,6 +560,7 @@ def test_lock_abi_revision_mismatch_is_named_and_needs_no_source(
     msg = str(caught.value)
     assert "records no ABI revision" in msg
     assert "older SDK" in msg
+    assert f". {no_rev_unpublished} records no ABI revision" in msg
 
     # (d) A lock entry at the SDK's own (matching) revision installs exactly
     # as before.

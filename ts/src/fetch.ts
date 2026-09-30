@@ -812,7 +812,7 @@ export function selectArtifact(index: ReleaseIndex, platform: string, req: Versi
             `release does not publish it at that revision: ${served(anyRevision, `that patch for ${platform}`)}` +
             `; at ABI revision ${rev} the release has: ${have}. Ask for the line (${req.line}) to take what was published.`
         : `chtypes: no artifact for ClickHouse line ${req.line} on ${platform} at ABI revision ${rev} (this SDK's): ` +
-            `${served(anyRevision, `that line for ${platform}`)}; at ABI revision ${rev} the release has: ${have}`,
+            `${served(anyRevision, `that line for ${platform}`)}; at ABI revision ${rev} the release has: ${have}.`,
     );
   }
   // A line can carry more than one row: two patches, or the same patch built
@@ -863,7 +863,7 @@ function forPlatform(index: ReleaseIndex, platform: string): IndexArtifact[] {
   if (rows.length === 0) {
     const have = [...new Set(index.artifacts.map((a) => `${a.os}-${a.arch}`))].sort();
     throw new ArtifactUnpublishedError(
-      `chtypes: the release has nothing for ${platform} (it has: ${have.length > 0 ? have.join(', ') : 'nothing'})`,
+      `chtypes: the release has nothing for ${platform} (it has: ${have.length > 0 ? have.join(', ') : 'nothing'}).`,
     );
   }
   return rows;
@@ -1187,7 +1187,7 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
     if (pin.file !== art.file || pin.sha256.toLowerCase() !== art.sha256) {
       const note = pin.abi_revision === undefined ? revisionNote(ctx, minor) : '';
       throw new ArtifactPinnedError(
-        `chtypes: ${ctx.lockPath} pins ${lockKey} to ${pin.file} (${pin.sha256}) but the release offers ${art.file} (${art.sha256}); frozen refuses it${note}`,
+        `chtypes: ${ctx.lockPath} pins ${lockKey} to ${pin.file} (${pin.sha256}) but the release offers ${art.file} (${art.sha256}); frozen refuses it.${note}`,
       );
     }
   }
@@ -1216,7 +1216,7 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
       const have = await sha256File(libPath);
       if (have === art.library_sha256) {
         emit({ type: 'status', message: `already installed and verified: ${libPath}` });
-        if (ctx.lockPath !== undefined) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256, abi_revision: fetchAbiRevision() });
+        if (ctx.lockPath !== undefined && !ctx.frozen) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256, abi_revision: fetchAbiRevision() });
         return result(false);
       }
       emit({ type: 'status', message: `${libPath} is present but hashes ${have} (want ${art.library_sha256}) — replacing` });
@@ -1286,7 +1286,7 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
       );
     }
     emit({ type: 'status', message: `installed and verified: ${install} (${manifest.library} sha256 ${finalSha})` });
-    if (ctx.lockPath !== undefined) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256, abi_revision: fetchAbiRevision() });
+    if (ctx.lockPath !== undefined && !ctx.frozen) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256, abi_revision: fetchAbiRevision() });
     return result(true);
   } finally {
     await rm(tarball, { force: true });
