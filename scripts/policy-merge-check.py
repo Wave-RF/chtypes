@@ -147,10 +147,11 @@ a post-hoc re-verification — a real gap versus the old guarantee, accepted
 because there is no synchronous moment left at which to make it.
 
 MANUAL MERGES GO THROUGH THE QUEUE TOO. A protected-class pull request (left
-for a human by condition 5) merges by `gh pr merge <n> --merge` same as
-always; once the repository requires the merge queue, that command enqueues
-rather than merging directly — GitHub's own behavior, nothing this file
-does. Draft status is still the hold switch either way.
+for a human by condition 5) is enqueued by hand with the same
+`enqueuePullRequest` mutation this file uses, pinned to the reviewed head
+(CONTRIBUTING.md has the command). `gh pr merge` does not work here: with a
+queue required it falls back to enabling auto-merge, which this repository
+does not allow (measured). Draft status is still the hold switch either way.
 
 ================================================================================
 PROTECTED_GLOBS
