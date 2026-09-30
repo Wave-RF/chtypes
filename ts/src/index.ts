@@ -13,19 +13,21 @@
  */
 
 export {
+  type DiscoveredColumn,
   parseChangedSettingsResult,
   parseColumnsResult,
   parseVersionResult,
   QUERY_CHANGED_SETTINGS,
   QUERY_SERVER_VERSION,
   QUERY_TABLE_COLUMNS,
-  type DiscoveredColumn,
   type ServerProfile,
 } from './discover.js';
+export { type ErrorCodeEntry, ErrorCodeTable } from './error-codes.js';
 export {
   ABI_REVISION,
   ArtifactCorruptError,
   ArtifactError,
+  type ArtifactErrorCode,
   ArtifactMissingError,
   ArtifactPinnedError,
   ArtifactUnpublishedError,
@@ -45,41 +47,61 @@ export {
   SchemaError,
   SourceUnreachableError,
   UnsupportedError,
-  type ArtifactErrorCode,
 } from './errors.js';
 export {
   compareVersions,
   DEFAULT_ARTIFACTS_URL,
   DEFAULT_LOCK_FILE,
   DEFAULT_RELEASE_TAG,
+  type EnsureOptions,
+  type EnsureResult,
   ensure,
   ensureAll,
+  type FetchEvent,
+  type IndexArtifact,
+  type InstalledArtifact,
   keyId,
-  listArtifacts,
+  type ListResult,
   LOCK_SCHEMA,
+  type LockEntry,
+  type LockFile,
+  listArtifacts,
   parseSignatureFile,
   parseVersionSpelling,
-  readLock,
   RELEASE_KEY_ID,
   RELEASE_PUBLIC_KEYS,
+  type ReleaseIndex,
+  readLock,
   resolvePlatform,
   selectAll,
   selectArtifact,
   sha256File,
   trustedKeys,
+  type VersionRequest,
   verifyEd25519,
   verifyInstalled,
-  type EnsureOptions,
-  type EnsureResult,
-  type FetchEvent,
-  type IndexArtifact,
-  type InstalledArtifact,
-  type ListResult,
-  type LockEntry,
-  type LockFile,
-  type ReleaseIndex,
-  type VersionRequest,
 } from './fetch.js';
+export { nativeStats } from './ffi.js';
+export {
+  DOC_ALL,
+  DOC_DEFAULTS,
+  DOC_TRANSFORMS,
+  DOC_VALUES,
+  EXPORT_NONE,
+  Format,
+  formatName,
+} from './format.js';
+export {
+  isValidUtf8,
+  Json,
+  type JsonKind,
+  parseDocument,
+  parseJsonValue,
+  rawBytes,
+  rawText,
+  repairBareDenormals,
+} from './json.js';
+export { CompileMode, type CompileOptions, Library, minorOf } from './library.js';
 export {
   cacheRegistryDir,
   ENV_AUTOFETCH,
@@ -90,65 +112,44 @@ export {
   registrySearchPath,
   systemRegistryDirs,
 } from './paths.js';
-export { extractTarGz, type ExtractedEntry } from './tar.js';
-export {
-  DOC_ALL,
-  DOC_DEFAULTS,
-  DOC_TRANSFORMS,
-  DOC_VALUES,
-  EXPORT_NONE,
-  Format,
-  formatName,
-} from './format.js';
-export { CompileMode, Library, minorOf, type CompileOptions } from './library.js';
-export { ErrorCodeTable, type ErrorCodeEntry } from './error-codes.js';
-export { nativeStats } from './ffi.js';
 export {
   compareMinor,
   defaultRegistryDir,
   looksLikeRegistry,
-  Registry,
-  resolveRegistryDir,
   type Manifest,
+  Registry,
   type RegistryOptions,
+  type Resolution,
+  resolveRegistryDir,
 } from './registry.js';
 export {
-  DefaultKind,
-  FilterOutcome,
-  isAnswer,
-  Outcome,
-  Source,
-  Verdict,
   type BatchResult,
   type ColumnDoc,
   type Computed,
+  DefaultKind,
+  FilterOutcome,
   type FilterResult,
   type FilterRowError,
+  isAnswer,
+  Outcome,
   type RowResult,
+  Source,
   type Span,
   type Substitution,
   type Transform,
   type Value,
+  Verdict,
 } from './results.js';
 export {
   Block,
-  Filter,
-  Schema,
   type ColumnInfo,
   type CompileFilterOptions,
   type EngineOptions,
+  Filter,
   type RowOptions,
   type RowsOptions,
+  Schema,
 } from './schema.js';
 export { encodeSettings, type Settings, type SettingValue } from './settings.js';
+export { type ExtractedEntry, extractTarGz } from './tar.js';
 export { isLossyReason, Reason } from './transform.js';
-export {
-  isValidUtf8,
-  Json,
-  parseDocument,
-  parseJsonValue,
-  rawBytes,
-  rawText,
-  repairBareDenormals,
-  type JsonKind,
-} from './json.js';

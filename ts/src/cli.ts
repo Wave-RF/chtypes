@@ -26,7 +26,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { ArtifactUnpublishedError, ChtypesError, FetchError, SourceUnreachableError } from './errors.js';
-import { ensure, ensureAll, listArtifacts, resolvePlatform, verifyInstalled, type EnsureOptions, type FetchEvent } from './fetch.js';
+import { type EnsureOptions, ensure, ensureAll, type FetchEvent, listArtifacts, resolvePlatform, verifyInstalled } from './fetch.js';
 import { fetchDestination } from './paths.js';
 
 /** The §6 exit codes. */
