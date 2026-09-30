@@ -116,7 +116,7 @@ Reference vector (openssl, `-rawin`): message `68656c6c6f0a` ("hello\n") signs u
 
 ## 5. Pinning
 
-`fetch --lock chtypes.lock` records, per `<os>-<arch>/<minor>`, the asset file and sha256 that were installed, and the ABI revision the selected row carried; `fetch --frozen` (or `ensure(..., lock=…)`) refuses anything else with `CHTYPES_ARTIFACT_PINNED`. The file is JSON, schema 1:
+`fetch --lock chtypes.lock` records, per `<os>-<arch>/<minor>`, the asset file and sha256 that were installed, and the ABI revision the selected row carried; `fetch --frozen` (or `ensure` given both a lock and `frozen`) refuses anything else with `CHTYPES_ARTIFACT_PINNED`. Without `--frozen`, `--lock` only records: an existing entry is replaced by what the fetch installed, which is how a lock is re-pinned. The file is JSON, schema 1:
 
 ```json
 {"schema": 1, "artifacts": {"linux-arm64/25.8": {"file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz", "sha256": "…", "abi_revision": 6}}}

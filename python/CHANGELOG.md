@@ -10,6 +10,10 @@ The four bindings in this repository are released together and give one answer, 
 
 - **`fetch --lock` now records the artifact's ABI revision** in each lock entry (`abi_revision`, optional and additive — schema stays 1); `--frozen` checks it FIRST, before the file/sha256 pin: a lock that names a different revision raises `ArtifactPinnedError`, naming both numbers and the `python -m chtypes fetch` remedy, instead of surfacing as a bare drifted pin or `ArtifactUnpublishedError`. A lock entry with no recorded revision (written by an SDK before this change) keeps today's behavior, with one sentence appended when it ends in one of those two errors. `offline=True, frozen=True` is unaffected (docs/guides/fetch.md §5, closes #253).
 
+### Fixed
+
+- **`fetch --lock` without `--frozen` re-pins, as in the other three bindings.** It used to enforce an existing lock entry anyway and refuse a differing one with `CHTYPES_ARTIFACT_PINNED`. That meant the re-lock command the refusal itself names (`--lock` without `--frozen`) was refused too, and the only way out was deleting the lock. Only `--frozen` enforces a pin now (`docs/guides/fetch.md` §5).
+
 ## [0.4.0] — 2026-09-30
 
 Speaks ABI revision 6 and refuses revision-5 artifacts. Revision 6 adds the error-code table and the partition key; revision-6 artifacts are published for every ClickHouse line this SDK supports, beside the revision-5 builds that 0.3.x keeps loading.
