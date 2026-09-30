@@ -62,8 +62,23 @@
 # or a test runner whose own output is the answer.
 name: ci
 
+# merge_group (checks_requested): the merge queue's own candidate combination
+# — a pull request's changes merged with main's CURRENT tip, not the
+# possibly-older main its own pull_request run tested — must run and
+# conclude every required job here or the queue waits forever. No job below
+# reads github.event.pull_request.*, github.base_ref or github.head_ref (the
+# only github.ref use is the concurrency group below, which is unique per
+# merge_group entry same as it is per pull request), so nothing needed a
+# merge_group-specific branch; this audit is recorded in
+# .github/workflows/policy-merge.yml's header and in scripts/policy-merge-
+# check.py's module docstring (ENQUEUE, NOT MERGE), which also explains why
+# it exists. .github/workflows/policy-merge.yml explicitly ignores a
+# merge_group-triggered run of this workflow — it is the queue's own test,
+# not something that workflow enqueues again.
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
   workflow_dispatch:
@@ -182,21 +197,29 @@ jobs:
       # channel currently serves.
       - name: selftest — abi-channel.sh's channel derivation (equal, ahead, behind, disagreeing, missing, explicit override)
         run: scripts/abi-channel.sh --selftest
-      # .github/workflows/regen-automerge.yml merges a pull request that only
-      # regenerates docs/support.md, and scripts/regen-automerge-check.py is
-      # its whole decision. Selftest first: each refusal (a second file, one
-      # byte, a missing, failing or pending required check, a fork, a stale
-      # head) must fire and an all-good input must pass. Then its pinned
-      # REQUIRED_CHECKS must name exactly the jobs in THIS file that carry no
-      # job-level `continue-on-error: true`, derived from this file's text:
-      # the built-in token cannot read branch protection, so that list is
-      # pinned, and renaming or adding a blocking job here without updating
-      # it fails here rather than leaving the automerge judging a stale list.
-      # No network, no artifact.
-      - name: selftest — every automerge refusal fires, and an all-good regeneration passes
-        run: scripts/regen-automerge-check.py --selftest
-      - name: the automerge's pinned required checks are exactly this file's blocking jobs
-        run: scripts/regen-automerge-check.py --check-ci-names
+      # .github/workflows/policy-merge.yml enqueues a pull request to merge
+      # itself once every condition holds, and scripts/policy-merge-check.py
+      # is its whole decision (chtypes#280 generalized this from the old
+      # regen-automerge, which only handled a docs/support.md regeneration — see that script's
+      # own header for the six conditions and PROTECTED_GLOBS). Selftest
+      # first: each refusal (every PROTECTED_GLOBS family, a docs/support.md
+      # byte mismatch or non-modification, a missing, failing or pending
+      # required check, a fork, a stale head) must fire and an all-good input
+      # must pass. Then its pinned REQUIRED_CHECKS must name exactly the jobs
+      # in THIS file that carry no job-level `continue-on-error: true`,
+      # derived from this file's text: the built-in token cannot read branch
+      # protection, so that list is pinned, and renaming or adding a blocking
+      # job here without updating it fails here rather than leaving the
+      # policy merge judging a stale list. Last, CONTRIBUTING.md's generated
+      # protected-glob block must still match PROTECTED_GLOBS exactly — the
+      # guide is derived, never hand-copied, and this is what catches the two
+      # drifting apart. No network, no artifact.
+      - name: selftest — every policy-merge refusal fires, and an all-good pull request passes
+        run: scripts/policy-merge-check.py --selftest
+      - name: the policy merge's pinned required checks are exactly this file's blocking jobs
+        run: scripts/policy-merge-check.py --check-ci-names
+      - name: CONTRIBUTING.md's protected-glob block matches PROTECTED_GLOBS exactly
+        run: scripts/policy-merge-check.py --check-guide
       # scripts/check-suite.sh, scripts/lib/provenance.py (called from inside
       # check-suite.sh's own --selftest) and scripts/published-lines.sh each
       # had a --selftest mode that no workflow step ever invoked (chtypes#268)

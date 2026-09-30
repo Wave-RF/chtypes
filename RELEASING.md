@@ -11,7 +11,7 @@ Four packages, one repository, one tag convention: **the directory prefix is the
 
 Each workflow refuses a tag whose version does not equal the manifest's, builds, and publishes with provenance where the registry supports it. No long-lived token is stored for PyPI or crates.io.
 
-**And each one then installs what it just published.** The last step of every release workflow is `scripts/verify-published.sh <eco> <version>`: a clean-room install from the public registry, with no credentials, followed by importing the package and asserting it reports the ABI revision in `include/chtypes.h`. The job cannot go green until that passes, retrying for 15 minutes.
+**And each one then installs what it just published.** The last step of every release workflow is `scripts/verify-published.sh <eco> <version>`: a clean-room install from the public registry, with no credentials, followed by importing the package and asserting it reports the ABI revision in `include/chtypes.h`. It runs as its own job (`verify`, after `publish`), retrying every 15s (30s past the ten-minute mark) for up to an hour on npm and 15 minutes on the other three — see the paragraph below.
 
 This is here because a publish step exiting 0 does not mean anyone can install the package. On `ts/v0.1.1` the job went green about seven minutes before npm served the tarball, and for two of those minutes `dist-tags.latest` resolved to a version that 404'd — a clean `npm install` failed while CI showed a green release (issue #10). A publish that never completes looks identical. Presence is not the test: the check installs and runs, so it also catches an artifact that resolves but does not work, and one whose ABI disagrees with the header.
 
@@ -40,6 +40,8 @@ Push the four tags **one at a time**, and wait for each workflow to go green bef
 None of the four can be taken back: crates.io and PyPI refuse to reuse a version number, and npm the same. A release is a one-way door on all four — the order only decides how much you know before you walk through the last one.
 
 ⚠️ **Do not read `release-ts` or `release-rust` failing on an already-published version as broken publishing.** `error: crate chtypes@X already exists` and `[E403] You cannot publish over the previously published versions` are both reached _after_ authentication succeeds, so they are the check that the publishers are still configured. Read the error before reporting a problem.
+
+npm can take about half an hour to serve a good publish (`ts/v0.4.0` measured ~26 minutes, with no human action anywhere in that window), so `release-ts.yml`'s `verify` job waits up to an hour before it gives up; if it still fails, re-run only the `verify` job — `publish` already succeeded and re-running it is refused by npm. The failure text says what it measured (whether the packument lists the version, what `dist-tags.latest` is, the tarball's HTTP status) before it guesses at a cause; on `0.4.0` the "may be staged for approval" guess it used to lead with was wrong — nothing was staged, npm was just slow.
 
 ## Registry setup, once each (the owner's console; nothing is stored here)
 

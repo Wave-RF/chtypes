@@ -19,14 +19,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz",
-     "sha256": "c1e6a7f9862ec62b2337a2defa0b3cda48e6d9f4a438b8d854490abb176fba2b"
+     "sha256": "cce513109b881985ae0051a02cbb7b546b5e1a21154560956975593573af6ed4"
     },
     "line": "25.8",
     "platform": "linux-arm64",
     "superseded": {
      "build": 0,
      "file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz",
-     "sha256": "b785b07663e65972585441178c50de1873e27798bd5441bc6959995544158beb"
+     "sha256": "0fa52f4711834df0f4cd8ddb646333832c2357cc865aea1a86403468c543e89c"
     }
    },
    {
@@ -34,14 +34,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz",
-     "sha256": "f9c7f11bfcfcdd57287d912b7cf954212ddcd965a58ee910eaef338d79f7c1eb"
+     "sha256": "134c0482031dc45b67fb7c805ad5dc6bed506dcec3a545aff597810ce534fbad"
     },
     "line": "26.7",
     "platform": "linux-arm64",
     "superseded": {
      "build": 105,
      "file": "chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz",
-     "sha256": "39fdbe5035d0a11cf5edf6345e86b94d766339f68550889ce24506aba6d8a0a5"
+     "sha256": "a1869dcea0971af181485fd27e35ded816b4e1082831f6eca2dce27918703c59"
     }
    },
    {
@@ -49,14 +49,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz",
-     "sha256": "84d79f7e543c160006478252d5a170d4bb57322881ffcb8157a25da82dce3763"
+     "sha256": "874cd54f183bf7bb096415e90b1311e713a0dc1208b0ce0d047a69a268118aab"
     },
     "line": "25.8",
     "platform": "linux-amd64",
     "superseded": {
      "build": 0,
      "file": "chtypes-25.8.28.1-lts-linux-amd64.tar.gz",
-     "sha256": "7ba41cc435771fa4c408378a3499fc0576c6f561072b87b17aa3bbed7a6094d1"
+     "sha256": "335b6d1b8511c8f2e0f30aebb9d9c71713d72dde40fc881c3b9e9c5e5a836097"
     }
    },
    {
@@ -64,14 +64,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz",
-     "sha256": "e110a2d15cfebe7ef14a0f86cf3855e4757d50fc90e3e76327c68dd795ddd149"
+     "sha256": "a18e127e472c7674b0c73407df61b47c574e85e615277012b9f47fb4521d5317"
     },
     "line": "26.7",
     "platform": "linux-amd64",
     "superseded": {
      "build": 105,
      "file": "chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz",
-     "sha256": "4e19dcb5d32e739f2d305b42595641fc7295b71a9c07f59d1cf1783ce6a01c5d"
+     "sha256": "423e1c91535c0c25d3ccdefb129748e99689ac204d4105729d35adf9b0dbb8f6"
     }
    },
    {
@@ -79,14 +79,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz",
-     "sha256": "ac0fe6821c4f6ca4cb6fabc60023f8fc0f9c5e0c1c97f00d2ce4dfc754eec3b6"
+     "sha256": "f26f93fe4e357cb04db87d5722f293be90d59f2683c652a9203d9701c16c8dc8"
     },
     "line": "25.8",
     "platform": "darwin-arm64",
     "superseded": {
      "build": 0,
      "file": "chtypes-25.8.28.1-lts-darwin-arm64.tar.gz",
-     "sha256": "5ba330165a6fbd6f51103fe9754cde0e24c0c9b3b85ec4134a12b5c104f9cf38"
+     "sha256": "5316b7fa9509b0790f85687e02c9a43c0566c66518dfbdb827e2be797d9122a7"
     }
    },
    {
@@ -94,14 +94,14 @@
     "install": {
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz",
-     "sha256": "296ce0d42ac941efea2c050f6bc2bd197018fbd88a43a20ec30d3b8699c60bfd"
+     "sha256": "2b2978a55b541ff026c335f7e14d845bf40c7d370e46fe6ad037e9005bacfe0e"
     },
     "line": "26.7",
     "platform": "darwin-arm64",
     "superseded": {
      "build": 105,
      "file": "chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz",
-     "sha256": "698cd565667724a053cbef9e2a0c70540ba4877ed29abbf43470c996f7406700"
+     "sha256": "7dcc12dcde3e75ea9c0d292de06e469970668b7b279bcbeab4136645ec3ec388"
     }
    }
   ],
@@ -114,7 +114,7 @@
    "25.8"
   ]
  },
- "fixtures_abi_revision": 5,
+ "fixtures_abi_revision": 6,
  "generated_by": "the artifact producer's fixture generator \u2014 never edit by hand",
  "index_doc_keys": [
   "artifacts",
@@ -159,149 +159,149 @@
   "cases": [
    {
     "at_high_revision": {
-     "abi_revision": 6,
+     "abi_revision": 7,
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz",
-     "sha256": "134c0482031dc45b67fb7c805ad5dc6bed506dcec3a545aff597810ce534fbad"
+     "sha256": "2187efba542e861c6ac9b0cac4bf1fb631ee0008e20562fb88220ef9087dc64b"
     },
     "at_low_revision": {
-     "abi_revision": 5,
+     "abi_revision": 6,
      "build": 105,
      "file": "chtypes-26.7.3.19-stable-linux-arm64-b105.tar.gz",
-     "sha256": "39fdbe5035d0a11cf5edf6345e86b94d766339f68550889ce24506aba6d8a0a5"
+     "sha256": "a1869dcea0971af181485fd27e35ded816b4e1082831f6eca2dce27918703c59"
     },
     "line": "26.7",
     "platform": "linux-arm64",
     "unfiltered": {
-     "abi_revision": 6,
+     "abi_revision": 7,
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-linux-arm64-b214.tar.gz",
-     "sha256": "134c0482031dc45b67fb7c805ad5dc6bed506dcec3a545aff597810ce534fbad"
+     "sha256": "2187efba542e861c6ac9b0cac4bf1fb631ee0008e20562fb88220ef9087dc64b"
     }
    },
    {
     "at_high_revision": {
-     "abi_revision": 6,
+     "abi_revision": 7,
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz",
-     "sha256": "a18e127e472c7674b0c73407df61b47c574e85e615277012b9f47fb4521d5317"
+     "sha256": "d819544d64dff270333e4a833bdc9f7ba5e1b82cfd6a956051d69f56b7c30506"
     },
     "at_low_revision": {
-     "abi_revision": 5,
+     "abi_revision": 6,
      "build": 105,
      "file": "chtypes-26.7.3.19-stable-linux-amd64-b105.tar.gz",
-     "sha256": "4e19dcb5d32e739f2d305b42595641fc7295b71a9c07f59d1cf1783ce6a01c5d"
+     "sha256": "423e1c91535c0c25d3ccdefb129748e99689ac204d4105729d35adf9b0dbb8f6"
     },
     "line": "26.7",
     "platform": "linux-amd64",
     "unfiltered": {
-     "abi_revision": 6,
+     "abi_revision": 7,
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-linux-amd64-b214.tar.gz",
-     "sha256": "a18e127e472c7674b0c73407df61b47c574e85e615277012b9f47fb4521d5317"
+     "sha256": "d819544d64dff270333e4a833bdc9f7ba5e1b82cfd6a956051d69f56b7c30506"
     }
    },
    {
     "at_high_revision": {
-     "abi_revision": 6,
+     "abi_revision": 7,
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz",
-     "sha256": "2b2978a55b541ff026c335f7e14d845bf40c7d370e46fe6ad037e9005bacfe0e"
+     "sha256": "087dbd3c4273592424e087261de3fcbec99c86c604070dedcae2c1a725fb4bca"
     },
     "at_low_revision": {
-     "abi_revision": 5,
+     "abi_revision": 6,
      "build": 105,
      "file": "chtypes-26.7.3.19-stable-darwin-arm64-b105.tar.gz",
-     "sha256": "698cd565667724a053cbef9e2a0c70540ba4877ed29abbf43470c996f7406700"
+     "sha256": "7dcc12dcde3e75ea9c0d292de06e469970668b7b279bcbeab4136645ec3ec388"
     },
     "line": "26.7",
     "platform": "darwin-arm64",
     "unfiltered": {
-     "abi_revision": 6,
+     "abi_revision": 7,
      "build": 214,
      "file": "chtypes-26.7.3.19-stable-darwin-arm64-b214.tar.gz",
-     "sha256": "2b2978a55b541ff026c335f7e14d845bf40c7d370e46fe6ad037e9005bacfe0e"
+     "sha256": "087dbd3c4273592424e087261de3fcbec99c86c604070dedcae2c1a725fb4bca"
     }
    },
    {
     "at_high_revision": {
-     "abi_revision": 6,
+     "abi_revision": 7,
      "build": 105,
      "file": "chtypes-25.8.28.1-lts-linux-arm64-b105.tar.gz",
-     "sha256": "0109f69d7aa9fc94a916a829ba7e79c836be98e7554a9727246a44866a9e6625"
+     "sha256": "ceaeda5347dba7731b945aae18f477f3f034d63f335942a9737716575c3c539e"
     },
     "at_low_revision": {
-     "abi_revision": 5,
+     "abi_revision": 6,
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz",
-     "sha256": "c1e6a7f9862ec62b2337a2defa0b3cda48e6d9f4a438b8d854490abb176fba2b"
+     "sha256": "cce513109b881985ae0051a02cbb7b546b5e1a21154560956975593573af6ed4"
     },
     "line": "25.8",
     "platform": "linux-arm64",
     "unfiltered": {
-     "abi_revision": 5,
+     "abi_revision": 6,
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-linux-arm64-b214.tar.gz",
-     "sha256": "c1e6a7f9862ec62b2337a2defa0b3cda48e6d9f4a438b8d854490abb176fba2b"
+     "sha256": "cce513109b881985ae0051a02cbb7b546b5e1a21154560956975593573af6ed4"
     }
    },
    {
     "at_high_revision": {
-     "abi_revision": 6,
+     "abi_revision": 7,
      "build": 105,
      "file": "chtypes-25.8.28.1-lts-linux-amd64-b105.tar.gz",
-     "sha256": "a0a9eb4cd9cc958b2177271cc44b096cb56720734e028a78cc3748a9f5c3f939"
+     "sha256": "aab8a84524d924c7577e101b7c097bdeae54f6c298a4110b74305d3dec896709"
     },
     "at_low_revision": {
-     "abi_revision": 5,
+     "abi_revision": 6,
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz",
-     "sha256": "84d79f7e543c160006478252d5a170d4bb57322881ffcb8157a25da82dce3763"
+     "sha256": "874cd54f183bf7bb096415e90b1311e713a0dc1208b0ce0d047a69a268118aab"
     },
     "line": "25.8",
     "platform": "linux-amd64",
     "unfiltered": {
-     "abi_revision": 5,
+     "abi_revision": 6,
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-linux-amd64-b214.tar.gz",
-     "sha256": "84d79f7e543c160006478252d5a170d4bb57322881ffcb8157a25da82dce3763"
+     "sha256": "874cd54f183bf7bb096415e90b1311e713a0dc1208b0ce0d047a69a268118aab"
     }
    },
    {
     "at_high_revision": {
-     "abi_revision": 6,
+     "abi_revision": 7,
      "build": 105,
      "file": "chtypes-25.8.28.1-lts-darwin-arm64-b105.tar.gz",
-     "sha256": "ed4fb63d189cfecbdfb0058be83425f4b1dbd1203fee252dfd3e771fd2aecc14"
+     "sha256": "bfed24868138b2eac6b36834e7b1b31455cb9ced9ca2ac572711c2a33de71622"
     },
     "at_low_revision": {
-     "abi_revision": 5,
+     "abi_revision": 6,
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz",
-     "sha256": "ac0fe6821c4f6ca4cb6fabc60023f8fc0f9c5e0c1c97f00d2ce4dfc754eec3b6"
+     "sha256": "f26f93fe4e357cb04db87d5722f293be90d59f2683c652a9203d9701c16c8dc8"
     },
     "line": "25.8",
     "platform": "darwin-arm64",
     "unfiltered": {
-     "abi_revision": 5,
+     "abi_revision": 6,
      "build": 214,
      "file": "chtypes-25.8.28.1-lts-darwin-arm64-b214.tar.gz",
-     "sha256": "ac0fe6821c4f6ca4cb6fabc60023f8fc0f9c5e0c1c97f00d2ce4dfc754eec3b6"
+     "sha256": "f26f93fe4e357cb04db87d5722f293be90d59f2683c652a9203d9701c16c8dc8"
     }
    }
   ],
   "discriminating_lines": [
    {
     "line": "26.7",
-    "revision": 5
+    "revision": 6
    },
    {
     "line": "25.8",
-    "revision": 6
+    "revision": 7
    }
   ],
   "fixture": "two-revisions",
-  "high_revision": 6,
+  "high_revision": 7,
   "lines": {
    "25.8": {
     "build_at_high_revision": 105,
@@ -314,7 +314,7 @@
     "clickhouse_version": "26.7.3.19-stable"
    }
   },
-  "low_revision": 5,
+  "low_revision": 6,
   "note": "an UNFILTERED resolve (today's binding behavior, before the ABI-revision filter) skips the first half and installs the higher-build row regardless of its revision \u2014 the two-SDK-versions-on-one-machine collision the filter exists to stop. On `26.7` the higher build sits on the high revision, so filtering to the LOW revision is what differs from unfiltered; on `25.8`, the mirror, the higher build sits on the low revision, so filtering to the HIGH revision is what differs. Every case records the unfiltered row too, under `unfiltered`, so a suite can prove both halves: that filtering resists the higher build at whichever revision this line pins, and that an unfiltered call still behaves exactly as it does today.",
   "rule": "filter candidate rows to the binding's own abi_revision FIRST \u2014 a row with none never matches \u2014 THEN apply builds.rule's newest-version/highest-build tie-break. A revision this release does not serve is a loud, named refusal (CHTYPES_ARTIFACT_UNPUBLISHED-shaped: \"no artifact at ABI revision R for line L on P\"), never a silent fall-through to another revision's row."
  },

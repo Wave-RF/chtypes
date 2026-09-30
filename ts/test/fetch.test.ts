@@ -676,7 +676,11 @@ describe('the verification chain against a synthetic release (docs/guides/fetch.
     const lock = path.join(scratch('lock'), 'chtypes.lock');
     const r = await ensure('25.8', opts(good, dest, { lock }));
     const want = good.files.get('25.8')!;
-    expect(readLock(lock)).toEqual({ schema: 1, artifacts: { [`${PLATFORM}/25.8`]: { file: want.file, sha256: want.sha256 } } });
+    const rev = FETCH_ABI_REVISION.override ?? ABI_REVISION;
+    expect(readLock(lock)).toEqual({
+      schema: 1,
+      artifacts: { [`${PLATFORM}/25.8`]: { file: want.file, sha256: want.sha256, abi_revision: rev } },
+    });
     expect(JSON.parse(readFileSync(lock, 'utf8'))).toMatchObject({ schema: 1 });
     // Frozen against the same release: fine, and still a no-op download.
     expect((await ensure('25.8', opts(good, dest, { lock, frozen: true }))).installed).toBe(false);
@@ -1405,6 +1409,81 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     const other = makeRelease({ artifacts: [{ minor: line, version: r.version, os: fixturePlatform.split('-')[0], arch: fixturePlatform.split('-')[1] }], seed: 'not the pinned one' });
     const pinned = await ensure(line, fixture('signed', scratch('fixture-dest2'), { url: other.url, lock: copy, frozen: true, trustedKeys: [KEY.hex] })).catch((e: unknown) => e);
     expect(pinned).toBeInstanceOf(ArtifactPinnedError);
+  });
+
+  it('issue #253: a lock entry records the ABI revision, and --frozen names a mismatch instead of a bare PINNED or UNPUBLISHED', async () => {
+    process.env['CHTYPES_TRUSTED_KEYS'] = key;
+    const lockFile = path.join(SPEC_FIXTURES, 'chtypes.lock');
+    const lock = readLock(lockFile)!;
+    const pinKey = Object.keys(lock.artifacts).find((k) => k.startsWith(`${fixturePlatform}/`))!;
+    const line = pinKey.split('/')[1]!;
+    const entry = lock.artifacts[pinKey]!;
+
+    // (b) A lock entry at a different revision: PINNED, naming both
+    // numbers, and — proven by pointing at a source that does not exist —
+    // refused WITHOUT ever reading a release.
+    const other = fixtureRevision + 1;
+    const mismatchedDir = scratch('mismatched');
+    const mismatched = path.join(mismatchedDir, 'chtypes.lock');
+    writeFileSync(mismatched, JSON.stringify({ schema: 1, artifacts: { [pinKey]: { ...entry, abi_revision: other } } }));
+    const unreachable = await ensure(line, {
+      dest: scratch('reg2'),
+      platform: fixturePlatform,
+      url: pathToFileURL(path.join(mismatchedDir, 'does-not-exist')).href,
+      lock: mismatched,
+      frozen: true,
+    }).catch((e: unknown) => e);
+    expect(unreachable).toBeInstanceOf(ArtifactPinnedError);
+    expect((unreachable as Error).message).toContain(`ABI revision ${other}`);
+    expect((unreachable as Error).message).toContain(`ABI revision ${fixtureRevision}`);
+    expect((unreachable as Error).message).toContain('re-lock with:');
+
+    // (c) A lock entry with no abi_revision at all (an older SDK's lock):
+    // the old path, plus one appended sentence — for a real drift (PINNED)
+    // and for a line the release does not offer at this revision
+    // (UNPUBLISHED; 24.8 is not among signed/'s published lines).
+    const noRevDrift = path.join(scratch('no-rev-drift'), 'chtypes.lock');
+    writeFileSync(noRevDrift, JSON.stringify({ schema: 1, artifacts: { [pinKey]: { file: entry.file, sha256: '00'.repeat(32) } } }));
+    const drift = await ensure(line, fixture('signed', scratch('reg3'), { lock: noRevDrift, frozen: true })).catch((e: unknown) => e);
+    expect(drift).toBeInstanceOf(ArtifactPinnedError);
+    expect((drift as Error).message).toContain('records no ABI revision');
+    expect((drift as Error).message).toContain('older SDK');
+    // The appended sentence starts its own sentence — never glued onto the
+    // one before it with no punctuation between them.
+    expect((drift as Error).message).toContain(`frozen refuses it. ${noRevDrift} records no ABI revision`);
+
+    const otherKey = `${fixturePlatform}/24.8`;
+    const noRevUnpublished = path.join(scratch('no-rev-unpublished'), 'chtypes.lock');
+    writeFileSync(noRevUnpublished, JSON.stringify({ schema: 1, artifacts: { [otherKey]: { file: 'x.tar.gz', sha256: '00' } } }));
+    const unpublished = await ensure('24.8', fixture('signed', scratch('reg4'), { lock: noRevUnpublished, frozen: true })).catch((e: unknown) => e);
+    expect(unpublished).toBeInstanceOf(ArtifactUnpublishedError);
+    expect((unpublished as Error).message).toContain('records no ABI revision');
+    expect((unpublished as Error).message).toContain('older SDK');
+    expect((unpublished as Error).message).toContain(`. ${noRevUnpublished} records no ABI revision`);
+
+    // (d) A lock entry at the SDK's own (matching) revision installs
+    // exactly as before, and --frozen never writes to the lock — not even
+    // to add abi_revision to an entry that matched without it.
+    const matching = path.join(scratch('matching'), 'chtypes.lock');
+    const matchingBytes = JSON.stringify({ schema: 1, artifacts: { [pinKey]: { ...entry, abi_revision: fixtureRevision } } });
+    writeFileSync(matching, matchingBytes);
+    const ok = await ensure(line, fixture('signed', scratch('reg5'), { lock: matching, frozen: true }));
+    expect(ok.file).toBe(entry.file);
+    expect(readFileSync(matching, 'utf8')).toBe(matchingBytes);
+
+    const noRevMatchDest = scratch('reg5b');
+    const noRevMatch = path.join(scratch('no-rev-match'), 'chtypes.lock');
+    const noRevMatchBytes = JSON.stringify({ schema: 1, artifacts: { [pinKey]: { file: entry.file, sha256: entry.sha256 } } });
+    writeFileSync(noRevMatch, noRevMatchBytes);
+    await ensure(line, fixture('signed', noRevMatchDest, { lock: noRevMatch, frozen: true }));
+    expect(readFileSync(noRevMatch, 'utf8')).toBe(noRevMatchBytes);
+
+    // (e) --offline --frozen stays unaffected: no source is ever read, so a
+    // mismatched-revision lock is simply not consulted against one.
+    const offlineDest = scratch('reg6');
+    await ensure(line, fixture('signed', offlineDest, { lock: path.join(scratch('plain'), 'chtypes.lock') }));
+    const offline = await ensure(line, { dest: offlineDest, platform: fixturePlatform, lock: mismatched, frozen: true, offline: true });
+    expect(offline.dir).toBe(path.join(offlineDest, line));
   });
 
   it('is fetched at the revision its rows carry, and at no other (docs/guides/fetch.md §2)', async () => {

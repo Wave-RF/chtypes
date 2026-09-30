@@ -1,7 +1,7 @@
 {
  "artifacts": [
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "arm64",
    "build": 0,
    "bytes": 472,
@@ -12,10 +12,10 @@
    "library": "libchtypes.dylib",
    "library_sha256": "d6ea1048c42b91f40c62bef79fc7bc1686d9e4b6a780d599d5fba6f52a420ccc",
    "os": "darwin",
-   "sha256": "5ba330165a6fbd6f51103fe9754cde0e24c0c9b3b85ec4134a12b5c104f9cf38"
+   "sha256": "5316b7fa9509b0790f85687e02c9a43c0566c66518dfbdb827e2be797d9122a7"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "arm64",
    "build": 214,
    "bytes": 527,
@@ -26,10 +26,10 @@
    "library": "libchtypes.dylib",
    "library_sha256": "cad448633cd536603c3a5f83bcfa10de951c470288c1af1ea33e269f0e984b4d",
    "os": "darwin",
-   "sha256": "ac0fe6821c4f6ca4cb6fabc60023f8fc0f9c5e0c1c97f00d2ce4dfc754eec3b6"
+   "sha256": "f26f93fe4e357cb04db87d5722f293be90d59f2683c652a9203d9701c16c8dc8"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "arm64",
    "build": 105,
    "bytes": 530,
@@ -40,10 +40,10 @@
    "library": "libchtypes.dylib",
    "library_sha256": "726458a215c967cb759b040fd589ba5f252b613bb72d5ab4b5e927ad74efc8d0",
    "os": "darwin",
-   "sha256": "698cd565667724a053cbef9e2a0c70540ba4877ed29abbf43470c996f7406700"
+   "sha256": "7dcc12dcde3e75ea9c0d292de06e469970668b7b279bcbeab4136645ec3ec388"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "arm64",
    "build": 214,
    "bytes": 530,
@@ -54,13 +54,13 @@
    "library": "libchtypes.dylib",
    "library_sha256": "dbb449e973045ab3bfa5e28e08bee61e69d610dd5cd6cb94a8a14a0e8379ef8b",
    "os": "darwin",
-   "sha256": "296ce0d42ac941efea2c050f6bc2bd197018fbd88a43a20ec30d3b8699c60bfd"
+   "sha256": "2b2978a55b541ff026c335f7e14d845bf40c7d370e46fe6ad037e9005bacfe0e"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "amd64",
    "build": 0,
-   "bytes": 465,
+   "bytes": 466,
    "clickhouse_minor": "25.8",
    "clickhouse_version": "25.8.28.1-lts",
    "core_commit": "unknown",
@@ -68,10 +68,10 @@
    "library": "libchtypes.so",
    "library_sha256": "bacc23d5e886c7b2c007479e731474e1f6a723c9304c0eeab829aa2b88376a49",
    "os": "linux",
-   "sha256": "7ba41cc435771fa4c408378a3499fc0576c6f561072b87b17aa3bbed7a6094d1"
+   "sha256": "335b6d1b8511c8f2e0f30aebb9d9c71713d72dde40fc881c3b9e9c5e5a836097"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "amd64",
    "build": 214,
    "bytes": 524,
@@ -82,10 +82,10 @@
    "library": "libchtypes.so",
    "library_sha256": "8f2d8e1570b92b204f037afbf9962d927c9082f11273a601a69663be8c6615b8",
    "os": "linux",
-   "sha256": "84d79f7e543c160006478252d5a170d4bb57322881ffcb8157a25da82dce3763"
+   "sha256": "874cd54f183bf7bb096415e90b1311e713a0dc1208b0ce0d047a69a268118aab"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "amd64",
    "build": 105,
    "bytes": 525,
@@ -96,10 +96,10 @@
    "library": "libchtypes.so",
    "library_sha256": "802be36a727b7f21d2dd2b4e00322200618c02e33583503a78f44cd308bb8d95",
    "os": "linux",
-   "sha256": "4e19dcb5d32e739f2d305b42595641fc7295b71a9c07f59d1cf1783ce6a01c5d"
+   "sha256": "423e1c91535c0c25d3ccdefb129748e99689ac204d4105729d35adf9b0dbb8f6"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "amd64",
    "build": 214,
    "bytes": 526,
@@ -110,10 +110,10 @@
    "library": "libchtypes.so",
    "library_sha256": "3609621f8c537a4092a637eada6e375044488a9bf056bb264c78f819b87c2e3a",
    "os": "linux",
-   "sha256": "e110a2d15cfebe7ef14a0f86cf3855e4757d50fc90e3e76327c68dd795ddd149"
+   "sha256": "a18e127e472c7674b0c73407df61b47c574e85e615277012b9f47fb4521d5317"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "arm64",
    "build": 0,
    "bytes": 467,
@@ -124,10 +124,10 @@
    "library": "libchtypes.so",
    "library_sha256": "829d44597c8252ff9f28323cedf1af3bdb512bdca6c7b54d6b76eddb783428d8",
    "os": "linux",
-   "sha256": "b785b07663e65972585441178c50de1873e27798bd5441bc6959995544158beb"
+   "sha256": "0fa52f4711834df0f4cd8ddb646333832c2357cc865aea1a86403468c543e89c"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "arm64",
    "build": 214,
    "bytes": 524,
@@ -138,10 +138,10 @@
    "library": "libchtypes.so",
    "library_sha256": "ff05466ae1643e1ca157acd2bb9e929e29615d66ffcf14f2279a8fa74d2343f0",
    "os": "linux",
-   "sha256": "c1e6a7f9862ec62b2337a2defa0b3cda48e6d9f4a438b8d854490abb176fba2b"
+   "sha256": "cce513109b881985ae0051a02cbb7b546b5e1a21154560956975593573af6ed4"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "arm64",
    "build": 105,
    "bytes": 525,
@@ -152,10 +152,10 @@
    "library": "libchtypes.so",
    "library_sha256": "f9633180097885cc9e895383ee6e3786bd565e62774372995c5effe2de894760",
    "os": "linux",
-   "sha256": "39fdbe5035d0a11cf5edf6345e86b94d766339f68550889ce24506aba6d8a0a5"
+   "sha256": "a1869dcea0971af181485fd27e35ded816b4e1082831f6eca2dce27918703c59"
   },
   {
-   "abi_revision": 5,
+   "abi_revision": 6,
    "arch": "arm64",
    "build": 214,
    "bytes": 527,
@@ -166,7 +166,7 @@
    "library": "libchtypes.so",
    "library_sha256": "838aa8b9b046fd31f2e54bffb9385e3d0e926ac73aa781521ef1f7f61c88d455",
    "os": "linux",
-   "sha256": "f9c7f11bfcfcdd57287d912b7cf954212ddcd965a58ee910eaef338d79f7c1eb"
+   "sha256": "134c0482031dc45b67fb7c805ad5dc6bed506dcec3a545aff597810ce534fbad"
   }
  ],
  "generated_at": "2026-09-09T00:00:00Z",

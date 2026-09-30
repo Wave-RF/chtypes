@@ -54,6 +54,7 @@ from ._manifest import (
 )
 from ._native import ABI_REVISION
 from .errors import (
+    FETCH_COMMAND,
     ArtifactCorruptError,
     ArtifactPinnedError,
     ArtifactUnpublishedError,
@@ -393,9 +394,12 @@ def verify_sums_signature(sums: bytes, sig: bytes, keys: Sequence[bytes], source
 # ------------------------------------------------------------------ §5 lock
 
 
-def read_lock(path: str | os.PathLike[str]) -> dict[str, dict[str, str]]:
-    """The pins in a lock file: ``{"<os>-<arch>/<minor>": {"file", "sha256"}}``;
-    ``{}`` when the file does not exist. A malformed file is a `ValueError`."""
+def read_lock(path: str | os.PathLike[str]) -> dict[str, dict[str, Any]]:
+    """The pins in a lock file: ``{"<os>-<arch>/<minor>": {"file", "sha256",
+    "abi_revision"?}}``; ``{}`` when the file does not exist. ``abi_revision``
+    is optional and additive (docs/guides/fetch.md §5) — an entry written before
+    this SDK recorded it simply has none, read the same way `_revision_of`
+    reads an index row that carries none. A malformed file is a `ValueError`."""
     p = Path(path)
     try:
         doc = json.loads(p.read_bytes())
@@ -408,7 +412,7 @@ def read_lock(path: str | os.PathLike[str]) -> dict[str, dict[str, str]]:
     artifacts = doc.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError(f"chtypes: {p} has no 'artifacts' object")
-    pins: dict[str, dict[str, str]] = {}
+    pins: dict[str, dict[str, Any]] = {}
     for key, entry in artifacts.items():
         if (
             not isinstance(entry, dict)
@@ -416,11 +420,15 @@ def read_lock(path: str | os.PathLike[str]) -> dict[str, dict[str, str]]:
             or not isinstance(entry.get("sha256"), str)
         ):
             raise ValueError(f"chtypes: {p}: entry {key!r} needs 'file' and 'sha256'")
-        pins[key] = {"file": entry["file"], "sha256": entry["sha256"]}
+        pin: dict[str, Any] = {"file": entry["file"], "sha256": entry["sha256"]}
+        rev = _revision_of(entry.get("abi_revision"))
+        if rev is not None:
+            pin["abi_revision"] = rev
+        pins[key] = pin
     return pins
 
 
-def write_lock(path: str | os.PathLike[str], pins: dict[str, dict[str, str]]) -> None:
+def write_lock(path: str | os.PathLike[str], pins: dict[str, dict[str, Any]]) -> None:
     """Write a schema-1 lock file atomically (temp sibling + rename), keys sorted."""
     p = Path(path)
     doc = {"schema": LOCK_SCHEMA, "artifacts": dict(sorted(pins.items()))}
@@ -531,7 +539,7 @@ class Release:
         if not on_platform:
             raise ArtifactUnpublishedError(
                 f"chtypes: {self.source} publishes nothing for {platform} "
-                f"(it has: {', '.join(self.platforms()) or 'nothing'})"
+                f"(it has: {', '.join(self.platforms()) or 'nothing'})."
             )
         have = ", ".join(e.clickhouse_version for e in on_platform if e.abi_revision == rev)
         if exact is not None:
@@ -563,7 +571,7 @@ class Release:
             f"chtypes: no artifact for ClickHouse line {line} on {platform} at ABI revision "
             f"{rev} (this SDK's) at {self.source}: "
             f"{_served(any_revision, f'that line for {platform}')}"
-            f"; at ABI revision {rev} the release has: {have or 'nothing'}"
+            f"; at ABI revision {rev} the release has: {have or 'nothing'}."
         )
 
 
@@ -839,7 +847,7 @@ class Fetcher:
             allow_unsigned if allow_unsigned is not None else _env_flag(ENV_ALLOW_UNSIGNED)
         )
         self._release: Release | None = None
-        self._pins: dict[str, dict[str, str]] | None = None
+        self._pins: dict[str, dict[str, Any]] | None = None
 
     # ------------------------------------------------------------ plumbing
 
@@ -860,7 +868,7 @@ class Fetcher:
             sys.stderr.write(line + "\n")
             sys.stderr.flush()
 
-    def _lock_pins(self) -> dict[str, dict[str, str]]:
+    def _lock_pins(self) -> dict[str, dict[str, Any]]:
         if self._pins is None:
             if self.lock is None:
                 self._pins = {}
@@ -872,6 +880,58 @@ class Fetcher:
                     )
                 self._pins = read_lock(self.lock)
         return self._pins
+
+    def _peek_lock_entry(self, minor: str) -> dict[str, Any] | None:
+        """The lock's own entry for ``<platform>/<minor>``, read straight off
+        disk with no release access — used only to decide whether to say more
+        about an ABI revision; the authoritative read stays `_lock_pins`,
+        called from `install`, which raises its own error for a lock that
+        cannot be read at all."""
+        if self.lock is None:
+            return None
+        try:
+            pins = read_lock(self.lock)
+        except ValueError:
+            return None
+        return pins.get(f"{self.platform}/{minor}")
+
+    def _check_lock_revision_early(self, spelling: str, minor: str) -> None:
+        """Fails fast, before any network access, when ``--frozen``'s lock
+        already names an ABI revision for this key that is not this
+        binding's own (docs/guides/fetch.md §5). A lock made for one ABI
+        revision does not get a second chance disguised as a drifted pin or
+        an unpublished line once the SDK moves to another: the fix is always
+        the same re-lock, so the message says that directly."""
+        if not self.frozen:
+            return
+        entry = self._peek_lock_entry(minor)
+        if entry is None:
+            return
+        rev = entry.get("abi_revision")
+        if rev is None or rev == _fetch_abi_revision():
+            return
+        key = f"{self.platform}/{minor}"
+        raise ArtifactPinnedError(
+            f"chtypes: {self.lock} pins {key} at ABI revision {rev}; this SDK speaks ABI "
+            f"revision {_fetch_abi_revision()} — re-lock with: {FETCH_COMMAND} {spelling} "
+            f"--lock {self.lock}"
+        )
+
+    def _revision_note(self, minor: str) -> str:
+        """The one sentence appended to a PINNED or UNPUBLISHED message when,
+        under ``--frozen``, the lock's own entry for this key exists but
+        names no ABI revision at all — written by an SDK before this field
+        existed. ``""`` when there is nothing to add."""
+        if not self.frozen:
+            return ""
+        entry = self._peek_lock_entry(minor)
+        if entry is None or entry.get("abi_revision") is not None:
+            return ""
+        return (
+            f" {self.lock} records no ABI revision (written by an older SDK); this SDK "
+            f"speaks ABI revision {_fetch_abi_revision()} — re-lock with: {FETCH_COMMAND} "
+            f"{minor} --lock {self.lock}"
+        )
 
     # ------------------------------------------------------------ the release
 
@@ -1037,7 +1097,14 @@ class Fetcher:
         line, exact = parse_spelling(spelling)
         if self.offline:
             return self._ensure_offline(line, exact)
-        entry = self.release().select(spelling, self.platform)
+        self._check_lock_revision_early(spelling, line)
+        try:
+            entry = self.release().select(spelling, self.platform)
+        except ArtifactUnpublishedError as exc:
+            note = self._revision_note(line)
+            if note:
+                raise ArtifactUnpublishedError(f"{exc}{note}") from None
+            raise
         installed = self.install(entry)
         self.install_goldens()
         return installed
@@ -1155,16 +1222,28 @@ class Fetcher:
         )
 
         # §5: the lock is consulted before anything is downloaded or trusted.
+        # The revision is checked FIRST, before the file/sha256 comparison
+        # below it: a lock that names a revision is refused the moment that
+        # revision is not this binding's own, never compared byte-for-byte
+        # against an artifact it could never have pinned.
         pin_key = f"{self.platform}/{minor}"
         pins = self._lock_pins()
         pinned = pins.get(pin_key)
         if pinned is not None:
+            pinned_rev = pinned.get("abi_revision")
+            if pinned_rev is not None and pinned_rev != _fetch_abi_revision():
+                raise ArtifactPinnedError(
+                    f"chtypes: {self.lock} pins {pin_key} at ABI revision {pinned_rev}; this "
+                    f"SDK speaks ABI revision {_fetch_abi_revision()} — re-lock with: "
+                    f"{FETCH_COMMAND} {minor} --lock {self.lock}"
+                )
             if pinned["file"] != entry.file or pinned["sha256"].lower() != entry.sha256:
+                note = "" if pinned_rev is not None else self._revision_note(minor)
                 raise ArtifactPinnedError(
                     f"chtypes: {self.lock} pins {pin_key} to {pinned['file']} "
                     f"(sha256 {pinned['sha256']}) but {release.source} offers {entry.file} "
                     f"(sha256 {entry.sha256}). Refusing the drift; re-run without --frozen "
-                    f"and with --lock to re-pin deliberately."
+                    f"and with --lock to re-pin deliberately.{note}"
                 )
         elif self.frozen:
             raise ArtifactPinnedError(
@@ -1273,12 +1352,13 @@ class Fetcher:
         if self.lock is None or self.frozen:
             return
         pins = self._lock_pins()
-        want = {"file": entry.file, "sha256": entry.sha256}
+        rev = _fetch_abi_revision()
+        want: dict[str, Any] = {"file": entry.file, "sha256": entry.sha256, "abi_revision": rev}
         if pins.get(key) == want:
             return
         pins[key] = want
         write_lock(self.lock, pins)
-        self._say(f"pinned {key} in {self.lock}")
+        self._say(f"pinned {key} -> {entry.file} (ABI revision {rev}) in {self.lock}")
 
     def _installed_matches(self, install: Path, entry: ReleaseEntry) -> bool:
         manifest = read_manifest(install)

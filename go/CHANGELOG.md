@@ -8,6 +8,14 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Added
 
+- **`fetch --lock` now records the artifact's ABI revision** in each lock entry (`abi_revision`, optional and additive — schema stays 1); `--frozen` checks it FIRST, before the file/sha256 pin: a lock that names a different revision is `CHTYPES_ARTIFACT_PINNED`, naming both numbers and the `fetch --lock` remedy, instead of surfacing as a bare drifted pin or `CHTYPES_ARTIFACT_UNPUBLISHED`. A lock entry with no recorded revision (written by an SDK before this change) keeps today's behavior, with one sentence appended when it ends in `CHTYPES_ARTIFACT_PINNED` or `CHTYPES_ARTIFACT_UNPUBLISHED`. `--offline --frozen` is unaffected (docs/guides/fetch.md §5, closes #253).
+
+## [0.4.0] — 2026-09-30
+
+Speaks ABI revision 6 and refuses revision-5 artifacts. Revision 6 adds the error-code table and the partition key; revision-6 artifacts are published for every ClickHouse line this SDK supports, beside the revision-5 builds that 0.3.x keeps loading.
+
+### Added
+
 - **`(*Library).ErrorCodes()`** — THIS build's own ClickHouse error-code table (`chs_error_codes`), as an `*ErrorCodeTable`: `Name(code) (string, bool)`, `Code(name) (int, bool)` and `All() []ErrorCodeEntry` (ascending). Per `Library` and never package-level, because the table moves between lines — one number names two different errors on 25.8 and 26.2. An unknown or negative code and an unknown name are absent, never synthesized; names match exactly. Built on the first call and kept on success only: a `NULL` answer is a plain error and is never cached; an artifact that predates the symbol answers `*UnsupportedError`. The linked build gains a package-level `ErrorCodes()` that builds its table afresh each call.
 - **`(*LoadedSchema).SetPartitionBy(expr)`** (and the linked `(*CompiledSchema).SetPartitionBy`) — declare the table's partition key; `""` removes it. The return follows `SetEngine`'s sign rule, not `SetTTL`'s: `*SchemaError` for the server's own CREATE-path refusal (e.g. 36 BAD_ARGUMENTS for a non-deterministic key, 549), `*UnsupportedError` for a decline (-2 is a key the server accepts but this build will not evaluate).
 - **`RowResult.PartitionID`** (`""` when absent) and **`BatchResult.PartitionCount`** (`0` when absent — which is also the answer for a key with no stored row). A batch over `max_partitions_per_insert_block` is an ordinary `Rejected` with `ErrCode` 252.

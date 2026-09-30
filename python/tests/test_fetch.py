@@ -448,7 +448,14 @@ def test_lock_records_then_enforces(
     ensure("25.8", lock=lock, **kw)
     pins = read_lock(lock)
     fixture_pins = read_lock(FIXTURES / "chtypes.lock")
-    assert pins == {f"{PLATFORM}/25.8": fixture_pins[f"{PLATFORM}/25.8"]}
+    key = f"{PLATFORM}/25.8"
+    # The committed fixture lock predates abi_revision (docs/guides/fetch.md
+    # §5); a fresh fetch pins the same file and sha256, plus this binding's
+    # own ABI revision — the one new thing it now records.
+    assert "abi_revision" not in fixture_pins[key]
+    assert pins[key]["file"] == fixture_pins[key]["file"]
+    assert pins[key]["sha256"] == fixture_pins[key]["sha256"]
+    assert pins[key]["abi_revision"] == chtypes.ABI_REVISION
     assert json.loads(lock.read_text())["schema"] == 1
 
     # --frozen with the fixture lock installs signed/, every row.
@@ -489,6 +496,96 @@ def test_lock_records_then_enforces(
     bad.write_text('{"schema": 2, "artifacts": {}}')
     with pytest.raises(ValueError, match="schema"):
         ensure("25.8", lock=bad, **kw)
+
+
+def test_lock_abi_revision_mismatch_is_named_and_needs_no_source(
+    dest: Path, tmp_path: Path, at_fixture_revision: int
+) -> None:
+    """Issue #253: a lock written by an SDK at one ABI revision must not be
+    silently accepted, or surface as a bare drifted-pin or unpublished-line
+    error, once the SDK speaks another."""
+    kw = dict(platform=PLATFORM, url=_url("signed"), dest=dest, trusted_keys=_test_keys())
+    key = f"{PLATFORM}/25.8"
+
+    # (b) A lock entry at a different revision: PINNED, naming both numbers,
+    # and — proven by pointing at a source that cannot be read — refused
+    # WITHOUT ever reading a release.
+    other = at_fixture_revision + 1
+    mismatched = tmp_path / "mismatched.lock"
+    doc = json.loads((FIXTURES / "chtypes.lock").read_text())
+    doc["artifacts"][key]["abi_revision"] = other
+    mismatched.write_text(json.dumps(doc))
+    with pytest.raises(chtypes.ArtifactPinnedError) as caught:
+        ensure(
+            "25.8",
+            lock=mismatched,
+            frozen=True,
+            platform=PLATFORM,
+            url="file://" + str(tmp_path / "does-not-exist"),
+            dest=tmp_path / "reg2",
+            trusted_keys=_test_keys(),
+        )
+    msg = str(caught.value)
+    assert f"ABI revision {other}" in msg
+    assert f"ABI revision {at_fixture_revision}" in msg
+    assert "re-lock with:" in msg
+    assert caught.value.code == "CHTYPES_ARTIFACT_PINNED"
+
+    # (c) A lock entry with no abi_revision at all (an older SDK's lock): the
+    # old path, plus one appended sentence — for a real drift (PINNED) and
+    # for a line the release does not offer at this revision (UNPUBLISHED).
+    no_rev_drift = tmp_path / "no-rev-drift.lock"
+    doc2 = json.loads((FIXTURES / "chtypes.lock").read_text())
+    doc2["artifacts"][key]["sha256"] = "00" * 32
+    no_rev_drift.write_text(json.dumps(doc2))
+    with pytest.raises(chtypes.ArtifactPinnedError) as caught:
+        ensure("25.8", lock=no_rev_drift, frozen=True, **{**kw, "dest": tmp_path / "reg3"})
+    msg = str(caught.value)
+    assert "records no ABI revision" in msg
+    assert "older SDK" in msg
+    assert f"ABI revision {at_fixture_revision}" in msg
+    # The appended sentence starts its own sentence — never glued onto the
+    # one before it with no punctuation between them.
+    assert f"deliberately. {no_rev_drift} records no ABI revision" in msg
+
+    # 24.8 is not among signed/'s published lines (expected.json's "lines"
+    # names only 25.8 and 26.7), so this is a genuine UNPUBLISHED.
+    no_rev_unpublished = tmp_path / "no-rev-unpublished.lock"
+    no_rev_unpublished.write_text(
+        json.dumps(
+            {"schema": 1, "artifacts": {f"{PLATFORM}/24.8": {"file": "x.tar.gz", "sha256": "00"}}}
+        )
+    )
+    with pytest.raises(chtypes.ArtifactUnpublishedError) as caught:
+        ensure("24.8", lock=no_rev_unpublished, frozen=True, **{**kw, "dest": tmp_path / "reg4"})
+    msg = str(caught.value)
+    assert "records no ABI revision" in msg
+    assert "older SDK" in msg
+    assert f". {no_rev_unpublished} records no ABI revision" in msg
+
+    # (d) A lock entry at the SDK's own (matching) revision installs exactly
+    # as before.
+    matching = tmp_path / "matching.lock"
+    doc3 = json.loads((FIXTURES / "chtypes.lock").read_text())
+    doc3["artifacts"][key]["abi_revision"] = at_fixture_revision
+    matching.write_text(json.dumps(doc3))
+    got = ensure("25.8", lock=matching, frozen=True, **{**kw, "dest": tmp_path / "reg5"})
+    assert got == tmp_path / "reg5" / "25.8"
+
+    # (e) --offline --frozen stays unaffected: no source is ever read, so a
+    # mismatched-revision lock is simply not consulted against one.
+    offline_dest = tmp_path / "reg6"
+    ensure("25.8", lock=tmp_path / "plain.lock", **{**kw, "dest": offline_dest})
+    got = ensure(
+        "25.8",
+        dest=offline_dest,
+        platform=PLATFORM,
+        lock=mismatched,
+        frozen=True,
+        offline=True,
+        trusted_keys=_test_keys(),
+    )
+    assert got == offline_dest / "25.8"
 
 
 # ---------------------------------------------------------------- offline

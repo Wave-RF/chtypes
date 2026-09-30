@@ -116,15 +116,31 @@ Reference vector (openssl, `-rawin`): message `68656c6c6f0a` ("hello\n") signs u
 
 ## 5. Pinning
 
-`fetch --lock chtypes.lock` records, per `<os>-<arch>/<minor>`, the asset file and sha256 that were installed; `fetch --frozen` (or `ensure(..., lock=…)`) refuses anything else with `CHTYPES_ARTIFACT_PINNED`. The file is JSON, schema 1:
+`fetch --lock chtypes.lock` records, per `<os>-<arch>/<minor>`, the asset file and sha256 that were installed, and the ABI revision the selected row carried; `fetch --frozen` (or `ensure(..., lock=…)`) refuses anything else with `CHTYPES_ARTIFACT_PINNED`. The file is JSON, schema 1:
 
 ```json
-{"schema": 1, "artifacts": {"linux-arm64/25.8": {"file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz", "sha256": "…"}}}
+{"schema": 1, "artifacts": {"linux-arm64/25.8": {"file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz", "sha256": "…", "abi_revision": 6}}}
 ```
 
 That is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, and CI fails on drift.
 
-**Current behavior across an ABI revision change.** A lock records a file and its sha256, not a revision, and `--frozen` checks the pin after §2 has chosen the row at the SDK's own revision. After you upgrade to an SDK at a new revision, `--frozen` with a lock written by the old one fails with `CHTYPES_ARTIFACT_PINNED` when the release has a row at the new revision, and with `CHTYPES_ARTIFACT_UNPUBLISHED` when it has none. The fix is to re-lock: fetch once with `--lock` and without `--frozen`, and commit the new lock.
+**`abi_revision` is optional and additive; the schema stays 1.** Every lock reader released through 0.4.0 ignores a field it does not recognize inside an entry. Go's `encoding/json` and Rust's serde decode into structs that allow unknown fields, and Python's and TypeScript's readers take only `file` and `sha256` from an entry. None of them rejects a schema-1 document that carries the field. A lock that records `abi_revision` therefore installs unmodified under every 0.3.x and 0.4.0 SDK.
+
+**`--frozen` checks the revision FIRST, before comparing file and sha256.** Three cases, per entry:
+
+- **The entry names an ABI revision, and it is not this SDK's own** — `CHTYPES_ARTIFACT_PINNED` (exit 1, the same code as always), naming both numbers and the remedy, e.g.:
+
+  ```text
+  chtypes.lock pins linux-arm64/25.8 at ABI revision 5; this SDK speaks ABI revision 6 — re-lock with: python -m chtypes fetch 25.8 --lock chtypes.lock
+  ```
+
+  This fires before the release is consulted. Without it, a lock made for another revision fails as a drifted pin (`CHTYPES_ARTIFACT_PINNED`, when the release has a row at this SDK's revision) or as an unpublished line (`CHTYPES_ARTIFACT_UNPUBLISHED`, when it has none), and neither message names the cause.
+- **The entry names no ABI revision at all** (written by an older SDK): the file/sha256 pin enforces as before, but whenever that ends in `CHTYPES_ARTIFACT_PINNED` or `CHTYPES_ARTIFACT_UNPUBLISHED`, one sentence is appended naming the gap: `chtypes.lock records no ABI revision (written by an older SDK); this SDK speaks ABI revision 6 — re-lock with: …`. A revision mismatch is never silently accepted just because the lock predates knowing about one.
+- **The entry names this SDK's own ABI revision** — installs exactly as it always has.
+
+`--offline --frozen` is unaffected in all three cases: offline never consults the release, so a revision mismatch in the lock is never the reason an offline fetch fails or succeeds.
+
+**Upgrading to an SDK at a new ABI revision: re-lock.** The remedy is always the same fetch `--lock` invocation the message names — run it once, without `--frozen`, and commit the new lock.
 
 ## 6. The commands and the function
 
@@ -169,7 +185,7 @@ Codes, shared: `CHTYPES_ARTIFACT_MISSING`, `CHTYPES_ARTIFACT_UNTRUSTED`, `CHTYPE
 `CHTYPES_ARTIFACT_UNPUBLISHED` for a line, an exact patch or `--all` that the release has only at another ABI revision (§2) names the line or patch, the platform, the SDK's own revision, and what the release does serve for it — the revision(s) its rows carry, that its rows record no ABI revision (built before revisions were recorded), or that it has no row for it at all — for example, from an SDK at revision `<R>` against a release that has the line only at `<S>`:
 
 ```text
-chtypes: no artifact for ClickHouse line 25.8 on linux-arm64 at ABI revision <R> (this SDK's) at <source>: the release has that line for linux-arm64 only at ABI revision <S>; at ABI revision <R> the release has: nothing [CHTYPES_ARTIFACT_UNPUBLISHED]
+chtypes: no artifact for ClickHouse line 25.8 on linux-arm64 at ABI revision <R> (this SDK's) at <source>: the release has that line for linux-arm64 only at ABI revision <S>; at ABI revision <R> the release has: nothing. [CHTYPES_ARTIFACT_UNPUBLISHED]
 ```
 
 and, when the line's only rows record no revision at all — darwin-arm64 24.8 on the rolling release today:
@@ -180,13 +196,15 @@ chtypes: no artifact for ClickHouse line 24.8 on darwin-arm64 at ABI revision <R
 
 The wording differs a little per binding (Rust folds the same facts into its `offered` field); the facts it names do not.
 
+Under `--frozen`, both `CHTYPES_ARTIFACT_PINNED` and this `CHTYPES_ARTIFACT_UNPUBLISHED` can carry one more sentence about the lock's own recorded ABI revision — §5 has the messages.
+
 ## 8. Deferred: system packages (brew, apt)
 
 A `brew install chtypes` or a Debian package would pre-seed the system locations in §1 and keep them updated by the package manager's own mechanism, and would carry the fetch command as a standalone tool. Deferred on 2026-09-09 until the four in-package commands exist; nothing in §1–§7 needs to change to add it — the search path already has its slots.
 
 ## 9. Test vectors
 
-`tests/fixtures/fetch/` holds miniature releases the four implementations are tested against through `--url file://…`: `signed/` (valid; tiny fake libraries whose manifests hash correctly), `bad-signature/`, `tampered-tarball/`, `sums-index-mismatch/`, `unsigned/`, `two-builds/`, `two-revisions/`, and a `chtypes.lock` that pins `signed/`.
+`tests/fixtures/fetch/` holds miniature releases the four implementations are tested against through `--url file://…`: `signed/` (valid; tiny fake libraries whose manifests hash correctly), `bad-signature/`, `tampered-tarball/`, `sums-index-mismatch/`, `unsigned/`, `two-builds/`, `two-revisions/`, and a `chtypes.lock` that pins `signed/` — committed before `abi_revision` existed, so its entries carry none; a suite that needs one at a revision (matching or mismatched) builds it at test time rather than editing this fixture.
 
 `two-builds/` is the rebuild case: one ClickHouse version published twice for each platform, so resolving a line exercises the build tie-break rather than the version alone. `expected.json` records it under `builds.cases` — deliberately apart from `verdicts`, which name one asset per line — and each case says which build must install and which it supersedes. The proof is the installed library's bytes: both rows share a `clickhouse_version`, so only `library_sha256` can tell them apart. They are generated by the build tooling and never edited by hand. An SDK's fetch suite must pass all of them with the same verdicts and codes.
 
