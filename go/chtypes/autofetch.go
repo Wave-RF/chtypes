@@ -1,146 +1,117 @@
 package chtypes
 
-// autofetch.go — the search-path miss and the opt-in lazy fetch
-// (docs/guides/fetch.md §1, §6, §7).
+// autofetch.go — the search-path miss, the opt-in lazy fetch, and
+// construction-time discovery (docs/guides/fetch.md §1, §6, §7). The
+// resolution engine itself (what a line or patch request does, in what
+// order, with or without a fetch) lives in resolve.go; this file is ForContext's
+// thin wrapper over it, discover()'s manifest scan, and the process-wide
+// autofetch memo both share.
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
 // ForContext is For with a context that bounds a lazy fetch.
 func (r *Registry) ForContext(ctx context.Context, v Version) (*Library, error) {
-	if v == "" {
-		return nil, fmt.Errorf("chtypes: empty version")
-	}
-	if l := r.lookup(v); l != nil {
-		return l, nil
-	}
-	minor := minorOf(string(v))
-	if l, err := r.resolveWithoutFetch(v, minor); l != nil || err != nil {
-		return l, err
-	}
-	if !r.autoFetch {
-		return nil, missingArtifactError(string(v), HostPlatform(), r.search)
-	}
-	dir, err := autoFetchOnce(ctx, minor, r.fetchOptions())
+	res, err := r.ResolveContext(ctx, v)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.loadArtifactDir(dir); err != nil {
-		return nil, err
-	}
-	if l := r.lookup(v); l != nil {
-		return l, nil
-	}
-	return nil, fmt.Errorf("chtypes: fetched %s but the library there does not answer for ClickHouse %s", dir, v)
+	return res.Library, nil
 }
 
-// resolveWithoutFetch is the whole of resolution EXCEPT the fetch: what is
-// already loaded, then the line's directory as the construction-time scan
-// recorded it, then a fresh walk of the §1 search path for a line installed
-// since. (nil, nil) means "no directory holds it", which is a fetch's cue on
-// the For path and ErrArtifactMissing on the preload path — preload never
-// fetches, and this is the one function that makes those two paths identical
-// in everything else.
-func (r *Registry) resolveWithoutFetch(v Version, minor string) (*Library, error) {
-	if l := r.lookup(v); l != nil {
-		return l, nil
-	}
-	// The scan already resolved every line it could see to the FIRST directory
-	// holding it, and it knows which line a manifest claims even when the
-	// directory is not named after it — which the <dir>/<minor> walk below
-	// cannot see.
-	if sub, ok := r.knownDir(minor); ok {
-		if err := r.loadArtifactDir(sub); err != nil {
-			return nil, err
-		}
-		if l := r.lookup(v); l != nil {
-			return l, nil
-		}
-	}
-	return r.loadFromSearchPath(v, minor)
-}
-
-// loadFromSearchPath walks the §1 directories for <minor>/manifest.json and
-// loads the first one that names a library which, once loaded, answers for
-// v. A directory whose library fails to load is an error, not a skip: a
-// registry that silently passes over a broken install would answer from a
-// neighbor, and the search order is the operator's to fix.
-func (r *Registry) loadFromSearchPath(v Version, minor string) (*Library, error) {
-	for _, dir := range r.search {
-		sub := filepath.Join(dir, minor)
-		if _, ok := readArtifactDir(sub); !ok {
-			continue
-		}
-		if err := r.loadArtifactDir(sub); err != nil {
-			return nil, err
-		}
-		if l := r.lookup(v); l != nil {
-			return l, nil
-		}
-	}
-	return nil, nil
-}
-
-// knownDir is the artifact directory the construction-time scan recorded for
-// a line, if it saw one.
-func (r *Registry) knownDir(minor string) (string, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	sub, ok := r.known[minor]
-	return sub, ok
-}
-
-// loadArtifactDir loads the artifact directory sub (<registry>/<minor>).
-func (r *Registry) loadArtifactDir(sub string) error {
-	m, ok := readArtifactDir(sub)
-	if !ok {
-		return fmt.Errorf("chtypes: %s holds no usable manifest.json", sub)
-	}
-	if err := r.Load(filepath.Join(sub, m.Library)); err != nil {
-		return fmt.Errorf("%s: %w", sub, err)
-	}
-	return nil
-}
-
-// discover records which line each directory on the §1 search path would
-// serve — first directory wins — without dlopening anything. It runs for
-// BOTH constructor shapes: an explicit directory is the head of the same
-// search path, and skipping the scan for it left Versions() empty until
-// something had been opened.
+// discover records which lines this registry can see SOMETHING for on the
+// §1 search path — the flat slot, patches/, or both — without dlopening
+// anything. It runs for BOTH constructor shapes: an explicit directory is
+// the head of the same search path, and skipping the scan for it left
+// Versions() empty until something had been opened. Its only role now is
+// the construction-time emptiness check and Versions()'s unopened-line
+// listing (resolve.go re-walks the search path itself on every call, so a
+// patch installed after construction is found regardless of what this
+// recorded).
 func (r *Registry) discover() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, dir := range r.search {
-		entries, err := os.ReadDir(dir)
+		r.discoverDirLocked(dir)
+	}
+}
+
+func (r *Registry) discoverDirLocked(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == patchesDirName {
+			r.discoverPatchesTreeLocked(filepath.Join(dir, name))
+			continue
+		}
+		sub := filepath.Join(dir, name)
+		m, ok := readArtifactDir(sub)
+		if !ok {
+			continue
+		}
+		r.noteKnownLocked(lineOfManifest(m.Minor, m.Version, name))
+	}
+}
+
+// discoverPatchesTreeLocked scans <dir>/patches/<minor>/<exact>/ for every
+// line it names, so a registry holding ONLY nested patches (no flat
+// install) for a line is not reported empty (P19).
+func (r *Registry) discoverPatchesTreeLocked(patchesRoot string) {
+	lineEntries, err := os.ReadDir(patchesRoot)
+	if err != nil {
+		return
+	}
+	for _, le := range lineEntries {
+		if !le.IsDir() {
+			continue
+		}
+		lineDir := filepath.Join(patchesRoot, le.Name())
+		exactEntries, err := os.ReadDir(lineDir)
 		if err != nil {
 			continue
 		}
-		for _, e := range entries {
-			if !e.IsDir() {
+		for _, ee := range exactEntries {
+			if !ee.IsDir() || strings.HasPrefix(ee.Name(), ".") {
 				continue
 			}
-			sub := filepath.Join(dir, e.Name())
-			m, ok := readArtifactDir(sub)
+			m, ok := readArtifactDir(filepath.Join(lineDir, ee.Name()))
 			if !ok {
 				continue
 			}
-			minor := m.Minor
-			if minor == "" && m.Version != "" {
-				minor = minorOf(m.Version)
-			}
-			if minor == "" {
-				minor = e.Name()
-			}
-			if _, seen := r.known[minor]; !seen {
-				r.known[minor] = sub
-			}
+			r.noteKnownLocked(lineOfManifest(m.Minor, m.Version, le.Name()))
 		}
 	}
+}
+
+func (r *Registry) noteKnownLocked(minor string) {
+	if minor != "" {
+		r.known[minor] = true
+	}
+}
+
+// lineOfManifest is the minor line a manifest names: its own
+// clickhouse_minor, else derived from clickhouse_version, else the
+// directory name it was found under — the same fallback chain
+// readArtifactDir's callers have always used.
+func lineOfManifest(minor, version, dirName string) string {
+	if minor != "" {
+		return minor
+	}
+	if version != "" {
+		return minorOf(version)
+	}
+	return dirName
 }
 
 // fetchOptions is what a lazy fetch runs with: the caller's options, the
@@ -155,14 +126,19 @@ func (r *Registry) fetchOptions() FetchOptions {
 	return o
 }
 
-// One fetch per process per (dest, line): concurrent opens of a missing
-// line wait for the one in flight and share its result. A fetch that
-// failed is forgotten so a later open may try again; a fetch that
-// succeeded is remembered, though the installed directory would satisfy
-// the search path anyway.
+// -------------------------------------------------------------- the memo
+//
+// One fetch per process per (dest, spelling): concurrent opens of a missing
+// line OR patch wait for the one in flight and share its result. A success
+// is remembered (the installed directory always still satisfies a later
+// lookup anyway); CHTYPES_ARTIFACT_UNPUBLISHED is remembered explicitly —
+// so a definite "not published" costs one network read, not one per call —
+// and any other failure is forgotten, so a later call may retry it.
+
 var (
-	autoFetchMu    sync.Mutex
-	autoFetchCalls = map[string]*autoFetchCall{}
+	autoFetchMu          sync.Mutex
+	autoFetchCalls       = map[string]*autoFetchCall{}
+	autoFetchUnpublished = map[string]bool{}
 )
 
 type autoFetchCall struct {
@@ -171,8 +147,8 @@ type autoFetchCall struct {
 	err  error
 }
 
-func autoFetchOnce(ctx context.Context, line string, opts FetchOptions) (string, error) {
-	key := opts.Dest + "\x00" + line
+func autoFetchOnce(ctx context.Context, spelling string, opts FetchOptions) (string, error) {
+	key := opts.Dest + "\x00" + spelling
 	autoFetchMu.Lock()
 	if c, ok := autoFetchCalls[key]; ok {
 		autoFetchMu.Unlock()
@@ -187,7 +163,7 @@ func autoFetchOnce(ctx context.Context, line string, opts FetchOptions) (string,
 	autoFetchCalls[key] = c
 	autoFetchMu.Unlock()
 
-	inst, err := Ensure(ctx, line, opts)
+	inst, err := Ensure(ctx, spelling, opts)
 	if err == nil {
 		c.dir = inst.Dir
 	}
@@ -196,7 +172,18 @@ func autoFetchOnce(ctx context.Context, line string, opts FetchOptions) (string,
 	if err != nil {
 		autoFetchMu.Lock()
 		delete(autoFetchCalls, key)
+		if isArtifactUnpublished(err) {
+			autoFetchUnpublished[key] = true
+		}
 		autoFetchMu.Unlock()
 	}
 	return c.dir, c.err
+}
+
+// autoFetchRememberedUnpublished reports whether key (dest + "\x00" +
+// spelling) already came back CHTYPES_ARTIFACT_UNPUBLISHED in this process.
+func autoFetchRememberedUnpublished(key string) bool {
+	autoFetchMu.Lock()
+	defer autoFetchMu.Unlock()
+	return autoFetchUnpublished[key]
 }
