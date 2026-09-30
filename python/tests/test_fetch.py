@@ -471,13 +471,31 @@ def test_lock_records_then_enforces(
     doc = json.loads((FIXTURES / "chtypes.lock").read_text())
     doc["artifacts"][f"{PLATFORM}/25.8"]["sha256"] = "00" * 32
     drifted.write_text(json.dumps(doc))
-    for frozen in (True, False):
-        with pytest.raises(chtypes.ArtifactPinnedError) as caught:
-            ensure("25.8", lock=drifted, frozen=frozen, **{**kw, "dest": tmp_path / "never"})
-        assert caught.value.code == "CHTYPES_ARTIFACT_PINNED"
-        with pytest.raises(chtypes.ArtifactPinnedError):
-            ensure("25.8", lock=drifted, frozen=frozen, **kw)
+    with pytest.raises(chtypes.ArtifactPinnedError) as caught:
+        ensure("25.8", lock=drifted, frozen=True, **{**kw, "dest": tmp_path / "never"})
+    assert caught.value.code == "CHTYPES_ARTIFACT_PINNED"
+    with pytest.raises(chtypes.ArtifactPinnedError):
+        ensure("25.8", lock=drifted, frozen=True, **kw)
     assert not (tmp_path / "never").exists()
+
+    # Without --frozen, --lock re-pins: the drifted entry is replaced by what
+    # this fetch installed, which is the remedy the PINNED message names.
+    ensure("25.8", lock=drifted, **kw)
+    repinned = read_lock(drifted)[key]
+    assert repinned["file"] == fixture_pins[key]["file"]
+    assert repinned["sha256"] == fixture_pins[key]["sha256"]
+    assert repinned["abi_revision"] == chtypes.ABI_REVISION
+    ensure("25.8", lock=drifted, frozen=True, **kw)  # and --frozen now accepts it
+
+    # A lock naming another ABI revision re-pins the same way without --frozen.
+    other_rev = tmp_path / "other-rev.lock"
+    doc = json.loads((FIXTURES / "chtypes.lock").read_text())
+    doc["artifacts"][key]["abi_revision"] = chtypes.ABI_REVISION + 1
+    other_rev.write_text(json.dumps(doc))
+    with pytest.raises(chtypes.ArtifactPinnedError, match="re-lock with"):
+        ensure("25.8", lock=other_rev, frozen=True, **kw)
+    ensure("25.8", lock=other_rev, **kw)
+    assert read_lock(other_rev)[key]["abi_revision"] == chtypes.ABI_REVISION
 
     # --frozen refuses a line the lock does not pin. Without a lock path it
     # reads ./chtypes.lock, and none there pins nothing — refused, PINNED.

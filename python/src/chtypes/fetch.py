@@ -1229,7 +1229,10 @@ class Fetcher:
         pin_key = f"{self.platform}/{minor}"
         pins = self._lock_pins()
         pinned = pins.get(pin_key)
-        if pinned is not None:
+        # Only --frozen enforces a pin. Without it, --lock records what this
+        # fetch installs, replacing any existing entry: that is the re-lock the
+        # messages below name, and what Go, TypeScript and Rust do.
+        if pinned is not None and self.frozen:
             pinned_rev = pinned.get("abi_revision")
             if pinned_rev is not None and pinned_rev != _fetch_abi_revision():
                 raise ArtifactPinnedError(
