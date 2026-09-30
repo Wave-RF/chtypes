@@ -124,7 +124,7 @@ Reference vector (openssl, `-rawin`): message `68656c6c6f0a` ("hello\n") signs u
 
 That is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, and CI fails on drift.
 
-**`abi_revision` is optional and additive; the schema stays 1.** Measured against each of the five CURRENT lock readers (as released in 0.4.0): all five ignore a field inside a lock entry they do not recognize — Go's `encoding/json` into a struct, Rust's serde into a struct, and Python's and TypeScript's hand-written readers, which each extract only `file` and `sha256` from an entry and simply do not look at anything else. None of the five requires the field, and none rejects a top-level `"schema": 1` document for carrying it. A lock written by this version therefore still works, unmodified, under every 0.3.x and 0.4.0 SDK: the revision rides along as a field those older readers have never heard of and quietly skip.
+**`abi_revision` is optional and additive; the schema stays 1.** Every lock reader released through 0.4.0 ignores a field it does not recognize inside an entry. Go's `encoding/json` and Rust's serde decode into structs that allow unknown fields, and Python's and TypeScript's readers take only `file` and `sha256` from an entry. None of them rejects a schema-1 document that carries the field. A lock that records `abi_revision` therefore installs unmodified under every 0.3.x and 0.4.0 SDK.
 
 **`--frozen` checks the revision FIRST, before comparing file and sha256.** Three cases, per entry:
 
@@ -134,8 +134,8 @@ That is the lockfile model every package manager uses: trust on first fetch, byt
   chtypes.lock pins linux-arm64/25.8 at ABI revision 5; this SDK speaks ABI revision 6 — re-lock with: python -m chtypes fetch 25.8 --lock chtypes.lock
   ```
 
-  This fires before the release is even consulted: a lock made for one ABI revision does not get a second chance disguised as a drifted pin (`CHTYPES_ARTIFACT_PINNED`, when a row at the new revision exists) or an unpublished line (`CHTYPES_ARTIFACT_UNPUBLISHED`, when it does not) — both of today's symptoms collapse into this one named cause.
-- **The entry names no ABI revision at all** — written by an SDK before this change — today's behavior is unchanged (the file/sha256 pin still enforces, or the line still resolves as before), but whenever that ends in `CHTYPES_ARTIFACT_PINNED` or `CHTYPES_ARTIFACT_UNPUBLISHED`, one sentence is appended naming the gap: `chtypes.lock records no ABI revision (written by an older SDK); this SDK speaks ABI revision 6 — re-lock with: …`. A revision mismatch is never silently accepted just because the lock predates knowing about one.
+  This fires before the release is consulted. Without it, a lock made for another revision fails as a drifted pin (`CHTYPES_ARTIFACT_PINNED`, when the release has a row at this SDK's revision) or as an unpublished line (`CHTYPES_ARTIFACT_UNPUBLISHED`, when it has none), and neither message names the cause.
+- **The entry names no ABI revision at all** (written by an older SDK): the file/sha256 pin enforces as before, but whenever that ends in `CHTYPES_ARTIFACT_PINNED` or `CHTYPES_ARTIFACT_UNPUBLISHED`, one sentence is appended naming the gap: `chtypes.lock records no ABI revision (written by an older SDK); this SDK speaks ABI revision 6 — re-lock with: …`. A revision mismatch is never silently accepted just because the lock predates knowing about one.
 - **The entry names this SDK's own ABI revision** — installs exactly as it always has.
 
 `--offline --frozen` is unaffected in all three cases: offline never consults the release, so a revision mismatch in the lock is never the reason an offline fetch fails or succeeds.
