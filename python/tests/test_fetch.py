@@ -109,11 +109,12 @@ def _assert_installed(directory: Path, row: dict) -> None:
 def test_a_rebuild_installs_the_highest_build(case: dict, dest: Path) -> None:
     """`two-builds/` publishes one ClickHouse version twice, as a rebuild does.
 
-    A release keeps the two highest builds per (version, platform), plus the
-    newest build of each ABI revision it still serves, so resolving
-    a line is not a question about the ClickHouse version alone: among rows of
-    the newest version the highest `build` wins. Before this, nothing in any
-    suite covered that — the rule lived only in unit tests of the comparator.
+    The release lists every build it has ever published per (version,
+    platform); selection takes the newest (at the SDK's own ABI revision), so
+    resolving a line is not a question about the ClickHouse version alone:
+    among rows of the newest version the highest `build` wins. Before this,
+    nothing in any suite covered that — the rule lived only in unit tests of
+    the comparator.
 
     The proof is the library's own bytes. Both rows carry the same
     `clickhouse_version`, so a manifest check cannot tell them apart; their

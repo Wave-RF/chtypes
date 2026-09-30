@@ -1121,8 +1121,8 @@ func (f *fetcher) selectArtifact(spelling, line, exact string) (*ReleaseArtifact
 		}
 	}
 	// A line can carry more than one row: two patches, or the same patch built
-	// twice (core keeps the two highest builds per version, plus the newest of
-	// each ABI revision it still serves). Take the newest by
+	// twice (the release lists every build it has ever published; selection
+	// takes the newest, at the SDK's own ABI revision). Take the newest by
 	// version and then by build, never by list order.
 	sort.SliceStable(hits, func(i, j int) bool {
 		return newerRow(hits[j], hits[i]) // ascending: the last is the one to take
