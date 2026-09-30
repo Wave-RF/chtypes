@@ -66,6 +66,7 @@ Read from this repository's own release tags and `include/chtypes.h` as it stood
 | `0.3.0` | 5 |
 | `0.3.1` | 5 |
 | `0.3.2` | 5 |
+| `0.4.0` | 6 |
 
 ### Which artifact build satisfies each revision, per ClickHouse line and platform
 
