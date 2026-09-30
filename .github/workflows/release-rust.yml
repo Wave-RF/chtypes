@@ -35,10 +35,25 @@ jobs:
       - run: cd rust && cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-      # A publish step exiting 0 does not mean anyone can install the package.
-      # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
-      # npm served the tarball, and for ~2 of those minutes `latest` resolved to
-      # a version that 404'd. This installs the real thing from the public
-      # registry, with no credentials, and makes it report its ABI revision.
+  # A publish step exiting 0 does not mean anyone can install the package.
+  # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
+  # npm served the tarball, and for ~2 of those minutes `latest` resolved to
+  # a version that 404'd. This installs the real thing from the public
+  # registry, with no credentials, and makes it report its ABI revision.
+  #
+  # Its own job, the way release-python.yml's `verify` already is, so
+  # "Re-run failed jobs" on a timeout re-runs ONLY this — `cargo publish`
+  # cannot be retried, crates.io refuses to publish over a version that
+  # already exists. No `environment` and no `id-token: write` here: this
+  # job only reads a public registry anonymously, it does not publish.
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: it installs from the public registry and speaks ABI revision
         run: scripts/verify-published.sh rust "${GITHUB_REF_NAME#rust/v}"
