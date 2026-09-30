@@ -2,7 +2,7 @@ package chtypes
 
 // resolve_test.go — exact-patch resolution, the flat/patches layout, the
 // same-line warned fallback, and lock schema 2 (issue #284). Cases are
-// labelled with the design's own P-numbers (the design comment on #284)
+// labeled with the design's own P-numbers (the design comment on #284)
 // where one applies.
 //
 // Most of this file drives Ensure/FetchAll/ListInstalled/VerifyInstalled
