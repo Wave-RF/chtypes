@@ -444,21 +444,37 @@ func TestFetchLockSchema1RewrittenToSchema2HoldingBothPatches(t *testing.T) {
 	}
 }
 
-// P8.
+// P8, plus F6: a line the release has but the lock does not pin is skipped
+// with a progress note, never refused — a new line is not drift in
+// anything that was pinned.
 func TestFetchAllFrozenInstallsOnlyThePinnedPatch(t *testing.T) {
 	isolateEnv(t)
-	dir, older, _ := twoPatchRelease(t)
+	pub, priv := newTestKey(t)
+	trustKey(t, pub)
+	older := fakeArtifact(HostPlatform(), "25.8.28.1-lts")
+	newer := fakeArtifact(HostPlatform(), "25.8.33.5-lts")
+	unpinnedLine := fakeArtifact(HostPlatform(), "26.7.3.19-stable")
+	dir := filepath.Join(t.TempDir(), "release")
+	writeRelease(t, dir, priv, older, newer, unpinnedLine)
+
 	lock := filepath.Join(t.TempDir(), "chtypes.lock")
 	if _, err := Ensure(context.Background(), older.version, FetchOptions{URL: "file://" + dir, Dest: t.TempDir(), LockFile: lock}); err != nil {
 		t.Fatal(err)
 	}
 	dest := t.TempDir()
-	all, err := FetchAll(context.Background(), FetchOptions{URL: "file://" + dir, Dest: dest, LockFile: lock, Frozen: true})
+	var progress strings.Builder
+	all, err := FetchAll(context.Background(), FetchOptions{URL: "file://" + dir, Dest: dest, LockFile: lock, Frozen: true, Progress: &progress})
 	if err != nil {
 		t.Fatalf("--all --frozen: %v", err)
 	}
 	if len(all) != 1 || all[0].Version != older.version {
 		t.Fatalf("--all --frozen installed %+v, want only %s", all, older.version)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "26.7")); err == nil {
+		t.Fatal("--all --frozen installed a line the lock does not pin")
+	}
+	if !strings.Contains(progress.String(), "26.7") {
+		t.Fatalf("no progress note naming the unpinned line 26.7:\n%s", progress.String())
 	}
 }
 
