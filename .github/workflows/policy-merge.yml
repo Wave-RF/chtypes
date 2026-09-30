@@ -1,32 +1,44 @@
-# regen-automerge — a pull request whose only change is a regeneration of
-# docs/support.md merges itself once `ci` has passed, when main's own
-# scripts/support-matrix.sh reproduces it byte for byte. Every condition and
-# the decision itself live in scripts/regen-automerge-check.py (read its
+# policy-merge — a pull request merges itself once every condition holds.
+# Generalized by chtypes#280 from the old regen-automerge, which only
+# handled a pull request that regenerated docs/support.md; every condition
+# and the decision itself live in scripts/policy-merge-check.py (read its
 # header); this file is the wiring. It does not open pull requests:
 # support-matrix-refresh.yml's header says why nothing here may.
 #
-# THE FOUR CONDITIONS. A pull request merges only when ALL of these hold:
-#   1. it changes exactly the files in the checker's ALLOWED_FILES (today
-#      docs/support.md alone), each one modified, nothing else;
-#   2. scripts/support-matrix.sh, from main's own checkout and against the
-#      live served index, produces a docs/support.md byte-identical to the
-#      pull request head's copy;
-#   3. every required check on the head is completed and successful — read
+# THE SIX CONDITIONS. A pull request merges only when ALL of these hold:
+#   1. the head is a branch of THIS repository, never a fork;
+#   2. every required check on the head is completed and successful — read
 #      BY NAME from the head's check runs, because the `ci` run's overall
 #      conclusion is not a usable signal (its non-blocking `divergences`
 #      job can be red by design);
-#   4. the head is a branch of this repository, not a fork.
-# Plus what a merge needs in order to succeed at all: one open, non-draft pull
-# request against main; a head that has not moved since `ci` judged it; no
-# known merge conflict; no requested changes and no review conversation.
-# Anything else is left for a human with ONE job-summary line naming the
-# condition that failed, and the run stays green: most `ci` runs are not
-# regenerations, and a refusal is not an error.
+#   3. the head has not moved since `ci` judged it;
+#   4. GitHub reports no merge conflict, and no review conversation — no
+#      requested changes, no review comment — exists;
+#   5. no file the pull request touches (its current path, or for a rename
+#      its old path too; a deletion counts) matches a glob in
+#      scripts/policy-merge-check.py's PROTECTED_GLOBS;
+#   6. ONLY when docs/support.md is part of the diff: it was MODIFIED, and
+#      scripts/support-matrix.sh, from main's own checkout and against the
+#      live served index, produces a docs/support.md byte-identical to the
+#      pull request head's copy.
+# Plus what a merge needs in order to succeed at all: one open, non-draft
+# pull request against main; a head that has not moved since `ci` judged it;
+# no known merge conflict. Anything else is left for a human with ONE
+# job-summary line naming the condition that failed, and the run stays
+# green: most `ci` runs are not candidates for a self-merge, and a refusal
+# is not an error.
 #
-# Condition 1 is also what makes condition 3 mean anything. A `pull_request`
+# DRAFT IS THE HOLD SWITCH. Marking a pull request draft stops this merging
+# it — condition (pull-request) above. To stop the mechanism outright for
+# every pull request: `gh workflow disable policy-merge`.
+#
+# Condition 5 is also what makes condition 2 mean anything. A `pull_request`
 # run of `ci` uses the pull request's own copy of ci.yml, so a pull request
-# that edited it could make any required check pass trivially. One that
-# changes nothing but docs/support.md ran main's ci.yml.
+# that edited it (or a script a required check runs) could make any
+# required check pass trivially. This is "a pull request must not be able
+# to weaken its own judge" (chtypes#280, the lead's scope addition), and
+# scripts/policy-merge-check.py's `decide()` evaluates `protected` before
+# `checks` for exactly this reason.
 #
 # ⚠️ THE PWN-REQUEST RULE — THE ONE THING THIS FILE MUST NEVER BREAK.
 # `workflow_run` runs this file from the DEFAULT BRANCH with a token that can
@@ -38,8 +50,9 @@
 # every head-controlled string (a SHA, a repository name) into a `run:` block
 # only through `env:`, as quoted data, never by expanding it into the script
 # text. The checkout below is main, and main's scripts are the only code that
-# runs. The head's docs/support.md is read as DATA, through the contents API
-# at the head SHA, and only compared byte for byte with main's regeneration.
+# runs. The head's docs/support.md — read only when it is part of the diff —
+# is read as DATA, through the contents API at the head SHA, and only
+# compared byte for byte with main's regeneration.
 # One step that executed head code here would hand every fork a write token
 # to this repository.
 #
@@ -64,14 +77,14 @@
 # run on main has no pull request to judge. `workflow_dispatch` re-checks one
 # pull request by number; with dry_run it does everything except the merge
 # call and says so in the job summary, which is how to watch it judge a real
-# regeneration without letting it merge. (A `workflow_run` workflow runs only
+# pull request without letting it merge. (A `workflow_run` workflow runs only
 # from the default branch, so neither path exists before this file is on
-# main.) To stop it outright: `gh workflow disable regen-automerge`.
+# main.)
 #
 # EXIT. A merge, a dry run and a refusal are green. An API failure, or
 # anything else unexpected, is red, so it can never pass for a quiet refusal;
-# so is a merge after which main's docs/support.md is not the regeneration.
-name: regen-automerge
+# so is a merge after which a touched docs/support.md is not the regeneration.
+name: policy-merge
 
 on:
   workflow_run:
@@ -96,7 +109,7 @@ permissions: {}
 # `ci` completion for the same commit (a re-run) waits, then finds the pull
 # request already merged and refuses quietly.
 concurrency:
-  group: regen-automerge-${{ github.event.workflow_run.head_sha || format('pr-{0}', inputs.pr) }}
+  group: policy-merge-${{ github.event.workflow_run.head_sha || format('pr-{0}', inputs.pr) }}
   cancel-in-progress: false
 
 # Every run: step uses bash with -eo pipefail. GitHub's default for a step
@@ -108,7 +121,7 @@ defaults:
 
 jobs:
   automerge:
-    name: "automerge — a docs/support.md-only regeneration merges when main reproduces it byte for byte"
+    name: "policy-merge — a pull request merges itself once every condition holds"
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -130,14 +143,17 @@ jobs:
           persist-credentials: false
       # Selftest first, the house rule for every checker: a refusal nobody has
       # seen fire is not known to work. Then the pinned required-check list
-      # must still name exactly ci.yml's blocking jobs, or a merge could be
-      # judged against the wrong list. Neither needs the network.
-      - name: selftest, and the pinned required checks still match ci.yml's blocking jobs
+      # must still name exactly ci.yml's blocking jobs, and the
+      # CONTRIBUTING.md guide must still match PROTECTED_GLOBS, or a merge
+      # could be judged against the wrong list, or a contributor could read a
+      # stale guide. None of the three needs the network.
+      - name: selftest, the pinned required checks, and the CONTRIBUTING.md guide all still agree with the code
         run: |
           set -euo pipefail
-          scripts/regen-automerge-check.py --selftest
-          scripts/regen-automerge-check.py --check-ci-names
-      - name: gate — every condition except the byte comparison, from API reads alone
+          scripts/policy-merge-check.py --selftest
+          scripts/policy-merge-check.py --check-ci-names
+          scripts/policy-merge-check.py --check-guide
+      - name: gate — every condition except the docs/support.md byte comparison, from API reads alone
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,22 +164,26 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            scripts/regen-automerge-check.py gate --repo "$REPO" --pr "$PR"
+            scripts/policy-merge-check.py gate --repo "$REPO" --pr "$PR"
           else
-            scripts/regen-automerge-check.py gate --repo "$REPO" \
+            scripts/policy-merge-check.py gate --repo "$REPO" \
               --run-head-sha "$RUN_HEAD_SHA" --run-head-repo "$RUN_HEAD_REPO"
           fi
-      # The regeneration is main's script over main's docs/support.md (whose
-      # hand-written text the generated block sits inside), against the
-      # default served index, the same one `docs` and support-matrix-refresh
-      # read. It writes to a scratch copy; the checkout is left untouched.
+      # Regenerated unconditionally once the gate passes, whether or not this
+      # pull request happens to touch docs/support.md — it is cheap, and
+      # `merge` (below) only USES it when the diff actually touches that
+      # file. The regeneration is main's script over main's docs/support.md
+      # (whose hand-written text the generated block sits inside), against
+      # the default served index, the same one `docs` and
+      # support-matrix-refresh read. It writes to a scratch copy; the
+      # checkout is left untouched.
       - name: regenerate docs/support.md with main's own script, against the live index
         if: steps.gate.outputs.candidate == '1'
         run: |
           set -euo pipefail
           cp docs/support.md "$RUNNER_TEMP/support.md"
           scripts/support-matrix.sh --out "$RUNNER_TEMP/support.md"
-      - name: condition 2 (byte for byte) and every other condition again, then the merge
+      - name: the docs/support.md byte comparison and every other condition again, then the merge
         if: steps.gate.outputs.candidate == '1'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -182,4 +202,4 @@ jobs:
           if [ "$DRY_RUN" = true ]; then
             args+=(--dry-run)
           fi
-          scripts/regen-automerge-check.py "${args[@]}"
+          scripts/policy-merge-check.py "${args[@]}"
