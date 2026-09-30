@@ -64,9 +64,11 @@
 # (`required_status_checks.strict: false`, measured) could not have given
 # this guarantee under a direct merge.
 #
-# A manual merge of a protected-class pull request (`gh pr merge <n>
-# --merge`) enqueues the same way, once the repository requires the queue —
-# GitHub's own behavior. Draft status is still the hold switch either way.
+# A protected-class pull request is merged by hand through the same queue,
+# with the same `enqueuePullRequest` mutation (CONTRIBUTING.md has the
+# command). `gh pr merge` does not work here: with a queue required it falls
+# back to enabling auto-merge, which this repository does not allow
+# (measured). Draft status is still the hold switch either way.
 #
 # THIS WORKFLOW IGNORES `merge_group` RUNS OF `ci`. The job's `if:` below
 # (`github.event.workflow_run.event == 'pull_request'`) already filtered out
