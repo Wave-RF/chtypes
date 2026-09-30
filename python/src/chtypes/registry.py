@@ -584,12 +584,19 @@ class Schema:
         own reader WRAPS an out-of-domain integer — `{p:UInt8}` given "256"
         binds 0 and matches every genuine zero (measured, uniform
         24.8-26.7) — while the same constant as a literal PROMOTES
-        (`x = 256` is never true). Size the brace type for the
-        tenant-supplied domain or validate the value first; malformed
-        spellings refuse loudly (457 for "-1"/"+7"/"007" as UInt8, 32 for
-        ""). A name bound twice at the C boundary takes the LAST binding —
-        the server's own insert_or_assign rule (unreachable through a dict,
-        stated for completeness).
+        (`x = 256` is never true). Sizing the brace type WIDER does not
+        remove this: the same wrap reappears at 2^64 on every integer width
+        once the bound value reaches it, and [U]Int128/[U]Int256 wrap at
+        their own width instead of at 2^64 — no brace type is safe against
+        an untrusted value's magnitude by size alone. For a value you
+        cannot already validate as in-domain and canonical, bind
+        `{p:String}` and use the round-trip strict-cast form instead of
+        picking a wider brace type (docs/guides/filters.md "The round-trip
+        form — the recipe for an untrusted value"). Malformed spellings
+        refuse loudly (457 for "-1"/"+7"/"007" as UInt8, 32 for ""). A name
+        bound twice at the C boundary takes the LAST binding — the server's
+        own insert_or_assign rule (unreachable through a dict, stated for
+        completeness).
 
         Errors follow rule 12's split: `SchemaError` when ClickHouse itself
         refuses the expression (unknown identifier 47, unknown function —
