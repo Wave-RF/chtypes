@@ -71,17 +71,21 @@ __all__ = [
     "ENV_AUTOFETCH",
     "ENV_TRUSTED_KEYS",
     "LOCK_SCHEMA",
+    "LOCK_SCHEMAS_READABLE",
+    "PATCHES_DIRNAME",
     "PLATFORMS",
     "RELEASE_KEY_ID",
     "RELEASE_PUBLIC_KEY",
     "SYSTEM_REGISTRY_ROOTS",
     "Fetcher",
+    "InstalledPatch",
     "Release",
     "ReleaseEntry",
     "ensure",
     "fetch_lines",
     "fetch_destination",
     "installed_lines",
+    "installed_patches",
     "parse_signature_file",
     "read_lock",
     "registry_search_path",
@@ -127,10 +131,22 @@ RELEASE_KEY_ID: Final = "deb275922dbff76e"
 SYSTEM_REGISTRY_ROOTS: Final = ("/usr/local/share/chtypes/artifacts", "/opt/chtypes/artifacts")
 
 PLATFORMS: Final = ("linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64")
-LOCK_SCHEMA: Final = 1
+#: The schema every SDK WRITES (SDK#284): keyed ``<os-arch>/<clickhouse_version>``
+#: (the exact patch), so several patches of one line each get their own pin.
+LOCK_SCHEMA: Final = 2
+#: Every schema a reader accepts. Schema 1 (keyed ``<os-arch>/<minor>``) is still
+#: read and is converted to schema-2 keys in memory (docs/guides/fetch.md §5);
+#: the first write into a schema-1 file rewrites it as schema 2 wholesale.
+LOCK_SCHEMAS_READABLE: Final = (1, 2)
 #: The lock file ``--frozen`` reads when no ``--lock`` names one (docs/guides/fetch.md,
 #: Decisions): relative, so it resolves against the working directory.
 DEFAULT_LOCK_FILE: Final = "chtypes.lock"
+#: The sibling tree holding every installed patch that is NOT the one a line
+#: request currently selects (SDK#284, "Layout rule"): ``patches/<minor>/
+#: <clickhouse_version>/``, beside the flat ``<minor>/`` slot. A released
+#: (pre-#284) reader ignores it — measured against v0.4.0 of all four
+#: bindings and `scripts/fetch.sh` — so it needs no migration.
+PATCHES_DIRNAME: Final = "patches"
 
 _USER_AGENT = "chtypes-python (+https://github.com/wave-rf/chtypes)"
 _HTTP_ATTEMPTS = 3
@@ -291,19 +307,96 @@ def installed_lines(registry: str | os.PathLike[str]) -> dict[str, tuple[Path, M
     return dict(sorted(found.items(), key=lambda kv: _minor_key(kv[0])))
 
 
+@dataclass(frozen=True, slots=True)
+class InstalledPatch:
+    """One installed patch under a registry directory (SDK#284): either the
+    flat slot the patch a LINE request selects installs to, or one of the
+    other patches of that line under ``patches/<minor>/<clickhouse_version>/``
+    (docs/guides/fetch.md "Layout rule"). ``version`` is the manifest's own
+    ``clickhouse_version`` — what actually loads, never a directory name."""
+
+    minor: str
+    version: str
+    directory: Path
+    manifest: Manifest
+    #: True for the flat ``<minor>/`` slot; False for a ``patches/`` sibling.
+    flat: bool
+
+
+def installed_patches(registry: str | os.PathLike[str]) -> list[InstalledPatch]:
+    """Every installed PATCH under one registry directory — the flat line
+    install at ``<minor>/`` and every other installed patch at
+    ``patches/<minor>/<clickhouse_version>/`` (SDK#284) — release order, flat
+    slot first within each line. Cheap — reads the manifests, loads nothing.
+
+    Supersedes `installed_lines` as the fetch-level listing: that function
+    still answers "the one patch a line request loads", one per line; this
+    one answers "every patch this destination holds"."""
+    root = Path(registry)
+    by_line: dict[str, list[InstalledPatch]] = {}
+    try:
+        top = sorted(root.iterdir())
+    except OSError:
+        return []
+    for entry in top:
+        if entry.name.startswith(".") or not entry.is_dir() or entry.name == PATCHES_DIRNAME:
+            continue
+        manifest = read_manifest(entry)
+        if manifest is None:
+            continue
+        minor = manifest.clickhouse_minor or minor_of(manifest.clickhouse_version) or entry.name
+        by_line.setdefault(minor, []).append(
+            InstalledPatch(minor, manifest.clickhouse_version or minor, entry, manifest, True)
+        )
+    patches_root = root / PATCHES_DIRNAME
+    try:
+        minor_dirs = sorted(patches_root.iterdir())
+    except OSError:
+        minor_dirs = []
+    for minor_dir in minor_dirs:
+        if minor_dir.name.startswith(".") or not minor_dir.is_dir():
+            continue
+        try:
+            version_dirs = sorted(minor_dir.iterdir())
+        except OSError:
+            continue
+        for version_dir in version_dirs:
+            if version_dir.name.startswith(".") or not version_dir.is_dir():
+                continue
+            manifest = read_manifest(version_dir)
+            if manifest is None:
+                continue
+            minor = (
+                manifest.clickhouse_minor or minor_of(manifest.clickhouse_version) or minor_dir.name
+            )
+            version = manifest.clickhouse_version or version_dir.name
+            by_line.setdefault(minor, []).append(
+                InstalledPatch(minor, version, version_dir, manifest, False)
+            )
+    out: list[InstalledPatch] = []
+    for minor in sorted(by_line, key=_minor_key):
+        out.extend(sorted(by_line[minor], key=lambda p: (_version_key(p.version), not p.flat)))
+    return out
+
+
 def verify_registry(
     registry: str | os.PathLike[str],
 ) -> list[tuple[str, Path, ArtifactCorruptError | None]]:
-    """Re-hash every installed line against its own manifest (the
-    ``chtypes verify`` command): ``[(minor, dir, None | error), …]``."""
+    """Re-hash every installed PATCH against its own manifest (the
+    ``chtypes verify`` command, SDK#284): ``[(label, dir, None | error), …]``.
+    ``label`` is the minor line for the flat slot — unchanged from before this
+    change — and ``"<minor>/<clickhouse_version>"`` for any other installed
+    patch, so an existing caller keying on the flat rows alone sees the same
+    labels as before."""
     report: list[tuple[str, Path, ArtifactCorruptError | None]] = []
-    for minor, (directory, _) in installed_lines(registry).items():
+    for patch in installed_patches(registry):
+        label = patch.minor if patch.flat else f"{patch.minor}/{patch.version}"
         try:
-            verify_library(directory)
+            verify_library(patch.directory)
         except Exception as exc:  # RegistryError from verify_library, or an OSError
-            report.append((minor, directory, ArtifactCorruptError(str(exc))))
+            report.append((label, patch.directory, ArtifactCorruptError(str(exc))))
         else:
-            report.append((minor, directory, None))
+            report.append((label, patch.directory, None))
     return report
 
 
@@ -316,6 +409,56 @@ def _minor_key(minor: str) -> tuple[int, ...]:
 
 def _version_key(version: str) -> tuple[int, ...]:
     return _minor_key(version.split("-", 1)[0])
+
+
+def _patch_matches(requested: str, candidate: str) -> bool:
+    """fetch.md Decision 7, the one patch-matching rule shared everywhere a
+    patch is matched: a spelling that carries a channel (``25.8.28.1-lts``)
+    matches only that exact spelling; one that carries none
+    (``25.8.28.1``) matches that patch number on ANY channel. Patch
+    ordering elsewhere is numeric, component by component, with the channel
+    ignored — this function only answers "does this one candidate match",
+    never picks among several.
+
+    Server-driven spellings carry no channel (``SELECT version()`` answers
+    e.g. ``25.8.28.1``), so without this rule every server-driven request
+    would miss an installed/published ``-lts``/``-stable`` row.
+    """
+    if "-" in requested:
+        return candidate == requested
+    return candidate.split("-", 1)[0] == requested
+
+
+# -------------------------------------------------------- §4 two-level layout
+
+
+def _iter_patch_dirs(root: Path, minor: str) -> Iterable[tuple[str, Path, bool]]:
+    """Every installed patch of ``minor`` directly reachable from ``root``:
+    the flat slot ``root/<minor>/`` (the patch a LINE request selects, if
+    any) and every sibling under ``root/patches/<minor>/<version>/`` (SDK#284
+    "Layout rule"). Yields ``(clickhouse_version, directory, is_flat)``, flat
+    first. Reads manifests only; loads nothing."""
+    flat = root / minor
+    manifest = read_manifest(flat)
+    if manifest is not None:
+        flat_minor = manifest.clickhouse_minor or minor_of(manifest.clickhouse_version) or minor
+        if flat_minor == minor:
+            yield (manifest.clickhouse_version or minor, flat, True)
+    patches_root = root / PATCHES_DIRNAME / minor
+    try:
+        entries = sorted(patches_root.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name.startswith(".") or not entry.is_dir():
+            continue
+        pm = read_manifest(entry)
+        if pm is None:
+            continue
+        p_minor = pm.clickhouse_minor or minor_of(pm.clickhouse_version)
+        if p_minor != minor:
+            continue
+        yield (pm.clickhouse_version or entry.name, entry, False)
 
 
 # --------------------------------------------------------------- §4 signature
@@ -394,12 +537,48 @@ def verify_sums_signature(sums: bytes, sig: bytes, keys: Sequence[bytes], source
 # ------------------------------------------------------------------ §5 lock
 
 
+#: ``chtypes-<version>-<os>-<arch>[-b<N>].tar.gz`` (docs/reference/artifact.md's
+#: asset grammar) — used only to convert a schema-1 lock KEY (``<os-arch>/
+#: <minor>``) into the schema-2 shape (``<os-arch>/<clickhouse_version>``) by
+#: recovering ``<version>`` from the entry's own ``file``, since schema 1 never
+#: recorded the exact patch it pinned.
+def _schema1_key_to_schema2(key: str, file: str, lockpath: Path) -> str:
+    if "/" not in key:
+        raise ValueError(f"chtypes: {lockpath}: entry {key!r} is not '<os-arch>/<minor>'")
+    platform, minor = key.split("/", 1)
+    pattern = re.compile(rf"^chtypes-(?P<version>.+)-{re.escape(platform)}(?:-b[0-9]+)?\.tar\.gz$")
+    m = pattern.match(file)
+    if m is None:
+        raise ValueError(
+            f"chtypes: {lockpath}: entry {key!r} names {file!r}, which does not parse as a "
+            f"chtypes artifact file name for {platform!r} — cannot convert this schema-1 lock "
+            f"entry to schema 2"
+        )
+    version = m.group("version")
+    if minor_of(version) != minor:
+        raise ValueError(
+            f"chtypes: {lockpath}: entry {key!r} names {file!r} (ClickHouse {version}), whose "
+            f"line is not {minor!r} — cannot convert this schema-1 lock entry to schema 2"
+        )
+    return f"{platform}/{version}"
+
+
 def read_lock(path: str | os.PathLike[str]) -> dict[str, dict[str, Any]]:
-    """The pins in a lock file: ``{"<os>-<arch>/<minor>": {"file", "sha256",
-    "abi_revision"?}}``; ``{}`` when the file does not exist. ``abi_revision``
-    is optional and additive (docs/guides/fetch.md §5) — an entry written before
-    this SDK recorded it simply has none, read the same way `_revision_of`
-    reads an index row that carries none. A malformed file is a `ValueError`."""
+    """The pins in a lock file, always in the schema-2 shape: ``{"<os>-<arch>/
+    <clickhouse_version>": {"file", "sha256", "abi_revision"?}}``; ``{}`` when
+    the file does not exist. ``abi_revision`` is optional and additive
+    (docs/guides/fetch.md §5) — an entry written before this SDK recorded it
+    simply has none, read the same way `_revision_of` reads an index row that
+    carries none. A malformed file, or an unreadable schema, is a `ValueError`.
+
+    Schema 1 (keyed ``<os-arch>/<minor>``, one pin per LINE) is still read: a
+    schema-1 key converts to its schema-2 shape by recovering the exact
+    ``clickhouse_version`` from the entry's own ``file`` name
+    (`_schema1_key_to_schema2`), since schema 1 never recorded which patch of
+    the line it pinned any other way. The first WRITE through this entry
+    point (`write_lock`, called by `Fetcher._record_pin`) rewrites the whole
+    file as schema 2 — schema is a property of the file, not of one entry, so
+    there is no "write schema 1 when it still fits"."""
     p = Path(path)
     try:
         doc = json.loads(p.read_bytes())
@@ -407,8 +586,10 @@ def read_lock(path: str | os.PathLike[str]) -> dict[str, dict[str, Any]]:
         return {}
     except (OSError, ValueError) as exc:
         raise ValueError(f"chtypes: cannot read lock file {p}: {exc}") from exc
-    if not isinstance(doc, dict) or doc.get("schema") != LOCK_SCHEMA:
-        raise ValueError(f"chtypes: {p} is not a chtypes lock file (schema {LOCK_SCHEMA})")
+    schemas = "/".join(str(s) for s in LOCK_SCHEMAS_READABLE)
+    if not isinstance(doc, dict) or doc.get("schema") not in LOCK_SCHEMAS_READABLE:
+        raise ValueError(f"chtypes: {p} is not a chtypes lock file (schema {schemas})")
+    schema = doc["schema"]
     artifacts = doc.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError(f"chtypes: {p} has no 'artifacts' object")
@@ -424,12 +605,35 @@ def read_lock(path: str | os.PathLike[str]) -> dict[str, dict[str, Any]]:
         rev = _revision_of(entry.get("abi_revision"))
         if rev is not None:
             pin["abi_revision"] = rev
-        pins[key] = pin
+        if schema == 2:
+            # A schema-2 key is keyed by the EXACT patch (§6); a hand-written
+            # or hand-edited file that still spells a LINE there is refused,
+            # naming the key, rather than silently keyed wrong forever after.
+            if "/" not in key:
+                raise ValueError(
+                    f"chtypes: {p}: entry {key!r} is not '<os-arch>/<clickhouse_version>'"
+                )
+            _platform, version = key.split("/", 1)
+            try:
+                _, exact = parse_spelling(version)
+            except ValueError:
+                exact = None
+            if exact is None:
+                raise ValueError(
+                    f"chtypes: {p}: entry {key!r} is keyed by a LINE, not an exact patch — "
+                    f"schema 2 pins the exact ClickHouse version (docs/guides/fetch.md §5)"
+                )
+            out_key = key
+        else:
+            out_key = _schema1_key_to_schema2(key, entry["file"], p)
+        pins[out_key] = pin
     return pins
 
 
 def write_lock(path: str | os.PathLike[str], pins: dict[str, dict[str, Any]]) -> None:
-    """Write a schema-1 lock file atomically (temp sibling + rename), keys sorted."""
+    """Write a lock file atomically (temp sibling + rename), schema `LOCK_SCHEMA`
+    (2), keys sorted. Always schema 2, whatever schema was read: writing is
+    the moment a schema-1 file converts (see `read_lock`)."""
     p = Path(path)
     doc = {"schema": LOCK_SCHEMA, "artifacts": dict(sorted(pins.items()))}
     text = json.dumps(doc, indent=2, sort_keys=False) + "\n"
@@ -881,57 +1085,134 @@ class Fetcher:
                 self._pins = read_lock(self.lock)
         return self._pins
 
-    def _peek_lock_entry(self, minor: str) -> dict[str, Any] | None:
-        """The lock's own entry for ``<platform>/<minor>``, read straight off
-        disk with no release access — used only to decide whether to say more
-        about an ABI revision; the authoritative read stays `_lock_pins`,
-        called from `install`, which raises its own error for a lock that
-        cannot be read at all."""
-        if self.lock is None:
-            return None
-        try:
-            pins = read_lock(self.lock)
-        except ValueError:
-            return None
-        return pins.get(f"{self.platform}/{minor}")
+    def _candidates(self, line: str, exact: str | None) -> list[tuple[str, dict[str, Any], str]]:
+        """§6 F1: the lock as the CANDIDATE SET, in place of the release's
+        rows. Every pinned entry for this platform whose version is of
+        ``line`` — and, for a patch spelling, that matches it under Decision 7
+        (`_patch_matches`) — as ``(key, pin, version)``. No release access."""
+        pins = self._lock_pins()
+        prefix = f"{self.platform}/"
+        out: list[tuple[str, dict[str, Any], str]] = []
+        for key, pin in pins.items():
+            if not key.startswith(prefix):
+                continue
+            version = key[len(prefix) :]
+            if minor_of(version) != line:
+                continue
+            if exact is not None and not _patch_matches(exact, version):
+                continue
+            out.append((key, pin, version))
+        return out
 
-    def _check_lock_revision_early(self, spelling: str, minor: str) -> None:
-        """Fails fast, before any network access, when ``--frozen``'s lock
-        already names an ABI revision for this key that is not this
-        binding's own (docs/guides/fetch.md §5). A lock made for one ABI
-        revision does not get a second chance disguised as a drifted pin or
-        an unpublished line once the SDK moves to another: the fix is always
-        the same re-lock, so the message says that directly."""
-        if not self.frozen:
-            return
-        entry = self._peek_lock_entry(minor)
-        if entry is None:
-            return
-        rev = entry.get("abi_revision")
-        if rev is None or rev == _fetch_abi_revision():
-            return
-        key = f"{self.platform}/{minor}"
-        raise ArtifactPinnedError(
-            f"chtypes: {self.lock} pins {key} at ABI revision {rev}; this SDK speaks ABI "
-            f"revision {_fetch_abi_revision()} — re-lock with: {FETCH_COMMAND} {spelling} "
-            f"--lock {self.lock}"
-        )
-
-    def _revision_note(self, minor: str) -> str:
-        """The one sentence appended to a PINNED or UNPUBLISHED message when,
-        under ``--frozen``, the lock's own entry for this key exists but
-        names no ABI revision at all — written by an SDK before this field
-        existed. ``""`` when there is nothing to add."""
-        if not self.frozen:
-            return ""
-        entry = self._peek_lock_entry(minor)
-        if entry is None or entry.get("abi_revision") is not None:
+    def _revision_note_for(self, pin: dict[str, Any], remedy_spelling: str) -> str:
+        """The one sentence appended to a PINNED or UNPUBLISHED message when
+        the lock's own candidate entry exists but names no ABI revision at
+        all — written by an SDK before this field existed. ``""`` when there
+        is nothing to add."""
+        if pin.get("abi_revision") is not None:
             return ""
         return (
             f" {self.lock} records no ABI revision (written by an older SDK); this SDK "
             f"speaks ABI revision {_fetch_abi_revision()} — re-lock with: {FETCH_COMMAND} "
-            f"{minor} --lock {self.lock}"
+            f"{remedy_spelling} --lock {self.lock}"
         )
+
+    def _check_candidate_revision(
+        self, key: str, pin: dict[str, Any], remedy_spelling: str
+    ) -> None:
+        """F2: before the release is read, a candidate whose lock entry names
+        an ABI revision other than this binding's own is refused — no network
+        access, and no chance to read as a bare drifted pin or an unpublished
+        line once the SDK has moved to another revision."""
+        rev = pin.get("abi_revision")
+        if rev is None or rev == _fetch_abi_revision():
+            return
+        raise ArtifactPinnedError(
+            f"chtypes: {self.lock} pins {key} at ABI revision {rev}; this SDK speaks ABI "
+            f"revision {_fetch_abi_revision()} — re-lock with: {FETCH_COMMAND} "
+            f"{remedy_spelling} --lock {self.lock}"
+        )
+
+    def _resolve_frozen_row(
+        self, release: Release, key: str, pin: dict[str, Any], remedy_spelling: str
+    ) -> ReleaseEntry:
+        """F3/F5: look the candidate's pinned ``file`` up in both the
+        platform's `index.json` rows and the verified `SHA256SUMS`, and
+        settle every drift the design still models. Never looks at any OTHER
+        row: a frozen fetch installs what the lock says, full stop."""
+        file = pin["file"]
+        note = self._revision_note_for(pin, remedy_spelling)
+        rows = [e for e in release.entries if e.platform == self.platform and e.file == file]
+        sums_sha = release.sums.get(file)
+        if not rows or sums_sha is None:
+            raise ArtifactUnpublishedError(
+                f"chtypes: the release at {release.source} does not list {file}, which "
+                f"{self.lock} pins for {key}.{note}"
+            )
+        row = max(rows, key=lambda e: e.build_number)
+        rev = _fetch_abi_revision()
+        if row.abi_revision != rev:
+            raise ArtifactPinnedError(
+                f"chtypes: {self.lock} pins {key} to {file}, published at ABI revision "
+                f"{row.abi_revision}; this SDK speaks ABI revision {rev} — re-lock with: "
+                f"{FETCH_COMMAND} {remedy_spelling} --lock {self.lock}{note}"
+            )
+        if sums_sha != row.sha256:
+            raise ArtifactCorruptError(
+                f"chtypes: index.json says {file} is {row.sha256} but SHA256SUMS says "
+                f"{sums_sha} — the release disagrees with itself; not installing it"
+            )
+        if pin["sha256"].lower() != row.sha256:
+            raise ArtifactPinnedError(
+                f"chtypes: {self.lock} pins {key} to {file} (sha256 {pin['sha256']}) but the "
+                f"release's {file} hashes {row.sha256}. Refusing the drift; re-run without "
+                f"--frozen and with --lock to re-pin deliberately.{note}"
+            )
+        return row
+
+    def _ensure_frozen(self, spelling: str, line: str, exact: str | None) -> Path:
+        """§6 F1–F5: the lock picks the candidate, entirely before the release
+        is read (F2); the release is then read only to find that one file."""
+        candidates = self._candidates(line, exact)
+        if not candidates:
+            raise ArtifactPinnedError(
+                f"chtypes: {self.lock} pins nothing for {self.platform}/{spelling}"
+            )
+        key, pin, version = max(candidates, key=lambda c: _version_key(c[2]))
+        self._check_candidate_revision(key, pin, spelling)
+        entry = self._resolve_frozen_row(self.release(), key, pin, spelling)
+        installed = self.install(entry, line_request=exact is None)
+        self.install_goldens()
+        return installed
+
+    def _ensure_all_frozen(self) -> list[Path]:
+        """F6: every line the lock pins for this platform, at its newest
+        pinned patch. A line the release has that the lock does not pin is
+        simply not installed — not a `--frozen` refusal, because nothing
+        pinned it."""
+        pins = self._lock_pins()
+        prefix = f"{self.platform}/"
+        by_line: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
+        for key, pin in pins.items():
+            if not key.startswith(prefix):
+                continue
+            version = key[len(prefix) :]
+            by_line.setdefault(minor_of(version), []).append((key, pin, version))
+        if not by_line:
+            raise ArtifactPinnedError(f"chtypes: {self.lock} pins nothing for {self.platform}")
+        chosen: dict[str, tuple[str, dict[str, Any], str]] = {}
+        for line, candidates in by_line.items():
+            key, pin, version = max(candidates, key=lambda c: _version_key(c[2]))
+            self._check_candidate_revision(key, pin, line)
+            chosen[line] = (key, pin, version)
+        release = self.release()
+        out: list[Path] = []
+        for line in sorted(chosen, key=_minor_key):
+            key, pin, _version = chosen[line]
+            entry = self._resolve_frozen_row(release, key, pin, line)
+            out.append(self.install(entry, line_request=True))
+        self.install_goldens()
+        return out
 
     # ------------------------------------------------------------ the release
 
@@ -1093,26 +1374,32 @@ class Fetcher:
     # --------------------------------------------------------------- ensure
 
     def ensure(self, spelling: str) -> Path:
-        """One line through the chain; returns ``<registry>/<minor>``."""
+        """One line or exact patch through the chain (R5/R6: still a hard
+        requirement — the registry falls back within a line, `ensure` never
+        does). A line installs FLAT at ``<registry>/<minor>``, demoting
+        whatever patch was there before into ``patches/<minor>/<its
+        version>/`` (SDK#284 "Layout rule"); any other exact patch installs
+        straight into ``patches/<minor>/<clickhouse_version>/`` — unless it is
+        already the flat slot's own patch, in which case that is what is
+        verified and returned."""
         line, exact = parse_spelling(spelling)
         if self.offline:
             return self._ensure_offline(line, exact)
-        self._check_lock_revision_early(spelling, line)
-        try:
-            entry = self.release().select(spelling, self.platform)
-        except ArtifactUnpublishedError as exc:
-            note = self._revision_note(line)
-            if note:
-                raise ArtifactUnpublishedError(f"{exc}{note}") from None
-            raise
-        installed = self.install(entry)
+        if self.frozen:
+            return self._ensure_frozen(spelling, line, exact)
+        entry = self.release().select(spelling, self.platform)
+        installed = self.install(entry, line_request=exact is None)
         self.install_goldens()
         return installed
 
     def ensure_all(self) -> list[Path]:
         """Every line the release publishes for the platform at this binding's
-        ABI revision. A line it has only at another revision is not installed,
-        and is named in one loud warning line; the rest go on."""
+        ABI revision, each installed FLAT (§6 F6 under ``--frozen``, where
+        this instead installs the newest patch the lock pins per line). A
+        line it has only at another revision is not installed, and is named
+        in one loud warning line; the rest go on."""
+        if self.frozen:
+            return self._ensure_all_frozen()
         release = self.release()
         offered = release.offered(self.platform)
         rev = _fetch_abi_revision()
@@ -1125,7 +1412,7 @@ class Fetcher:
             )
         for message in _skipped_lines(on_platform, self.platform, rev):
             self._warn(message)
-        out = [self.install(entry) for entry in offered]
+        out = [self.install(entry, line_request=True) for entry in offered]
         self.install_goldens()
         return out
 
@@ -1195,70 +1482,73 @@ class Fetcher:
         return path
 
     def _ensure_offline(self, line: str, exact: str | None) -> Path:
-        install = self.dest / line
-        manifest = read_manifest(install)
-        if manifest is None:
-            raise SourceUnreachableError(
-                f"chtypes: offline — ClickHouse {exact or line} ({self.platform}) is not installed "
-                f"in {self.dest} and nothing may be fetched from {self.source}"
-            )
-        if exact is not None and manifest.clickhouse_version not in (exact, exact.split("-")[0]):
-            raise SourceUnreachableError(
-                f"chtypes: offline — {install} holds ClickHouse {manifest.clickhouse_version}, "
-                f"not the {exact} asked for, and nothing may be fetched"
-            )
+        """The contract is unchanged by SDK#284 (§6 "--offline --frozen"): no
+        source is ever read, and the lock is never consulted. A line is
+        satisfied by the newest installed patch of the line in this
+        destination (flat or `patches/`); an exact patch by that patch,
+        matched under Decision 7 (`_patch_matches`) — never a fallback, a
+        fetch is always a hard requirement (R5)."""
+        candidates = list(_iter_patch_dirs(self.dest, line))
+        if exact is None:
+            if not candidates:
+                raise SourceUnreachableError(
+                    f"chtypes: offline — ClickHouse {line} ({self.platform}) is not installed "
+                    f"in {self.dest} and nothing may be fetched from {self.source}"
+                )
+            _version, install, _flat = max(candidates, key=lambda c: _version_key(c[0]))
+        else:
+            matches = [c for c in candidates if _patch_matches(exact, c[0])]
+            if not matches:
+                raise SourceUnreachableError(
+                    f"chtypes: offline — ClickHouse {exact} ({self.platform}) is not installed "
+                    f"in {self.dest} and nothing may be fetched from {self.source}"
+                )
+            _version, install, _flat = matches[0]
         self._verify_in_place(install, expected_sha=None)
         self._say(f"installed (offline: verified against its own manifest): {install}")
         return install
 
-    def install(self, entry: ReleaseEntry) -> Path:
-        """Steps 2–4 for one release entry, plus the lock and the atomic move."""
+    def install(self, entry: ReleaseEntry, *, line_request: bool) -> Path:
+        """Steps 2–4 for one release entry, plus the lock and the atomic move.
+
+        ``line_request`` decides the TARGET (SDK#284 "Layout rule"), never the
+        pin: a line fetch targets the flat ``<minor>/`` slot, demoting
+        whatever patch sat there before into ``patches/<minor>/<its
+        version>/`` — atomically, same filesystem, before the incoming patch
+        takes the flat slot. An exact-patch fetch targets
+        ``patches/<minor>/<clickhouse_version>/``, unless that exact patch is
+        already what the flat slot holds, in which case the flat slot IS the
+        target (no duplicate copy). Either way the LOCK key is always the
+        exact patch (`entry.clickhouse_version`), never the line: schema 2 is
+        keyed per patch (§6).
+
+        Under ``--frozen`` the pin has already been picked, checked and
+        resolved to this exact ``entry`` by `_ensure_frozen` /
+        `_ensure_all_frozen` before this is ever called, so nothing here
+        enforces a pin — it only records one when NOT frozen (`_record_pin`).
+        """
         release = self.release()
         minor = entry.minor
-        install = self.dest / minor
+        flat = self.dest / minor
         self._say(
             f"{entry.file}  ({entry.bytes} bytes, ClickHouse {entry.clickhouse_version}, "
             f"library {entry.library})"
         )
 
-        # §5: the lock is consulted before anything is downloaded or trusted.
-        # The revision is checked FIRST, before the file/sha256 comparison
-        # below it: a lock that names a revision is refused the moment that
-        # revision is not this binding's own, never compared byte-for-byte
-        # against an artifact it could never have pinned.
-        pin_key = f"{self.platform}/{minor}"
-        pins = self._lock_pins()
-        pinned = pins.get(pin_key)
-        # Only --frozen enforces a pin. Without it, --lock records what this
-        # fetch installs, replacing any existing entry: that is the re-lock the
-        # messages below name, and what Go, TypeScript and Rust do.
-        if pinned is not None and self.frozen:
-            pinned_rev = pinned.get("abi_revision")
-            if pinned_rev is not None and pinned_rev != _fetch_abi_revision():
-                raise ArtifactPinnedError(
-                    f"chtypes: {self.lock} pins {pin_key} at ABI revision {pinned_rev}; this "
-                    f"SDK speaks ABI revision {_fetch_abi_revision()} — re-lock with: "
-                    f"{FETCH_COMMAND} {minor} --lock {self.lock}"
-                )
-            if pinned["file"] != entry.file or pinned["sha256"].lower() != entry.sha256:
-                note = "" if pinned_rev is not None else self._revision_note(minor)
-                raise ArtifactPinnedError(
-                    f"chtypes: {self.lock} pins {pin_key} to {pinned['file']} "
-                    f"(sha256 {pinned['sha256']}) but {release.source} offers {entry.file} "
-                    f"(sha256 {entry.sha256}). Refusing the drift; re-run without --frozen "
-                    f"and with --lock to re-pin deliberately.{note}"
-                )
-        elif self.frozen:
-            raise ArtifactPinnedError(
-                f"chtypes: --frozen and {self.lock} has no pin for {pin_key}; "
-                f"nothing unpinned is installed under --frozen"
-            )
+        pin_key = f"{self.platform}/{entry.clickhouse_version}"
+        flat_manifest = read_manifest(flat)
+        flat_matches = (
+            flat_manifest is not None
+            and flat_manifest.clickhouse_version == entry.clickhouse_version
+        )
+        patches_target = self.dest / PATCHES_DIRNAME / minor / entry.clickhouse_version
+        target = flat if (line_request or flat_matches) else patches_target
 
         # Idempotence: installed and hashing what the release says is a no-op.
-        if not self.force and self._installed_matches(install, entry):
-            self._say(f"already installed and verified: {install / entry.library}")
+        if not self.force and self._installed_matches(target, entry):
+            self._say(f"already installed and verified: {target / entry.library}")
             self._record_pin(pin_key, entry)
-            return install
+            return target
 
         # §3 step 2: the signed SHA256SUMS must agree with index.json.
         sums_sha = release.sums.get(entry.file)
@@ -1322,17 +1612,48 @@ class Fetcher:
                 )
             self._verify_in_place(stage, expected_sha=entry.library_sha256)
 
+            # Demotion (SDK#284): a LINE fetch that is about to change which
+            # patch sits in the flat slot moves the outgoing install aside
+            # FIRST, atomically and on the same filesystem, into
+            # patches/<minor>/<its version>/ — never deleted. Only when the
+            # flat slot currently holds a DIFFERENT patch than the one about
+            # to land: the same-version repair/--force path below still
+            # replaces the flat slot in place, exactly as before this change.
+            demoted: tuple[Path, Path] | None = None
+            if (
+                target == flat
+                and flat_manifest is not None
+                and flat_manifest.clickhouse_version
+                and flat_manifest.clickhouse_version != entry.clickhouse_version
+            ):
+                demote_to = self.dest / PATCHES_DIRNAME / minor / flat_manifest.clickhouse_version
+                demote_to.parent.mkdir(parents=True, exist_ok=True)
+                if demote_to.exists() or demote_to.is_symlink():
+                    shutil.rmtree(demote_to, ignore_errors=True)
+                os.rename(flat, demote_to)
+                demoted = (flat, demote_to)
+                self._say(
+                    f"demoted ClickHouse {flat_manifest.clickhouse_version} to {demote_to} "
+                    f"— superseded by {entry.clickhouse_version} as {minor}'s installed patch"
+                )
+
             # Atomic: the fully verified sibling is renamed into place; the
-            # previous install, if any, is moved aside first and removed after.
+            # previous install, if any, is moved aside first and removed
+            # after. (After a demotion, `target` — the flat slot — is empty,
+            # so there is nothing left here to move aside.)
+            target.parent.mkdir(parents=True, exist_ok=True)
             replaced: Path | None = None
-            if install.exists() or install.is_symlink():
+            if target.exists() or target.is_symlink():
                 replaced = self.dest / f".{minor}.replaced.{os.getpid()}.{work.name[-6:]}"
-                os.rename(install, replaced)
+                os.rename(target, replaced)
             try:
-                os.rename(stage, install)
+                os.rename(stage, target)
             except OSError:
                 if replaced is not None:
-                    os.rename(replaced, install)
+                    os.rename(replaced, target)
+                if demoted is not None:
+                    was, now = demoted
+                    os.rename(now, was)
                 raise
             if replaced is not None:
                 shutil.rmtree(replaced, ignore_errors=True)
@@ -1341,15 +1662,15 @@ class Fetcher:
 
         # The installed library is hashed again, in place — everything before
         # this proved the bytes were right somewhere else.
-        self._verify_in_place(install, expected_sha=entry.library_sha256)
-        self._say(f"installed and verified: {install}")
+        self._verify_in_place(target, expected_sha=entry.library_sha256)
+        self._say(f"installed and verified: {target}")
         self._say(f"    {entry.library} sha256 {entry.library_sha256}")
         self._say(
             f"    ClickHouse {entry.clickhouse_version} — Registry({str(self.dest)!r}) "
             f"now serves {minor}"
         )
         self._record_pin(pin_key, entry)
-        return install
+        return target
 
     def _record_pin(self, key: str, entry: ReleaseEntry) -> None:
         if self.lock is None or self.frozen:

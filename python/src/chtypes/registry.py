@@ -8,9 +8,12 @@ Registry(dir) -> for_version(v) -> Library -> compile_ddl(ddl) -> Schema
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import threading
+import time
+import warnings
 import weakref
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack
@@ -29,18 +32,30 @@ from ._manifest import (
     read_manifest,
     verify_library,
 )
-from ._native import NativeLibrary
+from ._native import ABI_REVISION, NativeLibrary
 from .discover import DiscoveredColumn, _reconstruct_ddl
 from .errors import (
     FETCH_COMMAND,
     ArtifactMissingError,
+    ArtifactUnpublishedError,
     ChtypesError,
+    PatchFallbackWarning,
     RegistryError,
     SchemaError,
     UnsupportedError,
     _error_for,
 )
-from .fetch import ENV_AUTOFETCH, Fetcher, fetch_destination, registry_search_path
+from .fetch import (
+    ENV_AUTOFETCH,
+    PATCHES_DIRNAME,
+    Fetcher,
+    _iter_patch_dirs,
+    _patch_matches,
+    _version_key,
+    fetch_destination,
+    parse_spelling,
+    registry_search_path,
+)
 from .results import (
     COMPILE_DECLARED,
     DOC_ALL,
@@ -61,6 +76,7 @@ __all__ = [
     "Library",
     "Manifest",
     "Registry",
+    "Resolution",
     "Schema",
     "Settings",
     "encode_columns",
@@ -1219,6 +1235,68 @@ class Library:
         self._native.shutdown()
 
 
+# ------------------------------------------------------- the resolution seam
+#
+# R3/R4's pick over scanned manifests, factored out so it returns a
+# (directory, version) pair without opening anything — the seam a test can
+# drive directly, over directories built from fake manifests, with no
+# loadable library (docs/guides/fetch.md §9, "Resolution seam"). Not public
+# API: reached through `Registry.resolve` / `for_version`.
+
+
+def _pick_line(search_path: Sequence[Path], minor: str) -> tuple[Path, str] | None:
+    """R3 step 2: the newest patch of ``minor`` in the FIRST search-path
+    directory that holds ANY patch of it — flat slot or `patches/` sibling.
+    On a tie at the same version, a nested install beats a flat one."""
+    for root in search_path:
+        candidates = list(_iter_patch_dirs(root, minor))
+        if not candidates:
+            continue
+        version, directory, _flat = max(candidates, key=lambda c: (_version_key(c[0]), not c[2]))
+        return directory, version
+    return None
+
+
+def _pick_patch(search_path: Sequence[Path], minor: str, exact: str) -> tuple[Path, str] | None:
+    """R4 step 2: the first directory ANYWHERE on the search path holding a
+    patch matching ``exact`` under Decision 7 (`_patch_matches`) — not only
+    the first directory that holds the line."""
+    for root in search_path:
+        for version, directory, _flat in _iter_patch_dirs(root, minor):
+            if _patch_matches(exact, version):
+                return directory, version
+    return None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Resolution:
+    """What `Registry.resolve` hands back (SDK#284, docs/reference/bindings.md
+    "Version selection"): the loaded `Library`, what was asked for, what
+    actually loaded, and whether the two are the same patch.
+
+    `for_version` / `registry[v]` run the exact same resolution and hand back
+    only `.library` — `Resolution` exists for the callers that need to know
+    whether a patch request fell back within its line.
+    """
+
+    #: The `Library` this resolution loaded.
+    library: Library
+    #: The caller's spelling, trimmed of surrounding whitespace — not
+    #: normalized further, so it still carries a leading ``v`` if the caller
+    #: wrote one.
+    requested: str
+    #: The loaded library's OWN version (`Library.version`) — what actually
+    #: loaded, never what was requested.
+    version: str
+    #: `True` for a line request (`Registry.resolve("25.8")`): the request
+    #: asked for "a patch of this line" and got one. For a patch request,
+    #: `True` only when the loaded version matches the requested patch under
+    #: the shared matching rule (fetch.md Decision 7); `False` means the
+    #: fallback within the line was taken, and a `PatchFallbackWarning` was
+    #: raised once for this (requested, actual) pair in this process.
+    exact: bool
+
+
 class Registry:
     """Every artifact on the search path, dispatched by ClickHouse version.
 
@@ -1280,9 +1358,11 @@ class Registry:
 
     __slots__ = (
         "_autofetch",
-        "_by_id",
         "_closed",
+        "_fallback_cache",
         "_index",
+        "_line_pin",
+        "_loaded",
         "_mu",
         "_timezone",
         "_verify_hashes",
@@ -1308,7 +1388,17 @@ class Registry:
             if autofetch is not None
             else os.environ.get(ENV_AUTOFETCH, "").strip().lower() in ("1", "true", "yes", "on")
         )
-        self._by_id: dict[str, Library] = {}
+        #: Every Library this registry has opened, keyed by its OWN exact
+        #: version — never by minor. Several patches of one line coexist now
+        #: (SDK#284 §5), each its own dlopen'd image.
+        self._loaded: dict[str, Library] = {}
+        #: minor -> the exact version a LINE request pinned it to (R3). Set
+        #: once; never moves while this registry stays open, even once a
+        #: newer patch installs.
+        self._line_pin: dict[str, str] = {}
+        #: requested exact patch -> the fallback Library last resolved for it
+        #: (R4 step 4), reused between `_should_recheck` windows (R-c).
+        self._fallback_cache: dict[str, Library] = {}
         self._index: dict[str, Path] = {}
         self._closed = False
         self._mu = threading.RLock()
@@ -1339,16 +1429,31 @@ class Registry:
     # ----------------------------------------------------------- discovery
 
     def _scan(self) -> None:
-        """Index every line on the search path: minor -> the FIRST directory
-        holding it. Reads manifests only; loads nothing."""
-        index: dict[str, Path] = {}
+        """Index every line on the search path: minor -> the directory
+        holding the patch a LINE request would currently select (R3) — the
+        newest patch in the FIRST search-path directory holding ANY patch of
+        that line. Reads both the flat ``<minor>/`` slot and the
+        ``patches/<minor>/<version>/`` sibling tree on every directory
+        (SDK#284 "Layout rule"). Reads manifests only; loads nothing."""
+        candidates: set[str] = set()
         for root in self.search_path:
             try:
                 entries = sorted(root.iterdir())
             except OSError:
                 continue  # absent, or unreadable: not a registry
             for entry in entries:
-                if entry.name.startswith(".") or not entry.is_dir():
+                if entry.name.startswith("."):
+                    continue
+                if entry.name == PATCHES_DIRNAME and entry.is_dir():
+                    try:
+                        minor_dirs = sorted(entry.iterdir())
+                    except OSError:
+                        continue
+                    candidates.update(
+                        d.name for d in minor_dirs if not d.name.startswith(".") and d.is_dir()
+                    )
+                    continue
+                if not entry.is_dir():
                     continue
                 manifest = read_manifest(entry)
                 if manifest is None:
@@ -1356,13 +1461,23 @@ class Registry:
                 # The manifest's own claim, verified against the library at
                 # load; the directory name is only the last resort.
                 minor = manifest.clickhouse_minor or minor_of(manifest.clickhouse_version)
-                index.setdefault(minor or entry.name, entry)
+                candidates.add(minor or entry.name)
+        index: dict[str, Path] = {}
+        for minor in candidates:
+            found = _pick_line(self.search_path, minor)
+            if found is not None:
+                index[minor] = found[0]
         self._index = index
 
-    def _load(self, minor: str, entry: Path) -> Library:
-        manifest = read_manifest(entry)
+    def _load(self, directory: Path, version: str) -> Library:
+        """Open one already-located patch directory, memoized by its OWN
+        exact version: a second call for a version already open returns the
+        same wrapper rather than `dlopen`ing a second image."""
+        if version in self._loaded:
+            return self._loaded[version]
+        manifest = read_manifest(directory)
         if manifest is None:
-            raise RegistryError(f"chtypes: {entry} no longer holds a usable manifest.json")
+            raise RegistryError(f"chtypes: {directory} no longer holds a usable manifest.json")
         # check_library_bytes runs UNCONDITIONALLY (issue #82): nearly free
         # (one stat, never a re-hash), and it catches the commonest shape of
         # a broken artifact directory -- a truncated or partially-written
@@ -1370,49 +1485,48 @@ class Registry:
         # too as part of the fuller hash comparison, so it is not repeated
         # here when verification is already going to make it.
         if self._verify_hashes:
-            verify_library(entry)
+            verify_library(directory)
         else:
-            check_library_bytes(entry, manifest)
+            check_library_bytes(directory, manifest)
         # A directory that has a manifest and does not load is broken, not
         # absent: this is an error, naming the path.
-        library = Library(str(entry / manifest.library), manifest, self._timezone)
-        if library.minor != minor:
+        library = Library(str(directory / manifest.library), manifest, self._timezone)
+        if library.version != version:
             library.close()
             raise RegistryError(
-                f"chtypes: {entry} is indexed as ClickHouse {minor} but its library reports "
-                f"{library.version}"
+                f"chtypes: {directory} is indexed as ClickHouse {version} but its library "
+                f"reports {library.version}"
             )
-        # Indexed under BOTH its exact version and its minor line: docker
-        # tags drift, and an exact-match-only lookup silently loses a whole
-        # version column.
-        self._by_id[library.version] = library
-        self._by_id[library.minor] = library
+        self._loaded[library.version] = library
         return library
 
-    def _preload(self, version: str) -> None:
-        """Open one ``preload`` entry, at construction, without fetching.
-
-        Resolution is `for_version`'s, minus the fetch: preload never fetches,
-        even with ``autofetch`` on. A line no directory holds is the same §7
+    def _preload(self, spelling: str) -> None:
+        """Open one ``preload`` entry, at construction, through the SAME
+        resolution `resolve` runs — minus any fetch: preload never fetches,
+        even with ``autofetch`` on. A line no directory holds, or a patch
+        with no installed patch anywhere on its line, is the same §7
         `ArtifactMissingError` the first `for_version` would have raised —
-        raised earlier, not a new type.
+        raised earlier, not a new type (R7). A preloaded patch that falls
+        back within its line warns right here, at construction; a preloaded
+        line sets that line's pin.
         """
-        if not version:
+        if not spelling:
             raise RegistryError("chtypes: preload: an empty version does not mean 'pick one'")
-        minor = minor_of(version)
-        with self._mu:
-            if version in self._by_id or minor in self._by_id:
-                return
-            if minor not in self._index:
-                raise ArtifactMissingError(minor, host_platform(), self.search_path)
-            self._load(minor, self._index[minor])
+        saved, self._autofetch = self._autofetch, False
+        try:
+            self.resolve(spelling)
+        finally:
+            self._autofetch = saved
 
-    def _autofetch_line(self, version: str) -> None:
-        key = (str(self.directory), minor_of(version))
+    def _autofetch_line(self, minor: str) -> None:
+        """R3 step 3 / R4 step 4: ``Ensure(<line>)`` at most once per process
+        per (destination, line), however many callers or threads open it
+        concurrently (docs/guides/fetch.md §6)."""
+        key = (str(self.directory), minor)
         with _autofetch_lock(key):
             if key in _AUTOFETCHED:
                 return
-            Fetcher(dest=self.directory).ensure(version)
+            Fetcher(dest=self.directory).ensure(minor)
             _AUTOFETCHED.add(key)
 
     # ----------------------------------------------------------- resolution
@@ -1425,59 +1539,199 @@ class Registry:
         that happen to be open" would read as an empty registry until the first
         `for_version`. It opens nothing.
         """
-        minors = {lib.minor for lib in self._by_id.values()} | set(self._index)
+        minors = {lib.minor for lib in self._loaded.values()} | set(self._index)
         return tuple(sorted(minors, key=_minor_sort_key))
 
     def libraries(self) -> tuple[Library, ...]:
-        """The libraries this registry has LOADED, in release order.
+        """The libraries this registry has LOADED, in FULL numeric version
+        order (SDK#284 §5: several patches of one line can be open at once,
+        so minor order alone no longer disambiguates).
 
         What is open right now, never what could be: a discovered line that no
-        `for_version` and no ``preload`` has opened appears in `versions` and
-        not here. **This call opens nothing** — opening 120 MB of artifact per
-        line as the side effect of a listing is not something a caller can
-        undo, and it is what Go, TypeScript and Rust have always answered.
+        `for_version` / `resolve` and no ``preload`` has opened appears in
+        `versions` and not here. **This call opens nothing** — opening 120 MB
+        of artifact per patch as the side effect of a listing is not
+        something a caller can undo, and it is what Go, TypeScript and Rust
+        have always answered.
         """
         with self._mu:
-            unique = {id(lib): lib for lib in self._by_id.values()}
-        return tuple(sorted(unique.values(), key=lambda lib: _minor_sort_key(lib.minor)))
+            loaded = tuple(self._loaded.values())
+        return tuple(sorted(loaded, key=lambda lib: _version_key(lib.version)))
 
-    def for_version(self, version: str) -> Library:
-        """Resolve a minor line ("25.8") or an exact patch ("25.8.28.1-lts").
+    def resolve(self, version: str) -> Resolution:
+        """Resolve a minor line ("25.8") or an exact patch ("25.8.28.1-lts")
+        to a `Resolution` (SDK#284, docs/reference/bindings.md "Version
+        selection"). `for_version` / `registry[v]` run this exact same
+        resolution and hand back only `.library`.
 
-        A drifted patch resolves to its minor line, deliberately. Failure is
-        `ArtifactMissingError` naming every directory searched, never a
-        fallback to the nearest line: answering 26.7 semantics from a 25.8
-        artifact is a lie, and the rigs score silent wrongness hardest.
+        A LINE request never falls back and is always `Exact = True`: it
+        asked for "a patch of this line" and got the newest one this
+        registry can reach, pinned for as long as this registry stays open
+        — the pin never moves while the process runs, even once a newer
+        patch installs.
+
+        A PATCH request loads that exact patch when it is installed, or —
+        with ``autofetch`` on — published; otherwise it falls back to the
+        newest patch of the same line, sets ``Exact = False``, and raises a
+        `PatchFallbackWarning` once per (requested, actual) pair per process.
+        The fallback is re-verified against the search path at most once
+        every 60 seconds per (destination, requested patch); a patch
+        installed later, by fetch or by hand, is then picked up with no
+        restart.
+
+        Never crosses to another line, ever: that failure is always
+        `ArtifactMissingError`, naming every directory searched.
         """
         if self._closed:
             raise ChtypesError("chtypes: registry is closed")
-        if not version:
+        requested = version.strip()
+        if not requested:
             raise RegistryError("chtypes: an empty version does not mean 'pick one'")
-        minor = minor_of(version)
+        line, exact = parse_spelling(requested)
         with self._mu:
-            library = self._by_id.get(version) or self._by_id.get(minor)
-            if library is not None:
-                return library
-            if minor not in self._index:
-                self._scan()  # installed since construction, by fetch or by hand
-            if minor not in self._index and self._autofetch:
-                self._autofetch_line(version)
-                self._scan()
-            if minor not in self._index:
-                raise ArtifactMissingError(minor, host_platform(), self.search_path)
-            return self._load(minor, self._index[minor])
+            if exact is None:
+                library = self._resolve_line(line)
+                return Resolution(
+                    library=library, requested=requested, version=library.version, exact=True
+                )
+            library, is_exact = self._resolve_patch(line, exact)
+            return Resolution(
+                library=library, requested=requested, version=library.version, exact=is_exact
+            )
+
+    def _resolve_line(self, minor: str) -> Library:
+        """R3: (1) already pinned — return it; (2) the newest patch of
+        ``minor`` in the first search-path directory holding any patch of
+        it; (3) with autofetch on, `Ensure(minor)`; (4)
+        `ArtifactMissingError`."""
+        pinned = self._line_pin.get(minor)
+        if pinned is not None:
+            return self._loaded[pinned]
+        # `_pick_line` reads the search path fresh every call — no cached
+        # `self._index` lookup here, so a line installed since construction
+        # (by fetch or by hand) is found with no separate rescan step.
+        found = _pick_line(self.search_path, minor)
+        if found is None and self._autofetch:
+            self._autofetch_line(minor)
+            found = _pick_line(self.search_path, minor)
+        if found is None:
+            raise ArtifactMissingError(minor, host_platform(), self.search_path)
+        directory, version = found
+        library = self._load(directory, version)
+        self._line_pin[minor] = library.version
+        return library
+
+    def _resolve_patch(self, minor: str, exact: str) -> tuple[Library, bool]:
+        """R4: (1) already loaded, matching under Decision 7 — return it,
+        Exact; (2) the first directory ANYWHERE on the search path holding a
+        matching patch; (3) with autofetch on, `Ensure(exact)`, remembered as
+        unpublished for the rest of this process once it answers that; (4)
+        fall back to the newest patch of the line.
+
+        R-c bounds steps 2-4 together, not just step 4: once a fallback has
+        been resolved for this (destination, requested patch), a call within
+        the next 60 s skips straight to the cached fallback — no directory
+        read, no network — and only step 1's cheap already-loaded check and
+        the warning (deduplicated per pair) still run on every call.
+        """
+        for lib in self._loaded.values():
+            if lib.minor == minor and _patch_matches(exact, lib.version):
+                return lib, True
+
+        # `_should_recheck` is called UNCONDITIONALLY here (never short
+        # circuited by `cached is None`) so the very first fallback for this
+        # pair also starts the 60 s window — not just the second one.
+        recheck = _should_recheck(str(self.directory), exact)
+        cached = self._fallback_cache.get(exact)
+        if cached is not None and not recheck:
+            _warn_patch_fallback(exact, cached.version, autofetch=self._autofetch)
+            return cached, False
+
+        library = self._scan_for_patch(minor, exact)
+        if library is not None:
+            self._fallback_cache.pop(exact, None)
+            return library, True
+
+        if self._autofetch:
+            fetch_key = (str(self.directory), exact)
+            with _autofetch_lock(fetch_key):
+                already_unpublished = fetch_key in _UNPUBLISHED_PATCHES
+                if not already_unpublished:
+                    try:
+                        Fetcher(dest=self.directory).ensure(exact)
+                    except ArtifactUnpublishedError:
+                        _UNPUBLISHED_PATCHES.add(fetch_key)
+                    else:
+                        library = self._scan_for_patch(minor, exact)
+                        if library is not None:
+                            self._fallback_cache.pop(exact, None)
+                            return library, True
+                    # Any OTHER failure (untrusted/corrupt/pinned/unreachable)
+                    # propagates as-is — it is not remembered, so a later
+                    # call retries.
+
+        return self._fallback(minor, exact), False
+
+    def _scan_for_patch(self, minor: str, exact: str) -> Library | None:
+        # `_pick_patch` reads the search path fresh every call, so there is
+        # no separate "rescan and retry" step here either.
+        found = _pick_patch(self.search_path, minor, exact)
+        if found is None:
+            return None
+        directory, version = found
+        return self._load(directory, version)
+
+    def _fallback(self, minor: str, exact: str) -> Library:
+        """R4 step 4: the newest installed patch of the line — via
+        `Ensure(line)` first when autofetch is on. Warns once per
+        (requested, actual) pair per process (§3). The R-c recheck bound is
+        applied by the caller, `_resolve_patch`, before this ever runs."""
+        if self._autofetch:
+            self._autofetch_line(minor)
+        found = _pick_line(self.search_path, minor)
+        if found is None:
+            raise ArtifactMissingError(minor, host_platform(), self.search_path)
+        directory, version = found
+        library = self._load(directory, version)
+        self._fallback_cache[exact] = library
+        _warn_patch_fallback(exact, library.version, autofetch=self._autofetch)
+        return library
+
+    def for_version(self, version: str) -> Library:
+        """Resolve a minor line ("25.8") or an exact patch ("25.8.28.1-lts")
+        — sugar for ``self.resolve(version).library`` (SDK#284): same
+        resolution, same fallback-and-warn for a patch not installed, same
+        refusal, minus the `Resolution` wrapper.
+        """
+        return self.resolve(version).library
 
     def __getitem__(self, version: str) -> Library:
         """`registry["25.8"]` — sugar for `for_version`, same resolution rules."""
         return self.for_version(version)
 
     def __contains__(self, version: str) -> bool:
-        """Whether `for_version(version)` would resolve without fetching."""
-        return (
-            version in self._by_id
-            or minor_of(version) in self._by_id
-            or (minor_of(version) in self._index)
-        )
+        """Whether `resolve(version)` would resolve without fetching — true
+        when the patch, or any patch of its line, is installed or open
+        (R9)."""
+        v = version.strip()
+        if not v:
+            return False
+        try:
+            line, exact = parse_spelling(v)
+        except ValueError:
+            return False
+        if exact is None:
+            return (
+                line in self._line_pin
+                or line in self._index
+                or _pick_line(self.search_path, line) is not None
+            )
+        for lib in self._loaded.values():
+            if lib.minor == line and _patch_matches(exact, lib.version):
+                return True
+        if _pick_patch(self.search_path, line, exact) is not None:
+            return True
+        return line in self._index or _pick_line(self.search_path, line) is not None
 
     def __iter__(self) -> Iterator[Library]:
         """Iterate the LOADED libraries. Like `libraries`, it opens nothing."""
@@ -1489,8 +1743,8 @@ class Registry:
     def close(self) -> None:
         """`chs_shutdown` every loaded library. Close every `Schema` first."""
         with self._mu:
-            unique = {id(lib): lib for lib in self._by_id.values()}
-            for library in unique.values():
+            loaded = tuple(self._loaded.values())
+            for library in loaded:
                 library.close()
             self._closed = True
 
@@ -1506,16 +1760,77 @@ class Registry:
         self.close()
 
 
-# Lazy fetch runs ONCE per process per (destination, line), whatever the
-# number of Registry instances or threads that open it concurrently
-# (docs/guides/fetch.md §6): the lock serializes the opens, the memo keeps a line
-# whose fetch succeeded but whose load then failed from being re-downloaded
-# on every open.
+# Lazy fetch runs ONCE per process per (destination, spelling) — a line for
+# R3 step 3 / R4 step 4, an exact patch for R4 step 3's unpublished memo —
+# whatever the number of Registry instances or threads that open it
+# concurrently (docs/guides/fetch.md §6): the lock serializes the attempts,
+# and `_AUTOFETCHED` keeps a line whose fetch succeeded but whose load then
+# failed from being re-downloaded on every open.
 _AUTOFETCHED: set[tuple[str, str]] = set()
 _AUTOFETCH_LOCKS: dict[tuple[str, str], threading.Lock] = {}
 _AUTOFETCH_MU = threading.Lock()
+
+#: §1 autofetch memo, patch half: a (destination, requested exact patch) this
+#: process has already been told `CHTYPES_ARTIFACT_UNPUBLISHED` for is not
+#: retried on every call — only a definite "not published" is remembered; any
+#: other failure (untrusted/corrupt/pinned/unreachable) is not, so a later
+#: call retries it. Guarded by the same per-key lock as `_AUTOFETCHED`.
+_UNPUBLISHED_PATCHES: set[tuple[str, str]] = set()
 
 
 def _autofetch_lock(key: tuple[str, str]) -> threading.Lock:
     with _AUTOFETCH_MU:
         return _AUTOFETCH_LOCKS.setdefault(key, threading.Lock())
+
+
+#: R-c: a fallen-back patch request re-checks the search path at most once
+#: every 60 s per (destination, requested patch) per process — a directory
+#: read on every call would be needless overhead for what is meant to be a
+#: connect-time call. Keyed (destination, requested exact patch) -> the
+#: monotonic time of the last real recheck.
+_FALLBACK_RECHECK_SECONDS: Final = 60.0
+_FALLBACK_RECHECK: dict[tuple[str, str], float] = {}
+_FALLBACK_MU = threading.Lock()
+
+
+def _should_recheck(dest: str, exact: str) -> bool:
+    key = (dest, exact)
+    now = time.monotonic()
+    with _FALLBACK_MU:
+        last = _FALLBACK_RECHECK.get(key)
+        if last is not None and now - last < _FALLBACK_RECHECK_SECONDS:
+            return False
+        _FALLBACK_RECHECK[key] = now
+        return True
+
+
+#: §3: the warning fires once per (requested, actual) pair per process,
+#: across every `Registry` in it — process-wide, like the autofetch memos.
+#: The pair is recorded BEFORE the warning is raised (design risk R-h): a
+#: caller's own ``warnings.filterwarnings("error", category=PatchFallbackWarning)``
+#: turning this into an exception must not cause a retry to warn again — the
+#: library has already loaded by the time the warning fires.
+_WARNED_PAIRS: set[tuple[str, str]] = set()
+_WARN_MU = threading.Lock()
+
+
+def _warn_patch_fallback(requested: str, actual: str, *, autofetch: bool) -> None:
+    pair = (requested, actual)
+    with _WARN_MU:
+        if pair in _WARNED_PAIRS:
+            return
+        _WARNED_PAIRS.add(pair)
+    line = minor_of(actual)
+    if autofetch:
+        body = (
+            f"ClickHouse {requested} is not published for {host_platform()} at ABI revision "
+            f"{ABI_REVISION}; using {actual}, the newest published patch of {line}. Behavior "
+            f"can differ between patches."
+        )
+    else:
+        body = (
+            f"ClickHouse {requested} is not installed for {host_platform()}; using {actual}, "
+            f"the newest installed patch of {line}. Behavior can differ between patches. If "
+            f"{requested} is published, install it with: {FETCH_COMMAND} {requested}"
+        )
+    warnings.warn(f"chtypes: {body}", PatchFallbackWarning, stacklevel=5)
