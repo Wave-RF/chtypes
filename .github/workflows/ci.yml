@@ -320,7 +320,12 @@ jobs:
       # would silently check nothing. --print-lines reads the same
       # docs/divergences.json the reality check itself drives, so the two
       # can never name a different set.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restored on every event, SAVED only from a push to main (below):
+      # a pull_request or merge_group run's save lands under its own ref,
+      # which main can never read, so each new key used to be stored twice
+      # or three times and the repository's 10 GiB cache filled (#295).
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: divergences-cache
         with:
           path: .divergences-artifacts
           key: chtypes-divergences-linux-amd64-${{ hashFiles('docs/divergences.json') }}
@@ -335,6 +340,12 @@ jobs:
           for line in $(scripts/check-divergences.py --print-lines); do
             scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY"
           done
+      - name: save the divergences cache (push to main only, and only on a miss)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.divergences-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .divergences-artifacts
+          key: ${{ steps.divergences-cache.outputs.cache-primary-key }}
       - name: docs/limitations.md's Known-divergences claims still hold against the loaded artifacts
         run: scripts/check-divergences.py --registry "$CHTYPES_REGISTRY"
       # A second, unrelated, equally non-blocking claim about the same served
@@ -729,7 +740,10 @@ jobs:
           tag="${{ steps.channel.outputs.tag }}"
           [ -n "$tag" ] && tag_args=(--tag "$tag")
           scripts/published-lines.sh --platform linux-amd64 "${tag_args[@]}" | tee -a "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restore-only here; saved from a push to main after a clean fetch
+      # (below), for the reason the divergences job's cache step gives (#295).
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: artifacts-cache
         with:
           path: .artifacts
           key: chtypes-artifacts-linux-amd64-${{ steps.lines.outputs.key }}
@@ -763,6 +777,12 @@ jobs:
           fi
           ls -la "$CHTYPES_REGISTRY"
           cat "$CHTYPES_REGISTRY"/*/manifest.json
+      - name: save the artifacts cache (push to main only, a clean fetch, and only on a miss)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetch.outputs.exit_code == '0' && steps.artifacts-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .artifacts
+          key: ${{ steps.artifacts-cache.outputs.cache-primary-key }}
       # Gated on the fetch step's own outcome (#182), same as the five below
       # — the fetch step now carries continue-on-error, so nothing after it
       # skips by default the way it used to on a fail-fast failure there;
