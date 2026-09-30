@@ -6,13 +6,25 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+Speaks the same ABI revision as 0.4.0. This release refuses a schema-2 lock file with a clear message, and reads one written by a later SDK.
+
 ### Added
 
-- **`fetch`'s `lock` option now records the artifact's ABI revision** in each lock entry (`LockEntry.abi_revision`, optional and additive — schema stays 1); `frozen` checks it FIRST, before the file/sha256 pin: a lock that names a different revision throws `ArtifactPinnedError`, naming both numbers and the `npx @wavehouse/chtypes fetch` remedy, instead of surfacing as a bare drifted pin or `ArtifactUnpublishedError`. A lock entry with no recorded revision (written by an SDK before this change) keeps today's behavior, with one sentence appended when it ends in one of those two errors. `offline` with `frozen` is unaffected (docs/guides/fetch.md §5, closes #253).
+- **`fetch`'s `lock` option now records the artifact's ABI revision** in each lock entry (`LockEntry.abi_revision`, optional and additive); `frozen` checks it FIRST, before the file/sha256 pin: a lock that names a different revision throws `ArtifactPinnedError`, naming both numbers and the `npx @wavehouse/chtypes fetch` remedy, instead of surfacing as a bare drifted pin or `ArtifactUnpublishedError`. A lock entry with no recorded revision (written by an SDK before this change) keeps today's behavior, with one sentence appended when it ends in one of those two errors. `offline` with `frozen` is unaffected (docs/guides/fetch.md §5, closes #253).
+- **`Registry#resolve(version)` and the async `Registry#openResolution(version)`** — `for()` / `open()`'s full answer, as a `Resolution`: `library`, `requested` (the caller's own spelling, trimmed), `version` (what actually loaded) and `exact`. A minor-line request is always `exact: true`. A patch request (`"25.8.28.1-lts"`) that is not installed or published falls back to the newest patch of the same line, sets `exact: false`, and writes one `process.emitWarning` (`type: 'PatchFallbackWarning'`, `code: 'CHTYPES_PATCH_FALLBACK'`) per (requested, actual) pair per process — never another line, which stays the one `ArtifactMissingError`. `for()` / `open()` run the same resolution and hand back only `.library` (issue #284).
+- **The cache now holds every installed patch of a line, not only the newest.** The line's current pick still installs flat at `<registry>/<minor>/`, exactly as before; any other exact patch installs at `<registry>/patches/<minor>/<clickhouse_version>/`, which no released reader (0.4.x and earlier, `scripts/fetch.sh` included) scans, fetches into, or deletes. When a line fetch changes which patch occupies the flat slot, the outgoing install is DEMOTED — an atomic, same-filesystem rename into `patches/`, done before the incoming patch takes the flat slot — never deleted, so a server still on the older patch keeps its exact match with no re-fetch. `listArtifacts` / `verify` report one record per installed patch.
+- **Lock schema 2** (`LOCK_SCHEMA = 2`), keyed `<os>-<arch>/<clickhouse_version>` instead of `<os>-<arch>/<minor>`, because two patches of one line need two entries. Schema-1 locks are still read and are converted to schema 2 the first time this SDK writes the file. `--frozen` now installs exactly the file the lock pins, and no longer refuses because the release also serves a newer patch or a higher build (the old "pins X but the release offers Y" refusal is gone); `--all --frozen` installs the newest pinned patch of every line the lock pins for the platform, and a line the release has that the lock does not pin is simply not installed. SDKs through 0.4.x refuse a schema-2 lock file outright, naming the schema they expect.
+
+### Changed
+
+- **`fetch`'s patch matching now follows Decision 7 everywhere**, not only where it already did: a spelling with no channel suffix (`25.8.28.1`) matches an installed or served patch on any channel (`25.8.28.1-lts`); a spelled channel matches only itself. This is the one matching rule for the registry, the release, the lock and `scripts/fetch.sh` (`patchMatches`, unexported).
 
 ### Fixed
 
 - **`frozen` no longer writes the lock file.** A frozen install that passed its pin check rewrote the lock with the entry it had just verified, re-serialized. Go, Python and Rust never write under `--frozen`.
+- **The registry's offline path now checks a patch spelling against what is actually installed**, instead of accepting any installed patch of the line regardless of the exact version asked for.
+- **Offline never reads the lock file any more.** `--offline --frozen` used to treat a missing lock, or a lock that did not pin the requested line, as `CHTYPES_ARTIFACT_PINNED` even though nothing was ever read over the network; offline's verdict is now independent of the lock's contents, matching Decision 6 (`CHTYPES_SOURCE_UNREACHABLE` or `CHTYPES_ARTIFACT_CORRUPT` only).
+- **`open()` (and the new `openResolution()`) now try the exact patch first** when autofetch is on, instead of fetching the whole line unconditionally. Only on `CHTYPES_ARTIFACT_UNPUBLISHED` — remembered per (destination, patch) for the registry's lifetime, so it costs one network round trip, not one per call — does it fall back to fetching the line.
 
 ## [0.4.0] — 2026-09-30
 
