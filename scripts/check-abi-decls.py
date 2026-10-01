@@ -647,8 +647,8 @@ PLANTS = (
     (
         "go-linked arity",
         "go/chtypes/linked.go",
-        "out := C.chs_row(cs.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)",
-        "out := C.chs_row(cs.handle, C.int(format), praw, C.size_t(len(raw)), csj)",
+        "out := C.chs_row(cs.n.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)",
+        "out := C.chs_row(cs.n.handle, C.int(format), praw, C.size_t(len(raw)), csj)",
         "go-linked: C.chs_row is called with 5 argument(s); the header takes 6",
     ),
     (

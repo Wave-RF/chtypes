@@ -124,12 +124,12 @@ PLANT_FILE=(
   "include/chtypes.h"
 )
 PLANT_FIND=(
-  'C.chs_row(cs.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)'
+  'C.chs_row(cs.n.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)'
   'C.chs_validate_type(cexpr, &cCanon, &code, &cErr)'
   '#define CHS_DOC_TRANSFORMS 0x2u'
 )
 PLANT_REPL=(
-  'C.chs_row(cs.handle, C.size_t(format), praw, C.size_t(len(raw)), csj, pcols)'
+  'C.chs_row(cs.n.handle, C.size_t(format), praw, C.size_t(len(raw)), csj, pcols)'
   'C.chs_validate_type(cexpr, &code, &cCanon, &cErr)'
   '#define CHS_DOC_TRANSFORMS 0x8u'
 )
