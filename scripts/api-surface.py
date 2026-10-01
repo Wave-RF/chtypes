@@ -318,44 +318,70 @@ def normalize_api_report(text: str) -> list[str]:
     return out
 
 
+# api-extractor skips a reference to a global only when TypeScript lists the
+# name among its globals, and stops on any other reference to a declaration
+# in another file: "Internal Error: Unable to follow symbol for "<name>"".
+# Measured on the real ts tree (#318): @types/node 26.6.2's `Buffer` (a `var`
+# inside a `global` block of `declare module "node:buffer"`) and
+# `AbortSignal` both stop it. The way through is to make each such name a
+# global in its own right: a generated script file declaring `declare var
+# <name>: any;`, added to the analysis only, never to the package's build. A
+# report prints each declaration's own source text, so the shim cannot
+# change what the report says; it only lets the analysis finish. The loop
+# below adds one name per stop, each name at most once, so it ends.
+_UNFOLLOWED = re.compile(r'Unable to follow symbol for "([A-Za-z_$][\w$]*)"')
+_MAX_SHIMS = 40
+
+
 def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str], label: str) -> list[str]:
     out_dir, tmp_dir = ctx.scratch("ts", label, "report"), ctx.scratch("ts", label, "temp")
-    # "DOM" is in `lib` for api-extractor's analysis only (the package's own
-    # build is ts/tsconfig.json's, untouched). Measured on the real tree
-    # (#318): without it api-extractor stops with "Internal Error: Unable to
-    # follow symbol for "AbortSignal"" (ts/src/fetch.ts takes one). Inferred
-    # cause: @types/node declares that global through a conditional type on
-    # globalThis, and lib.dom declares it plainly. The report names the type,
-    # not where its declaration was found.
-    config = {
-        "projectFolder": str(project),
-        "mainEntryPointFilePath": str(entry),
-        "compiler": {"overrideTsconfig": {
-            "compilerOptions": {"target": "ES2023", "lib": ["ES2023", "ESNext.Disposable", "DOM"],
-                                "module": "NodeNext", "moduleResolution": "NodeNext", "strict": True, "skipLibCheck": True,
-                                "types": types},
-            "files": [str(entry)],
-        }},
-        "apiReport": {"enabled": True, "reportFileName": "api", "reportFolder": str(out_dir),
-                      "reportTempFolder": str(tmp_dir), "includeForgottenExports": True},
-        "docModel": {"enabled": False},
-        "dtsRollup": {"enabled": False},
-        "tsdocMetadata": {"enabled": False},
-        "messages": {
-            "compilerMessageReporting": {"default": {"logLevel": "warning"}},
-            "extractorMessageReporting": {"default": {"logLevel": "none", "addToApiReportFile": False}},
-            "tsdocMessageReporting": {"default": {"logLevel": "none"}},
-        },
-    }
-    # Beside the project's package.json, which api-extractor finds from the
-    # config file's own folder (measured: from anywhere else it refuses with
-    # "Unable to find a package.json file for the project being analyzed").
-    # `project` is always a scratch copy — a fixture copy or a tree extracted
-    # by `git archive` — never this checkout.
+    # Every generated file sits beside the project's package.json: api-extractor
+    # finds that from the config file's own folder (measured: from anywhere
+    # else it refuses with "Unable to find a package.json file for the
+    # project being analyzed"). `project` is always a scratch copy — a fixture
+    # copy or a tree extracted by `git archive` — never this checkout.
     config_path = project / f"api-extractor.{label}.json"
-    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
-    run(["pnpm", "dlx", f"@microsoft/api-extractor@{API_EXTRACTOR_VERSION}", "run", "--local", "--config",
-         config_path], cwd=ctx.neutral)
+    shim_path = project / f"api-extractor.{label}.globals.d.ts"
+    shims: list[str] = []
+    while True:
+        shim_path.write_text("".join(f"declare var {name}: any;\n" for name in shims), encoding="utf-8")
+        config = {
+            "projectFolder": str(project),
+            "mainEntryPointFilePath": str(entry),
+            "compiler": {"overrideTsconfig": {
+                "compilerOptions": {"target": "ES2023", "lib": ["ES2023", "ESNext.Disposable"], "module": "NodeNext",
+                                    "moduleResolution": "NodeNext", "strict": True, "skipLibCheck": True,
+                                    "types": types},
+                "files": [str(entry), str(shim_path)],
+            }},
+            "apiReport": {"enabled": True, "reportFileName": "api", "reportFolder": str(out_dir),
+                          "reportTempFolder": str(tmp_dir), "includeForgottenExports": True},
+            "docModel": {"enabled": False},
+            "dtsRollup": {"enabled": False},
+            "tsdocMetadata": {"enabled": False},
+            "messages": {
+                "compilerMessageReporting": {"default": {"logLevel": "warning"}},
+                "extractorMessageReporting": {"default": {"logLevel": "none", "addToApiReportFile": False}},
+                "tsdocMessageReporting": {"default": {"logLevel": "none"}},
+            },
+        }
+        config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        cmd = ["pnpm", "dlx", f"@microsoft/api-extractor@{API_EXTRACTOR_VERSION}", "run", "--local", "--config",
+               str(config_path)]
+        try:
+            proc = subprocess.run(cmd, cwd=ctx.neutral, capture_output=True, text=True)
+        except FileNotFoundError as e:
+            raise ToolError(f"pnpm is not installed: {e}") from e
+        if proc.returncode == 0:
+            break
+        said = proc.stdout + proc.stderr
+        m = _UNFOLLOWED.search(said)
+        if not m or m.group(1) in shims or len(shims) >= _MAX_SHIMS:
+            tail = "\n".join(said.strip().splitlines()[-25:])
+            raise ToolError(f"api-extractor exited {proc.returncode} for {label}:\n{tail}")
+        shims.append(m.group(1))
+    if shims:
+        print(f"  api-extractor ({label}): declared as globals for the analysis only: {', '.join(shims)}")
     for folder in (tmp_dir, out_dir):
         report = folder / "api.api.md"
         if report.exists():
