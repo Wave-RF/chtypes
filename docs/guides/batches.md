@@ -9,6 +9,10 @@ Two more reasons `rows` is the unit rather than a loop over `row`:
 - **Row separation is format-specific.** A quoted CSV field can contain a newline. Splitting on `\n` yourself produces a different parse from the one the server performs.
 - **One batch is one clock instant.** Every volatile DEFAULT in a body resolves to the same value, by construction. A loop over `row` gives each record its own `now()`.
 
+## A plain CSV/TSV body can still have a header
+
+`CSV` and `TSV` bodies are read by ClickHouse's own vendored row readers — not just `CSVWithNames`/`TSVWithNames` — so a first line that spells the column names is detected and consumed as a header under `input_format_csv_detect_header` / `input_format_tsv_detect_header`, honored exactly as the setting is set for that call, following ClickHouse's own default when it is not. That shifts row counts and verdict indices by one, and a data row that happens to repeat the column names can be swallowed as a header the same way it would be on a real server. Set either setting to `0` to force positional reading of every line.
+
 ## What happens at the first bad row is a policy
 
 It is ClickHouse's own, declared like any other setting, and both modes are measured against real servers.

@@ -268,21 +268,30 @@ func parseDefaultKind(s string) DefaultKind {
 // across the boundary (the C ABI contract §Types and schemas), so they must never
 // be renumbered.
 //
-// CSV, TSV, Values and JSONCompactEachRow are POSITIONAL: the k-th field
-// addresses the k-th insertable column (MATERIALIZED/ALIAS/EPHEMERAL occupy
-// no position). JSONEachRow and Native address columns by NAME, and so do
-// CSVWithNames and TSVWithNames, through their header row. The RowBinary
-// family, Native and Buffers are binary and all-or-nothing per batch.
+// Values and JSONCompactEachRow are POSITIONAL: the k-th field addresses the
+// k-th insertable column (MATERIALIZED/ALIAS/EPHEMERAL occupy no position).
+// CSV and TSV are positional too, unless input_format_csv_detect_header /
+// input_format_tsv_detect_header say otherwise: the body is read by
+// ClickHouse's own vendored row readers, which detect and consume a first
+// line that spells the column names exactly as a real server does, honoring
+// whichever value the call compiles with. JSONEachRow and Native address
+// columns by NAME, and so do CSVWithNames and TSVWithNames, through their
+// header row. The RowBinary family, Native and Buffers are binary and
+// all-or-nothing per batch.
 type Format int
 
 const (
 	// JSONEachRow is one JSON object per row, name-addressed.
 	JSONEachRow Format = iota
-	// CSV is comma-separated, positional; a quoted field can contain newlines.
+	// CSV is comma-separated; positional unless input_format_csv_detect_header
+	// detects and consumes a header line, exactly as a real server does
+	// (ClickHouse's own vendored reader). A quoted field can contain
+	// newlines.
 	CSV
-	// TSV (TabSeparated) is positional; `\N` is null. The one text format
-	// whose result documents carry the wire round-trip detector (see
-	// Transform).
+	// TSV (TabSeparated) is positional unless input_format_tsv_detect_header
+	// detects and consumes a header line, exactly as a real server does;
+	// `\N` is null. The one text format whose result documents carry the
+	// wire round-trip detector (see Transform).
 	TSV
 	// Values is the INSERT ... VALUES literal syntax, positional.
 	Values
