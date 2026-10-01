@@ -838,7 +838,7 @@ export function selectArtifact(index: ReleaseIndex, platform: string, req: Versi
     );
   }
   // A line can carry more than one row: two patches, or the same patch built
-  // twice (a release keeps the two highest builds per version). Take the newest
+  // twice (a release lists every build it publishes). Take the newest
   // by version and then by BUILD — never by list order, which is what a
   // version-only comparison degrades to once two rows compare equal, because
   // Array.prototype.sort is stable.

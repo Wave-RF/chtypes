@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Changed
+
+- **Every build the release publishes stays fetchable.** 0.3.2 said an older build stays fetchable only until that line's next publish evicts it under retention. That no longer holds: since 2026-09-30 the release is append-only and lists every build it publishes, and selection takes the newest at this SDK's ABI revision (`docs/guides/fetch.md` §2). Builds dropped before that date are re-listed only where a release-signed `SHA256SUMS` proves them.
+
 ## [0.5.0] — 2026-10-01
 
 **Upgrade together if you share a lock: 0.4.x and earlier refuse a schema-2 lock, and this release writes one.** Schema-1 locks are still read and are converted the next time the lock is written. A server's exact ClickHouse patch now loads when it is installed, or published and autofetch is on; otherwise the newest installed patch of the same line loads, flagged as not exact and warned once per pair, and no request ever crosses to another line. Several patches of one line coexist: the patch a line request selects installs flat as before, and every other patch installs under `patches/<minor>/<version>/`, where an older flat patch is moved rather than deleted. `--frozen` now installs exactly the pinned file, even while a newer one is served. Same ABI revision as 0.4.0 (6), so the artifacts 0.4.0 loads are the ones this release loads. An older Python SDK's refusal reads `ValueError: chtypes: <lock> is not a chtypes lock file (schema 1)`, before any download.

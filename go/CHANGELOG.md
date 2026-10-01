@@ -13,6 +13,7 @@ The four bindings in this repository are released together and give one answer, 
 ### Changed
 
 - **`Timezone` is now a function, `Timezone()`, with a new `SetTimezone(tz)` to change it — not a package-level `var`.** The var was read with no synchronization against a concurrent write to it, a data race `go test -race` can now prove was real; both are safe for concurrent use. `chtypes.Timezone = "…"` no longer compiles — read the default with `chtypes.Timezone()` and change it with `chtypes.SetTimezone("…")`, or prefer `WithTimezone` on the registries that need a different zone (#300).
+- **Every build the release publishes stays fetchable.** 0.3.2 said an older build stays fetchable only until that line's next publish evicts it under retention. That no longer holds: since 2026-09-30 the release is append-only and lists every build it publishes, and selection takes the newest at this SDK's ABI revision (`docs/guides/fetch.md` §2). Builds dropped before that date are re-listed only where a release-signed `SHA256SUMS` proves them.
 
 ## [0.5.0] — 2026-10-01
 

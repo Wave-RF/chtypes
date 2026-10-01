@@ -252,6 +252,18 @@ jobs:
         run: scripts/check-suite.sh --selftest
       - name: "selftest — published-lines.sh picks the newest BUILD in a line, not list order, not a lexical sort"
         run: scripts/published-lines.sh --selftest
+      # scripts/lib/gha_annotate.py (chtypes#320) turns a provenance line
+      # into a GitHub Actions check-run ANNOTATION, readable anonymously by
+      # a machine that cannot read this job's log (measured 2026-09-30: the
+      # log 403s unauthenticated). scripts/lib/provenance.py calls it
+      # directly (covered by provenance.py's own selftest, above, inside
+      # check-suite.sh's); the `artifacts` job below also calls its CLI
+      # directly for the channel notice and the "unknown" fallbacks, which
+      # is why this selftest is wired here rather than only reached as a
+      # caller's dependency. Needs no network and no artifact: it drives its
+      # own escaping and gating logic against fabricated input only.
+      - name: "selftest — scripts/lib/gha_annotate.py's escaping, titles and the unknown-annotation shape"
+        run: python3 scripts/lib/gha_annotate.py --selftest
       # scripts/check-selftests-wired.py is the static check that catches the
       # NEXT unwired selftest before it repeats the three above: every script
       # under scripts/ that declares a --selftest mode must be invoked with it
@@ -736,6 +748,48 @@ jobs:
       - name: this run's artifact channel — the header's ABI revision decides it, never a stored variable
         id: channel
         run: scripts/abi-channel.sh --platform linux-amd64 | tee -a "$GITHUB_OUTPUT"
+      # chtypes#320. A machine automating the artifact producer's ABI-
+      # revision transition reads THIS job's check-run ANNOTATIONS
+      # anonymously, never its log (measured 2026-09-30: the log 403s
+      # unauthenticated) — so the channel step's own outputs, above, are
+      # worth nothing to it unless they are turned into one here. This is a
+      # SEPARATE step rather than appended to the channel step's own `run:`
+      # because that step's stdout is captured into $GITHUB_OUTPUT via
+      # `tee -a` — a stray `::notice` line piped into that file is not a
+      # `key=value` line GitHub Actions can read back. `if: always()`: a
+      # channel-step FAILURE (behind/disagreeing/missing, per its own
+      # header) must still produce an explicit "unknown" annotation
+      # (scripts/lib/gha_annotate.py) rather than leave the reader with
+      # nothing — read `outcome`, never `conclusion`, same reasoning as the
+      # verdict step's own comment below.
+      - name: provenance annotation — the channel this run tested
+        if: always()
+        env:
+          CHANNEL_OUTCOME: ${{ steps.channel.outcome }}
+          CHANNEL_TAG: ${{ steps.channel.outputs.tag }}
+          CHANNEL_MODE: ${{ steps.channel.outputs.mode }}
+          CHANNEL_REVISION: ${{ steps.channel.outputs.revision }}
+          CHANNEL_SERVED: ${{ steps.channel.outputs.served }}
+        run: |
+          if [ "$CHANNEL_OUTCOME" != "success" ]; then
+            python3 scripts/lib/gha_annotate.py unknown "the channel (scripts/abi-channel.sh did not complete)"
+            exit 0
+          fi
+          case "$CHANNEL_MODE" in
+            default)
+              line="channel: the served release (header ABI revision $CHANNEL_REVISION == served $CHANNEL_SERVED)"
+              ;;
+            candidate)
+              line="channel: $CHANNEL_TAG (header ABI revision $CHANNEL_REVISION ahead of served $CHANNEL_SERVED)"
+              ;;
+            explicit)
+              line="channel: explicit tag $CHANNEL_TAG (vars.CHTYPES_ARTIFACTS_TAG), header ABI revision $CHANNEL_REVISION"
+              ;;
+            *)
+              line="channel: unrecognized mode '$CHANNEL_MODE' (tag=$CHANNEL_TAG, revision=$CHANNEL_REVISION)"
+              ;;
+          esac
+          python3 scripts/lib/gha_annotate.py notice "$line"
       # THREE lines, not two. The newest -lts and the newest -stable come from
       # the live index; 24.8 is pinned on top because it is the OLDEST line the
       # release publishes and the per-line boundaries are only observable with
@@ -1075,6 +1129,15 @@ jobs:
               echo "**\`$FAILED_TOOL\` itself failed** (exit ${FAILED_EXIT_CODE:-non-zero}, not a source outage). No suite and no example tour was exercised." >> "$GITHUB_STEP_SUMMARY"
               echo "artifacts: $FAILED_TOOL failed (exit ${FAILED_EXIT_CODE:-non-zero}) — no suite or example tour was exercised" >&2
             fi
+            # chtypes#320: none of the four suites below ran at all, so none
+            # of them printed its own provenance (scripts/lib/provenance.py
+            # never got invoked) — a machine reading only this job's
+            # annotations must see that named explicitly, never silence,
+            # which it would otherwise read as indistinguishable from "ran
+            # clean, nothing to warn about".
+            for lang in go python ts rust; do
+              python3 scripts/lib/gha_annotate.py unknown "$lang suite (the fetch did not complete; see the step summary above)"
+            done
             exit 1
           fi
 
