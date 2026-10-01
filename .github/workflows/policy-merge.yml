@@ -23,7 +23,11 @@
 #      api-surface job that did not complete with success, counts as
 #      changed. The security carve-out (signature and checksum verification
 #      code, the trust policy, the release key) stays protected whatever the
-#      verdict says;
+#      verdict says. A touch of tests/fixtures/fetch/** (chtypes#344) is
+#      excused only when the head's tree there is byte-identical to the
+#      served sdk-fetch-fixtures.tar.gz, fetched by main's own
+#      scripts/fetch.sh and verified under the release key; any failure in
+#      that chain leaves it protected;
 #   6. ONLY when docs/support.md is part of the diff: it was MODIFIED, and
 #      scripts/support-matrix.sh, run against the live served index over a
 #      scratch copy SEEDED WITH THE HEAD'S OWN BYTES — never main's checked-
@@ -121,7 +125,11 @@
 # `.github/**` or `scripts/**`. Condition 5's binding-source half
 # (chtypes#285 §1) reads one more log the same way, the `api-surface` job's,
 # after that same refusal: one fixed-regex verdict line per binding, anchored
-# to the start of a log line and naming the judged head's own sha.
+# to the start of a log line and naming the judged head's own sha. Its
+# served-fixture half (chtypes#344) reads only the head's tree LISTING
+# (paths, modes and blob ids through the git trees API, never a file's
+# bytes) and runs main's own scripts/fetch.sh, with constant arguments, no
+# CHTYPES_* variable and its own default source, on the served release.
 # The `enqueue` job checks out one file of main and reads nothing of the head
 # at all. One step that executed head code here would hand every fork a write
 # token to this repository.
