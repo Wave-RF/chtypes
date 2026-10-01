@@ -48,10 +48,16 @@
 #
 # WHAT THIS DOES INSTEAD — most of the benefit, none of the grant. When the
 # regenerated file differs from what is committed, this workflow:
-#   1. writes a per-row summary (old build → new build, and any line that
-#      appeared or disappeared) to the run's job summary — the same
-#      information issue #100 wanted in a PR body, just read from the run
-#      instead of a review queue;
+#   1. writes a short notice (docs/support.md disagrees with what is
+#      committed) to the run's job summary — the same information issue #100
+#      wanted in a PR body, just read from the run instead of a review queue.
+#      This used to also render a per-row table of what moved, via a helper
+#      script, but docs/support.md stopped rendering its own per-line table
+#      on #281 and links the artifact producer's served support table
+#      instead, so a before/after diff of this file had nothing left to
+#      parse — the helper matched zero rows of every table it was run
+#      against and was deleted rather than repointed (chtypes#377). The PR
+#      diff of the regenerated file is the per-row view now;
 #   2. uploads the regenerated docs/support.md as a run artifact, so
 #      applying it is "download and commit", not "re-derive it by hand";
 #   3. FAILS the job. This is a scheduled workflow, not a required check —
@@ -112,7 +118,6 @@ jobs:
       - name: regenerate and compare against what is committed
         id: regen
         run: |
-          cp docs/support.md /tmp/support.md.before
           scripts/support-matrix.sh
           if git diff --quiet -- docs/support.md; then
             echo "support-matrix-refresh: docs/support.md is already current — nothing to do"
@@ -120,15 +125,13 @@ jobs:
           else
             echo "changed=1" >> "$GITHUB_OUTPUT"
           fi
-      - name: per-row summary of what moved
+      - name: summary of what changed
         if: steps.regen.outputs.changed == '1'
         run: |
           {
             echo "### docs/support.md is stale"
             echo
-            echo "\`scripts/support-matrix.sh\` disagrees with what is committed. Changed ClickHouse line(s):"
-            echo
-            scripts/support-matrix-row-diff.sh /tmp/support.md.before docs/support.md
+            echo "\`scripts/support-matrix.sh\` disagrees with what is committed."
             echo
             echo "The regenerated file is attached to this run as an artifact —"
             echo "download it and commit it in place of \`docs/support.md\`, or"
