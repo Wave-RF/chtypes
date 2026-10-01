@@ -706,7 +706,27 @@ jobs:
     name: "artifacts — published lines, linux-amd64, every suite runs the golden set"
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [abi, go, python, ts, rust]
+    # needs: [abi] only, not [abi, go, python, ts, rust] (which this carried
+    # from the hosted-runners-only split, ccd5f4c5, 2026-09-10). None of the
+    # five's outputs are read here — no needs.*.outputs, no
+    # actions/download-artifact from any of them — so the full five-way fan-
+    # in was fail-fast/runner-economy only: skip this job's own fetch and
+    # five suites (~150-240s) when a free check already proved the PR
+    # broken. #334 (2026-10-01, 6a9f4fb) added `go test -race` to
+    # scripts/check-standalone.sh, which the go job also runs standalone;
+    # that pushed the go job from ~15-40s to ~65-106s, making it this job's
+    # longest wait and delaying this job's own start by the same amount —
+    # on top of the (separately raced) go suite this job already runs again
+    # for itself below. abi stays: it is the cheapest of the five (~30s)
+    # and the one whose failure (header/binding ABI disagreement, a bad FFI
+    # declaration) makes a run here least likely to mean anything. Dropping
+    # go/python/ts/rust means a broken build/lint/vet/clippy in one of them
+    # no longer skips this job — a PR that fails, say, ruff now also burns
+    # a full artifacts run in parallel instead of having it skipped — but
+    # go, python, ts and rust each remain required checks in their own
+    # right (branch protection names them individually, unchanged here);
+    # this only moves when the expensive job starts, not what gates a merge.
+    needs: [abi]
     env:
       CHTYPES_REGISTRY: ${{ github.workspace }}/.artifacts
       # The channel this job resolves — host and release tag — is an INPUT,
