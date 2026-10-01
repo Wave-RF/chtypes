@@ -6,6 +6,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-01
+
 ### Added
 
 - **`WithTimezone` registry option** — the server timezone a `Registry`'s libraries are `chs_init`'d with, overriding the process-wide default for just that registry: parity with Python's `Registry(timezone=…)`, TypeScript's `RegistryOptions.timezone` and Rust's `RegistryOptions::timezone`. A path already `chs_init`'d under a different timezone — by another registry, `WithTimezone`, or the process-wide default — is refused loudly instead of silently reused, matching the refusal Python, TypeScript and Rust already give (closes #300).

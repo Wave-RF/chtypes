@@ -6,6 +6,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-01
+
 ### Added
 
 - **`Schema::rows_export_with_options_and_filter`**, a non-breaking sibling of `Schema::rows_export_with` that takes a `RowOptions` in place of a bare settings slice, so the revision-5 INSERT column list (`RowOptions::columns`) composes with the attached filter on the same call — exactly as `Schema::rows_export_with_options` already takes it for the column-list-only path (closes #304). The C ABI's `chs_rows` already carries `columns_json` and the attached filter as two independent trailing parameters on one call; `Schema::rows_export_with` alone hardcoded `columns: None`, where Python's and TypeScript's `rows(..., columns=, row_filter=)` already let a caller combine the two.
