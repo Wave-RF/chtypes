@@ -13,6 +13,16 @@ Two more reasons `rows` is the unit rather than a loop over `row`:
 
 `CSV` and `TSV` bodies are read by ClickHouse's own vendored row readers — not just `CSVWithNames`/`TSVWithNames` — so a first line that spells the column names is detected and consumed as a header under `input_format_csv_detect_header` / `input_format_tsv_detect_header`, honored exactly as the setting is set for that call, following ClickHouse's own default when it is not. That shifts row counts and verdict indices by one, and a data row that happens to repeat the column names can be swallowed as a header the same way it would be on a real server. Set either setting to `0` to force positional reading of every line.
 
+## Framing: BOM, whitespace and line ends
+
+These are decided before a single column is parsed, independently of any bad-row policy. Measured by a downstream consumer on go/v0.5.2, darwin-arm64, against `26.8.15.10-lts`, build `1790845279`, and confirmed against the stock `clickhouse-server:26.8.15.10` server image — the server behaves identically, so none of this is a divergence:
+
+- **`JSONEachRow` skips a leading UTF-8 BOM** (`EF BB BF`) and every ASCII whitespace byte — space, tab, `\n`, `\r`, and also `\f` (form feed) and `\v` (vertical tab) — before a value or an array. A BOM followed by `[{…},{…},{…}]` reads as three records, not a malformed first one.
+- **Plain `CSV`/`TSV` skip a leading BOM only when the first column is a type whose text form can contain only valid UTF-8** — `UUID`, `DateTime` and the numeric types. A `String` first column keeps the BOM as data instead: a header line arrives with the raw `EF BB BF` bytes still stuck to the front of the first field, so it no longer reads as plain `id`, and the header-detection setting above will not recognize it as a header. `CSVWithNames`/`TSVWithNames` skip a leading BOM unconditionally, regardless of the first column's type (from the server's reader source, `RowInputFormatWithNamesAndTypes::readPrefix`, not measured).
+- **`\n\r` is ONE line end, not two.** A caller counting lines by counting `\r` or `\n` bytes independently of the reader overcounts by one per line that uses this ending.
+
+**A batch exposes no records-seen count, byte offsets or detected-header information today.** `rows` and `rows_read` describe records the reader parsed, not the bytes or lines it consumed getting there, so none of the three facts above is visible in a `BatchResult` — track the input independently, before the call, if you need to reconcile them. Exposing framing is a candidate for a future ABI revision, not something promised here.
+
 ## What happens at the first bad row is a policy
 
 It is ClickHouse's own, declared like any other setting, and both modes are measured against real servers.
@@ -102,6 +112,29 @@ So one `rows` call answers, per input record and in input order: accepted with i
 ### The wire format decides what one bad record can cost
 
 Under `allow_errors`, NDJSON and a multi-line JSON array resynchronize per record, so a malformed record costs only itself, as in the example above. A **single-line compact JSON array** has no per-record newline to resynchronize on, so one malformed record inside it loses the **entire** batch. This is server-faithful — it is how ClickHouse's own reader behaves, because the line is the unit it can resynchronise on — so the wire format is an operational choice worth making deliberately whenever `allow_errors` is in force.
+
+### A malformed `UUID` swallows the records behind it
+
+Resync under `allow_errors` is byte-matched to the server, and the server's own text `UUID` reader has a quirk this library reproduces exactly: it reads a fixed 36-byte window, and error recovery resumes after that window rather than after the bytes the bad value actually occupied — so recovery can land mid-record and silently swallow whatever follows.
+
+Measured by a downstream consumer on go/v0.5.2, darwin-arm64, against `26.8.15.10-lts`, build `1790845279`, and confirmed against the stock `clickhouse-server:26.8.15.10` server image — both match, so this is not a divergence:
+
+- **JSONEachRow**, one record per line, schema `page String, id UUID DEFAULT …`, `input_format_allow_errors_ratio=1`:
+
+  ```text
+  {"page":"/a","id":"x"}
+  {"page":"/b"}
+  {"page":"/c"}
+  ```
+
+  The batch answers **one** row — record 0, `skipped` with code 376 `Cannot parse UUID from String` — and nothing else. Records `/b` and `/c` are never parsed and never appear in `rows`: not `accepted`, not `skipped`, just absent.
+- **A longer six-record NDJSON body, first record malformed, answers 2–3 rows — the server itself stores 2.**
+- **CSV**, schema `id UUID, page String, n UInt8`: a bad first row (`zzz,/a,1`) followed by two valid rows loses `/b` but still answers `/c`.
+- **The server** stores the identical subset under the identical setting, and fails outright with code 376 without it.
+- **Control — these do NOT swallow a neighboring record:** `IPv4`, `IPv6`, `Date`, `Date32`, `DateTime`, `DateTime64`, `Decimal`, `Int128`, `UInt256`, `Bool`, `Enum`, `FixedString`.
+- **Cause, inferred:** the text `UUID` reader's fixed 36-byte window, not the bytes it actually consumed, is what error recovery resumes from — and how many later records that window swallows depends on how many of their bytes fall inside it, so a run of short records loses more of them than a run of long ones. The three-record, CSV and six-record counts above are consistent with that budget, not with anything specific to the wire format.
+
+A caller can't tell any of this happened from the per-record answers alone — see [Framing: BOM, whitespace and line ends](#framing-bom-whitespace-and-line-ends) for what a batch does and doesn't expose about the input bytes. If a schema takes untrusted `UUID` input under `allow_errors`, verify the record count independently rather than trusting `rows_read`.
 
 ### CHECK constraints are batch-level, not per-row
 

@@ -26,6 +26,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Registry, RegistryError } from '../src/index.js';
+import { REAL_ARTIFACT_TIMEOUT_MS } from './real-artifact-timeout.js';
 
 interface FixtureDoc {
   abi_revision: number;
@@ -139,7 +140,7 @@ describe.skipIf(!HAVE_FIXTURES)('abi revision fixture', () => {
           `this binding speaks ${doc.abi_revision}): ${message}`,
       ).toBe(true);
     }
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 
   it('matching revision loads', () => {
     const doc = DOC!;
@@ -155,5 +156,5 @@ describe.skipIf(!HAVE_FIXTURES)('abi revision fixture', () => {
     expect(lib.minor).toBe(doc.clickhouse_minor);
     expect(lib.version).toBe(doc.clickhouse_version);
     registry.close();
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 });

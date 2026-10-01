@@ -49,6 +49,7 @@ import {
   Registry,
   resolveRegistryDir,
 } from '../src/index.js';
+import { REAL_ARTIFACT_TIMEOUT_MS } from './real-artifact-timeout.js';
 
 const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
@@ -157,7 +158,7 @@ describe.skipIf(!HAVE_REGISTRY)('quoting, per loaded line', () => {
         console.warn(`[chtypes] line ${line} did not open and is not measured here: ${err}`);
       }
     }
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 
   /** (the always-quoted spelling, the if-needed answer) for one name. The
    * first is this build's own quoted form — that is what `quoteIdentifier` IS

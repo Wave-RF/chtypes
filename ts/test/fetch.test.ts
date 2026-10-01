@@ -74,6 +74,7 @@ import {
   verifyInstalled,
 } from '../src/index.js';
 import { fixtureAbiRevision } from './fixture-revision.js';
+import { REAL_ARTIFACT_TIMEOUT_MS } from './real-artifact-timeout.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC_FIXTURES = path.resolve(HERE, '..', '..', 'tests', 'fixtures', 'fetch');
@@ -1208,7 +1209,7 @@ describe('the registry: the search path, the missing-artifact error and autofetc
     } finally {
       real.close();
     }
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 
   it.skipIf(!HAVE_REGISTRY)('open(): a missing line rejects with the §7 error unless autofetch is on, which fetches once and then loads', async () => {
     const release = makeRelease({ artifacts: [{ minor: '19.1', version: '19.1.16.79' }] });
@@ -1254,7 +1255,7 @@ describe('the registry: the search path, the missing-artifact error and autofetc
     } finally {
       await server.close();
     }
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 });
 
 // ----------------------------------------------------------------- CLI

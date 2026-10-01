@@ -149,5 +149,5 @@ The two failure modes there are deliberately different from each other:
 ## Next
 
 - [`discovery.md`](discovery.md) — where a correct profile actually comes from.
-- [`batches.md`](batches.md) — `input_format_allow_errors_*`, the settings with the sharpest consequences.
+- [`batches.md`](batches.md) — `input_format_allow_errors_*`, the settings with the sharpest consequences, including [how a malformed `UUID` can swallow the records behind it](batches.md#a-malformed-uuid-swallows-the-records-behind-it) and [input framing rules](batches.md#framing-bom-whitespace-and-line-ends) (BOM, `\f`/`\v`, `\n\r`).
 - [`transformations.md`](transformations.md) — the clock settings in the context of substituted DEFAULTs.
