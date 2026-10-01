@@ -10,12 +10,12 @@ artifact half skips LOUDLY, by name, without a revision-6 registry.
 from __future__ import annotations
 
 import threading
-import weakref
 
 import pytest
 
 import chtypes
 from chtypes._document import parse_batch_document, parse_row_document
+from chtypes.registry import _SchemaNative
 
 
 def test_partition_fields_parse() -> None:
@@ -76,10 +76,8 @@ def _schema_over(native: _StubNative) -> chtypes.Schema:
     """A Schema whose native layer is the stub: the real method, a fake C side."""
     schema = object.__new__(chtypes.Schema)
     schema._library = _StubLibrary(native)
-    schema._handle = 1
     schema._mu = threading.Lock()
-    schema._filters = weakref.WeakSet()
-    schema._blocks = weakref.WeakSet()
+    schema._native = _SchemaNative(native, schema._mu, 1)
     return schema
 
 

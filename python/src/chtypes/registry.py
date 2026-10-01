@@ -218,6 +218,125 @@ def _as_bytes(raw: object, what: str) -> bytes:
     )
 
 
+class _SchemaNative:
+    """The schema handle plus the children-before-schema free-order
+    coordination (#381), held separately from `Schema` itself so that
+    neither this object nor anything it references ever points back at a
+    `Schema`, `Filter` or `Block` — a `weakref.finalize` callback that
+    referenced the object it was registered for would keep that object
+    reachable forever, and the finalizer would never run. Mirrors
+    `ts/src/schema.ts`'s `SchemaNative`, the same
+    FinalizationRegistry-safe shape, adapted for `weakref.finalize`.
+
+    `filters` / `blocks` are STRONG sets of the children's own native
+    halves — never of `Filter` / `Block` themselves, and never of a
+    `Schema`. A `Filter` or `Block` native half removes itself the moment
+    it frees its own handle, whether that happens through an explicit
+    `close()` or through its OWN `weakref.finalize` callback, so whichever
+    one the collector happens to run first wins and the other is a safe
+    no-op. That is what lets `release()` free whatever is STILL registered
+    before the schema handle, without depending on the relative order two
+    independent finalizers run in when a child and its schema die together
+    in one `gc.collect()`: CPython clears weakrefs — and so fires
+    `weakref.finalize` callbacks — before it runs any `__del__`, across the
+    whole unreachable set in an unspecified order. The previous design
+    tracked children through a `weakref.WeakSet` of the `Filter`/`Block`
+    objects themselves and relied on `Schema.__del__` to walk it; that
+    WeakSet is itself implemented with per-member weakref callbacks, so a
+    cycle that took `Schema` and a child down together cleared the WeakSet
+    before `__del__` ever ran, and `__del__` saw it empty (measured: free
+    order `['schema', 'filter', 'block']`, every trial).
+    """
+
+    __slots__ = ("blocks", "filters", "handle", "mu", "native")
+
+    def __init__(self, native: NativeLibrary, mu: threading.Lock, handle: int) -> None:
+        self.native = native
+        self.mu = mu
+        self.handle: int | None = handle
+        self.filters: set[_FilterNative] = set()
+        self.blocks: set[_BlockNative] = set()
+
+    def release(self) -> None:
+        """Free every still-registered child handle, then the schema
+        handle, under the lock. Idempotent."""
+        with self.mu:
+            self._release_locked()
+
+    def _release_locked(self) -> None:
+        """Caller holds `mu`."""
+        for f in list(self.filters):
+            f._release_locked()
+        for b in list(self.blocks):
+            b._release_locked()
+        if self.handle is not None:
+            self.native.schema_free(self.handle)
+            self.handle = None
+
+
+class _FilterNative:
+    """`Filter`'s half of the same coordination; see `_SchemaNative`. Holds
+    the SCHEMA'S NATIVE HALF, never the `Schema` object — the same rule
+    `_SchemaNative` itself follows, for the same reason."""
+
+    __slots__ = ("handle", "native", "schema")
+
+    def __init__(self, native: NativeLibrary, schema: _SchemaNative, handle: int) -> None:
+        self.native = native
+        self.schema = schema
+        self.handle: int | None = handle
+        schema.filters.add(self)
+
+    def release(self) -> None:
+        with self.schema.mu:
+            self._release_locked()
+
+    def _release_locked(self) -> None:
+        """Caller holds `schema.mu`."""
+        if self.handle is not None:
+            self.native.filter_free(self.handle)
+            self.handle = None
+        self.schema.filters.discard(self)
+
+
+class _BlockNative:
+    """`Block`'s half of the same coordination; see `_SchemaNative`."""
+
+    __slots__ = ("handle", "native", "schema")
+
+    def __init__(self, native: NativeLibrary, schema: _SchemaNative, handle: int) -> None:
+        self.native = native
+        self.schema = schema
+        self.handle: int | None = handle
+        schema.blocks.add(self)
+
+    def release(self) -> None:
+        with self.schema.mu:
+            self._release_locked()
+
+    def _release_locked(self) -> None:
+        """Caller holds `schema.mu`."""
+        if self.handle is not None:
+            self.native.block_free(self.handle)
+            self.handle = None
+        self.schema.blocks.discard(self)
+
+
+def _quiet_release(native: _SchemaNative | _FilterNative | _BlockNative) -> None:
+    """The `weakref.finalize` callback for a Schema/Filter/Block's native
+    half: a safety net, not the contract, so a `chs_*_free` call that raises
+    here — unlike from an explicit `close()`, which must still propagate —
+    is swallowed exactly as the former `__del__` backstop's own
+    `try/except Exception: pass` did. Without this, an exception escaping a
+    GC-triggered finalizer does not crash anything (Python already treats it
+    as "ignored"), but it does print as unraisable-exception noise, which the
+    old backstop never did."""
+    try:
+        native.release()
+    except Exception:
+        pass
+
+
 class Schema:
     """A column list compiled inside one library's ClickHouse.
 
@@ -230,27 +349,16 @@ class Schema:
 
     __slots__ = (
         "__weakref__",
-        "_blocks",
-        "_filters",
-        "_handle",
+        "_finalizer",
         "_library",
         "_mu",
+        "_native",
         "columns",
         "ddl",
     )
 
     def __init__(self, library: Library, handle: int, ddl: str) -> None:
         self._library = library
-        self._handle: int | None = handle
-        # Every open Filter compiled from this handle, so close() can free
-        # them FIRST — the C layer does not refcount, and freeing the schema
-        # under a live filter is use-after-free (the C ABI contract §Filters,
-        # handle lifetime). A WeakSet: an abandoned Filter's own __del__
-        # frees its handle, and this set never keeps one alive.
-        self._filters: weakref.WeakSet[Filter] = weakref.WeakSet()
-        # Every open Block parsed from this handle — the same non-owning
-        # rule, the same free-before-schema order (the C ABI contract §Blocks).
-        self._blocks: weakref.WeakSet[Block] = weakref.WeakSet()
         # ONE handle is single-threaded, by the ABI: "a single chs_schema *
         # MUST NOT be used from two threads at once" (the C ABI contract
         # §Thread-safety). The library's readers-writer lock deliberately lets
@@ -260,6 +368,14 @@ class Schema:
         # Always the OUTER lock of the two: a writer never takes a schema lock,
         # so there is no order to invert.
         self._mu = threading.Lock()
+        # The schema's own half of the children-before-schema free-order
+        # coordination; see `_SchemaNative`. A `Filter`/`Block` compiled from
+        # this handle registers its own native half here (never itself), so
+        # close()/release() can free every still-open child FIRST — the C
+        # layer does not refcount, and freeing the schema under a live filter
+        # or block is use-after-free (the C ABI contract §Filters/§Blocks,
+        # handle lifetime).
+        self._native = _SchemaNative(library._native, self._mu, handle)
         self.ddl = ddl
         self.columns: tuple[Column, ...] = tuple(
             Column(
@@ -271,6 +387,15 @@ class Schema:
             )
             for name, type_, kind, expr, literal in library._native.schema_columns(handle)
         )
+        # The safety net, not the contract — see `close`. A `weakref.finalize`
+        # callback, never `__del__`: it is bound ONLY to `self._native`, so it
+        # holds no reference to this Schema (nor to any Filter/Block), and it
+        # still runs — in the right relative order, because `_SchemaNative`'s
+        # own children-first loop does not depend on which finalizer the
+        # collector happens to run first — when this Schema and an open child
+        # die together in a reference cycle, where a `__del__`-based safety
+        # net would see its bookkeeping already cleared (#381).
+        self._finalizer = weakref.finalize(self, _quiet_release, self._native)
 
     # -- lifetime ----------------------------------------------------------
 
@@ -282,17 +407,11 @@ class Schema:
         requires, enforced here so no caller ordering can get it backwards.
 
         Also run by the context manager and (as a safety net, not the
-        contract) by `__del__`. Every later call on this schema raises
+        contract) by a `weakref.finalize` callback at garbage collection —
+        see `_SchemaNative`. Every later call on this schema raises
         `ChtypesError`. Close every `Schema` before closing its `Library`.
         """
-        with self._mu:
-            for f in list(self._filters):
-                f._close_locked()
-            for b in list(self._blocks):
-                b._close_locked()
-            if self._handle is not None:
-                self._library._native.schema_free(self._handle)
-                self._handle = None
+        self._native.release()
 
     def __enter__(self) -> Schema:
         return self
@@ -305,16 +424,10 @@ class Schema:
     ) -> None:
         self.close()
 
-    def __del__(self) -> None:  # pragma: no cover - a safety net, not the contract
-        try:
-            self.close()
-        except Exception:
-            pass
-
     def _live(self) -> int:
-        if self._handle is None:
+        if self._native.handle is None:
             raise ChtypesError("chtypes: schema is closed")
-        return self._handle
+        return self._native.handle
 
     # -- table-level declarations -------------------------------------------
 
@@ -647,7 +760,6 @@ class Schema:
             if fhandle is None:
                 raise _error_for(code, err or f"filter expression refused: {expr!r}")
             f = Filter(self, fhandle, expr)
-            self._filters.add(f)
         return f
 
     def parse_block(
@@ -697,7 +809,6 @@ class Schema:
             if bhandle is None:
                 raise _error_for(code, err or "block parse refused")
             b = Block(self, bhandle)
-            self._blocks.add(b)
         return b
 
 
@@ -714,7 +825,10 @@ class Filter:
     ways: the Filter holds its `Schema` (a strong reference, so the schema
     cannot be garbage-collected first), and `Schema.close()` closes every
     open Filter before freeing the schema. `close()` is idempotent; the
-    context manager and (as a safety net) `__del__` run it too.
+    context manager and (as a safety net) a `weakref.finalize` callback run
+    it too — see `_FilterNative` for why a `weakref.finalize` callback,
+    never `__del__`, is the safety net that holds even when a Filter and its
+    Schema die together in a reference cycle (#381).
 
     THREADS — the header's rule, verbatim: "one chs_filter must not be used
     from two threads at once, and a chs_filter call is ALSO a use of its
@@ -727,13 +841,24 @@ class Filter:
     until then it is a shadow/replay surface (the C ABI contract §Filters).
     """
 
-    __slots__ = ("__weakref__", "_handle", "_schema", "expr")
+    __slots__ = ("__weakref__", "_finalizer", "_native", "_schema", "expr")
 
     def __init__(self, schema: Schema, handle: int, expr: str) -> None:
         self._schema = schema
-        self._handle: int | None = handle
+        # The native half references the SCHEMA'S OWN native half, never
+        # `schema` itself, and registers itself there so `schema`'s release
+        # can free this handle first if nobody got to it already (#381).
+        self._native = _FilterNative(schema._library._native, schema._native, handle)
         #: The expression text as compiled, for logging and cache keys.
         self.expr = expr
+        # The safety net, not the contract — see `close`. A `weakref.finalize`
+        # callback bound only to `self._native`, so it holds no reference to
+        # this Filter (or to its Schema).
+        self._finalizer = weakref.finalize(self, _quiet_release, self._native)
+
+    @property
+    def _handle(self) -> int | None:
+        return self._native.handle
 
     def rows(self, fmt: Format, body: bytes, settings: Settings | None = None) -> FilterResult:
         """Evaluate the filter over a body of rows (`chs_filter_rows`) — the
@@ -796,14 +921,7 @@ class Filter:
         """Free the underlying `chs_filter` handle. Idempotent — including
         after `Schema.close()` already freed it (filters first, then the
         schema: the C-required order)."""
-        with self._schema._mu:
-            self._close_locked()
-
-    def _close_locked(self) -> None:
-        """Free the filter handle. Caller holds the schema's lock."""
-        if self._handle is not None:
-            self._schema._library._native.filter_free(self._handle)
-            self._handle = None
+        self._native.release()
 
     def __enter__(self) -> Filter:
         return self
@@ -815,12 +933,6 @@ class Filter:
         tb: TracebackType | None,
     ) -> None:
         self.close()
-
-    def __del__(self) -> None:  # pragma: no cover - a safety net, not the contract
-        try:
-            self.close()
-        except Exception:
-            pass
 
 
 class Block:
@@ -838,31 +950,34 @@ class Block:
     holds its `Schema` (a strong reference), and `Schema.close()` closes
     every open Block first. A block may be evaluated by MANY filters,
     sequentially; evaluation does not consume or mutate it. `close()` is
-    idempotent; the context manager and (as a safety net) `__del__` run it.
+    idempotent; the context manager and (as a safety net) a `weakref.finalize`
+    callback run it too — see `_BlockNative` for why a `weakref.finalize`
+    callback, never `__del__`, is the safety net that holds even when a Block
+    and its Schema die together in a reference cycle (#381).
 
     THREADS: one block must not be used from two threads at once, and an
     eval is a use of BOTH handles — `Filter.eval` takes the schema's own
     per-handle lock, which also serializes K filters over one block.
     """
 
-    __slots__ = ("__weakref__", "_handle", "_schema")
+    __slots__ = ("__weakref__", "_finalizer", "_native", "_schema")
 
     def __init__(self, schema: Schema, handle: int) -> None:
         self._schema = schema
-        self._handle: int | None = handle
+        # The native half references the SCHEMA'S OWN native half, never
+        # `schema` itself; see `Filter.__init__`.
+        self._native = _BlockNative(schema._library._native, schema._native, handle)
+        self._finalizer = weakref.finalize(self, _quiet_release, self._native)
+
+    @property
+    def _handle(self) -> int | None:
+        return self._native.handle
 
     def close(self) -> None:
         """Free the underlying `chs_block` handle. Idempotent — including
         after `Schema.close()` already freed it (blocks first, then the
         schema: the C-required order)."""
-        with self._schema._mu:
-            self._close_locked()
-
-    def _close_locked(self) -> None:
-        """Free the block handle. Caller holds the schema's lock."""
-        if self._handle is not None:
-            self._schema._library._native.block_free(self._handle)
-            self._handle = None
+        self._native.release()
 
     def __enter__(self) -> Block:
         return self
@@ -874,12 +989,6 @@ class Block:
         tb: TracebackType | None,
     ) -> None:
         self.close()
-
-    def __del__(self) -> None:  # pragma: no cover - a safety net, not the contract
-        try:
-            self.close()
-        except Exception:
-            pass
 
 
 class Library:
