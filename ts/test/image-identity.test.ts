@@ -33,6 +33,7 @@ import {
   looksLikeRegistry,
   resolveRegistryDir,
 } from '../src/index.js';
+import { REAL_ARTIFACT_TIMEOUT_MS } from './real-artifact-timeout.js';
 
 const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
@@ -139,7 +140,7 @@ describe.skipIf(!HAVE_REGISTRY)('one image per FILE over a real artifact', () =>
     expect(epoch(openUnder(origRoot, src.line, 'UTC'))).toBe(before);
     expect(epoch(openUnder(linkRoot, src.line, 'UTC'))).toBe(before);
     console.log('image identity: ran the hardlink case');
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 
   it('keeps a replaced file at an open path as the open image', () => {
     // The loader matches an open path before it looks at the file, so a NEW
@@ -163,7 +164,7 @@ describe.skipIf(!HAVE_REGISTRY)('one image per FILE over a real artifact', () =>
     expect(epoch(first), "the refused open moved the live image's zone").toBe(before);
     expect(epoch(openUnder(root, src.line, 'UTC'))).toBe(before);
     console.log('image identity: ran the replaced-file case');
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 });
 
 describe('one image per FILE, without an artifact', () => {

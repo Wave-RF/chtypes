@@ -82,8 +82,8 @@
 # different one (`ci/resolve-version.py`, cited from scripts/fetch.sh) purely
 # because it was a different filename under the same directory. CI_INFRA_PATH
 # below replaces reliance on enumerating every filename with a shape match on
-# the directory itself, and does the same for `infra/` (the former
-# chtypes-infra repository, folded into the private repository's own tree on
+# the directory itself, and does the same for `infra/` (a former private
+# sibling repository, folded into the private repository's own tree on
 # 2026-09-10).
 set -euo pipefail
 
@@ -93,10 +93,18 @@ cd "$HERE"
 # ---------------------------------------------------------------------------
 # Literal needles — case-insensitive substrings. Each rule is paired by index
 # with what to write instead. `-Fin`: fixed string, case-insensitive, print
-# line numbers. `Chtypes-Core` and `CHTYPES-CORE` must be caught exactly like
-# `chtypes-core` — a leak does not stop being one for how it was capitalized.
+# line numbers. A capitalized or shouted spelling of one of these must be
+# caught exactly like the lowercase form below — a leak does not stop being
+# one for how it was capitalized.
+#
+# A private sibling repository's own GitHub name used to be listed here as a
+# literal. It no longer is: a second private sibling now exists, named
+# `chtypes-` plus a different word, and a literal spelling one repository's
+# name cannot catch a different one. SIBLING_REPO_PATTERN below replaces it
+# with a SHAPE instead — any `chtypes-` followed by a letter — see its own
+# comment, near the end of this needle section, for the allowlist that keeps
+# this repository's own legitimate `chtypes-*` tokens out of the findings.
 RULES=(
-  'chtypes-core'
   "core repository's C ABI specification"
   'lib/csrc/'
   'tests/arbiter/'
@@ -118,7 +126,6 @@ RULES=(
   'Wave-RF/software/chtypes/'
 )
 WHYS=(
-  'the private repository by name. A reader cannot open it; say what the thing IS, not where it lives.'
   'the exact prose pointer a 2026-09 sweep left behind 148 times. Write "the C ABI contract"; include/chtypes.h is the public authority for it.'
   "the private repository's C++ source tree. A reader cannot open it; say \"the C++ wrapper\", not its path."
   "one of the private repository's two scoring rigs. A reader cannot open it; say \"the arbiter\" (this repository already does, in docs/reference/bindings.md) — never its path."
@@ -172,7 +179,7 @@ LOCAL_PATH_PLACEHOLDERS='me,you,user,username,u,runner'
 LOCAL_PATH_WHY='a local absolute path — a developer machine home directory. It tells a public reader nothing useful and leaks a filesystem layout; use a relative path, $HOME or ~.'
 
 # The private repository's `ci/` and `infra/` top-level directories — its CI
-# step scripts, and (since 2026-09-10, when the former chtypes-infra
+# step scripts, and (since 2026-09-10, when a former private sibling
 # repository was folded into it) its infrastructure tree. `ci/steps/` used to
 # be one literal entry in RULES above; a citation of a DIFFERENT file under
 # the same top-level directory (`ci/resolve-version.py`, cited from
@@ -243,6 +250,38 @@ PRIVATE_ISSUE_REF_WHY="an issue number in the private repository. A reader canno
 # real one. A selftest that needs another number builds it at runtime, so
 # the literal never appears in this file.
 ISSUE_REF_PLACEHOLDERS='core#0,core#99999'
+
+# WIDENED AGAIN 2026-10-01 (lead ruling). A literal here can only ever name
+# ONE private sibling repository, and a second now exists beside the first —
+# same organization, same `chtypes-` prefix, a different word after the
+# hyphen. The literal that used to sit at the top of RULES above caught the
+# first sibling and nothing else; the fix is a SHAPE, not a second literal
+# that would only repeat the mistake the next time a sibling is added. Any
+# `chtypes-` followed by a LETTER is read as a private sibling's name — the
+# artifact producer's own published filenames start `chtypes-<digit>` (a
+# version number: `chtypes-26.3.37.3-lts-linux-amd64-b1790845279.tar.gz`), so
+# they fall outside the shape without needing an exemption.
+#
+# This repository has plenty of its own legitimate `chtypes-<letter>` text —
+# the `<!-- agent:chtypes-sdk -->` PR marker, the examples' own package name,
+# mktemp templates, CI cache-key and job-name prefixes, test-fixture and
+# scratch-directory prefixes in every binding's own test suite. A shape this
+# wide needs an allowlist to stay usable, the same idea as
+# LOCAL_PATH_PLACEHOLDERS letting `/home/runner/…` (GitHub's own account)
+# through without widening the hole for a real one. SIBLING_REPO_ALLOWLIST
+# below is not a guess: it is every distinct `chtypes-<letter>…` token this
+# repository's own tracked files actually contain, measured with
+# `command grep -rnoE 'chtypes-[A-Za-z][A-Za-z0-9_.-]*'` over everything this
+# script scans, each one a real public token with nothing private behind it.
+# A token that is NOT on this list is read as a leak, exactly as before.
+#
+# Neither private repository's name is spelled anywhere in this file,
+# including this comment — the selftest below builds both from separate
+# string parts at runtime for exactly that reason, so the thing this rule
+# detects never sits in the file that detects it.
+SIBLING_REPO_PATTERN='(?<![A-Za-z0-9_])chtypes-([A-Za-z][A-Za-z0-9_.-]*)'
+SIBLING_REPO_WHY="a private sibling repository's name (any chtypes-<letter> token reads as one; the artifact producer's own filenames start chtypes-<digit> and never match). A reader cannot open it; say \"the artifact producer\" or \"the private sibling repositories\", never its name."
+SIBLING_REPO_ALLOWLIST='abi-channel-selftest.xxxxxx,abi-channel.xxxxxx,abi-fixture,abi-fixtures-xxxxxx,api-surface,api-surface-no-such-tool,api-surface-tools-,artifacts,artifacts-linux-amd64-,asset.tar.gz,bad-,candidate-poll-decide-selftest.xxxxxx,check-divergences,count,digest-,divergences-linux-amd64-,fetch-xxxxxx,fixture-rev-,go-fetch,image-,index-diff-selftest.xxxxxx,index-diff-snapshot.xxxxxx,index-diff.xxxxxx,lazy-,lines-selftest.xxxxxx,lines.xxxxxx,no-artifacts.xxxxxx,patch-,playground,python,readback-decide-selftest.xxxxxx,reg-,release-,rs-,rs-284-,rs-bytes-unconditional-,rs-empty-,rs-fetch-,rs-lazy-,rs-lock-,rs-lock-bad-schema-,rs-lock-bad1-,rs-lock-cand-,rs-lock-line-key-,rs-lock-lines-,rs-lock-schema1-,rs-missing-lib-,rs-open-refuse-autofetch-,rs-open-refuse-dir-,rs-open-refuse-fetch-,rs-sha-,rs-src-,rs-unpack-,rs-verify-,rs-verify-real-,sdk,selftest,standalone-census-selftest-,standalone.xxxxxx,support-matrix-selftest.xxxxxx,support.xxxxxx,test-libc,verify,verify.xxxxxx'
 
 tracked() {
   git ls-files -z \
@@ -333,6 +372,40 @@ if bad:
     printf 'lint-public: %s occurrence(s) of %s\n' "$n" 'a local absolute path' >&2
     printf '  %s\n' "$LOCAL_PATH_WHY" >&2
     printf '%s\n' "$path_hits" | sed 's/^/    /' >&2
+    rc=1
+  fi
+
+  # Any chtypes-<letter> token not on the measured allowlist — see
+  # SIBLING_REPO_PATTERN's comment above.
+  local sibling_hits
+  sibling_hits="$( (cd "$root" && tracked | tr '\n' '\0' | LINT_SIBLING_PATTERN="$SIBLING_REPO_PATTERN" LINT_SIBLING_ALLOW="$SIBLING_REPO_ALLOWLIST" python3 -c '
+import os, re, sys
+
+pat = re.compile(os.environ["LINT_SIBLING_PATTERN"], re.IGNORECASE)
+allow = {a for a in os.environ["LINT_SIBLING_ALLOW"].split(",") if a}
+bad = []
+for f in sys.stdin.read().split("\0"):
+    if not f:
+        continue
+    try:
+        text = open(f, encoding="utf-8", errors="ignore").read()
+    except OSError:
+        continue
+    for i, line in enumerate(text.splitlines(), 1):
+        for m in pat.finditer(line):
+            if m.group(1).lower() in allow:
+                continue
+            bad.append((f, i, line.strip()))
+for f, i, line in bad:
+    print(f"{f}:{i}:{line}")
+if bad:
+    sys.exit(1)
+' 2>/dev/null) || true)"
+  if [ -n "$sibling_hits" ]; then
+    n=$(printf '%s\n' "$sibling_hits" | wc -l | tr -d ' ')
+    printf 'lint-public: %s occurrence(s) of %s\n' "$n" 'a private sibling repository name' >&2
+    printf '  %s\n' "$SIBLING_REPO_WHY" >&2
+    printf '%s\n' "$sibling_hits" | sed 's/^/    /' >&2
     rc=1
   fi
 
@@ -451,7 +524,8 @@ if [ "${1:-}" = "--print-rules" ]; then
   printf 'REGEX\t%s\n' "$DIST_SCRIPT_PATTERN"
   printf 'REGEX\t%s\n' "$KEY_LOCATION_PATTERN"
   printf 'REGEX\t%s\n' "$PRIVATE_ISSUE_REF_PATTERN"
-  printf 'LOCALPATH\t%s\t%s\n' "$LOCAL_PATH_PATTERN" "$LOCAL_PATH_PLACEHOLDERS"
+  printf 'LOCALPATH\t%s\t%s\t%s\n' "$LOCAL_PATH_PATTERN" "$LOCAL_PATH_PLACEHOLDERS" 'a local absolute path'
+  printf 'LOCALPATH\t%s\t%s\t%s\n' "$SIBLING_REPO_PATTERN" "$SIBLING_REPO_ALLOWLIST" 'a private sibling repository name'
   exit 0
 fi
 
@@ -466,12 +540,18 @@ if [ "${1:-}" = "--selftest" ]; then
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   git init -q "$tmp"
 
-  # --- original two rules, unchanged spelling ---
-  printf 'see chtypes-core/tests/conformance for the rest\n' > "$tmp/planted-1.md"
+  # Both private repositories' names, built from separate string parts so
+  # neither is ever a contiguous literal in this file — see
+  # SIBLING_REPO_PATTERN's comment for why. Used below and again in the
+  # 2026-10-01 section further down.
+  sibling_core="chtypes""-""core"
+  sibling_core_case="Chtypes""-""Core"
+  sibling_infra="chtypes""-""infra"
+
+  # --- the remaining literal rule, unchanged spelling ---
   printf "per the core repository's C ABI specification, the sign decides\n" > "$tmp/planted-2.md"
 
-  # --- case-insensitivity: same two rules, different capitalization ---
-  printf 'vendored from Chtypes-Core a year ago\n' > "$tmp/planted-case-1.md"
+  # --- case-insensitivity: same rule, different capitalization ---
   printf "matches the CORE REPOSITORY'S C ABI SPECIFICATION exactly\n" > "$tmp/planted-case-2.md"
 
   # --- new literal path needles: the private repository's top-level shapes ---
@@ -556,8 +636,8 @@ if [ "${1:-}" = "--selftest" ]; then
   # --- issue #224: CI_INFRA_PATH_PATTERN replaces the old single-file
   #     `ci/steps/` literal with a shape match, so a DIFFERENT file under the
   #     same top-level directory (the actual leak, scripts/fetch.sh citing
-  #     ci/resolve-version.py) is caught too, and so is `infra/` (the former
-  #     chtypes-infra repository, folded into the private one on 2026-09-10).
+  #     ci/resolve-version.py) is caught too, and so is `infra/` (a former
+  #     private sibling repository, folded into the private one on 2026-09-10).
   #     Negative control: "ci/" is common enough as a bare substring that a
   #     word simply ending in it must NOT fire — see the header note above. ---
   printf 'the resolver lives at ci/resolve-version.py in that tree\n' > "$tmp/planted-ci-path.md"
@@ -569,7 +649,7 @@ if [ "${1:-}" = "--selftest" ]; then
   #     went unseen. A leak planted THERE must now be caught like anywhere
   #     else — this is the actual regression test for the exemption's removal. ---
   mkdir -p "$tmp/tests/fixtures/fetch"
-  printf 'generated by chtypes-core, never edit by hand\n' > "$tmp/tests/fixtures/fetch/README.md"
+  printf 'generated by %s, never edit by hand\n' "$sibling_core" > "$tmp/tests/fixtures/fetch/README.md"
 
   # --- 2026-09-26: a shell script directly under the private dist/, and a
   #     sentence naming where a key's private half is kept. The store name
@@ -599,6 +679,32 @@ if [ "${1:-}" = "--selftest" ]; then
   printf 'see chtypes#55 and Wave-RF/chtypes#123 for the history\n' > "$tmp/legal-issueref-own.md"
   printf 'the encore#1 build and a hardcore#2 fan\n' > "$tmp/legal-issueref-word.md"
 
+  # --- 2026-10-01 (lead ruling): SIBLING_REPO_PATTERN replaces the old
+  #     single-repository literal with a shape, because a second private
+  #     sibling now exists. Must-fail: the first sibling's name mid-path, the
+  #     second sibling's name, an org-qualified form, and an unrelated
+  #     made-up sibling name mid-sentence. Must-pass: a producer artifact
+  #     filename (chtypes-<digit>…, never chtypes-<letter>…), the bare word
+  #     "chtypes", and every token this repository's own tree legitimately
+  #     uses — driven straight from SIBLING_REPO_ALLOWLIST itself, so this
+  #     proof can never drift from the list the rule actually checks
+  #     against. ---
+  printf 'see %s/tests/conformance for the rest\n' "$sibling_core" > "$tmp/planted-sibling-core.md"
+  printf 'vendored from %s a year ago\n' "$sibling_core_case" > "$tmp/planted-sibling-core-case.md"
+  printf 'reported against %s a week after it was created\n' "$sibling_infra" > "$tmp/planted-sibling-infra.md"
+  printf 'org form: Wave-RF/%s showed up in a paste\n' "$sibling_infra" > "$tmp/planted-sibling-infra-orgform.md"
+  printf 'see chtypes-x for details\n' > "$tmp/planted-sibling-madeup.md"
+
+  printf 'the producer serves chtypes-26.3.37.3-lts-linux-amd64-b1790845279.tar.gz for that line\n' > "$tmp/legal-sibling-artifact-filename.md"
+  printf 'chtypes alone, no suffix, is just this repository\n' > "$tmp/legal-sibling-bare-word.md"
+
+  sibling_allow_n=0
+  IFS=',' read -r -a sibling_allow_tokens <<< "$SIBLING_REPO_ALLOWLIST"
+  for sibling_tok in "${sibling_allow_tokens[@]}"; do
+    sibling_allow_n=$((sibling_allow_n + 1))
+    printf 'a legitimate public token: chtypes-%s\n' "$sibling_tok" > "$tmp/legal-sibling-allow-$sibling_allow_n.md"
+  done
+
   # --- legal: describing the split in words, an in-repo path, and the
   #     generic placeholder path spellings this repository already ships ---
   printf 'the other half is the core repository, under its own license\n' > "$tmp/legal.md"
@@ -620,7 +726,7 @@ if [ "${1:-}" = "--selftest" ]; then
   printf '%s\n' "$out" | grep -q "scripts/lint-public.sh:2:core#$selfnum" || { echo "SELFTEST FAILED: the self-scan did not fire on a non-placeholder issue reference" >&2; exit 1; }
   printf '%s\n' "$out" | grep -q 'scripts/lint-public.sh:1:core#0' && { echo "SELFTEST FAILED: the self-scan flagged an allowed placeholder" >&2; exit 1; }
 
-  for want in planted-1.md planted-2.md planted-case-1.md planted-case-2.md \
+  for want in planted-2.md planted-case-2.md \
               planted-csrc.md planted-arbiter.md planted-acceptance.md \
               planted-proposals.md planted-note.md planted-path.md \
               planted-home-eric.md \
@@ -633,7 +739,10 @@ if [ "${1:-}" = "--selftest" ]; then
               tests/fixtures/fetch/README.md \
               planted-dist-publish.md planted-dist-fetch.md \
               planted-keyloc-wrapped.md planted-keyloc-release.md \
-              planted-issueref.md planted-issueref-2.md; do
+              planted-issueref.md planted-issueref-2.md \
+              planted-sibling-core.md planted-sibling-core-case.md \
+              planted-sibling-infra.md planted-sibling-infra-orgform.md \
+              planted-sibling-madeup.md; do
     printf '%s\n' "$out" | grep -q "$want" || { echo "SELFTEST FAILED: rule did not fire on $want" >&2; exit 1; }
   done
 
@@ -648,8 +757,14 @@ if [ "${1:-}" = "--selftest" ]; then
                legal-docsmeasurements-word.md legal-housing-word.md legal-golangci-word.md \
                legal-own-dist.md legal-keyloc-offline.md legal-keyloc-notin.md \
                legal-keyloc-inthe.md legal-keyloc-lowercase.md \
-               legal-issueref-own.md legal-issueref-word.md; do
+               legal-issueref-own.md legal-issueref-word.md \
+               legal-sibling-artifact-filename.md legal-sibling-bare-word.md; do
     printf '%s\n' "$out" | grep -q "$clean" && { echo "SELFTEST FAILED: a legal prose mention was flagged ($clean)" >&2; exit 1; }
+  done
+
+  for ((i = 1; i <= sibling_allow_n; i++)); do
+    printf '%s\n' "$out" | grep -q "legal-sibling-allow-$i.md" \
+      && { echo "SELFTEST FAILED: an allowlisted sibling token was flagged (legal-sibling-allow-$i.md: ${sibling_allow_tokens[$((i - 1))]})" >&2; exit 1; }
   done
 
   echo "lint-public: selftest ok — every rule fires (case-insensitively), legitimate prose stays legal"

@@ -6,11 +6,13 @@
 # mapping a consumer needs after a load-time refusal.
 #
 #   scripts/support-matrix.sh [--check] [--out <file>]
-#   scripts/support-matrix.sh --selftest   prove the Support column (below)
-#                                           renders each of its states
-#                                           against fixtures this script
-#                                           builds fresh every run, never
-#                                           today's real tags or served index
+#   scripts/support-matrix.sh --selftest   prove the ClickHouse-lines link
+#                                           (below) renders the same way
+#                                           whatever the served index's
+#                                           `supported_lines` key says, against
+#                                           fixtures this script builds fresh
+#                                           every run, never today's real tags
+#                                           or served index
 #
 # Nothing in that block is typed by hand, because every number in it rots on a
 # schedule somebody else controls. The language minimums are read from the four
@@ -44,23 +46,17 @@
 # fetch-fixtures-check, and for the same reason: stale prose is a smaller
 # failure than a pipeline that stalls on someone else's commit.
 #
-# The "ClickHouse lines" table's Support column (chtypes#281) reads the live
-# index.json's top-level `supported_lines` array — never a list hand-typed
-# here, and never re-derived from upstream's own EOL schedule. A line named
-# in it renders `supported`; a line this release serves but that is NOT
-# named in it renders `served, unsupported` — the SDK keeps resolving and
-# loading it exactly as before, only the label changes. A MISSING
-# `supported_lines` key means the state is unknown, never "unsupported": an
-# index published before the producer started writing the field must not
-# relabel every line it serves, so the Support column itself is omitted from
-# the table entirely in that case, rather than printed with a per-row
-# "unknown" that would read as a real, per-line answer this script does not
-# have. An EMPTY `supported_lines` array ([]) is a real, different state
-# from the key being absent — the producer answered "none", not "not yet
-# said" — so it renders exactly like a line left out of a non-empty list:
-# every served line is `served, unsupported`. See [Served, unsupported
-# ClickHouse lines](../docs/support.md#served-unsupported-clickhouse-lines)
-# for what the label means for a consumer.
+# The "ClickHouse lines" section (chtypes#281) no longer renders its own
+# Line/Platforms/Support table: the artifact producer's served
+# `support-matrix.md` renders that same table from the same `index.json`, in
+# the same publish step that writes it, and names that index's own sha256 —
+# so it can never drift from what this page would otherwise restate, and this
+# script instead links to it. That link is unconditional and does not read
+# `supported_lines` at all: whether that key is present, absent or empty on
+# the served index changes what the LINKED page's Support column says, never
+# whether this page links to it. See [Served, unsupported ClickHouse
+# lines](../docs/support.md#served-unsupported-clickhouse-lines) for what the
+# states on that linked page mean for a consumer.
 #
 # Environment: CHTYPES_ARTIFACTS_URL (default https://artifacts.wavehouse.dev).
 # Needs full git history and tags (fetch-depth: 0 / an unshallow, un-single-
@@ -81,8 +77,8 @@ if [ "${1:-}" = "--selftest" ]; then
   # never today's real tree's tags, which this script's own --check refuses
   # to run against mid-release (see the module comment), so a selftest tied
   # to them would depend on exactly when it runs. The fixture under test
-  # here is the Support column alone; everything else is held constant
-  # across all four cases below.
+  # here is the ClickHouse-lines link alone; everything else is held
+  # constant across both cases below.
   repo="$tmp/repo"
   mkdir -p "$repo/scripts" "$repo/go" "$repo/python" "$repo/ts" "$repo/rust" "$repo/include" "$repo/docs"
   cp "$SELF" "$repo/scripts/support-matrix.sh"
@@ -123,54 +119,56 @@ if [ "${1:-}" = "--selftest" ]; then
     cat "$repo/docs/support.md"
   }
 
-  # Case 1+2: key present, one line listed, one not.
+  # The served support-matrix.md this fixture's link should point at — never
+  # fetched by this script (it only links to it), so its content does not
+  # matter, only that the URL this script derives matches where it would
+  # really be served, alongside index.json under the same /artifacts/ prefix.
+  link="file://$tmp/served/artifacts/support-matrix.md"
+
+  assert_link_and_no_table() {
+    local out="$1" label="$2"
+    echo "$out" | grep -qF "$link" \
+      || die "SELFTEST FAILED ($label): the ClickHouse-lines section must link the served support table ($link):
+$out"
+    echo "$out" | grep -qi 'sha256' \
+      || die "SELFTEST FAILED ($label): the link's sentence must say the served table names the index's sha256:
+$out"
+    if echo "$out" | grep -qF '| Line | Platforms | Support |'; then
+      die "SELFTEST FAILED ($label): this page must not render its own Support column any more — that is the served table's job now:
+$out"
+    fi
+    if echo "$out" | grep -qE '^\| `(24\.8|26\.3)` \| all( \| |$)'; then
+      die "SELFTEST FAILED ($label): this page must not render its own per-line Line/Platforms row any more:
+$out"
+    fi
+  }
+
+  clickhouse_section() { printf '%s\n' "$1" | sed -n '/^## ClickHouse lines$/,/^## /p'; }
+
+  # Case 1: supported_lines present and names one of the two served lines.
+  # The link must appear and no per-line table must render — this page no
+  # longer renders a Support state at all, so which lines are IN the array
+  # must not change this page's output.
   printf '{"schema": 1, %s, "supported_lines": ["26.3"]}\n' "$rows" > "$served/index.json"
-  out="$(regen)"
-  echo "$out" | grep -qF '| `26.3` | all | supported |' \
-    || die "SELFTEST FAILED: a line IN supported_lines must render \`supported\`:
-$out"
-  echo "$out" | grep -qF '| `24.8` | all | served, unsupported |' \
-    || die "SELFTEST FAILED: a served line NOT in supported_lines must render \`served, unsupported\`:
-$out"
+  out_present="$(regen)"
+  assert_link_and_no_table "$out_present" "supported_lines present"
 
-  # Case 3: key absent entirely — "unknown", never "unsupported". No line
-  # may be labeled at all, so the Support column itself must not appear:
-  # a per-row "unknown" cell would read as a real, per-line answer this
-  # script does not have when the producer has not shipped the field yet.
+  # Case 2: supported_lines absent entirely. Before chtypes#281's trim this
+  # was a different rendered shape (no Support column, but still a per-line
+  # table); now it must render exactly the same link as case 1 — the
+  # decision of what a missing key means is entirely the served table's to
+  # make, and this page must not re-derive it or vary its own output on it.
   printf '{"schema": 1, %s}\n' "$rows" > "$served/index.json"
-  out="$(regen)"
-  if echo "$out" | grep -qF '| Line | Platforms | Support |'; then
-    die "SELFTEST FAILED: an absent supported_lines must NOT add a Support column:
-$out"
-  fi
-  echo "$out" | grep -qF '| `26.3` | all |' \
-    || die "SELFTEST FAILED: an absent supported_lines must still render the plain two-column row:
-$out"
-  # Narrower than a blanket search for "unsupported": the prose above the
-  # table cross-references this very state by name (chtypes#281) on every
-  # run, present key or not, so the real assertion is that no ROW carries a
-  # third, labeled column — already proven by the two checks above, and
-  # reconfirmed here against the specific labeled-row shape a regression
-  # would actually produce.
-  if echo "$out" | grep -qE '^\| `(24\.8|26\.3)` \| all \| '; then
-    die "SELFTEST FAILED: an absent supported_lines must label no row at all:
-$out"
-  fi
+  out_absent="$(regen)"
+  assert_link_and_no_table "$out_absent" "supported_lines absent"
+  [ "$(clickhouse_section "$out_absent")" = "$(clickhouse_section "$out_present")" ] \
+    || die "SELFTEST FAILED: the ClickHouse-lines section must render identically whether supported_lines is present or absent — the served table's link does not vary with it:
+--- present ---
+$(clickhouse_section "$out_present")
+--- absent ---
+$(clickhouse_section "$out_absent")"
 
-  # Case 4: key present but empty — every served line IS served,
-  # unsupported, a real and different state from "absent" (case 3): the
-  # producer answered "none", not "I haven't said yet", and that answer is
-  # distinguished from absence by the Support column appearing at all.
-  printf '{"schema": 1, %s, "supported_lines": []}\n' "$rows" > "$served/index.json"
-  out="$(regen)"
-  echo "$out" | grep -qF '| `26.3` | all | served, unsupported |' \
-    || die "SELFTEST FAILED: an empty supported_lines must mark every line served, unsupported:
-$out"
-  echo "$out" | grep -qF '| `24.8` | all | served, unsupported |' \
-    || die "SELFTEST FAILED: an empty supported_lines must mark every line served, unsupported:
-$out"
-
-  echo "support-matrix: selftest ok — supported_lines listed/not-listed render supported/served-unsupported, an absent key adds no Support column and labels nothing unsupported, and an empty list marks every served line served, unsupported"
+  echo "support-matrix: selftest ok — the ClickHouse-lines section links the served support table and renders no Support column (or per-line table) of its own, whether supported_lines is present or absent on the served index"
   exit 0
 fi
 
@@ -181,7 +179,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --check)   CHECK=1 ;;
     --out)     [ $# -ge 2 ] || die "--out needs a value"; OUT="$2"; shift ;;
-    -h|--help) sed -n '2,68p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,64p' "$0"; exit 0 ;;
     *)         die "unknown argument: $1" ;;
   esac
   shift
@@ -191,18 +189,26 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH"
 command -v git >/dev/null 2>&1 || die "git is not on PATH"
 [ -f "$OUT" ] || die "$OUT does not exist — the generated block is written into an existing page"
 
-URL="${CHTYPES_ARTIFACTS_URL:-https://artifacts.wavehouse.dev}"
-URL="${URL%/}/artifacts/index.json"
+BASE_URL="${CHTYPES_ARTIFACTS_URL:-https://artifacts.wavehouse.dev}"
+BASE_URL="${BASE_URL%/}"
+URL="$BASE_URL/artifacts/index.json"
+# The artifact producer's served, generated support table (chtypes#281):
+# rendered from this same index.json in the same publish step, alongside it
+# under the same /artifacts/ prefix. This script never fetches it — only
+# links to it as the per-line source, so the ClickHouse-lines section below
+# does not restate index.json's per-line platform/support data a second time.
+SUPPORT_TABLE_URL="$BASE_URL/artifacts/support-matrix.md"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/chtypes-support.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 curl -fsSL --retry 3 --max-time 60 "$URL" -o "$WORK/index.json" \
   || die "CHTYPES_SOURCE_UNREACHABLE: could not fetch $URL"
 
-python3 - "$HERE" "$WORK/index.json" "$OUT" "$WORK/out.md" "$URL" <<'PY'
+python3 - "$HERE" "$WORK/index.json" "$OUT" "$WORK/out.md" "$URL" "$SUPPORT_TABLE_URL" <<'PY'
 import json, re, subprocess, sys, pathlib
 
-root, index_path, out_path, tmp_path, url = (pathlib.Path(sys.argv[1]), sys.argv[2],
-                                             pathlib.Path(sys.argv[3]), pathlib.Path(sys.argv[4]), sys.argv[5])
+root, index_path, out_path, tmp_path, url, support_table_url = (
+    pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3]),
+    pathlib.Path(sys.argv[4]), sys.argv[5], sys.argv[6])
 
 def read(rel):
     return (root / rel).read_text(encoding="utf-8")
@@ -327,38 +333,20 @@ w("Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Wi
 w("")
 w("## ClickHouse lines")
 w("")
-w("One artifact per ClickHouse line, each carrying that release's own C++. A line is published once it has passed the artifact producer's comparison against a real server and the release includes it. Separately, chtypes supports a ClickHouse line exactly as long as upstream does — see [Served, unsupported ClickHouse lines](#served-unsupported-clickhouse-lines) below for what a line reads once upstream's own support for it ends:")
+w("One artifact per ClickHouse line, each carrying that release's own C++. A line is published once it has passed the artifact producer's comparison against a real server and the release includes it. Separately, chtypes supports a ClickHouse line exactly as long as upstream does — see [Served, unsupported ClickHouse lines](#served-unsupported-clickhouse-lines) below for what a line reads once upstream's own support for it ends.")
 w("")
 
-# The Support column reads the served index's top-level `supported_lines`
-# array (chtypes#281) and never re-derives it. Three real states, not two:
-#   - the key is present and names the line: `supported`.
-#   - the key is present and does NOT name the line (including an empty
-#     array): `served, unsupported` — this release still resolves and
-#     loads it exactly as before, only the label changes.
-#   - the key is ABSENT from the served index entirely: unknown, never
-#     "unsupported" — an index published before the producer started
-#     writing the field must not relabel every line it serves. The column
-#     itself is omitted from the table in this case, rather than carrying a
-#     per-row "unknown" that would read as a real, per-line answer this
-#     script does not have.
-supported_lines_present = "supported_lines" in doc
-supported_lines = set(doc.get("supported_lines") or [])
-if supported_lines_present:
-    w("| Line | Platforms | Support |")
-    w("|---|---|---|")
-else:
-    w("| Line | Platforms |")
-    w("|---|---|")
-for minor in sorted(lines, key=order):
-    e = lines[minor]
-    have = [p for p in plat_order if p in e["platforms"]]
-    marks = "all" if len(have) == len(plat_order) else ", ".join("`%s`" % p for p in have)
-    if supported_lines_present:
-        state = "supported" if minor in supported_lines else "served, unsupported"
-        w("| `%s` | %s | %s |" % (minor, marks, state))
-    else:
-        w("| `%s` | %s |" % (minor, marks))
+# Per-line platform coverage and support state (chtypes#281) used to be a
+# Line/Platforms/Support table rendered here, re-reading the same
+# `supported_lines` array the artifact producer's own served
+# `support-matrix.md` already renders a table from — straight off this same
+# `index.json`, in the same publish step that writes it, and naming that
+# index's own sha256. Two generated copies of the same per-line facts can
+# only drift, so this page links the served one instead of rendering its
+# own; which lines are IN `supported_lines`, or whether the key is present
+# at all, changes what the LINKED page says, never whether this page links
+# to it — see --selftest, which proves the link is the same either way.
+w("Per-line platform coverage and which lines are currently supported are rendered by the artifact producer directly from `index.json`, in the same publish step that writes it and naming that index's own sha256 — so they can never drift from what this page would otherwise have to restate: the [served support table](%s)." % support_table_url)
 w("")
 w("The exact ClickHouse patch each line is built from is in its artifact's `manifest.json` and in the served `index.json` (`clickhouse_version`); it moves with every upstream patch release, so it is not repeated here.")
 w("Ask for a line, never a nearest match: `for(\"25.8\")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.")
