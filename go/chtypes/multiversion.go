@@ -317,6 +317,7 @@ import "C"
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -324,6 +325,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"unsafe"
 )
 
@@ -442,19 +444,96 @@ type Library struct {
 	errorCodes errorCodeCache
 }
 
-// initMu guards dlopen + chs_init and the loadedLibs/loadedTimezones tables
-// below. Held only at load time, never on a call path, so it costs a startup
-// mutex and nothing else.
+// imageID is an artifact image's FILE identity: the (device, inode) pair a
+// stat of its path reports, following symlinks. It is what every table below
+// is keyed on, because it is what the dynamic loader deduplicates on: a
+// symlink, a second spelling and a HARDLINK of one file all stat to one
+// imageID, and dlopen hands each of them the one image already mapped
+// (issue #355). A resolved path cannot see a hardlink — it is a different
+// path to the same inode — and keying on one let a hardlink re-run chs_init
+// on a live image and move its zone.
+type imageID struct{ dev, ino uint64 }
+
+// initMu guards dlopen + chs_init and the loadedLibs/loadedTimezones/
+// loadedPaths tables below. Held only at load time, never on a call path, so
+// it costs a startup mutex and nothing else.
 var (
 	initMu     sync.Mutex
-	loadedLibs = map[string]*Library{}
+	loadedLibs = map[imageID]*Library{}
 	// loadedTimezones records the timezone each loaded image's chs_init call
-	// actually used, keyed exactly like loadedLibs (the resolved artifact
-	// path). It is what lets a later open of the SAME image with a
+	// actually used, keyed exactly like loadedLibs (the image's file
+	// identity). It is what lets a later open of the SAME image with a
 	// DIFFERENT timezone be refused loudly rather than silently reusing the
-	// first one's zone (WithTimezone, issue #300).
-	loadedTimezones = map[string]string{}
+	// first one's zone (WithTimezone, issue #300) — or, worse, re-running
+	// chs_init and moving the first one's zone (issue #355).
+	loadedTimezones = map[imageID]string{}
+	// loadedPaths maps every spelling an image has been opened under — as
+	// given and resolved — to its imageID. The loader matches an
+	// already-loaded image by the path it was opened under before it looks
+	// at the file at all, so once a path is open, a NEW file renamed over it
+	// (a fresh inode) is still answered with the OLD image. Keying on the
+	// inode alone would call that file new and re-run chs_init on the live
+	// image — measured: every call through the first opener then answered in
+	// the second zone. A spelling already open is therefore the image it was
+	// opened as, whatever is at that path now.
+	loadedPaths = map[string]imageID{}
 )
+
+// ErrInitConflict is the refusal to open an artifact image this process has
+// already initialized under a different timezone: one image gets one
+// chs_init, so the second zone can be neither honored nor silently ignored.
+// errors.Is(err, ErrInitConflict) is true for that refusal however it is
+// wrapped (Load and For add the artifact directory); the message names the
+// path, the live zone and the refused one. A hardlink or symlink to a loaded
+// artifact is the same image and is refused the same way.
+var ErrInitConflict = errors.New("chtypes: artifact image already initialized with a different timezone")
+
+// initConflictError is the ErrInitConflict refusal with its particulars.
+type initConflictError struct{ path, have, want string }
+
+func (e *initConflictError) Error() string {
+	return fmt.Sprintf("chtypes: %s is already initialized with timezone %q; cannot use %q "+
+		"(one image per file — a hardlink or symlink to a loaded artifact is the same image, "+
+		"and chs_init runs at most once per process)", e.path, e.have, e.want)
+}
+
+func (e *initConflictError) Is(target error) bool { return target == ErrInitConflict }
+
+// identifyImage answers which image dlopen will hand back for path: the one
+// already opened under this spelling (as given, or resolved) if there is one
+// (loadedPaths), else the file a stat of path names, following symlinks. It
+// also returns those spellings, for openLibrary to record. Caller holds
+// initMu.
+//
+// A path that cannot be stat'ed or resolved is refused with the path named —
+// never keyed on its spelling instead, because a spelling cannot tell a
+// hardlink of a loaded image from a new file, and guessing "new" is exactly
+// the silent re-initialization this guard exists to stop.
+func identifyImage(path string) (imageID, []string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return imageID{}, nil, fmt.Errorf("chtypes: cannot identify the artifact image at %s: %w", path, err)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return imageID{}, nil, fmt.Errorf("chtypes: cannot identify the artifact image at %s: "+
+			"stat reported no device and inode", path)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		resolved, err = filepath.Abs(resolved)
+	}
+	if err != nil {
+		return imageID{}, nil, fmt.Errorf("chtypes: cannot identify the artifact image at %s: %w", path, err)
+	}
+	spellings := []string{path, resolved}
+	for _, s := range spellings {
+		if id, ok := loadedPaths[s]; ok {
+			return id, spellings, nil
+		}
+	}
+	return imageID{dev: uint64(st.Dev), ino: st.Ino}, spellings, nil // Dev is int32 on darwin, uint64 on linux
+}
 
 // Registry holds one Library per ClickHouse version and dispatches by
 // version — the multi-version product path. Safe for concurrent use.
@@ -775,12 +854,13 @@ func verifyArtifactLibrary(path string) error {
 }
 
 // openLibrary dlopens and chs_inits one artifact AT MOST ONCE PER PROCESS,
-// keyed on its path, and hands back the same *Library to every later caller —
-// PROVIDED later caller asks for the same timezone the first one used; a
-// different one is refused loudly rather than silently honored (see below).
+// keyed on its file identity (imageID), and hands back the same *Library to
+// every later caller — PROVIDED later caller asks for the same timezone the
+// first one used; a different one is refused loudly, as ErrInitConflict,
+// rather than silently honored (see below).
 //
 // The deduplication is a correctness requirement, not a cache. dlopen is
-// refcounted per path: opening one artifact twice yields ONE address space and
+// refcounted per file: opening one artifact twice yields ONE address space and
 // therefore ONE set of the wrapper's globals. chs_init is not idempotent
 // bookkeeping over those — it rebuilds the refuse-list (clear, then repopulate)
 // and re-sets DateLUT's default timezone, unconditionally, and the row and
@@ -803,24 +883,23 @@ func openLibrary(path, timezone string) (*Library, error) {
 	initMu.Lock()
 	defer initMu.Unlock()
 
-	// Key on the RESOLVED path, not the spelling: dlopen refcounts one image
-	// per file, so `./x/libchtypes.so` and its absolute spelling — or a
-	// legacy-name symlink like the libchtypes.so -> libchtypes_s1.so bridge
-	// the core repository's build staging creates — are the SAME image, and missing
-	// the map here would run chs_init a second time on live state (the "AT
-	// MOST ONCE PER PROCESS" invariant below).
-	key := path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		if abs, err := filepath.Abs(resolved); err == nil {
-			key = abs
-		}
+	// Key on the FILE, not the spelling: dlopen maps one image per file, so
+	// `./x/libchtypes.so` and its absolute spelling, a legacy-name symlink
+	// like the libchtypes.so -> libchtypes_s1.so bridge the artifact
+	// producer's build staging creates, and a hardlink anywhere on the same
+	// filesystem are all the SAME image. Missing the map for any of them
+	// would run chs_init a second time on live state (the "AT MOST ONCE PER
+	// PROCESS" invariant below) and move the first opener's zone under it.
+	key, spellings, err := identifyImage(path)
+	if err != nil {
+		return nil, err
 	}
 	if lib, ok := loadedLibs[key]; ok {
 		if have := loadedTimezones[key]; have != timezone {
-			return nil, fmt.Errorf(
-				"chtypes: %s is already initialized with timezone %q; cannot use %q "+
-					"(one image per path — chs_init runs at most once per process)",
-				path, have, timezone)
+			return nil, &initConflictError{path: path, have: have, want: timezone}
+		}
+		for _, s := range spellings {
+			loadedPaths[s] = key
 		}
 		return lib, nil
 	}
@@ -874,6 +953,9 @@ func openLibrary(path, timezone string) (*Library, error) {
 
 	loadedLibs[key] = lib
 	loadedTimezones[key] = timezone
+	for _, s := range spellings {
+		loadedPaths[s] = key
+	}
 	return lib, nil
 }
 

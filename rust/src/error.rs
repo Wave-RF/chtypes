@@ -96,8 +96,10 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    /// A library file named by a manifest could not be read (its size, or its
-    /// bytes while verifying) — the file, not the registry directory.
+    /// A library file could not be read (its size or its identity, or its
+    /// bytes while verifying) — the file, not the registry directory. A path
+    /// whose identity cannot be read is refused before anything is
+    /// `dlopen`ed, because which loaded image it names cannot be known.
     #[error("chtypes: cannot read library {path}: {source}")]
     LibraryRead {
         /// The library file that could not be read.
@@ -181,14 +183,16 @@ pub enum Error {
     },
 
     /// The same artifact image is already initialized with a different
-    /// configuration. `dlopen` refcounts one image per path, so `chs_init`
-    /// runs at most once per artifact — a second load asking for a different
+    /// configuration. `dlopen` maps one image per FILE, so `chs_init` runs at
+    /// most once per artifact image — a second load asking for a different
     /// timezone cannot be honored and must not silently re-timezone the
-    /// first load's live libraries.
+    /// first load's live libraries. A hardlink or symlink to a loaded
+    /// artifact is that same image and is refused the same way.
     #[error(
         "chtypes: {path} is already initialized with timezone {have:?}; \
-         cannot re-initialize with {want:?} (one image per path — \
-         chs_init runs at most once)"
+         cannot re-initialize with {want:?} (one image per file — a hardlink \
+         or symlink to a loaded artifact is the same image, and chs_init runs \
+         at most once)"
     )]
     InitConflict {
         /// The artifact whose image is already initialized.

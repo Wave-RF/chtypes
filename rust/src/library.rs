@@ -89,8 +89,9 @@ pub struct Column {
 /// seeded settings list while the row path reads it by reference
 /// (the C ABI contract §Thread-safety: it "MUST be serialized against all other
 /// calls"), and two `Mutex<()>` values, one per `Library`, would have excluded
-/// nothing at all. The mutex is therefore interned on the canonicalized path,
-/// exactly as `INITED` is; `docs/reference/bindings.md` §Concurrency states the rule.
+/// nothing at all. The mutex is therefore interned on the image's identity
+/// (`image_identity`), exactly as `INITED` is, from the same single stat;
+/// `docs/reference/bindings.md` §Concurrency states the rule.
 pub struct Library {
     version: String,
     minor: String,
@@ -104,19 +105,74 @@ pub struct Library {
     error_codes: OnceLock<ErrorCodeTable>,
 }
 
-/// The one mutex per loaded image, keyed the way `chs_init` is keyed. See
-/// `Library`'s docs for why this cannot live in the `Library` value.
-fn image_lock(path: &Path) -> Arc<Mutex<()>> {
-    static LOCKS: Mutex<Option<std::collections::BTreeMap<PathBuf, Arc<Mutex<()>>>>> =
-        Mutex::new(None);
-    let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let mut guard = match LOCKS.lock() {
+/// An artifact image's identity: the `(st_dev, st_ino)` of its FILE.
+///
+/// Every per-image table in this crate — `INITED` and the mutex below — is
+/// keyed on it, because it is what `dlopen` itself deduplicates on: a
+/// symlink, a second spelling and a HARDLINK of one file all stat to one key,
+/// and `dlopen` hands each the one image already mapped. A canonicalized path
+/// cannot see a hardlink (a different path to the same inode), and keying on
+/// one let a hardlink re-run `chs_init` on a live image and move its zone
+/// (issue #355).
+type ImageKey = (u64, u64);
+
+/// Every spelling an image has been opened under — as given and
+/// canonicalized — to its key. The loader matches an already-loaded image by
+/// the path it was opened under before it looks at the file at all, so once
+/// a path is open, a NEW file renamed over it (a fresh inode) is still
+/// answered with the OLD image; keying on the inode alone would call that
+/// file new and re-run `chs_init` on the live image. A spelling already open
+/// is therefore the image it was opened as, whatever is at that path now.
+static IMAGE_PATHS: Mutex<std::collections::BTreeMap<PathBuf, ImageKey>> =
+    Mutex::new(std::collections::BTreeMap::new());
+
+fn lock_ignoring_poison<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    match m.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+/// The key of the image `dlopen` will hand back for `path`, and the spellings
+/// to record once it is open: the image already opened under this spelling,
+/// as given or canonicalized, if there is one; else the file a stat of
+/// `path` names, following symlinks.
+///
+/// A path that cannot be stat'ed or canonicalized is [`Error::LibraryRead`],
+/// naming it — never keyed on its spelling instead, because a spelling cannot
+/// tell a hardlink of a loaded image from a new file, and guessing "new" is
+/// exactly the silent re-initialization the key exists to stop.
+fn image_identity(path: &Path) -> Result<(ImageKey, [PathBuf; 2])> {
+    use std::os::unix::fs::MetadataExt;
+    let unreadable = |source| Error::LibraryRead {
+        path: path.to_path_buf(),
+        source,
     };
+    let meta = std::fs::metadata(path).map_err(unreadable)?;
+    let resolved = std::fs::canonicalize(path).map_err(unreadable)?;
+    let spellings = [path.to_path_buf(), resolved];
+    let known = lock_ignoring_poison(&IMAGE_PATHS);
+    if let Some(key) = spellings.iter().find_map(|s| known.get(s)) {
+        return Ok((*key, spellings));
+    }
+    Ok(((meta.dev(), meta.ino()), spellings))
+}
+
+/// Record that `key`'s image is open under each of `spellings`.
+fn remember_image_paths(key: ImageKey, spellings: [PathBuf; 2]) {
+    let mut known = lock_ignoring_poison(&IMAGE_PATHS);
+    for s in spellings {
+        known.insert(s, key);
+    }
+}
+
+/// The one mutex per loaded image, keyed the way `chs_init` is keyed. See
+/// `Library`'s docs for why this cannot live in the `Library` value.
+fn image_lock(key: ImageKey) -> Arc<Mutex<()>> {
+    static LOCKS: Mutex<std::collections::BTreeMap<ImageKey, Arc<Mutex<()>>>> =
+        Mutex::new(std::collections::BTreeMap::new());
     Arc::clone(
-        guard
-            .get_or_insert_with(std::collections::BTreeMap::new)
+        lock_ignoring_poison(&LOCKS)
             .entry(key)
             .or_insert_with(|| Arc::new(Mutex::new(()))),
     )
@@ -143,12 +199,19 @@ impl Library {
     /// * [`Error::Init`] — `chs_init` returned nonzero; the one reachable
     ///   cause is an unknown `timezone`, and the message names it.
     /// * [`Error::InitConflict`] — this artifact image is already initialized
-    ///   with a different timezone (one image per path; `chs_init` runs at
+    ///   with a different timezone (one image per FILE — a hardlink or
+    ///   symlink to a loaded artifact is the same image; `chs_init` runs at
     ///   most once).
+    /// * [`Error::LibraryRead`] — `path` cannot be stat'ed, so which image it
+    ///   names cannot be known; refused before anything is `dlopen`ed.
     /// * [`Error::Nul`] — `timezone` or the refuse-list contained an interior
     ///   NUL byte.
     pub fn load(path: impl AsRef<Path>, timezone: &str) -> Result<Library> {
         let path = path.as_ref();
+        // Which image this is, from ONE stat, before anything is dlopen'd:
+        // the same key interns the mutex and guards `chs_init` below, so a
+        // hardlink can never get two mutexes over one image.
+        let (key, spellings) = image_identity(path)?;
         let api = Api::open(path)?;
 
         // The library names itself; nothing is inferred from the path.
@@ -164,17 +227,16 @@ impl Library {
         .unwrap_or_default();
 
         // chs_init AT MOST ONCE per artifact image. dlopen refcounts one image
-        // per path, so a second Library over the same artifact shares its C
-        // globals — re-running chs_init would rebuild the refuse-list and
-        // re-set DateLUT under the first instance's live readers (the same
-        // hazard the Go binding's loadedLibs map and the TS binding's
-        // realpath-keyed map guard). Keyed on the canonicalized path so two
-        // spellings of one file cannot slip past; a second init with a
-        // DIFFERENT timezone is refused rather than silently re-timezoning
-        // the survivor's live libraries.
-        static INITED: std::sync::Mutex<std::collections::BTreeMap<std::path::PathBuf, String>> =
-            std::sync::Mutex::new(std::collections::BTreeMap::new());
-        let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        // per file, so a second Library over the same artifact — or over a
+        // hardlink or symlink to it — shares its C globals: re-running
+        // chs_init would rebuild the refuse-list and re-set DateLUT under the
+        // first instance's live readers (the same hazard the Go binding's
+        // loadedLibs map and the TS binding's `loaded` map guard). Keyed on
+        // the image's identity so no spelling or link of one file can slip
+        // past; a second init with a DIFFERENT timezone is refused rather
+        // than silently re-timezoning the survivor's live libraries.
+        static INITED: Mutex<std::collections::BTreeMap<ImageKey, String>> =
+            Mutex::new(std::collections::BTreeMap::new());
         {
             let mut inited = INITED.lock().expect("init registry poisoned");
             match inited.get(&key) {
@@ -200,6 +262,7 @@ impl Library {
                     inited.insert(key, timezone.to_string());
                 }
             }
+            remember_image_paths(key, spellings);
         }
 
         Ok(Library {
@@ -207,7 +270,7 @@ impl Library {
             minor,
             path: path.to_path_buf(),
             api,
-            lock: image_lock(path),
+            lock: image_lock(key),
             error_codes: OnceLock::new(),
         })
     }

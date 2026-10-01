@@ -32,13 +32,20 @@ from ._manifest import (
     read_manifest,
     verify_library,
 )
-from ._native import ABI_REVISION, NativeLibrary
+from ._native import (
+    ABI_REVISION,
+    ImageKey,
+    NativeLibrary,
+    image_identity,
+    remember_image_paths,
+)
 from .discover import DiscoveredColumn, _reconstruct_ddl
 from .errors import (
     FETCH_COMMAND,
     ArtifactMissingError,
     ArtifactUnpublishedError,
     ChtypesError,
+    InitConflictError,
     PatchFallbackWarning,
     RegistryError,
     SchemaError,
@@ -109,12 +116,13 @@ SettingValue = str | int | bool
 Settings = Mapping[str, SettingValue]
 
 
-# chs_init bookkeeping: resolved artifact path -> the timezone its image was
-# initialized with. Process-wide because the C state it guards is.
-_INITIALIZED_IMAGES: dict[str, str] = {}
+# chs_init bookkeeping: artifact image (its file's (st_dev, st_ino), see
+# `_native.image_identity`) -> the timezone it was initialized with.
+# Process-wide because the C state it guards is.
+_INITIALIZED_IMAGES: dict[ImageKey, str] = {}
 
 # Live-wrapper refcount per dlopen'd IMAGE, keyed like everything else on the
-# resolved path. `dlopen` refcounts one image per file, so two Registries over
+# image's file identity. `dlopen` refcounts one image per file, so two Registries over
 # one artifact directory share the C globals `chs_shutdown` tears into:
 # closing the first must be a no-op at the C boundary while the second still
 # holds the image, and only the LAST close runs `chs_shutdown`
@@ -122,7 +130,7 @@ _INITIALIZED_IMAGES: dict[str, str] = {}
 # `_INITIALIZED_IMAGES`, so two threads constructing Libraries over one
 # artifact cannot double-init or double-count. (The lock is cheap: load and close
 # paths only, never a row call.)
-_IMAGE_REFS: dict[str, int] = {}
+_IMAGE_REFS: dict[ImageKey, int] = {}
 _IMAGES_MU = threading.Lock()
 
 
@@ -896,7 +904,13 @@ class Library:
         # This library's own error-code table, once built (see error_codes).
         # Per Library and never shared: the table is a property of the build.
         self._error_codes = _ErrorCodeCache()
-        self._native = NativeLibrary(path)
+        # The image's identity, from ONE stat, keys the lock (inside
+        # NativeLibrary) and the chs_init and refcount tables below alike, so
+        # a hardlink can never get two locks over one image. A path that cannot
+        # be stat'ed is refused here, before anything is dlopen'd.
+        key, spellings = image_identity(path)
+        self._image_key = key
+        self._native = NativeLibrary(path, key)
         # The library names itself; nothing is inferred from the directory or
         # the file name.
         self.version = self._native.clickhouse_version()
@@ -924,14 +938,13 @@ class Library:
             unsafe = manifest.unsafe_families.strip()
         # chs_init AT MOST ONCE per artifact image. ctypes.CDLL and dlopen
         # refcount one image per file, so a second Registry over the same
-        # artifact shares its C globals — re-running chs_init would rebuild
-        # the refuse-list and re-set DateLUT under the first instance's live
-        # readers (the Go binding's loadedLibs map and the TS binding's
-        # realpath-keyed map guard the same hazard). Keyed on the resolved
-        # path; a second init asking for a DIFFERENT timezone is refused
+        # artifact — or over a hardlink or symlink to it — shares its C
+        # globals: re-running chs_init would rebuild the refuse-list and
+        # re-set DateLUT under the first instance's live readers (the Go
+        # binding's loadedLibs map and the TS binding's `loaded` map guard the
+        # same hazard). Keyed on the image's file identity; a second init
+        # asking for a DIFFERENT timezone is refused, as InitConflictError,
         # rather than silently re-timezoning live libraries.
-        key = str(Path(path).resolve())
-        self._image_key = key
         with _IMAGES_MU:
             prev_tz = _INITIALIZED_IMAGES.get(key)
             if prev_tz is None:
@@ -944,11 +957,8 @@ class Library:
                     raise RegistryError(f"chtypes: chs_init failed for {path}: [{rc}]{detail}")
                 _INITIALIZED_IMAGES[key] = timezone
             elif prev_tz != timezone:
-                raise RegistryError(
-                    f"chtypes: {path} is already initialized with timezone {prev_tz!r}; "
-                    f"cannot re-initialize with {timezone!r} (one image per path — "
-                    f"chs_init runs at most once)"
-                )
+                raise InitConflictError(path, prev_tz, timezone)
+            remember_image_paths(key, spellings)
             # Fully constructed: this wrapper now holds a reference on the
             # image, and `close()` releases exactly one (see close).
             _IMAGE_REFS[key] = _IMAGE_REFS.get(key, 0) + 1

@@ -1265,6 +1265,16 @@
       "rust": "Error::SourceUnreachable"
     },
     {
+      "id": "errors.init-conflict",
+      "group": "errors",
+      "kind": "type",
+      "what": "One artifact image, two timezones: the image is already initialized under another zone and chs_init runs at most once, so the load is refused. The image is the FILE (device and inode), so a hardlink or symlink to a loaded artifact is the same image and is refused the same way (issue #355)",
+      "go": "ErrInitConflict",
+      "python": "InitConflictError",
+      "ts": "InitConflictError",
+      "rust": "Error::InitConflict"
+    },
+    {
       "id": "errors.artifact-code-missing",
       "group": "errors", "kind": "constant", "value": "CHTYPES_ARTIFACT_MISSING",
       "what": "The docs/guides/fetch.md §6 machine-readable code, which the four CLIs print identically",
@@ -1727,7 +1737,6 @@
       "Error::ChecksumMismatch": "The load-time checksum refusal; see registry.verify-checksums.",
       "Error::VersionMismatch": "The right bytes in the wrong directory.",
       "Error::Init": "chs_init failure.",
-      "Error::InitConflict": "One image, two timezones.",
       "Error::EmptyRegistry": "Nothing loaded.",
       "Error::NoSuchVersion": "Resolution failure naming what IS loaded.",
       "Error::NoRegistryEnv": "No registry configured.",

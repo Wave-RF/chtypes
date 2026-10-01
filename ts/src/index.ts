@@ -43,6 +43,7 @@ export {
   CODE_UNSUPPORTED,
   FETCH_COMMAND,
   FetchError,
+  InitConflictError,
   RegistryError,
   SchemaError,
   SourceUnreachableError,

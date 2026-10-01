@@ -1514,3 +1514,154 @@ fn one_image_means_one_lock_across_registries() {
          against {w} settings swaps on registry B, 0 mismatches\n"
     ));
 }
+
+// ---- one image per FILE: hardlinks and replaced paths (issue #355) ----------
+//
+// `dlopen` maps one image per file. A hardlink is a different path to the same
+// file, so it is handed the image already mapped; a guard keyed on the
+// canonicalized path let it re-run `chs_init` on that live image and move the
+// first opener's zone. These tests copy the artifact first, so each owns a
+// FRESH image no other test has initialized, and drive `Library::load` — the
+// call that holds the guard — so every key comes from the crate's own stat.
+
+/// A scratch directory for one test, removed when dropped.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(tag: &str) -> Scratch {
+        let dir = std::env::temp_dir().join(format!("chtypes-rs-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        Scratch(dir)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Copy the library file `src` (and its refuse-list) into `dir` as a fresh
+/// file with its own inode.
+fn stage_copy(src: &std::path::Path, dir: &std::path::Path) -> PathBuf {
+    std::fs::create_dir_all(dir).expect("stage directory");
+    let dst = dir.join(src.file_name().expect("a library file name"));
+    std::fs::copy(src, &dst).expect("copy the artifact");
+    let unsafe_list = src.with_file_name("unsafe_families.txt");
+    if unsafe_list.is_file() {
+        std::fs::copy(&unsafe_list, dir.join("unsafe_families.txt")).expect("copy the refuse-list");
+    }
+    dst
+}
+
+/// What the live image says about a zone-sensitive value: a bare `DateTime`
+/// column given the epoch, rendered under whatever zone `chs_init` last set.
+fn epoch(lib: &Arc<chtypes::Library>) -> String {
+    let schema = lib.compile("x DateTime").compile().expect("compile");
+    let batch = stored(&schema, Format::JsonEachRow, br#"{"x":0}"#);
+    assert_eq!(batch.outcome, Outcome::Accepted, "{batch:?}");
+    batch.rows[0].values[0].text.to_string()
+}
+
+#[test]
+fn a_hard_linked_artifact_is_the_same_image() {
+    let reg = registry!();
+    let source = primary(reg);
+    let scratch = Scratch::new("hardlink");
+    let orig = stage_copy(source.path(), &scratch.0.join("orig"));
+    let link_dir = scratch.0.join("link");
+    std::fs::create_dir_all(&link_dir).expect("link directory");
+    let link = link_dir.join(orig.file_name().unwrap());
+    std::fs::hard_link(&orig, &link).expect("hardlink the artifact");
+
+    let first = Arc::new(chtypes::Library::load(&orig, "UTC").expect("first open (UTC)"));
+    let before = epoch(&first);
+
+    match chtypes::Library::load(&link, "Asia/Tokyo") {
+        Err(chtypes::Error::InitConflict { path, have, want }) => {
+            assert_eq!(path, link);
+            assert_eq!(have, "UTC");
+            assert_eq!(want, "Asia/Tokyo");
+        }
+        Err(other) => panic!("expected Error::InitConflict, got {other:?}"),
+        Ok(_) => panic!(
+            "a hardlink to an image initialized under UTC was opened under Asia/Tokyo: \
+             chs_init re-ran on the live image (issue #355)"
+        ),
+    }
+    assert_eq!(
+        epoch(&first),
+        before,
+        "the refused open moved the live image's zone"
+    );
+
+    chtypes::Library::load(&orig, "UTC").expect("the same path twice under the same zone");
+    let via_link = Arc::new(
+        chtypes::Library::load(&link, "UTC")
+            .expect("the hardlink under the SAME zone is the same image and zone"),
+    );
+    assert_eq!(epoch(&via_link), before);
+    announce("\nimage identity: ran a_hard_linked_artifact_is_the_same_image\n");
+}
+
+/// The loader matches an open path before it looks at the file, so a NEW file
+/// (a fresh inode) renamed over an open path is still the open image — keyed
+/// on the inode alone, it would look new and `chs_init` would re-run on the
+/// live image.
+#[test]
+fn a_replaced_file_at_an_open_path_is_the_open_image() {
+    use std::os::unix::fs::MetadataExt;
+    let reg = registry!();
+    let source = primary(reg);
+    let scratch = Scratch::new("replaced");
+    let path = stage_copy(source.path(), &scratch.0.join("a"));
+
+    let first = Arc::new(chtypes::Library::load(&path, "UTC").expect("first open (UTC)"));
+    let before = epoch(&first);
+    let old = std::fs::metadata(&path).unwrap();
+    let fresh = path.with_extension("new");
+    std::fs::copy(source.path(), &fresh).expect("copy the replacement");
+    std::fs::rename(&fresh, &path).expect("rename it over the open path");
+    let new = std::fs::metadata(&path).unwrap();
+    assert_ne!(
+        (old.dev(), old.ino()),
+        (new.dev(), new.ino()),
+        "precondition: a different file at the path"
+    );
+
+    match chtypes::Library::load(&path, "Asia/Tokyo") {
+        Err(chtypes::Error::InitConflict { .. }) => {}
+        Err(other) => panic!("expected Error::InitConflict, got {other:?}"),
+        Ok(_) => panic!("a replaced file at an open path re-ran chs_init on the live image"),
+    }
+    assert_eq!(
+        epoch(&first),
+        before,
+        "the refused open moved the live image's zone"
+    );
+    chtypes::Library::load(&path, "UTC").expect("the same zone is still allowed");
+    announce("\nimage identity: ran a_replaced_file_at_an_open_path_is_the_open_image\n");
+}
+
+/// The key comes from a stat that follows symlinks; a path it cannot stat is
+/// refused with the path named, never keyed on its spelling instead. A
+/// dangling symlink is the case that tells stat from lstat. Needs no artifact:
+/// the refusal comes before anything is dlopen'd.
+#[test]
+fn an_unstattable_artifact_path_is_refused() {
+    let scratch = Scratch::new("unstattable");
+    let path = scratch.0.join("libchtypes.so");
+    std::os::unix::fs::symlink(scratch.0.join("missing.so"), &path).expect("dangling symlink");
+    match chtypes::Library::load(&path, "UTC") {
+        Err(chtypes::Error::LibraryRead {
+            path: named,
+            source,
+        }) => {
+            assert_eq!(named, path);
+            assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+        }
+        Err(other) => panic!("expected Error::LibraryRead, got {other:?}"),
+        Ok(_) => panic!("a path that cannot be stat'ed must be refused"),
+    }
+}

@@ -22,6 +22,7 @@ __all__ = [
     "ArtifactUnpublishedError",
     "ArtifactUntrustedError",
     "ChtypesError",
+    "InitConflictError",
     "PatchFallbackWarning",
     "RegistryError",
     "SchemaError",
@@ -60,6 +61,39 @@ class RegistryError(ChtypesError):
     `Registry.for_version` cannot resolve (the message names the versions that
     ARE loaded — there is deliberately no nearest-version fallback).
     """
+
+
+class InitConflictError(RegistryError):
+    """This artifact IMAGE is already initialized under a different timezone.
+
+    `dlopen` maps one image per file, and `chs_init` runs at most once per
+    image, so a second load asking for another zone can be neither honored
+    nor silently ignored: re-running `chs_init` would move the zone under the
+    first load's live libraries. A hardlink or symlink to a loaded artifact is
+    that same image and is refused the same way.
+
+    A `RegistryError` because it is a reason the loader cannot serve this
+    request — the same family as every other loading-path refusal, and what
+    this condition raised before it had a type of its own, so
+    ``except RegistryError`` keeps catching it. Not an `ArtifactError`: the
+    artifact is fine, and none of the shared fetch codes describes it.
+
+    Attributes:
+        path: the artifact path this load asked for, as given.
+        have: the timezone the image is live under.
+        want: the timezone this load asked for, refused.
+    """
+
+    def __init__(self, path: str, have: str, want: str) -> None:
+        self.path = path
+        self.have = have
+        self.want = want
+        super().__init__(
+            f"chtypes: {path} is already initialized with timezone {have!r}; "
+            f"cannot re-initialize with {want!r} (one image per file — a hardlink "
+            f"or symlink to a loaded artifact is the same image, and chs_init runs "
+            f"at most once)"
+        )
 
 
 # The fetch/verify codes every SDK shares (docs/guides/fetch.md §7). A string code

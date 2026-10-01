@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`InitConflictError`** — raised for an artifact image this process already initialized under a different timezone, with `.path`, `.have` and `.want`. A `RegistryError` subclass, so `except RegistryError` still catches it, as it caught the untyped refusal before (#355).
+
 ### Changed
 
 - **Served revision-6 artifacts changed behavior on 2026-10-01 at build 1790845279 (chtypes#298), by design; no binding code changed, because every field below is a straight pass-through of the library's own document.** Every point below applies only to builds from `chtypes_build` 1790845279 onward, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9` — `docs/support.md`). A served, unsupported (retired) line — `26.6` at build `1790767905`, say — gets no new build or ABI revision, ever, and keeps the pre-relink behavior permanently.
@@ -16,6 +20,10 @@ The four bindings in this repository are released together and give one answer, 
   - Also in this build: the introspection functions `demangle`, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` now answer the server's own `446` in `DEFAULT`, `CHECK`, `PARTITION BY`, filters and `Values` (`46` where the address functions are not registered), admitted under `allow_introspection_functions=1` as a server's `CREATE` would admit them — narrowing `docs/limitations.md`'s `demangle` entry, retired separately.
 
   `docs/guides/filters.md`, `docs/guides/settings.md` and `docs/guides/batches.md` are updated to match, and new end-to-end tests pin the relinked behavior against a loaded artifact (`test_non_accepted_batch_zeroes_counts_and_carries_verdict_code`, `test_rejected_zero_row_batch_names_the_export_decline`, `test_session_timezone_setting_is_declined_not_ignored`).
+
+### Fixed
+
+- **A hard-linked artifact is now recognized as the same image.** The same-image timezone guard keyed on a resolved path, and a hardlink is a different path to the same file: `dlopen` handed it the image already loaded, `chs_init` re-ran on that live image, and the first `Library`'s answers silently moved to the second zone. The guard, the per-image lock and the per-image refcount now all key on the file itself (device and inode, from one stat that follows symlinks), so a hardlink opened under a different timezone raises `InitConflictError`, and under the same timezone it shares the open image's lock. A path that is already open still names the image it was opened as after a new file is renamed over it, because the loader matches that path before it looks at the file. A path that cannot be stat'ed now raises `RegistryError` naming it, before anything is `dlopen`ed; it used to fall back to the path's spelling (closes #355).
 
 ## [0.5.1] — 2026-10-01
 

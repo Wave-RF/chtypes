@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`InitConflictError`** — thrown for an artifact image this process already initialized under a different timezone, with `.path`, `.have` and `.want`. A `RegistryError` subclass, so a `catch` written against `for()`'s documented `RegistryError` still holds; it replaces the untyped `ChtypesError` this refusal used to be (#355).
+
 ### Changed
 
 - **Served revision-6 artifacts changed behavior on 2026-10-01 at build 1790845279 (chtypes#298), by design; no binding code changed, because every field below is a straight pass-through of the library's own document.** Every point below applies only to builds from `chtypes_build` 1790845279 onward, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9` — `docs/support.md`). A served, unsupported (retired) line — `26.6` at build `1790767905`, say — gets no new build or ABI revision, ever, and keeps the pre-relink behavior permanently.
@@ -16,6 +20,10 @@ The four bindings in this repository are released together and give one answer, 
   - Also in this build: the introspection functions `demangle`, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` now answer the server's own `446` in `DEFAULT`, `CHECK`, `PARTITION BY`, filters and `Values` (`46` where the address functions are not registered), admitted under `allow_introspection_functions=1` as a server's `CREATE` would admit them — narrowing `docs/limitations.md`'s `demangle` entry, retired separately.
 
   `docs/guides/filters.md`, `docs/guides/settings.md` and `docs/guides/batches.md` are updated to match, and new end-to-end tests pin the relinked behavior against a loaded artifact (`chtypes#298: the relinked contract (G1-G5)`).
+
+### Fixed
+
+- **A hard-linked artifact is now recognized as the same image.** The loaded-library map keyed on a realpath, and a hardlink is a different path to the same file: `dlopen` handed it the image already loaded, `chs_init` re-ran on that live image, and the first registry's libraries silently answered in the second zone. The map now keys on the file itself (device and inode, as bigints, from a stat that follows symlinks), so a hardlink opened under a different timezone throws `InitConflictError`, naming the path it was opened by, and under the same timezone it is the image already open. A path that is already open still names the image it was opened as after a new file is renamed over it, because the loader matches that path before it looks at the file. A path that cannot be stat'ed is now a `RegistryError` naming it, before anything is `dlopen`ed (closes #355).
 
 ## [0.5.1] — 2026-10-01
 
