@@ -142,7 +142,7 @@ Write the comparison explicitly instead — [`guides/filters.md` → Writing a f
 
 A known **over-hide** (the safe direction) travels with the same surface, present from `25.10` on only (the earlier, narrower boolean-context rule gives this library no type-level divergence to combine it with): this library's truthiness truncates to an integer, so `0.5` and `-0.5` hide a row a real server's `static_cast<bool>` keeps, and `NaN` hides a row on `arm64` only. Compare explicitly there too.
 
-The fix belongs to the library. This entry is removed, per line, on the relink that makes it refuse the query the way that line's own server does.
+The fix belongs to the library and is in progress for the supported lines (`26.3`, `26.7`, `26.8`, `26.9`); this entry narrows to the retired lines on the relink that makes those four refuse the query the way their own servers do. **Retired lines get no rebuild, so there the over-admit is permanent: do not use a retired line's build for row-level filtering.**
 
 ### A CHECK constraint admits any non-zero or non-UInt8 result a real server refuses
 
@@ -157,7 +157,7 @@ For example, `x UInt8, CONSTRAINT c CHECK x` admits a row with `x = 2` here; a r
 
 **Measured**: server side, by the artifact producer, identically against all 12 served lines (`24.8`, `25.3`, `25.8`, `25.10`, `26.2`–`26.9`) — unlike the filter entry above, this one does not vary by line: the CHECK pipeline's own type and value rule is the same on every served server. Library side, in this repository, against the published artifacts for the four **supported** lines (`26.3`, `26.7`, `26.8`, `26.9`). A fix is in progress for those four; whether the served, unsupported lines get one is not yet decided. The cause is the same `!= 0` truthiness as the filter entry above.
 
-The fix belongs to the library. This entry is removed, per line, on the relink that makes it reject the way that line's own server does.
+The fix belongs to the library and is in progress for the supported lines (`26.3`, `26.7`, `26.8`, `26.9`); this entry narrows to the retired lines on the relink that makes those four reject the way their own servers do. **Retired lines get no rebuild, so there the over-admit is permanent: do not rely on a retired line's build to enforce a CHECK.**
 
 ## Pre-1.0
 

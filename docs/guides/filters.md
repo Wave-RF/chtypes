@@ -25,7 +25,7 @@ toInt128(x) != 0          not: x            (x Int128)
 e8 = 'a'                  not: e8           (e8 an Enum)
 ```
 
-Today's library does not enforce this: it answers a result of any type with a C-style truthiness — `t` when the value's low 64 bits are non-zero — where a real server refuses the query outright with error 59. That is a known over-admit, being fixed; see the limitations entry linked above.
+Today's library does not enforce this: it answers a result of any type with a C-style truthiness — `t` when the value's low 64 bits are non-zero — where a real server refuses the query outright with error 59. That is a known over-admit. A library fix is in progress for the supported lines (`26.3`, `26.7`, `26.8`, `26.9`). **Retired lines will not be rebuilt with it, so their over-admit is permanent: do not use a retired line's build for row-level filtering.** See the limitations entry linked above.
 
 **A known over-hide travels with the same surface, in the safe direction.** The library's truthiness truncates to an integer, so `0.5` and `-0.5` hide a row a real server's own cast keeps, and `NaN` hides a row on `arm64`. Compare explicitly there too — `x != 0` rather than a bare `x`.
 
