@@ -997,6 +997,37 @@ jobs:
         run: |
           scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
           echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
+      # chtypes#281 rework. The per-line quoting-boundary test in each binding
+      # needs to tell "nothing below the documented boundary is served this
+      # run" (genuinely impossible — skip) apart from "something below the
+      # boundary IS served, but this run did not load it" (a CI configuration
+      # bug — fail). A test cannot see the resolved channel's own index.json
+      # to answer that itself: scripts/fetch.sh does not persist it into the
+      # registry (only per-line manifests land there), and only scripts/
+      # published-lines.sh / scripts/abi-channel.sh ever read the index at
+      # all, each into its own temp directory that does not outlive its step.
+      # This step derives CHTYPES_SERVED_LINES_AT_REVISION — every line the
+      # RESOLVED channel (served, candidate, or an explicit tag — whichever
+      # this run picked) serves at this SDK's own ABI revision — from
+      # scripts/published-lines.sh's own --served-at-revision, and exports it
+      # so every suite below can read it; never hand-typed. Deliberately
+      # WITHOUT continue-on-error, unlike the best-effort steps around it:
+      # once `fetch` has succeeded, this run's channel has already proven it
+      # serves at least the two leading lines and the derived oldest one
+      # (the `lines` step above) at this exact revision, so a failure here is
+      # a bug in this derivation, not an absence worth tolerating — the
+      # artifacts leg must never reach the boundary test without this set.
+      - name: every line served at this run's ABI revision (for the quoting-boundary tests' served-vs-loaded distinction)
+        id: served-lines
+        if: steps.fetch.outcome == 'success'
+        run: |
+          tag_args=()
+          tag="${{ steps.channel.outputs.tag }}"
+          [ -n "$tag" ] && tag_args=(--tag "$tag")
+          out="$(scripts/published-lines.sh --platform linux-amd64 "${tag_args[@]}" --served-at-revision "${{ steps.channel.outputs.revision }}")"
+          served="$(printf '%s\n' "$out" | sed -n 's/^served=//p')"
+          echo "CHTYPES_SERVED_LINES_AT_REVISION=$served" >> "$GITHUB_ENV"
+          echo "served at ABI revision ${{ steps.channel.outputs.revision }}: $served" >&2
 
       # ── The five suites below each carry `id:` and `continue-on-error`.
       #

@@ -42,6 +42,7 @@ forever is exactly the failure this file exists to prevent.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 
 import pytest
@@ -75,6 +76,52 @@ def expected_bare(line: str, name: str) -> bool:
     if line in LINES_QUOTING_SELECT_ONLY:
         return name != "select"
     return False
+
+
+# The environment variable the artifacts job's CI step sets (from
+# scripts/published-lines.sh's own --served-at-revision against the resolved
+# channel, never hand-typed) — chtypes#281 rework.
+CHTYPES_SERVED_ENV = "CHTYPES_SERVED_LINES_AT_REVISION"
+
+
+def _boundary_verdict(loaded_below: Sequence[str], served_below: Sequence[str]) -> str:
+    """What the below-boundary half of the per-line test should do, given
+    which of LINES_BELOW_EVERY_BOUNDARY this run actually LOADED and which
+    of them the resolved channel SERVES at this SDK's own ABI revision.
+
+    These are different facts: nothing served below the boundary is
+    genuinely impossible to observe this run ("skip"); something served but
+    not loaded is a CI configuration bug ("fail"), never a library finding;
+    both present is the ordinary case ("assert" — the per-case loop above
+    already did the work). A pure function so the three branches are
+    unit-testable (test_boundary_verdict, below) without a registry.
+    """
+    if not served_below:
+        return "skip"
+    if not loaded_below:
+        return "fail"
+    return "assert"
+
+
+@pytest.mark.parametrize(
+    ("loaded_below", "served_below", "want"),
+    [
+        (("26.3",), ("26.3",), "assert"),
+        ((), ("26.3",), "fail"),
+        ((), (), "skip"),
+        ((), ("24.8", "25.3"), "fail"),
+    ],
+    ids=[
+        "served and loaded: assert",
+        "served, not loaded: fail (a CI configuration bug)",
+        "nothing served: skip (genuinely impossible this run)",
+        "served (several) but none loaded: still fail",
+    ],
+)
+def test_boundary_verdict(
+    loaded_below: tuple[str, ...], served_below: tuple[str, ...], want: str
+) -> None:
+    assert _boundary_verdict(loaded_below, served_below) == want
 
 
 @pytest.fixture(scope="session")
@@ -131,19 +178,35 @@ def test_the_per_line_boundaries_are_what_the_release_documents(
             ran += 1
     assert ran == len(EVERY_NAME) * len(loaded), "a case was skipped inside the loop"
     assert ran > 0, "no line was examined"
-    # Both sides, or nothing is being measured. CI fetches a derived oldest
-    # line (chtypes#281 item 2) alongside the newest -lts and -stable
-    # precisely so this usually holds — but that line is picked by
-    # abi_revision, not by this list of names, and a retired line (24.8
-    # today) eventually stops being the one fetched. A below-boundary line
-    # simply not loaded this run is not a finding: skip, loudly, by name,
-    # rather than fail.
-    if not seen_below:
+    # chtypes#281 rework: "no below-boundary line loaded" used to be a single,
+    # loud skip. That let a genuine CI bug — fetching a channel that DOES
+    # serve a below-boundary line, yet somehow loading none of them — pass as
+    # silently as the case that is actually impossible to observe.
+    # CHTYPES_SERVED_LINES_AT_REVISION (set only in the artifacts job, from
+    # scripts/published-lines.sh --served-at-revision against the SAME
+    # resolved channel — never hand-typed) tells the two apart.
+    served_raw = os.environ.get(CHTYPES_SERVED_ENV)
+    if served_raw is None:
         pytest.skip(
-            "the registry holds no line below every documented boundary "
-            f"(one of {sorted(LINES_BELOW_EVERY_BOUNDARY)}) — the SDK's current ABI revision "
-            "does not serve one of them this run, so that side of the boundary cannot be "
-            f"observed. Lines loaded: {[line for line, _ in loaded]}"
+            f"{CHTYPES_SERVED_ENV} is not set (expected outside the artifacts job) — cannot "
+            "tell whether a line below every documented boundary "
+            f"(one of {sorted(LINES_BELOW_EVERY_BOUNDARY)}) is served at this SDK's ABI "
+            "revision, so that side of the boundary is unexamined this run"
+        )
+    served_below = [s for s in served_raw.split() if s in LINES_BELOW_EVERY_BOUNDARY]
+    verdict = _boundary_verdict(seen_below, served_below)
+    if verdict == "skip":
+        pytest.skip(
+            "no line below every documented boundary "
+            f"(one of {sorted(LINES_BELOW_EVERY_BOUNDARY)}) is served at this SDK's ABI "
+            f"revision — that side of the boundary genuinely cannot be observed this run. "
+            f"Served: {served_raw.split()}"
+        )
+    if verdict == "fail":
+        pytest.fail(
+            "a line below every documented boundary IS served at this SDK's ABI revision "
+            f"({served_below}) but this run loaded none of them — that is a CI configuration "
+            f"bug, not a library finding. Loaded: {[line for line, _ in loaded]}"
         )
     if not seen_above:
         pytest.fail(

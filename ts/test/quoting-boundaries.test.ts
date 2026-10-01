@@ -101,6 +101,40 @@ function expectedBare(line: string, name: string): boolean {
   return false;
 }
 
+/** Environment variable the artifacts job's CI step sets (from
+ * scripts/published-lines.sh's own --served-at-revision against the
+ * resolved channel, never hand-typed) — chtypes#281 rework. */
+const CHTYPES_SERVED_ENV = 'CHTYPES_SERVED_LINES_AT_REVISION';
+
+/** What the below-boundary half of the per-line test should do, given which
+ * of LINES_BELOW_EVERY_BOUNDARY this run actually LOADED and which of them
+ * the resolved channel SERVES at this SDK's own ABI revision. These are
+ * different facts: nothing served below the boundary is genuinely
+ * impossible to observe this run ('skip'); something served but not loaded
+ * is a CI configuration bug ('fail'), never a library finding; both present
+ * is the ordinary case ('assert' — the per-case loop below already did the
+ * work). A pure function so the three branches are unit-testable, below,
+ * without a registry. */
+function boundaryVerdict(
+  loadedBelow: readonly string[],
+  servedBelow: readonly string[],
+): 'assert' | 'fail' | 'skip' {
+  if (servedBelow.length === 0) return 'skip';
+  if (loadedBelow.length === 0) return 'fail';
+  return 'assert';
+}
+
+describe('boundaryVerdict (chtypes#281 rework)', () => {
+  it.each([
+    ['served and loaded: assert', ['26.3'], ['26.3'], 'assert'],
+    ['served, not loaded: fail (a CI configuration bug)', [], ['26.3'], 'fail'],
+    ['nothing served: skip (genuinely impossible this run)', [], [], 'skip'],
+    ['served (several) but none loaded: still fail', [], ['24.8', '25.3'], 'fail'],
+  ] as const)('%s', (_name, loadedBelow, servedBelow, want) => {
+    expect(boundaryVerdict(loadedBelow, servedBelow)).toBe(want);
+  });
+});
+
 interface Loaded {
   line: string;
   library: Library;
@@ -155,16 +189,34 @@ describe.skipIf(!HAVE_REGISTRY)('quoting, per loaded line', () => {
     }
     expect(ran, 'a case was skipped inside the loop').toBe(EVERY_NAME.length * loaded.length);
     expect(ran, 'no line was examined').toBeGreaterThan(0);
-    // Both sides, or nothing is being measured. CI fetches a derived oldest
-    // line (chtypes#281 item 2) alongside the newest -lts and -stable
-    // precisely so this usually holds — but that line is picked by
-    // abi_revision, not by this list of names, and a retired line (24.8
-    // today) eventually stops being the one fetched. A below-boundary line
-    // simply not loaded this run is not a finding: skip, loudly, by name,
-    // rather than fail.
-    if (below.length === 0) {
+    // chtypes#281 rework: "no below-boundary line loaded" used to be a
+    // single, loud skip. That let a genuine CI bug — fetching a channel that
+    // DOES serve a below-boundary line, yet somehow loading none of them —
+    // pass as silently as the case that is actually impossible to observe.
+    // CHTYPES_SERVED_ENV (set only in the artifacts job, from
+    // scripts/published-lines.sh --served-at-revision against the SAME
+    // resolved channel — never hand-typed) tells the two apart.
+    const servedRaw = process.env[CHTYPES_SERVED_ENV];
+    if (servedRaw === undefined) {
       ctx.skip(
-        `the registry holds no line below every documented boundary (one of ${[...LINES_BELOW_EVERY_BOUNDARY].join(', ')}) — the SDK's current ABI revision does not serve one of them this run, so that side of the boundary cannot be observed. Lines loaded: ${loaded.map((l) => l.line).join(', ')}`,
+        `${CHTYPES_SERVED_ENV} is not set (expected outside the artifacts job) — cannot tell whether a line below every documented boundary (one of ${[...LINES_BELOW_EVERY_BOUNDARY].join(', ')}) is served at this SDK's ABI revision, so that side of the boundary is unexamined this run`,
+      );
+    }
+    const servedBelow = servedRaw!
+      .split(/\s+/)
+      .filter((s) => s.length > 0 && LINES_BELOW_EVERY_BOUNDARY.has(s));
+    const verdict = boundaryVerdict(
+      below.map((l) => l.line),
+      servedBelow,
+    );
+    if (verdict === 'skip') {
+      ctx.skip(
+        `no line below every documented boundary (one of ${[...LINES_BELOW_EVERY_BOUNDARY].join(', ')}) is served at this SDK's ABI revision — that side of the boundary genuinely cannot be observed this run. Served: ${servedRaw}`,
+      );
+    }
+    if (verdict === 'fail') {
+      expect.fail(
+        `a line below every documented boundary IS served at this SDK's ABI revision (${servedBelow.join(', ')}) but this run loaded none of them — that is a CI configuration bug, not a library finding. Loaded: ${loaded.map((l) => l.line).join(', ')}`,
       );
     }
     expect(
