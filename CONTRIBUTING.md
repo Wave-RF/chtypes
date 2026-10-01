@@ -37,7 +37,7 @@ A pull request enqueues itself to main's merge queue once every condition below 
 3. the head has not moved since the checks ran;
 4. GitHub reports no merge conflict, and no review conversation — no requested changes, no open review comment — exists;
 5. no file the pull request touches (its current path, or for a rename its old path too; a deletion counts) matches a **protected glob**, below — and for a binding's source tree, which is protected only conditionally, that binding's **API verdict** on the head is `changed=false` (chtypes#285 §1, below);
-6. only when `docs/support.md` is part of the diff: it was modified (not added, deleted or renamed), and `scripts/support-matrix.sh`, run from main against the live served index, reproduces the head's copy byte for byte;
+6. only when `docs/support.md` is part of the diff: it was modified (not added, deleted or renamed), and `scripts/support-matrix.sh`, run from main against the live served index over a scratch copy seeded with the **head's own** bytes (never main's checked-out copy, chtypes#316), reproduces the head's copy byte for byte;
 7. only when the pull request touches a **test or fixture path** (chtypes#285 §1b, below): no suite's executed-test count, and no golden-case count, fell below main's last green `ci` push run.
 
 **Binding source and the API verdict (condition 5).** A pull request that touches a binding's source but changes none of its exported API merges itself once its checks pass. CI's non-blocking `api-surface` job (`scripts/api-surface.py`) compares the pull request's merge base with main — never main's tip — against its head, for each binding whose source the diff touches, with one pinned tool per binding, each pinned in that script and nowhere else:
