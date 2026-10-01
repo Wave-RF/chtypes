@@ -333,7 +333,17 @@ fi
 # binding's own header. Mirrors the first entry of the documented registry
 # search path (docs/guides/artifacts.md), same as check-standalone.sh: an
 # explicit $CHTYPES_REGISTRY if set, else the per-user cache.
-command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH; provenance cannot be printed"
+if ! command -v python3 >/dev/null 2>&1; then
+  # chtypes#320: the one case in this script where provenance literally
+  # cannot be printed — python3 itself is missing, so even the annotation
+  # helper (also python3) cannot run. A static echo, not
+  # scripts/lib/gha_annotate.py: no interpolated text here needs escaping
+  # ($WHICH is one of the literal python|ts|rust this script's own arg
+  # parsing already restricted it to), and this is the one place in the
+  # repository that cannot assume python3 is on PATH to format one for it.
+  [ "${GITHUB_ACTIONS:-}" != "true" ] || echo "::warning title=chtypes artifact provenance::unknown — $WHICH suite (python3 not on PATH; provenance cannot be printed)"
+  die "python3 is not on PATH; provenance cannot be printed"
+fi
 if [ "$NO_ARTIFACTS" -eq 1 ]; then
   python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
 else
