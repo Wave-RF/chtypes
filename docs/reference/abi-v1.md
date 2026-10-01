@@ -70,6 +70,7 @@ scripts/abi-v1/gen.py --write        # regenerate every output after editing spe
 scripts/abi-v1/gen.py --check        # what CI runs: any drift, stale output or refusal fails
 scripts/abi-v1/gen.py --fingerprint  # print CHS_ABI_FINGERPRINT
 scripts/abi-v1/gen.py --selftest     # prove each refusal fires, on temporary copies
+scripts/abi-v1/gen.py --render EMITTER --out DIR   # build-time files never committed, such as the test stub's source
 ```
 
 Every generated file starts with a banner naming the fingerprint and saying not to edit it, and `--check` fails on any difference, naming the file and the first differing line. Each output family is one module under `scripts/abi-v1/emit/`, discovered by file name. `scripts/abi-v1/check-no-hand-decls.py` fails on any `chs_*` declaration or symbol lookup written by hand outside the generated files, so nothing hand-written ever touches a raw entry point.

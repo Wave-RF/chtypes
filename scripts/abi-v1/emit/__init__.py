@@ -25,6 +25,15 @@ Paths are repository-relative, POSIX-separated. Two emitters producing one
 path is an error. A whole-file output under a binding's source tree must not
 match the security carve-out's verification needles
 (scripts/policy-merge-check.py), which `gen.py --check` asserts.
+
+BUILD-TIME FILES. An emitter may also define
+
+    def render_files(model: model.Model) -> dict[str, str]
+
+for files that are generated at build time and never committed (the test
+stub's C source is the case it exists for). `gen.py --render <module> --out
+DIR` writes them under DIR, keyed by DIR-relative path; `--check` never sees
+them. An emitter with only build-time files returns [] from outputs().
 """
 
 from __future__ import annotations

@@ -237,6 +237,29 @@ def write(root: Path) -> list[str]:
     return removed
 
 
+def render(root: Path, emitter: str, out: Path) -> list[str]:
+    """Write one emitter's build-time files under `out`; return their paths."""
+    if not re.fullmatch(r"[a-z][a-z0-9_]*", emitter):
+        raise ValueError(f"{emitter!r} is not an emitter module name")
+    model = abimodel.load(root)
+    mod = {m.__name__.rsplit(".", 1)[-1]: m for m in emit.discover()}.get(emitter)
+    if mod is None:
+        raise ValueError(f"no emitter scripts/abi-v1/emit/{emitter}.py")
+    fn = getattr(mod, "render_files", None)
+    if not callable(fn):
+        raise ValueError(f"emit/{emitter}.py defines no render_files(model)")
+    written = []
+    base = out.resolve()
+    for rel, text in sorted(fn(model).items()):
+        target = (base / rel).resolve()
+        if base not in target.parents:
+            raise ValueError(f"emit/{emitter}.py: {rel!r} escapes the output directory")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        written.append(str(target))
+    return written
+
+
 # ---------------------------------------------------------------- v0 symbols
 
 
@@ -651,6 +674,28 @@ def _selftest_tree() -> list[str]:
 
         plant("a stale generated file", stale, "stale")
         plant("--write removes a stale generated file", stale, None, ("--write", "--check"))
+
+        # --render writes an emitter's build-time files, and only under --out.
+        work = Path(tmp) / "render"
+        shutil.copytree(pristine, work)
+        (work / "scripts/abi-v1/emit" / "zz_selftest_render.py").write_text(
+            "def outputs(model):\n    return []\n\n\n"
+            "def render_files(model):\n    return {'sub/stub.c': '/* ' + model.fingerprint + ' */\\n'}\n"
+        )
+        out_dir = Path(tmp) / "render-out"
+        rc, log = _run(work, "--render", "zz_selftest_render", "--out", str(out_dir))
+        made = out_dir / "sub" / "stub.c"
+        if rc or not made.is_file() or jcs.fingerprint((work / abi).read_bytes()) not in made.read_text():
+            fails.append(f"--render did not write the emitter's build-time file:\n{log}")
+        rc, log = _run(work, "--check")
+        if rc:
+            fails.append(f"an emitter with only build-time files broke --check:\n{log}")
+        (work / "scripts/abi-v1/emit" / "zz_selftest_render.py").write_text(
+            "def outputs(model):\n    return []\n\n\ndef render_files(model):\n    return {'../escape.c': ''}\n"
+        )
+        rc, log = _run(work, "--render", "zz_selftest_render", "--out", str(out_dir))
+        if rc == 0 or "escapes the output directory" not in log:
+            fails.append(f"--render wrote outside --out:\n{log}")
     return fails
 
 
@@ -687,10 +732,28 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--fingerprint", action="store_true", help="print CHS_ABI_FINGERPRINT")
     mode.add_argument("--extract-v0", action="store_true", help="rewrite spec/abi-v1/v0-symbols.json from git tags")
     mode.add_argument("--selftest", action="store_true", help="prove every refusal fires")
+    mode.add_argument(
+        "--render",
+        metavar="EMITTER",
+        help="write emit/EMITTER.py's build-time (never committed) files under --out, e.g. the test stub's source",
+    )
+    ap.add_argument("--out", type=Path, help="the directory --render writes into")
     args = ap.parse_args(argv)
 
     if args.selftest:
         return selftest()
+    if args.render:
+        if args.out is None:
+            ap.error("--render needs --out DIR")
+        try:
+            written = render(ROOT, args.render, args.out)
+        except (abimodel.ModelError, ProseError, ValueError) as e:
+            for p in getattr(e, "problems", [str(e)]):
+                print(f"gen.py --render: {p}", file=sys.stderr)
+            return 1
+        for p in written:
+            print(p)
+        return 0
     if args.extract_v0:
         extract_v0(ROOT)
         return 0
