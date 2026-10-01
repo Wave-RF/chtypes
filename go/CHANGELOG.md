@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`WithColumns` now composes with `RowsExportWith`**, so the revision-5 INSERT column list can be attached to the same call as `WithRowFilter` (closes #304). `RowsOption` is now an interface a `RowOption` (`WithColumns`) satisfies too — the same shape `RowsExportOption` already gives `RowsExport` — rather than a plain function type; every existing `WithRowFilter`/`WithDocFlags` call site is unaffected. The C ABI's `chs_rows` already carries `columns_json` and the attached filter as two independent trailing parameters on one call; this binding previously hardcoded the column list to `nil` on `RowsExportWith` alone, where Python's and TypeScript's `rows(..., columns=, row_filter=)` already let a caller combine the two.
+
 ### Changed
 
 - **Every build the release publishes stays fetchable.** 0.3.2 said an older build stays fetchable only until that line's next publish evicts it under retention. That no longer holds: since 2026-09-30 the release is append-only and lists every build it publishes, and selection takes the newest at this SDK's ABI revision (`docs/guides/fetch.md` §2). Builds dropped before that date are re-listed only where a release-signed `SHA256SUMS` proves them.
