@@ -268,6 +268,74 @@ def test_fetch_sh_exact_newest_patch_never_writes_the_empty_flat_slot(tmp_path: 
     )
 
 
+def test_fetch_sh_line_request_ignores_a_non_newest_resolver_hint(tmp_path: Path) -> None:
+    """chtypes#294: a LINE spelling must always select the line's newest
+    published patch at this SDK's revision, even when the optional
+    developer resolver (the `CHTYPES_CORE_DIR` path) names a different,
+    older, but still-published patch as "the current upstream patch". The
+    resolver's hint may surface in the install-time note; it must never
+    narrow which row fetch.sh selects.
+
+    Drives fetch.sh's own developer-resolver discovery (`find
+    "$CHTYPES_CORE_DIR" -maxdepth 2 -name resolve-version.py`) with a stub
+    resolver written into a tmp dir for this test alone — no sibling
+    checkout required."""
+    patches = _patches()
+    case = patches["cases"][0]
+    newest = patches["newest"]
+    older = next(v for v in case["patches"] if v != newest)
+
+    core_dir = tmp_path / "stub-core"
+    core_dir.mkdir()
+    (core_dir / "resolve-version.py").write_text(
+        f"import json, sys\nprint(json.dumps({{'line': {case['line']!r}, 'exact': {older!r}}}))\n"
+    )
+
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("CHTYPES_") and k != "XDG_CACHE_HOME"
+    }
+    env["CHTYPES_TRUSTED_KEYS"] = ",".join(_expected()["trusted_keys"])
+    env["CHTYPES_CORE_DIR"] = str(core_dir)
+    env["XDG_CACHE_HOME"] = str(tmp_path / "xdg")
+    proc = subprocess.run(
+        [
+            "bash",
+            str(FETCH_SH),
+            case["line"],
+            "--platform",
+            case["platform"],
+            "--url",
+            f"file://{FIXTURES / patches['fixture']}",
+            "--dest",
+            str(tmp_path / "reg"),
+            "--abi-revision",
+            str(patches["abi_revision"]),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    installed = Path(proc.stdout.strip())
+    assert installed == tmp_path / "reg" / case["line"]
+    assert _manifest_version(installed) == newest, (
+        f"a line request must install the line's newest published patch ({newest}) "
+        f"even though the stub resolver suggested the older, still-published {older}"
+    )
+    library = installed / (json.loads((installed / "manifest.json").read_text())["library"])
+    assert (
+        hashlib.sha256(library.read_bytes()).hexdigest()
+        == case["patches"][newest]["library_sha256"]
+    )
+    # The resolver's hint still reaches the operator, as a note -- it is
+    # never a silent substitution.
+    assert f"line {case['line']} points at {older} upstream today" in proc.stderr, proc.stderr
+
+
 def test_fetch_sh_exact_request_is_a_noop_when_already_flat(tmp_path: Path) -> None:
     """The one exception to 'only a line spelling writes the flat slot': it
     is not a write at all. When the requested exact patch ALREADY sits in

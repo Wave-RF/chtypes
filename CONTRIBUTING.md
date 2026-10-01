@@ -124,3 +124,22 @@ gh api graphql -f query='mutation($id:ID!,$oid:GitObjectID!){enqueuePullRequest(
 The `.markdownlint.json`/`.markdownlint-cli2.jsonc`/`dprint.json`/`go/.golangci.yml`/`ts/biome.json`/`ts/tsconfig*.json` entries configure a required check's own tool — the same "must not weaken its own judge" reasoning as `.github/**` and `scripts/**`, one level down at the tool-config layer. `tests/parity/manifest.json` and `docs/divergences.json` are data a check reads to reach its verdict rather than code: the parity manifest declares what every binding must support, and the divergences register is an allowlist that excuses a result, the same threat model as a lint exemption — protected even though the `divergences` job itself is non-blocking. This list was produced by a sweep of every `ci.yml` `run:` line for a tool's config flags and name, cross-checked against each tool's default config-file name in `git ls-files`; it found no config file for cargo clippy/fmt, shellcheck, actionlint or vitest, and confirmed `.nvmrc` is read by no workflow here (every `setup-node` step hardcodes `node-version: 22`), so none of those needed adding.
 
 The carve-out covers both halves of verification in every binding: the fetch chain (the ed25519 signature over `SHA256SUMS`, each tarball's sha256, the lock pin, the trusted keys and the allow-unsigned switch) and the load-time checks (the `library_bytes` size check on every load and the opt-in sha256 re-hash). `scripts/lint-public.sh`'s one exemption (the literal `runner` segment in its local-path allowlist) lives inside the script itself, so `scripts/**` already covers it.
+
+## Reading the `artifacts` job's result without a token
+
+The `artifacts` job (`.github/workflows/ci.yml`) is the one place this repository proves a channel (the served release, or the artifact producer's `abi<N>-candidate`) was actually tested — but its job LOG is not readable by an unauthenticated caller: `.../actions/jobs/<id>/logs` returns 403 ("Must have admin rights to Repository."), measured 2026-09-30. Everything that log would otherwise be the only record of is instead emitted as a check-run **annotation** (chtypes#320), which a plain `curl` or a signed-out `gh api` CAN read: one `::notice title=chtypes artifact provenance::<line>` naming the channel this run tested, one more for each `provenance: …` line `scripts/lib/provenance.py` already prints (go/python/ts/rust each get their own, with the artifact line's `clickhouse_version`, `chtypes_build`, `abi_revision`, `core_commit` and `library_sha256`), and — never silence — a `::warning title=chtypes artifact provenance::unknown — <which>` for any of those that could not be determined (a suite that never ran because the fetch failed, a channel `scripts/abi-channel.sh` could not decide).
+
+Two reads answer "did this ref's `artifacts` job pass, and what exactly did it test", both without an `Authorization` header:
+
+```sh
+# 1. the job's own conclusion, by its check-run name, for a given commit sha
+gh api --method GET "repos/Wave-RF/chtypes/commits/<sha>/check-runs" \
+  -f "check_name=artifacts — published lines, linux-amd64, every suite runs the golden set" \
+  --jq '.check_runs[] | {id, status, conclusion}'
+
+# 2. that check run's own annotations — the channel it tested, and every provenance line
+gh api "repos/Wave-RF/chtypes/check-runs/<id>/annotations" \
+  --jq '.[] | select(.title == "chtypes artifact provenance") | .message'
+```
+
+`--method GET` matters on the first call: `gh api` defaults to `POST` once you pass it a `-f` parameter, unless told otherwise. Both calls work exactly the same signed out of `gh` entirely, or as a bare `curl` with no `-H` at all — confirmed directly against a real `artifacts` run on `main` (2026-09-30): the `check-runs` and `check-runs/<id>/annotations` reads both returned HTTP 200 with no credential of any kind, while that same job's `.../actions/jobs/<id>/logs` returned HTTP 403 on the identical, credential-less request. A reader that sees only `status`/`conclusion` and these annotations never needs the log at all.

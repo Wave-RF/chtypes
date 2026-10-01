@@ -704,10 +704,13 @@ CHS_API int chs_schema_column_default_is_literal(const chs_schema * s, int i);
  * `unsupported` and NEVER as a rejection: a real server would have run it, so
  * a rejection here would be an over-reject of our own making.
  *
- * NOT bounded, and stated rather than papered over: a DEFAULT that allocates
- * without bound. `DEFAULT range(400000000)` is 10.98 GB of RSS. See README
- * "Blocking DEFAULTs" for why the obvious setting does not fix it and why it
- * cannot be fixed at all on macOS.
+ * Memory is bounded by the RESOURCE ENVELOPE above, constant and
+ * row-dependent DEFAULTs alike: `DEFAULT range(400000000)` (10.98 GB of RSS
+ * before the envelope) is refused at chs_schema_compile in well under a
+ * second, naming the column and the budget; a row-dependent DEFAULT is
+ * bounded per row and reported `unsupported`. The tracker sees ClickHouse
+ * Allocator memory on every platform, and plain operator-new allocations on
+ * Linux only.
  *
  * ---------------------------------------------------------------------------
  * POSITIONAL FORMATS (CSV, TSV, Values, JSONCompactEachRow) address the k-th
