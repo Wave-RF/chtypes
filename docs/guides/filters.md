@@ -15,6 +15,20 @@ WHERE side:    x = 256          →  false, for every row   (promotion)
 
 So never reuse insert-side coercion to fold a `WHERE` constant. The filter surface exists so you do not have to.
 
+## Writing a filter's result type
+
+**A filter's top-level result must be `UInt8`/`Bool`, an integer up to 64 bits, `Float32`/`Float64`, or `Nullable`/`LowCardinality` of one of those.** A real server's own rule for what may answer a `WHERE` is narrower than "any type", and it differs by ClickHouse line — see [`limitations.md` → A filter whose result is not a boolean-context type admits rows a real server refuses](../limitations.md#a-filter-whose-result-is-not-a-boolean-context-type-admits-rows-a-real-server-refuses) for the exact boundary per line. Wrap anything else in an explicit comparison instead of filtering on the bare column:
+
+```text
+d != toDate(0)            not: d
+toInt128(x) != 0          not: x            (x Int128)
+e8 = 'a'                  not: e8           (e8 an Enum)
+```
+
+Today's library does not enforce this: it answers a result of any type with a C-style truthiness — `t` when the value's low 64 bits are non-zero — where a real server refuses the query outright with error 59. That is a known over-admit, being fixed; see the limitations entry linked above.
+
+**A known over-hide travels with the same surface, in the safe direction.** The library's truthiness truncates to an integer, so `0.5` and `-0.5` hide a row a real server's own cast keeps, and `NaN` hides a row on `arm64`. Compare explicitly there too — `x != 0` rather than a bare `x`.
+
 ## Four verdicts, two of which are not answers
 
 | verdict   | meaning                                                                   |
