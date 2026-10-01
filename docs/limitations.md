@@ -55,7 +55,7 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 No read-side security may be enforced on the filter surface until a release explicitly lifts this limitation — the CHANGELOG will say so, and until it does, assume it has not. Until then the surface is for shadow and replay: run it beside your existing enforcement and compare, do not replace.
 
-The parse-once block twin does not change that — it is a performance shape, not a maturity signal, and sits under the same gate. This is the canonical statement of the gate; `docs/guides/filters.md` points here rather than restating the criterion.
+The parse-once block twin does not change that — it is a performance shape, not a maturity signal, and sits under the same gate. This is the canonical statement of the gate; `docs/guides/filters.md` points here rather than restating the criterion. For the rule a filter's own result type must follow, see [`guides/filters.md` → Writing a filter's result type](guides/filters.md#writing-a-filters-result-type).
 
 **The gate lifts per `(ClickHouse line, platform)`, never all at once.** A pair's warning lifts once that pair has **three consecutive records with zero over-admits and zero over-hides against a real server, and no open filter divergences for it** (see [Known divergences](#known-divergences) below). A pair that diverges again after being lifted gets the warning back — a lift is a state, not a one-way promotion, and lifting one pair says nothing about any other.
 
@@ -79,7 +79,7 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 **No budget is a rule about process, not a claim about state.** A non-zero count, in either direction, on any binding against any ClickHouse line, is refused unless a person has named that case and recorded why, with a tracking reference attached. Nothing non-zero passes quietly, and no threshold waves anything through.
 
-**So it does not mean there are none.** What is true today is narrower, and worth stating exactly: **one case is currently known in which this library and a real server disagree about whether to accept a row: an over-accept, listed under [Known divergences](#known-divergences) below.** Apart from it, both directions are at zero across every line the artifacts are proved against — `measured` by the differential proof those artifacts are built from, not by this repository, and a state rather than a promise: it is what the rule has produced so far, not something the rule guarantees will hold tomorrow.
+**So it does not mean there are none.** What is true today is narrower, and worth stating exactly: **two cases are currently known in which this library and a real server disagree about whether to accept a row, both over-accepts, listed under [Known divergences](#known-divergences) below.** Apart from them, both directions are at zero across every line the artifacts are proved against — `measured` by the differential proof those artifacts are built from, not by this repository, and a state rather than a promise: it is what the rule has produced so far, not something the rule guarantees will hold tomorrow.
 
 ⚠️ **Zero in both directions is a statement about the verdict, not about the value or the error.** There are two other ways to disagree: both sides accept a row and **store different values**, or both refuse it and **report different codes**. Neither is an accept-or-reject disagreement, so the no-budget rule above does not cover them.
 
@@ -121,6 +121,43 @@ The artifact producer's relink at build `1790845279` made this library refuse th
 **Measured**: this library's own answer, in this repository, against the published ABI revision 6 artifacts. `demangle`'s DEFAULT still compiles and stores the demangled name on `25.10` (darwin-arm64, build `1790767905`) and, by CI's linux-amd64 job, on `24.8` (no darwin artifact is published for that line). On `26.3`, `26.8` and `26.9` (darwin-arm64, build `1790845279`) this library now refuses the `CREATE TABLE` itself with code 446, matching a real server; `26.7` was not part of this check's line list before and is not added by this measurement. The server half — a 446 refusal of the `CREATE TABLE` at the default setting — was measured by the artifact producer against stock ClickHouse servers pinned to each line's exact patch, not measured here.
 
 Do not put `demangle` in a DEFAULT for a server that runs at the default setting on `24.8` or `25.10`: this library still compiles the schema there, and the server refuses the `CREATE TABLE` with 446. On every supported line this library now refuses the same `CREATE TABLE` the same way.
+
+### A filter whose result is not a boolean-context type admits rows a real server refuses
+
+**Over-admit, on every served line.** A filter's top-level result is evaluated whatever its type is. A real server restricts which types a filter may answer over; this library does not — it answers a per-row verdict for any result type by truncating it to a C-style truthiness: `t` when the value's low 64 bits are non-zero, `f` otherwise.
+
+A real server's own rule is `canBeUsedInBooleanContext()`, and it differs by line:
+
+- **On `25.10` and `26.2`–`26.9`**, it is true only for the native-number types — `Int8`..`Int64`, `UInt8`..`UInt64`, `Float32`, `Float64`, `Bool` (`UInt8`) — plus `Nullable` and `LowCardinality` of those, and `Nullable(Nothing)`. Outside that set, a real server refuses the whole `SELECT … WHERE` at analysis, before any row is read, with error **59** (`ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER`). This library over-admits there for `Date`, `Date32`, `DateTime`, `Enum8`, `Int128`, `UInt256`, `BFloat16`, and any other type outside that set.
+- **On `24.8`, `25.3` and `25.8`**, the rule is narrower: those servers' own `canBeUsedInBooleanContext()` accepts only `UInt8` and `Nullable(UInt8)` as a filter column — upstream widened it in `FilterDescription.cpp` at `25.10` (`tryConvertAnyColumnToBool`). This library over-admits more broadly there: every other numeric filter is affected too, including `Int64`, `Float64`, and a bare integer literal such as `256` or `-1`. `24.8` has no `BFloat16` type to test against at all.
+
+|               |                                                                                                                   |
+| ------------- | ----------------------------------------------------------------------------------------------------------------- |
+| this library  | answers a per-row verdict, truthy on a non-zero low 64 bits, for any result type                                  |
+| a real server | refuses the query itself, error 59, before evaluating any row, outside that line's own boolean-context rule above |
+
+Write the comparison explicitly instead — [`guides/filters.md` → Writing a filter's result type](guides/filters.md#writing-a-filters-result-type) has the rule and worked examples.
+
+**Measured**: server side, by the artifact producer, against all 12 served lines (`24.8`, `25.3`, `25.8`, `25.10`, `26.2`–`26.9`) — the boolean-context boundary above, and the over-admit it produces, is identical on every one of them. Library side, in this repository, against the published artifacts for the four **supported** lines (`26.3`, `26.7`, `26.8`, `26.9`), through both `Filter.rows` and `Filter.eval` over a parsed block, with identical verdicts. A fix is in progress for those four; whether the served, unsupported lines get one is not yet decided.
+
+A known **over-hide** (the safe direction) travels with the same surface, present from `25.10` on only (the earlier, narrower boolean-context rule gives this library no type-level divergence to combine it with): this library's truthiness truncates to an integer, so `0.5` and `-0.5` hide a row a real server's `static_cast<bool>` keeps, and `NaN` hides a row on `arm64` only. Compare explicitly there too.
+
+The fix belongs to the library. This entry is removed, per line, on the relink that makes it refuse the query the way that line's own server does.
+
+### A CHECK constraint admits any non-zero or non-UInt8 result a real server refuses
+
+**Over-admit, on every served line.** The same truthiness as the filter entry above governs a `CONSTRAINT … CHECK` expression. A real server passes a row only when the CHECK expression's own type is `UInt8` and its value **equals `1`** exactly; anything else rejects the whole batch. This library instead admits any non-zero `UInt8` value, and admits a result of a wider or different type on the same truthy-low-64-bits rule, rather than rejecting it for its type.
+
+|               |                                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| this library  | admits a row whose CHECK result is non-zero and/or not `UInt8`                                                                                |
+| a real server | rejects a non-`UInt8` result with code **1** ("does not return a value of type UInt8"), and a `UInt8` result other than `1` with code **469** |
+
+For example, `x UInt8, CONSTRAINT c CHECK x` admits a row with `x = 2` here; a real server rejects it with 469. `x Int64, CONSTRAINT c CHECK x` admits a row with `x = 1` here; a real server rejects every row with code 1, because the CHECK result is `Int64`, never `UInt8`. Write `CHECK x = 1`, or another comparison whose own result is genuinely `UInt8` — see [`guides/batches.md` → CHECK constraints are batch-level, not per-row](guides/batches.md#check-constraints-are-batch-level-not-per-row).
+
+**Measured**: server side, by the artifact producer, identically against all 12 served lines (`24.8`, `25.3`, `25.8`, `25.10`, `26.2`–`26.9`) — unlike the filter entry above, this one does not vary by line: the CHECK pipeline's own type and value rule is the same on every served server. Library side, in this repository, against the published artifacts for the four **supported** lines (`26.3`, `26.7`, `26.8`, `26.9`). A fix is in progress for those four; whether the served, unsupported lines get one is not yet decided. The cause is the same `!= 0` truthiness as the filter entry above.
+
+The fix belongs to the library. This entry is removed, per line, on the relink that makes it reject the way that line's own server does.
 
 ## Pre-1.0
 

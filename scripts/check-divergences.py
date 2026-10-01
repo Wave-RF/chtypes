@@ -63,6 +63,16 @@ TWO CHECKS, BOTH REQUIRED, NEITHER A SUBSTITUTE FOR THE OTHER.
   schema that many times, rows concatenated in call order — separate
   INSERTs, not one bigger one).
 
+  A check naming "filter" (a boolean SQL expression, compiled over the same
+  schema) is driven down a different call tree than a plain schema.rows()
+  check: compile the schema, compile the filter over it, then
+  Filter.rows(format, payload) — one per-row Verdict ('t'/'f'/'e'/'d'),
+  never an Outcome. Its "expect" still names "outcome" (the call-level
+  FilterOutcome — "ok" unless the call itself was refused) and may also name
+  "verdicts" (the per-row list, checked only when the entry states one,
+  exactly as "stored"/"stored_same" are) — compare() does not care which
+  call tree produced the answer, only what the entry asserts.
+
 NON-BLOCKING BY DESIGN, same reasoning as the `docs` job's own comment in
 .github/workflows/ci.yml and scripts/support-matrix.sh's header: the artifact
 producer fixing a divergence is a cross-repo event this repository cannot
@@ -321,6 +331,19 @@ def compare(expect: dict[str, Any], actual: dict[str, Any]) -> str | None:
                 f"expected rows {idxs} of column {col!r} to all store the same text, but they "
                 f"differ: {detail}"
             )
+    if "verdicts" in expect:
+        # A FILTER check's per-row answer — the same shape as "stored" one
+        # level up: a list, index-aligned with the input rows, checked only
+        # when the entry states one. `actual["verdicts"]` is a list of
+        # Verdict characters ('t'/'f'/'e'/'d'); run_filter_check() builds it
+        # from FilterResult.verdicts and the selftest fakes build it the
+        # same shape.
+        got_verdicts = actual.get("verdicts")
+        if got_verdicts is None:
+            return "expected a 'verdicts' list but the actual result carries no verdicts at all"
+        want_verdicts = list(expect["verdicts"])
+        if list(got_verdicts) != want_verdicts:
+            return f"expected verdicts {want_verdicts!r}, the artifact answered {list(got_verdicts)!r}"
     return None
 
 
@@ -373,6 +396,37 @@ def run_check(library: Any, chk: dict[str, Any], chtypes_mod: Any) -> dict[str, 
     return {"outcome": outcome, "err_code": err_code, "err_msg": err_msg, "rows": rows}
 
 
+def run_filter_check(library: Any, chk: dict[str, Any], chtypes_mod: Any) -> dict[str, Any]:
+    """Drive one FILTER check: compile the schema, compile chk['filter'] over
+    it, then Filter.rows(format, payload) — the filter-verdict twin of
+    run_check()'s schema.rows() path, and a SEPARATE call tree rather than a
+    branch inside run_check, because a filter answers a per-row Verdict
+    ('t'/'f'/'e'/'d'), never an Outcome, and the two are not the same shape
+    to compare. Settings are compiled as the DECLARED profile, exactly as
+    run_check does (docs/guides/settings.md "The one exception: type gates
+    bind at compile").
+
+    May raise chtypes.SchemaError — from compiling the schema DDL itself, OR
+    from compiling the filter expression over it, a malformed expression
+    being refused exactly as a malformed schema is — or chtypes.RegistryError
+    (the line would not load at all); resolve_case() decides what either
+    means, unchanged, and does not need to tell the two SchemaError sources
+    apart to do it.
+
+    Returns {"outcome", "verdicts"}: "outcome" is the call-level
+    FilterOutcome ('ok' unless the call itself was refused or declined, in
+    which case "verdicts" is empty exactly as a non-OK schema.rows() batch
+    carries no rows); "verdicts" is the per-row Verdict characters, in input
+    order, index-aligned with the payload's rows."""
+    fmt = getattr(chtypes_mod.Format, _FORMATS[chk["format"]])
+    body = chk["payload"].encode("utf-8")
+    settings = chk.get("settings") or None
+    with library.compile_ddl(chk["schema"], settings=settings) as schema:
+        with schema.compile_filter(chk["filter"]) as filt:
+            fr = filt.rows(fmt, body)
+    return {"outcome": str(fr.outcome), "verdicts": [str(v) for v in fr.verdicts]}
+
+
 def resolve_case(
     chk: dict[str, Any],
     line: str,
@@ -400,8 +454,9 @@ def resolve_case(
             f"ClickHouse {line} would not load, and {(platform, line)} is not on the served "
             f"'unbuildable' list, so this is unexpected: {exc}",
         )
+    driver = run_filter_check if "filter" in chk else run_check
     try:
-        actual = run_check(library, chk, chtypes_mod)
+        actual = driver(library, chk, chtypes_mod)
     except chtypes_mod.SchemaError as exc:
         if exc.code == 115:
             return (
@@ -410,9 +465,15 @@ def resolve_case(
                 f"(unknown setting) — this artifact does not recognize a setting the check names; the "
                 f"check's line list is likely wrong, not the library ({exc.msg})",
             )
+        # A filter check's SchemaError may come from compiling the schema
+        # DDL OR from compiling the filter expression over it — both are a
+        # refusal the check could not run past, and resolve_case does not
+        # need to tell them apart to report one, so the message names both
+        # rather than guessing which one fired.
+        subject = f"filter {chk['filter']!r} over schema {chk['schema']!r}" if "filter" in chk else repr(chk["schema"])
         return (
             "problem",
-            f"ClickHouse {line}: compiling {chk['schema']!r} was refused (code {exc.code}: {exc.msg}) — "
+            f"ClickHouse {line}: compiling {subject} was refused (code {exc.code}: {exc.msg}) — "
             f"the check could not run",
         )
     mismatch = compare(chk["expect"], actual)
@@ -514,6 +575,11 @@ def load_data(path: Path) -> dict[str, Any]:
                 die(f"{path}: entry {e['id']!r} check {chk['id']!r} names an unknown format {chk['format']!r}")
             if "outcome" not in chk["expect"]:
                 die(f"{path}: entry {e['id']!r} check {chk['id']!r} 'expect' names no outcome")
+            if "filter" in chk and "verdicts" not in chk["expect"]:
+                die(
+                    f"{path}: entry {e['id']!r} check {chk['id']!r} names a 'filter' but 'expect' "
+                    "names no 'verdicts' — a filter check that asserts no per-row answer checks nothing new"
+                )
     return doc
 
 
@@ -626,6 +692,30 @@ class _FakeRow:
         self.values = [_FakeValue(c, t) for c, t in values.items()]
 
 
+class _FakeFilterResult:
+    def __init__(self, outcome: str, verdicts: list[str]):
+        self.outcome = outcome
+        self.verdicts = verdicts
+
+
+class _FakeFilter:
+    """A stand-in for chtypes.Filter: .rows() returns a canned
+    _FakeFilterResult — the boundary run_filter_check() calls through,
+    exactly as _FakeSchema.rows() stands in for a real Schema's rows()."""
+
+    def __init__(self, outcome: str, verdicts: list[str]):
+        self._outcome, self._verdicts = outcome, verdicts
+
+    def __enter__(self) -> "_FakeFilter":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def rows(self, fmt: object, body: bytes) -> _FakeFilterResult:
+        return _FakeFilterResult(self._outcome, list(self._verdicts))
+
+
 class _FakeSchema:
     def __init__(
         self,
@@ -634,6 +724,10 @@ class _FakeSchema:
         err_msg: str = "",
         rows_values: list[dict[str, str]] | None = None,
         sequence: list[tuple[str, list[dict[str, str]]]] | None = None,
+        chtypes_mod: Any = None,
+        filter_outcome: str = "ok",
+        filter_verdicts: list[str] | None = None,
+        filter_raise: tuple[int, str] | None = None,
     ):
         self._outcome, self._err_code, self._err_msg = outcome, err_code, err_msg
         self._rows_values = rows_values or []
@@ -645,12 +739,22 @@ class _FakeSchema:
         # which is all a batches=1 or a "same every call" test needs.
         self._sequence = list(sequence) if sequence is not None else None
         self._calls = 0
+        self._chtypes = chtypes_mod
+        self._filter_outcome = filter_outcome
+        self._filter_verdicts = filter_verdicts or []
+        self._filter_raise = filter_raise
 
     def __enter__(self) -> "_FakeSchema":
         return self
 
     def __exit__(self, *exc: object) -> None:
         return None
+
+    def compile_filter(self, expr: str, *, params: object = None) -> _FakeFilter:
+        if self._filter_raise is not None:
+            code, msg = self._filter_raise
+            raise self._chtypes.SchemaError(code, msg)
+        return _FakeFilter(self._filter_outcome, self._filter_verdicts)
 
     def rows(self, fmt: object, body: bytes, settings: object) -> Any:
         if self._sequence is not None:
@@ -683,18 +787,34 @@ class _FakeLibrary:
         raise_schema_error: tuple[int, str] | None = None,
         rows_values: list[dict[str, str]] | None = None,
         sequence: list[tuple[str, list[dict[str, str]]]] | None = None,
+        filter_outcome: str = "ok",
+        filter_verdicts: list[str] | None = None,
+        filter_raise: tuple[int, str] | None = None,
     ):
         self._chtypes = chtypes_mod
         self._outcome, self._err_code, self._err_msg = outcome, err_code, err_msg
         self._raise = raise_schema_error
         self._rows_values = rows_values
         self._sequence = sequence
+        self._filter_outcome = filter_outcome
+        self._filter_verdicts = filter_verdicts
+        self._filter_raise = filter_raise
 
     def compile_ddl(self, ddl: str, *, settings: object = None, mode: int = 0) -> _FakeSchema:
         if self._raise is not None:
             code, msg = self._raise
             raise self._chtypes.SchemaError(code, msg)
-        return _FakeSchema(self._outcome, self._err_code, self._err_msg, self._rows_values, self._sequence)
+        return _FakeSchema(
+            self._outcome,
+            self._err_code,
+            self._err_msg,
+            self._rows_values,
+            self._sequence,
+            chtypes_mod=self._chtypes,
+            filter_outcome=self._filter_outcome,
+            filter_verdicts=self._filter_verdicts,
+            filter_raise=self._filter_raise,
+        )
 
 
 class _FakeRegistry:
@@ -808,6 +928,29 @@ def selftest() -> int:
         "'stored_same' was checked although the entry did not state one",
     )
 
+    # ---- compare(): a matching 'verdicts' list passes — the FILTER check's
+    # own comparison, the per-row Verdict twin of 'stored' above.
+    expect_verdicts = {"outcome": "ok", "verdicts": ["t", "f", "t"]}
+    check(
+        compare(expect_verdicts, {"outcome": "ok", "verdicts": ["t", "f", "t"]}) is None,
+        "a matching 'verdicts' list was reported as a mismatch",
+    )
+
+    # ---- compare(): a wrong 'verdicts' list is caught, naming both lists —
+    # THE central negative for a filter check, same role as the outcome
+    # mismatch above: a relink that fixes the over-admit must be caught here.
+    m = compare(expect_verdicts, {"outcome": "ok", "verdicts": ["t", "t", "t"]})
+    check(
+        m is not None and "'f'" in m and repr(["t", "f", "t"]) in m,
+        f"a 'verdicts' mismatch was not caught, naming both lists: {m!r}",
+    )
+
+    # ---- compare(): 'verdicts' is checked ONLY when the entry states one.
+    check(
+        compare({"outcome": "ok"}, {"outcome": "ok", "verdicts": ["t", "f"]}) is None,
+        "'verdicts' was checked although the entry did not state one",
+    )
+
     # ---- resolve_case: the driver's own decision, end to end, against fakes
     # — no registry, no network, and no re-implemented copy of the logic
     # the real run uses.
@@ -816,6 +959,47 @@ def selftest() -> int:
     reg = _FakeRegistry(chtypes, {"25.8": _FakeLibrary(chtypes, outcome="accepted")})
     status, msg = resolve_case(chk_ok, "25.8", reg, "linux-amd64", set(), chtypes)
     check(status == "ok", f"a case matching its expectation was not reported ok: {status} {msg}")
+
+    # ---- resolve_case: a FILTER check, end to end, against the same fakes —
+    # a separate call tree from schema.rows() (run_filter_check, not
+    # run_check), proven here the same way run_check's chk_ok is above.
+    chk_filter_ok = {
+        "id": "f-ok", "lines": ["25.8"], "schema": "d Date", "format": "JSONEachRow",
+        "payload": '{"d":"1970-01-01"}\n{"d":"2024-01-01"}\n', "filter": "d",
+        "expect": {"outcome": "ok", "verdicts": ["f", "t"]},
+    }
+    reg_filter_ok = _FakeRegistry(
+        chtypes, {"25.8": _FakeLibrary(chtypes, filter_outcome="ok", filter_verdicts=["f", "t"])}
+    )
+    status, msg = resolve_case(chk_filter_ok, "25.8", reg_filter_ok, "linux-amd64", set(), chtypes)
+    check(status == "ok", f"a filter case matching its expectation was not reported ok: {status} {msg}")
+
+    # THE central negative for a filter check: a relink that fixes the
+    # over-admit (the library now answers 'f' where the entry still expects
+    # 't') must be reported as a problem, in the required words — this is
+    # the retirement signal for a filter entry, same role as chk_ok's
+    # negative counterpart below for a schema.rows() entry.
+    reg_filter_fixed = _FakeRegistry(
+        chtypes, {"25.8": _FakeLibrary(chtypes, filter_outcome="ok", filter_verdicts=["f", "f"])}
+    )
+    status, msg = resolve_case(chk_filter_ok, "25.8", reg_filter_fixed, "linux-amd64", set(), chtypes)
+    check(status == "problem", "a filter claim that no longer holds was not reported as a problem")
+    check("the page and the artifacts disagree" in msg, "the filter mismatch message is missing the required phrase")
+    check("docs/limitations.md" in msg, "the filter mismatch message does not point at docs/limitations.md")
+
+    # ---- resolve_case: a MALFORMED filter — compile_filter itself raises,
+    # exactly as a malformed schema DDL does for run_check, and the message
+    # must say so rather than being read as a page/artifact disagreement.
+    chk_filter_bad = {**chk_filter_ok, "filter": "not_a_real_column"}
+    reg_filter_bad = _FakeRegistry(
+        chtypes, {"25.8": _FakeLibrary(chtypes, filter_raise=(47, "Unknown expression identifier 'not_a_real_column'"))}
+    )
+    status, msg = resolve_case(chk_filter_bad, "25.8", reg_filter_bad, "linux-amd64", set(), chtypes)
+    check(status == "problem", "a malformed filter expression was not reported as a problem")
+    check(
+        "not_a_real_column" in msg and "the page and the artifacts disagree" not in msg,
+        f"a malformed-filter refusal was not distinguished from a real disagreement: {msg!r}",
+    )
 
     # ---- run_check: 'batches' (default 1, unchanged from before this
     # extension) drives the same payload through the same compiled schema
@@ -1005,14 +1189,18 @@ def selftest() -> int:
         return 1
     print(
         "check-divergences: selftest ok — coverage catches a heading with no entry, an entry with no "
-        "heading, and a duplicate; compare() catches an outcome/err_code/err_msg/stored/stored_same "
-        "mismatch and passes an exact match, and 'stored'/'stored_same' are each checked only when an "
-        "entry states one; run_check's 'batches' concatenates rows across repeated calls over one "
-        "compiled schema and surfaces a batch-to-batch outcome change as an ordinary mismatch rather "
-        "than merging it away; resolve_case reports ok/skip/problem correctly for a match, a 'stored' "
-        "row value that matches or no longer holds, a claim that no longer holds, an unfetched line, "
-        "an unbuildable (platform, line) pair, an inexplicable load failure, and a code-115 unknown "
-        "setting; classify_register and "
+        "heading, and a duplicate; compare() catches an outcome/err_code/err_msg/stored/stored_same/"
+        "verdicts mismatch and passes an exact match, and 'stored'/'stored_same'/'verdicts' are each "
+        "checked only when an entry states one; run_check's 'batches' concatenates rows across repeated "
+        "calls over one compiled schema and surfaces a batch-to-batch outcome change as an ordinary "
+        "mismatch rather than merging it away; resolve_case reports ok/skip/problem correctly for a "
+        "match, a 'stored' row value that matches or no longer holds, a claim that no longer holds, an "
+        "unfetched line, an unbuildable (platform, line) pair, an inexplicable load failure, and a "
+        "code-115 unknown setting; a FILTER check (run_filter_check, a separate call tree from "
+        "schema.rows()) is driven the same way, reports ok on a match, a problem naming "
+        "docs/limitations.md when a relink fixes the over-admit the entry still expects, and a distinct "
+        "problem — never a page/artifact disagreement — when the filter expression itself is malformed; "
+        "classify_register and "
         "has_divergences_section tell an intentionally empty register apart from a renamed/missing "
         "section; zero_run_problems and run() itself both still refuse when entries exist but nothing "
         "could be driven, and run() passes end to end, offline, when the register is genuinely empty"
