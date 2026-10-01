@@ -27,22 +27,9 @@ Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Windo
 
 ## ClickHouse lines
 
-One artifact per ClickHouse line, each carrying that release's own C++. A line is published once it has passed the artifact producer's comparison against a real server and the release includes it. Separately, chtypes supports a ClickHouse line exactly as long as upstream does — see [Served, unsupported ClickHouse lines](#served-unsupported-clickhouse-lines) below for what a line reads once upstream's own support for it ends:
+One artifact per ClickHouse line, each carrying that release's own C++. A line is published once it has passed the artifact producer's comparison against a real server and the release includes it. Separately, chtypes supports a ClickHouse line exactly as long as upstream does — see [Served, unsupported ClickHouse lines](#served-unsupported-clickhouse-lines) below for what a line reads once upstream's own support for it ends.
 
-| Line | Platforms | Support |
-|---|---|---|
-| `24.8` | all | served, unsupported |
-| `25.3` | all | served, unsupported |
-| `25.8` | all | served, unsupported |
-| `25.10` | all | served, unsupported |
-| `26.2` | all | served, unsupported |
-| `26.3` | all | supported |
-| `26.4` | all | served, unsupported |
-| `26.5` | all | served, unsupported |
-| `26.6` | all | served, unsupported |
-| `26.7` | all | supported |
-| `26.8` | all | supported |
-| `26.9` | all | supported |
+Per-line platform coverage and which lines are currently supported are rendered by the artifact producer directly from `index.json`, in the same publish step that writes it and naming that index's own sha256 — so they can never drift from what this page would otherwise have to restate: the [served support table](https://artifacts.wavehouse.dev/artifacts/support-matrix.md).
 
 The exact ClickHouse patch each line is built from is in its artifact's `manifest.json` and in the served `index.json` (`clickhouse_version`); it moves with every upstream patch release, so it is not repeated here.
 Ask for a line, never a nearest match: `for("25.8")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.
@@ -126,11 +113,9 @@ Nothing is removed to make room. Since 2026-09-30 the release is append-only: ev
 
 ## Served, unsupported ClickHouse lines
 
-**chtypes supports a ClickHouse line exactly as long as upstream does.** When upstream's own support for a line ends, the artifact producer retires it: no new builds and no new ABI revisions, ever, for that line — but its existing served artifacts stay, append-only, exactly like every other build. The Support column in the table above marks a retired line **served, unsupported** rather than removing it.
+**chtypes supports a ClickHouse line exactly as long as upstream does.** When upstream's own support for a line ends, the artifact producer retires it: no new builds and no new ABI revisions, ever, for that line — but its existing served artifacts stay, append-only, exactly like every other build. The [served support table](https://artifacts.wavehouse.dev/artifacts/support-matrix.md) marks a retired line **served, unsupported** rather than removing it, and also states what it means when the served index's `supported_lines` key is absent (unknown, never unsupported) — this page does not restate either, since both are rendered from the same `index.json` in the same publish step and a second copy here could only drift from what is actually served.
 
 A served, unsupported line keeps resolving and loading exactly as it does today: nothing about `for()`, fetch, or load-time ABI matching changes. What changes is scoped to the future, one ABI revision at a time. A retired line stays fetchable by every SDK release whose ABI revision it was built for — today that is revisions 5 and 6 — because the artifact producer never builds it for a revision it does not already have a build for. The first SDK release on a *later* ABI revision therefore cannot fetch that line at all: there is no build of it to find. That is intended, not a gap — it follows directly from supporting a line exactly as long as upstream does, since a future ABI revision will not include a line upstream had already retired.
-
-A line with no `Support` column entry at all (the column is absent from the whole table) means the served index does not yet carry a `supported_lines` field — the state is **unknown**, never "unsupported": nothing here says the line has lost support, only that the release has not said one way or the other yet.
 
 ## Checking from your own machine
 

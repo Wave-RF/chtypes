@@ -28,6 +28,7 @@ import {
   resolveRegistryDir,
   type Library,
 } from '../src/index.js';
+import { REAL_ARTIFACT_TIMEOUT_MS } from './real-artifact-timeout.js';
 
 // Out of order on purpose, with unknown keys at both levels, an entry with no
 // name and a negative code — none of which may reach a lookup.
@@ -193,7 +194,7 @@ describe.skipIf(!HAVE_FIXTURES)('the error-code table through the ABI fixture', 
     } finally {
       fixtureRegistry.close();
     }
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 });
 
 // ------------------------------------------------------------- with artifacts

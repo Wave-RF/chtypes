@@ -39,6 +39,7 @@ import {
 } from '../src/index.js';
 import { field, items } from '../src/json.js';
 import { rowResultOf } from '../src/results.js';
+import { REAL_ARTIFACT_TIMEOUT_MS } from './real-artifact-timeout.js';
 
 const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
@@ -292,7 +293,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
     registry = new Registry(REGISTRY ?? undefined, { preload: versions });
     newest = versions[versions.length - 1]!;
     preferred = registry.has('25.8') ? '25.8' : newest;
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 
   // chs_init registers chs_shutdown with atexit, but a test must not depend on
   // atexit: the DEFAULT evaluator's reload thread is what hangs a process that
@@ -910,7 +911,7 @@ describe.skipIf(!HAVE_REGISTRY)('chtypes over a real artifact registry', () => {
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
-    });
+    }, REAL_ARTIFACT_TIMEOUT_MS);
 
     it('refuses an artifact whose bytes do not match its manifest', () => {
       const tmp = mkdtempSync(path.join(tmpdir(), 'chtypes-bad-'));
