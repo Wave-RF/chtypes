@@ -625,6 +625,10 @@ type RowResult struct {
 	// ClickHouse's own code/message), for an eval-time VerdictDecline (the
 	// admission envelope), and for a row whose own Outcome is not Accepted
 	// (its own parse error, reported as VerdictDecline). Zero/"" otherwise.
+	// One exception: an AcceptedPoisoned row's VerdictErr stays "" because
+	// that row's own ErrMsg is itself empty — VerdictCode still carries the
+	// server's readback code. Never read an empty VerdictErr on a
+	// VerdictDecline as "nothing is wrong"; read VerdictCode instead.
 	VerdictCode int
 	VerdictErr  string
 	// PartitionID is the partition this row lands in, as the loaded build's
@@ -1314,11 +1318,17 @@ type BatchResult struct {
 	// crosses the boundary. Three states, and the distinction is the ABI's
 	// own (the C ABI contract §Rows):
 	//
-	//	nil            no export was requested, the export was DECLINED
-	//	               (ExportDeclined then names the reason), or a
-	//	               call-level verdict preempted the export machinery
-	//	               entirely (the batch Outcome is then the reason and
-	//	               ExportDeclined stays "").
+	//	nil            no export was requested, or the export was DECLINED —
+	//	               ExportDeclined then names the reason, ALWAYS, for a
+	//	               non-accepted batch of any kind (a server rejection, a
+	//	               zero-row refusal before any row was admitted, or a
+	//	               call-level -2 "unsupported" answer). Before the
+	//	               artifact producer's relink served at chtypes_build
+	//	               1790845279, a batch refused before any row was
+	//	               admitted (a CSVWithNames body naming an unknown header
+	//	               column under input_format_skip_unknown_fields=0,
+	//	               measured) left ExportDeclined "" despite withholding
+	//	               requested bytes; that gap is closed, by design.
 	//	non-nil, empty an accepted batch with zero accepted rows — the
 	//	               EMITTED-EMPTY case, distinguishable from a decline.
 	//	non-nil bytes  the exported lines; slice per Spans.
@@ -1334,11 +1344,22 @@ type BatchResult struct {
 	// server verdict.
 	ExportDeclined string
 	// RowsPassed and RowsCut (RowsExportWith only): accepted rows whose
-	// verdict is 't', and accepted rows with any other verdict, respectively.
-	// RowsPassed + RowsCut == the accepted-row count. Both zero when no
-	// filter was attached — indistinguishable from "filter attached, nothing
-	// passed and nothing accepted", so a caller keys presence on whether it
-	// called RowsExportWith with WithRowFilter, never on these being nonzero.
+	// verdict is 't', and accepted rows with any other verdict, respectively,
+	// ON AN ACCEPTED BATCH. RowsPassed + RowsCut == the accepted-row count.
+	// Both zero when no filter was attached — indistinguishable from "filter
+	// attached, nothing passed and nothing accepted", so a caller keys
+	// presence on whether it called RowsExportWith with WithRowFilter, never
+	// on these being nonzero. A row whose own Outcome is not Accepted sits in
+	// NEITHER count (len(Rows) decomposes into RowsPassed + RowsCut + the
+	// non-accepted rows).
+	//
+	// Both are also zero whenever the BATCH's own Outcome is not Accepted —
+	// even when an earlier row, in isolation, was itself Accepted with a 't'
+	// verdict. Before the artifact producer's relink served at chtypes_build
+	// 1790845279, a strict (no input_format_allow_errors_*) batch aborted by
+	// a later bad row measured RowsPassed=1 despite an Outcome of Rejected;
+	// that gap is closed, by design, so a batch Outcome other than Accepted
+	// now always reports 0/0 here.
 	RowsPassed int
 	RowsCut    int
 	// PartitionCount is the number of distinct partitions the batch's stored

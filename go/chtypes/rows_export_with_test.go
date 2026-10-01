@@ -10,9 +10,10 @@ import (
 // against hand-built documents shaped exactly as the C ABI contract §Rows
 // describes chs_rows' attached-filter document), RowsOption assembly, and
 // the Go-level cross-library refusal RowsExportWith performs before any C
-// call. TestRowsExportWithColumnsAndFilterComposeEndToEnd, at the end, is the
-// one exception: it needs a revision-5 artifact and skips loudly without one
-// (rev5Libraries, csv_reader_test.go).
+// call. TestRowsExportWithColumnsAndFilterComposeEndToEnd and the three
+// chtypes#298 regression tests at the end are the exceptions: each needs a
+// revision-5 artifact and skips loudly without one (rev5Libraries,
+// csv_reader_test.go).
 
 // TestVerdictOfMapsTheFourCharacters is the single source of truth
 // verdictOf implements: 't'/'f' answer, 'e' is the predicate throwing, and
@@ -301,4 +302,177 @@ func TestRowsExportWithColumnsAndFilterComposeEndToEnd(t *testing.T) {
 		t.Fatalf("TestRowsExportWithColumnsAndFilterComposeEndToEnd ran ZERO cases — a block that asserts nothing is not a pass")
 	}
 	t.Logf("TestRowsExportWithColumnsAndFilterComposeEndToEnd: %d line(s)", ran)
+}
+
+// ----------------------------------------------------- chtypes#298 (G1-G5)
+//
+// The artifact producer's relink served at chtypes_build 1790845279 changed
+// four document fields by design, measured against that build and against
+// the immediately preceding build (1790783214) of the SAME ClickHouse patch
+// on darwin-arm64 — same ABI revision, only the library rebuilt:
+//
+//   - G2: verdict_code/verdict_err are now populated on a non-answered
+//     verdict whose row is not itself accepted (measured: 0/"" before,
+//     the row's own code/message after).
+//   - G3: rows_passed/rows_cut are now 0 for a batch whose own Outcome is
+//     not Accepted, even when an individual row before the one that aborted
+//     it was itself accepted with a 't' verdict (measured: 1/0 before, 0/0
+//     after).
+//   - G5: export_declined is now populated for every non-accepted batch
+//     that requested an export, including a batch with ZERO rows (measured
+//     on a CSVWithNames body naming an unknown header column under
+//     input_format_skip_unknown_fields=0: "" before, a reason after).
+//
+// G4 (a skipped row counts in neither RowsPassed nor RowsCut) has no
+// library change — it is a docs-only clarification — so it is not measured
+// here; see docs/guides/filters.md.
+
+// TestNonAcceptedBatchZeroesCountsAndCarriesVerdictCode is G2 and G3
+// together, because the same strict (no input_format_allow_errors_*) body
+// exercises both at once: row 0 parses and is individually Accepted with
+// verdict 't'; row 1 is the CSV reader's own trailing-garbage refusal (code
+// 117), which aborts the batch — so the batch's own Outcome is Rejected
+// even though row 0, in isolation, was accepted and passed the filter.
+func TestNonAcceptedBatchZeroesCountsAndCarriesVerdictCode(t *testing.T) {
+	libs := rev5Libraries(t)
+	ran := 0
+	for _, lib := range libs {
+		s, err := lib.CompileDDL("id UInt8, n UInt8")
+		if err != nil {
+			t.Fatalf("%s: compile: %v", lib.Version, err)
+		}
+		f, err := s.CompileFilter("id >= 0")
+		if err != nil {
+			s.Close()
+			t.Fatalf("%s: CompileFilter: %v", lib.Version, err)
+		}
+
+		body := []byte("1,2\n1,abc\n") // row 1: "abc" in a UInt8 column — the CSV reader's own refusal
+		b, err := s.RowsExportWith(CSV, body, nil, ExportNone, WithRowFilter(f))
+		if err != nil {
+			f.Close()
+			s.Close()
+			t.Fatalf("%s: RowsExportWith: %v", lib.Version, err)
+		}
+		if b.Outcome != Rejected {
+			t.Fatalf("%s: batch Outcome = %v, want %v (the aborting row must still reject the whole batch)", lib.Version, b.Outcome, Rejected)
+		}
+		// G3: the batch's own Outcome is not Accepted, so BOTH counts must be
+		// zero — regardless of row 0's own accepted-and-'t' verdict.
+		if b.RowsPassed != 0 || b.RowsCut != 0 {
+			t.Errorf("%s: RowsPassed/RowsCut = %d/%d, want 0/0 for a batch whose own Outcome (%v) is not Accepted", lib.Version, b.RowsPassed, b.RowsCut, b.Outcome)
+		}
+		if len(b.Rows) != 2 {
+			t.Fatalf("%s: got %d row document(s), want 2", lib.Version, len(b.Rows))
+		}
+		// G2: row 1's own parse outcome is not Accepted (Rejected, code 117),
+		// so its verdict is 'd' and must carry that same code/message beside
+		// it — never the 0/"" the pre-relink library left there.
+		row1 := b.Rows[1]
+		if row1.Verdict == nil || *row1.Verdict != VerdictDecline {
+			t.Fatalf("%s: row 1 Verdict = %v, want %v (its own outcome is not Accepted)", lib.Version, row1.Verdict, VerdictDecline)
+		}
+		if row1.VerdictCode != csvRejectionCode || row1.VerdictErr == "" {
+			t.Errorf("%s: row 1 VerdictCode/VerdictErr = %d/%q, want %d/<non-empty> — a non-accepted row's own error, beside its decline verdict", lib.Version, row1.VerdictCode, row1.VerdictErr, csvRejectionCode)
+		}
+		if row1.VerdictCode != row1.ErrCode {
+			t.Errorf("%s: row 1 VerdictCode %d != its own ErrCode %d — the decline must carry the SAME error the row's own Outcome already reports", lib.Version, row1.VerdictCode, row1.ErrCode)
+		}
+
+		f.Close()
+		s.Close()
+		ran++
+	}
+	if ran != len(libs) {
+		t.Fatalf("TestNonAcceptedBatchZeroesCountsAndCarriesVerdictCode ran %d line(s), want %d", ran, len(libs))
+	}
+	if ran == 0 {
+		t.Fatalf("TestNonAcceptedBatchZeroesCountsAndCarriesVerdictCode ran ZERO cases — a block that asserts nothing is not a pass")
+	}
+	t.Logf("TestNonAcceptedBatchZeroesCountsAndCarriesVerdictCode: %d line(s)", ran)
+}
+
+// TestRejectedZeroRowBatchNamesTheExportDecline is G5: a CSVWithNames body
+// naming a header column no schema column matches, read under
+// input_format_skip_unknown_fields=0, is refused before a single row is
+// admitted — Rejected, rows_read 0, zero row documents — and an export was
+// requested. The pre-relink library left ExportDeclined empty here even
+// though bytes were withheld; the relinked one names the batch's own
+// outcome as the reason.
+func TestRejectedZeroRowBatchNamesTheExportDecline(t *testing.T) {
+	libs := rev5Libraries(t)
+	ran := 0
+	for _, lib := range libs {
+		s, err := lib.CompileDDL("id UInt8, p String")
+		if err != nil {
+			t.Fatalf("%s: compile: %v", lib.Version, err)
+		}
+		body := []byte("id,unknown_col\n1,a\n")
+		b, err := s.RowsExport(CSVWithNames, body, map[string]string{"input_format_skip_unknown_fields": "0"}, JSONCompactEachRow)
+		if err != nil {
+			s.Close()
+			t.Fatalf("%s: RowsExport: %v", lib.Version, err)
+		}
+		if b.Outcome != Rejected {
+			t.Fatalf("%s: Outcome = %v (code %d, %q), want %v", lib.Version, b.Outcome, b.ErrCode, b.ErrMsg, Rejected)
+		}
+		if b.RowsRead != 0 || len(b.Rows) != 0 {
+			t.Fatalf("%s: RowsRead=%d, %d row document(s) — want a call-level refusal with none", lib.Version, b.RowsRead, len(b.Rows))
+		}
+		if len(b.Payload) != 0 {
+			t.Errorf("%s: Payload = %q, want none — a rejected batch exports nothing", lib.Version, string(b.Payload))
+		}
+		if b.ExportDeclined == "" {
+			t.Errorf("%s: ExportDeclined is empty on a rejected zero-row batch that requested an export — a decline must always carry its reason (chtypes#298, G5)", lib.Version)
+		}
+		s.Close()
+		ran++
+	}
+	if ran != len(libs) {
+		t.Fatalf("TestRejectedZeroRowBatchNamesTheExportDecline ran %d line(s), want %d", ran, len(libs))
+	}
+	if ran == 0 {
+		t.Fatalf("TestRejectedZeroRowBatchNamesTheExportDecline ran ZERO cases — a block that asserts nothing is not a pass")
+	}
+	t.Logf("TestRejectedZeroRowBatchNamesTheExportDecline: %d line(s)", ran)
+}
+
+// TestSessionTimezoneSettingIsDeclinedNotIgnored is G1: ClickHouse's
+// session_timezone is a real, known setting name — never the server's own
+// code 115 — but this library resolves bare-DateTime timezone once,
+// process-wide, at chs_init, and never re-reads it per call. Before the
+// relink, a per-call session_timezone was silently accepted and had no
+// effect, indistinguishable from agreement. The relinked library declines
+// it the same way an unmodeled MergeTree setting is declined
+// (docs/guides/settings.md): it comes back in UnsupportedSettings, which
+// promotes the row's own Outcome to Unsupported.
+func TestSessionTimezoneSettingIsDeclinedNotIgnored(t *testing.T) {
+	libs := rev5Libraries(t)
+	ran := 0
+	for _, lib := range libs {
+		s, err := lib.CompileDDL("id UInt8, t DateTime")
+		if err != nil {
+			t.Fatalf("%s: compile: %v", lib.Version, err)
+		}
+		r, err := s.RowWithSettings(JSONEachRow, []byte(`{"id":1,"t":"2024-01-01 00:00:00"}`), map[string]string{"session_timezone": "Europe/Berlin"})
+		if err != nil {
+			s.Close()
+			t.Fatalf("%s: RowWithSettings: %v", lib.Version, err)
+		}
+		if !containsString(r.UnsupportedSettings, "session_timezone") {
+			t.Errorf("%s: UnsupportedSettings = %v, want it to name session_timezone — sent on a per-call map, this is a decline, never a silent admission", lib.Version, r.UnsupportedSettings)
+		}
+		if r.Outcome != Unsupported {
+			t.Errorf("%s: Outcome = %v, want %v — a non-empty UnsupportedSettings must promote the row (docs/guides/settings.md)", lib.Version, r.Outcome, Unsupported)
+		}
+		s.Close()
+		ran++
+	}
+	if ran != len(libs) {
+		t.Fatalf("TestSessionTimezoneSettingIsDeclinedNotIgnored ran %d line(s), want %d", ran, len(libs))
+	}
+	if ran == 0 {
+		t.Fatalf("TestSessionTimezoneSettingIsDeclinedNotIgnored ran ZERO cases — a block that asserts nothing is not a pass")
+	}
+	t.Logf("TestSessionTimezoneSettingIsDeclinedNotIgnored: %d line(s)", ran)
 }

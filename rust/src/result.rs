@@ -602,7 +602,11 @@ pub struct RowResult {
     /// code/message), beside an eval-time [`Verdict::Decline`] (the
     /// admission envelope), and for a row whose own `outcome` is not
     /// [`Outcome::Accepted`] (its own parse error, reported as `Decline`).
-    /// `0` otherwise.
+    /// `0` otherwise. One exception: an [`Outcome::AcceptedPoisoned`] row's
+    /// `verdict_err` stays empty because that row's own `err_msg` is itself
+    /// empty — `verdict_code` still carries the server's readback code.
+    /// Never read an empty `verdict_err` on a `Decline` as "nothing is
+    /// wrong"; read `verdict_code` instead.
     pub verdict_code: i32,
     /// The message beside `verdict_code`; empty otherwise.
     pub verdict_err: String,
@@ -664,11 +668,16 @@ pub struct BatchResult {
     /// the call returned — no ownership crosses the boundary. Three states,
     /// the ABI's own (the C ABI contract §Rows):
     ///
-    /// * `None` — no export was requested, the export was DECLINED
-    ///   ([`export_declined`](Self::export_declined) then names the reason),
-    ///   or a call-level verdict preempted the export machinery entirely
-    ///   (the batch [`outcome`](Self::outcome) is then the reason and
-    ///   `export_declined` stays empty).
+    /// * `None` — no export was requested, or the export was DECLINED:
+    ///   [`export_declined`](Self::export_declined) then names the reason,
+    ///   ALWAYS, for a non-accepted batch of any kind (a server rejection, a
+    ///   zero-row refusal before any row was admitted, or a call-level `-2`
+    ///   "unsupported" answer). Before the artifact producer's relink served
+    ///   at `chtypes_build` 1790845279, a batch refused before any row was
+    ///   admitted (a `CsvWithNames` body naming an unknown header column
+    ///   under `input_format_skip_unknown_fields=0`, measured) left
+    ///   `export_declined` empty despite withholding requested bytes; that
+    ///   gap is closed, by design.
     /// * `Some(empty)` — an accepted batch with zero accepted rows: the
     ///   EMITTED-EMPTY case, distinguishable from a decline.
     /// * `Some(bytes)` — the exported lines; slice per
@@ -686,11 +695,22 @@ pub struct BatchResult {
     pub export_declined: String,
     /// [`crate::Schema::rows_export_with`] only: accepted rows whose verdict
     /// is [`Verdict::True`], and accepted rows with any other verdict,
-    /// respectively. `rows_passed + rows_cut` equals the accepted-row
-    /// count. Both `0` when no filter was attached — indistinguishable from
-    /// "filter attached, nothing passed and nothing accepted", so key
-    /// presence on whether `rows_export_with` was called, never on these
-    /// being nonzero.
+    /// respectively, ON AN ACCEPTED BATCH. `rows_passed + rows_cut` equals
+    /// the accepted-row count. Both `0` when no filter was attached —
+    /// indistinguishable from "filter attached, nothing passed and nothing
+    /// accepted", so key presence on whether `rows_export_with` was called,
+    /// never on these being nonzero. A row whose own `outcome` is not
+    /// [`Outcome::Accepted`] sits in NEITHER count: `rows.len()` decomposes
+    /// into `rows_passed + rows_cut +` the non-accepted rows.
+    ///
+    /// Both are also `0` whenever the BATCH's own `outcome` is not
+    /// [`Outcome::Accepted`] — even when an earlier row, in isolation, was
+    /// itself accepted with a [`Verdict::True`] verdict. Before the artifact
+    /// producer's relink served at `chtypes_build` 1790845279, a strict (no
+    /// `input_format_allow_errors_*`) batch aborted by a later bad row
+    /// measured `rows_passed == 1` despite an `outcome` of
+    /// [`Outcome::Rejected`]; that gap is closed, by design, so a batch
+    /// `outcome` other than `Accepted` now always reports `0`/`0` here.
     pub rows_passed: usize,
     /// Accepted rows with any verdict OTHER than [`Verdict::True`]; see
     /// `rows_passed`.

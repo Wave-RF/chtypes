@@ -6,6 +6,17 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Changed
+
+- **Served revision-6 artifacts changed behavior on 2026-10-01 at build 1790845279 (chtypes#298), by design; no binding code changed, because every field below is a straight pass-through of the library's own document.**
+  - `RowResult.verdict_code`/`verdict_err` are now populated on every non-accepted row's `DECLINE` verdict (previously `0`/`""`). One exception: an `ACCEPTED_POISONED` row's `verdict_err` stays `""` because that row's own `err_msg` is itself empty — `verdict_code` still carries the server's readback code.
+  - `BatchResult.rows_passed`/`rows_cut` are now `0`/`0` whenever the batch's own `outcome` is not `ACCEPTED` — previously an earlier row's own accepted-and-`TRUE` verdict was still counted (measured: `1`/`0` on a strict batch a later bad row rejected). This is the only change in MEANING an SDK user can observe.
+  - `BatchResult.export_declined` is now named for every non-accepted batch that requested an export, a rejected zero-row batch included (previously left `""`); `rows_passed`/`rows_cut` are `0` there too when a filter is attached. This one is additive.
+  - A per-call `session_timezone` naming a valid, DIFFERENT zone is now declined — `unsupported_settings` names it and the row's `outcome` is promoted to `UNSUPPORTED` — rather than silently accepted and ignored. `""` and the process zone set at `chs_init` are still honored unchanged; an invalid zone name was already declined this way and is unchanged.
+  - Also in this build: the introspection functions `demangle`, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` now answer the server's own `446` in `DEFAULT`, `CHECK`, `PARTITION BY`, filters and `Values` (`46` where the address functions are not registered), admitted under `allow_introspection_functions=1` as a server's `CREATE` would admit them — narrowing `docs/limitations.md`'s `demangle` entry, retired separately.
+
+  `docs/guides/filters.md`, `docs/guides/settings.md` and `docs/guides/batches.md` are updated to match, and new end-to-end tests pin the relinked behavior against a loaded artifact (`test_non_accepted_batch_zeroes_counts_and_carries_verdict_code`, `test_rejected_zero_row_batch_names_the_export_decline`, `test_session_timezone_setting_is_declined_not_ignored`).
+
 ## [0.5.1] — 2026-10-01
 
 ### Changed
