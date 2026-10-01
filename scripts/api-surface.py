@@ -320,12 +320,19 @@ def normalize_api_report(text: str) -> list[str]:
 
 def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str], label: str) -> list[str]:
     out_dir, tmp_dir = ctx.scratch("ts", label, "report"), ctx.scratch("ts", label, "temp")
+    # "DOM" is in `lib` for api-extractor's analysis only (the package's own
+    # build is ts/tsconfig.json's, untouched). Measured on the real tree
+    # (#318): without it api-extractor stops with "Internal Error: Unable to
+    # follow symbol for "AbortSignal"" (ts/src/fetch.ts takes one). Inferred
+    # cause: @types/node declares that global through a conditional type on
+    # globalThis, and lib.dom declares it plainly. The report names the type,
+    # not where its declaration was found.
     config = {
         "projectFolder": str(project),
         "mainEntryPointFilePath": str(entry),
         "compiler": {"overrideTsconfig": {
-            "compilerOptions": {"target": "ES2023", "lib": ["ES2023", "ESNext.Disposable"], "module": "NodeNext",
-                                "moduleResolution": "NodeNext", "strict": True, "skipLibCheck": True,
+            "compilerOptions": {"target": "ES2023", "lib": ["ES2023", "ESNext.Disposable", "DOM"],
+                                "module": "NodeNext", "moduleResolution": "NodeNext", "strict": True, "skipLibCheck": True,
                                 "types": types},
             "files": [str(entry)],
         }},
