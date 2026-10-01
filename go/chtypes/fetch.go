@@ -334,6 +334,7 @@ func (f *fetcher) installGoldens(ctx context.Context) {
 		attempts = releaseLoadAttempts
 	}
 	delay := releaseRetryDelay
+	var elapsed time.Duration
 	var blob []byte
 	var listed bool
 	for attempt := 1; ; attempt++ {
@@ -351,18 +352,29 @@ func (f *fetcher) installGoldens(ctx context.Context) {
 		if err == nil {
 			break
 		}
-		if attempt >= attempts || !isPublishWindow(err) {
+		retry, retryAfter, hasRetryAfter := isRetryable(err)
+		if attempt >= attempts || !retry {
 			f.say("%v — the golden tests will skip", err)
 			return
 		}
-		f.say("%v (attempt %d/%d) — this is what a release being published looks like from outside; retrying in %s",
-			err, attempt, attempts, delay)
+		wait := delay
+		if hasRetryAfter {
+			wait = retryAfter
+		}
+		if elapsed+wait > retryBudget() {
+			f.say("%v — the source asked to wait %s before retrying, which would exceed the %s retry budget; the golden tests will skip",
+				err, wait, retryBudget())
+			return
+		}
+		f.say("%v (attempt %d/%d) — this is what a release being published (or briefly unreachable) looks like from outside; retrying in %s",
+			err, attempt, attempts, wait)
 		select {
 		case <-ctx.Done():
 			f.say("%v — the golden tests will skip", err)
 			return
-		case <-time.After(delay):
+		case <-time.After(wait):
 		}
+		elapsed += wait
 		delay *= 2
 	}
 	if !listed {
@@ -987,30 +999,99 @@ func (f *fetcher) loadRelease(ctx context.Context, line string) error {
 		attempts = releaseLoadAttempts
 	}
 	delay := releaseRetryDelay
+	var elapsed time.Duration
 	for attempt := 1; ; attempt++ {
 		err := f.loadReleaseOnce(ctx, line)
-		if err == nil || attempt >= attempts || !isPublishWindow(err) {
+		if err == nil {
+			return nil
+		}
+		retry, retryAfter, hasRetryAfter := isRetryable(err)
+		if !retry {
 			return err
 		}
-		f.say("%v (attempt %d/%d) — this is what a release being published looks like from outside; retrying in %s",
-			err, attempt, attempts, delay)
+		if attempt >= attempts {
+			return withRetryNote(err, fmt.Sprintf(" — giving up after %s", attemptWord(attempt)))
+		}
+		wait := delay
+		if hasRetryAfter {
+			wait = retryAfter
+		}
+		if elapsed+wait > retryBudget() {
+			return withRetryNote(err, fmt.Sprintf(
+				" — the source asked to wait %s before retrying, which would exceed the %s retry budget; giving up after %s",
+				wait, retryBudget(), attemptWord(attempt)))
+		}
+		f.say("%v (attempt %d/%d) — this is what a release being published (or briefly unreachable) looks like from outside; retrying in %s",
+			err, attempt, attempts, wait)
 		select {
 		case <-ctx.Done():
 			return err
-		case <-time.After(delay):
+		case <-time.After(wait):
 		}
+		elapsed += wait
 		delay *= 2
 	}
 }
 
-// isPublishWindow reports whether err is one of the symptoms of reading a
-// release mid-publish, and so worth reading again.
-func isPublishWindow(err error) bool {
+// isRetryable reports whether err is worth retrying through the §3a budget —
+// either a publish-window symptom (the signature or an index/sums/release-
+// file disagreement, as before) or, since chtypes#365, a retryable
+// source-level failure: an HTTP 5xx/408/429 or a connection-level failure.
+// retryAfter/hasRetryAfter carry the server's own requested wait, when the
+// failure came with one (only 503 and 429 ever do); they are always
+// zero/false for a publish-window symptom, which never comes with one.
+//
+// A tarball hash or size mismatch is never routed through this: it is
+// CodeArtifactCorrupt too, but installOne raises it directly, never wrapping
+// a *retryableSourceError, and nothing here is called on it — "a retry buys
+// time; it never converts a refusal into an install" (§3a) still holds.
+func isRetryable(err error) (ok bool, retryAfter time.Duration, hasRetryAfter bool) {
+	var ae *ArtifactError
+	if errors.As(err, &ae) && (ae.Code == CodeArtifactUntrusted || ae.Code == CodeArtifactCorrupt) {
+		return true, 0, false
+	}
+	var rs *retryableSourceError
+	if errors.As(err, &rs) {
+		return true, rs.retryAfter, rs.hasRetryAfter
+	}
+	return false, 0, false
+}
+
+// retryBudget is the total sleep time the default doubling schedule spends
+// across every attempt but the last — 4+8+16+32 = 60s for the default 5
+// attempts (docs/guides/fetch.md §3a) — and the cap chtypes#365 puts on a
+// server's own Retry-After: honored only as long as honoring it still fits
+// inside this, so a 503 that asks for far longer than the publish-window
+// retry was ever sized for fails fast instead of blocking for it.
+func retryBudget() time.Duration {
+	if releaseLoadAttempts <= 1 {
+		return 0
+	}
+	return releaseRetryDelay * time.Duration((int64(1)<<(releaseLoadAttempts-1))-1)
+}
+
+// attemptWord is "1 attempt" or "<n> attempts", for a message that names how
+// many were made.
+func attemptWord(n int) string {
+	if n == 1 {
+		return "1 attempt"
+	}
+	return fmt.Sprintf("%d attempts", n)
+}
+
+// withRetryNote appends a sentence to a retryable *ArtifactError's message,
+// before its trailing " [CODE]", without disturbing its Code, Line, Platform,
+// Source or wrapped cause — errors.Is/As and ExitCode all still see the same
+// error they always would. err that is not an *ArtifactError (should not
+// happen for anything isRetryable ever returns true for) is returned as-is.
+func withRetryNote(err error, note string) error {
 	var ae *ArtifactError
 	if !errors.As(err, &ae) {
-		return false
+		return err
 	}
-	return ae.Code == CodeArtifactUntrusted || ae.Code == CodeArtifactCorrupt
+	suffix := " [" + string(ae.Code) + "]"
+	base := strings.TrimSuffix(ae.Msg, suffix)
+	return &ArtifactError{Code: ae.Code, Line: ae.Line, Platform: ae.Platform, Source: ae.Source, Err: ae.Err, Msg: base + note + suffix}
 }
 
 // parseSums reads the `<sha256>  <file>` (or `<sha256> *<file>`) lines.
@@ -1536,6 +1617,53 @@ func alreadyInstalledAt(dir, wantLib string) bool {
 	return err == nil && got == wantLib
 }
 
+// openTarball opens one tarball, retrying a 5xx/408/429 or a connection-level
+// failure through the same docs/guides/fetch.md §3a budget and schedule
+// loadRelease uses (chtypes#365) — a transient blip reaching the host mid
+// download is exactly the symptom that budget exists for. It is a fresh
+// open() each attempt, never a resume: the previous attempt's partial bytes
+// are simply overwritten. A 404/410 (errAssetNotFound) and anything else not
+// isRetryable fail at once, as they always have.
+func (f *fetcher) openTarball(ctx context.Context, spelling, file string) (io.ReadCloser, error) {
+	attempts := 1
+	if f.src.remote {
+		attempts = releaseLoadAttempts
+	}
+	delay := releaseRetryDelay
+	var elapsed time.Duration
+	for attempt := 1; ; attempt++ {
+		rc, err := f.src.open(ctx, file)
+		if err == nil {
+			return rc, nil
+		}
+		wrapped := f.fail(CodeSourceUnreachable, spelling, err, "could not download %s from %s: %v", file, f.src, err)
+		retry, retryAfter, hasRetryAfter := isRetryable(err)
+		if !retry {
+			return nil, wrapped
+		}
+		if attempt >= attempts {
+			return nil, withRetryNote(wrapped, fmt.Sprintf(" — giving up after %s", attemptWord(attempt)))
+		}
+		wait := delay
+		if hasRetryAfter {
+			wait = retryAfter
+		}
+		if elapsed+wait > retryBudget() {
+			return nil, withRetryNote(wrapped, fmt.Sprintf(
+				" — the source asked to wait %s before retrying, which would exceed the %s retry budget; giving up after %s",
+				wait, retryBudget(), attemptWord(attempt)))
+		}
+		f.say("%v (attempt %d/%d) — retrying the download of %s in %s", err, attempt, attempts, file, wait)
+		select {
+		case <-ctx.Done():
+			return nil, wrapped
+		case <-time.After(wait):
+		}
+		elapsed += wait
+		delay *= 2
+	}
+}
+
 // installOne walks steps 2–4 for one selected row, installing it at the
 // layout the lead's amendment fixes (docs/guides/fetch.md §4, superseded):
 // the patch a LINE spelling selects (exact=="") installs FLAT at
@@ -1617,9 +1745,9 @@ func (f *fetcher) installOne(ctx context.Context, spelling, exact string, a *Rel
 	partial := filepath.Join(f.dest, "."+a.File+".partial."+pid)
 	defer os.Remove(partial)
 	f.say("downloading %s", a.File)
-	rc, err := f.src.open(ctx, a.File)
+	rc, err := f.openTarball(ctx, spelling, a.File)
 	if err != nil {
-		return nil, f.fail(CodeSourceUnreachable, spelling, err, "could not download %s from %s: %v", a.File, f.src, err)
+		return nil, err
 	}
 	n, gotSHA, err := hashAndWrite(rc, partial)
 	rc.Close()

@@ -206,9 +206,27 @@ class ArtifactUnpublishedError(ArtifactError):
 
 class SourceUnreachableError(ArtifactError):
     """The source could not be read: a network failure, a missing release
-    index, or `offline=True` with nothing installed."""
+    index, or `offline=True` with nothing installed.
+
+    Attributes:
+        retryable: worth retrying through the `docs/guides/fetch.md` §3a budget
+            (chtypes#365) — an HTTP 5xx/408/429, or a connection-level failure
+            reaching the host at all (refused, reset, timed out, DNS). `False`
+            for everything else this code is also raised for: offline, a
+            local file I/O error, or any other HTTP status.
+        retry_after: the source's own requested wait, in seconds — `Retry-After`
+            on a 503 or 429 — when it sent one. Always `None` unless
+            `retryable` is also `True`.
+    """
 
     code = CODE_SOURCE_UNREACHABLE
+
+    def __init__(
+        self, message: str, *, retryable: bool = False, retry_after: float | None = None
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.retry_after = retry_after
 
 
 class UnsignedArtifactWarning(UserWarning):
