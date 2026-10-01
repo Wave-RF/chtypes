@@ -4,13 +4,16 @@
 # and a key that changes exactly when those rows do.
 #
 #   scripts/published-lines.sh [--platform <os-arch>] [--tag <t>]
-#                               [--oldest-at-revision <N>]
+#                               [--oldest-at-revision <N> | --served-at-revision <N>]
 #   scripts/published-lines.sh --selftest   prove the newest BUILD in a line
 #                                            wins — not the first row in the
 #                                            index, and not a lexical sort —
-#                                            and that --oldest-at-revision
-#                                            skips a line stuck at an older
-#                                            revision rather than picking it
+#                                            that --oldest-at-revision skips
+#                                            a line stuck at an older
+#                                            revision rather than picking it,
+#                                            and that --served-at-revision
+#                                            lists every line actually at a
+#                                            given revision, oldest first
 #
 # Prints `lines=<lts-minor> <stable-minor>` and `key=<sha256>`, one per line —
 # the shape a GitHub Actions step appends to $GITHUB_OUTPUT — so CI never
@@ -35,6 +38,18 @@
 # still answer yes to right up until a relink leaves it behind, and
 # `supported_lines` never changes that answer either way. Fails loudly,
 # naming N and the platform, when nothing qualifies.
+#
+# --served-at-revision <N> is a SEPARATE standalone mode (never combined with
+# --oldest-at-revision, and ignores the normal lts/stable picks entirely):
+# prints `served=<m1> <m2> ...`, EVERY clickhouse_minor this index publishes
+# for the platform whose own winning row carries abi_revision == N, oldest
+# first — never just one line. CI's `artifacts` job runs this once per run
+# and exports the result as CHTYPES_SERVED_LINES_AT_REVISION, so each
+# binding's quoting-boundary test can tell "nothing below the documented
+# boundary is served this run" (genuinely impossible — skip) apart from
+# "something below the boundary IS served, but this run did not load it" (a
+# CI configuration bug — fail). Unlike --oldest-at-revision, an EMPTY result
+# is not an error here: it is information the caller may legitimately act on.
 #
 # Nothing is verified here, on purpose: this only CHOOSES lines and names a
 # key. scripts/fetch.sh re-reads the release under its ed25519 signature and
@@ -171,6 +186,65 @@ print("key=%s" % key)
 PY
 }
 
+# pick_served_at_revision <index.json> <platform> <revision>
+#
+# chtypes#281 rework: EVERY clickhouse_minor this index publishes for
+# <platform> whose own winning row (same rank as pick_lines() above) carries
+# abi_revision == <revision> — sorted oldest first. Unlike
+# --oldest-at-revision (which answers "which ONE line"), this answers "which
+# lines, in total, does the resolved channel serve at this SDK's revision" —
+# the question each binding's quoting-boundary test needs to tell "nothing
+# below the documented boundary is served this run" (skip) apart from
+# "something below the boundary IS served, but this run did not load it" (a
+# CI configuration bug, not a library fact — fail). Prints `served=<m1> <m2>
+# ...` (possibly empty, never an error on its own: an empty result is real
+# information a caller may act on) to stdout, and each qualifying row to
+# stderr. Only the index itself being unreadable is an error here.
+pick_served_at_revision() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, re, sys
+path, platform, revision = sys.argv[1], sys.argv[2], sys.argv[3]
+revision = int(revision)
+doc = json.load(open(path, encoding="utf-8"))
+if doc.get("schema") != 1:
+    sys.exit("published-lines: index.json schema %r is not 1 — this script cannot read it" % doc.get("schema"))
+os_, _, arch = platform.partition("-")
+rows = [a for a in doc.get("artifacts", []) if a.get("os") == os_ and a.get("arch") == arch]
+
+def line_order(a):
+    return tuple(int(p) for p in a["clickhouse_minor"].split("."))
+
+def build_order(a):
+    return tuple(int(p) for p in a["clickhouse_version"].split("-", 1)[0].split("."))
+
+def build_of(a):
+    b = a.get("build")
+    if isinstance(b, int) and b > 0:
+        return b
+    m = re.search(r"-b([0-9]+)\.tar\.gz$", a.get("file", ""))
+    return int(m.group(1)) if m else 0
+
+by_minor = {}
+for a in rows:
+    minor = a.get("clickhouse_minor")
+    if minor is None:
+        continue
+    by_minor.setdefault(minor, []).append(a)
+
+served = []
+for minor, group in by_minor.items():
+    winner = max(group, key=lambda a: (build_order(a), build_of(a)))
+    if winner.get("abi_revision") == revision:
+        served.append((minor, winner))
+served.sort(key=lambda item: line_order(item[1]))
+
+for minor, row in served:
+    print("published-lines: served at abi_revision %d -> %s (%s)" % (
+        revision, minor, row.get("clickhouse_version")), file=sys.stderr)
+print("served=%s" % " ".join(minor for minor, _ in served))
+PY
+}
+
 if [ "${1:-}" = "--selftest" ]; then
   # Both bugs a regression could reintroduce, proven against a planted index:
   #   1. "first row wins" — the oldest build of each line is listed first,
@@ -290,20 +364,48 @@ JSON
     || { echo "SELFTEST FAILED: the failure should name the revision that matched nothing: $out" >&2; exit 1; }
   echo "published-lines: selftest ok — no line at the given revision fails loudly, naming the revision, rather than silently dropping the third pick"
 
+  # -- pick_served_at_revision() (chtypes#281 rework): the FULL list of lines
+  #    at a given revision, oldest first — what CHTYPES_SERVED_LINES_AT_REVISION
+  #    carries, on the SAME fixture (24.8@5, 25.3@6, 26.7@6, 26.8@6).
+  out="$(pick_served_at_revision "$tmp/revisions-index.json" "linux-amd64" "6" 2>/dev/null)" \
+    || { echo "SELFTEST FAILED: pick_served_at_revision 6 exited non-zero" >&2; exit 1; }
+  [ "$out" = "served=25.3 26.7 26.8" ] \
+    || { echo "SELFTEST FAILED: served-at-revision 6 should be '25.3 26.7 26.8' (24.8 is stuck at revision 5), got: $out" >&2; exit 1; }
+  echo "published-lines: selftest ok — served-at-revision lists every line at the given revision, oldest first, excluding one stuck at an older revision"
+
+  out="$(pick_served_at_revision "$tmp/revisions-index.json" "linux-amd64" "5" 2>/dev/null)" \
+    || { echo "SELFTEST FAILED: pick_served_at_revision 5 exited non-zero" >&2; exit 1; }
+  [ "$out" = "served=24.8" ] \
+    || { echo "SELFTEST FAILED: served-at-revision 5 should be '24.8' (the only line there), got: $out" >&2; exit 1; }
+  echo "published-lines: selftest ok — served-at-revision lists a single line when only one qualifies"
+
+  # An empty result is NOT an error — it is information a caller may act on
+  # (CI's derivation step fails the job itself if it wants mandatory output;
+  # this function's own job is only to report what is actually true).
+  out="$(pick_served_at_revision "$tmp/revisions-index.json" "linux-amd64" "99" 2>/dev/null)" \
+    || { echo "SELFTEST FAILED: pick_served_at_revision 99 should succeed with an empty result, not fail" >&2; exit 1; }
+  [ "$out" = "served=" ] \
+    || { echo "SELFTEST FAILED: served-at-revision 99 should be empty (nothing is at revision 99), got: $out" >&2; exit 1; }
+  echo "published-lines: selftest ok — served-at-revision succeeds with an empty list rather than erroring, when nothing qualifies"
+
   exit 0
 fi
 
-PLATFORM="${CHTYPES_TARGET:-}"; TAG="artifacts"; OLDEST_REVISION=""
+PLATFORM="${CHTYPES_TARGET:-}"; TAG="artifacts"; OLDEST_REVISION=""; SERVED_REVISION=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform)            [ $# -ge 2 ] || die "--platform needs a value"; PLATFORM="$2"; shift ;;
     --tag)                 [ $# -ge 2 ] || die "--tag needs a value"; TAG="$2"; shift ;;
     --oldest-at-revision)  [ $# -ge 2 ] || die "--oldest-at-revision needs a value"; OLDEST_REVISION="$2"; shift ;;
+    --served-at-revision)  [ $# -ge 2 ] || die "--served-at-revision needs a value"; SERVED_REVISION="$2"; shift ;;
     -h|--help)  sed -n '2,37p' "$0"; exit 0 ;;
     *)          die "unknown argument: $1" ;;
   esac
   shift
 done
+if [ -n "$OLDEST_REVISION" ] && [ -n "$SERVED_REVISION" ]; then
+  die "--oldest-at-revision and --served-at-revision are two different standalone modes — pass only one"
+fi
 if [ -z "$PLATFORM" ]; then
   _os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$(uname -m)" in x86_64|amd64) _arch=amd64 ;; arm64|aarch64) _arch=arm64 ;; *) _arch="$(uname -m)" ;; esac
@@ -323,4 +425,8 @@ HTTP_CODE="$(curl -sSL --retry 3 --retry-delay 1 --max-time 60 -o "$WORK/index.j
   || HTTP_CODE="000"
 classify_index_fetch "$HTTP_CODE" "$URL"
 
-pick_lines "$WORK/index.json" "$PLATFORM" "$URL" "$OLDEST_REVISION"
+if [ -n "$SERVED_REVISION" ]; then
+  pick_served_at_revision "$WORK/index.json" "$PLATFORM" "$SERVED_REVISION"
+else
+  pick_lines "$WORK/index.json" "$PLATFORM" "$URL" "$OLDEST_REVISION"
+fi
