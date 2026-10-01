@@ -363,9 +363,11 @@ advance; scripts/api-surface.py's header says why nothing of the head runs in
 that job at all.
 
 The dependabot-ecosystem half of `protected` (chtypes#285 §2) reads the one
-new kind of thing this file reads: a commit's own message, and two more
-revisions of an already-protected manifest file — never a log, but the
-posture does not change. parse_dependabot_metadata matches dependabot's own
+new kind of thing this file reads: a commit's own message, two more
+revisions of an already-protected manifest file, and — added after #333's
+first review — the commit's own author/committer/verification fields and
+its pull request's force-push timeline. Never a log, but the posture does
+not change. parse_dependabot_metadata matches dependabot's own
 `updated-dependencies:` trailer by fixed regex, the same discipline as every
 other text this file parses; it is never evaluated as YAML or any other
 code. manifest_bump_problems parses a manifest's bytes with Python's own
@@ -373,13 +375,24 @@ code. manifest_bump_problems parses a manifest's bytes with Python's own
 has no function calls, no imports and no way to cause a side effect, so
 "parsing" one is exactly as safe as decode_contents() already treats
 docs/support.md's bytes, and strictly safer than running a regex against
-free text, which this file already does throughout. The one new PRIVILEGED
-signal — trusting `pr["user"]["login"] == "dependabot[bot]"` at all — cannot
-be forged by opening a pull request: GitHub assigns that identity only to a
-pull request its own Dependabot installation opens, which neither a fork nor
-an arbitrary collaborator can trigger on request; nothing here runs with
-elevated trust because of it; it narrows what a pull request must ALSO prove
-about its own commit and manifest diff before anything is excused.
+free text, which this file already does throughout.
+
+One PRIVILEGED signal — trusting `pr["user"]["login"] == "dependabot[bot]"`
+at all — cannot be forged by opening a pull request: GitHub assigns that
+identity only to a pull request its own Dependabot installation opens, which
+neither a fork nor an arbitrary collaborator can trigger on request. **This
+is true of the pull request's `author` field alone, not of every commit on
+its branch.** A pull request's author does not change after it is opened,
+but anyone with push access to the branch can force-push a REPLACEMENT
+commit afterward, carrying a hand-written dependabot-shaped trailer, and
+nothing about the pull request's own fields would change — the gap
+commit_provenance_problems and force_push_actor_problems close, by reading
+the HEAD COMMIT's own GitHub-identity fields (never its git-level name or
+email strings, which a forged commit can set to anything) and the branch's
+own force-push history, both trusted only as data, same as everything
+else here. Nothing runs with elevated trust because of any of this; it
+narrows what a pull request must ALSO prove about its own commit, its
+branch's history and its manifest diff before anything is excused.
 
 ================================================================================
 REQUIRED_CHECKS, AND WHY IT IS PINNED HERE
@@ -1024,18 +1037,38 @@ def carve_out_problems(sources: dict[str, str]) -> list[str]:
 # runtime dependencies, manifest version fields and GitHub Actions bumps stay
 # manual. Classified from dependabot's own commit metadata, read as DATA —
 # the pwn-request rule is unchanged, same posture as condition 7's job-log
-# reads: a commit's message and two more revisions of one already-protected
-# manifest file, never executed, sourced or evaluated as code.
-# manifest_bump_problems parses each ecosystem's declarative config format
-# with Python's own stdlib (tomllib/json) exactly the way decode_contents
-# already treats docs/support.md's bytes as data — a parse, never a run. The
-# one new privileged signal, the pull request's own author field, cannot be
-# forged by opening a pull request: GitHub assigns the `dependabot[bot]`
-# identity only to a pull request its own Dependabot installation opens,
-# which neither a fork nor an arbitrary collaborator can trigger on request.
+# reads: a commit's message, its own author/committer/verification fields,
+# its pull request's force-push timeline, and two more revisions of one
+# already-protected manifest file — never executed, sourced or evaluated as
+# code. manifest_bump_problems parses each ecosystem's declarative config
+# format with Python's own stdlib (tomllib/json) exactly the way
+# decode_contents already treats docs/support.md's bytes as data — a parse,
+# never a run.
 #
-# The narrowing applies only when ALL hold (chtypes#285 §2's own four):
+# The pull request's own `author` field cannot be forged by opening a pull
+# request: GitHub assigns the `dependabot[bot]` identity only to one its own
+# Dependabot installation opens, which neither a fork nor an arbitrary
+# collaborator can trigger on request. BUT that is true only of who OPENED
+# the pull request — anyone with push access to the branch can force-push a
+# REPLACEMENT commit afterward, carrying a hand-written dependabot-shaped
+# trailer, and nothing about the pull request's own fields (author,
+# commits==1) would change. That is why this narrowing also reads the HEAD
+# COMMIT's own identity (commit_provenance_problems) and the branch's own
+# force-push history (force_push_actor_problems) — added after #333's first
+# review, when the gap above was found before this narrowing ever shipped.
+#
+# The narrowing applies only when ALL hold (chtypes#285 §2, as reviewed):
 #   - the pull request's author is dependabot[bot];
+#   - the head commit's OWN author.login is dependabot[bot], its
+#     committer.login is web-flow, and its signature verification is
+#     verified=true — measured against this repository's own real
+#     dependabot commit 84401fd (commit_provenance_problems); trusts only
+#     the GitHub-identity `.login` fields, never the git-level author/
+#     committer name or email strings a forged commit can set to anything;
+#   - every HEAD_REF_FORCE_PUSHED_EVENT on the pull request's own timeline
+#     was made by dependabot[bot] (force_push_actors, force_push_actor_
+#     problems); more events than the read fetched (hasNextPage) is ALWAYS
+#     a refusal, never a pass — an unseen one could be anyone's;
 #   - every dependency the head commit's own metadata names is BOTH
 #     direct:development AND version-update:semver-patch;
 #   - the diff touches nothing OUTSIDE one ecosystem's manifest and lockfile
@@ -1052,7 +1085,10 @@ def carve_out_problems(sources: dict[str, str]) -> list[str]:
 # A missing, unparseable or disagreeing signal anywhere in this chain counts
 # as NOT proven, never as proven — gather_dependabot_ecosystem returns None,
 # which leaves the manifest/lockfile pair exactly as protected as before this
-# feature existed.
+# feature existed. And a touched UNCONDITIONAL glob (`.github/**`,
+# `scripts/**`, …) refuses regardless of any of this: first_protected_touch
+# runs before first_dependabot_touch in decide(), so no dependabot proof,
+# however complete, can excuse a diff that also touches one.
 
 _UPDATED_DEPENDENCIES_RE = re.compile(r"^updated-dependencies:\n(.*?)(?:^\.\.\.[ \t]*$|\Z)", re.M | re.S)
 _DEP_ENTRY_START_RE = re.compile(r"^- dependency-name:", re.M)
@@ -1120,13 +1156,72 @@ def candidate_dependabot_ecosystem(files: list[dict]) -> str | None:
     return None
 
 
-def dependabot_bump_problems(pr: dict, entries: list[dict[str, str | None]], parents: list[dict]) -> list[str]:
-    """Every way the author/commit-shape and per-dependency-metadata half of
-    the chtypes#285 §2 narrowing fails, given the pull request object, the
-    head commit's own already-parsed metadata (parse_dependabot_metadata) and
-    its parents list. Pure, so --selftest drives it from fabricated objects;
-    the manifest-diff half is manifest_bump_problems, checked separately
-    because it needs two more file reads this half must already justify."""
+def commit_provenance_problems(commit: dict) -> list[str]:
+    """Every way the HEAD COMMIT's own provenance fails to prove dependabot
+    wrote it — not the pull request's `author` field, which only says who
+    OPENED the pull request. GitHub assigns `dependabot[bot]` as a pull
+    request's author only to one its own installation opens, which neither a
+    fork nor an arbitrary collaborator can trigger on request — but anyone
+    with push access to the branch can force-push a REPLACEMENT commit
+    afterward, carrying a hand-written dependabot-shaped trailer, and
+    nothing about the pull request's own fields (author, commits==1) would
+    change. This reads the SAME commit object gather_dependabot_ecosystem
+    already fetches (`GET repos/{repo}/commits/{sha}`) — no extra API cost —
+    and trusts only the GitHub-identity `.login` fields, never the git-level
+    author/committer name or email strings a forged commit can set to
+    anything. Measured against this repository's own real dependabot commit
+    84401fd: `author.login`=`dependabot[bot]`, `committer.login`=`web-flow`,
+    `commit.verification.verified`=`True`, `reason`=`valid` — committed
+    through GitHub's own merge API, which is what makes the committer
+    `web-flow` and the commit PGP-signed by GitHub itself. A forged commit
+    authored by anyone else, or committed by pushing directly (not through
+    that API), fails at least one of these three."""
+    problems = []
+    author_login = (commit.get("author") or {}).get("login")
+    if author_login != "dependabot[bot]":
+        problems.append(f"the head commit's author.login is {author_login!r}, not dependabot[bot]")
+    committer_login = (commit.get("committer") or {}).get("login")
+    if committer_login != "web-flow":
+        problems.append(f"the head commit's committer.login is {committer_login!r}, not web-flow")
+    verified = ((commit.get("commit") or {}).get("verification") or {}).get("verified")
+    if verified is not True:
+        problems.append(f"the head commit's signature verification is {verified!r}, not True")
+    return problems
+
+
+def force_push_actor_problems(actors: list[str | None], has_next_page: bool) -> list[str]:
+    """Every way a pull request's own force-push history fails to prove
+    dependabot made every HEAD_REF_FORCE_PUSHED_EVENT on it (chtypes#285
+    §2's commit-provenance half): `commit_provenance_problems` alone proves
+    the CURRENT head commit was written and committed by dependabot, but
+    says nothing about whether a writer with push access force-pushed a
+    dependabot-authored-looking commit onto the branch themselves — whether
+    that is even possible through the contents API is unverified, so this
+    checks the branch's own force-push history instead. `actors` is every
+    such event's actor login, in timeline order (None if the actor itself is
+    unavailable — a deleted account, say); an empty list is the common case
+    (no force-push ever happened) and passes trivially. `has_next_page` true
+    — more events than force_push_actors fetched — is ALWAYS a refusal,
+    never a pass: an unseen event could be anyone's."""
+    if has_next_page:
+        return ["the pull request's force-push history has more events than this read fetched; an unseen "
+                "one could be anyone's, so this does not prove dependabot made every one"]
+    return [f"a force-push to the head ref was made by {actor!r}, not dependabot[bot]"
+            for actor in actors if actor != "dependabot[bot]"]
+
+
+def dependabot_bump_problems(pr: dict, entries: list[dict[str, str | None]], parents: list[dict],
+                             commit: dict, force_push_actor_logins: list[str | None],
+                             force_push_has_next_page: bool) -> list[str]:
+    """Every way the author/commit-shape, commit-provenance and per-
+    dependency-metadata half of the chtypes#285 §2 narrowing fails, given
+    the pull request object, the head commit's own already-parsed metadata
+    (parse_dependabot_metadata) and its parents list, the commit object
+    itself (commit_provenance_problems) and its branch's force-push history
+    (force_push_actor_problems). Pure, so --selftest drives it from
+    fabricated objects; the manifest-diff half is manifest_bump_problems,
+    checked separately because it needs two more file reads this half must
+    already justify."""
     problems = []
     author = (pr.get("user") or {}).get("login")
     if author != "dependabot[bot]":
@@ -1145,6 +1240,8 @@ def dependabot_bump_problems(pr: dict, entries: list[dict[str, str | None]], par
             problems.append(f"{name}: dependency-type is {e.get('dependency_type')!r}, not direct:development")
         if e.get("update_type") != "version-update:semver-patch":
             problems.append(f"{name}: update-type is {e.get('update_type')!r}, not version-update:semver-patch")
+    problems.extend(commit_provenance_problems(commit))
+    problems.extend(force_push_actor_problems(force_push_actor_logins, force_push_has_next_page))
     return problems
 
 
@@ -1949,7 +2046,8 @@ def gather_api_verdicts(repo: str, files: list[dict], check_runs: list[dict], he
 
 
 def classify_dependabot_bump(candidate: str, pr: dict, entries: list[dict[str, str | None]],
-                             parents: list[dict], old_manifest_bytes: bytes | None,
+                             parents: list[dict], commit: dict, force_push_actor_logins: list[str | None],
+                             force_push_has_next_page: bool, old_manifest_bytes: bytes | None,
                              new_manifest_bytes: bytes | None) -> str | None:
     """The pure core of gather_dependabot_ecosystem (chtypes#285 §2): given
     the file-list candidate ecosystem and everything the network half would
@@ -1959,10 +2057,11 @@ def classify_dependabot_bump(candidate: str, pr: dict, entries: list[dict[str, s
     problems already found enough wrong, or `parents` was not exactly one
     commit to read a parent sha from) and count as "not proven" here too,
     never as "skip this half". Pure, so --selftest drives the FULL
-    combination — author, commit shape, every entry's metadata, and the
-    manifest diff together — from fabricated objects, the same shape as the
-    six cases chtypes#285 §2 itself names."""
-    if dependabot_bump_problems(pr, entries, parents):
+    combination — author, commit shape, commit provenance, force-push
+    history, every entry's metadata, and the manifest diff together — from
+    fabricated objects, the same shape as the six cases chtypes#285 §2
+    itself names, plus the commit-provenance cases added after review."""
+    if dependabot_bump_problems(pr, entries, parents, commit, force_push_actor_logins, force_push_has_next_page):
         return None
     if old_manifest_bytes is None or new_manifest_bytes is None:
         return None
@@ -1972,6 +2071,36 @@ def classify_dependabot_bump(candidate: str, pr: dict, entries: list[dict[str, s
     return candidate
 
 
+_FORCE_PUSH_TIMELINE_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){"
+    "pullRequest(number:$number){timelineItems(itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT],first:100){"
+    "nodes{... on HeadRefForcePushedEvent{actor{login}}}pageInfo{hasNextPage}}}}}"
+)
+
+
+def force_push_actors(repo: str, number: int) -> tuple[list[str | None], bool]:
+    """Every HEAD_REF_FORCE_PUSHED_EVENT actor login on pull request `number`,
+    in timeline order, and whether this read saw all of them (chtypes#285
+    §2's commit-provenance half, added after #333's first review: the pull
+    request's own `author` field only proves who OPENED it, and commit_
+    provenance_problems only proves the CURRENT head commit's own identity —
+    neither says whether an intermediate force-push, now overwritten, was
+    someone else's). GraphQL, because the REST API carries no force-push
+    timeline. Verified directly against this repository's own real history
+    (PR #249, 84401fd's pull request): an empty `nodes` list with
+    `hasNextPage: false` is what a pull request with no force-push at all
+    returns."""
+    owner, name = repo.split("/", 1)
+    out = gh(["graphql", "-f", f"query={_FORCE_PUSH_TIMELINE_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}",
+             "-F", f"number={number}"], f"POST graphql force-push timeline for #{number}")
+    data = json.loads(out)
+    items = (((data.get("data") or {}).get("repository") or {}).get("pullRequest") or {}).get("timelineItems") or {}
+    nodes = items.get("nodes") or []
+    actors = [(n.get("actor") or {}).get("login") for n in nodes]
+    has_next_page = bool((items.get("pageInfo") or {}).get("hasNextPage"))
+    return actors, has_next_page
+
+
 def gather_dependabot_ecosystem(repo: str, pr: dict, files: list[dict]) -> str | None:
     """Which ecosystem's manifest/lockfile pair the chtypes#285 §2 narrowing
     excuses for this pull request, or None — at ZERO API cost unless the file
@@ -1979,10 +2108,12 @@ def gather_dependabot_ecosystem(repo: str, pr: dict, files: list[dict]) -> str |
     ecosystem) AND the pull request's own author is dependabot[bot] (already
     in hand from `pr`, no extra read). Reads the head commit once (its
     message for parse_dependabot_metadata, its parents list for the one-
-    parent check) and, only when there is exactly one parent to read the
-    pre-bump manifest at, the manifest's bytes at that parent and at the head
-    — two more contents-API reads, same call as head_file() already makes
-    for docs/support.md, never main's tip and never anything executed. The
+    parent check, and its own author/committer/verification for commit_
+    provenance_problems), the pull request's force-push timeline once
+    (force_push_actors) and, only when there is exactly one parent to read
+    the pre-bump manifest at, the manifest's bytes at that parent and at the
+    head — contents-API reads, same call as head_file() already makes for
+    docs/support.md, never main's tip and never anything executed. The
     actual decision is classify_dependabot_bump, which has its own test."""
     candidate = candidate_dependabot_ecosystem(files)
     if candidate is None:
@@ -1993,12 +2124,14 @@ def gather_dependabot_ecosystem(repo: str, pr: dict, files: list[dict]) -> str |
     commit = gh_object(f"repos/{repo}/commits/{sha}")
     entries = parse_dependabot_metadata(((commit.get("commit") or {}).get("message")) or "")
     parents = commit.get("parents") or []
+    fp_actors, fp_has_next_page = force_push_actors(repo, pr.get("number"))
     old_bytes = new_bytes = None
     if len(parents) == 1:
         manifest, _lockfile = DEPENDABOT_MANIFESTS[candidate]
         old_bytes = head_file(repo, manifest, parents[0]["sha"])
         new_bytes = head_file(repo, manifest, sha)
-    return classify_dependabot_bump(candidate, pr, entries, parents, old_bytes, new_bytes)
+    return classify_dependabot_bump(candidate, pr, entries, parents, commit, fp_actors, fp_has_next_page,
+                                    old_bytes, new_bytes)
 
 
 @dataclass(frozen=True)
@@ -3115,8 +3248,50 @@ def selftest() -> int:
                ff("go/go.mod", "go/go.sum"), None)
     expect_cand("no files at all is not a candidate", [], None)
 
-    # dependabot_bump_problems — author, commit shape, and every entry's own
-    # metadata, independent of any manifest byte.
+    # Lead-requested (chtypes#285 §2 review): pinned END-TO-END through
+    # decide() itself — the same function cmd_gate/cmd_enqueue call for the
+    # protected condition — not just candidate_dependabot_ecosystem in
+    # isolation. A dependabot PR whose diff also touches a non-manifest path
+    # must stay protected, whether that path is itself protected or not.
+    dep_manifest, dep_lockfile = DEPENDABOT_MANIFESTS["python"]
+    # Extension-free sample paths, same convention as _sample_protected_path
+    # above: scripts/lint-cited-paths.sh flags any tracked citation, under a
+    # watched top-level directory, of a path with a real extension that does
+    # not resolve to a file in this repository.
+    extra_protected = "scripts/__selftest_sample__"
+    extra_unprotected = "docs/__selftest_sample__"
+    # (a) manifest + lockfile + an UNCONDITIONALLY PROTECTED path (under
+    # scripts/**): stays protected even if dependabot_ecosystem were
+    # (wrongly) GRANTED — proves the ORDERING guarantee in decide() itself:
+    # first_protected_touch runs before first_dependabot_touch, so no
+    # dependabot proof, however complete, can excuse a diff that also
+    # touches an unconditional glob.
+    refusal_a = decide(**_with(pr=_pr(changed_files=3),
+                               files=ff(dep_manifest, dep_lockfile, extra_protected),
+                               dependabot_ecosystem="python"))
+    if refusal_a is None or refusal_a.condition != "protected" or extra_protected not in refusal_a.detail:
+        failures.append(f"chtypes#285 §2 end-to-end (a): manifest+lockfile+{extra_protected} must refuse "
+                        f"as protected, naming {extra_protected}, even with dependabot_ecosystem='python' "
+                        f"already granted; got {refusal_a.text() if refusal_a else 'a pass'}")
+    # (b) manifest + lockfile + an UNPROTECTED path (under docs/, no glob
+    # covers a bare docs/__selftest_sample__): the MANIFEST touch stays
+    # protected — dependabot_ecosystem is realistically None here, since
+    # candidate_dependabot_ecosystem itself refuses a file set with anything
+    # outside the pair (confirmed below), so gather_dependabot_ecosystem
+    # would never grant it in the first place. The extra path itself is not
+    # protected at all, so the refusal must name the manifest.
+    if candidate_dependabot_ecosystem(ff(dep_manifest, dep_lockfile, extra_unprotected)) is not None:
+        failures.append(f"candidate_dependabot_ecosystem: manifest+lockfile+an unprotected extra file "
+                        f"({extra_unprotected}) was wrongly treated as a candidate")
+    refusal_b = decide(**_with(pr=_pr(changed_files=3), files=ff(dep_manifest, dep_lockfile, extra_unprotected)))
+    if refusal_b is None or refusal_b.condition != "protected" or dep_manifest not in refusal_b.detail:
+        failures.append(f"chtypes#285 §2 end-to-end (b): manifest+lockfile+{extra_unprotected} must refuse as "
+                        f"protected, naming {dep_manifest} (not {extra_unprotected}, which is not protected at "
+                        f"all); got {refusal_b.text() if refusal_b else 'a pass'}")
+
+    # dependabot_bump_problems — author, commit shape, commit provenance,
+    # force-push history, and every entry's own metadata, independent of any
+    # manifest byte.
     def dep_pr(**changes: object) -> dict:
         p = {"number": 42, "state": "open", "user": {"login": "dependabot[bot]"}, "commits": 1}
         p.update(changes)
@@ -3128,25 +3303,84 @@ def selftest() -> int:
         e.update(changes)
         return e
 
+    def dep_commit(**changes: object) -> dict:
+        # The measured shape of this repository's own real dependabot
+        # commit, 84401fd: author.login=dependabot[bot], committer.login=
+        # web-flow (GitHub's own merge API), verified=true.
+        c = {"author": {"login": "dependabot[bot]"}, "committer": {"login": "web-flow"},
+            "commit": {"verification": {"verified": True}}}
+        c.update(changes)
+        return c
+
     one_parent = [{"sha": OTHER_SHA}]
-    if dependabot_bump_problems(dep_pr(), [dep_entry()], one_parent):
-        failures.append("dependabot_bump_problems: an all-good case was refused")
-    if not dependabot_bump_problems(dep_pr(user={"login": "someone"}), [dep_entry()], one_parent):
+    no_force_pushes: list[str | None] = []
+
+    def dbp(pr: dict | None = None, entries: list | None = None, parents: list[dict] | None = None,
+            commit: dict | None = None, fp_actors: list[str | None] | None = None,
+            fp_has_next: bool = False) -> list[str]:
+        return dependabot_bump_problems(
+            pr if pr is not None else dep_pr(), entries if entries is not None else [dep_entry()],
+            parents if parents is not None else one_parent, commit if commit is not None else dep_commit(),
+            fp_actors if fp_actors is not None else no_force_pushes, fp_has_next)
+
+    if dbp():
+        failures.append(f"dependabot_bump_problems: an all-good case (measured 84401fd shape) was refused: {dbp()}")
+    if not dbp(pr=dep_pr(user={"login": "someone"})):
         failures.append("dependabot_bump_problems: a non-dependabot author was not caught")
-    if not dependabot_bump_problems(dep_pr(commits=2), [dep_entry()], one_parent):
+    if not dbp(pr=dep_pr(commits=2)):
         failures.append("dependabot_bump_problems: more than one commit was not caught")
-    if not dependabot_bump_problems(dep_pr(), [dep_entry()], []):
+    if not dbp(parents=[]):
         failures.append("dependabot_bump_problems: zero parents was not caught")
-    if not dependabot_bump_problems(dep_pr(), [dep_entry()], [{"sha": SHA}, {"sha": OTHER_SHA}]):
+    if not dbp(parents=[{"sha": SHA}, {"sha": OTHER_SHA}]):
         failures.append("dependabot_bump_problems: two parents (a merge commit) was not caught")
-    if not dependabot_bump_problems(dep_pr(), [], one_parent):
+    if not dbp(entries=[]):
         failures.append("dependabot_bump_problems: no updated-dependencies entries at all was not caught")
-    if not dependabot_bump_problems(dep_pr(), [dep_entry(dependency_type="direct:production")], one_parent):
+    if not dbp(entries=[dep_entry(dependency_type="direct:production")]):
         failures.append("dependabot_bump_problems: a runtime (direct:production) dependency was not caught")
-    if not dependabot_bump_problems(dep_pr(), [dep_entry(update_type="version-update:semver-minor")], one_parent):
+    if not dbp(entries=[dep_entry(update_type="version-update:semver-minor")]):
         failures.append("dependabot_bump_problems: a minor bump was not caught")
-    if not dependabot_bump_problems(dep_pr(), [dep_entry(name=None)], one_parent):
+    if not dbp(entries=[dep_entry(name=None)]):
         failures.append("dependabot_bump_problems: a missing dependency-name was not caught")
+
+    # chtypes#285 §2, added after #333's first review: the pull request's
+    # own `author` field only proves who OPENED it — a force-push can
+    # replace the head commit with one carrying a forged trailer without
+    # changing any field of the pull request itself. commit_provenance_
+    # problems and force_push_actor_problems close that gap.
+    if not dbp(commit=dep_commit(author={"login": "someone"})):
+        failures.append("dependabot_bump_problems: a forged head commit's author.login was not caught")
+    if not dbp(commit=dep_commit(committer={"login": "someone"})):
+        failures.append("dependabot_bump_problems: a head commit committed by anyone but web-flow was not caught "
+                        "(pushed directly, not through GitHub's merge API)")
+    if not dbp(commit=dep_commit(commit={"verification": {"verified": False}})):
+        failures.append("dependabot_bump_problems: an unverified head commit signature was not caught")
+    if not dbp(fp_actors=["someone"]):
+        failures.append("dependabot_bump_problems: a force-push by a non-dependabot actor was not caught")
+    if not dbp(fp_actors=["dependabot[bot]"], fp_has_next=True):
+        failures.append("dependabot_bump_problems: hasNextPage=true on the force-push timeline was not caught "
+                        "even though every FETCHED actor was dependabot[bot] — an unseen event could be anyone's")
+    if dbp(fp_actors=["dependabot[bot]", "dependabot[bot]"]):
+        failures.append("dependabot_bump_problems: several force-pushes, all by dependabot[bot], were refused")
+
+    # commit_provenance_problems and force_push_actor_problems in isolation,
+    # independent of dependabot_bump_problems' other checks.
+    if commit_provenance_problems(dep_commit()):
+        failures.append(f"commit_provenance_problems: the measured 84401fd shape was refused: "
+                        f"{commit_provenance_problems(dep_commit())}")
+    if not commit_provenance_problems(dep_commit(author={"login": None})):
+        failures.append("commit_provenance_problems: a null author.login was not caught")
+    if not commit_provenance_problems(dep_commit(committer=None)):
+        failures.append("commit_provenance_problems: a missing committer object was not caught")
+    if not commit_provenance_problems(dep_commit(commit=None)):
+        failures.append("commit_provenance_problems: a missing commit.verification object was not caught")
+    if force_push_actor_problems([], False):
+        failures.append("force_push_actor_problems: no force-pushes at all was refused")
+    if force_push_actor_problems(["dependabot[bot]"], False):
+        failures.append("force_push_actor_problems: one force-push by dependabot[bot] was refused")
+    if not force_push_actor_problems([None], False):
+        failures.append("force_push_actor_problems: a force-push with no readable actor (None) was not caught")
+    if not force_push_actor_problems([], True):
+        failures.append("force_push_actor_problems: hasNextPage=true with zero fetched actors was not caught")
 
     # _only_version_changed — a string change is always just the specifier; a
     # table (Cargo's inline form) must keep every OTHER key identical.
@@ -3222,8 +3456,14 @@ def selftest() -> int:
     good_entries = [dep_entry()]
 
     def expect_class(label: str, candidate: str, pr: dict, entries: list[dict], parents: list[dict],
-                     old: bytes | None, new: bytes | None, want: str | None) -> None:
-        if classify_dependabot_bump(candidate, pr, entries, parents, old, new) != want:
+                     old: bytes | None, new: bytes | None, want: str | None, *,
+                     commit: dict | None = None, fp_actors: list[str | None] | None = None,
+                     fp_has_next: bool = False) -> None:
+        got = classify_dependabot_bump(candidate, pr, entries, parents,
+                                       commit if commit is not None else dep_commit(),
+                                       fp_actors if fp_actors is not None else no_force_pushes,
+                                       fp_has_next, old, new)
+        if got != want:
             failures.append(f"classify_dependabot_bump: {label}")
 
     expect_class("chtypes#285 §2: a dev-dependency patch bump through dependabot passes", "python",
@@ -3238,6 +3478,21 @@ def selftest() -> int:
                one_parent, py_old, py_version_changed, None)
     expect_class("classify_dependabot_bump never reaches the manifest diff without a usable parent",
                "python", dep_pr(), good_entries, [], None, None, None)
+
+    # chtypes#285 §2, added after #333's first review: a force-pushed
+    # replacement commit, forged to look like a dependabot bump, must still
+    # refuse end-to-end through classify_dependabot_bump — not just through
+    # commit_provenance_problems/force_push_actor_problems in isolation.
+    expect_class("chtypes#285 §2: a forged head commit (author.login not dependabot[bot]) refuses "
+               "end-to-end, even with an otherwise-perfect manifest diff", "python",
+               dep_pr(), good_entries, one_parent, py_old, py_new_good, None,
+               commit=dep_commit(author={"login": "someone"}))
+    expect_class("chtypes#285 §2: a non-dependabot force-push actor refuses end-to-end", "python",
+               dep_pr(), good_entries, one_parent, py_old, py_new_good, None,
+               fp_actors=["someone"])
+    expect_class("chtypes#285 §2: a force-push timeline with more events than fetched (hasNextPage) "
+               "refuses end-to-end", "python", dep_pr(), good_entries, one_parent, py_old, py_new_good,
+               None, fp_actors=["dependabot[bot]"], fp_has_next=True)
 
     # Measured against this repository's OWN history: commit 84401fd's real,
     # unedited message (a genuine dependabot patch bump of ruff that stayed
@@ -3376,7 +3631,14 @@ def selftest() -> int:
           "manifest_bump_problems and _only_version_changed catch a version-field change, a runtime dependency "
           "change, a dev dependency added or removed, and a named dependency changed by more than its own "
           "specifier, across all three narrowed ecosystems' own manifest formats, parsed as data by tomllib/json; "
-          "and DEPENDABOT_MANIFESTS cannot drift from PROTECTED_GLOBS' own dependabot_ecosystem entries silently")
+          "DEPENDABOT_MANIFESTS cannot drift from PROTECTED_GLOBS' own dependabot_ecosystem entries silently; "
+          "commit_provenance_problems and force_push_actor_problems (added after review) refuse a forged head "
+          "commit's author or committer login, an unverified signature, a non-dependabot force-push actor and an "
+          "unseen (hasNextPage) force-push event, measured against this repository's own real dependabot commit "
+          "84401fd and its pull request's own (empty) force-push timeline, and classify_dependabot_bump refuses "
+          "each of these end-to-end too; and decide() itself refuses a dependabot-eligible manifest+lockfile diff "
+          "that also touches an unconditionally protected path even if dependabot_ecosystem were granted, and "
+          "still protects the manifest when an extra UNPROTECTED path is also touched")
     return 0
 
 
