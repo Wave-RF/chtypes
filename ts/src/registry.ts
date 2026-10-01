@@ -326,8 +326,10 @@ const fallbackCache = new Map<string, { dir: string; checkedAt: number }>();
  * registry's timezone and the artifact's own `unsafe_families.txt`.
  *
  * Libraries are never dlclosed; `close()` joins background threads only.
- * Loading the same artifact path from two `Registry` instances shares one
- * loaded image, so `chs_init` still runs exactly once per artifact.
+ * Loading the same artifact FILE from two `Registry` instances — by one path,
+ * another spelling, a symlink or a hardlink — shares one loaded image, so
+ * `chs_init` still runs exactly once per artifact; a second timezone for an
+ * image already initialized is refused as `InitConflictError`.
  */
 export class Registry {
   /**
@@ -489,7 +491,7 @@ export class Registry {
 
     // Each library keeps its own DateLUT and its own refuse-list. An absent or
     // empty unsafe_families.txt is a valid empty list, not a missing file.
-    native.init(this.timezone, readUnsafeFamilies(sub, manifest));
+    native.init(this.timezone, readUnsafeFamilies(sub, manifest), libPath);
 
     const library = new Library(native);
     this.loaded.push(library);

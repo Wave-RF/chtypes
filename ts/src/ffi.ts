@@ -49,8 +49,15 @@ import {
   wrapPointer,
   type JsExternal,
 } from 'ffi-rs';
-import { realpathSync } from 'node:fs';
-import { ABI_REVISION, ChtypesError, schemaErrorFor, UnsupportedError } from './errors.js';
+import { realpathSync, statSync } from 'node:fs';
+import {
+  ABI_REVISION,
+  ChtypesError,
+  InitConflictError,
+  RegistryError,
+  schemaErrorFor,
+  UnsupportedError,
+} from './errors.js';
 import { DOC_ALL, EXPORT_NONE } from './format.js';
 
 const { External, String: Str, I32, U64, Void, U8Array } = DataType;
@@ -263,9 +270,62 @@ function declare(library: string) {
 
 type Fns = ReturnType<typeof declare>;
 
+/**
+ * One `NativeLibrary` per artifact IMAGE, keyed on its FILE identity: the
+ * `dev:ino` of a stat of its path, following symlinks, as bigints (an inode
+ * can exceed 2^53). That is what `dlopen` itself deduplicates on — a symlink,
+ * a second spelling and a HARDLINK of one file all stat to one key, and
+ * `dlopen` hands each the one image already mapped. A realpath cannot see a
+ * hardlink (a different path to the same inode), and keying on one let a
+ * hardlink re-run `chs_init` on a live image and move its zone (issue #355).
+ */
 const loaded = new Map<string, NativeLibrary>();
 
-/** One loaded artifact. Loading the same path twice returns the same object. */
+/**
+ * Every spelling an image has been opened under — as given and resolved — to
+ * its key. The loader matches an already-loaded image by the path it was
+ * opened under before it looks at the file at all, so once a path is open, a
+ * NEW file renamed over it (a fresh inode) is still answered with the OLD
+ * image; keying on the inode alone would call that file new and re-run
+ * `chs_init` on the live image. A spelling already open is therefore the image
+ * it was opened as, whatever is at that path now.
+ */
+const openedAs = new Map<string, string>();
+
+/**
+ * The key of the image `dlopen` will hand back for `path`, and the spellings
+ * to record once it is open: the image already opened under this spelling, as
+ * given or resolved, if there is one; else the file a stat of `path` names,
+ * following symlinks. A path that cannot be stat'ed or resolved is a
+ * `RegistryError` naming it — never keyed on its spelling instead, because a
+ * spelling cannot tell a hardlink of a loaded image from a new file, and
+ * guessing "new" is exactly the silent re-initialization the key exists to
+ * stop.
+ */
+function imageIdentity(path: string): { key: string; spellings: string[] } {
+  let key: string;
+  let resolved: string;
+  try {
+    const st = statSync(path, { bigint: true });
+    key = `${st.dev}:${st.ino}`;
+    resolved = realpathSync(path);
+  } catch (err) {
+    throw new RegistryError(`chtypes: cannot identify the artifact image at ${path}: ${String(err)}`, {
+      cause: err,
+    });
+  }
+  const spellings = [path, resolved];
+  for (const spelling of spellings) {
+    const known = openedAs.get(spelling);
+    if (known !== undefined) return { key: known, spellings };
+  }
+  return { key, spellings };
+}
+
+/**
+ * One loaded artifact. Loading the same image twice — by the same path, another
+ * spelling, a symlink or a hardlink — returns the same object.
+ */
 export class NativeLibrary {
   private readonly fns: Fns;
   private readonly haveStrlen: boolean;
@@ -306,9 +366,9 @@ export class NativeLibrary {
    */
   readonly abiRevision: number;
 
-  /** The realpath `open()` registered the image under — the `library` name for
-   * raw `load` calls that step outside the declared symbol table (the
-   * free-by-address in `rows`'s export path). */
+  /** The image key `open()` registered the image under with ffi-rs (see
+   * `loaded`) — the `library` name for raw `load` calls that step outside the
+   * declared symbol table (the free-by-address in `rows`'s export path). */
   private readonly key: string;
 
   private constructor(path: string, key: string) {
@@ -366,21 +426,25 @@ export class NativeLibrary {
   }
 
   static open(path: string): NativeLibrary {
-    // dlopen is refcounted, and `chs_init` must run exactly once per loaded
-    // library, so two Registry instances over one directory must share one
-    // NativeLibrary rather than initializing it twice.
-    const key = realpathSync(path);
-    const existing = loaded.get(key);
-    if (existing !== undefined) return existing;
-    open({ library: key, path });
-    const lib = new NativeLibrary(path, key);
-    loaded.set(key, lib);
+    // dlopen maps one image per file, and `chs_init` must run exactly once per
+    // image, so every open of one image — two Registry instances over one
+    // directory, a symlink, a hardlink — must share one NativeLibrary rather
+    // than initializing it twice. A path that cannot be stat'ed is refused
+    // here, before anything is dlopen'd.
+    const { key, spellings } = imageIdentity(path);
+    let lib = loaded.get(key);
+    if (lib === undefined) {
+      open({ library: key, path });
+      lib = new NativeLibrary(path, key);
+      loaded.set(key, lib);
+    }
+    for (const spelling of spellings) openedAs.set(spelling, key);
     return lib;
   }
 
   static isLoaded(path: string): boolean {
     try {
-      return loaded.has(realpathSync(path));
+      return loaded.has(imageIdentity(path).key);
     } catch {
       return false;
     }
@@ -489,14 +553,15 @@ export class NativeLibrary {
    * `out_err` is ClickHouse's own message on the one reachable failure — an
    * unknown timezone — and is folded into the thrown error's message; a bare
    * code cannot say which name was rejected.
+   *
+   * A second `init` asking for a DIFFERENT timezone is `InitConflictError`,
+   * naming `requestedPath` — the path this load asked for, which for a
+   * hardlink or symlink is not the path the image was first opened under.
    */
-  init(timezone: string, unsafeFamilies: string): void {
+  init(timezone: string, unsafeFamilies: string, requestedPath: string = this.path): void {
     if (this.initTimezone !== null) {
       if (this.initTimezone !== timezone) {
-        throw new ChtypesError(
-          `chtypes: ${this.path} is already loaded with timezone ${this.initTimezone}; ` +
-            `one loaded library gets one chs_init, so ${timezone} cannot be honored`,
-        );
+        throw new InitConflictError(requestedPath, this.initTimezone, timezone);
       }
       return;
     }

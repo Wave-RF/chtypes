@@ -62,6 +62,41 @@ export class ChtypesError extends Error {
 export class RegistryError extends ChtypesError {}
 
 /**
+ * This artifact IMAGE is already initialized under a different timezone.
+ *
+ * `dlopen` maps one image per file, and `chs_init` runs at most once per
+ * image, so a second load asking for another zone can be neither honored nor
+ * silently ignored: re-running `chs_init` would move the zone under the first
+ * load's live libraries. A hardlink or symlink to a loaded artifact is that
+ * same image and is refused the same way.
+ *
+ * A `RegistryError`, because it is a reason the loader cannot serve this
+ * request — so a `catch` written against `for()`'s documented `RegistryError`
+ * keeps working — and matched with `instanceof InitConflictError`, like every
+ * other class here. Not an `ArtifactError`: the artifact is fine, and none of
+ * the shared fetch codes describes it.
+ */
+export class InitConflictError extends RegistryError {
+  /** The artifact path this load asked for, as given. */
+  readonly path: string;
+  /** The timezone the image is live under. */
+  readonly have: string;
+  /** The timezone this load asked for, refused. */
+  readonly want: string;
+
+  constructor(path: string, have: string, want: string) {
+    super(
+      `chtypes: ${path} is already initialized with timezone ${JSON.stringify(have)}; ` +
+        `cannot re-initialize with ${JSON.stringify(want)} (one image per file — a hardlink ` +
+        'or symlink to a loaded artifact is the same image, and chs_init runs at most once)',
+    );
+    this.path = path;
+    this.have = have;
+    this.want = want;
+  }
+}
+
+/**
  * A REFUSAL: ClickHouse itself refused a type, a column list, an engine or a
  * TTL.
  *

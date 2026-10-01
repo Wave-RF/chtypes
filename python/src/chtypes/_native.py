@@ -291,22 +291,77 @@ class _RWLock:
                 self._cond.notify_all()
 
 
+# An artifact image's identity: the (st_dev, st_ino) of its FILE.
+#
+# Every per-image table in this binding — the lock below, and
+# `registry._INITIALIZED_IMAGES` / `registry._IMAGE_REFS` — is keyed on it,
+# because it is what `dlopen` itself deduplicates on: a symlink, a second
+# spelling and a HARDLINK of one file all stat to one key, and `dlopen` hands
+# each the one image already mapped. A resolved path cannot see a hardlink (a
+# different path to the same inode), and keying on one let a hardlink re-run
+# `chs_init` on a live image and move its zone (issue #355).
+ImageKey = tuple[int, int]
+
+# Every spelling an image has been opened under — as given and resolved — to
+# its key. The loader matches an already-loaded image by the path it was
+# opened under before it looks at the file at all, so once a path is open, a
+# NEW file renamed over it (a fresh inode) is still answered with the OLD
+# image; keying on the inode alone would call that file new and re-run
+# `chs_init` on the live image. A spelling already open is therefore the image
+# it was opened as, whatever is at that path now.
+_IMAGE_PATHS: Final[dict[str, ImageKey]] = {}
+# Guards `_IMAGE_PATHS` and `_IMAGE_LOCKS` (load paths only, never a row call).
+_IMAGE_LOCKS_MU: Final = threading.Lock()
+
+
+def image_identity(path: str) -> tuple[ImageKey, tuple[str, ...]]:
+    """The key of the image `dlopen` will hand back for ``path``, and the
+    spellings to record once it is open (`remember_image_paths`).
+
+    The image already opened under this spelling, as given or resolved, if
+    there is one; else the file a stat of ``path`` names, following symlinks.
+    A path that cannot be stat'ed or resolved raises `RegistryError` naming it
+    — it is never keyed on its spelling instead, because a spelling cannot
+    tell a hardlink of a loaded image from a new file, and guessing "new" is
+    exactly the silent re-initialization the key exists to stop.
+    """
+    try:
+        st = os.stat(path)
+        resolved = os.path.realpath(path, strict=True)
+    except OSError as exc:
+        raise RegistryError(
+            f"chtypes: cannot identify the artifact image at {path}: {exc}"
+        ) from exc
+    spellings = (path, resolved)
+    with _IMAGE_LOCKS_MU:
+        for spelling in spellings:
+            known = _IMAGE_PATHS.get(spelling)
+            if known is not None:
+                return known, spellings
+    return (st.st_dev, st.st_ino), spellings
+
+
+def remember_image_paths(key: ImageKey, spellings: tuple[str, ...]) -> None:
+    """Record that ``key``'s image is open under each of ``spellings``."""
+    with _IMAGE_LOCKS_MU:
+        for spelling in spellings:
+            _IMAGE_PATHS[spelling] = key
+
+
 # One lock per dlopen'd IMAGE, not per wrapper object.
 #
 # `dlopen` refcounts one image per file, so two `Registry` instances over one
 # directory share the C globals `chs_set_default_settings` replaces — and two
 # `NativeLibrary` objects each holding their own lock would exclude nothing at
 # all. Go closes this by interning the wrapper (a process-wide `loadedLibs`
-# map, one `*Library` per resolved path) and TypeScript by the same trick (a
-# realpath-keyed `loaded` map). Python's `Library` is not interned — only
+# map, one `*Library` per image) and TypeScript by the same trick (an
+# image-keyed `loaded` map). Python's `Library` is not interned — only
 # `chs_init` is deduplicated, by `_INITIALIZED_IMAGES` — so the LOCK is
 # interned instead, on the same key.
-_IMAGE_LOCKS: Final[dict[str, _RWLock]] = {}
-_IMAGE_LOCKS_MU: Final = threading.Lock()
+_IMAGE_LOCKS: Final[dict[ImageKey, _RWLock]] = {}
 
 
-def _image_lock(path: str) -> _RWLock:
-    key = os.path.realpath(path)
+def _image_lock(key: ImageKey) -> _RWLock:
     with _IMAGE_LOCKS_MU:
         lock = _IMAGE_LOCKS.get(key)
         if lock is None:
@@ -330,9 +385,12 @@ class NativeLibrary:
 
     __slots__ = ("_fn", "_lock", "abi_revision", "path")
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, image_key: ImageKey | None = None) -> None:
+        """``image_key`` is the image's identity as the caller already
+        computed it (`image_identity`), so the lock and the caller's own
+        tables share one key from one stat; computed here when omitted."""
         self.path = path
-        self._lock = _image_lock(path)
+        self._lock = _image_lock(image_key if image_key is not None else image_identity(path)[0])
         try:
             cdll = ctypes.CDLL(path, mode=os.RTLD_NOW | os.RTLD_LOCAL)
         except OSError as exc:

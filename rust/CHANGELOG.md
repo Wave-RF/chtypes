@@ -17,6 +17,10 @@ The four bindings in this repository are released together and give one answer, 
 
   `docs/guides/filters.md`, `docs/guides/settings.md` and `docs/guides/batches.md` are updated to match, and new end-to-end tests pin the relinked behavior against a loaded artifact (`non_accepted_batch_zeroes_counts_and_carries_verdict_code`, `rejected_zero_row_batch_names_the_export_decline`, `session_timezone_setting_is_declined_not_ignored`).
 
+### Fixed
+
+- **A hard-linked artifact is now recognized as the same image.** The same-image timezone guard keyed on a canonicalized path, and a hardlink is a different path to the same file: `dlopen` handed it the image already loaded, `chs_init` re-ran on that live image, and the first `Library`'s answers silently moved to the second zone. The guard and the per-image mutex now both key on the file itself (device and inode, from one stat that follows symlinks), so a hardlink loaded under a different timezone is `Error::InitConflict` (its shape unchanged), and under the same timezone it shares the open image's mutex. A path that is already open still names the image it was opened as after a new file is renamed over it, because the loader matches that path before it looks at the file. A path that cannot be stat'ed is now `Error::LibraryRead` naming it, returned before anything is `dlopen`ed; it used to fall back to the path's spelling and fail later as `Error::Load` (closes #355).
+
 ## [0.5.1] — 2026-10-01
 
 ### Added
