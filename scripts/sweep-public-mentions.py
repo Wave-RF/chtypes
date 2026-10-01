@@ -146,7 +146,7 @@ def exemption_reason(body: str) -> str | None:
     return None
 
 
-def get_needles() -> tuple[list[str], list[re.Pattern], tuple[re.Pattern, set[str]] | None]:
+def get_needles() -> tuple[list[str], list[re.Pattern], list[tuple[re.Pattern, set[str], str]]]:
     """Read the needle set straight from lint-public.sh --print-rules, so this
     script can never carry a second, drifted copy of what counts as a leak."""
     out = subprocess.run(
@@ -158,7 +158,14 @@ def get_needles() -> tuple[list[str], list[re.Pattern], tuple[re.Pattern, set[st
     ).stdout
     literals: list[str] = []
     regexes: list[re.Pattern] = []
-    local_path: tuple[re.Pattern, set[str]] | None = None
+    # LOCALPATH is a repeatable kind: a group-captured pattern plus an
+    # allowlist of what the captured group may legitimately be (a username,
+    # a public token this repository's own tree uses). lint-public.sh can
+    # print more than one of these — it does, as of 2026-10-01 — so this is a
+    # LIST, not a single slot; an earlier version of this function kept only
+    # the last one seen, which would have silently stopped checking local
+    # absolute paths the moment a second LOCALPATH rule was added.
+    local_rules: list[tuple[re.Pattern, set[str], str]] = []
     for line in out.splitlines():
         if not line.strip():
             continue
@@ -170,15 +177,16 @@ def get_needles() -> tuple[list[str], list[re.Pattern], tuple[re.Pattern, set[st
             regexes.append(re.compile(parts[1], re.IGNORECASE))
         elif kind == "LOCALPATH":
             pattern, placeholders_csv = parts[1], parts[2]
+            label = parts[3] if len(parts) > 3 else "local absolute path"
             placeholders = {p for p in placeholders_csv.split(",") if p}
-            local_path = (re.compile(pattern), placeholders)
+            local_rules.append((re.compile(pattern, re.IGNORECASE), placeholders, label))
         else:
             print(f"sweep-public-mentions: unrecognized rule kind {kind!r} from --print-rules", file=sys.stderr)
-    return literals, regexes, local_path
+    return literals, regexes, local_rules
 
 
 def find_hits(body: str, literals: list[str], regexes: list[re.Pattern],
-              local_path: tuple[re.Pattern, set[str]] | None) -> list[tuple[str, str]]:
+              local_rules: list[tuple[re.Pattern, set[str], str]]) -> list[tuple[str, str]]:
     """Return (needle-description, matching-line) pairs for one body of text."""
     hits: list[tuple[str, str]] = []
     for line in body.splitlines():
@@ -189,17 +197,16 @@ def find_hits(body: str, literals: list[str], regexes: list[re.Pattern],
         for pat in regexes:
             for m in pat.finditer(line):
                 hits.append((f"pattern: {pat.pattern}", line.strip()))
-        if local_path is not None:
-            pat, placeholders = local_path
+        for pat, placeholders, label in local_rules:
             for m in pat.finditer(line):
                 if m.group(1).lower() in placeholders:
                     continue
-                hits.append(("local absolute path", line.strip()))
+                hits.append((label, line.strip()))
     return hits
 
 
 def classify(label: str, items: list[dict], literals: list[str], regexes: list[re.Pattern],
-             local_path: tuple[re.Pattern, set[str]] | None) -> tuple[list[dict], list[dict]]:
+             local_rules: list[tuple[re.Pattern, set[str], str]]) -> tuple[list[dict], list[dict]]:
     """Split the hits found across a list of {url, body} items from one
     surface into findings and exempted occurrences. The exemption marker is
     read from EACH item's own body only (see exemption_reason) — a marker in
@@ -209,7 +216,7 @@ def classify(label: str, items: list[dict], literals: list[str], regexes: list[r
     findings: list[dict] = []
     exempted: list[dict] = []
     for item in items:
-        hits = find_hits(item["body"], literals, regexes, local_path)
+        hits = find_hits(item["body"], literals, regexes, local_rules)
         if not hits:
             continue
         reason = exemption_reason(item["body"])
@@ -262,7 +269,7 @@ def selftest() -> int:
     spells out a needle itself: it plants whatever the live rule set hands
     back, the same way lint-public.sh's own --selftest plants its fixtures in
     a throwaway git repo rather than in its own tracked source."""
-    literals, regexes, local_path = get_needles()
+    literals, regexes, local_rules = get_needles()
     if not literals:
         print(
             "sweep-public-mentions: selftest needs at least one LITERAL rule from "
@@ -292,7 +299,7 @@ def selftest() -> int:
         {"url": "https://example.invalid/unmarked-again", "body": f"and a second, unrelated mention of {needle}"},
     ]
 
-    findings, exempted = classify(label, items, literals, regexes, local_path)
+    findings, exempted = classify(label, items, literals, regexes, local_rules)
     finding_urls = {e["url"] for e in findings}
     exempted_urls = {e["url"] for e in exempted}
 
@@ -362,13 +369,13 @@ def main() -> int:
     if args.selftest:
         return selftest()
 
-    literals, regexes, local_path = get_needles()
+    literals, regexes, local_rules = get_needles()
     all_findings: list[dict] = []
     all_exempted: list[dict] = []
 
     for label, endpoint, jq in SURFACES:
         items = fetch(endpoint, jq, args.repo)
-        findings, exempted = classify(label, items, literals, regexes, local_path)
+        findings, exempted = classify(label, items, literals, regexes, local_rules)
         all_findings.extend(findings)
         all_exempted.extend(exempted)
 
