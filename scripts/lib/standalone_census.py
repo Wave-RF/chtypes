@@ -45,6 +45,21 @@ PARITY = [
 ]
 
 
+def _skip_message(output_lines):
+    """The message to print for one skipped test (chtypes#348): its own last
+    non-empty `output` line before the skip event, with the `--- SKIP:`
+    framing line Go always emits just before that event excluded — otherwise
+    every skip would print that boilerplate instead of the t.Skip/t.Skipf
+    text a line or two above it.
+    """
+    for line in reversed(output_lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("--- SKIP:"):
+            continue
+        return stripped
+    return ""
+
+
 def run_census(log_path, rc, have_reg, require, abi_fixtures_set):
     """Read one go-test -json log and return (exit_code, printed_lines).
 
@@ -59,6 +74,15 @@ def run_census(log_path, rc, have_reg, require, abi_fixtures_set):
     output: dict[str, list[str]] = {}
     passed: set[str] = set()
     lines: list[str] = []
+    # A package-level skip (the whole package built but matched no tests, or
+    # was excluded by a build constraint) carries no `Test` field at all —
+    # chtypes#348 asks only for PER-TEST skips to be named here, so those
+    # events stay excluded from `skip`/`skips` exactly as the pre-existing
+    # `if not t: continue` already excluded them (they were never counted,
+    # not merely unlabelled). `test_package` remembers each named test's own
+    # package so the printed line can carry it without a second pass over
+    # the log.
+    test_package: dict[str, str] = {}
 
     with open(log_path, encoding="utf-8", errors="replace") as f:
         for raw in f:
@@ -75,6 +99,7 @@ def run_census(log_path, rc, have_reg, require, abi_fixtures_set):
             t, a = ev.get("Test"), ev.get("Action")
             if not t:
                 continue
+            test_package.setdefault(t, ev.get("Package", ""))
             if a == "output":
                 output.setdefault(t, []).append(ev.get("Output", "").rstrip("\n"))
                 continue
@@ -110,8 +135,15 @@ def run_census(log_path, rc, have_reg, require, abi_fixtures_set):
     checked_subtests = [t for t in passed if t.startswith("TestGoldens/")]
     if require:
         lines.append("chtypes-count golden-cases=%d" % len(checked_subtests))
+    # chtypes#348 — name every per-test skip, not just count it: a skip that
+    # should have been an assertion must not look identical to an intended
+    # one. `<package>` comes from `test_package` (captured above, off the
+    # same events); `<message>` is that test's own last non-empty `output`
+    # line before its skip event, with the `--- SKIP:` framing line Go itself
+    # prints excluded, so what is left is the line carrying the actual
+    # t.Skip/t.Skipf text (e.g. "    foo_test.go:12: some reason").
     for t in skips:
-        lines.append("    SKIPPED " + t)
+        lines.append("    SKIP %s %s: %s" % (test_package.get(t, ""), t, _skip_message(output.get(t, []))))
     # A failure is named, and its own last words are quoted — a count alone
     # sends whoever reads the log to fetch the -json file, which CI does not
     # keep.
@@ -336,14 +368,72 @@ def selftest():
             )
             return 1
 
+        # 5. THE PIN (chtypes#348): a named per-test skip prints its package,
+        # name and message, a package-level skip (no `Test` at all) is never
+        # printed as one and never inflates the counts, and the
+        # chtypes-count line's ran/skipped numbers are exactly what they were
+        # before this feature existed — one pass, one named skip.
+        named = os.path.join(tmp, "named_skip.json")
+        _write_log(
+            named,
+            [
+                {"Action": "pass", "Test": "TestFoo", "Package": "example.com/pkg"},
+                {"Action": "run", "Test": "TestBar", "Package": "example.com/pkg"},
+                {"Action": "output", "Test": "TestBar", "Package": "example.com/pkg", "Output": "=== RUN   TestBar\n"},
+                {
+                    "Action": "output",
+                    "Test": "TestBar",
+                    "Package": "example.com/pkg",
+                    "Output": "    bar_test.go:42: skipping because X is unavailable\n",
+                },
+                {
+                    "Action": "output",
+                    "Test": "TestBar",
+                    "Package": "example.com/pkg",
+                    "Output": "--- SKIP: TestBar (0.00s)\n",
+                },
+                {"Action": "skip", "Test": "TestBar", "Package": "example.com/pkg"},
+                # A package-level skip: no `Test` field at all (e.g. a
+                # package whose build constraints excluded it outright).
+                # Must be ignored exactly as the pre-existing `if not t:
+                # continue` already ignored it — not counted, and never
+                # printed as a named per-test skip.
+                {"Action": "skip", "Package": "example.com/otherpkg"},
+            ],
+        )
+        code, lines = run_census(named, 0, False, False, False)
+        if "    SKIP example.com/pkg TestBar: bar_test.go:42: skipping because X is unavailable" not in lines:
+            print(
+                "SELFTEST FAILED: the named per-test skip's package, name and t.Skipf message were not "
+                "printed as expected:\n" + "\n".join(lines),
+                file=sys.stderr,
+            )
+            return 1
+        if "chtypes-count suite=go-no-artifacts ran=1 skipped=1" not in lines:
+            print(
+                "SELFTEST FAILED: the chtypes-count line did not read ran=1 skipped=1 — a package-level "
+                "skip (no Test) must not inflate the skipped count:\n" + "\n".join(lines),
+                file=sys.stderr,
+            )
+            return 1
+        if any("otherpkg" in l for l in lines):
+            print(
+                "SELFTEST FAILED: the package-level skip (no Test field) was printed as a named skip:\n"
+                + "\n".join(lines),
+                file=sys.stderr,
+            )
+            return 1
+
         print(
             "check-standalone: selftest ok — a clean checked run passes, a parent that passed with "
             "every subtest skipped (checked zero cases) is refused under --require-artifacts "
             "(chtypes#225), a parent that outright failed is refused for its own reason without the "
-            "new message masking it, the new check stays silent without --require-artifacts, and the "
+            "new message masking it, the new check stays silent without --require-artifacts, the "
             "chtypes-count suite/golden-cases lines (chtypes#285 §1b) are derived from the same "
             "ran/skip/checked_subtests, switch label without --require-artifacts, and drop the "
-            "golden-cases line entirely there"
+            "golden-cases line entirely there, and a named per-test skip prints its package, name and "
+            "t.Skipf message while a package-level skip (no Test) stays uncounted and unprinted "
+            "(chtypes#348)"
         )
         return 0
     finally:
