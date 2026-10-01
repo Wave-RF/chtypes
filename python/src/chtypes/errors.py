@@ -22,6 +22,7 @@ __all__ = [
     "ArtifactUnpublishedError",
     "ArtifactUntrustedError",
     "ChtypesError",
+    "PatchFallbackWarning",
     "RegistryError",
     "SchemaError",
     "SourceUnreachableError",
@@ -179,6 +180,21 @@ class SourceUnreachableError(ArtifactError):
 class UnsignedArtifactWarning(UserWarning):
     """Emitted, once per fetch, when `CHTYPES_ALLOW_UNSIGNED=1` skips the
     signature check — the one loud warning docs/guides/fetch.md §4 requires."""
+
+
+class PatchFallbackWarning(UserWarning):
+    """Emitted once per (requested, actual) pair per process when a request for
+    an exact ClickHouse patch falls back to the newest installed or published
+    patch of the same line (SDK#284, docs/guides/fetch.md "Version selection").
+
+    Behavior can differ between patches of one line — the reason this change
+    exists at all — so this is a loud, once-per-pair signal, not a debug log
+    line. The pair is recorded BEFORE the warning is emitted, so a caller's
+    own `warnings.filterwarnings("error", category=PatchFallbackWarning)`
+    turning this into an exception does not cause a retry to warn again
+    (design risk R-h): the library has already loaded by the time the warning
+    fires, and the fallback is not undone.
+    """
 
 
 class SchemaError(ChtypesError):

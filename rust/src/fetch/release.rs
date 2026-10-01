@@ -283,8 +283,9 @@ fn strip_channel(v: &str) -> &str {
     }
 }
 
-/// Numeric components for ordering: `25.10.7.6` > `25.8.28.1`.
-fn version_key(v: &str) -> Vec<u64> {
+/// Numeric components for ordering: `25.10.7.6` > `25.8.28.1`. `pub(crate)`
+/// so `super::lock` can order lock keys by the same rule (F1, F6).
+pub(crate) fn version_key(v: &str) -> Vec<u64> {
     strip_channel(v)
         .split('.')
         .map(|p| p.parse().unwrap_or(0))

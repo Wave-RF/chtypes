@@ -1,8 +1,21 @@
 /**
  * The artifact-directory loader: one subdirectory per ClickHouse minor line,
- * each self-contained (docs/reference/artifact.md).
+ * each self-contained (docs/reference/artifact.md), plus — since #284 — every
+ * OTHER installed exact patch of a line, in a sibling `patches/` tree:
  *
  *   <registry>/25.8/{manifest.json, libchtypes.dylib, CH_VERSION, unsafe_families.txt}
+ *   <registry>/patches/25.8/25.8.28.1-lts/{manifest.json, libchtypes.dylib, ...}
+ *
+ * The flat `<registry>/<minor>/` slot is what a LINE request resolves to —
+ * exactly the pre-#284 layout, so every SDK through 0.4.x keeps reading it
+ * unchanged. Any OTHER exact patch of that line lives in
+ * `<registry>/patches/<minor>/<clickhouse_version>/`, which no released SDK
+ * (0.4.x and earlier) scans, fetches into or deletes (measured, issue #284
+ * comment 5919199794): it is a new, additive tree, not a migration of the old
+ * one. When a line fetch changes which patch occupies the flat slot, the
+ * outgoing install is DEMOTED — an atomic, same-filesystem rename into
+ * `patches/<minor>/<its version>/` — never deleted, so a server still on the
+ * older patch keeps its exact match with no re-fetch.
  *
  * Two rules here were paid for and are not negotiable:
  *
@@ -14,23 +27,36 @@
  *    the platform that matters.
  *  - **Each artifact is loaded into its own symbol scope (`RTLD_LOCAL`).** That
  *    is the entire mechanism by which two builds that both define
- *    `DB::DataTypeFactory` live in one process. ffi-rs loads through libloading,
- *    which uses `RTLD_LAZY | RTLD_LOCAL`; `assertLocalSymbolScope()` in the test
- *    suite proves it from outside rather than trusting the claim.
+ *    `DB::DataTypeFactory` live in one process — now routinely two builds of
+ *    the SAME minor line, one per patch. ffi-rs loads through libloading,
+ *    which uses `RTLD_LAZY | RTLD_LOCAL`; `assertLocalSymbolScope()` in the
+ *    test suite proves it from outside rather than trusting the claim.
  *
  * Where a registry IS follows the search path of docs/guides/fetch.md §1 (`paths.ts`):
  * the explicit directory, `CHTYPES_REGISTRY`, the per-user cache, then the
  * reserved system locations. Construction READS THE MANIFESTS on that path and
- * `dlopen`s nothing; a line is taken, on request, from the first directory that
- * has it. A line no directory has is the one §7 error,
- * `ArtifactMissingError` — or, with `autofetch`, a fetch on first `open()`.
+ * `dlopen`s nothing; a version is taken, on request, from the first directory
+ * that has it. Resolution (docs/reference/bindings.md §Version selection):
+ *
+ *  - **A line request** ("25.8") never falls back and never crosses lines: the
+ *    newest patch of the line, in the first search-path directory that holds
+ *    any patch of it (a nested install beating a flat one on a version tie),
+ *    pinned for this registry for as long as it runs.
+ *  - **A patch request** ("25.8.28.1-lts") loads that exact patch when it is
+ *    open or installed anywhere on the search path. Otherwise it falls back to
+ *    the newest installed patch of the same line, flags the result
+ *    `exact: false`, and warns once per (requested, actual) pair per process —
+ *    never another line, which stays the one §7 error, `ArtifactMissingError`.
+ *
+ * A patch spelled with no channel suffix matches that patch on any channel
+ * (docs/guides/fetch.md Decision 7); ordering is numeric, channel ignored.
  */
 
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { ArtifactMissingError, FETCH_COMMAND, RegistryError } from './errors.js';
-import { ensure, type EnsureOptions } from './fetch.js';
+import { ABI_REVISION, ArtifactMissingError, ArtifactUnpublishedError, FETCH_COMMAND, RegistryError } from './errors.js';
+import { compareVersions, type EnsureOptions, ensure, parseVersionSpelling, patchMatches, type VersionRequest } from './fetch.js';
 import { NativeLibrary } from './ffi.js';
 import { Library, minorOf } from './library.js';
 import {
@@ -91,7 +117,8 @@ export interface RegistryOptions {
    * path. They are opened in the order given, before the constructor returns,
    * and an entry no directory on the §1 search path holds is
    * `ArtifactMissingError` — the same §7 error the first `for()` would have
-   * thrown, thrown earlier.
+   * thrown, thrown earlier. A patch entry that falls back to its line warns at
+   * construction, exactly as `for()` would.
    *
    * It NEVER fetches, even with `autofetch` on: this constructor is
    * synchronous and `ensure()` is not, and autofetch is a first-use behavior
@@ -103,12 +130,12 @@ export interface RegistryOptions {
    */
   preload?: readonly string[] | undefined;
   /**
-   * Lazy fetch on first open (docs/guides/fetch.md §6): `open()` of a line no
+   * Lazy fetch on first open (docs/guides/fetch.md §6): `open()` of a version no
    * directory on the search path holds runs `ensure()` first, into the
-   * directory a fetch writes to (§1), once per process per line. Off by
-   * default — a production process must not begin a 250 MB download inside
-   * a request — and `CHTYPES_AUTOFETCH=1` turns it on from the environment.
-   * `for()` stays synchronous and never fetches.
+   * directory a fetch writes to (§1), once per process per (destination,
+   * spelling). Off by default — a production process must not begin a 250 MB
+   * download inside a request — and `CHTYPES_AUTOFETCH=1` turns it on from the
+   * environment. `for()` / `resolve()` stay synchronous and never fetch.
    */
   autofetch?: boolean | undefined;
   /** Options handed to `ensure()` by autofetch: source (`url`/`tag`), lock, keys, progress. */
@@ -116,15 +143,181 @@ export interface RegistryOptions {
 }
 
 /**
+ * What a `resolve()` / `openResolution()` call hands back: the loaded
+ * `Library`, the caller's own spelling, what actually loaded, and whether the
+ * two are the same patch (docs/reference/bindings.md §Version selection).
+ * `for()` / `open()` run the same resolution and hand back only `.library`.
+ */
+export interface Resolution {
+  /** The `Library` this resolution loaded (or found already loaded). */
+  readonly library: Library;
+  /** The caller's own spelling, trimmed — never normalized further. */
+  readonly requested: string;
+  /**
+   * What actually loaded, i.e. `library.version`. Equal to the requested
+   * patch when `exact` is true; the newest installed/published patch of the
+   * requested line otherwise.
+   */
+  readonly version: string;
+  /**
+   * `true` for a line request — it asked for "a patch of this line" and got
+   * one. For a patch request, `true` only when the loaded version matches the
+   * requested patch (a spelled channel matches only itself; an unspelled one
+   * matches on any channel). `false` means the fallback within the line was
+   * taken, and a warning was already issued for this (requested, actual) pair
+   * — once per pair per process.
+   */
+  readonly exact: boolean;
+}
+
+/** One patch this registry found on disk: which directory, which slot, from which search-path root. */
+interface PatchLocation {
+  readonly minor: string;
+  readonly version: string;
+  readonly dir: string;
+  /** `true`: the flat `<root>/<minor>/` slot. `false`: `<root>/patches/<minor>/<version>/`. */
+  readonly flat: boolean;
+  /** Index into the registry's search path — lower sorts first. */
+  readonly rootIndex: number;
+}
+
+interface Resolved {
+  readonly library: Library;
+  readonly actual: string;
+  readonly exact: boolean;
+}
+
+/** Every patch (flat + `patches/`) a search-path root holds, whatever line it claims. */
+function flatLocationsInRoot(root: string, rootIndex: number): PatchLocation[] {
+  const out: PatchLocation[] = [];
+  if (!isDirectory(root)) return out;
+  let entries: string[];
+  try {
+    entries = readdirSync(root);
+  } catch {
+    return out;
+  }
+  for (const entry of entries.sort()) {
+    // A dot-directory is never a version (fetch stages downloads in hidden
+    // siblings), and `patches/` is the sibling tree, never a line itself.
+    if (entry.startsWith('.') || entry === 'patches') continue;
+    const sub = path.join(root, entry);
+    if (!isDirectory(sub)) continue;
+    const manifest = readManifest(sub);
+    if (manifest === null) continue;
+    const claimedMinor = manifest.clickhouse_minor ?? minorOf(manifest.clickhouse_version ?? entry);
+    const minor = claimedMinor !== '' ? claimedMinor : entry;
+    const version = manifest.clickhouse_version !== undefined && manifest.clickhouse_version !== '' ? manifest.clickhouse_version : entry;
+    out.push({ minor, version, dir: sub, flat: true, rootIndex });
+  }
+  return out;
+}
+
+/** Every patch under `<root>/patches/*\/*\/`. */
+function nestedLocationsInRoot(root: string, rootIndex: number): PatchLocation[] {
+  const out: PatchLocation[] = [];
+  const patchesRoot = path.join(root, 'patches');
+  if (!isDirectory(patchesRoot)) return out;
+  let minorEntries: string[];
+  try {
+    minorEntries = readdirSync(patchesRoot);
+  } catch {
+    return out;
+  }
+  for (const minorEntry of minorEntries.sort()) {
+    if (minorEntry.startsWith('.')) continue;
+    const minorDir = path.join(patchesRoot, minorEntry);
+    if (!isDirectory(minorDir)) continue;
+    let versionEntries: string[];
+    try {
+      versionEntries = readdirSync(minorDir);
+    } catch {
+      continue;
+    }
+    for (const versionEntry of versionEntries.sort()) {
+      if (versionEntry.startsWith('.')) continue;
+      const sub = path.join(minorDir, versionEntry);
+      if (!isDirectory(sub)) continue;
+      const manifest = readManifest(sub);
+      if (manifest === null) continue;
+      const claimedMinor = manifest.clickhouse_minor ?? minorOf(manifest.clickhouse_version ?? minorEntry);
+      const minor = claimedMinor !== '' ? claimedMinor : minorEntry;
+      const version = manifest.clickhouse_version !== undefined && manifest.clickhouse_version !== '' ? manifest.clickhouse_version : versionEntry;
+      out.push({ minor, version, dir: sub, flat: false, rootIndex });
+    }
+  }
+  return out;
+}
+
+/** Every patch (both slots) a root holds. */
+function locationsInRoot(root: string, rootIndex: number): PatchLocation[] {
+  return [...flatLocationsInRoot(root, rootIndex), ...nestedLocationsInRoot(root, rootIndex)];
+}
+
+/** R3/R4: the newest patch, among locations from the FIRST root that has any — ties: nested beats flat. */
+function pickLineWinner(locs: readonly PatchLocation[]): PatchLocation | undefined {
+  if (locs.length === 0) return undefined;
+  const firstRoot = Math.min(...locs.map((l) => l.rootIndex));
+  const candidates = locs.filter((l) => l.rootIndex === firstRoot);
+  let best = candidates[0]!;
+  for (const cur of candidates.slice(1)) {
+    const cmp = compareVersions(cur.version, best.version);
+    if (cmp > 0 || (cmp === 0 && !cur.flat && best.flat)) best = cur;
+  }
+  return best;
+}
+
+/** R4 step 2: the first root (in search-path order) holding a location whose version matches `req` under R2. */
+function pickPatchMatch(locs: readonly PatchLocation[], req: VersionRequest): PatchLocation | undefined {
+  return [...locs].sort((a, b) => a.rootIndex - b.rootIndex).find((l) => patchMatches(l.version, req));
+}
+
+/** §3: the fallback warning, once per (requested, actual) pair per process — shared by every Registry instance. */
+const warnedPatchFallbacks = new Set<string>();
+
+function emitPatchFallbackWarning(requested: string, actual: string, minor: string, platform: string, kind: 'installed' | 'published'): void {
+  const key = `${requested}\u0000${actual}`;
+  // Recorded BEFORE emitting: a caller's warning filter that throws must not
+  // cause a retry to warn again for the same pair.
+  if (warnedPatchFallbacks.has(key)) return;
+  warnedPatchFallbacks.add(key);
+  const body =
+    kind === 'installed'
+      ? `ClickHouse ${requested} is not installed for ${platform}; using ${actual}, the newest installed patch of ${minor}. ` +
+        `Behavior can differ between patches. If ${requested} is published, install it with: ${FETCH_COMMAND} ${requested}`
+      : `ClickHouse ${requested} is not published for ${platform} at ABI revision ${ABI_REVISION}; using ${actual}, ` +
+        `the newest published patch of ${minor}. Behavior can differ between patches.`;
+  process.emitWarning(`chtypes: ${body}`, { type: 'PatchFallbackWarning', code: 'CHTYPES_PATCH_FALLBACK' });
+}
+
+/** TEST-ONLY: forget every warned pair, so a suite can assert a fresh warning fires. Not re-exported from index.ts. */
+export function resetPatchFallbackWarnings(): void {
+  warnedPatchFallbacks.clear();
+}
+
+/**
+ * R-c: re-scan the search path for a patch fallback at most this often, per
+ * requested patch, per process. Caches the CHOSEN directory, not a loaded
+ * `Library` — the load itself (one known path, not a directory read per
+ * search-path entry) still runs on every call, so a fallback whose chosen
+ * artifact is broken keeps reporting the same failure rather than being
+ * silently remembered as unresolvable.
+ */
+const FALLBACK_RECHECK_MS = 60_000;
+const fallbackCache = new Map<string, { dir: string; checkedAt: number }>();
+
+/**
  * The artifact-directory loader — the multi-version entry point of this
  * package.
  *
  * **Construction reads `manifest.json` files and `dlopen`s nothing**, with or
  * without a directory. Nothing in this package opens an artifact except a
- * request for a specific version (`for()` / `open()`) or an explicit
- * `preload` — not `versions()`, not `libraries()`, not `has()`. An open costs
- * about 120 MB resident per version, which a listing call must not spend on a
- * caller's behalf.
+ * request for a specific version (`for()` / `resolve()` / `open()` /
+ * `openResolution()`) or an explicit `preload` — not `versions()`, not
+ * `libraries()`, not `has()`. An open costs about 120 MB resident per patch,
+ * which a listing call must not spend on a caller's behalf, and which grows
+ * with every DISTINCT patch a process is asked for — libraries are never
+ * dlclosed (docs/guides/multi-version.md).
  *
  * An open dlopens the artifact into its own symbol scope (`RTLD_LOCAL`),
  * verifies its ABI revision against this binding's `ABI_REVISION` (a different
@@ -148,25 +341,32 @@ export class Registry {
   /** This host's platform key, e.g. `darwin-arm64` — the only artifacts a process can dlopen. */
   readonly platform: string;
 
-  private readonly byId = new Map<string, Library>();
   private readonly byPath = new Map<string, Library>();
   private readonly loaded: Library[] = [];
+  /** Line -> the library currently answering FOR THE LINE. Set once per line; never re-pointed while this registry runs (R3/R8). */
+  private readonly linePins = new Map<string, Library>();
   /**
-   * Minor line -> the FIRST directory on the search path that holds it, as the
-   * construction-time manifest scan found it. What `versions()` answers from,
-   * and what makes "no artifact anywhere" and a bad `preload` entry decidable
-   * at construction without a single `dlopen`.
+   * Line -> every patch the construction-time manifest scan found for it,
+   * across the whole search path. What `versions()` answers from, and what
+   * makes "no artifact anywhere" and a bad `preload` entry decidable at
+   * construction without a single `dlopen`. Resolution itself re-scans the
+   * live filesystem on every call (a patch installed after construction, by
+   * this process or another, is used from the next call on).
    */
-  private readonly known = new Map<string, string>();
+  private readonly known = new Map<string, PatchLocation[]>();
   private readonly timezone: string;
   private readonly verifyChecksums: boolean;
   private readonly autofetch: boolean;
   private readonly fetchOptions: EnsureOptions;
   private readonly explicit: string | undefined;
+  /** (dest, line) already `Ensure()`d successfully by THIS registry's autofetch — never re-read over the network again. */
+  private readonly ensuredLines = new Set<string>();
+  /** (dest, exact patch) autofetch has already confirmed CHTYPES_ARTIFACT_UNPUBLISHED for — never retried within this registry's lifetime. */
+  private readonly unpublishedPatches = new Set<string>();
 
   /**
    * Scan a registry. Reads manifests; opens nothing unless `preload` names a
-   * line.
+   * version.
    *
    * @param dir - the registry root; the head of the search path. Absent, the
    *   path is `CHTYPES_REGISTRY`, the per-user artifact cache, then the system
@@ -176,7 +376,7 @@ export class Registry {
    * @throws {RegistryError} for what manifests can decide, and only that: a
    *   directory named explicitly (the argument or `CHTYPES_REGISTRY`) that does
    *   not exist, and no directory on the search path holding a readable
-   *   `<minor>/manifest.json` — both suppressed when autofetch is on. A
+   *   manifest at either slot — both suppressed when autofetch is on. A
    *   `preload` entry no directory holds is `ArtifactMissingError`. Everything
    *   a bad artifact can be wrong about — a failed checksum, a load failure, a
    *   library whose ClickHouse version disagrees with its manifest — is
@@ -206,35 +406,16 @@ export class Registry {
       }
     }
 
-    // The scan: every directory on the path, in order, first one holding a line
-    // wins. Manifests only — this is the cheap half of what construction used
+    // The scan: every directory on the path, in order, every patch at either
+    // slot. Manifests only — this is the cheap half of what construction used
     // to do, and it is all that is left of it.
-    for (const root of this.searchPath) {
-      if (!isDirectory(root)) continue;
-      let entries: string[];
-      try {
-        entries = readdirSync(root);
-      } catch {
-        continue; // unreadable: not a registry, and not this call's business
+    this.searchPath.forEach((root, rootIndex) => {
+      for (const loc of locationsInRoot(root, rootIndex)) {
+        const arr = this.known.get(loc.minor) ?? [];
+        arr.push(loc);
+        this.known.set(loc.minor, arr);
       }
-      for (const entry of entries.sort()) {
-        // A dot-directory is never a version: fetch stages its downloads and
-        // unpacks in hidden siblings, and a .DS_Store is not a version either.
-        if (entry.startsWith('.')) continue;
-        const sub = path.join(root, entry);
-        if (!isDirectory(sub)) continue;
-        // A registry may legitimately hold scratch directories: a missing or
-        // unparseable manifest is skipped in silence.
-        const manifest = readManifest(sub);
-        if (manifest === null) continue;
-        // The manifest's own claim; the directory name is only the last
-        // resort, exactly as it is when the library is finally loaded and
-        // names itself.
-        const claimed = manifest.clickhouse_minor ?? minorOf(manifest.clickhouse_version ?? '');
-        const line = claimed !== '' ? claimed : entry;
-        if (!this.known.has(line)) this.known.set(line, sub);
-      }
-    }
+    });
 
     const primary = this.searchPath.find((d) => looksLikeRegistry(d));
     if (primary === undefined) {
@@ -258,16 +439,22 @@ export class Registry {
 
   /**
    * Open one `preload` entry, before the constructor returns, without
-   * fetching. Resolution is `for()`'s, and so is the failure: a line no
-   * directory holds is the same `ArtifactMissingError`, raised earlier.
+   * fetching. Resolution is `for()`'s (minus any fetch), and so is the
+   * failure: a version no directory holds anywhere is the same
+   * `ArtifactMissingError`, raised earlier. A patch entry that falls back
+   * warns here, at construction, exactly as `for()` would.
    */
   private preloadLine(version: string): void {
     if (version === '') {
       throw new RegistryError("chtypes: preload: an empty version does not mean 'pick one'");
     }
-    if (this.resolve(version) === undefined) {
-      throw new ArtifactMissingError(minorOf(version), this.platform, this.searchPath);
+    const req = parseVersionSpelling(version);
+    const resolved = this.resolveSync(req);
+    if (resolved === undefined) {
+      throw new ArtifactMissingError(req.line, this.platform, this.searchPath);
     }
+    // resolveSync (resolvePatchSync, for a patch entry) already warns
+    // internally when it falls back — nothing further to do here.
   }
 
   /** dlopen one artifact directory, cross-check it, `chs_init` it, index it. */
@@ -306,70 +493,129 @@ export class Registry {
 
     const library = new Library(native);
     this.loaded.push(library);
-    // Release order, not scan order: the directory listing is lexical, which
-    // put 25.10 before 25.8 (docs/reference/bindings.md §Version selection, rule 2 —
-    // every ordered surface uses numeric release order; fixed 2026-08-26).
-    this.loaded.sort((a, b) => compareMinor(a.minor, b.minor));
+    // Full numeric version order (docs/reference/bindings.md §Version
+    // selection, rule 2): two patches of one line both sort by their own
+    // exact version, never merely grouped by minor.
+    this.loaded.sort((a, b) => compareVersions(a.version, b.version));
     this.byPath.set(sub, library);
-    // Indexed under both spellings: docker tags drift, and an exact-match-only
-    // lookup silently loses a whole version column. First directory wins: a
-    // line already loaded from earlier on the search path is not displaced.
-    if (!this.byId.has(library.version)) this.byId.set(library.version, library);
-    if (!this.byId.has(library.minor)) this.byId.set(library.minor, library);
     return library;
   }
 
-  /** Load `<dir>/<minor>/` if it is an artifact directory; null when it is not. */
-  private loadLine(dir: string, minor: string): Library | null {
-    const sub = path.join(dir, minor);
-    if (!isDirectory(sub)) return null;
-    const manifest = readManifest(sub);
+  /** Load an artifact directory whose manifest is already known-readable, or return null when it is not one. */
+  private loadDir(dir: string): Library | null {
+    const manifest = readManifest(dir);
     if (manifest === null) return null;
-    return this.load(sub, manifest);
+    return this.load(dir, manifest);
   }
 
-  private lookup(version: string): Library | undefined {
-    return this.byId.get(version) ?? this.byId.get(minorOf(version));
+  /** Every patch (both slots, every search-path root) this registry can currently see for `minor` — a live scan. */
+  private scanLine(minor: string): PatchLocation[] {
+    const out: PatchLocation[] = [];
+    this.searchPath.forEach((root, rootIndex) => {
+      for (const loc of locationsInRoot(root, rootIndex)) {
+        if (loc.minor === minor) out.push(loc);
+      }
+    });
+    return out;
+  }
+
+  /** R3: line request — the pin if this registry already has one, else the newest patch in the first root that holds any. */
+  private resolveLineSync(req: VersionRequest): Resolved | undefined {
+    const pinned = this.linePins.get(req.line);
+    if (pinned !== undefined) return { library: pinned, actual: pinned.version, exact: true };
+    const winner = pickLineWinner(this.scanLine(req.line));
+    if (winner === undefined) return undefined;
+    const library = this.loadDir(winner.dir);
+    if (library === null) return undefined;
+    this.linePins.set(req.line, library);
+    return { library, actual: library.version, exact: true };
+  }
+
+  /** R4 steps 1-2: an exact match, already open or anywhere on the search path — never a fallback. */
+  private resolveExactPatchSync(req: VersionRequest): Library | undefined {
+    const already = this.loaded.find((l) => patchMatches(l.version, req));
+    if (already !== undefined) return already;
+    const matched = pickPatchMatch(this.scanLine(req.line), req);
+    if (matched === undefined) return undefined;
+    return this.loadDir(matched.dir) ?? undefined;
   }
 
   /**
-   * Resolve without fetching: what is already open, then the line's directory
-   * as the construction-time scan recorded it, then a fresh walk of the search
-   * path for a line installed since. `undefined` means no directory holds it,
-   * which is a fetch's cue on `open()` and the §7 error everywhere else —
-   * `preload` never fetches, and this is the one function that makes the
-   * preload path and the first-use path identical in everything else.
+   * R4 in full, synchronous shape: exact, else the newest-installed fallback
+   * within the line. R-c: the already-open check is free (no I/O) and always
+   * current; everything past it needs a directory read per search-path entry,
+   * so once a request has fallen back, the WHOLE re-check — retrying the exact
+   * match and picking the fallback alike — is throttled together, at most
+   * once per `FALLBACK_RECHECK_MS` per requested patch per process.
+   *
+   * §3: the warning fires as soon as the fallback patch is CHOSEN — its
+   * version is already known from the manifest scan, before `loadDir` ever
+   * runs — so a caller sees the warning even when the chosen directory then
+   * fails to load (a broken artifact is still a fallback that was taken).
    */
-  private resolve(version: string): Library | undefined {
-    const hit = this.lookup(version);
-    if (hit !== undefined) return hit;
-    const minor = minorOf(version);
-    // The scan already resolved every line it could see to the FIRST directory
-    // holding it, and it knows which line a manifest claims even when the
-    // directory is not named after it — which the <dir>/<minor> walk below
-    // cannot see.
-    const scanned = this.known.get(minor);
-    if (scanned !== undefined) {
-      const manifest = readManifest(scanned);
-      if (manifest !== null) {
-        this.load(scanned, manifest);
-        const found = this.lookup(version);
-        if (found !== undefined) return found;
+  private resolvePatchSync(req: VersionRequest): Resolved | undefined {
+    const already = this.loaded.find((l) => patchMatches(l.version, req));
+    if (already !== undefined) return { library: already, actual: already.version, exact: true };
+
+    const cacheKey = req.exact!;
+    const cached = fallbackCache.get(cacheKey);
+    const now = Date.now();
+    if (cached !== undefined && now - cached.checkedAt < FALLBACK_RECHECK_MS) {
+      // Within the window: skip the re-scan (the exact-match retry AND the
+      // fallback pick alike), but still attempt to load the chosen directory
+      // — one already-known path, not a directory read per search-path
+      // entry, so a broken artifact keeps failing rather than being silently
+      // remembered as fine.
+      const library = this.loadDir(cached.dir);
+      if (library === null) return undefined;
+      return { library, actual: library.version, exact: false };
+    }
+
+    const locs = this.scanLine(req.line);
+    const matched = pickPatchMatch(locs, req);
+    if (matched !== undefined) {
+      const library = this.loadDir(matched.dir);
+      if (library !== null) {
+        fallbackCache.delete(cacheKey);
+        return { library, actual: library.version, exact: true };
       }
     }
-    for (const dir of this.searchPath) {
-      if (this.loadLine(dir, minor) !== null) {
-        const found = this.lookup(version);
-        if (found !== undefined) return found;
-      }
+    const winner = pickLineWinner(locs);
+    if (winner === undefined) {
+      fallbackCache.delete(cacheKey);
+      return undefined;
     }
-    return undefined;
+    this.warnFallback(req, winner.version, 'installed');
+    fallbackCache.set(cacheKey, { dir: winner.dir, checkedAt: now });
+    const library = this.loadDir(winner.dir);
+    if (library === null) return undefined;
+    return { library, actual: library.version, exact: false };
+  }
+
+  private resolveSync(req: VersionRequest): Resolved | undefined {
+    return req.exact === null ? this.resolveLineSync(req) : this.resolvePatchSync(req);
+  }
+
+  /** Would `req` resolve without opening anything? Mirrors `resolveSync` with no `load()` call. */
+  private wouldResolve(req: VersionRequest): boolean {
+    if (req.exact === null) {
+      if (this.linePins.has(req.line)) return true;
+      return pickLineWinner(this.scanLine(req.line)) !== undefined;
+    }
+    if (this.loaded.some((l) => patchMatches(l.version, req))) return true;
+    // A patch resolves via its line's fallback too (R9: has() is true when the
+    // patch, or any patch of its line, is installed or open).
+    return this.scanLine(req.line).length > 0;
+  }
+
+  private warnFallback(req: VersionRequest, actual: string, kind: 'installed' | 'published'): void {
+    emitPatchFallbackWarning(req.exact!, actual, req.line, this.platform, kind);
   }
 
   /**
    * Every ClickHouse minor line this registry CAN ANSWER FOR, oldest first —
    * the ones it has opened plus the ones its construction-time manifest scan
-   * discovered on the search path.
+   * discovered on the search path, at either slot.
    *
    * That is one meaning in all four bindings, and it is the meaning that
    * survives lazy loading: "the lines that happen to be open" would read as an
@@ -382,83 +628,169 @@ export class Registry {
   }
 
   /**
-   * The libraries this registry has OPENED, in release order (oldest minor
-   * line first) — what is open right now, never what could be. A discovered
-   * line that no `for()` and no `preload` has opened appears in `versions()`
-   * and not here. It opens nothing.
+   * The libraries this registry has OPENED, in full numeric version order —
+   * what is open right now, never what could be. Two patches of one line both
+   * appear, each in its own slot in this order. A discovered patch that no
+   * `for()` and no `preload` has opened appears in `versions()` and not here.
+   * It opens nothing.
    */
   libraries(): readonly Library[] {
     return this.loaded;
   }
 
   /**
-   * Resolve a version to its library. A minor line ("25.8") or an exact patch
-   * ("25.8.28.1-lts") both work, and an unknown patch inside a loaded minor line
-   * resolves to that line — asking for "25.8.30.16" finds the loaded 25.8.
+   * Resolve a version to its library. A minor line ("25.8") never falls back:
+   * the newest patch of the line, from the first search-path directory that
+   * holds any patch of it. An exact patch ("25.8.28.1-lts") loads that patch
+   * when it is open or installed anywhere on the search path; otherwise the
+   * newest installed patch of the same line is loaded instead, and one
+   * warning is written per (requested, actual) pair per process — `resolve()`
+   * reports the same fallback as `exact: false` instead of only warning.
    *
-   * **This is what opens an artifact.** Construction does not: the line is
-   * taken from the first directory on the search path that holds it
-   * (docs/guides/fetch.md §1), `dlopen`ed once, and joins `libraries()` from
-   * then on. Never a fetch: this call is synchronous; `open()` is the one that
-   * may fetch.
+   * **This is what opens an artifact.** Construction does not: a version is
+   * loaded on first request, `dlopen`ed once, and joins `libraries()` from
+   * then on. Never a fetch: this call is synchronous; `open()` /
+   * `openResolution()` are the ones that may fetch.
    *
-   * Failure is the one §7 error, never a fallback to the nearest version:
-   * answering 26.7 semantics from a 25.8 artifact is a lie, and silent
-   * wrongness is what the rigs score hardest.
+   * Failure is the one §7 error, never a fallback to another line: answering
+   * 26.7 semantics from a 25.8 artifact is a lie, and silent wrongness is what
+   * the rigs score hardest.
    *
    * @param version - a minor line (`"25.8"`) or an exact patch
    *   (`"25.8.28.1-lts"`), e.g. what `parseVersionResult` discovered.
    * @returns the loaded `Library` for that version.
    * @throws {ArtifactMissingError} (`code` `CHTYPES_ARTIFACT_MISSING`, a
-   *   `RegistryError`) when no directory on the search path holds the line;
-   *   the message names every directory looked in and the fetch command.
-   * @throws {RegistryError} when a directory holds the line but it does not load.
+   *   `RegistryError`) when no directory on the search path holds a matching
+   *   or fallback patch; the message names every directory looked in and the
+   *   fetch command.
+   * @throws {ChtypesError} when `version` is not a ClickHouse version spelling at all.
+   * @throws {RegistryError} when a directory holds a version but it does not load.
    */
   for(version: string): Library {
-    const hit = this.resolve(version);
-    if (hit !== undefined) return hit;
-    throw new ArtifactMissingError(minorOf(version), this.platform, this.searchPath);
+    return this.resolve(version).library;
   }
 
   /**
-   * `for()`, with the lazy fetch of docs/guides/fetch.md §6 in front of it: a line no
-   * directory on the search path holds is fetched through `ensure()` — into
-   * the directory a fetch writes to (§1), verified, once per process per line
-   * even under concurrent opens — and then loaded. With `autofetch` off (the
-   * default) this is `for()` behind a promise, and a missing line rejects
-   * with the same `ArtifactMissingError`.
+   * `for()`, but returns the full `Resolution` — the requested spelling, what
+   * actually loaded, and whether the two are the same patch. Never fetches;
+   * `openResolution()` is the async twin that may.
    *
-   * @throws {ArtifactMissingError} when the line is missing and autofetch is off.
+   * @throws {ArtifactMissingError} as `for()`.
+   * @throws {ChtypesError} when `version` is not a ClickHouse version spelling at all.
+   */
+  resolve(version: string): Resolution {
+    const requested = version.trim();
+    const req = parseVersionSpelling(version);
+    // resolveSync (resolvePatchSync, for a patch request) warns internally
+    // when it falls back, at the moment the fallback patch is CHOSEN — before
+    // load, so the warning still fires even if that load then fails.
+    const resolved = this.resolveSync(req);
+    if (resolved === undefined) throw new ArtifactMissingError(req.line, this.platform, this.searchPath);
+    return { library: resolved.library, requested, version: resolved.actual, exact: resolved.exact };
+  }
+
+  /**
+   * `for()`, with the lazy fetch of docs/guides/fetch.md §6 in front of it. A
+   * LINE request no directory holds is fetched through `ensure()` and loaded.
+   * A PATCH request tries `ensure()` of that exact patch first; on
+   * `CHTYPES_ARTIFACT_UNPUBLISHED` (remembered for this registry, so it costs
+   * one network round trip, not one per call) it falls back to `ensure()` of
+   * the line and loads whatever that installs, with `exact: false` and one
+   * warning. Any other fetch failure (untrusted, corrupt, pinned, source
+   * unreachable) surfaces as itself and is never remembered, so a later call
+   * retries. With `autofetch` off, this is `for()` behind a promise.
+   *
+   * @throws {ArtifactMissingError} when nothing is found and autofetch is off.
    * @throws {FetchError} the §7 fetch verdicts (`CHTYPES_ARTIFACT_UNTRUSTED`,
    *   `…_CORRUPT`, `…_PINNED`, `…_UNPUBLISHED`, `CHTYPES_SOURCE_UNREACHABLE`).
    * @throws {RegistryError} when the fetched artifact does not load.
    */
   async open(version: string): Promise<Library> {
-    try {
-      return this.for(version);
-    } catch (err) {
-      if (!(err instanceof ArtifactMissingError) || !this.autofetch) throw err;
-    }
-    const minor = minorOf(version);
+    return (await this.openResolution(version)).library;
+  }
+
+  /** `open()`, but returns the full `Resolution` — see `resolve()` and `open()`. */
+  async openResolution(version: string): Promise<Resolution> {
+    const requested = version.trim();
+    const req = parseVersionSpelling(version);
     const dest = this.fetchOptions.dest ?? fetchDestination(this.explicit, this.platform);
-    const result = await ensure(minor, { ...this.fetchOptions, dest, platform: this.platform });
-    this.loadLine(result.registry, result.line);
-    return this.for(version);
+
+    if (req.exact === null) {
+      const sync = this.resolveLineSync(req);
+      if (sync !== undefined) return { library: sync.library, requested, version: sync.actual, exact: true };
+      if (!this.autofetch) throw new ArtifactMissingError(req.line, this.platform, this.searchPath);
+      await this.ensureLineOnce(req.line, dest);
+      const after = this.resolveLineSync(req);
+      if (after === undefined) throw new ArtifactMissingError(req.line, this.platform, this.searchPath);
+      return { library: after.library, requested, version: after.actual, exact: true };
+    }
+
+    const exact = this.resolveExactPatchSync(req);
+    if (exact !== undefined) return { library: exact, requested, version: exact.version, exact: true };
+
+    if (this.autofetch) {
+      const unpublishedKey = `${dest}\u0000${req.exact}`;
+      if (!this.unpublishedPatches.has(unpublishedKey)) {
+        try {
+          await ensure(req.exact, { ...this.fetchOptions, dest, platform: this.platform });
+        } catch (err) {
+          if (err instanceof ArtifactUnpublishedError) {
+            this.unpublishedPatches.add(unpublishedKey);
+          } else {
+            // Untrusted, corrupt, pinned or unreachable: surface it as-is and
+            // remember nothing, so a later call retries (R4 step 3).
+            throw err;
+          }
+        }
+        if (!this.unpublishedPatches.has(unpublishedKey)) {
+          const found = this.resolveExactPatchSync(req);
+          if (found !== undefined) return { library: found, requested, version: found.version, exact: true };
+        }
+      }
+      // Step 4 (autofetch on): Ensure(line) at most once per (dest, line) for this registry.
+      await this.ensureLineOnce(req.line, dest);
+      const winner = pickLineWinner(this.scanLine(req.line));
+      if (winner === undefined) throw new ArtifactMissingError(req.line, this.platform, this.searchPath);
+      // Warn on the CHOSEN version, before the load — so a caller sees it even
+      // if the chosen directory then fails to load (§3).
+      this.warnFallback(req, winner.version, 'published');
+      const library = this.loadDir(winner.dir);
+      if (library === null) throw new ArtifactMissingError(req.line, this.platform, this.searchPath);
+      return { library, requested, version: library.version, exact: false };
+    }
+
+    // Autofetch off: the same synchronous fallback `for()`/`resolve()` take
+    // (resolvePatchSync warns internally when it falls back).
+    const resolved = this.resolvePatchSync(req);
+    if (resolved === undefined) throw new ArtifactMissingError(req.line, this.platform, this.searchPath);
+    return { library: resolved.library, requested, version: resolved.actual, exact: resolved.exact };
+  }
+
+  /** `ensure(line)`, at most once per (dest, line) over this registry's lifetime — never re-read over the network again. */
+  private async ensureLineOnce(line: string, dest: string): Promise<void> {
+    const key = `${dest}\u0000${line}`;
+    if (this.ensuredLines.has(key)) return;
+    const result = await ensure(line, { ...this.fetchOptions, dest, platform: this.platform });
+    this.loadDir(result.dir);
+    this.ensuredLines.add(key);
   }
 
   /**
-   * True when this registry can answer for a version: loaded already, or held
-   * by a directory on the search path (which `for()` would load). Never a
-   * fetch, and never a load.
+   * True when this registry can answer for a version without fetching or
+   * loading: already open, or held by a directory on the search path (at
+   * either slot) which `for()` would load. A patch resolves true when the
+   * patch itself, or any patch of its line, is installed or open — the same
+   * condition `for()` would resolve, fallback included. Never a fetch, and
+   * never a load.
    */
   has(version: string): boolean {
-    if (this.lookup(version) !== undefined) return true;
-    const minor = minorOf(version);
-    return this.searchPath.some((dir) => {
-      const sub = path.join(dir, minor);
-      const manifest = readManifest(sub);
-      return manifest !== null && existsSync(path.join(sub, manifest.library));
-    });
+    let req: VersionRequest;
+    try {
+      req = parseVersionSpelling(version);
+    } catch {
+      return false;
+    }
+    return this.wouldResolve(req);
   }
 
   /**
@@ -521,16 +853,39 @@ export function defaultRegistryDir(): string {
   return cacheRegistryDir(hostPlatform());
 }
 
-/** Does this directory hold at least one artifact with a usable manifest? */
+/**
+ * Does this directory hold at least one artifact with a usable manifest, at
+ * either slot — the flat `<dir>/<minor>/` layout or the `<dir>/patches/<minor>/<version>/`
+ * sibling tree? A registry that holds only nested installs is not empty.
+ */
 export function looksLikeRegistry(dir: string): boolean {
   if (!isDirectory(dir)) return false;
   try {
-    return readdirSync(dir).some((entry) => {
-      if (entry.startsWith('.')) return false;
+    const hasFlat = readdirSync(dir).some((entry) => {
+      if (entry.startsWith('.') || entry === 'patches') return false;
       const sub = path.join(dir, entry);
       if (!isDirectory(sub)) return false;
       const manifest = readManifest(sub);
       return manifest !== null && existsSync(path.join(sub, manifest.library));
+    });
+    if (hasFlat) return true;
+    const patchesDir = path.join(dir, 'patches');
+    if (!isDirectory(patchesDir)) return false;
+    return readdirSync(patchesDir).some((minorEntry) => {
+      const minorDir = path.join(patchesDir, minorEntry);
+      if (!isDirectory(minorDir)) return false;
+      let versionEntries: string[];
+      try {
+        versionEntries = readdirSync(minorDir);
+      } catch {
+        return false;
+      }
+      return versionEntries.some((versionEntry) => {
+        const sub = path.join(minorDir, versionEntry);
+        if (!isDirectory(sub)) return false;
+        const manifest = readManifest(sub);
+        return manifest !== null && existsSync(path.join(sub, manifest.library));
+      });
     });
   } catch {
     return false;

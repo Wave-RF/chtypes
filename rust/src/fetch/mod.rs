@@ -28,9 +28,25 @@ pub use trust::{
 
 use crate::error::{Error, FETCH_COMMAND, Result};
 pub(crate) use crate::library::minor_of;
-use crate::registry::{Manifest, host_platform, install_dir_for, locate_in, search_path_for};
+use crate::registry::{
+    Manifest, host_platform, install_dir_for, locate_in, locate_patch_in, search_path_for,
+};
 use release::{Release, Request};
 use source::Source;
+
+/// Where an install lands (docs/guides/fetch.md, THE LAYOUT RULE): the flat
+/// `<minor>/` slot a LINE request loads, or a specific patch's own
+/// `patches/<minor>/<version>/` directory. Determined once, from the kind of
+/// request that selected the row — never from whether the version happens to
+/// be the line's newest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstallSlot {
+    /// `<dest>/<minor>/` — what a LINE request loads.
+    Flat,
+    /// `<dest>/patches/<minor>/<clickhouse_version>/` — any other exact
+    /// patch.
+    Patch,
+}
 
 thread_local! {
     /// The test-only override of the ABI revision fetch selects rows at, for
@@ -244,13 +260,24 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
     let platform = platform_of(opts)?;
     let dest = install_dir_for(&platform, opts.dest.as_deref());
     let search = installed_search(opts, &platform, &dest);
+    // THE LAYOUT RULE: the patch a LINE request selects installs flat; any
+    // OTHER exact patch installs under patches/. Decided by the KIND of
+    // request, never by whether the version happens to be the line's newest.
+    let slot = if request.exact.is_some() {
+        InstallSlot::Patch
+    } else {
+        InstallSlot::Flat
+    };
 
-    // `--offline` is the no-source path (§6): an installed line whose library
-    // hashes what its own manifest says is the answer, and nothing else is.
-    // Otherwise the signed release is read first — SHA256SUMS, its signature,
-    // index.json; never the tarball — and "installed" means hashing what that
-    // listing says (§3), the same in all four SDKs (docs/guides/fetch.md, Decisions).
-    let found = locate_in(&search, &request.minor).and_then(|dir| InstalledDir::read(&dir).ok());
+    // `--offline` is the no-source path (§6): an installed patch whose
+    // library hashes what its own manifest says is the answer, and nothing
+    // else is. Otherwise the signed release is read first — SHA256SUMS, its
+    // signature, index.json; never the tarball — and "installed" means
+    // hashing what that listing says (§3), the same in all four SDKs
+    // (docs/guides/fetch.md, Decisions). A LINE request is located with the
+    // two-level, first-directory-wins scan (R3); an exact patch is looked
+    // for anywhere on the whole search path (R4 step 2).
+    let found = located_installed(&search, &request);
     if opts.offline && !opts.force {
         if let Some(inst) = &found {
             if request.accepts(&inst.manifest.clickhouse_version) {
@@ -272,25 +299,33 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
     let source = Source::resolve(opts.url.as_deref(), opts.tag.as_deref(), opts.offline)?;
     let policy = policy_of(opts)?;
     let release = Release::load(&source, &policy, opts.progress)?;
-    let row = release
-        .select(&request, &platform)
-        .map_err(|e| annotate_unpublished(e, opts, &platform, &request.minor))?;
-    let key = lock_key(&platform, &row.clickhouse_minor);
+
     let mut lock = lock_of(opts)?;
-    if opts.frozen {
-        lock.as_ref()
-            .expect("frozen always has a lock")
-            .enforce(&key, row)?;
-    }
+    let (row, key) = if opts.frozen {
+        let (row, key) = frozen_row(
+            lock.as_ref().expect("frozen always has a lock"),
+            &release,
+            &platform,
+            &request,
+        )?;
+        (row, key)
+    } else {
+        let row = release.select(&request, &platform)?;
+        (row, lock_key(&platform, &row.clickhouse_version))
+    };
     say(
         opts,
         &format!(
-            "ClickHouse {} -> line {} ({}), {platform}, from {}",
-            request.spelling, row.clickhouse_minor, row.clickhouse_version, release.origin
+            "ClickHouse {} -> patch {} (line {}), {platform}, from {}",
+            request.spelling, row.clickhouse_version, row.clickhouse_minor, release.origin
         ),
     );
 
-    // Installed and hashing what the release says: nothing to download.
+    // Installed and hashing what the release says: nothing to download. A
+    // LINE request whose selected patch is already installed, but only under
+    // patches/ (an earlier exact-patch fetch put it there), is PROMOTED into
+    // the flat slot — a local move, no network — so the flat slot keeps
+    // holding the line's newest, as the layout rule requires.
     if !opts.force {
         if let Some(inst) = &found {
             if inst.manifest.clickhouse_version == row.clickhouse_version
@@ -298,14 +333,21 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
             {
                 if let Ok(sha) = inst.verify() {
                     if sha == row.library_sha256 {
+                        let final_dir =
+                            seat_existing(&dest, slot, &row.clickhouse_minor, &inst.dir)?;
+                        let final_inst: InstalledDir = if final_dir == inst.dir {
+                            inst.clone()
+                        } else {
+                            InstalledDir::read(&final_dir)?
+                        };
                         say(
                             opts,
                             &format!(
                                 "already installed and verified: {}",
-                                inst.library().display()
+                                final_inst.library().display()
                             ),
                         );
-                        let installed = inst.installed(
+                        let installed = final_inst.installed(
                             &platform,
                             sha,
                             Some((row.file.clone(), row.sha256.clone())),
@@ -318,10 +360,144 @@ pub fn ensure(line: &str, opts: &EnsureOptions) -> Result<Installed> {
         }
     }
 
-    let installed = install::fetch_and_install(&source, row, &dest, &platform, opts.progress)?;
+    let installed =
+        install::fetch_and_install(&source, row, &dest, &platform, slot, opts.progress)?;
     record(lock.as_mut(), opts, &key, row)?;
     install_goldens(&source, &release, &policy, &dest, opts.progress);
     Ok(installed)
+}
+
+/// `ensure`'s pre-check: a LINE request is located with [`locate_in`]'s
+/// two-level, first-directory-wins scan (R3); an exact patch is looked for
+/// anywhere on the whole search path with [`locate_patch_in`] (R4 step 2).
+fn located_installed(search: &[PathBuf], request: &Request) -> Option<InstalledDir> {
+    let dir = match &request.exact {
+        Some(exact) => locate_patch_in(search, exact),
+        None => locate_in(search, &request.minor),
+    }?;
+    InstalledDir::read(&dir).ok()
+}
+
+/// Promote an already-verified install into the flat slot when a LINE
+/// request (`slot == Flat`) selected it and it currently sits only under
+/// `<dest>/patches/…` — a local rename, demoting whatever is in the flat
+/// slot first (THE LAYOUT RULE), never a re-download. An install found
+/// elsewhere on the search path (a system location, another `--dest`) is
+/// left exactly where it is: only a directory already inside THIS `dest`'s
+/// own `patches/` is ours to move.
+fn seat_existing(
+    dest: &Path,
+    slot: InstallSlot,
+    minor: &str,
+    existing_dir: &Path,
+) -> Result<PathBuf> {
+    if slot == InstallSlot::Patch {
+        return Ok(existing_dir.to_path_buf());
+    }
+    let flat = dest.join(minor);
+    if existing_dir == flat {
+        return Ok(flat);
+    }
+    if !existing_dir.starts_with(dest.join("patches")) {
+        return Ok(existing_dir.to_path_buf());
+    }
+    let (target, _action) = install::seat_flat(dest, minor, existing_dir)?;
+    Ok(target)
+}
+
+/// F1–F5: resolve the ONE row `--frozen` installs for `request`, from the
+/// lock's own candidates alone — never the release's unpinned rows.
+///
+/// # Errors
+///
+/// [`Error::ArtifactPinned`] — the lock pins nothing for `request` on
+/// `platform`, or the row the candidate names carries another ABI revision,
+/// or the candidate's sha256 disagrees with what the release lists for that
+/// file. [`Error::ArtifactUnpublished`] — the release does not list the
+/// pinned file at all. [`Error::ArtifactCorrupt`] — the release disagrees
+/// with its own signed sums about that file (the same check every install
+/// makes).
+fn frozen_row<'a>(
+    lock: &LockFile,
+    release: &'a Release,
+    platform: &str,
+    request: &Request,
+) -> Result<(&'a IndexRow, String)> {
+    let (key, entry) =
+        lock.best_candidate(platform, request)
+            .ok_or_else(|| Error::ArtifactPinned {
+                key: format!("{platform}/{}", request.spelling),
+                message: format!(
+                    "{} pins nothing for {platform}/{}",
+                    lock.path().display(),
+                    request.spelling
+                ),
+            })?;
+    let row = release
+        .rows()
+        .iter()
+        .find(|r| r.platform() == platform && r.file == entry.file)
+        .ok_or_else(|| Error::ArtifactUnpublished {
+            requested: request.spelling.clone(),
+            platform: platform.to_string(),
+            origin: release.origin.clone(),
+            offered: format!(
+                "the release at {} does not list {}, which {} pins for {key}.{}",
+                release.origin,
+                entry.file,
+                lock.path().display(),
+                no_revision_note(lock, entry, &request.spelling)
+            ),
+        })?;
+    if let Some(row_rev) = row.abi_revision {
+        let rev = fetch_abi_revision();
+        if row_rev != rev {
+            return Err(Error::ArtifactPinned {
+                key: key.to_string(),
+                message: format!(
+                    "{} pins {key} -> {}, but the release's row for it is ABI revision \
+                     {row_rev}, not this SDK's {rev} — re-lock with: {FETCH_COMMAND} {} --lock {}",
+                    lock.path().display(),
+                    entry.file,
+                    request.spelling,
+                    lock.path().display()
+                ),
+            });
+        }
+    }
+    release.cross_check(row)?;
+    if row.sha256 != entry.sha256 {
+        return Err(Error::ArtifactPinned {
+            key: key.to_string(),
+            message: format!(
+                "{} pins {key} -> {} {}, but the release lists {} as {}.{}",
+                lock.path().display(),
+                entry.file,
+                entry.sha256,
+                row.file,
+                row.sha256,
+                no_revision_note(lock, entry, &request.spelling)
+            ),
+        });
+    }
+    Ok((row, key.to_string()))
+}
+
+/// The one sentence appended to a PINNED or UNPUBLISHED message when, under
+/// `--frozen`, the candidate entry exists but names no ABI revision at all —
+/// written by an SDK before this field existed (#282's remedy). `""` when
+/// the entry does record one.
+fn no_revision_note(lock: &LockFile, entry: &LockEntry, spelling: &str) -> String {
+    if entry.abi_revision.is_some() {
+        return String::new();
+    }
+    format!(
+        " {} records no ABI revision (written by an older SDK); this SDK speaks ABI revision {} \
+         — re-lock with: {FETCH_COMMAND} {spelling} --lock {}",
+        lock.path().display(),
+        fetch_abi_revision(),
+        lock.path().display()
+    )
 }
 
 /// The served golden set: a release-level file like `index.json`, and a row in
@@ -420,9 +596,15 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
     let platform = platform_of(opts)?;
     let dest = install_dir_for(&platform, opts.dest.as_deref());
     let search = installed_search(opts, &platform, &dest);
+    check_lock_revision_early_all(opts, &platform)?;
     let source = Source::resolve(opts.url.as_deref(), opts.tag.as_deref(), opts.offline)?;
     let policy = policy_of(opts)?;
     let release = Release::load(&source, &policy, opts.progress)?;
+
+    if opts.frozen {
+        return ensure_all_frozen(opts, &platform, &dest, &source, &policy, &release);
+    }
+
     let rows = release.all(&platform);
     if rows.is_empty() {
         let on_platform: Vec<&IndexRow> = release
@@ -462,12 +644,9 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
     for row in rows {
         row_complete(row)?;
         release.cross_check(row)?;
-        let key = lock_key(&platform, &row.clickhouse_minor);
-        if opts.frozen {
-            lock.as_ref()
-                .expect("frozen always has a lock")
-                .enforce(&key, row)?;
-        }
+        // --all always picks the newest patch of each line (`release.all`):
+        // a LINE-level selection, so every install here is flat.
+        let key = lock_key(&platform, &row.clickhouse_version);
         let found = if opts.force {
             None
         } else {
@@ -486,16 +665,30 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
         });
         let installed = match confirmed {
             Some((inst, sha)) => {
+                let final_dir =
+                    seat_existing(&dest, InstallSlot::Flat, &row.clickhouse_minor, &inst.dir)?;
+                let final_inst: InstalledDir = if final_dir == inst.dir {
+                    inst
+                } else {
+                    InstalledDir::read(&final_dir)?
+                };
                 say(
                     opts,
                     &format!(
                         "already installed and verified: {}",
-                        inst.library().display()
+                        final_inst.library().display()
                     ),
                 );
-                inst.installed(&platform, sha, Some((row.file.clone(), row.sha256.clone())))
+                final_inst.installed(&platform, sha, Some((row.file.clone(), row.sha256.clone())))
             }
-            None => install::fetch_and_install(&source, row, &dest, &platform, opts.progress)?,
+            None => install::fetch_and_install(
+                &source,
+                row,
+                &dest,
+                &platform,
+                InstallSlot::Flat,
+                opts.progress,
+            )?,
         };
         record(lock.as_mut(), opts, &key, row)?;
         out.push(installed);
@@ -504,12 +697,116 @@ pub fn ensure_all(opts: &EnsureOptions) -> Result<Vec<Installed>> {
     Ok(out)
 }
 
+/// `--all --frozen` (F6): installs the newest PINNED patch of each line the
+/// lock pins for `platform` — never a line the release has that the lock
+/// does not pin, which gets one progress note instead of an error. Always a
+/// flat (LINE-level) install.
+fn ensure_all_frozen(
+    opts: &EnsureOptions,
+    platform: &str,
+    dest: &Path,
+    source: &Source,
+    policy: &TrustPolicy,
+    release: &Release,
+) -> Result<Vec<Installed>> {
+    let lock = lock_of(opts)?.expect("frozen always has a lock");
+    let by_line = lock.lines_for(platform);
+    if by_line.is_empty() {
+        return Err(Error::ArtifactPinned {
+            key: format!("{platform}/*"),
+            message: format!(
+                "{} pins nothing for {platform}; --all --frozen has nothing to install",
+                lock.path().display()
+            ),
+        });
+    }
+    let pinned_lines: std::collections::BTreeSet<&str> =
+        by_line.keys().map(String::as_str).collect();
+    for row in release.all(platform) {
+        if !pinned_lines.contains(row.clickhouse_minor.as_str()) {
+            say(
+                opts,
+                &format!(
+                    "{} is served but not pinned in {}; --all --frozen does not install it",
+                    row.clickhouse_minor,
+                    lock.path().display()
+                ),
+            );
+        }
+    }
+    let search = installed_search(opts, platform, dest);
+    let mut out = Vec::with_capacity(by_line.len());
+    for (minor, (key, _entry)) in &by_line {
+        // Delegate to `frozen_row` for the actual F1–F5 checks, rather than
+        // re-deriving them: one code path for the revision check, the
+        // release lookup, cross_check and the sha comparison, `lines_for`'s
+        // grouping having already picked the right candidate.
+        let request = Request {
+            spelling: minor.clone(),
+            minor: minor.clone(),
+            exact: None,
+        };
+        let (row, got_key) = frozen_row(&lock, release, platform, &request)?;
+        debug_assert_eq!(&got_key, key);
+        row_complete(row)?;
+        let found = if opts.force {
+            None
+        } else {
+            locate_in(&search, minor).and_then(|dir| InstalledDir::read(&dir).ok())
+        };
+        let confirmed = found.and_then(|inst| {
+            (inst.manifest.clickhouse_version == row.clickhouse_version
+                && inst.manifest.library == row.library)
+                .then(|| {
+                    inst.verify()
+                        .ok()
+                        .filter(|sha| *sha == row.library_sha256)
+                        .map(|sha| (inst, sha))
+                })
+                .flatten()
+        });
+        let installed = match confirmed {
+            Some((inst, sha)) => {
+                let final_dir = seat_existing(dest, InstallSlot::Flat, minor, &inst.dir)?;
+                let final_inst: InstalledDir = if final_dir == inst.dir {
+                    inst
+                } else {
+                    InstalledDir::read(&final_dir)?
+                };
+                say(
+                    opts,
+                    &format!(
+                        "already installed and verified: {}",
+                        final_inst.library().display()
+                    ),
+                );
+                final_inst.installed(platform, sha, Some((row.file.clone(), row.sha256.clone())))
+            }
+            None => install::fetch_and_install(
+                source,
+                row,
+                dest,
+                platform,
+                InstallSlot::Flat,
+                opts.progress,
+            )?,
+        };
+        out.push(installed);
+    }
+    // --frozen never writes the lock (F7): `lock` was read only to pick
+    // candidates, above.
+    install_goldens(source, release, policy, dest, opts.progress);
+    Ok(out)
+}
+
 /// Re-hash every installed line under `dir` against its own manifest
 /// (`chtypes verify`). A directory holding no line answers an empty list —
 /// the caller says so; an empty answer must never read as "all verified".
 pub fn verify_installed(dir: &Path) -> Vec<Verification> {
     let mut out = Vec::new();
-    for (line, sub) in crate::registry::installed_lines(std::slice::from_ref(&dir.to_path_buf())) {
+    for patch in crate::registry::installed_patches(std::slice::from_ref(&dir.to_path_buf())) {
+        let sub = patch.dir;
+        let line = patch.line;
         let inst = match InstalledDir::read(&sub) {
             Ok(inst) => inst,
             Err(e) => {
@@ -649,28 +946,13 @@ fn record(
     Ok(())
 }
 
-/// The lock's own entry for `key`, read straight off disk with no release
-/// access — used only to decide whether to say more about an ABI revision.
-/// The authoritative read stays [`lock_of`], called from [`ensure`] and
-/// [`ensure_all`], which raises its own error for a lock that cannot be
-/// read at all; any error here (a missing or unparsable file) reads as "no
-/// entry".
-fn peek_lock_entry(opts: &EnsureOptions, key: &str) -> Option<LockEntry> {
-    let path = opts
-        .lock
-        .clone()
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCK_FILE));
-    let lock = LockFile::load(&path, false).ok()?;
-    lock.artifacts.get(key).cloned()
-}
-
-/// Fails fast, before any network access, when `frozen`'s lock already
-/// names an ABI revision for this key that is not this crate's own
-/// (`docs/guides/fetch.md` §5). A lock made for one ABI revision does not
-/// get a second chance disguised as a drifted pin or an unpublished line
+/// Fails fast, before any network access, when `frozen`'s lock already pins
+/// a candidate for `request` at an ABI revision that is not this crate's own
+/// (`docs/guides/fetch.md` §5, F2). A lock made for one ABI revision does not
+/// get a second chance disguised as a drifted pin or an unpublished patch
 /// once the crate moves to another: the fix is always the same re-lock, so
 /// the message says that directly instead of waiting to see which of the
-/// two symptoms selection would have produced.
+/// two symptoms [`frozen_row`] would have produced.
 fn check_lock_revision_early(
     opts: &EnsureOptions,
     platform: &str,
@@ -679,81 +961,67 @@ fn check_lock_revision_early(
     if !opts.frozen {
         return Ok(());
     }
-    let key = lock_key(platform, &request.minor);
-    let Some(entry) = peek_lock_entry(opts, &key) else {
-        return Ok(());
-    };
-    let Some(pinned_rev) = entry.abi_revision else {
+    let path = opts
+        .lock
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCK_FILE));
+    // A lock that cannot be read at all raises its own error later, from the
+    // authoritative [`lock_of`]; here, any read failure reads as "nothing to
+    // check early" and falls through to that later, better-placed error.
+    let Ok(lock) = LockFile::load(&path, false) else {
         return Ok(());
     };
     let rev = fetch_abi_revision();
-    if pinned_rev == rev {
+    for (key, entry) in lock.candidates(platform, request) {
+        if let Some(pinned_rev) = entry.abi_revision {
+            if pinned_rev != rev {
+                return Err(Error::ArtifactPinned {
+                    key: key.to_string(),
+                    message: format!(
+                        "{} pins {key} at ABI revision {pinned_rev}; this SDK speaks ABI \
+                         revision {rev} — re-lock with: {FETCH_COMMAND} {} --lock {}",
+                        path.display(),
+                        request.spelling,
+                        path.display()
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// [`check_lock_revision_early`] for `--all --frozen` (F2: "every candidate
+/// is checked before anything is read") — one candidate per line, the newest
+/// patch [`LockFile::lines_for`] would pin.
+fn check_lock_revision_early_all(opts: &EnsureOptions, platform: &str) -> Result<()> {
+    if !opts.frozen {
         return Ok(());
     }
     let path = opts
         .lock
         .clone()
         .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCK_FILE));
-    Err(Error::ArtifactPinned {
-        key: key.clone(),
-        message: format!(
-            "{} pins {key} at ABI revision {pinned_rev}; this SDK speaks ABI revision {rev} — \
-             re-lock with: {FETCH_COMMAND} {} --lock {}",
-            path.display(),
-            request.spelling,
-            path.display()
-        ),
-    })
-}
-
-/// The one sentence appended to a PINNED or UNPUBLISHED message when, under
-/// `frozen`, the lock's own entry for this key exists but names no ABI
-/// revision at all — written by an SDK before this field existed. `""`
-/// when there is nothing to add.
-fn revision_note(opts: &EnsureOptions, platform: &str, minor: &str) -> String {
-    if !opts.frozen {
-        return String::new();
-    }
-    let key = lock_key(platform, minor);
-    let Some(entry) = peek_lock_entry(opts, &key) else {
-        return String::new();
+    let Ok(lock) = LockFile::load(&path, false) else {
+        return Ok(());
     };
-    if entry.abi_revision.is_some() {
-        return String::new();
-    }
-    let path = opts
-        .lock
-        .clone()
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOCK_FILE));
-    format!(
-        " {} records no ABI revision (written by an older SDK); this SDK speaks ABI revision {} \
-         — re-lock with: {FETCH_COMMAND} {minor} --lock {}",
-        path.display(),
-        fetch_abi_revision(),
-        path.display()
-    )
-}
-
-/// Appends [`revision_note`] to an [`Error::ArtifactUnpublished`]'s
-/// `offered` clause; any other error passes through unchanged.
-fn annotate_unpublished(err: Error, opts: &EnsureOptions, platform: &str, minor: &str) -> Error {
-    match err {
-        Error::ArtifactUnpublished {
-            requested,
-            platform: p,
-            origin,
-            offered,
-        } => {
-            let note = revision_note(opts, platform, minor);
-            Error::ArtifactUnpublished {
-                requested,
-                platform: p,
-                origin,
-                offered: format!("{offered}{note}"),
+    let rev = fetch_abi_revision();
+    for (minor, (key, entry)) in lock.lines_for(platform) {
+        if let Some(pinned_rev) = entry.abi_revision {
+            if pinned_rev != rev {
+                return Err(Error::ArtifactPinned {
+                    key: key.clone(),
+                    message: format!(
+                        "{} pins {key} at ABI revision {pinned_rev}; this SDK speaks ABI \
+                         revision {rev} — re-lock with: {FETCH_COMMAND} {minor} --lock {}",
+                        path.display(),
+                        path.display()
+                    ),
+                });
             }
         }
-        other => other,
     }
+    Ok(())
 }
 
 fn row_complete(row: &IndexRow) -> Result<()> {
@@ -775,7 +1043,9 @@ fn say(opts: &EnsureOptions, message: &str) {
     }
 }
 
-/// An installed `<registry>/<minor>` and its manifest.
+/// An installed patch directory — the flat `<registry>/<minor>` slot, or a
+/// `patches/<minor>/<version>` sibling — and its manifest.
+#[derive(Clone)]
 struct InstalledDir {
     dir: PathBuf,
     manifest: Manifest,

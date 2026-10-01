@@ -270,13 +270,17 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	have := map[string]chtypes.Installed{}
+	// Per line, EVERY installed patch — since #284 a line can have more than
+	// one (the flat slot plus patches/), and the release comparison below
+	// must recognize any of them, not just whichever happened to be seen
+	// last.
+	have := map[string][]chtypes.Installed{}
 	fmt.Fprintf(stdout, "installed (%s):\n", dir)
 	if len(installed) == 0 {
 		fmt.Fprintln(stdout, "  (nothing)")
 	}
 	for _, inst := range installed {
-		have[inst.Line] = inst
+		have[inst.Line] = append(have[inst.Line], inst)
 		fmt.Fprintf(stdout, "  %-6s %-20s %s\n", inst.Line, inst.Version, inst.Library)
 	}
 	if sf.offline {
@@ -313,14 +317,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 			continue
 		}
 		n++
-		state := ""
-		if inst, ok := have[a.ClickHouseMinor]; ok {
-			if inst.Version == a.ClickHouseVersion {
-				state = "  (installed)"
-			} else {
-				state = "  (installed: " + inst.Version + ")"
-			}
-		}
+		state := installedState(have[a.ClickHouseMinor], a.ClickHouseVersion)
 		fmt.Fprintf(stdout, "  %-6s %-20s b%-3d %s  %d bytes%s\n", a.ClickHouseMinor, a.ClickHouseVersion, a.BuildNumber(), a.File, a.Bytes, state)
 	}
 	if n == 0 {
@@ -340,6 +337,26 @@ func listABIRevision() int {
 		return n
 	}
 	return chtypes.ABIRevision
+}
+
+// installedState is one release row's "  (installed)" annotation, checked
+// against EVERY installed patch of its line (#284: a line can have more
+// than one installed at once — the flat slot plus patches/). "" when the
+// line has nothing installed at all; "(installed)" when this exact row is
+// among them; otherwise the OTHER installed patches of the line, so a
+// caller sees what it would fall back to without fetching this one.
+func installedState(line []chtypes.Installed, version string) string {
+	if len(line) == 0 {
+		return ""
+	}
+	var others []string
+	for _, inst := range line {
+		if inst.Version == version {
+			return "  (installed)"
+		}
+		others = append(others, inst.Version)
+	}
+	return "  (installed: " + strings.Join(others, ", ") + ")"
 }
 
 // notShown is list's one line naming the platform's rows at another ABI

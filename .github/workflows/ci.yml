@@ -819,12 +819,61 @@ jobs:
           fi
           ls -la "$CHTYPES_REGISTRY"
           cat "$CHTYPES_REGISTRY"/*/manifest.json
+          # patches/<minor>/<clickhouse_version>/ (chtypes#284, "Layout
+          # rule") does not exist on an ordinary line fetch, only after the
+          # two-real-patches step below adds to it — so this is conditional,
+          # unlike the flat cat above.
+          if compgen -G "$CHTYPES_REGISTRY/patches/*/*/manifest.json" >/dev/null; then
+            cat "$CHTYPES_REGISTRY"/patches/*/*/manifest.json
+          fi
       - name: save the artifacts cache (push to main only, a clean fetch, and only on a miss)
         if: steps.lines.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetch.outputs.exit_code == '0' && steps.artifacts-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .artifacts
           key: ${{ steps.artifacts-cache.outputs.cache-primary-key }}
+      # Best-effort, additive, never gates the job (chtypes#284, design §8,
+      # "P18 in CI"): two real patches of one line the channel publishes
+      # twice, so each binding's "load a newer patch without restarting"
+      # case has real artifacts to drive instead of skipping by name. Both
+      # are fetched by EXACT spelling, so both land under patches/<line>/
+      # (the cross-binding placement rule: only a line spelling or --all
+      # writes the flat slot) unless one happens to already be flat from the
+      # per-line fetch above -- a registry's own resolution reads both
+      # levels regardless, so this is not a special case for the suites that
+      # consume CHTYPES_TWO_PATCHES. `--release-file index.json` re-verifies
+      # the release's own listing through the full chain (signature, then
+      # index-vs-SHA256SUMS) without installing an artifact, so no new trust
+      # surface is added here. Left unset -- never failing this job -- when
+      # this run's channel has no line with two patches at its own ABI
+      # revision (a revision cutover, a candidate channel that has not yet
+      # built a second patch of anything).
+      - name: two real patches of one line, for the "load without restarting" cases
+        id: two-patches
+        if: steps.fetch.outcome == 'success'
+        continue-on-error: true
+        env:
+          CHANNEL_REVISION: ${{ steps.channel.outputs.revision }}
+        run: |
+          tag_args=()
+          tag="${{ steps.channel.outputs.tag }}"
+          [ -n "$tag" ] && tag_args=(--tag "$tag")
+          scripts/fetch.sh --release-file index.json --dest "$RUNNER_TEMP/two-patches-index" "${tag_args[@]}"
+          # One physical line, deliberately: a YAML block scalar requires every
+          # line of this step's `run:` body to share its indentation, which a
+          # multi-line python heredoc cannot also satisfy as valid Python (the
+          # two indentation rules conflict) — see the commit that added this
+          # for the IndentationError it replaced.
+          pair="$(python3 -c 'import json,os,sys; doc=json.load(open(sys.argv[1])); own=int(os.environ["CHANNEL_REVISION"]); rows=[a for a in doc.get("artifacts",[]) if a.get("os")=="linux" and a.get("arch")=="amd64" and a.get("abi_revision")==own]; by_minor={}; [by_minor.setdefault(a["clickhouse_minor"],set()).add(a["clickhouse_version"]) for a in rows]; cands=sorted((m for m in by_minor if len(by_minor[m])>=2), key=lambda m:[int(p) for p in m.split(".")]); print(" ".join(sorted(by_minor[cands[0]], key=lambda v:[int(p) for p in v.split("-",1)[0].split(".")])[-2:])) if cands else None' "$RUNNER_TEMP/two-patches-index/index.json")"
+          if [ -n "$pair" ]; then
+            older="${pair%% *}"; newer="${pair##* }"
+            scripts/fetch.sh "$older" --platform linux-amd64 --dest "$CHTYPES_REGISTRY" "${tag_args[@]}"
+            scripts/fetch.sh "$newer" --platform linux-amd64 --dest "$CHTYPES_REGISTRY" "${tag_args[@]}"
+            echo "CHTYPES_TWO_PATCHES=$older $newer" >> "$GITHUB_ENV"
+            echo "two real patches of one line: $older $newer" >&2
+          else
+            echo "no line at ABI revision $CHANNEL_REVISION publishes two patches on linux-amd64 in this channel — CHTYPES_TWO_PATCHES left unset; each binding's case skips by name" >&2
+          fi
       # Gated on the fetch step's own outcome (#182), same as the five below
       # — the fetch step now carries continue-on-error, so nothing after it
       # skips by default the way it used to on a fail-fast failure there;

@@ -442,12 +442,18 @@ def test_fetch_all_installs_every_published_line(dest: Path) -> None:
 def test_lock_records_then_enforces(
     dest: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """SDK#284 §6: schema 2, keyed by the EXACT patch. The committed fixture
+    lock (``tests/fixtures/fetch/chtypes.lock``) is still schema 1, keyed by
+    line — `read_lock` converts it to schema-2 keys transparently, and the
+    first WRITE through a schema-1 file rewrites it as schema 2 wholesale."""
     kw = dict(platform=PLATFORM, url=_url("signed"), dest=dest, trusted_keys=_test_keys())
+    patch_258 = _expected()["lines"]["25.8"]
+    raw_key_258 = f"{PLATFORM}/25.8"  # the schema-1 (line-keyed) spelling
+    key = f"{PLATFORM}/{patch_258}"  # the schema-2 (exact-patch-keyed) spelling
     lock = tmp_path / "chtypes.lock"
     ensure("25.8", lock=lock, **kw)
     pins = read_lock(lock)
     fixture_pins = read_lock(FIXTURES / "chtypes.lock")
-    key = f"{PLATFORM}/25.8"
     # The committed fixture lock predates abi_revision (docs/guides/fetch.md
     # §5); a fresh fetch pins the same file and sha256, plus this binding's
     # own ABI revision — the one new thing it now records.
@@ -455,21 +461,24 @@ def test_lock_records_then_enforces(
     assert pins[key]["file"] == fixture_pins[key]["file"]
     assert pins[key]["sha256"] == fixture_pins[key]["sha256"]
     assert pins[key]["abi_revision"] == chtypes.ABI_REVISION
-    assert json.loads(lock.read_text())["schema"] == 1
+    # The SDK always WRITES schema 2, whatever schema it read (§6).
+    assert json.loads(lock.read_text())["schema"] == 2
 
-    # --frozen with the fixture lock installs signed/, every row.
+    # --frozen with the fixture lock installs signed/, every row it pins —
+    # the fixture lock is schema 1 and is read (converted), never written.
     frozen_dest = tmp_path / "frozen"
     got = fetch_lines(
         all_lines=True, lock=FIXTURES / "chtypes.lock", frozen=True, **{**kw, "dest": frozen_dest}
     )
     assert [p.name for p in got] == list(_expected()["lines"])
     assert read_lock(FIXTURES / "chtypes.lock") == fixture_pins  # never written under --frozen
+    assert json.loads((FIXTURES / "chtypes.lock").read_text())["schema"] == 1  # untouched on disk
 
     # A lock whose sha256 differs refuses with CHTYPES_ARTIFACT_PINNED — before
     # anything is downloaded, and whether or not the line is already installed.
     drifted = tmp_path / "drifted.lock"
     doc = json.loads((FIXTURES / "chtypes.lock").read_text())
-    doc["artifacts"][f"{PLATFORM}/25.8"]["sha256"] = "00" * 32
+    doc["artifacts"][raw_key_258]["sha256"] = "00" * 32
     drifted.write_text(json.dumps(doc))
     with pytest.raises(chtypes.ArtifactPinnedError) as caught:
         ensure("25.8", lock=drifted, frozen=True, **{**kw, "dest": tmp_path / "never"})
@@ -479,18 +488,20 @@ def test_lock_records_then_enforces(
     assert not (tmp_path / "never").exists()
 
     # Without --frozen, --lock re-pins: the drifted entry is replaced by what
-    # this fetch installed, which is the remedy the PINNED message names.
+    # this fetch installed, which is the remedy the PINNED message names —
+    # and the schema-1 lock converts to schema 2 in the same write.
     ensure("25.8", lock=drifted, **kw)
     repinned = read_lock(drifted)[key]
     assert repinned["file"] == fixture_pins[key]["file"]
     assert repinned["sha256"] == fixture_pins[key]["sha256"]
     assert repinned["abi_revision"] == chtypes.ABI_REVISION
+    assert json.loads(drifted.read_text())["schema"] == 2
     ensure("25.8", lock=drifted, frozen=True, **kw)  # and --frozen now accepts it
 
     # A lock naming another ABI revision re-pins the same way without --frozen.
     other_rev = tmp_path / "other-rev.lock"
     doc = json.loads((FIXTURES / "chtypes.lock").read_text())
-    doc["artifacts"][key]["abi_revision"] = chtypes.ABI_REVISION + 1
+    doc["artifacts"][raw_key_258]["abi_revision"] = chtypes.ABI_REVISION + 1
     other_rev.write_text(json.dumps(doc))
     with pytest.raises(chtypes.ArtifactPinnedError, match="re-lock with"):
         ensure("25.8", lock=other_rev, frozen=True, **kw)
@@ -499,7 +510,7 @@ def test_lock_records_then_enforces(
 
     # --frozen refuses a line the lock does not pin. Without a lock path it
     # reads ./chtypes.lock, and none there pins nothing — refused, PINNED.
-    with pytest.raises(chtypes.ArtifactPinnedError, match="no pin"):
+    with pytest.raises(chtypes.ArtifactPinnedError, match="pins nothing"):
         ensure("26.7", lock=lock, frozen=True, **kw)
     nolock = tmp_path / "nolock"
     nolock.mkdir()
@@ -508,9 +519,10 @@ def test_lock_records_then_enforces(
         ensure("26.7", frozen=True, **kw)
     (nolock / "chtypes.lock").write_bytes((FIXTURES / "chtypes.lock").read_bytes())
     assert ensure("25.8", frozen=True, **kw) == dest / "25.8"  # ./chtypes.lock pins signed/
-    # A malformed lock is a usage error, loudly, not a silent "no pins".
+    # A malformed lock is a usage error, loudly, not a silent "no pins" — and
+    # schema 2 is no longer one of the malformed numbers (SDK#284 reads it).
     bad = tmp_path / "bad.lock"
-    bad.write_text('{"schema": 2, "artifacts": {}}')
+    bad.write_text('{"schema": 3, "artifacts": {}}')
     with pytest.raises(ValueError, match="schema"):
         ensure("25.8", lock=bad, **kw)
 
@@ -566,11 +578,22 @@ def test_lock_abi_revision_mismatch_is_named_and_needs_no_source(
     assert f"deliberately. {no_rev_drift} records no ABI revision" in msg
 
     # 24.8 is not among signed/'s published lines (expected.json's "lines"
-    # names only 25.8 and 26.7), so this is a genuine UNPUBLISHED.
+    # names only 25.8 and 26.7), so this is a genuine UNPUBLISHED. The file
+    # name must still parse under the asset grammar — SDK#284's schema-1 ->
+    # schema-2 key conversion needs it to recover the exact patch the old
+    # entry pinned — so it names a plausible, still-unpublished patch.
     no_rev_unpublished = tmp_path / "no-rev-unpublished.lock"
     no_rev_unpublished.write_text(
         json.dumps(
-            {"schema": 1, "artifacts": {f"{PLATFORM}/24.8": {"file": "x.tar.gz", "sha256": "00"}}}
+            {
+                "schema": 1,
+                "artifacts": {
+                    f"{PLATFORM}/24.8": {
+                        "file": f"chtypes-24.8.1.1-{PLATFORM}.tar.gz",
+                        "sha256": "00" * 32,
+                    }
+                },
+            }
         )
     )
     with pytest.raises(chtypes.ArtifactUnpublishedError) as caught:

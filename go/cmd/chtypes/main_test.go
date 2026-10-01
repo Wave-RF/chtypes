@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -218,6 +219,68 @@ func TestFetchVerifyListAgainstFixtures(t *testing.T) {
 	rc, _, errs = exec(t, "fetch", "25.8", "--url", signed, "--dest", filepath.Join(t.TempDir(), "x"))
 	if rc != 1 || !strings.Contains(errs, "CHTYPES_ARTIFACT_UNTRUSTED") {
 		t.Fatalf("embedded key only: rc=%d %q", rc, errs)
+	}
+}
+
+// TestFetchListVerifyAgainstTwoPatchesFixture drives the CLI over
+// tests/fixtures/fetch/two-patches/ (issue #284): an exact-patch fetch lands
+// under patches/<minor>/<exact>/, a line fetch lands flat, `list` shows both
+// installed patches and marks BOTH release rows "(installed)", and `verify`
+// reports both.
+func TestFetchListVerifyAgainstTwoPatchesFixture(t *testing.T) {
+	dir, key := fixtures(t)
+	isolate(t)
+	t.Setenv("CHTYPES_TRUSTED_KEYS", key)
+	src := "file://" + filepath.Join(dir, "two-patches")
+	blob, err := os.ReadFile(filepath.Join(dir, "expected.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exp struct {
+		Patches struct {
+			Line   string   `json:"line"`
+			Served []string `json:"served"`
+			Newest string   `json:"newest"`
+		} `json:"patches"`
+	}
+	if err := json.Unmarshal(blob, &exp); err != nil {
+		t.Fatal(err)
+	}
+	if exp.Patches.Line == "" || len(exp.Patches.Served) != 2 {
+		t.Fatalf("expected.json carries no usable patches block: %+v", exp.Patches)
+	}
+	older, newer := exp.Patches.Served[0], exp.Patches.Served[1]
+	if newer != exp.Patches.Newest {
+		// served[] is documented as ascending; keep this test honest about it.
+		t.Fatalf("served = %v, newest = %s — served[1] is assumed to be the newest", exp.Patches.Served, exp.Patches.Newest)
+	}
+
+	dest := filepath.Join(t.TempDir(), "reg")
+	rc, out, errs := exec(t, "fetch", older, "--url", src, "--dest", dest)
+	wantOlderDir := filepath.Join(dest, "patches", exp.Patches.Line, older)
+	if rc != 0 || strings.TrimSpace(out) != wantOlderDir {
+		t.Fatalf("fetch exact older: rc=%d stdout=%q stderr=%q, want dir %q", rc, out, errs, wantOlderDir)
+	}
+	rc, out, errs = exec(t, "fetch", exp.Patches.Line, "--url", src, "--dest", dest)
+	wantFlatDir := filepath.Join(dest, exp.Patches.Line)
+	if rc != 0 || strings.TrimSpace(out) != wantFlatDir {
+		t.Fatalf("fetch line: rc=%d stdout=%q stderr=%q, want dir %q", rc, out, errs, wantFlatDir)
+	}
+
+	rc, out, _ = exec(t, "verify", "--dest", dest)
+	if rc != 0 || !strings.Contains(out, "2 installed, 2 verified, 0 bad") {
+		t.Fatalf("verify: rc=%d %q", rc, out)
+	}
+
+	rc, out, _ = exec(t, "list", "--dest", dest, "--url", src)
+	if rc != 0 {
+		t.Fatalf("list: rc=%d %q", rc, out)
+	}
+	if strings.Count(out, "(installed)") != 2 {
+		t.Fatalf("list did not mark BOTH served patches installed:\n%s", out)
+	}
+	if !strings.Contains(out, older) || !strings.Contains(out, newer) {
+		t.Fatalf("list does not name both installed patches:\n%s", out)
 	}
 }
 

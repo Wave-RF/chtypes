@@ -20,7 +20,7 @@
  * installed, at the directory the search path says.
  */
 
-import { generateKeyPairSync, randomBytes, sign as signRaw, createHash, type KeyObject } from 'node:crypto';
+import { createHash, generateKeyPairSync, type KeyObject, randomBytes, sign as signRaw } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -29,7 +29,12 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { EXIT, runCli, type CliIo } from '../src/cli.js';
+import { type CliIo, EXIT, runCli } from '../src/cli.js';
+// RELEASE_RETRY and FETCH_ABI_REVISION are internal, test-only knobs (not
+// re-exported from index.js): mutable objects, so the publish-window retry
+// delay can be shrunk to near zero here without a real wait, and the shared
+// fixtures can be fetched at the ABI revision they carry.
+import { FETCH_ABI_REVISION, RELEASE_RETRY } from '../src/fetch.js';
 import {
   ABI_REVISION,
   ArtifactCorruptError,
@@ -38,40 +43,36 @@ import {
   ArtifactPinnedError,
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
-  ChtypesError,
-  FetchError,
-  Registry,
-  RegistryError,
-  RELEASE_PUBLIC_KEYS,
-  SourceUnreachableError,
   artifactMissingMessage,
+  ChtypesError,
   cacheRegistryDir,
   compareVersions,
+  type EnsureOptions,
   ensure,
   ensureAll,
   extractTarGz,
+  FetchError,
+  type FetchEvent,
   fetchDestination,
   hostPlatform,
   keyId,
+  LOCK_SCHEMA,
   listArtifacts,
   looksLikeRegistry,
   parseSignatureFile,
   parseVersionSpelling,
+  RELEASE_PUBLIC_KEYS,
+  Registry,
+  RegistryError,
   readLock,
   registrySearchPath,
   resolveRegistryDir,
+  SourceUnreachableError,
   sha256File,
   trustedKeys,
   verifyEd25519,
   verifyInstalled,
-  type EnsureOptions,
-  type FetchEvent,
 } from '../src/index.js';
-// RELEASE_RETRY and FETCH_ABI_REVISION are internal, test-only knobs (not
-// re-exported from index.js): mutable objects, so the publish-window retry
-// delay can be shrunk to near zero here without a real wait, and the shared
-// fixtures can be fetched at the ABI revision they carry.
-import { FETCH_ABI_REVISION, RELEASE_RETRY } from '../src/fetch.js';
 import { fixtureAbiRevision } from './fixture-revision.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -615,7 +616,11 @@ describe('the verification chain against a synthetic release (docs/guides/fetch.
     // The published patch, typed with or without its channel, is the line.
     expect((await ensure('25.8.28.1-lts', opts(good, dest))).version).toBe('25.8.28.1-lts');
     expect((await ensure('v25.8.28.1', opts(good, dest))).version).toBe('25.8.28.1-lts');
-    expect(readdirSync(dest)).toEqual(['25.8']);
+    // An EXACT patch request always installs at patches/<minor>/<version>/,
+    // never the flat slot — even into an empty destination, and even though
+    // this patch is also its line's newest (issue #284, the layout rule).
+    expect(readdirSync(dest)).toEqual(['patches']);
+    expect(readdirSync(path.join(dest, 'patches', '25.8'))).toEqual(['25.8.28.1-lts']);
   });
 
   it('CHTYPES_SOURCE_UNREACHABLE: a source that cannot be reached, or does not serve the release', async () => {
@@ -677,11 +682,12 @@ describe('the verification chain against a synthetic release (docs/guides/fetch.
     const r = await ensure('25.8', opts(good, dest, { lock }));
     const want = good.files.get('25.8')!;
     const rev = FETCH_ABI_REVISION.override ?? ABI_REVISION;
+    // Schema 2 (issue #284): keyed by the exact patch installed, never the bare line.
     expect(readLock(lock)).toEqual({
-      schema: 1,
-      artifacts: { [`${PLATFORM}/25.8`]: { file: want.file, sha256: want.sha256, abi_revision: rev } },
+      schema: LOCK_SCHEMA,
+      artifacts: { [`${PLATFORM}/25.8.28.1-lts`]: { file: want.file, sha256: want.sha256, abi_revision: rev } },
     });
-    expect(JSON.parse(readFileSync(lock, 'utf8'))).toMatchObject({ schema: 1 });
+    expect(JSON.parse(readFileSync(lock, 'utf8'))).toMatchObject({ schema: LOCK_SCHEMA });
     // Frozen against the same release: fine, and still a no-op download.
     expect((await ensure('25.8', opts(good, dest, { lock, frozen: true }))).installed).toBe(false);
     expect(r.sha256).toBe(want.sha256);
@@ -692,14 +698,18 @@ describe('the verification chain against a synthetic release (docs/guides/fetch.
     expect((unpinned as FetchError).code).toBe('CHTYPES_ARTIFACT_PINNED');
     expect(existsSync(path.join(dest, '26.7'))).toBe(false);
 
-    // The same line, rebuilt: different bytes, different sha256 — drift, refused.
+    // The same patch, rebuilt: different bytes, different sha256 — drift,
+    // refused. Never "pins X but the release offers Y" any more (issue #284,
+    // F5): the lock is the candidate set, and the release serving something
+    // newer is not drift in anything that was pinned; only the SAME file
+    // name's bytes disagreeing still refuses.
     const drifted = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }], seed: 'rebuilt' });
     const drift = await ensure('25.8', opts(drifted, dest, { lock, frozen: true })).catch((e: unknown) => e);
     expect(drift).toBeInstanceOf(ArtifactPinnedError);
-    expect((drift as Error).message).toMatch(/pins .* but the release offers/);
+    expect((drift as Error).message).toMatch(/pins .* but the release lists it as/);
     // Without --frozen the lock follows the fetch (trust on first fetch, re-pinned on change).
     await ensure('25.8', opts(drifted, dest, { lock }));
-    expect(readLock(lock)!.artifacts[`${PLATFORM}/25.8`]!.sha256).toBe(drifted.files.get('25.8')!.sha256);
+    expect(readLock(lock)!.artifacts[`${PLATFORM}/25.8.28.1-lts`]!.sha256).toBe(drifted.files.get('25.8')!.sha256);
 
     // No lock file at all under --frozen: nothing is pinned, so everything is refused.
     const missing = await ensure('25.8', opts(good, dest, { lock: path.join(dest, 'absent.lock'), frozen: true })).catch((e: unknown) => e);
@@ -1116,7 +1126,7 @@ describe('the CLI (docs/guides/fetch.md §6)', () => {
 
     const lock = path.join(scratch('cli-lock'), 'chtypes.lock');
     expect((await run(['fetch', '25.8', '--url', good.url, '--dest', dest, '--lock', lock, '-q'])).code).toBe(0);
-    expect(readLock(lock)!.artifacts[`${PLATFORM}/25.8`]).toBeDefined();
+    expect(readLock(lock)!.artifacts[`${PLATFORM}/25.8.28.1-lts`]).toBeDefined();
     const pinned = await run(['fetch', '26.7', '--url', good.url, '--dest', dest, '--lock', lock, '--frozen', '-q']);
     expect(pinned.code).toBe(EXIT.verificationFailed);
     expect(pinned.err).toMatch(/\[CHTYPES_ARTIFACT_PINNED\]/);
@@ -1396,7 +1406,11 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     expect(lock.schema).toBe(1);
     const pinKey = Object.keys(lock.artifacts).find((k) => k.startsWith(`${fixturePlatform}/`));
     expect(pinKey).toBeDefined();
-    const line = pinKey!.split('/')[1]!;
+    // readLock always hands back schema-2-shaped (patch-keyed) artifacts, even
+    // though this fixture's own file is schema 1 (asserted above): recover the
+    // MINOR line from the pinned patch, so this line request stays a line
+    // request throughout the test.
+    const line = parseVersionSpelling(pinKey!.split('/')[1]!).line;
     const dest = scratch('fixture-dest');
     // The lock is a shared fixture: never written to. Copy it beside the destination.
     const copy = path.join(dest, 'chtypes.lock');
@@ -1416,7 +1430,12 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     const lockFile = path.join(SPEC_FIXTURES, 'chtypes.lock');
     const lock = readLock(lockFile)!;
     const pinKey = Object.keys(lock.artifacts).find((k) => k.startsWith(`${fixturePlatform}/`))!;
-    const line = pinKey.split('/')[1]!;
+    // readLock hands back schema-2-shaped (patch-keyed) artifacts regardless of
+    // this fixture's own on-disk schema (1): recover the MINOR line, so every
+    // `ensure(line, …)` below stays a line request, and every synthetic lock
+    // this test writes is schema 2 (a patch-keyed key under schema 1 would not
+    // convert — its version and its file both name a patch, not a line).
+    const line = parseVersionSpelling(pinKey.split('/')[1]!).line;
     const entry = lock.artifacts[pinKey]!;
 
     // (b) A lock entry at a different revision: PINNED, naming both
@@ -1425,7 +1444,7 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     const other = fixtureRevision + 1;
     const mismatchedDir = scratch('mismatched');
     const mismatched = path.join(mismatchedDir, 'chtypes.lock');
-    writeFileSync(mismatched, JSON.stringify({ schema: 1, artifacts: { [pinKey]: { ...entry, abi_revision: other } } }));
+    writeFileSync(mismatched, JSON.stringify({ schema: LOCK_SCHEMA, artifacts: { [pinKey]: { ...entry, abi_revision: other } } }));
     const unreachable = await ensure(line, {
       dest: scratch('reg2'),
       platform: fixturePlatform,
@@ -1443,7 +1462,7 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     // and for a line the release does not offer at this revision
     // (UNPUBLISHED; 24.8 is not among signed/'s published lines).
     const noRevDrift = path.join(scratch('no-rev-drift'), 'chtypes.lock');
-    writeFileSync(noRevDrift, JSON.stringify({ schema: 1, artifacts: { [pinKey]: { file: entry.file, sha256: '00'.repeat(32) } } }));
+    writeFileSync(noRevDrift, JSON.stringify({ schema: LOCK_SCHEMA, artifacts: { [pinKey]: { file: entry.file, sha256: '00'.repeat(32) } } }));
     const drift = await ensure(line, fixture('signed', scratch('reg3'), { lock: noRevDrift, frozen: true })).catch((e: unknown) => e);
     expect(drift).toBeInstanceOf(ArtifactPinnedError);
     expect((drift as Error).message).toContain('records no ABI revision');
@@ -1452,9 +1471,11 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     // one before it with no punctuation between them.
     expect((drift as Error).message).toContain(`frozen refuses it. ${noRevDrift} records no ABI revision`);
 
-    const otherKey = `${fixturePlatform}/24.8`;
+    // A schema-2 key must name an exact patch, not a bare line — "24.8.1.1" is
+    // a stand-in patch of a line signed/ does not publish at all.
+    const otherKey = `${fixturePlatform}/24.8.1.1`;
     const noRevUnpublished = path.join(scratch('no-rev-unpublished'), 'chtypes.lock');
-    writeFileSync(noRevUnpublished, JSON.stringify({ schema: 1, artifacts: { [otherKey]: { file: 'x.tar.gz', sha256: '00' } } }));
+    writeFileSync(noRevUnpublished, JSON.stringify({ schema: LOCK_SCHEMA, artifacts: { [otherKey]: { file: 'x.tar.gz', sha256: '00'.repeat(32) } } }));
     const unpublished = await ensure('24.8', fixture('signed', scratch('reg4'), { lock: noRevUnpublished, frozen: true })).catch((e: unknown) => e);
     expect(unpublished).toBeInstanceOf(ArtifactUnpublishedError);
     expect((unpublished as Error).message).toContain('records no ABI revision');
@@ -1465,7 +1486,7 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
     // exactly as before, and --frozen never writes to the lock — not even
     // to add abi_revision to an entry that matched without it.
     const matching = path.join(scratch('matching'), 'chtypes.lock');
-    const matchingBytes = JSON.stringify({ schema: 1, artifacts: { [pinKey]: { ...entry, abi_revision: fixtureRevision } } });
+    const matchingBytes = JSON.stringify({ schema: LOCK_SCHEMA, artifacts: { [pinKey]: { ...entry, abi_revision: fixtureRevision } } });
     writeFileSync(matching, matchingBytes);
     const ok = await ensure(line, fixture('signed', scratch('reg5'), { lock: matching, frozen: true }));
     expect(ok.file).toBe(entry.file);
@@ -1473,7 +1494,7 @@ describe.skipIf(!HAVE_FIXTURES)('the shared vectors under tests/fixtures/fetch (
 
     const noRevMatchDest = scratch('reg5b');
     const noRevMatch = path.join(scratch('no-rev-match'), 'chtypes.lock');
-    const noRevMatchBytes = JSON.stringify({ schema: 1, artifacts: { [pinKey]: { file: entry.file, sha256: entry.sha256 } } });
+    const noRevMatchBytes = JSON.stringify({ schema: LOCK_SCHEMA, artifacts: { [pinKey]: { file: entry.file, sha256: entry.sha256 } } });
     writeFileSync(noRevMatch, noRevMatchBytes);
     await ensure(line, fixture('signed', noRevMatchDest, { lock: noRevMatch, frozen: true }));
     expect(readFileSync(noRevMatch, 'utf8')).toBe(noRevMatchBytes);
