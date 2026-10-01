@@ -10,6 +10,8 @@
  * evaluated through `chs_rows`) and skips loudly without one.
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { ChtypesError } from '../src/errors.js';
 import type { BlockHandle, FilterHandle, NativeLibrary, SchemaHandle } from '../src/ffi.js';
@@ -144,17 +146,49 @@ describe('Schema#rows cross-library filter refusal', () => {
 // here; see docs/guides/filters.md.
 //
 // The fix reached only the SUPPORTED lines' artifacts (docs/support.md):
-// 26.3, 26.7, 26.8 and 26.9. A served, unsupported (retired) line gets no
-// new build or ABI revision, ever, so its existing artifact keeps the
-// pre-relink behavior permanently — measured: 26.6's newest served build,
-// 1790767905, predates this relink and was never republished. `openRev5`
-// also opens such a line (anything ABI revision 5+), so the three tests
-// below run against `relinked`, which narrows `rev5` to the supported set,
-// rather than asserting the new behavior against a line that was never
-// given it.
+// 26.3, 26.7, 26.8 and 26.9, at chtypes_build 1790845279 or later. A served,
+// unsupported (retired) line gets no new build or ABI revision, ever, so its
+// existing artifact keeps the pre-relink behavior permanently — measured:
+// 26.6's newest served build, 1790767905, predates this relink and was
+// never republished. `openRev5` also opens such a line (anything ABI
+// revision 5+), so the three tests below run against `relinked`, which
+// gates `rev5` on the artifact's OWN chtypes_build (`isRelinkedBuild`)
+// rather than a hand-typed line list — a hand-typed list goes stale the
+// moment a new supported line ships, and silently stops exercising it.
 
 const CSV_REJECTION_CODE = 117;
-const RELINK_SUPPORTED_LINES = new Set(['26.3', '26.7', '26.8', '26.9']);
+// RELINK_BUILD_298 is the chtypes_build the chtypes#298 relink was served
+// at. It is the one constant isRelinkedBuild is built from: the relink is a
+// property of the BUILD, not of which lines happened to be supported the
+// day this file was written.
+const RELINK_BUILD_298 = 1790845279;
+
+/** `relinked`'s predicate, factored out so it can be pinned against
+ * fabricated build numbers without a loaded artifact (see the threshold
+ * test below). A missing or zero chtypesBuild — 0 is what a manifest that
+ * predates the field reads as — must never be treated as relinked. */
+const isRelinkedBuild = (build: number): boolean => build >= RELINK_BUILD_298;
+
+/** Reads library's own manifest.json for its chtypes_build field, the same
+ * file and the same place scripts/lib/provenance.py reads it from: next to
+ * the loaded library. There is no public accessor for this field — the
+ * registry's own Manifest interface does not carry it — so this reads the
+ * manifest directly rather than guessing. A manifest that cannot be read or
+ * parsed throws: this gate must never default a line it could not actually
+ * measure to "relinked". */
+const chtypesBuildOf = (library: Library): number => {
+  const manifestPath = path.join(path.dirname(library.path), 'manifest.json');
+  const doc = JSON.parse(readFileSync(manifestPath, 'utf8')) as { chtypes_build?: number };
+  return doc.chtypes_build ?? 0;
+};
+
+describe('chtypes#298: isRelinkedBuild threshold', () => {
+  it('keeps the relink build, rejects one short of it, and rejects a build of 0', () => {
+    expect(isRelinkedBuild(RELINK_BUILD_298)).toBe(true);
+    expect(isRelinkedBuild(RELINK_BUILD_298 - 1)).toBe(false);
+    expect(isRelinkedBuild(0)).toBe(false);
+  });
+});
 
 const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
@@ -193,17 +227,16 @@ if (HAVE_REGISTRY) {
     console.warn('[chtypes] chtypes#298 tests SKIPPED: the registry holds no ABI revision-5 artifact.');
   }
   for (const library of rev5) {
-    if (RELINK_SUPPORTED_LINES.has(library.minor)) {
+    const build = chtypesBuildOf(library);
+    if (isRelinkedBuild(build)) {
       relinked.push(library);
     } else {
-      console.warn(
-        `[chtypes] line ${library.minor} (${library.version}) not exercised: a served, unsupported (retired) line never receives this relink (docs/support.md)`,
-      );
+      console.warn(`[chtypes] skipping ${library.minor} at build ${build}: predates the relink ${RELINK_BUILD_298}`);
     }
   }
   if (relinked.length === 0) {
     console.warn(
-      '[chtypes] chtypes#298 tests SKIPPED: the registry holds no artifact on a relinked line (26.3, 26.7, 26.8, 26.9).',
+      `[chtypes] chtypes#298 tests SKIPPED: the registry holds no artifact at chtypes_build ${RELINK_BUILD_298} or later (the chtypes#298 relink).`,
     );
   }
 } else {
