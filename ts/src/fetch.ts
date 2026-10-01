@@ -1092,7 +1092,10 @@ function installContext(platform: string, dest: string, options: EnsureOptions):
   const lockPath =
     options.lock !== undefined && options.lock !== '' ? path.resolve(options.lock) : frozen ? path.resolve(DEFAULT_LOCK_FILE) : undefined;
   const lock = lockPath !== undefined ? readLock(lockPath) : null;
-  if (frozen && lock === null) {
+  // Decision 6: offline never reads the lock at all, so a missing lock file
+  // is not refused here — `ensureUncached`'s offline branch never consults
+  // `ctx.lock` and answers from the destination alone.
+  if (frozen && lock === null && options.offline !== true) {
     throw new ArtifactPinnedError(`chtypes: ${lockPath} does not exist, and frozen refuses anything it does not pin`);
   }
   if (platform !== hostPlatform()) {

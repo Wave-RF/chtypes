@@ -108,7 +108,10 @@ function attemptedDir(run: () => unknown): string {
   }
   expect(thrown, 'expected a load attempt (RegistryError), not a clean resolve').toBeInstanceOf(RegistryError);
   expect(thrown).not.toBeInstanceOf(ArtifactMissingError);
-  const m = /cannot load (.+[/\\]libchtypes\.so):/.exec((thrown as Error).message);
+  // Non-greedy: the native loader's own error can re-mention the same path
+  // (e.g. `Error: <path>: invalid ELF header`), so a greedy capture runs past
+  // the first, authoritative "cannot load <path>:" and into that nested text.
+  const m = /cannot load (.+?[/\\]libchtypes\.so):/.exec((thrown as Error).message);
   expect(m, `could not find an attempted path in: ${(thrown as Error).message}`).not.toBeNull();
   return path.dirname(m![1]!);
 }

@@ -22,6 +22,7 @@ The four bindings in this repository are released together and give one answer, 
 ### Fixed
 
 - **Autofetch now retries after a transient failure, where it used to make one attempt per line per process forever.** `Registry`'s autofetch memo (line and, new, per-patch) now remembers a SUCCESS or a definite `CHTYPES_ARTIFACT_UNPUBLISHED` for the rest of the process, keyed by (destination, spelling) — but an untrusted, corrupt, pinned or unreachable-source failure is never remembered, so the next open retries it. Before this fix, a single flaky read (a mid-publish window, a transient network blip) left a registry permanently answering `CHTYPES_ARTIFACT_MISSING` for that line until the process restarted, even though the underlying condition had long since cleared.
+- **`--offline` now refuses to read a `file://` or plain-directory source, matching the HTTP path.** `Source::Dir` ignored `offline` entirely, so an exact-patch request that fell through the local "already installed" check (a genuine miss) went on to read the release from a `file://` source and answered `CHTYPES_ARTIFACT_UNPUBLISHED` instead of `CHTYPES_SOURCE_UNREACHABLE` — a Decision 6 violation that only an HTTP source's own offline check happened to hide.
 
 ## [0.4.0] — 2026-09-30
 
