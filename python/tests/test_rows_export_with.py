@@ -31,10 +31,23 @@ _CSV_REJECTION_CODE = 117
 class _FakeNative:
     """Stands in for `NativeLibrary` in tests that must never dlopen: the
     only call `Schema.__init__` makes is `schema_columns`, for the column
-    introspection list."""
+    introspection list. The three `*_free` methods are never exercised by
+    assertions here — they only need to exist so a `Schema`/`Filter` built
+    over this fake can be garbage-collected cleanly, since GC now reaches
+    them through each object's own `weakref.finalize` safety net (#381)
+    rather than skipping it on an uncaught `AttributeError`."""
 
     def schema_columns(self, handle: int) -> list[tuple[str, str, str, str, bool]]:
         return []
+
+    def schema_free(self, handle: int) -> None:
+        pass
+
+    def filter_free(self, handle: int) -> None:
+        pass
+
+    def block_free(self, handle: int) -> None:
+        pass
 
 
 class _FakeLibrary:
