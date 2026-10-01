@@ -30,6 +30,15 @@
 #
 # The artifact-backed proof beyond these — the server-truth suites, the
 # oracle, the rigs — is the core repository's server-truth suites.
+#
+# chtypes#285 §1b. Once this suite's own verdict is decided, one more fixed
+# line goes to stdout — `chtypes-count suite=<lang>-no-artifacts|<lang>-
+# artifacts ran=<n> skipped=<n>` — so scripts/policy-merge-check.py's
+# `test-counts` condition can read this job's own executed-test count back
+# off its log and refuse a pull request whose test or fixture change let a
+# suite's count fall below main's last green `ci` push run. See that
+# script's module docstring for why the job's log, not its check-run
+# output.summary, is what gets read.
 set -euo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -554,6 +563,22 @@ here: rust passed ${PARITY_N:-0} of at least $PARITY_MIN parity tests (tests/par
     fi
     ;;
 esac
+
+# chtypes#285 §1b — one fixed, machine-readable line per suite, read by
+# scripts/policy-merge-check.py's `test-counts` condition off THIS job's own
+# log (GET .../actions/jobs/{id}/logs — a check run's own `output.summary`
+# and annotations are NOT populated for a GitHub-Actions-authored job, so the
+# console log, which that endpoint DOES serve, is the only place a read-only
+# token can read this from; verified against a real run, not assumed — see
+# policy-merge-check.py's own module docstring). Derived from $PASSED/
+# $SKIPPED above, never a second, hand-set count: it cannot read differently
+# than the VERDICT line below, because both read the same two variables.
+# CI always passes exactly one of --no-artifacts/--require-artifacts (the
+# label below assumes that; an ad hoc local run with neither flag prints the
+# no-artifacts label, which nothing reads).
+SUITE_LABEL="$WHICH-no-artifacts"
+[ "$REQUIRE" -eq 1 ] && SUITE_LABEL="$WHICH-artifacts"
+echo "chtypes-count suite=$SUITE_LABEL ran=${PASSED:-} skipped=${SKIPPED:-0}"
 
 [ -n "$SUMMARY" ] || PROBLEMS+=("no summary line — the runner did not finish; see $LOG")
 [ "$RC" -eq 0 ] || PROBLEMS+=("the runner exited $RC")
