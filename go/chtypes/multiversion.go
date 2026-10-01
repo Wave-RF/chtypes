@@ -752,6 +752,29 @@ func (r *Registry) preloadLines() error {
 	return nil
 }
 
+// resolveUnsafeFamilies answers the refuse-list chs_init is called with
+// (docs/reference/artifact.md step 9): dir's own unsafe_families.txt when
+// that file is present, even empty; otherwise dir/manifest.json's own
+// unsafe_families field when IT is present, even empty. When NEITHER source
+// is present this refuses rather than falling back to an empty guard —
+// chs_init must never run with an empty refuse-list by default.
+func resolveUnsafeFamilies(dir string) (string, error) {
+	if b, err := os.ReadFile(filepath.Join(dir, "unsafe_families.txt")); err == nil {
+		return strings.TrimSpace(string(b)), nil
+	}
+	if mf, err := os.ReadFile(filepath.Join(dir, "manifest.json")); err == nil {
+		var m struct {
+			UnsafeFamilies *string `json:"unsafe_families"`
+		}
+		if json.Unmarshal(mf, &m) == nil && m.UnsafeFamilies != nil {
+			return strings.TrimSpace(*m.UnsafeFamilies), nil
+		}
+	}
+	return "", fmt.Errorf(
+		"chtypes: %s has neither unsafe_families.txt nor manifest.json's unsafe_families field; "+
+			"refusing to load without an explicit refuse-list", dir)
+}
+
 // readArtifactDir reads one <minor>/manifest.json; ok is false when the
 // directory is not an artifact directory.
 func readArtifactDir(sub string) (m struct {
@@ -937,9 +960,9 @@ func openLibrary(path, timezone string) (*Library, error) {
 	// Each library keeps its own DateLUT and its own refuse-list.
 	tz := C.CString(timezone)
 	defer C.free(unsafe.Pointer(tz))
-	ul := ""
-	if b, err := os.ReadFile(filepath.Join(filepath.Dir(path), "unsafe_families.txt")); err == nil {
-		ul = strings.TrimSpace(string(b))
+	ul, err := resolveUnsafeFamilies(filepath.Dir(path))
+	if err != nil {
+		return nil, err
 	}
 	cul := C.CString(ul)
 	defer C.free(unsafe.Pointer(cul))

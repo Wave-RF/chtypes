@@ -66,7 +66,11 @@ class Manifest:
     arch: str = ""
     library_bytes: int = 0
     library_sha256: str = ""
-    unsafe_families: str = ""
+    #: ``None`` when the field is ABSENT (a manifest predating it, or one that
+    #: simply omits it) — distinct from an empty string, which is a PRESENT,
+    #: valid empty refuse-list. `_resolve_unsafe_families` below is the only
+    #: thing that tells the two apart.
+    unsafe_families: str | None = None
 
 
 def read_manifest(version_dir: str | os.PathLike[str]) -> Manifest | None:
@@ -88,6 +92,26 @@ def read_manifest(version_dir: str | os.PathLike[str]) -> Manifest | None:
         return Manifest(**{k: v for k, v in doc.items() if k in known})
     except TypeError:  # pragma: no cover - a field of the wrong type
         return None
+
+
+def _resolve_unsafe_families(version_dir: str | os.PathLike[str], manifest: Manifest) -> str:
+    """The refuse-list to pass to ``chs_init`` (docs/reference/artifact.md step 9):
+    ``unsafe_families.txt`` beside the library when that file is present, even
+    empty; otherwise the manifest's own ``unsafe_families`` field when IT is
+    present, even empty. Neither present is refused rather than falling back
+    to an empty guard — ``chs_init`` must never run with an empty refuse-list
+    by default.
+    """
+    try:
+        return (Path(version_dir) / "unsafe_families.txt").read_text().strip()
+    except OSError:
+        pass
+    if manifest.unsafe_families is not None:
+        return manifest.unsafe_families.strip()
+    raise RegistryError(
+        f"chtypes: {version_dir} has neither unsafe_families.txt nor manifest.json's "
+        "unsafe_families field; refusing to load without an explicit refuse-list"
+    )
 
 
 def check_library_bytes(

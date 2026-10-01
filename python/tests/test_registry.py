@@ -16,6 +16,7 @@ import pytest
 
 import chtypes
 from chtypes import Format, Outcome
+from chtypes._manifest import _resolve_unsafe_families
 from chtypes._native import NativeLibrary
 from chtypes.fetch import cache_registry_dir
 
@@ -218,6 +219,42 @@ def test_manifest_ignores_unknown_fields(tmp_path: Path) -> None:
     manifest = chtypes.read_manifest(tmp_path)
     assert manifest is not None
     assert manifest.library == "libchtypes.so"
+
+
+# `_resolve_unsafe_families` is exercised directly (docs/reference/artifact.md
+# step 9: "the contents of that version's own unsafe_families.txt") rather
+# than through a real Library, which would need a loadable artifact: the
+# three cases below are about WHICH source wins, never about chs_init itself.
+
+
+def test_resolve_unsafe_families_falls_back_to_manifest_field(tmp_path: Path) -> None:
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"library": "libchtypes.so", "unsafe_families": "Array,Map"})
+    )
+    manifest = chtypes.read_manifest(tmp_path)
+    assert manifest is not None
+    # No unsafe_families.txt written: the manifest's field must reach init.
+    assert _resolve_unsafe_families(tmp_path, manifest) == "Array,Map"
+
+
+def test_resolve_unsafe_families_refuses_with_neither_source(tmp_path: Path) -> None:
+    (tmp_path / "manifest.json").write_text(json.dumps({"library": "libchtypes.so"}))
+    manifest = chtypes.read_manifest(tmp_path)
+    assert manifest is not None
+    with pytest.raises(chtypes.RegistryError) as refused:
+        _resolve_unsafe_families(tmp_path, manifest)
+    assert "unsafe_families.txt" in str(refused.value)
+    assert "manifest" in str(refused.value)
+
+
+def test_resolve_unsafe_families_empty_file_wins_over_manifest_field(tmp_path: Path) -> None:
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"library": "libchtypes.so", "unsafe_families": "Array,Map"})
+    )
+    (tmp_path / "unsafe_families.txt").write_text("")
+    manifest = chtypes.read_manifest(tmp_path)
+    assert manifest is not None
+    assert _resolve_unsafe_families(tmp_path, manifest) == ""
 
 
 def test_verify_library_accepts_an_uppercase_digest(tmp_path: Path) -> None:

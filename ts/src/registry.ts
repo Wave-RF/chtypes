@@ -919,12 +919,29 @@ function readManifest(dir: string): Manifest | null {
   }
 }
 
-function readUnsafeFamilies(dir: string, manifest: Manifest): string {
+/**
+ * The refuse-list to pass to `chs_init` (docs/reference/artifact.md step 9):
+ * `unsafe_families.txt` beside `dir` when that file is present, even empty;
+ * otherwise `manifest`'s own `unsafe_families` field when IT is present,
+ * even empty. Neither present throws `RegistryError` rather than falling
+ * back to an empty guard — `chs_init` must never run with an empty
+ * refuse-list by default.
+ *
+ * Exported for tests only (the same shape as this module's own
+ * `resetPatchFallbackWarnings`): not re-exported from `index.ts`, so it
+ * never reaches the public API.
+ */
+export function readUnsafeFamilies(dir: string, manifest: Manifest): string {
   try {
     return readFileSync(path.join(dir, 'unsafe_families.txt'), 'utf8').trim();
   } catch {
-    return (manifest.unsafe_families ?? '').trim();
+    // fall through to the manifest field below
   }
+  if (manifest.unsafe_families !== undefined) return manifest.unsafe_families.trim();
+  throw new RegistryError(
+    `chtypes: ${dir} has neither unsafe_families.txt nor manifest.json's unsafe_families field; ` +
+      'refusing to load without an explicit refuse-list',
+  );
 }
 
 /**

@@ -134,9 +134,12 @@ pub struct Manifest {
     #[serde(default)]
     pub arch: String,
     /// The generated refuse-list, inline. `unsafe_families.txt` next to the
-    /// library is what is actually passed to `chs_init`.
+    /// library is tried FIRST; this field is the fallback when that file is
+    /// absent (`Library::load`'s `resolve_unsafe_families`). `None` when the
+    /// field itself is absent — distinct from `Some(String::new())`, a
+    /// PRESENT, valid empty refuse-list.
     #[serde(default)]
-    pub unsafe_families: String,
+    pub unsafe_families: Option<String>,
 }
 
 /// Every artifact under one directory, indexed by version — or, built with

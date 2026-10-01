@@ -101,7 +101,7 @@ func TestOpenLibraryRefusesConflictingTimezone(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"),
-		[]byte(`{"library":"libchtypes`+soext+`","clickhouse_version":"x","clickhouse_minor":"x"}`), 0o644); err != nil {
+		[]byte(`{"library":"libchtypes`+soext+`","clickhouse_version":"x","clickhouse_minor":"x","unsafe_families":""}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -181,7 +181,7 @@ func stageArtifact(t *testing.T, src, soext, dir string) string {
 func writeStubManifest(t *testing.T, dir, soext string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"),
-		[]byte(`{"library":"libchtypes`+soext+`","clickhouse_version":"x","clickhouse_minor":"x"}`), 0o644); err != nil {
+		[]byte(`{"library":"libchtypes`+soext+`","clickhouse_version":"x","clickhouse_minor":"x","unsafe_families":""}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

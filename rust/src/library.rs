@@ -178,15 +178,40 @@ fn image_lock(key: ImageKey) -> Arc<Mutex<()>> {
     )
 }
 
+/// The refuse-list to pass to `chs_init` for the artifact at `path`
+/// (docs/reference/artifact.md step 9): `unsafe_families.txt` beside it when
+/// that file is present, even empty; otherwise `manifest.json`'s own
+/// `unsafe_families` field when IT is present, even empty. Neither source
+/// present is [`Error::MissingUnsafeFamilies`] rather than a silent empty
+/// guard — `chs_init` must never run with an empty refuse-list by default.
+fn resolve_unsafe_families(path: &Path) -> Result<String> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    if let Ok(s) = std::fs::read_to_string(dir.join("unsafe_families.txt")) {
+        return Ok(s.trim().to_string());
+    }
+    if let Ok(text) = std::fs::read_to_string(dir.join("manifest.json")) {
+        if let Ok(m) = serde_json::from_str::<crate::registry::Manifest>(&text) {
+            if let Some(families) = m.unsafe_families {
+                return Ok(families.trim().to_string());
+            }
+        }
+    }
+    Err(Error::MissingUnsafeFamilies {
+        path: dir.to_path_buf(),
+    })
+}
+
 impl Library {
     /// `dlopen` one artifact, ask it its own version, and `chs_init` it exactly
     /// once with `timezone` and the contents of the artifact's own
-    /// `unsafe_families.txt`.
+    /// `unsafe_families.txt`, falling back to `manifest.json`'s own
+    /// `unsafe_families` field when that file is absent.
     ///
     /// The refuse-list is generated at build time by probing the build's own
-    /// registry and must never be hard-coded. An absent or empty file means an
-    /// empty list — every artifact in the current matrix ships an empty one, so
-    /// treating "empty" as "missing, bail out" would be wrong.
+    /// registry and must never be hard-coded. A PRESENT but empty file or
+    /// field means an empty list — every artifact in the current matrix ships
+    /// one, so treating "empty" as "missing, bail out" would be wrong. Neither
+    /// source present IS "missing, bail out": see [`Error::MissingUnsafeFamilies`].
     ///
     /// # Errors
     ///
@@ -196,6 +221,9 @@ impl Library {
     ///   and loads with per-symbol degradation).
     /// * [`Error::NotAnArtifact`] — the library loaded but lacks one of the
     ///   four mandatory `chs_*` symbols.
+    /// * [`Error::MissingUnsafeFamilies`] — neither `unsafe_families.txt` nor
+    ///   `manifest.json`'s `unsafe_families` field is present next to the
+    ///   library; refused rather than loaded with an empty guard.
     /// * [`Error::Init`] — `chs_init` returned nonzero; the one reachable
     ///   cause is an unknown `timezone`, and the message names it.
     /// * [`Error::InitConflict`] — this artifact image is already initialized
@@ -218,13 +246,7 @@ impl Library {
         let version = api.clickhouse_version();
         let minor = minor_of(&version);
 
-        let families = std::fs::read_to_string(
-            path.parent()
-                .unwrap_or(Path::new("."))
-                .join("unsafe_families.txt"),
-        )
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
+        let families = resolve_unsafe_families(path)?;
 
         // chs_init AT MOST ONCE per artifact image. dlopen refcounts one image
         // per file, so a second Library over the same artifact — or over a
@@ -730,5 +752,71 @@ mod tests {
             DefaultKind::parse("FUTURE"),
             DefaultKind::Other("FUTURE".into())
         );
+    }
+
+    // `resolve_unsafe_families` is exercised directly (docs/reference/artifact.md
+    // step 9: "the contents of that version's own unsafe_families.txt") rather
+    // than through `Library::load`, which would need a loadable artifact: the
+    // three cases below are about WHICH source wins, never about chs_init itself.
+
+    /// A scratch directory for one test, removed when dropped — the same
+    /// shape `tests/integration.rs`'s `Scratch` uses, kept local here since
+    /// unit tests in this module cannot reach that integration-test type.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str) -> Scratch {
+            let dir = std::env::temp_dir().join(format!("chtypes-rs-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("scratch directory");
+            Scratch(dir)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn resolve_unsafe_families_falls_back_to_manifest_field() {
+        let scratch = Scratch::new("fallback");
+        std::fs::write(
+            scratch.0.join("manifest.json"),
+            r#"{"library":"libchtypes.so","unsafe_families":"Array,Map"}"#,
+        )
+        .unwrap();
+        // No unsafe_families.txt written: the manifest's field must reach init.
+        let got = resolve_unsafe_families(&scratch.0.join("libchtypes.so")).unwrap();
+        assert_eq!(got, "Array,Map");
+    }
+
+    #[test]
+    fn resolve_unsafe_families_refuses_with_neither_source() {
+        let scratch = Scratch::new("neither");
+        std::fs::write(
+            scratch.0.join("manifest.json"),
+            r#"{"library":"libchtypes.so"}"#,
+        )
+        .unwrap();
+        let err = resolve_unsafe_families(&scratch.0.join("libchtypes.so")).unwrap_err();
+        assert!(matches!(err, Error::MissingUnsafeFamilies { .. }), "{err}");
+        let message = err.to_string();
+        assert!(message.contains("unsafe_families.txt"), "{message}");
+        assert!(message.contains("manifest.json"), "{message}");
+    }
+
+    #[test]
+    fn resolve_unsafe_families_empty_file_wins_over_manifest_field() {
+        let scratch = Scratch::new("empty-wins");
+        std::fs::write(
+            scratch.0.join("manifest.json"),
+            r#"{"library":"libchtypes.so","unsafe_families":"Array,Map"}"#,
+        )
+        .unwrap();
+        std::fs::write(scratch.0.join("unsafe_families.txt"), "").unwrap();
+        let got = resolve_unsafe_families(&scratch.0.join("libchtypes.so")).unwrap();
+        assert_eq!(got, "");
     }
 }
