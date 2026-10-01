@@ -74,6 +74,8 @@ Nothing is a verdict but the chain; no exit code, no `Content-Length`, no "downl
 
 The install is atomic: unpack into a temporary sibling, rename into place, inside whichever of the two directories it is landing in. When a line fetch is about to put a different patch in the flat slot, the outgoing patch is renamed into `patches/<minor>/<its version>/` FIRST — atomically, on the same filesystem — and never deleted (§1, "Two levels"). An already-installed line or patch that hashes what `SHA256SUMS` says is reported as installed and nothing is downloaded (`--force` re-downloads).
 
+Unpacking accepts only regular files and directories: a tar entry of any other type — symlink, hardlink, character or block device, FIFO — refuses the whole install rather than being silently skipped, in all four bindings.
+
 ### 3a. The publish window, an edge cache widens it, and what retries
 
 A publish into the rolling release is **three objects** — `SHA256SUMS`, `SHA256SUMS.sig`, `index.json` — plus, when a release-level file is being installed (`sdk-goldens.json`, or `--release-file`), a **fourth**. Object storage cannot swap any of them atomically. They are uploaded in that order, so an old `index.json` read against new sums still cross-checks at step 2; the narrowest unsafe window is between the sums and the signature that covers them — one small object, seconds long.
