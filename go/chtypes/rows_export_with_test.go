@@ -1,15 +1,18 @@
 package chtypes
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
-// These tests cover what can be exercised WITHOUT a loaded artifact: the
-// pure document-decoding logic (verdictOf, rowResultOf, batchResultOf
+// Most of this file covers what can be exercised WITHOUT a loaded artifact:
+// the pure document-decoding logic (verdictOf, rowResultOf, batchResultOf
 // against hand-built documents shaped exactly as the C ABI contract §Rows
 // describes chs_rows' attached-filter document), RowsOption assembly, and
 // the Go-level cross-library refusal RowsExportWith performs before any C
-// call. Nothing here dlopens a library or asserts against a live server —
-// that end-to-end path needs a revision-5 artifact, which does not exist
-// yet (issue #54).
+// call. TestRowsExportWithColumnsAndFilterComposeEndToEnd, at the end, is the
+// one exception: it needs a revision-5 artifact and skips loudly without one
+// (rev5Libraries, csv_reader_test.go).
 
 // TestVerdictOfMapsTheFourCharacters is the single source of truth
 // verdictOf implements: 't'/'f' answer, 'e' is the predicate throwing, and
@@ -127,7 +130,7 @@ func TestRowsOptionAssembly(t *testing.T) {
 	f := &LoadedFilter{Expr: "tenant = 1"}
 	var cfg rowsExportWithConfig
 	for _, o := range []RowsOption{WithDocFlags(DocValues), WithRowFilter(f), WithDocFlags(DocDefaults)} {
-		o(&cfg)
+		o.applyRowsExportWith(&cfg)
 	}
 	if cfg.filter != f {
 		t.Fatalf("cfg.filter = %v, want %v", cfg.filter, f)
@@ -144,10 +147,49 @@ func TestRowsOptionAssembly(t *testing.T) {
 func TestRowsExportWithNoFilterOptionLeavesConfigEmpty(t *testing.T) {
 	var cfg rowsExportWithConfig
 	for _, o := range []RowsOption{WithDocFlags(DocAll)} {
-		o(&cfg)
+		o.applyRowsExportWith(&cfg)
 	}
 	if cfg.filter != nil {
 		t.Fatalf("cfg.filter = %v, want nil with no WithRowFilter", cfg.filter)
+	}
+}
+
+// TestRowsOptionAssemblyWithColumns is issue #304's own regression: WithColumns
+// (a RowOption) rides RowsOption via RowOption.applyRowsExportWith, exactly as
+// it already rides RowsExportOption for RowsExport, so a column list composes
+// with an attached filter in one RowsExportWith call — the gap the C ABI's
+// chs_rows never had (it already takes columns_json and filter on the same
+// call) but Go's RowsExportWith did, until now.
+func TestRowsOptionAssemblyWithColumns(t *testing.T) {
+	f := &LoadedFilter{Expr: "tenant = 1"}
+	var cfg rowsExportWithConfig
+	for _, o := range []RowsOption{WithColumns([]string{"tenant", "id"}), WithRowFilter(f)} {
+		o.applyRowsExportWith(&cfg)
+	}
+	if cfg.filter != f {
+		t.Fatalf("cfg.filter = %v, want %v", cfg.filter, f)
+	}
+	want := []string{"tenant", "id"}
+	if len(cfg.columns) != len(want) {
+		t.Fatalf("cfg.columns = %v, want %v", cfg.columns, want)
+	}
+	for i, c := range want {
+		if cfg.columns[i] != c {
+			t.Fatalf("cfg.columns = %v, want %v", cfg.columns, want)
+		}
+	}
+}
+
+// TestRowsOptionAssemblyWithColumnsEmptyLeavesNil confirms an empty WithColumns
+// slice leaves cfg.columns empty, the same "no list" reading columnsCArgLoaded
+// gives it elsewhere — never an empty JSON array sent to the server.
+func TestRowsOptionAssemblyWithColumnsEmptyLeavesNil(t *testing.T) {
+	var cfg rowsExportWithConfig
+	for _, o := range []RowsOption{WithColumns(nil)} {
+		o.applyRowsExportWith(&cfg)
+	}
+	if len(cfg.columns) != 0 {
+		t.Fatalf("cfg.columns = %v, want empty", cfg.columns)
 	}
 }
 
@@ -174,4 +216,89 @@ func TestRowsExportWithCrossLibraryFilterRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a refusal for a filter compiled over a different loaded library")
 	}
+}
+
+// TestRowsExportWithColumnsAndFilterComposeEndToEnd is issue #304's own
+// end-to-end regression, against a real revision-5 artifact: WithColumns and
+// WithRowFilter attached to the SAME RowsExportWith call compose exactly as
+// the C ABI's chs_rows already allows — columns_json and the attached filter
+// are two independent trailing parameters on one call — and exactly as
+// Python and TypeScript already let a caller combine them. Before this fix,
+// Go's RowsExportWith hardcoded the columns_json argument to NULL, so a
+// listed EPHEMERAL column's value never reached the DEFAULT the filter then
+// reads — the issue's own measurement ("tenant is empty and the filter
+// answers f").
+//
+// _t is EPHEMERAL: its value is read only when WithColumns lists it, never
+// stored, never exported. tenant's DEFAULT reads _t, so tenant resolves to
+// "acme"/"other" only when _t was actually carried through — proof the
+// column list reached the same chs_rows call as the filter, not a second,
+// column-list-less one.
+func TestRowsExportWithColumnsAndFilterComposeEndToEnd(t *testing.T) {
+	libs := rev5Libraries(t)
+	ran := 0
+	for _, lib := range libs {
+		s, err := lib.CompileDDL("id UInt32, _t String EPHEMERAL, tenant String DEFAULT _t")
+		if err != nil {
+			t.Fatalf("%s: compile: %v", lib.Version, err)
+		}
+		f, err := s.CompileFilter("tenant = 'acme'")
+		if err != nil {
+			s.Close()
+			t.Fatalf("%s: CompileFilter: %v", lib.Version, err)
+		}
+
+		body := []byte(`{"id":1,"_t":"acme"}` + "\n" + `{"id":2,"_t":"other"}` + "\n")
+		b, err := s.RowsExportWith(JSONEachRow, body, nil, JSONCompactEachRow,
+			WithColumns([]string{"id", "_t"}), WithRowFilter(f))
+		if err != nil {
+			f.Close()
+			s.Close()
+			t.Fatalf("%s: RowsExportWith: %v", lib.Version, err)
+		}
+		if b.Outcome != Accepted {
+			t.Fatalf("%s: Outcome = %v (code %d, %q), want %v", lib.Version, b.Outcome, b.ErrCode, b.ErrMsg, Accepted)
+		}
+		if len(b.Rows) != 2 {
+			t.Fatalf("%s: got %d row(s), want 2", lib.Version, len(b.Rows))
+		}
+		if b.Rows[0].Verdict == nil || *b.Rows[0].Verdict != VerdictTrue {
+			t.Fatalf("%s: row 0 Verdict = %v, want VerdictTrue (tenant == \"acme\")", lib.Version, b.Rows[0].Verdict)
+		}
+		if b.Rows[1].Verdict == nil || *b.Rows[1].Verdict != VerdictFalse {
+			t.Fatalf("%s: row 1 Verdict = %v, want VerdictFalse (tenant == \"other\")", lib.Version, b.Rows[1].Verdict)
+		}
+		if b.RowsPassed != 1 || b.RowsCut != 1 {
+			t.Fatalf("%s: RowsPassed/RowsCut = %d/%d, want 1/1", lib.Version, b.RowsPassed, b.RowsCut)
+		}
+		if len(b.Spans) != 2 {
+			t.Fatalf("%s: got %d span(s), want 2", lib.Version, len(b.Spans))
+		}
+		if b.Spans[1] != (Span{}) {
+			t.Fatalf("%s: cut row's span = %+v, want the zero span", lib.Version, b.Spans[1])
+		}
+
+		passed := b.Payload[b.Spans[0].Off : b.Spans[0].Off+b.Spans[0].Len]
+		var fields []json.RawMessage
+		if err := json.Unmarshal(passed, &fields); err != nil {
+			t.Fatalf("%s: exported row %q is not one JSON array: %v", lib.Version, string(passed), err)
+		}
+		if len(fields) != 2 {
+			t.Fatalf("%s: exported row has %d field(s) (%q), want 2 — [id, tenant], the stored columns in declared order", lib.Version, len(fields), string(passed))
+		}
+		if string(fields[0]) != "1" || string(fields[1]) != `"acme"` {
+			t.Errorf("%s: exported row = %q, want [1,\"acme\"]", lib.Version, string(passed))
+		}
+
+		f.Close()
+		s.Close()
+		ran++
+	}
+	if ran != len(libs) {
+		t.Fatalf("TestRowsExportWithColumnsAndFilterComposeEndToEnd ran %d line(s), want %d", ran, len(libs))
+	}
+	if ran == 0 {
+		t.Fatalf("TestRowsExportWithColumnsAndFilterComposeEndToEnd ran ZERO cases — a block that asserts nothing is not a pass")
+	}
+	t.Logf("TestRowsExportWithColumnsAndFilterComposeEndToEnd: %d line(s)", ran)
 }

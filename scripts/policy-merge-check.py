@@ -9,7 +9,6 @@
     scripts/policy-merge-check.py gate    --repo OWNER/NAME --run-head-sha SHA --run-head-repo OWNER/NAME
     scripts/policy-merge-check.py gate    --repo OWNER/NAME --pr N
     scripts/policy-merge-check.py enqueue --repo OWNER/NAME --pr N --head-sha SHA
-                                          --regenerated docs/support.md=FILE
                                           [--run-head-repo OWNER/NAME] [--dry-run]
 
 Run by .github/workflows/policy-merge.yml, whose header says why the workflow
@@ -100,17 +99,24 @@ the pull request is left for a human and the exit status is 0.
                  leaves the pull request for a human.
   bytes      (6) ONLY when the pull request touches docs/support.md: it was
                  MODIFIED (not added, deleted or renamed), and main's own
-                 scripts/support-matrix.sh, run against the live index,
-                 reproduces the head's copy byte for byte. A pull request
-                 that does not touch docs/support.md skips this condition.
-                 This is necessarily a PRE-ENQUEUE check only — see ENQUEUE,
-                 NOT MERGE for why the old post-merge re-verification (the
-                 merge commit's docs/support.md still equals the regeneration)
-                 cannot run anymore.
+                 scripts/support-matrix.sh, run against the live index OVER A
+                 SCRATCH COPY SEEDED WITH THE HEAD'S OWN BYTES — never main's
+                 checked-out copy (chtypes#316: main's hand-written prose
+                 used to collide with every prose-only edit on the head,
+                 because the old code regenerated from main's tree and
+                 compared that against the head) — reproduces the head's
+                 copy byte for byte. A pull request that does not touch
+                 docs/support.md skips this condition. This is necessarily a
+                 PRE-ENQUEUE check only — see ENQUEUE, NOT MERGE for why the
+                 old post-merge re-verification (the merge commit's
+                 docs/support.md still equals the regeneration) cannot run
+                 anymore.
 
 `gate` checks everything except the byte HALF of `bytes`, which needs the
-regeneration; the workflow regenerates only when the gate passes, so an
-ordinary pull request costs a handful of API reads. `test-counts` has no such
+regeneration; `enqueue` regenerates only after every other condition already
+holds (regenerate_guarded_file, from the head's own bytes), so an ordinary
+pull request costs a handful of API reads before the gate ever reaches this
+one, and the gate itself never regenerates at all. `test-counts` has no such
 split — gather_test_counts reads every job log it needs (never a head file)
 up front, so `gate` checks it fully, at the API cost of up to five job-log
 reads per side, and only for a pull request that touches a test or fixture
@@ -304,8 +310,12 @@ run that anyone can start by opening a pull request from a fork. So nothing
 from a pull request's head may run here. This script never reads a head file
 from disk and never executes, sources, imports or parses anything of the
 head: a head file's bytes (docs/support.md alone, and only when it is part of
-the diff) arrive from the contents API and are only compared with other
-bytes. The workflow checks out main, and main's code is all that runs.
+the diff) arrive from the contents API, and regenerate_guarded_file writes
+them to a scratch file as plain input text for main's own regenerator — never
+main's checked-out copy (chtypes#316) — which rewrites only that file's
+generated block in place; the result is then only ever compared with other
+bytes, never executed, sourced or parsed as code at any point. The workflow
+checks out main, and main's code is all that runs.
 
 `test-counts` (chtypes#285 §1b) reads more than one file's bytes — up to five
 job LOGS per side — but the posture is identical: `gather_test_counts` reads
@@ -356,6 +366,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -371,13 +383,29 @@ BASE_BRANCH = "main"
 
 # The generated files this script still checks byte for byte when a pull
 # request touches them (condition 6). docs/support.md is the only one today;
-# adding a second is a deliberate act with three parts: the workflow must
-# regenerate it too and pass it as --regenerated PATH=FILE, `merge` refuses
-# (exit 2) until every entry here has a regenerated copy, and decide()'s
-# `bytes` condition needs a matching lookup — it is not derived from this
-# tuple automatically, on purpose, because each generated file's status rule
-# could one day differ.
+# adding a second is a deliberate act with three parts: register its
+# generator in GUARDED_FILE_GENERATORS below, cmd_enqueue refuses (exit 2,
+# KeyError) until every GUARDED_FILES entry has one, and decide()'s `bytes`
+# condition needs a matching lookup — it is not derived from this tuple
+# automatically, on purpose, because each generated file's status rule could
+# one day differ.
 GUARDED_FILES = ("docs/support.md",)
+
+# Which of main's own scripts regenerates each GUARDED_FILES entry.
+# regenerate_guarded_file (below) seeds a scratch copy with the HEAD's OWN
+# bytes — fetched as DATA through the contents API (head_file), never main's
+# checked-out copy — and runs this script over that SAME path with --out, so
+# it rewrites only the generated block in place and leaves the head's own
+# prose untouched (scripts/support-matrix.sh's own read-modify-write contract
+# on --out: it refuses if the markers are missing, never if the surrounding
+# prose differs from main's). chtypes#316: the old workflow step seeded the
+# scratch file from main's own checked-out docs/support.md instead, so any
+# prose edit on the head was compared against MAIN's prose plus a freshly
+# computed block and always differed. ROOT-anchored so it resolves whatever
+# the invoking process's working directory is.
+GUARDED_FILE_GENERATORS: dict[str, str] = {
+    "docs/support.md": os.path.join(ROOT, "scripts", "support-matrix.sh"),
+}
 
 
 @dataclass(frozen=True)
@@ -1331,6 +1359,38 @@ def head_file(repo: str, path: str, sha: str) -> bytes:
     return decode_contents(gh_object(f"repos/{repo}/contents/{path}?ref={sha}"), path)
 
 
+def regenerate_guarded_file(path: str, head_bytes: bytes, scratch_path: str,
+                            run: Callable[..., object] = subprocess.run) -> bytes:
+    """What `enqueue` compares a GUARDED_FILES entry's head bytes against:
+    main's own regeneration, run over the HEAD's OWN copy — never main's
+    checked-out tree (chtypes#316). The old workflow step seeded the scratch
+    file with `cp docs/support.md $SCRATCH` from main's own checkout, so a
+    pull request's prose was compared against MAIN's prose plus a freshly
+    computed block, and any edit outside the generated block always differed.
+
+    Writing `head_bytes` — fetched as DATA through the contents API by
+    head_file(), never executed, sourced or parsed as code — into the scratch
+    file first means the generator (GUARDED_FILE_GENERATORS[path], main's own
+    script and nothing of the head) sees the head's own prose and markers,
+    and rewrites only the generated block in place
+    (scripts/support-matrix.sh's own read-modify-write contract on --out).
+    Regenerating a page whose own prose and block already match the live
+    index reproduces it byte for byte, whatever its prose says — which is
+    exactly what makes a prose-only edit pass and a stale or hand-edited
+    block refuse.
+
+    `run` is injectable so --selftest can prove this composition — the
+    scratch file is seeded from `head_bytes`, nothing else, before the
+    generator ever sees it — with a fake generator standing in for the real
+    script, which needs the network and a tagged git history this file's own
+    selftest must not depend on."""
+    with open(scratch_path, "wb") as f:
+        f.write(head_bytes)
+    run([GUARDED_FILE_GENERATORS[path], "--out", scratch_path], check=True)
+    with open(scratch_path, "rb") as f:
+        return f.read()
+
+
 # --------------------------------------------- test-counts (chtypes#285 §1b)
 #
 # A check run's own `output.summary` and `output.text` are NOT populated for
@@ -1630,19 +1690,6 @@ def cmd_gate(args: argparse.Namespace) -> int:
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
-    regenerated: dict[str, bytes] = {}
-    for spec in args.regenerated:
-        path, sep, local = spec.partition("=")
-        if not sep:
-            print(f"policy-merge-check: --regenerated needs PATH=FILE, got {spec!r}", file=sys.stderr)
-            return 2
-        with open(local, "rb") as f:
-            regenerated[path] = f.read()
-    if sorted(regenerated) != sorted(GUARDED_FILES):
-        print(f"policy-merge-check: the workflow regenerated {sorted(regenerated)} but GUARDED_FILES is "
-              f"{sorted(GUARDED_FILES)}; every guarded file needs a regenerated copy, whether or not this pull "
-              "request happens to touch it", file=sys.stderr)
-        return 2
     number, sha = args.pr, args.head_sha
     facts = gather(args.repo, number, sha)
     test_counts = gather_test_counts(args.repo, facts.files, facts.check_runs)
@@ -1657,7 +1704,17 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     # not a replacement for it.
     refusal = decide(**judged)
     if refusal is None:
+        # Regenerated unconditionally, whether or not this pull request
+        # happens to touch a guarded file — it is cheap, and decide()'s own
+        # bytes condition only USES it when the diff actually touches
+        # docs/support.md. Each guarded file's generator runs over a scratch
+        # copy seeded with the HEAD's OWN bytes (chtypes#316) — never main's
+        # checked-out tree — so the comparison below is against what the
+        # head's own prose and markers regenerate to, not against main's.
         head_bytes = {path: head_file(args.repo, path, sha) for path in GUARDED_FILES}
+        with tempfile.TemporaryDirectory(prefix="policy-merge-regen-") as scratch_dir:
+            regenerated = {path: regenerate_guarded_file(path, data, os.path.join(scratch_dir, os.path.basename(path)))
+                          for path, data in head_bytes.items()}
         refusal = decide(**judged, head_bytes=head_bytes, regenerated=regenerated)
     where = f"PR #{number} at {sha[:12]}"
     if refusal:
@@ -2275,6 +2332,66 @@ def selftest() -> int:
     if first_difference(GOOD, bytes(one_byte)) != (len(GOOD) - 3, GOOD.count(b"\n")):
         failures.append(f"first_difference located the planted byte wrongly: {first_difference(GOOD, bytes(one_byte))}")
 
+    # chtypes#316: the regeneration must run over the HEAD's OWN copy, never
+    # main's checked-out tree, or a prose edit outside the generated block
+    # collides with main's prose forever. These four model the issue's own
+    # scenarios at the pure decide() level: `regenerated` is what cmd_enqueue
+    # now computes by feeding the HEAD's own bytes (never main's) into main's
+    # generator — regenerate_guarded_file, which has its own test, below, for
+    # the seeding itself.
+    PROSE_A = b"# Support\n\nSome human-written context.\n\n"
+    PROSE_B = b"# Support\n\nSome human-written context, lightly reworded.\n\n"
+    BLOCK_HANDEDITED = b"| `25.8` | all |\n| `26.1` | linux-amd64 only |\n"
+    BLOCK_STALE = b"| `25.8` | all |\n"
+    BLOCK_CURRENT = b"| `25.8` | all |\n| `26.1` | all |\n"
+
+    def _page(prose: bytes, block: bytes) -> bytes:
+        return prose + block
+
+    expect("chtypes#316: a prose-only edit passes — regenerating the head's own "
+           "(edited) prose with the already-current block reproduces it exactly",
+           decide(**{**sg, "head_bytes": {"docs/support.md": _page(PROSE_B, BLOCK_CURRENT)},
+                    "regenerated": {"docs/support.md": _page(PROSE_B, BLOCK_CURRENT)}}), None)
+    expect("chtypes#316: a hand-edited generated cell refuses — regenerating the head's "
+           "own prose recomputes the correct block, which differs from the hand-edited one",
+           decide(**{**sg, "head_bytes": {"docs/support.md": _page(PROSE_A, BLOCK_HANDEDITED)},
+                    "regenerated": {"docs/support.md": _page(PROSE_A, BLOCK_CURRENT)}}), "bytes")
+    expect("chtypes#316: a stale generated block refuses — the live index moved on since "
+           "the head last regenerated",
+           decide(**{**sg, "head_bytes": {"docs/support.md": _page(PROSE_A, BLOCK_STALE)},
+                    "regenerated": {"docs/support.md": _page(PROSE_A, BLOCK_CURRENT)}}), "bytes")
+    expect("chtypes#316: a pure regeneration PR still passes — the head committed exactly "
+           "what the generator produces, prose unchanged",
+           decide(**{**sg, "head_bytes": {"docs/support.md": _page(PROSE_A, BLOCK_CURRENT)},
+                    "regenerated": {"docs/support.md": _page(PROSE_A, BLOCK_CURRENT)}}), None)
+
+    # regenerate_guarded_file itself (chtypes#316's actual fix): the scratch
+    # file must be seeded with the HEAD's bytes before the generator ever
+    # sees it, and the returned bytes are whatever the generator leaves
+    # behind — proven with a fake `run`, so this needs neither the network
+    # nor the tagged git history the real scripts/support-matrix.sh needs.
+    with tempfile.TemporaryDirectory(prefix="policy-merge-selftest-") as scratch_dir:
+        scratch_path = os.path.join(scratch_dir, "support.md")
+        seen_before_run: list[bytes] = []
+        calls: list[list[str]] = []
+
+        def fake_generator_run(cmd: list[str], **kwargs: object) -> None:
+            calls.append(cmd)
+            with open(cmd[-1], "rb") as f:
+                seen_before_run.append(f.read())
+            with open(cmd[-1], "wb") as f:
+                f.write(b"REGENERATED:" + seen_before_run[-1])
+
+        result = regenerate_guarded_file("docs/support.md", b"THE HEAD'S OWN BYTES", scratch_path,
+                                         run=fake_generator_run)
+        if seen_before_run != [b"THE HEAD'S OWN BYTES"]:
+            failures.append(f"regenerate_guarded_file: the generator saw {seen_before_run!r}, not the head's own "
+                            "bytes — chtypes#316 regressed")
+        if calls != [[GUARDED_FILE_GENERATORS["docs/support.md"], "--out", scratch_path]]:
+            failures.append(f"regenerate_guarded_file: ran {calls!r}, not GUARDED_FILE_GENERATORS' own entry")
+        if result != b"REGENERATED:THE HEAD'S OWN BYTES":
+            failures.append(f"regenerate_guarded_file: returned {result!r}, not the generator's own output")
+
     # condition 2 — required checks
     required_one = REQUIRED_CHECKS[3]
     expect("a missing required check", decide(**_with(check_runs=_checks(drop=required_one))), "checks")
@@ -2525,8 +2642,11 @@ def selftest() -> int:
         return 1
     print("policy-merge-check: selftest ok — every PROTECTED_GLOBS family refuses (incl. a rename's old path and "
           "a deletion, and ts/biome.json by name), docs/support.md's byte guard refuses a mismatch and a "
-          "non-modification, a missing, failing or pending required check, a fork, a stale head, a draft, a "
-          "conflict and a review each refuse; an all-good input passes; build_enqueue_plan carries the judged "
+          "non-modification, and (chtypes#316) a prose-only edit passes, a hand-edited generated cell and a "
+          "stale generated block each refuse, and a pure regeneration still passes — all against a regeneration "
+          "of the HEAD's own bytes, never main's checked-out copy, which regenerate_guarded_file's own test "
+          "proves it seeds the scratch file with; a missing, failing or pending required check, a fork, a stale "
+          "head, a draft, a conflict and a review each refuse; an all-good input passes; build_enqueue_plan carries the judged "
           "head sha and node_id and never reaches the mutation on a dry run; the hand-off to the enqueue job carries "
           "exactly that node id and head sha, and enqueue-as-bot refuses malformed ones; only a job that completed "
           "with success is read for a count; the merge-bot mint must ask for "
@@ -2591,7 +2711,6 @@ def main(argv: list[str]) -> int:
     m.add_argument("--pr", type=int, required=True)
     m.add_argument("--head-sha", required=True)
     m.add_argument("--run-head-repo", default="")
-    m.add_argument("--regenerated", action="append", default=[], metavar="PATH=FILE")
     m.add_argument("--dry-run", action="store_true")
     q = sub.add_parser("enqueue-as-bot", help="enqueuePullRequest with the App token in GH_TOKEN")
     q.add_argument("--pr", required=True)
