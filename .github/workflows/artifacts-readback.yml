@@ -329,9 +329,13 @@ jobs:
       # (github-actions[bot]) whose FIRST line is the
       # `artifacts-readback: generated_at <v>` marker every comment this
       # workflow posts carries — see the file header for why only the first
-      # line counts. `sort=created&direction=asc` (the list endpoint's own
-      # default, named explicitly rather than relied on) means the LAST
-      # matching line is the newest. A non-2xx response or output `--jq`
+      # line counts. This per-issue endpoint returns comments in ascending
+      # ID (creation) order and takes no sort/direction parameters, so the
+      # LAST matching line is the newest. `-X GET` is explicit and the page
+      # size rides in the URL: `gh api` switches to POST as soon as any
+      # `-f` field is passed, which here would try to CREATE a comment on
+      # #73 (a 422 with no body) and make every cache miss fail closed with
+      # no loss notice. A non-2xx response or output `--jq`
       # cannot parse makes `gh api` itself exit non-zero, which is read
       # below as read_ok=0 — never a quiet "no prior comment".
       - name: read #73's prior artifacts-readback comments (one paginated call) — tells a genuine first run from a lost baseline
@@ -350,8 +354,8 @@ jobs:
           # --jq program are jq's OWN variables (an `as $first` binding and a
           # named capture group), never shell variables -- the single quotes
           # are deliberate, so this jq program reaches the API unexpanded.
-          gh api --paginate -f sort=created -f direction=asc \
-            "repos/${GITHUB_REPOSITORY}/issues/73/comments" \
+          gh api -X GET --paginate \
+            "repos/${GITHUB_REPOSITORY}/issues/73/comments?per_page=100" \
             --jq '.[] | select(.user.login == "github-actions[bot]") | (.body | split("\n")[0]) as $first | select($first | test("^<!-- artifacts-readback: generated_at .+ -->$")) | ($first | capture("^<!-- artifacts-readback: generated_at (?<ts>.+) -->$").ts)' \
             >"$OUT" 2>"$ERR" || ec=$?
 
