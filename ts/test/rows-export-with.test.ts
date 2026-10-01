@@ -21,9 +21,20 @@ import { batchResultOf, isAnswer, Outcome, Verdict } from '../src/results.js';
 import { Filter, Schema } from '../src/schema.js';
 
 // A stand-in for NativeLibrary: just enough surface (`columns`) for
-// `Schema`'s constructor, with no real dlopen behind it.
+// `Schema`'s constructor, with no real dlopen behind it. `schemaFree` /
+// `filterFree` / `blockFree` are also no-ops here, never exercised by these
+// tests directly — but `Schema`'s own `FinalizationRegistry` callback (see
+// `schema.ts`) can still call them on an abandoned fake `Schema`/`Filter`
+// whenever the GC happens to collect one during this file's run, and a
+// missing method there throws inside that callback, failing the whole
+// suite on a timing accident unrelated to what the test actually checks.
 function fakeNative(): NativeLibrary {
-  return { columns: () => [] } as unknown as NativeLibrary;
+  return {
+    columns: () => [],
+    schemaFree: () => {},
+    filterFree: () => {},
+    blockFree: () => {},
+  } as unknown as NativeLibrary;
 }
 
 describe('rows(..., { rowFilter }) verdict decoding', () => {
