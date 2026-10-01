@@ -1288,7 +1288,7 @@ fn a_profile_less_handle_is_untouched_by_the_profile_channel() {
     ));
 }
 
-/// `docs/reference/bindings.md` rule 12 — the SIGN of `chs_schema_engine`'s return
+/// `docs/reference/bindings.md` §The error split — the SIGN of `chs_schema_engine`'s return
 /// decides the KIND of error. A POSITIVE rc is the SERVER refusing a DDL that
 /// can therefore never exist and must arrive as [`chtypes::Error::Schema`],
 /// carrying the server's own code; a NEGATIVE rc is this library declining and

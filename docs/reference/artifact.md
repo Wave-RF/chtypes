@@ -41,33 +41,45 @@ Sizes, measured 2026-08-26: 159–288 MiB per `.dylib`, 191–272 MiB per `.so`,
 
 ## `manifest.json`
 
-Exactly nine fields, written by the build that produces it with `sort_keys=True, indent=1`. A real one, verbatim:
+Written by the build that produces it, with `sort_keys=True, indent=1`. **The field set is additive and has grown**, so this document gives the fields rather than a count that would go stale again. Fetched from the served registry on 2026-10-01 (`scripts/fetch.sh 26.9 --platform linux-amd64`) — `26.9.7.9-stable`, `chtypes_build` 1790845279 — a real one, verbatim:
 
 ```json
 {
- "arch": "arm64",
- "clickhouse_commit": "cfec8e085bab84e94140bb82eb5c18d64f4ff61a",
- "clickhouse_minor": "25.8",
- "clickhouse_version": "25.8.28.1-lts",
- "library": "libchtypes.dylib",
- "library_bytes": 232259712,
- "library_sha256": "b9800e96af1769b577e8788e2259cfd091611b06bc14617dae05df1d21402629",
- "os": "darwin",
+ "abi_revision": 6,
+ "arch": "amd64",
+ "chtypes_build": 1790845279,
+ "clickhouse_commit": "783f6f1ceb6f74ffabe244c760ff1c3103e22df0",
+ "clickhouse_minor": "26.9",
+ "clickhouse_version": "26.9.7.9-stable",
+ "core_commit": "c810a27afdb05288d98af6c254103de7a38f80a2",
+ "glibc_floor": "2.4",
+ "inputs_sha256": "7bdc1d88fc49fdb2bb3a7477c38d12fbca84c5373651665aa3ba6f72afe7778c",
+ "library": "libchtypes.so",
+ "library_bytes": 306086312,
+ "library_sha256": "594b0d49a63e53fa6ff1264ae6e148986f17fcfa0c2181275865ca4b653434f7",
+ "os": "linux",
  "unsafe_families": ""
 }
 ```
 
-| Field                | Type   | Meaning and how a loader uses it                                                                                                                                                  |
-| -------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `library`            | string | **The shared library's file name.** A loader MUST read the file name from here and MUST NOT construct it. See the rule below.                                                     |
-| `library_bytes`      | int    | Size of that file. Cheap first-pass integrity check.                                                                                                                              |
-| `library_sha256`     | string | SHA-256 of that file. The only integrity check that means anything.                                                                                                               |
-| `clickhouse_version` | string | The exact release, e.g. `25.8.28.1-lts`. **Cross-check** against `chs_clickhouse_version()`; do not trust it over the library.                                                    |
-| `clickhouse_minor`   | string | The minor line, e.g. `25.8`. Informational — a loader SHOULD derive the minor from the library's own reported version instead.                                                    |
-| `clickhouse_commit`  | string | The upstream commit the tree was built from. Provenance; the only field that ties an artifact to a specific ClickHouse source state.                                              |
-| `os`                 | string | `linux` \| `darwin`. Lowercased `platform.system()`.                                                                                                                              |
-| `arch`               | string | `arm64` \| `amd64`. Normalized.                                                                                                                                                   |
-| `unsafe_families`    | string | The generated refuse-list, inline — the FALLBACK a loader uses when `unsafe_families.txt` is absent (§Loading step 9). Empty on every current artifact, which ships the file too. |
+**`glibc_floor` is Linux-only.** The same build (`chtypes_build` 1790845279) fetched for `darwin-arm64` the same day carries every field above except `glibc_floor`.
+
+| Field                | Type   | Meaning and how a loader uses it                                                                                                                                                                                                                  |
+| -------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `library`            | string | **The shared library's file name.** A loader MUST read the file name from here and MUST NOT construct it. See the rule below.                                                                                                                     |
+| `library_bytes`      | int    | Size of that file. Cheap first-pass integrity check.                                                                                                                                                                                              |
+| `library_sha256`     | string | SHA-256 of that file. The only integrity check that means anything.                                                                                                                                                                               |
+| `clickhouse_version` | string | The exact release, e.g. `26.9.7.9-stable`. **Cross-check** against `chs_clickhouse_version()`; do not trust it over the library.                                                                                                                  |
+| `clickhouse_minor`   | string | The minor line, e.g. `26.9`. Informational — a loader SHOULD derive the minor from the library's own reported version instead.                                                                                                                    |
+| `clickhouse_commit`  | string | The upstream commit the tree was built from. Provenance; the only field that ties an artifact to a specific ClickHouse source state.                                                                                                              |
+| `os`                 | string | `linux` \| `darwin`. Lowercased `platform.system()`.                                                                                                                                                                                              |
+| `arch`               | string | `arm64` \| `amd64`. Normalized.                                                                                                                                                                                                                   |
+| `unsafe_families`    | string | The generated refuse-list, inline — the FALLBACK a loader uses when `unsafe_families.txt` is absent (§Loading step 9). Empty on every current artifact, which ships the file too.                                                                 |
+| `abi_revision`       | int    | The ABI revision this build was linked against. Mirrors `chs_abi_revision()`, which a loader calls directly (§Loading step 5); this copy lets a tool read it from `manifest.json` without `dlopen`ing anything, e.g. `scripts/lib/provenance.py`. |
+| `chtypes_build`      | int    | The artifact producer's own build/publish identifier (a Unix timestamp in current builds). No loader parses it; this repository's guides cite it to date a behavior-affecting relink (e.g. "as of `chtypes_build` 1790845279").                   |
+| `core_commit`        | string | The commit of the artifact producer's own repository the build came from. Provenance only.                                                                                                                                                        |
+| `inputs_sha256`      | string | A hash the artifact producer publishes over its own build inputs. No binding in this repository reads it today.                                                                                                                                   |
+| `glibc_floor`        | string | The minimum glibc this build requires, as measured by the artifact producer (§Platform properties a loader must respect). **Present on Linux artifacts only** — measured absent on `darwin`.                                                      |
 
 Additive changes to this file are allowed. A loader MUST ignore fields it does not know rather than failing, and MUST NOT require a field that is absent.
 

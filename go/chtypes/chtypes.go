@@ -674,7 +674,7 @@ type Substitution struct {
 //
 // Code is ALWAYS a real ClickHouse error code. "This build declines to answer"
 // is a DIFFERENT TYPE — UnsupportedError — never this one carrying a sentinel,
-// so no SchemaError ever holds CodeUnsupported (docs/reference/bindings.md rule 12).
+// so no SchemaError ever holds CodeUnsupported (docs/reference/bindings.md §The error split).
 type SchemaError struct {
 	Column string // "" when the failure is not attributable to one column
 	Code   int
@@ -738,7 +738,7 @@ const CodeUnsupported = -2
 // schemaErr is the ONE place an ABI error code becomes a Go error, so the
 // refusal/decline split cannot be decided differently in two files.
 //
-// The SIGN decides (docs/reference/bindings.md rule 12, the C ABI contract "Error model"):
+// The SIGN decides (docs/reference/bindings.md §The error split, the C ABI contract "Error model"):
 // a positive code is the server's own refusal and rides through verbatim; any
 // negative code is this library declining (-2 "I will not guess", -1 a guarded
 // exception, -3 the dlopen shim's missing-symbol sentinel) and becomes an

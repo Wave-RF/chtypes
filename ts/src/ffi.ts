@@ -1102,7 +1102,7 @@ export class NativeLibrary {
    * PHYSICAL columns, compiled by the same TreeRewriter + ExpressionAnalyzer
    * pipeline the CONSTRAINT CHECK path runs (the C ABI contract §Filters).
    *
-   * The error split is rule 12's: a NULL handle with a positive code is the
+   * The error split (docs/reference/bindings.md §The error split): a NULL handle with a positive code is the
    * server's own refusal (`SchemaError`, code and message verbatim — unknown
    * identifier 47, unknown function, an analyzer-raised NO_COMMON_TYPE, and
    * since revision 4 the server's own parameter refusals: 456 for an unbound

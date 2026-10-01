@@ -38,7 +38,7 @@ import { classify, isLossyReason } from './transform.js';
 
 /**
  * The verdict on a row or a batch — the error taxonomy in one string, and
- * conflating any two arms is a scoring error (the C ABI contract §Error model):
+ * conflating any two arms is a scoring error (docs/limitations.md §The error model is normative):
  *
  * - `'accepted'` — the server would take this, possibly with silent coercions
  *   (read `transformed`), defaults filled and volatile DEFAULTs substituted

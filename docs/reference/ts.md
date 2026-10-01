@@ -150,7 +150,7 @@ The parsers read the `JSONEachRow` bytes through this package's own byte-exact r
 
 **Errors** — `ChtypesError` (base), `RegistryError`, `InitConflictError` (a `RegistryError`; `.path`, `.have`, `.want`), `ArtifactError` (the single catchable type for `ArtifactMissingError` and `FetchError` with its five verdict subclasses), `SchemaError`, `UnsupportedError`.
 
-**One image per file.** `chs_init` runs at most once per `dlopen`'d image, and the image is the FILE — its device and inode, from a stat that follows symlinks — so a symlink, another spelling or a hardlink of an open artifact is that same image, by any `Registry`. Asking for it under a different timezone throws `InitConflictError` rather than re-timezoning the live libraries; a path that cannot be stat'ed is a `RegistryError` rather than being guessed at.
+**One image per file.** `chs_init` runs at most once per `dlopen`'d image, and the image is the FILE — its device and inode, from a stat that follows symlinks — so a symlink, another spelling or a hardlink of an open artifact is that same image, by any `Registry`. Asking for it under a different timezone throws `InitConflictError` rather than re-timezoning the live libraries; a path that cannot be stat'ed is a `RegistryError` rather than being guessed at. **Why the comparison is by spelling, not by canonical zone:** [`bindings.md` §The init-timezone guard compares spellings, deliberately](bindings.md#the-init-timezone-guard-compares-spellings-deliberately).
 
 ## Two Node facts worth knowing
 

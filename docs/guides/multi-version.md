@@ -178,7 +178,7 @@ There is a `shutdown` in three of the four bindings, and it joins the DEFAULT ev
 
 It is required in exactly three situations: before any `dlclose`, when the host controls its own teardown order, and in tests that must not depend on `atexit`. Close every schema first; the calls are idempotent.
 
-Python and Rust refcount it per image, so the **last** close per image runs `chs_shutdown` — two registries over one directory share every image, and closing one must not tear the evaluator down under the other.
+**Only Python refcounts it per image** (`Library.close()`, measured in `python/src/chtypes/registry.py`): the **last** close per image runs `chs_shutdown`, because two registries over one directory share every image and closing one must not tear the evaluator down under the other. TypeScript's and Rust's `shutdown()` run straight through to `chs_shutdown` on every call with no refcount (`ts/src/library.ts`, `rust/src/library.rs`) — a host running two registries over one artifact owns the ordering of its own explicit teardown calls. [`bindings.md` §Teardown](../reference/bindings.md#teardown-and-the-binding-that-deliberately-has-none) is where the per-binding reasoning lives; this page states only the consequence for sizing a deployment.
 
 Go has no teardown surface at all, deliberately: it never `dlclose`s a loaded artifact, so `chs_shutdown` is never owed.
 

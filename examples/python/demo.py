@@ -847,7 +847,7 @@ def section9(lib: chtypes.Library) -> None:
 # WHY: the three kinds demand three different reactions (tell the tenant /
 # fall back cautiously / fix the deployment). Since 2026-08-26 the decline
 # type is a PEER of the refusal type in every SDK — Python's grandfathered
-# subclass is retired (docs/reference/bindings.md rule 12) — so a bare `except
+# subclass is retired (docs/reference/bindings.md §The error split) — so a bare `except
 # SchemaError` can never swallow a decline again: forgetting the decline arm
 # now raises past the handler (loud) instead of silently converting declines
 # into rejections (a manufactured over-reject, which has no budget).
@@ -1430,7 +1430,7 @@ def feed(
 
 def describe_error(call, what: str) -> None:
     """Print which typed error a call raises. The two verdict types are PEERS
-    (docs/reference/bindings.md rule 12): neither except arm can catch the other's."""
+    (docs/reference/bindings.md §The error split): neither except arm can catch the other's."""
     try:
         result = call()
         if hasattr(result, "close"):
@@ -1470,7 +1470,7 @@ def caught(call) -> str:
         return "(no error)"
     except chtypes.ChtypesError as err:
         # Both verdict arms on purpose: since the peer-type split
-        # (docs/reference/bindings.md rule 12) `except SchemaError` no longer catches
+        # (docs/reference/bindings.md §The error split) `except SchemaError` no longer catches
         # declines, and this helper wants either arm's rendered text.
         return str(err)
 
