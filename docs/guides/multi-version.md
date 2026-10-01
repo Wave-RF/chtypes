@@ -146,15 +146,31 @@ Measured under contention in Python's own suite: 27,770 batch reads across 8 thr
 
 **Parallelism comes from more schemas, not from sharing one.** That is true in every binding; Rust is simply the one that will not compile the alternative.
 
-### Above 26.2 on Linux, the process is what scales — not more handles
+### ParseBlock throughput scales with handle count again, on every line (chtypes#78)
 
-_Operational, dated 2026-09-17 — not a safety change; the guarantee above still holds exactly as written: concurrent calls on distinct handles are safe, one handle is single-threaded._ The artifact producer — this repository has not run the following and publishes no benchmark figure of its own — found that on Linux, ClickHouse lines above 26.2 (26.3 through 26.8 at the time of writing, with 26.6 the one they benchmarked directly) stop gaining ParseBlock throughput from adding handles inside one process, because an upstream change now routes every allocation in the image through one global tracker; separate processes were unaffected in their measurements and kept scaling. The mechanism cannot occur on macOS. They also read each pinned line's own upstream allocator-tracker source rather than trusting version numbers alone, since 24.8 and 25.3 are LTS lines that take independent backports, and confirmed the mechanism is absent on 24.8, 25.3, 25.8, 25.10 and 26.2 — but of those, only 25.8 and 26.2 were also benchmarked to show scaling intact, so read 24.8, 25.3 and 25.10 as confirmed clean by source, not as measured for throughput.
+_Updated 2026-09-30 — not a safety change; the guarantee above still holds exactly as written: concurrent calls on distinct handles are safe, one handle is single-threaded._
 
-A fix is specified and queued behind other work; the producer's current read is that this holds through the next cutover, not that it is permanent, so treat it as today's upstream state rather than a fixed property of these lines. Until it changes, size gateway concurrency above 26.2 by process count rather than by handles per process — separate processes keep scaling on every line above.
+A dated note stood here through 2026-09-29 saying that, on Linux, ClickHouse lines above 26.2 had stopped gaining ParseBlock throughput from adding handles inside one process. That no longer holds for current artifacts. **chtypes#78** has the artifact producer's fix and its full measurement — cited here rather than restated: their ParseBlock probe (`measured`, the producer's numbers) showed 26.6's N8/N1 throughput going from 3.60× to 7.95× after the fix, with every affected line's post-fix ratio in the 7.74×–8.02× range.
+
+A downstream consumer's own, independent measurement adds a second, more recent data point: **5.92× at N=8 with its own handles, against a 0.99× process-wide-mutex gate, on revision-6 26.6 artifacts, linux-arm64** (`measured (reporter)`; an OrbStack Linux VM on Apple silicon, ~3.5 host cores busy elsewhere, a process ceiling of ~6× in that environment — amd64 not measured).
+
+Size concurrency inside one process by handles, on every line — there is no longer a reason to size it by process count instead.
 
 ### One boundary worth naming: `worker_threads`
 
 In Node, two JS threads share one dlopen'd image and one set of C globals, which no per-isolate counter can see. Seed default settings **before** starting workers, or serialize the seed yourself, and do not share a `Schema` across workers.
+
+### Go: sizing concurrent handles
+
+Nothing in chtypes caps how many handles a caller runs at once — size a caller-side semaphore to `runtime.GOMAXPROCS(0)` yourself. Parallelism beyond the number of OS threads Go will actually schedule for your goroutines buys queueing, not throughput.
+
+`GOMEMLIMIT`, if set, sees only Go's own live heap. The C++ library behind a `dlopen`'d artifact keeps its own heap — the compiled schema, open filters, and the DEFAULT evaluator's working set — entirely invisible to it, so a `GOMEMLIMIT` sized from `runtime.MemStats` or `pprof` alone will trip GC far too late, or never, against memory the Go runtime cannot see. Leave headroom for it, sized from the figures below rather than from Go's own heap alone.
+
+**Measured (reporter)**, linux-arm64, a 6-column DDL with a per-claim `DEFAULT`: opening a library costs +92.7 MiB resident (ClickHouse 26.6) / +89.7 MiB (25.8); a compiled-but-unused handle, 39–43 KiB; first use of each of the first hundred handles, 89–115 KiB; 256 warm handles (100 of them with a filter attached), +23.9/+24.3 MiB total (~96–97 KiB each); 1000 warm handles, +40.6/+55.5 MiB (~41–57 KiB each). darwin-arm64, a 5-column DDL: ~45 KiB per warm handle. `CompileDDL`'s own cost: a median of ~971 µs for 40 columns, ~12 µs for 4 columns.
+
+**`Close` does not lower RSS.** The same measurement closed all 1000 handles above and recovered only 0.7–0.8 MiB — the C++ allocator keeps its arena. Size a long-lived process for its peak handle count, not its steady-state one.
+
+**Benchmark the library that is actually loaded, not the version you asked for.** A patch request can fall back to a different patch of the same line (see [Resolution](#resolution-the-exact-patch-else-its-line--never-another-line) above), and a line request can pick up a newer patch after a fetch elsewhere on the path. Assert `Library.Version` (or `Resolution.Version`) in every cell of a benchmark table, so a number can never silently mix builds.
 
 ## Teardown
 

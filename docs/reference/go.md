@@ -132,6 +132,10 @@ The implementation is stdlib only — `crypto/ed25519`, `crypto/sha256`, `archiv
 
 `SetDefaultSettings` is **only** there. It replaces a process-global that the row path reads by reference, so the ABI requires it to exclude everything else on the image — and a dlopen'd `Library` deliberately does not carry the symbol in its function-pointer table. A Go consumer puts those settings in the compile profile and the per-call map instead; see [settings](../guides/settings.md).
 
+## Concurrency and memory
+
+Sizing a caller-side semaphore, accounting for `GOMEMLIMIT` against a `dlopen`'d artifact's own C++ heap, per-handle RSS and `CompileDDL` cost figures, and why `Close` does not lower RSS: [`multi-version.md`](../guides/multi-version.md#go-sizing-concurrent-handles).
+
 ## See also
 
 - [`bindings.md`](bindings.md) — the normative shape all four bindings implement.
