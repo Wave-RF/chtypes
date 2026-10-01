@@ -65,7 +65,15 @@ the pull request is left for a human and the exit status is 0.
                  — read from the `api-surface` job's own log
                  (gather_api_verdicts; a missing, unparseable or errored
                  verdict, or a job that did not complete with success,
-                 counts as changed). This is also
+                 counts as changed); and for one ecosystem's MANIFEST AND
+                 LOCKFILE (the dependabot-ecosystem entries, chtypes#285 §2),
+                 gather_dependabot_ecosystem has proven the whole pull
+                 request is a dependabot patch-level dev-dependency bump of
+                 exactly that ecosystem — a missing, unparseable or
+                 disagreeing signal anywhere in that chain (the author, the
+                 commit shape, any dependency's own metadata, or the
+                 manifest diff) counts as not proven, same fail-closed
+                 posture as a missing api-surface verdict. This is also
                  what makes `checks` (next) mean anything: a pull_request run
                  of `ci` uses the pull request's own copy of `.github/` and
                  `scripts/`, which a pull request that edited either could
@@ -250,7 +258,18 @@ design: over-protect rather than under-protect.
                           added, same conservative reasoning; go/go.sum does
                           not exist in the tree yet (the Go module has no
                           external dependency today) and is protected in
-                          advance of needing one.
+                          advance of needing one. The python/ts/rust pairs are
+                          CONDITIONAL since chtypes#285 §2 (DEPENDABOT_MANIFESTS,
+                          below): protected only while gather_dependabot_
+                          ecosystem has not proven the whole pull request is a
+                          dependabot patch-level dev-dependency bump of
+                          exactly that ecosystem. go/go.mod and go/go.sum stay
+                          UNCONDITIONAL — Go has no dev/runtime split for a
+                          commit's own metadata to name, and there is no
+                          external Go dependency to bump yet anyway; a Go bump
+                          stays manual. ts/pnpm-workspace.yaml also stays
+                          unconditional: it is not a dependency manifest
+                          dependabot bumps.
   .markdownlint.json, .markdownlint-cli2.jsonc, dprint.json
                           configure the required `prose` job's tools
                           (markdownlint-cli2, dprint); a PR could otherwise
@@ -287,6 +306,11 @@ runner, `pnpm test` → `vitest run`) has no config file in this tree either.
 `.nvmrc` was considered and DROPPED: every `actions/setup-node` step in this
 repository's workflows hardcodes `node-version: 22`; none reads
 `node-version-file`, so nothing here is sensitive to its contents.
+
+DEPENDABOT_MANIFESTS (chtypes#285 §2) names each conditional ecosystem's own
+manifest and lockfile; _dependabot_manifests_agree_with_globs (run by
+--selftest) proves it cannot drift from the entries above the way --check-
+guide proves CONTRIBUTING.md cannot drift from PROTECTED_GLOBS itself.
 
 scripts/fetch.sh, the shell fetch that also verifies release signatures, is
 inside scripts/**. scripts/lint-public.sh's one exemption (the literal `runner` segment in its
@@ -338,6 +362,25 @@ must name the judged head's own sha, which no commit can contain in
 advance; scripts/api-surface.py's header says why nothing of the head runs in
 that job at all.
 
+The dependabot-ecosystem half of `protected` (chtypes#285 §2) reads the one
+new kind of thing this file reads: a commit's own message, and two more
+revisions of an already-protected manifest file — never a log, but the
+posture does not change. parse_dependabot_metadata matches dependabot's own
+`updated-dependencies:` trailer by fixed regex, the same discipline as every
+other text this file parses; it is never evaluated as YAML or any other
+code. manifest_bump_problems parses a manifest's bytes with Python's own
+`tomllib`/`json` — a declarative DATA format, not a programming language: it
+has no function calls, no imports and no way to cause a side effect, so
+"parsing" one is exactly as safe as decode_contents() already treats
+docs/support.md's bytes, and strictly safer than running a regex against
+free text, which this file already does throughout. The one new PRIVILEGED
+signal — trusting `pr["user"]["login"] == "dependabot[bot]"` at all — cannot
+be forged by opening a pull request: GitHub assigns that identity only to a
+pull request its own Dependabot installation opens, which neither a fork nor
+an arbitrary collaborator can trigger on request; nothing here runs with
+elevated trust because of it; it narrows what a pull request must ALSO prove
+about its own commit and manifest diff before anything is excused.
+
 ================================================================================
 REQUIRED_CHECKS, AND WHY IT IS PINNED HERE
 ================================================================================
@@ -367,6 +410,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -421,23 +465,33 @@ class ProtectedGlob:
     `binding`, when set, makes the entry CONDITIONAL (chtypes#285 §1): it is
     that binding's source tree, and a touch of it is protected only while the
     `api-surface` verdict for that binding on the judged head is not
-    `changed=false` (api_surface_problems). Every entry without a `binding`
-    is protected unconditionally. `verification` marks an unconditional
-    entry as part of the SECURITY CARVE-OUT — signature and checksum
-    verification code and the embedded release key, inside a binding's
-    source tree but protected whatever its API verdict says;
-    `--check-carve-out` keeps those entries in step with the tree."""
+    `changed=false` (api_surface_problems). `dependabot_ecosystem`, when set,
+    makes the entry CONDITIONAL the other way (chtypes#285 §2): it is one
+    ecosystem's manifest or lockfile, and a touch of it is protected only
+    while `gather_dependabot_ecosystem` has not proven the whole pull request
+    is a dependabot patch-level dev-dependency bump of exactly that
+    ecosystem (dependabot_bump_problems, manifest_bump_problems). Every entry
+    with neither `binding` nor `dependabot_ecosystem` set is protected
+    unconditionally. `verification` marks an unconditional entry as part of
+    the SECURITY CARVE-OUT — signature and checksum verification code and
+    the embedded release key, inside a binding's source tree but protected
+    whatever its API verdict says; `--check-carve-out` keeps those entries in
+    step with the tree."""
 
     pattern: str
     reason: str
     except_suffix: str | None = None
     binding: str | None = None
     verification: bool = False
+    dependabot_ecosystem: str | None = None
 
     def label(self) -> str:
         base = f"{self.pattern} (except *{self.except_suffix})" if self.except_suffix else self.pattern
         if self.binding:
             return f"{base} [unless the api-surface verdict for {self.binding} is changed=false]"
+        if self.dependabot_ecosystem:
+            return (f"{base} [unless this is a proven dependabot patch-level dev-dependency bump of "
+                    f"{self.dependabot_ecosystem}]")
         return base
 
     def guide_bullet(self) -> str:
@@ -445,6 +499,9 @@ class ProtectedGlob:
         if self.binding:
             return (f"- `{self.pattern}`{exc} — {self.reason}; protected only while the `api-surface` verdict for "
                     f"`{self.binding}` on the head is not `changed=false`")
+        if self.dependabot_ecosystem:
+            return (f"- `{self.pattern}`{exc} — {self.reason}; protected only while this is not a proven "
+                    f"dependabot patch-level dev-dependency bump of {self.dependabot_ecosystem}")
         if self.verification:
             return f"- `{self.pattern}`{exc} — {self.reason}; security carve-out, protected whatever the API verdict"
         return f"- `{self.pattern}`{exc} — {self.reason}"
@@ -525,19 +582,37 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("rust/build.rs",
                   "a build script cargo runs on every build, consumers' and the api-surface job's alike (none "
                   "exists today)"),
+    # go/go.mod and go/go.sum are deliberately UNCONDITIONAL — chtypes#285 §2
+    # narrows the other five release-input pairs below for dependabot, but
+    # Go has no dev/runtime dependency split for a commit's own metadata to
+    # name, and this tree has zero external Go dependencies today (no
+    # `require` block in go/go.mod, so go/go.sum does not exist yet either):
+    # there is no case to narrow, and proving a module is test-only would
+    # need `go list -deps -test` against `go list -deps` on main's own tree,
+    # a heuristic this checker does not implement. A Go dependency bump stays
+    # manual.
     ProtectedGlob("go/go.mod", "a release input: the Go module's own manifest"),
     ProtectedGlob("go/go.sum",
                   "a release input: the Go module's dependency lockfile (not yet present in this tree; "
                   "protected in advance of needing one)"),
-    ProtectedGlob("python/pyproject.toml", "a release input: the Python package manifest"),
-    ProtectedGlob("python/uv.lock", "a release input: the Python dependency lockfile"),
-    ProtectedGlob("ts/package.json", "a release input: the npm package manifest"),
-    ProtectedGlob("ts/pnpm-lock.yaml", "a release input: the npm dependency lockfile"),
+    # The next five pairs are each one ecosystem's manifest and lockfile,
+    # CONDITIONAL since chtypes#285 §2: protected unless gather_dependabot_
+    # ecosystem proves the whole pull request is a dependabot patch-level
+    # dev-dependency bump of exactly that ecosystem. ts/pnpm-workspace.yaml
+    # is not part of any ecosystem pair — it is not a dependency manifest
+    # dependabot bumps — and stays unconditional below.
+    ProtectedGlob("python/pyproject.toml", "a release input: the Python package manifest",
+                  dependabot_ecosystem="python"),
+    ProtectedGlob("python/uv.lock", "a release input: the Python dependency lockfile",
+                  dependabot_ecosystem="python"),
+    ProtectedGlob("ts/package.json", "a release input: the npm package manifest", dependabot_ecosystem="ts"),
+    ProtectedGlob("ts/pnpm-lock.yaml", "a release input: the npm dependency lockfile", dependabot_ecosystem="ts"),
     ProtectedGlob("ts/pnpm-workspace.yaml",
                   "a release input: the pnpm workspace manifest — not in issue #280's own list, found via "
                   "`git ls-files` per this checker's own brief"),
-    ProtectedGlob("rust/Cargo.toml", "a release input: the crate manifest"),
-    ProtectedGlob("rust/Cargo.lock", "a release input: the crate dependency lockfile"),
+    ProtectedGlob("rust/Cargo.toml", "a release input: the crate manifest", dependabot_ecosystem="rust"),
+    ProtectedGlob("rust/Cargo.lock", "a release input: the crate dependency lockfile",
+                  dependabot_ecosystem="rust"),
     ProtectedGlob("RELEASING.md", "the release procedure itself"),
     # Configures a required check's own tool, found by a sweep of every
     # ci.yml run: line for --config/-c flags and each tool's name, cross-
@@ -635,9 +710,11 @@ def is_protected(path: str) -> ProtectedGlob | None:
     """The first UNCONDITIONAL PROTECTED_GLOBS entry that covers `path`, or
     None. A binding-source entry is never returned here: whether a touch of
     one is protected depends on that binding's api-surface verdict, which
-    binding_of() and api_surface_problems() decide."""
+    binding_of() and api_surface_problems() decide. Neither is a dependabot-
+    ecosystem entry (chtypes#285 §2): dependabot_glob_of() and
+    dependabot_bump_problems()/manifest_bump_problems() decide those."""
     for g in PROTECTED_GLOBS:
-        if g.binding is None and _covers(g, path):
+        if g.binding is None and g.dependabot_ecosystem is None and _covers(g, path):
             return g
     return None
 
@@ -654,8 +731,54 @@ def binding_of(path: str) -> ProtectedGlob | None:
     return None
 
 
+def dependabot_glob_of(path: str) -> ProtectedGlob | None:
+    """The dependabot-ecosystem entry (a PROTECTED_GLOBS entry with
+    `dependabot_ecosystem` set, chtypes#285 §2) that covers `path`, or None.
+    The ONE mapping from a path to an ecosystem's manifest/lockfile pair."""
+    for g in PROTECTED_GLOBS:
+        if g.dependabot_ecosystem is not None and _covers(g, path):
+            return g
+    return None
+
+
 # Every binding with a source-tree entry, in PROTECTED_GLOBS order.
 BINDINGS: tuple[str, ...] = tuple(g.binding for g in PROTECTED_GLOBS if g.binding is not None)
+
+# chtypes#285 §2: which path is the MANIFEST (parsed by manifest_bump_problems
+# for its dependency specifiers) and which is the LOCKFILE (opaque; dependabot
+# regenerates it faithfully and this checker never parses it) for each
+# dependabot-narrowed ecosystem. Go is deliberately absent — see the
+# go/go.mod PROTECTED_GLOBS entry's own comment. This is a second, hand-
+# written source of the same paths PROTECTED_GLOBS already carries with
+# `dependabot_ecosystem` set; _dependabot_manifests_agree_with_globs (run by
+# --selftest) proves the two cannot drift apart silently, the same discipline
+# the CONTRIBUTING.md guide block already gets via --check-guide.
+DEPENDABOT_MANIFESTS: dict[str, tuple[str, str]] = {
+    "python": ("python/pyproject.toml", "python/uv.lock"),
+    "ts": ("ts/package.json", "ts/pnpm-lock.yaml"),
+    "rust": ("rust/Cargo.toml", "rust/Cargo.lock"),
+}
+
+
+def _dependabot_manifests_agree_with_globs() -> list[str]:
+    """Every way DEPENDABOT_MANIFESTS and PROTECTED_GLOBS' own
+    `dependabot_ecosystem` entries disagree about which paths belong to which
+    ecosystem — a pure check of the two constants against each other, run by
+    --selftest (see DEPENDABOT_MANIFESTS' own comment)."""
+    problems = []
+    from_globs: dict[str, list[str]] = {}
+    for g in PROTECTED_GLOBS:
+        if g.dependabot_ecosystem is not None:
+            from_globs.setdefault(g.dependabot_ecosystem, []).append(g.pattern)
+    if set(from_globs) != set(DEPENDABOT_MANIFESTS):
+        problems.append(f"PROTECTED_GLOBS names ecosystems {sorted(from_globs)} but DEPENDABOT_MANIFESTS names "
+                        f"{sorted(DEPENDABOT_MANIFESTS)}")
+    for eco, paths in sorted(from_globs.items()):
+        manifest = DEPENDABOT_MANIFESTS.get(eco)
+        if manifest is not None and sorted(paths) != sorted(manifest):
+            problems.append(f"{eco}: PROTECTED_GLOBS has {sorted(paths)} but DEPENDABOT_MANIFESTS has "
+                            f"{sorted(manifest)}")
+    return problems
 
 
 def _touched_paths(files: list[dict]):
@@ -691,6 +814,23 @@ def touched_bindings(files: list[dict]) -> dict[str, str]:
         if g is not None and g.binding not in touched:
             touched[g.binding] = path
     return touched
+
+
+def first_dependabot_touch(files: list[dict], ecosystem: str | None) -> tuple[str, ProtectedGlob] | None:
+    """The first (path, glob) a pull request's file list touches that a
+    dependabot-ecosystem PROTECTED_GLOBS entry (chtypes#285 §2) covers, whose
+    OWN ecosystem is not the one `ecosystem` proves — i.e. still protected.
+    `ecosystem` None (nothing proven) means every such entry still refuses,
+    exactly as if it were unconditional; `ecosystem` set means only that ONE
+    ecosystem's manifest and lockfile are excused, and any other touched
+    ecosystem's pair (which candidate_dependabot_ecosystem's own "touches
+    only that ecosystem" rule should already have prevented from coexisting
+    with a proof) still refuses too."""
+    for path in _touched_paths(files):
+        g = dependabot_glob_of(path)
+        if g is not None and g.dependabot_ecosystem != ecosystem:
+            return path, g
+    return None
 
 
 # ------------------------------------------------------- test/fixture paths
@@ -878,6 +1018,259 @@ def carve_out_problems(sources: dict[str, str]) -> list[str]:
     return problems
 
 
+# ---------------------------------------- dependabot dependency bumps (chtypes#285 §2)
+#
+# Patch-level bumps of DEV and test-only dependencies merge themselves;
+# runtime dependencies, manifest version fields and GitHub Actions bumps stay
+# manual. Classified from dependabot's own commit metadata, read as DATA —
+# the pwn-request rule is unchanged, same posture as condition 7's job-log
+# reads: a commit's message and two more revisions of one already-protected
+# manifest file, never executed, sourced or evaluated as code.
+# manifest_bump_problems parses each ecosystem's declarative config format
+# with Python's own stdlib (tomllib/json) exactly the way decode_contents
+# already treats docs/support.md's bytes as data — a parse, never a run. The
+# one new privileged signal, the pull request's own author field, cannot be
+# forged by opening a pull request: GitHub assigns the `dependabot[bot]`
+# identity only to a pull request its own Dependabot installation opens,
+# which neither a fork nor an arbitrary collaborator can trigger on request.
+#
+# The narrowing applies only when ALL hold (chtypes#285 §2's own four):
+#   - the pull request's author is dependabot[bot];
+#   - every dependency the head commit's own metadata names is BOTH
+#     direct:development AND version-update:semver-patch;
+#   - the diff touches nothing OUTSIDE one ecosystem's manifest and lockfile
+#     — a non-empty subset of that pair, not necessarily both: a patch bump
+#     that stays inside the manifest's own version range moves only the
+#     LOCKFILE (measured against this repository's own history, 84401fd)
+#     (candidate_dependabot_ecosystem, zero API cost otherwise);
+#   - the manifest diff — the head commit against its own parent, never
+#     against main's possibly-unrelated tip — changes only those
+#     dependencies' version specifiers: the manifest's own version field is
+#     unchanged, no runtime (production) dependency changed at all, no dev
+#     dependency was added or removed, and no dev dependency outside the
+#     named set changed (manifest_bump_problems).
+# A missing, unparseable or disagreeing signal anywhere in this chain counts
+# as NOT proven, never as proven — gather_dependabot_ecosystem returns None,
+# which leaves the manifest/lockfile pair exactly as protected as before this
+# feature existed.
+
+_UPDATED_DEPENDENCIES_RE = re.compile(r"^updated-dependencies:\n(.*?)(?:^\.\.\.[ \t]*$|\Z)", re.M | re.S)
+_DEP_ENTRY_START_RE = re.compile(r"^- dependency-name:", re.M)
+_DEP_NAME_RE = re.compile(r"^- dependency-name:\s*(\S+)", re.M)
+_DEP_TYPE_RE = re.compile(r"^\s+dependency-type:\s*(\S+)", re.M)
+_DEP_UPDATE_TYPE_RE = re.compile(r"^\s+update-type:\s*(\S+)", re.M)
+
+
+def parse_dependabot_metadata(commit_message: str) -> list[dict[str, str | None]]:
+    """Every dependency dependabot's own `updated-dependencies:` trailer
+    names in `commit_message`, each as {"name", "dependency_type",
+    "update_type"} (a value is None when that field's own line is missing —
+    never guessed from another entry's). [] when the trailer itself is
+    absent or carries no `- dependency-name:` entry at all. A grouped update
+    (chtypes#285's own `dependency-group` field, ignored here) carries
+    several entries in one block; each is parsed independently by splitting
+    at every `- dependency-name:` line first, so one entry's fields are never
+    attributed to a neighbor's. Matched by fixed regex against a GitHub-
+    generated trailer, never evaluated as YAML or any other code."""
+    block_match = _UPDATED_DEPENDENCIES_RE.search(commit_message)
+    if not block_match:
+        return []
+    block = block_match.group(1)
+    starts = [m.start() for m in _DEP_ENTRY_START_RE.finditer(block)]
+    if not starts:
+        return []
+    bounds = [*starts, len(block)]
+    entries = []
+    for i in range(len(starts)):
+        chunk = block[bounds[i]:bounds[i + 1]]
+        name_m, type_m, update_m = _DEP_NAME_RE.search(chunk), _DEP_TYPE_RE.search(chunk), _DEP_UPDATE_TYPE_RE.search(chunk)
+        entries.append({
+            "name": name_m.group(1) if name_m else None,
+            "dependency_type": type_m.group(1) if type_m else None,
+            "update_type": update_m.group(1) if update_m else None,
+        })
+    return entries
+
+
+def candidate_dependabot_ecosystem(files: list[dict]) -> str | None:
+    """Which ecosystem this diff could possibly be a self-mergeable
+    dependency bump for, from the file list ALONE, at zero API cost — or
+    None. The touched paths (current path, or for a rename the old path too)
+    must be a NON-EMPTY subset of exactly one ecosystem's {manifest,
+    lockfile} pair from DEPENDABOT_MANIFESTS — chtypes#285 §2's own "touches
+    only that ecosystem's manifest and lockfile" means touches nothing
+    OUTSIDE that pair, not that both files must be touched: a patch bump
+    that stays inside the manifest's own version range (python's `ruff>=0.14`
+    covering both the old and the new patch) moves only the LOCKFILE, never
+    the manifest at all — measured against this very repository's own
+    history (`84401fd`, a real dependabot patch bump of ruff touching only
+    python/uv.lock). A third file alongside the pair, or files from more
+    than one ecosystem, are each never a candidate, so
+    gather_dependabot_ecosystem reads no further API data for a diff this
+    condition could never excuse. manifest_bump_problems still holds when
+    the manifest itself was not touched: an unchanged file trivially changes
+    nothing beyond any dependency's own specifier, so there is nothing for
+    it to object to."""
+    touched = set(_touched_paths(files))
+    if not touched:
+        return None
+    for eco, pair in DEPENDABOT_MANIFESTS.items():
+        if touched <= set(pair):
+            return eco
+    return None
+
+
+def dependabot_bump_problems(pr: dict, entries: list[dict[str, str | None]], parents: list[dict]) -> list[str]:
+    """Every way the author/commit-shape and per-dependency-metadata half of
+    the chtypes#285 §2 narrowing fails, given the pull request object, the
+    head commit's own already-parsed metadata (parse_dependabot_metadata) and
+    its parents list. Pure, so --selftest drives it from fabricated objects;
+    the manifest-diff half is manifest_bump_problems, checked separately
+    because it needs two more file reads this half must already justify."""
+    problems = []
+    author = (pr.get("user") or {}).get("login")
+    if author != "dependabot[bot]":
+        problems.append(f"the pull request's author is {author!r}, not dependabot[bot]")
+    if pr.get("commits") != 1:
+        problems.append(f"the pull request carries {pr.get('commits')!r} commit(s), not exactly one")
+    if len(parents) != 1:
+        problems.append(f"the head commit has {len(parents)} parent(s), not exactly one")
+    if not entries:
+        problems.append("the head commit's message carries no updated-dependencies metadata")
+    for e in entries:
+        name = e.get("name") or "<unnamed>"
+        if not e.get("name"):
+            problems.append("an updated-dependencies entry carries no dependency-name")
+        if e.get("dependency_type") != "direct:development":
+            problems.append(f"{name}: dependency-type is {e.get('dependency_type')!r}, not direct:development")
+        if e.get("update_type") != "version-update:semver-patch":
+            problems.append(f"{name}: update-type is {e.get('update_type')!r}, not version-update:semver-patch")
+    return problems
+
+
+_PEP508_NAME_RE = re.compile(r"^([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+
+
+def _pep508_name(requirement: str) -> str | None:
+    """The project-name half of a PEP 508 requirement string ("pytest>=8.0"
+    -> "pytest"), or None if it does not even start with one. The specifier,
+    any extras and any marker are deliberately left attached to the OTHER
+    half the caller keeps (python_manifest_shape): this file never needs to
+    parse a specifier's own meaning, only to tell whether two requirement
+    strings for the same name are byte-identical."""
+    m = _PEP508_NAME_RE.match(requirement.strip())
+    return m.group(1) if m else None
+
+
+def python_manifest_shape(data: dict) -> tuple[object, dict[str, str], dict[str, str]]:
+    """(version, {prod name: requirement string}, {dev name: requirement
+    string}) from a parsed pyproject.toml. Runtime dependencies are
+    `[project.dependencies]`; dev dependencies are every list under
+    `[dependency-groups]` (this tree's own shape: a `dev` group of pytest and
+    ruff) — every group is treated alike, because PEP 735 groups are
+    deliberately not production/development-typed themselves, and the only
+    group this tree has IS its dev dependencies."""
+    project = data.get("project") or {}
+    prod: dict[str, str] = {}
+    for req in project.get("dependencies") or []:
+        if isinstance(req, str):
+            name = _pep508_name(req)
+            if name:
+                prod[name] = req
+    dev: dict[str, str] = {}
+    for group in (data.get("dependency-groups") or {}).values():
+        if not isinstance(group, list):
+            continue
+        for req in group:
+            if isinstance(req, str):
+                name = _pep508_name(req)
+                if name:
+                    dev[name] = req
+    return project.get("version"), prod, dev
+
+
+def ts_manifest_shape(data: dict) -> tuple[object, dict[str, object], dict[str, object]]:
+    """(version, dependencies, devDependencies) from a parsed package.json —
+    npm's own split needs no translation."""
+    return data.get("version"), dict(data.get("dependencies") or {}), dict(data.get("devDependencies") or {})
+
+
+def rust_manifest_shape(data: dict) -> tuple[object, dict[str, object], dict[str, object]]:
+    """(version, [dependencies], [dev-dependencies]) from a parsed
+    Cargo.toml. A crate's table value (`{ version = "1", features = [...] }`)
+    is kept as the dict tomllib already parsed it into, not flattened to a
+    bare version string: _only_version_changed below checks every OTHER key
+    of such a table stayed exactly as it was, not just that `version` did."""
+    package = data.get("package") or {}
+    return package.get("version"), dict(data.get("dependencies") or {}), dict(data.get("dev-dependencies") or {})
+
+
+MANIFEST_SHAPE: dict[str, Callable[[dict], tuple[object, dict[str, object], dict[str, object]]]] = {
+    "python": python_manifest_shape,
+    "ts": ts_manifest_shape,
+    "rust": rust_manifest_shape,
+}
+MANIFEST_PARSE: dict[str, Callable[[bytes], dict]] = {
+    "python": lambda b: tomllib.loads(b.decode("utf-8")),
+    "ts": lambda b: json.loads(b.decode("utf-8")),
+    "rust": lambda b: tomllib.loads(b.decode("utf-8")),
+}
+
+
+def _only_version_changed(old: object, new: object) -> bool:
+    """Whether `old` -> `new`, one manifest's dependency VALUE for one name,
+    changes only a version specifier. A plain string (python's PEP 508
+    requirement, npm's semver range) changing at all counts as exactly that —
+    the specifier IS the whole string. A table (Cargo's `{ version = "1",
+    features = [...] }`) must keep every OTHER key byte-identical; a key
+    added, removed, or changed besides `version` is more than a version
+    bump. A type change between the two (string -> table or back) is also
+    refused: dependabot never does this for one dependency, so seeing it is
+    reason enough to leave the pull request for a human."""
+    if isinstance(old, str) and isinstance(new, str):
+        return True
+    if isinstance(old, dict) and isinstance(new, dict):
+        return set(old) == set(new) and all(k == "version" or old[k] == new[k] for k in old)
+    return False
+
+
+def manifest_bump_problems(ecosystem: str, old_bytes: bytes, new_bytes: bytes, dependency_names: set[str]) -> list[str]:
+    """Every way `ecosystem`'s manifest changed by more than `dependency_
+    names`' own version specifiers between `old_bytes` (the head commit's
+    PARENT — the pre-bump manifest) and `new_bytes` (the head itself): the
+    manifest's own version field moved, a runtime (production) dependency
+    changed at all, a dev dependency was added or removed, a dev dependency
+    outside `dependency_names` changed, or a named dependency changed by more
+    than its version specifier (_only_version_changed). Both parses use
+    Python's own stdlib (tomllib/json) — a declarative data format read as
+    data, the same posture decode_contents already treats a file's bytes
+    with, never executed, sourced or evaluated as code. A parse failure on
+    either side is itself a problem, never a silent pass."""
+    try:
+        old_version, old_prod, old_dev = MANIFEST_SHAPE[ecosystem](MANIFEST_PARSE[ecosystem](old_bytes))
+        new_version, new_prod, new_dev = MANIFEST_SHAPE[ecosystem](MANIFEST_PARSE[ecosystem](new_bytes))
+    except Exception as e:  # noqa: BLE001 — any parse failure is a problem, not a crash
+        return [f"{ecosystem}'s manifest could not be parsed on both sides: {type(e).__name__}: {e}"]
+    problems = []
+    if old_version != new_version:
+        problems.append(f"the manifest's own version field changed ({old_version!r} -> {new_version!r})")
+    if old_prod != new_prod:
+        problems.append("a runtime (production) dependency changed")
+    if set(old_dev) != set(new_dev):
+        problems.append(f"a dev dependency was added or removed ({sorted(old_dev)} -> {sorted(new_dev)}), not just "
+                        "bumped")
+    else:
+        for name, old_value in old_dev.items():
+            new_value = new_dev[name]
+            if old_value == new_value:
+                continue
+            if name not in dependency_names:
+                problems.append(f"{name} changed but dependabot's commit did not list it as updated")
+            elif not _only_version_changed(old_value, new_value):
+                problems.append(f"{name} changed by more than its version specifier")
+    return problems
+
+
 # ------------------------------------------------------- the CONTRIBUTING.md guide
 
 
@@ -977,7 +1370,9 @@ CONDITIONS = {
     "pull-request": "one open, non-draft pull request against main carries the commit",
     "stale": "the head is still the commit ci judged",
     "protected": "condition 5, no touched file (current or, for a rename, old path) matches a protected glob, "
-                 "and every touched binding's source has an api-surface verdict of changed=false on the head",
+                 "every touched binding's source has an api-surface verdict of changed=false on the head, and a "
+                 "touched ecosystem manifest/lockfile pair (chtypes#285 §2) is excused only by a proven "
+                 "dependabot patch-level dev-dependency bump of that ecosystem",
     "checks": "condition 2, every required check passed",
     "test-counts": "condition 7 (chtypes#285 §1b), only when the diff touches a test or fixture path: no "
                    "suite's executed-test count, and no golden-case count, fell below main's last green ci "
@@ -1096,7 +1491,7 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
            files: list[dict], check_runs: list[dict], reviews: list[dict],
            review_comments: list[dict], head_bytes: dict[str, bytes] | None = None,
            regenerated: dict[str, bytes] | None = None, test_counts: TestCountFacts | None = None,
-           api_verdicts: dict[str, list[str]] | None = None,
+           api_verdicts: dict[str, list[str]] | None = None, dependabot_ecosystem: str | None = None,
            required: tuple[str, ...] = REQUIRED_CHECKS) -> Refusal | None:
     """The first condition that fails, or None when every condition holds.
     With `regenerated` None (the gate), the byte HALF of condition 6 is not
@@ -1106,7 +1501,13 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
     condition 7 needs (job logs, never a head file) up front, so both `gate`
     and `enqueue` check it fully. `api_verdicts` (gather_api_verdicts, the
     api-surface job's log for this head) is the same: None or {} is no
-    verdict at all, which keeps every touched binding's source protected."""
+    verdict at all, which keeps every touched binding's source protected.
+    `dependabot_ecosystem` (gather_dependabot_ecosystem, chtypes#285 §2) has
+    no such split either — it reads everything it needs (a commit and two
+    manifest revisions, never a head file) up front, zero cost unless the
+    file list alone already looks like a candidate: None excuses nothing, so
+    every ecosystem's manifest and lockfile stays exactly as protected as
+    before this parameter existed."""
     # fork (condition 1)
     if run_head_repo is not None and run_head_repo != repo:
         return Refusal("fork", f"the ci run's head is in {run_head_repo or '<no repository>'}, not {repo}")
@@ -1139,6 +1540,18 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
     if touch is not None:
         path, glob = touch
         return Refusal("protected", f"{path} matches the protected glob `{glob.pattern}` ({glob.reason})")
+    # The dependabot-ecosystem class (chtypes#285 §2), still condition 5 and
+    # still before `checks`: dependabot_ecosystem was proven (or not) from
+    # the head commit's own metadata and two manifest revisions, never from
+    # anything the pull request's own copy of ci.yml or scripts/ could have
+    # produced — the unconditional check above already refused a touch of
+    # either tree.
+    dep_touch = first_dependabot_touch(files, dependabot_ecosystem)
+    if dep_touch is not None:
+        path, glob = dep_touch
+        return Refusal("protected", f"{path} matches the protected glob `{glob.pattern}` ({glob.reason}); excused "
+                                    f"only for a proven dependabot patch-level dev-dependency bump of "
+                                    f"{glob.dependabot_ecosystem}")
     # The binding-source class (chtypes#285 §1), still condition 5 and still
     # before `checks`: the api-surface verdicts it reads were written by the
     # pull request's own copy of ci.yml and scripts/, which the unconditional
@@ -1535,6 +1948,59 @@ def gather_api_verdicts(repo: str, files: list[dict], check_runs: list[dict], he
     return parse_api_surface(job_log(repo, job_id), head_sha)
 
 
+def classify_dependabot_bump(candidate: str, pr: dict, entries: list[dict[str, str | None]],
+                             parents: list[dict], old_manifest_bytes: bytes | None,
+                             new_manifest_bytes: bytes | None) -> str | None:
+    """The pure core of gather_dependabot_ecosystem (chtypes#285 §2): given
+    the file-list candidate ecosystem and everything the network half would
+    otherwise have fetched, already parsed, the final verdict — `candidate`
+    or None. `old_manifest_bytes`/`new_manifest_bytes` are None exactly when
+    gather_dependabot_ecosystem never needed to read them (dependabot_bump_
+    problems already found enough wrong, or `parents` was not exactly one
+    commit to read a parent sha from) and count as "not proven" here too,
+    never as "skip this half". Pure, so --selftest drives the FULL
+    combination — author, commit shape, every entry's metadata, and the
+    manifest diff together — from fabricated objects, the same shape as the
+    six cases chtypes#285 §2 itself names."""
+    if dependabot_bump_problems(pr, entries, parents):
+        return None
+    if old_manifest_bytes is None or new_manifest_bytes is None:
+        return None
+    names = {e["name"] for e in entries if e.get("name")}
+    if manifest_bump_problems(candidate, old_manifest_bytes, new_manifest_bytes, names):
+        return None
+    return candidate
+
+
+def gather_dependabot_ecosystem(repo: str, pr: dict, files: list[dict]) -> str | None:
+    """Which ecosystem's manifest/lockfile pair the chtypes#285 §2 narrowing
+    excuses for this pull request, or None — at ZERO API cost unless the file
+    list alone already looks like a candidate (candidate_dependabot_
+    ecosystem) AND the pull request's own author is dependabot[bot] (already
+    in hand from `pr`, no extra read). Reads the head commit once (its
+    message for parse_dependabot_metadata, its parents list for the one-
+    parent check) and, only when there is exactly one parent to read the
+    pre-bump manifest at, the manifest's bytes at that parent and at the head
+    — two more contents-API reads, same call as head_file() already makes
+    for docs/support.md, never main's tip and never anything executed. The
+    actual decision is classify_dependabot_bump, which has its own test."""
+    candidate = candidate_dependabot_ecosystem(files)
+    if candidate is None:
+        return None
+    if (pr.get("user") or {}).get("login") != "dependabot[bot]":
+        return None
+    sha = (pr.get("head") or {}).get("sha") or ""
+    commit = gh_object(f"repos/{repo}/commits/{sha}")
+    entries = parse_dependabot_metadata(((commit.get("commit") or {}).get("message")) or "")
+    parents = commit.get("parents") or []
+    old_bytes = new_bytes = None
+    if len(parents) == 1:
+        manifest, _lockfile = DEPENDABOT_MANIFESTS[candidate]
+        old_bytes = head_file(repo, manifest, parents[0]["sha"])
+        new_bytes = head_file(repo, manifest, sha)
+    return classify_dependabot_bump(candidate, pr, entries, parents, old_bytes, new_bytes)
+
+
 @dataclass(frozen=True)
 class EnqueuePlan:
     """What `cmd_enqueue` should do once `decide()` has passed: either
@@ -1675,9 +2141,11 @@ def cmd_gate(args: argparse.Namespace) -> int:
     facts = gather(args.repo, number, sha)
     test_counts = gather_test_counts(args.repo, facts.files, facts.check_runs)
     api_verdicts = gather_api_verdicts(args.repo, facts.files, facts.check_runs, sha)
+    dependabot_ecosystem = gather_dependabot_ecosystem(args.repo, facts.pr, facts.files)
     refusal = decide(repo=args.repo, expected_head_sha=sha, run_head_repo=run_head_repo, pr=facts.pr,
                      files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
-                     review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts)
+                     review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts,
+                     dependabot_ecosystem=dependabot_ecosystem)
     if refusal:
         output(candidate=0)
         return refuse(refusal, f"PR #{number} at {sha[:12]}")
@@ -1694,9 +2162,11 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     facts = gather(args.repo, number, sha)
     test_counts = gather_test_counts(args.repo, facts.files, facts.check_runs)
     api_verdicts = gather_api_verdicts(args.repo, facts.files, facts.check_runs, sha)
+    dependabot_ecosystem = gather_dependabot_ecosystem(args.repo, facts.pr, facts.files)
     judged = dict(repo=args.repo, expected_head_sha=sha, run_head_repo=args.run_head_repo or None, pr=facts.pr,
                   files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
-                  review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts)
+                  review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts,
+                  dependabot_ecosystem=dependabot_ecosystem)
     # Every other condition first, fresh: a head that moved or vanished since
     # the gate is `stale`, never a failed read of its bytes. This IS the
     # primary defense against a moved head — see enqueue_pull_request()'s own
@@ -2046,6 +2516,13 @@ def selftest() -> int:
         if g.binding is not None:
             expect(f"binding source {g.pattern} with its own changed=false verdict passes",
                    decide(**_with(files=one, api_verdicts={g.binding: ["false"]})), None)
+        elif g.dependabot_ecosystem is not None:
+            expect(f"dependabot-ecosystem manifest {g.pattern} passes once {g.dependabot_ecosystem} is proven",
+                   decide(**_with(pr=_pr(changed_files=1), files=one, dependabot_ecosystem=g.dependabot_ecosystem)),
+                   None)
+            expect(f"{g.pattern} still refuses for a DIFFERENT proven ecosystem",
+                   decide(**_with(pr=_pr(changed_files=1), files=one, dependabot_ecosystem="some-other-ecosystem")),
+                   "protected")
         else:
             expect(f"{g.pattern} refuses whatever every binding's api-surface verdict says",
                    decide(**_with(files=one, api_verdicts=dict(all_unchanged))), "protected")
@@ -2558,6 +3035,235 @@ def selftest() -> int:
         except ValueError as e:
             failures.append(f"_match_protected: PROTECTED_GLOBS entry {g.pattern!r} is an unsupported shape: {e}")
 
+    # chtypes#285 §2: dependabot dependency bumps. DEPENDABOT_MANIFESTS and
+    # PROTECTED_GLOBS' own dependabot_ecosystem entries must agree (the same
+    # discipline the CONTRIBUTING.md guide gets via --check-guide).
+    manifest_glob_problems = _dependabot_manifests_agree_with_globs()
+    if manifest_glob_problems:
+        failures.append(f"DEPENDABOT_MANIFESTS and PROTECTED_GLOBS disagree: {manifest_glob_problems}")
+
+    # parse_dependabot_metadata — a fixed-format trailer, matched by regex,
+    # never evaluated as YAML or any other code.
+    single_trailer = (
+        "Bump pytest from 8.0.0 to 8.1.0.\n\n"
+        "Bumps [pytest](https://github.com/pytest-dev/pytest) from 8.0.0 to 8.1.0.\n\n"
+        "---\n"
+        "updated-dependencies:\n"
+        "- dependency-name: pytest\n"
+        "  dependency-version: 8.1.0\n"
+        "  dependency-type: direct:development\n"
+        "  update-type: version-update:semver-patch\n"
+        "...\n\n"
+        "Signed-off-by: dependabot[bot] <support@github.com>\n"
+    )
+    [single] = parse_dependabot_metadata(single_trailer)
+    if single != {"name": "pytest", "dependency_type": "direct:development", "update_type": "version-update:semver-patch"}:
+        failures.append(f"parse_dependabot_metadata: a single entry was misread: {single}")
+    grouped_trailer = (
+        "Bumps the dev-dependencies group with 2 updates.\n\n---\n"
+        "updated-dependencies:\n"
+        "- dependency-name: pytest\n"
+        "  dependency-version: 8.1.0\n"
+        "  dependency-type: direct:development\n"
+        "  dependency-group: dev-dependencies\n"
+        "  update-type: version-update:semver-patch\n"
+        "- dependency-name: ruff\n"
+        "  dependency-version: 0.14.2\n"
+        "  dependency-type: direct:development\n"
+        "  dependency-group: dev-dependencies\n"
+        "  update-type: version-update:semver-patch\n"
+        "...\n\nSigned-off-by: dependabot[bot] <support@github.com>\n"
+    )
+    grouped = parse_dependabot_metadata(grouped_trailer)
+    if [e["name"] for e in grouped] != ["pytest", "ruff"]:
+        failures.append(f"parse_dependabot_metadata: a grouped update's entries were misread: {grouped}")
+    if any(e["dependency_type"] != "direct:development" or e["update_type"] != "version-update:semver-patch"
+           for e in grouped):
+        failures.append(f"parse_dependabot_metadata: a grouped entry's own fields leaked into its neighbor: {grouped}")
+    if parse_dependabot_metadata("just a plain commit message\n"):
+        failures.append("parse_dependabot_metadata: a message with no trailer at all was not empty")
+    if parse_dependabot_metadata("updated-dependencies:\n(nothing here starts with '- dependency-name:')\n...\n"):
+        failures.append("parse_dependabot_metadata: a trailer with no entry line was not empty")
+    incomplete_trailer = ("---\nupdated-dependencies:\n- dependency-name: pytest\n"
+                         "  dependency-type: direct:development\n...\n")
+    [incomplete] = parse_dependabot_metadata(incomplete_trailer)
+    if incomplete["update_type"] is not None:
+        failures.append(f"parse_dependabot_metadata: a missing update-type line was not None: {incomplete}")
+
+    # candidate_dependabot_ecosystem — the file list alone, at zero API cost.
+    def ff(*paths: str) -> list[dict]:
+        return [{"filename": p, "status": "modified"} for p in paths]
+
+    for eco, (manifest, lockfile) in DEPENDABOT_MANIFESTS.items():
+        if candidate_dependabot_ecosystem(ff(manifest, lockfile)) != eco:
+            failures.append(f"candidate_dependabot_ecosystem: {eco}'s own manifest+lockfile pair was not {eco!r}")
+
+    def expect_cand(label: str, files: list[dict], want: str | None) -> None:
+        if candidate_dependabot_ecosystem(files) != want:
+            failures.append(f"candidate_dependabot_ecosystem: {label}")
+
+    expect_cand("the LOCKFILE alone is a candidate — measured against this repository's own history "
+               "(84401fd: a real dependabot patch bump staying inside the manifest's own range touched "
+               "only python/uv.lock)", ff(DEPENDABOT_MANIFESTS["python"][1]), "python")
+    expect_cand("the MANIFEST alone is a candidate too (the lockfile is not required to have moved)",
+               ff(DEPENDABOT_MANIFESTS["python"][0]), "python")
+    expect_cand("chtypes#285 §2: an EXTRA file beside a real pair refuses (not a candidate at all)",
+               ff(*DEPENDABOT_MANIFESTS["python"], "README.md"), None)
+    expect_cand("two ecosystems' pairs together is not a candidate",
+               ff(*DEPENDABOT_MANIFESTS["python"], *DEPENDABOT_MANIFESTS["ts"]), None)
+    expect_cand("go's manifest and a lockfile that does not exist yet is never a candidate (go is absent on purpose)",
+               ff("go/go.mod", "go/go.sum"), None)
+    expect_cand("no files at all is not a candidate", [], None)
+
+    # dependabot_bump_problems — author, commit shape, and every entry's own
+    # metadata, independent of any manifest byte.
+    def dep_pr(**changes: object) -> dict:
+        p = {"number": 42, "state": "open", "user": {"login": "dependabot[bot]"}, "commits": 1}
+        p.update(changes)
+        return p
+
+    def dep_entry(**changes: object) -> dict[str, str | None]:
+        e = {"name": "pytest", "dependency_type": "direct:development",
+            "update_type": "version-update:semver-patch"}
+        e.update(changes)
+        return e
+
+    one_parent = [{"sha": OTHER_SHA}]
+    if dependabot_bump_problems(dep_pr(), [dep_entry()], one_parent):
+        failures.append("dependabot_bump_problems: an all-good case was refused")
+    if not dependabot_bump_problems(dep_pr(user={"login": "someone"}), [dep_entry()], one_parent):
+        failures.append("dependabot_bump_problems: a non-dependabot author was not caught")
+    if not dependabot_bump_problems(dep_pr(commits=2), [dep_entry()], one_parent):
+        failures.append("dependabot_bump_problems: more than one commit was not caught")
+    if not dependabot_bump_problems(dep_pr(), [dep_entry()], []):
+        failures.append("dependabot_bump_problems: zero parents was not caught")
+    if not dependabot_bump_problems(dep_pr(), [dep_entry()], [{"sha": SHA}, {"sha": OTHER_SHA}]):
+        failures.append("dependabot_bump_problems: two parents (a merge commit) was not caught")
+    if not dependabot_bump_problems(dep_pr(), [], one_parent):
+        failures.append("dependabot_bump_problems: no updated-dependencies entries at all was not caught")
+    if not dependabot_bump_problems(dep_pr(), [dep_entry(dependency_type="direct:production")], one_parent):
+        failures.append("dependabot_bump_problems: a runtime (direct:production) dependency was not caught")
+    if not dependabot_bump_problems(dep_pr(), [dep_entry(update_type="version-update:semver-minor")], one_parent):
+        failures.append("dependabot_bump_problems: a minor bump was not caught")
+    if not dependabot_bump_problems(dep_pr(), [dep_entry(name=None)], one_parent):
+        failures.append("dependabot_bump_problems: a missing dependency-name was not caught")
+
+    # _only_version_changed — a string change is always just the specifier; a
+    # table (Cargo's inline form) must keep every OTHER key identical.
+    if not _only_version_changed("1.4", "1.4.1"):
+        failures.append("_only_version_changed: a plain string version change was refused")
+    if not _only_version_changed({"version": "1.4", "default-features": False},
+                                 {"version": "1.4.1", "default-features": False}):
+        failures.append("_only_version_changed: a table whose only OTHER key stayed equal was refused")
+    if _only_version_changed({"version": "1.4", "default-features": False},
+                             {"version": "1.4.1", "default-features": True}):
+        failures.append("_only_version_changed: a table change outside `version` was accepted")
+    if _only_version_changed({"version": "1.4"}, {"version": "1.4", "features": ["x"]}):
+        failures.append("_only_version_changed: an ADDED key was accepted")
+    if _only_version_changed("1.4", {"version": "1.4.1"}):
+        failures.append("_only_version_changed: a string-to-table type change was accepted")
+
+    # manifest_bump_problems, one fixture pair per ecosystem — each proves the
+    # four things chtypes#285 §2 asks for: the version field, a runtime
+    # dependency, a dev dependency's own set, and "only the named dependency's
+    # specifier" all get checked, from tomllib/json parsing the bytes as DATA.
+    py_old = (b'[project]\nname = "x"\nversion = "0.5.0"\ndependencies = []\n\n'
+             b'[dependency-groups]\ndev = ["pytest>=8.0", "ruff>=0.14"]\n')
+    py_new_good = py_old.replace(b"pytest>=8.0", b"pytest>=8.1")
+    if manifest_bump_problems("python", py_old, py_new_good, {"pytest"}):
+        failures.append("manifest_bump_problems: python's own good dev bump was refused")
+    if not manifest_bump_problems("python", py_old, py_new_good, {"ruff"}):
+        failures.append("manifest_bump_problems: python's bump named a dependency dependabot did not list")
+    py_version_changed = py_new_good.replace(b'version = "0.5.0"', b'version = "0.5.1"')
+    if not manifest_bump_problems("python", py_old, py_version_changed, {"pytest"}):
+        failures.append("manifest_bump_problems: python's own manifest version field change was not caught")
+    py_prod_added = py_new_good.replace(b"dependencies = []", b'dependencies = ["requests>=2"]')
+    if not manifest_bump_problems("python", py_old, py_prod_added, {"pytest"}):
+        failures.append("manifest_bump_problems: python's runtime (production) dependency change was not caught")
+    py_dev_added = py_new_good.replace(b'dev = ["pytest>=8.1", "ruff>=0.14"]',
+                                      b'dev = ["pytest>=8.1", "ruff>=0.14", "mypy>=1"]')
+    if not manifest_bump_problems("python", py_old, py_dev_added, {"pytest"}):
+        failures.append("manifest_bump_problems: python's own dev dependency ADDED alongside the bump was not caught")
+
+    ts_old = (b'{"name": "x", "version": "0.5.0", "dependencies": {"ffi-rs": "^1.3.7"}, '
+             b'"devDependencies": {"vitest": "^5.0.0", "typescript": "^7.0.2"}}')
+    ts_new_good = ts_old.replace(b'"vitest": "^5.0.0"', b'"vitest": "^5.0.1"')
+    if manifest_bump_problems("ts", ts_old, ts_new_good, {"vitest"}):
+        failures.append("manifest_bump_problems: ts's own good devDependencies bump was refused")
+    ts_prod_changed = ts_new_good.replace(b'"ffi-rs": "^1.3.7"', b'"ffi-rs": "^1.3.8"')
+    if not manifest_bump_problems("ts", ts_old, ts_prod_changed, {"vitest"}):
+        failures.append("manifest_bump_problems: ts's runtime (production) dependency change was not caught")
+    ts_version_changed = ts_new_good.replace(b'"version": "0.5.0"', b'"version": "0.5.1"')
+    if not manifest_bump_problems("ts", ts_old, ts_version_changed, {"vitest"}):
+        failures.append("manifest_bump_problems: ts's own manifest version field change was not caught")
+    ts_dev_removed = ts_new_good.replace(b', "typescript": "^7.0.2"', b"")
+    if not manifest_bump_problems("ts", ts_old, ts_dev_removed, {"vitest"}):
+        failures.append("manifest_bump_problems: ts's own devDependencies entry REMOVED was not caught")
+
+    rust_old = (b'[package]\nname = "x"\nversion = "0.5.0"\n\n[dependencies]\nserde_json = "1"\n\n'
+               b'[dev-dependencies]\nproptest = { version = "1.4", default-features = false }\n')
+    rust_new_good = rust_old.replace(b'version = "1.4"', b'version = "1.4.1"')
+    if manifest_bump_problems("rust", rust_old, rust_new_good, {"proptest"}):
+        failures.append("manifest_bump_problems: rust's own good dev-dependencies table bump was refused")
+    rust_more_than_version = rust_new_good.replace(b"default-features = false", b"default-features = true")
+    if not manifest_bump_problems("rust", rust_old, rust_more_than_version, {"proptest"}):
+        failures.append("manifest_bump_problems: rust's table change beyond `version` was not caught "
+                        "(_only_version_changed)")
+    rust_prod_changed = rust_new_good.replace(b'serde_json = "1"\n\n[dev', b'serde_json = "2"\n\n[dev')
+    if not manifest_bump_problems("rust", rust_old, rust_prod_changed, {"proptest"}):
+        failures.append("manifest_bump_problems: rust's runtime (production) dependency change was not caught")
+    if "could not be parsed" not in " ".join(manifest_bump_problems("rust", rust_old, b"not valid toml {{{", {"x"})):
+        failures.append("manifest_bump_problems: an unparseable manifest on the head side was not caught as a problem")
+
+    # classify_dependabot_bump — the pure end-to-end combination, mapped
+    # directly to chtypes#285 §2's own six selftest cases (the file-list half
+    # of "an extra file refuses" is candidate_dependabot_ecosystem's own test
+    # above; this is everything classify_dependabot_bump alone decides).
+    good_entries = [dep_entry()]
+
+    def expect_class(label: str, candidate: str, pr: dict, entries: list[dict], parents: list[dict],
+                     old: bytes | None, new: bytes | None, want: str | None) -> None:
+        if classify_dependabot_bump(candidate, pr, entries, parents, old, new) != want:
+            failures.append(f"classify_dependabot_bump: {label}")
+
+    expect_class("chtypes#285 §2: a dev-dependency patch bump through dependabot passes", "python",
+               dep_pr(), good_entries, one_parent, py_old, py_new_good, "python")
+    expect_class("chtypes#285 §2: a runtime dependency refuses", "python", dep_pr(),
+               [dep_entry(dependency_type="direct:production")], one_parent, py_old, py_new_good, None)
+    expect_class("chtypes#285 §2: a minor bump refuses", "python", dep_pr(),
+               [dep_entry(update_type="version-update:semver-minor")], one_parent, py_old, py_new_good, None)
+    expect_class("chtypes#285 §2: a non-dependabot author refuses", "python",
+               dep_pr(user={"login": "someone"}), good_entries, one_parent, py_old, py_new_good, None)
+    expect_class("chtypes#285 §2: a version-field change refuses", "python", dep_pr(), good_entries,
+               one_parent, py_old, py_version_changed, None)
+    expect_class("classify_dependabot_bump never reaches the manifest diff without a usable parent",
+               "python", dep_pr(), good_entries, [], None, None, None)
+
+    # Measured against this repository's OWN history: commit 84401fd's real,
+    # unedited message (a genuine dependabot patch bump of ruff that stayed
+    # inside pyproject.toml's own `ruff>=0.14` range and so touched ONLY
+    # python/uv.lock, never the manifest) must still pass — old_bytes ==
+    # new_bytes here because the manifest in that real commit truly did not
+    # change, the same shape candidate_dependabot_ecosystem's own lockfile-
+    # alone case models above.
+    real_84401fd_message = (
+        "deps: bump ruff in /python in the python-deps group\n\n"
+        "Bumps the python-deps group in /python with 1 update: [ruff](https://github.com/astral-sh/ruff).\n\n\n"
+        "Updates `ruff` from 0.16.8 to 0.16.9\n"
+        "- [Release notes](https://github.com/astral-sh/ruff/releases)\n"
+        "- [Changelog](https://github.com/astral-sh/ruff/blob/main/CHANGELOG.md)\n"
+        "- [Commits](https://github.com/astral-sh/ruff/compare/0.16.8...0.16.9)\n\n"
+        "---\nupdated-dependencies:\n- dependency-name: ruff\n  dependency-version: 0.16.9\n"
+        "  dependency-type: direct:development\n  update-type: version-update:semver-patch\n"
+        "  dependency-group: python-deps\n...\n\nSigned-off-by: dependabot[bot] <support@github.com>\n"
+    )
+    real_84401fd_entries = parse_dependabot_metadata(real_84401fd_message)
+    if [e["name"] for e in real_84401fd_entries] != ["ruff"]:
+        failures.append(f"parse_dependabot_metadata: the real 84401fd trailer was misread: {real_84401fd_entries}")
+    expect_class("chtypes#285 §2, measured against this repository's own 84401fd: a lockfile-only patch bump "
+               "(the manifest's own range already covered it, so the manifest itself did not change) still "
+               "passes", "python", dep_pr(), real_84401fd_entries, one_parent, py_old, py_old, "python")
+
     # the CONTRIBUTING.md guide/constant divergence case (chtypes#280: pin one
     # selftest case that fails if the guide and the constant diverge).
     expected_block = protected_globs_guide_block()
@@ -2660,8 +3366,17 @@ def selftest() -> int:
           "quoted mid-line, a later false after a true, and a second touched binding without its own false; the "
           "security carve-out and rust/build.rs refuse whatever every verdict says; test-counts still applies; the "
           "api-surface job must exist under the name read and be non-blocking, and a skipped, failed, timed-out, "
-          "unfinished or foreign-app one is never read (no verdict, still protected); and the carve-out's derivation "
-          "catches verification code outside it and an entry that covers nothing")
+          "unfinished or foreign-app one is never read (no verdict, still protected); the carve-out's derivation "
+          "catches verification code outside it and an entry that covers nothing; and (chtypes#285 §2) "
+          "classify_dependabot_bump passes a dev-dependency patch bump through dependabot and refuses a runtime "
+          "dependency, a minor bump, a non-dependabot author and a manifest version-field change, "
+          "candidate_dependabot_ecosystem refuses an extra file beside a real manifest+lockfile pair (and two "
+          "ecosystems' pairs together, and go's absent pair), dependabot_bump_problems and parse_dependabot_"
+          "metadata are each driven from fabricated commits and trailers never a hand-set verdict, "
+          "manifest_bump_problems and _only_version_changed catch a version-field change, a runtime dependency "
+          "change, a dev dependency added or removed, and a named dependency changed by more than its own "
+          "specifier, across all three narrowed ecosystems' own manifest formats, parsed as data by tomllib/json; "
+          "and DEPENDABOT_MANIFESTS cannot drift from PROTECTED_GLOBS' own dependabot_ecosystem entries silently")
     return 0
 
 
