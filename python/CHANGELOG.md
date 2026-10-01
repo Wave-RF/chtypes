@@ -6,6 +6,11 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ensure`/`fetch` now retry a transient HTTP 5xx, 408 or 429 from the artifacts host, and a connection-level failure (refused, reset, timed out, DNS), within the existing retry budget and schedule** (`docs/guides/fetch.md` §3a: 5 attempts, delays doubling from 4s) — previously `_Source._open`/`download` ran their own separate, shorter retry (3 attempts, incrementing by whole seconds) before giving up, independent of the publish-window budget, and a 408 was never retried at all. A `Retry-After` on a 503 or 429 is honored, in both the delta-seconds and HTTP-date forms, capped so it never makes the total wait exceed the existing budget — one that does not fit fails at once, naming the requested delay. A 404 or 410, and a tarball hash or size mismatch, are still decided on the first attempt, never retried. `SourceUnreachableError` gains `.retryable`/`.retry_after` attributes (closes #365).
+- **`fetch`/`ensure` now send `CHTYPES_DOWNLOAD_TOKEN` as a bearer token** to an HTTP source, matching the other three bindings and `scripts/fetch.sh` — found missing during the #365 audit.
+
 ## [0.5.2] — 2026-10-01
 
 ### Added

@@ -109,9 +109,23 @@ impl Source {
     }
 
     fn unreachable(&self, message: String) -> Error {
+        self.unreachable_retry(message, false, None)
+    }
+
+    /// The same shape as [`Source::unreachable`], but able to mark the
+    /// failure retryable through the `docs/guides/fetch.md` §3a budget
+    /// (chtypes#365), with the source's own requested wait when it sent one.
+    fn unreachable_retry(
+        &self,
+        message: String,
+        retryable: bool,
+        retry_after: Option<Duration>,
+    ) -> Error {
         Error::SourceUnreachable {
             origin: self.describe().to_string(),
             message,
+            retryable,
+            retry_after,
         }
     }
 
@@ -121,7 +135,11 @@ impl Source {
     /// # Errors
     ///
     /// [`Error::SourceUnreachable`] — offline, a transport failure, or an HTTP
-    /// status other than 200/404.
+    /// status other than 200/404/410. `retryable` is set (chtypes#365) for an
+    /// HTTP 5xx/408/429 or any transport-level failure reaching the host at
+    /// all (refused, reset, timed out, DNS — `ureq`'s `call()` does not
+    /// distinguish these any further, so none are singled out); never for
+    /// offline, a local-file I/O error, or any other HTTP status.
     pub(crate) fn open(&self, name: &str) -> Result<Option<Opened>> {
         match self {
             Source::Dir { base, offline, .. } => {
@@ -152,15 +170,38 @@ impl Source {
                 if let Some(t) = token {
                     request = request.header("Authorization", format!("Bearer {t}"));
                 }
-                let response = request
-                    .call()
-                    .map_err(|e| self.unreachable(format!("GET {url}: {e}")))?;
-                match response.status().as_u16() {
+                let response = request.call().map_err(|e| {
+                    // A failure here never even reached a status line — refused,
+                    // reset, timed out, DNS — exactly the connection-level
+                    // failures chtypes#365 wants retried.
+                    self.unreachable_retry(format!("GET {url}: {e}"), true, None)
+                })?;
+                let status = response.status().as_u16();
+                match status {
                     200 => {
                         let len = response.body().content_length();
                         Ok(Some((Box::new(response.into_body().into_reader()), len)))
                     }
                     404 | 410 => Ok(None),
+                    status if is_retryable_status(status) => {
+                        // Retry-After is honored only for the two statuses
+                        // docs/guides/fetch.md §3a documents it for (chtypes#365):
+                        // 503 and 429.
+                        let retry_after = if status == 503 || status == 429 {
+                            response
+                                .headers()
+                                .get("retry-after")
+                                .and_then(|v| v.to_str().ok())
+                                .and_then(|v| parse_retry_after(v, std::time::SystemTime::now()))
+                        } else {
+                            None
+                        };
+                        Err(self.unreachable_retry(
+                            format!("GET {url}: HTTP {status}"),
+                            true,
+                            retry_after,
+                        ))
+                    }
                     status => Err(self.unreachable(format!("GET {url}: HTTP {status}"))),
                 }
             }
@@ -193,9 +234,120 @@ impl Source {
     }
 }
 
+/// `true` for the HTTP statuses chtypes#365 retries: any 5xx, 408 (Request
+/// Timeout) and 429 (Too Many Requests). 404 and 410 are handled before this
+/// is ever consulted — they are never retried.
+fn is_retryable_status(status: u16) -> bool {
+    (500..600).contains(&status) || status == 408 || status == 429
+}
+
+/// A `Retry-After` header value (RFC 9110 §10.2.3): either delta-seconds or
+/// an HTTP-date. `None` when it is neither.
+fn parse_retry_after(value: &str, now: std::time::SystemTime) -> Option<Duration> {
+    let value = value.trim();
+    if let Ok(secs) = value.parse::<u64>() {
+        return Some(Duration::from_secs(secs));
+    }
+    let when = parse_http_date(value)?;
+    Some(when.duration_since(now).unwrap_or(Duration::ZERO))
+}
+
+/// Parses the one HTTP-date form every real server sends (RFC 9110 §5.6.7,
+/// "the preferred format"; it is what every language's own date formatter in
+/// this contract's test suites emits too): `"Sun, 06 Nov 1994 08:49:37 GMT"`.
+/// The two obsolete forms RFC 9110 says a recipient MAY also accept are not
+/// implemented — nothing this contract talks to (or tests against) ever
+/// sends them.
+fn parse_http_date(value: &str) -> Option<std::time::SystemTime> {
+    // "Sun, 06 Nov 1994 08:49:37 GMT" -> ["Sun,", "06", "Nov", "1994", "08:49:37", "GMT"]
+    let fields: Vec<&str> = value.split_whitespace().collect();
+    let [_weekday, day, month, year, time, tz] = fields[..] else {
+        return None;
+    };
+    if tz != "GMT" {
+        return None;
+    }
+    let day: u32 = day.parse().ok()?;
+    let month = MONTHS.iter().position(|m| *m == month)? as u32 + 1;
+    let year: i64 = year.parse().ok()?;
+    let mut parts = time.splitn(3, ':');
+    let hour: u64 = parts.next()?.parse().ok()?;
+    let minute: u64 = parts.next()?.parse().ok()?;
+    let second: u64 = parts.next()?.parse().ok()?;
+    let days = days_from_civil(year, month, day);
+    let secs = days
+        .checked_mul(86_400)?
+        .checked_add_unsigned(hour * 3600 + minute * 60 + second)?;
+    if secs >= 0 {
+        Some(std::time::UNIX_EPOCH + Duration::from_secs(secs as u64))
+    } else {
+        std::time::UNIX_EPOCH.checked_sub(Duration::from_secs(secs.unsigned_abs()))
+    }
+}
+
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// Days since the Unix epoch for a proleptic-Gregorian civil date — Howard
+/// Hinnant's `days_from_civil` (public domain,
+/// <https://howardhinnant.github.io/date_algorithms.html#days_from_civil>),
+/// used here instead of a date crate dependency for one header field three
+/// HTTP statuses ever carry.
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let mp = (i64::from(m) + 9) % 12; // [0, 11]
+    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_after_delta_seconds_and_http_date_both_parse() {
+        let now = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        assert_eq!(
+            parse_retry_after("120", now),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(parse_retry_after(" 0 ", now), Some(Duration::ZERO));
+        assert_eq!(parse_retry_after("not a number or a date", now), None);
+
+        // RFC 9110's own worked example of the preferred HTTP-date form.
+        let when = parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT").expect("must parse");
+        assert_eq!(
+            when.duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            784_111_777
+        );
+        // A date already in the past is zero, never a negative wait.
+        let past = std::time::UNIX_EPOCH + Duration::from_secs(784_111_777 + 10);
+        assert_eq!(
+            parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT", past),
+            Some(Duration::ZERO)
+        );
+        let future = std::time::UNIX_EPOCH + Duration::from_secs(784_111_777 - 10);
+        assert_eq!(
+            parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT", future),
+            Some(Duration::from_secs(10))
+        );
+    }
+
+    #[test]
+    fn is_retryable_status_matches_5xx_408_429_only() {
+        for status in [500, 502, 503, 504, 599, 408, 429] {
+            assert!(is_retryable_status(status), "{status}");
+        }
+        for status in [200, 301, 400, 401, 403, 404, 410, 499] {
+            assert!(!is_retryable_status(status), "{status}");
+        }
+    }
 
     #[test]
     fn a_url_and_a_tag_are_one_choice() {

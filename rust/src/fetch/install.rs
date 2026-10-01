@@ -47,7 +47,7 @@ pub(crate) fn fetch_and_install(
     };
 
     let result = (|| {
-        download(source, row, &tarball, progress)?;
+        download_with_retry(source, row, &tarball, progress)?;
         unpack_flat(&tarball, &incoming)?;
         std::fs::remove_file(&tarball).ok();
         // Validated BEFORE it takes the registry's name: a tarball whose
@@ -99,6 +99,69 @@ pub(crate) fn fetch_and_install(
     })
 }
 
+/// [`download`], retried through the same `docs/guides/fetch.md` §3a budget and
+/// schedule [`super::release::Release::load`] uses (chtypes#365): an HTTP
+/// 5xx/408/429 or a connection-level failure reaching the host at all is
+/// exactly the symptom that budget exists for, and a transient blip mid
+/// download deserves the same treatment a blip reading the metadata gets.
+/// Every retry is a fresh [`Source::open`] and a fresh stream — never a
+/// resume — since `download` truncates `tarball` at the start of each call.
+///
+/// A 404/410 (`Error::Fetch`, from the `source.open` call inside `download`
+/// returning `None`) and a tarball hash or size mismatch (`Error::
+/// ArtifactCorrupt`, raised by `download`'s own caller after this returns)
+/// are never retried — neither is `retryable` here, and the second never
+/// even reaches this function.
+fn download_with_retry(
+    source: &Source,
+    row: &IndexRow,
+    tarball: &Path,
+    progress: bool,
+) -> Result<()> {
+    let attempts = if matches!(source, Source::Http { .. }) {
+        super::release::RELEASE_LOAD_ATTEMPTS
+    } else {
+        1
+    };
+    let mut delay = super::release::release_retry_delay();
+    let mut elapsed = std::time::Duration::ZERO;
+    let mut attempt = 1;
+    loop {
+        match download(source, row, tarball, progress) {
+            Err(err) => {
+                let (retryable, retry_after) = super::release::retry_info(&err);
+                if attempt >= attempts || !retryable {
+                    return Err(err);
+                }
+                let wait = retry_after.unwrap_or(delay);
+                if elapsed + wait > super::release::retry_budget() {
+                    return Err(super::release::with_retry_note(
+                        err,
+                        &format!(
+                            " — the source asked to wait {wait:?} before retrying, which would \
+                             exceed the {:?} retry budget; giving up after {}",
+                            super::release::retry_budget(),
+                            super::release::attempt_word(attempt)
+                        ),
+                    ));
+                }
+                if progress {
+                    eprintln!(
+                        "chtypes: {err} (attempt {attempt}/{attempts}) — retrying the download \
+                         of {} in {wait:?}",
+                        row.file
+                    );
+                }
+                std::thread::sleep(wait);
+                elapsed += wait;
+                delay *= 2;
+                attempt += 1;
+            }
+            ok => return ok,
+        }
+    }
+}
+
 /// Step 3: stream the asset to `tarball`, hashing every byte written; the
 /// hash must equal the (signed, cross-checked) sha256 or the file is deleted
 /// and nothing is unpacked.
@@ -126,11 +189,18 @@ fn download(source: &Source, row: &IndexRow, tarball: &Path, progress: bool) -> 
     let mut buf = vec![0u8; 1 << 20];
     let mut next_report = total / 10;
     loop {
+        // A failure here is mid-stream, after `source.open` already answered
+        // 200 — out of scope for chtypes#365's retry, which covers the
+        // request/response that opens the download, not a body read
+        // thereafter (every binding draws the line the same way). Reported
+        // plainly, exactly as a tarball hash mismatch is.
         let n = reader
             .read(&mut buf)
             .map_err(|e| Error::SourceUnreachable {
                 origin: source.describe().to_string(),
                 message: format!("reading {}: {e}", row.file),
+                retryable: false,
+                retry_after: None,
             })?;
         if n == 0 {
             break;

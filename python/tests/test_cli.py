@@ -157,7 +157,8 @@ def test_unpublished_exits_4_and_unreachable_exits_3(
         == 4
     )
     assert "CHTYPES_ARTIFACT_UNPUBLISHED" in capsys.readouterr().err
-    monkeypatch.setattr("chtypes.fetch._HTTP_ATTEMPTS", 1)
+    # A refused connection is retried through the full §3a budget
+    # (chtypes#365); keep the real sleep out of the loop.
     monkeypatch.setattr("chtypes.fetch.time.sleep", lambda s: None)
     assert main(["fetch", "25.8", "--url", "http://127.0.0.1:1/x", "--dest", str(tmp_path)]) == 3
     assert "CHTYPES_SOURCE_UNREACHABLE" in capsys.readouterr().err

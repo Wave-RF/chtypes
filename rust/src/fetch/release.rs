@@ -369,16 +369,75 @@ pub(crate) fn release_retry_delay() -> std::time::Duration {
     std::time::Duration::from_secs(4)
 }
 
-/// Is this error a symptom of reading a release mid-publish, and therefore
-/// worth reading again? Three are: a signature under no trusted key, an index
-/// that disagrees with the sums, and (checked by `super::install_goldens`,
-/// which reuses this) a release-level file whose hash disagrees with its own
-/// SHA256SUMS row — both raise `Error::ArtifactCorrupt`.
-pub(crate) fn is_publish_window(err: &Error) -> bool {
-    matches!(
-        err,
-        Error::ArtifactUntrusted { .. } | Error::ArtifactCorrupt { .. }
-    )
+/// The total sleep time the default doubling schedule spends across every
+/// attempt but the last — 60s for the default 5 attempts — and the cap
+/// chtypes#365 puts on a source's own `Retry-After`: honored only as long as
+/// honoring it still fits inside this, so a 503 asking for far longer than
+/// this budget was ever sized for fails fast instead of blocking for it.
+pub(crate) fn retry_budget() -> std::time::Duration {
+    if RELEASE_LOAD_ATTEMPTS <= 1 {
+        return std::time::Duration::ZERO;
+    }
+    release_retry_delay() * ((1u32 << (RELEASE_LOAD_ATTEMPTS - 1)) - 1)
+}
+
+/// Is `err` worth retrying through the §3a budget — either a publish-window
+/// symptom (a signature under no trusted key, or an index/sums/release-file
+/// disagreement — both raise `Error::ArtifactCorrupt`/`ArtifactUntrusted`) or,
+/// since chtypes#365, a retryable source-level failure (an HTTP 5xx/408/429 or
+/// a connection-level failure, as [`Source::open`](super::source::Source::open)
+/// classifies it). The second half's own requested wait (`Retry-After` on a
+/// 503/429) comes back `Some` only when the source sent one; a publish-window
+/// symptom never carries one.
+///
+/// A tarball hash or size mismatch is never routed through this: it raises
+/// `Error::ArtifactCorrupt` too, but `install::fetch_and_install` reports it
+/// directly, never through a retryable `Error::SourceUnreachable`, and
+/// nothing here is called on it — "a retry buys time; it never converts a
+/// refusal into an install" still holds.
+pub(crate) fn retry_info(err: &Error) -> (bool, Option<std::time::Duration>) {
+    match err {
+        Error::ArtifactUntrusted { .. } | Error::ArtifactCorrupt { .. } => (true, None),
+        Error::SourceUnreachable {
+            retryable,
+            retry_after,
+            ..
+        } => (*retryable, *retry_after),
+        _ => (false, None),
+    }
+}
+
+/// "1 attempt" or "<n> attempts", for a message that names how many were made.
+pub(crate) fn attempt_word(n: u32) -> String {
+    if n == 1 {
+        "1 attempt".to_string()
+    } else {
+        format!("{n} attempts")
+    }
+}
+
+/// Appends a sentence naming the attempt count to an exhausted retryable
+/// `Error::SourceUnreachable`'s own message, in place — `origin`/`retryable`/
+/// `retry_after` and the artifact code are unchanged, only the text grows.
+/// The pre-existing publish-window symptoms (`ArtifactUntrusted`/
+/// `ArtifactCorrupt`) are returned unchanged: their exhaustion message is not
+/// part of chtypes#365, and splicing text into their own differently-shaped
+/// Display string is not worth the awkward grammar for no behavior change.
+pub(crate) fn with_retry_note(err: Error, note: &str) -> Error {
+    match err {
+        Error::SourceUnreachable {
+            origin,
+            message,
+            retryable,
+            retry_after,
+        } => Error::SourceUnreachable {
+            origin,
+            message: message + note,
+            retryable,
+            retry_after,
+        },
+        other => other,
+    }
 }
 
 impl Release {
@@ -417,6 +476,8 @@ impl Release {
                     return Err(Error::SourceUnreachable {
                         origin: origin.clone(),
                         message: "no release here (no index.json, no SHA256SUMS)".into(),
+                        retryable: false,
+                        retry_after: None,
                     });
                 }
                 return Err(untrusted("the release has no SHA256SUMS".into()));
@@ -493,7 +554,8 @@ impl Release {
         Ok(())
     }
 
-    /// [`Release::load_once`], retried through a publish window.
+    /// [`Release::load_once`], retried through a publish window — and, since
+    /// chtypes#365, through a transient source-level blip too.
     ///
     /// A publish into the rolling release is three objects — `SHA256SUMS`,
     /// `SHA256SUMS.sig`, `index.json` — plus, in `super::install_goldens`'s own
@@ -503,16 +565,22 @@ impl Release {
     /// one object can still be served stale from cache", which measures the
     /// same as its `Cache-Control` max-age.
     ///
-    /// Three symptoms of reading inside that window are retried: a signature
-    /// that does not verify, an index that disagrees with the sums, and (via
-    /// [`Release::read_goldens`]) a release-level file whose hash disagrees
-    /// with its own SHA256SUMS row, or that the sums list but the source does
-    /// not yet serve. Every retry re-reads the WHOLE set from scratch — never
-    /// one freshly re-fetched object checked against another attempt's stale
-    /// one. Nothing else is retried, and neither are these three once the
-    /// attempts run out: the same error surfaces, with the same exit code, as
-    /// it did before. A tarball whose hash is wrong is never retried; that is
-    /// the release lying about a byte.
+    /// Retried, all through [`retry_info`]: a signature that does not verify;
+    /// an index that disagrees with the sums; (via [`Release::read_goldens`])
+    /// a release-level file whose hash disagrees with its own SHA256SUMS row,
+    /// or that the sums list but the source does not yet serve; and, since
+    /// chtypes#365, an HTTP 5xx/408/429 or a connection-level failure
+    /// reaching the host at all. A `Retry-After` the source sends on a 503 or
+    /// 429 is honored in place of the doubling schedule's own delay, capped
+    /// so the total never exceeds [`retry_budget`] — one that does not fit
+    /// fails at once, naming the requested delay, rather than blocking for
+    /// it. Every retry re-reads the WHOLE set from scratch — never one
+    /// freshly re-fetched object checked against another attempt's stale
+    /// one. Nothing else is retried, and neither are these once the attempts
+    /// (or the budget) run out: the same error surfaces, with the same exit
+    /// code, naming how many attempts were made. A 404/410, and a tarball
+    /// whose hash is wrong, are never retried — the release lying about a
+    /// byte, or simply not having the thing, is not a transient blip.
     ///
     /// Only an HTTP source can be mid-publish, so a `file://` or directory
     /// source is read exactly once.
@@ -523,16 +591,40 @@ impl Release {
             1
         };
         let mut delay = release_retry_delay();
+        let mut elapsed = std::time::Duration::ZERO;
         let mut attempt = 1;
         loop {
             match Release::load_once(source, policy, progress) {
-                Err(err) if attempt < attempts && is_publish_window(&err) => {
+                Err(err) => {
+                    let (retryable, retry_after) = retry_info(&err);
+                    if !retryable {
+                        return Err(err);
+                    }
+                    if attempt >= attempts {
+                        return Err(with_retry_note(
+                            err,
+                            &format!(" — giving up after {}", attempt_word(attempt)),
+                        ));
+                    }
+                    let wait = retry_after.unwrap_or(delay);
+                    if elapsed + wait > retry_budget() {
+                        return Err(with_retry_note(
+                            err,
+                            &format!(
+                                " — the source asked to wait {wait:?} before retrying, which \
+                                 would exceed the {:?} retry budget; giving up after {}",
+                                retry_budget(),
+                                attempt_word(attempt)
+                            ),
+                        ));
+                    }
                     eprintln!(
                         "chtypes: {err} (attempt {attempt}/{attempts}) — this is what a release \
-                         being published looks like from outside; retrying in {}s",
-                        delay.as_secs()
+                         being published (or briefly unreachable) looks like from outside; \
+                         retrying in {wait:?}"
                     );
-                    std::thread::sleep(delay);
+                    std::thread::sleep(wait);
+                    elapsed += wait;
                     delay *= 2;
                     attempt += 1;
                 }
@@ -656,8 +748,8 @@ impl Release {
     /// simply does not list `name` at all — not an error, and not a window
     /// symptom. A hash mismatch, or the sums listing it while `source` does
     /// not (yet) serve it, raises `Error::ArtifactCorrupt` — exactly what
-    /// [`is_publish_window`] recognizes, so `super::install_goldens` can retry
-    /// it the same way [`Release::load`] retries the signature and the index.
+    /// [`retry_info`] recognizes, so `super::install_goldens` can retry it
+    /// the same way [`Release::load`] retries the signature and the index.
     pub(crate) fn read_goldens(&self, source: &Source, name: &str) -> Result<Option<Vec<u8>>> {
         let Some(want) = self.sum_for(name) else {
             return Ok(None);
