@@ -495,7 +495,16 @@ class RowResult:
     # Set beside `Verdict.ERROR` (the predicate threw, ClickHouse's own
     # code/message), beside an eval-time `Verdict.DECLINE` (the admission
     # envelope), and for a row whose own `outcome` is not ACCEPTED (its own
-    # parse error, reported as DECLINE). 0/"" otherwise.
+    # parse error, reported as DECLINE). 0/"" otherwise. One exception: an
+    # ACCEPTED_POISONED row's `verdict_err` stays "" because that row's own
+    # `err_msg` is itself empty — `verdict_code` still carries the server's
+    # readback code. Never read an empty `verdict_err` on a DECLINE as
+    # "nothing is wrong"; read `verdict_code` instead.
+    #
+    # The non-ACCEPTED-row case is populated only from chtypes_build
+    # 1790845279 or later on a supported line (docs/support.md) — a served,
+    # unsupported (retired) line gets no new build or ABI revision and
+    # keeps the pre-relink 0/"" permanently.
     verdict_code: int = 0
     verdict_err: str = ""
     # Revision 6: the partition this row lands in, as the loaded build's own
@@ -582,10 +591,20 @@ class BatchResult:
     # returns — no ownership crosses the boundary). Three states, the ABI's
     # own (the C ABI contract §Rows):
     #
-    #   None   no export was requested, the export was DECLINED
-    #          (`export_declined` then names the reason), or a call-level
-    #          verdict preempted the export machinery entirely (the batch
-    #          `outcome` is then the reason and `export_declined` stays "").
+    #   None   no export was requested, or the export was DECLINED —
+    #          `export_declined` then names the reason, ALWAYS, for a
+    #          non-accepted batch of any kind (a server rejection, a
+    #          zero-row refusal before any row was admitted, or a
+    #          call-level -2 "unsupported" answer). Before the artifact
+    #          producer's relink served at chtypes_build 1790845279, a batch
+    #          refused before any row was admitted (a CSV_WITH_NAMES body
+    #          naming an unknown header column under
+    #          input_format_skip_unknown_fields=0, measured) left
+    #          `export_declined` "" despite withholding requested bytes;
+    #          that gap is closed, by design, for chtypes_build 1790845279
+    #          or later on a supported line (docs/support.md) — a served,
+    #          unsupported (retired) line gets no new build or ABI revision
+    #          and keeps the pre-relink "" permanently.
     #   b""    an accepted batch with zero accepted rows — EMITTED-EMPTY,
     #          distinguishable from a decline.
     #   bytes  the exported lines; slice per `spans`.
@@ -601,11 +620,24 @@ class BatchResult:
     # server verdict.
     export_declined: str = ""
     # `row_filter=` only: accepted rows whose verdict is TRUE, and accepted
-    # rows with any other verdict, respectively. `rows_passed + rows_cut`
-    # equals the accepted-row count. Both zero when no filter was attached —
-    # indistinguishable from "filter attached, nothing passed and nothing
-    # accepted", so key presence on whether `row_filter` was passed, never on
-    # these being nonzero.
+    # rows with any other verdict, respectively, ON AN ACCEPTED BATCH.
+    # `rows_passed + rows_cut` equals the accepted-row count. Both zero when
+    # no filter was attached — indistinguishable from "filter attached,
+    # nothing passed and nothing accepted", so key presence on whether
+    # `row_filter` was passed, never on these being nonzero. A row whose own
+    # outcome is not ACCEPTED sits in NEITHER count: `len(rows)` decomposes
+    # into `rows_passed + rows_cut` plus the non-accepted rows.
+    #
+    # Both are also zero whenever the BATCH's own outcome is not ACCEPTED —
+    # even when an earlier row, in isolation, was itself accepted with a
+    # TRUE verdict. Before the artifact producer's relink served at
+    # chtypes_build 1790845279, a strict (no input_format_allow_errors_*)
+    # batch aborted by a later bad row measured rows_passed=1 despite an
+    # outcome of REJECTED; that gap is closed, by design, so a batch outcome
+    # other than ACCEPTED now always reports 0/0 here, for chtypes_build
+    # 1790845279 or later on a supported line (docs/support.md) — a served,
+    # unsupported (retired) line gets no new build or ABI revision and
+    # keeps the pre-relink counting permanently.
     rows_passed: int = 0
     rows_cut: int = 0
     # Revision 6: the distinct partitions this batch's stored rows span —

@@ -235,7 +235,16 @@ export interface RowResult {
    * Set beside `'e'` (the predicate threw, ClickHouse's own code/message),
    * beside an eval-time `'d'` (the admission envelope), and for a row whose
    * own `outcome` is not `'accepted'` (its own parse error, reported as
-   * `'d'`). 0/`''` otherwise.
+   * `'d'`). 0/`''` otherwise. One exception: an `'accepted_poisoned'` row's
+   * `verdictErr` stays `''` because that row's own `errMsg` is itself
+   * empty — `verdictCode` still carries the server's readback code. Never
+   * read an empty `verdictErr` on a `'d'` verdict as "nothing is wrong";
+   * read `verdictCode` instead.
+   *
+   * The non-`'accepted'`-row case is populated only from `chtypes_build`
+   * 1790845279 or later on a supported line (`docs/support.md`) — a
+   * served, unsupported (retired) line gets no new build or ABI revision
+   * and keeps the pre-relink `0`/`''` permanently.
    */
   readonly verdictCode: number;
   readonly verdictErr: string;
@@ -298,11 +307,23 @@ export interface BatchResult {
    * returned — no ownership crosses the FFI boundary. Three states, and the
    * distinction is the ABI's own (the C ABI contract §Rows):
    *
-   *   `undefined`         no export was requested, the export was DECLINED
-   *                       (`exportDeclined` then names the reason), or a
-   *                       call-level verdict preempted the export machinery
-   *                       entirely (the batch `outcome` is then the reason and
-   *                       `exportDeclined` stays absent).
+   *   `undefined`         no export was requested, or the export was
+   *                       DECLINED — `exportDeclined` then names the reason,
+   *                       ALWAYS, for a non-accepted batch of any kind (a
+   *                       server rejection, a zero-row refusal before any
+   *                       row was admitted, or a call-level -2 "unsupported"
+   *                       answer). Before the artifact producer's relink
+   *                       served at `chtypes_build` 1790845279, a batch
+   *                       refused before any row was admitted (a
+   *                       `CSVWithNames` body naming an unknown header
+   *                       column under `input_format_skip_unknown_fields=0`,
+   *                       measured) left `exportDeclined` `undefined`
+   *                       despite withholding requested bytes; that gap is
+   *                       closed, by design, for `chtypes_build` 1790845279
+   *                       or later on a supported line (`docs/support.md`)
+   *                       — a served, unsupported (retired) line gets no
+   *                       new build or ABI revision and keeps the
+   *                       pre-relink `undefined` permanently.
    *   zero-length Buffer  EMITTED-EMPTY: an accepted batch with zero accepted
    *                       rows — distinguishable from a decline.
    *   bytes               the exported lines; slice per `spans`.
@@ -327,11 +348,25 @@ export interface BatchResult {
   readonly exportDeclined: string | undefined;
   /**
    * `rows(..., { rowFilter })` only: accepted rows whose verdict is `'t'`,
-   * and accepted rows with any other verdict, respectively. `rowsPassed +
-   * rowsCut` equals the accepted-row count. Both `0` when no filter was
-   * attached — indistinguishable from "filter attached, nothing passed and
-   * nothing accepted", so key presence on whether `rowFilter` was passed,
-   * never on these being nonzero.
+   * and accepted rows with any other verdict, respectively, ON AN ACCEPTED
+   * BATCH. `rowsPassed + rowsCut` equals the accepted-row count. Both `0`
+   * when no filter was attached — indistinguishable from "filter attached,
+   * nothing passed and nothing accepted", so key presence on whether
+   * `rowFilter` was passed, never on these being nonzero. A row whose own
+   * `outcome` is not `'accepted'` sits in NEITHER count: `rows.length`
+   * decomposes into `rowsPassed + rowsCut` plus the non-accepted rows.
+   *
+   * Both are also `0` whenever the BATCH's own `outcome` is not
+   * `'accepted'` — even when an earlier row, in isolation, was itself
+   * accepted with a `'t'` verdict. Before the artifact producer's relink
+   * served at `chtypes_build` 1790845279, a strict (no
+   * `input_format_allow_errors_*`) batch aborted by a later bad row
+   * measured `rowsPassed === 1` despite an `outcome` of `'rejected'`; that
+   * gap is closed, by design, so a batch `outcome` other than `'accepted'`
+   * now always reports `0`/`0` here, for `chtypes_build` 1790845279 or
+   * later on a supported line (`docs/support.md`) — a served, unsupported
+   * (retired) line gets no new build or ABI revision and keeps the
+   * pre-relink counting permanently.
    */
   readonly rowsPassed: number;
   readonly rowsCut: number;
@@ -558,8 +593,7 @@ export function batchResultOf(doc: Json, payload: Buffer | null = null): BatchRe
 
   // row_spans is present exactly when export bytes were emitted;
   // export_declined exactly when an export was requested and withheld
-  // (the C ABI contract §Rows). Both absent = no export requested, or a call-level
-  // verdict preempted the machinery.
+  // (the C ABI contract §Rows). Both absent = no export requested.
   const spansNode = field(doc, 'row_spans');
   const spans =
     spansNode === undefined

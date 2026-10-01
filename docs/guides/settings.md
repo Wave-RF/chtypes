@@ -122,6 +122,21 @@ Three are **per-process**, settable only through `set_default_settings`:
 
 **Sending a per-process key on a per-call map is a decline, never an admission.** It comes back in the result's `unsupported_settings`, and the row is promoted to the `unsupported` outcome. Do not score such a row as agreement: chtypes did not answer it.
 
+## A real ClickHouse setting this library does not model: `session_timezone`
+
+`session_timezone` is a genuine, known ClickHouse setting — never the server's own code 115 — but it is not one of the six `chtypes_*` keys above, and this library resolves bare-`DateTime`/`DateTime64` timezone exactly once, process-wide, at `chs_init` (the `timezone` argument), never per call. As of the artifact producer's relink served at `chtypes_build` 1790845279, a per-call `session_timezone` naming a **valid, different** zone is **declined**, the same way an unmodeled MergeTree setting at a non-default value is declined, below: it comes back in `unsupported_settings`, which promotes the row to `unsupported`. `measured`, before vs. after that relink, on the same ClickHouse patch (darwin-arm64 26.8.15.10-lts, build 1790783214 vs. 1790845279):
+
+| per-call `session_timezone`                | before the relink                                               | after the relink                                                       |
+| ------------------------------------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `""` (unset)                               | accepted, no effect                                             | **unchanged**: accepted, no effect                                     |
+| the process zone (`"UTC"` here)            | accepted, no effect                                             | **unchanged**: accepted, no effect                                     |
+| a different valid zone (`"Europe/Berlin"`) | accepted, SILENTLY IGNORED — the row's own timezone never moved | **declined**: in `unsupported_settings`, row promoted to `unsupported` |
+| an invalid zone name (`"Not/AZone"`)       | declined: in `unsupported_settings`                             | **unchanged**: declined, same as before                                |
+
+So the only new outcome is the third row: before the relink, a caller sending a tenant's real timezone per call could not tell "ignored" from "honored," because both looked identical — `accepted`, nothing in `unsupported_settings`. This is a library change, not a binding one: every binding already promotes a row whenever `unsupported_settings` is non-empty, so no binding code moved.
+
+> **This applies only to builds at `chtypes_build` 1790845279 or later, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9` — [`support.md`](../support.md)).** A served, unsupported (retired) line never gets a new build or a new ABI revision ([`support.md` → Served, unsupported ClickHouse lines](../support.md#served-unsupported-clickhouse-lines)), so it keeps the pre-relink behavior permanently — `26.6`'s newest build, `1790767905`, predates this relink and was never republished.
+
 ## MergeTree settings are a different namespace
 
 The `SETTINGS` clause after an engine declaration is its own namespace, and it is passed separately — `WithMergeTreeSettings` in Go, `merge_tree_settings=` in Python, `mergeTreeSettings` in TypeScript, the third argument of `set_engine` in Rust.

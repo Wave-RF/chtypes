@@ -1,29 +1,40 @@
 /**
- * Unit-level coverage for issue #54 (`Schema#rows(..., { rowFilter })`) that
- * needs no loaded artifact: the pure document-decoding path
- * (`batchResultOf` against a hand-built chs_rows-with-attached-filter
- * document, shaped exactly as the C ABI contract §Rows describes it) and
- * the TypeScript-level cross-library refusal `Schema#rows` performs before
- * any C call.
+ * Unit-level coverage for issue #54 (`Schema#rows(..., { rowFilter })`): the
+ * pure document-decoding path (`batchResultOf` against a hand-built
+ * chs_rows-with-attached-filter document, shaped exactly as the C ABI
+ * contract §Rows describes it) and the TypeScript-level cross-library
+ * refusal `Schema#rows` performs before any C call.
  *
- * What this file deliberately does NOT cover: a real `Filter` compiled and
- * evaluated through `chs_rows` against a live artifact. No revision-5
- * artifact exists yet (issue #54's own blocker), so that path is wired
- * (`Schema#rows`'s `options.rowFilter` branch and `NativeLibrary#rows`'s
- * `filterHandle` argument) but not run here.
+ * The chtypes#298 regression tests at the end of this file are the
+ * exception: each needs a revision-5 artifact (a real `Filter` compiled and
+ * evaluated through `chs_rows`) and skips loudly without one.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { ChtypesError } from '../src/errors.js';
 import type { BlockHandle, FilterHandle, NativeLibrary, SchemaHandle } from '../src/ffi.js';
+import { Format } from '../src/format.js';
 import { parseDocument } from '../src/json.js';
-import { batchResultOf, isAnswer, type Verdict } from '../src/results.js';
+import type { Library } from '../src/library.js';
+import { looksLikeRegistry, Registry, resolveRegistryDir } from '../src/registry.js';
+import { batchResultOf, isAnswer, Outcome, Verdict } from '../src/results.js';
 import { Filter, Schema } from '../src/schema.js';
 
 // A stand-in for NativeLibrary: just enough surface (`columns`) for
-// `Schema`'s constructor, with no real dlopen behind it.
+// `Schema`'s constructor, with no real dlopen behind it. `schemaFree` /
+// `filterFree` / `blockFree` are also no-ops here, never exercised by these
+// tests directly — but `Schema`'s own `FinalizationRegistry` callback (see
+// `schema.ts`) can still call them on an abandoned fake `Schema`/`Filter`
+// whenever the GC happens to collect one during this file's run, and a
+// missing method there throws inside that callback, failing the whole
+// suite on a timing accident unrelated to what the test actually checks.
 function fakeNative(): NativeLibrary {
-  return { columns: () => [] } as unknown as NativeLibrary;
+  return {
+    columns: () => [],
+    schemaFree: () => {},
+    filterFree: () => {},
+    blockFree: () => {},
+  } as unknown as NativeLibrary;
 }
 
 describe('rows(..., { rowFilter }) verdict decoding', () => {
@@ -106,5 +117,204 @@ describe('Schema#rows cross-library filter refusal', () => {
     const filter = new Filter(otherNative, otherSchema, otherSchemaNative, {} as unknown as FilterHandle, '1');
 
     expect(() => schema.rows(0, new Uint8Array(), undefined, { rowFilter: filter })).toThrow(ChtypesError);
+  });
+});
+
+// ------------------------------------------------------- chtypes#298 (G1-G5)
+//
+// The artifact producer's relink served at chtypes_build 1790845279 changed
+// four document fields by design, measured against that build and against
+// the immediately preceding build (1790783214) of the SAME ClickHouse patch
+// on darwin-arm64 — same ABI revision, only the library rebuilt:
+//
+// - G2: `verdictCode`/`verdictErr` are now populated on a non-answered
+//   verdict whose row is not itself accepted (measured: 0/'' before, the
+//   row's own code/message after).
+// - G3: `rowsPassed`/`rowsCut` are now 0 for a batch whose own outcome is
+//   not `Outcome.Accepted`, even when an individual row before the one
+//   that aborted it was itself accepted with a `'t'` verdict (measured:
+//   1/0 before, 0/0 after).
+// - G5: `exportDeclined` is now populated for every non-accepted batch
+//   that requested an export, including a batch with ZERO rows (measured
+//   on a `Format.CSVWithNames` body naming an unknown header column under
+//   `input_format_skip_unknown_fields=0`: `''` before, a reason after).
+//
+// G4 (a skipped row counts in neither `rowsPassed` nor `rowsCut`) has no
+// library change — it is a docs-only clarification — so it is not measured
+// here; see docs/guides/filters.md.
+//
+// The fix reached only the SUPPORTED lines' artifacts (docs/support.md):
+// 26.3, 26.7, 26.8 and 26.9. A served, unsupported (retired) line gets no
+// new build or ABI revision, ever, so its existing artifact keeps the
+// pre-relink behavior permanently — measured: 26.6's newest served build,
+// 1790767905, predates this relink and was never republished. `openRev5`
+// also opens such a line (anything ABI revision 5+), so the three tests
+// below run against `relinked`, which narrows `rev5` to the supported set,
+// rather than asserting the new behavior against a line that was never
+// given it.
+
+const CSV_REJECTION_CODE = 117;
+const RELINK_SUPPORTED_LINES = new Set(['26.3', '26.7', '26.8', '26.9']);
+
+const REGISTRY = resolveRegistryDir();
+const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
+
+/** Every line the test registry holds that loads at ABI revision 5 — the
+ * same selection as csv-reader.test.ts's own `openRev5`. */
+const openRev5 = (): { registry: Registry; libraries: Library[] } => {
+  const dir = REGISTRY ?? undefined;
+  const registry = new Registry(dir);
+  const libraries: Library[] = [];
+  for (const line of registry.versions()) {
+    let library: Library;
+    try {
+      library = registry.for(line);
+    } catch (err) {
+      console.warn(`[chtypes] line ${line} not exercised: ${(err as Error).message}`);
+      continue;
+    }
+    if (library.abiRevision < 5) {
+      console.warn(`[chtypes] line ${line} not exercised: ABI revision ${library.abiRevision}, needs 5`);
+      continue;
+    }
+    libraries.push(library);
+  }
+  return { registry, libraries };
+};
+
+let rev5Registry: Registry | undefined;
+let rev5: Library[] = [];
+const relinked: Library[] = [];
+if (HAVE_REGISTRY) {
+  const opened = openRev5();
+  rev5Registry = opened.registry;
+  rev5 = opened.libraries;
+  if (rev5.length === 0) {
+    console.warn('[chtypes] chtypes#298 tests SKIPPED: the registry holds no ABI revision-5 artifact.');
+  }
+  for (const library of rev5) {
+    if (RELINK_SUPPORTED_LINES.has(library.minor)) {
+      relinked.push(library);
+    } else {
+      console.warn(
+        `[chtypes] line ${library.minor} (${library.version}) not exercised: a served, unsupported (retired) line never receives this relink (docs/support.md)`,
+      );
+    }
+  }
+  if (relinked.length === 0) {
+    console.warn(
+      '[chtypes] chtypes#298 tests SKIPPED: the registry holds no artifact on a relinked line (26.3, 26.7, 26.8, 26.9).',
+    );
+  }
+} else {
+  console.warn('[chtypes] chtypes#298 tests SKIPPED: no artifact registry on the search path.');
+}
+
+afterAll(() => {
+  rev5Registry?.close();
+});
+
+describe.skipIf(!HAVE_REGISTRY || relinked.length === 0)('chtypes#298: the relinked contract (G1-G5)', () => {
+  it('zeroes rowsPassed/rowsCut and carries verdictCode on a non-accepted batch (G2, G3)', () => {
+    // The same strict (no input_format_allow_errors_*) body exercises both
+    // at once. Row 0 parses and is individually accepted with verdict 't';
+    // row 1 is the CSV reader's own trailing-garbage refusal (code 117),
+    // which aborts the batch — so the batch's own outcome is `Rejected`
+    // even though row 0, in isolation, was accepted and passed the filter.
+    let ran = 0;
+    for (const library of relinked) {
+      const schema = library.compileDdl('id UInt8, n UInt8');
+      const filter = schema.compileFilter('id >= 0');
+      try {
+        const body = Buffer.from('1,2\n1,abc\n', 'utf8'); // row 1: "abc" in a UInt8 column
+        const batch = schema.rows(Format.CSV, body, undefined, { rowFilter: filter });
+        const where = library.version;
+
+        expect(batch.outcome, `${where}: the aborting row must still reject the whole batch`).toBe(Outcome.Rejected);
+        // G3: the batch's own outcome is not Accepted, so BOTH counts must
+        // be zero, regardless of row 0's own accepted-and-'t' verdict.
+        expect([batch.rowsPassed, batch.rowsCut], `${where}: rowsPassed/rowsCut, want 0/0 for a non-Accepted batch`).toEqual([0, 0]);
+        expect(batch.rows.length, `${where}: want 2 row documents`).toBe(2);
+
+        // G2: row 1's own parse outcome is not Accepted (Rejected, code
+        // 117), so its verdict is 'd' and must carry that same
+        // code/message beside it — never the 0/'' the pre-relink library
+        // left there.
+        const row1 = batch.rows[1]!;
+        expect(row1.verdict, `${where}: row 1's own outcome is not Accepted`).toBe(Verdict.Decline);
+        expect(row1.verdictCode, `${where}: verdictCode, want the row's own error code`).toBe(CSV_REJECTION_CODE);
+        expect(row1.verdictErr, `${where}: verdictErr must not be empty`).not.toBe('');
+        expect(row1.verdictCode, `${where}: verdictCode must equal the row's own errCode`).toBe(row1.errCode);
+        ran++;
+      } finally {
+        filter.close();
+        schema.close();
+      }
+    }
+    expect(ran, 'ran the wrong number of cases').toBe(relinked.length);
+    expect(ran, 'ran ZERO cases — a block that asserts nothing is not a pass').toBeGreaterThan(0);
+  });
+
+  it('names the export decline on a rejected zero-row batch (G5)', () => {
+    // A CSVWithNames body naming a header column no schema column matches,
+    // read under input_format_skip_unknown_fields=0, is refused before a
+    // single row is admitted — Rejected, rowsRead 0, zero row documents —
+    // and an export was requested. The pre-relink library left
+    // exportDeclined empty here even though bytes were withheld; the
+    // relinked one names the batch's own outcome as the reason.
+    let ran = 0;
+    for (const library of relinked) {
+      const schema = library.compileDdl('id UInt8, p String');
+      try {
+        const body = Buffer.from('id,unknown_col\n1,a\n', 'utf8');
+        const batch = schema.rows(Format.CSVWithNames, body, { input_format_skip_unknown_fields: '0' }, { exportFormat: Format.JSONCompactEachRow });
+        const where = library.version;
+
+        expect(batch.outcome, `${where}`).toBe(Outcome.Rejected);
+        expect(batch.rowsRead, `${where}: want a call-level refusal with no rows`).toBe(0);
+        expect(batch.rows.length, `${where}`).toBe(0);
+        expect(batch.payload, `${where}: a rejected batch exports nothing`).toBeUndefined();
+        expect(batch.exportDeclined, `${where}: exportDeclined must not be empty (chtypes#298, G5)`).toBeTruthy();
+        ran++;
+      } finally {
+        schema.close();
+      }
+    }
+    expect(ran, 'ran the wrong number of cases').toBe(relinked.length);
+    expect(ran, 'ran ZERO cases — a block that asserts nothing is not a pass').toBeGreaterThan(0);
+  });
+
+  it('declines session_timezone rather than silently ignoring it (G1)', () => {
+    // ClickHouse's session_timezone is a real, known setting name — never
+    // the server's own code 115 — but this library resolves bare-DateTime
+    // timezone once, process-wide, at chs_init, and never re-reads it per
+    // call. Before the relink, a per-call session_timezone was silently
+    // accepted and had no effect, indistinguishable from agreement. The
+    // relinked library declines it the same way an unmodeled MergeTree
+    // setting is declined (docs/guides/settings.md): it comes back in
+    // unsupportedSettings, which promotes the row's own outcome to
+    // Unsupported.
+    let ran = 0;
+    for (const library of relinked) {
+      const schema = library.compileDdl('id UInt8, t DateTime');
+      try {
+        const result = schema.row(Format.JSONEachRow, Buffer.from('{"id":1,"t":"2024-01-01 00:00:00"}', 'utf8'), {
+          session_timezone: 'Europe/Berlin',
+        });
+        const where = library.version;
+
+        expect(result.unsupportedSettings, `${where}: sent on a per-call map, this is a decline, never a silent admission`).toContain(
+          'session_timezone',
+        );
+        expect(result.outcome, `${where}: a non-empty unsupportedSettings must promote the row (docs/guides/settings.md)`).toBe(
+          Outcome.Unsupported,
+        );
+        ran++;
+      } finally {
+        schema.close();
+      }
+    }
+    expect(ran, 'ran the wrong number of cases').toBe(relinked.length);
+    expect(ran, 'ran ZERO cases — a block that asserts nothing is not a pass').toBeGreaterThan(0);
   });
 });
