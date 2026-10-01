@@ -17,7 +17,9 @@ or let the SDK's `scripts/fetch.sh` do it, which verifies the chain for you.
 
 `build` is the chtypes wrapper build (core's commit count). Rows of the
 same ClickHouse version and platform differ only in the wrapper linked
-into them; take the highest build. The listing keeps the two highest.
+into them; take the highest build at your SDK's ABI revision. The listing
+is append-only: every build ever published stays listed and fetchable, so
+a lock file that pins a file name and sha256 keeps resolving.
 
 Verification: `SHA256SUMS` covers every tarball; each tarball's
 `manifest.json` carries `library_sha256` for the library inside it.

@@ -19,7 +19,7 @@ use std::process::ExitCode;
 
 use chtypes::fetch::{self, EnsureOptions};
 use chtypes::{
-    CODE_ARTIFACT_UNPUBLISHED, CODE_SOURCE_UNREACHABLE, Error, host_platform, installed_lines,
+    CODE_ARTIFACT_UNPUBLISHED, CODE_SOURCE_UNREACHABLE, Error, host_platform, installed_patches,
 };
 
 const USAGE: &str = "\
@@ -299,17 +299,18 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
     };
     let platform = args.platform.clone().unwrap_or_else(host_platform);
     println!("installed ({platform}):");
-    let installed = installed_lines(&dirs);
+    let installed = installed_patches(&dirs);
     if installed.is_empty() {
         println!("  (nothing)");
     }
-    for (line, dir) in &installed {
-        let version = std::fs::read_to_string(dir.join("manifest.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str::<chtypes::Manifest>(&t).ok())
-            .map(|m| m.clickhouse_version)
-            .unwrap_or_default();
-        println!("  {line:<8} {version:<20} {}", dir.display());
+    for patch in &installed {
+        println!(
+            "  {:<8} {:<20} {}{}",
+            patch.line,
+            patch.version,
+            patch.dir.display(),
+            if patch.flat { "" } else { "  (patches/)" }
+        );
     }
     let quiet = EnsureOptions {
         progress: false,
@@ -335,7 +336,9 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
                 .filter(|r| r.platform() == platform && r.abi_revision == Some(revision))
             {
                 any = true;
-                let have = installed.iter().any(|(l, _)| l == &row.clickhouse_minor);
+                let have = installed
+                    .iter()
+                    .any(|p| p.line == row.clickhouse_minor && p.version == row.clickhouse_version);
                 println!(
                     "  {:<8} {:<20} b{:<3} {}  {} bytes{}",
                     row.clickhouse_minor,

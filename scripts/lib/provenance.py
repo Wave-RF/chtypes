@@ -90,36 +90,50 @@ def report(registry: str | None, header_path: str, out=None) -> None:
         print(f"provenance: no artifact registry at {registry or '<empty>'}", file=out)
         return
 
-    line_dirs = sorted((p for p in reg.iterdir() if p.is_dir()), key=lambda p: p.name)
-    if not line_dirs:
+    # Two levels (chtypes#284, "Layout rule"): the flat <minor>/ holding the
+    # line's currently newest patch, and patches/<minor>/<clickhouse_version>/
+    # holding every OTHER installed exact patch. `patches/` itself carries no
+    # manifest.json of its own and is excluded from the flat listing below —
+    # it is reported as its own, separately labeled set of entries instead of
+    # once as a bare "scratch directory".
+    line_dirs = sorted(
+        (p for p in reg.iterdir() if p.is_dir() and p.name != "patches"), key=lambda p: p.name
+    )
+    nested_dirs: list[Path] = []
+    patches_root = reg / "patches"
+    if patches_root.is_dir():
+        for minor_dir in sorted((p for p in patches_root.iterdir() if p.is_dir()), key=lambda p: p.name):
+            nested_dirs.extend(
+                sorted((p for p in minor_dir.iterdir() if p.is_dir()), key=lambda p: p.name)
+            )
+
+    if not line_dirs and not nested_dirs:
         print(f"provenance: {registry} has no line directories", file=out)
 
-    for line_dir in line_dirs:
-        name = line_dir.name
-        manifest_path = line_dir / "manifest.json"
+    def report_one(display: str, minor_fallback: str, manifest_path: Path) -> None:
         if not manifest_path.is_file():
             # A registry may legitimately hold scratch directories
             # (docs/guides/artifacts.md, Loading step 2) — every loader skips
             # them silently. This says so, out loud, instead.
-            print(f"provenance: {name}: no manifest.json (scratch directory, skipped)", file=out)
-            continue
+            print(f"provenance: {display}: no manifest.json (scratch directory, skipped)", file=out)
+            return
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:
-            print(f"provenance: {name}: manifest.json unparseable ({e})", file=out)
-            continue
+            print(f"provenance: {display}: manifest.json unparseable ({e})", file=out)
+            return
         if not isinstance(manifest, dict):
-            print(f"provenance: {name}: manifest.json is not an object, skipped", file=out)
-            continue
+            print(f"provenance: {display}: manifest.json is not an object, skipped", file=out)
+            return
 
-        minor = _field(manifest, "clickhouse_minor") if manifest.get("clickhouse_minor") else name
+        minor = _field(manifest, "clickhouse_minor") if manifest.get("clickhouse_minor") else minor_fallback
         version = _field(manifest, "clickhouse_version")
         build = _field(manifest, "chtypes_build")
         abi = manifest.get("abi_revision")
         core_commit = _field(manifest, "core_commit", 12)
         lib_sha = _field(manifest, "library_sha256", 12)
         print(
-            f"provenance: {minor}: clickhouse={version} chtypes_build={build} "
+            f"provenance: {display}: clickhouse={version} chtypes_build={build} "
             f"abi_revision={abi if abi is not None else '?'} core_commit={core_commit} "
             f"library_sha256={lib_sha}",
             file=out,
@@ -137,6 +151,12 @@ def report(registry: str | None, header_path: str, out=None) -> None:
                 f"({abi!r}) — cannot compare it to this binding's pinned revision {pinned}",
                 file=out,
             )
+
+    for line_dir in line_dirs:
+        report_one(line_dir.name, line_dir.name, line_dir / "manifest.json")
+    for patch_dir in nested_dirs:
+        minor = patch_dir.parent.name
+        report_one(f"{minor} (patches/{patch_dir.name})", minor, patch_dir / "manifest.json")
 
     goldens_path = reg / "sdk-goldens.json"
     if not goldens_path.is_file():
@@ -229,6 +249,28 @@ def selftest() -> int:
         # never crash the printer.
         (registry / "not-a-version").mkdir()
 
+        # A nested patch under patches/<minor>/<version>/ (chtypes#284,
+        # "Layout rule") — a patch other than the one in the flat slot. A
+        # DIFFERENT minor line from the flat cases above (26.7, not 25.8),
+        # so its own ABI-revision mismatch cannot be confused with — or mask
+        # — 25.8's flat case below. Reported separately, by its own label,
+        # never folded into a flat line and never silently skipped as
+        # "patches: no manifest.json".
+        nested = registry / "patches" / "26.7" / "26.7.14.3-lts"
+        nested.mkdir(parents=True)
+        (nested / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "clickhouse_minor": "26.7",
+                    "clickhouse_version": "26.7.14.3-lts",
+                    "chtypes_build": 1780500000,
+                    "abi_revision": 4,
+                    "core_commit": "eeeeeeeeeeeeffffffffffffffffffff",
+                    "library_sha256": "1111222233334444555566667777888899990000",
+                }
+            )
+        )
+
         pinned = read_pinned_abi_revision(str(header))
         out = run(str(registry), str(header))
 
@@ -259,6 +301,20 @@ def selftest() -> int:
             "the manifest-less scratch directory was not named",
         )
         check("no artifact registry" not in out, "a real registry was reported as absent")
+        check(
+            "26.7 (patches/26.7.14.3-lts): clickhouse=26.7.14.3-lts chtypes_build=1780500000 "
+            "abi_revision=4 core_commit=eeeeeeeeeeee library_sha256=111122223333" in out,
+            "a nested patches/<minor>/<version>/ install did not print its own provenance line",
+        )
+        check(
+            f"WARNING: 26.7's artifact is ABI revision 4, this binding is pinned to {pinned}" in out,
+            "the nested patch's own ABI-revision mismatch did not warn",
+        )
+        check(
+            "patches: no manifest.json (scratch directory, skipped)" not in out,
+            "the patches/ sibling tree itself was reported as a manifest-less scratch "
+            "directory rather than excluded from the flat listing",
+        )
 
         # THE point of this case: change a TEMP COPY of the header's number
         # and require the warning to move with it. A test that hard-sets the

@@ -135,15 +135,47 @@ x = 256        (literal)      →  never true
 x = {p:UInt8}  bound "256"    →  binds 0, matches every real zero
 ```
 
-That behavior is uniform across every supported line and matches a real server, so it is not a bug to route around, and the fix is not a better-sized brace type — binding the column's own narrow type at any width is what reintroduces the wrap above. For a **narrow** integer column — `UInt8`, `UInt16`, `UInt32`, `Int8`, `Int16` or `Int32` — bind `{p:String}` instead, with a canonical spelling of the value: the comparison then coerces the bound `String` against the column's type, and an out-of-domain canonical value answers a clean `false`, matching nothing, rather than wrapping into a real row. That recommendation is bounded, not unconditional, and the boundaries below were measured by the artifact producer against live servers across eight served ClickHouse lines — they are part of what the recipe means, not a caveat appended to it:
+That behavior is uniform across every supported line and matches a real server, so it is not a bug to route around, and the fix is not a better-sized brace type — binding the column's own narrow type at any width is what reintroduces the wrap above. Binding `{p:String}` instead, with a canonical spelling of the value, moves the comparison onto the coercion path: for a **narrow** integer column — `UInt8`, `UInt16`, `UInt32`, `Int8`, `Int16` or `Int32` — a canonical out-of-domain value **below 2^64** answers a clean `false`, matching nothing, rather than wrapping into a real row.
 
-- **It stops at 64 bits.** Comparison-time coercion promotes the column's own type before parsing the bound value, and `UInt64`/`Int64` have nothing wider left to promote to — so the same wrap this section opened with returns, on the comparison side instead of the substitution side. `u64 = {p:String}` bound `"18446744073709551616"` matches exactly the row holding `0`; `i64 = {p:String}` bound `"9223372036854775808"` matches the row holding `-9223372036854775808`. Binding `String` **moves** that hazard from narrow columns to wide ones; it does not remove it — do not bind `String` in place of `UInt64` or `Int64` on this reasoning.
+**That "clean false" promise holds only below 2^64 — it is not a general recipe for an untrusted value**, and the boundaries below were measured by the artifact producer against live servers across every served ClickHouse line. They are part of what the recipe means, not a caveat appended to it:
+
+- **The wrap returns at 2^64, on every integer width — narrow columns included.** A bound value at or above 2^64 wraps **modulo 2^64** before the comparison runs, whatever the column's own width is: `u8 = {p:String}` bound `"18446744073709551616"` (2^64) matches the row holding `0`, exactly as if the column were `UInt64`; `u32 = {p:String}` bound `"18446744073709551621"` (2^64 + 5) matches the row holding `5`. The "clean false" promise above holds only for a canonical out-of-domain value **below** 2^64 — at or above it, the recipe fails silently on a `UInt8` column exactly as it does on a `UInt64` one. **`[U]Int128` and `[U]Int256` columns wrap at their own width instead of at 2^64** — `u128 = {p:String}` wraps modulo 2^128, `u256 = {p:String}` modulo 2^256 — so the boundary to check is the compared column's own width when it is 128 bits or wider, and 2^64 otherwise. This governs ordering comparisons too: `u8 > {p:String}` bound a value at or above 2^64 admits rows depending on where the wrapped value lands, not on the value's true magnitude. Binding `String` **moves** the wrap from the substitution side to the comparison side; it does not remove it, at any width.
 - **It depends on the value's spelling, not just its magnitude.** A clean `false` is what a _canonical_ out-of-domain value gets. Against a narrow integer column, `"007"`, `"+7"`, `" 7"`, `"7.0"`, `"-1"` and `"abc"` each throw code **53** instead, and `""` throws **32** — exactly the spellings a gateway forwards from a caller unvalidated. Validate the value's spelling as canonical before binding it; the outcome is `false` or an error depending on spelling, never uniformly `false`.
-- **It does not extend to ordering comparisons.** `u8 < 256` (literal) admits every row; `u8 < '256'` (bound `String`) admits none — a failed conversion becomes a constant for the whole comparison, so `<` cannot admit what `=` would not. Do not carry this recipe to `<`, `<=`, `>` or `>=`.
+- **It does not extend to ordering comparisons even below 2^64.** `u8 < 256` (literal) admits every row; `u8 < '256'` (bound `String`) admits none — a failed conversion becomes a constant for the whole comparison, so `<` cannot admit what `=` would not. Do not carry the plain bind-`String` recipe to `<`, `<=`, `>` or `>=`; the round-trip form below is the one that does extend to them.
 
 Two error channels are in play here, and binding `String` moves a value between them rather than exempting it from both. **Substitution time**, before any row is read, is where the declared brace type's own reader deserializes the bound value: `{p:UInt8}` bound `"-1"`, `"+7"` or `"007"` is the server's own **457**, and an empty string is **32**. **Comparison time**, after substitution has already succeeded, is where the code-53 cases above are thrown, against a narrow column. Binding `String` takes a value out of the substitution channel — it does not make a bad spelling valid, it changes when and how that spelling is rejected.
 
-`String` parameter values follow ClickHouse's own escaped-text field rules: a backslash, a tab, a newline and a carriage return must each be escaped in the value you bind. A value ending in a trailing backslash is refused with the server's own **code 25**.
+`String` parameter values follow ClickHouse's own escaped-text field rules: a backslash, a tab, a newline and a carriage return must each be escaped in the value you bind. A value ending in a trailing backslash is refused with the server's own **code 25**. Skip the escaping and the failure differs by character, and neither one is a clean rejection you can rely on catching: a raw, unescaped tab or newline inside the bound value is the server's own **code 457**; an unescaped backslash ahead of an ordinary character is read as if it were one of the escapes above — `a\b` parses as `a` followed by a backspace, not the three characters you sent — and the comparison then silently answers `false`, with no error at all. Escape the backslash itself first, or the reader decides for you which escape you meant.
+
+An `Array(String)` parameter literal follows the same quoted-element rule as a scalar `String`: only `'` and `\` are escaped inside each element, with no additional scalar encoding layered on top.
+
+### The round-trip form — the recipe for an untrusted value
+
+Every bound-`String` trick above is bounded by width, by magnitude, or by comparison operator. The recipe that is not — safe against an untrusted value at any magnitude, against an integer column of any width, for `=` and for ordering alike — casts the bound value to the column's own type and round-trips it back through `toString`, discarding anything that does not survive the round trip exactly:
+
+```text
+c OP if(toString(accurateCastOrNull({p:String}, 'T')) = {p:String}, accurateCastOrNull({p:String}, 'T'), NULL)
+```
+
+`accurateCastOrNull({p:String}, 'T')` already answers `NULL` for a value that overflows `T` — but only up to 64 bits; on `[U]Int128`/`[U]Int256` it silently wraps instead of refusing, an upstream ClickHouse behavior, not a chtypes divergence. The `toString(...) = {p:String}` half is what closes that gap: it does not trust `accurateCastOrNull`'s own precision, it re-serializes whatever the cast produced and checks that text against the exact string you bound, so a value that wrapped anywhere — 64-bit or 256-bit — fails the round trip and the comparison sees `NULL` in place of the wrapped row, whatever `OP` is.
+
+One narrow width:
+
+```text
+u8 = if(toString(accurateCastOrNull({p:String}, 'UInt8')) = {p:String}, accurateCastOrNull({p:String}, 'UInt8'), NULL)
+```
+
+bound `"18446744073709551616"` (2^64): the cast wraps to `0`, `toString(0)` is `"0"`, which does not equal the bound text, so the whole expression is `NULL` — no row matches. In-range values round-trip unchanged, and using `u8` as a primary key works exactly as it did before.
+
+One 256-bit width:
+
+```text
+u256 = if(toString(accurateCastOrNull({p:String}, 'UInt256')) = {p:String}, accurateCastOrNull({p:String}, 'UInt256'), NULL)
+```
+
+measured clean at every served ClickHouse line, on both chtypes and a live server: in-range answers are unchanged, an out-of-domain value at any magnitude answers `NULL` rather than wrapping into a real row, and — unlike a bound `String` alone — this form holds for `<`, `<=`, `>` and `>=` as well as `=`.
+
+This is the recipe to reach for whenever the bound value's magnitude is not already validated as in-domain and canonical. The plain bind-`String` recipe above remains true as far as it goes — a canonical, validated, below-2^64 value against a narrow column does get a clean `false` — but it is not a substitute for the round trip once the value's magnitude is untrusted.
 
 ### Bounding the compile path
 

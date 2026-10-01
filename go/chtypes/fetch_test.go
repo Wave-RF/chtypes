@@ -780,21 +780,22 @@ func TestFetchLockAndFrozen(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "reg")
 	lock := filepath.Join(t.TempDir(), "chtypes.lock")
 
-	// --lock records what was installed.
+	// --lock records what was installed, keyed by the EXACT patch (schema 2,
+	// #284) — not the line.
 	inst, err := Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Dest: dest, LockFile: lock})
 	if err != nil {
 		t.Fatal(err)
 	}
 	l, err := ReadLockFile(lock)
-	if err != nil || l.Schema != 1 {
+	if err != nil || l.Schema != LockSchema {
 		t.Fatalf("lock: %+v %v", l, err)
 	}
-	key := LockKey(HostPlatform(), "25.8")
+	key := LockKey(HostPlatform(), inst.Version)
 	if e := l.Artifacts[key]; e.File != inst.File || e.SHA256 != inst.SHA256 {
 		t.Fatalf("lock entry %+v, want %s %s", e, inst.File, inst.SHA256)
 	}
 	raw, _ := os.ReadFile(lock)
-	if !strings.Contains(string(raw), `"schema": 1`) || !strings.Contains(string(raw), key) {
+	if !strings.Contains(string(raw), `"schema": 2`) || !strings.Contains(string(raw), key) {
 		t.Fatalf("lock bytes:\n%s", raw)
 	}
 
@@ -807,7 +808,11 @@ func TestFetchLockAndFrozen(t *testing.T) {
 		t.Fatalf("frozen fresh: %v", err)
 	}
 
-	// The release moved on: a different asset for the line is refused.
+	// The release moved on to a DIFFERENT patch of the line: the lock's own
+	// pinned file is no longer listed at all, which is UNPUBLISHED under the
+	// new §5 rule (F5) — not PINNED, which the design's §6 explicitly
+	// retires for this case ("the release offers something newer" is no
+	// longer a refusal; only a same-named file with different bytes is).
 	rel2 := filepath.Join(t.TempDir(), "release2")
 	pub2, priv2 := newTestKey(t)
 	writeRelease(t, rel2, priv2, fakeArtifact(HostPlatform(), "25.8.30.16-lts"))
@@ -815,7 +820,7 @@ func TestFetchLockAndFrozen(t *testing.T) {
 	dest2 := filepath.Join(t.TempDir(), "reg2")
 	var progress bytes.Buffer
 	_, err = Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel2, Dest: dest2, LockFile: lock, Frozen: true, Progress: &progress})
-	wantCode(t, err, CodeArtifactPinned)
+	wantCode(t, err, CodeArtifactUnpublished)
 	if strings.Contains(progress.String(), "downloading") {
 		t.Fatal("downloaded under --frozen mismatch")
 	}
@@ -851,10 +856,11 @@ func TestFetchLockAndFrozen(t *testing.T) {
 	if len(l.Artifacts) != 2 {
 		t.Fatalf("lock after merge: %+v", l.Artifacts)
 	}
-	// An unreadable lock schema is refused.
-	os.WriteFile(lock, []byte(`{"schema": 2, "artifacts": {}}`), 0o644)
-	if _, err := ReadLockFile(lock); err == nil {
-		t.Fatal("schema 2 read")
+	// An unreadable lock schema is refused, naming both the schemas this
+	// package still accepts.
+	os.WriteFile(lock, []byte(`{"schema": 3, "artifacts": {}}`), 0o644)
+	if _, err := ReadLockFile(lock); err == nil || !strings.Contains(err.Error(), "1") || !strings.Contains(err.Error(), "2") {
+		t.Fatalf("schema 3 read, or did not name schemas 1 and 2: %v", err)
 	}
 }
 
@@ -867,12 +873,14 @@ func TestFetchLockRecordsABIRevisionAndFrozenNamesAMismatch(t *testing.T) {
 	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
 	dest := filepath.Join(t.TempDir(), "reg")
 	lock := filepath.Join(t.TempDir(), "chtypes.lock")
-	key := LockKey(HostPlatform(), "25.8")
 
-	// (a) --lock records the row's abi_revision, this package's own.
-	if _, err := Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Dest: dest, LockFile: lock}); err != nil {
+	// (a) --lock records the row's abi_revision, this package's own, keyed
+	// by the EXACT patch (schema 2, #284).
+	instA, err := Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Dest: dest, LockFile: lock})
+	if err != nil {
 		t.Fatal(err)
 	}
+	key := LockKey(HostPlatform(), instA.Version)
 	l, err := ReadLockFile(lock)
 	if err != nil {
 		t.Fatal(err)
@@ -909,9 +917,16 @@ func TestFetchLockRecordsABIRevisionAndFrozenNamesAMismatch(t *testing.T) {
 
 	// (c) A lock entry with no abi_revision at all (an older SDK's lock):
 	// the old path, plus one appended sentence, for both PINNED (a real
-	// drift) and UNPUBLISHED (the line is not offered at this revision).
+	// drift — the pinned FILE is published, but with different bytes) and
+	// UNPUBLISHED (the pinned patch is not offered at all). Both entries are
+	// written as schema-1 (platform/line) so the conversion path is
+	// exercised too; their `file` must parse as a real asset name for the
+	// conversion to succeed, so the drift case reuses the real installed
+	// file name with a wrong sha256, rather than a nonsense name.
 	noRevLock := filepath.Join(t.TempDir(), "no-rev.lock")
-	os.WriteFile(noRevLock, []byte(fmt.Sprintf(`{"schema": 1, "artifacts": {%q: {"file": "not-the-file.tar.gz", "sha256": "00"}}}`, key)), 0o644)
+	schema1Key := LockKey(HostPlatform(), "25.8")
+	os.WriteFile(noRevLock, []byte(fmt.Sprintf(`{"schema": 1, "artifacts": {%q: {"file": %q, "sha256": %q}}}`,
+		schema1Key, instA.File, strings.Repeat("0", 64))), 0o644)
 	_, err = Ensure(context.Background(), "25.8", FetchOptions{URL: "file://" + rel, Dest: filepath.Join(t.TempDir(), "reg3"), LockFile: noRevLock, Frozen: true})
 	ae = wantCode(t, err, CodeArtifactPinned)
 	if !strings.Contains(ae.Msg, "records no ABI revision") || !strings.Contains(ae.Msg, "older SDK") || !strings.Contains(ae.Msg, fmt.Sprintf("ABI revision %d", ABIRevision)) {
@@ -926,7 +941,8 @@ func TestFetchLockRecordsABIRevisionAndFrozenNamesAMismatch(t *testing.T) {
 
 	noRevLock2 := filepath.Join(t.TempDir(), "no-rev2.lock")
 	otherKey := LockKey(HostPlatform(), "26.7")
-	os.WriteFile(noRevLock2, []byte(fmt.Sprintf(`{"schema": 1, "artifacts": {%q: {"file": "x.tar.gz", "sha256": "00"}}}`, otherKey)), 0o644)
+	otherFile := fmt.Sprintf("chtypes-26.7.3.19-stable-%s.tar.gz", HostPlatform())
+	os.WriteFile(noRevLock2, []byte(fmt.Sprintf(`{"schema": 1, "artifacts": {%q: {"file": %q, "sha256": "00"}}}`, otherKey, otherFile)), 0o644)
 	_, err = Ensure(context.Background(), "26.7", FetchOptions{URL: "file://" + rel, Dest: filepath.Join(t.TempDir(), "reg4"), LockFile: noRevLock2, Frozen: true})
 	ae = wantCode(t, err, CodeArtifactUnpublished)
 	if !strings.Contains(ae.Msg, "records no ABI revision") || !strings.Contains(ae.Msg, "older SDK") {

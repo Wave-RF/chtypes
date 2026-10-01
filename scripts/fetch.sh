@@ -20,10 +20,17 @@
 # SHA256SUMS into --dest, which it requires. The SDK suites' served fixtures
 # arrive that way.)
 #
-# Installs into <dest>/<clickhouse_minor>/, which is exactly the layout
-# chtypes.NewRegistry scans: one directory per version, each holding the
-# manifest.json that names the library to dlopen. Point a Registry at <dest>
-# after this and the version is live.
+# Installs the patch a LINE request selects FLAT at <dest>/<clickhouse_minor>/
+# — exactly the layout chtypes.NewRegistry scans, one directory per line, each
+# holding the manifest.json that names the library to dlopen; released SDKs
+# through 0.4.x read and write only this. Any OTHER exact patch of that line
+# — one an explicit patch spelling names, or one a later line fetch displaces
+# out of the flat slot — installs at
+# <dest>/patches/<clickhouse_minor>/<clickhouse_version>/ instead: a sibling
+# tree every current SDK reads and no released SDK touches (measured;
+# docs/guides/fetch.md §1, §4; issue #284 "Layout rule"). A displaced patch is
+# DEMOTED into that tree, atomically, never deleted. Point a Registry at
+# <dest> after this and every patch that landed is live.
 #
 # Only rows at ONE ABI revision are ever considered (docs/guides/fetch.md §2):
 # the CHS_ABI_REVISION of this tree's own include/chtypes.h, or --abi-revision
@@ -59,9 +66,11 @@
 # optional (plain curl against the release URL is the fallback), and the
 # release's own index.json is the authority on what exists. It installs into
 # the per-user artifact cache every SDK here defaults to —
-# ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>/<minor>/,
-# R the ABI revision above — so two SDK versions at different revisions on
-# one machine never overwrite each other's artifacts.
+# ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>/<minor>/
+# for a line's currently newest patch (flat), plus
+# .../patches/<minor>/<clickhouse_version>/ for any other installed exact
+# patch — R the ABI revision above — so two SDK versions at different
+# revisions on one machine never overwrite each other's artifacts.
 #
 # Where it fetches from, by default: https://artifacts.wavehouse.dev/<tag>/ —
 # the public artifacts host, where <tag> is a release tag or the rolling
@@ -168,6 +177,19 @@ fi
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
   else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+# manifest_version <dir> -> that install's own manifest.json clickhouse_version,
+# or empty when there is no readable manifest there. Used to tell which exact
+# patch (if any) currently sits in a line's flat slot, for the layout rule's
+# demotion (issue #284).
+manifest_version() {
+  [ -f "$1/manifest.json" ] || return 0
+  python3 -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("clickhouse_version") or "")
+except Exception:
+    print("")' "$1/manifest.json" 2>/dev/null || true
 }
 
 # ------------------------------------------------------- platform and dest
@@ -697,6 +719,43 @@ def rank(a):
     # older sibling could win on nothing but its position in the index.
     return (vkey(a), build_of(a))
 
+CHANNELS = ("lts", "stable", "prestable", "testing")
+
+def strip_channel(v):
+    for c in CHANNELS:
+        suf = "-" + c
+        if v.endswith(suf):
+            return v[: -len(suf)]
+    return v
+
+def patch_matches(version, spelling):
+    # fetch.md Decision 7 (chtypes#284): a spelled channel matches only
+    # itself; an unspelled one matches that patch on any channel. A server's
+    # own SELECT version() answers without a channel, so without this rule
+    # every server-driven request would miss.
+    if strip_channel(spelling) != spelling:
+        return version == spelling
+    return strip_channel(version) == spelling
+
+# The newest published patch of each line, among the rows this SDK can load —
+# what a LINE request (or --all) installs at <minor>/.
+best_by_minor = {}
+for a in arts:
+    cur = best_by_minor.get(a["clickhouse_minor"])
+    if cur is None or rank(a) > rank(cur):
+        best_by_minor[a["clickhouse_minor"]] = a
+
+# The layout rule's flat slot is decided by REQUEST TYPE, never by whether a
+# row happens to be a line's newest (chtypes#284, cross-binding placement
+# rule, matching Go and Python): ONLY a line spelling or --all writes
+# <minor>/. An exact-patch spelling ALWAYS installs at
+# patches/<minor>/<clickhouse_version>/ -- even when it is the line's newest
+# published patch and the flat slot is empty. The one exception is not a
+# write at all: when that exact version already sits in the flat slot and
+# verifies, install_one() below reports it as already installed there,
+# rather than duplicating it into patches/.
+IS_FLAT = want_all or not strict
+
 if want_all:
     if not arts:
         sys.exit("unpublished: the release has nothing for %s-%s at %s: %s"
@@ -712,22 +771,29 @@ if want_all:
             sys.stderr.write("fetch.sh: WARNING: ClickHouse line %s on %s-%s is not installed: %s, and this "
                              "SDK speaks ABI revision %d\n"
                              % (minor, os_, arch, served(by_line[minor], "that line for %s-%s" % (os_, arch)), own))
-    # One per minor line — a release should not carry two patches of a line, but
-    # if it does, the newer one is the one to install.
-    best = {}
-    for a in arts:
-        cur = best.get(a["clickhouse_minor"])
-        if cur is None or rank(a) > rank(cur):
-            best[a["clickhouse_minor"]] = a
-    hit = sorted(best.values(), key=lambda a: [int(p) for p in a["clickhouse_minor"].split(".")])
+    # One per minor line. Two (or more) patches of a line is the NORMAL case
+    # at a current ABI revision (chtypes#284) — the newest is what --all
+    # installs into the flat <minor>/ slot; any other patch already on this
+    # machine is read from patches/<minor>/<version>/, but --all never
+    # fetches one on its own.
+    hit = sorted(best_by_minor.values(), key=lambda a: [int(p) for p in a["clickhouse_minor"].split(".")])
 else:
-    hit = [a for a in arts if exact and a["clickhouse_version"] == exact]
+    # A LINE spelling always selects the line's NEWEST published patch at
+    # this SDK's revision (chtypes#294). The exact-match filter below fires
+    # only for a STRICT request -- one the CALLER spelled as a full patch.
+    # The optional developer resolver's `exact` hint can ride along on a
+    # bare line request too (it names "the current upstream patch"), and
+    # that hint is not a caller requirement: gating selection on it here
+    # would let a resolver's hint silently install a non-newest patch. The
+    # hint still reaches the operator -- the install-time note below -- it
+    # just never gates which row is chosen.
+    hit = [a for a in arts if strict and exact and patch_matches(a["clickhouse_version"], exact)]
     if strict and not hit:
         sys.exit("unpublished: you asked for exactly ClickHouse %s on %s-%s at %s and this release does "
                  "not publish it at that revision: %s; at ABI revision %d the release has: %s.\n"
                  "          Ask for the line (%s) to take what was published."
                  % (exact, os_, arch, at,
-                    served([a for a in on_platform if a["clickhouse_version"] == exact],
+                    served([a for a in on_platform if patch_matches(a["clickhouse_version"], exact)],
                            "that patch for %s-%s" % (os_, arch)),
                     own, have, line))
     if not hit:
@@ -739,8 +805,9 @@ else:
                     served([a for a in on_platform if a["clickhouse_minor"] == line],
                            "that line for %s-%s" % (os_, arch)),
                     own, have))
-    # A line can carry more than one row: two patches, or the same patch built
-    # twice (core keeps the two highest builds per version). Take the newest by
+    # A line can carry more than one row: two (or more) patches, or the same
+    # patch built more than once -- the channel is append-only, so every
+    # build ever published stays listed (chtypes#284). Take the newest by
     # version and then by build, never by list order.
     hit = [sorted(hit, key=rank)[-1]]
 
@@ -749,7 +816,8 @@ for a in hit:
         if not a.get(k):
             sys.exit("corrupt: index.json entry for %s is missing %s" % (a.get("file"), k))
     print("|".join([a["file"], a["sha256"], str(a["bytes"]), a["clickhouse_version"],
-                    a["clickhouse_minor"], a["library"], a["library_sha256"]]))
+                    a["clickhouse_minor"], a["library"], a["library_sha256"],
+                    "1" if IS_FLAT else "0"]))
 PY
 )" || {
   # The selector's own message is the useful half; its first word is the code.
@@ -764,21 +832,55 @@ PY
 # install at this ABI revision — loud, never silent.
 if [ -s "$WORK/.select.err" ]; then cat "$WORK/.select.err" >&2; fi
 
-# install_one <row> — one index.json row, from the release to <dest>/<minor>/.
+# install_one <row> — one index.json row, from the release to <dest>/<minor>/
+# (flat, the patch a line request selects) or
+# <dest>/patches/<minor>/<clickhouse_version>/ (any other exact patch).
 install_one() {
-  local ASSET ASSET_SHA ASSET_BYTES A_VER A_MINOR A_LIB A_LIBSHA
-  IFS='|' read -r ASSET ASSET_SHA ASSET_BYTES A_VER A_MINOR A_LIB A_LIBSHA <<EOF
+  local ASSET ASSET_SHA ASSET_BYTES A_VER A_MINOR A_LIB A_LIBSHA A_FLAT
+  IFS='|' read -r ASSET ASSET_SHA ASSET_BYTES A_VER A_MINOR A_LIB A_LIBSHA A_FLAT <<EOF
 $1
 EOF
-  [ -n "$ASSET" ] && [ -n "$ASSET_SHA" ] && [ -n "$A_LIBSHA" ] \
+  [ -n "$ASSET" ] && [ -n "$ASSET_SHA" ] && [ -n "$A_LIBSHA" ] && [ -n "$A_FLAT" ] \
     || fail CHTYPES_ARTIFACT_CORRUPT "malformed index row: $1"
   say "$ASSET  ($ASSET_BYTES bytes, ClickHouse $A_VER, library $A_LIB)"
   if [ "$ALL" = 0 ] && [ -n "$WANT_EXACT" ] && [ "$A_VER" != "$WANT_EXACT" ]; then
-    echo "fetch.sh: note — line $WANT_LINE points at $WANT_EXACT upstream today;" >&2
-    echo "          this release publishes $A_VER for that line, and that is what was installed." >&2
+    # Decision 7 (chtypes#284): a channel-less WANT_EXACT that matches A_VER
+    # once A_VER's channel is stripped is an ordinary exact match, not
+    # upstream drift from a moving tag — the note below is for the latter.
+    A_VER_BARE="$(printf '%s' "$A_VER" | sed -E 's/-(lts|stable|prestable|testing)$//')"
+    if [ "$A_VER_BARE" != "$WANT_EXACT" ]; then
+      echo "fetch.sh: note — line $WANT_LINE points at $WANT_EXACT upstream today;" >&2
+      echo "          this release publishes $A_VER for that line, and that is what was installed." >&2
+    fi
   fi
 
-  local INSTALL="$DEST/$A_MINOR"
+  # The layout rule (chtypes#284, cross-binding placement rule, matching Go
+  # and Python): A_FLAT=1 (set by the selector above) means this row came
+  # from a LINE spelling or --all -- NEVER from whether it happens to be the
+  # line's newest patch -- and installs FLAT at <minor>/, exactly as every
+  # SDK through 0.4.x reads and writes. An EXACT-patch spelling is always
+  # A_FLAT=0 and installs nested at patches/<minor>/<clickhouse_version>/,
+  # even when it is the line's newest and the flat slot is empty -- a sibling
+  # tree released SDKs neither see nor touch.
+  local FLAT_DIR="$DEST/$A_MINOR" INSTALL
+  if [ "$A_FLAT" = "1" ]; then
+    INSTALL="$FLAT_DIR"
+  else
+    INSTALL="$DEST/patches/$A_MINOR/$A_VER"
+    # A flat install already holding this EXACT patch — an older SDK's
+    # install, or a line fetch from before this one — satisfies the request
+    # without duplicating 300 MB of bytes: the flat slot is read indefinitely
+    # (fetch.md §4).
+    if [ "$FORCE" = 0 ] && [ "$(manifest_version "$FLAT_DIR")" = "$A_VER" ] && [ -f "$FLAT_DIR/$A_LIB" ]; then
+      local FLAT_HAVE
+      FLAT_HAVE="$(sha256_of "$FLAT_DIR/$A_LIB")"
+      if [ "$FLAT_HAVE" = "$A_LIBSHA" ]; then
+        say "already installed and verified (the flat slot already holds this patch): $FLAT_DIR/$A_LIB"
+        echo "$FLAT_DIR"
+        return 0
+      fi
+    fi
+  fi
 
   # Already installed and intact? Say so instead of re-downloading 300 MB. The
   # test is the same one the install path ends with, so "already there" is a
@@ -792,6 +894,29 @@ EOF
       return 0
     fi
     echo "fetch.sh: $INSTALL/$A_LIB is present but hashes $HAVE (want $A_LIBSHA) — replacing" >&2
+  fi
+
+  # Demote the outgoing patch; never delete it. When this row takes the flat
+  # slot and a DIFFERENT patch currently sits there, that patch is renamed
+  # into patches/<minor>/<its version>/ — atomically, same filesystem, BEFORE
+  # the incoming patch takes the flat slot. A server still on the older
+  # patch keeps its exact match, with no re-fetch and no duplicated bytes;
+  # <minor>/ readers, including a released SDK sharing this cache, see
+  # nothing new (issue #284, "Layout rule: approved, with one amendment").
+  if [ "$A_FLAT" = "1" ]; then
+    local OUTGOING_VER
+    OUTGOING_VER="$(manifest_version "$FLAT_DIR")"
+    if [ -n "$OUTGOING_VER" ] && [ "$OUTGOING_VER" != "$A_VER" ]; then
+      local DEMOTE_DIR="$DEST/patches/$A_MINOR/$OUTGOING_VER"
+      mkdir -p "$DEST/patches/$A_MINOR"
+      if [ -e "$DEMOTE_DIR" ]; then
+        # Already preserved there — never keep two copies of the same bytes.
+        rm -rf "$FLAT_DIR"
+      else
+        say "demoting $A_MINOR ($OUTGOING_VER) out of the flat slot -> patches/$A_MINOR/$OUTGOING_VER"
+        mv "$FLAT_DIR" "$DEMOTE_DIR"
+      fi
+    fi
   fi
 
   # ---------------------------------------- the tarball, hashed before unpacking
@@ -813,7 +938,7 @@ EOF
   say "sha256 verified before unpacking: $GOT_SHA"
 
   # ----------------------------------------------------------------- install
-  local UNPACK="$WORK/unpack.$A_MINOR"
+  local UNPACK="$WORK/unpack.$A_MINOR.$A_VER"
   rm -rf "$UNPACK"; mkdir -p "$UNPACK"
   tar -xzf "$WORK/$ASSET" -C "$UNPACK"
   [ -f "$UNPACK/manifest.json" ] || fail CHTYPES_ARTIFACT_CORRUPT "$ASSET contains no manifest.json at its root"
@@ -843,9 +968,14 @@ EOF
   [ -f "$UNPACK/$M_LIB" ] || fail CHTYPES_ARTIFACT_CORRUPT "$ASSET names library $M_LIB but does not contain it"
 
   # Move into place through a sibling temp directory: an interrupted install must
-  # never leave a half-populated <minor>/ for NewRegistry to dlopen.
-  mkdir -p "$DEST"
-  local NEWDIR="$DEST/.$A_MINOR.incoming.$$" OLDDIR="$DEST/.$A_MINOR.replaced.$$"
+  # never leave a half-populated target for NewRegistry (or a patches/ reader)
+  # to dlopen. NEWDIR/OLDDIR sit beside INSTALL itself — dot-prefixed, skipped
+  # by every scanner — so the final renames stay on one filesystem whether
+  # INSTALL is the flat slot or a nested patches/<minor>/<version>/ directory.
+  local INSTALL_PARENT INSTALL_BASE
+  INSTALL_PARENT="$(dirname "$INSTALL")"; INSTALL_BASE="$(basename "$INSTALL")"
+  mkdir -p "$INSTALL_PARENT"
+  local NEWDIR="$INSTALL_PARENT/.$INSTALL_BASE.incoming.$$" OLDDIR="$INSTALL_PARENT/.$INSTALL_BASE.replaced.$$"
   rm -rf "$NEWDIR" "$OLDDIR"
   mv "$UNPACK" "$NEWDIR"
   if [ -e "$INSTALL" ]; then mv "$INSTALL" "$OLDDIR"; fi
@@ -866,7 +996,11 @@ EOF
   ( cd "$INSTALL" && ls -l ) >&2
   printf '    %s sha256 %s\n' "$M_LIB" "$FINAL_SHA" >&2
   printf '    release signature: %s\n' "$SIG_STATUS" >&2
-  echo "    ClickHouse $M_VER — chtypes.NewRegistry(\"$DEST\") will now serve $M_MINOR" >&2
+  if [ "$A_FLAT" = "1" ]; then
+    echo "    ClickHouse $M_VER — chtypes.NewRegistry(\"$DEST\") will now serve $M_MINOR as $M_VER" >&2
+  else
+    echo "    ClickHouse $M_VER — installed beside the flat $M_MINOR slot; an exact request for $M_VER finds it here" >&2
+  fi
   echo "$INSTALL"
 }
 

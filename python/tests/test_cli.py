@@ -216,6 +216,50 @@ def test_verify_and_list(env: Path, tmp_path: Path, capsys: pytest.CaptureFixtur
 
 
 @needs_fixtures
+def test_list_and_verify_report_the_patches_tree_too(
+    env: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """SDK#284: `list` and `verify` both report every installed PATCH, not
+    only the flat line slot — using `two-patches/`, which serves two patches
+    of one line side by side."""
+    doc = json.loads(EXPECTED_FILE.read_text())
+    if "patches" not in doc:
+        raise AssertionError(
+            f"{EXPECTED_FILE} carries no 'patches' block — tests/fixtures/fetch/two-patches/ "
+            f"is required for SDK#284 (docs/guides/fetch.md §9); this is a hard failure"
+        )
+    block = doc["patches"]
+    line, older, newer = block["line"], block["served"][0], block["served"][1]
+    two_patches = str(FIXTURES / "two-patches")
+    dest = tmp_path / "reg"
+    base = ["fetch", "--platform", PLATFORM, "--url", two_patches, "--dest", str(dest)]
+    assert main([*base, older]) == 0  # -> patches/25.8/<older>/
+    assert main([*base, line]) == 0  # -> 25.8/ (flat), holds `newer`
+    capsys.readouterr()
+
+    assert main(["list", "--platform", PLATFORM, "--url", two_patches, "--dest", str(dest)]) == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert any(ln.startswith(f"  {line:<8} {newer:<18} {dest / line}") for ln in lines)
+    assert any(
+        ln.startswith(f"  {line:<8} {older:<18} {dest / 'patches' / line / older}")
+        and "(patches/)" in ln
+        for ln in lines
+    )
+    # "release offers" is a per-LINE view (the newest patch of each line), so
+    # only `newer` appears there, and it is installed.
+    assert out.count("[installed]") == 1 and "[not installed]" not in out
+
+    assert main(["verify", "--dest", str(dest)]) == 0
+    out, err = capsys.readouterr()
+    rows = out.splitlines()[:-1]  # last line is the golden-set line
+    labels = [ln.split()[0] for ln in rows]
+    assert line in labels  # the flat slot, still bare-labeled for compatibility
+    assert f"{line}/{older}" in labels  # the patches/ install, labeled minor/version
+    assert "2 installed line(s) verified" in err
+
+
+@needs_fixtures
 def test_lock_and_frozen_through_the_cli(
     env: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -224,7 +268,10 @@ def test_lock_and_frozen_through_the_cli(
     dest = tmp_path / "reg"
     base = ["fetch", "--platform", PLATFORM, "--url", signed, "--dest", str(dest)]
     assert main([*base, "25.8", "--lock", str(lock)]) == 0
-    assert json.loads(lock.read_text())["artifacts"].keys() == {f"{PLATFORM}/25.8"}
+    # Schema 2 (SDK#284): keyed by the exact patch, not the line.
+    patch_258 = json.loads(EXPECTED_FILE.read_text())["lines"]["25.8"]
+    assert json.loads(lock.read_text())["artifacts"].keys() == {f"{PLATFORM}/{patch_258}"}
+    assert json.loads(lock.read_text())["schema"] == 2
     assert main([*base, "26.7", "--lock", str(lock), "--frozen"]) == 1
     assert "CHTYPES_ARTIFACT_PINNED" in capsys.readouterr().err
     # --frozen alone reads ./chtypes.lock: none here is PINNED (exit 1), not usage.

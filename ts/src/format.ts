@@ -5,9 +5,14 @@
  *
  * Name-addressed: `JSONEachRow`, and `CSVWithNames` / `TSVWithNames` through
  * their header row. Positional (the k-th field lands in the k-th insertable
- * column; MATERIALIZED / ALIAS / EPHEMERAL occupy no position): `CSV`, `TSV`,
+ * column; MATERIALIZED / ALIAS / EPHEMERAL occupy no position):
  * `Values`, `JSONCompactEachRow`, the RowBinary family, and `Buffers`.
- * `Native` is column-oriented and name-addressed.
+ * `CSV` and `TSV` are positional too, unless `input_format_csv_detect_header`
+ * / `input_format_tsv_detect_header` say otherwise — the body is read by
+ * ClickHouse's own vendored row readers, which detect and consume a first
+ * line that spells the column names exactly as a real server does, honoring
+ * whichever value the call compiles with. `Native` is column-oriented and
+ * name-addressed.
  *
  * The RowBinary family, `Native`, `Buffers`, `CSVWithNames` and
  * `TSVWithNames` depend on when the loaded ARTIFACT was linked, not on this
@@ -18,9 +23,9 @@
 export const Format = {
   /** One JSON object per line, fields matched to columns by name. */
   JSONEachRow: 0,
-  /** Comma-separated, positional. A quoted field can contain a newline. */
+  /** Comma-separated; positional unless `input_format_csv_detect_header` detects and consumes a header line, exactly as a real server does (ClickHouse's own vendored reader). A quoted field can contain a newline. */
   CSV: 1,
-  /** Tab-separated, positional; `\N` is null. The one text format whose result documents carry `wire` (detector 3). */
+  /** Tab-separated; positional unless `input_format_tsv_detect_header` detects and consumes a header line, exactly as a real server does; `\N` is null. The one text format whose result documents carry `wire` (detector 3). */
   TSV: 2,
   /** The SQL `VALUES` tuple syntax, positional. */
   Values: 3,

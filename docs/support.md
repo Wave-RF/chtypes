@@ -67,6 +67,7 @@ Read from this repository's own release tags and `include/chtypes.h` as it stood
 | `0.3.1` | 5 |
 | `0.3.2` | 5 |
 | `0.4.0` | 6 |
+| `0.5.0` | 6 |
 
 ### Which artifact build satisfies each revision, per ClickHouse line and platform
 
@@ -143,4 +144,4 @@ The darwin artifacts exist so you can develop and run the suites on a laptop. Th
 
 ## Pre-1.0
 
-Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen. A function's exact signature is not one of those things: pre-1.0, a signature change rides an ABI revision instead, and that revision is what a caller can actually rely on — an SDK refuses to load an artifact whose revision it does not speak, naming both numbers, and that refusal is shipped and run by every binding's own suite, not merely documented. See [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) for where that match happens; what a given revision covers is maintained by the artifact producer. This tree speaks ABI revision 5 (`include/chtypes.h`) — revision 5, the INSERT column list, is the first signature change since the first tag. Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list. If a refusal is the reason you are reading this, [ABI revisions](#abi-revisions) above maps your installed SDK version to the revision it speaks and the artifact build that satisfies it.
+Package names, the artifact name `libchtypes`, the `chs_` prefix and the `enum chs_format` numbers are frozen. A function's exact signature is not one of those things: pre-1.0, a signature change rides an ABI revision instead, and that revision is what a caller can actually rely on — an SDK refuses to load an artifact whose revision it does not speak, naming both numbers, and that refusal is shipped and run by every binding's own suite, not merely documented. See [`guides/fetch.md`](guides/fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) for where that match happens; what a given revision covers is maintained by the artifact producer. This tree speaks the ABI revision `CHS_ABI_REVISION` names in [`include/chtypes.h`](../include/chtypes.h) — currently 6, whose error-code table and partition key are the most recent signature change since the first tag; see [Which ABI revision an SDK version speaks](#which-abi-revision-an-sdk-version-speaks) above for the rest of the history. Anything else may still move before 1.0 — each binding's CHANGELOG carries its own list. If a refusal is the reason you are reading this, [ABI revisions](#abi-revisions) above maps your installed SDK version to the revision it speaks and the artifact build that satisfies it.

@@ -49,7 +49,13 @@ class Format(IntEnum):
     """The `chs_format` codes. The numbers are part of the ABI: never renumber."""
 
     JSON_EACH_ROW = 0
+    # Comma-separated; positional unless input_format_csv_detect_header
+    # detects and consumes a header line, exactly as a real server does
+    # (ClickHouse's own vendored reader).
     CSV = 1
+    # Tab-separated; positional unless input_format_tsv_detect_header
+    # detects and consumes a header line, exactly as a real server does
+    # (ClickHouse's own vendored reader).
     TSV = 2
     VALUES = 3
     JSON_COMPACT_EACH_ROW = 4

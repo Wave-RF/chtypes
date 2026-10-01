@@ -4,6 +4,7 @@
     scripts/policy-merge-check.py --selftest          every refusal below fires, and an all-good input passes
     scripts/policy-merge-check.py --check-ci-names     REQUIRED_CHECKS agrees with ci.yml's blocking jobs (no network)
     scripts/policy-merge-check.py --check-guide        CONTRIBUTING.md's protected-glob block agrees with PROTECTED_GLOBS (no network)
+    scripts/policy-merge-check.py --check-carve-out    the security carve-out agrees with the tree's verification code (no network)
     scripts/policy-merge-check.py --print-protected    PROTECTED_GLOBS, one per line
     scripts/policy-merge-check.py gate    --repo OWNER/NAME --run-head-sha SHA --run-head-repo OWNER/NAME
     scripts/policy-merge-check.py gate    --repo OWNER/NAME --pr N
@@ -38,7 +39,7 @@ verdicts, the diff's file list, and — for docs/support.md alone — a
 byte-for-byte regeneration.
 
 ================================================================================
-THE SIX CONDITIONS
+THE SEVEN CONDITIONS
 ================================================================================
 
 A pull request enqueues itself when ALL of these hold. Evaluated in this
@@ -58,7 +59,14 @@ the pull request is left for a human and the exit status is 0.
                  longer what would be enqueued.
   protected  (5) No file the pull request touches — its current path, or for
                  a rename its OLD path too; a deletion counts by its one path
-                 — matches a glob in PROTECTED_GLOBS (below). This is also
+                 — matches an unconditional glob in PROTECTED_GLOBS (below);
+                 and for every binding whose SOURCE TREE it touches (the
+                 four conditional entries, chtypes#285 §1), that binding's
+                 api-surface verdict on the judged head is `changed=false`
+                 — read from the `api-surface` job's own log
+                 (gather_api_verdicts; a missing, unparseable or errored
+                 verdict, or a job that did not complete with success,
+                 counts as changed). This is also
                  what makes `checks` (next) mean anything: a pull_request run
                  of `ci` uses the pull request's own copy of `.github/` and
                  `scripts/`, which a pull request that edited either could
@@ -71,6 +79,18 @@ the pull request is left for a human and the exit status is 0.
                  run on the head, and every such run is `completed` with
                  conclusion `success`. Checks outside that list are ignored:
                  ci.yml's `divergences` job can be red by design.
+  test-counts    ONLY when the pull request touches a test or fixture path
+                 (chtypes#285 §1b, is_test_or_fixture_path has the exact
+                 rule): no suite's executed-test count, and no golden-case
+                 count, fell below main's last green `ci` push run — read
+                 from each job's own log (see gather_test_counts and its own
+                 comment for why the log, not the check run's output, is
+                 what a read-only token can actually read). A missing or
+                 unparseable count on either side is a drop, never
+                 "unchanged". Evaluated after `checks` so an already-red
+                 suite is reported as `checks`, never masked as a
+                 test-count drop; a pull request touching no test or
+                 fixture path skips this at zero API cost.
   mergeable      GitHub has not already reported a merge conflict
                  (`mergeable: false`). An enqueue known to fail is not tried.
   review     (4) No reviewer's latest review requests changes, and no review
@@ -90,10 +110,15 @@ the pull request is left for a human and the exit status is 0.
 
 `gate` checks everything except the byte HALF of `bytes`, which needs the
 regeneration; the workflow regenerates only when the gate passes, so an
-ordinary pull request costs a handful of API reads. `enqueue` reads every
-fact again, checks all of them including the byte comparison, and enqueues
-with `expectedHeadOid=<head>` so GitHub itself refuses if the head moved in
-between (reported as `stale`).
+ordinary pull request costs a handful of API reads. `test-counts` has no such
+split — gather_test_counts reads every job log it needs (never a head file)
+up front, so `gate` checks it fully, at the API cost of up to five job-log
+reads per side, and only for a pull request that touches a test or fixture
+path. The api-surface verdicts are the same: one job-log read, only for a
+pull request that touches binding source and nothing unconditionally
+protected. `enqueue` reads every fact again, checks all of them including the
+byte comparison, and enqueues with `expectedHeadOid=<head>` so GitHub itself
+refuses if the head moved in between (reported as `stale`).
 
 ================================================================================
 ENQUEUE, NOT MERGE — WHY THE QUEUE IS WHAT CLOSES THE RACE
@@ -146,11 +171,24 @@ pre-enqueue byte comparison against the head's own diff and does not attempt
 a post-hoc re-verification — a real gap versus the old guarantee, accepted
 because there is no synchronous moment left at which to make it.
 
+BUILT-IN TOKEN EVENTS START NO WORKFLOW. An entry enqueued with the
+workflow's built-in token gets no merge_group run of `ci`: GitHub starts no
+workflow for an event that token causes, so the entry waits at
+AWAITING_CHECKS until the queue's timeout (measured on #289; the same entry
+re-enqueued with a user token got its run 13 seconds later; chtypes#291).
+So `enqueue` here only JUDGES and hands the judged node id and head sha on as
+step outputs (handoff_outputs), with read-only permissions. The workflow's
+`enqueue` job, the only holder of the merge-bot App's token, then runs
+`enqueue-as-bot`, which validates those two values (bot_args_problem) and
+makes the one enqueuePullRequest call. An entry the App enqueues does get its
+merge_group run.
+
 MANUAL MERGES GO THROUGH THE QUEUE TOO. A protected-class pull request (left
-for a human by condition 5) merges by `gh pr merge <n> --merge` same as
-always; once the repository requires the merge queue, that command enqueues
-rather than merging directly — GitHub's own behavior, nothing this file
-does. Draft status is still the hold switch either way.
+for a human by condition 5) is enqueued by hand with the same
+`enqueuePullRequest` mutation this file uses, pinned to the reviewed head
+(CONTRIBUTING.md has the command). `gh pr merge` does not work here: with a
+queue required it falls back to enabling auto-merge, which this repository
+does not allow (measured). Draft status is still the hold switch either way.
 
 ================================================================================
 PROTECTED_GLOBS
@@ -168,12 +206,35 @@ design: over-protect rather than under-protect.
                           release signatures
   include/**              the frozen C ABI header
   go/**/*.go (except *_test.go), python/src/**, ts/src/**, rust/src/**
-                          each binding's public API surface. v1 protects ALL
-                          non-test source per binding rather than computing an
-                          export list: Go has none, and Python/Rust export by
-                          visibility, not by anything a path rule can read. A
-                          follow-up could narrow this with committed API
-                          snapshots (not built here).
+                          each binding's source tree — CONDITIONAL since
+                          chtypes#285 §1. No path rule can read an export
+                          list (Go has none; Python and Rust export by
+                          visibility), so the export list is COMPUTED instead:
+                          ci.yml's non-blocking `api-surface` job runs one
+                          pinned tool per binding (scripts/api-surface.py's
+                          header names them, and why each is trusted not to
+                          run anything of the head), merge base against
+                          head, and a touch of a binding's source is
+                          protected only while that binding's verdict is not
+                          `changed=false`. An exported ADDITION is a change.
+  the SECURITY CARVE-OUT  inside those trees but UNCONDITIONAL, whatever the
+                          verdict: go/chtypes/{fetch_sign,fetch,registry_path,
+                          multiversion,resolve}.go, python/src/chtypes/{_ed25519,
+                          fetch,_manifest,registry}.py, ts/src/{fetch,
+                          registry}.ts, rust/src/fetch/**, rust/src/digest.rs,
+                          rust/src/registry.rs — the fetch chain (the ed25519
+                          signature, each tarball's sha256, the lock pin, the
+                          trusted keys and the allow-unsigned switch) and the
+                          load-time checks (library_bytes on every load, the
+                          opt-in sha256 re-hash). Derived by VERIFICATION_NEEDLES
+                          (the primitives and trust anchors, never names a
+                          re-export also carries), and `--check-carve-out`,
+                          run by the required `abi` job, derives it again
+                          from the tree on every pull request.
+  rust/build.rs           not source by path, but code cargo RUNS on every
+                          build — a consumer's, and the api-surface job's,
+                          whose log the conditional entries above trust.
+                          None exists today.
   go/go.mod, go/go.sum, python/pyproject.toml, python/uv.lock,
   ts/package.json, ts/pnpm-lock.yaml, ts/pnpm-workspace.yaml,
   rust/Cargo.toml, rust/Cargo.lock, RELEASING.md
@@ -221,12 +282,8 @@ runner, `pnpm test` → `vitest run`) has no config file in this tree either.
 repository's workflows hardcodes `node-version: 22`; none reads
 `node-version-file`, so nothing here is sensitive to its contents.
 
-Signature/checksum verification code and each binding's embedded release
-public key already sit inside the binding-source or scripts globs above —
-confirmed by reading each, not assumed: go/chtypes/fetch_sign.go,
-python/src/chtypes/_ed25519.py, python/src/chtypes/fetch.py, ts/src/fetch.ts,
-rust/src/fetch/mod.rs, rust/src/fetch/release.rs, rust/src/fetch/trust.rs.
-scripts/lint-public.sh's one exemption (the literal `runner` segment in its
+scripts/fetch.sh, the shell fetch that also verifies release signatures, is
+inside scripts/**. scripts/lint-public.sh's one exemption (the literal `runner` segment in its
 LOCAL_PATH_PLACEHOLDERS allowlist) lives inside the script itself, so
 scripts/** already covers it; there is no exemption file outside that glob.
 
@@ -249,6 +306,27 @@ from disk and never executes, sources, imports or parses anything of the
 head: a head file's bytes (docs/support.md alone, and only when it is part of
 the diff) arrive from the contents API and are only compared with other
 bytes. The workflow checks out main, and main's code is all that runs.
+
+`test-counts` (chtypes#285 §1b) reads more than one file's bytes — up to five
+job LOGS per side — but the posture is identical: `gather_test_counts` reads
+each job's console output through the Actions API (`GET
+repos/{repo}/actions/jobs/{id}/logs`), a passive read of text GitHub's own
+runner already produced, and every line this file cares about is matched by
+regex (`parse_suite_counts`/`parse_golden_count`) against fixed integers,
+never executed, sourced, imported or otherwise interpreted as code. The job
+whose log is read is itself one `.github/**`/`scripts/**` cannot touch
+without tripping `protected` first (evaluated before `checks`, and
+`test-counts` sits after `checks`), so by the time a log is ever read, the
+scripts that produced it are provably main's own.
+
+The binding-source half of `protected` (chtypes#285 §1) reads one more log
+the same way — the `api-surface` job's — and only after the unconditional
+half has refused any pull request that touched `.github/**` or `scripts/**`,
+so the job that wrote it ran main's ci.yml and main's scripts/api-surface.py.
+Each verdict line is matched by a fixed regex at the start of a log line and
+must name the judged head's own sha, which no commit can contain in
+advance; scripts/api-surface.py's header says why nothing of the head runs in
+that job at all.
 
 ================================================================================
 REQUIRED_CHECKS, AND WHY IT IS PINNED HERE
@@ -282,6 +360,11 @@ from dataclasses import dataclass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CI_YML = os.path.join(ROOT, ".github", "workflows", "ci.yml")
+POLICY_YML = os.path.join(ROOT, ".github", "workflows", "policy-merge.yml")
+# The only permissions the merge-bot token may be minted with. The App itself
+# carries more (the artifact producer's branch updates need Workflows); the
+# SDK's mint must never ask for them.
+MINT_PERMISSIONS = {"permission-contents": "write", "permission-pull-requests": "write"}
 GUIDE_PATH = os.path.join(ROOT, "CONTRIBUTING.md")
 
 BASE_BRANCH = "main"
@@ -305,19 +388,37 @@ class ProtectedGlob:
     CONTRIBUTING.md block --check-guide verifies. `except_suffix`, when set,
     exempts a path the pattern would otherwise match if its filename ends
     with it (go/**/*.go except *_test.go: a test is not part of the public
-    API surface the glob exists to protect)."""
+    API surface the glob exists to protect).
+
+    `binding`, when set, makes the entry CONDITIONAL (chtypes#285 §1): it is
+    that binding's source tree, and a touch of it is protected only while the
+    `api-surface` verdict for that binding on the judged head is not
+    `changed=false` (api_surface_problems). Every entry without a `binding`
+    is protected unconditionally. `verification` marks an unconditional
+    entry as part of the SECURITY CARVE-OUT — signature and checksum
+    verification code and the embedded release key, inside a binding's
+    source tree but protected whatever its API verdict says;
+    `--check-carve-out` keeps those entries in step with the tree."""
 
     pattern: str
     reason: str
     except_suffix: str | None = None
+    binding: str | None = None
+    verification: bool = False
 
     def label(self) -> str:
-        if self.except_suffix:
-            return f"{self.pattern} (except *{self.except_suffix})"
-        return self.pattern
+        base = f"{self.pattern} (except *{self.except_suffix})" if self.except_suffix else self.pattern
+        if self.binding:
+            return f"{base} [unless the api-surface verdict for {self.binding} is changed=false]"
+        return base
 
     def guide_bullet(self) -> str:
         exc = f" (except `*{self.except_suffix}`)" if self.except_suffix else ""
+        if self.binding:
+            return (f"- `{self.pattern}`{exc} — {self.reason}; protected only while the `api-surface` verdict for "
+                    f"`{self.binding}` on the head is not `changed=false`")
+        if self.verification:
+            return f"- `{self.pattern}`{exc} — {self.reason}; security carve-out, protected whatever the API verdict"
         return f"- `{self.pattern}`{exc} — {self.reason}"
 
 
@@ -333,17 +434,69 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
                   "every gate a required check runs, this checker itself, and scripts/fetch.sh, which verifies "
                   "release signatures"),
     ProtectedGlob("include/**", "the frozen C ABI header"),
-    ProtectedGlob("go/**/*.go",
-                  "a binding's public API surface; Go has no export list to compute a narrower rule from, so v1 "
-                  "protects all non-test Go source",
-                  except_suffix="_test.go"),
-    ProtectedGlob("python/src/**",
-                  "a binding's public API surface; Python exports by visibility, not a list this checker can "
-                  "read, so v1 protects all of it"),
-    ProtectedGlob("ts/src/**",
-                  "a binding's public API surface; same reasoning as python/src/** — no export list to read"),
-    ProtectedGlob("rust/src/**",
-                  "a binding's public API surface; same reasoning as python/src/** — no export list to read"),
+    # Each binding's source tree, CONDITIONAL since chtypes#285 §1: a touch
+    # is refused only while the `api-surface` job's verdict for that binding
+    # on the judged head is not `changed=false` (an exported addition, a
+    # removal or a signature change, or no readable verdict at all).
+    ProtectedGlob("go/**/*.go", "go binding source (the exported API is computed by apidiff)",
+                  except_suffix="_test.go", binding="go"),
+    ProtectedGlob("python/src/**", "python binding source (the public API is computed from griffe's model)",
+                  binding="python"),
+    ProtectedGlob("ts/src/**", "ts binding source (the exported API is computed by api-extractor)", binding="ts"),
+    ProtectedGlob("rust/src/**", "rust binding source (the public API is computed by cargo-public-api)",
+                  binding="rust"),
+    # THE SECURITY CARVE-OUT (chtypes#285 §1): signature and checksum
+    # verification code, the trust policy and the embedded release key sit
+    # inside the binding-source globs above but stay protected
+    # UNCONDITIONALLY — an unchanged API says nothing about whether a
+    # verification still verifies. Derived by grepping each binding for its
+    # verification primitives and trust anchors (VERIFICATION_NEEDLES, below),
+    # and `--check-carve-out` fails when a file the needles hit is not covered
+    # here, or an entry here no longer exists — so this list cannot silently
+    # go stale when code moves.
+    ProtectedGlob("go/chtypes/fetch_sign.go",
+                  "the embedded release public key and the ed25519 signature check", verification=True),
+    ProtectedGlob("go/chtypes/fetch.go",
+                  "the fetch chain: the signature-check call, every tarball's sha256 against SHA256SUMS, the lock "
+                  "pin, the trusted-keys and allow-unsigned options", verification=True),
+    ProtectedGlob("go/chtypes/registry_path.go",
+                  "names the CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED variables the trust policy reads",
+                  verification=True),
+    ProtectedGlob("go/chtypes/multiversion.go",
+                  "load-time verification: the library_bytes size check on every load and the "
+                  "WithVerifyChecksums sha256 re-hash", verification=True),
+    ProtectedGlob("go/chtypes/resolve.go",
+                  "exact-patch resolution's load path, which runs the same load-time verification",
+                  verification=True),
+    ProtectedGlob("python/src/chtypes/_ed25519.py", "the ed25519 signature check itself", verification=True),
+    ProtectedGlob("python/src/chtypes/fetch.py",
+                  "the embedded release public key, the trust policy, and the fetch chain's signature and sha256 "
+                  "checks", verification=True),
+    ProtectedGlob("python/src/chtypes/_manifest.py",
+                  "load-time verification: check_library_bytes and verify_library's sha256 re-hash",
+                  verification=True),
+    ProtectedGlob("python/src/chtypes/registry.py",
+                  "calls the load-time verification on every load (verify_hashes)", verification=True),
+    ProtectedGlob("ts/src/fetch.ts",
+                  "the embedded release public keys, the trust policy, and the fetch chain's signature and sha256 "
+                  "checks", verification=True),
+    ProtectedGlob("ts/src/registry.ts",
+                  "load-time verification: checkLibraryBytes on every load and the verifyChecksums sha256 re-hash",
+                  verification=True),
+    ProtectedGlob("rust/src/fetch/**",
+                  "the embedded release public key, the trust policy, the signature check, the sha256 checks and "
+                  "the lock pin", verification=True),
+    ProtectedGlob("rust/src/digest.rs", "the sha256 helper every checksum check hashes with", verification=True),
+    ProtectedGlob("rust/src/registry.rs",
+                  "load-time verification: the library_bytes size check and the verify_checksums sha256 re-hash",
+                  verification=True),
+    # Not binding source by path, but code: cargo finds and RUNS a build
+    # script at the crate root on every build — on every consumer's machine,
+    # and inside the api-surface job, whose log the binding-source class
+    # above trusts. None exists today; adding one waits for a human.
+    ProtectedGlob("rust/build.rs",
+                  "a build script cargo runs on every build, consumers' and the api-surface job's alike (none "
+                  "exists today)"),
     ProtectedGlob("go/go.mod", "a release input: the Go module's own manifest"),
     ProtectedGlob("go/go.sum",
                   "a release input: the Go module's dependency lockfile (not yet present in this tree; "
@@ -382,12 +535,30 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("docs/divergences.json",
                   "the machine-checkable register of known divergences the divergences job reads; an allowlist "
                   "that excuses a result"),
+    # Tool configuration a pull request could ADD, at any depth (#322). None
+    # of these exists today; once binding source can merge itself on an
+    # unchanged API verdict, adding one beside a harmless source change would
+    # otherwise reconfigure a required job and merge with it.
+    ProtectedGlob("**/.cargo/**", "cargo configuration (source replacement, rustflags) the required rust job would read"),
+    ProtectedGlob("**/rust-toolchain*", "selects the Rust toolchain the required rust job resolves"),
+    ProtectedGlob("**/.npmrc", "npm registry and token configuration the required ts job would read"),
+    ProtectedGlob("**/go.work*", "a Go workspace file that redirects module resolution in the required go job"),
+    ProtectedGlob("**/.python-version", "selects the Python interpreter the required python job resolves"),
+    ProtectedGlob("**/pip.conf", "pip index and source configuration a Python install would read"),
+    ProtectedGlob("**/.yarnrc*", "yarn registry configuration a Node install would read"),
+    ProtectedGlob("**/bunfig.toml", "bun registry configuration a Node install would read"),
 )
 
 # --check-ci-names on this file's own PROTECTED_GLOBS: the two wildcard
 # shapes PROTECTED_GLOBS actually uses, each anchored to the whole pattern.
 _TRAILING_DOUBLE_STAR = re.compile(r"^(?P<dir>[\w./-]+)/\*\*$")
 _MIDDLE_DOUBLE_STAR = re.compile(r"^(?P<dir>[\w./-]+)/\*\*/\*(?P<ext>\.[\w.]+)$")
+# Any-depth shapes for tool configuration a PR could ADD anywhere (#322):
+# '**/NAME' or '**/NAME*' matches the file NAME (or any name starting with
+# it) in any directory, the repository root included; '**/DIR/**' matches
+# anything under a directory named DIR at any depth.
+_ANY_DEPTH_NAME = re.compile(r"^\*\*/(?P<name>[\w.-]+)(?P<prefix>\*)?$")
+_ANY_DEPTH_DIR = re.compile(r"^\*\*/(?P<seg>[\w.-]+)/\*\*$")
 
 
 def _match_protected(pattern: str, path: str) -> bool:
@@ -404,7 +575,10 @@ def _match_protected(pattern: str, path: str) -> bool:
         any number of path segments — including zero — in between. This is
         what makes go/**/*.go match go/x.go as well as go/a/b/x.go, and
         match neither gofoo/x.go (no '/' after the 'go' segment) nor
-        go/x.txt (wrong suffix)."""
+        go/x.txt (wrong suffix).
+      - '**/NAME' / '**/NAME*': the file's own name is NAME (or starts with
+        NAME), in any directory including the root.
+      - '**/DIR/**': some directory segment of `path` is DIR."""
     if "*" not in pattern:
         return path == pattern
     m = _TRAILING_DOUBLE_STAR.match(pattern)
@@ -415,34 +589,268 @@ def _match_protected(pattern: str, path: str) -> bool:
     if m:
         prefix, suffix = m["dir"] + "/", m["ext"]
         return path.startswith(prefix) and path.endswith(suffix)
+    m = _ANY_DEPTH_DIR.match(pattern)
+    if m:
+        return m["seg"] in path.split("/")[:-1]
+    m = _ANY_DEPTH_NAME.match(pattern)
+    if m:
+        base = path.rsplit("/", 1)[-1]
+        return base.startswith(m["name"]) if m["prefix"] else base == m["name"]
     raise ValueError(f"unsupported glob shape in PROTECTED_GLOBS: {pattern!r}; extend _match_protected first")
 
 
+def _covers(g: ProtectedGlob, path: str) -> bool:
+    return _match_protected(g.pattern, path) and not (g.except_suffix and path.endswith(g.except_suffix))
+
+
 def is_protected(path: str) -> ProtectedGlob | None:
-    """The first PROTECTED_GLOBS entry that covers `path`, or None."""
+    """The first UNCONDITIONAL PROTECTED_GLOBS entry that covers `path`, or
+    None. A binding-source entry is never returned here: whether a touch of
+    one is protected depends on that binding's api-surface verdict, which
+    binding_of() and api_surface_problems() decide."""
     for g in PROTECTED_GLOBS:
-        if _match_protected(g.pattern, path) and not (g.except_suffix and path.endswith(g.except_suffix)):
+        if g.binding is None and _covers(g, path):
             return g
     return None
 
 
-def first_protected_touch(files: list[dict]) -> tuple[str, ProtectedGlob] | None:
-    """The first (path, glob) a pull request's file list touches that
-    PROTECTED_GLOBS covers. Every file counts by its current path
-    (`filename`); a rename also counts by its OLD path (`previous_filename`)
-    — moving a protected file out from under its glob, or a file into one, is
-    a protected-class change either way. A deletion counts the same as any
-    other status: its `filename` is the path that no longer exists."""
-    for f in files:
-        for path in (f.get("filename"), f.get("previous_filename")):
-            if path:
-                hit = is_protected(path)
-                if hit is not None:
-                    return path, hit
+def binding_of(path: str) -> ProtectedGlob | None:
+    """The binding-source entry (a PROTECTED_GLOBS entry with `binding` set)
+    that covers `path`, or None. The ONE mapping from a path to a binding:
+    scripts/api-surface.py imports this function to decide which bindings a
+    diff touches, so the job that writes the verdicts and the checker that
+    reads them cannot disagree about which binding a file belongs to."""
+    for g in PROTECTED_GLOBS:
+        if g.binding is not None and _covers(g, path):
+            return g
     return None
 
 
-# ------------------------------------------------- the CONTRIBUTING.md guide
+# Every binding with a source-tree entry, in PROTECTED_GLOBS order.
+BINDINGS: tuple[str, ...] = tuple(g.binding for g in PROTECTED_GLOBS if g.binding is not None)
+
+
+def _touched_paths(files: list[dict]):
+    """Every path a pull request's file list touches: each file's current
+    path (`filename`) and, for a rename, its OLD path (`previous_filename`)
+    too — moving a file out from under a glob, or into one, is a change to
+    that glob's class either way. A deletion counts by its one path, the one
+    that no longer exists."""
+    for f in files:
+        for path in (f.get("filename"), f.get("previous_filename")):
+            if path:
+                yield path
+
+
+def first_protected_touch(files: list[dict]) -> tuple[str, ProtectedGlob] | None:
+    """The first (path, glob) a pull request's file list touches that an
+    UNCONDITIONAL PROTECTED_GLOBS entry covers (rename and deletion handling:
+    _touched_paths)."""
+    for path in _touched_paths(files):
+        hit = is_protected(path)
+        if hit is not None:
+            return path, hit
+    return None
+
+
+def touched_bindings(files: list[dict]) -> dict[str, str]:
+    """binding -> the first touched path of that binding's source tree, for
+    every binding whose source the pull request touches (rename and deletion
+    handling: _touched_paths)."""
+    touched: dict[str, str] = {}
+    for path in _touched_paths(files):
+        g = binding_of(path)
+        if g is not None and g.binding not in touched:
+            touched[g.binding] = path
+    return touched
+
+
+# ------------------------------------------------------- test/fixture paths
+#
+# chtypes#285 §1b: which pull requests the `test-counts` condition even looks
+# at. Derived from a sweep of this tree's own layout (`git ls-files` for
+# every path segment named tests?/fixtures?, plus *_test.go/.test.ts), not
+# guessed — the same discipline PROTECTED_GLOBS' own sweep used.
+
+_TEST_PATH_PREFIXES = ("python/tests/", "ts/test/", "rust/tests/", "tests/fixtures/")
+
+
+def is_test_or_fixture_path(path: str) -> bool:
+    """Whether `path` is a test-or-fixture input the `test-counts` condition
+    (chtypes#285 §1b) cares about:
+      - `go/**/*_test.go` — the exact *_test.go exception PROTECTED_GLOBS'
+        own `go/**/*.go` entry already carves out of the protected API
+        surface (go/cmd/chtypes/main_test.go included: it is a plain suffix
+        check, not anchored to go/chtypes/);
+      - `python/tests/**`, `ts/test/**`, `rust/tests/**` — each binding's own
+        suite;
+      - `tests/fixtures/**` — the fetch fixtures every binding's fetch suite
+        reads (docs/guides/fetch.md §9). The fixture-reading TEST files
+        themselves (go/chtypes/fetch_fixtures_test.go,
+        ts/test/fixture-revision.ts, and their python/rust counterparts)
+        already match one of the rules above; this entry is for the fixture
+        DATA under tests/fixtures/ itself.
+    `tests/parity/manifest.json` is deliberately NOT one of these: it is
+    already a PROTECTED_GLOBS entry (the cross-binding parity contract, a
+    threat this condition does not need to duplicate) — a pull request may
+    not touch it and merge itself at all, so `test-counts` never gets a
+    chance to look at it either way."""
+    if path.startswith("go/") and path.endswith("_test.go"):
+        return True
+    return path.startswith(_TEST_PATH_PREFIXES)
+
+
+def touches_test_or_fixture_path(files: list[dict]) -> bool:
+    """Whether ANY file the pull request touches — its current path, or for a
+    rename its old path too — is a test or fixture path (same rename/deletion
+    handling as first_protected_touch: a file moved OUT of a test directory,
+    or a deleted test file, can drop a suite's count same as a weakened one,
+    so both paths of a rename count, and a deletion counts by its one path)."""
+    for f in files:
+        for path in (f.get("filename"), f.get("previous_filename")):
+            if path and is_test_or_fixture_path(path):
+                return True
+    return False
+
+
+# ---------------------------------------------------- api-surface (chtypes#285 §1)
+#
+# ci.yml's non-blocking `api-surface` job (scripts/api-surface.py) prints one
+# verdict line per touched binding into its own job LOG, and this reads that
+# log the way `test-counts` reads its counts: a check run's output fields are
+# null for an Actions job (measured; see gather_test_counts), so the console
+# log is the one channel a read-only token can read. The job stays green for
+# any genuine verdict, so a deliberate API change is not shown red; this
+# file, not the job's color, is what turns `changed=true` into "wait for a
+# human".
+
+API_SURFACE_CHECK = "api-surface — every touched binding's exported API, merge base against head (report only)"
+API_SURFACE_PREFIX = "chtypes-api-surface"
+
+
+def api_surface_line(binding: str, head_sha: str, changed: str) -> str:
+    """The one verdict line scripts/api-surface.py prints per touched binding
+    — defined here, ONCE, and imported by that script, so the writer and
+    parse_api_surface (the reader) cannot drift apart. `changed` is `true`,
+    `false` or `error`; only `false` ever unprotects anything."""
+    return f"{API_SURFACE_PREFIX} binding={binding} head={head_sha} changed={changed}"
+
+
+# A verdict starts its log line: GitHub prefixes every line with its own ISO
+# timestamp (and the first line of a log with a byte-order mark), so the
+# optional prefix is exactly that and nothing else. A tool's output that
+# merely CONTAINS the text — a compiler warning quoting it, say — is not a
+# verdict.
+_API_VERDICT_RE = re.compile(r"^\ufeff?(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z )?"
+                             + re.escape(API_SURFACE_PREFIX)
+                             + r" binding=(\S+) head=(\S+) changed=(\S*)[ \t]*\r?$", re.M)
+
+
+def parse_api_surface(log_text: str, head_sha: str) -> dict[str, list[str]]:
+    """binding -> every `changed=` value the job log carries for `head_sha`,
+    in log order. A line naming any other head is not a verdict about this
+    one (a re-run on a moved head, a merge-group run), and a commit cannot
+    name its own sha in advance, so nothing in the judged tree can print a
+    line that passes for this head's verdict."""
+    out: dict[str, list[str]] = {}
+    for m in _API_VERDICT_RE.finditer(log_text):
+        if m.group(2) == head_sha:
+            out.setdefault(m.group(1), []).append(m.group(3))
+    return out
+
+
+def api_surface_problems(touched: dict[str, str], verdicts: dict[str, list[str]]) -> list[str]:
+    """Why each touched binding's source is still protected. Unchanged needs
+    at least one verdict line for that binding on the judged head and EVERY
+    such line exactly `false`: a missing verdict, `true`, `error` and
+    anything unparseable all count as changed, and a second line can only
+    add doubt, never remove it. An untouched binding needs no verdict."""
+    problems = []
+    for binding, path in touched.items():
+        values = verdicts.get(binding) or []
+        glob = binding_of(path)
+        where = f"{path} is {binding} binding source (`{glob.pattern if glob else '?'}`)"
+        if not values:
+            problems.append(f"{where} and the api-surface job printed no verdict for {binding} on this head — "
+                            "a missing verdict counts as changed")
+        elif any(v != "false" for v in values):
+            seen = "/".join(sorted({v or "<empty>" for v in values if v != "false"}))
+            problems.append(f"{where} and the api-surface verdict for {binding} on this head is changed={seen} — "
+                            "an exported API change, or a tool that could not tell, waits for a human")
+    return problems
+
+
+def api_surface_job_problems(ci_text: str) -> list[str]:
+    """Why ci.yml's api-surface job is not what this file reads: no job
+    carries API_SURFACE_CHECK as its check-run name, or that job blocks
+    (it must carry job-level `continue-on-error: true`, so a deliberate API
+    change is never a red required check)."""
+    jobs = [j for j in ci_jobs(ci_text) if j.name == API_SURFACE_CHECK]
+    if not jobs:
+        return [f"no ci.yml job carries the check-run name {API_SURFACE_CHECK!r} this checker reads verdicts from"]
+    if any(j.blocking for j in jobs):
+        return [f"ci.yml's job {jobs[0].job_id} ({API_SURFACE_CHECK!r}) blocks; it must carry job-level "
+                "continue-on-error: true"]
+    return []
+
+
+# ------------------------------------------- the security carve-out's derivation
+#
+# What verification code and trust anchors look like in each binding — never
+# a list of names (a re-export of RELEASE_PUBLIC_KEY is not verification
+# code), always the primitive or the literal that does the work: a hash or
+# signature library, the release key's own 64-hex literal, the trust
+# policy's two environment variable names as whole string literals, and
+# each binding's load-time verification entry points. Measured against the
+# tree when this was written: the needles hit exactly the carve-out entries
+# above and nothing else.
+VERIFICATION_NEEDLES: dict[str, tuple[str, ...]] = {
+    "*": (r"[\"'][0-9a-fA-F]{64}[\"']", r"[\"']CHTYPES_TRUSTED_KEYS[\"']", r"[\"']CHTYPES_ALLOW_UNSIGNED[\"']"),
+    "go": (r'"crypto/ed25519"', r'"crypto/sha256"', r"\bfileSHA256\(", r"\bverifyArtifactLibrary\(",
+           r"\bcheckLibraryBytes\("),
+    "python": (r"\bimport hashlib\b", r"\bfrom hashlib import\b", r"\b_ed25519\b", r"\bverify_library\(",
+               r"\bcheck_library_bytes\("),
+    "ts": (r"['\"]node:crypto['\"]", r"\bverifyChecksum\(", r"\bcheckLibraryBytes\("),
+    "rust": (r"\bsha2::", r"\bed25519_dalek\b", r"\bsha256_file\(", r"\bsha256_hex\(", r"\bverify_signature\("),
+}
+_COMMENT_PREFIXES = {"python": ("#",), "go": ("//", "/*", "*"), "ts": ("//", "/*", "*"), "rust": ("//", "/*", "*")}
+
+
+def verification_hits(binding: str, text: str) -> list[str]:
+    """Every VERIFICATION_NEEDLES pattern (the binding's own and the shared
+    ones) that matches a non-comment line of `text`. A full-line comment is
+    dropped first, so a comment that only DESCRIBES verification is not
+    verification code."""
+    code = "\n".join(line for line in text.splitlines()
+                     if not line.lstrip().startswith(_COMMENT_PREFIXES[binding]))
+    return [p for p in VERIFICATION_NEEDLES["*"] + VERIFICATION_NEEDLES[binding] if re.search(p, code)]
+
+
+def carve_out_problems(sources: dict[str, str]) -> list[str]:
+    """Every way the carve-out entries in PROTECTED_GLOBS disagree with
+    `sources` (path -> text, every tracked file of every binding's source
+    tree): a file the needles hit that no carve-out entry covers — the
+    verification code moved, or new code grew — and a carve-out entry that
+    covers no file at all — it moved away. A pure function of the text, so
+    the selftest drives it from fabricated trees."""
+    problems = []
+    carve_outs = [g for g in PROTECTED_GLOBS if g.verification]
+    for path, text in sorted(sources.items()):
+        g = binding_of(path)
+        if g is None:
+            continue
+        hits = verification_hits(g.binding, text)
+        if hits and not any(_covers(c, path) for c in carve_outs):
+            problems.append(f"{path} matches the verification needle {hits[0]!r} but no carve-out entry covers it; "
+                            "add it to PROTECTED_GLOBS with verification=True")
+    for c in carve_outs:
+        if not any(_covers(c, p) for p in sources):
+            problems.append(f"the carve-out entry `{c.pattern}` covers no file in the tree; the code moved — find "
+                            "where and update the entry")
+    return problems
+
+
+# ------------------------------------------------------- the CONTRIBUTING.md guide
 
 
 GUIDE_BLOCK_START = ("<!-- BEGIN policy-merge protected globs (generated by "
@@ -510,12 +918,42 @@ REQUIRED_CHECKS = (
 # a check run of the same name from any other app satisfies nothing.
 REQUIRED_CHECK_APP = "github-actions"
 
+# ---------------------------------------------------- test-counts (chtypes#285 §1b)
+#
+# Which check-run name to read each `chtypes-count` line from. Four suites,
+# each printed from TWO jobs (its own no-artifact job, and the `artifacts`
+# job's own step for that suite — see scripts/check-suite.sh and
+# scripts/lib/standalone_census.py, which print the line), plus the
+# golden-case count, sourced from wherever the goldens are already counted
+# TODAY (the `artifacts` job's go step — see standalone_census.py's own
+# docstring). The four `-artifacts` labels and `GOLDEN_LABEL` share ONE check
+# name because all five lines are printed by steps inside that SAME job — one
+# job log read serves all five, not five separate ones.
+_ARTIFACTS_CHECK = "artifacts — published lines, linux-amd64, every suite runs the golden set"
+SUITE_CHECK_NAME: dict[str, str] = {
+    "go-no-artifacts": "go — build, vet, standalone check (no artifacts)",
+    "python-no-artifacts": "python — ruff, import, suite (no artifacts)",
+    "ts-no-artifacts": "ts — build, typecheck, suite (no artifacts)",
+    "rust-no-artifacts": "rust — build, clippy, fmt, suite (no artifacts)",
+    "go-artifacts": _ARTIFACTS_CHECK,
+    "python-artifacts": _ARTIFACTS_CHECK,
+    "ts-artifacts": _ARTIFACTS_CHECK,
+    "rust-artifacts": _ARTIFACTS_CHECK,
+}
+SUITE_LABELS: tuple[str, ...] = tuple(SUITE_CHECK_NAME)
+GOLDEN_LABEL = "golden-cases"
+GOLDEN_CHECK_NAME = _ARTIFACTS_CHECK
+
 CONDITIONS = {
     "fork": "condition 1, the head is a branch of this repository",
     "pull-request": "one open, non-draft pull request against main carries the commit",
     "stale": "the head is still the commit ci judged",
-    "protected": "condition 5, no touched file (current or, for a rename, old path) matches a protected glob",
+    "protected": "condition 5, no touched file (current or, for a rename, old path) matches a protected glob, "
+                 "and every touched binding's source has an api-surface verdict of changed=false on the head",
     "checks": "condition 2, every required check passed",
+    "test-counts": "condition 7 (chtypes#285 §1b), only when the diff touches a test or fixture path: no "
+                   "suite's executed-test count, and no golden-case count, fell below main's last green ci "
+                   "push run",
     "mergeable": "GitHub reports no merge conflict",
     "review": "condition 4, no requested changes and no review conversation",
     "bytes": "condition 6, docs/support.md — when touched — is main's own regeneration byte for byte",
@@ -579,15 +1017,68 @@ def first_difference(a: bytes, b: bytes) -> tuple[int, int]:
     return i, a[:i].count(b"\n") + 1
 
 
+@dataclass(frozen=True)
+class TestCountFacts:
+    """Everything `test_count_problems` needs, already fetched. `head`/`main`
+    map a SUITE_LABELS entry to (ran, skipped); a label absent from a dict is
+    exactly a missing count (see gather_test_counts). Empty dicts and None
+    golden counts are the correct, zero-API-call value for a pull request
+    that does not touch a test or fixture path — `decide()` never even looks
+    at this unless `touches_test_or_fixture_path(files)` is true."""
+    head: dict[str, tuple[int, int]]
+    main: dict[str, tuple[int, int]]
+    head_golden: int | None
+    main_golden: int | None
+
+
+def test_count_problems(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]],
+                        head_golden: int | None, main_golden: int | None) -> list[str]:
+    """Every way chtypes#285 §1b's rule fails: a suite's (or the golden set's)
+    executed-test count on the head is lower than main's last green `ci` push
+    run, checked PER SUITE, never summed — one suite dropping is a refusal
+    even while another rises. Only the `ran` half of each pair is compared:
+    skips are printed for a human but never compared directly, because a test
+    that moved from ran to skipped has ALREADY dropped `ran` by exactly one —
+    comparing skip counts too would not catch anything `ran` does not already
+    catch, and would give a rising skip count (new tests deliberately added
+    as skip-when-no-registry, say) a second, spurious way to refuse. A count
+    missing from either dict — gather_test_counts never put a line there
+    because the job produced none, or a parse found nothing — is a drop,
+    never 'unchanged'."""
+    problems = []
+    for label in SUITE_LABELS:
+        h, m = head.get(label), main.get(label)
+        if h is None or m is None:
+            problems.append(f"{label}: {'no' if h is None else 'a'} count on the head, "
+                            f"{'no' if m is None else 'a'} count on main's last green ci push — a missing "
+                            "count is a drop")
+            continue
+        if h[0] < m[0]:
+            problems.append(f"{label}: ran {h[0]}, main's last green ci push ran {m[0]}")
+    if head_golden is None or main_golden is None:
+        problems.append(f"{GOLDEN_LABEL}: {'no' if head_golden is None else 'a'} count on the head, "
+                        f"{'no' if main_golden is None else 'a'} count on main's last green ci push — a "
+                        "missing count is a drop")
+    elif head_golden < main_golden:
+        problems.append(f"{GOLDEN_LABEL}: checked {head_golden}, main's last green ci push checked {main_golden}")
+    return problems
+
+
 def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: dict,
            files: list[dict], check_runs: list[dict], reviews: list[dict],
            review_comments: list[dict], head_bytes: dict[str, bytes] | None = None,
-           regenerated: dict[str, bytes] | None = None,
+           regenerated: dict[str, bytes] | None = None, test_counts: TestCountFacts | None = None,
+           api_verdicts: dict[str, list[str]] | None = None,
            required: tuple[str, ...] = REQUIRED_CHECKS) -> Refusal | None:
     """The first condition that fails, or None when every condition holds.
     With `regenerated` None (the gate), the byte HALF of condition 6 is not
     checked — but a docs/support.md that was added, deleted or renamed rather
-    than modified is still refused at gate time; that much is pure API data."""
+    than modified is still refused at gate time; that much is pure API data.
+    `test_counts` has no such split: gather_test_counts reads everything
+    condition 7 needs (job logs, never a head file) up front, so both `gate`
+    and `enqueue` check it fully. `api_verdicts` (gather_api_verdicts, the
+    api-surface job's log for this head) is the same: None or {} is no
+    verdict at all, which keeps every touched binding's source protected."""
     # fork (condition 1)
     if run_head_repo is not None and run_head_repo != repo:
         return Refusal("fork", f"the ci run's head is in {run_head_repo or '<no repository>'}, not {repo}")
@@ -620,12 +1111,33 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
     if touch is not None:
         path, glob = touch
         return Refusal("protected", f"{path} matches the protected glob `{glob.pattern}` ({glob.reason})")
+    # The binding-source class (chtypes#285 §1), still condition 5 and still
+    # before `checks`: the api-surface verdicts it reads were written by the
+    # pull request's own copy of ci.yml and scripts/, which the unconditional
+    # check above has just shown to be main's.
+    problems = api_surface_problems(touched_bindings(files), api_verdicts or {})
+    if problems:
+        more = f"; and {len(problems) - 2} more" if len(problems) > 2 else ""
+        return Refusal("protected", "; ".join(problems[:2]) + more)
 
     # checks (condition 2)
     problems = check_run_problems(check_runs, required)
     if problems:
         more = f"; and {len(problems) - 3} more" if len(problems) > 3 else ""
         return Refusal("checks", "; ".join(problems[:3]) + more)
+
+    # test-counts (condition 7, chtypes#285 §1b) — only when the diff touches
+    # a test or fixture path (is_test_or_fixture_path has the exact rule).
+    # Evaluated AFTER `checks` so a suite that is already red is reported as
+    # `checks`, never masked as a test-count drop; a pull request that
+    # touches no test or fixture path skips this at zero cost, both here and
+    # in gather_test_counts, which never reads a job log in that case.
+    if touches_test_or_fixture_path(files):
+        tc = test_counts or TestCountFacts(head={}, main={}, head_golden=None, main_golden=None)
+        problems = test_count_problems(tc.head, tc.main, tc.head_golden, tc.main_golden)
+        if problems:
+            more = f"; and {len(problems) - 3} more" if len(problems) > 3 else ""
+            return Refusal("test-counts", "; ".join(problems[:3]) + more)
 
     # mergeable
     if pr.get("mergeable") is False:
@@ -819,6 +1331,150 @@ def head_file(repo: str, path: str, sha: str) -> bytes:
     return decode_contents(gh_object(f"repos/{repo}/contents/{path}?ref={sha}"), path)
 
 
+# --------------------------------------------- test-counts (chtypes#285 §1b)
+#
+# A check run's own `output.summary` and `output.text` are NOT populated for
+# a GitHub-Actions-authored job — measured directly against a real run on
+# this repository (`gh api repos/.../check-runs/<id>` on a completed `go`
+# job: both fields came back null, `annotations_count` 1, and the one
+# annotation was GitHub's own runner-image deprecation notice, not anything a
+# workflow step wrote). So this reads the job's own LOG instead: `GET
+# repos/{repo}/actions/jobs/{job_id}/logs`, confirmed readable and returning
+# the full console output (`gh api ... --allow-escape-sequences`, the flag
+# `gh` requires for content that contains raw ANSI escapes — check-suite.sh's
+# `say()`/`note()` helpers print some — regardless of whether stdout is a
+# terminal; without it `gh` refuses the whole response rather than emitting
+# unsafe bytes, even into a redirected file). A check run's own `id` (already
+# in `check_runs`, from `commits/{sha}/check-runs`) IS the workflow job id —
+# also confirmed directly (`gh api repos/.../actions/jobs/<the check run's
+# id>` returned the same job, by name and run_id). Both endpoints need the
+# `actions: read` permission, which the `automerge` job does not otherwise
+# use; policy-merge.yml documents why it is safe to add: this reads the
+# ALREADY-COMPLETED run's own log text as data, through the API, exactly the
+# same pwn-request posture as the docs/support.md byte comparison — nothing
+# here executes, sources or parses-as-code anything of the head.
+_COUNT_RE = re.compile(r"chtypes-count suite=(\S+) ran=(\d+) skipped=(\d+)")
+_GOLDEN_COUNT_RE = re.compile(r"chtypes-count golden-cases=(\d+)")
+
+
+def parse_suite_counts(log_text: str) -> dict[str, tuple[int, int]]:
+    """Every `chtypes-count suite=<label> ran=<n> skipped=<n>` line in a
+    job's log text, keyed by label — the last line for a given label wins,
+    the same "several runs, take what actually happened" posture
+    check_run_problems applies to a re-run's check runs. A job log commonly
+    carries several labels at once: the `artifacts` job prints four (one per
+    suite step)."""
+    return {m.group(1): (int(m.group(2)), int(m.group(3))) for m in _COUNT_RE.finditer(log_text)}
+
+
+def parse_golden_count(log_text: str) -> int | None:
+    """The last `chtypes-count golden-cases=<n>` line in a job's log text, or
+    None if it never printed one (a fetch failure before the go suite step
+    ran, an older log predating this feature, or — genuinely — the
+    no-artifact job's log, which never prints this line at all)."""
+    last = None
+    for m in _GOLDEN_COUNT_RE.finditer(log_text):
+        last = int(m.group(1))
+    return last
+
+
+def readable_job_ids(runs: list[dict]) -> dict[str, int]:
+    """Check-run (or job) name -> id, for only the runs that COMPLETED with
+    conclusion `success`. A skipped, failed or canceled job has no usable
+    count, and a skipped one has no log at all: GET .../jobs/{id}/logs
+    answers 404 for it (measured on #311's skipped `artifacts` job, which
+    turned this condition's read into an exit-2 error). Leaving such a job
+    out makes its suite a missing count, which test_count_problems refuses
+    loudly, never an error and never a pass."""
+    return {r["name"]: r["id"] for r in runs
+            if r.get("id") is not None and r.get("status") == "completed" and r.get("conclusion") == "success"}
+
+
+def job_log(repo: str, job_id: int) -> str:
+    return gh(["--allow-escape-sequences", f"repos/{repo}/actions/jobs/{job_id}/logs"],
+              f"GET actions/jobs/{job_id}/logs")
+
+
+def latest_green_push_jobs(repo: str) -> dict[str, int]:
+    """Check-run name -> job id, for `repo`'s most recent completed,
+    successful `push`-triggered run of `ci` on `main` — never a
+    `pull_request` run (judges one pull request) or a `merge_group` run
+    (judges the queue's own candidate combination): a `push` run is main's
+    own tip judging itself, which is what "main's last green ci push run"
+    means. Empty if none is found — a fresh repository, or immediately after
+    ci.yml itself first gained the `push` trigger — which test_count_problems
+    reads as every suite (and the golden count) being a missing count on the
+    main side, refusing rather than guessing."""
+    runs = gh_items(f"repos/{repo}/actions/workflows/ci.yml/runs?branch={BASE_BRANCH}&event=push&status=success"
+                    "&per_page=1", ".workflow_runs[]")
+    if not runs:
+        return {}
+    jobs = gh_items(f"repos/{repo}/actions/runs/{runs[0]['id']}/jobs?per_page=100", ".jobs[]")
+    return readable_job_ids(jobs)
+
+
+def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> TestCountFacts:
+    """The head's and main's chtypes-count facts, or four empty/None values
+    at ZERO API cost when the diff does not touch a test or fixture path —
+    `decide()` would ignore them either way, but there is no reason to read
+    five job logs twice over for a pull request this condition never looks
+    at."""
+    if not touches_test_or_fixture_path(files):
+        return TestCountFacts(head={}, main={}, head_golden=None, main_golden=None)
+    head_job_id = readable_job_ids(check_runs)
+    main_job_id = latest_green_push_jobs(repo)
+
+    def read(job_id_by_name: dict[str, int]) -> tuple[dict[str, tuple[int, int]], int | None]:
+        counts: dict[str, tuple[int, int]] = {}
+        logs: dict[int, str] = {}
+
+        def log_of(job_id: int) -> str:
+            if job_id not in logs:
+                logs[job_id] = job_log(repo, job_id)
+            return logs[job_id]
+
+        for label, check_name in SUITE_CHECK_NAME.items():
+            job_id = job_id_by_name.get(check_name)
+            if job_id is None:
+                continue
+            found = parse_suite_counts(log_of(job_id)).get(label)
+            if found is not None:
+                counts[label] = found
+        golden_job_id = job_id_by_name.get(GOLDEN_CHECK_NAME)
+        golden = parse_golden_count(log_of(golden_job_id)) if golden_job_id is not None else None
+        return counts, golden
+
+    head_counts, head_golden = read(head_job_id)
+    main_counts, main_golden = read(main_job_id)
+    return TestCountFacts(head=head_counts, main=main_counts, head_golden=head_golden, main_golden=main_golden)
+
+
+def api_surface_job_id(check_runs: list[dict]) -> int | None:
+    """The api-surface job whose log may be read for verdicts: the GitHub
+    Actions check run named API_SURFACE_CHECK, only if it COMPLETED with
+    success (readable_job_ids). A skipped job has no log at all (404) and a
+    failed or canceled one may have stopped before printing a verdict, so
+    either is None here: a missing verdict, which keeps every touched
+    binding protected — never an exit-2 error and never a pass. A tool that
+    fails makes the whole job red, so one broken tool holds every binding's
+    source for a human until it is fixed; that is the fail-closed side."""
+    runs = [r for r in check_runs if (r.get("app") or {}).get("slug") == REQUIRED_CHECK_APP]
+    return readable_job_ids(runs).get(API_SURFACE_CHECK)
+
+
+def gather_api_verdicts(repo: str, files: list[dict], check_runs: list[dict], head_sha: str) -> dict[str, list[str]]:
+    """The api-surface verdicts for `head_sha`, read from that job's own log —
+    at ZERO API cost when the diff touches no binding source, or touches an
+    unconditionally protected file (decide() refuses that first, and reads
+    nothing it has not already shown to be main's)."""
+    if first_protected_touch(files) is not None or not touched_bindings(files):
+        return {}
+    job_id = api_surface_job_id(check_runs)
+    if job_id is None:
+        return {}
+    return parse_api_surface(job_log(repo, job_id), head_sha)
+
+
 @dataclass(frozen=True)
 class EnqueuePlan:
     """What `cmd_enqueue` should do once `decide()` has passed: either
@@ -840,6 +1496,32 @@ def build_enqueue_plan(pr: dict, head_sha: str, dry_run: bool) -> EnqueuePlan:
     if not node_id:
         raise ValueError("the pull request object carries no node_id to enqueue")
     return EnqueuePlan(node_id=node_id, head_sha=head_sha, dry_run=dry_run)
+
+
+def handoff_outputs(plan: EnqueuePlan, number: int) -> dict[str, str]:
+    """The step outputs that hand a judged pull request to the `enqueue` job,
+    which holds the App token and does nothing else (BUILT-IN TOKEN EVENTS
+    START NO WORKFLOW, below). A pure function, so --selftest proves the
+    judged node id and head sha are what is handed on."""
+    return {"enqueue": "1", "pr": str(number), "node_id": plan.node_id, "head_sha": plan.head_sha}
+
+
+_SHA40 = re.compile(r"[0-9a-f]{40}")
+_NODE_ID = re.compile(r"[A-Za-z0-9_=-]{1,200}")
+
+
+def bot_args_problem(node_id: str, head_sha: str, pr: str) -> str | None:
+    """Why `enqueue-as-bot`'s arguments cannot be what the judging job
+    handed on, or None. They arrive through job outputs; anything that is not
+    a node id, a 40-hex head sha and a pull request number is refused before
+    the App token is used."""
+    if not _NODE_ID.fullmatch(node_id or ""):
+        return f"--node-id {node_id!r} is not a GraphQL node id"
+    if not _SHA40.fullmatch(head_sha or ""):
+        return f"--head-sha {head_sha!r} is not a 40-hex commit sha"
+    if not (pr or "").isdigit():
+        return f"--pr {pr!r} is not a pull request number"
+    return None
 
 
 def enqueue_pull_request(node_id: str, head_sha: str) -> dict:
@@ -931,9 +1613,11 @@ def cmd_gate(args: argparse.Namespace) -> int:
             output(candidate=0)
             return refuse(refusal, f"commit {sha[:12]}")
     facts = gather(args.repo, number, sha)
+    test_counts = gather_test_counts(args.repo, facts.files, facts.check_runs)
+    api_verdicts = gather_api_verdicts(args.repo, facts.files, facts.check_runs, sha)
     refusal = decide(repo=args.repo, expected_head_sha=sha, run_head_repo=run_head_repo, pr=facts.pr,
                      files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
-                     review_comments=facts.review_comments)
+                     review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts)
     if refusal:
         output(candidate=0)
         return refuse(refusal, f"PR #{number} at {sha[:12]}")
@@ -961,9 +1645,11 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         return 2
     number, sha = args.pr, args.head_sha
     facts = gather(args.repo, number, sha)
+    test_counts = gather_test_counts(args.repo, facts.files, facts.check_runs)
+    api_verdicts = gather_api_verdicts(args.repo, facts.files, facts.check_runs, sha)
     judged = dict(repo=args.repo, expected_head_sha=sha, run_head_repo=args.run_head_repo or None, pr=facts.pr,
                   files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
-                  review_comments=facts.review_comments)
+                  review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts)
     # Every other condition first, fresh: a head that moved or vanished since
     # the gate is `stale`, never a failed read of its bytes. This IS the
     # primary defense against a moved head — see enqueue_pull_request()'s own
@@ -988,25 +1674,60 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         extra = f" (regenerated from main at {main_sha[:12]})" if touched_guarded else ""
         summary(f"policy-merge: DRY RUN. {where}: every condition holds{extra}; enqueuePullRequest was not called")
         return 0
-    try:
-        result = enqueue_pull_request(plan.node_id, plan.head_sha)
-    except ApiError:
-        # Deliberately not decoded into a friendly `stale` refusal here — see
-        # enqueue_pull_request()'s own docstring for why, and the module
-        # docstring's ENQUEUE, NOT MERGE section for what does catch a moved
-        # head (decide()'s `stale` condition, just above, already fresh).
-        raise
-    entry = ((result.get("data") or {}).get("enqueuePullRequest") or {}).get("mergeQueueEntry")
-    if not entry:
-        print(f"policy-merge-check: the enqueue mutation returned {result!r}", file=sys.stderr)
-        return 2
+    # The judging job never enqueues: an entry the built-in token enqueues
+    # gets no merge_group run of `ci` and stalls (BUILT-IN TOKEN EVENTS START
+    # NO WORKFLOW, above). It hands the judged node id and head sha to the
+    # `enqueue` job, which mints the App token and calls the mutation.
+    output(**handoff_outputs(plan, number))
     if touched_guarded:
-        summary(f"policy-merge: enqueued PR #{number} (head {sha}); {', '.join(touched_guarded)} at the head "
-                f"matched main's regeneration (main at {main_sha[:12]}) byte for byte before enqueueing — the "
-                "queue's own test of the merged combination is what happens next, not a re-check by this workflow")
+        summary(f"policy-merge: every condition holds for PR #{number} (head {sha}); {', '.join(touched_guarded)} at "
+                f"the head matched main's regeneration (main at {main_sha[:12]}) byte for byte; handed to the "
+                "enqueue job")
     else:
-        summary(f"policy-merge: enqueued PR #{number} (head {sha}); no guarded generated file was touched, so no "
-                "byte comparison was needed")
+        summary(f"policy-merge: every condition holds for PR #{number} (head {sha}); no guarded generated file was "
+                "touched; handed to the enqueue job")
+    return 0
+
+
+def mint_scope_problems(text: str) -> list[str]:
+    """Why policy-merge.yml's App-token mint is not scoped exactly as
+    MINT_PERMISSIONS says, or []. Reads the workflow's text: every
+    create-github-app-token step, its `permission-*` inputs, and that it sits
+    in a job whose environment is merge-bot."""
+    problems: list[str] = []
+    lines = text.splitlines()
+    steps = [i for i, l in enumerate(lines) if "actions/create-github-app-token@" in l]
+    if len(steps) != 1:
+        return [f"expected exactly one create-github-app-token step, found {len(steps)}"]
+    i = steps[0]
+    indent = len(lines[i]) - len(lines[i].lstrip(" -"))
+    found: dict[str, str] = {}
+    for l in lines[i + 1:]:
+        stripped = l.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if len(l) - len(l.lstrip(" ")) <= indent - 2 or stripped.startswith("- "):
+            break
+        m = re.fullmatch(r"(permission-[a-z-]+):\s*(\S+)", stripped)
+        if m:
+            found[m.group(1)] = m.group(2)
+    if found != MINT_PERMISSIONS:
+        problems.append(f"the mint asks for {found}, not exactly {MINT_PERMISSIONS}")
+    job_start = max((j for j in range(i) if re.fullmatch(r"  [a-z][a-z0-9_-]*:", lines[j])), default=None)
+    if job_start is None or not any(lines[k].strip() == "environment: merge-bot" for k in range(job_start, i)):
+        problems.append("the mint is not in a job whose environment is merge-bot")
+    return problems
+
+
+def cmd_check_mint_scope() -> int:
+    with open(POLICY_YML, encoding="utf-8") as f:
+        problems = mint_scope_problems(f.read())
+    if problems:
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
+        print("policy-merge-check: the merge-bot token mint is not scoped as MINT_PERMISSIONS says", file=sys.stderr)
+        return 1
+    print(f"policy-merge-check: ok, the merge-bot mint asks for exactly {MINT_PERMISSIONS} in the merge-bot job")
     return 0
 
 
@@ -1014,19 +1735,50 @@ def cmd_check_ci_names() -> int:
     with open(CI_YML, encoding="utf-8") as f:
         text = f.read()
     try:
-        problems = ci_name_problems(text, REQUIRED_CHECKS)
+        problems = ci_name_problems(text, REQUIRED_CHECKS) + api_surface_job_problems(text)
     except CiShapeError as e:
         print(f"policy-merge-check: {e}", file=sys.stderr)
         return 1
     if problems:
         for p in problems:
             print(f"  {p}", file=sys.stderr)
-        print(f"policy-merge-check: REQUIRED_CHECKS and ci.yml's blocking jobs disagree ({len(problems)}).\n"
-              "  Update REQUIRED_CHECKS in scripts/policy-merge-check.py in the same change, and ask an\n"
-              "  admin to update branch protection's required checks to match.", file=sys.stderr)
+        print(f"policy-merge-check: REQUIRED_CHECKS and ci.yml's blocking jobs disagree, or the api-surface job "
+              f"is not the non-blocking job this file reads ({len(problems)}).\n"
+              "  Update REQUIRED_CHECKS (or API_SURFACE_CHECK) in scripts/policy-merge-check.py in the same\n"
+              "  change, and ask an admin to update branch protection's required checks to match.", file=sys.stderr)
         return 1
     blocking = sum(1 for j in ci_jobs(text) if j.blocking)
-    print(f"policy-merge-check: ok, REQUIRED_CHECKS names exactly ci.yml's {blocking} blocking job(s)")
+    print(f"policy-merge-check: ok, REQUIRED_CHECKS names exactly ci.yml's {blocking} blocking job(s), and the "
+          "api-surface job is there and non-blocking")
+    return 0
+
+
+def tracked_binding_sources() -> dict[str, str]:
+    """path -> text for every tracked file of every binding's source tree,
+    read from THIS checkout (`git ls-files`). Run by ci.yml on the pull
+    request's own tree and by policy-merge.yml on main's; never on a head
+    that policy-merge is judging."""
+    out = subprocess.run(["git", "-C", ROOT, "ls-files", "-z"], capture_output=True, check=True).stdout
+    sources: dict[str, str] = {}
+    for path in out.decode("utf-8").split("\0"):
+        if path and binding_of(path) is not None:
+            with open(os.path.join(ROOT, path), encoding="utf-8", errors="replace") as f:
+                sources[path] = f.read()
+    return sources
+
+
+def cmd_check_carve_out() -> int:
+    sources = tracked_binding_sources()
+    problems = carve_out_problems(sources)
+    if problems:
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
+        print(f"policy-merge-check: the security carve-out in PROTECTED_GLOBS disagrees with the tree "
+              f"({len(problems)}). Verification code must stay protected whatever its API verdict.", file=sys.stderr)
+        return 1
+    covered = sorted(p for p in sources if any(g.verification and _covers(g, p) for g in PROTECTED_GLOBS))
+    print(f"policy-merge-check: ok, every binding file the verification needles hit is in the carve-out "
+          f"({len(covered)} file(s): {', '.join(covered)})")
     return 0
 
 
@@ -1125,6 +1877,17 @@ def _support_good() -> dict:
     return d
 
 
+ALL_SUITE_GOOD: dict[str, tuple[int, int]] = {label: (10, 0) for label in SUITE_LABELS}
+
+
+def _tc(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]],
+        head_golden: int | None = 1, main_golden: int | None = 1) -> TestCountFacts:
+    """A TestCountFacts for the selftest, defaulting the golden count to a
+    matching, non-zero (1, 1) so a case about the SUITE side never
+    incidentally also fails on the golden side, and vice versa."""
+    return TestCountFacts(head=head, main=main, head_golden=head_golden, main_golden=main_golden)
+
+
 def _sample_protected_path(g: ProtectedGlob) -> str:
     """A path _match_protected(g.pattern, ...) matches, derived from the
     pattern itself — never a hand-picked real file — so a new PROTECTED_GLOBS
@@ -1145,6 +1908,12 @@ def _sample_protected_path(g: ProtectedGlob) -> str:
     m = _MIDDLE_DOUBLE_STAR.match(g.pattern)
     if m:
         return f"{m['dir']}/__selftest_sample__{m['ext']}"
+    m = _ANY_DEPTH_DIR.match(g.pattern)
+    if m:
+        return f"__selftest_sample__/{m['seg']}/__selftest_sample__"
+    m = _ANY_DEPTH_NAME.match(g.pattern)
+    if m:
+        return f"__selftest_sample__/{m['name']}{'__selftest_sample__' if m['prefix'] else ''}"
     raise ValueError(f"selftest cannot derive a sample path for {g.pattern!r}")
 
 
@@ -1208,17 +1977,30 @@ def selftest() -> int:
                                  {"filename": "docs/reference/bindings.md", "status": "added"}])), None)
 
     # condition 5 — protected, driven from PROTECTED_GLOBS itself, never a
-    # hand-typed duplicate of it: every glob family refuses.
+    # hand-typed duplicate of it: every glob family refuses with no
+    # api-surface verdict at all; a binding-source sample passes with that
+    # binding's `changed=false`; every other entry — the security carve-out
+    # among them — still refuses with EVERY binding's `changed=false`.
+    all_unchanged = {b: ["false"] for b in BINDINGS}
     for g in PROTECTED_GLOBS:
         sample = _sample_protected_path(g)
-        expect(f"protected: {g.pattern}",
-               decide(**_with(pr=_pr(changed_files=1), files=[{"filename": sample, "status": "modified"}])),
-               "protected")
-    expect("a go test file is the *_test.go exception, not protected",
-           decide(**_with(files=[{"filename": "go/chtypes/client_test.go", "status": "modified"}])), None)
+        one = [{"filename": sample, "status": "modified"}]
+        expect(f"protected: {g.pattern}", decide(**_with(pr=_pr(changed_files=1), files=one)), "protected")
+        if g.binding is not None:
+            expect(f"binding source {g.pattern} with its own changed=false verdict passes",
+                   decide(**_with(files=one, api_verdicts={g.binding: ["false"]})), None)
+        else:
+            expect(f"{g.pattern} refuses whatever every binding's api-surface verdict says",
+                   decide(**_with(files=one, api_verdicts=dict(all_unchanged))), "protected")
+    expect("a go test file is the *_test.go exception, not protected (test-counts holds too)",
+           decide(**_with(files=[{"filename": "go/chtypes/client_test.go", "status": "modified"}],
+                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)))), None)
     expect("ts/biome.json alone (lint-ts's own config) is protected",
            decide(**_with(pr=_pr(changed_files=1), files=[{"filename": "ts/biome.json", "status": "modified"}])),
            "protected")
+    for added in ("rust-toolchain.toml", ".cargo/config.toml", "ts/.npmrc", "go.work"):
+        expect(f"ADDING {added} (tool configuration, #322) is protected",
+               decide(**_with(pr=_pr(changed_files=1), files=[{"filename": added, "status": "added"}])), "protected")
     expect("a rename whose OLD path was protected",
            decide(**_with(pr=_pr(changed_files=1),
                           files=[{"filename": "README.md", "status": "renamed",
@@ -1239,6 +2021,124 @@ def selftest() -> int:
            decide(**_with(check_runs=[], files=[{"filename": ".github/workflows/ci.yml", "status": "modified"}])),
            "protected")
 
+    # The binding-source class (chtypes#285 §1), driven through decide()'s
+    # own `api_verdicts` — and, where the question is what a log line means,
+    # through parse_api_surface on a fabricated job log, never a hand-set
+    # dict standing in for the parse.
+    go_src = [{"filename": "go/chtypes/transform.go", "status": "modified"}]
+
+    def log_of(*lines: str) -> str:
+        return "\ufeff" + "".join(f"2026-10-01T00:49:13.2543384Z {line}\n" for line in lines)
+
+    def verdicts(*lines: str, head: str = SHA) -> dict[str, list[str]]:
+        return parse_api_surface(log_of(*lines), head)
+
+    expect("api-surface: binding source with changed=false (parsed from a job log) passes",
+           decide(**_with(files=go_src, api_verdicts=verdicts(api_surface_line("go", SHA, "false")))), None)
+    expect("api-surface: changed=true refuses",
+           decide(**_with(files=go_src, api_verdicts=verdicts(api_surface_line("go", SHA, "true")))), "protected")
+    expect("api-surface: a missing verdict refuses (no api_verdicts at all)", decide(**_with(files=go_src)),
+           "protected")
+    expect("api-surface: a missing verdict refuses (a log with every binding but this one)",
+           decide(**_with(files=go_src, api_verdicts=verdicts(*(api_surface_line(b, SHA, "false")
+                                                                for b in BINDINGS if b != "go")))), "protected")
+    expect("api-surface: a tool-error verdict refuses",
+           decide(**_with(files=go_src, api_verdicts=verdicts(api_surface_line("go", SHA, "error")))), "protected")
+    for label, line in (("an empty value", api_surface_line("go", SHA, "")),
+                        ("a capitalized False", api_surface_line("go", SHA, "False")),
+                        ("a short head sha", api_surface_line("go", SHA[:12], "false")),
+                        ("a verdict quoted mid-line by a tool", "warning: x: " + api_surface_line("go", SHA, "false")),
+                        ("a verdict for another head", api_surface_line("go", OTHER_SHA, "false")),
+                        ("an untouched line", f"{API_SURFACE_PREFIX} binding=go head={SHA} untouched")):
+        expect(f"api-surface: an unparseable or foreign verdict refuses ({label})",
+               decide(**_with(files=go_src, api_verdicts=verdicts(line))), "protected")
+    expect("api-surface: a later changed=false never outweighs an earlier changed=true",
+           decide(**_with(files=go_src, api_verdicts=verdicts(api_surface_line("go", SHA, "true"),
+                                                             api_surface_line("go", SHA, "false")))), "protected")
+    two = [{"filename": "go/chtypes/transform.go", "status": "modified"},
+           {"filename": "rust/src/schema.rs", "status": "modified"}]
+    expect("api-surface: two bindings touched, only one verdict — refuses",
+           decide(**_with(pr=_pr(changed_files=2), files=two, api_verdicts={"go": ["false"]})), "protected")
+    expect("api-surface: two bindings touched, one changed — refuses",
+           decide(**_with(pr=_pr(changed_files=2), files=two, api_verdicts={"go": ["false"], "rust": ["true"]})),
+           "protected")
+    expect("api-surface: two bindings touched, both unchanged — passes",
+           decide(**_with(pr=_pr(changed_files=2), files=two, api_verdicts={"go": ["false"], "rust": ["false"]})),
+           None)
+    expect("api-surface: an untouched binding needs no verdict",
+           decide(**_with(files=[{"filename": "python/src/chtypes/results.py", "status": "modified"}],
+                          api_verdicts={"python": ["false"]})), None)
+    expect("api-surface: a rename out of a binding's source counts by its old path",
+           decide(**_with(files=[{"filename": "docs/__selftest_sample__", "status": "renamed",
+                                  "previous_filename": "ts/src/format.ts"}], api_verdicts={"go": ["false"]})),
+           "protected")
+    for g in PROTECTED_GLOBS:
+        if g.verification:
+            expect(f"api-surface: the carve-out {g.pattern} refuses even with its binding's changed=false",
+                   decide(**_with(files=[{"filename": _sample_protected_path(g), "status": "modified"}],
+                                  api_verdicts=dict(all_unchanged))), "protected")
+    expect("api-surface: rust/build.rs (a build script cargo runs) refuses whatever the verdict",
+           decide(**_with(files=[{"filename": "rust/build.rs", "status": "added"}], api_verdicts=dict(all_unchanged))),
+           "protected")
+    expect("api-surface: an unchanged API does not exempt the test-counts condition (a drop still refuses)",
+           decide(**_with(pr=_pr(changed_files=2),
+                          files=go_src + [{"filename": "go/chtypes/transform_test.go", "status": "modified"}],
+                          api_verdicts={"go": ["false"]},
+                          test_counts=_tc({**ALL_SUITE_GOOD, "go-no-artifacts": (9, 0)}, dict(ALL_SUITE_GOOD)))),
+           "test-counts")
+    expect("api-surface: an unchanged API and equal test counts pass together",
+           decide(**_with(pr=_pr(changed_files=2),
+                          files=go_src + [{"filename": "go/chtypes/transform_test.go", "status": "modified"}],
+                          api_verdicts={"go": ["false"]},
+                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)))), None)
+    if touched_bindings(two) != {"go": "go/chtypes/transform.go", "rust": "rust/src/schema.rs"}:
+        failures.append(f"touched_bindings: read {touched_bindings(two)!r}")
+    if binding_of("go/chtypes/transform_test.go") is not None or binding_of("python/tests/x.py") is not None:
+        failures.append("binding_of: a test file was read as binding source")
+
+    # ci.yml's api-surface job: present under the exact name this file reads,
+    # and non-blocking — derived from text, never a hand-set answer.
+    job = f'  surface:\n    name: "{API_SURFACE_CHECK}"\n    continue-on-error: true\n    runs-on: x\n'
+    if api_surface_job_problems(CI_GOOD + job):
+        failures.append(f"api_surface_job_problems: refused a non-blocking job: {api_surface_job_problems(CI_GOOD + job)}")
+    if not api_surface_job_problems(CI_GOOD + job.replace("continue-on-error: true", "continue-on-error: false")):
+        failures.append("api_surface_job_problems: accepted a BLOCKING api-surface job")
+    if not api_surface_job_problems(CI_GOOD):
+        failures.append("api_surface_job_problems: accepted a ci.yml with no api-surface job")
+
+    # The security carve-out's derivation, on fabricated trees: every entry
+    # present with a needle in it is clean; a needle in an uncovered file, a
+    # carve-out entry that covers nothing, and a needle only in a comment are
+    # each read the right way.
+    tree = {"go/chtypes/fetch_sign.go": 'import "crypto/ed25519"',
+            "go/chtypes/fetch.go": 'import "crypto/sha256"',
+            "go/chtypes/registry_path.go": 'envAllowUnsign = "CHTYPES_ALLOW_UNSIGNED"',
+            "go/chtypes/multiversion.go": "if err := checkLibraryBytes(path); err != nil {",
+            "go/chtypes/resolve.go": "if err := verifyArtifactLibrary(path); err != nil {",
+            "go/chtypes/transform.go": "package chtypes",
+            "python/src/chtypes/_ed25519.py": "import hashlib",
+            "python/src/chtypes/fetch.py": "from ._ed25519 import verify",
+            "python/src/chtypes/_manifest.py": "def verify_library(d):",
+            "python/src/chtypes/registry.py": "check_library_bytes(entry, manifest)",
+            "ts/src/fetch.ts": "import { createHash } from 'node:crypto';",
+            "ts/src/registry.ts": "verifyChecksum(libPath, manifest);",
+            "rust/src/fetch/trust.rs": "use ed25519_dalek::VerifyingKey;",
+            "rust/src/digest.rs": "use sha2::{Digest, Sha256};",
+            "rust/src/registry.rs": "let actual = crate::digest::sha256_file(&path);",
+            "rust/src/lib.rs": "pub mod fetch;"}
+    if carve_out_problems(tree):
+        failures.append(f"carve_out_problems: refused a tree that matches the carve-out: {carve_out_problems(tree)}")
+    if not carve_out_problems({**tree, "go/chtypes/sneaky.go": 'import "crypto/sha256"'}):
+        failures.append("carve_out_problems: a sha256 import in an uncovered Go file was not caught")
+    if not carve_out_problems({**tree, "ts/src/keys.ts": f"const K = '{'ab' * 32}';"}):
+        failures.append("carve_out_problems: a 64-hex key literal in an uncovered TS file was not caught")
+    if carve_out_problems({**tree, "go/chtypes/doc.go": '// we import "crypto/sha256" elsewhere'}):
+        failures.append("carve_out_problems: a needle inside a comment only was read as verification code")
+    if not carve_out_problems({k: v for k, v in tree.items() if k != "go/chtypes/fetch_sign.go"}):
+        failures.append("carve_out_problems: a carve-out entry covering no file was not caught")
+    if not carve_out_problems({k: v for k, v in tree.items() if not k.startswith("rust/src/fetch/")}):
+        failures.append("carve_out_problems: rust/src/fetch/** covering no file was not caught")
+
     # build_enqueue_plan — a pure function of facts already in hand, so
     # "enqueue is called with the judged head sha" and "dry run never calls
     # it" are provable without a network call (enqueue_pull_request itself,
@@ -1255,6 +2155,83 @@ def selftest() -> int:
         failures.append("build_enqueue_plan: a pull request object with no node_id was accepted")
     except ValueError:
         pass
+    # The hand-off to the App-token job carries exactly the judged node id
+    # and head sha, and enqueue-as-bot refuses anything else before the App
+    # token is used.
+    handed = handoff_outputs(plan, 7)
+    if handed != {"enqueue": "1", "pr": "7", "node_id": _good_pr()["node_id"], "head_sha": SHA}:
+        failures.append(f"handoff_outputs: did not hand on the judged node_id/head_sha: {handed!r}")
+    if bot_args_problem(_good_pr()["node_id"], SHA, "7") is not None:
+        failures.append("bot_args_problem: refused a well-formed node id, head sha and number")
+    good_yml = ("jobs:\n  enqueue:\n    environment: merge-bot\n    steps:\n"
+                "      - uses: actions/create-github-app-token@abc # v3\n        id: app\n        with:\n"
+                "          app-id: x\n          permission-contents: write\n          permission-pull-requests: write\n"
+                "      - name: next\n        run: true\n")
+    if mint_scope_problems(good_yml):
+        failures.append(f"mint_scope_problems: refused the exact scope: {mint_scope_problems(good_yml)}")
+    wider = good_yml.replace("          permission-pull-requests: write\n",
+                             "          permission-pull-requests: write\n          permission-workflows: write\n")
+    if not mint_scope_problems(wider):
+        failures.append("mint_scope_problems: accepted a mint that also asks for permission-workflows")
+    if not mint_scope_problems(good_yml.replace("          permission-contents: write\n", "")):
+        failures.append("mint_scope_problems: accepted a mint with no permission list (the App's full set)")
+    if not mint_scope_problems(good_yml.replace("    environment: merge-bot\n", "")):
+        failures.append("mint_scope_problems: accepted a mint outside the merge-bot environment")
+    # Tool configuration a PR could ADD is protected at any depth (#322).
+    for path, want in ((".cargo/config.toml", True), ("rust/.cargo/config.toml", True),
+                       ("rust-toolchain.toml", True), ("rust/rust-toolchain", True), (".npmrc", True),
+                       ("ts/.npmrc", True), ("go.work", True), ("go/go.work.sum", True), (".python-version", True),
+                       ("python/pip.conf", True), (".yarnrc.yml", True), ("ts/bunfig.toml", True),
+                       ("docs/__selftest_cargo_notes__", False), ("rust/src/npmrc_reader.rs", False),
+                       ("go/workflow.go", False), ("docs/__selftest_toolchain__", False)):
+        got = any(_covers(g, path) for g in PROTECTED_GLOBS if not g.binding)
+        if got != want:
+            failures.append(f"tool-config protection: {path!r} protected={got}, expected {want}")
+    try:
+        _match_protected("**/a/**/b", "a/x/b")
+        failures.append("_match_protected: accepted an unsupported glob shape instead of raising")
+    except ValueError:
+        pass
+    # A skipped / failed / unfinished job is never read for a
+    # count: a skipped job has no log (404), so reading it was an exit-2
+    # error on #311 instead of a refusal.
+    runs_mix = [_run("a"), _run("b", conclusion="skipped"), _run("c", conclusion="failure"),
+                _run("d", status="in_progress", conclusion=None)]
+    for i, r in enumerate(runs_mix):
+        r["id"] = 100 + i
+    if readable_job_ids(runs_mix) != {"a": 100}:
+        failures.append(f"readable_job_ids: kept a job that has no usable log: {readable_job_ids(runs_mix)!r}")
+    # The same rule for the api-surface job: a skipped, failed, timed-out or
+    # unfinished one is no job id at all — so gather_api_verdicts reads no
+    # log (no 404, no exit 2) and returns no verdict — and decide() then
+    # keeps the binding source protected. Only a successful run of the
+    # GitHub Actions app is read.
+    for label, run, want in (("succeeded", _run(API_SURFACE_CHECK), 900),
+                             ("skipped", _run(API_SURFACE_CHECK, conclusion="skipped"), None),
+                             ("failed", _run(API_SURFACE_CHECK, conclusion="failure"), None),
+                             ("timed out", _run(API_SURFACE_CHECK, conclusion="timed_out"), None),
+                             ("still running", _run(API_SURFACE_CHECK, status="in_progress", conclusion=None), None),
+                             ("from another app", _run(API_SURFACE_CHECK, app="someone-else"), None)):
+        run["id"] = 900
+        if api_surface_job_id(_checks(extra=[run])) != want:
+            failures.append(f"api_surface_job_id: an api-surface job that {label} gave "
+                            f"{api_surface_job_id(_checks(extra=[run]))!r}, not {want!r}")
+    if api_surface_job_id(_checks()) is not None:
+        failures.append("api_surface_job_id: found an api-surface job in check runs that carry none")
+    if gather_api_verdicts(REPO, [{"filename": "go/chtypes/transform.go"}],
+                           _checks(extra=[dict(_run(API_SURFACE_CHECK, conclusion="skipped"), id=901)]), SHA) != {}:
+        failures.append("gather_api_verdicts: a skipped api-surface job was read for a verdict")
+    expect("api-surface: a skipped job's (absent) verdict keeps binding source protected",
+           decide(**_with(files=[{"filename": "go/chtypes/transform.go", "status": "modified"}],
+                          check_runs=_checks(extra=[dict(_run(API_SURFACE_CHECK, conclusion="skipped"), id=901)]),
+                          api_verdicts=gather_api_verdicts(
+                              REPO, [{"filename": "go/chtypes/transform.go"}],
+                              _checks(extra=[dict(_run(API_SURFACE_CHECK, conclusion="skipped"), id=901)]), SHA))),
+           "protected")
+    for bad in ((_good_pr()["node_id"], "abc", "7"), (_good_pr()["node_id"], SHA.upper(), "7"),
+                ("", SHA, "7"), ("PR_x y", SHA, "7"), (_good_pr()["node_id"], SHA, "7; rm")):
+        if bot_args_problem(*bad) is None:
+            failures.append(f"bot_args_problem: accepted {bad!r}")
     # cmd_enqueue's own control flow is what makes "dry run never calls the
     # mutation" and "a moved head refuses before the mutation" true: the
     # dry-run branch returns before enqueue_pull_request() is ever
@@ -1321,6 +2298,83 @@ def selftest() -> int:
     expect("two runs of one required check, one failed",
            decide(**_with(check_runs=_checks(extra=[_run(required_one, conclusion="failure")]))), "checks")
     expect("no check runs at all", decide(**_with(check_runs=[])), "checks")
+
+    # test-counts (condition 7, chtypes#285 §1b) — driven directly through
+    # decide()'s own `test_counts` parameter, the same way condition 6 is
+    # driven through `head_bytes`/`regenerated` rather than a real job-log
+    # fetch: gather_test_counts (the network half) is not exercised here, on
+    # the same "a pure decision is what --selftest proves" principle as the
+    # rest of this file.
+    a_test_path = "python/tests/test_foo.py"
+    expect("test-counts: every suite (and the golden count) equal, a test path touched",
+           decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
+                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)))), None)
+    expect("test-counts: one suite rises, the rest equal, still passes",
+           decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
+                          test_counts=_tc({**ALL_SUITE_GOOD, "go-no-artifacts": (11, 0)},
+                                          dict(ALL_SUITE_GOOD)))), None)
+    expect("test-counts: a drop in one suite refuses even while another rises",
+           decide(**_with(files=[{"filename": "rust/tests/foo.rs", "status": "modified"}],
+                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-artifacts": (5, 0),
+                                           "go-no-artifacts": (99, 0)},
+                                          dict(ALL_SUITE_GOOD)))), "test-counts")
+    expect("test-counts: a count missing on the head refuses",
+           decide(**_with(files=[{"filename": "ts/test/foo.test.ts", "status": "modified"}],
+                          test_counts=_tc({k: v for k, v in ALL_SUITE_GOOD.items() if k != "ts-artifacts"},
+                                          dict(ALL_SUITE_GOOD)))), "test-counts")
+    expect("test-counts: a count missing on main (main's push run predates this feature) refuses",
+           decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
+                          test_counts=_tc(dict(ALL_SUITE_GOOD), {}))), "test-counts")
+    expect("test-counts: a case moved from ran to skipped is a drop in ran, and refuses",
+           decide(**_with(files=[{"filename": "go/chtypes/foo_test.go", "status": "modified"}],
+                          test_counts=_tc({**ALL_SUITE_GOOD, "go-artifacts": (9, 1)},
+                                          {**ALL_SUITE_GOOD, "go-artifacts": (10, 0)}))), "test-counts")
+    expect("test-counts: the golden-case count drops",
+           decide(**_with(files=[{"filename": "tests/fixtures/fetch/x", "status": "modified"}],
+                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD),
+                                          head_golden=3, main_golden=5))), "test-counts")
+    expect("test-counts: the golden-case count missing on the head refuses",
+           decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
+                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD),
+                                          head_golden=None))), "test-counts")
+    expect("test-counts: a pull request touching no test or fixture path skips the condition "
+           "entirely, even with a real drop sitting in test_counts",
+           decide(**_with(files=[{"filename": "README.md", "status": "modified"}],
+                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-artifacts": (0, 0)},
+                                          dict(ALL_SUITE_GOOD)))), None)
+    expect("test-counts: no test_counts argument at all, on a PR that touches no test path, still passes "
+           "(the default TestCountFacts is never consulted)",
+           decide(**_with(files=[{"filename": "README.md", "status": "modified"}])), None)
+
+    # is_test_or_fixture_path / touches_test_or_fixture_path — concrete sanity
+    # checks, independent of the decide()-level cases above.
+    if not is_test_or_fixture_path("go/chtypes/client_test.go"):
+        failures.append("is_test_or_fixture_path: a go _test.go file was not recognized")
+    if not is_test_or_fixture_path("go/cmd/chtypes/main_test.go"):
+        failures.append("is_test_or_fixture_path: a nested go _test.go file was not recognized")
+    if is_test_or_fixture_path("go/chtypes/client.go"):
+        failures.append("is_test_or_fixture_path: a non-test go file was recognized as one")
+    for p in ("python/tests/test_golden.py", "ts/test/golden.test.ts", "rust/tests/golden.rs",
+             "tests/fixtures/fetch/signed/index.json"):
+        if not is_test_or_fixture_path(p):
+            failures.append(f"is_test_or_fixture_path: {p!r} was not recognized")
+    for p in ("python/src/chtypes/fetch.py", "tests/parity/manifest.json", "README.md"):
+        if is_test_or_fixture_path(p):
+            failures.append(f"is_test_or_fixture_path: {p!r} was wrongly recognized as a test/fixture path")
+    if not touches_test_or_fixture_path([{"filename": "README.md", "status": "renamed",
+                                          "previous_filename": "rust/tests/old.rs"}]):
+        failures.append("touches_test_or_fixture_path: a rename's OLD path under rust/tests/ was not caught")
+    if touches_test_or_fixture_path([{"filename": "README.md", "status": "modified"}]):
+        failures.append("touches_test_or_fixture_path: an unrelated file was read as a test/fixture touch")
+
+    # test_count_problems — the pure comparison, independent of decide()'s
+    # own plumbing above.
+    if test_count_problems(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD), 1, 1):
+        failures.append("test_count_problems: an all-equal input was refused")
+    if not test_count_problems({**ALL_SUITE_GOOD, "python-no-artifacts": (1, 0)}, dict(ALL_SUITE_GOOD), 1, 1):
+        failures.append("test_count_problems: a single-suite drop was not caught")
+    if test_count_problems(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD), 5, 5):
+        failures.append("test_count_problems: equal golden counts were refused")
 
     # condition 1 — fork
     expect("the ci run's head is a fork", decide(**_with(run_head_repo="someone/chtypes")), "fork")
@@ -1473,12 +2527,43 @@ def selftest() -> int:
           "a deletion, and ts/biome.json by name), docs/support.md's byte guard refuses a mismatch and a "
           "non-modification, a missing, failing or pending required check, a fork, a stale head, a draft, a "
           "conflict and a review each refuse; an all-good input passes; build_enqueue_plan carries the judged "
-          "head sha and node_id and never reaches the mutation on a dry run; ci.yml's blocking jobs and the "
-          "CONTRIBUTING.md guide block are both derived from their source, never hand-set")
+          "head sha and node_id and never reaches the mutation on a dry run; the hand-off to the enqueue job carries "
+          "exactly that node id and head sha, and enqueue-as-bot refuses malformed ones; only a job that completed "
+          "with success is read for a count; the merge-bot mint must ask for "
+          "exactly contents and pull-requests write inside the merge-bot job; ci.yml's blocking jobs and the "
+          "CONTRIBUTING.md guide block are both derived from their source, never hand-set; test-counts "
+          "(chtypes#285 §1b) refuses a single-suite drop even while another suite rises, a missing count on "
+          "either side, a ran-to-skipped shift, and a golden-case-count drop, passes an equal or rising count, "
+          "and is skipped entirely — at zero API cost — for a pull request that touches no test or fixture path; "
+          "binding source (chtypes#285 §1) passes on its own binding's changed=false, read from a job log, and "
+          "refuses on changed=true, a missing, tool-error or unparseable verdict, a verdict for another head or "
+          "quoted mid-line, a later false after a true, and a second touched binding without its own false; the "
+          "security carve-out and rust/build.rs refuse whatever every verdict says; test-counts still applies; the "
+          "api-surface job must exist under the name read and be non-blocking, and a skipped, failed, timed-out, "
+          "unfinished or foreign-app one is never read (no verdict, still protected); and the carve-out's derivation "
+          "catches verification code outside it and an entry that covers nothing")
     return 0
 
 
 # ----------------------------------------------------------------------- main
+
+
+def cmd_enqueue_as_bot(args: argparse.Namespace) -> int:
+    """The `enqueue` job's one call: enqueuePullRequest with the App
+    installation token in GH_TOKEN, pinned to the judged head. It reads no
+    repository file and judges nothing; the judging job already did."""
+    problem = bot_args_problem(args.node_id, args.head_sha, args.pr)
+    if problem:
+        print(f"policy-merge-check: {problem}", file=sys.stderr)
+        return 2
+    result = enqueue_pull_request(args.node_id, args.head_sha)
+    entry = ((result.get("data") or {}).get("enqueuePullRequest") or {}).get("mergeQueueEntry")
+    if not entry:
+        print(f"policy-merge-check: the enqueue mutation returned {result!r}", file=sys.stderr)
+        return 2
+    summary(f"policy-merge: enqueued PR #{args.pr} (head {args.head_sha}) as the merge-bot App; the queue's "
+            "merge_group run of ci is what happens next")
+    return 0
 
 
 def main(argv: list[str]) -> int:
@@ -1490,6 +2575,10 @@ def main(argv: list[str]) -> int:
         return cmd_print_protected()
     if argv == ["--check-guide"]:
         return cmd_check_guide()
+    if argv == ["--check-mint-scope"]:
+        return cmd_check_mint_scope()
+    if argv == ["--check-carve-out"]:
+        return cmd_check_carve_out()
     parser = argparse.ArgumentParser(prog="policy-merge-check.py")
     sub = parser.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("gate", help="every condition but the byte comparison")
@@ -1497,13 +2586,17 @@ def main(argv: list[str]) -> int:
     g.add_argument("--pr", type=int)
     g.add_argument("--run-head-sha")
     g.add_argument("--run-head-repo")
-    m = sub.add_parser("enqueue", help="every condition, then enqueuePullRequest")
+    m = sub.add_parser("enqueue", help="every condition, then hand the judged head to the enqueue job")
     m.add_argument("--repo", required=True)
     m.add_argument("--pr", type=int, required=True)
     m.add_argument("--head-sha", required=True)
     m.add_argument("--run-head-repo", default="")
     m.add_argument("--regenerated", action="append", default=[], metavar="PATH=FILE")
     m.add_argument("--dry-run", action="store_true")
+    q = sub.add_parser("enqueue-as-bot", help="enqueuePullRequest with the App token in GH_TOKEN")
+    q.add_argument("--pr", required=True)
+    q.add_argument("--node-id", required=True)
+    q.add_argument("--head-sha", required=True)
     args = parser.parse_args(argv)
     if args.cmd == "gate":
         if (args.pr is None) == (args.run_head_sha is None):
@@ -1511,7 +2604,11 @@ def main(argv: list[str]) -> int:
         if args.run_head_sha is not None and args.run_head_repo is None:
             parser.error("--run-head-sha needs --run-head-repo")
     try:
-        return cmd_gate(args) if args.cmd == "gate" else cmd_enqueue(args)
+        if args.cmd == "gate":
+            return cmd_gate(args)
+        if args.cmd == "enqueue-as-bot":
+            return cmd_enqueue_as_bot(args)
+        return cmd_enqueue(args)
     except Exception as e:  # noqa: BLE001 — every unexpected failure must read as one, never as a refusal
         print(f"policy-merge-check: {type(e).__name__}: {e}", file=sys.stderr)
         summary(f"policy-merge: ERROR ({type(e).__name__}), nothing was merged: {e}")

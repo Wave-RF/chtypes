@@ -148,7 +148,7 @@ def test_all_names_every_line_served_only_at_another_revision(
     fetcher = Fetcher(dest=tmp_path, platform=PLATFORM, url=str(tmp_path))
     fetcher._release = release
     installed: list[str] = []
-    monkeypatch.setattr(fetcher, "install", lambda e: installed.append(e.minor) or tmp_path)
+    monkeypatch.setattr(fetcher, "install", lambda e, **_kw: installed.append(e.minor) or tmp_path)
     monkeypatch.setattr(fetcher, "install_goldens", lambda: None)
     fetcher.ensure_all()
     assert installed == ["25.8"]
