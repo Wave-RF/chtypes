@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Fixed
+
+- **A schema abandoned with an open filter or block is now reclaimed.** A `LoadedSchema` dropped without `Close()` while a `LoadedFilter` or `LoadedBlock` over it was still open leaked all of their C handles for the life of the process: each child points back at its schema, the schema tracked its children so it could free them first, and all three carried a `runtime.SetFinalizer`; Go does not collect a cycle that contains a finalizer. Measured against a 25.8 artifact: 0 of 100 such schemas, filters or blocks were freed after repeated GC; all 100 of each are now, each exactly once, children before their schema. The GC backstop is now `runtime.AddCleanup` over a separate native half that holds the handles, so the cycle stays collectable, and the schema's cleanup frees any child still open before the schema whichever cleanup runs first. A held filter or block still keeps its schema alive, and `Close()` is unchanged: idempotent, children first, and still the only deterministic release. The linked build's `CompiledSchema`, `Filter` and `Block` had the same cycle and take the same fix (closes #375).
+
 ## [0.5.2] — 2026-10-01
 
 ### Added

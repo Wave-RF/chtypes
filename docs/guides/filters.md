@@ -290,12 +290,12 @@ A filter and a block must come from the **same schema handle**. A mismatched pai
 
 Neither may outlive its schema, and each binding enforces that in its own idiom:
 
-|            |                                                                                                  |
-| ---------- | ------------------------------------------------------------------------------------------------ |
-| Go         | the schema's `Close` frees open filters and blocks first, and finalizers run in dependency order |
-| Python     | `Schema.close()` frees open filters and blocks first                                             |
-| TypeScript | `Schema#close` frees them first; `using` nests naturally — block, filter, schema                 |
-| Rust       | a `Filter` and a `Block` **borrow** their `Schema`, so the wrong free order does not compile     |
+|            |                                                                                                             |
+| ---------- | ----------------------------------------------------------------------------------------------------------- |
+| Go         | the schema's `Close` frees open filters and blocks first, and so does its GC cleanup when nothing closed it |
+| Python     | `Schema.close()` frees open filters and blocks first                                                        |
+| TypeScript | `Schema#close` frees them first; `using` nests naturally — block, filter, schema                            |
+| Rust       | a `Filter` and a `Block` **borrow** their `Schema`, so the wrong free order does not compile                |
 
 In Go a filter call is also a use of its schema handle, so two filters over one schema never run concurrently. Parallelism comes from more schemas, not from sharing one.
 
