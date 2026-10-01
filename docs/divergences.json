@@ -8,13 +8,10 @@
       "checks": [
         {
           "id": "demangle-admitted-default-settings",
-          "note": "the divergence itself, on every line: allow_introspection_functions defaults to disabled, and a real server refuses the CREATE TABLE with 446 (FUNCTION_NOT_ALLOWED) at that default; this library never consults the setting, so it compiles the schema and stores demangle's answer regardless (server half measured by the artifact producer, not here)",
+          "note": "the divergence itself, on the two served-unsupported lines that got no build at the relink below: allow_introspection_functions defaults to disabled, and a real server refuses the CREATE TABLE with 446 (FUNCTION_NOT_ALLOWED) at that default; this library never consults the setting, so it compiles the schema and stores demangle's answer regardless (server half measured by the artifact producer, not here). On every supported line (26.3, 26.7, 26.8, 26.9) the artifact producer's relink at build 1790845279 made this library refuse the same CREATE TABLE with 446 too, so the divergence no longer reproduces there; this check narrowed to the two lines where it still does",
           "lines": [
             "24.8",
-            "25.10",
-            "26.3",
-            "26.8",
-            "26.9"
+            "25.10"
           ],
           "schema": "s String, v String DEFAULT demangle(s)",
           "format": "JSONEachRow",

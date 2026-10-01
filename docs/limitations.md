@@ -99,7 +99,7 @@ Every entry below has a machine-checkable twin in [`docs/divergences.json`](dive
 
 ### A DEFAULT over demangle admits what a real server refuses to create
 
-**Over-accept.** This library compiles a schema, and admits a row against it, that a real server refuses to create in the first place.
+**Over-accept, on `24.8` and `25.10`.** This library compiles a schema, and admits a row against it, that a real server refuses to create in the first place.
 
 The ClickHouse setting `allow_introspection_functions` defaults to disabled. At that default, a real server refuses a `CREATE TABLE` containing a `DEFAULT` over `demangle` with error 446 (`FUNCTION_NOT_ALLOWED`). This library never consults the setting, so it compiles the same schema and evaluates the same DEFAULT identically at either value. For example, `s String, v String DEFAULT demangle(s)`, with a body that never supplies `v`:
 
@@ -108,11 +108,11 @@ The ClickHouse setting `allow_introspection_functions` defaults to disabled. At 
 | this library  | compiles the schema and stores the function's answer, at either setting value |
 | a real server | refuses the `CREATE TABLE` itself, error 446, at the default setting          |
 
-`demangle`'s DEFAULT is admitted this way on every served line, 24.8 through 26.9. This entry retires on the relink that makes the library refuse the same `CREATE TABLE` with 446. On ABI revision 6, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` are declined (`unsupported`) at insert time on every served line, so they do not diverge and carry no entry here.
+The artifact producer's relink at build `1790845279` made this library refuse the same `CREATE TABLE` with 446 on every **supported** line — 26.3, 26.7, 26.8 and 26.9 — so the over-accept no longer reproduces there. It is unchanged on `24.8` and `25.10`: both are **served, unsupported** lines (see [Served, unsupported ClickHouse lines](support.md#served-unsupported-clickhouse-lines)), upstream's own support for them has ended, and the artifact producer builds no new artifact for a retired line, ever — so their library half is still the pre-relink build and `demangle`'s DEFAULT still compiles and stores the demangled name there. This entry narrows to those two lines and retires fully only if a future served build for one of them ever changes that (append-only builds mean that would have to be a new ABI revision's artifact, not a relink of the existing one). On ABI revision 6, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` are declined (`unsupported`) at insert time on every served line, so they do not diverge and carry no entry here.
 
-**Measured**: this library's own answer, in this repository, against the published ABI revision 6 artifacts, on 25.10, 26.3, 26.8 and 26.9 (darwin-arm64), and on 24.8 by CI's linux-amd64 job (no darwin artifact is published for that line). `demangle`'s DEFAULT compiles and stores the demangled name on all five. The server half, a 446 refusal of the `CREATE TABLE` at the default setting on all 12 lines, was measured by the artifact producer against stock ClickHouse servers pinned to each line's exact patch, not measured here.
+**Measured**: this library's own answer, in this repository, against the published ABI revision 6 artifacts. `demangle`'s DEFAULT still compiles and stores the demangled name on `25.10` (darwin-arm64, build `1790767905`) and, by CI's linux-amd64 job, on `24.8` (no darwin artifact is published for that line). On `26.3`, `26.8` and `26.9` (darwin-arm64, build `1790845279`) this library now refuses the `CREATE TABLE` itself with code 446, matching a real server; `26.7` was not part of this check's line list before and is not added by this measurement. The server half — a 446 refusal of the `CREATE TABLE` at the default setting — was measured by the artifact producer against stock ClickHouse servers pinned to each line's exact patch, not measured here.
 
-Do not put `demangle` in a DEFAULT for a server that runs at the default setting: this library compiles the schema, and the server refuses the `CREATE TABLE` with 446.
+Do not put `demangle` in a DEFAULT for a server that runs at the default setting on `24.8` or `25.10`: this library still compiles the schema there, and the server refuses the `CREATE TABLE` with 446. On every supported line this library now refuses the same `CREATE TABLE` the same way.
 
 ## Pre-1.0
 
