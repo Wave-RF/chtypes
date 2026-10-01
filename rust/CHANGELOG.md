@@ -10,6 +10,10 @@ The four bindings in this repository are released together and give one answer, 
 
 - **`LockFile::record` now records the artifact's ABI revision** in each lock entry (`LockEntry::abi_revision`, optional and additive — schema stays 1); `LockFile::enforce` checks it FIRST, before the file/sha256 pin: a lock that names a different revision is `Error::ArtifactPinned`, naming both numbers and the `cargo install chtypes && chtypes fetch` remedy, instead of surfacing as a bare drifted pin or `Error::ArtifactUnpublished`. A lock entry with no recorded revision (written by an SDK before this change) keeps today's behavior, with one sentence appended when it ends in one of those two errors. `offline` with `frozen` is unaffected (docs/guides/fetch.md §5, closes #253).
 
+### Changed
+
+- **Docs: plain `Csv`/`Tsv` input also honors `input_format_csv_detect_header` / `input_format_tsv_detect_header`, exactly as a real server does**, because the body is read by ClickHouse's own vendored row readers. The behavior arrived with 0.3.0's switch to those readers; it is now documented (#299).
+
 ## [0.4.0] — 2026-09-30
 
 Speaks ABI revision 6 and refuses revision-5 artifacts. Revision 6 adds the error-code table and the partition key; revision-6 artifacts are published for every ClickHouse line this SDK supports, beside the revision-5 builds that 0.3.x keeps loading.

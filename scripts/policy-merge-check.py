@@ -1347,6 +1347,18 @@ def parse_golden_count(log_text: str) -> int | None:
     return last
 
 
+def readable_job_ids(runs: list[dict]) -> dict[str, int]:
+    """Check-run (or job) name -> id, for only the runs that COMPLETED with
+    conclusion `success`. A skipped, failed or canceled job has no usable
+    count, and a skipped one has no log at all: GET .../jobs/{id}/logs
+    answers 404 for it (measured on #311's skipped `artifacts` job, which
+    turned this condition's read into an exit-2 error). Leaving such a job
+    out makes its suite a missing count, which test_count_problems refuses
+    loudly, never an error and never a pass."""
+    return {r["name"]: r["id"] for r in runs
+            if r.get("id") is not None and r.get("status") == "completed" and r.get("conclusion") == "success"}
+
+
 def job_log(repo: str, job_id: int) -> str:
     return gh(["--allow-escape-sequences", f"repos/{repo}/actions/jobs/{job_id}/logs"],
               f"GET actions/jobs/{job_id}/logs")
@@ -1367,7 +1379,7 @@ def latest_green_push_jobs(repo: str) -> dict[str, int]:
     if not runs:
         return {}
     jobs = gh_items(f"repos/{repo}/actions/runs/{runs[0]['id']}/jobs?per_page=100", ".jobs[]")
-    return {j["name"]: j["id"] for j in jobs}
+    return readable_job_ids(jobs)
 
 
 def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> TestCountFacts:
@@ -1378,7 +1390,7 @@ def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> 
     at."""
     if not touches_test_or_fixture_path(files):
         return TestCountFacts(head={}, main={}, head_golden=None, main_golden=None)
-    head_job_id = {c["name"]: c["id"] for c in check_runs if c.get("id") is not None}
+    head_job_id = readable_job_ids(check_runs)
     main_job_id = latest_green_push_jobs(repo)
 
     def read(job_id_by_name: dict[str, int]) -> tuple[dict[str, tuple[int, int]], int | None]:
@@ -2124,6 +2136,15 @@ def selftest() -> int:
         failures.append("mint_scope_problems: accepted a mint with no permission list (the App's full set)")
     if not mint_scope_problems(good_yml.replace("    environment: merge-bot\n", "")):
         failures.append("mint_scope_problems: accepted a mint outside the merge-bot environment")
+    # A skipped / failed / unfinished job is never read for a
+    # count: a skipped job has no log (404), so reading it was an exit-2
+    # error on #311 instead of a refusal.
+    runs_mix = [_run("a"), _run("b", conclusion="skipped"), _run("c", conclusion="failure"),
+                _run("d", status="in_progress", conclusion=None)]
+    for i, r in enumerate(runs_mix):
+        r["id"] = 100 + i
+    if readable_job_ids(runs_mix) != {"a": 100}:
+        failures.append(f"readable_job_ids: kept a job that has no usable log: {readable_job_ids(runs_mix)!r}")
     for bad in ((_good_pr()["node_id"], "abc", "7"), (_good_pr()["node_id"], SHA.upper(), "7"),
                 ("", SHA, "7"), ("PR_x y", SHA, "7"), (_good_pr()["node_id"], SHA, "7; rm")):
         if bot_args_problem(*bad) is None:
@@ -2424,7 +2445,8 @@ def selftest() -> int:
           "non-modification, a missing, failing or pending required check, a fork, a stale head, a draft, a "
           "conflict and a review each refuse; an all-good input passes; build_enqueue_plan carries the judged "
           "head sha and node_id and never reaches the mutation on a dry run; the hand-off to the enqueue job carries "
-          "exactly that node id and head sha, and enqueue-as-bot refuses malformed ones; the merge-bot mint must ask for "
+          "exactly that node id and head sha, and enqueue-as-bot refuses malformed ones; only a job that completed "
+          "with success is read for a count; the merge-bot mint must ask for "
           "exactly contents and pull-requests write inside the merge-bot job; ci.yml's blocking jobs and the "
           "CONTRIBUTING.md guide block are both derived from their source, never hand-set; test-counts "
           "(chtypes#285 §1b) refuses a single-suite drop even while another suite rises, a missing count on "

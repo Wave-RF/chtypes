@@ -30,9 +30,13 @@ use crate::transform::classify;
 pub enum Format {
     /// Name-addressed JSON objects, one per row.
     JsonEachRow = 0,
-    /// Positional CSV.
+    /// Positional CSV, unless `input_format_csv_detect_header` detects and
+    /// consumes a header line, exactly as a real server does (ClickHouse's
+    /// own vendored reader).
     Csv = 1,
-    /// Positional TSV.
+    /// Positional TSV, unless `input_format_tsv_detect_header` detects and
+    /// consumes a header line, exactly as a real server does (ClickHouse's
+    /// own vendored reader).
     Tsv = 2,
     /// ClickHouse's `Values` literal syntax.
     Values = 3,
