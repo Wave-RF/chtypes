@@ -538,6 +538,28 @@ jobs:
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts rust
 
+  # TEMPORARY — chtypes#364 measurement only, removed before this PR merges
+  # (fix-lane brief, "run it in CI on your PR only"). `continue-on-error:
+  # true` at the JOB level so scripts/policy-merge-check.py --check-ci-names
+  # reads it as non-blocking and never asks it to be added to
+  # REQUIRED_CHECKS; it gates nothing and nothing here is kept.
+  scratch-concurrency-probe-364:
+    name: "scratch: rust concurrency probe (chtypes#364, TEMPORARY)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+      - name: fetch a scratch registry (25.8, linux-amd64)
+        run: scripts/fetch.sh 25.8 --platform linux-amd64 --dest "$GITHUB_WORKSPACE/.scratch-artifacts-364"
+      - name: cargo test --release -- --ignored concurrency_scales_with_handle_count --nocapture
+        env:
+          CHTYPES_REGISTRY: ${{ github.workspace }}/.scratch-artifacts-364
+        run: cd rust && cargo test --release --test concurrency_throughput -- --ignored --nocapture
+      - name: runner core count (nproc), for the printed measurement's context
+        run: nproc
+
   abi-fixtures:
     # ⚠️ THIS JOB IS SEPARATE FROM THE FOUR ABOVE ON PURPOSE. DO NOT FOLD IT
     # BACK INTO THEM — the saving looks real and the cost is invisible.
