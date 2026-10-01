@@ -219,7 +219,7 @@ design: over-protect rather than under-protect.
                           `changed=false`. An exported ADDITION is a change.
   the SECURITY CARVE-OUT  inside those trees but UNCONDITIONAL, whatever the
                           verdict: go/chtypes/{fetch_sign,fetch,registry_path,
-                          multiversion}.go, python/src/chtypes/{_ed25519,
+                          multiversion,resolve}.go, python/src/chtypes/{_ed25519,
                           fetch,_manifest,registry}.py, ts/src/{fetch,
                           registry}.ts, rust/src/fetch/**, rust/src/digest.rs,
                           rust/src/registry.rs — the fetch chain (the ed25519
@@ -465,6 +465,9 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("go/chtypes/multiversion.go",
                   "load-time verification: the library_bytes size check on every load and the "
                   "WithVerifyChecksums sha256 re-hash", verification=True),
+    ProtectedGlob("go/chtypes/resolve.go",
+                  "exact-patch resolution's load path, which runs the same load-time verification",
+                  verification=True),
     ProtectedGlob("python/src/chtypes/_ed25519.py", "the ed25519 signature check itself", verification=True),
     ProtectedGlob("python/src/chtypes/fetch.py",
                   "the embedded release public key, the trust policy, and the fetch chain's signature and sha256 "
@@ -2074,6 +2077,7 @@ def selftest() -> int:
             "go/chtypes/fetch.go": 'import "crypto/sha256"',
             "go/chtypes/registry_path.go": 'envAllowUnsign = "CHTYPES_ALLOW_UNSIGNED"',
             "go/chtypes/multiversion.go": "if err := checkLibraryBytes(path); err != nil {",
+            "go/chtypes/resolve.go": "if err := verifyArtifactLibrary(path); err != nil {",
             "go/chtypes/transform.go": "package chtypes",
             "python/src/chtypes/_ed25519.py": "import hashlib",
             "python/src/chtypes/fetch.py": "from ._ed25519 import verify",

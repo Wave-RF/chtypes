@@ -78,6 +78,7 @@ gh api graphql -f query='mutation($id:ID!,$oid:GitObjectID!){enqueuePullRequest(
 - `go/chtypes/fetch.go` — the fetch chain: the signature-check call, every tarball's sha256 against SHA256SUMS, the lock pin, the trusted-keys and allow-unsigned options; security carve-out, protected whatever the API verdict
 - `go/chtypes/registry_path.go` — names the CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED variables the trust policy reads; security carve-out, protected whatever the API verdict
 - `go/chtypes/multiversion.go` — load-time verification: the library_bytes size check on every load and the WithVerifyChecksums sha256 re-hash; security carve-out, protected whatever the API verdict
+- `go/chtypes/resolve.go` — exact-patch resolution's load path, which runs the same load-time verification; security carve-out, protected whatever the API verdict
 - `python/src/chtypes/_ed25519.py` — the ed25519 signature check itself; security carve-out, protected whatever the API verdict
 - `python/src/chtypes/fetch.py` — the embedded release public key, the trust policy, and the fetch chain's signature and sha256 checks; security carve-out, protected whatever the API verdict
 - `python/src/chtypes/_manifest.py` — load-time verification: check_library_bytes and verify_library's sha256 re-hash; security carve-out, protected whatever the API verdict
