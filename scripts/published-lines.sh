@@ -30,6 +30,37 @@
 set -euo pipefail
 die() { echo "published-lines: $*" >&2; exit 1; }
 
+# fail <CHTYPES_...> <message> — mirrors scripts/fetch.sh's own fail(): names
+# the docs/guides/fetch.md §7 code and exits with its §6 number, so a caller
+# (the `lines` step in .github/workflows/ci.yml) can tell "not published" from
+# "unreachable" without parsing prose, exactly as it already can for fetch.sh.
+fail() {
+  local code="$1"; shift
+  echo "published-lines: $code: $*" >&2
+  case "$code" in
+    CHTYPES_SOURCE_UNREACHABLE)   exit 3 ;;
+    CHTYPES_ARTIFACT_UNPUBLISHED) exit 4 ;;
+    *)                            exit 1 ;;
+  esac
+}
+
+# classify_index_fetch <http-code> <url> — maps the index fetch's HTTP outcome
+# to the same two codes scripts/fetch.sh's own get_file()/fetch_release_file()
+# distinguish (chtypes#262): 200 is silently fine; 404 means the host is
+# REACHABLE and answers "no such release" — CHTYPES_ARTIFACT_UNPUBLISHED, exit
+# 4, never CHTYPES_SOURCE_UNREACHABLE; anything else (a timeout, a DNS
+# failure, a 5xx — curl reports these as "000" or leaves a non-2xx code) is a
+# real reachability failure, exit 3. A function, not inlined, so --selftest
+# can drive it without a network call.
+classify_index_fetch() {
+  local code="$1" url="$2"
+  case "$code" in
+    200) return 0 ;;
+    404) fail CHTYPES_ARTIFACT_UNPUBLISHED "no index.json at $url — nothing is published under this tag" ;;
+    *)   fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $url (HTTP $code)" ;;
+  esac
+}
+
 # pick_lines <index.json> <platform> <url-label>
 #
 # Reads <index.json>, restricts to <platform> (os-arch), and prints
@@ -132,6 +163,30 @@ JSON
   printf '%s\n' "$err" | grep -q '26.7.9.12-stable' \
     && { echo "SELFTEST FAILED: chose 26.7.9.12 over 26.7.10.6 — a lexical, not numeric, comparison" >&2; exit 1; }
   echo "published-lines: selftest ok — newest build wins within a line, not list order, not a lexical sort"
+
+  # chtypes#262: a 404 on the index is a REACHABLE host saying "no such
+  # release" — CHTYPES_ARTIFACT_UNPUBLISHED, exit 4 — never
+  # CHTYPES_SOURCE_UNREACHABLE. Proven against a bogus non-200/404 code too,
+  # so the two cannot collapse into each other.
+  out=""; rc=0
+  out="$(classify_index_fetch 404 "https://example.invalid/abi6-candidate/index.json" 2>&1)" || rc=$?
+  [ "$rc" -eq 4 ] || { echo "SELFTEST FAILED: a 404 should exit 4 (CHTYPES_ARTIFACT_UNPUBLISHED), got $rc: $out" >&2; exit 1; }
+  printf '%s\n' "$out" | grep -q CHTYPES_ARTIFACT_UNPUBLISHED \
+    || { echo "SELFTEST FAILED: a 404's message should name CHTYPES_ARTIFACT_UNPUBLISHED: $out" >&2; exit 1; }
+  echo "published-lines: selftest ok — a 404 on the index is CHTYPES_ARTIFACT_UNPUBLISHED, exit 4"
+
+  rc=0
+  out="$(classify_index_fetch 000 "https://example.invalid/abi6-candidate/index.json" 2>&1)" || rc=$?
+  [ "$rc" -eq 3 ] || { echo "SELFTEST FAILED: an unreachable host should exit 3 (CHTYPES_SOURCE_UNREACHABLE), got $rc: $out" >&2; exit 1; }
+  printf '%s\n' "$out" | grep -q CHTYPES_SOURCE_UNREACHABLE \
+    || { echo "SELFTEST FAILED: an unreachable host's message should name CHTYPES_SOURCE_UNREACHABLE: $out" >&2; exit 1; }
+  echo "published-lines: selftest ok — a real reachability failure stays CHTYPES_SOURCE_UNREACHABLE, exit 3, never collapsed into the 404 case"
+
+  rc=0
+  out="$(classify_index_fetch 500 "https://example.invalid/artifacts/index.json" 2>&1)" || rc=$?
+  [ "$rc" -eq 3 ] || { echo "SELFTEST FAILED: a 500 should also be CHTYPES_SOURCE_UNREACHABLE (exit 3), got $rc: $out" >&2; exit 1; }
+  echo "published-lines: selftest ok — a 5xx is CHTYPES_SOURCE_UNREACHABLE too, not treated as unpublished"
+
   exit 0
 fi
 
@@ -157,7 +212,11 @@ URL="${CHTYPES_ARTIFACTS_URL:-https://artifacts.wavehouse.dev}"
 URL="${URL%/}/$TAG/index.json"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/chtypes-lines.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
-curl -fsSL --retry 3 --max-time 60 "$URL" -o "$WORK/index.json" \
-  || die "CHTYPES_SOURCE_UNREACHABLE: could not fetch $URL"
+# -f dropped (chtypes#262): with it, curl fails identically on a 404 and on a
+# real network error, and this script cannot then tell "not published" from
+# "unreachable" apart. -w prints the status so classify_index_fetch can.
+HTTP_CODE="$(curl -sSL --retry 3 --retry-delay 1 --max-time 60 -o "$WORK/index.json" -w '%{http_code}' "$URL")" \
+  || HTTP_CODE="000"
+classify_index_fetch "$HTTP_CODE" "$URL"
 
 pick_lines "$WORK/index.json" "$PLATFORM" "$URL"
