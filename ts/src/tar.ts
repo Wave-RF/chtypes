@@ -5,11 +5,12 @@
  * that extracts regular files under one directory is a page of code.
  *
  * Files only. Directories are created; everything else — symlinks, hard
- * links, devices, FIFOs — is skipped without being followed: an artifact is
- * `manifest.json`, one library and two text files, and a link inside one is
- * an attack, not a feature. Every entry name is confined to the destination
- * (no absolute names, no `..` components, no escape once resolved), and a
- * name that escapes is refused as corrupt rather than clamped.
+ * links, devices, FIFOs — refuses the whole install rather than being
+ * skipped or followed: an artifact is `manifest.json`, one library and two
+ * text files, and a link inside one is an attack, not a feature. Every entry
+ * name is confined to the destination (no absolute names, no `..`
+ * components, no escape once resolved), and a name that escapes is refused
+ * as corrupt rather than clamped.
  *
  * The archive is consumed as a stream: a 300 MB library is written to disk
  * as it inflates and never sits in memory whole.
@@ -39,8 +40,9 @@ export interface ExtractedEntry {
  * exist. Returns the regular files written, in archive order.
  *
  * @throws {ArtifactCorruptError} when the bytes are not a gzip stream, a
- *   header fails its checksum, the archive is truncated, or an entry name
- *   would land outside `dest`.
+ *   header fails its checksum, the archive is truncated, an entry name would
+ *   land outside `dest`, or an entry is not a regular file or directory (a
+ *   symlink, hardlink, device or FIFO).
  */
 export async function extractTarGz(archive: string, dest: string): Promise<ExtractedEntry[]> {
   const extractor = new TarExtractor(path.resolve(dest));
@@ -179,8 +181,15 @@ class TarExtractor extends Writable {
         if (target !== this.dest) await mkdir(target, { recursive: true });
         this.pending = { kind: 'skip' };
       } else {
-        // Links, devices, FIFOs: files only. Skipped, never followed.
-        this.pending = { kind: 'skip' };
+        // Links, devices, FIFOs: an artifact is a manifest, one library and
+        // two text files, and a link inside one is an attack, not a feature
+        // — refused, never silently skipped (Go's untarGz default case and
+        // Python's _extract refuse the same way, naming the type).
+        throw new ArtifactCorruptError(
+          `chtypes: tarball entry ${JSON.stringify(name)} is not a regular file or directory (type ${JSON.stringify(
+            String.fromCharCode(flag),
+          )}); links and devices are refused, not unpacked`,
+        );
       }
     }
 

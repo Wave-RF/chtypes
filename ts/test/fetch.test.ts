@@ -1039,13 +1039,12 @@ describe('the tar reader: files only, confined to the destination', () => {
     await expect(extractTarGz(prefixed, out)).rejects.toThrow(/path traversal/);
   });
 
-  it('skips links and devices without following them, creates directories and empty files, reads pax and GNU long names', async () => {
+  it('creates directories and empty files, reads pax and GNU long names', async () => {
     const out = scratch('out');
     const longName = `${'d'.repeat(120)}/file.txt`;
     const tgz = write(
       'mixed.tgz',
       tarball([
-        tarEntry('link', Buffer.alloc(0), '2'),
         tarEntry('dir/', Buffer.alloc(0), '5'),
         tarEntry('dir/empty', Buffer.alloc(0)),
         tarEntry('./plain', Buffer.from('plain')),
@@ -1058,11 +1057,25 @@ describe('the tar reader: files only, confined to the destination', () => {
     );
     const entries = await extractTarGz(tgz, out);
     expect(entries.map((e) => e.name)).toEqual(['dir/empty', 'plain', longName, `gnu/${'g'.repeat(110)}`, 'pre/fix/split']);
-    expect(existsSync(path.join(out, 'link'))).toBe(false);
     expect(statSync(path.join(out, 'dir/empty')).size).toBe(0);
     expect(readFileSync(path.join(out, 'plain'), 'utf8')).toBe('plain');
     expect(readFileSync(path.join(out, longName), 'utf8')).toBe('via pax');
     expect(readFileSync(path.join(out, 'pre/fix/split'), 'utf8')).toBe('prefixed');
+  });
+
+  it('refuses symlinks, hardlinks, devices and FIFOs, writing nothing to the destination', async () => {
+    // ustar type flags: '2' symlink, '1' hardlink, '3' char device, '4' block
+    // device, '6' FIFO — the same catch-all Go's untarGz default case and
+    // Python's _extract refuse, never silently skipped (an artifact is a
+    // manifest, one library and two text files, and a link inside one is an
+    // attack, not a feature).
+    for (const flag of ['2', '1', '3', '4', '6']) {
+      const out = scratch(`out-${flag}`);
+      const tgz = write(`link-${flag}.tgz`, tarball([tarEntry('link', Buffer.alloc(0), flag)]));
+      await expect(extractTarGz(tgz, out)).rejects.toThrow(ArtifactCorruptError);
+      await expect(extractTarGz(tgz, out)).rejects.toThrow(/not a regular file or directory/);
+      expect(readdirSync(out)).toEqual([]);
+    }
   });
 
   it('refuses a truncated archive, a bad header checksum, and bytes that are not gzip', async () => {
