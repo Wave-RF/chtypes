@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # support-matrix.sh — regenerate the generated block of docs/support.md: which
 # language versions each binding requires, which platforms the release ships,
-# which ClickHouse lines it publishes today, and — the SDK-version -> ABI
-# revision -> artifact-build mapping a consumer needs after a load-time
-# refusal.
+# which ClickHouse lines it publishes today, which of those lines upstream
+# still supports, and — the SDK-version -> ABI revision -> artifact-build
+# mapping a consumer needs after a load-time refusal.
 #
 #   scripts/support-matrix.sh [--check] [--out <file>]
+#   scripts/support-matrix.sh --selftest   prove the Support column (below)
+#                                           renders each of its states
+#                                           against fixtures this script
+#                                           builds fresh every run, never
+#                                           today's real tags or served index
 #
 # Nothing in that block is typed by hand, because every number in it rots on a
 # schedule somebody else controls. The language minimums are read from the four
@@ -39,12 +44,135 @@
 # fetch-fixtures-check, and for the same reason: stale prose is a smaller
 # failure than a pipeline that stalls on someone else's commit.
 #
+# The "ClickHouse lines" table's Support column (chtypes#281) reads the live
+# index.json's top-level `supported_lines` array — never a list hand-typed
+# here, and never re-derived from upstream's own EOL schedule. A line named
+# in it renders `supported`; a line this release serves but that is NOT
+# named in it renders `served, unsupported` — the SDK keeps resolving and
+# loading it exactly as before, only the label changes. A MISSING
+# `supported_lines` key means the state is unknown, never "unsupported": an
+# index published before the producer started writing the field must not
+# relabel every line it serves, so the Support column itself is omitted from
+# the table entirely in that case, rather than printed with a per-row
+# "unknown" that would read as a real, per-line answer this script does not
+# have. An EMPTY `supported_lines` array ([]) is a real, different state
+# from the key being absent — the producer answered "none", not "not yet
+# said" — so it renders exactly like a line left out of a non-empty list:
+# every served line is `served, unsupported`. See [Served, unsupported
+# ClickHouse lines](../docs/support.md#served-unsupported-clickhouse-lines)
+# for what the label means for a consumer.
+#
 # Environment: CHTYPES_ARTIFACTS_URL (default https://artifacts.wavehouse.dev).
 # Needs full git history and tags (fetch-depth: 0 / an unshallow, un-single-
 # branch clone) for the ABI-revision half — a shallow checkout dies loudly
 # with what to run rather than silently omitting the table.
 set -euo pipefail
 die() { echo "support-matrix: $*" >&2; exit 1; }
+
+if [ "${1:-}" = "--selftest" ]; then
+  [ $# -eq 1 ] || die "--selftest takes no other arguments"
+  SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/chtypes-support-matrix-selftest.XXXXXX")"
+  trap 'rm -rf "$tmp"' EXIT
+
+  # A minimal fake repo this script can treat as its own root: one manifest
+  # per binding (just enough to satisfy each language-minimum regex above),
+  # a header, and the four lang/v0.1.0 tags the ABI-revision half reads —
+  # never today's real tree's tags, which this script's own --check refuses
+  # to run against mid-release (see the module comment), so a selftest tied
+  # to them would depend on exactly when it runs. The fixture under test
+  # here is the Support column alone; everything else is held constant
+  # across all four cases below.
+  repo="$tmp/repo"
+  mkdir -p "$repo/scripts" "$repo/go" "$repo/python" "$repo/ts" "$repo/rust" "$repo/include" "$repo/docs"
+  cp "$SELF" "$repo/scripts/support-matrix.sh"
+  printf 'module example\n\ngo 1.21\n' > "$repo/go/go.mod"
+  printf '[project]\nname = "example"\nrequires-python = ">=3.9"\n' > "$repo/python/pyproject.toml"
+  printf '{"engines": {"node": ">=18.0.0"}}\n' > "$repo/ts/package.json"
+  printf '[package]\nname = "example"\nversion = "0.1.0"\nedition = "2021"\nrust-version = "1.70"\n' > "$repo/rust/Cargo.toml"
+  printf '#define CHS_ABI_REVISION 5\n' > "$repo/include/chtypes.h"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email test@example.com
+  git -C "$repo" config user.name test
+  # Lightweight tags, deliberately: this fixture only needs `git show
+  # <tag>:include/chtypes.h` to resolve, and a real contributor's (or this
+  # Mac's) ambient tag.gpgSign/commit.gpgSign config must not reach into a
+  # throwaway repo this selftest builds and deletes every run.
+  git -C "$repo" config tag.gpgSign false
+  git -C "$repo" config commit.gpgSign false
+  git -C "$repo" add -A
+  git -C "$repo" commit -qm initial >/dev/null
+  for lang in go python ts rust; do
+    git -C "$repo" tag "$lang/v0.1.0"
+  done
+
+  # Two served lines, neither carrying an explicit abi_revision — so the
+  # one implicit revision this script requires (see the module comment) is
+  # exactly the 5 the header and all four tags name.
+  served="$tmp/served/artifacts"
+  mkdir -p "$served"
+  rows='"artifacts": [
+      {"os": "linux", "arch": "amd64", "clickhouse_minor": "24.8", "build": 1},
+      {"os": "linux", "arch": "amd64", "clickhouse_minor": "26.3", "build": 2}
+    ]'
+
+  regen() {
+    printf '# support\n\n<!-- BEGIN GENERATED — scripts/support-matrix.sh; do not edit by hand -->\nstub\n<!-- END GENERATED -->\n' \
+      > "$repo/docs/support.md"
+    CHTYPES_ARTIFACTS_URL="file://$tmp/served" "$repo/scripts/support-matrix.sh" --out "$repo/docs/support.md" >/dev/null
+    cat "$repo/docs/support.md"
+  }
+
+  # Case 1+2: key present, one line listed, one not.
+  printf '{"schema": 1, %s, "supported_lines": ["26.3"]}\n' "$rows" > "$served/index.json"
+  out="$(regen)"
+  echo "$out" | grep -qF '| `26.3` | all | supported |' \
+    || die "SELFTEST FAILED: a line IN supported_lines must render \`supported\`:
+$out"
+  echo "$out" | grep -qF '| `24.8` | all | served, unsupported |' \
+    || die "SELFTEST FAILED: a served line NOT in supported_lines must render \`served, unsupported\`:
+$out"
+
+  # Case 3: key absent entirely — "unknown", never "unsupported". No line
+  # may be labeled at all, so the Support column itself must not appear:
+  # a per-row "unknown" cell would read as a real, per-line answer this
+  # script does not have when the producer has not shipped the field yet.
+  printf '{"schema": 1, %s}\n' "$rows" > "$served/index.json"
+  out="$(regen)"
+  if echo "$out" | grep -qF '| Line | Platforms | Support |'; then
+    die "SELFTEST FAILED: an absent supported_lines must NOT add a Support column:
+$out"
+  fi
+  echo "$out" | grep -qF '| `26.3` | all |' \
+    || die "SELFTEST FAILED: an absent supported_lines must still render the plain two-column row:
+$out"
+  # Narrower than a blanket search for "unsupported": the prose above the
+  # table cross-references this very state by name (chtypes#281) on every
+  # run, present key or not, so the real assertion is that no ROW carries a
+  # third, labeled column — already proven by the two checks above, and
+  # reconfirmed here against the specific labeled-row shape a regression
+  # would actually produce.
+  if echo "$out" | grep -qE '^\| `(24\.8|26\.3)` \| all \| '; then
+    die "SELFTEST FAILED: an absent supported_lines must label no row at all:
+$out"
+  fi
+
+  # Case 4: key present but empty — every served line IS served,
+  # unsupported, a real and different state from "absent" (case 3): the
+  # producer answered "none", not "I haven't said yet", and that answer is
+  # distinguished from absence by the Support column appearing at all.
+  printf '{"schema": 1, %s, "supported_lines": []}\n' "$rows" > "$served/index.json"
+  out="$(regen)"
+  echo "$out" | grep -qF '| `26.3` | all | served, unsupported |' \
+    || die "SELFTEST FAILED: an empty supported_lines must mark every line served, unsupported:
+$out"
+  echo "$out" | grep -qF '| `24.8` | all | served, unsupported |' \
+    || die "SELFTEST FAILED: an empty supported_lines must mark every line served, unsupported:
+$out"
+
+  echo "support-matrix: selftest ok — supported_lines listed/not-listed render supported/served-unsupported, an absent key adds no Support column and labels nothing unsupported, and an empty list marks every served line served, unsupported"
+  exit 0
+fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$HERE/docs/support.md"
@@ -53,7 +181,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --check)   CHECK=1 ;;
     --out)     [ $# -ge 2 ] || die "--out needs a value"; OUT="$2"; shift ;;
-    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,68p' "$0"; exit 0 ;;
     *)         die "unknown argument: $1" ;;
   esac
   shift
@@ -199,15 +327,38 @@ w("Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Wi
 w("")
 w("## ClickHouse lines")
 w("")
-w("One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has passed the artifact producer's comparison against a real server and the release publishes it:")
+w("One artifact per ClickHouse line, each carrying that release's own C++. A line is published once it has passed the artifact producer's comparison against a real server and the release includes it. Separately, chtypes supports a ClickHouse line exactly as long as upstream does — see [Served, unsupported ClickHouse lines](#served-unsupported-clickhouse-lines) below for what a line reads once upstream's own support for it ends:")
 w("")
-w("| Line | Platforms |")
-w("|---|---|")
+
+# The Support column reads the served index's top-level `supported_lines`
+# array (chtypes#281) and never re-derives it. Three real states, not two:
+#   - the key is present and names the line: `supported`.
+#   - the key is present and does NOT name the line (including an empty
+#     array): `served, unsupported` — this release still resolves and
+#     loads it exactly as before, only the label changes.
+#   - the key is ABSENT from the served index entirely: unknown, never
+#     "unsupported" — an index published before the producer started
+#     writing the field must not relabel every line it serves. The column
+#     itself is omitted from the table in this case, rather than carrying a
+#     per-row "unknown" that would read as a real, per-line answer this
+#     script does not have.
+supported_lines_present = "supported_lines" in doc
+supported_lines = set(doc.get("supported_lines") or [])
+if supported_lines_present:
+    w("| Line | Platforms | Support |")
+    w("|---|---|---|")
+else:
+    w("| Line | Platforms |")
+    w("|---|---|")
 for minor in sorted(lines, key=order):
     e = lines[minor]
     have = [p for p in plat_order if p in e["platforms"]]
     marks = "all" if len(have) == len(plat_order) else ", ".join("`%s`" % p for p in have)
-    w("| `%s` | %s |" % (minor, marks))
+    if supported_lines_present:
+        state = "supported" if minor in supported_lines else "served, unsupported"
+        w("| `%s` | %s | %s |" % (minor, marks, state))
+    else:
+        w("| `%s` | %s |" % (minor, marks))
 w("")
 w("The exact ClickHouse patch each line is built from is in its artifact's `manifest.json` and in the served `index.json` (`clickhouse_version`); it moves with every upstream patch release, so it is not repeated here.")
 w("Ask for a line, never a nearest match: `for(\"25.8\")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.")

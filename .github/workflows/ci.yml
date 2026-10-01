@@ -297,6 +297,12 @@ jobs:
           # release tag (git show <tag>:include/chtypes.h), and the default
           # single-commit checkout carries neither.
           fetch-depth: 0
+      # Selftest first, same discipline as `abi`, `public` and `divergences`:
+      # a checker nobody has seen fail is not a checker. Needs no network and
+      # no tags from this checkout — it builds its own fixture repo and its
+      # own served index fresh, against this very script.
+      - name: "selftest — the Support column renders supported/served-unsupported, an absent key adds no column, an empty list marks every line unsupported"
+        run: scripts/support-matrix.sh --selftest
       - name: docs/support.md matches the manifests and the live index
         run: |
           if ! scripts/support-matrix.sh --check; then
