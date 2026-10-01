@@ -107,6 +107,18 @@ pub struct RowOptions {
 /// **not** [`Sync`], so the compiler rejects sharing one handle between threads
 /// rather than leaving it to a comment. Concurrency across versions, or across
 /// schemas of one version, is expressed by making more schemas.
+///
+/// **This `!Sync` bound IS this crate's per-Schema lock** (chtypes#364, rule
+/// 2 — "a single handle stays single-threaded"): Go and Python enforce the
+/// same rule with a runtime mutex per handle because their languages have no
+/// compile-time alternative; here the type system refuses the unsafe program
+/// outright, at zero runtime cost, so a second, redundant runtime lock
+/// around an object the compiler already keeps on one thread would only ever
+/// be uncontended. REMOVABLE the same way a real lock would be: if a future
+/// artifact proves one handle safe to call from two threads at once, this
+/// bound relaxes to `unsafe impl Sync for Schema {}` (with whatever interior
+/// synchronization that safety proof requires) in one place, exactly as
+/// dropping a lock's acquire/release would be for Go or Python.
 pub struct Schema {
     lib: Arc<Library>,
     handle: *mut ChsSchema,
@@ -118,10 +130,11 @@ pub struct Schema {
 
 // SAFETY: the handle is owned exclusively by this Schema (compile returns a fresh
 // one and Drop is the only release), and every call into the library takes the
-// library's mutex, so moving the handle to another thread cannot produce a
-// concurrent use of it. `Sync` is deliberately NOT implemented: two threads
-// holding &Schema could call chs_row on one handle at once, which the header
-// forbids.
+// library's per-image lock (shared for an ordinary call, exclusive only for
+// set_default_settings/shutdown), so moving the handle to another thread cannot
+// produce a concurrent use of it. `Sync` is deliberately NOT implemented: two
+// threads holding &Schema could call chs_row on one handle at once, which the
+// header forbids.
 unsafe impl Send for Schema {}
 
 impl Schema {
@@ -851,7 +864,7 @@ impl Schema {
 /// already forbids all of it: `Filter` borrows its `Schema`, and `Schema` is
 /// `!Sync`, so neither the filter nor its schema can be shared across
 /// threads in the first place. Every call additionally takes the library's
-/// own mutex, the crate's standing discipline.
+/// own per-image lock, shared, the crate's standing discipline.
 ///
 /// # Enforcement gate
 ///
@@ -973,7 +986,8 @@ impl Drop for Filter<'_> {
 /// `chtypes.h`, verbatim: one `chs_block` *"must not be used from two
 /// threads at once"*, and an eval is a use of BOTH handles. The type system
 /// already forbids all of it — `Block` borrows its `Schema`, which is
-/// `!Sync` — and every call additionally takes the library's own mutex.
+/// `!Sync` — and every call additionally takes the library's own per-image
+/// lock, shared.
 pub struct Block<'s> {
     schema: &'s Schema,
     handle: *mut ChsBlock,

@@ -139,7 +139,7 @@ cargo install chtypes && chtypes fetch 26.8    # also verify, list, where
 
 ## Thread-safety
 
-One mutex per loaded image serializes every call into a `Library`, including `set_default_settings`, which the ABI requires be excluded against everything else on that image. `Library` and `Registry` are `Send + Sync` — share them freely.
+A per-image `RwLock` (chtypes#364) is held SHARED by every ordinary call into a `Library` — distinct handles run concurrently — and EXCLUSIVE only by `set_default_settings` and `shutdown`, which the ABI requires be excluded against everything else on that image. `Library` and `Registry` are `Send + Sync` — share them freely.
 
 `Schema` is `Send` and deliberately **not** `Sync`: one native handle must not be used from two threads at once, and the type system enforces it. Parallelism comes from more schemas, not shared ones.
 

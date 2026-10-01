@@ -1,7 +1,7 @@
 //! One loaded ClickHouse build.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::compile::{CompileMode, CompileRequest};
 use crate::discover::{DiscoveredColumn, reconstruct_ddl_with};
@@ -74,12 +74,23 @@ pub struct Column {
 /// The library names itself: [`Library::version`] comes from
 /// `chs_clickhouse_version()`, never from the directory or file name.
 ///
-/// Thread-safety follows the reference implementation's `dlopen` path and is
-/// deliberately more conservative than the ABI requires: one mutex per loaded
-/// IMAGE guards every call, including `chs_schema_compile` and `chs_free`. The
-/// header allows concurrent calls on *distinct* handles; per-handle parallelism
-/// inside one version is a change a binding must prove with the rigs rather than
-/// by reasoning, so this crate does not take it.
+/// Thread-safety follows the reference implementation's `dlopen` path
+/// (`docs/reference/bindings.md` §Concurrency): a per-IMAGE reader/writer lock
+/// is held SHARED by every ordinary call — `chs_schema_compile`, `chs_row` /
+/// `chs_rows`, `chs_free`, every introspection entry point — since rule 1
+/// already lets distinct handles run those concurrently, and held EXCLUSIVE
+/// only by the two calls that mutate state every handle on the image shares:
+/// [`Library::set_default_settings`] (rule 3) and [`Library::shutdown`]
+/// (which joins the image's own DEFAULT-evaluator threads out from under
+/// every live handle). Before chtypes#364 this was a single `Mutex`,
+/// serializing every call on an image into one queue; measured on a
+/// GitHub-hosted 4-core runner, 8 distinct `Schema` handles on one image ran
+/// at 0.74× the throughput of 1 — contention, not parallelism — which is why
+/// it is a reader/writer lock now. [`Schema`] itself stays `Send` and
+/// deliberately **not** `Sync` (see its own docs): that is rule 2, the
+/// per-handle exclusion, enforced structurally rather than by a second
+/// runtime lock — a handle already cannot reach two threads at once, so a
+/// `Mutex` around it would only ever be uncontended.
 ///
 /// Per loaded IMAGE, not per `Library` value, and the difference is
 /// load-bearing (2026-08-26). `dlopen` refcounts one mapping per file, so two
@@ -88,27 +99,74 @@ pub struct Column {
 /// is deduplicated by path just below. `set_default_settings` REPLACES the
 /// seeded settings list while the row path reads it by reference
 /// (the C ABI contract §Thread-safety: it "MUST be serialized against all other
-/// calls"), and two `Mutex<()>` values, one per `Library`, would have excluded
-/// nothing at all. The mutex is therefore interned on the image's identity
-/// (`image_identity`), exactly as `INITED` is, from the same single stat;
-/// `docs/reference/bindings.md` §Concurrency states the rule.
+/// calls"), and two per-`Library` locks, one per `Library` VALUE, would have
+/// excluded nothing at all. The lock is therefore interned on the image's
+/// identity (`image_identity`), exactly as `INITED` is, from the same single
+/// stat; `docs/reference/bindings.md` §Concurrency states the rule.
+///
+/// **chtypes#364, removable:** the artifact producer is moving
+/// `chs_set_default_settings` to a lock-free swap; once that ships,
+/// [`Library::set_default_settings`]'s call to [`ImageLock::exclusive`] is
+/// the only one left, and removing it collapses every remaining call site to
+/// a single, uncontended `shared()` — at which point this type is no longer
+/// pulling its weight as a reader/writer lock and a plain `Mutex` (or no
+/// lock at all, if `shutdown` is proven safe to run concurrently with a live
+/// call too) is the simpler shape again.
 pub struct Library {
     version: String,
     minor: String,
     path: PathBuf,
     api: Api,
-    /// Serializes every call into this library. See the type docs.
-    lock: Arc<Mutex<()>>,
+    /// The per-image lock. See the type docs and [`ImageLock`].
+    lock: Arc<ImageLock>,
     /// This library's own error-code table, once built (see
     /// [`Library::error_codes`]). Per `Library` and never shared: the table is
     /// a property of the build.
     error_codes: OnceLock<ErrorCodeTable>,
 }
 
+/// The per-image exclusion seam (chtypes#364). ONE small named type, so the
+/// two rules it enforces — and the one future removal — have one place to
+/// live rather than being spread across every call site that takes a guard.
+struct ImageLock(RwLock<()>);
+
+impl ImageLock {
+    fn new() -> ImageLock {
+        ImageLock(RwLock::new(()))
+    }
+
+    /// Rule 1 (`docs/reference/bindings.md` §Concurrency): `chs_row` /
+    /// `chs_rows` — and every other ordinary entry point, which the same
+    /// rule's reasoning covers identically — are safe together on DISTINCT
+    /// handles. Every call in this crate except the two below takes the lock
+    /// here, so they run concurrently with each other and are excluded only
+    /// from the two calls that touch image-global state.
+    fn shared(&self) -> RwLockReadGuard<'_, ()> {
+        match self.0.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    /// Rule 3: `chs_set_default_settings` REPLACES a process-global the row
+    /// path reads BY REFERENCE, so it "MUST be serialized against all other
+    /// calls" on the image, not merely against itself — a plain `Mutex`
+    /// serializing readers against each other would satisfy that rule too,
+    /// but at the cost rule 1 exists to avoid. `shutdown` takes this for the
+    /// same reason: it joins the image's DEFAULT-evaluator threads, which a
+    /// live call elsewhere on the image is still using.
+    fn exclusive(&self) -> RwLockWriteGuard<'_, ()> {
+        match self.0.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
+
 /// An artifact image's identity: the `(st_dev, st_ino)` of its FILE.
 ///
-/// Every per-image table in this crate — `INITED` and the mutex below — is
-/// keyed on it, because it is what `dlopen` itself deduplicates on: a
+/// Every per-image table in this crate — `INITED` and the [`ImageLock`]
+/// below — is keyed on it, because it is what `dlopen` itself deduplicates on: a
 /// symlink, a second spelling and a HARDLINK of one file all stat to one key,
 /// and `dlopen` hands each the one image already mapped. A canonicalized path
 /// cannot see a hardlink (a different path to the same inode), and keying on
@@ -166,15 +224,16 @@ fn remember_image_paths(key: ImageKey, spellings: [PathBuf; 2]) {
     }
 }
 
-/// The one mutex per loaded image, keyed the way `chs_init` is keyed. See
-/// `Library`'s docs for why this cannot live in the `Library` value.
-fn image_lock(key: ImageKey) -> Arc<Mutex<()>> {
-    static LOCKS: Mutex<std::collections::BTreeMap<ImageKey, Arc<Mutex<()>>>> =
+/// The one [`ImageLock`] per loaded image, keyed the way `chs_init` is
+/// keyed. See `Library`'s docs for why this cannot live in the `Library`
+/// value.
+fn image_lock(key: ImageKey) -> Arc<ImageLock> {
+    static LOCKS: Mutex<std::collections::BTreeMap<ImageKey, Arc<ImageLock>>> =
         Mutex::new(std::collections::BTreeMap::new());
     Arc::clone(
         lock_ignoring_poison(&LOCKS)
             .entry(key)
-            .or_insert_with(|| Arc::new(Mutex::new(()))),
+            .or_insert_with(|| Arc::new(ImageLock::new())),
     )
 }
 
@@ -209,8 +268,8 @@ impl Library {
     pub fn load(path: impl AsRef<Path>, timezone: &str) -> Result<Library> {
         let path = path.as_ref();
         // Which image this is, from ONE stat, before anything is dlopen'd:
-        // the same key interns the mutex and guards `chs_init` below, so a
-        // hardlink can never get two mutexes over one image.
+        // the same key interns the ImageLock and guards `chs_init` below, so
+        // a hardlink can never get two locks over one image.
         let (key, spellings) = image_identity(path)?;
         let api = Api::open(path)?;
 
@@ -426,8 +485,10 @@ impl Library {
     /// Thread-safety: the ABI requires this call be serialized against every
     /// other call on the same loaded image (`docs/reference/bindings.md` §Concurrency,
     /// rule 3 — the row path reads the seeded settings by reference). This
-    /// crate satisfies that with the per-image mutex every call takes, so no
-    /// caller-side exclusion is needed.
+    /// crate satisfies that by taking the per-image lock EXCLUSIVE
+    /// ([`Library::lock_exclusive`]) rather than shared, so no caller-side
+    /// exclusion is needed; chtypes#364 is the measurement behind why every
+    /// other call takes it merely shared instead.
     ///
     /// # Errors
     ///
@@ -443,7 +504,7 @@ impl Library {
         settings: &[(K, V)],
     ) -> Result<()> {
         let json = settings_json(settings)?;
-        let _guard = self.lock();
+        let _guard = self.lock_exclusive();
         match self.api.set_default_settings(&json) {
             None => Err(Error::PredatesFeature {
                 feature: "chs_set_default_settings",
@@ -613,8 +674,13 @@ impl Library {
     /// `chs_init` registers this with `atexit`, so an ordinary process needs no
     /// call. Call it when the host controls its own teardown order, or from a
     /// test that must not depend on `atexit`. Idempotent.
+    ///
+    /// Thread-safety: takes the per-image lock EXCLUSIVE
+    /// ([`Library::lock_exclusive`]) — this joins threads the DEFAULT
+    /// evaluator shares with every other live handle on the image, so it
+    /// must not run while one of them is mid-call.
     pub fn shutdown(&self) {
-        let _guard = self.lock();
+        let _guard = self.lock_exclusive();
         self.api.shutdown();
     }
 
@@ -622,15 +688,22 @@ impl Library {
         &self.api
     }
 
-    /// The per-library lock every call takes. A poisoned mutex cannot leave the
-    /// native library in a bad state — every C entry point is a pure function of
-    /// (build, schema text, row bytes, settings, clock instant) with no
-    /// cross-call state — so the guard is recovered rather than propagated.
-    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
-        match self.lock.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        }
+    /// The per-image lock, SHARED — every call except
+    /// [`Library::set_default_settings`] and [`Library::shutdown`] takes this
+    /// one. A poisoned lock cannot leave the native library in a bad state —
+    /// every C entry point is a pure function of (build, schema text, row
+    /// bytes, settings, clock instant) with no cross-call state — so the
+    /// guard is recovered rather than propagated. See [`ImageLock`] and
+    /// `Library`'s own docs for the rule this enforces (chtypes#364).
+    pub(crate) fn lock(&self) -> RwLockReadGuard<'_, ()> {
+        self.lock.shared()
+    }
+
+    /// The per-image lock, EXCLUSIVE — only [`Library::set_default_settings`]
+    /// and [`Library::shutdown`] take this one. See [`ImageLock`] and
+    /// `Library`'s own docs.
+    pub(crate) fn lock_exclusive(&self) -> RwLockWriteGuard<'_, ()> {
+        self.lock.exclusive()
     }
 }
 

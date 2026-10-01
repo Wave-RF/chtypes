@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Distinct `Schema` handles on one loaded image now run concurrently instead of serializing on a single per-image mutex.** The ABI already allows `chs_row`/`chs_rows` together on distinct handles; this crate was more conservative than that. Measured on a GitHub-hosted 4-core `linux-amd64` runner (ClickHouse 25.8.33.6-lts, ABI revision 6): 8 handles on one image ran at **0.74×** the throughput of 1 under the old `Mutex` (contention, not parallelism), and **2.56×** after replacing it with a per-image `RwLock` — held shared by every ordinary call and exclusive only by `set_default_settings` and `shutdown`, the two calls that mutate state every handle on an image shares. `Schema` stays `Send` and deliberately not `Sync`; a new contention test (readers against concurrent `set_default_settings` swaps, byte-identical answers, no deadlock or panic) guards the exclusion directly (closes #364).
+
 ## [0.5.2] — 2026-10-01
 
 ### Changed
