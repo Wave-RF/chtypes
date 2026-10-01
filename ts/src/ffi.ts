@@ -923,8 +923,11 @@ export class NativeLibrary {
    *
    *   `payload === null`  the library emitted nothing — no export requested,
    *                       or the export DECLINED, with the document's
-   *                       `export_declined` always saying why. The ABI's
-   *                       `{NULL, 0}`.
+   *                       `export_declined` always saying why (from
+   *                       `chtypes_build` 1790845279 on a supported line —
+   *                       `docs/support.md`; a served, unsupported line
+   *                       keeps `export_declined` empty here permanently).
+   *                       The ABI's `{NULL, 0}`.
    *   zero-length Buffer  EMITTED-EMPTY: an accepted batch with zero accepted
    *                       rows — `data` non-NULL, `len` 0. An answer, not a
    *                       decline.

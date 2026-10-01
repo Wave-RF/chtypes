@@ -135,6 +135,8 @@ Three are **per-process**, settable only through `set_default_settings`:
 
 So the only new outcome is the third row: before the relink, a caller sending a tenant's real timezone per call could not tell "ignored" from "honored," because both looked identical — `accepted`, nothing in `unsupported_settings`. This is a library change, not a binding one: every binding already promotes a row whenever `unsupported_settings` is non-empty, so no binding code moved.
 
+> **This applies only to builds at `chtypes_build` 1790845279 or later, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9` — [`support.md`](../support.md)).** A served, unsupported (retired) line never gets a new build or a new ABI revision ([`support.md` → Served, unsupported ClickHouse lines](../support.md#served-unsupported-clickhouse-lines)), so it keeps the pre-relink behavior permanently — `26.6`'s newest build, `1790767905`, predates this relink and was never republished.
+
 ## MergeTree settings are a different namespace
 
 The `SETTINGS` clause after an engine declaration is its own namespace, and it is passed separately — `WithMergeTreeSettings` in Go, `merge_tree_settings=` in Python, `mergeTreeSettings` in TypeScript, the third argument of `set_engine` in Rust.

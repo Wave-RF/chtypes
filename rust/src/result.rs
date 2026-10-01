@@ -607,6 +607,11 @@ pub struct RowResult {
     /// empty — `verdict_code` still carries the server's readback code.
     /// Never read an empty `verdict_err` on a `Decline` as "nothing is
     /// wrong"; read `verdict_code` instead.
+    ///
+    /// The non-`Accepted`-row case is populated only from `chtypes_build`
+    /// 1790845279 or later on a supported line (`docs/support.md`) — a
+    /// served, unsupported (retired) line gets no new build or ABI revision
+    /// and keeps the pre-relink `0`/empty permanently.
     pub verdict_code: i32,
     /// The message beside `verdict_code`; empty otherwise.
     pub verdict_err: String,
@@ -677,7 +682,10 @@ pub struct BatchResult {
     ///   admitted (a `CsvWithNames` body naming an unknown header column
     ///   under `input_format_skip_unknown_fields=0`, measured) left
     ///   `export_declined` empty despite withholding requested bytes; that
-    ///   gap is closed, by design.
+    ///   gap is closed, by design, for `chtypes_build` 1790845279 or later
+    ///   on a supported line (`docs/support.md`) — a served, unsupported
+    ///   (retired) line gets no new build or ABI revision and keeps the
+    ///   pre-relink empty `export_declined` permanently.
     /// * `Some(empty)` — an accepted batch with zero accepted rows: the
     ///   EMITTED-EMPTY case, distinguishable from a decline.
     /// * `Some(bytes)` — the exported lines; slice per
@@ -701,7 +709,7 @@ pub struct BatchResult {
     /// accepted", so key presence on whether `rows_export_with` was called,
     /// never on these being nonzero. A row whose own `outcome` is not
     /// [`Outcome::Accepted`] sits in NEITHER count: `rows.len()` decomposes
-    /// into `rows_passed + rows_cut +` the non-accepted rows.
+    /// into `rows_passed + rows_cut` plus the non-accepted rows.
     ///
     /// Both are also `0` whenever the BATCH's own `outcome` is not
     /// [`Outcome::Accepted`] — even when an earlier row, in isolation, was
@@ -710,7 +718,11 @@ pub struct BatchResult {
     /// `input_format_allow_errors_*`) batch aborted by a later bad row
     /// measured `rows_passed == 1` despite an `outcome` of
     /// [`Outcome::Rejected`]; that gap is closed, by design, so a batch
-    /// `outcome` other than `Accepted` now always reports `0`/`0` here.
+    /// `outcome` other than `Accepted` now always reports `0`/`0` here, for
+    /// `chtypes_build` 1790845279 or later on a supported line
+    /// (`docs/support.md`) — a served, unsupported (retired) line gets no
+    /// new build or ABI revision and keeps the pre-relink counting
+    /// permanently.
     pub rows_passed: usize,
     /// Accepted rows with any verdict OTHER than [`Verdict::True`]; see
     /// `rows_passed`.

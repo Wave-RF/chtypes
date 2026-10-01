@@ -8,7 +8,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
-- **Served revision-6 artifacts changed behavior on 2026-10-01 at build 1790845279 (chtypes#298), by design; no binding code changed, because every field below is a straight pass-through of the library's own document.**
+- **Served revision-6 artifacts changed behavior on 2026-10-01 at build 1790845279 (chtypes#298), by design; no binding code changed, because every field below is a straight pass-through of the library's own document.** Every point below applies only to builds from `chtypes_build` 1790845279 onward, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9` — `docs/support.md`). A served, unsupported (retired) line — `26.6` at build `1790767905`, say — gets no new build or ABI revision, ever, and keeps the pre-relink behavior permanently.
   - `RowResult::verdict_code`/`verdict_err` are now populated on every non-accepted row's `Decline` verdict (previously `0`/`""`). One exception: an `AcceptedPoisoned` row's `verdict_err` stays empty because that row's own `err_msg` is itself empty — `verdict_code` still carries the server's readback code.
   - `BatchResult::rows_passed`/`rows_cut` are now `0`/`0` whenever the batch's own `outcome` is not `Accepted` — previously an earlier row's own accepted-and-`True` verdict was still counted (measured: `1`/`0` on a strict batch a later bad row rejected). This is the only change in MEANING an SDK user can observe.
   - `BatchResult::export_declined` is now named for every non-accepted batch that requested an export, a rejected zero-row batch included (previously left empty); `rows_passed`/`rows_cut` are `0` there too when a filter is attached. This one is additive.

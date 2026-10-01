@@ -8,7 +8,7 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
-- **Served revision-6 artifacts changed behavior on 2026-10-01 at build 1790845279 (chtypes#298), by design; no binding code changed, because every field below is a straight pass-through of the library's own document.**
+- **Served revision-6 artifacts changed behavior on 2026-10-01 at build 1790845279 (chtypes#298), by design; no binding code changed, because every field below is a straight pass-through of the library's own document.** Every point below applies only to builds from `chtypes_build` 1790845279 onward, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9` — `docs/support.md`). A served, unsupported (retired) line — `26.6` at build `1790767905`, say — gets no new build or ABI revision, ever, and keeps the pre-relink behavior permanently.
   - `RowResult.VerdictCode`/`VerdictErr` are now populated on every non-accepted row's `d` verdict (previously `0`/`""`). One exception: an `AcceptedPoisoned` row's `VerdictErr` stays `""` because that row's own `ErrMsg` is itself empty — `VerdictCode` still carries the server's readback code.
   - `BatchResult.RowsPassed`/`RowsCut` are now `0`/`0` whenever the batch's own `Outcome` is not `Accepted` — previously an earlier row's own accepted-and-`t` verdict was still counted (measured: `1`/`0` on a strict batch a later bad row rejected). This is the only change in MEANING an SDK user can observe.
   - `BatchResult.ExportDeclined` is now named for every non-accepted batch that requested an export, a rejected zero-row batch included (previously left `""`); `RowsPassed`/`RowsCut` are `0` there too when a filter is attached. This one is additive.

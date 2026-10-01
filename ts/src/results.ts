@@ -240,6 +240,11 @@ export interface RowResult {
    * empty — `verdictCode` still carries the server's readback code. Never
    * read an empty `verdictErr` on a `'d'` verdict as "nothing is wrong";
    * read `verdictCode` instead.
+   *
+   * The non-`'accepted'`-row case is populated only from `chtypes_build`
+   * 1790845279 or later on a supported line (`docs/support.md`) — a
+   * served, unsupported (retired) line gets no new build or ABI revision
+   * and keeps the pre-relink `0`/`''` permanently.
    */
   readonly verdictCode: number;
   readonly verdictErr: string;
@@ -314,7 +319,11 @@ export interface BatchResult {
    *                       column under `input_format_skip_unknown_fields=0`,
    *                       measured) left `exportDeclined` `undefined`
    *                       despite withholding requested bytes; that gap is
-   *                       closed, by design.
+   *                       closed, by design, for `chtypes_build` 1790845279
+   *                       or later on a supported line (`docs/support.md`)
+   *                       — a served, unsupported (retired) line gets no
+   *                       new build or ABI revision and keeps the
+   *                       pre-relink `undefined` permanently.
    *   zero-length Buffer  EMITTED-EMPTY: an accepted batch with zero accepted
    *                       rows — distinguishable from a decline.
    *   bytes               the exported lines; slice per `spans`.
@@ -345,7 +354,7 @@ export interface BatchResult {
    * nothing passed and nothing accepted", so key presence on whether
    * `rowFilter` was passed, never on these being nonzero. A row whose own
    * `outcome` is not `'accepted'` sits in NEITHER count: `rows.length`
-   * decomposes into `rowsPassed + rowsCut +` the non-accepted rows.
+   * decomposes into `rowsPassed + rowsCut` plus the non-accepted rows.
    *
    * Both are also `0` whenever the BATCH's own `outcome` is not
    * `'accepted'` — even when an earlier row, in isolation, was itself
@@ -354,7 +363,10 @@ export interface BatchResult {
    * `input_format_allow_errors_*`) batch aborted by a later bad row
    * measured `rowsPassed === 1` despite an `outcome` of `'rejected'`; that
    * gap is closed, by design, so a batch `outcome` other than `'accepted'`
-   * now always reports `0`/`0` here.
+   * now always reports `0`/`0` here, for `chtypes_build` 1790845279 or
+   * later on a supported line (`docs/support.md`) — a served, unsupported
+   * (retired) line gets no new build or ABI revision and keeps the
+   * pre-relink counting permanently.
    */
   readonly rowsPassed: number;
   readonly rowsCut: number;
