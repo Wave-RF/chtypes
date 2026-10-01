@@ -2045,6 +2045,516 @@ fn inner_golden_window_never_heals() {
     println!("INNER-OK golden-never-heals");
 }
 
+// ------------------------------------------------- chtypes#365: transient errors
+
+/// One asset name's injected failure: a status (optionally with a
+/// `Retry-After`), or a bare connection drop (`reset`) simulating a
+/// connection-level failure — for the next `remaining` requests, falling
+/// through to the real file afterward.
+struct Flake {
+    status: u16, // ignored when `reset` is true
+    retry_after: Option<String>,
+    remaining: usize,
+    reset: bool,
+}
+
+struct FlakyServer {
+    url: String,
+    hits: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+}
+
+fn reason_phrase(status: u16) -> &'static str {
+    match status {
+        404 => "Not Found",
+        410 => "Gone",
+        408 => "Request Timeout",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        _ => "Error",
+    }
+}
+
+fn respond_with_status(stream: &std::net::TcpStream, status: u16, retry_after: Option<&str>) {
+    use std::io::Write;
+    let mut stream = match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let mut head = format!("HTTP/1.1 {status} {}\r\n", reason_phrase(status));
+    if let Some(ra) = retry_after {
+        head.push_str(&format!("Retry-After: {ra}\r\n"));
+    }
+    head.push_str("Content-Length: 0\r\nConnection: close\r\n\r\n");
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.flush();
+}
+
+/// [`serve_golden_window`], but able to answer specific asset names with an
+/// injected [`Flake`] for their first `remaining` requests, falling through
+/// to the real file afterward — chtypes#365's own real transient blip, made
+/// real on loopback.
+fn serve_with_flakes(
+    dir: PathBuf,
+    mut flakes: std::collections::HashMap<String, Flake>,
+) -> FlakyServer {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let hits = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::<
+        String,
+        usize,
+    >::new()));
+    let counted = std::sync::Arc::clone(&hits);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            let Some(name) = read_request_name(&stream) else {
+                continue;
+            };
+            {
+                let mut h = counted.lock().unwrap();
+                *h.entry(name.clone()).or_insert(0) += 1;
+            }
+            let mut answered = false;
+            if let Some(flake) = flakes.get_mut(&name) {
+                if flake.remaining > 0 {
+                    flake.remaining -= 1;
+                    answered = true;
+                    if !flake.reset {
+                        respond_with_status(&stream, flake.status, flake.retry_after.as_deref());
+                    }
+                    // `reset`: `stream` is dropped, unanswered, at the end of
+                    // this block — a connection-level failure, from the
+                    // client's view.
+                }
+            }
+            if !answered {
+                respond_with_file(&stream, &dir.join(&name));
+            }
+        }
+    });
+    FlakyServer { url, hits }
+}
+
+/// The tarball name [`write_golden_window_release`] publishes for `platform`.
+fn golden_window_tarball_name(platform: &str) -> String {
+    format!("chtypes-25.8.28.1-lts-{platform}.tar.gz")
+}
+
+/// Runs `ensure` and prints exactly one marker line: `INNER-365-OK <version>`
+/// on success, `INNER-365-ERR <code> <message>` on failure (`<code>` is
+/// `NONE` for an error with no artifact code). Shared by every chtypes#365
+/// test below so each only has to set up its own server and read one line
+/// back, never duplicate this plumbing.
+#[test]
+fn inner_ensure_365() {
+    if !inner() {
+        return;
+    }
+    let opts = EnsureOptions {
+        dest: Some(PathBuf::from(std::env::var("CHTYPES_TEST_DEST").unwrap())),
+        platform: Some(std::env::var("CHTYPES_TEST_PLATFORM").unwrap()),
+        url: Some(std::env::var("CHTYPES_TEST_RELEASE_URL").unwrap()),
+        trusted_keys: Some(vec![std::env::var("CHTYPES_TEST_KEY").unwrap()]),
+        allow_unsigned: Some(false),
+        ..Default::default()
+    };
+    match fetch::ensure("25.8", &opts) {
+        Ok(installed) => println!("INNER-365-OK {}", installed.version),
+        Err(err) => println!(
+            "INNER-365-ERR {} {err}",
+            err.artifact_code().unwrap_or("NONE")
+        ),
+    }
+}
+
+/// `envs` always carries the four options `inner_ensure_365` needs, plus
+/// whatever the caller adds (at minimum `CHTYPES_FETCH_TEST_RETRY_DELAY_MS`).
+fn run_365(server: &str, key: &str, dest: &Path, extra: &[(&str, &str)]) -> Run {
+    let mut envs = vec![
+        ("CHTYPES_TEST_RELEASE_URL", server),
+        ("CHTYPES_TEST_KEY", key),
+        ("CHTYPES_TEST_DEST", dest.to_str().unwrap()),
+        ("CHTYPES_TEST_PLATFORM", foreign()),
+    ];
+    envs.extend_from_slice(extra);
+    rerun("inner_ensure_365", &envs)
+}
+
+/// The issue's own scenario: the artifacts host answers 500 for a short
+/// blip, then recovers. `SHA256SUMS` is read before `index.json`
+/// (`Release::load_once`), so failing `index.json` alone is enough to
+/// exercise the whole retry path without the "no SHA256SUMS" special case
+/// confusing it.
+#[test]
+fn fetch_retries_transient_server_errors() {
+    let dir = tmp("chtypes365-500-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let mut flakes = std::collections::HashMap::new();
+    flakes.insert(
+        "index.json".to_string(),
+        Flake {
+            status: 500,
+            retry_after: None,
+            remaining: 2,
+            reset: false,
+        },
+    );
+    let server = serve_with_flakes(dir.clone(), flakes);
+    let dest = tmp("chtypes365-500-dest");
+
+    let r = run_365(
+        &server.url,
+        &key,
+        &dest,
+        &[("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "5")],
+    );
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(
+        r.stdout.contains("INNER-365-OK 25.8.28.1-lts"),
+        "{}",
+        r.stdout
+    );
+    let hits = server.hits.lock().unwrap();
+    assert_eq!(
+        *hits.get("index.json").unwrap_or(&0),
+        3,
+        "want exactly 3 reads of index.json (2 failures + 1 success): {hits:?}"
+    );
+    drop(hits);
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+/// `Retry-After` in delta-seconds, short enough to fit the budget: honored in
+/// place of the doubling schedule's own (much larger) delay.
+#[test]
+fn fetch_honors_retry_after_delta_seconds() {
+    let dir = tmp("chtypes365-ra-delta-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let mut flakes = std::collections::HashMap::new();
+    flakes.insert(
+        "index.json".to_string(),
+        Flake {
+            status: 503,
+            retry_after: Some("1".to_string()),
+            remaining: 1,
+            reset: false,
+        },
+    );
+    let server = serve_with_flakes(dir.clone(), flakes);
+    let dest = tmp("chtypes365-ra-delta-dest");
+
+    let start = std::time::Instant::now();
+    // 10s: large enough that honoring the 1s Retry-After is clearly a
+    // DIFFERENT, shorter wait, never a coincidence of the default schedule.
+    let r = run_365(
+        &server.url,
+        &key,
+        &dest,
+        &[("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "10000")],
+    );
+    let elapsed = start.elapsed();
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(
+        r.stdout.contains("INNER-365-OK 25.8.28.1-lts"),
+        "{}",
+        r.stdout
+    );
+    assert!(
+        elapsed >= std::time::Duration::from_millis(700)
+            && elapsed <= std::time::Duration::from_secs(8),
+        "waited {elapsed:?}, want ~1s (Retry-After honored, not the 10s schedule default)"
+    );
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+/// `Retry-After` far longer than the retry budget could ever wait out is not
+/// honored by sleeping through it: the fetch fails at once, naming the
+/// requested delay, and reads the flaky asset exactly once.
+#[test]
+fn fetch_retry_after_longer_than_budget_fails_at_once() {
+    let dir = tmp("chtypes365-ra-huge-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let mut flakes = std::collections::HashMap::new();
+    flakes.insert(
+        "index.json".to_string(),
+        Flake {
+            status: 503,
+            retry_after: Some("9999".to_string()),
+            remaining: 5,
+            reset: false,
+        },
+    );
+    let server = serve_with_flakes(dir.clone(), flakes);
+    let dest = tmp("chtypes365-ra-huge-dest");
+
+    let start = std::time::Instant::now();
+    // 10ms base delay -> a ~150ms budget, nowhere near 9999s.
+    let r = run_365(
+        &server.url,
+        &key,
+        &dest,
+        &[("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "10")],
+    );
+    let elapsed = start.elapsed();
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(
+        r.stdout
+            .contains("INNER-365-ERR CHTYPES_SOURCE_UNREACHABLE"),
+        "{}",
+        r.stdout
+    );
+    assert!(
+        r.stdout.contains("9999"),
+        "message does not name the requested delay: {}",
+        r.stdout
+    );
+    assert!(
+        elapsed <= std::time::Duration::from_secs(3),
+        "took {elapsed:?} — a 9999s Retry-After was waited out instead of refused at once"
+    );
+    let hits = server.hits.lock().unwrap();
+    assert_eq!(
+        *hits.get("index.json").unwrap_or(&0),
+        1,
+        "want exactly 1 read (no retry once the budget cannot fit it): {hits:?}"
+    );
+    drop(hits);
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+/// A 404 on the tarball is decided at once, never retried — "a retry buys
+/// time; it never converts a refusal into an install" (§3a), restated for
+/// status codes by chtypes#365. The tarball, not `index.json`/`SHA256SUMS`,
+/// is the clean place to prove this: those two have their own "no release
+/// here" / "no SHA256SUMS" special cases, unrelated to chtypes#365, that a
+/// 404 on either also triggers.
+#[test]
+fn fetch_404_on_the_tarball_fails_on_the_first_attempt() {
+    let dir = tmp("chtypes365-404-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let file = golden_window_tarball_name(foreign());
+    let mut flakes = std::collections::HashMap::new();
+    flakes.insert(
+        file.clone(),
+        Flake {
+            status: 404,
+            retry_after: None,
+            remaining: 99,
+            reset: false,
+        },
+    );
+    let server = serve_with_flakes(dir.clone(), flakes);
+    let dest = tmp("chtypes365-404-dest");
+
+    let r = run_365(
+        &server.url,
+        &key,
+        &dest,
+        &[("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "1")],
+    );
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(r.stdout.contains("INNER-365-ERR"), "{}", r.stdout);
+    let hits = server.hits.lock().unwrap();
+    assert_eq!(
+        *hits.get(&file).unwrap_or(&0),
+        1,
+        "want exactly 1 download (a 404 is never retried): {hits:?}"
+    );
+    drop(hits);
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+/// The same as the 404 case, for 410 — chtypes#365: "Never retry a 404 or 410."
+#[test]
+fn fetch_410_on_the_tarball_fails_on_the_first_attempt() {
+    let dir = tmp("chtypes365-410-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let file = golden_window_tarball_name(foreign());
+    let mut flakes = std::collections::HashMap::new();
+    flakes.insert(
+        file.clone(),
+        Flake {
+            status: 410,
+            retry_after: None,
+            remaining: 99,
+            reset: false,
+        },
+    );
+    let server = serve_with_flakes(dir.clone(), flakes);
+    let dest = tmp("chtypes365-410-dest");
+
+    let r = run_365(
+        &server.url,
+        &key,
+        &dest,
+        &[("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "1")],
+    );
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(r.stdout.contains("INNER-365-ERR"), "{}", r.stdout);
+    let hits = server.hits.lock().unwrap();
+    assert_eq!(
+        *hits.get(&file).unwrap_or(&0),
+        1,
+        "want exactly 1 download (a 410 is never retried): {hits:?}"
+    );
+    drop(hits);
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+/// A tarball whose hash disagrees with the signed release is the release
+/// lying about a byte, not a half-finished upload — never retried, even
+/// though downloading it raised no transient symptom at all.
+#[test]
+fn fetch_tarball_hash_mismatch_is_never_retried() {
+    let dir = tmp("chtypes365-corrupt-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let file = golden_window_tarball_name(foreign());
+    let tarball_path = dir.join(&file);
+    let mut bytes = std::fs::read(&tarball_path).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xFF;
+    std::fs::write(&tarball_path, &bytes).unwrap();
+
+    let hooks: std::collections::HashMap<String, Box<dyn FnMut() + Send>> =
+        std::collections::HashMap::new();
+    let server = serve_golden_window(dir.clone(), hooks);
+    let dest = tmp("chtypes365-corrupt-dest");
+
+    let r = run_365(
+        &server.url,
+        &key,
+        &dest,
+        &[("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "1")],
+    );
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(
+        r.stdout.contains("INNER-365-ERR CHTYPES_ARTIFACT_CORRUPT"),
+        "{}",
+        r.stdout
+    );
+    let hits = server.hits.lock().unwrap();
+    assert_eq!(
+        *hits.get(&file).unwrap_or(&0),
+        1,
+        "want exactly 1 download (a hash mismatch is never retried): {hits:?}"
+    );
+    drop(hits);
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+/// The tarball half of chtypes#365: a transient 502 on the asset itself
+/// (after `SHA256SUMS`/`.sig`/`index.json` all verified) is retried the same
+/// way a metadata blip is.
+#[test]
+fn fetch_retries_a_transient_tarball_download_failure() {
+    let dir = tmp("chtypes365-tarball-502-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let file = golden_window_tarball_name(foreign());
+    let mut flakes = std::collections::HashMap::new();
+    flakes.insert(
+        file.clone(),
+        Flake {
+            status: 502,
+            retry_after: None,
+            remaining: 2,
+            reset: false,
+        },
+    );
+    let server = serve_with_flakes(dir.clone(), flakes);
+    let dest = tmp("chtypes365-tarball-502-dest");
+
+    let r = run_365(
+        &server.url,
+        &key,
+        &dest,
+        &[("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "5")],
+    );
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(
+        r.stdout.contains("INNER-365-OK 25.8.28.1-lts"),
+        "{}",
+        r.stdout
+    );
+    let hits = server.hits.lock().unwrap();
+    assert_eq!(
+        *hits.get(&file).unwrap_or(&0),
+        3,
+        "want exactly 3 downloads (2 failures + 1 success): {hits:?}"
+    );
+    drop(hits);
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+/// Every download of the tarball hits a connection-level failure (the
+/// connection is accepted, then closed without a response — a reset, from
+/// the client's view): the fetch still fails `CHTYPES_SOURCE_UNREACHABLE`,
+/// naming the attempt count.
+#[test]
+fn fetch_tarball_connection_failure_exhausts_budget() {
+    let dir = tmp("chtypes365-tarball-reset-release");
+    let key = write_golden_window_release(&dir, foreign());
+    let file = golden_window_tarball_name(foreign());
+    let mut flakes = std::collections::HashMap::new();
+    flakes.insert(
+        file.clone(),
+        Flake {
+            status: 0,
+            retry_after: None,
+            remaining: 1000,
+            reset: true,
+        },
+    );
+    let server = serve_with_flakes(dir.clone(), flakes);
+    let dest = tmp("chtypes365-tarball-reset-dest");
+
+    let r = run_365(
+        &server.url,
+        &key,
+        &dest,
+        &[("CHTYPES_FETCH_TEST_RETRY_DELAY_MS", "1")],
+    );
+    assert_eq!(r.code, 0, "inner run failed:\n{}\n{}", r.stdout, r.stderr);
+    assert!(
+        r.stdout
+            .contains("INNER-365-ERR CHTYPES_SOURCE_UNREACHABLE"),
+        "{}",
+        r.stdout
+    );
+    assert!(
+        r.stdout.contains("attempt"),
+        "message does not name the attempt count: {}",
+        r.stdout
+    );
+    let hits = server.hits.lock().unwrap();
+    // Mirrors release::RELEASE_LOAD_ATTEMPTS (a pub(crate) constant this
+    // external test crate cannot name directly).
+    assert_eq!(
+        *hits.get(&file).unwrap_or(&0),
+        5,
+        "want exactly 5 downloads (one per attempt): {hits:?}"
+    );
+    drop(hits);
+    for d in [dir, dest] {
+        std::fs::remove_dir_all(&d).ok();
+    }
+}
+
 // ------------------------------------------------ the ABI revision (§2)
 
 /// The override the fixture tests fetch under is wired and derived: the

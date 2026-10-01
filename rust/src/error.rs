@@ -473,6 +473,16 @@ pub enum Error {
         origin: String,
         /// The transport's own words, or `offline`.
         message: String,
+        /// Worth retrying through the `docs/guides/fetch.md` §3a budget
+        /// (chtypes#365): an HTTP 5xx/408/429, or a connection-level failure
+        /// reaching the host at all (refused, reset, timed out, DNS). Never
+        /// true for offline, a 404/410 (never routed through this variant —
+        /// `Source::open` answers `Ok(None)` for those), or any other
+        /// definite refusal.
+        retryable: bool,
+        /// The source's own requested wait — `Retry-After` on a 503 or 429
+        /// — when it sent one. Only ever `Some` while `retryable` is true.
+        retry_after: Option<std::time::Duration>,
     },
 
     /// Fetch machinery that reached no verdict: an unreadable release listing,
@@ -709,6 +719,8 @@ mod tests {
                 Error::SourceUnreachable {
                     origin: "s".into(),
                     message: "offline".into(),
+                    retryable: false,
+                    retry_after: None,
                 },
                 "CHTYPES_SOURCE_UNREACHABLE",
             ),
