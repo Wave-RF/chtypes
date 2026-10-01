@@ -1,0 +1,10 @@
+{
+  "merged": true,
+  "closing_issues": [
+    {
+      "number": 306,
+      "state": "CLOSED",
+      "repository": { "nameWithOwner": "Wave-RF/chtypes" }
+    }
+  ]
+}

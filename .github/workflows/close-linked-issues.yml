@@ -1,0 +1,136 @@
+# close-linked-issues — after a pull request merges into main, close every
+# issue its own `closingIssuesReferences` names, with a comment naming the
+# merge. scripts/close-linked-issues.py does the work; this file is the
+# wiring (chtypes#362).
+#
+# WHY THIS EXISTS. Measured 2026-10-01: GitHub's own keyword auto-close
+# (`Closes #N`) does not fire for a merge whose actor is the policy-merge
+# App's installation token — 3 of 3 linked issues closed when a maintainer
+# enqueued the pull request, 0 of 2 when the `chtypes` App did (#353, #361).
+# Every self-merged fix otherwise leaves its own issue open until someone
+# notices by hand.
+#
+# WHY NOT THE merge-bot APP. policy-merge.yml's own header says what that
+# App's token is minted with — `actions:write`, `contents:write`,
+# `metadata:read`, `pull_requests:write`, `workflows:write` (measured) — no
+# `issues` permission at all, so an App token from it could not close
+# anything here even before asking whether it should. This workflow instead
+# runs on `push` to main with the workflow's own BUILT-IN `GITHUB_TOKEN`,
+# scoped at job level to exactly `issues: write` (close + comment) and
+# `pull-requests: read` (the GraphQL closingIssuesReferences read below). No
+# App, no secret, nothing minted.
+#
+# IDEMPOTENT BY CONSTRUCTION — THE ENQUEUER NEVER NEEDS READING. A
+# maintainer-enqueued pull request's linked issues are already closed by
+# GitHub's own auto-close by the time this workflow's push event fires:
+# scripts/close-linked-issues.py only ever acts on a closingIssuesReferences
+# entry whose own state is still OPEN, in THIS repository, so that case is a
+# no-op here, not a special case this workflow detects. It never reopens
+# anything and never touches an issue already closed.
+#
+# TRIGGER. `push` to main. This repository's branch protection
+# (enforce_admins on) means every commit reaching main does so by way of a
+# pull request — a merge-queue merge or a maintainer's manual one — so every
+# push here is, in practice, one merge. The script itself resolves each
+# pushed commit to its merged pull request through
+# `GET repos/{repo}/commits/{sha}/pulls` (proven against #361's and #357's
+# own real merge commits — see the script's own header and
+# tests/fixtures/close-linked-issues/README.md) and does nothing, quietly,
+# for a commit that is not one. `workflow_dispatch` re-checks one already-
+# merged commit by hand; a push-triggered workflow cannot run before it is
+# on main, so there is no way to watch this judge a real merge before it
+# merges — the first proof is the first App-enqueued pull request that
+# closes an issue after this lands.
+#
+# FAIL CLOSED. Any `gh api` error inside the script (a non-2xx response, or
+# output it cannot parse) is ApiError, printed to stderr and exit 2; the
+# step below turns that into a loud `::error::` and the job itself ends red
+# — never a silent pass.
+name: close-linked-issues
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "An already-merged commit on main to re-check (e.g. after a failed run)"
+        required: true
+        type: string
+
+permissions: {}
+
+# One run per triggering commit (or per manual sha) at a time; never
+# canceled mid-close — a close plus its explanatory comment must finish
+# together, not be cut off between the two.
+concurrency:
+  group: close-linked-issues-${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.sha }}
+  cancel-in-progress: false
+
+# Every run: step uses bash with -eo pipefail. GitHub's default for a step
+# with no shell: is `bash -e {0}`, WITHOUT pipefail, so a failing command on
+# the left of a pipe was hidden by the exit status of the one on the right.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  close:
+    name: "close-linked-issues — close every OPEN, same-repository closingIssuesReferences of the pushed commit's merged pull request"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Selftest first, the house rule for every checker in this repository:
+      # a refusal nobody has seen fire is not known to work. No network.
+      - name: selftest — the pure close decision, against captured real API data and fabricated edge cases
+        run: scripts/close-linked-issues.py --selftest
+
+      - name: close every linked issue the pushed commit(s)' merged pull request(s) list, if still open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DISPATCH_SHA: ${{ inputs.sha }}
+          PUSH_COMMITS_JSON: ${{ toJSON(github.event.commits) }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # Validated with a strict regex before it reaches gh api at all —
+            # the same discipline every other attacker-controlled workflow
+            # input in this repository is held to (see
+            # artifacts-readback.yml's identical treatment of its own two
+            # dispatch inputs).
+            if ! [[ "$DISPATCH_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "::error::close-linked-issues: --sha input '$DISPATCH_SHA' is not a 40-character hex commit sha"
+              exit 1
+            fi
+            shas=("$DISPATCH_SHA")
+          else
+            # github.event.commits is the push payload's own list of commits
+            # introduced by this push (GitHub, not this script, decides what
+            # that list contains); extracted here, never interpolated into
+            # the run: text directly, same discipline every other
+            # attacker-controlled workflow input in this repository is held
+            # to (lint-actions.sh's actionlint pass checks for exactly this).
+            mapfile -t shas < <(printf '%s' "$PUSH_COMMITS_JSON" | python3 -c 'import json, sys; [print(c["id"]) for c in json.load(sys.stdin)]')
+          fi
+
+          if [ "${#shas[@]}" -eq 0 ]; then
+            echo "close-linked-issues: no commits to check on this push"
+            exit 0
+          fi
+
+          # UNPIPED: the exit code below is the script's own, never a
+          # pipeline's rightmost command's.
+          ec=0
+          scripts/close-linked-issues.py --repo "$REPO" --sha "${shas[@]}" || ec=$?
+          if [ "$ec" -ne 0 ]; then
+            echo "::error::close-linked-issues: scripts/close-linked-issues.py failed (exit $ec) -- see the step log above for which gh api call failed"
+            exit "$ec"
+          fi
