@@ -38,7 +38,10 @@ THE TOOLS, ONE PER BINDING, EACH PINNED HERE AND NOWHERE ELSE:
           one API report for the base and one for the head, compared as text
           once doc-comment-only markers are dropped. Forgotten exports are
           included, so a change to a non-exported type an export names is
-          seen too.
+          seen too. A global it cannot follow (@types/node's Buffer and
+          AbortSignal, measured) is declared for the analysis only; see
+          api_extractor_report's comment for why that cannot change a
+          report.
   rust    cargo-public-api at CARGO_PUBLIC_API_VERSION, on the pinned
           RUST_NIGHTLY (rustdoc JSON format 57, which that version reads),
           with --all-features. cargo-semver-checks was the other candidate
