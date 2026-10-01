@@ -407,6 +407,25 @@ pub(crate) fn retry_info(err: &Error) -> (bool, Option<std::time::Duration>) {
     }
 }
 
+/// Like [`retry_info`], but for the tarball download: `download` raises
+/// `Error::ArtifactCorrupt` ITSELF for a hash or size mismatch (the release
+/// lying about a byte), so treating every `ArtifactCorrupt` as a
+/// publish-window symptom here — as `retry_info` correctly does for the
+/// metadata, where that code never means that — would retry exactly the
+/// refusal `docs/guides/fetch.md` §3a says never to. Only a retryable
+/// `Error::SourceUnreachable` (chtypes#365: an HTTP 5xx/408/429 or a
+/// connection-level failure) is ever retried here.
+pub(crate) fn retryable_download_error(err: &Error) -> (bool, Option<std::time::Duration>) {
+    match err {
+        Error::SourceUnreachable {
+            retryable,
+            retry_after,
+            ..
+        } => (*retryable, *retry_after),
+        _ => (false, None),
+    }
+}
+
 /// "1 attempt" or "<n> attempts", for a message that names how many were made.
 pub(crate) fn attempt_word(n: u32) -> String {
     if n == 1 {

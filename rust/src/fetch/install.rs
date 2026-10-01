@@ -108,10 +108,14 @@ pub(crate) fn fetch_and_install(
 /// resume — since `download` truncates `tarball` at the start of each call.
 ///
 /// A 404/410 (`Error::Fetch`, from the `source.open` call inside `download`
-/// returning `None`) and a tarball hash or size mismatch (`Error::
-/// ArtifactCorrupt`, raised by `download`'s own caller after this returns)
-/// are never retried — neither is `retryable` here, and the second never
-/// even reaches this function.
+/// returning `None`) is never retried. Neither is a tarball hash or size
+/// mismatch: `download` raises that as `Error::ArtifactCorrupt` ITSELF
+/// (before this function ever sees a success), so this uses
+/// [`super::release::retryable_download_error`], not the broader
+/// [`super::release::retry_info`] the metadata retry uses — that broader
+/// check treats every `ArtifactCorrupt` as a publish-window symptom, which
+/// is correct for the metadata (where that code never means a hash mismatch)
+/// and wrong here, where it does.
 fn download_with_retry(
     source: &Source,
     row: &IndexRow,
@@ -129,9 +133,18 @@ fn download_with_retry(
     loop {
         match download(source, row, tarball, progress) {
             Err(err) => {
-                let (retryable, retry_after) = super::release::retry_info(&err);
-                if attempt >= attempts || !retryable {
+                let (retryable, retry_after) = super::release::retryable_download_error(&err);
+                if !retryable {
                     return Err(err);
+                }
+                if attempt >= attempts {
+                    return Err(super::release::with_retry_note(
+                        err,
+                        &format!(
+                            " — giving up after {}",
+                            super::release::attempt_word(attempt)
+                        ),
+                    ));
                 }
                 let wait = retry_after.unwrap_or(delay);
                 if elapsed + wait > super::release::retry_budget() {

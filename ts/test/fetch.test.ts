@@ -625,21 +625,31 @@ describe('the verification chain against a synthetic release (docs/guides/fetch.
   });
 
   it('CHTYPES_SOURCE_UNREACHABLE: a source that cannot be reached, or does not serve the release', async () => {
-    const dest = scratch('dest');
-    const dead = await ensure('25.8', opts(good, dest, { url: 'http://127.0.0.1:1' })).catch((e: unknown) => e);
-    expect(dead).toBeInstanceOf(SourceUnreachableError);
-    expect((dead as FetchError).code).toBe('CHTYPES_SOURCE_UNREACHABLE');
-    const empty = scratch('empty-release');
-    const nothing = await ensure('25.8', opts(good, dest, { url: empty })).catch((e: unknown) => e);
-    expect(nothing).toBeInstanceOf(SourceUnreachableError);
-    expect((nothing as Error).message).toMatch(/no SHA256SUMS at/);
-    const server = await serve(empty);
+    // A refused connection is now retried through the full §3a budget
+    // (chtypes#365), so this keeps the delay near-zero — the budget running
+    // out is the point, not the wall-clock time it takes.
+    const savedRetry = { ...RELEASE_RETRY };
+    RELEASE_RETRY.delayMs = 1;
     try {
-      expect(await codeOf(ensure('25.8', opts(good, dest, { url: server.url })))).toBe('CHTYPES_SOURCE_UNREACHABLE');
+      const dest = scratch('dest');
+      const dead = await ensure('25.8', opts(good, dest, { url: 'http://127.0.0.1:1' })).catch((e: unknown) => e);
+      expect(dead).toBeInstanceOf(SourceUnreachableError);
+      expect((dead as FetchError).code).toBe('CHTYPES_SOURCE_UNREACHABLE');
+      const empty = scratch('empty-release');
+      const nothing = await ensure('25.8', opts(good, dest, { url: empty })).catch((e: unknown) => e);
+      expect(nothing).toBeInstanceOf(SourceUnreachableError);
+      expect((nothing as Error).message).toMatch(/no SHA256SUMS at/);
+      const server = await serve(empty);
+      try {
+        expect(await codeOf(ensure('25.8', opts(good, dest, { url: server.url })))).toBe('CHTYPES_SOURCE_UNREACHABLE');
+      } finally {
+        await server.close();
+      }
+      expect(readdirSync(dest)).toEqual([]);
     } finally {
-      await server.close();
+      RELEASE_RETRY.attempts = savedRetry.attempts;
+      RELEASE_RETRY.delayMs = savedRetry.delayMs;
     }
-    expect(readdirSync(dest)).toEqual([]);
   });
 
   it('a plain directory and a file:// URL are the same source', async () => {
@@ -1316,7 +1326,17 @@ describe('the CLI (docs/guides/fetch.md §6)', () => {
     const tampered = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }], tamper: 'tarball' });
     expect((await run(['fetch', '25.8', '--url', tampered.url, '--dest', dest, '-q'])).code).toBe(EXIT.verificationFailed);
 
-    const unreachable = await run(['fetch', '25.8', '--url', 'http://127.0.0.1:1', '--dest', dest, '-q']);
+    // A refused connection is now retried through the full §3a budget
+    // (chtypes#365); keep the delay near-zero so this stays fast.
+    const savedRetry = { ...RELEASE_RETRY };
+    RELEASE_RETRY.delayMs = 1;
+    let unreachable: Awaited<ReturnType<typeof run>>;
+    try {
+      unreachable = await run(['fetch', '25.8', '--url', 'http://127.0.0.1:1', '--dest', dest, '-q']);
+    } finally {
+      RELEASE_RETRY.attempts = savedRetry.attempts;
+      RELEASE_RETRY.delayMs = savedRetry.delayMs;
+    }
     expect(unreachable.code).toBe(EXIT.sourceUnreachable);
     expect(unreachable.err).toMatch(/\[CHTYPES_SOURCE_UNREACHABLE\]/);
 
