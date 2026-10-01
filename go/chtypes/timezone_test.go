@@ -361,12 +361,11 @@ func TestUnstattableArtifactPathIsRefused(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dir, "missing.so"), path); err != nil {
 		t.Fatal(err)
 	}
-	writeStubManifest(t, dir, ".so")
-	r, err := NewRegistry(dir, WithTimezone("UTC"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = r.Load(path)
+	// openLibrary directly — the function that holds the guard, and what
+	// Registry.Load calls — because a Registry needs a discoverable line on
+	// the search path to be constructed at all, and this case must run on a
+	// machine with no artifact anywhere.
+	_, err := openLibrary(path, "UTC")
 	if err == nil {
 		t.Fatal("a path that cannot be stat'ed must be refused")
 	}
