@@ -309,21 +309,94 @@ if [ "$SOURCE_KIND" != url ] && [ -z "$REPO" ]; then
   [ -n "$REPO" ] || bad_usage "cannot tell which GitHub repo to fetch from — pass --repo owner/name, set CHTYPES_RELEASE_REPO, or use --url"
 fi
 
-get_file() { # get_file <asset-name> <destination>  ->  0 fetched · 1 absent (404, no such file) · 2 unreachable
+# retry_after_seconds <headers-file>: the LAST Retry-After header in a dumped
+# response (curl -D re-dumps per hop; the final response is what matters),
+# parsed per RFC 9110 §10.2.3 — delta-seconds or an HTTP-date — rounded up so
+# a date-form value is never under-waited. Prints nothing when absent or
+# unparseable; chtypes#365 honors it only for 429 and 503 (the caller's job).
+retry_after_seconds() {
+  local raw
+  raw="$(grep -i '^retry-after:' "$1" 2>/dev/null | tail -1 | cut -d: -f2- | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  [ -n "$raw" ] || return 0
+  python3 - "$raw" <<'PY'
+import datetime
+import sys
+from email.utils import parsedate_to_datetime
+
+raw = sys.argv[1]
+try:
+    print(max(0, int(raw)))
+    raise SystemExit(0)
+except ValueError:
+    pass
+try:
+    when = parsedate_to_datetime(raw)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    secs = (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+    print(max(0, int(secs) + (1 if secs % 1 else 0)))
+except Exception:
+    pass
+PY
+}
+
+# attempt_word <n>: "1 attempt" or "<n> attempts", for a message naming how
+# many were made.
+attempt_word() {
+  if [ "$1" = 1 ]; then echo "1 attempt"; else echo "$1 attempts"; fi
+}
+
+# fetch_retry_budget: the total sleep time the default doubling schedule
+# spends across every attempt but the last — the cap chtypes#365 puts on a
+# source's own Retry-After (metadata_retry_loop / download_with_retry, below).
+fetch_retry_budget() {
+  if [ "$METADATA_ATTEMPTS" -gt 1 ]; then
+    echo $(( METADATA_RETRY_DELAY * ( (1 << (METADATA_ATTEMPTS - 1)) - 1) ))
+  else
+    echo 0
+  fi
+}
+
+get_file() { # get_file <asset-name> <destination>  ->  0 fetched · 1 absent (404/410) · 2 unreachable
   # "Absent" and "unreachable" are different verdicts: a release with no
   # SHA256SUMS.sig is UNTRUSTED, a host that cannot be reached is not.
-  local name="$1" out="$2" src code
-  rm -f "$out"
+  #
+  # One attempt only: retrying (chtypes#365) is the caller's job —
+  # metadata_retry_loop re-reads the WHOLE consistent set from scratch, and
+  # download_with_retry re-opens the tarball — never a single request retried
+  # in place. FETCH_RETRYABLE/FETCH_RETRY_AFTER are set on a code-2 return: an
+  # HTTP 5xx/408/429 or a connection-level failure reaching the host at all
+  # (refused, reset, timed out, DNS — curl's own exit code does not
+  # distinguish these any further, so none are singled out) is retryable;
+  # anything else is a definite refusal.
+  local name="$1" out="$2" src code curl_rc
+  rm -f "$out" "$WORK/.headers"
+  FETCH_RETRYABLE=0
+  FETCH_RETRY_AFTER=""
   case "$SOURCE_KIND" in
     url)
       case "$BASE_URL" in
         http://*|https://*)
-          code="$(curl -sSL --retry 3 --retry-delay 1 -o "$out" -w '%{http_code}' \
-                    ${CHTYPES_DOWNLOAD_TOKEN:+-H "Authorization: Bearer $CHTYPES_DOWNLOAD_TOKEN"} \
-                    "$BASE_URL/$name" 2>"$WORK/.curl.err")" || code="000"
+          if code="$(curl -sSL -D "$WORK/.headers" -o "$out" -w '%{http_code}' \
+                       ${CHTYPES_DOWNLOAD_TOKEN:+-H "Authorization: Bearer $CHTYPES_DOWNLOAD_TOKEN"} \
+                       "$BASE_URL/$name" 2>"$WORK/.curl.err")"; then
+            curl_rc=0
+          else
+            curl_rc=$?; code="000"
+          fi
+          if [ "$curl_rc" -ne 0 ]; then
+            FETCH_RETRYABLE=1
+            rm -f "$out"
+            echo "fetch.sh: $BASE_URL/$name: $(tr -d '\n' < "$WORK/.curl.err")" >&2
+            return 2
+          fi
           case "$code" in
             200) return 0 ;;
-            404) rm -f "$out"; return 1 ;;
+            404|410) rm -f "$out"; return 1 ;;
+            408|429|5??)
+              FETCH_RETRYABLE=1
+              case "$code" in 429|503) FETCH_RETRY_AFTER="$(retry_after_seconds "$WORK/.headers")" ;; esac
+              rm -f "$out"; echo "fetch.sh: $BASE_URL/$name -> HTTP $code $(tr -d '\n' < "$WORK/.curl.err")" >&2; return 2 ;;
             *)   rm -f "$out"; echo "fetch.sh: $BASE_URL/$name -> HTTP $code $(tr -d '\n' < "$WORK/.curl.err")" >&2; return 2 ;;
           esac ;;
         *)
@@ -334,6 +407,8 @@ get_file() { # get_file <asset-name> <destination>  ->  0 fetched · 1 absent (4
       esac ;;
     gh)
       # No --tag means the latest release, which is gh's own default here.
+      # gh's own transfer resilience is out of scope here (chtypes#365 is about
+      # the direct-HTTP paths); a failure still surfaces as "absent", as before.
       local args=(--repo "$REPO" --pattern "$name" --dir "$(dirname "$out")" --clobber)
       if [ -n "$TAG" ]; then gh release download "$TAG" "${args[@]}" >/dev/null 2>&1 || true
       else gh release download "${args[@]}" >/dev/null 2>&1 || true; fi
@@ -342,10 +417,24 @@ get_file() { # get_file <asset-name> <destination>  ->  0 fetched · 1 absent (4
     http)
       if [ -n "$TAG" ]; then src="https://github.com/$REPO/releases/download/$TAG/$name"
       else src="https://github.com/$REPO/releases/latest/download/$name"; fi
-      code="$(curl -sSL --retry 3 --retry-delay 1 -o "$out" -w '%{http_code}' "$src" 2>"$WORK/.curl.err")" || code="000"
+      if code="$(curl -sSL -D "$WORK/.headers" -o "$out" -w '%{http_code}' "$src" 2>"$WORK/.curl.err")"; then
+        curl_rc=0
+      else
+        curl_rc=$?; code="000"
+      fi
+      if [ "$curl_rc" -ne 0 ]; then
+        FETCH_RETRYABLE=1
+        rm -f "$out"
+        echo "fetch.sh: $src: $(tr -d '\n' < "$WORK/.curl.err")" >&2
+        return 2
+      fi
       case "$code" in
         200) return 0 ;;
-        404) rm -f "$out"; return 1 ;;
+        404|410) rm -f "$out"; return 1 ;;
+        408|429|5??)
+          FETCH_RETRYABLE=1
+          case "$code" in 429|503) FETCH_RETRY_AFTER="$(retry_after_seconds "$WORK/.headers")" ;; esac
+          rm -f "$out"; echo "fetch.sh: $src -> HTTP $code $(tr -d '\n' < "$WORK/.curl.err")" >&2; return 2 ;;
         *)   rm -f "$out"; echo "fetch.sh: $src -> HTTP $code $(tr -d '\n' < "$WORK/.curl.err")" >&2; return 2 ;;
       esac ;;
   esac
@@ -451,12 +540,22 @@ refuse("the signature (header names key %s) verifies under none of the %d truste
 PY
 }
 fetch_release_file() { # fetch_release_file <name>: a release-level file the source MUST have
+  # A retryable "unreachable" (chtypes#365) joins the window retry below —
+  # WINDOW_CODE/WINDOW_MSG/WINDOW_RETRY_AFTER set, return 1 — instead of
+  # failing the script outright; anything else still fails at once, as before.
   local rc=0
   get_file "$1" "$WORK/$1" || rc=$?
   case "$rc" in
-    0) ;;
+    0) return 0 ;;
     1) fail CHTYPES_SOURCE_UNREACHABLE "no $1 at $SOURCE_DESC — not a chtypes release" ;;
-    *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $1 from $SOURCE_DESC" ;;
+    *)
+      if [ "$FETCH_RETRYABLE" = 1 ]; then
+        WINDOW_CODE=CHTYPES_SOURCE_UNREACHABLE
+        WINDOW_MSG="could not fetch $1 from $SOURCE_DESC"
+        WINDOW_RETRY_AFTER="$FETCH_RETRY_AFTER"
+        return 1
+      fi
+      fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $1 from $SOURCE_DESC" ;;
   esac
 }
 # ------------------------------------- the release metadata, and the retries
@@ -472,16 +571,23 @@ fetch_release_file() { # fetch_release_file <name>: a release-level file the sou
 # paired with the previous SHA256SUMS refused CORRUPT a full minute after a
 # republish.
 #
-# Three symptoms fall in that window, and all three are retried: the signature
-# does not verify, index.json disagrees with SHA256SUMS, and a release-level
-# file's hash disagrees with its own SHA256SUMS row (or SHA256SUMS lists it
-# but the source does not yet serve it — a new row can land before the file it
-# describes is visible). On every retry the WHOLE set is re-read from
+# Retried, all through the same budget: the signature does not verify,
+# index.json disagrees with SHA256SUMS, a release-level file's hash disagrees
+# with its own SHA256SUMS row (or SHA256SUMS lists it but the source does not
+# yet serve it — a new row can land before the file it describes is visible),
+# and, since chtypes#365, an HTTP 5xx/408/429 or a connection-level failure
+# reaching the host at all (refused, reset, timed out, DNS) on any of
+# SHA256SUMS, SHA256SUMS.sig, index.json or the watched release-level file. A
+# Retry-After the source sends on a 503 or 429 is honored in place of the
+# doubling schedule's own delay, capped so the total never exceeds the budget
+# below — one that does not fit fails at once, naming the requested delay,
+# rather than blocking for it. On every retry the WHOLE set is re-read from
 # scratch — never one freshly re-fetched object checked against another
-# attempt's stale one. Nothing else is retried, and neither are these three
-# once the attempts run out: the same refusal, the same code, as always. A
-# tarball whose hash is wrong (below) is the release lying about a byte, not a
-# half-finished upload, and it refuses at once.
+# attempt's stale one. Nothing else is retried, and neither are these once the
+# attempts (or the budget) run out: the same refusal, the same code, naming
+# how many attempts were made. A 404/410, and a tarball whose hash is wrong
+# (below, via download_with_retry), are never retried — the release lying
+# about a byte, or simply not having the thing, is not a transient blip.
 #
 # The budget: 5 attempts, delays 4/8/16/32s doubling (60s of sleep, ~70s wall
 # with network time) — chosen to outlast the observed 60s edge-cache TTL plus
@@ -491,7 +597,8 @@ fetch_release_file() { # fetch_release_file <name>: a release-level file the sou
 # retry still doubles it) — both existed before this change, and
 # CHTYPES_METADATA_RETRY_DELAY's meaning changed from "the constant delay
 # between all attempts" to "the first delay, which then doubles"; a test that
-# wants every sleep near-instant sets it to 0.
+# wants every sleep near-instant sets it to 0. download_with_retry (the
+# tarball) uses this same budget and these same two overrides.
 #
 # Only a real HTTP source can be mid-publish. A file:// fixture or a directory
 # is whatever it is, so it refuses on the first look, exactly as it always has —
@@ -518,8 +625,8 @@ esac
 # means (unpublished, for a required --release-file; "skip the golden tests
 # quietly", for the always-optional sdk-goldens.json).
 try_metadata() {
-  WINDOW_CODE=""; WINDOW_MSG=""; WATCH_LISTED=0
-  fetch_release_file SHA256SUMS
+  WINDOW_CODE=""; WINDOW_MSG=""; WINDOW_RETRY_AFTER=""; WATCH_LISTED=0
+  fetch_release_file SHA256SUMS || return 1
   SIG_STATUS=""
   if [ "${CHTYPES_ALLOW_UNSIGNED:-}" = 1 ]; then
     echo "fetch.sh: WARNING signature verification is OFF (CHTYPES_ALLOW_UNSIGNED=1)." >&2
@@ -533,7 +640,14 @@ try_metadata() {
     case "$rc" in
       0) ;;
       1) fail CHTYPES_ARTIFACT_UNTRUSTED "$SOURCE_DESC has no SHA256SUMS.sig — an unsigned release is never installed (CHTYPES_ALLOW_UNSIGNED=1 overrides, for a test)" ;;
-      *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch SHA256SUMS.sig from $SOURCE_DESC" ;;
+      *)
+        if [ "$FETCH_RETRYABLE" = 1 ]; then
+          WINDOW_CODE=CHTYPES_SOURCE_UNREACHABLE
+          WINDOW_MSG="could not fetch SHA256SUMS.sig from $SOURCE_DESC"
+          WINDOW_RETRY_AFTER="$FETCH_RETRY_AFTER"
+          return 1
+        fi
+        fail CHTYPES_SOURCE_UNREACHABLE "could not fetch SHA256SUMS.sig from $SOURCE_DESC" ;;
     esac
     if ! SIG_STATUS="$(verify_signature "$WORK/SHA256SUMS" "$WORK/SHA256SUMS.sig")"; then
       WINDOW_CODE=CHTYPES_ARTIFACT_UNTRUSTED
@@ -543,7 +657,7 @@ try_metadata() {
     say "SHA256SUMS.sig verified: $SIG_STATUS"
   fi
 
-  fetch_release_file index.json
+  fetch_release_file index.json || return 1
 
   # The whole-release cross-check, hoisted here from the per-asset one below so
   # that a disagreement is caught while re-fetching all three still fixes it.
@@ -595,7 +709,14 @@ PY_XCHECK
       1) WINDOW_CODE=CHTYPES_ARTIFACT_CORRUPT
          WINDOW_MSG="SHA256SUMS lists $WATCH_FILE but $SOURCE_DESC does not serve it — the release disagrees with itself; not installing it"
          return 1 ;;
-      *) fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $WATCH_FILE from $SOURCE_DESC" ;;
+      *)
+        if [ "$FETCH_RETRYABLE" = 1 ]; then
+          WINDOW_CODE=CHTYPES_SOURCE_UNREACHABLE
+          WINDOW_MSG="could not fetch $WATCH_FILE from $SOURCE_DESC"
+          WINDOW_RETRY_AFTER="$FETCH_RETRY_AFTER"
+          return 1
+        fi
+        fail CHTYPES_SOURCE_UNREACHABLE "could not fetch $WATCH_FILE from $SOURCE_DESC" ;;
     esac
     got="$(sha256_of "$WORK/$WATCH_FILE")"
     if [ "$got" != "$want" ]; then
@@ -609,17 +730,65 @@ PY_XCHECK
 # metadata_retry_loop runs try_metadata (WATCH_FILE/WATCH_REQUIRED already
 # set by the caller) through the publish-window retry above, doubling the
 # delay each time; on exhausted attempts it fails exactly as try_metadata's
-# own fail() calls always have — same code, same exit status.
+# own fail() calls always have — same code, same exit status, naming how many
+# attempts were made. Since chtypes#365, a WINDOW_RETRY_AFTER try_metadata set
+# (a Retry-After the source sent on a 503/429) is honored in place of the
+# doubling schedule's own delay, capped so the total never exceeds
+# fetch_retry_budget — one that does not fit fails at once, naming the
+# requested delay, rather than blocking for it.
 metadata_retry_loop() {
-  local attempt=1 delay="$METADATA_RETRY_DELAY"
+  local attempt=1 delay="$METADATA_RETRY_DELAY" elapsed=0 wait_s budget
   while :; do
     try_metadata && return 0
     if [ "$attempt" -ge "$METADATA_ATTEMPTS" ]; then
-      fail "$WINDOW_CODE" "$WINDOW_MSG"
+      fail "$WINDOW_CODE" "$WINDOW_MSG — giving up after $(attempt_word "$attempt")"
+    fi
+    wait_s="$delay"
+    [ -n "$WINDOW_RETRY_AFTER" ] && wait_s="$WINDOW_RETRY_AFTER"
+    budget="$(fetch_retry_budget)"
+    if [ $((elapsed + wait_s)) -gt "$budget" ]; then
+      fail "$WINDOW_CODE" "$WINDOW_MSG — the source asked to wait ${wait_s}s before retrying, which would exceed the ${budget}s retry budget; giving up after $(attempt_word "$attempt")"
     fi
     echo "fetch.sh: $WINDOW_CODE on attempt $attempt/$METADATA_ATTEMPTS — this is what a release" >&2
-    echo "          being published looks like from outside; retrying in ${delay}s" >&2
-    sleep "$delay"
+    echo "          being published (or briefly unreachable) looks like from outside; retrying in ${wait_s}s" >&2
+    sleep "$wait_s"
+    elapsed=$((elapsed + wait_s))
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
+
+# download_with_retry <asset> <dest>: the tarball half of chtypes#365 — the
+# same budget and schedule metadata_retry_loop uses, for the one step that
+# loop never covered (the asset itself, not the metadata that names it). An
+# HTTP 5xx/408/429 or a connection-level failure retries, honoring a
+# Retry-After the source sent (503/429) in place of the doubling delay,
+# capped at the same retry budget; a 404/410 or any other definite refusal
+# fails at once, as it always has, under the same CHTYPES_SOURCE_UNREACHABLE.
+# Every attempt is a fresh download — never a resume.
+download_with_retry() {
+  local asset="$1" out="$2" attempt=1 delay="$METADATA_RETRY_DELAY" elapsed=0 wait_s budget rc=0
+  while :; do
+    rc=0; get_file "$asset" "$out" || rc=$?
+    [ "$rc" = 0 ] && return 0
+    if [ "$rc" = 1 ]; then
+      fail CHTYPES_SOURCE_UNREACHABLE "could not download $asset from $SOURCE_DESC"
+    fi
+    if [ "$FETCH_RETRYABLE" != 1 ]; then
+      fail CHTYPES_SOURCE_UNREACHABLE "could not download $asset from $SOURCE_DESC"
+    fi
+    if [ "$attempt" -ge "$METADATA_ATTEMPTS" ]; then
+      fail CHTYPES_SOURCE_UNREACHABLE "could not download $asset from $SOURCE_DESC — giving up after $(attempt_word "$attempt")"
+    fi
+    wait_s="$delay"
+    [ -n "$FETCH_RETRY_AFTER" ] && wait_s="$FETCH_RETRY_AFTER"
+    budget="$(fetch_retry_budget)"
+    if [ $((elapsed + wait_s)) -gt "$budget" ]; then
+      fail CHTYPES_SOURCE_UNREACHABLE "could not download $asset from $SOURCE_DESC — the source asked to wait ${wait_s}s before retrying, which would exceed the ${budget}s retry budget; giving up after $(attempt_word "$attempt")"
+    fi
+    echo "fetch.sh: HTTP failure on attempt $attempt/$METADATA_ATTEMPTS downloading $asset — retrying in ${wait_s}s" >&2
+    sleep "$wait_s"
+    elapsed=$((elapsed + wait_s))
     attempt=$((attempt + 1))
     delay=$((delay * 2))
   done
@@ -928,7 +1097,7 @@ EOF
 
   say "downloading $ASSET"
   rm -f "$WORK/$ASSET"
-  get_file "$ASSET" "$WORK/$ASSET" || fail CHTYPES_SOURCE_UNREACHABLE "could not download $ASSET from $SOURCE_DESC"
+  download_with_retry "$ASSET" "$WORK/$ASSET"
   local GOT_BYTES GOT_SHA
   GOT_BYTES="$(wc -c < "$WORK/$ASSET" | tr -d ' ')"
   GOT_SHA="$(sha256_of "$WORK/$ASSET")"
@@ -1040,8 +1209,9 @@ if [ "$ALL" = 1 ]; then say "$INSTALLED version(s) installed into $DEST"; fi
 # call's by-then possibly-stale SHA256SUMS. When the attempts run out this
 # fails exactly as it always has: the same code, the same exit status.
 install_goldens() {
-  local attempt=1 delay="$METADATA_RETRY_DELAY" want got rc=0
+  local attempt=1 delay="$METADATA_RETRY_DELAY" elapsed=0 wait_s budget want got rc=0
   while :; do
+    WINDOW_RETRY_AFTER=""
     if [ "$attempt" -eq 1 ]; then
       want="$(awk -v f="sdk-goldens.json" '$2 == f || $2 == "*" f {print $1}' "$WORK/SHA256SUMS" | head -1)"
       if [ -z "$want" ]; then
@@ -1063,6 +1233,13 @@ install_goldens() {
       elif [ "$rc" = 1 ]; then
         WINDOW_CODE=CHTYPES_ARTIFACT_CORRUPT
         WINDOW_MSG="SHA256SUMS lists sdk-goldens.json but $SOURCE_DESC does not serve it — the release disagrees with itself; not installing it"
+      elif [ "$FETCH_RETRYABLE" = 1 ]; then
+        # chtypes#365: an HTTP 5xx/408/429 or a connection-level failure is
+        # worth another look through the window retry below, exactly as the
+        # existing hash-mismatch/not-served symptoms above already get.
+        WINDOW_CODE=CHTYPES_SOURCE_UNREACHABLE
+        WINDOW_MSG="could not fetch sdk-goldens.json from $SOURCE_DESC"
+        WINDOW_RETRY_AFTER="$FETCH_RETRY_AFTER"
       else
         fail CHTYPES_SOURCE_UNREACHABLE "could not fetch sdk-goldens.json from $SOURCE_DESC"
       fi
@@ -1079,13 +1256,24 @@ install_goldens() {
         fi
         return 0
       fi
+      # A non-retryable window failure from try_metadata itself already
+      # called fail() and exited; reaching here means WINDOW_CODE is set and
+      # retryable (a publish-window symptom, or chtypes#365's own retryable
+      # SOURCE_UNREACHABLE).
     fi
     if [ "$attempt" -ge "$METADATA_ATTEMPTS" ]; then
-      fail "$WINDOW_CODE" "$WINDOW_MSG"
+      fail "$WINDOW_CODE" "$WINDOW_MSG — giving up after $(attempt_word "$attempt")"
+    fi
+    wait_s="$delay"
+    [ -n "$WINDOW_RETRY_AFTER" ] && wait_s="$WINDOW_RETRY_AFTER"
+    budget="$(fetch_retry_budget)"
+    if [ $((elapsed + wait_s)) -gt "$budget" ]; then
+      fail "$WINDOW_CODE" "$WINDOW_MSG — the source asked to wait ${wait_s}s before retrying, which would exceed the ${budget}s retry budget; giving up after $(attempt_word "$attempt")"
     fi
     echo "fetch.sh: $WINDOW_CODE on attempt $attempt/$METADATA_ATTEMPTS — this is what a release" >&2
-    echo "          being published looks like from outside; retrying in ${delay}s" >&2
-    sleep "$delay"
+    echo "          being published (or briefly unreachable) looks like from outside; retrying in ${wait_s}s" >&2
+    sleep "$wait_s"
+    elapsed=$((elapsed + wait_s))
     attempt=$((attempt + 1))
     delay=$((delay * 2))
   done

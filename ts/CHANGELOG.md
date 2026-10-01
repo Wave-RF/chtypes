@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ensure`/`fetch` now retry a transient HTTP 5xx, 408 or 429 from the artifacts host, and a connection-level failure (refused, reset, timed out, DNS), within the existing retry budget and schedule** (`docs/guides/fetch.md` §3a: 5 attempts, delays doubling from 4s) — previously `HttpSource`'s `request` ran its own separate, shorter retry (3 attempts, 500ms steps) before giving up, independent of the publish-window budget, and a tarball download had no outer retry at all. A `Retry-After` on a 503 or 429 is honored, in both the delta-seconds and HTTP-date forms, capped so it never makes the total wait exceed the existing budget — one that does not fit fails at once, naming the requested delay. A 404 or 410, and a tarball hash or size mismatch, are still decided on the first attempt, never retried; a 410 is now also recognized as "not found" (it used to fall through as an ungrouped refusal, never retried either way, but misclassified). `SourceUnreachableError` gains `.retryable`/`.retryAfterMs` properties (closes #365).
+
 ## [0.5.2] — 2026-10-01
 
 ### Added

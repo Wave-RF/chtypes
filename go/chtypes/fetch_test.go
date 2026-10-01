@@ -87,6 +87,12 @@ func fakeArtifact(platform, version string) testArtifact {
 	}
 }
 
+// tarballFile is the asset name writeRelease gives this artifact — the same
+// grammar index.json and SHA256SUMS name it under (artifacts.md).
+func tarballFile(a testArtifact) string {
+	return fmt.Sprintf("chtypes-%s-%s-%s.tar.gz", a.version, a.os, a.arch)
+}
+
 func sha256Hex(b []byte) string {
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])
@@ -215,11 +221,28 @@ type countingServer struct {
 
 	hookMu sync.Mutex
 	hooks  map[string]func()
+
+	failMu sync.Mutex
+	fail   map[string]*failSpec
+}
+
+// failSpec makes an asset answer with an HTTP status (and, optionally, a
+// Retry-After header) instead of its real bytes, for the next `remaining`
+// requests — chtypes#365: a real transient 5xx/408/429 blip, made real on
+// loopback, the same way afterFirstServe makes a healing publish window
+// real. reset instead hijacks the connection and closes it without
+// answering at all, simulating a connection-level failure (a reset, from
+// the client's view) rather than a status code.
+type failSpec struct {
+	status     int
+	retryAfter string // "" sends no Retry-After header
+	remaining  int
+	reset      bool
 }
 
 func serveRelease(t *testing.T, dir string) *countingServer {
 	t.Helper()
-	cs := &countingServer{hits: map[string]int{}, hooks: map[string]func(){}}
+	cs := &countingServer{hits: map[string]int{}, hooks: map[string]func(){}, fail: map[string]*failSpec{}}
 	fs := http.FileServer(http.Dir(dir))
 	cs.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/")
@@ -228,6 +251,26 @@ func serveRelease(t *testing.T, dir string) *countingServer {
 		firstServe := cs.hits[name] == 1
 		cs.mu.Unlock()
 		cs.all.Add(1)
+		cs.failMu.Lock()
+		spec := cs.fail[name]
+		if spec != nil && spec.remaining > 0 {
+			spec.remaining--
+			cs.failMu.Unlock()
+			if spec.reset {
+				if hj, ok := w.(http.Hijacker); ok {
+					if conn, _, err := hj.Hijack(); err == nil {
+						conn.Close()
+					}
+				}
+				return
+			}
+			if spec.retryAfter != "" {
+				w.Header().Set("Retry-After", spec.retryAfter)
+			}
+			w.WriteHeader(spec.status)
+			return
+		}
+		cs.failMu.Unlock()
 		// Serve first, so the response the caller is waiting on (the bad
 		// signature, on the first read) is already written before any hook
 		// below is allowed to mutate the file on disk.
@@ -249,6 +292,24 @@ func (cs *countingServer) count(name string) int {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	return cs.hits[name]
+}
+
+// failNTimes answers the next n requests for name with status (and, when
+// retryAfter != "", a Retry-After header) instead of serving the file; the
+// (n+1)th request onward is served normally.
+func (cs *countingServer) failNTimes(name string, status int, retryAfter string, n int) {
+	cs.failMu.Lock()
+	defer cs.failMu.Unlock()
+	cs.fail[name] = &failSpec{status: status, retryAfter: retryAfter, remaining: n}
+}
+
+// resetNTimes hijacks and closes the connection for the next n requests for
+// name, instead of answering at all — a connection-level failure, not a
+// status code.
+func (cs *countingServer) resetNTimes(name string, n int) {
+	cs.failMu.Lock()
+	defer cs.failMu.Unlock()
+	cs.fail[name] = &failSpec{remaining: n, reset: true}
 }
 
 // afterFirstServe registers fn to run once name has been served for the
@@ -727,12 +788,18 @@ func TestFetchHTTPSource(t *testing.T) {
 	os.Remove(filepath.Join(rel, "index.json"))
 	_, err = Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest2})
 	wantCode(t, err, CodeSourceUnreachable)
-	// A closed port: unreachable (after the retries).
-	dead := httptest.NewServer(http.NotFoundHandler())
-	url := dead.URL
-	dead.Close()
-	_, err = Ensure(context.Background(), "25.8", FetchOptions{URL: url, Dest: dest2})
-	wantCode(t, err, CodeSourceUnreachable)
+	// A closed port: unreachable (after the retries, chtypes#365 now sends a
+	// refused connection through the same budget a 5xx would — run it with a
+	// near-zero delay so the budget still runs out in no time).
+	func() {
+		defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+		releaseRetryDelay = time.Millisecond
+		dead := httptest.NewServer(http.NotFoundHandler())
+		url := dead.URL
+		dead.Close()
+		_, err = Ensure(context.Background(), "25.8", FetchOptions{URL: url, Dest: dest2})
+		wantCode(t, err, CodeSourceUnreachable)
+	}()
 	// The default source is the artifacts host under the tag, both from the env.
 	t.Setenv(envArtifactsURL, srv.URL)
 	src, err := newSource("", "", nil)
@@ -1184,7 +1251,12 @@ func TestMissingArtifactErrorVerbatim(t *testing.T) {
 func TestAutoFetchFailureIsTheFetchError(t *testing.T) {
 	// A missing line with autofetch on and a dead source: the fetch's own
 	// error comes back (not "missing"), and the next open may try again.
+	// A refused connection is now retried through the full §3a budget
+	// (chtypes#365), so this keeps the delay near-zero — the budget running
+	// out, three times over, is the point, not the wall-clock time it takes.
 	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = time.Millisecond
 	dead := httptest.NewServer(http.NotFoundHandler())
 	url := dead.URL
 	dead.Close()
@@ -1274,6 +1346,257 @@ func TestLoadReleaseStopsRetryingAndRefuses(t *testing.T) {
 	if n := srv.count("SHA256SUMS.sig"); n != releaseLoadAttempts {
 		t.Fatalf("SHA256SUMS.sig read %d time(s), want exactly %d", n, releaseLoadAttempts)
 	}
+}
+
+// ------------------------------------------------- chtypes#365: transient errors
+
+// TestFetchRetriesTransientServerErrors is the issue's own scenario: the
+// artifacts host answers 500 for a short blip, then recovers. index.json is
+// read first, so failing it is enough to exercise the whole retry path —
+// the fetch must still succeed, reading it more than once, and the attempt
+// count must show up in progress.
+func TestFetchRetriesTransientServerErrors(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = 5 * time.Millisecond
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	srv := serveRelease(t, rel)
+	srv.failNTimes("index.json", http.StatusInternalServerError, "", 2)
+	dest := filepath.Join(t.TempDir(), "reg")
+	var progress bytes.Buffer
+
+	inst, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest, Progress: &progress})
+	if err != nil {
+		t.Fatalf("two transient 500s must not fail the fetch: %v\n%s", err, progress.String())
+	}
+	if inst.Version != "25.8.28.1-lts" {
+		t.Fatalf("Version = %s", inst.Version)
+	}
+	if n := srv.count("index.json"); n != 3 {
+		t.Fatalf("index.json read %d time(s), want exactly 3 (2 failures + 1 success)", n)
+	}
+	if !strings.Contains(progress.String(), "attempt 1/") || !strings.Contains(progress.String(), "attempt 2/") {
+		t.Fatalf("progress does not report the attempt count:\n%s", progress.String())
+	}
+}
+
+// TestFetchHonorsRetryAfterDeltaSeconds is the 503 form of the same budget:
+// the server names its own wait, in seconds, and a short one is honored and
+// succeeds.
+func TestFetchHonorsRetryAfterDeltaSeconds(t *testing.T) {
+	isolateEnv(t)
+	// The default schedule's own delay must stay large enough that honoring
+	// a 1s Retry-After is clearly a DIFFERENT, shorter wait, never a
+	// coincidence of the doubling schedule.
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = 10 * time.Second
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	srv := serveRelease(t, rel)
+	srv.failNTimes("index.json", http.StatusServiceUnavailable, "1", 1)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	start := time.Now()
+	inst, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	waited := time.Since(start)
+	if err != nil {
+		t.Fatalf("a short Retry-After must heal: %v", err)
+	}
+	if inst.Version != "25.8.28.1-lts" {
+		t.Fatalf("Version = %s", inst.Version)
+	}
+	if waited < 900*time.Millisecond || waited > 8*time.Second {
+		t.Fatalf("waited %s, want ~1s (Retry-After honored, not the 10s default schedule)", waited)
+	}
+}
+
+// TestFetchHonorsRetryAfterHTTPDate is the same as the delta-seconds form,
+// spelled as an HTTP-date (RFC 9110 §10.2.3) instead.
+func TestFetchHonorsRetryAfterHTTPDate(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = 10 * time.Second
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	srv := serveRelease(t, rel)
+	// http.TimeFormat has one-second resolution, so a 2s ask leaves comfortable
+	// room below the test's own lower bound once it is truncated to the second.
+	when := time.Now().Add(2 * time.Second).UTC().Format(http.TimeFormat)
+	srv.failNTimes("index.json", http.StatusServiceUnavailable, when, 1)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	start := time.Now()
+	_, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	waited := time.Since(start)
+	if err != nil {
+		t.Fatalf("a short Retry-After date must heal: %v", err)
+	}
+	if waited < 300*time.Millisecond || waited > 8*time.Second {
+		t.Fatalf("waited %s, want ~1-2s (Retry-After honored, not the 10s default schedule)", waited)
+	}
+}
+
+// TestFetchRetryAfterLongerThanBudgetFailsAtOnce is docs/guides/fetch.md
+// §3a's cap (chtypes#365): a Retry-After far longer than the retry budget
+// could ever wait out is not honored by sleeping through it — the fetch
+// fails immediately, naming the requested delay, and never retries.
+func TestFetchRetryAfterLongerThanBudgetFailsAtOnce(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = 10 * time.Millisecond // budget ~150ms; nothing here should sleep it out
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	srv := serveRelease(t, rel)
+	srv.failNTimes("index.json", http.StatusServiceUnavailable, "9999", 5)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	start := time.Now()
+	_, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	elapsed := time.Since(start)
+	ae := wantCode(t, err, CodeSourceUnreachable)
+	wantDelay := (9999 * time.Second).String() // Duration.String() renders this "2h46m39s", not "9999s"
+	if !strings.Contains(ae.Msg, wantDelay) {
+		t.Fatalf("message does not name the requested delay (%s): %q", wantDelay, ae.Msg)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("took %s — a 9999s Retry-After was waited out instead of refused at once", elapsed)
+	}
+	if n := srv.count("index.json"); n != 1 {
+		t.Fatalf("index.json read %d time(s), want exactly 1 (no retry once the budget cannot fit it)", n)
+	}
+	noArtifactDirs(t, dest)
+}
+
+// TestFetch404FailsOnTheFirstAttempt: a missing asset is decided at once,
+// never retried — "a retry buys time; it never converts a refusal into an
+// install" (§3a), restated for status codes by chtypes#365.
+func TestFetch404FailsOnTheFirstAttempt(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = time.Millisecond
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	srv := serveRelease(t, rel)
+	srv.failNTimes("index.json", http.StatusNotFound, "", 99)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	_, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	wantCode(t, err, CodeSourceUnreachable)
+	if n := srv.count("index.json"); n != 1 {
+		t.Fatalf("index.json read %d time(s), want exactly 1 (a 404 is never retried)", n)
+	}
+	noArtifactDirs(t, dest)
+}
+
+// TestFetch410FailsOnTheFirstAttempt is the same as 404 (chtypes#365): Gone
+// stays a decided-at-once refusal, like Not Found.
+func TestFetch410FailsOnTheFirstAttempt(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = time.Millisecond
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	srv := serveRelease(t, rel)
+	srv.failNTimes("index.json", http.StatusGone, "", 99)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	_, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	wantCode(t, err, CodeSourceUnreachable)
+	if n := srv.count("index.json"); n != 1 {
+		t.Fatalf("index.json read %d time(s), want exactly 1 (a 410 is never retried)", n)
+	}
+}
+
+// TestFetchTarballHashMismatchIsNeverRetried: a corrupted tarball is the
+// release lying about a byte, not a transient blip — it refuses at once,
+// even though the download itself succeeded without a single transient
+// symptom (chtypes#365 adds retries around the download, never around this).
+func TestFetchTarballHashMismatchIsNeverRetried(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = time.Millisecond
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	art := fakeArtifact(HostPlatform(), "25.8.28.1-lts")
+	rewrite(t, filepath.Join(rel, tarballFile(art)), func(b []byte) []byte {
+		b = append([]byte(nil), b...)
+		b[len(b)-1] ^= 0xFF
+		return b
+	})
+	srv := serveRelease(t, rel)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	_, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	wantCode(t, err, CodeArtifactCorrupt)
+	if n := srv.count(tarballFile(art)); n != 1 {
+		t.Fatalf("%s downloaded %d time(s), want exactly 1 (a hash mismatch is never retried)", tarballFile(art), n)
+	}
+	noArtifactDirs(t, dest)
+}
+
+// TestFetchRetriesATransientTarballDownloadFailure is the tarball half of
+// chtypes#365: a 500 on the asset itself (after index.json/SHA256SUMS/.sig
+// all verified) is retried the same way a metadata blip is, and a repeated
+// connection-level failure exhausts the same budget and reports the attempt
+// count.
+func TestFetchRetriesATransientTarballDownloadFailure(t *testing.T) {
+	isolateEnv(t)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseRetryDelay = 5 * time.Millisecond
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	art := fakeArtifact(HostPlatform(), "25.8.28.1-lts")
+	srv := serveRelease(t, rel)
+	srv.failNTimes(tarballFile(art), http.StatusBadGateway, "", 2)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	inst, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	if err != nil {
+		t.Fatalf("two transient 502s on the tarball must not fail the fetch: %v", err)
+	}
+	if inst.Version != "25.8.28.1-lts" {
+		t.Fatalf("Version = %s", inst.Version)
+	}
+	if n := srv.count(tarballFile(art)); n != 3 {
+		t.Fatalf("%s downloaded %d time(s), want exactly 3 (2 failures + 1 success)", tarballFile(art), n)
+	}
+}
+
+// TestFetchTarballConnectionFailureExhaustsBudget: every download attempt
+// hits a connection-level failure (the connection is accepted, then closed
+// without a response — a reset, from the client's view) — the fetch still
+// fails CHTYPES_SOURCE_UNREACHABLE, naming the attempt count, not a bare
+// "connection reset" with no context.
+func TestFetchTarballConnectionFailureExhaustsBudget(t *testing.T) {
+	isolateEnv(t)
+	defer func(n int) { releaseLoadAttempts = n }(releaseLoadAttempts)
+	defer func(d time.Duration) { releaseRetryDelay = d }(releaseRetryDelay)
+	releaseLoadAttempts = 3
+	releaseRetryDelay = time.Millisecond
+
+	rel, _, _ := signedRelease(t, "25.8.28.1-lts")
+	art := fakeArtifact(HostPlatform(), "25.8.28.1-lts")
+	srv := serveRelease(t, rel)
+	// Fail every download of the tarball — far more than the attempt budget
+	// will ever spend — with a connection-level failure.
+	srv.resetNTimes(tarballFile(art), 1000)
+	dest := filepath.Join(t.TempDir(), "reg")
+
+	_, err := Ensure(context.Background(), "25.8", FetchOptions{URL: srv.URL, Dest: dest})
+	ae := wantCode(t, err, CodeSourceUnreachable)
+	if !strings.Contains(ae.Msg, "attempt") {
+		t.Fatalf("message does not name the attempt count: %q", ae.Msg)
+	}
+	// At least releaseLoadAttempts requests reached the server — exactly that
+	// many logical open() attempts were made. It can be more on the wire:
+	// Go's own http.Transport silently retries an idempotent GET once more
+	// when a reused persistent connection turns out to already be dead,
+	// which is orthogonal to this package's own retry loop.
+	if n := srv.count(tarballFile(art)); n < releaseLoadAttempts {
+		t.Fatalf("%s requested %d time(s), want at least %d", tarballFile(art), n, releaseLoadAttempts)
+	}
+	noArtifactDirs(t, dest)
 }
 
 // addReleaseFile adds one release-level file (like sdk-goldens.json) to an
