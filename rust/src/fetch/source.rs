@@ -39,6 +39,7 @@ pub(crate) enum Source {
     Dir {
         base: PathBuf,
         shown: String,
+        offline: bool,
     },
 }
 
@@ -70,6 +71,7 @@ impl Source {
             return Ok(Source::Dir {
                 base: PathBuf::from(path),
                 shown: base.clone(),
+                offline,
             });
         }
         if base.starts_with("http://") || base.starts_with("https://") {
@@ -94,6 +96,7 @@ impl Source {
         Ok(Source::Dir {
             shown: base.clone(),
             base: PathBuf::from(base),
+            offline,
         })
     }
 
@@ -121,7 +124,10 @@ impl Source {
     /// status other than 200/404.
     pub(crate) fn open(&self, name: &str) -> Result<Option<Opened>> {
         match self {
-            Source::Dir { base, .. } => {
+            Source::Dir { base, offline, .. } => {
+                if *offline {
+                    return Err(self.unreachable(format!("offline — {name} was not requested")));
+                }
                 let path = base.join(name);
                 match std::fs::File::open(&path) {
                     Ok(file) => {
@@ -199,7 +205,7 @@ mod tests {
     #[test]
     fn file_urls_and_plain_directories_are_local_sources() {
         match Source::resolve(Some("file:///tmp/rel"), None, false).unwrap() {
-            Source::Dir { base, shown } => {
+            Source::Dir { base, shown, .. } => {
                 assert_eq!(base, PathBuf::from("/tmp/rel"));
                 assert_eq!(shown, "file:///tmp/rel");
             }

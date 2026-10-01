@@ -465,12 +465,29 @@ var (
 // artifact except a request for a specific version (For / ForContext / Load)
 // or an explicit WithPreload.
 type Registry struct {
-	mu   sync.RWMutex
-	byID map[string]*Library
-	// known maps a minor line to the artifact directory discovered for it
-	// on the search path at construction, whether or not it has been
-	// dlopen'd yet. Guarded by mu.
-	known map[string]string
+	mu sync.RWMutex
+	// byVersion holds every library this registry has opened, keyed by its
+	// OWN reported version — one entry per library, since two directories
+	// can never hold the same exact patch at once (the demotion rule keeps
+	// the flat slot and patches/ from ever duplicating a version). Guarded
+	// by mu.
+	byVersion map[string]*Library
+	// linePin is the line's resolved library, set at most ONCE per line
+	// (R3, R8): the first line request (or Load, or a patch's same-line
+	// fallback via a line-shaped Ensure) decides it, and it never moves
+	// while the process runs. Guarded by mu.
+	linePin map[string]*Library
+	// known records which lines this registry can see SOMETHING for —
+	// populated at construction by discover(), used only for the
+	// construction-time emptiness check and for Versions() to list a line
+	// nothing has opened yet. It plays no part in resolution: Resolve
+	// always re-walks the search path, so a patch fetched after
+	// construction is found on the next call. Guarded by mu.
+	known map[string]bool
+
+	// fbMu guards fallback, the R-c 60s-per-patch re-check cache (resolve.go).
+	fbMu     sync.Mutex
+	fallback map[string]fallbackCacheEntry
 
 	explicit  string   // the constructor's directory, "" for the search path alone
 	search    []string // the §1 search path, in order
@@ -566,7 +583,7 @@ func WithPreload(versions ...string) RegistryOption {
 // checksum, a refused ABI revision, a manifest that disagrees with the library
 // it names — is reported by the first call that asks for that line.
 func NewRegistry(dir string, opts ...RegistryOption) (*Registry, error) {
-	r := &Registry{byID: map[string]*Library{}, known: map[string]string{}, explicit: dir}
+	r := &Registry{byVersion: map[string]*Library{}, linePin: map[string]*Library{}, known: map[string]bool{}, explicit: dir}
 	for _, o := range opts {
 		o(r)
 	}
@@ -593,20 +610,17 @@ func NewRegistry(dir string, opts ...RegistryOption) (*Registry, error) {
 	return r, nil
 }
 
-// preloadLines opens WithPreload's lines, in order, before the constructor
-// returns. It goes through the §1 search path and never through the fetch
-// path: preload does not fetch.
+// preloadLines opens WithPreload's entries, in order, before the
+// constructor returns — each resolved exactly as Resolve resolves one
+// (line or exact patch), minus any fetch (R7): it goes through the §1
+// search path and never through the fetch path, even with AutoFetch on.
 func (r *Registry) preloadLines() error {
 	for _, v := range r.preload {
 		if v == "" {
 			return fmt.Errorf("chtypes: WithPreload: an empty version does not mean 'pick one'")
 		}
-		l, err := r.resolveWithoutFetch(Version(v), minorOf(v))
-		if err != nil {
+		if _, err := r.resolveVersion(context.Background(), Version(v), false); err != nil {
 			return err
-		}
-		if l == nil {
-			return missingArtifactError(v, HostPlatform(), r.search)
 		}
 	}
 	return nil
@@ -631,7 +645,10 @@ func readArtifactDir(sub string) (m struct {
 
 // Load dlopens one library and registers it under its own reported version.
 // Loading the same path twice — into this Registry or another one — reuses the
-// Library that was already initialized for it.
+// Library that was already initialized for it. It pins the library's LINE
+// only when the line has no pin yet (R8): a second Load of another patch of
+// an already-pinned line registers the patch (so ResolveContext of its exact
+// version finds it) without re-pointing what a line request answers.
 //
 // The manifest.json beside path is consulted TWICE, for two different
 // questions, on two different conditions:
@@ -643,23 +660,8 @@ func readArtifactDir(sub string) (m struct {
 //     anything is dlopen'd: an image cannot be unmapped, so both checks have
 //     to happen while refusing is still possible.
 func (r *Registry) Load(path string) error {
-	if err := checkLibraryBytes(path); err != nil {
-		return err
-	}
-	if r.verify {
-		if err := verifyArtifactLibrary(path); err != nil {
-			return err
-		}
-	}
-	lib, err := openLibrary(path)
-	if err != nil {
-		return err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.byID[string(lib.Version)] = lib
-	r.byID[lib.Minor] = lib
-	return nil
+	_, err := r.load(path)
+	return err
 }
 
 // checkLibraryBytes compares path's file size against its manifest.json's
@@ -852,53 +854,38 @@ func (r *Registry) SearchPath() []string {
 func (r *Registry) Libraries() []*Library {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	seen := map[*Library]bool{}
-	out := make([]*Library, 0, len(r.byID))
-	for _, l := range r.byID {
-		if !seen[l] {
-			seen[l] = true
-			out = append(out, l)
-		}
+	out := make([]*Library, 0, len(r.byVersion))
+	for _, l := range r.byVersion {
+		out = append(out, l)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return minorSortKey(out[i].Minor).before(minorSortKey(out[j].Minor))
+		return lessVersionKey(versionKey(string(out[i].Version)), versionKey(string(out[j].Version)))
 	})
 	return out
 }
 
 // For resolves a version to its library. A minor line ("25.8") or an exact
-// patch ("25.8.28.1-lts") both work: lookup tries the given string first,
-// then its minor line, so a drifted docker patch tag still finds its line.
-// Resolution never falls back to the nearest version, because answering
-// 26.7 semantics from a 25.8 artifact would be silently wrong.
+// patch ("25.8.28.1-lts") both work. For a patch request that is not
+// installed or published, the newest installed/published patch of the SAME
+// line is used instead, flagged and warned once (see Resolve); a request
+// never crosses to another line, because answering 26.7 semantics from a
+// 25.8 artifact would be silently wrong.
 //
 // A line the loaded set lacks is looked for along the §1 search path and
-// loaded from the first directory that holds it; a line found nowhere is
+// loaded from the first directory that holds it; one found nowhere is
 // fetched first when AutoFetch is on, and is otherwise ErrArtifactMissing
 // (errors.Is), with the §7 message naming every directory looked in.
-// ForContext is the same with a context for the fetch.
+// ForContext is the same with a context for the fetch. Resolve/ResolveContext
+// run the identical resolution and additionally report what was requested,
+// what actually loaded, and whether it was exact.
 func (r *Registry) For(v Version) (*Library, error) {
 	return r.ForContext(context.Background(), v)
-}
-
-// lookup answers from what is loaded: the exact spelling first, then the
-// minor line.
-func (r *Registry) lookup(v Version) *Library {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if l, ok := r.byID[string(v)]; ok {
-		return l
-	}
-	if l, ok := r.byID[minorOf(string(v))]; ok {
-		return l
-	}
-	return nil
 }
 
 func (r *Registry) versionsLocked() []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, l := range r.byID {
+	for _, l := range r.byVersion {
 		if !seen[l.Minor] {
 			seen[l.Minor] = true
 			out = append(out, l.Minor)

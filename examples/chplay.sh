@@ -62,9 +62,19 @@ usage() {
 #
 # Everything below needs at least one built artifact. Check once, up front,
 # with an actionable message — not four times with a stack trace each.
+#
+# Two levels count (chtypes#284, "Layout rule"): the flat <minor>/ holding a
+# line's currently newest patch, and patches/<minor>/<clickhouse_version>/
+# holding any OTHER installed exact patch — a registry with only the latter
+# must not read as empty.
 artifact_count() {
   local n=0 d
   for d in "$REGISTRY"/*/; do
+    [ "$(basename "$d")" = patches ] && continue
+    [ -e "${d}libchtypes.dylib" ] || [ -e "${d}libchtypes.so" ] && n=$((n + 1))
+  done
+  for d in "$REGISTRY"/patches/*/*/; do
+    [ -d "$d" ] || continue
     [ -e "${d}libchtypes.dylib" ] || [ -e "${d}libchtypes.so" ] && n=$((n + 1))
   done
   echo "$n"

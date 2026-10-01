@@ -75,19 +75,24 @@ let installed = ensure("25.8", &EnsureOptions::default())?;   // installed.dir, 
 
 A **registry** is a directory holding one subdirectory per ClickHouse minor line, looked for in the order [`fetch.md` §1](fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) defines.
 
-Inside, one directory per line:
+Inside, one directory per line, plus a `patches/` sibling tree for any OTHER installed exact patch of a line (chtypes#284, "Layout rule"):
 
 ```text
 <registry>/
-  25.8/
-    manifest.json         the record — read this, infer nothing
-    libchtypes.dylib      (.so on Linux; the NAME comes from manifest.json)
-    CH_VERSION            the ClickHouse version, as plain text
-    unsafe_families.txt   this build's own refuse-list; empty is a valid list
+  25.8/                    the patch a LINE request selects — FLAT
+    manifest.json          the record — read this, infer nothing
+    libchtypes.dylib       (.so on Linux; the NAME comes from manifest.json)
+    CH_VERSION             the ClickHouse version, as plain text
+    unsafe_families.txt    this build's own refuse-list; empty is a valid list
   26.7/
 ...
-  sdk-goldens.json        the served golden set, if the release publishes one
+  patches/
+    25.8/
+      25.8.28.1-lts/       any OTHER exact patch of 25.8 — the same four files
+  sdk-goldens.json         the served golden set, if the release publishes one
 ```
+
+Several patches of one line can be installed at once. **ONLY a line spelling (or `--all`) writes the flat `<minor>/` slot — exactly as before this existed.** An exact-patch spelling ALWAYS installs at `patches/<minor>/<clickhouse_version>/` instead, even when it happens to be the line's newest published patch and the flat slot is empty: placement depends on how the patch was asked for, never on whether it is the newest one the release has. The one exception is not a write at all — an exact request for a patch that already sits flat, verified, is a no-op that reports the flat directory. `patches/` is a sibling tree released SDKs through 0.4.x neither see nor touch — measured against v0.4.0 of all four bindings and `scripts/fetch.sh`, including `list` and `verify`. When a LATER line fetch changes which patch occupies the flat slot, the outgoing one is DEMOTED into `patches/`, atomically, never deleted. [`fetch.md` §1](fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) has the full rule, including what happens when an old and a new SDK share one cache.
 
 **The library's file name comes out of `manifest.json` and is never assumed.** The name `libchtypes` and the `chs_` prefix are frozen, but Linux artifacts built before the `_s1` suffix was dropped call the file `libchtypes_s1.so`, and such artifacts still circulate. Every loader here is manifest-driven and takes either.
 
@@ -95,8 +100,8 @@ Inside, one directory per line:
 
 What a loader does with that directory, in order. This is the reference algorithm every binding implements; a binding may add to it but may not skip a step.
 
-1. Read the registry directory. For each entry that is a directory:
-2. Read `manifest.json`. **If it is missing or unparseable, skip the directory silently** — a registry may legitimately hold scratch directories, and a `.DS_Store` is not a version.
+1. Read the registry directory. For each entry that is a directory: a `patches/` entry is read ONE level deeper — each `patches/<minor>/<clickhouse_version>/` it holds is itself an entry, read exactly like a flat `<minor>/` below. Every other entry is a flat line install.
+2. Read `manifest.json`. **If it is missing or unparseable, skip the directory silently** — a registry may legitimately hold scratch directories, and a `.DS_Store` is not a version. A cache that holds only nested `patches/` installs is not empty because of this: both levels are checked before deciding a registry has nothing.
 3. `dlopen` the file `manifest.json`'s `library` field names, with `RTLD_NOW | RTLD_LOCAL`. A failure here **is** an error and aborts with the path and the `dlerror()` text: a directory that has a manifest and does not load is broken, not absent.
 4. Resolve the `chs_*` symbols by name. Four are **mandatory** — `chs_clickhouse_version`, `chs_init`, `chs_schema_compile`, `chs_rows`. If any is missing, `dlclose` and reject the library: it is not a chtypes artifact.
 5. Resolve `chs_abi_revision`. **Absent** means the artifact predates the probe: record revision `0` and continue under the rules below, because absence is ignorance, not incompatibility. **Present** means call it — and if it returns a value that is neither `0` nor the revision this binding was written against (`CHS_ABI_REVISION`), **reject the library**, naming both numbers. The artifact has positively stated that the binding's declarations do not describe it, and calling through them is undefined.
@@ -104,7 +109,7 @@ What a loader does with that directory, in order. This is the reference algorith
 7. Column introspection is **all-or-nothing**: the six `chs_schema_column_*` entry points shipped together, so if any is missing, treat the whole group as absent and leave the column list empty rather than partially populated.
 8. Ask the library its own version with `chs_clickhouse_version()`. **The library names itself; nothing is inferred from the path.** Derive the minor line from that string.
 9. Call `chs_init(timezone, unsafe_families)` once per library, with the contents of that version's own `unsafe_families.txt`. Each library keeps its own DateLUT and its own refuse-list.
-10. Index the library under **both** its exact version and its minor line.
+10. Index the library under its **exact version** always. Index it under its **minor line** too only when it is the newest published patch of that line found in the FIRST directory on the search path that holds any patch of it (chtypes#284, "Layout rule") — a patch loaded from `patches/` never silently answers a line request unless it is the one this rule picks.
 
 `RTLD_LOCAL` is not a detail: it is what keeps each library's ClickHouse symbols private, so two builds that both define `DB::DataTypeFactory` never collide. A loader that uses `RTLD_GLOBAL` will appear to work and answer with the wrong version's semantics. [`multi-version.md`](multi-version.md) is what that buys you.
 
@@ -133,7 +138,7 @@ Two environment variables move the trust boundary, and both are deliberate:
 
 ## Pinning, for CI and production
 
-`fetch --lock chtypes.lock` records, per `<os>-<arch>/<minor>`, the asset file and sha256 that were installed, and the ABI revision the row carried. `fetch --frozen` then refuses anything else with `CHTYPES_ARTIFACT_PINNED` — checking the revision first, so a lock made for an ABI revision your SDK no longer speaks is named as that ([`fetch.md`](fetch.md) §5). It is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, CI fails on drift.
+`fetch --lock chtypes.lock` records, per `<os>-<arch>/<clickhouse_version>` — the EXACT patch, not the line (schema 2, chtypes#284) — the asset file and sha256 that were installed, and the ABI revision the row carried. `fetch --frozen` then refuses anything else with `CHTYPES_ARTIFACT_PINNED` — checking the revision first, so a lock made for an ABI revision your SDK no longer speaks is named as that ([`fetch.md`](fetch.md) §5). It is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, CI fails on drift.
 
 ```sh
 npx @wavehouse/chtypes fetch 25.8 --lock chtypes.lock   # record
@@ -142,19 +147,19 @@ npx @wavehouse/chtypes fetch 25.8 --frozen              # refuse anything the lo
 
 `--frozen` without `--lock` reads `./chtypes.lock`. A lock file that does not exist under `--frozen` is `CHTYPES_ARTIFACT_PINNED`: nothing is pinned, so nothing is installed.
 
-A pin survives a rebuild on purpose. The same ClickHouse version can be published more than once, each with a higher build number, and a line resolves — among the artifacts built at the ABI revision your SDK speaks, the only ones a fetch ever installs ([`fetch.md`](fetch.md) §2) — to its newest version and then to the **highest build** of that version. Because a lock pins a file name and a hash rather than a line, a rebuild does not silently become what you install.
+**The file you pin is the file you get — even while the channel serves something newer.** A lock entry selects among the release's rows by its own key; it is never compared against what else is served, so the refusal "pins X but the release offers Y" no longer exists. Rebuilds are included: the same ClickHouse version can be published more than once, each with a higher build number, and a lock pins a file name and a hash rather than a line or a bare version, so a rebuild does not silently become what you install.
 
 ## Lazy fetch is opt-in
 
-Opening a line that no directory on the search path holds can fetch it first, but only if you ask: the registry constructor's `autofetch` option, or `CHTYPES_AUTOFETCH=1` for every registry in the process. Off, the missing line is the one error below.
+Opening a line or an exact patch that no directory on the search path holds can fetch it first, but only if you ask: the registry constructor's `autofetch` option, or `CHTYPES_AUTOFETCH=1` for every registry in the process. Off, the missing line or patch is the one error below.
 
-It is off by default because **a production process must not begin a 250 MB download inside a request**. With it on, the fetch runs once per process per line under one lock, so concurrent opens share the one download.
+It is off by default because **a production process must not begin a 250 MB download inside a request**. With it on, a PATCH request fetches that patch first; only once the release has confirmed it does not publish that patch does the fetch fall back to the line, once per process per (destination, spelling) under one lock, so concurrent opens share the one download.
 
 In TypeScript the split is in the method names rather than a flag: `registry.for(v)` is synchronous and never fetches, `await registry.open(v)` is its twin that can.
 
 ## The one error
 
-A line no directory on the search path holds is one identifiable error in every binding — Go's `ErrArtifactMissing` (which works with `errors.Is`), Python's and TypeScript's `ArtifactMissingError`, Rust's `Error::ArtifactMissing` — carrying the same message everywhere apart from the bracketed parts:
+A line or an exact patch no directory on the search path holds is one identifiable error in every binding — Go's `ErrArtifactMissing` (which works with `errors.Is`), Python's and TypeScript's `ArtifactMissingError`, Rust's `Error::ArtifactMissing` — carrying the same message everywhere apart from the bracketed parts:
 
 ```text
 chtypes: no artifact for ClickHouse 25.8 (darwin-arm64). Looked in: /Users/me/.cache/chtypes/artifacts/abi<R>/darwin-arm64, /usr/local/share/chtypes/artifacts/darwin-arm64, /opt/chtypes/artifacts/darwin-arm64.
@@ -164,7 +169,7 @@ or set CHTYPES_AUTOFETCH=1 to fetch on first use.
 
 It names every directory it looked in and the exact command that would fix it, because the alternative — a stack trace about a `NULL` handle — sends people to the wrong half of the system. The fetch-time failures share a vocabulary of codes with it: `CHTYPES_ARTIFACT_MISSING`, `…_UNTRUSTED`, `…_CORRUPT`, `…_PINNED`, `…_UNPUBLISHED`, and `CHTYPES_SOURCE_UNREACHABLE`.
 
-**A version is never a nearest match.** Asking for `25.8` resolves that line or fails naming what is present; it never quietly hands back a neighbor. Version behavior is not monotonic — 25.10 rejects a DEFAULT that both 25.8 and 26.6 accept — so a neighbor's answer is not an approximation of the right one, it is a different answer.
+**A version is never another LINE's answer.** Asking for `25.8` resolves that line or fails naming what is present; it never quietly hands back 26.7's semantics. Version behavior is not monotonic — 25.10 rejects a DEFAULT that both 25.8 and 26.6 accept — so a different line's answer is not an approximation of the right one, it is a different answer. **A missing exact patch is the one exception, and only within its own line** (chtypes#284): `registry.For("25.8.30.16")` for a patch the release has not built yet resolves to the newest installed or published patch of 25.8 instead, flagged `Exact = false` on the resolution and warned once per (requested, actual) pair — never silently, and never across a line boundary. [`multi-version.md`](multi-version.md#resolution-the-exact-patch-else-its-line--never-another-line) has the full resolution order and the warning text. `fetch`/`ensure` themselves never do this: a fetch for an unpublished exact patch is still `CHTYPES_ARTIFACT_UNPUBLISHED`, only the registry's `For`/`resolve` falls back.
 
 ## What a release contains
 

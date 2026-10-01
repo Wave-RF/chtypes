@@ -20,7 +20,6 @@ import warnings
 from collections.abc import Sequence
 from pathlib import Path
 
-from ._manifest import Manifest
 from .errors import (
     CODE_ARTIFACT_UNPUBLISHED,
     CODE_SOURCE_UNREACHABLE,
@@ -28,7 +27,7 @@ from .errors import (
     ChtypesError,
     UnsignedArtifactWarning,
 )
-from .fetch import DEFAULT_ARTIFACTS_URL, DEFAULT_TAG, PLATFORMS, ReleaseEntry
+from .fetch import DEFAULT_ARTIFACTS_URL, DEFAULT_TAG, PLATFORMS
 
 __all__ = ["main"]
 
@@ -202,17 +201,20 @@ def _cmd_list(args: argparse.Namespace) -> int:
         _not_shown,
         fetch_destination,
         host_platform,
-        installed_lines,
+        installed_patches,
     )
 
     platform = args.platform or host_platform()
     registry = fetch_destination(args.dest, platform=platform)
-    have = installed_lines(registry)
+    have = installed_patches(registry)
     sys.stdout.write(f"installed ({registry}):\n")
     if not have:
         sys.stdout.write("  (nothing)\n")
-    for minor, (directory, manifest) in have.items():
-        sys.stdout.write(f"  {minor:<8} {manifest.clickhouse_version:<18} {directory}\n")
+    for patch in have:
+        # SDK#284: the flat slot (the patch a LINE request selects) and every
+        # other patch under patches/<minor>/<version>/ both report.
+        tag = "" if patch.flat else "  (patches/)"
+        sys.stdout.write(f"  {patch.minor:<8} {patch.version:<18} {patch.directory}{tag}\n")
     sys.stdout.flush()
 
     fetcher = Fetcher(dest=registry, platform=platform, url=args.url, tag=args.tag, progress=_say)
@@ -222,8 +224,9 @@ def _cmd_list(args: argparse.Namespace) -> int:
     sys.stdout.write(f"release ({release.source}, {signed}) offers for {platform}:\n")
     if not offered:
         sys.stdout.write("  (nothing)\n")
+    installed_versions = {patch.version for patch in have}
     for entry in offered:
-        state = "installed" if _installed(have, entry) else "not installed"
+        state = "installed" if entry.clickhouse_version in installed_versions else "not installed"
         sys.stdout.write(
             f"  {entry.minor:<8} {entry.clickhouse_version:<18} b{entry.build_number:<3} "
             f"{entry.file}  [{state}]\n"
@@ -235,11 +238,6 @@ def _cmd_list(args: argparse.Namespace) -> int:
         sys.stdout.write(f"  {note}\n")
     sys.stdout.flush()
     return EXIT_OK
-
-
-def _installed(have: dict[str, tuple[object, Manifest]], entry: ReleaseEntry) -> bool:
-    got = have.get(entry.minor)
-    return got is not None and got[1].clickhouse_version == entry.clickhouse_version
 
 
 def _goldens_line(registry: Path) -> None:

@@ -63,8 +63,17 @@ export const DEFAULT_RELEASE_TAG = 'artifacts';
 export const RELEASE_PUBLIC_KEYS: readonly string[] = [
   'fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc',
 ];
-/** The lock-file schema this SDK writes and reads (docs/guides/fetch.md §5). */
-export const LOCK_SCHEMA = 1;
+/**
+ * The lock-file schema this SDK writes, and the newest it reads
+ * (docs/guides/fetch.md §5). Schema 1 (`<os>-<arch>/<minor>`) is still read
+ * and is converted to schema 2 (`<os>-<arch>/<clickhouse_version>`) the first
+ * time this SDK writes the file — schema 2 is what a two-patches-per-line
+ * cache needs to key on, since two patches of one line share a schema-1 key.
+ * SDKs through 0.4.x cannot read a schema-2 lock and refuse it (issue #284).
+ */
+export const LOCK_SCHEMA = 2;
+/** The newest lock schema this SDK STILL READS besides its own (docs/guides/fetch.md §5). */
+const LOCK_SCHEMA_LEGACY = 1;
 /** The lock file `frozen` reads when no `lock` names one (docs/guides/fetch.md, Decisions); relative, so the working directory's. */
 export const DEFAULT_LOCK_FILE = 'chtypes.lock';
 const INDEX_SCHEMA = 1;
@@ -166,9 +175,15 @@ export interface EnsureOptions {
   readonly signal?: AbortSignal | undefined;
 }
 
-/** What `ensure` did: where the line is, what it is, and whether bytes moved. */
+/** What `ensure` did: where the patch is, what it is, and whether bytes moved. */
 export interface EnsureResult {
-  /** The installed line directory, `<registry>/<minor>` — what `fetch` prints. */
+  /**
+   * The installed directory — what `fetch` prints. A LINE request's pick
+   * installs flat, `<registry>/<minor>`, exactly as before #284. Any other
+   * exact patch installs at `<registry>/patches/<minor>/<clickhouse_version>`
+   * (issue #284, the layout the artifact producer's own CI still reads
+   * `<registry>/<minor>` directly for).
+   */
   readonly dir: string;
   /** The registry directory the line lives in. */
   readonly registry: string;
@@ -189,7 +204,7 @@ export interface EnsureResult {
   readonly keyId: string | null;
 }
 
-/** One installed line, as `verify` and `list` report it. */
+/** One installed PATCH, as `verify` and `list` report it — one record per patch, flat slot and `patches/` tree alike (issue #284). */
 export interface InstalledArtifact {
   readonly line: string;
   readonly dir: string;
@@ -249,6 +264,20 @@ export function parseVersionSpelling(spelling: string): VersionRequest {
   }
   const line = `${parts[0]}.${parts[1]}`;
   return parts.length >= 4 ? { spelling, line, exact: s, bare } : { spelling, line, exact: null, bare: null };
+}
+
+/**
+ * Decision 7 / R2 (issue #284): does `candidate` — a served or installed
+ * `clickhouse_version` — match `req`? A spelled channel (`-lts` etc.) matches
+ * only itself; an unspelled one matches that patch on any channel. This is
+ * the ONE matching rule for every place a patch is matched: the registry, the
+ * release, the lock and `scripts/fetch.sh`. `false` for a line request — a
+ * line never "matches" a patch under this rule, it CONTAINS one.
+ */
+export function patchMatches(candidate: string, req: VersionRequest): boolean {
+  if (req.exact === null) return false;
+  if (CHANNEL.test(req.exact)) return candidate === req.exact;
+  return candidate === req.exact || candidate.replace(CHANNEL, '') === req.bare;
 }
 
 /** Numeric order over dotted versions, channel suffix ignored: 25.10 > 25.8, 25.8.30.16 > 25.8.28.1. */
@@ -795,15 +824,8 @@ export function selectArtifact(index: ReleaseIndex, platform: string, req: Versi
   const all = forPlatform(index, platform);
   const rev = fetchAbiRevision();
   const have = all.filter((a) => a.abi_revision === rev).map((a) => a.clickhouse_version).join(', ') || 'nothing';
-  let anyRevision: IndexArtifact[];
-  if (req.exact !== null) {
-    const typedChannel = CHANNEL.test(req.exact);
-    anyRevision = all.filter(
-      (a) => a.clickhouse_version === req.exact || (!typedChannel && a.clickhouse_version.replace(CHANNEL, '') === req.bare),
-    );
-  } else {
-    anyRevision = all.filter((a) => a.clickhouse_minor === req.line);
-  }
+  const anyRevision =
+    req.exact !== null ? all.filter((a) => patchMatches(a.clickhouse_version, req)) : all.filter((a) => a.clickhouse_minor === req.line);
   const hit = anyRevision.filter((a) => a.abi_revision === rev);
   if (hit.length === 0) {
     throw new ArtifactUnpublishedError(
@@ -903,11 +925,21 @@ export async function ensure(spelling: string, options: EnsureOptions = {}): Pro
   return p;
 }
 
+/** A synthetic line-shaped request, for the parts of `installOne` / the lock helpers that take one — `--all` never spells an exact patch. */
+function lineRequest(line: string): VersionRequest {
+  return { spelling: line, line, exact: null, bare: null };
+}
+
 /**
  * `fetch --all`: every line the release publishes for the platform at this
- * binding's ABI revision, each through `ensure`'s chain. A line it has only at
- * another revision is not installed and is named in one loud stderr line; the
- * rest go on.
+ * binding's ABI revision, each through `ensure`'s chain — installed flat, as
+ * a line request always is. A line it has only at another revision is not
+ * installed and is named in one loud stderr line; the rest go on.
+ *
+ * Under `--frozen` (F6): every line the lock pins for this platform, at its
+ * own newest pinned patch — never a line the release has that the lock does
+ * not pin (that is not drift in anything that was pinned). Every candidate's
+ * ABI revision is checked (F2) before the release is even read.
  */
 export async function ensureAll(options: EnsureOptions = {}): Promise<EnsureResult[]> {
   const platform = resolvePlatform(options.platform);
@@ -915,16 +947,36 @@ export async function ensureAll(options: EnsureOptions = {}): Promise<EnsureResu
   const emit = options.onProgress ?? noop;
   if (options.offline) throw new ChtypesError('chtypes: --all needs the release listing; it cannot run offline');
   const ctx = installContext(platform, dest, options);
+
+  let pinnedLines: string[] = [];
+  if (ctx.frozen) {
+    pinnedLines = linesPinnedForPlatform(ctx.lock!, platform);
+    for (const line of pinnedLines) checkLockRevisionEarly(ctx, lineRequest(line));
+  }
+
   const source = openSource(options);
   emit({ type: 'status', message: `every published ClickHouse line, ${platform} -> ${dest}` });
   emit({ type: 'status', message: `source ${source.description}` });
   const release = await loadRelease(source, options, emit);
+
+  if (ctx.frozen) {
+    const out: EnsureResult[] = [];
+    for (const line of pinnedLines) {
+      const req = lineRequest(line);
+      const candidate = selectFromLock(ctx.lock!, platform, req)!;
+      const art = verifyFrozenCandidate(release, ctx, req, candidate);
+      out.push(await installOne(release, art, ctx, req));
+    }
+    await installGoldens(release, ctx, options);
+    return out;
+  }
+
   const rows = selectAll(release.index, platform);
   // A line the release has only at another ABI revision is not installed —
   // and never silently: one loud line per such line, then the rest go on.
   for (const message of skippedLines(release.index, platform)) warn(`chtypes: WARNING: ${message}`);
   const out: EnsureResult[] = [];
-  for (const art of rows) out.push(await installOne(release, art, ctx));
+  for (const art of rows) out.push(await installOne(release, art, ctx, lineRequest(art.clickhouse_minor)));
   await installGoldens(release, ctx, options);
   return out;
 }
@@ -1040,7 +1092,10 @@ function installContext(platform: string, dest: string, options: EnsureOptions):
   const lockPath =
     options.lock !== undefined && options.lock !== '' ? path.resolve(options.lock) : frozen ? path.resolve(DEFAULT_LOCK_FILE) : undefined;
   const lock = lockPath !== undefined ? readLock(lockPath) : null;
-  if (frozen && lock === null) {
+  // Decision 6: offline never reads the lock at all, so a missing lock file
+  // is not refused here — `ensureUncached`'s offline branch never consults
+  // `ctx.lock` and answers from the destination alone.
+  if (frozen && lock === null && options.offline !== true) {
     throw new ArtifactPinnedError(`chtypes: ${lockPath} does not exist, and frozen refuses anything it does not pin`);
   }
   if (platform !== hostPlatform()) {
@@ -1052,79 +1107,168 @@ function installContext(platform: string, dest: string, options: EnsureOptions):
   return { platform, dest, lockPath, lock, frozen, force: options.force ?? false, emit: options.onProgress ?? noop };
 }
 
-/** The lock's own entry for `<platform>/<minor>`, or `undefined`. */
-function lockEntryFor(ctx: InstallContext, minor: string): LockEntry | undefined {
-  return ctx.lock?.artifacts[`${ctx.platform}/${minor}`];
+/**
+ * Every lock entry (its full `<os>-<arch>/<clickhouse_version>` key) that
+ * `req` — a patch or a line spelling, for `platform` — matches under R2.
+ */
+function candidatesFromLock(
+  lock: LockFile,
+  platform: string,
+  req: VersionRequest,
+): { key: string; entry: LockEntry; version: string }[] {
+  const prefix = `${platform}/`;
+  const rows: { key: string; entry: LockEntry; version: string }[] = [];
+  for (const [key, entry] of Object.entries(lock.artifacts)) {
+    if (!key.startsWith(prefix)) continue;
+    const version = key.slice(prefix.length);
+    const matches = req.exact !== null ? patchMatches(version, req) : minorOfVersion(version) === req.line;
+    if (matches) rows.push({ key, entry, version });
+  }
+  return rows;
+}
+
+/** F1: the newest-versioned candidate the lock pins for `req` — a patch spelling's own entry, or a line's newest pinned patch. */
+function selectFromLock(
+  lock: LockFile,
+  platform: string,
+  req: VersionRequest,
+): { key: string; entry: LockEntry; version: string } | undefined {
+  const rows = candidatesFromLock(lock, platform, req);
+  if (rows.length === 0) return undefined;
+  return rows.reduce((best, cur) => (compareVersions(cur.version, best.version) > 0 ? cur : best));
+}
+
+/** Every line the lock pins at least one patch of, for `platform` — what `--all --frozen` (F6) installs. */
+function linesPinnedForPlatform(lock: LockFile, platform: string): string[] {
+  const prefix = `${platform}/`;
+  const lines = new Set<string>();
+  for (const key of Object.keys(lock.artifacts)) {
+    if (key.startsWith(prefix)) lines.add(minorOfVersion(key.slice(prefix.length)));
+  }
+  return [...lines].sort(compareVersions);
 }
 
 /**
  * Fails fast, before any network access, when `frozen`'s lock already names
- * an ABI revision for this key that is not this binding's own
- * (docs/guides/fetch.md §5). A lock made for one ABI revision does not get a
- * second chance disguised as a drifted pin or an unpublished line once the
+ * an ABI revision for one of `req`'s candidates that is not this binding's own
+ * (docs/guides/fetch.md §5, F2). A lock made for one ABI revision does not get
+ * a second chance disguised as a drifted pin or an unpublished line once the
  * SDK moves to another: the fix is always the same re-lock, so the message
  * says that directly instead of waiting to see which of the two symptoms
  * selection would have produced.
  */
 function checkLockRevisionEarly(ctx: InstallContext, req: VersionRequest): void {
-  if (!ctx.frozen) return;
-  const entry = lockEntryFor(ctx, req.line);
-  if (entry === undefined || entry.abi_revision === undefined || entry.abi_revision === fetchAbiRevision()) return;
-  const key = `${ctx.platform}/${req.line}`;
-  throw new ArtifactPinnedError(
-    `chtypes: ${ctx.lockPath} pins ${key} at ABI revision ${entry.abi_revision}; this SDK speaks ABI revision ` +
-      `${fetchAbiRevision()} — re-lock with: ${FETCH_COMMAND} ${req.spelling} --lock ${ctx.lockPath}`,
-  );
+  if (!ctx.frozen || ctx.lock === null) return;
+  for (const { key, entry } of candidatesFromLock(ctx.lock, ctx.platform, req)) {
+    if (entry.abi_revision === undefined || entry.abi_revision === fetchAbiRevision()) continue;
+    throw new ArtifactPinnedError(
+      `chtypes: ${ctx.lockPath} pins ${key} at ABI revision ${entry.abi_revision}; this SDK speaks ABI revision ` +
+        `${fetchAbiRevision()} — re-lock with: ${FETCH_COMMAND} ${req.spelling} --lock ${ctx.lockPath}`,
+    );
+  }
 }
 
 /**
  * The one sentence appended to a PINNED or UNPUBLISHED message when, under
- * `frozen`, the lock's own entry for this key exists but names no ABI
- * revision at all — written by an SDK before this field existed. `''` when
- * there is nothing to add.
+ * `frozen`, one of the lock's own candidate entries for `req` exists but
+ * names no ABI revision at all — written by an SDK before this field
+ * existed. `''` when there is nothing to add.
  */
-function revisionNote(ctx: InstallContext, minor: string): string {
-  if (!ctx.frozen) return '';
-  const entry = lockEntryFor(ctx, minor);
-  if (entry === undefined || entry.abi_revision !== undefined) return '';
+function revisionNote(ctx: InstallContext, req: VersionRequest): string {
+  if (!ctx.frozen || ctx.lock === null) return '';
+  const entry = candidatesFromLock(ctx.lock, ctx.platform, req).find((r) => r.entry.abi_revision === undefined);
+  if (entry === undefined) return '';
   return (
     ` ${ctx.lockPath} records no ABI revision (written by an older SDK); this SDK speaks ABI revision ` +
-    `${fetchAbiRevision()} — re-lock with: ${FETCH_COMMAND} ${minor} --lock ${ctx.lockPath}`
+    `${fetchAbiRevision()} — re-lock with: ${FETCH_COMMAND} ${req.spelling} --lock ${ctx.lockPath}`
   );
+}
+
+/** F5: the release's own row for a lock candidate, verified against SHA256SUMS, the pin's own hash, and the SDK's ABI revision — in that order. */
+function verifyFrozenCandidate(
+  release: Release,
+  ctx: InstallContext,
+  req: VersionRequest,
+  candidate: { key: string; entry: LockEntry; version: string },
+): IndexArtifact {
+  const { key, entry, version } = candidate;
+  const [os, arch] = ctx.platform.split('-');
+  const row = release.index.artifacts.find((a) => a.file === entry.file && a.os === os && a.arch === arch);
+  const listedSha = release.sums.get(entry.file);
+  if (row === undefined || listedSha === undefined) {
+    throw new ArtifactUnpublishedError(
+      `chtypes: the release at ${release.source.description} does not list ${entry.file}, which ${ctx.lockPath} pins for ${key}.${revisionNote(ctx, req)}`,
+    );
+  }
+  if (row.sha256 !== listedSha) {
+    throw new ArtifactCorruptError(
+      `chtypes: index.json says ${entry.file} is ${row.sha256} but SHA256SUMS says ${listedSha} — the release disagrees with itself; not installing it`,
+    );
+  }
+  if (row.abi_revision !== fetchAbiRevision()) {
+    throw new ArtifactPinnedError(
+      `chtypes: ${ctx.lockPath} pins ${key} to ${entry.file}, which the release at ${release.source.description} serves at ABI revision ` +
+        `${row.abi_revision ?? 'none recorded'}; this SDK speaks ABI revision ${fetchAbiRevision()} — re-lock with: ` +
+        `${FETCH_COMMAND} ${version} --lock ${ctx.lockPath}${revisionNote(ctx, req)}`,
+    );
+  }
+  if (entry.sha256.toLowerCase() !== listedSha) {
+    throw new ArtifactPinnedError(
+      `chtypes: ${ctx.lockPath} pins ${key} to ${entry.file} (${entry.sha256}) but the release lists it as ${listedSha}; ` +
+        `frozen refuses it.${revisionNote(ctx, req)}`,
+    );
+  }
+  return row;
+}
+
+/** F1-F5: install exactly what the lock pins for `req`, never a newer patch or build the release also serves. */
+async function installFrozen(release: Release, req: VersionRequest, ctx: InstallContext, options: EnsureOptions): Promise<EnsureResult> {
+  const lock = ctx.lock!; // installContext refuses `frozen` with no lock before this is ever called.
+  const candidate = selectFromLock(lock, ctx.platform, req);
+  if (candidate === undefined) {
+    throw new ArtifactPinnedError(`chtypes: ${ctx.lockPath} pins nothing for ${ctx.platform}/${req.spelling}, and frozen refuses anything it does not pin`);
+  }
+  const art = verifyFrozenCandidate(release, ctx, req, candidate);
+  const installed = await installOne(release, art, ctx, req);
+  await installGoldens(release, ctx, options);
+  return installed;
 }
 
 async function ensureUncached(req: VersionRequest, platform: string, dest: string, options: EnsureOptions): Promise<EnsureResult> {
   const ctx = installContext(platform, dest, options);
-  const install = path.join(dest, req.line);
 
   if (options.offline) {
-    // Never touch the source: installed and hashing what its own manifest says is the whole test.
-    const have = await installedLine(install);
-    const pin = ctx.lock?.artifacts[`${platform}/${req.line}`];
-    if (have !== null && have.ok && (!ctx.frozen || pin !== undefined)) {
-      ctx.emit({ type: 'status', message: `offline — already installed and verified: ${install}` });
+    // Never touch the source, and never the lock (Decision 6): installed and
+    // hashing what its own manifest says, at either slot, is the whole test.
+    const patches = await installedPatchesForLine(dest, req.line);
+    const match: InstalledArtifact | null =
+      req.exact !== null
+        ? (patches.find((p) => patchMatches(p.version, req)) ?? null)
+        : patches.reduce<InstalledArtifact | null>(
+            (best, cur) => (best === null || compareVersions(cur.version, best.version) > 0 ? cur : best),
+            null,
+          );
+    if (match !== null && match.ok) {
+      ctx.emit({ type: 'status', message: `offline — already installed and verified: ${match.dir}` });
       return {
-        dir: install,
+        dir: match.dir,
         registry: dest,
         line: req.line,
-        version: have.version,
+        version: match.version,
         platform,
-        file: pin?.file ?? '',
-        sha256: pin?.sha256 ?? '',
-        library: have.library,
-        librarySha256: have.expected,
+        file: '',
+        sha256: '',
+        library: match.library,
+        librarySha256: match.expected,
         installed: false,
         source: 'offline',
         signed: false,
         keyId: null,
       };
     }
-    if (have !== null && have.ok && ctx.frozen) {
-      throw new ArtifactPinnedError(`chtypes: ${ctx.lockPath} pins nothing for ${platform}/${req.line}, and frozen refuses anything it does not pin`);
-    }
     throw new SourceUnreachableError(
-      `chtypes: offline — ClickHouse ${req.line} (${platform}) is not installed and verified in ${dest}` +
-        (have !== null && !have.ok ? ` (${have.problem})` : '') +
+      `chtypes: offline — ClickHouse ${req.spelling} (${platform}) is not installed and verified in ${dest}` +
+        (match !== null && !match.ok ? ` (${match.problem})` : '') +
         ', and offline forbids fetching it',
     );
   }
@@ -1138,25 +1282,58 @@ async function ensureUncached(req: VersionRequest, platform: string, dest: strin
   });
   ctx.emit({ type: 'status', message: `source ${source.description}` });
   const release = await loadRelease(source, options, ctx.emit);
-  let art: IndexArtifact;
-  try {
-    art = selectArtifact(release.index, platform, req);
-  } catch (err) {
-    if (!(err instanceof ArtifactUnpublishedError)) throw err;
-    const note = revisionNote(ctx, req.line);
-    throw note ? new ArtifactUnpublishedError(`${err.message}${note}`) : err;
-  }
-  const installed = await installOne(release, art, ctx);
+
+  if (ctx.frozen) return installFrozen(release, req, ctx, options);
+
+  const art = selectArtifact(release.index, platform, req);
+  const installed = await installOne(release, art, ctx, req);
   await installGoldens(release, ctx, options);
   return installed;
 }
 
-/** One index row, from the release into `<dest>/<minor>/` — steps 2 through 4. */
-async function installOne(release: Release, art: IndexArtifact, ctx: InstallContext): Promise<EnsureResult> {
+/**
+ * Same-filesystem, atomic: move the current flat `<dest>/<minor>/` occupant
+ * aside to `<dest>/patches/<minor>/<its version>/` — NEVER deleted — before a
+ * different patch takes the flat slot (issue #284, the layout rule). A
+ * no-op when nothing is flat yet, or when the flat occupant already IS
+ * `incomingVersion` (the ordinary re-verify/rebuild path handles that case).
+ */
+async function demoteFlatIfDifferent(dest: string, minor: string, incomingVersion: string): Promise<void> {
+  const flat = path.join(dest, minor);
+  if (!existsSync(flat)) return;
+  const existing = readInstalledManifest(flat);
+  if (existing === null || existing.version === incomingVersion) return;
+  const patchesDir = path.join(dest, 'patches', minor);
+  const target = path.join(patchesDir, existing.version);
+  await mkdir(patchesDir, { recursive: true });
+  if (existsSync(target)) await rm(target, { recursive: true, force: true });
+  await rename(flat, target);
+}
+
+/** Does `dir` already hold `art`, byte-verified — a manifest and a library hashing `art.library_sha256`? */
+async function verifiedInstall(dir: string, art: IndexArtifact): Promise<boolean> {
+  const libPath = path.join(dir, art.library);
+  if (!existsSync(path.join(dir, 'manifest.json')) || !existsSync(libPath)) return false;
+  return (await sha256File(libPath)) === art.library_sha256;
+}
+
+/**
+ * One index row, from the release into its slot — steps 2 through 4. A LINE
+ * request's pick installs flat, `<dest>/<minor>/`, demoting a different flat
+ * occupant first (never deleting it). Any other exact patch request installs
+ * at `<dest>/patches/<minor>/<clickhouse_version>/` — unless that exact
+ * version already sits flat, byte-verified, in which case it counts as
+ * installed there and no second copy is made (docs/guides/fetch.md §4).
+ */
+async function installOne(release: Release, art: IndexArtifact, ctx: InstallContext, req: VersionRequest): Promise<EnsureResult> {
   const { dest, platform, emit } = ctx;
   const minor = art.clickhouse_minor;
-  const install = path.join(dest, minor);
-  const lockKey = `${platform}/${minor}`;
+  const version = art.clickhouse_version;
+  const wantsFlat = req.exact === null;
+  const flat = path.join(dest, minor);
+  const nested = path.join(dest, 'patches', minor, version);
+  const install = wantsFlat ? flat : nested;
+  const lockKey = `${platform}/${version}`;
   emit({ type: 'status', message: `${art.file}  (${art.bytes} bytes, ClickHouse ${art.clickhouse_version}, library ${art.library})` });
 
   // Step 2: the authentic SHA256SUMS must agree with index.json, byte for byte.
@@ -1168,32 +1345,8 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
     );
   }
 
-  // §5: a frozen lock refuses anything but what it pins. The revision is
-  // checked FIRST, before the file/sha256 comparison below it: a lock that
-  // names a revision is refused the moment that revision is not this
-  // binding's own, never compared byte-for-byte against an artifact it
-  // could never have pinned.
-  if (ctx.frozen && ctx.lock !== null) {
-    const pin = ctx.lock.artifacts[lockKey];
-    if (pin === undefined) {
-      throw new ArtifactPinnedError(`chtypes: ${ctx.lockPath} pins nothing for ${lockKey}, and frozen refuses anything it does not pin`);
-    }
-    if (pin.abi_revision !== undefined && pin.abi_revision !== fetchAbiRevision()) {
-      throw new ArtifactPinnedError(
-        `chtypes: ${ctx.lockPath} pins ${lockKey} at ABI revision ${pin.abi_revision}; this SDK speaks ABI revision ` +
-          `${fetchAbiRevision()} — re-lock with: ${FETCH_COMMAND} ${minor} --lock ${ctx.lockPath}`,
-      );
-    }
-    if (pin.file !== art.file || pin.sha256.toLowerCase() !== art.sha256) {
-      const note = pin.abi_revision === undefined ? revisionNote(ctx, minor) : '';
-      throw new ArtifactPinnedError(
-        `chtypes: ${ctx.lockPath} pins ${lockKey} to ${pin.file} (${pin.sha256}) but the release offers ${art.file} (${art.sha256}); frozen refuses it.${note}`,
-      );
-    }
-  }
-
-  const result = (installed: boolean): EnsureResult => ({
-    dir: install,
+  const result = (installed: boolean, dir: string): EnsureResult => ({
+    dir,
     registry: dest,
     line: minor,
     version: art.clickhouse_version,
@@ -1208,22 +1361,35 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
     keyId: release.keyId,
   });
 
+  const recordLock = (): void => {
+    if (ctx.lockPath !== undefined && !ctx.frozen) {
+      writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256, abi_revision: fetchAbiRevision() });
+    }
+  };
+
   // Already installed and intact? The same hash the install path ends with,
   // so "already there" is a verified claim, not an inference from a directory.
   if (!ctx.force) {
-    const libPath = path.join(install, art.library);
-    if (existsSync(path.join(install, 'manifest.json')) && existsSync(libPath)) {
-      const have = await sha256File(libPath);
-      if (have === art.library_sha256) {
-        emit({ type: 'status', message: `already installed and verified: ${libPath}` });
-        if (ctx.lockPath !== undefined && !ctx.frozen) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256, abi_revision: fetchAbiRevision() });
-        return result(false);
-      }
-      emit({ type: 'status', message: `${libPath} is present but hashes ${have} (want ${art.library_sha256}) — replacing` });
+    if (await verifiedInstall(install, art)) {
+      emit({ type: 'status', message: `already installed and verified: ${path.join(install, art.library)}` });
+      recordLock();
+      return result(false, install);
+    }
+    // §4: a patch request whose exact version already sits flat (put there by
+    // an earlier line fetch) is already installed — no second, nested copy.
+    if (!wantsFlat && (await verifiedInstall(flat, art))) {
+      emit({ type: 'status', message: `already installed and verified (flat): ${path.join(flat, art.library)}` });
+      recordLock();
+      return result(false, flat);
     }
   }
 
+  // A line request whose pick differs from the current flat occupant demotes
+  // that occupant to patches/ BEFORE the incoming patch takes the flat slot.
+  if (wantsFlat) await demoteFlatIfDifferent(dest, minor, version);
+
   await mkdir(dest, { recursive: true });
+  await mkdir(path.dirname(install), { recursive: true });
   const tag = `${process.pid}.${randomBytes(4).toString('hex')}`;
   // Hidden siblings: the loader skips dot-directories, so a half-written
   // install is never scanned as a version.
@@ -1268,7 +1434,7 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
     }
 
     // Into place through a sibling: an interrupted install never leaves a
-    // half-populated <minor>/ for the loader to dlopen.
+    // half-populated slot for the loader to dlopen.
     const replaced = path.join(dest, `.${minor}.replaced.${tag}`);
     if (existsSync(install)) await rename(install, replaced);
     await rename(incoming, install);
@@ -1286,8 +1452,8 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
       );
     }
     emit({ type: 'status', message: `installed and verified: ${install} (${manifest.library} sha256 ${finalSha})` });
-    if (ctx.lockPath !== undefined && !ctx.frozen) writeLockEntry(ctx.lockPath, lockKey, { file: art.file, sha256: art.sha256, abi_revision: fetchAbiRevision() });
-    return result(true);
+    recordLock();
+    return result(true, install);
   } finally {
     await rm(tarball, { force: true });
     await rm(incoming, { recursive: true, force: true });
@@ -1297,32 +1463,33 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
 // ------------------------------------------------------ verify and list
 
 /**
- * `chtypes verify`: re-hash every installed line in a registry directory
- * against its own manifest. A line whose manifest cannot be read is not a
- * line (a scratch directory) and is skipped, as the loader skips it.
+ * `chtypes verify`: re-hash every installed PATCH in a registry directory —
+ * the flat slot and every `patches/<minor>/<version>/` sibling (issue #284)
+ * — against its own manifest. A directory whose manifest cannot be read is
+ * not a patch (a scratch directory) and is skipped, as the loader skips it.
  */
 export async function verifyInstalled(dest?: string, platform?: string): Promise<InstalledArtifact[]> {
   const dir = fetchDestination(dest, resolvePlatform(platform));
   const out: InstalledArtifact[] = [];
-  for (const line of installedLines(dir)) {
-    const state = await installedLine(path.join(dir, line));
+  for (const sub of allInstalledDirs(dir)) {
+    const state = await installedPatch(sub);
     if (state !== null) out.push(state);
   }
-  return out;
+  return out.sort((a, b) => compareVersions(a.version, b.version));
 }
 
-/** `chtypes list`: what is installed in the registry directory, and what the release offers for the platform. */
+/** `chtypes list`: what is installed in the registry directory (one record per patch), and what the release offers for the platform. */
 export async function listArtifacts(options: EnsureOptions = {}): Promise<ListResult> {
   const platform = resolvePlatform(options.platform);
   const dir = fetchDestination(options.dest, platform);
   const installed: InstalledArtifact[] = [];
-  for (const line of installedLines(dir)) {
-    const m = readInstalledManifest(path.join(dir, line));
+  for (const sub of allInstalledDirs(dir)) {
+    const m = readInstalledManifest(sub);
     if (m === null) continue;
-    const present = existsSync(path.join(dir, line, m.library));
+    const present = existsSync(path.join(sub, m.library));
     installed.push({
-      line,
-      dir: path.join(dir, line),
+      line: m.minor,
+      dir: sub,
       version: m.version,
       library: m.library,
       expected: m.librarySha256,
@@ -1331,6 +1498,7 @@ export async function listArtifacts(options: EnsureOptions = {}): Promise<ListRe
       problem: present ? null : `${m.library} is missing`,
     });
   }
+  installed.sort((a, b) => compareVersions(a.version, b.version));
   if (options.offline) return { registry: dir, platform, installed, offered: null, source: null };
   const source = openSource(options);
   const release = await loadRelease(source, options, options.onProgress ?? noop);
@@ -1347,7 +1515,39 @@ export async function listArtifacts(options: EnsureOptions = {}): Promise<ListRe
 
 // ------------------------------------------------------------ the lock
 
-/** Read a lock file; null when it does not exist. */
+/** `chtypes-<version>-<os>-<arch>[-b<N>].tar.gz` (docs/guides/artifacts.md), version captured whole (it may itself contain dots and a channel). */
+const ASSET_FILE_NAME = /^chtypes-(.+)-(linux|darwin)-(arm64|amd64)(?:-b\d+)?\.tar\.gz$/;
+
+/** The ClickHouse version a served asset file name claims, or `null` when it does not parse. */
+function versionFromAssetFile(file: string): string | null {
+  const m = ASSET_FILE_NAME.exec(file);
+  return m === null ? null : m[1]!;
+}
+
+/** True for a PATCH spelling (four or more numeric components) — what schema 2's keys must name, never a bare line. */
+function isPatchVersion(version: string): boolean {
+  try {
+    return parseVersionSpelling(version).exact !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read a lock file; `null` when it does not exist. Accepts schema 1 and
+ * schema 2 (docs/guides/fetch.md §5); `.schema` reports the number that was
+ * actually on disk (so a caller can tell which it read), while `.artifacts`
+ * is ALWAYS schema-2-shaped: a schema-1 entry `<os>-<arch>/<minor>` is
+ * converted to the schema-2 entry `<os>-<arch>/<v>`, `<v>` being the
+ * ClickHouse version its own `file` names — the one schema-1 could not
+ * record, because it never had two patches of a line to distinguish. Every
+ * other reader in this module treats `.artifacts` as schema-2-keyed
+ * unconditionally; only this doc comment and `.schema` itself ever mention
+ * schema 1 again. Any other schema number is refused, naming both 1 and
+ * `LOCK_SCHEMA`. An entry that does not parse, under either schema — including
+ * a schema-2 key that names a bare line rather than an exact patch — makes the
+ * whole lock unreadable and the error names it.
+ */
 export function readLock(file: string): LockFile | null {
   let text: string;
   try {
@@ -1362,8 +1562,12 @@ export function readLock(file: string): LockFile | null {
   } catch (err) {
     throw new ChtypesError(`chtypes: lock file ${file} is not JSON: ${errorText(err)}`, { cause: err });
   }
-  if (typeof doc !== 'object' || doc === null || (doc as Record<string, unknown>)['schema'] !== LOCK_SCHEMA) {
-    throw new ChtypesError(`chtypes: lock file ${file} is not schema ${LOCK_SCHEMA}`);
+  if (typeof doc !== 'object' || doc === null) {
+    throw new ChtypesError(`chtypes: lock file ${file} is not schema ${LOCK_SCHEMA_LEGACY} or ${LOCK_SCHEMA}`);
+  }
+  const schema = (doc as Record<string, unknown>)['schema'];
+  if (schema !== LOCK_SCHEMA_LEGACY && schema !== LOCK_SCHEMA) {
+    throw new ChtypesError(`chtypes: lock file ${file} is schema ${JSON.stringify(schema)}, not ${LOCK_SCHEMA_LEGACY} or ${LOCK_SCHEMA}`);
   }
   const raw = (doc as Record<string, unknown>)['artifacts'];
   const artifacts: Record<string, LockEntry> = {};
@@ -1371,16 +1575,44 @@ export function readLock(file: string): LockFile | null {
     for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
       if (typeof v !== 'object' || v === null) continue;
       const e = v as Record<string, unknown>;
-      if (typeof e['file'] === 'string' && typeof e['sha256'] === 'string') {
-        // abi_revision is optional and additive (docs/guides/fetch.md §5): an
-        // entry written before this SDK recorded it simply has none, read the
-        // same way an index row that carries none is — never a typed number
-        // (TS cannot tell 5.0 from 5, so anything not a safe integer is absent).
-        artifacts[k] = { file: e['file'], sha256: e['sha256'], ...revisionOf(e['abi_revision']) };
+      if (typeof e['file'] !== 'string' || typeof e['sha256'] !== 'string') continue;
+      // abi_revision is optional and additive (docs/guides/fetch.md §5): an
+      // entry written before this SDK recorded it simply has none, read the
+      // same way an index row that carries none is — never a typed number
+      // (TS cannot tell 5.0 from 5, so anything not a safe integer is absent).
+      const entry: LockEntry = { file: e['file'], sha256: e['sha256'], ...revisionOf(e['abi_revision']) };
+      const slash = k.indexOf('/');
+      if (slash < 0) {
+        throw new ChtypesError(`chtypes: lock file ${file}: entry ${JSON.stringify(k)} is not <os>-<arch>/<version>`);
+      }
+      const platformKey = k.slice(0, slash);
+      const versionOrMinor = k.slice(slash + 1);
+      if (schema === LOCK_SCHEMA_LEGACY) {
+        const version = versionFromAssetFile(entry.file);
+        if (version === null) {
+          throw new ChtypesError(
+            `chtypes: lock file ${file}: entry ${JSON.stringify(k)}'s file ${JSON.stringify(entry.file)} does not name a ` +
+              'ClickHouse version — cannot convert this schema 1 lock to schema 2',
+          );
+        }
+        if (minorOfVersion(version) !== versionOrMinor) {
+          throw new ChtypesError(
+            `chtypes: lock file ${file}: entry ${JSON.stringify(k)} names line ${versionOrMinor} but its file ` +
+              `${JSON.stringify(entry.file)} is ${version} — cannot convert this schema 1 lock to schema 2`,
+          );
+        }
+        artifacts[`${platformKey}/${version}`] = entry;
+      } else {
+        if (!isPatchVersion(versionOrMinor)) {
+          throw new ChtypesError(
+            `chtypes: lock file ${file}: entry ${JSON.stringify(k)} names a line, not an exact patch — schema ${LOCK_SCHEMA} keys are <os>-<arch>/<clickhouse_version>`,
+          );
+        }
+        artifacts[k] = entry;
       }
     }
   }
-  return { schema: LOCK_SCHEMA, artifacts };
+  return { schema, artifacts };
 }
 
 function writeLockEntry(file: string, key: string, entry: LockEntry): void {
@@ -1422,19 +1654,23 @@ function readInstalledManifest(dir: string): InstalledManifest | null {
   }
 }
 
-/** The state of one installed line directory: null when it is not one (no usable manifest). */
-async function installedLine(dir: string): Promise<InstalledArtifact | null> {
+/**
+ * The state of one installed patch directory (flat or `patches/<minor>/<version>/`):
+ * null when it is not one (no usable manifest). `line` comes from the
+ * manifest's own claim, never from the directory name — a nested directory is
+ * named after the VERSION, not the line.
+ */
+async function installedPatch(dir: string): Promise<InstalledArtifact | null> {
   const m = readInstalledManifest(dir);
   if (m === null) return null;
-  const line = path.basename(dir);
   const libPath = path.join(dir, m.library);
   if (!existsSync(libPath)) {
-    return { line, dir, version: m.version, library: m.library, expected: m.librarySha256, actual: null, ok: false, problem: `${m.library} is missing` };
+    return { line: m.minor, dir, version: m.version, library: m.library, expected: m.librarySha256, actual: null, ok: false, problem: `${m.library} is missing` };
   }
   const actual = await sha256File(libPath);
   const ok = actual === m.librarySha256;
   return {
-    line,
+    line: m.minor,
     dir,
     version: m.version,
     library: m.library,
@@ -1445,16 +1681,71 @@ async function installedLine(dir: string): Promise<InstalledArtifact | null> {
   };
 }
 
-function installedLines(dir: string): string[] {
+/** Every installed-patch directory in a registry root: the flat slot per line, plus every `patches/<minor>/<version>/`. */
+function allInstalledDirs(dir: string): string[] {
+  const out: string[] = [];
   let entries: string[];
   try {
     entries = readdirSync(dir);
   } catch {
-    return [];
+    return out;
   }
-  return entries
-    .filter((e) => !e.startsWith('.') && existsSync(path.join(dir, e, 'manifest.json')))
-    .sort(compareVersions);
+  for (const entry of entries.sort()) {
+    if (entry.startsWith('.') || entry === 'patches') continue;
+    if (existsSync(path.join(dir, entry, 'manifest.json'))) out.push(path.join(dir, entry));
+  }
+  const patchesRoot = path.join(dir, 'patches');
+  let minorEntries: string[];
+  try {
+    minorEntries = readdirSync(patchesRoot);
+  } catch {
+    return out;
+  }
+  for (const minorEntry of minorEntries.sort()) {
+    if (minorEntry.startsWith('.')) continue;
+    const minorDir = path.join(patchesRoot, minorEntry);
+    let versionEntries: string[];
+    try {
+      versionEntries = readdirSync(minorDir);
+    } catch {
+      continue;
+    }
+    for (const versionEntry of versionEntries.sort()) {
+      if (versionEntry.startsWith('.')) continue;
+      const sub = path.join(minorDir, versionEntry);
+      if (existsSync(path.join(sub, 'manifest.json'))) out.push(sub);
+    }
+  }
+  return out;
+}
+
+/**
+ * Every installed patch of `minor` in `dest` — the flat slot and every
+ * `patches/<minor>/<version>/` sibling — byte-verified against its own
+ * manifest. Used offline, where the source and the lock are both off limits
+ * (Decision 6): "installed" there means hashed and matching, not merely present.
+ */
+async function installedPatchesForLine(dest: string, minor: string): Promise<InstalledArtifact[]> {
+  const flat = path.join(dest, minor);
+  const dirs = existsSync(path.join(flat, 'manifest.json')) ? [flat] : [];
+  const patchesDir = path.join(dest, 'patches', minor);
+  let versionEntries: string[] = [];
+  try {
+    versionEntries = readdirSync(patchesDir);
+  } catch {
+    versionEntries = [];
+  }
+  for (const versionEntry of versionEntries.sort()) {
+    if (versionEntry.startsWith('.')) continue;
+    const sub = path.join(patchesDir, versionEntry);
+    if (existsSync(path.join(sub, 'manifest.json'))) dirs.push(sub);
+  }
+  const out: InstalledArtifact[] = [];
+  for (const d of dirs) {
+    const state = await installedPatch(d);
+    if (state !== null) out.push(state);
+  }
+  return out;
 }
 
 /** sha256 of a file, streamed — a 300 MB library never sits in memory whole. */

@@ -122,9 +122,10 @@ pub use fetch::{Action, EnsureOptions, Installed, ensure};
 pub use library::{Column, DEFAULT_TIMEZONE, DefaultKind, Library};
 pub use raw::RawText;
 pub use registry::{
-    AUTOFETCH_ENV, Manifest, REGISTRY_ENV, Registry, RegistryOptions, SYSTEM_ARTIFACT_ROOTS,
-    cache_dir_for, default_registry_dir, host_platform, install_dir, install_dir_for,
-    installed_lines, locate, locate_in, registry_search_path, search_path_for,
+    AUTOFETCH_ENV, InstalledPatch, Manifest, REGISTRY_ENV, Registry, RegistryOptions, Resolution,
+    SYSTEM_ARTIFACT_ROOTS, cache_dir_for, default_registry_dir, host_platform, install_dir,
+    install_dir_for, installed_lines, installed_patches, locate, locate_in, registry_search_path,
+    search_path_for,
 };
 pub use result::source;
 pub use result::{

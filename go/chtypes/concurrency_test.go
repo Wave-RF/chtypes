@@ -500,7 +500,7 @@ func TestArtifactIsInitialisedOnce(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			r3 := &Registry{byID: map[string]*Library{}}
+			r3 := &Registry{byVersion: map[string]*Library{}, linePin: map[string]*Library{}}
 			if err := r3.Load(path); err != nil {
 				t.Errorf("g%d: Load: %v", i, err)
 				return
