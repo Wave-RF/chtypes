@@ -296,13 +296,24 @@ describe('Registry#resolve — the Resolution object, without dlopen', () => {
 
 describe('the fallback warning (§3): process.emitWarning, once per (requested, actual) pair', () => {
   const captured: { type: string; code: string; message: string }[] = [];
-  const onWarning = (w: Error & { type?: string; code?: string }): void => {
-    captured.push({ type: w.type ?? '', code: w.code ?? '', message: w.message });
+  const onWarning = (w: Error & { code?: string }): void => {
+    // Node's warning object carries the `type` option back as `.name`, the
+    // ordinary Error field — there is no separate `.type` property.
+    captured.push({ type: w.name, code: w.code ?? '', message: w.message });
   };
-  beforeEach(() => {
+  beforeEach(async () => {
+    process.on('warning', onWarning);
+    // A fallback warning earlier in this file (R1-R9's own `registry.for()`
+    // calls, none of which has a listener attached) is still emitted via
+    // `process.emitWarning`, which defers through `process.nextTick` — and
+    // that can still be in flight several plain microtask ticks later
+    // (confirmed empirically against this Node version), so it would
+    // otherwise land in THIS test's `captured` once a listener exists. Only
+    // a real macrotask boundary reliably drains a `process.nextTick`
+    // backlog, so flush one, attached but discarded, before resetting.
+    await new Promise((r) => setTimeout(r, 0));
     captured.length = 0;
     resetPatchFallbackWarnings();
-    process.on('warning', onWarning);
   });
   afterEach(() => {
     process.off('warning', onWarning);
