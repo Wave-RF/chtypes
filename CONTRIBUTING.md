@@ -108,6 +108,14 @@ gh api graphql -f query='mutation($id:ID!,$oid:GitObjectID!){enqueuePullRequest(
 - `ts/tsconfig.test.json` — configures the required ts job's typecheck step (tsc -p tsconfig.test.json)
 - `tests/parity/manifest.json` — the cross-binding parity contract each of the required go/python/ts/rust jobs' own parity test reads and enforces — declares what every binding must support
 - `docs/divergences.json` — the machine-checkable register of known divergences the divergences job reads; an allowlist that excuses a result
+- `**/.cargo/**` — cargo configuration (source replacement, rustflags) the required rust job would read
+- `**/rust-toolchain*` — selects the Rust toolchain the required rust job resolves
+- `**/.npmrc` — npm registry and token configuration the required ts job would read
+- `**/go.work*` — a Go workspace file that redirects module resolution in the required go job
+- `**/.python-version` — selects the Python interpreter the required python job resolves
+- `**/pip.conf` — pip index and source configuration a Python install would read
+- `**/.yarnrc*` — yarn registry configuration a Node install would read
+- `**/bunfig.toml` — bun registry configuration a Node install would read
 
 <!-- END policy-merge protected globs -->
 

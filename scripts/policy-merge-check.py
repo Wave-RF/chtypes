@@ -535,12 +535,30 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("docs/divergences.json",
                   "the machine-checkable register of known divergences the divergences job reads; an allowlist "
                   "that excuses a result"),
+    # Tool configuration a pull request could ADD, at any depth (#322). None
+    # of these exists today; once binding source can merge itself on an
+    # unchanged API verdict, adding one beside a harmless source change would
+    # otherwise reconfigure a required job and merge with it.
+    ProtectedGlob("**/.cargo/**", "cargo configuration (source replacement, rustflags) the required rust job would read"),
+    ProtectedGlob("**/rust-toolchain*", "selects the Rust toolchain the required rust job resolves"),
+    ProtectedGlob("**/.npmrc", "npm registry and token configuration the required ts job would read"),
+    ProtectedGlob("**/go.work*", "a Go workspace file that redirects module resolution in the required go job"),
+    ProtectedGlob("**/.python-version", "selects the Python interpreter the required python job resolves"),
+    ProtectedGlob("**/pip.conf", "pip index and source configuration a Python install would read"),
+    ProtectedGlob("**/.yarnrc*", "yarn registry configuration a Node install would read"),
+    ProtectedGlob("**/bunfig.toml", "bun registry configuration a Node install would read"),
 )
 
 # --check-ci-names on this file's own PROTECTED_GLOBS: the two wildcard
 # shapes PROTECTED_GLOBS actually uses, each anchored to the whole pattern.
 _TRAILING_DOUBLE_STAR = re.compile(r"^(?P<dir>[\w./-]+)/\*\*$")
 _MIDDLE_DOUBLE_STAR = re.compile(r"^(?P<dir>[\w./-]+)/\*\*/\*(?P<ext>\.[\w.]+)$")
+# Any-depth shapes for tool configuration a PR could ADD anywhere (#322):
+# '**/NAME' or '**/NAME*' matches the file NAME (or any name starting with
+# it) in any directory, the repository root included; '**/DIR/**' matches
+# anything under a directory named DIR at any depth.
+_ANY_DEPTH_NAME = re.compile(r"^\*\*/(?P<name>[\w.-]+)(?P<prefix>\*)?$")
+_ANY_DEPTH_DIR = re.compile(r"^\*\*/(?P<seg>[\w.-]+)/\*\*$")
 
 
 def _match_protected(pattern: str, path: str) -> bool:
@@ -557,7 +575,10 @@ def _match_protected(pattern: str, path: str) -> bool:
         any number of path segments — including zero — in between. This is
         what makes go/**/*.go match go/x.go as well as go/a/b/x.go, and
         match neither gofoo/x.go (no '/' after the 'go' segment) nor
-        go/x.txt (wrong suffix)."""
+        go/x.txt (wrong suffix).
+      - '**/NAME' / '**/NAME*': the file's own name is NAME (or starts with
+        NAME), in any directory including the root.
+      - '**/DIR/**': some directory segment of `path` is DIR."""
     if "*" not in pattern:
         return path == pattern
     m = _TRAILING_DOUBLE_STAR.match(pattern)
@@ -568,6 +589,13 @@ def _match_protected(pattern: str, path: str) -> bool:
     if m:
         prefix, suffix = m["dir"] + "/", m["ext"]
         return path.startswith(prefix) and path.endswith(suffix)
+    m = _ANY_DEPTH_DIR.match(pattern)
+    if m:
+        return m["seg"] in path.split("/")[:-1]
+    m = _ANY_DEPTH_NAME.match(pattern)
+    if m:
+        base = path.rsplit("/", 1)[-1]
+        return base.startswith(m["name"]) if m["prefix"] else base == m["name"]
     raise ValueError(f"unsupported glob shape in PROTECTED_GLOBS: {pattern!r}; extend _match_protected first")
 
 
@@ -1880,6 +1908,12 @@ def _sample_protected_path(g: ProtectedGlob) -> str:
     m = _MIDDLE_DOUBLE_STAR.match(g.pattern)
     if m:
         return f"{m['dir']}/__selftest_sample__{m['ext']}"
+    m = _ANY_DEPTH_DIR.match(g.pattern)
+    if m:
+        return f"__selftest_sample__/{m['seg']}/__selftest_sample__"
+    m = _ANY_DEPTH_NAME.match(g.pattern)
+    if m:
+        return f"__selftest_sample__/{m['name']}{'__selftest_sample__' if m['prefix'] else ''}"
     raise ValueError(f"selftest cannot derive a sample path for {g.pattern!r}")
 
 
@@ -1964,6 +1998,9 @@ def selftest() -> int:
     expect("ts/biome.json alone (lint-ts's own config) is protected",
            decide(**_with(pr=_pr(changed_files=1), files=[{"filename": "ts/biome.json", "status": "modified"}])),
            "protected")
+    for added in ("rust-toolchain.toml", ".cargo/config.toml", "ts/.npmrc", "go.work"):
+        expect(f"ADDING {added} (tool configuration, #322) is protected",
+               decide(**_with(pr=_pr(changed_files=1), files=[{"filename": added, "status": "added"}])), "protected")
     expect("a rename whose OLD path was protected",
            decide(**_with(pr=_pr(changed_files=1),
                           files=[{"filename": "README.md", "status": "renamed",
@@ -2140,6 +2177,21 @@ def selftest() -> int:
         failures.append("mint_scope_problems: accepted a mint with no permission list (the App's full set)")
     if not mint_scope_problems(good_yml.replace("    environment: merge-bot\n", "")):
         failures.append("mint_scope_problems: accepted a mint outside the merge-bot environment")
+    # Tool configuration a PR could ADD is protected at any depth (#322).
+    for path, want in ((".cargo/config.toml", True), ("rust/.cargo/config.toml", True),
+                       ("rust-toolchain.toml", True), ("rust/rust-toolchain", True), (".npmrc", True),
+                       ("ts/.npmrc", True), ("go.work", True), ("go/go.work.sum", True), (".python-version", True),
+                       ("python/pip.conf", True), (".yarnrc.yml", True), ("ts/bunfig.toml", True),
+                       ("docs/__selftest_cargo_notes__", False), ("rust/src/npmrc_reader.rs", False),
+                       ("go/workflow.go", False), ("docs/__selftest_toolchain__", False)):
+        got = any(_covers(g, path) for g in PROTECTED_GLOBS if not g.binding)
+        if got != want:
+            failures.append(f"tool-config protection: {path!r} protected={got}, expected {want}")
+    try:
+        _match_protected("**/a/**/b", "a/x/b")
+        failures.append("_match_protected: accepted an unsupported glob shape instead of raising")
+    except ValueError:
+        pass
     # A skipped / failed / unfinished job is never read for a
     # count: a skipped job has no log (404), so reading it was an exit-2
     # error on #311 instead of a refusal.
