@@ -25,9 +25,11 @@
 #      code, the trust policy, the release key) stays protected whatever the
 #      verdict says;
 #   6. ONLY when docs/support.md is part of the diff: it was MODIFIED, and
-#      scripts/support-matrix.sh, from main's own checkout and against the
-#      live served index, produces a docs/support.md byte-identical to the
-#      pull request head's copy;
+#      scripts/support-matrix.sh, run against the live served index over a
+#      scratch copy SEEDED WITH THE HEAD'S OWN BYTES — never main's checked-
+#      out copy (chtypes#316: main's hand-written prose used to collide with
+#      every prose-only edit on the head) — reproduces the pull request
+#      head's copy byte for byte;
 #   7. ONLY when the pull request touches a test or fixture path
 #      (chtypes#285 §1b): no suite's executed-test count, and no
 #      golden-case count, fell below main's last green `ci` push run — read
@@ -108,7 +110,9 @@
 # the script text. The checkout below is main, and main's scripts are the
 # only code that runs. The head's docs/support.md — read only when it is part
 # of the diff — is read as DATA, through the contents API at the head SHA,
-# and only compared byte for byte with main's regeneration. Condition 7
+# written to a scratch file as the regenerator's input text, and only
+# compared byte for byte with what that regenerator — main's own script,
+# never anything of the head — produces from it. Condition 7
 # (chtypes#285 §1b) reads more of this shape, never a new kind of risk: up to
 # five job LOGS per side, through the Actions API, matched against a fixed
 # regex for two integers — never executed, sourced or parsed as code. The
@@ -260,21 +264,20 @@ jobs:
             scripts/policy-merge-check.py gate --repo "$REPO" \
               --run-head-sha "$RUN_HEAD_SHA" --run-head-repo "$RUN_HEAD_REPO"
           fi
-      # Regenerated unconditionally once the gate passes, whether or not this
-      # pull request happens to touch docs/support.md — it is cheap, and
-      # `enqueue` (below) only USES it when the diff actually touches that
-      # file. The regeneration is main's script over main's docs/support.md
-      # (whose hand-written text the generated block sits inside), against
-      # the default served index, the same one `docs` and
-      # support-matrix-refresh read. It writes to a scratch copy; the
-      # checkout is left untouched.
-      - name: regenerate docs/support.md with main's own script, against the live index
-        if: steps.gate.outputs.candidate == '1'
-        run: |
-          set -euo pipefail
-          cp docs/support.md "$RUNNER_TEMP/support.md"
-          scripts/support-matrix.sh --out "$RUNNER_TEMP/support.md"
-      - name: the docs/support.md byte comparison and every other condition again, then the hand-off
+      # The byte comparison (condition 6) regenerates unconditionally once the
+      # gate passes, whether or not this pull request touches docs/support.md
+      # — it is cheap, and `decide()`'s own bytes condition only USES it when
+      # the diff actually touches that file. chtypes#316: the regeneration
+      # seeds a scratch copy with the HEAD's OWN docs/support.md — read as
+      # DATA through the contents API, never main's checked-out copy, whose
+      # hand-written prose used to collide with every prose-only edit on the
+      # head — and runs main's own scripts/support-matrix.sh over that SAME
+      # scratch path, against the live served index. The script rewrites
+      # only the generated block in place and leaves the head's own prose
+      # untouched; this is all inside policy-merge-check.py's
+      # regenerate_guarded_file now, so there is no separate workflow step
+      # for it any more, and the checkout is left untouched either way.
+      - name: the docs/support.md byte comparison (against the head's own regeneration) and every other condition again, then the hand-off
         id: judge
         if: steps.gate.outputs.candidate == '1'
         env:
@@ -286,8 +289,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          args=(enqueue --repo "$REPO" --pr "$PR" --head-sha "$HEAD_SHA"
-                --regenerated "docs/support.md=$RUNNER_TEMP/support.md")
+          args=(enqueue --repo "$REPO" --pr "$PR" --head-sha "$HEAD_SHA")
           if [ -n "$RUN_HEAD_REPO" ]; then
             args+=(--run-head-repo "$RUN_HEAD_REPO")
           fi
