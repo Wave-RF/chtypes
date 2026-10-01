@@ -11,6 +11,9 @@ through `chs_rows`) and skips loudly without one.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 import chtypes
@@ -160,14 +163,15 @@ def test_rows_cross_library_filter_refused() -> None:
 # here; see docs/guides/filters.md.
 #
 # The fix reached only the SUPPORTED lines' artifacts (docs/support.md):
-# 26.3, 26.7, 26.8 and 26.9. A served, unsupported (retired) line gets no
-# new build or ABI revision, ever, so its existing artifact keeps the
-# pre-relink behavior permanently — measured: 26.6's newest served build,
-# 1790767905, predates this relink and was never republished.
-# _rev5_libraries also opens such a line (anything ABI revision 5+), so the
-# three tests below filter to the supported set explicitly, through
-# _relinked_libraries, rather than asserting the new behavior against a
-# line that was never given it.
+# 26.3, 26.7, 26.8 and 26.9, at chtypes_build 1790845279 or later. A served,
+# unsupported (retired) line gets no new build or ABI revision, ever, so its
+# existing artifact keeps the pre-relink behavior permanently — measured:
+# 26.6's newest served build, 1790767905, predates this relink and was never
+# republished. _rev5_libraries also opens such a line (anything ABI revision
+# 5+), so the three tests below gate on the artifact's OWN chtypes_build
+# (_relinked_libraries), rather than a hand-typed line list — a hand-typed
+# list goes stale the moment a new supported line ships, and silently stops
+# exercising it.
 
 
 @pytest.fixture(scope="session")
@@ -194,31 +198,70 @@ def _rev5_libraries(registry: chtypes.Registry) -> list[chtypes.Library]:
     return libraries
 
 
-_RELINK_SUPPORTED_LINES = {"26.3", "26.7", "26.8", "26.9"}
+# _RELINK_BUILD_298 is the chtypes_build the chtypes#298 relink was served
+# at. It is the one constant _relinked_libraries is built from: the relink
+# is a property of the BUILD, not of which lines happened to be supported
+# the day this file was written.
+_RELINK_BUILD_298 = 1790845279
+
+
+def _is_relinked_build(build: int) -> bool:
+    """`_relinked_libraries`' predicate, factored out so it can be pinned
+    against fabricated build numbers without a loaded artifact (see
+    test_is_relinked_build_threshold). A missing or zero chtypes_build — 0 is
+    what a manifest that predates the field reads as — must never be treated
+    as relinked."""
+    return build >= _RELINK_BUILD_298
+
+
+def _chtypes_build_of(library: chtypes.Library) -> int:
+    """Read library's own manifest.json for its chtypes_build field, the
+    same file and the same place scripts/lib/provenance.py reads it from:
+    next to the loaded library. There is no public accessor for this field —
+    chtypes.Manifest does not carry it — so this reads the manifest directly
+    rather than guessing. A manifest that cannot be read or parsed fails the
+    fixture loudly: this gate must never default a line it could not
+    actually measure to "relinked"."""
+    manifest_path = Path(library.path).parent / "manifest.json"
+    doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return int(doc.get("chtypes_build") or 0)
 
 
 @pytest.fixture(scope="session")
 def _relinked_libraries(_rev5_libraries: list[chtypes.Library]) -> list[chtypes.Library]:
-    """`_rev5_libraries` narrowed to the lines the chtypes#298 relink
-    (chtypes_build 1790845279) actually reached. A loaded line this build
-    does not name is a served, unsupported (retired) line by construction
-    (docs/support.md) — logged and passed over, the same verdict every
-    artifact-backed test here gives for a line it cannot exercise."""
+    """`_rev5_libraries` narrowed to the lines whose own artifact's
+    chtypes_build is at least _RELINK_BUILD_298 — the chtypes#298 relink. A
+    loaded line below that build — a served, unsupported (retired) line that
+    will never receive it (docs/support.md), or simply a supported line
+    fetched before the relink shipped — is logged and passed over, the same
+    verdict every artifact-backed test here gives for a line it cannot
+    exercise."""
     libraries = []
     for library in _rev5_libraries:
-        if library.minor not in _RELINK_SUPPORTED_LINES:
+        build = _chtypes_build_of(library)
+        if not _is_relinked_build(build):
             print(
-                f"line {library.minor} ({library.version}) not exercised: a served, "
-                f"unsupported (retired) line never receives this relink (docs/support.md)"
+                f"skipping {library.minor} at build {build}: predates the relink "
+                f"{_RELINK_BUILD_298}"
             )
             continue
         libraries.append(library)
     if not libraries:
         pytest.skip(
-            "registry holds no artifact on a chtypes#298-relinked line (26.3, 26.7, 26.8, "
-            "26.9) — fetch one with scripts/fetch.sh (docs/guides/fetch.md)"
+            f"registry holds no artifact at chtypes_build {_RELINK_BUILD_298} or later (the "
+            "chtypes#298 relink) — fetch one with scripts/fetch.sh (docs/guides/fetch.md)"
         )
     return libraries
+
+
+def test_is_relinked_build_threshold() -> None:
+    """Pins `_is_relinked_build`'s own threshold against fabricated build
+    numbers, independent of any loaded artifact: the relink's own build is
+    kept, one build short of it is not, and a manifest predating
+    chtypes_build (0) is not — it must never read as relinked by default."""
+    assert _is_relinked_build(_RELINK_BUILD_298) is True
+    assert _is_relinked_build(_RELINK_BUILD_298 - 1) is False
+    assert _is_relinked_build(0) is False
 
 
 def test_non_accepted_batch_zeroes_counts_and_carries_verdict_code(

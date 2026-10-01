@@ -2,6 +2,8 @@ package chtypes
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -328,35 +330,97 @@ func TestRowsExportWithColumnsAndFilterComposeEndToEnd(t *testing.T) {
 // here; see docs/guides/filters.md.
 //
 // The fix reached only the SUPPORTED lines' artifacts (docs/support.md):
-// 26.3, 26.7, 26.8 and 26.9. A served, unsupported (retired) line gets no
-// new build or ABI revision, ever, so its existing artifact keeps the
-// pre-relink behavior permanently — measured: 26.6's newest served build,
-// 1790767905, predates this relink and was never republished. rev5Libraries
-// also opens such a line (anything ABI revision 5+), so these three tests
-// filter to the supported set explicitly rather than asserting the new
-// behavior against a line that was never given it.
+// 26.3, 26.7, 26.8 and 26.9, at chtypes_build 1790845279 or later. A served,
+// unsupported (retired) line gets no new build or ABI revision, ever, so its
+// existing artifact keeps the pre-relink behavior permanently — measured:
+// 26.6's newest served build, 1790767905, predates this relink and was
+// never republished. rev5Libraries also opens such a line (anything ABI
+// revision 5+), so these three tests gate on the artifact's OWN
+// chtypes_build (relinkedLibraries) rather than a hand-typed line list — a
+// hand-typed list goes stale the moment a new supported line ships, and
+// silently stops exercising it.
 
-// relinkedLibraries is rev5Libraries narrowed to the lines the chtypes#298
-// relink (chtypes_build 1790845279) actually reached. A loaded line this
-// build does not name is a served, unsupported (retired) line by
-// construction (docs/support.md) — logged and passed over, the same verdict
-// every artifact-backed test here gives for a line it cannot exercise.
+// relinkBuild298 is the chtypes_build the chtypes#298 relink was served at.
+// It is the one constant relinkedLibraries is built from: the relink is a
+// property of the BUILD, not of which lines happened to be supported the
+// day this file was written.
+const relinkBuild298 int64 = 1790845279
+
+// isRelinkedBuild is relinkedLibraries' predicate, factored out so it can be
+// pinned against fabricated build numbers without a loaded artifact (see
+// TestIsRelinkedBuildThreshold). A missing or zero chtypes_build — 0 is what
+// a manifest that predates the field reads as — must never be treated as
+// relinked.
+func isRelinkedBuild(build int64) bool {
+	return build >= relinkBuild298
+}
+
+// chtypesBuildOf reads lib's own manifest.json for its chtypes_build field,
+// the same file and the same place scripts/lib/provenance.py reads it from:
+// next to the loaded library. There is no public accessor for this field —
+// the loader's own artifactManifest does not carry it — so this reads the
+// manifest directly rather than guessing. A manifest that cannot be read or
+// parsed fails the helper loudly: this gate must never default a line it
+// could not actually measure to "relinked".
+func chtypesBuildOf(t *testing.T, lib *Library) int64 {
+	t.Helper()
+	path := filepath.Join(filepath.Dir(lib.Path), "manifest.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%s: reading %s: %v", lib.Version, path, err)
+	}
+	var m struct {
+		ChtypesBuild int64 `json:"chtypes_build"`
+	}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("%s: %s: %v", lib.Version, path, err)
+	}
+	return m.ChtypesBuild
+}
+
+// relinkedLibraries is rev5Libraries narrowed to the lines whose own
+// artifact's chtypes_build is at least relinkBuild298 — the chtypes#298
+// relink. A loaded line below that build — a served, unsupported (retired)
+// line that will never receive it (docs/support.md), or simply a supported
+// line fetched before the relink shipped — is logged and passed over, the
+// same verdict every artifact-backed test here gives for a line it cannot
+// exercise.
 func relinkedLibraries(t *testing.T) []*Library {
 	t.Helper()
-	supported := map[string]bool{"26.3": true, "26.7": true, "26.8": true, "26.9": true}
 	all := rev5Libraries(t)
 	var libs []*Library
 	for _, lib := range all {
-		if !supported[lib.Minor] {
-			t.Logf("line %s (%s) not exercised: a served, unsupported (retired) line never receives this relink (docs/support.md)", lib.Minor, lib.Version)
+		build := chtypesBuildOf(t, lib)
+		if !isRelinkedBuild(build) {
+			t.Logf("skipping %s at build %d: predates the relink %d", lib.Minor, build, relinkBuild298)
 			continue
 		}
 		libs = append(libs, lib)
 	}
 	if len(libs) == 0 {
-		t.Skipf("registry holds no artifact on a chtypes#298-relinked line (26.3, 26.7, 26.8, 26.9) — fetch one with scripts/fetch.sh (docs/guides/fetch.md)")
+		t.Skipf("registry holds no artifact at chtypes_build %d or later (the chtypes#298 relink) — fetch one with scripts/fetch.sh (docs/guides/fetch.md)", relinkBuild298)
 	}
 	return libs
+}
+
+// TestIsRelinkedBuildThreshold pins isRelinkedBuild's own threshold against
+// fabricated build numbers, independent of any loaded artifact: the relink's
+// own build is kept, one build short of it is not, and a manifest predating
+// chtypes_build (0) is not — it must never read as relinked by default.
+func TestIsRelinkedBuildThreshold(t *testing.T) {
+	cases := []struct {
+		build int64
+		want  bool
+	}{
+		{relinkBuild298, true},
+		{relinkBuild298 - 1, false},
+		{0, false},
+	}
+	for _, c := range cases {
+		if got := isRelinkedBuild(c.build); got != c.want {
+			t.Errorf("isRelinkedBuild(%d) = %v, want %v", c.build, got, c.want)
+		}
+	}
 }
 
 // TestNonAcceptedBatchZeroesCountsAndCarriesVerdictCode is G2 and G3

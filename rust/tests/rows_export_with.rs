@@ -110,36 +110,79 @@ macro_rules! rev5 {
     }};
 }
 
-/// The chtypes#298 relink (`chtypes_build` 1790845279) reached only the
-/// SUPPORTED lines' artifacts (`docs/support.md`): 26.3, 26.7, 26.8 and
-/// 26.9. A served, unsupported (retired) line gets no new build or ABI
-/// revision, ever, so its existing artifact keeps the pre-relink behavior
-/// permanently — measured: 26.6's newest served build, 1790767905, predates
-/// this relink and was never republished. `rev5_libraries` also opens such
-/// a line (anything ABI revision 5+), so the three regression tests below
-/// filter to the supported set explicitly, through `relinked_libraries`,
-/// rather than asserting the new behavior against a line that was never
-/// given it.
-static RELINK_SUPPORTED_LINES: [&str; 4] = ["26.3", "26.7", "26.8", "26.9"];
+/// The chtypes#298 relink reached only the SUPPORTED lines' artifacts
+/// (`docs/support.md`): 26.3, 26.7, 26.8 and 26.9, at `chtypes_build`
+/// 1790845279 or later. A served, unsupported (retired) line gets no new
+/// build or ABI revision, ever, so its existing artifact keeps the
+/// pre-relink behavior permanently — measured: 26.6's newest served build,
+/// 1790767905, predates this relink and was never republished.
+/// `rev5_libraries` also opens such a line (anything ABI revision 5+), so
+/// the three regression tests below gate on the artifact's OWN
+/// `chtypes_build` (`relinked_libraries`) rather than a hand-typed line
+/// list — a hand-typed list goes stale the moment a new supported line
+/// ships, and silently stops exercising it.
+///
+/// `RELINK_BUILD_298` is the one constant `relinked_libraries` is built
+/// from: the relink is a property of the BUILD, not of which lines happened
+/// to be supported the day this file was written.
+const RELINK_BUILD_298: i64 = 1790845279;
+
+/// `relinked_libraries`' predicate, factored out so it can be pinned against
+/// fabricated build numbers without a loaded artifact (see
+/// `is_relinked_build_threshold` below). A missing or zero `chtypes_build` —
+/// `0` is what a manifest that predates the field reads as — must never be
+/// treated as relinked.
+fn is_relinked_build(build: i64) -> bool {
+    build >= RELINK_BUILD_298
+}
+
+/// Reads lib's own manifest.json for its `chtypes_build` field, the same
+/// file and the same place `scripts/lib/provenance.py` reads it from: next
+/// to the loaded library. There is no public accessor for this field —
+/// `chtypes::Manifest` does not carry it — so this reads the manifest
+/// directly rather than guessing. A manifest that cannot be read or parsed
+/// panics: this gate must never default a line it could not actually
+/// measure to "relinked".
+fn chtypes_build_of(lib: &Library) -> i64 {
+    let manifest_path = lib
+        .path()
+        .parent()
+        .expect("a loaded library's path has a parent directory")
+        .join("manifest.json");
+    let text = std::fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|e| panic!("{}: {e}", manifest_path.display()));
+    let doc: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", manifest_path.display()));
+    doc.get("chtypes_build")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0)
+}
+
 static RELINKED_LIBRARIES: OnceLock<Vec<Arc<Library>>> = OnceLock::new();
 
 fn relinked_libraries() -> &'static [Arc<Library>] {
     RELINKED_LIBRARIES.get_or_init(|| {
         let mut libraries = Vec::new();
         for lib in rev5_libraries() {
-            if RELINK_SUPPORTED_LINES.contains(&lib.minor()) {
+            let build = chtypes_build_of(lib);
+            if is_relinked_build(build) {
                 libraries.push(Arc::clone(lib));
             } else {
                 announce(&format!(
-                    "\nline {} ({}) not exercised: a served, unsupported (retired) line never \
-                     receives this relink (docs/support.md)\n",
-                    lib.minor(),
-                    lib.version()
+                    "\nskipping {} at build {build}: predates the relink {RELINK_BUILD_298}\n",
+                    lib.minor()
                 ));
             }
         }
         libraries
     })
+}
+
+#[test]
+fn is_relinked_build_threshold() {
+    assert!(is_relinked_build(RELINK_BUILD_298));
+    assert!(!is_relinked_build(RELINK_BUILD_298 - 1));
+    assert!(!is_relinked_build(0));
 }
 
 macro_rules! relinked {
@@ -149,7 +192,7 @@ macro_rules! relinked {
             announce(concat!(
                 "\nSKIP ",
                 $name,
-                ": needs an artifact on a chtypes#298-relinked line (26.3, 26.7, 26.8, 26.9)\n"
+                ": needs an artifact at chtypes_build 1790845279 or later (the chtypes#298 relink)\n"
             ));
             return;
         }
