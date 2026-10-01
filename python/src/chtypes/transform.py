@@ -552,3 +552,8 @@ def _compact_json(text: str) -> str:
             out.append(c)
         i += 1
     return "".join(out)
+
+
+def _api_surface_demo() -> int:
+    """Private: a demo of an api-surface verdict, not for merge."""
+    return 1

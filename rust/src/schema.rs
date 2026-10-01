@@ -1123,3 +1123,9 @@ mod tests {
         );
     }
 }
+
+/// Private: a demo of an api-surface verdict, not for merge.
+#[allow(dead_code)]
+fn api_surface_demo() -> u32 {
+    1
+}

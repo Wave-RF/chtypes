@@ -134,3 +134,9 @@ export function formatName(f: Format): string {
   }
   return `format(${String(f)})`;
 }
+
+/** Not exported: a demo of an api-surface verdict, not for merge. */
+function apiSurfaceDemo(): number {
+  return 1;
+}
+void apiSurfaceDemo;

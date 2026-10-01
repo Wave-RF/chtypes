@@ -694,3 +694,6 @@ func compactJSON(s string) string {
 	}
 	return b.String()
 }
+
+// apiSurfaceDemo is unexported: a demo of an api-surface verdict, not for merge.
+func apiSurfaceDemo() int { return 1 }
