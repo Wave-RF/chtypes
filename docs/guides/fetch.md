@@ -34,6 +34,8 @@ Each registry directory above holds two levels of installs. **ONLY a line spelli
 
 `CHTYPES_ARTIFACTS_URL` (default `https://artifacts.wavehouse.dev`) plus a release tag (default the rolling `artifacts`; `--tag v1.2.0` for a frozen one) gives `<url>/<tag>/`; `--url <base>` names any other base, including a local directory or a `file://` path. A line (`26.8`) resolves to the one patch the release publishes for it; an exact patch (`26.8.15.10-lts`) is a hard requirement and fails if absent.
 
+`CHTYPES_DOWNLOAD_TOKEN`, when set, is sent as an HTTP `Authorization: Bearer <token>` header on every request to an `http(s)` source — optional, and only ever meaningful against a source that checks it; the default artifacts host does not require one. All four bindings and `scripts/fetch.sh` send it the same way.
+
 A release holds four kinds of file:
 
 | file                                          | what it is                                                                 |
