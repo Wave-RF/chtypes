@@ -733,17 +733,39 @@ jobs:
       # lines a boundary case cannot be measured at all, only asserted. 24.8
       # also exercises the path with no show_create_query_identifier_quoting_rule
       # setting, which 25.3 onward has and it does not.
+      # id + continue-on-error (chtypes#262), same reasoning as the fetch
+      # step below: on a candidate channel with nothing published yet,
+      # published-lines.sh itself refuses (exit 4, CHTYPES_ARTIFACT_UNPUBLISHED
+      # — or exit 3, CHTYPES_SOURCE_UNREACHABLE, for a real outage) BEFORE the
+      # fetch step ever runs. Without continue-on-error here, this step used
+      # to fail fast with FETCH_EXIT_CODE left empty below, so the verdict's
+      # dedicated "no candidate build" branch never matched and every such
+      # run printed the generic "fetch itself failed" message instead. This
+      # step now records its own exit code and re-raises so it still fails
+      # fast; the verdict step reads THIS exit code first, so it can
+      # recognize a missing candidate whichever of the two steps hits it.
       - name: the newest -lts and -stable lines the release publishes (live index.json), plus 24.8
         id: lines
+        continue-on-error: true
         run: |
           tag_args=()
           tag="${{ steps.channel.outputs.tag }}"
           [ -n "$tag" ] && tag_args=(--tag "$tag")
-          scripts/published-lines.sh --platform linux-amd64 "${tag_args[@]}" | tee -a "$GITHUB_OUTPUT"
+          ec=0
+          scripts/published-lines.sh --platform linux-amd64 "${tag_args[@]}" | tee -a "$GITHUB_OUTPUT" || ec=$?
+          echo "exit_code=$ec" >> "$GITHUB_OUTPUT"
+          if [ "$ec" -ne 0 ]; then
+            exit "$ec"
+          fi
       # Restore-only here; saved from a push to main after a clean fetch
       # (below), for the reason the divergences job's cache step gives (#295).
+      # Gated on the lines step's own outcome (chtypes#262): a candidate
+      # channel with nothing published leaves steps.lines.outputs.key empty,
+      # and restoring under that key would be pointless (never gated before
+      # #262 because the step could not yet continue past that failure).
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: artifacts-cache
+        if: steps.lines.outcome == 'success'
         with:
           path: .artifacts
           key: chtypes-artifacts-linux-amd64-${{ steps.lines.outputs.key }}
@@ -759,8 +781,16 @@ jobs:
       # toolchain setup or itself fails fast on the same outage before any
       # suite runs, and the verdict below reads this step's exit code first
       # regardless of what, if anything, ran after it.
+      #
+      # Gated on the lines step's own outcome (chtypes#262): when lines
+      # already refused (a candidate channel with nothing published, or a
+      # real outage), running this loop over its empty `lines` output would
+      # only re-attempt the same failure against 24.8 alone and obscure which
+      # step actually hit it first; skipping cleanly here is what lets the
+      # verdict step read lines' own exit code instead.
       - name: fetch, verified — an already-installed line is re-hashed and not downloaded
         id: fetch
+        if: steps.lines.outcome == 'success'
         continue-on-error: true
         run: |
           tag_args=()
@@ -785,7 +815,7 @@ jobs:
             cat "$CHTYPES_REGISTRY"/patches/*/*/manifest.json
           fi
       - name: save the artifacts cache (push to main only, a clean fetch, and only on a miss)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetch.outputs.exit_code == '0' && steps.artifacts-cache.outputs.cache-hit != 'true'
+        if: steps.lines.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.fetch.outputs.exit_code == '0' && steps.artifacts-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .artifacts
@@ -974,6 +1004,8 @@ jobs:
       - name: verdict — all five results, and this job is red if any of them is not a pass
         if: always()
         env:
+          LINES_OUTCOME: ${{ steps.lines.outcome }}
+          LINES_EXIT_CODE: ${{ steps.lines.outputs.exit_code }}
           FETCH_OUTCOME: ${{ steps.fetch.outcome }}
           FETCH_EXIT_CODE: ${{ steps.fetch.outputs.exit_code }}
           FETCH_SOURCE_URL: ${{ steps.fetch.outputs.source_url }}
@@ -986,9 +1018,28 @@ jobs:
           RUST_OUTCOME: ${{ steps.suite-rust.outcome }}
           TOURS_OUTCOME: ${{ steps.tours.outcome }}
         run: |
-          if [ "$FETCH_OUTCOME" != "success" ]; then
+          if [ "$LINES_OUTCOME" != "success" ] || [ "$FETCH_OUTCOME" != "success" ]; then
             echo "### artifacts — the fetch itself did not complete; nothing below ran" >> "$GITHUB_STEP_SUMMARY"
             echo >> "$GITHUB_STEP_SUMMARY"
+            # chtypes#262: whichever of `lines` (scripts/published-lines.sh)
+            # or `fetch` (scripts/fetch.sh) actually hit the failure carries
+            # the exit code and tool name that matter — `lines` runs first
+            # and has no continue-on-error's worth of downstream dependency
+            # on `fetch` having run at all, so a candidate channel with
+            # nothing published can be refused by EITHER script first, and
+            # this has to recognize it whichever one does (previously only
+            # FETCH_EXIT_CODE was read here, which stayed empty whenever
+            # `lines` was the one that failed, so every such run fell through
+            # to the generic "fetch itself failed" message below instead).
+            if [ "$LINES_OUTCOME" != "success" ]; then
+              FAILED_TOOL="scripts/published-lines.sh"
+              FAILED_EXIT_CODE="$LINES_EXIT_CODE"
+              FAILED_SOURCE_URL="${CHTYPES_ARTIFACTS_URL:-https://artifacts.wavehouse.dev}"
+            else
+              FAILED_TOOL="scripts/fetch.sh"
+              FAILED_EXIT_CODE="$FETCH_EXIT_CODE"
+              FAILED_SOURCE_URL="$FETCH_SOURCE_URL"
+            fi
             # chtypes#232: on the candidate channel, exit 3
             # (CHTYPES_SOURCE_UNREACHABLE) and exit 4
             # (CHTYPES_ARTIFACT_UNPUBLISHED) both mean the SAME thing here —
@@ -1002,15 +1053,15 @@ jobs:
             # a silent fallback there is exactly the kind of masking that let
             # a broken refusal hide once already (the abi-fixtures job's own
             # header, #105).
-            if [ "$CHANNEL_MODE" = "candidate" ] && { [ "$FETCH_EXIT_CODE" = "3" ] || [ "$FETCH_EXIT_CODE" = "4" ]; }; then
-              echo "**No candidate build for revision $CHANNEL_REVISION** — \`scripts/fetch.sh\` exited $FETCH_EXIT_CODE reading the \`$CHANNEL_TAG\` channel (source: ${FETCH_SOURCE_URL:-the artifacts host}). The artifact producer has not published a candidate for revision $CHANNEL_REVISION yet. No suite and no example tour was exercised — this does not fall back to the served channel." >> "$GITHUB_STEP_SUMMARY"
-              echo "artifacts: the artifact producer has not published a candidate for revision $CHANNEL_REVISION (\`$CHANNEL_TAG\`, fetch.sh exit $FETCH_EXIT_CODE) — no suite or example tour was exercised, and this never falls back to the served channel" >&2
-            elif [ "$FETCH_EXIT_CODE" = "3" ]; then
-              echo "**The artifact source was unreachable** (\`scripts/fetch.sh\` exited 3, CHTYPES_SOURCE_UNREACHABLE, fetching the published lines from ${FETCH_SOURCE_URL:-the artifacts host}). No suite and no example tour was exercised." >> "$GITHUB_STEP_SUMMARY"
-              echo "artifacts: the artifact source (${FETCH_SOURCE_URL:-the artifacts host}) was unreachable while fetching the published lines — no suite or example tour was exercised" >&2
+            if [ "$CHANNEL_MODE" = "candidate" ] && { [ "$FAILED_EXIT_CODE" = "3" ] || [ "$FAILED_EXIT_CODE" = "4" ]; }; then
+              echo "**No candidate build for revision $CHANNEL_REVISION** — \`$FAILED_TOOL\` exited $FAILED_EXIT_CODE reading the \`$CHANNEL_TAG\` channel (source: ${FAILED_SOURCE_URL:-the artifacts host}). The artifact producer has not published a candidate for revision $CHANNEL_REVISION yet. No suite and no example tour was exercised — this does not fall back to the served channel." >> "$GITHUB_STEP_SUMMARY"
+              echo "artifacts: the artifact producer has not published a candidate for revision $CHANNEL_REVISION (\`$CHANNEL_TAG\`, $FAILED_TOOL exit $FAILED_EXIT_CODE) — no suite or example tour was exercised, and this never falls back to the served channel" >&2
+            elif [ "$FAILED_EXIT_CODE" = "3" ]; then
+              echo "**The artifact source was unreachable** (\`$FAILED_TOOL\` exited 3, CHTYPES_SOURCE_UNREACHABLE, fetching the published lines from ${FAILED_SOURCE_URL:-the artifacts host}). No suite and no example tour was exercised." >> "$GITHUB_STEP_SUMMARY"
+              echo "artifacts: the artifact source (${FAILED_SOURCE_URL:-the artifacts host}) was unreachable while fetching the published lines — no suite or example tour was exercised" >&2
             else
-              echo "**\`scripts/fetch.sh\` itself failed** (exit ${FETCH_EXIT_CODE:-non-zero}, not a source outage). No suite and no example tour was exercised." >> "$GITHUB_STEP_SUMMARY"
-              echo "artifacts: fetch itself failed (exit ${FETCH_EXIT_CODE:-non-zero}) — no suite or example tour was exercised" >&2
+              echo "**\`$FAILED_TOOL\` itself failed** (exit ${FAILED_EXIT_CODE:-non-zero}, not a source outage). No suite and no example tour was exercised." >> "$GITHUB_STEP_SUMMARY"
+              echo "artifacts: $FAILED_TOOL failed (exit ${FAILED_EXIT_CODE:-non-zero}) — no suite or example tour was exercised" >&2
             fi
             exit 1
           fi

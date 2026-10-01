@@ -20,6 +20,10 @@ Speaks lock schema 2. **0.4.x and earlier refuse a schema-2 lock file outright**
 - **Lock schema 2** (`LOCK_SCHEMA = 2`), keyed `<os>-<arch>/<clickhouse_version>` — the exact patch, not the line, so two patches of one line each get their own pin and nothing is silently dropped when a second is fetched. Schema 1 is still read: a `<os-arch>/<minor>` entry converts to its schema-2 key by recovering the exact version from the entry's own pinned `file` name. The first write through an existing schema-1 file rewrites it as schema 2 wholesale — schema is a property of the file, not of one entry. `--frozen` now selects entirely from the lock (never from the release's other rows) and installs exactly the pinned file, even while a newer patch — or a higher build of the same patch — is served: the old "pins X but the release offers Y" refusal is gone. `--all --frozen` installs the newest patch EACH pinned line's lock entries name; a line the release has that the lock does not pin is simply not installed, not a refusal.
 - **fetch.md Decision 7 (a channel-free spelling matches that patch on any channel) now applies to `ensure`'s offline path too** — the request that lands here whenever a live server answers `SELECT version()` with no channel suffix.
 
+### Changed
+
+- **Docs: plain `CSV`/`TSV` input also honors `input_format_csv_detect_header` / `input_format_tsv_detect_header`, exactly as a real server does**, because the body is read by ClickHouse's own vendored row readers. The behavior arrived with 0.3.0's switch to those readers; it is now documented (#299).
+
 ### Fixed
 
 - **`fetch --lock` without `--frozen` re-pins, as in the other three bindings.** It used to enforce an existing lock entry anyway and refuse a differing one with `CHTYPES_ARTIFACT_PINNED`. That meant the re-lock command the refusal itself names (`--lock` without `--frozen`) was refused too, and the only way out was deleting the lock. Only `--frozen` enforces a pin now (`docs/guides/fetch.md` §5).

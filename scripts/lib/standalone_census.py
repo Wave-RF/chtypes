@@ -9,6 +9,16 @@ re-implementation of the rule that would only prove the pin agrees with
 itself (see scripts/check-suite.sh's own remarks on why a derived value must
 never be hand-set in its own test).
 
+Also prints two chtypes#285 §1b lines, read by scripts/policy-merge-check.py's
+`test-counts` condition off this job's own log: `chtypes-count suite=go-
+no-artifacts|go-artifacts ran=<n> skipped=<n>` (derived from `ran`/`skip`
+above), and — only under --require-artifacts, since that is the one run
+where the golden set is actually exercised against a real registry —
+`chtypes-count golden-cases=<n>`, `n` being `len(checked_subtests)`: the same
+count the zero-checked guard (chtypes#225) already computes to tell
+"TestGoldens ran" apart from "TestGoldens checked something", not a second,
+freshly guessed number.
+
     scripts/lib/standalone_census.py <log> <rc> <have_reg 0|1> <require 0|1>
     scripts/lib/standalone_census.py --selftest
 """
@@ -80,6 +90,26 @@ def run_census(log_path, rc, have_reg, require, abi_fixtures_set):
                 skips.append(t)
 
     lines.append("  standalone census — %d ran, %d skipped, %d failed" % (ran, skip, fail))
+    # chtypes#285 §1b — one fixed, machine-readable line per job, read by
+    # scripts/policy-merge-check.py's `test-counts` condition off THIS job's
+    # own log (a check run's own `output.summary`/annotations are NOT
+    # populated for a GitHub-Actions-authored job — verified against a real
+    # run, not assumed; see that script's module docstring). Derived from
+    # `ran`/`skip` above, never a second, hand-set count — see --selftest's
+    # own pin that this line moves when the derivation does.
+    suite_label = "go-artifacts" if require else "go-no-artifacts"
+    lines.append("chtypes-count suite=%s ran=%d skipped=%d" % (suite_label, ran, skip))
+    # The golden-case count (chtypes#285 §1b) — sourced from where the
+    # goldens are already counted, in this SAME required `artifacts` job:
+    # every subtest actually named "TestGoldens/<version>/<case id>" that
+    # passed is one checked golden case, the identical set the zero-checked
+    # guard below already computes to tell "TestGoldens ran" apart from
+    # "TestGoldens checked something" (chtypes#225) — never a second, freshly
+    # guessed count. Emitted only under --require-artifacts: the no-artifact
+    # job's TestGoldens skips wholesale and has nothing to count.
+    checked_subtests = [t for t in passed if t.startswith("TestGoldens/")]
+    if require:
+        lines.append("chtypes-count golden-cases=%d" % len(checked_subtests))
     for t in skips:
         lines.append("    SKIPPED " + t)
     # A failure is named, and its own last words are quoted — a count alone
@@ -127,7 +157,9 @@ def run_census(log_path, rc, have_reg, require, abi_fixtures_set):
         # assertAtLeastOneGoldenChecked already fails TestGoldens itself in
         # this situation (which the check above already catches), but this
         # census must not depend on that guard staying in place to say so.
-        checked_subtests = [t for t in passed if t.startswith("TestGoldens/")]
+        # `checked_subtests` is computed once, above (chtypes#285 §1b), so
+        # the golden-case count this prints and the guard below can never
+        # read a different set.
         if "TestGoldens" in passed and not checked_subtests:
             problems.append(
                 "TestGoldens passed but checked zero cases — no subtest under TestGoldens/ passed "
@@ -190,6 +222,46 @@ def selftest():
         if code != 0:
             print(
                 "SELFTEST FAILED: a clean run with a real checked case was refused:\n" + "\n".join(lines),
+                file=sys.stderr,
+            )
+            return 1
+
+        # 1b. THE PIN (chtypes#285 §1b): the two printed chtypes-count lines
+        # are DERIVED from ran/skip/checked_subtests, not a second, hand-set
+        # number — so this fails if that derivation ever changes without this
+        # test noticing. The clean fixture above has 7 PARITY passes +
+        # TestGoldens (parent) + one real per-case subtest, all passing, none
+        # skipped: ran=9, skipped=0, one golden case checked.
+        if "chtypes-count suite=go-artifacts ran=9 skipped=0" not in lines:
+            print(
+                "SELFTEST FAILED: the go-artifacts chtypes-count line did not read ran=9 skipped=0 off the "
+                "same clean fixture:\n" + "\n".join(lines),
+                file=sys.stderr,
+            )
+            return 1
+        if "chtypes-count golden-cases=1" not in lines:
+            print(
+                "SELFTEST FAILED: the golden-cases chtypes-count line did not read 1 off the same clean "
+                "fixture's one checked subtest:\n" + "\n".join(lines),
+                file=sys.stderr,
+            )
+            return 1
+        # Without --require-artifacts the label switches to go-no-artifacts
+        # and the golden-cases line is not printed at all — the no-artifact
+        # job's TestGoldens skips wholesale and has nothing to count, and a
+        # line asserting 0 would be indistinguishable from a real zero-case
+        # regression under --require-artifacts.
+        _, no_artifact_lines = run_census(clean, 0, False, False, False)
+        if "chtypes-count suite=go-no-artifacts ran=9 skipped=0" not in no_artifact_lines:
+            print(
+                "SELFTEST FAILED: the go-no-artifacts chtypes-count line did not read ran=9 skipped=0:\n"
+                + "\n".join(no_artifact_lines),
+                file=sys.stderr,
+            )
+            return 1
+        if any(l.startswith("chtypes-count golden-cases=") for l in no_artifact_lines):
+            print(
+                "SELFTEST FAILED: a golden-cases line was printed without --require-artifacts",
                 file=sys.stderr,
             )
             return 1
@@ -268,7 +340,10 @@ def selftest():
             "check-standalone: selftest ok — a clean checked run passes, a parent that passed with "
             "every subtest skipped (checked zero cases) is refused under --require-artifacts "
             "(chtypes#225), a parent that outright failed is refused for its own reason without the "
-            "new message masking it, and the new check stays silent without --require-artifacts"
+            "new message masking it, the new check stays silent without --require-artifacts, and the "
+            "chtypes-count suite/golden-cases lines (chtypes#285 §1b) are derived from the same "
+            "ran/skip/checked_subtests, switch label without --require-artifacts, and drop the "
+            "golden-cases line entirely there"
         )
         return 0
     finally:

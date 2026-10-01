@@ -268,21 +268,30 @@ func parseDefaultKind(s string) DefaultKind {
 // across the boundary (the C ABI contract §Types and schemas), so they must never
 // be renumbered.
 //
-// CSV, TSV, Values and JSONCompactEachRow are POSITIONAL: the k-th field
-// addresses the k-th insertable column (MATERIALIZED/ALIAS/EPHEMERAL occupy
-// no position). JSONEachRow and Native address columns by NAME, and so do
-// CSVWithNames and TSVWithNames, through their header row. The RowBinary
-// family, Native and Buffers are binary and all-or-nothing per batch.
+// Values and JSONCompactEachRow are POSITIONAL: the k-th field addresses the
+// k-th insertable column (MATERIALIZED/ALIAS/EPHEMERAL occupy no position).
+// CSV and TSV are positional too, unless input_format_csv_detect_header /
+// input_format_tsv_detect_header say otherwise: the body is read by
+// ClickHouse's own vendored row readers, which detect and consume a first
+// line that spells the column names exactly as a real server does, honoring
+// whichever value the call compiles with. JSONEachRow and Native address
+// columns by NAME, and so do CSVWithNames and TSVWithNames, through their
+// header row. The RowBinary family, Native and Buffers are binary and
+// all-or-nothing per batch.
 type Format int
 
 const (
 	// JSONEachRow is one JSON object per row, name-addressed.
 	JSONEachRow Format = iota
-	// CSV is comma-separated, positional; a quoted field can contain newlines.
+	// CSV is comma-separated; positional unless input_format_csv_detect_header
+	// detects and consumes a header line, exactly as a real server does
+	// (ClickHouse's own vendored reader). A quoted field can contain
+	// newlines.
 	CSV
-	// TSV (TabSeparated) is positional; `\N` is null. The one text format
-	// whose result documents carry the wire round-trip detector (see
-	// Transform).
+	// TSV (TabSeparated) is positional unless input_format_tsv_detect_header
+	// detects and consumes a header line, exactly as a real server does;
+	// `\N` is null. The one text format whose result documents carry the
+	// wire round-trip detector (see Transform).
 	TSV
 	// Values is the INSERT ... VALUES literal syntax, positional.
 	Values
@@ -1018,10 +1027,15 @@ type filterConfig struct {
 // brace type's own reader, which WRAPS an out-of-domain integer — {p:UInt8}
 // given "256" binds 0 and matches every genuine zero (measured, uniform
 // 24.8-26.7, server-matched) — while the same constant written as a literal
-// PROMOTES (x = 256 over UInt8 is simply never true). A too-narrow
-// parameter type silently matches the wrong rows: size the type for the
-// tenant-supplied domain ({p:UInt64}, {p:String}) or validate the value
-// before binding it. Malformed spellings refuse loudly (the server's 457
+// PROMOTES (x = 256 over UInt8 is simply never true). Sizing the brace type
+// WIDER does not remove this: the same wrap reappears at 2^64 on every
+// integer width once the bound value reaches it, and [U]Int128/[U]Int256
+// wrap at their own width instead of at 2^64 — there is no brace type that
+// is safe against an untrusted value's magnitude by size alone. For a value
+// you cannot already validate as in-domain and canonical, bind {p:String}
+// and use the round-trip strict-cast form instead of picking a wider brace
+// type (docs/guides/filters.md "The round-trip form — the recipe for an
+// untrusted value"). Malformed spellings refuse loudly (the server's 457
 // for "-1"/"+7"/"007" as UInt8; 32 for ""). A name bound twice at the C
 // boundary takes the LAST binding — the server's own insert_or_assign rule
 // (unreachable through this map, stated for completeness).

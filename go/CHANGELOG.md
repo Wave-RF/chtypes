@@ -22,6 +22,10 @@ Released SDKs refuse a schema-2 lock (below), so this cycle ships as 0.5.0.
 
 - **Autofetch of a patch spelling now fetches that patch**, where it used to fetch the whole line and silently serve whatever patch the line resolved to. `Registry.Load` no longer re-points an already-resolved line's pin when a second, different patch of that line is loaded into the same registry — the pin is set once, by whichever request (or `Load`) resolves the line first, and never moves again while the process runs.
 
+### Changed
+
+- **Docs: plain `CSV`/`TSV` input also honors `input_format_csv_detect_header` / `input_format_tsv_detect_header`, exactly as a real server does**, because the body is read by ClickHouse's own vendored row readers. The behavior arrived with 0.3.0's switch to those readers; it is now documented (#299).
+
 ## [0.4.0] — 2026-09-30
 
 Speaks ABI revision 6 and refuses revision-5 artifacts. Revision 6 adds the error-code table and the partition key; revision-6 artifacts are published for every ClickHouse line this SDK supports, beside the revision-5 builds that 0.3.x keeps loading.
