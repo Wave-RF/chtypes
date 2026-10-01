@@ -6,6 +6,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-01
+
 ### Added
 
 - **`Schema`, `Filter` and `Block` now carry a `FinalizationRegistry` GC backup**, matching Python's `__del__` safety net and Rust's `Drop`: a handle nobody explicitly `close()`'d no longer leaks its C memory for the life of the process. `close()` stays the only deterministic release path; when a schema and its still-open filters/blocks are all abandoned together, the schema's own finalizer frees the children FIRST, preserving the free order the C layer requires, regardless of which object's finalizer the GC happens to run first (closes #302).
