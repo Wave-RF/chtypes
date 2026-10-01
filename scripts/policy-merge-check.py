@@ -690,7 +690,7 @@ def touches_test_or_fixture_path(files: list[dict]) -> bool:
 # null for an Actions job (measured; see gather_test_counts), so the console
 # log is the one channel a read-only token can read. The job stays green for
 # any genuine verdict, so a deliberate API change is not shown red; this
-# file, not the job's colour, is what turns `changed=true` into "wait for a
+# file, not the job's color, is what turns `changed=true` into "wait for a
 # human".
 
 API_SURFACE_CHECK = "api-surface — every touched binding's exported API, merge base against head (report only)"
@@ -2029,7 +2029,7 @@ def selftest() -> int:
            decide(**_with(files=[{"filename": "python/src/chtypes/results.py", "status": "modified"}],
                           api_verdicts={"python": ["false"]})), None)
     expect("api-surface: a rename out of a binding's source counts by its old path",
-           decide(**_with(files=[{"filename": "docs/x.md", "status": "renamed",
+           decide(**_with(files=[{"filename": "docs/__selftest_sample__", "status": "renamed",
                                   "previous_filename": "ts/src/format.ts"}], api_verdicts={"go": ["false"]})),
            "protected")
     for g in PROTECTED_GLOBS:
@@ -2145,6 +2145,33 @@ def selftest() -> int:
         r["id"] = 100 + i
     if readable_job_ids(runs_mix) != {"a": 100}:
         failures.append(f"readable_job_ids: kept a job that has no usable log: {readable_job_ids(runs_mix)!r}")
+    # The same rule for the api-surface job: a skipped, failed, timed-out or
+    # unfinished one is no job id at all — so gather_api_verdicts reads no
+    # log (no 404, no exit 2) and returns no verdict — and decide() then
+    # keeps the binding source protected. Only a successful run of the
+    # GitHub Actions app is read.
+    for label, run, want in (("succeeded", _run(API_SURFACE_CHECK), 900),
+                             ("skipped", _run(API_SURFACE_CHECK, conclusion="skipped"), None),
+                             ("failed", _run(API_SURFACE_CHECK, conclusion="failure"), None),
+                             ("timed out", _run(API_SURFACE_CHECK, conclusion="timed_out"), None),
+                             ("still running", _run(API_SURFACE_CHECK, status="in_progress", conclusion=None), None),
+                             ("from another app", _run(API_SURFACE_CHECK, app="someone-else"), None)):
+        run["id"] = 900
+        if api_surface_job_id(_checks(extra=[run])) != want:
+            failures.append(f"api_surface_job_id: an api-surface job that {label} gave "
+                            f"{api_surface_job_id(_checks(extra=[run]))!r}, not {want!r}")
+    if api_surface_job_id(_checks()) is not None:
+        failures.append("api_surface_job_id: found an api-surface job in check runs that carry none")
+    if gather_api_verdicts(REPO, [{"filename": "go/chtypes/transform.go"}],
+                           _checks(extra=[dict(_run(API_SURFACE_CHECK, conclusion="skipped"), id=901)]), SHA) != {}:
+        failures.append("gather_api_verdicts: a skipped api-surface job was read for a verdict")
+    expect("api-surface: a skipped job's (absent) verdict keeps binding source protected",
+           decide(**_with(files=[{"filename": "go/chtypes/transform.go", "status": "modified"}],
+                          check_runs=_checks(extra=[dict(_run(API_SURFACE_CHECK, conclusion="skipped"), id=901)]),
+                          api_verdicts=gather_api_verdicts(
+                              REPO, [{"filename": "go/chtypes/transform.go"}],
+                              _checks(extra=[dict(_run(API_SURFACE_CHECK, conclusion="skipped"), id=901)]), SHA))),
+           "protected")
     for bad in ((_good_pr()["node_id"], "abc", "7"), (_good_pr()["node_id"], SHA.upper(), "7"),
                 ("", SHA, "7"), ("PR_x y", SHA, "7"), (_good_pr()["node_id"], SHA, "7; rm")):
         if bot_args_problem(*bad) is None:
@@ -2456,7 +2483,8 @@ def selftest() -> int:
           "refuses on changed=true, a missing, tool-error or unparseable verdict, a verdict for another head or "
           "quoted mid-line, a later false after a true, and a second touched binding without its own false; the "
           "security carve-out and rust/build.rs refuse whatever every verdict says; test-counts still applies; the "
-          "api-surface job must exist under the name read and be non-blocking; and the carve-out's derivation "
+          "api-surface job must exist under the name read and be non-blocking, and a skipped, failed, timed-out, "
+          "unfinished or foreign-app one is never read (no verdict, still protected); and the carve-out's derivation "
           "catches verification code outside it and an entry that covers nothing")
     return 0
 

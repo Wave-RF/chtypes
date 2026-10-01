@@ -576,7 +576,7 @@ def selftest() -> int:
     # Which bindings a diff touches: the checker's own mapping.
     if touched_in(["go/chtypes/transform.go", "go/chtypes/transform_test.go", "README.md"]) != {"go"}:
         failures.append("touched_in: a Go source file was not read as go, or a test file was")
-    if touched_in(["python/tests/test_x.py", "ts/test/x.test.ts", "rust/tests/x.rs", "docs/x.md"]):
+    if touched_in(["python/tests/test_x.py", "ts/test/x.test.ts", "rust/tests/x.rs", "docs/__selftest_sample__"]):
         failures.append("touched_in: a test or doc path was read as binding source")
     if touched_in(["python/src/chtypes/fetch.py", "rust/src/fetch/trust.rs"]) != {"python", "rust"}:
         failures.append("touched_in: a carve-out file must still name its binding (the verdict is still printed)")
