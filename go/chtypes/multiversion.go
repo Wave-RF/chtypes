@@ -997,6 +997,13 @@ func (l *Library) newLoadedSchema(h unsafe.Pointer) *LoadedSchema {
 			s.LiteralDefault = append(s.LiteralDefault, C.chs_lib_col_is_literal(&l.lib, s.handle, ci) != 0)
 		}
 	}
+	// A never-Closed LoadedSchema used to leak its C handle for the life of
+	// the process (issue #302) — LoadedFilter and LoadedBlock already carry
+	// this same backup (below), and the linked build's CompiledSchema does
+	// too (linked.go). Close is idempotent (it checks s.handle == nil before
+	// freeing), which is what makes it safe for the finalizer to call even
+	// after an explicit Close already ran.
+	runtime.SetFinalizer(s, func(x *LoadedSchema) { x.Close() })
 	return s
 }
 

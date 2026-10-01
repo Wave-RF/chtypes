@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`Schema`, `Filter` and `Block` now carry a `FinalizationRegistry` GC backup**, matching Python's `__del__` safety net and Rust's `Drop`: a handle nobody explicitly `close()`'d no longer leaks its C memory for the life of the process. `close()` stays the only deterministic release path; when a schema and its still-open filters/blocks are all abandoned together, the schema's own finalizer frees the children FIRST, preserving the free order the C layer requires, regardless of which object's finalizer the GC happens to run first (closes #302).
+
 ### Changed
 
 - **Every build the release publishes stays fetchable.** 0.3.2 said an older build stays fetchable only until that line's next publish evicts it under retention. That no longer holds: since 2026-09-30 the release is append-only and lists every build it publishes, and selection takes the newest at this SDK's ABI revision (`docs/guides/fetch.md` §2). Builds dropped before that date are re-listed only where a release-signed `SHA256SUMS` proves them.

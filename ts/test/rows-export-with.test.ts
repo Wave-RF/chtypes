@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ChtypesError } from '../src/errors.js';
-import type { FilterHandle, NativeLibrary, SchemaHandle } from '../src/ffi.js';
+import type { BlockHandle, FilterHandle, NativeLibrary, SchemaHandle } from '../src/ffi.js';
 import { parseDocument } from '../src/json.js';
 import { batchResultOf, isAnswer, type Verdict } from '../src/results.js';
 import { Filter, Schema } from '../src/schema.js';
@@ -94,7 +94,16 @@ describe('Schema#rows cross-library filter refusal', () => {
     const schema = new Schema(fakeNative(), {} as unknown as SchemaHandle, 'x UInt8');
     const otherNative = fakeNative();
     const otherSchema = new Schema(otherNative, {} as unknown as SchemaHandle, 'x UInt8');
-    const filter = new Filter(otherNative, otherSchema, {} as unknown as FilterHandle, '1');
+    // A stand-in for Schema's own GC-finalizer coordination state (schema.ts's
+    // unexported SchemaNative) — this test never closes anything, so only the
+    // shape needs to match, not a real schema's bookkeeping.
+    const otherSchemaNative = {
+      native: otherNative,
+      handle: {} as unknown as SchemaHandle,
+      openFilters: new Set<FilterHandle>(),
+      openBlocks: new Set<BlockHandle>(),
+    };
+    const filter = new Filter(otherNative, otherSchema, otherSchemaNative, {} as unknown as FilterHandle, '1');
 
     expect(() => schema.rows(0, new Uint8Array(), undefined, { rowFilter: filter })).toThrow(ChtypesError);
   });
