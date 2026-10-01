@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "abi_generation": 1,
+  "registry": {
+    "default_bases": ["https://registry.wavehouse.dev/chtypes/v1"],
+    "env_bases": "CHTYPES_ARTIFACTS_URL",
+    "base_separator": ",",
+    "allowed_schemes": ["https", "http", "file"],
+    "fixtures_repository_suffix": "/sdk-fetch-fixtures"
+  },
+  "env": {
+    "cache": "CHTYPES_CACHE",
+    "token": "CHTYPES_DOWNLOAD_TOKEN",
+    "trusted_keys": "CHTYPES_TRUSTED_KEYS",
+    "allow_unsigned": "CHTYPES_ALLOW_UNSIGNED",
+    "autofetch": "CHTYPES_AUTOFETCH",
+    "target": "CHTYPES_TARGET",
+    "retired": ["CHTYPES_REGISTRY"]
+  },
+  "spelling": {
+    "regex": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))?)?$",
+    "refuse_hint_regex": "^v|-(lts|stable)$"
+  },
+  "platforms": [
+    {"key": "linux-amd64", "os": "linux", "architecture": "amd64"},
+    {"key": "linux-arm64", "os": "linux", "architecture": "arm64"},
+    {"key": "darwin-arm64", "os": "darwin", "architecture": "arm64"}
+  ],
+  "media_types": {
+    "index": "application/vnd.oci.image.index.v1+json",
+    "manifest": "application/vnd.oci.image.manifest.v1+json",
+    "empty_config": "application/vnd.oci.empty.v1+json",
+    "config": "application/vnd.wavehouse.chtypes.config.v1+json",
+    "layer": "application/vnd.oci.image.layer.v1.tar+zstd",
+    "bundle": "application/vnd.dev.sigstore.bundle.v0.3+json",
+    "artifact_type": "application/vnd.wavehouse.chtypes.artifact.v1",
+    "goldens_artifact_type": "application/vnd.wavehouse.chtypes.goldens.v1",
+    "fixtures_artifact_type": "application/vnd.wavehouse.chtypes.sdk-fetch-fixtures.v1",
+    "channel_artifact_type": "application/vnd.wavehouse.chtypes.channel.v1"
+  },
+  "dsse": {
+    "payload_type": "application/vnd.in-toto+json",
+    "max_signatures": 4
+  },
+  "statement_type": "https://in-toto.io/Statement/v1",
+  "predicate_types": {
+    "artifact": "https://artifacts.wavehouse.dev/spec/artifact/v1",
+    "goldens": "https://artifacts.wavehouse.dev/spec/goldens/v1",
+    "fixtures": "https://artifacts.wavehouse.dev/spec/sdk-fetch-fixtures/v1",
+    "channel": "https://artifacts.wavehouse.dev/spec/channel/v1"
+  },
+  "trust": {
+    "release_keys": [
+      {
+        "keyid": "deb275922dbff76e",
+        "ed25519_hex": "fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc"
+      }
+    ],
+    "keyid_algorithm": "sha256-first16hex"
+  },
+  "test_keys": [
+    {
+      "keyid": "6c3468e4ec653ac0",
+      "ed25519_hex": "b9b314491f92f6c4b93fc69f932164739a619965ed79dbbcea7a4ae2da611ce2",
+      "trusted_by_default": false
+    }
+  ],
+  "retry": {
+    "attempts": 5,
+    "first_wait_s": 4,
+    "multiplier": 2,
+    "retry_statuses": [408, 429, 500, 502, 503, 504],
+    "retry_after_statuses": [429, 503],
+    "retry_after_over_budget": "refuse",
+    "digest_404": "next_base_then_retry_on_last",
+    "tag_404": "next_base_then_unpublished"
+  },
+  "timeouts": {
+    "connect_s": 30,
+    "idle_read_s": 60
+  },
+  "limits": {
+    "manifest_bytes": 4194304,
+    "bundle_bytes": 1048576,
+    "tags_list_bytes": 8388608,
+    "layout_index_bytes": 8388608,
+    "max_referrers": 16,
+    "max_redirects": 5,
+    "max_unpacked_bytes": 4294967296,
+    "zstd_window_log_max": 27
+  },
+  "cache": {
+    "root_template": "${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/v1",
+    "system_dirs": ["/usr/local/share/chtypes/v1", "/opt/chtypes/v1"],
+    "unpacked_dir": "unpacked/sha256",
+    "verified_record": "verified.json",
+    "annotation_prefix": "dev.wavehouse.chtypes."
+  },
+  "lock": {
+    "schema": 3,
+    "default_file": "chtypes.lock"
+  },
+  "autofetch": {
+    "unpublished_memo_s": 300
+  },
+  "errors": {
+    "CHTYPES_ARTIFACT_MISSING": 1,
+    "CHTYPES_ARTIFACT_UNTRUSTED": 1,
+    "CHTYPES_ARTIFACT_CORRUPT": 1,
+    "CHTYPES_ARTIFACT_PINNED": 1,
+    "CHTYPES_ARTIFACT_UNPUBLISHED": 4,
+    "CHTYPES_SOURCE_UNREACHABLE": 3,
+    "CHTYPES_SOURCE_UNAUTHORIZED": 5,
+    "CHTYPES_SOURCE_FORBIDDEN": 6,
+    "CHTYPES_SOURCE_INCOMPATIBLE": 7,
+    "CHTYPES_ARTIFACT_INCOMPATIBLE": 8
+  }
+}

@@ -626,6 +626,16 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
                   "every gate a required check runs, this checker itself, and scripts/fetch.sh, which verifies "
                   "release signatures"),
     ProtectedGlob("include/**", "the frozen C ABI header"),
+    # The v1 fetch layer's own frozen interface: the generated-constants
+    # source, its JSON schemas, the case/report/lock schema shapes every v1
+    # binding and the conformance runner build against, and the per-binding
+    # enrollment markers. Unconditional: none of it is binding source an
+    # api-surface verdict says anything about, and it is the one place every
+    # v1 fetcher agrees on the wire contract — a silent drift here breaks
+    # all four at once rather than one.
+    ProtectedGlob("spec/**",
+                  "the v1 fetch layer's generated-constants source, JSON schemas and binding "
+                  "enrollment markers — the frozen interface every v1 fetcher builds against"),
     # Each binding's source tree, CONDITIONAL since chtypes#285 §1: a touch
     # is refused only while the `api-surface` job's verdict for that binding
     # on the judged head is not `changed=false` (an exported addition, a
@@ -682,6 +692,30 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("rust/src/registry.rs",
                   "load-time verification: the library_bytes size check and the verify_checksums sha256 re-hash",
                   verification=True),
+    # The v1 fetch layer's own carve-out (same reasoning, same discipline):
+    # each binding's new ocifetch module sits inside the already-CONDITIONAL
+    # binding-source globs above (go/**/*.go, python/src/**, ts/src/**,
+    # rust/src/**), and each one's generated constants file carries the
+    # embedded release key as a 64-hex literal plus the CHTYPES_TRUSTED_KEYS
+    # / CHTYPES_ALLOW_UNSIGNED environment variable names — exactly what
+    # VERIFICATION_NEEDLES["*"] matches — so without an unconditional entry
+    # here, an unchanged api-surface verdict would excuse a change to the
+    # trust policy or the embedded key the moment the v1 fetch code (not yet
+    # written) lands. A whole directory per binding, not individual files,
+    # because the fetch, trust and byte-verification logic is not yet split
+    # into named files the way v0's is.
+    ProtectedGlob("go/internal/ocifetch/**",
+                  "the v1 fetch layer: generated constants (the embedded release key) plus the trust, "
+                  "resolve and byte-verification code built on them", verification=True),
+    ProtectedGlob("python/src/chtypes/_ocifetch/**",
+                  "the v1 fetch layer: generated constants (the embedded release key) plus the trust, "
+                  "resolve and byte-verification code built on them", verification=True),
+    ProtectedGlob("ts/src/ocifetch/**",
+                  "the v1 fetch layer: generated constants (the embedded release key) plus the trust, "
+                  "resolve and byte-verification code built on them", verification=True),
+    ProtectedGlob("rust/src/ocifetch/**",
+                  "the v1 fetch layer: generated constants (the embedded release key) plus the trust, "
+                  "resolve and byte-verification code built on them", verification=True),
     # Not binding source by path, but code: cargo finds and RUNS a build
     # script at the crate root on every build — on every consumer's machine,
     # and inside the api-surface job, whose log the binding-source class
@@ -753,6 +787,17 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
                   "the fetch fixtures every binding's fetch suite asserts: the test key, the refusal cases, and "
                   "expected.json, the outcome each case must produce",
                   served_asset="sdk-fetch-fixtures.tar.gz", served_untracked=("abi-revision/",)),
+    # The v1 analog, unconditional (not CONDITIONAL on a served asset the way
+    # tests/fixtures/fetch/** above is): the artifact producer does not yet
+    # publish this shape (the v1 fetch-layer plan's §9/A17), so there is no
+    # signed release asset to excuse a re-import against. It carries the same
+    # kind of outcome-bearing cases (cases.json's `expect` block) plus the
+    # test and "other" signing keys, and a PR that edits a refusal case and
+    # its expected outcome together is exactly the same threat this whole
+    # class of entry exists to block.
+    ProtectedGlob("tests/fixtures/fetch-v1/**",
+                  "the v1 conformance fixtures: the test and other-key signing keys, the route trees and OCI "
+                  "layouts, the scripted HTTP responses, and cases.json's outcome for each"),
     # Hand-written test data with no served source: the packages the
     # api-surface job's fixture proof runs every pinned tool on before it
     # prints any verdict (scripts/api-surface.py's prove(), on the pull
@@ -3585,7 +3630,15 @@ def selftest() -> int:
             "rust/src/fetch/trust.rs": "use ed25519_dalek::VerifyingKey;",
             "rust/src/digest.rs": "use sha2::{Digest, Sha256};",
             "rust/src/registry.rs": "let actual = crate::digest::sha256_file(&path);",
-            "rust/src/lib.rs": "pub mod fetch;"}
+            "rust/src/lib.rs": "pub mod fetch;",
+            # The v1 fetch layer's carve-out (one representative file per
+            # binding's ocifetch directory): each generated constants file
+            # carries the embedded release key as a 64-hex literal, the
+            # needle every one of these entries exists to catch.
+            "go/internal/ocifetch/constants_gen.go": 'ReleaseKeyHex = "' + "ab" * 32 + '"',
+            "python/src/chtypes/_ocifetch/_constants.py": 'RELEASE_KEY_HEX = "' + "ab" * 32 + '"',
+            "ts/src/ocifetch/constants.gen.ts": 'export const RELEASE_KEY_HEX = "' + "ab" * 32 + '";',
+            "rust/src/ocifetch/constants.rs": 'pub const RELEASE_KEY_HEX: &str = "' + "ab" * 32 + '";'}
     if carve_out_problems(tree):
         failures.append(f"carve_out_problems: refused a tree that matches the carve-out: {carve_out_problems(tree)}")
     if not carve_out_problems({**tree, "go/chtypes/sneaky.go": 'import "crypto/sha256"'}):

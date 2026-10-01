@@ -1,0 +1,171 @@
+# v1.yml — the v1 fetch layer's own checks, separate from ci.yml (the v1
+# fetch-layer plan's §2.2).
+#
+# ci.yml is NOT touched by this workflow's existence: its `pull_request:`
+# trigger carries no branch filter, so every pull request into `v1` already
+# runs ci.yml's full required set unchanged — proof that v1 work leaves v0's
+# code paths green on the branch until the switch (plan §2.4). This file adds
+# exactly the v1-specific checks on top of that, triggered only on `v1`.
+#
+# Job names below are the check CONTEXTS branch protection on `v1` names
+# (plan §2.2's table) — renaming one here is a protected-surface change, not
+# cosmetic. `v1-constants`, `v1-fixtures` and `v1-parity` are required;
+# `v1-conformance` and `v1-network` feed `v1-parity` (read, never required
+# themselves); `v1-refcheck` and `v1-oras-preseed` are report-only /
+# dispatch-only.
+#
+# STATUS (lane 0A, first on `v1`): only `v1-constants` is live. Every other
+# job is a one-line placeholder that fails loudly with "not yet provided" —
+# deliberately, not a bug — until the lane that owns its body lands
+# (`v1-fixtures`, `v1-network`, `v1-parity`, `v1-refcheck` and
+# `v1-oras-preseed`: lane 0B; `v1-conformance`'s matrix legs: each binding
+# lane, against the runner commands plan §3.3 fixes). The shape (job ids,
+# names, the matrix legs, and `v1-parity`'s `needs`/`if: always()`) is frozen
+# now so a later lane fills in steps, never restructures the DAG.
+name: v1
+
+on:
+  pull_request:
+    branches: [v1]
+  push:
+    branches: [v1]
+  workflow_dispatch:
+    inputs:
+      registry_base:
+        description: "Base URL for a staging-registry conformance run (unused until the delivery side names one)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v1-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  v1-constants:
+    name: "v1-constants — one constants source, generated into all four"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Selftest first, the same discipline every gate in this repository
+      # follows (scripts/check-abi-decls.py, scripts/lint-public.sh, …): a
+      # checker nobody has seen fail is not a checker. It proves --check
+      # catches drift on a throwaway copy, never the real tree.
+      - name: "selftest — --check catches a flipped source value, and a test key cannot reach the default trust list"
+        run: scripts/fetch-v1/gen-constants.py --selftest
+      - name: every generated output and the guide's block match spec/fetch-v1/constants.json
+        run: scripts/fetch-v1/gen-constants.py --check
+
+  v1-fixtures:
+    name: "v1-fixtures — fixtures regenerate byte-identical from the generator"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: not yet provided (lane 0B)
+        run: |
+          echo "v1-fixtures: not yet provided (lane 0B) — the fixtures generator and the schema" >&2
+          echo "validator under scripts/fetch-v1/ land on a later PR into v1." >&2
+          exit 1
+
+  v1-conformance:
+    name: "v1-conformance (${{ matrix.binding }} ${{ matrix.toolchain }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - binding: go
+            toolchain: go1.27.x
+          - binding: python
+            toolchain: "3.11"
+          - binding: python
+            toolchain: "3.13"
+          - binding: python
+            toolchain: "3.14"
+          - binding: ts
+            toolchain: node22.21.0
+          - binding: ts
+            toolchain: node24
+          - binding: rust
+            toolchain: "1.85"
+          - binding: rust
+            toolchain: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: not yet provided (the binding lane for ${{ matrix.binding }})
+        run: |
+          echo "v1-conformance (${{ matrix.binding }} ${{ matrix.toolchain }}): not yet provided —" >&2
+          echo "toolchain setup, egress cut and the conformance runner (plan §3.3) land on a" >&2
+          echo "later PR into v1, once scripts/fetch-v1/gen-constants.py's outputs (this PR) and" >&2
+          echo "the fixtures (lane 0B) both exist." >&2
+          exit 1
+
+  v1-network:
+    name: "v1-network — registry:2 over TLS via the system CA store, through HTTPS_PROXY"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: not yet provided (lane 0B)
+        run: |
+          echo "v1-network: not yet provided (lane 0B) — the registry:2 + CA + proxy setup" >&2
+          echo "lands on a later PR into v1." >&2
+          exit 1
+
+  v1-parity:
+    name: "v1-parity — every enrolled binding passes every conformance case"
+    needs: [v1-conformance, v1-network]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # `if: always()` is deliberate and permanent, not a placeholder
+      # artifact: the parity gate (lane 0B) must run even when v1-conformance
+      # or v1-network failed, because reporting that failure — "0 enrolled",
+      # a missing report, a stale cases_sha256 — is its job, never something
+      # it skips past.
+      - name: "selftest — the parity gate's own fixtures (missing, failed, extra, stale cases_sha256)"
+        run: |
+          echo "v1-parity: not yet provided (lane 0B) — the parity gate under scripts/fetch-v1/" >&2
+          echo "lands on a later PR into v1. Expected: vacuously green with 0 enrolled once it" >&2
+          echo "exists, before any binding lane merges." >&2
+          exit 1
+
+  v1-refcheck:
+    name: "v1-refcheck — reference verifiers agree with the fixture verdicts (report only)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: not yet provided (lane 0B)
+        run: |
+          echo "v1-refcheck: not yet provided (lane 0B) — sigstore-go, @sigstore/verify and" >&2
+          echo "cosign verify-blob-attestation land on a later PR into v1. Report-only: never" >&2
+          echo "required until the delivery side's §9 step 1 measurement names which reference" >&2
+          echo "verifiers accept an ed25519-keyed bundle." >&2
+          exit 1
+
+  v1-oras-preseed:
+    name: "v1-oras-preseed — regenerate layouts/oras-preseed/ (workflow_dispatch only)"
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: not yet provided (lane 0B)
+        run: |
+          echo "v1-oras-preseed: not yet provided (lane 0B) — the pinned-oras regeneration of" >&2
+          echo "layouts/oras-preseed/ lands on a later PR into v1. workflow_dispatch only:" >&2
+          echo "never runs on a pull_request or push trigger." >&2
+          exit 1
