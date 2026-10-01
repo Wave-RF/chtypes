@@ -425,31 +425,43 @@ class HttpSource implements Source {
     this.description = base;
   }
 
+  /**
+   * One attempt: `null` for a 404/410 (not found; never retried), the
+   * response for an ok status, and `SourceUnreachableError` for anything
+   * else — `.retryable` set (chtypes#365) for an HTTP 5xx/408/429 or a
+   * connection-level failure reaching the host at all (refused, reset, timed
+   * out, DNS, aborted — `fetch`'s own error does not distinguish these any
+   * further, so none are singled out), `.retryAfterMs` set alongside it when
+   * the source sent one (503/429 only). Retried, when `.retryable`, by
+   * {@link loadRelease} or `downloadWithRetry` — never here, so a retry
+   * always re-reads the whole consistent set (or re-opens the whole
+   * download) from scratch.
+   */
   private async request(name: string): Promise<Response | null> {
     const url = `${this.base}/${name}`;
     const headers: Record<string, string> = {};
     const token = process.env['CHTYPES_DOWNLOAD_TOKEN'];
     if (token !== undefined && token !== '') headers['Authorization'] = `Bearer ${token}`;
-    let last: unknown;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const res = await fetch(url, { headers, redirect: 'follow', ...(this.signal ? { signal: this.signal } : {}) });
-        if (res.status === 404) {
-          await res.body?.cancel();
-          return null;
-        }
-        if (res.ok) return res;
+    try {
+      const res = await fetch(url, { headers, redirect: 'follow', ...(this.signal ? { signal: this.signal } : {}) });
+      if (res.status === 404 || res.status === 410) {
         await res.body?.cancel();
-        last = new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
-        // Client errors do not get better on retry; server errors and throttling might.
-        if (res.status < 500 && res.status !== 408 && res.status !== 429) break;
-      } catch (err) {
-        if (this.signal?.aborted) throw err;
-        last = err;
+        return null;
       }
-      if (attempt < 3) await sleep(500 * attempt);
+      if (res.ok) return res;
+      const retryable = isRetryableStatus(res.status);
+      const retryAfterMs = retryable ? retryAfterMsFrom(res) : undefined;
+      const message = `chtypes: cannot fetch ${url}: HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`;
+      await res.body?.cancel();
+      throw new SourceUnreachableError(message, { retryable, retryAfterMs });
+    } catch (err) {
+      if (err instanceof SourceUnreachableError) throw err;
+      if (this.signal?.aborted) throw err;
+      // A connection-level failure reaching the host at all — refused,
+      // reset, timed out, DNS — looks exactly like a blip, not a verdict
+      // about the release (chtypes#365).
+      throw new SourceUnreachableError(`chtypes: cannot fetch ${url}: ${errorText(err)}`, { cause: err, retryable: true });
     }
-    throw new SourceUnreachableError(`chtypes: cannot fetch ${url}: ${errorText(last)}`, { cause: last });
   }
 
   async get(name: string): Promise<Buffer | null> {
@@ -588,6 +600,74 @@ async function loadReleaseOnce(source: Source, options: EnsureOptions, emit: (e:
 export const RELEASE_RETRY: { attempts: number; delayMs: number } = { attempts: 5, delayMs: 4_000 };
 
 /**
+ * `true` for the HTTP statuses chtypes#365 retries: any 5xx, 408 (Request
+ * Timeout) and 429 (Too Many Requests). 404 and 410 are handled before this
+ * is ever consulted — they are never retried.
+ */
+function isRetryableStatus(status: number): boolean {
+  return (status >= 500 && status < 600) || status === 408 || status === 429;
+}
+
+/**
+ * A `Retry-After` header (RFC 9110 §10.2.3), honored only for 503 and 429 —
+ * the pair this contract documents it for. Accepts both forms: delta-seconds
+ * and an HTTP-date. `undefined` when the status does not carry one, the
+ * header is absent, or it does not parse as either form.
+ */
+function retryAfterMsFrom(res: Response): number | undefined {
+  if (res.status !== 503 && res.status !== 429) return undefined;
+  const header = res.headers.get('retry-after');
+  if (header === null || header.trim() === '') return undefined;
+  const seconds = Number(header.trim());
+  if (Number.isFinite(seconds)) return Math.max(0, seconds) * 1000;
+  const when = Date.parse(header);
+  if (Number.isNaN(when)) return undefined;
+  return Math.max(0, when - Date.now());
+}
+
+/**
+ * The total sleep time the default doubling schedule spends across every
+ * attempt but the last — 60s for the default 5 attempts — and the cap
+ * chtypes#365 puts on a source's own `Retry-After`: honored only as long as
+ * honoring it still fits inside this, so a 503 asking for far longer than
+ * this budget was ever sized for fails fast instead of blocking for it.
+ */
+function retryBudgetMs(): number {
+  if (RELEASE_RETRY.attempts <= 1) return 0;
+  return RELEASE_RETRY.delayMs * (2 ** (RELEASE_RETRY.attempts - 1) - 1);
+}
+
+/** "1 attempt" or "<n> attempts", for a message naming how many were made. */
+function attemptWord(n: number): string {
+  return n === 1 ? '1 attempt' : `${n} attempts`;
+}
+
+/**
+ * Is `err` worth retrying through the §3a budget — either a publish-window
+ * symptom (unchanged) or, since chtypes#365, a retryable source-level
+ * failure. The second half's own requested wait (`Retry-After` on a 503/429)
+ * comes back defined only when the source sent one; a publish-window symptom
+ * never carries one.
+ */
+function retryInfo(err: unknown): { retryable: boolean; retryAfterMs?: number | undefined } {
+  if (err instanceof ArtifactUntrustedError || err instanceof ArtifactCorruptError) return { retryable: true };
+  if (err instanceof SourceUnreachableError && err.retryable) return { retryable: true, retryAfterMs: err.retryAfterMs };
+  return { retryable: false };
+}
+
+/**
+ * Appends a sentence to a retryable `SourceUnreachableError`'s own message —
+ * `.code`/`.retryable`/`.retryAfterMs` are unchanged, only the text grows.
+ */
+function withRetryNote(err: SourceUnreachableError, note: string): SourceUnreachableError {
+  return new SourceUnreachableError(`${err.message}${note}`, {
+    cause: err.cause,
+    retryable: err.retryable,
+    retryAfterMs: err.retryAfterMs,
+  });
+}
+
+/**
  * {@link loadReleaseOnce}, retried through a publish window.
  *
  * A publish into the rolling release is three objects — `SHA256SUMS`,
@@ -614,19 +694,35 @@ export const RELEASE_RETRY: { attempts: number; delayMs: number } = { attempts: 
 async function loadRelease(source: Source, options: EnsureOptions, emit: (e: FetchEvent) => void): Promise<Release> {
   const attempts = source instanceof HttpSource ? RELEASE_RETRY.attempts : 1;
   let delayMs = RELEASE_RETRY.delayMs;
+  let elapsedMs = 0;
   for (let attempt = 1; ; attempt++) {
     try {
       return await loadReleaseOnce(source, options, emit);
     } catch (err) {
-      const retryable = err instanceof ArtifactUntrustedError || err instanceof ArtifactCorruptError;
-      if (!retryable || attempt >= attempts) throw err;
+      const { retryable, retryAfterMs } = retryInfo(err);
+      if (!retryable) throw err;
+      if (attempt >= attempts) {
+        throw err instanceof SourceUnreachableError ? withRetryNote(err, ` — giving up after ${attemptWord(attempt)}`) : err;
+      }
+      const waitMs = retryAfterMs ?? delayMs;
+      if (elapsedMs + waitMs > retryBudgetMs()) {
+        if (err instanceof SourceUnreachableError) {
+          throw withRetryNote(
+            err,
+            ` — the source asked to wait ${waitMs / 1000}s before retrying, which would exceed the ` +
+              `${retryBudgetMs() / 1000}s retry budget; giving up after ${attemptWord(attempt)}`,
+          );
+        }
+        throw err;
+      }
       emit({
         type: 'status',
         message:
           `${String(err)} (attempt ${attempt}/${attempts}) — this is what a release being ` +
-          `published looks like from outside; retrying in ${delayMs / 1000}s`,
+          `published (or briefly unreachable) looks like from outside; retrying in ${waitMs / 1000}s`,
       });
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await sleep(waitMs);
+      elapsedMs += waitMs;
       delayMs *= 2;
     }
   }
@@ -1033,6 +1129,7 @@ async function readGoldensOnce(source: Source, sums: ReadonlyMap<string, string>
 async function installGoldens(release: Release, ctx: InstallContext, options: EnsureOptions): Promise<void> {
   const attempts = release.source instanceof HttpSource ? RELEASE_RETRY.attempts : 1;
   let delayMs = RELEASE_RETRY.delayMs;
+  let elapsedMs = 0;
   let blob: Buffer | null = null;
   for (let attempt = 1; ; attempt++) {
     try {
@@ -1046,18 +1143,29 @@ async function installGoldens(release: Release, ctx: InstallContext, options: En
       }
       break;
     } catch (err) {
-      const retryable = err instanceof ArtifactUntrustedError || err instanceof ArtifactCorruptError;
+      const { retryable, retryAfterMs } = retryInfo(err);
       if (!retryable || attempt >= attempts) {
         ctx.emit({ type: 'status', message: `${String(err)} — the golden tests will skip` });
+        return;
+      }
+      const waitMs = retryAfterMs ?? delayMs;
+      if (elapsedMs + waitMs > retryBudgetMs()) {
+        ctx.emit({
+          type: 'status',
+          message:
+            `${String(err)} — the source asked to wait ${waitMs / 1000}s before retrying, which would ` +
+            `exceed the ${retryBudgetMs() / 1000}s retry budget; the golden tests will skip`,
+        });
         return;
       }
       ctx.emit({
         type: 'status',
         message:
           `${String(err)} (attempt ${attempt}/${attempts}) — this is what a release being ` +
-          `published looks like from outside; retrying in ${delayMs / 1000}s`,
+          `published (or briefly unreachable) looks like from outside; retrying in ${waitMs / 1000}s`,
       });
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await sleep(waitMs);
+      elapsedMs += waitMs;
       delayMs *= 2;
     }
   }
@@ -1318,6 +1426,49 @@ async function verifiedInstall(dir: string, art: IndexArtifact): Promise<boolean
 }
 
 /**
+ * {@link Source.download}, retried through the same docs/guides/fetch.md §3a budget
+ * and schedule {@link loadRelease} uses (chtypes#365) — a transient blip
+ * reaching the host mid download is exactly the symptom that budget exists
+ * for. Every attempt is a fresh download — never a resume. `false` (not
+ * found: a 404/410) and a tarball hash or size mismatch (raised by this
+ * function's own caller, after it returns) are never retried.
+ */
+async function downloadWithRetry(
+  source: Source,
+  name: string,
+  to: string,
+  onReceived: (received: number) => void,
+  emit: (e: FetchEvent) => void,
+): Promise<boolean> {
+  const attempts = source instanceof HttpSource ? RELEASE_RETRY.attempts : 1;
+  let delayMs = RELEASE_RETRY.delayMs;
+  let elapsedMs = 0;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await source.download(name, to, onReceived);
+    } catch (err) {
+      if (!(err instanceof SourceUnreachableError) || !err.retryable) throw err;
+      if (attempt >= attempts) throw withRetryNote(err, ` — giving up after ${attemptWord(attempt)}`);
+      const waitMs = err.retryAfterMs ?? delayMs;
+      if (elapsedMs + waitMs > retryBudgetMs()) {
+        throw withRetryNote(
+          err,
+          ` — the source asked to wait ${waitMs / 1000}s before retrying, which would exceed the ` +
+            `${retryBudgetMs() / 1000}s retry budget; giving up after ${attemptWord(attempt)}`,
+        );
+      }
+      emit({
+        type: 'status',
+        message: `${String(err)} (attempt ${attempt}/${attempts}) — retrying the download of ${name} in ${waitMs / 1000}s`,
+      });
+      await sleep(waitMs);
+      elapsedMs += waitMs;
+      delayMs *= 2;
+    }
+  }
+}
+
+/**
  * One index row, from the release into its slot — steps 2 through 4. A LINE
  * request's pick installs flat, `<dest>/<minor>/`, demoting a different flat
  * occupant first (never deleting it). Any other exact patch request installs
@@ -1397,9 +1548,8 @@ async function installOne(release: Release, art: IndexArtifact, ctx: InstallCont
   const incoming = path.join(dest, `.${minor}.incoming.${tag}`);
   try {
     emit({ type: 'status', message: `downloading ${art.file}` });
-    const got = await release.source.download(art.file, tarball, (received) =>
-      emit({ type: 'download', file: art.file, received, total: art.bytes }),
-    );
+    const onReceived = (received: number): void => emit({ type: 'download', file: art.file, received, total: art.bytes });
+    const got = await downloadWithRetry(release.source, art.file, tarball, onReceived, emit);
     if (!got) throw new SourceUnreachableError(`chtypes: could not download ${art.file} from ${release.source.description}`);
 
     // Step 3: size, then hash, before a byte is unpacked.

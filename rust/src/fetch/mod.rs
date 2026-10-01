@@ -540,6 +540,7 @@ fn install_goldens(
         1
     };
     let mut delay = release::release_retry_delay();
+    let mut elapsed = std::time::Duration::ZERO;
     let mut attempt = 1;
     let blob = loop {
         let result = if attempt == 1 {
@@ -552,19 +553,30 @@ fn install_goldens(
         };
         match result {
             Ok(blob) => break blob,
-            Err(err) if attempt < attempts && release::is_publish_window(&err) => {
+            Err(err) => {
+                let (retryable, retry_after) = release::retry_info(&err);
+                if attempt >= attempts || !retryable {
+                    note(format!("{err} — the golden tests will skip"));
+                    return;
+                }
+                let wait = retry_after.unwrap_or(delay);
+                if elapsed + wait > release::retry_budget() {
+                    note(format!(
+                        "{err} — the source asked to wait {wait:?} before retrying, which would \
+                         exceed the {:?} retry budget; the golden tests will skip",
+                        release::retry_budget()
+                    ));
+                    return;
+                }
                 note(format!(
                     "{err} (attempt {attempt}/{attempts}) — this is what a release being \
-                     published looks like from outside; retrying in {}s",
-                    delay.as_secs()
+                     published (or briefly unreachable) looks like from outside; retrying in \
+                     {wait:?}"
                 ));
-                std::thread::sleep(delay);
+                std::thread::sleep(wait);
+                elapsed += wait;
                 delay *= 2;
                 attempt += 1;
-            }
-            Err(err) => {
-                note(format!("{err} — the golden tests will skip"));
-                return;
             }
         }
     };

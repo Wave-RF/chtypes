@@ -625,21 +625,31 @@ describe('the verification chain against a synthetic release (docs/guides/fetch.
   });
 
   it('CHTYPES_SOURCE_UNREACHABLE: a source that cannot be reached, or does not serve the release', async () => {
-    const dest = scratch('dest');
-    const dead = await ensure('25.8', opts(good, dest, { url: 'http://127.0.0.1:1' })).catch((e: unknown) => e);
-    expect(dead).toBeInstanceOf(SourceUnreachableError);
-    expect((dead as FetchError).code).toBe('CHTYPES_SOURCE_UNREACHABLE');
-    const empty = scratch('empty-release');
-    const nothing = await ensure('25.8', opts(good, dest, { url: empty })).catch((e: unknown) => e);
-    expect(nothing).toBeInstanceOf(SourceUnreachableError);
-    expect((nothing as Error).message).toMatch(/no SHA256SUMS at/);
-    const server = await serve(empty);
+    // A refused connection is now retried through the full §3a budget
+    // (chtypes#365), so this keeps the delay near-zero — the budget running
+    // out is the point, not the wall-clock time it takes.
+    const savedRetry = { ...RELEASE_RETRY };
+    RELEASE_RETRY.delayMs = 1;
     try {
-      expect(await codeOf(ensure('25.8', opts(good, dest, { url: server.url })))).toBe('CHTYPES_SOURCE_UNREACHABLE');
+      const dest = scratch('dest');
+      const dead = await ensure('25.8', opts(good, dest, { url: 'http://127.0.0.1:1' })).catch((e: unknown) => e);
+      expect(dead).toBeInstanceOf(SourceUnreachableError);
+      expect((dead as FetchError).code).toBe('CHTYPES_SOURCE_UNREACHABLE');
+      const empty = scratch('empty-release');
+      const nothing = await ensure('25.8', opts(good, dest, { url: empty })).catch((e: unknown) => e);
+      expect(nothing).toBeInstanceOf(SourceUnreachableError);
+      expect((nothing as Error).message).toMatch(/no SHA256SUMS at/);
+      const server = await serve(empty);
+      try {
+        expect(await codeOf(ensure('25.8', opts(good, dest, { url: server.url })))).toBe('CHTYPES_SOURCE_UNREACHABLE');
+      } finally {
+        await server.close();
+      }
+      expect(readdirSync(dest)).toEqual([]);
     } finally {
-      await server.close();
+      RELEASE_RETRY.attempts = savedRetry.attempts;
+      RELEASE_RETRY.delayMs = savedRetry.delayMs;
     }
-    expect(readdirSync(dest)).toEqual([]);
   });
 
   it('a plain directory and a file:// URL are the same source', async () => {
@@ -803,6 +813,205 @@ describe('the golden-set publish window (docs/guides/fetch.md §3a)', () => {
       expect(server.hits.get('sdk-goldens.json')).toBe(RELEASE_RETRY.attempts);
       expect(events.some((e) => e.type === 'status' && /hashes to/.test(e.message) && /SHA256SUMS says/.test(e.message))).toBe(true);
       expect(events.some((e) => e.type === 'status' && /the golden tests will skip/.test(e.message))).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+// --------------------------------------------- chtypes#365: transient errors
+
+interface Flake {
+  status?: number;
+  retryAfter?: string;
+  remaining: number;
+  reset?: boolean;
+}
+
+/**
+ * Like {@link serve}, but able to answer specific asset names with an
+ * injected HTTP status (optionally with `Retry-After`), or drop the
+ * connection outright (a connection-level failure, from the client's view),
+ * for their next `remaining` requests — chtypes#365's own real transient
+ * blip, made real on loopback.
+ */
+async function serveFlaky(dir: string, flakes: Map<string, Flake>): Promise<{ url: string; hits: Map<string, number>; close: () => Promise<void> }> {
+  const hits = new Map<string, number>();
+  const server: Server = createServer((req, res) => {
+    const name = decodeURIComponent((req.url ?? '/').replace(/^\/+/, '').split('?')[0]!);
+    const n = (hits.get(name) ?? 0) + 1;
+    hits.set(name, n);
+    const flake = flakes.get(name);
+    if (flake !== undefined && flake.remaining > 0) {
+      flake.remaining -= 1;
+      if (flake.reset === true) {
+        req.socket.destroy(); // dropped, unanswered: a reset, from the client's view
+        return;
+      }
+      if (flake.retryAfter !== undefined) res.setHeader('Retry-After', flake.retryAfter);
+      res.statusCode = flake.status ?? 500;
+      res.end();
+      return;
+    }
+    const file = path.join(dir, name);
+    if (name === '' || name.includes('..') || !existsSync(file) || !statSync(file).isFile()) {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    res.setHeader('content-type', 'application/octet-stream');
+    createReadStream(file).pipe(res);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    hits,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+describe('chtypes#365: transient errors', () => {
+  const savedRetry = { ...RELEASE_RETRY };
+  afterEach(() => {
+    RELEASE_RETRY.attempts = savedRetry.attempts;
+    RELEASE_RETRY.delayMs = savedRetry.delayMs;
+  });
+
+  it('retries a transient 500 on index.json, then succeeds, and reports the attempt count', async () => {
+    RELEASE_RETRY.delayMs = 5;
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }] });
+    const server = await serveFlaky(release.dir, new Map([['index.json', { status: 500, remaining: 2 }]]));
+    const dest = scratch('365-500');
+    const events: FetchEvent[] = [];
+    try {
+      const result = await ensure('25.8', opts({ ...release, url: server.url }, dest, { onProgress: (e) => events.push(e) }));
+      expect(result.installed).toBe(true);
+      expect(server.hits.get('index.json')).toBe(3);
+      expect(events.some((e) => e.type === 'status' && /attempt 1\//.test(e.message))).toBe(true);
+      expect(events.some((e) => e.type === 'status' && /attempt 2\//.test(e.message))).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('honors a short Retry-After (delta-seconds) in place of the default schedule', async () => {
+    RELEASE_RETRY.delayMs = 10_000; // large enough that a 1s wait is clearly honored, not coincidental
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }] });
+    const server = await serveFlaky(release.dir, new Map([['index.json', { status: 503, retryAfter: '1', remaining: 1 }]]));
+    const dest = scratch('365-retry-after');
+    try {
+      const start = Date.now();
+      const result = await ensure('25.8', opts({ ...release, url: server.url }, dest));
+      const waited = Date.now() - start;
+      expect(result.installed).toBe(true);
+      expect(waited).toBeGreaterThanOrEqual(700);
+      expect(waited).toBeLessThanOrEqual(8000);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a Retry-After far longer than the retry budget fails at once, naming the delay', async () => {
+    RELEASE_RETRY.delayMs = 10; // budget ~150ms
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }] });
+    const server = await serveFlaky(release.dir, new Map([['index.json', { status: 503, retryAfter: '9999', remaining: 5 }]]));
+    const dest = scratch('365-retry-after-huge');
+    try {
+      const start = Date.now();
+      let caught: unknown;
+      try {
+        await ensure('25.8', opts({ ...release, url: server.url }, dest));
+      } catch (err) {
+        caught = err;
+      }
+      const elapsed = Date.now() - start;
+      expect(caught).toBeInstanceOf(SourceUnreachableError);
+      expect((caught as Error).message).toContain('9999');
+      expect(elapsed).toBeLessThan(3000);
+      expect(server.hits.get('index.json')).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a 404 fails on the first attempt', async () => {
+    RELEASE_RETRY.delayMs = 1;
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }] });
+    const server = await serveFlaky(release.dir, new Map([['index.json', { status: 404, remaining: 99 }]]));
+    const dest = scratch('365-404');
+    try {
+      await expect(ensure('25.8', opts({ ...release, url: server.url }, dest))).rejects.toThrow();
+      expect(server.hits.get('index.json')).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a 410 fails on the first attempt', async () => {
+    RELEASE_RETRY.delayMs = 1;
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }] });
+    const server = await serveFlaky(release.dir, new Map([['index.json', { status: 410, remaining: 99 }]]));
+    const dest = scratch('365-410');
+    try {
+      await expect(ensure('25.8', opts({ ...release, url: server.url }, dest))).rejects.toThrow();
+      expect(server.hits.get('index.json')).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a tarball hash mismatch is never retried', async () => {
+    RELEASE_RETRY.delayMs = 1;
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }], tamper: 'tarball' });
+    const entry = release.files.get('25.8')!;
+    const server = await serveFlaky(release.dir, new Map());
+    const dest = scratch('365-corrupt');
+    try {
+      const err = await ensure('25.8', opts({ ...release, url: server.url }, dest)).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ArtifactCorruptError);
+      expect(server.hits.get(entry.file)).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('retries a transient 502 on the tarball download, then succeeds', async () => {
+    RELEASE_RETRY.delayMs = 5;
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }] });
+    const entry = release.files.get('25.8')!;
+    const server = await serveFlaky(release.dir, new Map([[entry.file, { status: 502, remaining: 2 }]]));
+    const dest = scratch('365-tarball-502');
+    try {
+      const result = await ensure('25.8', opts({ ...release, url: server.url }, dest));
+      expect(result.installed).toBe(true);
+      expect(server.hits.get(entry.file)).toBe(3);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a connection failure on every tarball download exhausts the budget', async () => {
+    RELEASE_RETRY.attempts = 3;
+    RELEASE_RETRY.delayMs = 1;
+    const release = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }] });
+    const entry = release.files.get('25.8')!;
+    const server = await serveFlaky(release.dir, new Map([[entry.file, { remaining: 1000, reset: true }]]));
+    const dest = scratch('365-tarball-reset');
+    try {
+      let caught: unknown;
+      try {
+        await ensure('25.8', opts({ ...release, url: server.url }, dest));
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(SourceUnreachableError);
+      expect((caught as Error).message).toContain('attempt');
+      expect(server.hits.get(entry.file)).toBeGreaterThanOrEqual(RELEASE_RETRY.attempts);
     } finally {
       await server.close();
     }
@@ -1117,7 +1326,17 @@ describe('the CLI (docs/guides/fetch.md §6)', () => {
     const tampered = makeRelease({ artifacts: [{ minor: '25.8', version: '25.8.28.1-lts' }], tamper: 'tarball' });
     expect((await run(['fetch', '25.8', '--url', tampered.url, '--dest', dest, '-q'])).code).toBe(EXIT.verificationFailed);
 
-    const unreachable = await run(['fetch', '25.8', '--url', 'http://127.0.0.1:1', '--dest', dest, '-q']);
+    // A refused connection is now retried through the full §3a budget
+    // (chtypes#365); keep the delay near-zero so this stays fast.
+    const savedRetry = { ...RELEASE_RETRY };
+    RELEASE_RETRY.delayMs = 1;
+    let unreachable: Awaited<ReturnType<typeof run>>;
+    try {
+      unreachable = await run(['fetch', '25.8', '--url', 'http://127.0.0.1:1', '--dest', dest, '-q']);
+    } finally {
+      RELEASE_RETRY.attempts = savedRetry.attempts;
+      RELEASE_RETRY.delayMs = savedRetry.delayMs;
+    }
     expect(unreachable.code).toBe(EXIT.sourceUnreachable);
     expect(unreachable.err).toMatch(/\[CHTYPES_SOURCE_UNREACHABLE\]/);
 

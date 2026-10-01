@@ -858,14 +858,212 @@ def test_fetch_goldens_window_that_never_heals_leaves_golden_tests_skipping(
     assert any("hashes to" in ln and "SHA256SUMS says" in ln for ln in lines)
 
 
+# ------------------------------------------------- chtypes#365: transient errors
+
+
+class _FlakyHandler(http.server.SimpleHTTPRequestHandler):
+    """Like `_CountingHandler`, but able to answer one path with an injected
+    HTTP status (optionally with ``Retry-After``), or drop the connection
+    outright (a connection-level failure, from the client's view), for its
+    next N requests — chtypes#365's own real transient blip, made real on
+    loopback. ``server.flakes`` maps a path to a mutable
+    ``{"status", "retry_after", "remaining", "reset"}`` dict."""
+
+    def log_message(self, *a: object, **k: object) -> None:
+        pass
+
+    def do_GET(self) -> None:  # noqa: N802 (stdlib's naming)
+        name = self.path.lstrip("/")
+        hits: dict[str, int] = self.server.hits  # type: ignore[attr-defined]
+        hits[name] = hits.get(name, 0) + 1
+        flakes: dict[str, dict] = self.server.flakes  # type: ignore[attr-defined]
+        flake = flakes.get(name)
+        if flake is not None and flake["remaining"] > 0:
+            flake["remaining"] -= 1
+            if flake.get("reset"):
+                self.close_connection = True
+                return  # drop the connection, unanswered: a reset, from the client's view
+            self.send_response(flake["status"])
+            if flake.get("retry_after") is not None:
+                self.send_header("Retry-After", str(flake["retry_after"]))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        super().do_GET()
+
+
+@contextlib.contextmanager
+def _flaky_release_server(root: Path) -> Iterator[tuple[str, dict[str, int], dict[str, dict]]]:
+    """`root` served over real HTTP, with per-path hit counts and injectable
+    flakes (chtypes#365's own transient blip, made real)."""
+
+    def factory(*args: object, **kwargs: object) -> _FlakyHandler:
+        return _FlakyHandler(*args, directory=str(root), **kwargs)  # type: ignore[arg-type]
+
+    with socketserver.TCPServer(("127.0.0.1", 0), factory) as server:
+        server.hits = {}  # type: ignore[attr-defined]
+        server.flakes = {}  # type: ignore[attr-defined]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield (
+                f"http://127.0.0.1:{server.server_address[1]}",
+                server.hits,  # type: ignore[attr-defined]
+                server.flakes,  # type: ignore[attr-defined]
+            )
+        finally:
+            server.shutdown()
+
+
+def test_fetch_retries_transient_server_errors(dest: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The issue's own scenario: the artifacts host answers 500 for a short
+    blip, then recovers. `SHA256SUMS` is read before `index.json`, so failing
+    `index.json` alone exercises the whole retry path without the "no
+    SHA256SUMS" special case getting in the way. Must succeed, and report the
+    attempt count."""
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 0.01)
+    with _flaky_release_server(FIXTURES / "signed") as (url, hits, flakes):
+        flakes["index.json"] = {"status": 500, "retry_after": None, "remaining": 2}
+        lines: list[str] = []
+        installed = ensure(
+            "25.8",
+            platform=PLATFORM,
+            url=url,
+            dest=dest,
+            trusted_keys=_test_keys(),
+            progress=lines.append,
+        )
+    assert installed.name == "25.8"
+    assert hits["index.json"] == 3, "want exactly 3 reads (2 failures + 1 success)"
+    assert any("attempt 1/" in ln for ln in lines)
+    assert any("attempt 2/" in ln for ln in lines)
+
+
+def test_fetch_honors_retry_after_delta_seconds(
+    dest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A short `Retry-After`, in delta-seconds, is honored in place of the
+    doubling schedule's own (much larger) delay."""
+    # Large enough that honoring the 1s Retry-After is clearly a DIFFERENT,
+    # shorter wait, never a coincidence of the default schedule.
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 10.0)
+    with _flaky_release_server(FIXTURES / "signed") as (url, _hits, flakes):
+        flakes["index.json"] = {"status": 503, "retry_after": "1", "remaining": 1}
+        start = fetch_module.time.monotonic()
+        installed = ensure("25.8", platform=PLATFORM, url=url, dest=dest, trusted_keys=_test_keys())
+        waited = fetch_module.time.monotonic() - start
+    assert installed.name == "25.8"
+    assert 0.5 <= waited <= 8.0, f"waited {waited}s, want ~1s (Retry-After honored, not 10s)"
+
+
+def test_fetch_retry_after_longer_than_budget_fails_at_once(
+    dest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `Retry-After` far longer than the retry budget could ever wait out is
+    not honored by sleeping through it: the fetch fails at once, naming the
+    requested delay, and reads the flaky asset exactly once."""
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 0.01)  # budget ~0.15s
+    with _flaky_release_server(FIXTURES / "signed") as (url, hits, flakes):
+        flakes["index.json"] = {"status": 503, "retry_after": "9999", "remaining": 5}
+        start = fetch_module.time.monotonic()
+        with pytest.raises(chtypes.SourceUnreachableError) as caught:
+            ensure("25.8", platform=PLATFORM, url=url, dest=dest, trusted_keys=_test_keys())
+        elapsed = fetch_module.time.monotonic() - start
+    assert caught.value.code == "CHTYPES_SOURCE_UNREACHABLE"
+    assert "9999" in str(caught.value)
+    assert elapsed < 3.0, "a 9999s Retry-After was waited out instead of refused at once"
+    assert hits["index.json"] == 1, "no retry once the budget cannot fit the requested delay"
+    assert not dest.exists()
+
+
+def test_fetch_404_fails_on_the_first_attempt(dest: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 404 is decided at once, never retried — "a retry buys time; it never
+    converts a refusal into an install" (§3a), restated for status codes."""
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 0.001)
+    with _flaky_release_server(FIXTURES / "signed") as (url, hits, flakes):
+        flakes["SHA256SUMS"] = {"status": 404, "retry_after": None, "remaining": 99}
+        with pytest.raises(chtypes.SourceUnreachableError) as caught:
+            ensure("25.8", platform=PLATFORM, url=url, dest=dest, trusted_keys=_test_keys())
+    assert not caught.value.retryable
+    assert hits["SHA256SUMS"] == 1, "a 404 is never retried"
+    assert not dest.exists()
+
+
+def test_fetch_410_fails_on_the_first_attempt(dest: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same as 404, for 410 (chtypes#365: "Never retry a 404 or 410")."""
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 0.001)
+    with _flaky_release_server(FIXTURES / "signed") as (url, hits, flakes):
+        flakes["SHA256SUMS"] = {"status": 410, "retry_after": None, "remaining": 99}
+        with pytest.raises(chtypes.SourceUnreachableError) as caught:
+            ensure("25.8", platform=PLATFORM, url=url, dest=dest, trusted_keys=_test_keys())
+    assert not caught.value.retryable
+    assert hits["SHA256SUMS"] == 1, "a 410 is never retried"
+    assert not dest.exists()
+
+
+def test_fetch_tarball_hash_mismatch_is_never_retried(
+    tmp_path: Path, dest: Path, signed_entry: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tarball whose hash disagrees with the signed release is the release
+    lying about a byte, not a half-finished upload — never retried, even
+    though downloading it raised no transient symptom at all."""
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 0.001)
+    root = tmp_path / "corrupt-release"
+    shutil.copytree(FIXTURES / "signed", root)
+    tarball = root / signed_entry["file"]
+    data = bytearray(tarball.read_bytes())
+    data[-1] ^= 0xFF
+    tarball.write_bytes(bytes(data))
+
+    with _flaky_release_server(root) as (url, hits, _flakes):
+        with pytest.raises(chtypes.ArtifactCorruptError):
+            ensure("25.8", platform=PLATFORM, url=url, dest=dest, trusted_keys=_test_keys())
+    assert hits[signed_entry["file"]] == 1, "a hash mismatch is never retried"
+
+
+def test_fetch_retries_a_transient_tarball_download_failure(
+    dest: Path, signed_entry: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tarball half of chtypes#365: a transient 502 on the asset itself
+    (after `SHA256SUMS`/`.sig`/`index.json` all verified) is retried the same
+    way a metadata blip is."""
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 0.01)
+    with _flaky_release_server(FIXTURES / "signed") as (url, hits, flakes):
+        flakes[signed_entry["file"]] = {"status": 502, "retry_after": None, "remaining": 2}
+        installed = ensure("25.8", platform=PLATFORM, url=url, dest=dest, trusted_keys=_test_keys())
+    assert installed.name == "25.8"
+    assert hits[signed_entry["file"]] == 3, "want exactly 3 downloads (2 failures + 1 success)"
+
+
+def test_fetch_tarball_connection_failure_exhausts_budget(
+    dest: Path, signed_entry: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every download of the tarball hits a connection-level failure (the
+    connection is accepted, then dropped without a response): the fetch
+    still fails `CHTYPES_SOURCE_UNREACHABLE`, naming the attempt count."""
+    monkeypatch.setattr(fetch_module, "RELEASE_RETRY_DELAY", 0.001)
+    with _flaky_release_server(FIXTURES / "signed") as (url, hits, flakes):
+        flakes[signed_entry["file"]] = {"reset": True, "remaining": 1000}
+        with pytest.raises(chtypes.SourceUnreachableError) as caught:
+            ensure("25.8", platform=PLATFORM, url=url, dest=dest, trusted_keys=_test_keys())
+    assert caught.value.retryable
+    assert "attempt" in str(caught.value)
+    assert hits[signed_entry["file"]] == fetch_module.RELEASE_LOAD_ATTEMPTS
+    assert not dest.exists() or list(dest.iterdir()) == []
+
+
 def test_unreachable_host_is_source_unreachable(
     dest: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(fetch_module, "_HTTP_ATTEMPTS", 1)
+    # A refused connection is retried through the full §3a budget
+    # (chtypes#365), so this keeps the real sleep out of the loop entirely —
+    # the budget running out, in the end, is the point, not the wall-clock
+    # time it takes.
     monkeypatch.setattr(fetch_module.time, "sleep", lambda s: None)
     with pytest.raises(chtypes.SourceUnreachableError) as caught:
         ensure("25.8", platform=PLATFORM, url="http://127.0.0.1:1/artifacts", dest=dest)
     assert caught.value.code == "CHTYPES_SOURCE_UNREACHABLE"
+    assert caught.value.retryable
     assert not dest.exists()
 
 

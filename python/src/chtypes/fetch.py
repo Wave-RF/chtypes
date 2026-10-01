@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import datetime
+import email.utils
 import hashlib
 import http.client
 import json
@@ -101,6 +103,10 @@ ENV_TRUSTED_KEYS: Final = "CHTYPES_TRUSTED_KEYS"
 ENV_ALLOW_UNSIGNED: Final = "CHTYPES_ALLOW_UNSIGNED"
 ENV_AUTOFETCH: Final = "CHTYPES_AUTOFETCH"
 ENV_REGISTRY: Final = "CHTYPES_REGISTRY"
+#: An optional bearer token sent to an HTTP source (the delivery Worker's
+#: download tokens); the other three bindings and `scripts/fetch.sh` send the
+#: same header (chtypes#365 audit — this binding did not, until now).
+ENV_DOWNLOAD_TOKEN: Final = "CHTYPES_DOWNLOAD_TOKEN"
 
 #: How many times `Fetcher.release` reads an ``http(s)`` release before giving
 #: up, and the BASE delay before the first retry — each later retry doubles it,
@@ -111,6 +117,15 @@ ENV_REGISTRY: Final = "CHTYPES_REGISTRY"
 #: mid-publish window still clears on the second attempt.
 RELEASE_LOAD_ATTEMPTS: Final = 5
 RELEASE_RETRY_DELAY: Final = 4
+
+#: HTTP statuses worth retrying through the budget above (chtypes#365): any
+#: 5xx, plus 408 (Request Timeout) and 429 (Too Many Requests). 404 and 410
+#: are deliberately absent — `_Source._open` answers those as "not found",
+#: never an exception, so they never reach this check at all.
+_RETRYABLE_STATUSES: Final = frozenset({408, 429}) | frozenset(range(500, 600))
+#: `Retry-After` (RFC 9110 §10.2.3) is honored only for these two — the pair
+#: this contract documents it for.
+_RETRY_AFTER_STATUSES: Final = frozenset({429, 503})
 
 #: The served golden set: a release-level file, and a row in the signed
 #: SHA256SUMS, installed beside the artifacts as ``<registry>/sdk-goldens.json``.
@@ -149,7 +164,6 @@ DEFAULT_LOCK_FILE: Final = "chtypes.lock"
 PATCHES_DIRNAME: Final = "patches"
 
 _USER_AGENT = "chtypes-python (+https://github.com/wave-rf/chtypes)"
-_HTTP_ATTEMPTS = 3
 _HTTP_TIMEOUT = 60.0
 
 _T = TypeVar("_T")
@@ -158,6 +172,54 @@ _CHUNK = 1 << 20
 log = logging.getLogger("chtypes.fetch")
 
 Progress = Callable[[str], None]
+
+
+def _retry_budget() -> float:
+    """The total sleep time the default doubling schedule spends across every
+    attempt but the last — 60s for the default 5 attempts (`docs/guides/fetch.md`
+    §3a) — and the cap chtypes#365 puts on a source's own `Retry-After`:
+    honored only as long as honoring it still fits inside this, so a 503
+    asking for far longer than this budget was ever sized for fails fast
+    instead of blocking for it."""
+    if RELEASE_LOAD_ATTEMPTS <= 1:
+        return 0.0
+    return RELEASE_RETRY_DELAY * ((1 << (RELEASE_LOAD_ATTEMPTS - 1)) - 1)
+
+
+def _retry_after_seconds(status: int, header: str | None) -> float | None:
+    """Parses a ``Retry-After`` header (RFC 9110 §10.2.3): delta-seconds or an
+    HTTP-date, honored only for 503 and 429 (`_RETRY_AFTER_STATUSES`). `None`
+    when the status does not carry one, the header is absent, or it does not
+    parse as either form."""
+    if status not in _RETRY_AFTER_STATUSES or not header:
+        return None
+    header = header.strip()
+    try:
+        return max(0.0, float(int(header)))
+    except ValueError:
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(header)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.UTC)
+    return max(0.0, (when - datetime.datetime.now(datetime.UTC)).total_seconds())
+
+
+def _attempt_word(n: int) -> str:
+    """``1 attempt`` or ``<n> attempts``, for a message naming how many were made."""
+    return "1 attempt" if n == 1 else f"{n} attempts"
+
+
+def _append_retry_note(exc: SourceUnreachableError, note: str) -> SourceUnreachableError:
+    """Appends `note` to a retryable `SourceUnreachableError`'s own message, in
+    place — `.code`, `.retryable` and `.retry_after` are unchanged, and it is
+    the SAME object (so re-raising it never manufactures a self-referential
+    ``__context__``); only the text grows."""
+    if exc.args:
+        exc.args = (str(exc.args[0]) + note, *exc.args[1:])
+    return exc
 
 
 def _env_flag(name: str) -> bool:
@@ -898,7 +960,10 @@ class _Source:
             return resp.read()
 
     def download(self, name: str, into: Path, expected_bytes: int) -> tuple[int, str]:
-        """Stream one asset to ``into``, hashing as it goes: (bytes, sha256 hex)."""
+        """One attempt: stream one asset to ``into``, hashing as it goes:
+        (bytes, sha256 hex). Retried, through the §3a budget, by
+        `Fetcher._download_with_retry` — never here, so a retry is always a
+        fresh ``_open`` and a fresh stream, never a resume."""
         if self.kind == "file":
             assert self.root is not None
             src = self.root / name
@@ -907,25 +972,12 @@ class _Source:
                     f"chtypes: {self} names {name} but does not contain it — a broken release"
                 )
             return self._copy(src.open("rb"), into, expected_bytes, name)
-        last: Exception | None = None
-        for attempt in range(1, _HTTP_ATTEMPTS + 1):
-            try:
-                with self._open(name) as resp:
-                    if resp is None:
-                        raise ArtifactCorruptError(
-                            f"chtypes: {self} names {name} but does not serve it — a broken release"
-                        )
-                    return self._copy(resp, into, expected_bytes, name)
-            except (
-                urllib.error.URLError,
-                http.client.HTTPException,
-                ConnectionError,
-                TimeoutError,
-            ) as exc:
-                last = exc
-                self.progress(f"  {name}: {exc} (attempt {attempt} of {_HTTP_ATTEMPTS})")
-                time.sleep(min(2.0 * attempt, 6.0))
-        raise SourceUnreachableError(f"chtypes: could not download {name} from {self}: {last}")
+        with self._open(name) as resp:
+            if resp is None:
+                raise ArtifactCorruptError(
+                    f"chtypes: {self} names {name} but does not serve it — a broken release"
+                )
+            return self._copy(resp, into, expected_bytes, name)
 
     def _copy(self, stream: Any, into: Path, expected_bytes: int, name: str) -> tuple[int, str]:
         digest = hashlib.sha256()
@@ -950,25 +1002,42 @@ class _Source:
         return total, digest.hexdigest()
 
     def _open(self, name: str) -> _Response:
+        """One attempt: `None` for a 404/410 (not found; never retried), the
+        response for a 200, and `SourceUnreachableError` for anything else —
+        `.retryable` set (chtypes#365) for an HTTP 5xx/408/429 or a
+        connection-level failure reaching the host at all (refused, reset,
+        timed out, DNS — ``urllib``/``http.client``/``OSError`` do not
+        distinguish these any further, so none are singled out), `.retry_after`
+        set alongside it when the source sent one (503/429 only). Retried, when
+        `.retryable`, by `Fetcher._retry_publish_window` or
+        `Fetcher._download_with_retry` — never here, so a retry always re-reads
+        the whole consistent set (or re-opens the whole download) from scratch."""
         assert self.kind == "http"
         url = f"{self.base}/{urllib.parse.quote(name)}"
-        req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-        last: Exception | None = None
-        for attempt in range(1, _HTTP_ATTEMPTS + 1):
-            try:
-                return _Response(urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT))
-            except urllib.error.HTTPError as exc:
-                if exc.code in (404, 410):
-                    exc.close()
-                    return _Response(None)
-                last = exc
-                if exc.code < 500 and exc.code != 429:
-                    break  # a definite refusal is not a transient fault
-            except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
-                last = exc
-            self.progress(f"  {name}: {last} (attempt {attempt} of {_HTTP_ATTEMPTS})")
-            time.sleep(min(2.0 * attempt, 6.0))
-        raise SourceUnreachableError(f"chtypes: cannot reach {url}: {last}")
+        headers = {"User-Agent": _USER_AGENT}
+        token = os.environ.get(ENV_DOWNLOAD_TOKEN)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            return _Response(urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT))
+        except urllib.error.HTTPError as exc:
+            if exc.code in (404, 410):
+                exc.close()
+                return _Response(None)
+            retryable = exc.code in _RETRYABLE_STATUSES
+            retry_after = None
+            if retryable:
+                retry_after = _retry_after_seconds(exc.code, exc.headers.get("Retry-After"))
+            message = f"chtypes: cannot reach {url}: {exc}"
+            exc.close()
+            raise SourceUnreachableError(
+                message, retryable=retryable, retry_after=retry_after
+            ) from exc
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+            raise SourceUnreachableError(
+                f"chtypes: cannot reach {url}: {exc}", retryable=True
+            ) from exc
 
 
 class _Response:
@@ -1218,9 +1287,9 @@ class Fetcher:
 
     def _retry_publish_window(self, load: Callable[[], _T]) -> _T:
         """Runs ``load`` through the publish-window retry: on every attempt but
-        the last, an `ArtifactUntrustedError` or `ArtifactCorruptError` is
-        logged and slept off before trying again; any other exception, or the
-        last attempt's, propagates immediately.
+        the last, a retryable symptom is logged and slept off before trying
+        again; any other exception, or the last attempt's, propagates
+        immediately.
 
         A publish into the rolling release is three objects — ``SHA256SUMS``,
         ``SHA256SUMS.sig``, ``index.json`` — plus, when ``load`` also reads it,
@@ -1229,21 +1298,29 @@ class Fetcher:
         uploads" to "as long as any one object can still be served stale from
         cache" (observed ``Cache-Control: max-age=60`` on all four).
 
-        Three symptoms of reading inside it are retried: a signature under no
-        trusted key, an index that disagrees with the sums, and a release-level
-        file whose hash disagrees with its own SHA256SUMS row (or that the sums
-        list but the source does not yet serve). Each retry calls ``load``
-        again from scratch — the whole consistent set is re-read together,
-        never one freshly re-fetched object checked against another attempt's
-        stale one. Nothing else is retried, and neither are these three once
-        the attempts run out: the same exception surfaces, with the same exit
-        code, as it did before. A tarball whose hash is wrong is never retried;
-        that is the release lying about a byte, not a half-finished upload.
+        Retried: a signature under no trusted key; an index that disagrees
+        with the sums; a release-level file whose hash disagrees with its own
+        SHA256SUMS row (or that the sums list but the source does not yet
+        serve); and, since chtypes#365, a `SourceUnreachableError` whose
+        `.retryable` is set — an HTTP 5xx/408/429 or a connection-level
+        failure reaching the host at all. A `.retry_after` the source sent
+        (``Retry-After`` on a 503 or 429) is honored in place of the doubling
+        schedule's own delay, capped so the total never exceeds `_retry_budget`
+        — one that does not fit fails at once, naming the requested delay,
+        rather than blocking for it. Each retry calls ``load`` again from
+        scratch — the whole consistent set is re-read together, never one
+        freshly re-fetched object checked against another attempt's stale one.
+        Nothing else is retried, and neither are these once the attempts (or
+        the budget) run out: the same exception surfaces, with the same exit
+        code, naming how many attempts were made. A 404/410, and a tarball
+        whose hash is wrong, are never retried — the release lying about a
+        byte, or simply not having the thing, is not a transient blip.
 
         Only an ``http(s)`` source can be mid-publish, so a ``file://`` or
         directory source runs ``load`` exactly once."""
         attempts = RELEASE_LOAD_ATTEMPTS if self.source.kind == "http" else 1
         delay = RELEASE_RETRY_DELAY
+        elapsed = 0.0
         for attempt in range(1, attempts + 1):
             try:
                 return load()
@@ -1252,9 +1329,76 @@ class Fetcher:
                     raise
                 self._say(
                     f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
-                    f"published looks like from outside; retrying in {delay}s"
+                    f"published (or briefly unreachable) looks like from outside; retrying in "
+                    f"{delay}s"
                 )
                 time.sleep(delay)
+                elapsed += delay
+                delay *= 2
+            except SourceUnreachableError as exc:
+                if not exc.retryable:
+                    raise
+                if attempt >= attempts:
+                    raise _append_retry_note(
+                        exc, f" — giving up after {_attempt_word(attempt)}"
+                    ) from None
+                wait = exc.retry_after if exc.retry_after is not None else delay
+                if elapsed + wait > _retry_budget():
+                    raise _append_retry_note(
+                        exc,
+                        f" — the source asked to wait {wait:g}s before retrying, which would "
+                        f"exceed the {_retry_budget():g}s retry budget; giving up after "
+                        f"{_attempt_word(attempt)}",
+                    ) from None
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
+                    f"published (or briefly unreachable) looks like from outside; retrying in "
+                    f"{wait}s"
+                )
+                time.sleep(wait)
+                elapsed += wait
+                delay *= 2
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _download_with_retry(self, name: str, into: Path, expected_bytes: int) -> tuple[int, str]:
+        """`_Source.download`, retried through the same §3a budget and schedule
+        `_retry_publish_window` uses (chtypes#365): an HTTP 5xx/408/429 or a
+        connection-level failure reaching the host at all is exactly the
+        symptom that budget exists for, and a transient blip mid download
+        deserves the same treatment a blip reading the metadata gets. Every
+        retry is a fresh `_Source._open` and a fresh stream — never a resume.
+
+        A 404/410 (`ArtifactCorruptError`, raised by `_Source.download` when
+        `_Source._open` answers "not found" for a file the index just listed)
+        and a tarball hash or size mismatch (raised by this method's own
+        caller, after it returns) are never retried."""
+        attempts = RELEASE_LOAD_ATTEMPTS if self.source.kind == "http" else 1
+        delay = RELEASE_RETRY_DELAY
+        elapsed = 0.0
+        for attempt in range(1, attempts + 1):
+            try:
+                return self.source.download(name, into, expected_bytes)
+            except SourceUnreachableError as exc:
+                if not exc.retryable:
+                    raise
+                if attempt >= attempts:
+                    raise _append_retry_note(
+                        exc, f" — giving up after {_attempt_word(attempt)}"
+                    ) from None
+                wait = exc.retry_after if exc.retry_after is not None else delay
+                if elapsed + wait > _retry_budget():
+                    raise _append_retry_note(
+                        exc,
+                        f" — the source asked to wait {wait:g}s before retrying, which would "
+                        f"exceed the {_retry_budget():g}s retry budget; giving up after "
+                        f"{_attempt_word(attempt)}",
+                    ) from None
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — retrying the download of {name} "
+                    f"in {wait}s"
+                )
+                time.sleep(wait)
+                elapsed += wait
                 delay *= 2
         raise AssertionError("unreachable")  # pragma: no cover
 
@@ -1440,6 +1584,7 @@ class Fetcher:
         """
         attempts = RELEASE_LOAD_ATTEMPTS if self.source.kind == "http" else 1
         delay = RELEASE_RETRY_DELAY
+        elapsed = 0.0
         sums = self.release().sums
         listed = False
         blob: bytes | None = None
@@ -1454,15 +1599,37 @@ class Fetcher:
                     # this re-reads everything, not just the golden set.
                     _, blob, listed = self._load_release(want_goldens=True)
                 break
-            except (ArtifactUntrustedError, ArtifactCorruptError, SourceUnreachableError) as exc:
+            except (ArtifactUntrustedError, ArtifactCorruptError) as exc:
                 if attempt >= attempts:
                     self._say(f"{exc} — the golden tests will skip")
                     return None
                 self._say(
                     f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
-                    f"published looks like from outside; retrying in {delay}s"
+                    f"published (or briefly unreachable) looks like from outside; retrying in "
+                    f"{delay}s"
                 )
                 time.sleep(delay)
+                elapsed += delay
+                delay *= 2
+            except SourceUnreachableError as exc:
+                if not exc.retryable or attempt >= attempts:
+                    self._say(f"{exc} — the golden tests will skip")
+                    return None
+                wait = exc.retry_after if exc.retry_after is not None else delay
+                if elapsed + wait > _retry_budget():
+                    self._say(
+                        f"{exc} — the source asked to wait {wait:g}s before retrying, which "
+                        f"would exceed the {_retry_budget():g}s retry budget; the golden tests "
+                        f"will skip"
+                    )
+                    return None
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
+                    f"published (or briefly unreachable) looks like from outside; retrying in "
+                    f"{wait}s"
+                )
+                time.sleep(wait)
+                elapsed += wait
                 delay *= 2
         if not listed:
             self._say(
@@ -1569,7 +1736,7 @@ class Fetcher:
             # §3 step 3: the tarball is hashed BEFORE it is unpacked.
             tarball = work / entry.file
             self._say(f"downloading {entry.file} from {release.source}")
-            got_bytes, got_sha = self.source.download(entry.file, tarball, entry.bytes)
+            got_bytes, got_sha = self._download_with_retry(entry.file, tarball, entry.bytes)
             if got_bytes != entry.bytes:
                 raise ArtifactCorruptError(
                     f"chtypes: {entry.file} is {got_bytes} bytes, the release says {entry.bytes} "

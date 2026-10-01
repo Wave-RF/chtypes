@@ -364,7 +364,24 @@ export class ArtifactUnpublishedError extends FetchError {
  * not installed and verified.
  */
 export class SourceUnreachableError extends FetchError {
-  constructor(message: string, options?: { cause?: unknown }) {
+  /**
+   * Worth retrying through the docs/guides/fetch.md §3a budget (chtypes#365): an HTTP
+   * 5xx/408/429, or a connection-level failure reaching the host at all
+   * (refused, reset, timed out, DNS). `false` for everything else this code
+   * is also raised for: offline, a local file I/O error, or any other HTTP
+   * status.
+   */
+  readonly retryable: boolean;
+  /**
+   * The source's own requested wait, in milliseconds — `Retry-After` on a
+   * 503 or 429 — when it sent one. `undefined` unless `retryable` is also
+   * `true`.
+   */
+  readonly retryAfterMs: number | undefined;
+
+  constructor(message: string, options?: { cause?: unknown; retryable?: boolean; retryAfterMs?: number | undefined }) {
     super('CHTYPES_SOURCE_UNREACHABLE', message, options);
+    this.retryable = options?.retryable ?? false;
+    this.retryAfterMs = options?.retryAfterMs;
   }
 }
