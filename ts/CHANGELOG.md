@@ -10,6 +10,10 @@ The four bindings in this repository are released together and give one answer, 
 
 - **`fetch`'s `lock` option now records the artifact's ABI revision** in each lock entry (`LockEntry.abi_revision`, optional and additive — schema stays 1); `frozen` checks it FIRST, before the file/sha256 pin: a lock that names a different revision throws `ArtifactPinnedError`, naming both numbers and the `npx @wavehouse/chtypes fetch` remedy, instead of surfacing as a bare drifted pin or `ArtifactUnpublishedError`. A lock entry with no recorded revision (written by an SDK before this change) keeps today's behavior, with one sentence appended when it ends in one of those two errors. `offline` with `frozen` is unaffected (docs/guides/fetch.md §5, closes #253).
 
+### Changed
+
+- **Docs: plain `CSV`/`TSV` input also honors `input_format_csv_detect_header` / `input_format_tsv_detect_header`, exactly as a real server does**, because the body is read by ClickHouse's own vendored row readers. The behavior arrived with 0.3.0's switch to those readers; it is now documented (#299).
+
 ### Fixed
 
 - **`frozen` no longer writes the lock file.** A frozen install that passed its pin check rewrote the lock with the entry it had just verified, re-serialized. Go, Python and Rust never write under `--frozen`.
