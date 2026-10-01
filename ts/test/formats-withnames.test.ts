@@ -35,6 +35,7 @@ import {
   type RowResult,
   type Value,
 } from '../src/index.js';
+import { REAL_ARTIFACT_TIMEOUT_MS } from './real-artifact-timeout.js';
 
 const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
@@ -157,7 +158,7 @@ describe.skipIf(!HAVE_REGISTRY)('#119: CSVWithNames (10) and TSVWithNames (11) o
     }
     lines = gathered;
     supported = gathered.filter((l) => l.supported);
-  });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
 
   afterAll(() => {
     registry?.close();

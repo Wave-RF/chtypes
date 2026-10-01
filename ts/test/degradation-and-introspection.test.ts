@@ -4,7 +4,7 @@
  * duplicate handling, and release-order sorting.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   Registry,
   UnsupportedError,
@@ -15,6 +15,7 @@ import {
   Format,
 } from '../src/index.js';
 import { rowResultOf } from '../src/results.js';
+import { REAL_ARTIFACT_TIMEOUT_MS } from './real-artifact-timeout.js';
 
 const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
@@ -61,13 +62,26 @@ describe('discovery duplicate names', () => {
 });
 
 describe.skipIf(!HAVE_REGISTRY)('against a real registry', () => {
-  it('libraries() comes back in release order, not directory order', () => {
-    // `libraries()` lists what is OPEN and construction opens nothing, so this
-    // asks for every line first. Driving the preload off `versions()` is what
-    // keeps the assertion from passing vacuously over an empty list.
-    const registry = new Registry(REGISTRY ?? undefined, {
+  // Loaded ONCE here, with its own generous timeout (#369), rather than each
+  // `it()` below building its own `Registry` with `preload`: three separate
+  // cold dlopens in a row is what let one of them land on vitest's 5 s
+  // default. Every discovered version is preloaded up front so the tests that
+  // used to ask for only the first or last line still find it already open.
+  let registry: Registry;
+
+  beforeAll(() => {
+    registry = new Registry(REGISTRY ?? undefined, {
       preload: new Registry(REGISTRY ?? undefined).versions(),
     });
+  }, REAL_ARTIFACT_TIMEOUT_MS);
+
+  afterAll(() => {
+    registry?.close();
+  });
+
+  it('libraries() comes back in release order, not directory order', () => {
+    // `libraries()` lists what is OPEN, and the shared `beforeAll` preloaded
+    // every discovered line, so this reads release order off the full set.
     const minors = registry.libraries().map((l) => l.minor);
     const numeric = (m: string): number => {
       const [a = '0', b = '0'] = m.split('.');
@@ -85,8 +99,6 @@ describe.skipIf(!HAVE_REGISTRY)('against a real registry', () => {
   });
 
   it('exposes the introspection trio (docs/reference/bindings.md §Introspection)', () => {
-    const discovered = new Registry(REGISTRY ?? undefined).versions();
-    const registry = new Registry(REGISTRY ?? undefined, { preload: discovered.slice(-1) });
     const lib = registry.libraries()[registry.libraries().length - 1]!;
     const families = lib.registeredFamilies();
     expect(families).toContain('String');
@@ -101,8 +113,6 @@ describe.skipIf(!HAVE_REGISTRY)('against a real registry', () => {
   });
 
   it('rows() degrades a missing chs_rows to UnsupportedError, exactly as row() does', () => {
-    const discovered = new Registry(REGISTRY ?? undefined).versions();
-    const registry = new Registry(REGISTRY ?? undefined, { preload: discovered.slice(0, 1) });
     const lib = registry.libraries()[0]!;
     const schema = lib.compileDdl('x UInt8');
     try {
