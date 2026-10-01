@@ -48,6 +48,8 @@ import (
 	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
 
 // ---------------------------------------------------------------- process init
@@ -77,7 +79,7 @@ var (
 	// Writer: SetDefaultSettings. Readers: every entry point that reaches
 	// chs_row, chs_rows, chs_schema_compile or chs_validate_type. Read locks are
 	// shared, so this costs concurrent callers nothing and is NOT the
-	// per-schema serialization — CompiledSchema.mu is still what makes one
+	// per-schema serialization — compiledSchemaNative.mu is still what makes one
 	// handle single-threaded.
 	//
 	// The dlopen'd multi-version path never calls chs_set_default_settings (it
@@ -325,7 +327,7 @@ func QuoteLiteral(v Version, text string) (string, error) {
 //
 // A CompiledSchema is single-threaded: one handle must not be used from two
 // goroutines at once (an internal mutex enforces it); DISTINCT schemas
-// proceed in parallel. Close releases the native handle; a finalizer covers
+// proceed in parallel. Close releases the native handle; a GC cleanup covers
 // forgetting it.
 type CompiledSchema struct {
 	Version Version
@@ -336,17 +338,97 @@ type CompiledSchema struct {
 	// applied without the expression interpreter.
 	LiteralDefault []bool
 
-	handle *C.chs_schema
+	// n is the native half: the handle, its open children's handles and the
+	// lock over all of them — the linked twin of loadedSchemaNative, kept
+	// apart from the CompiledSchema for the same reason (issue #375).
+	n *compiledSchemaNative
+}
+
+// compiledSchemaNative is everything the C layer owns for one CompiledSchema.
+// It points at no Go object a caller holds, so the GC cleanups that run on it
+// leave a schema↔child cycle collectable; see loadedSchemaNative, whose
+// reasoning is this type's word for word.
+type compiledSchemaNative struct {
 	mu     sync.Mutex
-	// filters tracks every open Filter compiled from this handle, so Close
-	// can free them FIRST — the C layer does not refcount, and freeing the
-	// schema under a live filter is use-after-free (the C ABI contract §Filters,
-	// handle lifetime). Guarded by mu.
-	filters map[*Filter]struct{}
-	// blocks tracks every open Block parsed from this handle — the same
-	// non-owning rule, the same free-before-schema order (the C ABI contract
-	// §Blocks). Guarded by mu.
-	blocks map[*Block]struct{}
+	handle *C.chs_schema // guarded by mu; nil once freed
+	// filters and blocks hold every child still open over this handle, so a
+	// release can free them FIRST — the C layer does not refcount, and
+	// freeing the schema under a live filter or block is use-after-free (the
+	// C ABI contract §Filters and §Blocks, handle lifetime). Guarded by mu.
+	filters map[*compiledFilterNative]struct{}
+	blocks  map[*compiledBlockNative]struct{}
+}
+
+// compiledFilterNative is one Filter's native half, freed under its schema's
+// lock.
+type compiledFilterNative struct {
+	schema *compiledSchemaNative
+	handle *C.chs_filter // guarded by schema.mu; nil once freed
+}
+
+// compiledBlockNative is one Block's native half.
+type compiledBlockNative struct {
+	schema *compiledSchemaNative
+	handle *C.chs_block // guarded by schema.mu; nil once freed
+}
+
+// release frees every child still open over this schema, then the schema
+// handle: the C-required order. Idempotent; Close's body and the schema's GC
+// cleanup.
+func (n *compiledSchemaNative) release() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for c := range n.filters {
+		c.freeLocked()
+	}
+	n.filters = nil
+	for c := range n.blocks {
+		c.freeLocked()
+	}
+	n.blocks = nil
+	if n.handle != nil {
+		C.chs_schema_free(n.handle)
+		noteFreed(testhook.FreedSchema, unsafe.Pointer(n.handle))
+		n.handle = nil
+	}
+}
+
+// release frees this filter's handle unless something already has.
+// Idempotent; Filter.Close's body and the filter's GC cleanup.
+func (c *compiledFilterNative) release() {
+	c.schema.mu.Lock()
+	defer c.schema.mu.Unlock()
+	c.freeLocked()
+}
+
+// freeLocked frees the filter handle. Caller holds the schema's mu.
+func (c *compiledFilterNative) freeLocked() {
+	if c.handle == nil {
+		return
+	}
+	C.chs_filter_free(c.handle)
+	noteFreed(testhook.FreedFilter, unsafe.Pointer(c.handle))
+	c.handle = nil
+	delete(c.schema.filters, c)
+}
+
+// release frees this block's handle unless something already has.
+// Idempotent; Block.Close's body and the block's GC cleanup.
+func (c *compiledBlockNative) release() {
+	c.schema.mu.Lock()
+	defer c.schema.mu.Unlock()
+	c.freeLocked()
+}
+
+// freeLocked frees the block handle. Caller holds the schema's mu.
+func (c *compiledBlockNative) freeLocked() {
+	if c.handle == nil {
+		return
+	}
+	C.chs_block_free(c.handle)
+	noteFreed(testhook.FreedBlock, unsafe.Pointer(c.handle))
+	c.handle = nil
+	delete(c.schema.blocks, c)
 }
 
 // ParseSchema validates every type expression and DEFAULT expression in s,
@@ -445,7 +527,7 @@ func CompileDDL(v Version, ddl string, opts ...CompileOption) (*CompiledSchema, 
 		return nil, schemaErr(int(code), msg, "")
 	}
 
-	cs := &CompiledSchema{Version: v, handle: h}
+	cs := &CompiledSchema{Version: v, n: &compiledSchemaNative{handle: h}}
 	n := int(C.chs_schema_column_count(h))
 	for i := 0; i < n; i++ {
 		ci := C.int(i)
@@ -458,7 +540,10 @@ func CompileDDL(v Version, ddl string, opts ...CompileOption) (*CompiledSchema, 
 		cs.Canonical = append(cs.Canonical, cs.Columns[i].Type)
 		cs.LiteralDefault = append(cs.LiteralDefault, C.chs_schema_column_default_is_literal(h, ci) != 0)
 	}
-	runtime.SetFinalizer(cs, func(x *CompiledSchema) { x.Close() })
+	// The GC backstop for a schema nobody Close()'d, handed the native half
+	// and never cs, so open children pointing back at cs cannot pin it
+	// (issue #375).
+	runtime.AddCleanup(cs, (*compiledSchemaNative).release, cs.n)
 	return cs, nil
 }
 
@@ -481,12 +566,12 @@ func (cs *CompiledSchema) SetEngine(engine, orderBy string, opts ...EngineOption
 		opt(&cfg)
 	}
 	// Shared: chs_schema_engine reads the seeded settings; only
-	// SetDefaultSettings writes them. cs.mu is what serializes this handle.
+	// SetDefaultSettings writes them. cs.n.mu is what serializes this handle.
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if cs.handle == nil {
+	cs.n.mu.Lock()
+	defer cs.n.mu.Unlock()
+	if cs.n.handle == nil {
 		return fmt.Errorf("chtypes: schema is closed")
 	}
 	ce := C.CString(engine)
@@ -496,7 +581,7 @@ func (cs *CompiledSchema) SetEngine(engine, orderBy string, opts ...EngineOption
 	cmt := C.CString(settingsJSON(cfg.mergeTreeSettings))
 	defer C.free(unsafe.Pointer(cmt))
 	var cErr *C.char
-	rc := C.chs_schema_engine(cs.handle, ce, co, cmt, &cErr)
+	rc := C.chs_schema_engine(cs.n.handle, ce, co, cmt, &cErr)
 	if rc == 0 {
 		return nil
 	}
@@ -531,15 +616,15 @@ func (cs *CompiledSchema) SetEngine(engine, orderBy string, opts ...EngineOption
 func (cs *CompiledSchema) SetTTL(ttl string) error {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if cs.handle == nil {
+	cs.n.mu.Lock()
+	defer cs.n.mu.Unlock()
+	if cs.n.handle == nil {
 		return fmt.Errorf("chtypes: schema is closed")
 	}
 	ct := C.CString(ttl)
 	defer C.free(unsafe.Pointer(ct))
 	var cErr *C.char
-	rc := C.chs_schema_ttl(cs.handle, ct, &cErr)
+	rc := C.chs_schema_ttl(cs.n.handle, ct, &cErr)
 	if rc == 0 {
 		return nil
 	}
@@ -562,15 +647,15 @@ func (cs *CompiledSchema) SetTTL(ttl string) error {
 func (cs *CompiledSchema) SetPartitionBy(expr string) error {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if cs.handle == nil {
+	cs.n.mu.Lock()
+	defer cs.n.mu.Unlock()
+	if cs.n.handle == nil {
 		return fmt.Errorf("chtypes: schema is closed")
 	}
 	cp := C.CString(expr)
 	defer C.free(unsafe.Pointer(cp))
 	var cErr *C.char
-	rc := C.chs_schema_partition_by(cs.handle, cp, &cErr)
+	rc := C.chs_schema_partition_by(cs.n.handle, cp, &cErr)
 	msg := ""
 	if cErr != nil {
 		msg = C.GoString(cErr)
@@ -579,25 +664,15 @@ func (cs *CompiledSchema) SetPartitionBy(expr string) error {
 	return partitionByError(int(rc), msg)
 }
 
-// Close releases the native schema. Optional: a finalizer does it too. Any
+// Close releases the native schema. Optional: a GC cleanup does it too. Any
 // Filter or Block still open on this schema is closed FIRST, in the same
 // call — the handles-before-schema free order the C layer requires, enforced
-// here so no caller ordering (and no finalizer timing) can get it backwards.
+// here so no caller ordering (and no cleanup timing) can get it backwards.
 func (cs *CompiledSchema) Close() {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	for f := range cs.filters {
-		f.closeLocked()
+	if cs.n == nil {
+		return
 	}
-	cs.filters = nil
-	for b := range cs.blocks {
-		b.closeLocked()
-	}
-	cs.blocks = nil
-	if cs.handle != nil {
-		C.chs_schema_free(cs.handle)
-		cs.handle = nil
-	}
+	cs.n.release()
 }
 
 // Filter is one boolean SQL expression compiled against a CompiledSchema's
@@ -608,10 +683,11 @@ func (cs *CompiledSchema) Close() {
 //
 // LIFETIME: a Filter references its schema handle; the C layer does not
 // refcount (the C ABI contract §Filters). This binding enforces the free order
-// structurally, both ways: the Filter holds its *CompiledSchema (so the
-// schema finalizer cannot run first — Go runs finalizers in dependency
-// order), and CompiledSchema.Close closes every open Filter before freeing
-// the schema. Close a Filter when done; a finalizer covers forgetting it.
+// structurally, both ways: the Filter holds its *CompiledSchema (so the schema
+// stays reachable, and usable, while the filter is), and both
+// CompiledSchema.Close and the schema's GC cleanup free every open Filter
+// before freeing the schema. Close a Filter when done; a GC cleanup covers
+// forgetting it.
 // A filter compiled from a schema handle answers for THAT handle: recompile
 // filters when the schema is recompiled.
 //
@@ -628,8 +704,8 @@ type Filter struct {
 	// Expr is the expression text as compiled, for logging and cache keys.
 	Expr string
 
-	cs     *CompiledSchema
-	handle *C.chs_filter
+	cs *CompiledSchema
+	n  *compiledFilterNative
 }
 
 // CompileFilter compiles one boolean expression over this schema's PHYSICAL
@@ -659,9 +735,9 @@ func (cs *CompiledSchema) CompileFilter(expr string, opts ...FilterOption) (*Fil
 	}
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if cs.handle == nil {
+	cs.n.mu.Lock()
+	defer cs.n.mu.Unlock()
+	if cs.n.handle == nil {
 		return nil, fmt.Errorf("chtypes: schema is closed")
 	}
 	cexpr := C.CString(expr)
@@ -670,7 +746,7 @@ func (cs *CompiledSchema) CompileFilter(expr string, opts ...FilterOption) (*Fil
 	defer C.free(unsafe.Pointer(cparams))
 	var code C.int
 	var cErr *C.char
-	h := C.chs_filter_compile(cs.handle, cexpr, cparams, &code, &cErr)
+	h := C.chs_filter_compile(cs.n.handle, cexpr, cparams, &code, &cErr)
 	if h == nil {
 		msg := ""
 		if cErr != nil {
@@ -679,12 +755,13 @@ func (cs *CompiledSchema) CompileFilter(expr string, opts ...FilterOption) (*Fil
 		}
 		return nil, schemaErr(int(code), msg, "")
 	}
-	f := &Filter{Expr: expr, cs: cs, handle: h}
-	if cs.filters == nil {
-		cs.filters = map[*Filter]struct{}{}
+	fn := &compiledFilterNative{schema: cs.n, handle: h}
+	if cs.n.filters == nil {
+		cs.n.filters = map[*compiledFilterNative]struct{}{}
 	}
-	cs.filters[f] = struct{}{}
-	runtime.SetFinalizer(f, func(x *Filter) { x.Close() })
+	cs.n.filters[fn] = struct{}{}
+	f := &Filter{Expr: expr, cs: cs, n: fn}
+	runtime.AddCleanup(f, (*compiledFilterNative).release, fn)
 	return f, nil
 }
 
@@ -703,9 +780,9 @@ func (f *Filter) Rows(format Format, body []byte, settings map[string]string) (F
 	// The filter call IS a use of its schema handle: take the schema's own
 	// lock, which is also what makes two filters over one schema never run
 	// concurrently.
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if f.handle == nil {
+	cs.n.mu.Lock()
+	defer cs.n.mu.Unlock()
+	if f.n.handle == nil {
 		return FilterResult{}, fmt.Errorf("chtypes: filter is closed")
 	}
 
@@ -721,7 +798,7 @@ func (f *Filter) Rows(format Format, body []byte, settings map[string]string) (F
 		defer C.free(unsafe.Pointer(pbody))
 	}
 
-	out := C.chs_filter_rows(f.handle, C.int(format), pbody, C.size_t(len(body)), csj)
+	out := C.chs_filter_rows(f.n.handle, C.int(format), pbody, C.size_t(len(body)), csj)
 	runtime.KeepAlive(body)
 	if out == nil {
 		return FilterResult{}, fmt.Errorf("chtypes: chs_filter_rows returned null")
@@ -732,27 +809,13 @@ func (f *Filter) Rows(format Format, body []byte, settings map[string]string) (F
 }
 
 // Close releases the native filter. Idempotent; safe before OR via the
-// schema's own Close (which closes open filters first); a finalizer covers
+// schema's own Close (which closes open filters first); a GC cleanup covers
 // forgetting it entirely.
 func (f *Filter) Close() {
-	cs := f.cs
-	if cs == nil {
+	if f.n == nil {
 		return
 	}
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	f.closeLocked()
-}
-
-// closeLocked frees the filter handle. Caller holds cs.mu.
-func (f *Filter) closeLocked() {
-	if f.handle != nil {
-		C.chs_filter_free(f.handle)
-		f.handle = nil
-	}
-	if f.cs != nil && f.cs.filters != nil {
-		delete(f.cs.filters, f)
-	}
+	f.n.release()
 }
 
 // ---------------------------------------------------------------- blocks
@@ -769,17 +832,18 @@ func (f *Filter) closeLocked() {
 //
 // LIFETIME: a Block references its schema handle exactly as a Filter does —
 // no copy, no refcount. This binding enforces the order both ways: the Block
-// holds its *CompiledSchema (finalizers run in dependency order) and
-// CompiledSchema.Close closes every open Block before freeing the schema. A
-// Block may be evaluated by MANY filters, sequentially; evaluation does not
-// consume or mutate it. Recompile blocks when the schema is recompiled.
+// holds its *CompiledSchema (so the schema stays reachable while the block
+// is) and both CompiledSchema.Close and the schema's GC cleanup free every
+// open Block before freeing the schema. A Block may be evaluated by MANY
+// filters, sequentially; evaluation does not consume or mutate it. Recompile
+// blocks when the schema is recompiled.
 //
 // THREADS: one Block must not be used from two threads at once, and an Eval
 // call is a use of BOTH handles — this binding takes the schema's own handle
 // lock for every block call, which also serializes K filters over one block.
 type Block struct {
-	cs     *CompiledSchema
-	handle *C.chs_block
+	cs *CompiledSchema
+	n  *compiledBlockNative
 }
 
 // ParseBlock parses a body once under this schema — same formats and settings
@@ -800,9 +864,9 @@ type Block struct {
 func (cs *CompiledSchema) ParseBlock(format Format, body []byte, settings map[string]string, opts ...RowOption) (*Block, error) {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if cs.handle == nil {
+	cs.n.mu.Lock()
+	defer cs.n.mu.Unlock()
+	if cs.n.handle == nil {
 		return nil, fmt.Errorf("chtypes: schema is closed")
 	}
 
@@ -823,7 +887,7 @@ func (cs *CompiledSchema) ParseBlock(format Format, body []byte, settings map[st
 
 	var code C.int
 	var cErr *C.char
-	h := C.chs_block_parse(cs.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr, pcols)
+	h := C.chs_block_parse(cs.n.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr, pcols)
 	runtime.KeepAlive(body)
 	if h == nil {
 		msg := ""
@@ -833,12 +897,13 @@ func (cs *CompiledSchema) ParseBlock(format Format, body []byte, settings map[st
 		}
 		return nil, schemaErr(int(code), msg, "")
 	}
-	b := &Block{cs: cs, handle: h}
-	if cs.blocks == nil {
-		cs.blocks = map[*Block]struct{}{}
+	bn := &compiledBlockNative{schema: cs.n, handle: h}
+	if cs.n.blocks == nil {
+		cs.n.blocks = map[*compiledBlockNative]struct{}{}
 	}
-	cs.blocks[b] = struct{}{}
-	runtime.SetFinalizer(b, func(x *Block) { x.Close() })
+	cs.n.blocks[bn] = struct{}{}
+	b := &Block{cs: cs, n: bn}
+	runtime.AddCleanup(b, (*compiledBlockNative).release, bn)
 	return b, nil
 }
 
@@ -864,8 +929,8 @@ func (f *Filter) Eval(b *Block) (FilterResult, error) {
 	}
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+	cs.n.mu.Lock()
+	defer cs.n.mu.Unlock()
 	return f.evalLocked(b)
 }
 
@@ -875,7 +940,7 @@ func (f *Filter) Eval(b *Block) (FilterResult, error) {
 func (f *Filter) evalCrossSchema(b *Block) (FilterResult, error) {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
-	first, second := f.cs, b.cs
+	first, second := f.cs.n, b.cs.n
 	if uintptr(unsafe.Pointer(first)) > uintptr(unsafe.Pointer(second)) {
 		first, second = second, first
 	}
@@ -889,13 +954,13 @@ func (f *Filter) evalCrossSchema(b *Block) (FilterResult, error) {
 // evalLocked runs chs_filter_eval. Caller holds the schema lock(s) covering
 // both handles and the defaultSettings read lock.
 func (f *Filter) evalLocked(b *Block) (FilterResult, error) {
-	if f.handle == nil {
+	if f.n.handle == nil {
 		return FilterResult{}, fmt.Errorf("chtypes: filter is closed")
 	}
-	if b.handle == nil {
+	if b.n.handle == nil {
 		return FilterResult{}, fmt.Errorf("chtypes: block is closed")
 	}
-	out := C.chs_filter_eval(f.handle, b.handle)
+	out := C.chs_filter_eval(f.n.handle, b.n.handle)
 	if out == nil {
 		return FilterResult{}, fmt.Errorf("chtypes: chs_filter_eval returned null")
 	}
@@ -905,27 +970,13 @@ func (f *Filter) evalLocked(b *Block) (FilterResult, error) {
 }
 
 // Close releases the native block. Idempotent; safe before OR via the
-// schema's own Close (which closes open blocks first); a finalizer covers
+// schema's own Close (which closes open blocks first); a GC cleanup covers
 // forgetting it entirely.
 func (b *Block) Close() {
-	cs := b.cs
-	if cs == nil {
+	if b.n == nil {
 		return
 	}
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	b.closeLocked()
-}
-
-// closeLocked frees the block handle. Caller holds cs.mu.
-func (b *Block) closeLocked() {
-	if b.handle != nil {
-		C.chs_block_free(b.handle)
-		b.handle = nil
-	}
-	if b.cs != nil && b.cs.blocks != nil {
-		delete(b.cs.blocks, b)
-	}
+	b.n.release()
 }
 
 // Rows validates and coerces a whole request body against a compiled schema
@@ -996,9 +1047,9 @@ func (cs *CompiledSchema) RowsExport(format Format, body []byte, settings map[st
 func (cs *CompiledSchema) rowsThrough(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags, columns []string) (BatchResult, error) {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if cs.handle == nil {
+	cs.n.mu.Lock()
+	defer cs.n.mu.Unlock()
+	if cs.n.handle == nil {
 		return BatchResult{}, fmt.Errorf("chtypes: schema is closed")
 	}
 
@@ -1027,7 +1078,7 @@ func (cs *CompiledSchema) rowsThrough(format Format, body []byte, settings map[s
 	if exportFormat != ExportNone {
 		ob = &obv
 	}
-	out := C.chs_rows(cs.handle, C.int(format), pbody, C.size_t(len(body)), csj,
+	out := C.chs_rows(cs.n.handle, C.int(format), pbody, C.size_t(len(body)), csj,
 		C.int(exportFormat), C.uint(flags), ob, pcols, nil)
 	runtime.KeepAlive(body)
 	// Copy-then-free the export buffer FIRST, whatever happens to the
@@ -1081,9 +1132,9 @@ func (cs *CompiledSchema) Row(format Format, raw []byte, opts ...RowOption) (Row
 func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings map[string]string, opts ...RowOption) (RowResult, error) {
 	defaultSettingsMu.RLock()
 	defer defaultSettingsMu.RUnlock()
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if cs.handle == nil {
+	cs.n.mu.Lock()
+	defer cs.n.mu.Unlock()
+	if cs.n.handle == nil {
 		return RowResult{}, fmt.Errorf("chtypes: schema is closed")
 	}
 
@@ -1104,7 +1155,7 @@ func (cs *CompiledSchema) RowWithSettings(format Format, raw []byte, settings ma
 		defer C.free(unsafe.Pointer(pcols))
 	}
 
-	out := C.chs_row(cs.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)
+	out := C.chs_row(cs.n.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)
 	runtime.KeepAlive(raw)
 	if out == nil {
 		return RowResult{}, fmt.Errorf("chtypes: chs_row returned null")

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // FetchABIRevision is the ABI revision fetch selects release rows at in place
@@ -59,3 +60,25 @@ func FixturesABIRevision(dir string) (int, error) {
 	}
 	return n, nil
 }
+
+// NativeKind names which C release function a NativeFreed observer saw.
+type NativeKind int
+
+const (
+	FreedSchema NativeKind = iota + 1 // chs_schema_free
+	FreedFilter                       // chs_filter_free
+	FreedBlock                        // chs_block_free
+)
+
+// NativeFreed holds an optional observer of native frees: when it holds a
+// function, the chtypes package calls it once for every schema, filter and
+// block handle it frees, with the handle's address, right after the C call
+// returns and still under the lock that guarded it. It is how the GC tests
+// count C frees instead of timing them: an abandoned schema is reclaimed
+// exactly when its handle, and each of its open children's, has been seen
+// here.
+//
+// Nil (the default) costs the free path one atomic load. A test installs an
+// observer for its own duration and removes it after; the observer must not
+// call back into chtypes.
+var NativeFreed atomic.Pointer[func(kind NativeKind, handle uintptr)]

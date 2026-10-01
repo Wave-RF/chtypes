@@ -327,6 +327,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
 
 // ---------------------------------------------------------------- locking
@@ -340,7 +342,7 @@ import (
 // per Library across every call, which serialized unrelated schemas against
 // each other and was strictly stronger than the ABI promises.
 //
-// HANDLE LEVEL — LoadedSchema.mu, exclusive. One handle, one thread at a time,
+// HANDLE LEVEL — loadedSchemaNative.mu, exclusive. One handle, one thread at a time,
 // which is the header's second clause verbatim:
 //
 //	chs_row, chs_rows          `const chs_schema *`. The header names chs_row;
@@ -1056,31 +1058,161 @@ type LoadedSchema struct {
 	Canonical      []string
 	LiteralDefault []bool
 
-	lib    *Library
-	handle unsafe.Pointer
+	lib *Library
+	// n is the native half: the handle, its open children's handles and the
+	// lock over all of them. See loadedSchemaNative for why it is separate.
+	n *loadedSchemaNative
+}
+
+// loadedSchemaNative is everything the C layer owns for one LoadedSchema: the
+// schema handle, the handle of every filter and block still open over it,
+// and the one lock that guards them all. It is a separate object from the
+// LoadedSchema, and points at no Go object a caller holds, for one reason:
+// it is what the GC cleanups run on (issue #375).
+//
+// Each LoadedFilter and LoadedBlock points at its LoadedSchema, which keeps
+// the schema reachable for as long as any child is, and the schema has to
+// find its open children to free them first (the C ABI contract §Filters
+// and §Blocks: the C layer does not refcount, and freeing a schema under a
+// live child is a use-after-free). When those were Go pointers both ways and
+// each object carried a runtime.SetFinalizer, a schema abandoned with an open
+// child was a cycle with finalizers in it, which Go does not collect: all of
+// its C handles leaked for the life of the process.
+//
+// So the schema tracks its children's NATIVE halves instead, and the GC
+// backstop is runtime.AddCleanup, whose cleanup is handed a native half and
+// never the object: a cycle stays collectable, and when a schema and its
+// children become unreachable together their cleanups may run in any order,
+// concurrently. Each one takes this lock, and a child's handle is freed by
+// whichever of its own Close, its own cleanup, or the schema's release gets
+// there first; the others find it nil. The schema's release always frees the
+// children still registered before the schema handle, so the free order
+// holds whichever cleanup runs first.
+type loadedSchemaNative struct {
+	lib *Library
 	// mu makes this ONE handle single-threaded, which is the whole of the
-	// header's second clause. Distinct LoadedSchemas never contend.
-	mu sync.Mutex
-	// filters tracks every open LoadedFilter compiled from this handle, so
-	// Close can free them FIRST (the C ABI contract §Filters, handle lifetime).
-	// Guarded by mu.
-	filters map[*LoadedFilter]struct{}
-	// blocks tracks every open LoadedBlock parsed from this handle — the
-	// same non-owning rule, the same free-before-schema order (the C ABI contract
-	// §Blocks). Guarded by mu.
-	blocks map[*LoadedBlock]struct{}
+	// header's second clause. Distinct LoadedSchemas never contend. A filter
+	// or block call takes it too: it is a use of the schema handle.
+	mu     sync.Mutex
+	handle unsafe.Pointer // guarded by mu; nil once freed
+	// filters and blocks hold every child still open over this handle, so a
+	// release can free them FIRST. Guarded by mu.
+	filters map[*loadedFilterNative]struct{}
+	blocks  map[*loadedBlockNative]struct{}
+}
+
+// loadedFilterNative is one LoadedFilter's native half: its handle, freed
+// under its schema's lock. See loadedSchemaNative.
+type loadedFilterNative struct {
+	schema *loadedSchemaNative
+	handle unsafe.Pointer // guarded by schema.mu; nil once freed
+}
+
+// loadedBlockNative is one LoadedBlock's native half. See loadedSchemaNative.
+type loadedBlockNative struct {
+	schema *loadedSchemaNative
+	handle unsafe.Pointer // guarded by schema.mu; nil once freed
 }
 
 // lock takes both levels in the one legal order: the library's read lock (so no
 // chs_init can be in flight) and then this handle's exclusive lock. Always
 // released by the returned func, so every call site is one deferred line and
 // none of them can invent a different order and deadlock.
-func (s *LoadedSchema) lock() func() {
-	s.lib.mu.RLock()
-	s.mu.Lock()
+func (n *loadedSchemaNative) lock() func() {
+	n.lib.mu.RLock()
+	n.mu.Lock()
 	return func() {
-		s.mu.Unlock()
-		s.lib.mu.RUnlock()
+		n.mu.Unlock()
+		n.lib.mu.RUnlock()
+	}
+}
+
+// lock is the schema's own lock; see loadedSchemaNative.lock.
+func (s *LoadedSchema) lock() func() { return s.n.lock() }
+
+// release frees every child still open over this schema, then the schema
+// handle: the C-required order. Idempotent. It is both Close's body and the
+// schema's GC cleanup.
+func (n *loadedSchemaNative) release() {
+	unlock := n.lock()
+	defer unlock()
+	for c := range n.filters {
+		c.freeLocked()
+	}
+	n.filters = nil
+	for c := range n.blocks {
+		c.freeLocked()
+	}
+	n.blocks = nil
+	if n.handle == nil {
+		return
+	}
+	C.chs_lib_schema_free(&n.lib.lib, n.handle)
+	noteFreed(testhook.FreedSchema, n.handle)
+	n.handle = nil
+}
+
+// release frees this filter's handle unless something already has.
+// Idempotent; LoadedFilter.Close's body and the filter's GC cleanup.
+func (c *loadedFilterNative) release() {
+	unlock := c.schema.lock()
+	defer unlock()
+	c.freeLocked()
+}
+
+// freeLocked frees the filter handle. Caller holds the schema's lock.
+func (c *loadedFilterNative) freeLocked() {
+	if c.handle == nil {
+		return
+	}
+	C.chs_lib_filter_free(&c.schema.lib.lib, c.handle)
+	noteFreed(testhook.FreedFilter, c.handle)
+	c.handle = nil
+	delete(c.schema.filters, c)
+}
+
+// release frees this block's handle unless something already has.
+// Idempotent; LoadedBlock.Close's body and the block's GC cleanup.
+func (c *loadedBlockNative) release() {
+	unlock := c.schema.lock()
+	defer unlock()
+	c.freeLocked()
+}
+
+// freeLocked frees the block handle. Caller holds the schema's lock.
+func (c *loadedBlockNative) freeLocked() {
+	if c.handle == nil {
+		return
+	}
+	C.chs_lib_block_free(&c.schema.lib.lib, c.handle)
+	noteFreed(testhook.FreedBlock, c.handle)
+	c.handle = nil
+	delete(c.schema.blocks, c)
+}
+
+// noteFreed reports one native free to a test's observer, if one is
+// installed (go/internal/testhook.NativeFreed); nil costs one atomic load.
+func noteFreed(kind testhook.NativeKind, h unsafe.Pointer) {
+	if fn := testhook.NativeFreed.Load(); fn != nil {
+		(*fn)(kind, uintptr(h))
+	}
+}
+
+// lockPair takes two schemas' locks under one library read lock, in a fixed
+// global order so two crossed calls cannot deadlock, for a call that uses a
+// handle from each. a and b must be distinct and from the same library.
+func lockPair(a, b *loadedSchemaNative) func() {
+	first, second := a, b
+	if uintptr(unsafe.Pointer(first)) > uintptr(unsafe.Pointer(second)) {
+		first, second = second, first
+	}
+	a.lib.mu.RLock()
+	first.mu.Lock()
+	second.mu.Lock()
+	return func() {
+		second.mu.Unlock()
+		first.mu.Unlock()
+		a.lib.mu.RUnlock()
 	}
 }
 
@@ -1126,27 +1258,25 @@ func (l *Library) CompileDDL(ddl string, opts ...CompileOption) (*LoadedSchema, 
 // group into Go. The caller holds l.mu's read side; the handle is not yet
 // visible to any other goroutine.
 func (l *Library) newLoadedSchema(h unsafe.Pointer) *LoadedSchema {
-	s := &LoadedSchema{lib: l, handle: h}
-	if n := int(C.chs_lib_col_count(&l.lib, s.handle)); n >= 0 {
+	s := &LoadedSchema{lib: l, n: &loadedSchemaNative{lib: l, handle: h}}
+	if n := int(C.chs_lib_col_count(&l.lib, h)); n >= 0 {
 		for i := 0; i < n; i++ {
 			ci := C.int(i)
 			s.Columns = append(s.Columns, Column{
-				Name:        C.GoString(C.chs_lib_col_name(&l.lib, s.handle, ci)),
-				Type:        C.GoString(C.chs_lib_col_type(&l.lib, s.handle, ci)),
-				Default:     C.GoString(C.chs_lib_col_default_expr(&l.lib, s.handle, ci)),
-				DefaultKind: parseDefaultKind(C.GoString(C.chs_lib_col_default_kind(&l.lib, s.handle, ci))),
+				Name:        C.GoString(C.chs_lib_col_name(&l.lib, h, ci)),
+				Type:        C.GoString(C.chs_lib_col_type(&l.lib, h, ci)),
+				Default:     C.GoString(C.chs_lib_col_default_expr(&l.lib, h, ci)),
+				DefaultKind: parseDefaultKind(C.GoString(C.chs_lib_col_default_kind(&l.lib, h, ci))),
 			})
 			s.Canonical = append(s.Canonical, s.Columns[i].Type)
-			s.LiteralDefault = append(s.LiteralDefault, C.chs_lib_col_is_literal(&l.lib, s.handle, ci) != 0)
+			s.LiteralDefault = append(s.LiteralDefault, C.chs_lib_col_is_literal(&l.lib, h, ci) != 0)
 		}
 	}
-	// A never-Closed LoadedSchema used to leak its C handle for the life of
-	// the process (issue #302) — LoadedFilter and LoadedBlock already carry
-	// this same backup (below), and the linked build's CompiledSchema does
-	// too (linked.go). Close is idempotent (it checks s.handle == nil before
-	// freeing), which is what makes it safe for the finalizer to call even
-	// after an explicit Close already ran.
-	runtime.SetFinalizer(s, func(x *LoadedSchema) { x.Close() })
+	// The GC backstop for a schema nobody Close()'d (issues #302, #375): the
+	// cleanup is handed the native half, never s, so s stays collectable even
+	// with open children pointing back at it. release is idempotent, so an
+	// explicit Close that already ran leaves it nothing to do.
+	runtime.AddCleanup(s, (*loadedSchemaNative).release, s.n)
 	return s
 }
 
@@ -1407,11 +1537,11 @@ func (s *LoadedSchema) SetEngine(engine, orderBy string, opts ...EngineOption) e
 	// chs_schema_engine takes a NON-const handle: it is a writer. The nil check
 	// moves inside the lock so a concurrent Close cannot free between the two.
 	unlock := s.lock()
-	if s.handle == nil {
+	if s.n.handle == nil {
 		unlock()
 		return fmt.Errorf("chtypes: schema is closed")
 	}
-	rc := C.chs_lib_engine(&s.lib.lib, s.handle, ce, co, cmt, &cErr)
+	rc := C.chs_lib_engine(&s.lib.lib, s.n.handle, ce, co, cmt, &cErr)
 	msg := ""
 	if cErr != nil {
 		msg = C.GoString(cErr)
@@ -1441,11 +1571,11 @@ func (s *LoadedSchema) SetTTL(ttl string) error {
 	var cErr *C.char
 	// Also a NON-const handle, so also a writer. See SetEngine.
 	unlock := s.lock()
-	if s.handle == nil {
+	if s.n.handle == nil {
 		unlock()
 		return fmt.Errorf("chtypes: schema is closed")
 	}
-	rc := C.chs_lib_ttl(&s.lib.lib, s.handle, ct, &cErr)
+	rc := C.chs_lib_ttl(&s.lib.lib, s.n.handle, ct, &cErr)
 	msg := ""
 	if cErr != nil {
 		msg = C.GoString(cErr)
@@ -1487,11 +1617,11 @@ func (s *LoadedSchema) SetPartitionBy(expr string) error {
 	var cErr *C.char
 	// A NON-const handle, so a writer, exactly like SetEngine and SetTTL.
 	unlock := s.lock()
-	if s.handle == nil {
+	if s.n.handle == nil {
 		unlock()
 		return fmt.Errorf("chtypes: schema is closed")
 	}
-	rc := C.chs_lib_partition_by(&s.lib.lib, s.handle, cp, &cErr)
+	rc := C.chs_lib_partition_by(&s.lib.lib, s.n.handle, cp, &cErr)
 	msg := ""
 	if cErr != nil {
 		msg = C.GoString(cErr)
@@ -1503,24 +1633,15 @@ func (s *LoadedSchema) SetPartitionBy(expr string) error {
 
 // Close releases the native schema. Idempotent, and safe to race with calls on
 // the same handle: whoever gets the lock first wins and the rest see a closed
-// schema rather than a freed one. Any LoadedFilter still open on this schema
-// is closed FIRST — the filter-before-schema free order the C layer requires.
+// schema rather than a freed one. Any LoadedFilter or LoadedBlock still open
+// on this schema is closed FIRST — the children-before-schema free order the C
+// layer requires. A schema nobody closes is released the same way once it and
+// every child over it are unreachable; Close is the deterministic path.
 func (s *LoadedSchema) Close() {
-	unlock := s.lock()
-	defer unlock()
-	for f := range s.filters {
-		f.closeLocked()
-	}
-	s.filters = nil
-	for b := range s.blocks {
-		b.closeLocked()
-	}
-	s.blocks = nil
-	if s.handle == nil {
+	if s.n == nil {
 		return
 	}
-	C.chs_lib_schema_free(&s.lib.lib, s.handle)
-	s.handle = nil
+	s.n.release()
 }
 
 // columnsCArgLoaded is the dlopen'd path's twin of the linked path's
@@ -1569,11 +1690,11 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 	// header's "a single handle must not be used from two threads at once".
 	// Distinct handles run this concurrently — that is the whole relaxation.
 	unlock := s.lock()
-	if s.handle == nil {
+	if s.n.handle == nil {
 		unlock()
 		return RowResult{}, fmt.Errorf("chtypes: schema is closed")
 	}
-	out := C.chs_lib_row(&s.lib.lib, s.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)
+	out := C.chs_lib_row(&s.lib.lib, s.n.handle, C.int(format), praw, C.size_t(len(raw)), csj, pcols)
 	runtime.KeepAlive(raw)
 	if out == nil {
 		unlock()
@@ -1649,11 +1770,11 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 	// the identical `const chs_schema *` and is documented alongside chs_row
 	// under the STATELESSNESS block that covers every entry point.
 	unlock := s.lock()
-	if s.handle == nil {
+	if s.n.handle == nil {
 		unlock()
 		return BatchResult{}, fmt.Errorf("chtypes: schema is closed")
 	}
-	out := C.chs_lib_rows_export(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj,
+	out := C.chs_lib_rows_export(&s.lib.lib, s.n.handle, C.int(format), pbody, C.size_t(len(body)), csj,
 		C.int(exportFormat), C.uint(flags), ob, pcols)
 	runtime.KeepAlive(body)
 	// Copy-then-free the export buffer inside the critical section (chs_free
@@ -1753,29 +1874,18 @@ func (s *LoadedSchema) rowsThroughWithFilter(format Format, body []byte, setting
 	if fs == s {
 		unlock = s.lock()
 	} else {
-		first, second := s, fs
-		if uintptr(unsafe.Pointer(first)) > uintptr(unsafe.Pointer(second)) {
-			first, second = second, first
-		}
-		s.lib.mu.RLock()
-		first.mu.Lock()
-		second.mu.Lock()
-		unlock = func() {
-			second.mu.Unlock()
-			first.mu.Unlock()
-			s.lib.mu.RUnlock()
-		}
+		unlock = lockPair(s.n, fs.n)
 	}
-	if s.handle == nil {
+	if s.n.handle == nil {
 		unlock()
 		return BatchResult{}, fmt.Errorf("chtypes: schema is closed")
 	}
-	if f.handle == nil {
+	if f.n.handle == nil {
 		unlock()
 		return BatchResult{}, fmt.Errorf("chtypes: filter is closed")
 	}
-	out := C.chs_lib_rows_export_filtered(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj,
-		C.int(exportFormat), C.uint(flags), ob, pcols, f.handle)
+	out := C.chs_lib_rows_export_filtered(&s.lib.lib, s.n.handle, C.int(format), pbody, C.size_t(len(body)), csj,
+		C.int(exportFormat), C.uint(flags), ob, pcols, f.n.handle)
 	runtime.KeepAlive(body)
 	// Copy-then-free the export buffer inside the critical section, exactly
 	// as rowsThrough does.
@@ -1806,17 +1916,18 @@ func (s *LoadedSchema) rowsThroughWithFilter(format Format, body []byte, setting
 
 // LoadedFilter is the dlopen'd twin of Filter: one boolean expression
 // compiled inside one specific version's library, with the same lifetime and
-// thread rules — the LoadedFilter references its LoadedSchema, the schema's
-// Close closes open filters first, and every filter call takes the schema's
-// own handle lock (a filter call IS a use of its schema handle). See Filter
-// for the full contract, including the enforcement gate: shadow/replay only
-// until the WHERE-truth rig gates green.
+// thread rules — the LoadedFilter references its LoadedSchema (so the schema
+// stays reachable while the filter is), the schema's Close closes open
+// filters first, and every filter call takes the schema's own handle lock (a
+// filter call IS a use of its schema handle). See Filter for the full
+// contract, including the enforcement gate: shadow/replay only until the
+// WHERE-truth rig gates green.
 type LoadedFilter struct {
 	// Expr is the expression text as compiled, for logging and cache keys.
 	Expr string
 
 	schema *LoadedSchema
-	handle unsafe.Pointer
+	n      *loadedFilterNative
 }
 
 // CompileFilter mirrors CompiledSchema.CompileFilter for a dlopen'd library:
@@ -1841,11 +1952,11 @@ func (s *LoadedSchema) CompileFilter(expr string, opts ...FilterOption) (*Loaded
 	var code C.int
 	var cErr *C.char
 	unlock := s.lock()
-	if s.handle == nil {
+	if s.n.handle == nil {
 		unlock()
 		return nil, fmt.Errorf("chtypes: schema is closed")
 	}
-	h := C.chs_lib_filter_compile(&s.lib.lib, s.handle, cexpr, cparams, &code, &cErr)
+	h := C.chs_lib_filter_compile(&s.lib.lib, s.n.handle, cexpr, cparams, &code, &cErr)
 	if h == nil {
 		msg := ""
 		if cErr != nil {
@@ -1855,13 +1966,16 @@ func (s *LoadedSchema) CompileFilter(expr string, opts ...FilterOption) (*Loaded
 		unlock()
 		return nil, schemaErr(int(code), msg, "")
 	}
-	f := &LoadedFilter{Expr: expr, schema: s, handle: unsafe.Pointer(h)}
-	if s.filters == nil {
-		s.filters = map[*LoadedFilter]struct{}{}
+	fn := &loadedFilterNative{schema: s.n, handle: unsafe.Pointer(h)}
+	if s.n.filters == nil {
+		s.n.filters = map[*loadedFilterNative]struct{}{}
 	}
-	s.filters[f] = struct{}{}
+	s.n.filters[fn] = struct{}{}
 	unlock()
-	runtime.SetFinalizer(f, func(x *LoadedFilter) { x.Close() })
+	f := &LoadedFilter{Expr: expr, schema: s, n: fn}
+	// The GC backstop for a filter nobody closed, on the native half only, so
+	// the filter→schema pointer never forms an uncollectable cycle (#375).
+	runtime.AddCleanup(f, (*loadedFilterNative).release, fn)
 	return f, nil
 }
 
@@ -1885,11 +1999,11 @@ func (f *LoadedFilter) Rows(format Format, body []byte, settings map[string]stri
 	// The schema's own two-level lock: a filter call is a use of its schema
 	// handle, so two filters over one schema never run concurrently.
 	unlock := s.lock()
-	if f.handle == nil {
+	if f.n.handle == nil {
 		unlock()
 		return FilterResult{}, fmt.Errorf("chtypes: filter is closed")
 	}
-	out := C.chs_lib_filter_rows(&s.lib.lib, f.handle, C.int(format), pbody, C.size_t(len(body)), csj)
+	out := C.chs_lib_filter_rows(&s.lib.lib, f.n.handle, C.int(format), pbody, C.size_t(len(body)), csj)
 	runtime.KeepAlive(body)
 	if out == nil {
 		unlock()
@@ -1904,37 +2018,23 @@ func (f *LoadedFilter) Rows(format Format, body []byte, settings map[string]stri
 
 // Close releases the native filter. Idempotent, and also performed by the
 // schema's own Close (filters first, then the schema — the C-required
-// order).
+// order), so closing either one first is safe.
 func (f *LoadedFilter) Close() {
-	s := f.schema
-	if s == nil {
+	if f.n == nil {
 		return
 	}
-	unlock := s.lock()
-	defer unlock()
-	f.closeLocked()
-}
-
-// closeLocked frees the filter handle. Caller holds the schema's lock.
-func (f *LoadedFilter) closeLocked() {
-	if f.handle != nil {
-		C.chs_lib_filter_free(&f.schema.lib.lib, f.handle)
-		f.handle = nil
-	}
-	if f.schema != nil && f.schema.filters != nil {
-		delete(f.schema.filters, f)
-	}
+	f.n.release()
 }
 
 // LoadedBlock is the dlopen'd twin of Block: one body parsed once inside one
 // specific version's library, evaluable by many LoadedFilters sequentially
 // with no re-parse. Same lifetime and thread rules — the LoadedBlock
-// references its LoadedSchema, the schema's Close closes open blocks first,
-// and every block call takes the schema's own handle lock. See Block for the
-// full contract.
+// references its LoadedSchema (so the schema stays reachable while the block
+// is), the schema's Close closes open blocks first, and every block call
+// takes the schema's own handle lock. See Block for the full contract.
 type LoadedBlock struct {
 	schema *LoadedSchema
-	handle unsafe.Pointer
+	n      *loadedBlockNative
 }
 
 // ParseBlock mirrors CompiledSchema.ParseBlock for a dlopen'd library: parse
@@ -1967,11 +2067,11 @@ func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[strin
 	var code C.int
 	var cErr *C.char
 	unlock := s.lock()
-	if s.handle == nil {
+	if s.n.handle == nil {
 		unlock()
 		return nil, fmt.Errorf("chtypes: schema is closed")
 	}
-	h := C.chs_lib_block_parse(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr, pcols)
+	h := C.chs_lib_block_parse(&s.lib.lib, s.n.handle, C.int(format), pbody, C.size_t(len(body)), csj, &code, &cErr, pcols)
 	runtime.KeepAlive(body)
 	if h == nil {
 		msg := ""
@@ -1982,13 +2082,15 @@ func (s *LoadedSchema) ParseBlock(format Format, body []byte, settings map[strin
 		unlock()
 		return nil, schemaErr(int(code), msg, "")
 	}
-	b := &LoadedBlock{schema: s, handle: unsafe.Pointer(h)}
-	if s.blocks == nil {
-		s.blocks = map[*LoadedBlock]struct{}{}
+	bn := &loadedBlockNative{schema: s.n, handle: unsafe.Pointer(h)}
+	if s.n.blocks == nil {
+		s.n.blocks = map[*loadedBlockNative]struct{}{}
 	}
-	s.blocks[b] = struct{}{}
+	s.n.blocks[bn] = struct{}{}
 	unlock()
-	runtime.SetFinalizer(b, func(x *LoadedBlock) { x.Close() })
+	b := &LoadedBlock{schema: s, n: bn}
+	// The same GC backstop as a filter's, on the native half only (#375).
+	runtime.AddCleanup(b, (*loadedBlockNative).release, bn)
 	return b, nil
 }
 
@@ -2007,31 +2109,19 @@ func (f *LoadedFilter) Eval(b *LoadedBlock) (FilterResult, error) {
 	if fs == bs {
 		unlock = fs.lock()
 	} else {
-		// Two schemas, one library: the library read lock once, then both
-		// handle locks in a fixed global order so two crossed Evals cannot
-		// deadlock. The C layer answers its rejected-1002 document.
-		first, second := fs, bs
-		if uintptr(unsafe.Pointer(first)) > uintptr(unsafe.Pointer(second)) {
-			first, second = second, first
-		}
-		fs.lib.mu.RLock()
-		first.mu.Lock()
-		second.mu.Lock()
-		unlock = func() {
-			second.mu.Unlock()
-			first.mu.Unlock()
-			fs.lib.mu.RUnlock()
-		}
+		// Two schemas, one library: both handle locks, in the fixed global
+		// order. The C layer answers its rejected-1002 document.
+		unlock = lockPair(fs.n, bs.n)
 	}
-	if f.handle == nil {
+	if f.n.handle == nil {
 		unlock()
 		return FilterResult{}, fmt.Errorf("chtypes: filter is closed")
 	}
-	if b.handle == nil {
+	if b.n.handle == nil {
 		unlock()
 		return FilterResult{}, fmt.Errorf("chtypes: block is closed")
 	}
-	out := C.chs_lib_filter_eval(&fs.lib.lib, f.handle, b.handle)
+	out := C.chs_lib_filter_eval(&fs.lib.lib, f.n.handle, b.n.handle)
 	if out == nil {
 		unlock()
 		return FilterResult{}, fmt.Errorf("chtypes: chs_filter_eval returned null")
@@ -2043,26 +2133,13 @@ func (f *LoadedFilter) Eval(b *LoadedBlock) (FilterResult, error) {
 }
 
 // Close releases the native block. Idempotent, and also performed by the
-// schema's own Close (blocks first, then the schema — the C-required order).
+// schema's own Close (blocks first, then the schema — the C-required order),
+// so closing either one first is safe.
 func (b *LoadedBlock) Close() {
-	s := b.schema
-	if s == nil {
+	if b.n == nil {
 		return
 	}
-	unlock := s.lock()
-	defer unlock()
-	b.closeLocked()
-}
-
-// closeLocked frees the block handle. Caller holds the schema's lock.
-func (b *LoadedBlock) closeLocked() {
-	if b.handle != nil {
-		C.chs_lib_block_free(&b.schema.lib.lib, b.handle)
-		b.handle = nil
-	}
-	if b.schema != nil && b.schema.blocks != nil {
-		delete(b.schema.blocks, b)
-	}
+	b.n.release()
 }
 
 // sortMinorLines orders minor lines numerically. docs/reference/bindings.md §Version
