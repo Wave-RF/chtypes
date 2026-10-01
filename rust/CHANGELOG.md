@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The crash-guard refuse-list is now sourced identically to the other three bindings, and an artifact with neither source refuses rather than loading unguarded.** This crate read only `unsafe_families.txt` next to the library, so a directory missing that file silently called `chs_init` with an empty guard; `unsafe_families.txt` is still tried first, even when it is empty, but `manifest.json`'s own `unsafe_families` field is now the fallback when the file is absent, and present-but-empty wins in both places. A directory with neither source is now `Error::MissingUnsafeFamilies`, naming both, instead of loading with no refuse-list at all (`docs/reference/artifact.md` step 9).
+
 ## [0.5.2] — 2026-10-01
 
 ### Changed

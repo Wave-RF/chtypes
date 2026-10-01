@@ -57,17 +57,17 @@ Exactly nine fields, written by the build that produces it with `sort_keys=True,
 }
 ```
 
-| Field                | Type   | Meaning and how a loader uses it                                                                                                     |
-| -------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `library`            | string | **The shared library's file name.** A loader MUST read the file name from here and MUST NOT construct it. See the rule below.        |
-| `library_bytes`      | int    | Size of that file. Cheap first-pass integrity check.                                                                                 |
-| `library_sha256`     | string | SHA-256 of that file. The only integrity check that means anything.                                                                  |
-| `clickhouse_version` | string | The exact release, e.g. `25.8.28.1-lts`. **Cross-check** against `chs_clickhouse_version()`; do not trust it over the library.       |
-| `clickhouse_minor`   | string | The minor line, e.g. `25.8`. Informational — a loader SHOULD derive the minor from the library's own reported version instead.       |
-| `clickhouse_commit`  | string | The upstream commit the tree was built from. Provenance; the only field that ties an artifact to a specific ClickHouse source state. |
-| `os`                 | string | `linux` \| `darwin`. Lowercased `platform.system()`.                                                                                 |
-| `arch`               | string | `arm64` \| `amd64`. Normalized.                                                                                                      |
-| `unsafe_families`    | string | The generated refuse-list, inline. Duplicates `unsafe_families.txt`; empty on every current artifact.                                |
+| Field                | Type   | Meaning and how a loader uses it                                                                                                                                                  |
+| -------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `library`            | string | **The shared library's file name.** A loader MUST read the file name from here and MUST NOT construct it. See the rule below.                                                     |
+| `library_bytes`      | int    | Size of that file. Cheap first-pass integrity check.                                                                                                                              |
+| `library_sha256`     | string | SHA-256 of that file. The only integrity check that means anything.                                                                                                               |
+| `clickhouse_version` | string | The exact release, e.g. `25.8.28.1-lts`. **Cross-check** against `chs_clickhouse_version()`; do not trust it over the library.                                                    |
+| `clickhouse_minor`   | string | The minor line, e.g. `25.8`. Informational — a loader SHOULD derive the minor from the library's own reported version instead.                                                    |
+| `clickhouse_commit`  | string | The upstream commit the tree was built from. Provenance; the only field that ties an artifact to a specific ClickHouse source state.                                              |
+| `os`                 | string | `linux` \| `darwin`. Lowercased `platform.system()`.                                                                                                                              |
+| `arch`               | string | `arm64` \| `amd64`. Normalized.                                                                                                                                                   |
+| `unsafe_families`    | string | The generated refuse-list, inline — the FALLBACK a loader uses when `unsafe_families.txt` is absent (§Loading step 9). Empty on every current artifact, which ships the file too. |
 
 Additive changes to this file are allowed. A loader MUST ignore fields it does not know rather than failing, and MUST NOT require a field that is absent.
 
@@ -91,7 +91,7 @@ The reference algorithm (`chtypes.NewRegistry` in `go/chtypes/multiversion.go`):
 6. Every other symbol is **optional**. A missing one means "this artifact predates the feature" and MUST degrade to `unsupported` at call time, never to a load failure. The reference returns a private `-3` from its C shims for a missing `chs_schema_engine` / `chs_schema_ttl` and turns it into `CodeUnsupported` with `"this artifact predates engine support (rebuild it)"`; a missing `chs_row` returns `NULL`, reported as `"this artifact predates chs_row (rebuild it)"`.
 7. Column introspection is **all-or-nothing**: `chs_schema_column_count`, `_name`, `_type`, `_default_expr`, `_default_kind`, `_default_is_literal` shipped together. If any is missing, treat the whole group as absent and leave the schema's column list empty rather than partially populated.
 8. Ask the library its own version: `chs_clickhouse_version()`. **The library names itself; nothing is inferred from the path.** Derive the minor line from that string.
-9. `chs_init(timezone, unsafe_families, out_err)`, once per library, with the contents of that version's own `unsafe_families.txt`. Each library keeps its own DateLUT and its own refuse-list. `out_err` MAY be `NULL`; when it is not and the call fails, it carries ClickHouse's own message (free with `chs_free`) — the reachable failure is an unknown timezone.
+9. `chs_init(timezone, unsafe_families, out_err)`, once per library, with the refuse-list resolved as: that version's own `unsafe_families.txt` when the file is present, even empty; otherwise `manifest.json`'s own `unsafe_families` field when IT is present, even empty. **A loader MUST NOT fall back to an empty guard when neither source is present** — that is refused instead, naming both sources, because an empty refuse-list is indistinguishable from one that was never set. Each library keeps its own DateLUT and its own refuse-list. `out_err` MAY be `NULL`; when it is not and the call fails, it carries ClickHouse's own message (free with `chs_free`) — the reachable failure is an unknown timezone.
 10. Index the library under **both** its exact version and its minor line.
 11. If zero libraries loaded, that is an error naming the directory — an empty registry is a configuration mistake, not an empty result.
 

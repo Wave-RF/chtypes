@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The crash-guard refuse-list is now sourced identically to the other three bindings, and an artifact with neither source refuses rather than loading unguarded.** This binding already fell back to the manifest's `unsafe_families` field when `unsafe_families.txt` was absent, but a manifest predating the field (or one that simply omitted it) parsed to the same `undefined` as one carrying it empty, so `chs_init` silently ran with no refuse-list either way. A directory with neither the file nor the field is now refused, naming both, instead of loading unguarded (`docs/reference/artifact.md` step 9).
+
 ## [0.5.2] — 2026-10-01
 
 ### Added

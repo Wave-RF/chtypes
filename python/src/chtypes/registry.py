@@ -25,6 +25,7 @@ from ._document import parse_batch_document, parse_filter_document, parse_row_do
 from ._error_codes import ErrorCodeTable, _ErrorCodeCache
 from ._manifest import (
     Manifest,
+    _resolve_unsafe_families,
     cache_registry_dir,
     check_library_bytes,
     host_platform,
@@ -1040,11 +1041,10 @@ class Library:
             )
         # Each library keeps its own DateLUT and its own refuse-list. An absent
         # or empty unsafe_families.txt is a valid EMPTY LIST, not a missing file:
-        # every artifact in the current matrix ships one.
-        try:
-            unsafe = (Path(path).parent / "unsafe_families.txt").read_text().strip()
-        except OSError:
-            unsafe = manifest.unsafe_families.strip()
+        # every artifact in the current matrix ships one. Neither it nor the
+        # manifest's own unsafe_families field present is refused, never a
+        # silent empty guard (docs/reference/artifact.md step 9).
+        unsafe = _resolve_unsafe_families(Path(path).parent, manifest)
         # chs_init AT MOST ONCE per artifact image. ctypes.CDLL and dlopen
         # refcount one image per file, so a second Registry over the same
         # artifact — or over a hardlink or symlink to it — shares its C

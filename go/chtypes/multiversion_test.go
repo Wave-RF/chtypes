@@ -25,7 +25,7 @@ func TestRegistryLoadsAndDispatches(t *testing.T) {
 		blob, _ := os.ReadFile(src)
 		os.WriteFile(filepath.Join(sub, "libchtypes"+soext), blob, 0o755)
 		os.WriteFile(filepath.Join(sub, "manifest.json"),
-			[]byte(`{"library":"libchtypes`+soext+`","clickhouse_version":"x","clickhouse_minor":"x"}`), 0o644)
+			[]byte(`{"library":"libchtypes`+soext+`","clickhouse_version":"x","clickhouse_minor":"x","unsafe_families":""}`), 0o644)
 	}
 	r, err := NewRegistry(dir)
 	if err != nil {
@@ -174,6 +174,69 @@ func writeFakeArtifact(t *testing.T, dir, line string, manifest map[string]any, 
 		t.Fatal(err)
 	}
 	return sub
+}
+
+// resolveUnsafeFamilies is exercised directly (docs/reference/artifact.md step
+// 9: "the contents of that version's own unsafe_families.txt") rather than
+// through a full Load, which would need a real dlopen-able artifact: the
+// three cases below are about WHICH source wins, never about chs_init itself.
+
+func TestResolveUnsafeFamiliesFallsBackToManifestField(t *testing.T) {
+	dir := t.TempDir()
+	sub := writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+		"unsafe_families":    "Array,Map",
+	}, []byte("not a shared library"))
+
+	got, err := resolveUnsafeFamilies(sub)
+	if err != nil {
+		t.Fatalf("resolveUnsafeFamilies: %v", err)
+	}
+	if got != "Array,Map" {
+		t.Fatalf("got %q, want the manifest's unsafe_families to reach init", got)
+	}
+}
+
+func TestResolveUnsafeFamiliesRefusesWithNeitherSource(t *testing.T) {
+	dir := t.TempDir()
+	sub := writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+		// No unsafe_families field, and writeFakeArtifact never writes
+		// unsafe_families.txt: neither source is present.
+	}, []byte("not a shared library"))
+
+	_, err := resolveUnsafeFamilies(sub)
+	if err == nil {
+		t.Fatal("want a refusal when neither unsafe_families.txt nor the manifest's unsafe_families field is present")
+	}
+	if !strings.Contains(err.Error(), "unsafe_families.txt") || !strings.Contains(err.Error(), "manifest") {
+		t.Fatalf("want the refusal to name both sources, got: %v", err)
+	}
+}
+
+func TestResolveUnsafeFamiliesEmptyFileWinsOverManifestField(t *testing.T) {
+	dir := t.TempDir()
+	sub := writeFakeArtifact(t, dir, "25.8", map[string]any{
+		"library":            "libchtypes.so",
+		"clickhouse_version": "25.8.1.1",
+		"clickhouse_minor":   "25.8",
+		"unsafe_families":    "Array,Map",
+	}, []byte("not a shared library"))
+	if err := os.WriteFile(filepath.Join(sub, "unsafe_families.txt"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveUnsafeFamilies(sub)
+	if err != nil {
+		t.Fatalf("resolveUnsafeFamilies: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("got %q, want the present-but-empty txt file to win over a non-empty manifest field", got)
+	}
 }
 
 func TestVerifyChecksumsRefusesBytesTheManifestDoesNotClaim(t *testing.T) {

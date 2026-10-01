@@ -129,6 +129,21 @@ pub enum Error {
         symbol: &'static str,
     },
 
+    /// Neither `unsafe_families.txt` next to the library nor `manifest.json`'s
+    /// own `unsafe_families` field is present. `chs_init` must never run with
+    /// an empty refuse-list by default (docs/reference/artifact.md step 9), so
+    /// a directory with neither source is refused rather than loaded unguarded.
+    /// A file or field that IS present, even empty, is a valid empty list and
+    /// never raises this.
+    #[error(
+        "chtypes: {path}: neither unsafe_families.txt nor manifest.json's unsafe_families \
+         field is present; refusing to load without an explicit refuse-list"
+    )]
+    MissingUnsafeFamilies {
+        /// The artifact directory missing both sources.
+        path: PathBuf,
+    },
+
     /// `manifest.library_bytes` disagrees with the file on disk. A move that
     /// reported success and truncated a 232 MB library looks identical to one
     /// that worked, which is exactly why this is checked.
