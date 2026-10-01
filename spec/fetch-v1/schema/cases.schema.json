@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chtypes.wave-rf.dev/spec/fetch-v1/schema/cases.schema.json",
+  "title": "chtypes v1 conformance cases",
+  "description": "The case table every enrolled binding's conformance runner executes, as the fixtures/server/parity lane will write it under tests/fixtures/fetch-v1/ (docs/guides/fetch-v1.md §10, once that lane fills it in).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "source", "cases"],
+  "properties": {
+    "schema": {"const": 1},
+    "source": {
+      "type": "object",
+      "description": "Provenance of the generator run that produced this file, so a stale checkout is detectable without re-running the generator.",
+      "additionalProperties": false,
+      "required": ["generator_commit", "go_sum_sha256"],
+      "properties": {
+        "generator_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "go_sum_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tree", "transports", "http_script", "setup", "request", "env", "expect"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "tree": {"type": "string", "description": "The route-tree/layout name under tests/fixtures/fetch-v1/trees/ or layouts/ this case runs against."},
+        "transports": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "enum": ["file", "http", "registry"]},
+          "uniqueItems": true
+        },
+        "http_script": {
+          "type": ["string", "null"],
+          "description": "The id of an http-script fixture (tests/fixtures/fetch-v1/http/<id>.json) for the http transport, or null when the http transport serves the tree unscripted."
+        },
+        "setup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cache", "system_dirs", "lock", "before_index_rename_hook"],
+          "properties": {
+            "cache": {"type": "string", "description": "\"empty\", or the name of a pre-seeded cache fixture."},
+            "system_dirs": {"type": "array", "items": {"type": "string"}},
+            "lock": {"type": ["string", "null"], "description": "The name of an input lock fixture under locks/, or null."},
+            "before_index_rename_hook": {
+              "type": ["string", "null"],
+              "description": "The name of a race hook the runner installs before the cache's index.json atomic rename (e.g. index-race-reapply), or null."
+            }
+          }
+        },
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["spelling", "platform", "offline", "frozen", "lock_write", "update",
+                       "allow_unsigned", "trust", "bases"],
+          "properties": {
+            "spelling": {"type": "string"},
+            "platform": {"type": "string", "enum": ["linux-amd64", "linux-arm64", "darwin-arm64"]},
+            "offline": {"type": "boolean"},
+            "frozen": {"type": "boolean"},
+            "lock_write": {"type": "boolean"},
+            "update": {"type": "boolean"},
+            "allow_unsigned": {"type": "boolean"},
+            "trust": {"type": "string", "enum": ["release", "test"], "description": "Which trust list the runner configures: the default release key, or the fixture test key (opt-in, see test-key/README.md)."},
+            "bases": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string"},
+              "description": "Base URL templates; `{base}` expands per transport (docs/guides/fetch-v1.md §2)."
+            }
+          }
+        },
+        "env": {
+          "type": "object",
+          "description": "Extra environment variables the runner sets for this case only, beyond what `request` already implies.",
+          "additionalProperties": {"type": "string"}
+        },
+        "expect": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ok", "version", "build", "manifest", "library_sha256", "code", "sleeps",
+                       "warnings", "requests", "lock_after"],
+          "properties": {
+            "ok": {"type": "boolean"},
+            "version": {"type": ["string", "null"]},
+            "build": {"type": ["string", "null"]},
+            "manifest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+            "library_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+            "code": {
+              "type": ["string", "null"],
+              "enum": [null, "CHTYPES_ARTIFACT_MISSING", "CHTYPES_ARTIFACT_UNTRUSTED",
+                       "CHTYPES_ARTIFACT_CORRUPT", "CHTYPES_ARTIFACT_PINNED",
+                       "CHTYPES_ARTIFACT_UNPUBLISHED", "CHTYPES_SOURCE_UNREACHABLE",
+                       "CHTYPES_SOURCE_UNAUTHORIZED", "CHTYPES_SOURCE_FORBIDDEN",
+                       "CHTYPES_SOURCE_INCOMPATIBLE", "CHTYPES_ARTIFACT_INCOMPATIBLE"]
+            },
+            "sleeps": {
+              "type": "array",
+              "items": {"type": "number", "minimum": 0},
+              "description": "The exact sequence of injected sleep(seconds) calls a retrying fetch must make."
+            },
+            "warnings": {"type": "array", "items": {"type": "string"}},
+            "requests": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["max", "none_matching", "auth_on_second_origin"],
+              "properties": {
+                "max": {"type": ["integer", "null"], "minimum": 0},
+                "none_matching": {"type": "array", "items": {"type": "string"}},
+                "auth_on_second_origin": {"type": "boolean"}
+              }
+            },
+            "lock_after": {
+              "type": ["string", "null"],
+              "description": "The name of an expected-lock fixture under locks/ this case's resulting lock file must equal, or null when the case does not write a lock."
+            }
+          }
+        }
+      }
+    }
+  }
+}

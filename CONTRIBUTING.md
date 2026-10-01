@@ -103,6 +103,7 @@ gh api graphql -f query='mutation($id:ID!,$oid:GitObjectID!){enqueuePullRequest(
 - `.github/**` — the workflows define and run the required checks; a pull_request run of ci uses the pull request's own copy
 - `scripts/**` — every gate a required check runs, this checker itself, and scripts/fetch.sh, which verifies release signatures
 - `include/**` — the frozen C ABI header
+- `spec/**` — the v1 fetch layer's generated-constants source, JSON schemas and binding enrollment markers — the frozen interface every v1 fetcher builds against
 - `go/**/*.go` (except `*_test.go`) — go binding source (the exported API is computed by apidiff); protected only while the `api-surface` verdict for `go` on the head is not `changed=false`
 - `python/src/**` — python binding source (the public API is computed from griffe's model); protected only while the `api-surface` verdict for `python` on the head is not `changed=false`
 - `ts/src/**` — ts binding source (the exported API is computed by api-extractor); protected only while the `api-surface` verdict for `ts` on the head is not `changed=false`
@@ -121,6 +122,10 @@ gh api graphql -f query='mutation($id:ID!,$oid:GitObjectID!){enqueuePullRequest(
 - `rust/src/fetch/**` — the embedded release public key, the trust policy, the signature check, the sha256 checks and the lock pin; security carve-out, protected whatever the API verdict
 - `rust/src/digest.rs` — the sha256 helper every checksum check hashes with; security carve-out, protected whatever the API verdict
 - `rust/src/registry.rs` — load-time verification: the library_bytes size check and the verify_checksums sha256 re-hash; security carve-out, protected whatever the API verdict
+- `go/internal/ocifetch/**` — the v1 fetch layer: generated constants (the embedded release key) plus the trust, resolve and byte-verification code built on them; security carve-out, protected whatever the API verdict
+- `python/src/chtypes/_ocifetch/**` — the v1 fetch layer: generated constants (the embedded release key) plus the trust, resolve and byte-verification code built on them; security carve-out, protected whatever the API verdict
+- `ts/src/ocifetch/**` — the v1 fetch layer: generated constants (the embedded release key) plus the trust, resolve and byte-verification code built on them; security carve-out, protected whatever the API verdict
+- `rust/src/ocifetch/**` — the v1 fetch layer: generated constants (the embedded release key) plus the trust, resolve and byte-verification code built on them; security carve-out, protected whatever the API verdict
 - `rust/build.rs` — a build script cargo runs on every build, consumers' and the api-surface job's alike (none exists today)
 - `go/go.mod` — a release input: the Go module's own manifest
 - `go/go.sum` — a release input: the Go module's dependency lockfile (not yet present in this tree; protected in advance of needing one)
@@ -141,6 +146,7 @@ gh api graphql -f query='mutation($id:ID!,$oid:GitObjectID!){enqueuePullRequest(
 - `ts/tsconfig.test.json` — configures the required ts job's typecheck step (tsc -p tsconfig.test.json)
 - `tests/parity/manifest.json` — the cross-binding parity contract each of the required go/python/ts/rust jobs' own parity test reads and enforces — declares what every binding must support
 - `tests/fixtures/fetch/**` — the fetch fixtures every binding's fetch suite asserts: the test key, the refusal cases, and expected.json, the outcome each case must produce; protected unless the head's tree under it is byte-identical to a fresh extraction of the served `sdk-fetch-fixtures.tar.gz` (`abi-revision/` excepted, which this repository does not track), verified under the release key
+- `tests/fixtures/fetch-v1/**` — the v1 conformance fixtures: the test and other-key signing keys, the route trees and OCI layouts, the scripted HTTP responses, and cases.json's outcome for each
 - `tests/fixtures/api-surface/**` — the api-surface job's fixture proof: the packages each pinned API tool must read as changed or unchanged before any verdict is trusted
 - `docs/divergences.json` — the machine-checkable register of known divergences the divergences job reads; an allowlist that excuses a result
 - `**/.cargo/**` — cargo configuration (source replacement, rustflags) the required rust job would read

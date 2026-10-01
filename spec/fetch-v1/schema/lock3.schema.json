@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chtypes.wave-rf.dev/spec/fetch-v1/schema/lock3.schema.json",
+  "title": "chtypes v1 lock file (schema 3)",
+  "description": "chtypes.lock (docs/guides/fetch-v1.md §6): per declared platform, the request, the exact version and build, and the platform manifest/layer/bundle digests. The index digest is informational only (never fetched by digest under --frozen; §7.4 of the layout-v2 spec). Schema 1 and 2 (v0) are refused outright, never read as this shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "abi", "platforms", "requests"],
+  "properties": {
+    "schema": {"const": 3},
+    "abi": {"type": "integer", "const": 1},
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "enum": ["linux-amd64", "linux-arm64", "darwin-arm64"]},
+      "uniqueItems": true
+    },
+    "requests": {
+      "type": "object",
+      "description": "Keyed by the spelling originally requested (e.g. \"26.8\", \"26.8.15\", \"26.8.15.10\").",
+      "additionalProperties": {
+        "type": "object",
+        "description": "Keyed by platform key; only platforms this lock declares (the `platforms` array) may appear.",
+        "additionalProperties": {"$ref": "#/$defs/pin"}
+      }
+    }
+  },
+  "$defs": {
+    "pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "build", "manifest", "layer", "bundle"],
+      "properties": {
+        "version": {"type": "string", "description": "The exact four-part version resolved at lock time, e.g. \"26.8.15.10\"."},
+        "build": {"type": "string", "description": "The fixed-width UTC build timestamp from the signed predicate, e.g. \"20261001.183455\"."},
+        "manifest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "layer": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "bundle": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "index": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Informational only. The index is computed, not stored, so a by-digest GET of it is not guaranteed to be served; --frozen never fetches it."
+        }
+      }
+    }
+  }
+}

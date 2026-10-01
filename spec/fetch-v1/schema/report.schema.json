@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chtypes.wave-rf.dev/spec/fetch-v1/schema/report.schema.json",
+  "title": "chtypes v1 conformance report",
+  "description": "The CHTYPES_V1_REPORT file each binding's conformance runner writes after executing every case (docs/guides/fetch-v1.md §10, §3.3 of the v1 fetch-layer plan). The fixtures/server/parity lane's parity gate reads one per binding per toolchain leg.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "binding", "toolchain", "cases_sha256", "results"],
+  "properties": {
+    "schema": {"const": 1},
+    "binding": {"type": "string", "enum": ["go", "python", "ts", "rust"]},
+    "toolchain": {
+      "type": "string",
+      "description": "The exact toolchain identity this report ran under, e.g. \"go1.27.x\", \"python3.13\", \"node22.21.0\", \"rust1.85\"."
+    },
+    "cases_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of the exact case table (under tests/fixtures/fetch-v1/) this report was run against; the parity gate refuses a report whose value disagrees with the head's own case table."
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "transport", "verdict", "detail"],
+        "properties": {
+          "id": {"type": "string"},
+          "transport": {"type": "string", "enum": ["file", "http", "registry"]},
+          "verdict": {"type": "string", "enum": ["pass", "fail"]},
+          "detail": {"type": "string", "description": "Empty on pass; the assertion that failed, on fail."}
+        }
+      }
+    }
+  }
+}
