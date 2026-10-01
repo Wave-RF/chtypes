@@ -153,3 +153,4 @@ export {
 export { encodeSettings, type Settings, type SettingValue } from './settings.js';
 export { type ExtractedEntry, extractTarGz } from './tar.js';
 export { isLossyReason, Reason } from './transform.js';
+export { API_SURFACE_DEMO } from './format.js';

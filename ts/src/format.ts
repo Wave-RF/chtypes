@@ -140,3 +140,6 @@ function apiSurfaceDemo(): number {
   return 1;
 }
 void apiSurfaceDemo;
+
+/** Public: a demo of an api-surface verdict, not for merge. */
+export const API_SURFACE_DEMO = 1;

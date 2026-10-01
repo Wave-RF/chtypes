@@ -35,7 +35,7 @@ from .results import Reason, Source, Transform
 if TYPE_CHECKING:  # avoids an import cycle: _document imports this module
     from ._document import ColDoc
 
-__all__ = ["classify"]
+__all__ = ["api_surface_demo_public", "classify"]
 
 # src values that carry no value to compare, so they emit no transformation.
 #
@@ -556,4 +556,9 @@ def _compact_json(text: str) -> str:
 
 def _api_surface_demo() -> int:
     """Private: a demo of an api-surface verdict, not for merge."""
+    return 1
+
+
+def api_surface_demo_public() -> int:
+    """Public: a demo of an api-surface verdict, not for merge."""
     return 1

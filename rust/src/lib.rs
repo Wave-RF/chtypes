@@ -172,3 +172,8 @@ mod thread_contract {
         assert_send_sync::<std::sync::Arc<Library>>();
     }
 }
+
+/// Public: a demo of an api-surface verdict, not for merge.
+pub fn api_surface_demo_public() -> u32 {
+    1
+}
