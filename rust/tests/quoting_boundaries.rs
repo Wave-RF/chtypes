@@ -96,6 +96,46 @@ fn announce(message: &str) {
     let _ = std::io::stderr().flush();
 }
 
+/// What the below-boundary half of `the_per_line_boundaries_are_what_the_
+/// release_documents` should do, given which of `LINES_BELOW_EVERY_BOUNDARY`
+/// this run actually LOADED and which of them the resolved channel SERVES at
+/// this SDK's own ABI revision (`CHTYPES_SERVED_LINES_AT_REVISION`,
+/// chtypes#281 rework). These are different facts: nothing served below the
+/// boundary is genuinely impossible to observe this run ("skip"); something
+/// served but not loaded is a CI configuration bug ("fail"), never a library
+/// finding; both present is the ordinary case ("assert" — the per-case loop
+/// already did the work). A pure function so the three branches are
+/// unit-testable, below, without a registry.
+fn boundary_verdict(loaded_below: &[&str], served_below: &[&str]) -> &'static str {
+    if served_below.is_empty() {
+        "skip"
+    } else if loaded_below.is_empty() {
+        "fail"
+    } else {
+        "assert"
+    }
+}
+
+#[test]
+fn boundary_verdict_served_and_loaded_asserts() {
+    assert_eq!(boundary_verdict(&["26.3"], &["26.3"]), "assert");
+}
+
+#[test]
+fn boundary_verdict_served_not_loaded_fails_a_ci_configuration_bug() {
+    assert_eq!(boundary_verdict(&[], &["26.3"]), "fail");
+}
+
+#[test]
+fn boundary_verdict_nothing_served_skips_genuinely_impossible_this_run() {
+    assert_eq!(boundary_verdict(&[], &[]), "skip");
+}
+
+#[test]
+fn boundary_verdict_several_served_but_none_loaded_still_fails() {
+    assert_eq!(boundary_verdict(&[], &["24.8", "25.3"]), "fail");
+}
+
 fn registry_dir() -> PathBuf {
     match std::env::var_os(chtypes::REGISTRY_ENV) {
         Some(dir) => PathBuf::from(dir),
@@ -210,10 +250,11 @@ fn line_names(loaded: &Loaded) -> Vec<&str> {
 #[test]
 fn the_per_line_boundaries_are_what_the_release_documents() {
     let loaded = lines!();
-    let (mut ran, mut below, mut above) = (0usize, 0usize, 0usize);
+    let (mut ran, mut above) = (0usize, 0usize);
+    let mut below_loaded: Vec<&str> = Vec::new();
     for (line, lib) in loaded {
         if LINES_BELOW_EVERY_BOUNDARY.contains(&line.as_str()) {
-            below += 1;
+            below_loaded.push(line.as_str());
         } else if !LINES_QUOTING_SELECT_ONLY.contains(&line.as_str()) {
             above += 1;
         }
@@ -241,16 +282,49 @@ fn the_per_line_boundaries_are_what_the_release_documents() {
         "a case was skipped inside the loop"
     );
     assert!(ran > 0, "no line was examined");
-    // Both sides, or nothing is being measured. CI fetches 24.8 alongside the
-    // newest -lts and -stable precisely so this holds.
-    assert!(
-        below > 0,
-        "the registry holds no line below every documented boundary (one of {:?}), so the \
-         boundary cannot be observed at all — scripts/fetch.sh 24.8 installs one. Lines loaded: \
-         {:?}",
-        LINES_BELOW_EVERY_BOUNDARY,
-        line_names(loaded)
-    );
+    // chtypes#281 rework: "no below-boundary line loaded" used to be a
+    // single, loud skip. That let a genuine CI bug — fetching a channel that
+    // DOES serve a below-boundary line, yet somehow loading none of them —
+    // pass as silently as the case that is actually impossible to observe.
+    // CHTYPES_SERVED_LINES_AT_REVISION (set only in the artifacts job, from
+    // scripts/published-lines.sh --served-at-revision against the SAME
+    // resolved channel — never hand-typed) tells the two apart.
+    let served_raw = match std::env::var("CHTYPES_SERVED_LINES_AT_REVISION") {
+        Ok(v) => v,
+        Err(_) => {
+            announce(&format!(
+                "\nSKIP the_per_line_boundaries_are_what_the_release_documents: \
+                 CHTYPES_SERVED_LINES_AT_REVISION is not set (expected outside the artifacts \
+                 job) — cannot tell whether a line below every documented boundary (one of \
+                 {LINES_BELOW_EVERY_BOUNDARY:?}) is served at this SDK's ABI revision, so that \
+                 side of the boundary is unexamined this run\n"
+            ));
+            return;
+        }
+    };
+    let served_below: Vec<&str> = served_raw
+        .split_whitespace()
+        .filter(|s| LINES_BELOW_EVERY_BOUNDARY.contains(s))
+        .collect();
+    match boundary_verdict(&below_loaded, &served_below) {
+        "skip" => {
+            announce(&format!(
+                "\nSKIP the_per_line_boundaries_are_what_the_release_documents \
+                 (below-boundary half): no line below every documented boundary (one of \
+                 {LINES_BELOW_EVERY_BOUNDARY:?}) is served at this SDK's ABI revision — that \
+                 side of the boundary genuinely cannot be observed this run. Served: \
+                 {served_raw:?}\n"
+            ));
+            return;
+        }
+        "fail" => panic!(
+            "a line below every documented boundary IS served at this SDK's ABI revision \
+             ({served_below:?}) but this run loaded none of them — that is a CI configuration \
+             bug, not a library finding. Loaded: {:?}",
+            line_names(loaded)
+        ),
+        _ => {}
+    }
     assert!(
         above > 0,
         "the registry holds no line at or above the last documented boundary, so the quoted side \
@@ -258,8 +332,9 @@ fn the_per_line_boundaries_are_what_the_release_documents() {
         line_names(loaded)
     );
     println!(
-        "{ran} cases over {:?} ({below} below every boundary, {above} at or above the last)",
-        line_names(loaded)
+        "{ran} cases over {:?} ({} below every boundary, {above} at or above the last)",
+        line_names(loaded),
+        below_loaded.len()
     );
 }
 

@@ -337,10 +337,13 @@ jobs:
       - name: selftest — a claim that no longer holds, and a heading/entry mismatch, are both caught
         run: scripts/check-divergences.py --selftest
       # Exactly the lines docs/divergences.json names, on linux-amd64 — never
-      # the `artifacts` job's newest -lts / -stable / 24.8: the documented
-      # entry's version range (26.2/26.3, plus its 25.10/26.4 contrast lines)
-      # is not covered by that job (its own comment says why it fetches what
-      # it fetches — see .github/workflows/ci.yml above), so bolting on there
+      # the `artifacts` job's own three (the newest -lts / -stable / a
+      # derived oldest, chtypes#281 item 2): the documented entries' own
+      # version range is a DIFFERENT set of lines (run `scripts/
+      # check-divergences.py --print-lines` for today's — it is not repeated
+      # here, since it drifts as entries are added and retired) that job's
+      # own three do not cover (its own comment says why it fetches what it
+      # fetches — see .github/workflows/ci.yml above), so bolting on there
       # would silently check nothing. --print-lines reads the same
       # docs/divergences.json the reality check itself drives, so the two
       # can never name a different set.
@@ -359,10 +362,32 @@ jobs:
       # served, and a pending candidate revision has nothing to say about
       # that — there would be no artifact_revision-matching row to check
       # divergences against on a candidate channel in the first place.
+      # A line docs/divergences.json names (chtypes#281 item 4) can retire —
+      # served, but no longer getting new ABI revisions — the same as any
+      # other line. scripts/fetch.sh then exits 4 (CHTYPES_ARTIFACT_UNPUBLISHED:
+      # the line IS published, just not at this SDK's revision), and this
+      # loop runs under bash's default `-eo pipefail`, so a hard failure on
+      # that exit code used to abort the whole loop before a single later
+      # line — 25.10, 26.3, 26.8, 26.9 — ever fetched, going dark instead of
+      # checking anything (the job is non-blocking, so this never reddened a
+      # merge, only silently stopped testing). Exit 4 alone is now a loud,
+      # named skip: scripts/check-divergences.py's own "not in this
+      # registry" skip (resolve_case(), chtypes#281) then applies to every
+      # check that named it, exactly as it already does for a line nobody
+      # fetched at all. Exit 3 (CHTYPES_SOURCE_UNREACHABLE: a real outage)
+      # and anything else still aborts the loop — only "published, wrong
+      # revision" is safe to treat as absence.
       - name: fetch exactly what docs/divergences.json names
         run: |
           for line in $(scripts/check-divergences.py --print-lines); do
-            scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY"
+            ec=0
+            scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY" || ec=$?
+            if [ "$ec" -eq 4 ]; then
+              echo "divergences: $line is not published at this SDK's ABI revision (CHTYPES_ARTIFACT_UNPUBLISHED) — skipping it; any check naming it will skip loudly by name"
+              continue
+            elif [ "$ec" -ne 0 ]; then
+              exit "$ec"
+            fi
           done
       - name: save the divergences cache (push to main only, and only on a miss)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.divergences-cache.outputs.cache-hit != 'true'
@@ -811,14 +836,23 @@ jobs:
           esac
           python3 scripts/lib/gha_annotate.py notice "$line"
       # THREE lines, not two. The newest -lts and the newest -stable come from
-      # the live index; 24.8 is pinned on top because it is the OLDEST line the
-      # release publishes and the per-line boundaries are only observable with
-      # something below them. Both dynamic lines sit ABOVE every boundary the
-      # SDK documents — `select` back-quoted from 26.3, `from`/`values` from
-      # 26.5, header-name matching going case-insensitive at 26.5 — so with two
-      # lines a boundary case cannot be measured at all, only asserted. 24.8
-      # also exercises the path with no show_create_query_identifier_quoting_rule
-      # setting, which 25.3 onward has and it does not.
+      # the live index; the third is DERIVED (chtypes#281 item 2) — the OLDEST
+      # line this run's channel publishes whose own winning row carries this
+      # SDK's ABI revision (scripts/published-lines.sh's own
+      # --oldest-at-revision) — because the per-line boundaries are only
+      # observable with something below the two leading lines. Both of those
+      # sit ABOVE every boundary the SDK documents — `select` back-quoted from
+      # 26.3, `from`/`values` from 26.5, header-name matching going
+      # case-insensitive at 26.5 — so with only the two leading lines a
+      # boundary case cannot be measured at all, only asserted. This used to
+      # be the hardcoded line 24.8, which also exercises the path with no
+      # show_create_query_identifier_quoting_rule setting (25.3 onward has
+      # it); 24.8 is now a retired ("served, unsupported", item 1) line that
+      # gets no further ABI revisions, so hand-typing it would eventually ask
+      # for a row this release stops publishing at this SDK's revision —
+      # never docs/support.md's `supported_lines`, because the question here
+      # is "is this line fetchable at this revision", which a retired line
+      # can still answer yes to.
       # id + continue-on-error (chtypes#262), same reasoning as the fetch
       # step below: on a candidate channel with nothing published yet,
       # published-lines.sh itself refuses (exit 4, CHTYPES_ARTIFACT_UNPUBLISHED
@@ -830,7 +864,7 @@ jobs:
       # step now records its own exit code and re-raises so it still fails
       # fast; the verdict step reads THIS exit code first, so it can
       # recognize a missing candidate whichever of the two steps hits it.
-      - name: the newest -lts and -stable lines the release publishes (live index.json), plus 24.8
+      - name: the newest -lts and -stable lines the release publishes (live index.json), plus the oldest line still at this run's ABI revision
         id: lines
         continue-on-error: true
         run: |
@@ -838,7 +872,7 @@ jobs:
           tag="${{ steps.channel.outputs.tag }}"
           [ -n "$tag" ] && tag_args=(--tag "$tag")
           ec=0
-          scripts/published-lines.sh --platform linux-amd64 "${tag_args[@]}" | tee -a "$GITHUB_OUTPUT" || ec=$?
+          scripts/published-lines.sh --platform linux-amd64 "${tag_args[@]}" --oldest-at-revision "${{ steps.channel.outputs.revision }}" | tee -a "$GITHUB_OUTPUT" || ec=$?
           echo "exit_code=$ec" >> "$GITHUB_OUTPUT"
           if [ "$ec" -ne 0 ]; then
             exit "$ec"
@@ -871,9 +905,12 @@ jobs:
       # Gated on the lines step's own outcome (chtypes#262): when lines
       # already refused (a candidate channel with nothing published, or a
       # real outage), running this loop over its empty `lines` output would
-      # only re-attempt the same failure against 24.8 alone and obscure which
-      # step actually hit it first; skipping cleanly here is what lets the
-      # verdict step read lines' own exit code instead.
+      # only re-attempt the same failure against an empty list and obscure
+      # which step actually hit it first; skipping cleanly here is what lets
+      # the verdict step read lines' own exit code instead. All three lines —
+      # the two leading ones and the derived oldest (chtypes#281 item 2) —
+      # now come from that one step's own `lines=` output; nothing is
+      # appended here by name.
       - name: fetch, verified — an already-installed line is re-hashed and not downloaded
         id: fetch
         if: steps.lines.outcome == 'success'
@@ -883,7 +920,7 @@ jobs:
           tag="${{ steps.channel.outputs.tag }}"
           [ -n "$tag" ] && tag_args=(--tag "$tag")
           ec=0
-          for line in ${{ steps.lines.outputs.lines }} 24.8; do
+          for line in ${{ steps.lines.outputs.lines }}; do
             scripts/fetch.sh "$line" --platform linux-amd64 --dest "$CHTYPES_REGISTRY" "${tag_args[@]}" || { ec=$?; break; }
           done
           echo "exit_code=$ec" >> "$GITHUB_OUTPUT"
@@ -960,6 +997,37 @@ jobs:
         run: |
           scripts/abi-fixtures.sh --out "$RUNNER_TEMP/abi-fixtures"
           echo "CHTYPES_ABI_FIXTURES=$RUNNER_TEMP/abi-fixtures" >> "$GITHUB_ENV"
+      # chtypes#281 rework. The per-line quoting-boundary test in each binding
+      # needs to tell "nothing below the documented boundary is served this
+      # run" (genuinely impossible — skip) apart from "something below the
+      # boundary IS served, but this run did not load it" (a CI configuration
+      # bug — fail). A test cannot see the resolved channel's own index.json
+      # to answer that itself: scripts/fetch.sh does not persist it into the
+      # registry (only per-line manifests land there), and only scripts/
+      # published-lines.sh / scripts/abi-channel.sh ever read the index at
+      # all, each into its own temp directory that does not outlive its step.
+      # This step derives CHTYPES_SERVED_LINES_AT_REVISION — every line the
+      # RESOLVED channel (served, candidate, or an explicit tag — whichever
+      # this run picked) serves at this SDK's own ABI revision — from
+      # scripts/published-lines.sh's own --served-at-revision, and exports it
+      # so every suite below can read it; never hand-typed. Deliberately
+      # WITHOUT continue-on-error, unlike the best-effort steps around it:
+      # once `fetch` has succeeded, this run's channel has already proven it
+      # serves at least the two leading lines and the derived oldest one
+      # (the `lines` step above) at this exact revision, so a failure here is
+      # a bug in this derivation, not an absence worth tolerating — the
+      # artifacts leg must never reach the boundary test without this set.
+      - name: every line served at this run's ABI revision (for the quoting-boundary tests' served-vs-loaded distinction)
+        id: served-lines
+        if: steps.fetch.outcome == 'success'
+        run: |
+          tag_args=()
+          tag="${{ steps.channel.outputs.tag }}"
+          [ -n "$tag" ] && tag_args=(--tag "$tag")
+          out="$(scripts/published-lines.sh --platform linux-amd64 "${tag_args[@]}" --served-at-revision "${{ steps.channel.outputs.revision }}")"
+          served="$(printf '%s\n' "$out" | sed -n 's/^served=//p')"
+          echo "CHTYPES_SERVED_LINES_AT_REVISION=$served" >> "$GITHUB_ENV"
+          echo "served at ABI revision ${{ steps.channel.outputs.revision }}: $served" >&2
 
       # ── The five suites below each carry `id:` and `continue-on-error`.
       #

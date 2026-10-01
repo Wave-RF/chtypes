@@ -53,6 +53,7 @@ package chtypes
 // failure these tests exist to prevent.
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -164,13 +165,56 @@ func bothForms(t *testing.T, lib *Library, name string) (always, answer string) 
 	return always, answer
 }
 
+// boundaryVerdict decides what the below-boundary half of
+// TestQuotingBoundariesPerLine should do, given which of
+// linesBelowEveryBoundary this run actually LOADED and which of them the
+// resolved channel SERVES at this SDK's own ABI revision
+// (CHTYPES_SERVED_LINES_AT_REVISION, chtypes#281 rework). These are
+// different facts: nothing served below the boundary is genuinely
+// impossible to observe this run (skip); something served but not loaded
+// is a CI configuration bug (fail), never a library finding; both present
+// is the ordinary case (assert, the caller's existing per-case loop above
+// already did the work). A pure function so the three branches are
+// unit-testable (TestBoundaryVerdict, below) without a registry.
+func boundaryVerdict(loadedBelow, servedBelow []string) string {
+	switch {
+	case len(servedBelow) == 0:
+		return "skip"
+	case len(loadedBelow) == 0:
+		return "fail"
+	default:
+		return "assert"
+	}
+}
+
+func TestBoundaryVerdict(t *testing.T) {
+	cases := []struct {
+		name                     string
+		loadedBelow, servedBelow []string
+		want                     string
+	}{
+		{"served and loaded: assert", []string{"26.3"}, []string{"26.3"}, "assert"},
+		{"served, not loaded: fail (a CI configuration bug)", nil, []string{"26.3"}, "fail"},
+		{"nothing served: skip (genuinely impossible this run)", nil, nil, "skip"},
+		{"served (several) but none loaded: still fail", nil, []string{"24.8", "25.3"}, "fail"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := boundaryVerdict(c.loadedBelow, c.servedBelow); got != c.want {
+				t.Fatalf("boundaryVerdict(%v, %v) = %q, want %q", c.loadedBelow, c.servedBelow, got, c.want)
+			}
+		})
+	}
+}
+
 func TestQuotingBoundariesPerLine(t *testing.T) {
 	loaded := loadedLines(t)
 	names := everyName()
-	ran, below, above := 0, 0, 0
+	ran, above := 0, 0
+	var belowLoaded []string
 	for _, l := range loaded {
 		if linesBelowEveryBoundary[l.line] {
-			below++
+			belowLoaded = append(belowLoaded, l.line)
 		} else if !linesQuotingSelectOnly[l.line] {
 			above++
 		}
@@ -195,15 +239,40 @@ func TestQuotingBoundariesPerLine(t *testing.T) {
 	if ran == 0 {
 		t.Fatal("no line was examined")
 	}
-	// Both sides, or nothing is being measured. CI fetches 24.8 alongside the
-	// newest -lts and -stable precisely so this holds.
-	if below == 0 {
-		t.Fatalf("the registry holds no line below every documented boundary (24.8 is one), so the boundary cannot be observed at all — scripts/fetch.sh 24.8 installs one. Lines loaded: %v", lineNames(loaded))
+	// Both sides, or nothing is being measured. CI fetches a derived oldest
+	// line (chtypes#281 item 2) alongside the newest -lts and -stable
+	// precisely so this usually holds — but that line is picked by abi_revision,
+	// not by this list of names, and a retired line (24.8 today) eventually
+	// stops being the one fetched. A below-boundary line simply not being
+	// loaded THIS run is not a finding: skip, loudly, by name, rather than
+	// fail — the same discipline every other line-presence check here uses.
+	// chtypes#281 rework: "no below-boundary line loaded" used to be a
+	// single, loud skip. That let a genuine CI bug — fetching a channel that
+	// DOES serve a below-boundary line, yet somehow loading none of them —
+	// pass as silently as the case that is actually impossible to observe.
+	// CHTYPES_SERVED_LINES_AT_REVISION (set only in the artifacts job, from
+	// scripts/published-lines.sh --served-at-revision against the SAME
+	// resolved channel — never hand-typed) tells the two apart.
+	served, haveServed := os.LookupEnv("CHTYPES_SERVED_LINES_AT_REVISION")
+	if !haveServed {
+		t.Skipf("CHTYPES_SERVED_LINES_AT_REVISION is not set (expected outside the artifacts job) — cannot tell whether a line below every documented boundary (%v) is served at this SDK's ABI revision, so that side of the boundary is unexamined this run", linesBelowEveryBoundary)
+	}
+	var servedBelow []string
+	for _, s := range strings.Fields(served) {
+		if linesBelowEveryBoundary[s] {
+			servedBelow = append(servedBelow, s)
+		}
+	}
+	switch boundaryVerdict(belowLoaded, servedBelow) {
+	case "skip":
+		t.Skipf("no line below every documented boundary (%v) is served at this SDK's ABI revision — that side of the boundary genuinely cannot be observed this run. Served: %v", linesBelowEveryBoundary, strings.Fields(served))
+	case "fail":
+		t.Fatalf("a line below every documented boundary IS served at this SDK's ABI revision (%v) but this run loaded none of them — that is a CI configuration bug, not a library finding. Loaded: %v", servedBelow, lineNames(loaded))
 	}
 	if above == 0 {
 		t.Fatalf("the registry holds no line at or above the last documented boundary, so the quoted side of it cannot be observed — scripts/fetch.sh 26.8 installs one. Lines loaded: %v", lineNames(loaded))
 	}
-	t.Logf("%d cases over %v (%d below every boundary, %d at or above the last)", ran, lineNames(loaded), below, above)
+	t.Logf("%d cases over %v (%d below every boundary, %d at or above the last)", ran, lineNames(loaded), len(belowLoaded), above)
 }
 
 func lineNames(loaded []loadedLine) []string {

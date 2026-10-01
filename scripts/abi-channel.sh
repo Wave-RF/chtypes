@@ -27,12 +27,26 @@
 #      include/chtypes.h. It must match exactly once, or this refuses to
 #      guess and fails.
 #   2. The served revision: from the served channel's index.json, restricted
-#      to the given platform, this takes the lines scripts/published-lines.sh
-#      picks for that platform PLUS 24.8, picks each line's winning row by
+#      to the given platform, this takes the two lines
+#      scripts/published-lines.sh picks for that platform — the newest -lts
+#      and newest -stable — picks each line's winning row by
 #      scripts/fetch.sh's own rank (ClickHouse version numerically, then
-#      wrapper build), and reads that row's abi_revision. All the chosen
-#      rows must agree, and every one of them must carry an abi_revision, or
-#      this cannot say what the served revision is and refuses to guess.
+#      wrapper build), and reads that row's abi_revision. Both must agree,
+#      and both must carry an abi_revision, or this cannot say what the
+#      served revision is and refuses to guess.
+#   2b. Full-fleet confirmation (chtypes#281 item 2): once the two leading
+#      lines agree on a revision, this additionally requires that SOME OTHER
+#      line on the served channel — the OLDEST one whose own winning row is
+#      at that same revision — also carries it, or this refuses to guess,
+#      same as a disagreement between the two leading lines. This used to be
+#      a THIRD hardcoded line (24.8) folded into step 2 above; derived
+#      instead, because 24.8 is now a retired ("served, unsupported", item 1)
+#      line that gets no further ABI revisions, so a line pinned by name
+#      eventually falls behind every real relink and reads as a permanent
+#      disagreement rather than the one-time signal a partial relink should
+#      be. Never docs/support.md's `supported_lines`: the question here is
+#      "did the relink reach this far down the fleet", which a line answers
+#      whether or not it is still advertised as supported.
 #   3. header == served: the default channel (empty tag), same as before
 #      this script existed. header > served: `abi<header>-candidate`, for
 #      BOTH scripts/published-lines.sh and scripts/fetch.sh. header < served:
@@ -149,19 +163,97 @@ print("ok %d" % distinct[0])
 PY
 }
 
-# resolve_lines <url> <tag> <platform> — the lines this run checks the served
-# revision against: scripts/published-lines.sh's own two picks for <platform>
-# under <tag> (the served/default tag when called for real; a fixture tag in
-# --selftest), plus 24.8, the oldest line the release publishes and the one
-# with no abi_revision at all before it existed. Never re-implemented here —
+# oldest_line_at_revision <index.json> <platform> <revision> [<exclude-line>...]
+#
+# chtypes#281 item 2's full-fleet confirmation (step 2b above): does the
+# served channel publish some OTHER line — not one of <exclude-line>...,
+# normally the two leading lines served_revision() already confirmed — for
+# <platform> whose own winning row (same rank served_revision() above uses)
+# carries abi_revision == <revision>? Prints that line's clickhouse_minor to
+# stdout (the OLDEST one, when several qualify) and the chosen row to
+# stderr. The exclusion matters: without it, the two leading lines
+# ALWAYS trivially "confirm" the very revision they were just used to
+# establish, so a partial relink that moved only them would read as fully
+# confirmed. Exits non-zero, naming the revision and the platform, when
+# nothing OTHER qualifies — the caller decides what that means; run() below
+# treats it as a hard refusal, the same "stay loud" discipline
+# served_revision()'s own missing/disagree cases already use.
+#
+# Never scripts/support-matrix.sh's `supported_lines`: a retired line still
+# answers this correctly as long as its winning row is actually at this
+# revision, and a line that stops getting new revisions (chtypes#281 item 1)
+# simply stops qualifying here on its own — no separate list to consult, and
+# nothing to keep in sync with one.
+oldest_line_at_revision() {
+  local index="$1" platform="$2" revision="$3"
+  shift 3
+  python3 - "$index" "$platform" "$revision" "$@" <<'PY'
+import json, re, sys
+index_path, platform, revision = sys.argv[1], sys.argv[2], sys.argv[3]
+exclude = set(sys.argv[4:])
+revision = int(revision)
+doc = json.load(open(index_path, encoding="utf-8"))
+if doc.get("schema") != 1:
+    sys.exit("abi-channel: index.json schema %r is not 1 — this script cannot read it" % doc.get("schema"))
+os_, _, arch = platform.partition("-")
+rows = [a for a in doc.get("artifacts", []) if a.get("os") == os_ and a.get("arch") == arch
+        and a.get("clickhouse_minor") not in exclude]
+
+def vkey(a):
+    return tuple(int(p) for p in a["clickhouse_version"].split("-", 1)[0].split("."))
+
+def build_of(a):
+    b = a.get("build")
+    if isinstance(b, int) and b > 0:
+        return b
+    m = re.search(r"-b([0-9]+)\.tar\.gz$", a.get("file", ""))
+    return int(m.group(1)) if m else 0
+
+def rank(a):
+    return (vkey(a), build_of(a))
+
+by_minor = {}
+for a in rows:
+    minor = a.get("clickhouse_minor")
+    if minor is None:
+        continue
+    by_minor.setdefault(minor, []).append(a)
+
+at_revision = []
+for minor, group in by_minor.items():
+    winner = max(group, key=rank)
+    if winner.get("abi_revision") == revision:
+        at_revision.append((minor, winner))
+
+if not at_revision:
+    sys.exit("abi-channel: no OTHER line on %s carries abi_revision %d in its winning row (checked everything except %s)"
+              % (platform, revision, ", ".join(sorted(exclude)) or "nothing"))
+
+oldest_minor, oldest_row = min(at_revision, key=lambda item: tuple(int(p) for p in item[0].split(".")))
+print("abi-channel: full-fleet check at abi_revision %d -> oldest OTHER line %s also carries it (%s, %s)" % (
+    revision, oldest_minor, oldest_row.get("clickhouse_version"), oldest_row.get("file")), file=sys.stderr)
+print(oldest_minor)
+PY
+}
+
+# resolve_lines <url> <tag> <platform> — the two leading lines this run
+# checks the served revision against: scripts/published-lines.sh's own two
+# picks for <platform> under <tag> (the served/default tag when called for
+# real; a fixture tag in --selftest). Never re-implemented here —
 # published-lines.sh is the one place that decides which two lines those are.
+# The full-fleet confirmation (step 2b, chtypes#281 item 2) is a SEPARATE
+# check in run(), below, against oldest_line_at_revision() — it used to be a
+# third line (24.8) folded in here, but that line's own winning row stopped
+# moving once it was retired, so it cannot be resolved the same way the two
+# leading lines are: it has to be derived FROM the revision the two leading
+# lines agree on, which does not exist yet when this function runs.
 resolve_lines() {
   local url="$1" tag="$2" platform="$3" out lines
   out="$(CHTYPES_ARTIFACTS_URL="$url" "$SCRIPTS/published-lines.sh" --platform "$platform" --tag "$tag" 2>/dev/null)" \
     || die "scripts/published-lines.sh could not pick the served channel's two lines for $platform"
   lines="$(printf '%s\n' "$out" | sed -n 's/^lines=//p')"
   [ -n "$lines" ] || die "scripts/published-lines.sh printed no 'lines=' for $platform"
-  printf '%s 24.8' "$lines"
+  printf '%s' "$lines"
 }
 
 # choose <header-rev> <served-status-line> — the three-way decision (or the
@@ -218,6 +310,21 @@ run() {
     || die "CHTYPES_SOURCE_UNREACHABLE: could not fetch ${url%/}/artifacts/index.json"
   # shellcheck disable=SC2086 # $lines is a script-controlled, space-joined list of bare version strings
   out="$(served_revision "$index" "$platform" $lines)"
+
+  # chtypes#281 item 2, step 2b: once the two leading lines agree on a
+  # revision, confirm that SOME OTHER line on the served channel — excluding
+  # those same two, or they would trivially "confirm" the very revision they
+  # were just used to establish — the oldest one actually at that same
+  # revision, also carries it, before trusting "served" at all. A bare
+  # command, not a command substitution: a non-zero exit here must abort
+  # this script under `set -e`, exactly like every other refusal in this
+  # file, and `local x=$(...)` would swallow that exit code instead of
+  # propagating it.
+  # shellcheck disable=SC2086 # $lines is the same script-controlled, space-joined list used above
+  case "$out" in
+    ok\ *) oldest_line_at_revision "$index" "$platform" "${out#ok }" $lines >/dev/null ;;
+  esac
+
   local decision
   decision="$(choose "$header_rev" "$out")"
   printf '%s\nrevision=%s\n' "$decision" "$header_rev"
@@ -232,13 +339,17 @@ if [ "${1:-}" = "--selftest" ]; then
   # A fixture index.json with one row per line, each carrying the given
   # abi_revision (or none at all, when omitted from the map). Uses the same
   # two synthetic lines published-lines.sh's own --selftest already proves
-  # "newest build wins" against, plus 24.8, so this never has to re-derive
-  # which build within a line is served — it only has to say what THAT row's
-  # abi_revision is. Never read off the real, live index.
-  write_index() {  # write_index <path> <rev-for-26.8> <rev-for-26.7> <rev-for-24.8>  ('-' = omit)
-    python3 - "$1" "$2" "$3" "$4" <<'PY'
+  # "newest build wins" against, so this never has to re-derive which build
+  # within a line is served — it only has to say what THAT row's abi_revision
+  # is. Never read off the real, live index. Two rows only — the two leading
+  # lines served_revision()/choose() actually run on in run() today; the
+  # full-fleet confirmation (oldest_line_at_revision()) gets its OWN fixture
+  # below, because it needs a line below both of these, which this fixture
+  # was never meant to provide.
+  write_index() {  # write_index <path> <rev-for-26.8> <rev-for-26.7>  ('-' = omit)
+    python3 - "$1" "$2" "$3" <<'PY'
 import json, sys
-path, r1, r2, r3 = sys.argv[1:5]
+path, r1, r2 = sys.argv[1:4]
 def row(minor, version, rev):
     d = {"os": "linux", "arch": "amd64", "clickhouse_minor": minor,
          "clickhouse_version": version, "file": "chtypes-%s-linux-amd64.tar.gz" % version,
@@ -249,7 +360,6 @@ def row(minor, version, rev):
 doc = {"schema": 1, "artifacts": [
     row("26.8", "26.8.6.5-lts", r1),
     row("26.7", "26.7.10.6-stable", r2),
-    row("24.8", "24.8.1.1-lts", r3),
 ]}
 json.dump(doc, open(path, "w"))
 PY
@@ -296,33 +406,103 @@ PY
   idx="$tmp/index.json"
 
   write_header "$h" 5
-  write_index "$idx" 5 5 5
+  write_index "$idx" 5 5
   check "equal: header 5 == served 5 -> default channel" ok "mode=default" -- \
-    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7 24.8); choose 5 \"\$out\""
+    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7); choose 5 \"\$out\""
   check "equal: no tag is emitted" ok "tag=" -- \
-    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7 24.8); choose 5 \"\$out\""
+    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7); choose 5 \"\$out\""
 
   write_header "$h" 6
   check "ahead: header 6 > served 5 -> abi6-candidate" ok "tag=abi6-candidate" -- \
-    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7 24.8); choose 6 \"\$out\""
+    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7); choose 6 \"\$out\""
   check "ahead: mode=candidate" ok "mode=candidate" -- \
-    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7 24.8); choose 6 \"\$out\""
+    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7); choose 6 \"\$out\""
 
   check "behind: header 4 < served 5 fails, naming both numbers" fail "header=4 served=5" -- \
-    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7 24.8); choose 4 \"\$out\""
+    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7); choose 4 \"\$out\""
 
-  write_index "$idx" 5 6 5
+  write_index "$idx" 5 6
   check "disagreeing rows: fails, naming the disagreement" fail "disagree on abi_revision" -- \
-    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7 24.8); choose 5 \"\$out\""
+    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7); choose 5 \"\$out\""
 
-  write_index "$idx" 5 - 5
+  write_index "$idx" 5 -
   check "a row missing abi_revision: fails, naming the line" fail "carry no abi_revision" -- \
-    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7 24.8); choose 5 \"\$out\""
+    bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7); choose 5 \"\$out\""
+
+  # -- oldest_line_at_revision(): chtypes#281 item 2's full-fleet
+  #    confirmation (step 2b). A SEPARATE fixture with four lines: 24.8 is
+  #    stuck at revision 5 — what a retired line looks like once a relink
+  #    moves past it — while 25.3 and the two newest (-lts/-stable) lines
+  #    are all at revision 6.
+  fidx="$tmp/fleet-index.json"
+  python3 - "$fidx" <<'PY'
+import json, sys
+path = sys.argv[1]
+def row(minor, version, rev, build=1):
+    return {"os": "linux", "arch": "amd64", "clickhouse_minor": minor,
+            "clickhouse_version": version, "file": "chtypes-%s-linux-amd64.tar.gz" % version,
+            "sha256": "0" * 64, "build": build, "abi_revision": rev}
+doc = {"schema": 1, "artifacts": [
+    row("24.8", "24.8.1.1-lts", 5),
+    row("25.3", "25.3.2.2-lts", 6),
+    row("26.7", "26.7.10.6-stable", 6),
+    row("26.8", "26.8.6.5-lts", 6),
+]}
+json.dump(doc, open(path, "w"))
+PY
+  # Every call below excludes 26.8/26.7 (the two leading lines), matching
+  # exactly how run() calls this against the real fixture: the question is
+  # always "does some OTHER line confirm the revision", never "do the two
+  # lines that already established it also report it" (see the integration
+  # case further down for why that distinction matters).
+  #
+  # (a) the oldest OTHER line overall (24.8) IS at the given revision —
+  #     picked outright, since there is nothing older at that revision to
+  #     prefer.
+  out="$(bash -c "source '$0' --lib; oldest_line_at_revision '$fidx' linux-amd64 5 26.8 26.7" 2>/dev/null)" \
+    || { echo "SELFTEST FAILED (full-fleet: present at revision): expected success, got failure" >&2; fail=1; }
+  [ "$out" = "24.8" ] \
+    || { echo "SELFTEST FAILED (full-fleet: present at revision): wanted 24.8 at revision 5, got: $out" >&2; fail=1; }
+  echo "abi-channel: selftest ok — full-fleet: the oldest other line, present at the given revision, is picked"
+  # (b) 24.8 — the oldest OTHER line overall — is served only at an OLDER
+  #     revision (5): skipped, and 25.3, the next-oldest line that IS at
+  #     revision 6, is picked instead.
+  out="$(bash -c "source '$0' --lib; oldest_line_at_revision '$fidx' linux-amd64 6 26.8 26.7" 2>/dev/null)" \
+    || { echo "SELFTEST FAILED (full-fleet: skip stale oldest): expected success, got failure" >&2; fail=1; }
+  [ "$out" = "25.3" ] \
+    || { echo "SELFTEST FAILED (full-fleet: skip stale oldest): wanted 25.3 at revision 6 (24.8 is stuck at 5), got: $out" >&2; fail=1; }
+  echo "abi-channel: selftest ok — full-fleet: a line stuck at an older revision is skipped, and the next-oldest line at the target revision is picked"
+  # (c) no OTHER row anywhere carries the given revision: stays loud, naming
+  #     it — the same refusal discipline served_revision()'s own
+  #     missing/disagree cases already use, never a silent pass.
+  check "full-fleet: no other line at the given revision fails loudly, naming it" fail "abi_revision 99" -- \
+    bash -c "source '$0' --lib; oldest_line_at_revision '$fidx' linux-amd64 99 26.8 26.7"
+  # Integration: run()'s OWN sequence (served_revision on the two leading
+  # lines, THEN the full-fleet gate) must reject a relink that moved only
+  # the two leading lines while the fleet's confirmation line stayed behind
+  # — even though a 2-line-only check would have called this "ok".
+  gidx="$tmp/partial-relink-index.json"
+  python3 - "$gidx" <<'PY'
+import json, sys
+path = sys.argv[1]
+def row(minor, version, rev):
+    return {"os": "linux", "arch": "amd64", "clickhouse_minor": minor,
+            "clickhouse_version": version, "file": "chtypes-%s-linux-amd64.tar.gz" % version,
+            "sha256": "0" * 64, "build": 1, "abi_revision": rev}
+doc = {"schema": 1, "artifacts": [
+    row("24.8", "24.8.1.1-lts", 6),
+    row("26.7", "26.7.10.6-stable", 7),
+    row("26.8", "26.8.6.5-lts", 7),
+]}
+json.dump(doc, open(path, "w"))
+PY
+  check "full-fleet integration: two leading lines agree but nothing else confirms it -> stays loud" fail "abi_revision 7" -- \
+    bash -c "source '$0' --lib; out=\$(served_revision '$gidx' linux-amd64 26.8 26.7); case \"\$out\" in ok\\ *) oldest_line_at_revision '$gidx' linux-amd64 \"\${out#ok }\" 26.8 26.7 ;; esac"
 
   # -- explicit tag: wins outright, even over what would otherwise be a
   #    hard failure (header behind served) — proving it short-circuits
   #    BEFORE the comparison, never merely after it.
-  write_index "$idx" 5 5 5
+  write_index "$idx" 5 5
   write_header "$h" 4
   out="$(CHTYPES_ARTIFACTS_TAG=my-mirror bash "$0" --header "$h" --platform linux-amd64 2>&1)"
   rc=$?
@@ -335,11 +515,11 @@ PY
   # -- the output follows a header edit: same served rows, revision alone
   #    changes -> default flips to candidate and back, on the temp header's
   #    OWN bytes, never a cached or hand-set value.
-  write_index "$idx" 5 5 5
+  write_index "$idx" 5 5
   write_header "$h" 5
-  m1="$(bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7 24.8); choose \$(header_revision '$h') \"\$out\"" | sed -n 's/^mode=//p')"
+  m1="$(bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7); choose \$(header_revision '$h') \"\$out\"" | sed -n 's/^mode=//p')"
   write_header "$h" 7
-  m2="$(bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7 24.8); choose \$(header_revision '$h') \"\$out\"" | sed -n 's/^mode=//p')"
+  m2="$(bash -c "source '$0' --lib; out=\$(served_revision '$idx' linux-amd64 26.8 26.7); choose \$(header_revision '$h') \"\$out\"" | sed -n 's/^mode=//p')"
   if [ "$m1" = default ] && [ "$m2" = candidate ]; then
     echo "abi-channel: selftest ok — the output follows the temp header's own number ($m1 at rev 5, $m2 at rev 7), not a cached value"
   else
