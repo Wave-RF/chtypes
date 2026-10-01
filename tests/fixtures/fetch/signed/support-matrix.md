@@ -4,7 +4,7 @@
 
 Rendered from `index.json` in the same publish step that writes it, so it can never drift from what is actually served. Language minimums and which ABI revision each SDK version speaks live in the SDK's own `docs/support.md` — this file covers only what `index.json` itself states.
 
-`index.json` sha256: `73fb5079f45985bc8831f094255edec96cb860592ca34b1c2dcdd76d1bd77ff3`
+`index.json` sha256: `dccca8adf615679fe6cb8641786260b24bde7aa1fca6449f126b1b86aa4625a2`
 
 ## Platforms
 
@@ -20,13 +20,15 @@ Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Windo
 
 One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has passed the artifact producer's comparison against a real server and the release publishes it:
 
-| Line | Platforms |
-|---|---|
-| `25.8` | all |
-| `26.7` | all |
+| Line | Platforms | Support |
+|---|---|---|
+| `25.8` | all | served, unsupported — still fetchable and loadable by any SDK on its ABI revision; unmaintained |
+| `26.7` | all | supported |
 
 The exact ClickHouse patch each line is built from is in its artifact's `manifest.json` and in the served `index.json` (`clickhouse_version`); it moves with every upstream patch release, so it is not repeated here.
 Ask for a line, never a nearest match: `for("25.8")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.
+
+A line reads **served, unsupported** only because it is missing from the served `index.json`'s `supported_lines` array — never removed, deprecated or blocked. An index with no `supported_lines` key at all states nothing here; absence means unknown, never unsupported.
 
 ## ABI revisions
 

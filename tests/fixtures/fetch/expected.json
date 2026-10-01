@@ -123,6 +123,7 @@
   "license_url",
   "release_tag",
   "schema",
+  "supported_lines",
   "unbuildable"
  ],
  "index_row_fields": [
