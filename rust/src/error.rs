@@ -64,7 +64,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Everything that can go wrong loading an artifact or asking it a question.
 ///
 /// Three different answers travel through this one type, and a caller must
-/// keep them apart (the C ABI contract §Error model):
+/// keep them apart (docs/limitations.md §The error model is normative):
 ///
 /// * **A rejection** — [`Error::Schema`]: ClickHouse itself refused, with its
 ///   own code and message. The DDL or profile can never exist on that server
@@ -514,7 +514,7 @@ impl Error {
     }
 
     /// Build the right variant from a C code. The SIGN decides
-    /// (docs/reference/bindings.md §The error split, the C ABI contract §Error model): a positive
+    /// (docs/reference/bindings.md §The error split): a positive
     /// code is the server's own refusal and rides through verbatim; ANY
     /// negative code is this library declining — `-2` "I will not guess",
     /// `-1` a guarded exception, and any sentinel a later era adds — and

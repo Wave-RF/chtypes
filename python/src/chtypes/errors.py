@@ -266,7 +266,7 @@ class SchemaError(ChtypesError):
     conflated: reporting a decline as a rejection manufactures an over-reject
     (silent data loss), and hiding a rejection behind a decline lets a DDL
     that can never exist look merely unmodeled. Both budgets are zero
-    (the C ABI contract §Error model).
+    (docs/limitations.md §The error model is normative).
 
     Attributes:
         code: the ClickHouse error code — always the server's own.
@@ -334,7 +334,7 @@ def _error_for(code: int, msg: str, column: str = "") -> ChtypesError:
     """The ONE place an ABI error code becomes an exception, so the
     refusal/decline split cannot be decided differently in two files.
 
-    The SIGN decides (docs/reference/bindings.md §The error split, the C ABI contract §Error model):
+    The SIGN decides (docs/reference/bindings.md §The error split):
     a positive code is the server's own refusal and rides through verbatim;
     any negative code is this library declining (`-2` "I will not guess",
     `-1` a guarded exception) and becomes an `UnsupportedError`. Keying on
