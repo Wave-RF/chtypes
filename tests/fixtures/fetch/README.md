@@ -21,7 +21,7 @@ which deliberately span both revisions — see that section below.
 Platforms `linux-arm64`, `linux-amd64`, `darwin-arm64`; lines `25.8` → `25.8.28.1-lts`, `26.7` → `26.7.3.19-stable`; release tag `fixtures`.
 Not published anywhere: platform `darwin-amd64`, line `24.8`, patch `25.8.99.1-lts` (→ `CHTYPES_ARTIFACT_UNPUBLISHED`, exit 4).
 
-Every `index.json` document carries exactly these top-level keys: `artifacts`, `generated_at`, `license`, `license_url`, `release_tag`, `schema`, `unbuildable`.
+Every `index.json` document carries exactly these top-level keys: `artifacts`, `generated_at`, `license`, `license_url`, `release_tag`, `schema`, `supported_lines`, `unbuildable`.
 Every `index.json` row carries exactly these fields: `abi_revision`, `arch`, `build`, `bytes`, `clickhouse_minor`, `clickhouse_version`, `core_commit`, `file`, `library`, `library_sha256`, `os`, `sha256`.
 Files in every release directory: `index.json`, `SHA256SUMS`, `SHA256SUMS.sig`
 (absent in `unsigned/`), `LICENSE`, `NOTICE`, `RELEASE_NOTES.md`, and one
