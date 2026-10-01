@@ -330,7 +330,7 @@ def selftest() -> int:
     # --- fabricated: cross-repository reference -> never close.
     check(
         issues_to_close(
-            REPO, True, [{"number": 9, "state": "OPEN", "repository": {"nameWithOwner": "Wave-RF/chtypes-core"}}]
+            REPO, True, [{"number": 9, "state": "OPEN", "repository": {"nameWithOwner": "Wave-RF/unrelated-repo"}}]
         ) == [],
         "a closingIssuesReferences entry in a different repository must never be closed",
     )
