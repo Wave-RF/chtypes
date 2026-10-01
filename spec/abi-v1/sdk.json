@@ -1,6 +1,6 @@
 {
   "sdk_schema": 1,
-  "reuse_v0_names": false,
+  "reuse_v0_names": true,
   "provisional_markers": {
     "A4": "the content of build_info capabilities: which formats and document flags a build reports",
     "A5": "process initialization and the time-zone contract: whether an init call survives, and where a zone is set",

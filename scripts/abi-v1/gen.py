@@ -598,13 +598,24 @@ def _selftest_tree() -> list[str]:
             _json_edit(w / abi, lambda d: _fn_entry(d, "chs_back_quote").update(name="chs_quote_identifier"))
             _edit(w / docs, "### chs_back_quote\n", "### chs_quote_identifier\n")
 
-        plant("a v0 name reused with a different signature", collide, "reuses a v0 name with a different signature")
+        def reuse_off(w: Path) -> None:
+            _json_edit(w / sdk, lambda d: d.update(reuse_v0_names=False))
 
-        def collide_allowed(w: Path) -> None:
+        def collide_off(w: Path) -> None:
+            collide(w)
+            reuse_off(w)
+
+        plant(
+            "a v0 name reused with a different signature while reuse_v0_names is false",
+            collide_off,
+            "reuses a v0 name with a different signature",
+        )
+
+        def collide_on(w: Path) -> None:
             collide(w)
             _json_edit(w / sdk, lambda d: d.update(reuse_v0_names=True))
 
-        plant("the same reuse once reuse_v0_names is true", collide_allowed, None, ("--write", "--check"))
+        plant("the same reuse while reuse_v0_names is true", collide_on, None, ("--write", "--check"))
 
         def no_tombstone(w: Path) -> None:
             _json_edit(

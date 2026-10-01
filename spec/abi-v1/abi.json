@@ -845,7 +845,7 @@
       ]
     },
     {
-      "name": "chs_error_code_table",
+      "name": "chs_error_codes",
       "class": "api",
       "thread": "any",
       "returns": {
@@ -870,7 +870,7 @@
       ]
     },
     {
-      "name": "chs_tool_registered_families",
+      "name": "chs_registered_families",
       "class": "tooling",
       "thread": "process_serial",
       "returns": {
@@ -895,7 +895,7 @@
       ]
     },
     {
-      "name": "chs_tool_function_flags",
+      "name": "chs_function_flags",
       "class": "tooling",
       "thread": "process_serial",
       "returns": {
@@ -920,7 +920,7 @@
       ]
     },
     {
-      "name": "chs_tool_reference_type",
+      "name": "chs_reference_type",
       "class": "tooling",
       "thread": "process_serial",
       "returns": {

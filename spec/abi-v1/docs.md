@@ -188,19 +188,19 @@ Releases the caller's reference to an error. Freeing NULL does nothing.
 
 A JSON document counting the live handles of each kind this image has made, taken before the document's own buffer exists. A test abandons handles, lets its runtime collect them and then asserts every count is zero, which is how all four bindings prove their finalizers release everything.
 
-### chs_error_code_table
+### chs_error_codes
 
-ClickHouse's own error-code table for this build, as a JSON document: a passthrough over the vendored table, never a copy. The table belongs to the build, and one number can name different errors on two ClickHouse lines, so a caller that needs several lines asks each library. Named for what it returns; the v0 symbol with the nearer name had a different signature.
+ClickHouse's own error-code table for this build, as a JSON document: a passthrough over the vendored table, never a copy. The table belongs to the build, and one number can name different errors on two ClickHouse lines, so a caller that needs several lines asks each library. The name is v0's, with the v1 call shape; the tombstone keeps every v0 binding from reaching it.
 
-### chs_tool_registered_families
+### chs_registered_families
 
 Every type family in this build's own type registry, one per line. A tooling export for the artifact producer's build gates: no binding wraps it, and a loader resolves it only for presence.
 
-### chs_tool_function_flags
+### chs_function_flags
 
 A tab-separated audit of every registered function's volatility flags, one function per line, read off this build's own registry. A tooling export for the artifact producer's build gates, which derive the statelessness evidence from it; no binding wraps it.
 
-### chs_tool_reference_type
+### chs_reference_type
 
 The widened reference type this build pairs with a type expression. A tooling export; no binding wraps it.
 
@@ -222,7 +222,7 @@ Parses one type expression with ClickHouse's own parser and returns its canonica
 
 ### chs_back_quote
 
-A name quoted the way ClickHouse's own `backQuote` quotes it: always quoted, every special byte escaped. A passthrough over the vendored function; the name is a byte string. Named after that function, because the v0 symbol for the same job had a different signature.
+A name quoted the way ClickHouse's own `backQuote` quotes it: always quoted, every special byte escaped. A passthrough over the vendored function, and named after it; the name is a byte string.
 
 ### chs_back_quote_if_needed
 
