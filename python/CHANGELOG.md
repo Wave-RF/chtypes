@@ -6,6 +6,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-10-01
+
 ### Added
 
 - **`InitConflictError`** — raised for an artifact image this process already initialized under a different timezone, with `.path`, `.have` and `.want`. A `RegistryError` subclass, so `except RegistryError` still catches it, as it caught the untyped refusal before (#355).

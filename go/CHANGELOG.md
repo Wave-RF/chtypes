@@ -6,6 +6,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-10-01
+
 ### Added
 
 - **`ErrInitConflict`** — the sentinel for the refusal to open an artifact image this process already initialized under a different timezone. `errors.Is(err, chtypes.ErrInitConflict)` matches it however `Load` or `For` wraps it, and the message still names the path and both zones (#355).
