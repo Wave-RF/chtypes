@@ -1106,21 +1106,36 @@ func WithFilterParams(params map[string]string) FilterOption {
 
 // ----------------------------------------------------- filtered row export
 
-// rowsExportWithConfig is RowsExportWith's assembled options: DocFlags plus
-// an attached row filter. A separate carrier from rowsExportConfig
-// (RowsExport's own) because this call's growth slot carries a schema-bound
-// filter handle that RowsExport's option set never needed.
+// rowsExportWithConfig is RowsExportWith's assembled options: DocFlags, an
+// attached row filter, and (issue #304) the revision-5 INSERT column list —
+// the same list RowsExport already accepts, now reachable on this entry
+// point too via WithColumns.
 type rowsExportWithConfig struct {
-	flags  DocFlags
-	filter *LoadedFilter
+	flags   DocFlags
+	filter  *LoadedFilter
+	columns []string
 }
 
 // RowsOption configures RowsExportWith — a new entry point rather than an
 // option added to RowsExport, because RowsExport's own variadic parameter
 // was already spent (docs/guides/filters.md "Exporting only the rows a
 // filter admits"; the decision is issue #54's own). WithRowFilter and
-// WithDocFlags are its two options.
-type RowsOption func(*rowsExportWithConfig)
+// WithDocFlags are its two dedicated options; WithColumns (RowOption) rides
+// the same interface, exactly as RowsExportOption lets it ride RowsExport's
+// own variadic — so a column list composes with an attached filter in one
+// call, matching Python's and TypeScript's `rows(..., columns=, row_filter=)`
+// (issue #304).
+type RowsOption interface {
+	applyRowsExportWith(*rowsExportWithConfig)
+}
+
+// rowsOptionFunc adapts a plain function into a RowsOption — the carrier
+// WithRowFilter and WithDocFlags return. Unexported: nothing outside this
+// package can construct a rowsExportWithConfig to call one against, so there
+// is no reason for a caller to build their own.
+type rowsOptionFunc func(*rowsExportWithConfig)
+
+func (f rowsOptionFunc) applyRowsExportWith(c *rowsExportWithConfig) { f(c) }
 
 // WithRowFilter attaches a compiled filter to RowsExportWith's export
 // channel: ONE chs_rows parse then answers both the per-row verdict
@@ -1147,7 +1162,7 @@ type RowsOption func(*rowsExportWithConfig)
 // frees open filters first. RowsExportWith reuses that existing mechanism;
 // it does not invent a second one.
 func WithRowFilter(f *LoadedFilter) RowsOption {
-	return func(c *rowsExportWithConfig) { c.filter = f }
+	return rowsOptionFunc(func(c *rowsExportWithConfig) { c.filter = f })
 }
 
 // WithDocFlags selects which document groups RowsExportWith's per-row
@@ -1156,7 +1171,7 @@ func WithRowFilter(f *LoadedFilter) RowsOption {
 // accepts) because RowsExportWith's opts are RowsOption values. Repeated
 // calls OR their bits together, exactly as RowsExport's DocFlags args do.
 func WithDocFlags(flags DocFlags) RowsOption {
-	return func(c *rowsExportWithConfig) { c.flags |= flags }
+	return rowsOptionFunc(func(c *rowsExportWithConfig) { c.flags |= flags })
 }
 
 // -------------------------------------------------------------- row options
@@ -1179,7 +1194,7 @@ type rowConfig struct {
 type RowOption func(*rowConfig)
 
 // WithColumns declares the INSERT column list (ABI revision 5) for Row,
-// RowWithSettings, Rows, RowsExport and ParseBlock — the
+// RowWithSettings, Rows, RowsExport, RowsExportWith and ParseBlock — the
 // `INSERT INTO t (a, b, …)` shape. The data then supplies exactly the listed
 // columns — k-th field to k-th listed column in the positional formats (CSV,
 // TSV, Values, JSONCompactEachRow, the binary family), keys matched against
@@ -1246,6 +1261,17 @@ func (d DocFlags) applyRowsExport(c *rowsExportConfig) { c.flags |= d }
 
 // applyRowsExport lets a RowOption (WithColumns) ride the same call.
 func (o RowOption) applyRowsExport(c *rowsExportConfig) {
+	var rc rowConfig
+	o(&rc)
+	if len(rc.columns) > 0 {
+		c.columns = rc.columns
+	}
+}
+
+// applyRowsExportWith lets a RowOption (WithColumns) ride RowsExportWith's
+// opts too (issue #304) — the same bridge applyRowsExport already gives
+// RowsExport, so a column list composes with an attached filter in one call.
+func (o RowOption) applyRowsExportWith(c *rowsExportWithConfig) {
 	var rc rowConfig
 	o(&rc)
 	if len(rc.columns) > 0 {
