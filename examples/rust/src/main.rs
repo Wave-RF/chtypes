@@ -23,7 +23,7 @@
 //!
 //! ```text
 //! cargo run                        # newest vendored version
-//! CHTYPES_VERSION=25.8 cargo run   # pick a line
+//! CHTYPES_VERSION=26.8 cargo run   # pick a line
 //! ../chplay.sh rust                # same, with prerequisite checks
 //! ```
 //!
@@ -161,7 +161,7 @@ fn section1() -> (Registry, Arc<Library>) {
     let registry = match Registry::from_env_or(&fallback) {
         Ok(r) => r,
         Err(err) => fatal(&format!(
-            "open registry: {err}\n\nFetch an artifact first: `scripts/fetch.sh 25.8`."
+            "open registry: {err}\n\nFetch an artifact first: `scripts/fetch.sh 26.8`."
         )),
     };
     let versions = registry.versions();
@@ -177,8 +177,8 @@ fn section1() -> (Registry, Arc<Library>) {
         note("cross-version sweeps will degrade gracefully. More: `scripts/fetch.sh 26.7`");
     }
 
-    // Version selection: a minor line ("25.8") and an exact patch
-    // ("25.8.28.1-lts") both resolve. Docker tags drift, so an
+    // Version selection: a minor line ("26.8") and an exact patch
+    // ("26.8.15.10-lts") both resolve. Docker tags drift, so an
     // exact-match-only lookup would silently lose a whole version line.
     let want = match std::env::var("CHTYPES_VERSION") {
         Ok(v) if !v.is_empty() => {

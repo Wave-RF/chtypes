@@ -17,7 +17,7 @@
 // Run it:
 //
 //	docker run -d --name chguide-ch --label com.docker.compose.project=chguide \
-//	    -e CLICKHOUSE_PASSWORD=chguide clickhouse/clickhouse-server:25.8
+//	    -e CLICKHOUSE_PASSWORD=chguide clickhouse/clickhouse-server:26.8
 //	CH_ADDR=http://<container-ip>:8123 go run ./ingest-demo
 //
 // See README.md in this directory.

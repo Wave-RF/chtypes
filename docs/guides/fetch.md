@@ -32,7 +32,7 @@ Each registry directory above holds two levels of installs. **ONLY a line spelli
 
 ## 2. Where artifacts come from
 
-`CHTYPES_ARTIFACTS_URL` (default `https://artifacts.wavehouse.dev`) plus a release tag (default the rolling `artifacts`; `--tag v1.2.0` for a frozen one) gives `<url>/<tag>/`; `--url <base>` names any other base, including a local directory or a `file://` path. A line (`25.8`) resolves to the one patch the release publishes for it; an exact patch (`25.8.28.1-lts`) is a hard requirement and fails if absent.
+`CHTYPES_ARTIFACTS_URL` (default `https://artifacts.wavehouse.dev`) plus a release tag (default the rolling `artifacts`; `--tag v1.2.0` for a frozen one) gives `<url>/<tag>/`; `--url <base>` names any other base, including a local directory or a `file://` path. A line (`26.8`) resolves to the one patch the release publishes for it; an exact patch (`26.8.15.10-lts`) is a hard requirement and fails if absent.
 
 A release holds four kinds of file:
 
@@ -132,12 +132,12 @@ Reference vector (openssl, `-rawin`): message `68656c6c6f0a` ("hello\n") signs u
 `fetch --lock chtypes.lock` records, per `<os>-<arch>/<clickhouse_version>` (the EXACT patch installed or found installed — chtypes#284), the asset file and sha256, and the ABI revision the selected row carried. `fetch --frozen` (or `ensure` given both a lock and `frozen`) refuses anything else with `CHTYPES_ARTIFACT_PINNED`. Without `--frozen`, `--lock` only records: an existing entry is replaced by what the fetch installed, and nothing is removed — that is how a lock is re-pinned, and how it accumulates one entry per exact patch a project has ever locked. The file is JSON, schema 2:
 
 ```json
-{"schema": 2, "artifacts": {"linux-arm64/25.8.28.1-lts": {"file": "chtypes-25.8.28.1-lts-linux-arm64.tar.gz", "sha256": "…", "abi_revision": 6}}}
+{"schema": 2, "artifacts": {"linux-arm64/26.8.15.10-lts": {"file": "chtypes-26.8.15.10-lts-linux-arm64.tar.gz", "sha256": "…", "abi_revision": 6}}}
 ```
 
 That is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, and CI fails on drift — now keyed so that several patches of one line coexist in the same lock file.
 
-**Schema 2 is keyed by exact patch, not by line, because a lock that can only say "linux-arm64/25.8" cannot pin two patches of 25.8 at once** — and pinning an older patch while a newer one is served (the headline case below) is exactly what this schema exists for. `abi_revision` is always written now (it was optional and additive under schema 1). A schema-2 entry that carries none — a hand edit — is treated as schema 1's "records no ABI revision" case, below.
+**Schema 2 is keyed by exact patch, not by line, because a lock that can only say "linux-arm64/26.8" cannot pin two patches of 26.8 at once** — and pinning an older patch while a newer one is served (the headline case below) is exactly what this schema exists for. `abi_revision` is always written now (it was optional and additive under schema 1). A schema-2 entry that carries none — a hand edit — is treated as schema 1's "records no ABI revision" case, below.
 
 **Reading schema 1.** Every SDK still reads it: a schema-1 entry `<os>-<arch>/<minor>` is read as if it were `<os>-<arch>/<clickhouse_version>`, where `<clickhouse_version>` comes from the entry's own `file`, under the asset-name grammar ([`artifacts.md`](artifacts.md), `chtypes-<version>-<os>-<arch>[-b<N>].tar.gz`) — and that version's line must equal the key's `<minor>`, or the entry does not parse (the lock is then unreadable, naming the bad entry, exactly as a malformed entry does today). **The SDK always writes schema 2**: the first write into a schema-1 file converts every entry to schema-2 keys in the same write, because schema 1 cannot record two patches of one line and writing schema 1 "when it still fits" would make the file's format depend on its content. Any schema number but 1 or 2 is refused, naming both accepted numbers.
 
@@ -146,7 +146,7 @@ That is the lockfile model every package manager uses: trust on first fetch, byt
 - **The entry names an ABI revision, and it is not this SDK's own** — `CHTYPES_ARTIFACT_PINNED` (exit 1, the same code as always), naming both numbers and the remedy, e.g.:
 
   ```text
-  chtypes.lock pins linux-arm64/25.8.28.1-lts at ABI revision 5; this SDK speaks ABI revision 6 — re-lock with: python -m chtypes fetch 25.8.28.1-lts --lock chtypes.lock
+  chtypes.lock pins linux-arm64/26.8.15.10-lts at ABI revision 5; this SDK speaks ABI revision 6 — re-lock with: python -m chtypes fetch 26.8.15.10-lts --lock chtypes.lock
   ```
 
   This fires before the release is consulted. Without it, a lock made for another revision fails as a drifted pin (`CHTYPES_ARTIFACT_PINNED`, when the release has a row at this SDK's revision) or as an unpublished patch (`CHTYPES_ARTIFACT_UNPUBLISHED`, when it has none), and neither message names the cause.
@@ -187,10 +187,10 @@ chtypes where                        the registry directory fetch would write to
 
 | SDK        | invocation                                                             | library call                        |
 | ---------- | ---------------------------------------------------------------------- | ----------------------------------- |
-| TypeScript | `npx @wavehouse/chtypes fetch 25.8` (`bin: chtypes`)                   | `ensure('25.8', opts)`              |
-| Python     | `python -m chtypes fetch 25.8` and the `chtypes` console script        | `chtypes.ensure('25.8', **opts)`    |
-| Rust       | `cargo install chtypes` → `chtypes fetch 25.8` (the crate's `[[bin]]`) | `chtypes::ensure("25.8", &opts)`    |
-| Go         | `go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8`   | `chtypes.Ensure(ctx, "25.8", opts)` |
+| TypeScript | `npx @wavehouse/chtypes fetch 26.8` (`bin: chtypes`)                   | `ensure('26.8', opts)`              |
+| Python     | `python -m chtypes fetch 26.8` and the `chtypes` console script        | `chtypes.ensure('26.8', **opts)`    |
+| Rust       | `cargo install chtypes` → `chtypes fetch 26.8` (the crate's `[[bin]]`) | `chtypes::ensure("26.8", &opts)`    |
+| Go         | `go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8`   | `chtypes.Ensure(ctx, "26.8", opts)` |
 
 `ensure` is idempotent: installed-and-verified is a no-op, otherwise it fetches through §3. It returns the directory the patch landed in — `<registry>/<minor>/` for the patch a line request selects, `<registry>/patches/<minor>/<clickhouse_version>/` for any other exact patch (§1). Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source unreachable · 4 not published for this platform/line/patch.
 
@@ -215,7 +215,7 @@ Codes, shared: `CHTYPES_ARTIFACT_MISSING`, `CHTYPES_ARTIFACT_UNTRUSTED`, `CHTYPE
 `CHTYPES_ARTIFACT_UNPUBLISHED` for a line, an exact patch or `--all` that the release has only at another ABI revision (§2) names the line or patch, the platform, the SDK's own revision, and what the release does serve for it — the revision(s) its rows carry, that its rows record no ABI revision (built before revisions were recorded), or that it has no row for it at all — for example, from an SDK at revision `<R>` against a release that has the line only at `<S>`:
 
 ```text
-chtypes: no artifact for ClickHouse line 25.8 on linux-arm64 at ABI revision <R> (this SDK's) at <source>: the release has that line for linux-arm64 only at ABI revision <S>; at ABI revision <R> the release has: nothing. [CHTYPES_ARTIFACT_UNPUBLISHED]
+chtypes: no artifact for ClickHouse line 26.8 on linux-arm64 at ABI revision <R> (this SDK's) at <source>: the release has that line for linux-arm64 only at ABI revision <S>; at ABI revision <R> the release has: nothing. [CHTYPES_ARTIFACT_UNPUBLISHED]
 ```
 
 and, when the line's only rows record no revision at all — darwin-arm64 24.8 on the rolling release today:
@@ -228,7 +228,7 @@ The wording differs a little per binding (Rust folds the same facts into its `of
 
 Under `--frozen`, both `CHTYPES_ARTIFACT_PINNED` and this `CHTYPES_ARTIFACT_UNPUBLISHED` can carry one more sentence about the lock's own recorded ABI revision — §5 has the messages.
 
-**`fetch`/`ensure` (and `scripts/fetch.sh`) never fall back to a same-line patch, even after chtypes#284: a hard requirement stays a hard requirement.** `fetch 25.8.28.1-lts` that the release does not publish is `CHTYPES_ARTIFACT_UNPUBLISHED`, exactly as above, whether or not the release publishes some OTHER patch of 25.8 — never a quiet substitute. Only the **registry's** `For`/`resolve` falls back, and only for a load, never for a fetch: [`multi-version.md`](multi-version.md#resolution-the-exact-patch-else-its-line--never-another-line) has that rule and the warning it prints.
+**`fetch`/`ensure` (and `scripts/fetch.sh`) never fall back to a same-line patch, even after chtypes#284: a hard requirement stays a hard requirement.** `fetch 26.8.15.10-lts` that the release does not publish is `CHTYPES_ARTIFACT_UNPUBLISHED`, exactly as above, whether or not the release publishes some OTHER patch of 26.8 — never a quiet substitute. Only the **registry's** `For`/`resolve` falls back, and only for a load, never for a fetch: [`multi-version.md`](multi-version.md#resolution-the-exact-patch-else-its-line--never-another-line) has that rule and the warning it prints.
 
 ## 8. Deferred: system packages (brew, apt)
 
@@ -256,11 +256,11 @@ Where the four implementations diverged, one rule was chosen and the odd ones ou
 4. **An explicit registry directory that lacks a line falls through** to the rest of the §1 path, in every SDK's search-path constructor. In Rust that constructor is `Registry::from_search_path()` / `Registry::from_search_path_with(RegistryOptions { dir, .. })`; `Registry::new(dir)` stays the single-directory loader (that directory only, `Error::ArtifactMissing` for a line it lacks), by design. **A named directory that does not exist is refused at construction in all four**, unless autofetch is on, in which case it is the destination-to-be. Construction reads manifests and `dlopen`s nothing everywhere; see [`multi-version.md`](multi-version.md#how-it-works-and-what-it-costs).
 5. **`CHTYPES_ALLOW_UNSIGNED=1` skips step 0 entirely**: `SHA256SUMS.sig` is not even fetched, so a present-but-wrong signature installs, behind the one loud warning naming the source. `SHA256SUMS` itself is still required and steps 1–4 still run — a tampered tarball is still refused. All four agree.
 6. **"Installed" is decided against the signed release.** A plain `ensure` / `fetch` of an installed line reads `SHA256SUMS`, its signature and `index.json` — never the tarball — and reports installed when the library in place hashes what that listing says (§3). `--offline` is the one path that reads no source: an installed line that hashes what its own `manifest.json` says is the answer; anything else is `CHTYPES_SOURCE_UNREACHABLE` (a damaged install, `CHTYPES_ARTIFACT_CORRUPT`). (Rust's plain `ensure` was local-only; changed.)
-7. **An exact patch spelled without its channel matches that patch on any channel**: `25.8.28.1` and `v25.8.28.1` take `25.8.28.1-lts`; a spelled channel (`25.8.28.1-stable`) matches only itself, and a miss is `CHTYPES_ARTIFACT_UNPUBLISHED`, never the neighboring patch. (Go required the exact string; changed.)
+7. **An exact patch spelled without its channel matches that patch on any channel**: `26.8.15.10` and `v26.8.15.10` take `26.8.15.10-lts`; a spelled channel (`26.8.15.10-stable`) matches only itself, and a miss is `CHTYPES_ARTIFACT_UNPUBLISHED`, never the neighboring patch. (Go required the exact string; changed.)
 8. **`CHTYPES_ARTIFACT_PINNED` exits 1**, like `…_UNTRUSTED` and `…_CORRUPT`: a verification failure. Only `CHTYPES_SOURCE_UNREACHABLE` (3) and `CHTYPES_ARTIFACT_UNPUBLISHED` (4) have exit codes of their own. All four agree.
 9. **The "Install it" line of §7, per SDK** — two spaces after the colon, then the SDK's own fetch command and the line: Go `go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch <line>` · Python `python -m chtypes fetch <line>` · TypeScript `npx @wavehouse/chtypes fetch <line>` · Rust `cargo install chtypes && chtypes fetch <line>`.
 10. **Python's `Registry()` walks the §1 search path** like the other three. It once required an explicit path or `CHTYPES_REGISTRY`; that was the last constructor that did not, and it changed on the same day.
-11. **(2026-09-30, chtypes#284, exact-patch resolution.) Decision 7 applies everywhere a patch is matched, not only at the registry's online resolution.** `scripts/fetch.sh`'s own selector used to compare a patch spelling by string equality — `25.8.28.1-lts` installed, `25.8.28.1` was `CHTYPES_ARTIFACT_UNPUBLISHED` — and Python's offline path refused a channel-less spelling against an installed channeled patch (`SourceUnreachableError`, "…holds ClickHouse 25.8.28.1-lts, not the 25.8.28.1 asked for"). Both are now Decision 7, same as the other three always were.
+11. **(2026-09-30, chtypes#284, exact-patch resolution.) Decision 7 applies everywhere a patch is matched, not only at the registry's online resolution.** `scripts/fetch.sh`'s own selector used to compare a patch spelling by string equality — `26.8.15.10-lts` installed, `26.8.15.10` was `CHTYPES_ARTIFACT_UNPUBLISHED` — and Python's offline path refused a channel-less spelling against an installed channeled patch (`SourceUnreachableError`, "…holds ClickHouse 26.8.15.10-lts, not the 26.8.15.10 asked for"). Both are now Decision 7, same as the other three always were.
 12. **Autofetch of a patch spelling fetches that patch first, in all four.** Go, TypeScript and Rust used to fetch the LINE even for a patch request — quietly serving the release's newest patch instead of the one actually asked for; Python already fetched the patch and simply failed `CHTYPES_ARTIFACT_UNPUBLISHED` if the release did not have it. All four now try the exact patch, then fall back to the newest patch of the line only once the patch is CONFIRMED unpublished — never on a verification or network failure, which retries instead.
 13. **A lock is enforced only under `--frozen`, in all four.** Python used to refuse `ensure(..., lock=…)` against an existing entry even without `--frozen`, so #282's own printed re-lock remedy — run the same command again, without `--frozen` — was itself refused by the check it was meant to fix. `--lock` without `--frozen` only ever records now, in every binding (the fix landed ahead of this work, in #288).
 14. **Offline never reads the lock, in any of the four.** TypeScript's `--offline --frozen` used to require a lock file and refuse an unpinned line even offline (`CHTYPES_ARTIFACT_PINNED`); Go, Python and Rust never did. Decision 6 — offline fails only with `CHTYPES_SOURCE_UNREACHABLE` or `CHTYPES_ARTIFACT_CORRUPT` — now holds without exception.

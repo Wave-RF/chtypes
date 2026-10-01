@@ -10,10 +10,10 @@ Two things: this package, and at least one **artifact** — the per-version nati
 
 ```sh
 pnpm add @wavehouse/chtypes
-npx @wavehouse/chtypes fetch 25.8
+npx @wavehouse/chtypes fetch 26.8
 ```
 
-The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/25.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
+The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/26.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
 
 ## Quickstart
 
@@ -21,7 +21,7 @@ The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/25.8/` — the
 import { Format, Registry } from '@wavehouse/chtypes';
 
 const registry = new Registry();     // walks the search path
-const lib = registry.for('25.8');    // a line or an exact patch; never a nearest match
+const lib = registry.for('26.8');    // a line or an exact patch; never a nearest match
 const schema = lib.compileDdl('x UInt8, ts DateTime DEFAULT now()');
 
 const batch = schema.rows(Format.JSONEachRow, Buffer.from('{"x":256}'));

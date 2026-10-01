@@ -9,15 +9,15 @@ This page is what a consumer needs. [`fetch.md`](fetch.md) is the normative cont
 Every binding ships the same command, so you need nothing from this repository:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8   # Go
-python -m chtypes fetch 25.8                                         # Python
-npx @wavehouse/chtypes fetch 25.8                                    # TypeScript
-cargo install chtypes && chtypes fetch 25.8                          # Rust
+go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8   # Go
+python -m chtypes fetch 26.8                                         # Python
+npx @wavehouse/chtypes fetch 26.8                                    # TypeScript
+cargo install chtypes && chtypes fetch 26.8                          # Rust
 ```
 
 `fetch --all` takes every line the release publishes for this platform. From a checkout, [`scripts/fetch.sh`](../../scripts/fetch.sh) is the reference implementation of the same contract.
 
-All four print the installed directory alone on stdout and progress on stderr, so `dir="$(python -m chtypes fetch 25.8)"` composes. The other three subcommands are spelled identically everywhere:
+All four print the installed directory alone on stdout and progress on stderr, so `dir="$(python -m chtypes fetch 26.8)"` composes. The other three subcommands are spelled identically everywhere:
 
 | command           | answers                                                     |
 | ----------------- | ----------------------------------------------------------- |
@@ -33,8 +33,8 @@ The same thing from code, when you would rather not shell out:
 <details open><summary><b>Go</b></summary>
 
 ```go
-inst, err := chtypes.Ensure(ctx, "25.8", chtypes.FetchOptions{Progress: os.Stderr})
-// inst.Dir is <registry>/25.8; inst.AlreadyInstalled says whether any bytes moved
+inst, err := chtypes.Ensure(ctx, "26.8", chtypes.FetchOptions{Progress: os.Stderr})
+// inst.Dir is <registry>/26.8; inst.AlreadyInstalled says whether any bytes moved
 ```
 
 </details>
@@ -44,7 +44,7 @@ inst, err := chtypes.Ensure(ctx, "25.8", chtypes.FetchOptions{Progress: os.Stder
 ```python
 import chtypes
 
-path = chtypes.ensure("25.8")   # returns the installed directory; idempotent
+path = chtypes.ensure("26.8")   # returns the installed directory; idempotent
 ```
 
 </details>
@@ -54,7 +54,7 @@ path = chtypes.ensure("25.8")   # returns the installed directory; idempotent
 ```ts
 import { ensure } from '@wavehouse/chtypes';
 
-const r = await ensure('25.8');   // r.dir is <registry>/25.8; r.installed says whether bytes moved
+const r = await ensure('26.8');   // r.dir is <registry>/26.8; r.installed says whether bytes moved
 ```
 
 </details>
@@ -64,7 +64,7 @@ const r = await ensure('25.8');   // r.dir is <registry>/25.8; r.installed says 
 ```rust
 use chtypes::{EnsureOptions, ensure};
 
-let installed = ensure("25.8", &EnsureOptions::default())?;   // installed.dir, installed.action
+let installed = ensure("26.8", &EnsureOptions::default())?;   // installed.dir, installed.action
 ```
 
 </details>
@@ -79,7 +79,7 @@ Inside, one directory per line, plus a `patches/` sibling tree for any OTHER ins
 
 ```text
 <registry>/
-  25.8/                    the patch a LINE request selects — FLAT
+  26.8/                    the patch a LINE request selects — FLAT
     manifest.json          the record — read this, infer nothing
     libchtypes.dylib       (.so on Linux; the NAME comes from manifest.json)
     CH_VERSION             the ClickHouse version, as plain text
@@ -87,8 +87,8 @@ Inside, one directory per line, plus a `patches/` sibling tree for any OTHER ins
   26.7/
 ...
   patches/
-    25.8/
-      25.8.28.1-lts/       any OTHER exact patch of 25.8 — the same four files
+    26.8/
+      26.8.14.3-lts/       any OTHER exact patch of 26.8 — the same four files
   sdk-goldens.json         the served golden set, if the release publishes one
 ```
 
@@ -141,8 +141,8 @@ Two environment variables move the trust boundary, and both are deliberate:
 `fetch --lock chtypes.lock` records, per `<os>-<arch>/<clickhouse_version>` — the EXACT patch, not the line (schema 2, chtypes#284) — the asset file and sha256 that were installed, and the ABI revision the row carried. `fetch --frozen` then refuses anything else with `CHTYPES_ARTIFACT_PINNED` — checking the revision first, so a lock made for an ABI revision your SDK no longer speaks is named as that ([`fetch.md`](fetch.md) §5). It is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, CI fails on drift.
 
 ```sh
-npx @wavehouse/chtypes fetch 25.8 --lock chtypes.lock   # record
-npx @wavehouse/chtypes fetch 25.8 --frozen              # refuse anything the lock does not pin
+npx @wavehouse/chtypes fetch 26.8 --lock chtypes.lock   # record
+npx @wavehouse/chtypes fetch 26.8 --frozen              # refuse anything the lock does not pin
 ```
 
 `--frozen` without `--lock` reads `./chtypes.lock`. A lock file that does not exist under `--frozen` is `CHTYPES_ARTIFACT_PINNED`: nothing is pinned, so nothing is installed.
@@ -162,8 +162,8 @@ In TypeScript the split is in the method names rather than a flag: `registry.for
 A line or an exact patch no directory on the search path holds is one identifiable error in every binding — Go's `ErrArtifactMissing` (which works with `errors.Is`), Python's and TypeScript's `ArtifactMissingError`, Rust's `Error::ArtifactMissing` — carrying the same message everywhere apart from the bracketed parts:
 
 ```text
-chtypes: no artifact for ClickHouse 25.8 (darwin-arm64). Looked in: /Users/me/.cache/chtypes/artifacts/abi<R>/darwin-arm64, /usr/local/share/chtypes/artifacts/darwin-arm64, /opt/chtypes/artifacts/darwin-arm64.
-Install it:  python -m chtypes fetch 25.8
+chtypes: no artifact for ClickHouse 26.8 (darwin-arm64). Looked in: /Users/me/.cache/chtypes/artifacts/abi<R>/darwin-arm64, /usr/local/share/chtypes/artifacts/darwin-arm64, /opt/chtypes/artifacts/darwin-arm64.
+Install it:  python -m chtypes fetch 26.8
 or set CHTYPES_AUTOFETCH=1 to fetch on first use.
 ```
 
@@ -179,7 +179,7 @@ One release, one `index.json` (schema 1), and it is a **complete set rather than
 chtypes-<clickhouse_version>-<os>-<arch>[-b<build>].tar.gz
 ```
 
-where `<clickhouse_version>` is the manifest's own `clickhouse_version`, channel suffix included (`25.8.28.1-lts`, `26.7.3.19-stable`) — not the minor line, and not a repository version. `-b<build>` is the wrapper build for that ClickHouse version; a name without one is build 0.
+where `<clickhouse_version>` is the manifest's own `clickhouse_version`, channel suffix included (`26.8.15.10-lts`, `26.7.3.19-stable`) — not the minor line, and not a repository version. `-b<build>` is the wrapper build for that ClickHouse version; a name without one is build 0.
 
 Two version axes meet here, and conflating them is the mistake to avoid. **The ClickHouse version** is a property of an artifact: it is in the asset name, in `manifest.json`, in `CH_VERSION`, and the library reports it itself. **The release tag** is a snapshot of this repository's code packaged with the set of ClickHouse artifacts current when it was cut. So one release carries N ClickHouse versions × M platforms.
 

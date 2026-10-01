@@ -22,7 +22,7 @@
 // against CANNED bytes shaped exactly like a real server's responses.
 //
 //   pnpm install && pnpm demo             # newest vendored version
-//   CHTYPES_VERSION=25.8 pnpm demo        # pick a line
+//   CHTYPES_VERSION=26.8 pnpm demo        # pick a line
 //   ../chplay.sh ts                       # same, with prerequisite checks
 //
 // Nothing here is a test — the real suites live in ts. Every number
@@ -180,7 +180,7 @@ function section1() {
   } catch (err) {
     fatal(
       `open registry ${JSON.stringify(dir)}: ${err.message}\n\n` +
-        'Fetch an artifact first: `scripts/fetch.sh 25.8`.',
+        'Fetch an artifact first: `scripts/fetch.sh 26.8`.',
     );
   }
   const versions = registry.versions();
@@ -192,8 +192,8 @@ function section1() {
     note('cross-version sweeps will degrade gracefully. More: `scripts/fetch.sh 26.7`');
   }
 
-  // Version selection: a minor line ("25.8") and an exact patch
-  // ("25.8.28.1-lts") both resolve. Docker tags drift, so an
+  // Version selection: a minor line ("26.8") and an exact patch
+  // ("26.8.15.10-lts") both resolve. Docker tags drift, so an
   // exact-match-only lookup would silently lose a whole version line.
   let want = process.env.CHTYPES_VERSION;
   if (want) {

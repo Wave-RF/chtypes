@@ -22,7 +22,7 @@
 // against CANNED bytes shaped exactly like a real server's responses.
 //
 //	go run .                       # newest vendored version
-//	CHTYPES_VERSION=25.8 go run .  # pick a line
+//	CHTYPES_VERSION=26.8 go run .  # pick a line
 //	../chplay.sh go                # same, with prerequisite checks
 //
 // Nothing here is a test — the real suites live in go/chtypes and
@@ -147,7 +147,7 @@ func section1() (*chtypes.Registry, *chtypes.Library) {
 	dir := registryDir()
 	reg, err := chtypes.NewRegistry(dir)
 	if err != nil {
-		fatal("open registry %q: %v\n\nFetch an artifact first: `scripts/fetch.sh 25.8`.", dir, err)
+		fatal("open registry %q: %v\n\nFetch an artifact first: `scripts/fetch.sh 26.8`.", dir, err)
 	}
 	versions := reg.Versions()
 	kv("registry dir", dir)
@@ -158,8 +158,8 @@ func section1() (*chtypes.Registry, *chtypes.Library) {
 		note("cross-version sweeps will degrade gracefully. More: `scripts/fetch.sh 26.7`")
 	}
 
-	// Version selection: a minor line ("25.8") and an exact patch
-	// ("25.8.28.1-lts") both resolve. Docker tags drift, so an
+	// Version selection: a minor line ("26.8") and an exact patch
+	// ("26.8.15.10-lts") both resolve. Docker tags drift, so an
 	// exact-match-only lookup would silently lose a whole version line.
 	want := os.Getenv("CHTYPES_VERSION")
 	if want == "" {

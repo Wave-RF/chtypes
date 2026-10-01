@@ -10,10 +10,10 @@ Two things: this crate, and at least one **artifact** — the per-version native
 
 ```sh
 cargo add chtypes
-cargo install chtypes && chtypes fetch 25.8
+cargo install chtypes && chtypes fetch 26.8
 ```
 
-The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/25.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
+The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/26.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
 
 The `fetch` feature is on by default and carries the binary, `ensure` and autofetch. `default-features = false` drops it and every dependency it brings (`ed25519-dalek`, `sha2`, `ureq`, `base64`, `tar`, `flate2`), leaving the loader alone.
 
@@ -24,7 +24,7 @@ use chtypes::{Format, Registry, NO_SETTINGS};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Registry::from_search_path();  // walks the search path
-    let lib = registry.for_version("25.8")?;      // a line or an exact patch; never a nearest match
+    let lib = registry.for_version("26.8")?;      // a line or an exact patch; never a nearest match
     let schema = lib.compile("x UInt8, ts DateTime DEFAULT now()").compile()?;
 
     let batch = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, NO_SETTINGS)?;

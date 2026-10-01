@@ -12,7 +12,7 @@ Bring up a server of your own — **do not use another project's container**, an
 
 ```sh
 docker run -d --name chguide-ch --label com.docker.compose.project=chguide \
-    -e CLICKHOUSE_PASSWORD=chguide clickhouse/clickhouse-server:25.8
+    -e CLICKHOUSE_PASSWORD=chguide clickhouse/clickhouse-server:26.8
 
 IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' chguide-ch)
 cd examples/go && CH_ADDR=http://$IP:8123 go run ./ingest-demo

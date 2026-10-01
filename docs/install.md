@@ -66,13 +66,13 @@ Version requirements per language, the platforms artifacts are published for, an
 Each binding ships the same fetch command, so you need nothing from this repository:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8   # Go
-python -m chtypes fetch 25.8                                         # Python
-npx @wavehouse/chtypes fetch 25.8                                    # TypeScript
-cargo install chtypes && chtypes fetch 25.8                          # Rust
+go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8   # Go
+python -m chtypes fetch 26.8                                         # Python
+npx @wavehouse/chtypes fetch 26.8                                    # TypeScript
+cargo install chtypes && chtypes fetch 26.8                          # Rust
 ```
 
-That installs into `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>/25.8/` — the per-user cache every binding reads by default, so **one machine set up once serves all four**. `<R>` is the ABI revision the SDK speaks: fetch installs only artifacts built at it, and each revision gets its own directory, so two SDK versions at different revisions never overwrite each other's artifacts (an install from before this layout is not migrated; the first fetch after upgrading downloads again). `$CHTYPES_REGISTRY` overrides where it goes and where it is looked for.
+That installs into `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>/26.8/` — the per-user cache every binding reads by default, so **one machine set up once serves all four**. `<R>` is the ABI revision the SDK speaks: fetch installs only artifacts built at it, and each revision gets its own directory, so two SDK versions at different revisions never overwrite each other's artifacts (an install from before this layout is not migrated; the first fetch after upgrading downloads again). `$CHTYPES_REGISTRY` overrides where it goes and where it is looked for.
 
 Before anything lands, the command checks an ed25519 signature over the release and the sha256 of every byte. `fetch --all` takes every line the release publishes for this platform; `verify`, `list` and `where` are the other three subcommands. [`guides/artifacts.md`](guides/artifacts.md) has the whole story, including pinning for CI.
 
@@ -87,7 +87,7 @@ reg, err := chtypes.NewRegistry("")   // "" = walk the search path
 if err != nil {
 	log.Fatal(err)
 }
-fmt.Println(reg.Versions())           // [24.8 25.3 25.8 …]
+fmt.Println(reg.Versions())           // [24.8 25.3 26.8 …]
 ```
 
 </details>
@@ -97,7 +97,7 @@ fmt.Println(reg.Versions())           // [24.8 25.3 25.8 …]
 ```python
 from chtypes import Registry
 
-print(Registry().versions())   # ('24.8', '25.3', '25.8', …)
+print(Registry().versions())   # ('24.8', '25.3', '26.8', …)
 ```
 
 </details>
@@ -107,7 +107,7 @@ print(Registry().versions())   # ('24.8', '25.3', '25.8', …)
 ```ts
 import { Registry } from '@wavehouse/chtypes';
 
-console.log(new Registry().versions());   // [ '24.8', '25.3', '25.8', … ]
+console.log(new Registry().versions());   // [ '24.8', '25.3', '26.8', … ]
 ```
 
 </details>
@@ -117,7 +117,7 @@ console.log(new Registry().versions());   // [ '24.8', '25.3', '25.8', … ]
 ```rust
 use chtypes::Registry;
 
-println!("{:?}", Registry::from_search_path().versions());   // ["24.8", "25.3", "25.8", …]
+println!("{:?}", Registry::from_search_path().versions());   // ["24.8", "25.3", "26.8", …]
 ```
 
 </details>

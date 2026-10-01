@@ -12,14 +12,14 @@ That is the whole command — `uv` resolves `python` as an editable path depende
 
 ## Prerequisites
 
-- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/`, `<R>` the SDK's ABI revision) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 25.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
+- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/`, `<R>` the SDK's ABI revision) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 26.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
 - **uv** (or any Python ≥ 3.11 with `python` installed).
 
 ## Knobs
 
 | variable           | effect                                                                                               |
 | ------------------ | ---------------------------------------------------------------------------------------------------- |
-| `CHTYPES_VERSION`  | which artifact the tour uses (`25.8`, `25.8.28.1-lts`, …). Default: the newest line held             |
+| `CHTYPES_VERSION`  | which artifact the tour uses (`26.8`, `26.8.15.10-lts`, …). Default: the newest line held            |
 | `CHTYPES_REGISTRY` | the artifact directory. Default: the per-user cache, `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>` |
 
 ## What is Python-specific here

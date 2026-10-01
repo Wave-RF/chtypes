@@ -2,7 +2,7 @@
 
 One artifact, one schema, one row — the same program in each language. It shows the thing chtypes exists for: the row is **accepted**, and `256` is silently stored as `0`.
 
-You need a binding and an artifact for line 25.8. [`install.md`](install.md) if you have neither; any published line works, 25.8 is just the one spelled below.
+You need a binding and an artifact for line 26.8. [`install.md`](install.md) if you have neither; any published line works, 26.8 is just the one spelled below.
 
 ## The program
 
@@ -23,7 +23,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	lib, err := reg.For("25.8") // a line or an exact patch; never a nearest match
+	lib, err := reg.For("26.8") // a line or an exact patch; never a nearest match
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func main() {
 from chtypes import Format, Registry
 
 registry = Registry()                   # walks the search path
-library = registry.for_version("25.8")  # a line or an exact patch; never a nearest match
+library = registry.for_version("26.8")  # a line or an exact patch; never a nearest match
 
 with library.compile_ddl("x UInt8, ts DateTime DEFAULT now()") as schema:
     batch = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n')
@@ -82,7 +82,7 @@ print(bad.outcome, bad.err_code, bad.err_msg)  # rejected 27 Cannot parse input:
 import { Format, Registry } from '@wavehouse/chtypes';
 
 const registry = new Registry();     // walks the search path
-const lib = registry.for('25.8');    // a line or an exact patch; never a nearest match
+const lib = registry.for('26.8');    // a line or an exact patch; never a nearest match
 const schema = lib.compileDdl('x UInt8, ts DateTime DEFAULT now()');
 
 const batch = schema.rows(Format.JSONEachRow, Buffer.from('{"x":256}'));
@@ -107,7 +107,7 @@ use chtypes::{Format, Registry, NO_SETTINGS};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Registry::from_search_path();  // walks the search path
-    let lib = registry.for_version("25.8")?;      // a line or an exact patch; never a nearest match
+    let lib = registry.for_version("26.8")?;      // a line or an exact patch; never a nearest match
     let schema = lib.compile("x UInt8, ts DateTime DEFAULT now()").compile()?;
 
     let batch = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, NO_SETTINGS)?;

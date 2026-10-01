@@ -10,10 +10,10 @@ Two things: this package, and at least one **artifact** — the per-version nati
 
 ```sh
 uv add chtypes            # or: pip install chtypes
-python -m chtypes fetch 25.8
+python -m chtypes fetch 26.8
 ```
 
-The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/25.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it. The ed25519 verifier is pure stdlib too.
+The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/26.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it. The ed25519 verifier is pure stdlib too.
 
 ## Quickstart
 
@@ -21,7 +21,7 @@ The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/25.8/` — the
 from chtypes import Format, Registry
 
 registry = Registry()                   # walks the search path
-library = registry.for_version("25.8")  # a line or an exact patch; never a nearest match
+library = registry.for_version("26.8")  # a line or an exact patch; never a nearest match
 
 with library.compile_ddl("x UInt8, ts DateTime DEFAULT now()") as schema:
     batch = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n')
