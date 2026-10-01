@@ -1066,9 +1066,11 @@ def carve_out_problems(sources: dict[str, str]) -> list[str]:
 #     the GitHub-identity `.login` fields, never the git-level author/
 #     committer name or email strings a forged commit can set to anything;
 #   - every HEAD_REF_FORCE_PUSHED_EVENT on the pull request's own timeline
-#     was made by dependabot[bot] (force_push_actors, force_push_actor_
-#     problems); more events than the read fetched (hasNextPage) is ALWAYS
-#     a refusal, never a pass — an unseen one could be anyone's;
+#     has an actor of GraphQL's OWN shape for the bot — ("Bot", "dependabot"),
+#     NOT REST's "dependabot[bot]" (measured against this repository's own
+#     PR #249; force_push_actors, force_push_actor_problems); more events
+#     than the read fetched (hasNextPage) is ALWAYS a refusal, never a pass
+#     — an unseen one could be anyone's;
 #   - every dependency the head commit's own metadata names is BOTH
 #     direct:development AND version-update:semver-patch;
 #   - the diff touches nothing OUTSIDE one ecosystem's manifest and lockfile
@@ -1189,7 +1191,7 @@ def commit_provenance_problems(commit: dict) -> list[str]:
     return problems
 
 
-def force_push_actor_problems(actors: list[str | None], has_next_page: bool) -> list[str]:
+def force_push_actor_problems(actors: list[tuple[str | None, str | None]], has_next_page: bool) -> list[str]:
     """Every way a pull request's own force-push history fails to prove
     dependabot made every HEAD_REF_FORCE_PUSHED_EVENT on it (chtypes#285
     §2's commit-provenance half): `commit_provenance_problems` alone proves
@@ -1197,31 +1199,48 @@ def force_push_actor_problems(actors: list[str | None], has_next_page: bool) -> 
     says nothing about whether a writer with push access force-pushed a
     dependabot-authored-looking commit onto the branch themselves — whether
     that is even possible through the contents API is unverified, so this
-    checks the branch's own force-push history instead. `actors` is every
-    such event's actor login, in timeline order (None if the actor itself is
-    unavailable — a deleted account, say); an empty list is the common case
-    (no force-push ever happened) and passes trivially. `has_next_page` true
-    — more events than force_push_actors fetched — is ALWAYS a refusal,
-    never a pass: an unseen event could be anyone's."""
+    checks the branch's own force-push history instead.
+
+    GraphQL spells the bot's identity DIFFERENTLY from REST — measured
+    directly against this repository's own PR #249 (84401fd's pull
+    request): `gh api graphql`'s `actor{__typename login}` returns
+    `{"__typename":"Bot","login":"dependabot"}`, with NO `[bot]` suffix,
+    while REST's `pulls/249 .user.login` (what commit_provenance_problems
+    and the pull-request-author check above both read) is
+    `"dependabot[bot]"`. Comparing a GraphQL actor to the REST spelling
+    would refuse every force-push dependabot makes to rebase its own PR
+    against a moved base — which it does whenever main moves — defeating
+    this entire carve-out while looking merely cautious (fail-closed, but
+    wrong). `actors` is therefore every such event's actor as a
+    `(__typename, login)` pair, in timeline order — `(None, None)` if the
+    actor itself is unavailable, a deleted account, say; only exactly
+    `("Bot", "dependabot")` passes. An empty list is the common case (no
+    force-push ever happened) and passes trivially. `has_next_page` true —
+    more events than force_push_actors fetched — is ALWAYS a refusal, never
+    a pass: an unseen event could be anyone's."""
     if has_next_page:
         return ["the pull request's force-push history has more events than this read fetched; an unseen "
                 "one could be anyone's, so this does not prove dependabot made every one"]
-    return [f"a force-push to the head ref was made by {actor!r}, not dependabot[bot]"
-            for actor in actors if actor != "dependabot[bot]"]
+    return [f"a force-push to the head ref was made by {typename!r}/{login!r}, not Bot/dependabot"
+            for typename, login in actors if (typename, login) != ("Bot", "dependabot")]
 
 
 def dependabot_bump_problems(pr: dict, entries: list[dict[str, str | None]], parents: list[dict],
-                             commit: dict, force_push_actor_logins: list[str | None],
+                             commit: dict, force_push_actor_pairs: list[tuple[str | None, str | None]],
                              force_push_has_next_page: bool) -> list[str]:
     """Every way the author/commit-shape, commit-provenance and per-
     dependency-metadata half of the chtypes#285 §2 narrowing fails, given
     the pull request object, the head commit's own already-parsed metadata
     (parse_dependabot_metadata) and its parents list, the commit object
     itself (commit_provenance_problems) and its branch's force-push history
-    (force_push_actor_problems). Pure, so --selftest drives it from
-    fabricated objects; the manifest-diff half is manifest_bump_problems,
-    checked separately because it needs two more file reads this half must
-    already justify."""
+    (force_push_actor_problems). `pr["user"]["login"]` and
+    `commit["author"]["login"]` are both REST fields and both compared to
+    `"dependabot[bot]"`, correctly; `force_push_actor_pairs` is GraphQL and
+    compared to `("Bot", "dependabot")` instead — see force_push_actor_
+    problems' own docstring for the measured difference. Pure, so --selftest
+    drives it from fabricated objects; the manifest-diff half is manifest_
+    bump_problems, checked separately because it needs two more file reads
+    this half must already justify."""
     problems = []
     author = (pr.get("user") or {}).get("login")
     if author != "dependabot[bot]":
@@ -1241,7 +1260,7 @@ def dependabot_bump_problems(pr: dict, entries: list[dict[str, str | None]], par
         if e.get("update_type") != "version-update:semver-patch":
             problems.append(f"{name}: update-type is {e.get('update_type')!r}, not version-update:semver-patch")
     problems.extend(commit_provenance_problems(commit))
-    problems.extend(force_push_actor_problems(force_push_actor_logins, force_push_has_next_page))
+    problems.extend(force_push_actor_problems(force_push_actor_pairs, force_push_has_next_page))
     return problems
 
 
@@ -2046,7 +2065,8 @@ def gather_api_verdicts(repo: str, files: list[dict], check_runs: list[dict], he
 
 
 def classify_dependabot_bump(candidate: str, pr: dict, entries: list[dict[str, str | None]],
-                             parents: list[dict], commit: dict, force_push_actor_logins: list[str | None],
+                             parents: list[dict], commit: dict,
+                             force_push_actor_pairs: list[tuple[str | None, str | None]],
                              force_push_has_next_page: bool, old_manifest_bytes: bytes | None,
                              new_manifest_bytes: bytes | None) -> str | None:
     """The pure core of gather_dependabot_ecosystem (chtypes#285 §2): given
@@ -2058,10 +2078,12 @@ def classify_dependabot_bump(candidate: str, pr: dict, entries: list[dict[str, s
     commit to read a parent sha from) and count as "not proven" here too,
     never as "skip this half". Pure, so --selftest drives the FULL
     combination — author, commit shape, commit provenance, force-push
-    history, every entry's metadata, and the manifest diff together — from
-    fabricated objects, the same shape as the six cases chtypes#285 §2
+    history (GraphQL's own `("Bot", "dependabot")` spelling, not REST's
+    `"dependabot[bot]"` — force_push_actor_problems' own docstring has the
+    measurement), every entry's metadata, and the manifest diff together —
+    from fabricated objects, the same shape as the six cases chtypes#285 §2
     itself names, plus the commit-provenance cases added after review."""
-    if dependabot_bump_problems(pr, entries, parents, commit, force_push_actor_logins, force_push_has_next_page):
+    if dependabot_bump_problems(pr, entries, parents, commit, force_push_actor_pairs, force_push_has_next_page):
         return None
     if old_manifest_bytes is None or new_manifest_bytes is None:
         return None
@@ -2074,29 +2096,38 @@ def classify_dependabot_bump(candidate: str, pr: dict, entries: list[dict[str, s
 _FORCE_PUSH_TIMELINE_QUERY = (
     "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){"
     "pullRequest(number:$number){timelineItems(itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT],first:100){"
-    "nodes{... on HeadRefForcePushedEvent{actor{login}}}pageInfo{hasNextPage}}}}}"
+    "nodes{... on HeadRefForcePushedEvent{actor{__typename login}}}pageInfo{hasNextPage}}}}}"
 )
 
 
-def force_push_actors(repo: str, number: int) -> tuple[list[str | None], bool]:
-    """Every HEAD_REF_FORCE_PUSHED_EVENT actor login on pull request `number`,
-    in timeline order, and whether this read saw all of them (chtypes#285
-    §2's commit-provenance half, added after #333's first review: the pull
-    request's own `author` field only proves who OPENED it, and commit_
-    provenance_problems only proves the CURRENT head commit's own identity —
-    neither says whether an intermediate force-push, now overwritten, was
-    someone else's). GraphQL, because the REST API carries no force-push
-    timeline. Verified directly against this repository's own real history
-    (PR #249, 84401fd's pull request): an empty `nodes` list with
-    `hasNextPage: false` is what a pull request with no force-push at all
-    returns."""
+def force_push_actors(repo: str, number: int) -> tuple[list[tuple[str | None, str | None]], bool]:
+    """Every HEAD_REF_FORCE_PUSHED_EVENT actor on pull request `number`, each
+    as a `(__typename, login)` pair, in timeline order, and whether this read
+    saw all of them (chtypes#285 §2's commit-provenance half, added after
+    #333's first review: the pull request's own `author` field only proves
+    who OPENED it, and commit_provenance_problems only proves the CURRENT
+    head commit's own identity — neither says whether an intermediate
+    force-push, now overwritten, was someone else's). GraphQL, because the
+    REST API carries no force-push timeline.
+
+    `__typename` is fetched alongside `login` because GraphQL spells the
+    bot's identity DIFFERENTLY from REST — measured directly against this
+    repository's own PR #249 (84401fd's pull request): this query returns
+    `{"__typename":"Bot","login":"dependabot"}` for the bot, with NO `[bot]`
+    suffix on the login, while REST's `pulls/249 .user.login` is
+    `"dependabot[bot]"`. force_push_actor_problems is the one place that
+    compares against the GraphQL spelling (`("Bot", "dependabot")`); every
+    other check in this file reads REST and compares against
+    `"dependabot[bot]"`. Also verified against PR #249: an empty `nodes`
+    list with `hasNextPage: false` is what a pull request with no force-push
+    at all returns."""
     owner, name = repo.split("/", 1)
     out = gh(["graphql", "-f", f"query={_FORCE_PUSH_TIMELINE_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}",
              "-F", f"number={number}"], f"POST graphql force-push timeline for #{number}")
     data = json.loads(out)
     items = (((data.get("data") or {}).get("repository") or {}).get("pullRequest") or {}).get("timelineItems") or {}
     nodes = items.get("nodes") or []
-    actors = [(n.get("actor") or {}).get("login") for n in nodes]
+    actors = [((n.get("actor") or {}).get("__typename"), (n.get("actor") or {}).get("login")) for n in nodes]
     has_next_page = bool((items.get("pageInfo") or {}).get("hasNextPage"))
     return actors, has_next_page
 
@@ -3313,10 +3344,10 @@ def selftest() -> int:
         return c
 
     one_parent = [{"sha": OTHER_SHA}]
-    no_force_pushes: list[str | None] = []
+    no_force_pushes: list[tuple[str | None, str | None]] = []
 
     def dbp(pr: dict | None = None, entries: list | None = None, parents: list[dict] | None = None,
-            commit: dict | None = None, fp_actors: list[str | None] | None = None,
+            commit: dict | None = None, fp_actors: list[tuple[str | None, str | None]] | None = None,
             fp_has_next: bool = False) -> list[str]:
         return dependabot_bump_problems(
             pr if pr is not None else dep_pr(), entries if entries is not None else [dep_entry()],
@@ -3354,13 +3385,36 @@ def selftest() -> int:
                         "(pushed directly, not through GitHub's merge API)")
     if not dbp(commit=dep_commit(commit={"verification": {"verified": False}})):
         failures.append("dependabot_bump_problems: an unverified head commit signature was not caught")
-    if not dbp(fp_actors=["someone"]):
-        failures.append("dependabot_bump_problems: a force-push by a non-dependabot actor was not caught")
-    if not dbp(fp_actors=["dependabot[bot]"], fp_has_next=True):
+
+    # chtypes#285 §2: GraphQL spells the bot's identity DIFFERENTLY from
+    # REST — measured directly against this repository's own PR #249:
+    # `actor{__typename login}` returns {"__typename":"Bot","login":
+    # "dependabot"}, NOT "dependabot[bot]" (the REST spelling `dep_pr`/
+    # `dep_commit` above correctly use for the PR author and commit author/
+    # committer, which ARE REST fields). The pass case below is driven from
+    # that EXACT measured shape, and every failing case is pinned by name so
+    # the test fails if anyone "fixes" this back to the REST spelling.
+    GRAPHQL_BOT = ("Bot", "dependabot")
+    if dbp(fp_actors=[GRAPHQL_BOT]):
+        failures.append(f"dependabot_bump_problems: one force-push by the measured GraphQL bot shape {GRAPHQL_BOT} "
+                        "was refused")
+    if dbp(fp_actors=[GRAPHQL_BOT, GRAPHQL_BOT]):
+        failures.append("dependabot_bump_problems: several force-pushes, all by the measured GraphQL bot shape, "
+                        "were refused")
+    if not dbp(fp_actors=[("User", "dependabot")]):
+        failures.append('dependabot_bump_problems: a force-push actor typed User (not Bot) named "dependabot" '
+                        "was not caught")
+    if not dbp(fp_actors=[("Bot", "dependabot[bot]")]):
+        failures.append("dependabot_bump_problems: a force-push actor using the REST spelling (dependabot[bot]) "
+                        "instead of GraphQL's (dependabot) was not caught")
+    if not dbp(fp_actors=[("User", "EricAndrechek")]):
+        failures.append("dependabot_bump_problems: a force-push by a human collaborator was not caught")
+    if not dbp(fp_actors=[(None, None)]):
+        failures.append("dependabot_bump_problems: a force-push with no readable actor was not caught")
+    if not dbp(fp_actors=[GRAPHQL_BOT], fp_has_next=True):
         failures.append("dependabot_bump_problems: hasNextPage=true on the force-push timeline was not caught "
-                        "even though every FETCHED actor was dependabot[bot] — an unseen event could be anyone's")
-    if dbp(fp_actors=["dependabot[bot]", "dependabot[bot]"]):
-        failures.append("dependabot_bump_problems: several force-pushes, all by dependabot[bot], were refused")
+                        "even though every FETCHED actor matched the measured GraphQL bot shape — an unseen "
+                        "event could be anyone's")
 
     # commit_provenance_problems and force_push_actor_problems in isolation,
     # independent of dependabot_bump_problems' other checks.
@@ -3375,10 +3429,19 @@ def selftest() -> int:
         failures.append("commit_provenance_problems: a missing commit.verification object was not caught")
     if force_push_actor_problems([], False):
         failures.append("force_push_actor_problems: no force-pushes at all was refused")
-    if force_push_actor_problems(["dependabot[bot]"], False):
-        failures.append("force_push_actor_problems: one force-push by dependabot[bot] was refused")
-    if not force_push_actor_problems([None], False):
-        failures.append("force_push_actor_problems: a force-push with no readable actor (None) was not caught")
+    if force_push_actor_problems([GRAPHQL_BOT], False):
+        failures.append(f"force_push_actor_problems: one force-push by the measured GraphQL bot shape "
+                        f"{GRAPHQL_BOT} was refused")
+    if not force_push_actor_problems([("User", "dependabot")], False):
+        failures.append('force_push_actor_problems: actor ("User", "dependabot") was not caught')
+    if not force_push_actor_problems([("Bot", "dependabot[bot]")], False):
+        failures.append('force_push_actor_problems: actor ("Bot", "dependabot[bot]") (the REST spelling, wrong '
+                        "for GraphQL) was not caught")
+    if not force_push_actor_problems([("User", "EricAndrechek")], False):
+        failures.append('force_push_actor_problems: actor ("User", "EricAndrechek") was not caught')
+    if not force_push_actor_problems([(None, None)], False):
+        failures.append("force_push_actor_problems: a force-push with no readable actor ((None, None)) was not "
+                        "caught")
     if not force_push_actor_problems([], True):
         failures.append("force_push_actor_problems: hasNextPage=true with zero fetched actors was not caught")
 
@@ -3457,7 +3520,8 @@ def selftest() -> int:
 
     def expect_class(label: str, candidate: str, pr: dict, entries: list[dict], parents: list[dict],
                      old: bytes | None, new: bytes | None, want: str | None, *,
-                     commit: dict | None = None, fp_actors: list[str | None] | None = None,
+                     commit: dict | None = None,
+                     fp_actors: list[tuple[str | None, str | None]] | None = None,
                      fp_has_next: bool = False) -> None:
         got = classify_dependabot_bump(candidate, pr, entries, parents,
                                        commit if commit is not None else dep_commit(),
@@ -3489,10 +3553,13 @@ def selftest() -> int:
                commit=dep_commit(author={"login": "someone"}))
     expect_class("chtypes#285 §2: a non-dependabot force-push actor refuses end-to-end", "python",
                dep_pr(), good_entries, one_parent, py_old, py_new_good, None,
-               fp_actors=["someone"])
+               fp_actors=[("User", "EricAndrechek")])
+    expect_class("chtypes#285 §2: a force-push actor using the REST spelling (dependabot[bot]) instead of "
+               "GraphQL's (Bot/dependabot) refuses end-to-end", "python", dep_pr(), good_entries, one_parent,
+               py_old, py_new_good, None, fp_actors=[("Bot", "dependabot[bot]")])
     expect_class("chtypes#285 §2: a force-push timeline with more events than fetched (hasNextPage) "
                "refuses end-to-end", "python", dep_pr(), good_entries, one_parent, py_old, py_new_good,
-               None, fp_actors=["dependabot[bot]"], fp_has_next=True)
+               None, fp_actors=[("Bot", "dependabot")], fp_has_next=True)
 
     # Measured against this repository's OWN history: commit 84401fd's real,
     # unedited message (a genuine dependabot patch bump of ruff that stayed
@@ -3633,12 +3700,15 @@ def selftest() -> int:
           "specifier, across all three narrowed ecosystems' own manifest formats, parsed as data by tomllib/json; "
           "DEPENDABOT_MANIFESTS cannot drift from PROTECTED_GLOBS' own dependabot_ecosystem entries silently; "
           "commit_provenance_problems and force_push_actor_problems (added after review) refuse a forged head "
-          "commit's author or committer login, an unverified signature, a non-dependabot force-push actor and an "
-          "unseen (hasNextPage) force-push event, measured against this repository's own real dependabot commit "
-          "84401fd and its pull request's own (empty) force-push timeline, and classify_dependabot_bump refuses "
-          "each of these end-to-end too; and decide() itself refuses a dependabot-eligible manifest+lockfile diff "
-          "that also touches an unconditionally protected path even if dependabot_ecosystem were granted, and "
-          "still protects the manifest when an extra UNPROTECTED path is also touched")
+          "commit's author or committer login, an unverified signature, a non-dependabot force-push actor "
+          "(driven from GraphQL's OWN measured actor shape, (\"Bot\", \"dependabot\") — never REST's "
+          "\"dependabot[bot]\" — with pinned failures for a User-typed actor, the REST spelling under the wrong "
+          "type, a human collaborator, and a missing actor) and an unseen (hasNextPage) force-push event, "
+          "measured against this repository's own real dependabot commit 84401fd and its pull request's own "
+          "(empty) force-push timeline, and classify_dependabot_bump refuses each of these end-to-end too; and "
+          "decide() itself refuses a dependabot-eligible manifest+lockfile diff that also touches an "
+          "unconditionally protected path even if dependabot_ecosystem were granted, and still protects the "
+          "manifest when an extra UNPROTECTED path is also touched")
     return 0
 
 
