@@ -477,8 +477,10 @@ impl Schema {
     }
 
     /// The ONE `chs_rows` call site — [`Schema::rows`], [`Schema::rows_export`],
-    /// [`Schema::rows_with_options`], [`Schema::rows_export_with_options`] and
-    /// [`Schema::rows_export_with`] are all single invocations of it.
+    /// [`Schema::rows_with_options`], [`Schema::rows_export_with_options`],
+    /// [`Schema::rows_export_with`] and
+    /// [`Schema::rows_export_with_options_and_filter`] are all single
+    /// invocations of it.
     fn rows_through(
         &self,
         format: Format,
@@ -498,8 +500,9 @@ impl Schema {
     }
 
     /// [`Schema::rows_through`]'s twin with the attached-filter parameter
-    /// exposed — see [`Schema::rows_export_with`] for the contract. `filter`
-    /// is NULL for every call except that one.
+    /// exposed — see [`Schema::rows_export_with`] and
+    /// [`Schema::rows_export_with_options_and_filter`] for the contract.
+    /// `filter` is NULL for every call except those two.
     fn rows_through_filtered(
         &self,
         format: Format,
@@ -544,17 +547,16 @@ impl Schema {
     /// ([`RowResult::verdict`]) and, for rows whose verdict is
     /// [`crate::Verdict::True`], the export bytes.
     ///
-    /// `options` is the same [`RowOptions`] [`Schema::rows_export_with_options`]
-    /// takes — including [`RowOptions::columns`], the revision-5 INSERT
-    /// column list (issue #304): the C ABI's `chs_rows` already carries both
-    /// `columns_json` and the attached filter as independent trailing
-    /// parameters on the one call, and this method now passes `options`
-    /// through to [`Schema::rows_through_filtered`] rather than hardcoding
-    /// `columns: None`, so a column list composes with a filter here exactly
-    /// as it already does on [`Schema::rows_export_with_options`] — matching
-    /// Python's `rows(..., columns=, row_filter=)` and TypeScript's
+    /// **Superseded by [`Schema::rows_export_with_options_and_filter`]**,
+    /// which takes a [`RowOptions`] in `settings`'s place so the revision-5
+    /// INSERT column list ([`RowOptions::columns`]) composes with the
+    /// attached filter on the same call — matching Python's
+    /// `rows(..., columns=, row_filter=)` and TypeScript's
     /// `rows(..., {columns, rowFilter})`, which already let a caller combine
-    /// the two.
+    /// the two (issue #304). This method's own signature is unchanged and
+    /// keeps working exactly as released; it is a candidate for removal in
+    /// the next breaking release once callers have moved to the options
+    /// form.
     ///
     /// [`crate::Verdict::Error`] (the predicate threw) and
     /// [`crate::Verdict::Decline`] (declined — including a row whose own
@@ -584,7 +586,59 @@ impl Schema {
     ///
     /// [`crate::Error::CrossLibrarySchema`], plus every error
     /// [`Schema::rows_export`] can return.
-    pub fn rows_export_with(
+    pub fn rows_export_with<K: AsRef<str>, V: AsRef<str>>(
+        &self,
+        format: Format,
+        body: &[u8],
+        settings: &[(K, V)],
+        export: Option<Format>,
+        doc_flags: DocFlags,
+        filter: &Filter<'_>,
+    ) -> Result<BatchResult> {
+        if !Arc::ptr_eq(&self.lib, &filter.schema.lib) {
+            return Err(Error::CrossLibrarySchema {
+                filter_version: filter.schema.lib.version().to_string(),
+                schema_version: self.lib.version().to_string(),
+            });
+        }
+        let export_code = export.map_or(EXPORT_NONE, Format::code);
+        self.rows_through_filtered(
+            format,
+            body,
+            &RowOptions {
+                settings: owned_pairs(settings),
+                columns: None,
+            },
+            export_code,
+            doc_flags,
+            filter.handle,
+        )
+    }
+
+    /// [`Schema::rows_export_with`] with a [`RowOptions`] in place of a bare
+    /// settings slice — the same shape [`Schema::rows_export_with_options`]
+    /// already gives the no-filter path — so [`RowOptions::columns`], the
+    /// revision-5 INSERT column list, composes with the attached filter on
+    /// the SAME call (issue #304). The C ABI's `chs_rows` already carries
+    /// `columns_json` and the attached filter as two independent trailing
+    /// parameters on one call; this is the entry point that passes both
+    /// through, where [`Schema::rows_export_with`] alone hardcodes
+    /// `columns: None`. Added rather than changing
+    /// [`Schema::rows_export_with`]'s own signature, which is released and
+    /// stays exactly as published.
+    ///
+    /// Every other rule is [`Schema::rows_export_with`]'s own: the ONE
+    /// `chs_rows` parse answers both per-row verdict and export bytes,
+    /// `'e'`/`'d'` verdicts are NEVER exported and NEVER collapsed into
+    /// `'f'`, and `filter` must be compiled over THIS schema (a different
+    /// `Schema` of the SAME library rejects the call loudly with code 1002;
+    /// a DIFFERENT loaded library is [`crate::Error::CrossLibrarySchema`],
+    /// refused before any C call).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Schema::rows_export_with`].
+    pub fn rows_export_with_options_and_filter(
         &self,
         format: Format,
         body: &[u8],
