@@ -1574,6 +1574,14 @@ fn a_hard_linked_artifact_is_the_same_image() {
     std::fs::create_dir_all(&link_dir).expect("link directory");
     let link = link_dir.join(orig.file_name().unwrap());
     std::fs::hard_link(&orig, &link).expect("hardlink the artifact");
+    // The link's directory is an artifact directory too: it needs its own
+    // refuse-list, or the loader refuses it before the zone check this test is
+    // about (docs/reference/artifact.md §Loading step 9).
+    let unsafe_list = orig.with_file_name("unsafe_families.txt");
+    if unsafe_list.is_file() {
+        std::fs::copy(&unsafe_list, link_dir.join("unsafe_families.txt"))
+            .expect("copy the refuse-list beside the link");
+    }
 
     let first = Arc::new(chtypes::Library::load(&orig, "UTC").expect("first open (UTC)"));
     let before = epoch(&first);
