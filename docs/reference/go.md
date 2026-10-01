@@ -125,7 +125,7 @@ The implementation is stdlib only — `crypto/ed25519`, `crypto/sha256`, `archiv
 
 **Pinned to the header** — `ABIRevision`, `CodeUnsupported` (the wire sentinel `-2`, carried by results and never by an error value), `ExportNone`.
 
-**Process state** — `Timezone()` / `SetTimezone(tz)` are the server TZ a `Registry` without `WithTimezone` is `chs_init`'d with; it defaults to `"UTC"` and is safe to read or change concurrently. `WithTimezone` is the per-registry option (parity with Python/TypeScript/Rust); a path already `chs_init`'d under a different timezone — by another registry, `WithTimezone`, or the process default — is refused loudly rather than silently reused.
+**Process state** — `Timezone` is the server TZ a `Registry` without `WithTimezone` is `chs_init`'d with; it defaults to `"UTC"`. `DefaultTimezone()` / `SetDefaultTimezone(tz)` read or change it under a lock and are safe for concurrent use; assigning `Timezone` directly is safe only before the first library opens, exactly as its own doc comment says. `WithTimezone` is the per-registry option (parity with Python/TypeScript/Rust); a path already `chs_init`'d under a different timezone — by another registry, `WithTimezone`, or the process default — is refused loudly rather than silently reused.
 
 ## Linked build only
 

@@ -504,18 +504,18 @@ type Registry struct {
 	fetch     FetchOptions
 	// timezone is this registry's own server timezone (WithTimezone), "" when
 	// not given — effectiveTimezone then falls back to the process-wide
-	// default, Timezone().
+	// default, DefaultTimezone().
 	timezone string
 }
 
 // effectiveTimezone is the timezone this registry's libraries are chs_init'd
 // with: WithTimezone's value when given, else the process-wide default
-// (Timezone/SetTimezone).
+// (DefaultTimezone/SetDefaultTimezone).
 func (r *Registry) effectiveTimezone() string {
 	if r.timezone != "" {
 		return r.timezone
 	}
-	return Timezone()
+	return DefaultTimezone()
 }
 
 // RegistryOption configures NewRegistry.
@@ -527,8 +527,9 @@ type RegistryOption func(*Registry)
 func WithAutoFetch(on bool) RegistryOption { return func(r *Registry) { r.autoFetch = on } }
 
 // WithTimezone sets the server timezone this registry's libraries are
-// chs_init'd with, overriding the process-wide default (Timezone/SetTimezone)
-// for just this registry — parity with Python's `Registry(timezone=…)`,
+// chs_init'd with, overriding the process-wide default
+// (DefaultTimezone/SetDefaultTimezone) for just this registry — parity with
+// Python's `Registry(timezone=…)`,
 // TypeScript's `RegistryOptions.timezone` and Rust's
 // `RegistryOptions::timezone` (docs/reference/bindings.md's "Server
 // timezone" row; issue #300).

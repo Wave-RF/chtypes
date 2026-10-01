@@ -1,18 +1,24 @@
 // timezone_test.go — the per-registry WithTimezone option and the race fix
 // for the process-wide default (issue #300).
 //
-// Two things are proved here, matching the issue's two asks:
+// Three things are proved here, matching the issue's two asks plus the
+// lead's non-breaking ruling:
 //
 //   - A second open of the SAME artifact image under a DIFFERENT timezone is
 //     refused loudly rather than silently reusing the first one's zone — the
 //     same conflict rule Python and Rust already enforce
 //     (docs/guides/multi-version.md), now mirrored in Go via WithTimezone.
-//   - Timezone()/SetTimezone() are safe for concurrent use. Before this fix,
-//     Timezone was a bare package-level `var`: a goroutine assigning it
-//     directly while another goroutine read it (via openLibrary) was an
-//     unsynchronized read/write on a plain string, a data race `go test
-//     -race` would catch. TestTimezoneGetSetIsRaceFree drives exactly that
-//     access pattern through the new accessors and is clean under -race.
+//   - DefaultTimezone()/SetDefaultTimezone() are safe for concurrent use.
+//     Before this fix, Timezone was a bare package-level `var` with no
+//     accessor at all: a goroutine assigning it directly while another
+//     goroutine read it (via openLibrary) was an unsynchronized read/write on
+//     a plain string, a data race `go test -race` would catch.
+//     TestDefaultTimezoneGetSetIsRaceFree drives exactly that access pattern
+//     through the new accessors and is clean under -race.
+//   - `chtypes.Timezone = "..."` still compiles and is exactly what
+//     DefaultTimezone() reads back — the var was kept, not replaced, so a
+//     downstream consumer that assigns it directly under its own mutex is
+//     unaffected by this change.
 package chtypes
 
 import (
@@ -23,17 +29,37 @@ import (
 	"testing"
 )
 
-// TestTimezoneGetSetIsRaceFree hammers SetTimezone and Timezone from many
-// goroutines at once. Run with `go test -race -run TestTimezoneGetSetIsRaceFree`:
-// against the old bare `var Timezone string` this exact access pattern (one
-// goroutine writing, another reading, with no shared lock) is the data race
-// issue #300 reports; against the accessors below, both sides share
-// timezoneMu and the race detector has nothing to report. Needs no artifact
-// and no registry — it is purely about the package-level state's own
-// synchronization.
-func TestTimezoneGetSetIsRaceFree(t *testing.T) {
-	original := Timezone()
-	defer SetTimezone(original)
+// TestTimezoneVarStillCompilesAndIsWhatDefaultTimezoneReads is the
+// compile-level proof that this change is non-breaking: a downstream
+// consumer's `chtypes.Timezone = tz` (the exact spelling the lead's ruling
+// names) must still compile, and DefaultTimezone() must answer with exactly
+// what was assigned — the var remains the single source of truth,
+// DefaultTimezone is only a synchronized way to read it.
+func TestTimezoneVarStillCompilesAndIsWhatDefaultTimezoneReads(t *testing.T) {
+	original := Timezone
+	defer func() { Timezone = original }()
+
+	Timezone = "Asia/Kolkata"
+	if got := DefaultTimezone(); got != "Asia/Kolkata" {
+		t.Fatalf("DefaultTimezone() = %q after `Timezone = \"Asia/Kolkata\"`, want the same string", got)
+	}
+
+	SetDefaultTimezone("Pacific/Auckland")
+	if Timezone != "Pacific/Auckland" {
+		t.Fatalf("Timezone = %q after SetDefaultTimezone(\"Pacific/Auckland\"), want the same string", Timezone)
+	}
+}
+
+// TestDefaultTimezoneGetSetIsRaceFree hammers SetDefaultTimezone and
+// DefaultTimezone from many goroutines at once. Run with
+// `go test -race -run TestDefaultTimezoneGetSetIsRaceFree`: a caller that
+// goes through these two accessors exclusively cannot race openLibrary's own
+// read of the default (issue #300) — both sides share timezoneMu and the
+// race detector has nothing to report. Needs no artifact and no registry —
+// it is purely about the package-level state's own synchronization.
+func TestDefaultTimezoneGetSetIsRaceFree(t *testing.T) {
+	original := DefaultTimezone()
+	defer SetDefaultTimezone(original)
 
 	zones := []string{"UTC", "America/New_York", "Europe/Berlin", "Asia/Tokyo", "Pacific/Kiritimati"}
 	var wg sync.WaitGroup
@@ -41,12 +67,12 @@ func TestTimezoneGetSetIsRaceFree(t *testing.T) {
 		wg.Add(2)
 		go func(i int) {
 			defer wg.Done()
-			SetTimezone(zones[i%len(zones)])
+			SetDefaultTimezone(zones[i%len(zones)])
 		}(i)
 		go func() {
 			defer wg.Done()
-			if got := Timezone(); got == "" {
-				t.Error("Timezone() returned an empty string under contention")
+			if got := DefaultTimezone(); got == "" {
+				t.Error("DefaultTimezone() returned an empty string under contention")
 			}
 		}()
 	}
@@ -112,9 +138,9 @@ func TestOpenLibraryRefusesConflictingTimezone(t *testing.T) {
 
 	// A registry that names no WithTimezone falls back to the process-wide
 	// default, which participates in the exact same conflict rule.
-	original := Timezone()
-	defer SetTimezone(original)
-	SetTimezone("Europe/Berlin")
+	original := DefaultTimezone()
+	defer SetDefaultTimezone(original)
+	SetDefaultTimezone("Europe/Berlin")
 	r4, err := NewRegistry(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +148,7 @@ func TestOpenLibraryRefusesConflictingTimezone(t *testing.T) {
 	if err := r4.Load(path); err == nil {
 		t.Fatal("the process-wide default must be refused too when it conflicts with the live image's timezone")
 	}
-	SetTimezone("UTC")
+	SetDefaultTimezone("UTC")
 	r5, err := NewRegistry(dir)
 	if err != nil {
 		t.Fatal(err)
