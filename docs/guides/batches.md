@@ -128,8 +128,8 @@ Measured by a downstream consumer on go/v0.5.2, darwin-arm64, against `26.8.15.1
   ```
 
   The batch answers **one** row — record 0, `skipped` with code 376 `Cannot parse UUID from String` — and nothing else. Records `/b` and `/c` are never parsed and never appear in `rows`: not `accepted`, not `skipped`, just absent.
-- **A longer six-record NDJSON body, first record malformed, answers 2–3 rows — the server itself stores 2.** Measured by the artifact producer.
-- **CSV** swallows differently: a bad first row (`zzz,/a,1`) followed by two valid rows loses `/b` but still answers `/c`.
+- **A longer six-record NDJSON body, first record malformed, answers 2–3 rows — the server itself stores 2.**
+- **CSV**, schema `id UUID, page String, n UInt8`: a bad first row (`zzz,/a,1`) followed by two valid rows loses `/b` but still answers `/c`.
 - **The server** stores the identical subset under the identical setting, and fails outright with code 376 without it.
 - **Control — these do NOT swallow a neighboring record:** `IPv4`, `IPv6`, `Date`, `Date32`, `DateTime`, `DateTime64`, `Decimal`, `Int128`, `UInt256`, `Bool`, `Enum`, `FixedString`.
 - **Cause, inferred:** the text `UUID` reader's fixed 36-byte window, not the bytes it actually consumed, is what error recovery resumes from — and how many later records that window swallows depends on how many of their bytes fall inside it, so a run of short records loses more of them than a run of long ones. The three-record, CSV and six-record counts above are consistent with that budget, not with anything specific to the wire format.
