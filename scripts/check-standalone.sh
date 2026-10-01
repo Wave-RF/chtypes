@@ -27,6 +27,17 @@
 # $CHTYPES_REGISTRY, so this machine's own cache is invisible.
 # --require-artifacts is the opposite rule, for CI's artifact-backed run:
 # TestGoldens must have RUN, and no test may have skipped for want of one.
+#
+# The suite runs under `-race` (issue #302's CI half): the dlopen-only build
+# is cgo throughout, so Go's race detector instruments every Go-level access
+# around it, and this is the ONE place either mode of this script calls
+# `go test`. Measured locally (darwin-arm64, this script's own wall time,
+# build+vet+suite together): --no-artifacts 4.6s unraced / 8.1s raced;
+# --registry (the full suite, including the concurrency stress tests)
+# 7.5s unraced / 36.6s raced. Race detection costs roughly 2-5x here, worse
+# the more concurrent work a case actually does, but every figure is still
+# seconds, not minutes, so it stays in the SAME jobs that already gate every
+# PR rather than being pushed somewhere slower and easier to stop noticing.
 set -euo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -181,7 +192,7 @@ rc=0
 # The fetch fixtures are different: they live in this repository
 # (tests/fixtures/fetch, docs/guides/fetch.md §9), so the fetch suite is told where they
 # are through CHTYPES_FETCH_FIXTURES and skips loudly without them.
-( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_FETCH_FIXTURES="$ROOT/tests/fixtures/fetch" CHTYPES_UNBUILDABLE="$CHTYPES_UNBUILDABLE" go test -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
+( cd "$DEST" && CHTYPES_REGISTRY="$REG" CHTYPES_FETCH_FIXTURES="$ROOT/tests/fixtures/fetch" CHTYPES_UNBUILDABLE="$CHTYPES_UNBUILDABLE" go test -race -json -count=1 ./... ) > "$LOG" 2>&1 || rc=$?
 [ -s "$LOG" ] || die "go test produced no -json output (rc=$rc)"
 # The verdict logic lives in scripts/lib/standalone_census.py, not here, so
 # `--selftest` above can drive it directly against a synthetic log — the

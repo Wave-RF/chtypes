@@ -18,6 +18,66 @@ import {
 } from './results.js';
 import { encodeSettings, type Settings } from './settings.js';
 
+/**
+ * Native state a `Schema`'s GC finalizer frees from, tracked separately from
+ * the `Schema` object itself: a `FinalizationRegistry` callback must never
+ * hold (or close over) a reference to the object it was registered for —
+ * that would keep it reachable forever and the finalizer would never run.
+ *
+ * `Filter` and `Block` each remove their own handle from `openFilters` /
+ * `openBlocks` when they free it — whether that is an explicit `close()` or
+ * their OWN finalizer — so whichever gets there first wins and the other is
+ * a safe no-op. That is what lets this schema's finalizer walk whatever is
+ * STILL in these sets and free it before freeing the schema itself (the C
+ * layer does not refcount: freeing the schema under a live filter or block
+ * handle is a use-after-free) without racing a filter's or block's own
+ * independent finalizer — the spec promises nothing about the order two
+ * separate `FinalizationRegistry` callbacks run in, so correctness cannot
+ * depend on which one happens to fire first.
+ */
+interface SchemaNative {
+  readonly native: NativeLibrary;
+  handle: SchemaHandle | null;
+  readonly openFilters: Set<FilterHandle>;
+  readonly openBlocks: Set<BlockHandle>;
+}
+
+const schemaFinalizer = new FinalizationRegistry<SchemaNative>((n) => {
+  if (n.handle === null) return; // closed explicitly already
+  for (const h of n.openFilters) n.native.filterFree(h);
+  n.openFilters.clear();
+  for (const h of n.openBlocks) n.native.blockFree(h);
+  n.openBlocks.clear();
+  n.native.schemaFree(n.handle);
+  n.handle = null;
+});
+
+/** `Filter`'s half of the same coordination; see `SchemaNative`. */
+interface FilterNative {
+  readonly native: NativeLibrary;
+  readonly schema: SchemaNative;
+  handle: FilterHandle | null;
+}
+
+const filterFinalizer = new FinalizationRegistry<FilterNative>((n) => {
+  if (n.handle === null) return;
+  if (n.schema.openFilters.delete(n.handle)) n.native.filterFree(n.handle);
+  n.handle = null;
+});
+
+/** `Block`'s half of the same coordination; see `SchemaNative`. */
+interface BlockNative {
+  readonly native: NativeLibrary;
+  readonly schema: SchemaNative;
+  handle: BlockHandle | null;
+}
+
+const blockFinalizer = new FinalizationRegistry<BlockNative>((n) => {
+  if (n.handle === null) return;
+  if (n.schema.openBlocks.delete(n.handle)) n.native.blockFree(n.handle);
+  n.handle = null;
+});
+
 /** One declared column, as ClickHouse canonicalized it. */
 export interface ColumnInfo {
   readonly name: string;
@@ -185,7 +245,10 @@ export interface CompileFilterOptions {
 /**
  * A compiled schema — one tenant table's column list, compiled inside one
  * version's library. Obtained from `Library#compileDdl`; never constructed
- * directly. Release with `close()` (idempotent) or `using` / `Symbol.dispose`.
+ * directly. Release with `close()` (idempotent) or `using` / `Symbol.dispose`
+ * — `close()` stays the primary path; a GC finalizer that calls it for a
+ * schema nobody closed is a backstop, not a replacement, since there is no
+ * promise about WHEN (or, in principle, whether) it runs.
  *
  * Thread-safety: the C ABI forbids using one `chs_schema *` from two threads
  * at once; on a single JS thread every call here is synchronous, so ordinary
@@ -201,7 +264,8 @@ export class Schema {
    * (`defaultKind === 'EPHEMERAL'`), not per row.
    */
   readonly columns: readonly ColumnInfo[];
-  private handle: SchemaHandle | null;
+  /** The handle plus the GC-finalizer coordination state; see `SchemaNative`. */
+  private readonly n: SchemaNative;
   /**
    * Every open `Filter` compiled from this handle, so `close()` can free them
    * FIRST — the C layer does not refcount, and freeing the schema under a
@@ -221,13 +285,14 @@ export class Schema {
     /** The column-declaration list this schema was compiled from, verbatim. */
     readonly ddl: string,
   ) {
-    this.handle = handle;
+    this.n = { native, handle, openFilters: new Set(), openBlocks: new Set() };
     this.columns = native.columns(handle);
+    schemaFinalizer.register(this, this.n, this);
   }
 
   private live(): SchemaHandle {
-    if (this.handle === null) throw new ChtypesError('chtypes: schema is closed');
-    return this.handle;
+    if (this.n.handle === null) throw new ChtypesError('chtypes: schema is closed');
+    return this.n.handle;
   }
 
   /**
@@ -446,7 +511,8 @@ export class Schema {
    */
   compileFilter(expr: string, options?: CompileFilterOptions): Filter {
     const handle = this.native.filterCompile(this.live(), expr, encodeSettings(options?.params));
-    const filter = new Filter(this.native, this, handle, expr);
+    this.n.openFilters.add(handle);
+    const filter = new Filter(this.native, this, this.n, handle, expr);
     this.filters.add(filter);
     return filter;
   }
@@ -492,7 +558,8 @@ export class Schema {
    */
   parseBlock(format: Format, body: Uint8Array, settings?: Settings, options?: RowOptions): Block {
     const handle = this.native.blockParse(this.live(), format, body, encodeSettings(settings), options?.columns);
-    const block = new Block(this.native, this, handle);
+    this.n.openBlocks.add(handle);
+    const block = new Block(this.native, this, this.n, handle);
     this.blocks.add(block);
     return block;
   }
@@ -515,9 +582,10 @@ export class Schema {
     this.filters.clear();
     for (const block of this.blocks) block.close();
     this.blocks.clear();
-    if (this.handle === null) return;
-    this.native.schemaFree(this.handle);
-    this.handle = null;
+    if (this.n.handle === null) return;
+    this.native.schemaFree(this.n.handle);
+    this.n.handle = null;
+    schemaFinalizer.unregister(this);
   }
 
   /** `using schema = lib.compileDdl(...)` releases it at scope exit. */
@@ -539,6 +607,10 @@ export class Schema {
  * work on both objects in any nesting — the schema's dispose runs the
  * filter's first when the caller forgot. A filter compiled from a schema
  * answers for THAT handle: recompile filters when the schema is recompiled.
+ * A filter nobody closed is also backed by a GC finalizer, coordinated with
+ * its schema's own (see `SchemaNative`) so the two can never free this
+ * filter's handle out of order or twice, whichever one the GC happens to run
+ * first.
  *
  * THREADS: the header's rule, verbatim — one `chs_filter` "must not be used
  * from two threads at once, and a chs_filter call is ALSO a use of its schema
@@ -553,17 +625,20 @@ export class Schema {
  * green; until then it is a shadow/replay surface (the C ABI contract §Filters).
  */
 export class Filter {
-  private handle: FilterHandle | null;
+  /** The handle plus the GC-finalizer coordination state; see `FilterNative`. */
+  private readonly n: FilterNative;
 
   /** @internal — obtained from `Schema#compileFilter`. */
   constructor(
     private readonly native: NativeLibrary,
     private readonly schema: Schema,
+    schemaNative: SchemaNative,
     handle: FilterHandle,
     /** The expression text as compiled, for logging and cache keys. */
     readonly expr: string,
   ) {
-    this.handle = handle;
+    this.n = { native, schema: schemaNative, handle };
+    filterFinalizer.register(this, this.n, this);
   }
 
   /** @internal — the loaded library this filter's handle belongs to, for
@@ -574,8 +649,8 @@ export class Filter {
 
   /** @internal — the live handle, for `Schema#rows(options.rowFilter)`. */
   liveHandle(): FilterHandle {
-    if (this.handle === null) throw new ChtypesError('chtypes: filter is closed');
-    return this.handle;
+    if (this.n.handle === null) throw new ChtypesError('chtypes: filter is closed');
+    return this.n.handle;
   }
 
   /**
@@ -595,8 +670,8 @@ export class Filter {
    *   a JS `number`.
    */
   rows(format: Format, body: Uint8Array, settings?: Settings): FilterResult {
-    if (this.handle === null) throw new ChtypesError('chtypes: filter is closed');
-    const doc = this.native.filterRows(this.handle, format, body, encodeSettings(settings));
+    if (this.n.handle === null) throw new ChtypesError('chtypes: filter is closed');
+    const doc = this.native.filterRows(this.n.handle, format, body, encodeSettings(settings));
     return filterResultOf(parseDocument(doc));
   }
 
@@ -620,24 +695,30 @@ export class Filter {
    *   from two different libraries.
    */
   eval(block: Block): FilterResult {
-    if (this.handle === null) throw new ChtypesError('chtypes: filter is closed');
+    if (this.n.handle === null) throw new ChtypesError('chtypes: filter is closed');
     if (block.nativeLib !== this.native) {
       throw new ChtypesError('chtypes: filter and block come from different libraries');
     }
-    const doc = this.native.filterEval(this.handle, block.liveHandle());
+    const doc = this.native.filterEval(this.n.handle, block.liveHandle());
     return filterResultOf(parseDocument(doc));
   }
 
   /**
    * Release the native filter (`chs_filter_free`). Idempotent, and also
    * performed by the schema's own `close()` — filters first, then the schema,
-   * the C-required order.
+   * the C-required order. Also the backstop a GC finalizer calls for a filter
+   * nobody closed — see `SchemaNative`; the `openFilters.delete` guard is
+   * what makes it safe to run whether `close()`, this filter's own finalizer,
+   * or the schema's finalizer gets here first.
    */
   close(): void {
-    if (this.handle === null) return;
-    this.native.filterFree(this.handle);
-    this.handle = null;
+    if (this.n.handle === null) return;
+    if (this.n.schema.openFilters.delete(this.n.handle)) {
+      this.native.filterFree(this.n.handle);
+    }
+    this.n.handle = null;
     this.schema.forgetFilter(this);
+    filterFinalizer.unregister(this);
   }
 
   /** `using filter = schema.compileFilter(...)` releases it at scope exit. */
@@ -667,17 +748,25 @@ export class Filter {
  * is a use of BOTH handles. On a single JS thread every call here is
  * synchronous, so ordinary Node code satisfies both by construction; do not
  * share a `Block` — or its `Schema` — across `worker_threads`.
+ *
+ * A block nobody closed is also backed by a GC finalizer, coordinated with
+ * its schema's own (see `SchemaNative`) so the two can never free this
+ * block's handle out of order or twice, whichever one the GC happens to run
+ * first.
  */
 export class Block {
-  private handle: BlockHandle | null;
+  /** The handle plus the GC-finalizer coordination state; see `BlockNative`. */
+  private readonly n: BlockNative;
 
   /** @internal — obtained from `Schema#parseBlock`. */
   constructor(
     private readonly native: NativeLibrary,
     private readonly schema: Schema,
+    schemaNative: SchemaNative,
     handle: BlockHandle,
   ) {
-    this.handle = handle;
+    this.n = { native, schema: schemaNative, handle };
+    blockFinalizer.register(this, this.n, this);
   }
 
   /** @internal — the loaded library this block's handle belongs to. */
@@ -687,20 +776,26 @@ export class Block {
 
   /** @internal — the live handle, for `Filter#eval`. */
   liveHandle(): BlockHandle {
-    if (this.handle === null) throw new ChtypesError('chtypes: block is closed');
-    return this.handle;
+    if (this.n.handle === null) throw new ChtypesError('chtypes: block is closed');
+    return this.n.handle;
   }
 
   /**
    * Release the native block (`chs_block_free`). Idempotent, and also
    * performed by the schema's own `close()` — blocks first, then the schema,
-   * the C-required order.
+   * the C-required order. Also the backstop a GC finalizer calls for a block
+   * nobody closed — see `SchemaNative`; the `openBlocks.delete` guard is what
+   * makes it safe to run whether `close()`, this block's own finalizer, or
+   * the schema's finalizer gets here first.
    */
   close(): void {
-    if (this.handle === null) return;
-    this.native.blockFree(this.handle);
-    this.handle = null;
+    if (this.n.handle === null) return;
+    if (this.n.schema.openBlocks.delete(this.n.handle)) {
+      this.native.blockFree(this.n.handle);
+    }
+    this.n.handle = null;
     this.schema.forgetBlock(this);
+    blockFinalizer.unregister(this);
   }
 
   /** `using block = schema.parseBlock(...)` releases it at scope exit. */

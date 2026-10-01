@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`Schema`, `Filter` and `Block` now carry a `FinalizationRegistry` GC backup**, matching Python's `__del__` safety net and Rust's `Drop`: a handle nobody explicitly `close()`'d no longer leaks its C memory for the life of the process. `close()` stays the only deterministic release path; when a schema and its still-open filters/blocks are all abandoned together, the schema's own finalizer frees the children FIRST, preserving the free order the C layer requires, regardless of which object's finalizer the GC happens to run first (closes #302).
+
 ## [0.5.0] — 2026-10-01
 
 **Upgrade together if you share a lock: 0.4.x and earlier refuse a schema-2 lock, and this release writes one.** Schema-1 locks are still read and are converted the next time the lock is written. A server's exact ClickHouse patch now loads when it is installed, or published and autofetch is on; otherwise the newest installed patch of the same line loads, flagged as not exact and warned once per pair, and no request ever crosses to another line. Several patches of one line coexist: the patch a line request selects installs flat as before, and every other patch installs under `patches/<minor>/<version>/`, where an older flat patch is moved rather than deleted. `--frozen` now installs exactly the pinned file, even while a newer one is served. Same ABI revision as 0.4.0 (6), so the artifacts 0.4.0 loads are the ones this release loads.
