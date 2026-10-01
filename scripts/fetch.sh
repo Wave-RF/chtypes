@@ -778,7 +778,16 @@ if want_all:
     # fetches one on its own.
     hit = sorted(best_by_minor.values(), key=lambda a: [int(p) for p in a["clickhouse_minor"].split(".")])
 else:
-    hit = [a for a in arts if exact and patch_matches(a["clickhouse_version"], exact)]
+    # A LINE spelling always selects the line's NEWEST published patch at
+    # this SDK's revision (chtypes#294). The exact-match filter below fires
+    # only for a STRICT request -- one the CALLER spelled as a full patch.
+    # The optional developer resolver's `exact` hint can ride along on a
+    # bare line request too (it names "the current upstream patch"), and
+    # that hint is not a caller requirement: gating selection on it here
+    # would let a resolver's hint silently install a non-newest patch. The
+    # hint still reaches the operator -- the install-time note below -- it
+    # just never gates which row is chosen.
+    hit = [a for a in arts if strict and exact and patch_matches(a["clickhouse_version"], exact)]
     if strict and not hit:
         sys.exit("unpublished: you asked for exactly ClickHouse %s on %s-%s at %s and this release does "
                  "not publish it at that revision: %s; at ABI revision %d the release has: %s.\n"

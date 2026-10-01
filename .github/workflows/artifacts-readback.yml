@@ -36,9 +36,11 @@
 #
 # ⚠️ EXIT 1 IS NOT ONE THING, AND ONLY ONE HALF OF IT POSTS. index-diff.sh's
 # `die()` (a fetch failure, an unreadable baseline file, invalid JSON) and
-# its comparison's own hard-failure VERDICT (a row TRUE-DROPPED, or the
-# release-level `sdk-fetch-fixtures.tar.gz` manifest row gone missing) both
-# exit 1 — bash cannot tell them apart by number alone. They ARE told apart
+# its comparison's own hard-failure VERDICT — since the artifact producer's
+# channel went append-only (chtypes#283): a row key removed, a SHA256SUMS
+# filename removed (the release-level `sdk-fetch-fixtures.tar.gz` manifest
+# row going missing is one case of this), or a tarball's bytes changing —
+# both exit 1 — bash cannot tell them apart by number alone. They ARE told apart
 # here, by what the tool printed: the comparison always prints its own
 # `  generated_at: before=... after=...` line before it can ever reach a
 # hard-failure verdict, while `die()` fires before that line is ever
@@ -270,9 +272,9 @@ jobs:
 
           # Only post-advance and post-fail reach here.
           if [ "$outcome" = post-fail ]; then
-            verdict="A row was TRUE-DROPPED from the served index, or the sdk-fetch-fixtures.tar.gz manifest row went missing (generated_at $before -> $after) -- see the VERDICT line below."
+            verdict="The channel is append-only (chtypes#283): a row key was REMOVED from the served index, a SHA256SUMS filename was removed (sdk-fetch-fixtures.tar.gz going missing is one case of this), or a tarball's bytes changed (generated_at $before -> $after) -- see the VERDICT line below."
           else
-            verdict="generated_at moved from $before to $after; nothing was dropped."
+            verdict="generated_at moved from $before to $after; nothing was removed."
           fi
 
           # ANSI escapes stripped before this goes anywhere public -- same

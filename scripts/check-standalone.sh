@@ -104,7 +104,16 @@ fi
 # per artifact line's manifest fields, the goldens file's identity, and a
 # loud (never fatal) WARNING when a line's ABI revision does not match this
 # binding's own header.
-command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH; provenance cannot be printed"
+if ! command -v python3 >/dev/null 2>&1; then
+  # chtypes#320: the one case here where provenance literally cannot be
+  # printed — python3 itself is missing, so even the annotation helper
+  # (also python3) cannot run. A static echo, not scripts/lib/gha_annotate.py
+  # — this check-standalone.sh is Go-only, so the suite name is always "go",
+  # and this is the one place in the repository that cannot assume python3
+  # is on PATH to format one for it.
+  [ "${GITHUB_ACTIONS:-}" != "true" ] || echo "::warning title=chtypes artifact provenance::unknown — go suite (python3 not on PATH; provenance cannot be printed)"
+  die "python3 is not on PATH; provenance cannot be printed"
+fi
 if [ "$NO_ARTIFACTS" -eq 1 ]; then
   python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
 else

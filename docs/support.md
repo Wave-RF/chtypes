@@ -104,13 +104,13 @@ Read from the live index: revision 4 is whichever revision the served `abi_revis
 | `26.6` | `linux-arm64` | `1789482654` | `1790460995` | `1790767905` |
 | `26.7` | `darwin-arm64` | `1789830374` | `1790618314` | `1790783214` |
 | `26.7` | `linux-amd64` | `1789830374` | `1790618314` | `1790783214` |
-| `26.7` | `linux-arm64` | `1789830374` | `1790618314` | `1790783214` |
+| `26.7` | `linux-arm64` | `1789830374` | `1790618314` | `1790819462` |
 | `26.8` | `darwin-arm64` | `1790001762` | `1790632171` | `1790783214` |
 | `26.8` | `linux-amd64` | `1790001762` | `1790632171` | `1790783214` |
 | `26.8` | `linux-arm64` | `1790001762` | `1790632171` | `1790783214` |
-| `26.9` | `darwin-arm64` | — | `1790632171` | `1790783214` |
-| `26.9` | `linux-amd64` | — | `1790632171` | `1790783214` |
-| `26.9` | `linux-arm64` | — | `1790632171` | `1790783214` |
+| `26.9` | `darwin-arm64` | — | `1790632171` | `1790819462` |
+| `26.9` | `linux-amd64` | — | `1790632171` | `1790819462` |
+| `26.9` | `linux-arm64` | — | `1790632171` | `1790819462` |
 
 Every line/platform pairing above either has a build for every revision the index writes explicitly, or is excluded by design (marked above), or reads **—** at revision 4, where the index carries no row for it at all and this script does not guess why (see above) — never merely "not yet published" without one of those reasons.
 
@@ -120,7 +120,7 @@ Every line/platform pairing above either has a build for every revision the inde
 
 A line appears above once it has passed the artifact producer's comparison against a real server and the release publishes the artifact. Lines are added as they pass it, so this page is a snapshot of a moving list — `curl -s https://artifacts.wavehouse.dev/artifacts/index.json` is always the live answer, and `scripts/fetch.sh --all` reads it rather than restating it.
 
-Nothing is removed to make room. The index keeps every patch row ever published, so a machine holding an older patch keeps working.
+Nothing is removed to make room. Since 2026-09-30 the release is append-only: every build it publishes stays listed in `index.json` and the signed `SHA256SUMS`, so a machine holding an older patch keeps working. Rows that the earlier retention rule dropped before that date are re-listed only where a release-signed `SHA256SUMS` proves their bytes; the rest stay unlisted.
 
 ## Checking from your own machine
 
