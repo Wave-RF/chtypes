@@ -158,6 +158,16 @@ def test_rows_cross_library_filter_refused() -> None:
 # G4 (a skipped row counts in neither rows_passed nor rows_cut) has no
 # library change — it is a docs-only clarification — so it is not measured
 # here; see docs/guides/filters.md.
+#
+# The fix reached only the SUPPORTED lines' artifacts (docs/support.md):
+# 26.3, 26.7, 26.8 and 26.9. A served, unsupported (retired) line gets no
+# new build or ABI revision, ever, so its existing artifact keeps the
+# pre-relink behavior permanently — measured: 26.6's newest served build,
+# 1790767905, predates this relink and was never republished.
+# _rev5_libraries also opens such a line (anything ABI revision 5+), so the
+# three tests below filter to the supported set explicitly, through
+# _relinked_libraries, rather than asserting the new behavior against a
+# line that was never given it.
 
 
 @pytest.fixture(scope="session")
@@ -184,8 +194,35 @@ def _rev5_libraries(registry: chtypes.Registry) -> list[chtypes.Library]:
     return libraries
 
 
+_RELINK_SUPPORTED_LINES = {"26.3", "26.7", "26.8", "26.9"}
+
+
+@pytest.fixture(scope="session")
+def _relinked_libraries(_rev5_libraries: list[chtypes.Library]) -> list[chtypes.Library]:
+    """`_rev5_libraries` narrowed to the lines the chtypes#298 relink
+    (chtypes_build 1790845279) actually reached. A loaded line this build
+    does not name is a served, unsupported (retired) line by construction
+    (docs/support.md) — logged and passed over, the same verdict every
+    artifact-backed test here gives for a line it cannot exercise."""
+    libraries = []
+    for library in _rev5_libraries:
+        if library.minor not in _RELINK_SUPPORTED_LINES:
+            print(
+                f"line {library.minor} ({library.version}) not exercised: a served, "
+                f"unsupported (retired) line never receives this relink (docs/support.md)"
+            )
+            continue
+        libraries.append(library)
+    if not libraries:
+        pytest.skip(
+            "registry holds no artifact on a chtypes#298-relinked line (26.3, 26.7, 26.8, "
+            "26.9) — fetch one with scripts/fetch.sh (docs/guides/fetch.md)"
+        )
+    return libraries
+
+
 def test_non_accepted_batch_zeroes_counts_and_carries_verdict_code(
-    _rev5_libraries: list[chtypes.Library],
+    _relinked_libraries: list[chtypes.Library],
 ) -> None:
     """G2 and G3 together: the same strict (no input_format_allow_errors_*)
     body exercises both at once. Row 0 parses and is individually ACCEPTED
@@ -194,7 +231,7 @@ def test_non_accepted_batch_zeroes_counts_and_carries_verdict_code(
     is REJECTED even though row 0, in isolation, was accepted and passed
     the filter."""
     ran = 0
-    for library in _rev5_libraries:
+    for library in _relinked_libraries:
         with library.compile_ddl("id UInt8, n UInt8") as schema:
             with schema.compile_filter("id >= 0") as f:
                 body = b"1,2\n1,abc\n"  # row 1: "abc" in a UInt8 column
@@ -237,9 +274,9 @@ def test_non_accepted_batch_zeroes_counts_and_carries_verdict_code(
                 )
                 ran += 1
 
-    assert ran == len(_rev5_libraries), (
+    assert ran == len(_relinked_libraries), (
         f"test_non_accepted_batch_zeroes_counts_and_carries_verdict_code ran {ran} line(s), "
-        f"want {len(_rev5_libraries)}"
+        f"want {len(_relinked_libraries)}"
     )
     assert ran > 0, (
         "test_non_accepted_batch_zeroes_counts_and_carries_verdict_code ran ZERO cases — a "
@@ -248,7 +285,7 @@ def test_non_accepted_batch_zeroes_counts_and_carries_verdict_code(
 
 
 def test_rejected_zero_row_batch_names_the_export_decline(
-    _rev5_libraries: list[chtypes.Library],
+    _relinked_libraries: list[chtypes.Library],
 ) -> None:
     """G5: a CSV_WITH_NAMES body naming a header column no schema column
     matches, read under input_format_skip_unknown_fields=0, is refused
@@ -257,7 +294,7 @@ def test_rejected_zero_row_batch_names_the_export_decline(
     export_declined empty here even though bytes were withheld; the
     relinked one names the batch's own outcome as the reason."""
     ran = 0
-    for library in _rev5_libraries:
+    for library in _relinked_libraries:
         with library.compile_ddl("id UInt8, p String") as schema:
             body = b"id,unknown_col\n1,a\n"
             batch = schema.rows(
@@ -285,9 +322,9 @@ def test_rejected_zero_row_batch_names_the_export_decline(
             )
             ran += 1
 
-    assert ran == len(_rev5_libraries), (
+    assert ran == len(_relinked_libraries), (
         f"test_rejected_zero_row_batch_names_the_export_decline ran {ran} line(s), "
-        f"want {len(_rev5_libraries)}"
+        f"want {len(_relinked_libraries)}"
     )
     assert ran > 0, (
         "test_rejected_zero_row_batch_names_the_export_decline ran ZERO cases — a block that "
@@ -296,7 +333,7 @@ def test_rejected_zero_row_batch_names_the_export_decline(
 
 
 def test_session_timezone_setting_is_declined_not_ignored(
-    _rev5_libraries: list[chtypes.Library],
+    _relinked_libraries: list[chtypes.Library],
 ) -> None:
     """G1: ClickHouse's session_timezone is a real, known setting name —
     never the server's own code 115 — but this library resolves
@@ -308,7 +345,7 @@ def test_session_timezone_setting_is_declined_not_ignored(
     in unsupported_settings, which promotes the row's own outcome to
     UNSUPPORTED."""
     ran = 0
-    for library in _rev5_libraries:
+    for library in _relinked_libraries:
         with library.compile_ddl("id UInt8, t DateTime") as schema:
             result = schema.row(
                 Format.JSON_EACH_ROW,
@@ -326,9 +363,9 @@ def test_session_timezone_setting_is_declined_not_ignored(
             )
             ran += 1
 
-    assert ran == len(_rev5_libraries), (
+    assert ran == len(_relinked_libraries), (
         f"test_session_timezone_setting_is_declined_not_ignored ran {ran} line(s), "
-        f"want {len(_rev5_libraries)}"
+        f"want {len(_relinked_libraries)}"
     )
     assert ran > 0, (
         "test_session_timezone_setting_is_declined_not_ignored ran ZERO cases — a block that "

@@ -326,6 +326,38 @@ func TestRowsExportWithColumnsAndFilterComposeEndToEnd(t *testing.T) {
 // G4 (a skipped row counts in neither RowsPassed nor RowsCut) has no
 // library change — it is a docs-only clarification — so it is not measured
 // here; see docs/guides/filters.md.
+//
+// The fix reached only the SUPPORTED lines' artifacts (docs/support.md):
+// 26.3, 26.7, 26.8 and 26.9. A served, unsupported (retired) line gets no
+// new build or ABI revision, ever, so its existing artifact keeps the
+// pre-relink behavior permanently — measured: 26.6's newest served build,
+// 1790767905, predates this relink and was never republished. rev5Libraries
+// also opens such a line (anything ABI revision 5+), so these three tests
+// filter to the supported set explicitly rather than asserting the new
+// behavior against a line that was never given it.
+
+// relinkedLibraries is rev5Libraries narrowed to the lines the chtypes#298
+// relink (chtypes_build 1790845279) actually reached. A loaded line this
+// build does not name is a served, unsupported (retired) line by
+// construction (docs/support.md) — logged and passed over, the same verdict
+// every artifact-backed test here gives for a line it cannot exercise.
+func relinkedLibraries(t *testing.T) []*Library {
+	t.Helper()
+	supported := map[string]bool{"26.3": true, "26.7": true, "26.8": true, "26.9": true}
+	all := rev5Libraries(t)
+	var libs []*Library
+	for _, lib := range all {
+		if !supported[lib.Minor] {
+			t.Logf("line %s (%s) not exercised: a served, unsupported (retired) line never receives this relink (docs/support.md)", lib.Minor, lib.Version)
+			continue
+		}
+		libs = append(libs, lib)
+	}
+	if len(libs) == 0 {
+		t.Skipf("registry holds no artifact on a chtypes#298-relinked line (26.3, 26.7, 26.8, 26.9) — fetch one with scripts/fetch.sh (docs/guides/fetch.md)")
+	}
+	return libs
+}
 
 // TestNonAcceptedBatchZeroesCountsAndCarriesVerdictCode is G2 and G3
 // together, because the same strict (no input_format_allow_errors_*) body
@@ -334,7 +366,7 @@ func TestRowsExportWithColumnsAndFilterComposeEndToEnd(t *testing.T) {
 // 117), which aborts the batch — so the batch's own Outcome is Rejected
 // even though row 0, in isolation, was accepted and passed the filter.
 func TestNonAcceptedBatchZeroesCountsAndCarriesVerdictCode(t *testing.T) {
-	libs := rev5Libraries(t)
+	libs := relinkedLibraries(t)
 	ran := 0
 	for _, lib := range libs {
 		s, err := lib.CompileDDL("id UInt8, n UInt8")
@@ -400,7 +432,7 @@ func TestNonAcceptedBatchZeroesCountsAndCarriesVerdictCode(t *testing.T) {
 // though bytes were withheld; the relinked one names the batch's own
 // outcome as the reason.
 func TestRejectedZeroRowBatchNamesTheExportDecline(t *testing.T) {
-	libs := rev5Libraries(t)
+	libs := relinkedLibraries(t)
 	ran := 0
 	for _, lib := range libs {
 		s, err := lib.CompileDDL("id UInt8, p String")
@@ -447,7 +479,7 @@ func TestRejectedZeroRowBatchNamesTheExportDecline(t *testing.T) {
 // (docs/guides/settings.md): it comes back in UnsupportedSettings, which
 // promotes the row's own Outcome to Unsupported.
 func TestSessionTimezoneSettingIsDeclinedNotIgnored(t *testing.T) {
-	libs := rev5Libraries(t)
+	libs := relinkedLibraries(t)
 	ran := 0
 	for _, lib := range libs {
 		s, err := lib.CompileDDL("id UInt8, t DateTime")

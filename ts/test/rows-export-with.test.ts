@@ -131,8 +131,19 @@ describe('Schema#rows cross-library filter refusal', () => {
 // G4 (a skipped row counts in neither `rowsPassed` nor `rowsCut`) has no
 // library change — it is a docs-only clarification — so it is not measured
 // here; see docs/guides/filters.md.
+//
+// The fix reached only the SUPPORTED lines' artifacts (docs/support.md):
+// 26.3, 26.7, 26.8 and 26.9. A served, unsupported (retired) line gets no
+// new build or ABI revision, ever, so its existing artifact keeps the
+// pre-relink behavior permanently — measured: 26.6's newest served build,
+// 1790767905, predates this relink and was never republished. `openRev5`
+// also opens such a line (anything ABI revision 5+), so the three tests
+// below run against `relinked`, which narrows `rev5` to the supported set,
+// rather than asserting the new behavior against a line that was never
+// given it.
 
 const CSV_REJECTION_CODE = 117;
+const RELINK_SUPPORTED_LINES = new Set(['26.3', '26.7', '26.8', '26.9']);
 
 const REGISTRY = resolveRegistryDir();
 const HAVE_REGISTRY = REGISTRY !== null && looksLikeRegistry(REGISTRY);
@@ -162,12 +173,27 @@ const openRev5 = (): { registry: Registry; libraries: Library[] } => {
 
 let rev5Registry: Registry | undefined;
 let rev5: Library[] = [];
+const relinked: Library[] = [];
 if (HAVE_REGISTRY) {
   const opened = openRev5();
   rev5Registry = opened.registry;
   rev5 = opened.libraries;
   if (rev5.length === 0) {
     console.warn('[chtypes] chtypes#298 tests SKIPPED: the registry holds no ABI revision-5 artifact.');
+  }
+  for (const library of rev5) {
+    if (RELINK_SUPPORTED_LINES.has(library.minor)) {
+      relinked.push(library);
+    } else {
+      console.warn(
+        `[chtypes] line ${library.minor} (${library.version}) not exercised: a served, unsupported (retired) line never receives this relink (docs/support.md)`,
+      );
+    }
+  }
+  if (relinked.length === 0) {
+    console.warn(
+      '[chtypes] chtypes#298 tests SKIPPED: the registry holds no artifact on a relinked line (26.3, 26.7, 26.8, 26.9).',
+    );
   }
 } else {
   console.warn('[chtypes] chtypes#298 tests SKIPPED: no artifact registry on the search path.');
@@ -177,7 +203,7 @@ afterAll(() => {
   rev5Registry?.close();
 });
 
-describe.skipIf(!HAVE_REGISTRY || rev5.length === 0)('chtypes#298: the relinked contract (G1-G5)', () => {
+describe.skipIf(!HAVE_REGISTRY || relinked.length === 0)('chtypes#298: the relinked contract (G1-G5)', () => {
   it('zeroes rowsPassed/rowsCut and carries verdictCode on a non-accepted batch (G2, G3)', () => {
     // The same strict (no input_format_allow_errors_*) body exercises both
     // at once. Row 0 parses and is individually accepted with verdict 't';
@@ -185,7 +211,7 @@ describe.skipIf(!HAVE_REGISTRY || rev5.length === 0)('chtypes#298: the relinked 
     // which aborts the batch — so the batch's own outcome is `Rejected`
     // even though row 0, in isolation, was accepted and passed the filter.
     let ran = 0;
-    for (const library of rev5) {
+    for (const library of relinked) {
       const schema = library.compileDdl('id UInt8, n UInt8');
       const filter = schema.compileFilter('id >= 0');
       try {
@@ -214,7 +240,7 @@ describe.skipIf(!HAVE_REGISTRY || rev5.length === 0)('chtypes#298: the relinked 
         schema.close();
       }
     }
-    expect(ran, 'ran the wrong number of cases').toBe(rev5.length);
+    expect(ran, 'ran the wrong number of cases').toBe(relinked.length);
     expect(ran, 'ran ZERO cases — a block that asserts nothing is not a pass').toBeGreaterThan(0);
   });
 
@@ -226,7 +252,7 @@ describe.skipIf(!HAVE_REGISTRY || rev5.length === 0)('chtypes#298: the relinked 
     // exportDeclined empty here even though bytes were withheld; the
     // relinked one names the batch's own outcome as the reason.
     let ran = 0;
-    for (const library of rev5) {
+    for (const library of relinked) {
       const schema = library.compileDdl('id UInt8, p String');
       try {
         const body = Buffer.from('id,unknown_col\n1,a\n', 'utf8');
@@ -243,7 +269,7 @@ describe.skipIf(!HAVE_REGISTRY || rev5.length === 0)('chtypes#298: the relinked 
         schema.close();
       }
     }
-    expect(ran, 'ran the wrong number of cases').toBe(rev5.length);
+    expect(ran, 'ran the wrong number of cases').toBe(relinked.length);
     expect(ran, 'ran ZERO cases — a block that asserts nothing is not a pass').toBeGreaterThan(0);
   });
 
@@ -258,7 +284,7 @@ describe.skipIf(!HAVE_REGISTRY || rev5.length === 0)('chtypes#298: the relinked 
     // unsupportedSettings, which promotes the row's own outcome to
     // Unsupported.
     let ran = 0;
-    for (const library of rev5) {
+    for (const library of relinked) {
       const schema = library.compileDdl('id UInt8, t DateTime');
       try {
         const result = schema.row(Format.JSONEachRow, Buffer.from('{"id":1,"t":"2024-01-01 00:00:00"}', 'utf8'), {
@@ -277,7 +303,7 @@ describe.skipIf(!HAVE_REGISTRY || rev5.length === 0)('chtypes#298: the relinked 
         schema.close();
       }
     }
-    expect(ran, 'ran the wrong number of cases').toBe(rev5.length);
+    expect(ran, 'ran the wrong number of cases').toBe(relinked.length);
     expect(ran, 'ran ZERO cases — a block that asserts nothing is not a pass').toBeGreaterThan(0);
   });
 });

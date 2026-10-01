@@ -110,6 +110,53 @@ macro_rules! rev5 {
     }};
 }
 
+/// The chtypes#298 relink (`chtypes_build` 1790845279) reached only the
+/// SUPPORTED lines' artifacts (`docs/support.md`): 26.3, 26.7, 26.8 and
+/// 26.9. A served, unsupported (retired) line gets no new build or ABI
+/// revision, ever, so its existing artifact keeps the pre-relink behavior
+/// permanently — measured: 26.6's newest served build, 1790767905, predates
+/// this relink and was never republished. `rev5_libraries` also opens such
+/// a line (anything ABI revision 5+), so the three regression tests below
+/// filter to the supported set explicitly, through `relinked_libraries`,
+/// rather than asserting the new behavior against a line that was never
+/// given it.
+static RELINK_SUPPORTED_LINES: [&str; 4] = ["26.3", "26.7", "26.8", "26.9"];
+static RELINKED_LIBRARIES: OnceLock<Vec<Arc<Library>>> = OnceLock::new();
+
+fn relinked_libraries() -> &'static [Arc<Library>] {
+    RELINKED_LIBRARIES.get_or_init(|| {
+        let mut libraries = Vec::new();
+        for lib in rev5_libraries() {
+            if RELINK_SUPPORTED_LINES.contains(&lib.minor()) {
+                libraries.push(Arc::clone(lib));
+            } else {
+                announce(&format!(
+                    "\nline {} ({}) not exercised: a served, unsupported (retired) line never \
+                     receives this relink (docs/support.md)\n",
+                    lib.minor(),
+                    lib.version()
+                ));
+            }
+        }
+        libraries
+    })
+}
+
+macro_rules! relinked {
+    ($name:literal) => {{
+        let libs = relinked_libraries();
+        if libs.is_empty() {
+            announce(concat!(
+                "\nSKIP ",
+                $name,
+                ": needs an artifact on a chtypes#298-relinked line (26.3, 26.7, 26.8, 26.9)\n"
+            ));
+            return;
+        }
+        libs
+    }};
+}
+
 /// `_t` is EPHEMERAL: its value is read only when `RowOptions::columns` lists
 /// it, never stored, never exported. `tenant`'s DEFAULT reads `_t`, so
 /// `tenant` resolves to `"acme"`/`"other"` only when `_t` was actually
@@ -330,7 +377,7 @@ const CSV_REJECTION_CODE: i32 = 117;
 /// the filter.
 #[test]
 fn non_accepted_batch_zeroes_counts_and_carries_verdict_code() {
-    let libs = rev5!("non_accepted_batch_zeroes_counts_and_carries_verdict_code");
+    let libs = relinked!("non_accepted_batch_zeroes_counts_and_carries_verdict_code");
     let mut ran = 0usize;
     for lib in libs {
         let where_ = lib.version().to_string();
@@ -410,7 +457,7 @@ fn non_accepted_batch_zeroes_counts_and_carries_verdict_code() {
 /// relinked one names the batch's own outcome as the reason.
 #[test]
 fn rejected_zero_row_batch_names_the_export_decline() {
-    let libs = rev5!("rejected_zero_row_batch_names_the_export_decline");
+    let libs = relinked!("rejected_zero_row_batch_names_the_export_decline");
     let mut ran = 0usize;
     for lib in libs {
         let where_ = lib.version().to_string();
@@ -481,7 +528,7 @@ fn rejected_zero_row_batch_names_the_export_decline() {
 /// `Unsupported`.
 #[test]
 fn session_timezone_setting_is_declined_not_ignored() {
-    let libs = rev5!("session_timezone_setting_is_declined_not_ignored");
+    let libs = relinked!("session_timezone_setting_is_declined_not_ignored");
     let mut ran = 0usize;
     for lib in libs {
         let where_ = lib.version().to_string();
