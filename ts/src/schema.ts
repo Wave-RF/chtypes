@@ -309,7 +309,7 @@ export class Schema {
    *
    * The two error classes here are the refusal/decline split and MUST be
    * handled as peers — `UnsupportedError` is deliberately NOT
-   * `instanceof SchemaError` (docs/reference/bindings.md rule 12):
+   * `instanceof SchemaError` (docs/reference/bindings.md §The error split):
    *
    * @param engine - the engine expression, e.g. `"SummingMergeTree"`,
    *   `"CollapsingMergeTree(sign)"`.

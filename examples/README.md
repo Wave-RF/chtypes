@@ -63,4 +63,4 @@ The tours print these differences rather than hiding them:
 
 ## History
 
-An earlier revision of these playgrounds (nine sections, live-server discovery) surfaced five cross-SDK inconsistencies in August 2026; all five were fixed in the library, the SDKs and the spec on 2026-08-26. The findings and their outcomes are recorded in `docs/reference/bindings.md` (§Teardown, §Concurrency, rule 12) and the C ABI contract (§Compile-time vs per-call settings), which is where the normative story lives.
+An earlier revision of these playgrounds (nine sections, live-server discovery) surfaced five cross-SDK inconsistencies in August 2026; all five were fixed in the library, the SDKs and the spec on 2026-08-26. The findings and their outcomes are recorded in `docs/reference/bindings.md` (§Teardown, §Concurrency, §The error split) and the C ABI contract (§Compile-time vs per-call settings), which is where the normative story lives.

@@ -735,7 +735,7 @@ class Schema:
         own insert_or_assign rule (unreachable through a dict, stated for
         completeness).
 
-        Errors follow rule 12's split: `SchemaError` when ClickHouse itself
+        Errors follow §The error split: `SchemaError` when ClickHouse itself
         refuses the expression (unknown identifier 47, unknown function —
         and the server's own parameter refusals: an UNBOUND `{name:Type}` is
         456 UNKNOWN_QUERY_PARAMETER "Substitution `name` is not set", a value
@@ -1098,7 +1098,7 @@ class Library:
             # negative one — `-2` for an unsafe family this build refuses to
             # construct, `-1` for a guarded exception — is this library
             # declining (`UnsupportedError`), never a rejection the product
-            # invented (docs/reference/bindings.md rule 12).
+            # invented (docs/reference/bindings.md §The error split).
             raise _error_for(code, err or f"invalid type expression: {type_expr!r}")
         return canonical
 
@@ -1279,7 +1279,7 @@ class Library:
             # refused HERE — and it is a decline, not a rejection a real server
             # would have made. `_error_for` keys on the SIGN of the code, so a
             # future negative sentinel can never become "a SchemaError with a
-            # negative code" (docs/reference/bindings.md rule 12).
+            # negative code" (docs/reference/bindings.md §The error split).
             raise _error_for(code, err or f"invalid column list: {ddl!r}")
         return Schema(self, handle, ddl)
 
