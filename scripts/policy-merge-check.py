@@ -4,6 +4,7 @@
     scripts/policy-merge-check.py --selftest          every refusal below fires, and an all-good input passes
     scripts/policy-merge-check.py --check-ci-names     REQUIRED_CHECKS agrees with ci.yml's blocking jobs (no network)
     scripts/policy-merge-check.py --check-guide        CONTRIBUTING.md's protected-glob block agrees with PROTECTED_GLOBS (no network)
+    scripts/policy-merge-check.py --check-carve-out    the security carve-out agrees with the tree's verification code (no network)
     scripts/policy-merge-check.py --print-protected    PROTECTED_GLOBS, one per line
     scripts/policy-merge-check.py gate    --repo OWNER/NAME --run-head-sha SHA --run-head-repo OWNER/NAME
     scripts/policy-merge-check.py gate    --repo OWNER/NAME --pr N
@@ -58,7 +59,14 @@ the pull request is left for a human and the exit status is 0.
                  longer what would be enqueued.
   protected  (5) No file the pull request touches — its current path, or for
                  a rename its OLD path too; a deletion counts by its one path
-                 — matches a glob in PROTECTED_GLOBS (below). This is also
+                 — matches an unconditional glob in PROTECTED_GLOBS (below);
+                 and for every binding whose SOURCE TREE it touches (the
+                 four conditional entries, chtypes#285 §1), that binding's
+                 api-surface verdict on the judged head is `changed=false`
+                 — read from the `api-surface` job's own log
+                 (gather_api_verdicts; a missing, unparseable or errored
+                 verdict, or a job that did not complete with success,
+                 counts as changed). This is also
                  what makes `checks` (next) mean anything: a pull_request run
                  of `ci` uses the pull request's own copy of `.github/` and
                  `scripts/`, which a pull request that edited either could
@@ -106,7 +114,9 @@ ordinary pull request costs a handful of API reads. `test-counts` has no such
 split — gather_test_counts reads every job log it needs (never a head file)
 up front, so `gate` checks it fully, at the API cost of up to five job-log
 reads per side, and only for a pull request that touches a test or fixture
-path. `enqueue` reads every fact again, checks all of them including the
+path. The api-surface verdicts are the same: one job-log read, only for a
+pull request that touches binding source and nothing unconditionally
+protected. `enqueue` reads every fact again, checks all of them including the
 byte comparison, and enqueues with `expectedHeadOid=<head>` so GitHub itself
 refuses if the head moved in between (reported as `stale`).
 
@@ -196,12 +206,35 @@ design: over-protect rather than under-protect.
                           release signatures
   include/**              the frozen C ABI header
   go/**/*.go (except *_test.go), python/src/**, ts/src/**, rust/src/**
-                          each binding's public API surface. v1 protects ALL
-                          non-test source per binding rather than computing an
-                          export list: Go has none, and Python/Rust export by
-                          visibility, not by anything a path rule can read. A
-                          follow-up could narrow this with committed API
-                          snapshots (not built here).
+                          each binding's source tree — CONDITIONAL since
+                          chtypes#285 §1. No path rule can read an export
+                          list (Go has none; Python and Rust export by
+                          visibility), so the export list is COMPUTED instead:
+                          ci.yml's non-blocking `api-surface` job runs one
+                          pinned tool per binding (scripts/api-surface.py's
+                          header names them, and why each is trusted not to
+                          run anything of the head), merge base against
+                          head, and a touch of a binding's source is
+                          protected only while that binding's verdict is not
+                          `changed=false`. An exported ADDITION is a change.
+  the SECURITY CARVE-OUT  inside those trees but UNCONDITIONAL, whatever the
+                          verdict: go/chtypes/{fetch_sign,fetch,registry_path,
+                          multiversion,resolve}.go, python/src/chtypes/{_ed25519,
+                          fetch,_manifest,registry}.py, ts/src/{fetch,
+                          registry}.ts, rust/src/fetch/**, rust/src/digest.rs,
+                          rust/src/registry.rs — the fetch chain (the ed25519
+                          signature, each tarball's sha256, the lock pin, the
+                          trusted keys and the allow-unsigned switch) and the
+                          load-time checks (library_bytes on every load, the
+                          opt-in sha256 re-hash). Derived by VERIFICATION_NEEDLES
+                          (the primitives and trust anchors, never names a
+                          re-export also carries), and `--check-carve-out`,
+                          run by the required `abi` job, derives it again
+                          from the tree on every pull request.
+  rust/build.rs           not source by path, but code cargo RUNS on every
+                          build — a consumer's, and the api-surface job's,
+                          whose log the conditional entries above trust.
+                          None exists today.
   go/go.mod, go/go.sum, python/pyproject.toml, python/uv.lock,
   ts/package.json, ts/pnpm-lock.yaml, ts/pnpm-workspace.yaml,
   rust/Cargo.toml, rust/Cargo.lock, RELEASING.md
@@ -249,12 +282,8 @@ runner, `pnpm test` → `vitest run`) has no config file in this tree either.
 repository's workflows hardcodes `node-version: 22`; none reads
 `node-version-file`, so nothing here is sensitive to its contents.
 
-Signature/checksum verification code and each binding's embedded release
-public key already sit inside the binding-source or scripts globs above —
-confirmed by reading each, not assumed: go/chtypes/fetch_sign.go,
-python/src/chtypes/_ed25519.py, python/src/chtypes/fetch.py, ts/src/fetch.ts,
-rust/src/fetch/mod.rs, rust/src/fetch/release.rs, rust/src/fetch/trust.rs.
-scripts/lint-public.sh's one exemption (the literal `runner` segment in its
+scripts/fetch.sh, the shell fetch that also verifies release signatures, is
+inside scripts/**. scripts/lint-public.sh's one exemption (the literal `runner` segment in its
 LOCAL_PATH_PLACEHOLDERS allowlist) lives inside the script itself, so
 scripts/** already covers it; there is no exemption file outside that glob.
 
@@ -289,6 +318,15 @@ whose log is read is itself one `.github/**`/`scripts/**` cannot touch
 without tripping `protected` first (evaluated before `checks`, and
 `test-counts` sits after `checks`), so by the time a log is ever read, the
 scripts that produced it are provably main's own.
+
+The binding-source half of `protected` (chtypes#285 §1) reads one more log
+the same way — the `api-surface` job's — and only after the unconditional
+half has refused any pull request that touched `.github/**` or `scripts/**`,
+so the job that wrote it ran main's ci.yml and main's scripts/api-surface.py.
+Each verdict line is matched by a fixed regex at the start of a log line and
+must name the judged head's own sha, which no commit can contain in
+advance; scripts/api-surface.py's header says why nothing of the head runs in
+that job at all.
 
 ================================================================================
 REQUIRED_CHECKS, AND WHY IT IS PINNED HERE
@@ -350,19 +388,37 @@ class ProtectedGlob:
     CONTRIBUTING.md block --check-guide verifies. `except_suffix`, when set,
     exempts a path the pattern would otherwise match if its filename ends
     with it (go/**/*.go except *_test.go: a test is not part of the public
-    API surface the glob exists to protect)."""
+    API surface the glob exists to protect).
+
+    `binding`, when set, makes the entry CONDITIONAL (chtypes#285 §1): it is
+    that binding's source tree, and a touch of it is protected only while the
+    `api-surface` verdict for that binding on the judged head is not
+    `changed=false` (api_surface_problems). Every entry without a `binding`
+    is protected unconditionally. `verification` marks an unconditional
+    entry as part of the SECURITY CARVE-OUT — signature and checksum
+    verification code and the embedded release key, inside a binding's
+    source tree but protected whatever its API verdict says;
+    `--check-carve-out` keeps those entries in step with the tree."""
 
     pattern: str
     reason: str
     except_suffix: str | None = None
+    binding: str | None = None
+    verification: bool = False
 
     def label(self) -> str:
-        if self.except_suffix:
-            return f"{self.pattern} (except *{self.except_suffix})"
-        return self.pattern
+        base = f"{self.pattern} (except *{self.except_suffix})" if self.except_suffix else self.pattern
+        if self.binding:
+            return f"{base} [unless the api-surface verdict for {self.binding} is changed=false]"
+        return base
 
     def guide_bullet(self) -> str:
         exc = f" (except `*{self.except_suffix}`)" if self.except_suffix else ""
+        if self.binding:
+            return (f"- `{self.pattern}`{exc} — {self.reason}; protected only while the `api-surface` verdict for "
+                    f"`{self.binding}` on the head is not `changed=false`")
+        if self.verification:
+            return f"- `{self.pattern}`{exc} — {self.reason}; security carve-out, protected whatever the API verdict"
         return f"- `{self.pattern}`{exc} — {self.reason}"
 
 
@@ -378,17 +434,69 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
                   "every gate a required check runs, this checker itself, and scripts/fetch.sh, which verifies "
                   "release signatures"),
     ProtectedGlob("include/**", "the frozen C ABI header"),
-    ProtectedGlob("go/**/*.go",
-                  "a binding's public API surface; Go has no export list to compute a narrower rule from, so v1 "
-                  "protects all non-test Go source",
-                  except_suffix="_test.go"),
-    ProtectedGlob("python/src/**",
-                  "a binding's public API surface; Python exports by visibility, not a list this checker can "
-                  "read, so v1 protects all of it"),
-    ProtectedGlob("ts/src/**",
-                  "a binding's public API surface; same reasoning as python/src/** — no export list to read"),
-    ProtectedGlob("rust/src/**",
-                  "a binding's public API surface; same reasoning as python/src/** — no export list to read"),
+    # Each binding's source tree, CONDITIONAL since chtypes#285 §1: a touch
+    # is refused only while the `api-surface` job's verdict for that binding
+    # on the judged head is not `changed=false` (an exported addition, a
+    # removal or a signature change, or no readable verdict at all).
+    ProtectedGlob("go/**/*.go", "go binding source (the exported API is computed by apidiff)",
+                  except_suffix="_test.go", binding="go"),
+    ProtectedGlob("python/src/**", "python binding source (the public API is computed from griffe's model)",
+                  binding="python"),
+    ProtectedGlob("ts/src/**", "ts binding source (the exported API is computed by api-extractor)", binding="ts"),
+    ProtectedGlob("rust/src/**", "rust binding source (the public API is computed by cargo-public-api)",
+                  binding="rust"),
+    # THE SECURITY CARVE-OUT (chtypes#285 §1): signature and checksum
+    # verification code, the trust policy and the embedded release key sit
+    # inside the binding-source globs above but stay protected
+    # UNCONDITIONALLY — an unchanged API says nothing about whether a
+    # verification still verifies. Derived by grepping each binding for its
+    # verification primitives and trust anchors (VERIFICATION_NEEDLES, below),
+    # and `--check-carve-out` fails when a file the needles hit is not covered
+    # here, or an entry here no longer exists — so this list cannot silently
+    # go stale when code moves.
+    ProtectedGlob("go/chtypes/fetch_sign.go",
+                  "the embedded release public key and the ed25519 signature check", verification=True),
+    ProtectedGlob("go/chtypes/fetch.go",
+                  "the fetch chain: the signature-check call, every tarball's sha256 against SHA256SUMS, the lock "
+                  "pin, the trusted-keys and allow-unsigned options", verification=True),
+    ProtectedGlob("go/chtypes/registry_path.go",
+                  "names the CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED variables the trust policy reads",
+                  verification=True),
+    ProtectedGlob("go/chtypes/multiversion.go",
+                  "load-time verification: the library_bytes size check on every load and the "
+                  "WithVerifyChecksums sha256 re-hash", verification=True),
+    ProtectedGlob("go/chtypes/resolve.go",
+                  "exact-patch resolution's load path, which runs the same load-time verification",
+                  verification=True),
+    ProtectedGlob("python/src/chtypes/_ed25519.py", "the ed25519 signature check itself", verification=True),
+    ProtectedGlob("python/src/chtypes/fetch.py",
+                  "the embedded release public key, the trust policy, and the fetch chain's signature and sha256 "
+                  "checks", verification=True),
+    ProtectedGlob("python/src/chtypes/_manifest.py",
+                  "load-time verification: check_library_bytes and verify_library's sha256 re-hash",
+                  verification=True),
+    ProtectedGlob("python/src/chtypes/registry.py",
+                  "calls the load-time verification on every load (verify_hashes)", verification=True),
+    ProtectedGlob("ts/src/fetch.ts",
+                  "the embedded release public keys, the trust policy, and the fetch chain's signature and sha256 "
+                  "checks", verification=True),
+    ProtectedGlob("ts/src/registry.ts",
+                  "load-time verification: checkLibraryBytes on every load and the verifyChecksums sha256 re-hash",
+                  verification=True),
+    ProtectedGlob("rust/src/fetch/**",
+                  "the embedded release public key, the trust policy, the signature check, the sha256 checks and "
+                  "the lock pin", verification=True),
+    ProtectedGlob("rust/src/digest.rs", "the sha256 helper every checksum check hashes with", verification=True),
+    ProtectedGlob("rust/src/registry.rs",
+                  "load-time verification: the library_bytes size check and the verify_checksums sha256 re-hash",
+                  verification=True),
+    # Not binding source by path, but code: cargo finds and RUNS a build
+    # script at the crate root on every build — on every consumer's machine,
+    # and inside the api-surface job, whose log the binding-source class
+    # above trusts. None exists today; adding one waits for a human.
+    ProtectedGlob("rust/build.rs",
+                  "a build script cargo runs on every build, consumers' and the api-surface job's alike (none "
+                  "exists today)"),
     ProtectedGlob("go/go.mod", "a release input: the Go module's own manifest"),
     ProtectedGlob("go/go.sum",
                   "a release input: the Go module's dependency lockfile (not yet present in this tree; "
@@ -427,12 +535,30 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("docs/divergences.json",
                   "the machine-checkable register of known divergences the divergences job reads; an allowlist "
                   "that excuses a result"),
+    # Tool configuration a pull request could ADD, at any depth (#322). None
+    # of these exists today; once binding source can merge itself on an
+    # unchanged API verdict, adding one beside a harmless source change would
+    # otherwise reconfigure a required job and merge with it.
+    ProtectedGlob("**/.cargo/**", "cargo configuration (source replacement, rustflags) the required rust job would read"),
+    ProtectedGlob("**/rust-toolchain*", "selects the Rust toolchain the required rust job resolves"),
+    ProtectedGlob("**/.npmrc", "npm registry and token configuration the required ts job would read"),
+    ProtectedGlob("**/go.work*", "a Go workspace file that redirects module resolution in the required go job"),
+    ProtectedGlob("**/.python-version", "selects the Python interpreter the required python job resolves"),
+    ProtectedGlob("**/pip.conf", "pip index and source configuration a Python install would read"),
+    ProtectedGlob("**/.yarnrc*", "yarn registry configuration a Node install would read"),
+    ProtectedGlob("**/bunfig.toml", "bun registry configuration a Node install would read"),
 )
 
 # --check-ci-names on this file's own PROTECTED_GLOBS: the two wildcard
 # shapes PROTECTED_GLOBS actually uses, each anchored to the whole pattern.
 _TRAILING_DOUBLE_STAR = re.compile(r"^(?P<dir>[\w./-]+)/\*\*$")
 _MIDDLE_DOUBLE_STAR = re.compile(r"^(?P<dir>[\w./-]+)/\*\*/\*(?P<ext>\.[\w.]+)$")
+# Any-depth shapes for tool configuration a PR could ADD anywhere (#322):
+# '**/NAME' or '**/NAME*' matches the file NAME (or any name starting with
+# it) in any directory, the repository root included; '**/DIR/**' matches
+# anything under a directory named DIR at any depth.
+_ANY_DEPTH_NAME = re.compile(r"^\*\*/(?P<name>[\w.-]+)(?P<prefix>\*)?$")
+_ANY_DEPTH_DIR = re.compile(r"^\*\*/(?P<seg>[\w.-]+)/\*\*$")
 
 
 def _match_protected(pattern: str, path: str) -> bool:
@@ -449,7 +575,10 @@ def _match_protected(pattern: str, path: str) -> bool:
         any number of path segments — including zero — in between. This is
         what makes go/**/*.go match go/x.go as well as go/a/b/x.go, and
         match neither gofoo/x.go (no '/' after the 'go' segment) nor
-        go/x.txt (wrong suffix)."""
+        go/x.txt (wrong suffix).
+      - '**/NAME' / '**/NAME*': the file's own name is NAME (or starts with
+        NAME), in any directory including the root.
+      - '**/DIR/**': some directory segment of `path` is DIR."""
     if "*" not in pattern:
         return path == pattern
     m = _TRAILING_DOUBLE_STAR.match(pattern)
@@ -460,31 +589,80 @@ def _match_protected(pattern: str, path: str) -> bool:
     if m:
         prefix, suffix = m["dir"] + "/", m["ext"]
         return path.startswith(prefix) and path.endswith(suffix)
+    m = _ANY_DEPTH_DIR.match(pattern)
+    if m:
+        return m["seg"] in path.split("/")[:-1]
+    m = _ANY_DEPTH_NAME.match(pattern)
+    if m:
+        base = path.rsplit("/", 1)[-1]
+        return base.startswith(m["name"]) if m["prefix"] else base == m["name"]
     raise ValueError(f"unsupported glob shape in PROTECTED_GLOBS: {pattern!r}; extend _match_protected first")
 
 
+def _covers(g: ProtectedGlob, path: str) -> bool:
+    return _match_protected(g.pattern, path) and not (g.except_suffix and path.endswith(g.except_suffix))
+
+
 def is_protected(path: str) -> ProtectedGlob | None:
-    """The first PROTECTED_GLOBS entry that covers `path`, or None."""
+    """The first UNCONDITIONAL PROTECTED_GLOBS entry that covers `path`, or
+    None. A binding-source entry is never returned here: whether a touch of
+    one is protected depends on that binding's api-surface verdict, which
+    binding_of() and api_surface_problems() decide."""
     for g in PROTECTED_GLOBS:
-        if _match_protected(g.pattern, path) and not (g.except_suffix and path.endswith(g.except_suffix)):
+        if g.binding is None and _covers(g, path):
             return g
     return None
 
 
-def first_protected_touch(files: list[dict]) -> tuple[str, ProtectedGlob] | None:
-    """The first (path, glob) a pull request's file list touches that
-    PROTECTED_GLOBS covers. Every file counts by its current path
-    (`filename`); a rename also counts by its OLD path (`previous_filename`)
-    — moving a protected file out from under its glob, or a file into one, is
-    a protected-class change either way. A deletion counts the same as any
-    other status: its `filename` is the path that no longer exists."""
+def binding_of(path: str) -> ProtectedGlob | None:
+    """The binding-source entry (a PROTECTED_GLOBS entry with `binding` set)
+    that covers `path`, or None. The ONE mapping from a path to a binding:
+    scripts/api-surface.py imports this function to decide which bindings a
+    diff touches, so the job that writes the verdicts and the checker that
+    reads them cannot disagree about which binding a file belongs to."""
+    for g in PROTECTED_GLOBS:
+        if g.binding is not None and _covers(g, path):
+            return g
+    return None
+
+
+# Every binding with a source-tree entry, in PROTECTED_GLOBS order.
+BINDINGS: tuple[str, ...] = tuple(g.binding for g in PROTECTED_GLOBS if g.binding is not None)
+
+
+def _touched_paths(files: list[dict]):
+    """Every path a pull request's file list touches: each file's current
+    path (`filename`) and, for a rename, its OLD path (`previous_filename`)
+    too — moving a file out from under a glob, or into one, is a change to
+    that glob's class either way. A deletion counts by its one path, the one
+    that no longer exists."""
     for f in files:
         for path in (f.get("filename"), f.get("previous_filename")):
             if path:
-                hit = is_protected(path)
-                if hit is not None:
-                    return path, hit
+                yield path
+
+
+def first_protected_touch(files: list[dict]) -> tuple[str, ProtectedGlob] | None:
+    """The first (path, glob) a pull request's file list touches that an
+    UNCONDITIONAL PROTECTED_GLOBS entry covers (rename and deletion handling:
+    _touched_paths)."""
+    for path in _touched_paths(files):
+        hit = is_protected(path)
+        if hit is not None:
+            return path, hit
     return None
+
+
+def touched_bindings(files: list[dict]) -> dict[str, str]:
+    """binding -> the first touched path of that binding's source tree, for
+    every binding whose source the pull request touches (rename and deletion
+    handling: _touched_paths)."""
+    touched: dict[str, str] = {}
+    for path in _touched_paths(files):
+        g = binding_of(path)
+        if g is not None and g.binding not in touched:
+            touched[g.binding] = path
+    return touched
 
 
 # ------------------------------------------------------- test/fixture paths
@@ -533,6 +711,143 @@ def touches_test_or_fixture_path(files: list[dict]) -> bool:
             if path and is_test_or_fixture_path(path):
                 return True
     return False
+
+
+# ---------------------------------------------------- api-surface (chtypes#285 §1)
+#
+# ci.yml's non-blocking `api-surface` job (scripts/api-surface.py) prints one
+# verdict line per touched binding into its own job LOG, and this reads that
+# log the way `test-counts` reads its counts: a check run's output fields are
+# null for an Actions job (measured; see gather_test_counts), so the console
+# log is the one channel a read-only token can read. The job stays green for
+# any genuine verdict, so a deliberate API change is not shown red; this
+# file, not the job's color, is what turns `changed=true` into "wait for a
+# human".
+
+API_SURFACE_CHECK = "api-surface — every touched binding's exported API, merge base against head (report only)"
+API_SURFACE_PREFIX = "chtypes-api-surface"
+
+
+def api_surface_line(binding: str, head_sha: str, changed: str) -> str:
+    """The one verdict line scripts/api-surface.py prints per touched binding
+    — defined here, ONCE, and imported by that script, so the writer and
+    parse_api_surface (the reader) cannot drift apart. `changed` is `true`,
+    `false` or `error`; only `false` ever unprotects anything."""
+    return f"{API_SURFACE_PREFIX} binding={binding} head={head_sha} changed={changed}"
+
+
+# A verdict starts its log line: GitHub prefixes every line with its own ISO
+# timestamp (and the first line of a log with a byte-order mark), so the
+# optional prefix is exactly that and nothing else. A tool's output that
+# merely CONTAINS the text — a compiler warning quoting it, say — is not a
+# verdict.
+_API_VERDICT_RE = re.compile(r"^\ufeff?(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z )?"
+                             + re.escape(API_SURFACE_PREFIX)
+                             + r" binding=(\S+) head=(\S+) changed=(\S*)[ \t]*\r?$", re.M)
+
+
+def parse_api_surface(log_text: str, head_sha: str) -> dict[str, list[str]]:
+    """binding -> every `changed=` value the job log carries for `head_sha`,
+    in log order. A line naming any other head is not a verdict about this
+    one (a re-run on a moved head, a merge-group run), and a commit cannot
+    name its own sha in advance, so nothing in the judged tree can print a
+    line that passes for this head's verdict."""
+    out: dict[str, list[str]] = {}
+    for m in _API_VERDICT_RE.finditer(log_text):
+        if m.group(2) == head_sha:
+            out.setdefault(m.group(1), []).append(m.group(3))
+    return out
+
+
+def api_surface_problems(touched: dict[str, str], verdicts: dict[str, list[str]]) -> list[str]:
+    """Why each touched binding's source is still protected. Unchanged needs
+    at least one verdict line for that binding on the judged head and EVERY
+    such line exactly `false`: a missing verdict, `true`, `error` and
+    anything unparseable all count as changed, and a second line can only
+    add doubt, never remove it. An untouched binding needs no verdict."""
+    problems = []
+    for binding, path in touched.items():
+        values = verdicts.get(binding) or []
+        glob = binding_of(path)
+        where = f"{path} is {binding} binding source (`{glob.pattern if glob else '?'}`)"
+        if not values:
+            problems.append(f"{where} and the api-surface job printed no verdict for {binding} on this head — "
+                            "a missing verdict counts as changed")
+        elif any(v != "false" for v in values):
+            seen = "/".join(sorted({v or "<empty>" for v in values if v != "false"}))
+            problems.append(f"{where} and the api-surface verdict for {binding} on this head is changed={seen} — "
+                            "an exported API change, or a tool that could not tell, waits for a human")
+    return problems
+
+
+def api_surface_job_problems(ci_text: str) -> list[str]:
+    """Why ci.yml's api-surface job is not what this file reads: no job
+    carries API_SURFACE_CHECK as its check-run name, or that job blocks
+    (it must carry job-level `continue-on-error: true`, so a deliberate API
+    change is never a red required check)."""
+    jobs = [j for j in ci_jobs(ci_text) if j.name == API_SURFACE_CHECK]
+    if not jobs:
+        return [f"no ci.yml job carries the check-run name {API_SURFACE_CHECK!r} this checker reads verdicts from"]
+    if any(j.blocking for j in jobs):
+        return [f"ci.yml's job {jobs[0].job_id} ({API_SURFACE_CHECK!r}) blocks; it must carry job-level "
+                "continue-on-error: true"]
+    return []
+
+
+# ------------------------------------------- the security carve-out's derivation
+#
+# What verification code and trust anchors look like in each binding — never
+# a list of names (a re-export of RELEASE_PUBLIC_KEY is not verification
+# code), always the primitive or the literal that does the work: a hash or
+# signature library, the release key's own 64-hex literal, the trust
+# policy's two environment variable names as whole string literals, and
+# each binding's load-time verification entry points. Measured against the
+# tree when this was written: the needles hit exactly the carve-out entries
+# above and nothing else.
+VERIFICATION_NEEDLES: dict[str, tuple[str, ...]] = {
+    "*": (r"[\"'][0-9a-fA-F]{64}[\"']", r"[\"']CHTYPES_TRUSTED_KEYS[\"']", r"[\"']CHTYPES_ALLOW_UNSIGNED[\"']"),
+    "go": (r'"crypto/ed25519"', r'"crypto/sha256"', r"\bfileSHA256\(", r"\bverifyArtifactLibrary\(",
+           r"\bcheckLibraryBytes\("),
+    "python": (r"\bimport hashlib\b", r"\bfrom hashlib import\b", r"\b_ed25519\b", r"\bverify_library\(",
+               r"\bcheck_library_bytes\("),
+    "ts": (r"['\"]node:crypto['\"]", r"\bverifyChecksum\(", r"\bcheckLibraryBytes\("),
+    "rust": (r"\bsha2::", r"\bed25519_dalek\b", r"\bsha256_file\(", r"\bsha256_hex\(", r"\bverify_signature\("),
+}
+_COMMENT_PREFIXES = {"python": ("#",), "go": ("//", "/*", "*"), "ts": ("//", "/*", "*"), "rust": ("//", "/*", "*")}
+
+
+def verification_hits(binding: str, text: str) -> list[str]:
+    """Every VERIFICATION_NEEDLES pattern (the binding's own and the shared
+    ones) that matches a non-comment line of `text`. A full-line comment is
+    dropped first, so a comment that only DESCRIBES verification is not
+    verification code."""
+    code = "\n".join(line for line in text.splitlines()
+                     if not line.lstrip().startswith(_COMMENT_PREFIXES[binding]))
+    return [p for p in VERIFICATION_NEEDLES["*"] + VERIFICATION_NEEDLES[binding] if re.search(p, code)]
+
+
+def carve_out_problems(sources: dict[str, str]) -> list[str]:
+    """Every way the carve-out entries in PROTECTED_GLOBS disagree with
+    `sources` (path -> text, every tracked file of every binding's source
+    tree): a file the needles hit that no carve-out entry covers — the
+    verification code moved, or new code grew — and a carve-out entry that
+    covers no file at all — it moved away. A pure function of the text, so
+    the selftest drives it from fabricated trees."""
+    problems = []
+    carve_outs = [g for g in PROTECTED_GLOBS if g.verification]
+    for path, text in sorted(sources.items()):
+        g = binding_of(path)
+        if g is None:
+            continue
+        hits = verification_hits(g.binding, text)
+        if hits and not any(_covers(c, path) for c in carve_outs):
+            problems.append(f"{path} matches the verification needle {hits[0]!r} but no carve-out entry covers it; "
+                            "add it to PROTECTED_GLOBS with verification=True")
+    for c in carve_outs:
+        if not any(_covers(c, p) for p in sources):
+            problems.append(f"the carve-out entry `{c.pattern}` covers no file in the tree; the code moved — find "
+                            "where and update the entry")
+    return problems
 
 
 # ------------------------------------------------------- the CONTRIBUTING.md guide
@@ -633,7 +948,8 @@ CONDITIONS = {
     "fork": "condition 1, the head is a branch of this repository",
     "pull-request": "one open, non-draft pull request against main carries the commit",
     "stale": "the head is still the commit ci judged",
-    "protected": "condition 5, no touched file (current or, for a rename, old path) matches a protected glob",
+    "protected": "condition 5, no touched file (current or, for a rename, old path) matches a protected glob, "
+                 "and every touched binding's source has an api-surface verdict of changed=false on the head",
     "checks": "condition 2, every required check passed",
     "test-counts": "condition 7 (chtypes#285 §1b), only when the diff touches a test or fixture path: no "
                    "suite's executed-test count, and no golden-case count, fell below main's last green ci "
@@ -752,6 +1068,7 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
            files: list[dict], check_runs: list[dict], reviews: list[dict],
            review_comments: list[dict], head_bytes: dict[str, bytes] | None = None,
            regenerated: dict[str, bytes] | None = None, test_counts: TestCountFacts | None = None,
+           api_verdicts: dict[str, list[str]] | None = None,
            required: tuple[str, ...] = REQUIRED_CHECKS) -> Refusal | None:
     """The first condition that fails, or None when every condition holds.
     With `regenerated` None (the gate), the byte HALF of condition 6 is not
@@ -759,7 +1076,9 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
     than modified is still refused at gate time; that much is pure API data.
     `test_counts` has no such split: gather_test_counts reads everything
     condition 7 needs (job logs, never a head file) up front, so both `gate`
-    and `enqueue` check it fully."""
+    and `enqueue` check it fully. `api_verdicts` (gather_api_verdicts, the
+    api-surface job's log for this head) is the same: None or {} is no
+    verdict at all, which keeps every touched binding's source protected."""
     # fork (condition 1)
     if run_head_repo is not None and run_head_repo != repo:
         return Refusal("fork", f"the ci run's head is in {run_head_repo or '<no repository>'}, not {repo}")
@@ -792,6 +1111,14 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
     if touch is not None:
         path, glob = touch
         return Refusal("protected", f"{path} matches the protected glob `{glob.pattern}` ({glob.reason})")
+    # The binding-source class (chtypes#285 §1), still condition 5 and still
+    # before `checks`: the api-surface verdicts it reads were written by the
+    # pull request's own copy of ci.yml and scripts/, which the unconditional
+    # check above has just shown to be main's.
+    problems = api_surface_problems(touched_bindings(files), api_verdicts or {})
+    if problems:
+        more = f"; and {len(problems) - 2} more" if len(problems) > 2 else ""
+        return Refusal("protected", "; ".join(problems[:2]) + more)
 
     # checks (condition 2)
     problems = check_run_problems(check_runs, required)
@@ -1122,6 +1449,32 @@ def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> 
     return TestCountFacts(head=head_counts, main=main_counts, head_golden=head_golden, main_golden=main_golden)
 
 
+def api_surface_job_id(check_runs: list[dict]) -> int | None:
+    """The api-surface job whose log may be read for verdicts: the GitHub
+    Actions check run named API_SURFACE_CHECK, only if it COMPLETED with
+    success (readable_job_ids). A skipped job has no log at all (404) and a
+    failed or canceled one may have stopped before printing a verdict, so
+    either is None here: a missing verdict, which keeps every touched
+    binding protected — never an exit-2 error and never a pass. A tool that
+    fails makes the whole job red, so one broken tool holds every binding's
+    source for a human until it is fixed; that is the fail-closed side."""
+    runs = [r for r in check_runs if (r.get("app") or {}).get("slug") == REQUIRED_CHECK_APP]
+    return readable_job_ids(runs).get(API_SURFACE_CHECK)
+
+
+def gather_api_verdicts(repo: str, files: list[dict], check_runs: list[dict], head_sha: str) -> dict[str, list[str]]:
+    """The api-surface verdicts for `head_sha`, read from that job's own log —
+    at ZERO API cost when the diff touches no binding source, or touches an
+    unconditionally protected file (decide() refuses that first, and reads
+    nothing it has not already shown to be main's)."""
+    if first_protected_touch(files) is not None or not touched_bindings(files):
+        return {}
+    job_id = api_surface_job_id(check_runs)
+    if job_id is None:
+        return {}
+    return parse_api_surface(job_log(repo, job_id), head_sha)
+
+
 @dataclass(frozen=True)
 class EnqueuePlan:
     """What `cmd_enqueue` should do once `decide()` has passed: either
@@ -1261,9 +1614,10 @@ def cmd_gate(args: argparse.Namespace) -> int:
             return refuse(refusal, f"commit {sha[:12]}")
     facts = gather(args.repo, number, sha)
     test_counts = gather_test_counts(args.repo, facts.files, facts.check_runs)
+    api_verdicts = gather_api_verdicts(args.repo, facts.files, facts.check_runs, sha)
     refusal = decide(repo=args.repo, expected_head_sha=sha, run_head_repo=run_head_repo, pr=facts.pr,
                      files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
-                     review_comments=facts.review_comments, test_counts=test_counts)
+                     review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts)
     if refusal:
         output(candidate=0)
         return refuse(refusal, f"PR #{number} at {sha[:12]}")
@@ -1292,9 +1646,10 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     number, sha = args.pr, args.head_sha
     facts = gather(args.repo, number, sha)
     test_counts = gather_test_counts(args.repo, facts.files, facts.check_runs)
+    api_verdicts = gather_api_verdicts(args.repo, facts.files, facts.check_runs, sha)
     judged = dict(repo=args.repo, expected_head_sha=sha, run_head_repo=args.run_head_repo or None, pr=facts.pr,
                   files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
-                  review_comments=facts.review_comments, test_counts=test_counts)
+                  review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts)
     # Every other condition first, fresh: a head that moved or vanished since
     # the gate is `stale`, never a failed read of its bytes. This IS the
     # primary defense against a moved head — see enqueue_pull_request()'s own
@@ -1380,19 +1735,50 @@ def cmd_check_ci_names() -> int:
     with open(CI_YML, encoding="utf-8") as f:
         text = f.read()
     try:
-        problems = ci_name_problems(text, REQUIRED_CHECKS)
+        problems = ci_name_problems(text, REQUIRED_CHECKS) + api_surface_job_problems(text)
     except CiShapeError as e:
         print(f"policy-merge-check: {e}", file=sys.stderr)
         return 1
     if problems:
         for p in problems:
             print(f"  {p}", file=sys.stderr)
-        print(f"policy-merge-check: REQUIRED_CHECKS and ci.yml's blocking jobs disagree ({len(problems)}).\n"
-              "  Update REQUIRED_CHECKS in scripts/policy-merge-check.py in the same change, and ask an\n"
-              "  admin to update branch protection's required checks to match.", file=sys.stderr)
+        print(f"policy-merge-check: REQUIRED_CHECKS and ci.yml's blocking jobs disagree, or the api-surface job "
+              f"is not the non-blocking job this file reads ({len(problems)}).\n"
+              "  Update REQUIRED_CHECKS (or API_SURFACE_CHECK) in scripts/policy-merge-check.py in the same\n"
+              "  change, and ask an admin to update branch protection's required checks to match.", file=sys.stderr)
         return 1
     blocking = sum(1 for j in ci_jobs(text) if j.blocking)
-    print(f"policy-merge-check: ok, REQUIRED_CHECKS names exactly ci.yml's {blocking} blocking job(s)")
+    print(f"policy-merge-check: ok, REQUIRED_CHECKS names exactly ci.yml's {blocking} blocking job(s), and the "
+          "api-surface job is there and non-blocking")
+    return 0
+
+
+def tracked_binding_sources() -> dict[str, str]:
+    """path -> text for every tracked file of every binding's source tree,
+    read from THIS checkout (`git ls-files`). Run by ci.yml on the pull
+    request's own tree and by policy-merge.yml on main's; never on a head
+    that policy-merge is judging."""
+    out = subprocess.run(["git", "-C", ROOT, "ls-files", "-z"], capture_output=True, check=True).stdout
+    sources: dict[str, str] = {}
+    for path in out.decode("utf-8").split("\0"):
+        if path and binding_of(path) is not None:
+            with open(os.path.join(ROOT, path), encoding="utf-8", errors="replace") as f:
+                sources[path] = f.read()
+    return sources
+
+
+def cmd_check_carve_out() -> int:
+    sources = tracked_binding_sources()
+    problems = carve_out_problems(sources)
+    if problems:
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
+        print(f"policy-merge-check: the security carve-out in PROTECTED_GLOBS disagrees with the tree "
+              f"({len(problems)}). Verification code must stay protected whatever its API verdict.", file=sys.stderr)
+        return 1
+    covered = sorted(p for p in sources if any(g.verification and _covers(g, p) for g in PROTECTED_GLOBS))
+    print(f"policy-merge-check: ok, every binding file the verification needles hit is in the carve-out "
+          f"({len(covered)} file(s): {', '.join(covered)})")
     return 0
 
 
@@ -1522,6 +1908,12 @@ def _sample_protected_path(g: ProtectedGlob) -> str:
     m = _MIDDLE_DOUBLE_STAR.match(g.pattern)
     if m:
         return f"{m['dir']}/__selftest_sample__{m['ext']}"
+    m = _ANY_DEPTH_DIR.match(g.pattern)
+    if m:
+        return f"__selftest_sample__/{m['seg']}/__selftest_sample__"
+    m = _ANY_DEPTH_NAME.match(g.pattern)
+    if m:
+        return f"__selftest_sample__/{m['name']}{'__selftest_sample__' if m['prefix'] else ''}"
     raise ValueError(f"selftest cannot derive a sample path for {g.pattern!r}")
 
 
@@ -1585,18 +1977,30 @@ def selftest() -> int:
                                  {"filename": "docs/reference/bindings.md", "status": "added"}])), None)
 
     # condition 5 — protected, driven from PROTECTED_GLOBS itself, never a
-    # hand-typed duplicate of it: every glob family refuses.
+    # hand-typed duplicate of it: every glob family refuses with no
+    # api-surface verdict at all; a binding-source sample passes with that
+    # binding's `changed=false`; every other entry — the security carve-out
+    # among them — still refuses with EVERY binding's `changed=false`.
+    all_unchanged = {b: ["false"] for b in BINDINGS}
     for g in PROTECTED_GLOBS:
         sample = _sample_protected_path(g)
-        expect(f"protected: {g.pattern}",
-               decide(**_with(pr=_pr(changed_files=1), files=[{"filename": sample, "status": "modified"}])),
-               "protected")
+        one = [{"filename": sample, "status": "modified"}]
+        expect(f"protected: {g.pattern}", decide(**_with(pr=_pr(changed_files=1), files=one)), "protected")
+        if g.binding is not None:
+            expect(f"binding source {g.pattern} with its own changed=false verdict passes",
+                   decide(**_with(files=one, api_verdicts={g.binding: ["false"]})), None)
+        else:
+            expect(f"{g.pattern} refuses whatever every binding's api-surface verdict says",
+                   decide(**_with(files=one, api_verdicts=dict(all_unchanged))), "protected")
     expect("a go test file is the *_test.go exception, not protected (test-counts holds too)",
            decide(**_with(files=[{"filename": "go/chtypes/client_test.go", "status": "modified"}],
                           test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)))), None)
     expect("ts/biome.json alone (lint-ts's own config) is protected",
            decide(**_with(pr=_pr(changed_files=1), files=[{"filename": "ts/biome.json", "status": "modified"}])),
            "protected")
+    for added in ("rust-toolchain.toml", ".cargo/config.toml", "ts/.npmrc", "go.work"):
+        expect(f"ADDING {added} (tool configuration, #322) is protected",
+               decide(**_with(pr=_pr(changed_files=1), files=[{"filename": added, "status": "added"}])), "protected")
     expect("a rename whose OLD path was protected",
            decide(**_with(pr=_pr(changed_files=1),
                           files=[{"filename": "README.md", "status": "renamed",
@@ -1616,6 +2020,124 @@ def selftest() -> int:
            "(fabricated) checks are trusted",
            decide(**_with(check_runs=[], files=[{"filename": ".github/workflows/ci.yml", "status": "modified"}])),
            "protected")
+
+    # The binding-source class (chtypes#285 §1), driven through decide()'s
+    # own `api_verdicts` — and, where the question is what a log line means,
+    # through parse_api_surface on a fabricated job log, never a hand-set
+    # dict standing in for the parse.
+    go_src = [{"filename": "go/chtypes/transform.go", "status": "modified"}]
+
+    def log_of(*lines: str) -> str:
+        return "\ufeff" + "".join(f"2026-10-01T00:49:13.2543384Z {line}\n" for line in lines)
+
+    def verdicts(*lines: str, head: str = SHA) -> dict[str, list[str]]:
+        return parse_api_surface(log_of(*lines), head)
+
+    expect("api-surface: binding source with changed=false (parsed from a job log) passes",
+           decide(**_with(files=go_src, api_verdicts=verdicts(api_surface_line("go", SHA, "false")))), None)
+    expect("api-surface: changed=true refuses",
+           decide(**_with(files=go_src, api_verdicts=verdicts(api_surface_line("go", SHA, "true")))), "protected")
+    expect("api-surface: a missing verdict refuses (no api_verdicts at all)", decide(**_with(files=go_src)),
+           "protected")
+    expect("api-surface: a missing verdict refuses (a log with every binding but this one)",
+           decide(**_with(files=go_src, api_verdicts=verdicts(*(api_surface_line(b, SHA, "false")
+                                                                for b in BINDINGS if b != "go")))), "protected")
+    expect("api-surface: a tool-error verdict refuses",
+           decide(**_with(files=go_src, api_verdicts=verdicts(api_surface_line("go", SHA, "error")))), "protected")
+    for label, line in (("an empty value", api_surface_line("go", SHA, "")),
+                        ("a capitalized False", api_surface_line("go", SHA, "False")),
+                        ("a short head sha", api_surface_line("go", SHA[:12], "false")),
+                        ("a verdict quoted mid-line by a tool", "warning: x: " + api_surface_line("go", SHA, "false")),
+                        ("a verdict for another head", api_surface_line("go", OTHER_SHA, "false")),
+                        ("an untouched line", f"{API_SURFACE_PREFIX} binding=go head={SHA} untouched")):
+        expect(f"api-surface: an unparseable or foreign verdict refuses ({label})",
+               decide(**_with(files=go_src, api_verdicts=verdicts(line))), "protected")
+    expect("api-surface: a later changed=false never outweighs an earlier changed=true",
+           decide(**_with(files=go_src, api_verdicts=verdicts(api_surface_line("go", SHA, "true"),
+                                                             api_surface_line("go", SHA, "false")))), "protected")
+    two = [{"filename": "go/chtypes/transform.go", "status": "modified"},
+           {"filename": "rust/src/schema.rs", "status": "modified"}]
+    expect("api-surface: two bindings touched, only one verdict — refuses",
+           decide(**_with(pr=_pr(changed_files=2), files=two, api_verdicts={"go": ["false"]})), "protected")
+    expect("api-surface: two bindings touched, one changed — refuses",
+           decide(**_with(pr=_pr(changed_files=2), files=two, api_verdicts={"go": ["false"], "rust": ["true"]})),
+           "protected")
+    expect("api-surface: two bindings touched, both unchanged — passes",
+           decide(**_with(pr=_pr(changed_files=2), files=two, api_verdicts={"go": ["false"], "rust": ["false"]})),
+           None)
+    expect("api-surface: an untouched binding needs no verdict",
+           decide(**_with(files=[{"filename": "python/src/chtypes/results.py", "status": "modified"}],
+                          api_verdicts={"python": ["false"]})), None)
+    expect("api-surface: a rename out of a binding's source counts by its old path",
+           decide(**_with(files=[{"filename": "docs/__selftest_sample__", "status": "renamed",
+                                  "previous_filename": "ts/src/format.ts"}], api_verdicts={"go": ["false"]})),
+           "protected")
+    for g in PROTECTED_GLOBS:
+        if g.verification:
+            expect(f"api-surface: the carve-out {g.pattern} refuses even with its binding's changed=false",
+                   decide(**_with(files=[{"filename": _sample_protected_path(g), "status": "modified"}],
+                                  api_verdicts=dict(all_unchanged))), "protected")
+    expect("api-surface: rust/build.rs (a build script cargo runs) refuses whatever the verdict",
+           decide(**_with(files=[{"filename": "rust/build.rs", "status": "added"}], api_verdicts=dict(all_unchanged))),
+           "protected")
+    expect("api-surface: an unchanged API does not exempt the test-counts condition (a drop still refuses)",
+           decide(**_with(pr=_pr(changed_files=2),
+                          files=go_src + [{"filename": "go/chtypes/transform_test.go", "status": "modified"}],
+                          api_verdicts={"go": ["false"]},
+                          test_counts=_tc({**ALL_SUITE_GOOD, "go-no-artifacts": (9, 0)}, dict(ALL_SUITE_GOOD)))),
+           "test-counts")
+    expect("api-surface: an unchanged API and equal test counts pass together",
+           decide(**_with(pr=_pr(changed_files=2),
+                          files=go_src + [{"filename": "go/chtypes/transform_test.go", "status": "modified"}],
+                          api_verdicts={"go": ["false"]},
+                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)))), None)
+    if touched_bindings(two) != {"go": "go/chtypes/transform.go", "rust": "rust/src/schema.rs"}:
+        failures.append(f"touched_bindings: read {touched_bindings(two)!r}")
+    if binding_of("go/chtypes/transform_test.go") is not None or binding_of("python/tests/x.py") is not None:
+        failures.append("binding_of: a test file was read as binding source")
+
+    # ci.yml's api-surface job: present under the exact name this file reads,
+    # and non-blocking — derived from text, never a hand-set answer.
+    job = f'  surface:\n    name: "{API_SURFACE_CHECK}"\n    continue-on-error: true\n    runs-on: x\n'
+    if api_surface_job_problems(CI_GOOD + job):
+        failures.append(f"api_surface_job_problems: refused a non-blocking job: {api_surface_job_problems(CI_GOOD + job)}")
+    if not api_surface_job_problems(CI_GOOD + job.replace("continue-on-error: true", "continue-on-error: false")):
+        failures.append("api_surface_job_problems: accepted a BLOCKING api-surface job")
+    if not api_surface_job_problems(CI_GOOD):
+        failures.append("api_surface_job_problems: accepted a ci.yml with no api-surface job")
+
+    # The security carve-out's derivation, on fabricated trees: every entry
+    # present with a needle in it is clean; a needle in an uncovered file, a
+    # carve-out entry that covers nothing, and a needle only in a comment are
+    # each read the right way.
+    tree = {"go/chtypes/fetch_sign.go": 'import "crypto/ed25519"',
+            "go/chtypes/fetch.go": 'import "crypto/sha256"',
+            "go/chtypes/registry_path.go": 'envAllowUnsign = "CHTYPES_ALLOW_UNSIGNED"',
+            "go/chtypes/multiversion.go": "if err := checkLibraryBytes(path); err != nil {",
+            "go/chtypes/resolve.go": "if err := verifyArtifactLibrary(path); err != nil {",
+            "go/chtypes/transform.go": "package chtypes",
+            "python/src/chtypes/_ed25519.py": "import hashlib",
+            "python/src/chtypes/fetch.py": "from ._ed25519 import verify",
+            "python/src/chtypes/_manifest.py": "def verify_library(d):",
+            "python/src/chtypes/registry.py": "check_library_bytes(entry, manifest)",
+            "ts/src/fetch.ts": "import { createHash } from 'node:crypto';",
+            "ts/src/registry.ts": "verifyChecksum(libPath, manifest);",
+            "rust/src/fetch/trust.rs": "use ed25519_dalek::VerifyingKey;",
+            "rust/src/digest.rs": "use sha2::{Digest, Sha256};",
+            "rust/src/registry.rs": "let actual = crate::digest::sha256_file(&path);",
+            "rust/src/lib.rs": "pub mod fetch;"}
+    if carve_out_problems(tree):
+        failures.append(f"carve_out_problems: refused a tree that matches the carve-out: {carve_out_problems(tree)}")
+    if not carve_out_problems({**tree, "go/chtypes/sneaky.go": 'import "crypto/sha256"'}):
+        failures.append("carve_out_problems: a sha256 import in an uncovered Go file was not caught")
+    if not carve_out_problems({**tree, "ts/src/keys.ts": f"const K = '{'ab' * 32}';"}):
+        failures.append("carve_out_problems: a 64-hex key literal in an uncovered TS file was not caught")
+    if carve_out_problems({**tree, "go/chtypes/doc.go": '// we import "crypto/sha256" elsewhere'}):
+        failures.append("carve_out_problems: a needle inside a comment only was read as verification code")
+    if not carve_out_problems({k: v for k, v in tree.items() if k != "go/chtypes/fetch_sign.go"}):
+        failures.append("carve_out_problems: a carve-out entry covering no file was not caught")
+    if not carve_out_problems({k: v for k, v in tree.items() if not k.startswith("rust/src/fetch/")}):
+        failures.append("carve_out_problems: rust/src/fetch/** covering no file was not caught")
 
     # build_enqueue_plan — a pure function of facts already in hand, so
     # "enqueue is called with the judged head sha" and "dry run never calls
@@ -1655,6 +2177,21 @@ def selftest() -> int:
         failures.append("mint_scope_problems: accepted a mint with no permission list (the App's full set)")
     if not mint_scope_problems(good_yml.replace("    environment: merge-bot\n", "")):
         failures.append("mint_scope_problems: accepted a mint outside the merge-bot environment")
+    # Tool configuration a PR could ADD is protected at any depth (#322).
+    for path, want in ((".cargo/config.toml", True), ("rust/.cargo/config.toml", True),
+                       ("rust-toolchain.toml", True), ("rust/rust-toolchain", True), (".npmrc", True),
+                       ("ts/.npmrc", True), ("go.work", True), ("go/go.work.sum", True), (".python-version", True),
+                       ("python/pip.conf", True), (".yarnrc.yml", True), ("ts/bunfig.toml", True),
+                       ("docs/__selftest_cargo_notes__", False), ("rust/src/npmrc_reader.rs", False),
+                       ("go/workflow.go", False), ("docs/__selftest_toolchain__", False)):
+        got = any(_covers(g, path) for g in PROTECTED_GLOBS if not g.binding)
+        if got != want:
+            failures.append(f"tool-config protection: {path!r} protected={got}, expected {want}")
+    try:
+        _match_protected("**/a/**/b", "a/x/b")
+        failures.append("_match_protected: accepted an unsupported glob shape instead of raising")
+    except ValueError:
+        pass
     # A skipped / failed / unfinished job is never read for a
     # count: a skipped job has no log (404), so reading it was an exit-2
     # error on #311 instead of a refusal.
@@ -1664,6 +2201,33 @@ def selftest() -> int:
         r["id"] = 100 + i
     if readable_job_ids(runs_mix) != {"a": 100}:
         failures.append(f"readable_job_ids: kept a job that has no usable log: {readable_job_ids(runs_mix)!r}")
+    # The same rule for the api-surface job: a skipped, failed, timed-out or
+    # unfinished one is no job id at all — so gather_api_verdicts reads no
+    # log (no 404, no exit 2) and returns no verdict — and decide() then
+    # keeps the binding source protected. Only a successful run of the
+    # GitHub Actions app is read.
+    for label, run, want in (("succeeded", _run(API_SURFACE_CHECK), 900),
+                             ("skipped", _run(API_SURFACE_CHECK, conclusion="skipped"), None),
+                             ("failed", _run(API_SURFACE_CHECK, conclusion="failure"), None),
+                             ("timed out", _run(API_SURFACE_CHECK, conclusion="timed_out"), None),
+                             ("still running", _run(API_SURFACE_CHECK, status="in_progress", conclusion=None), None),
+                             ("from another app", _run(API_SURFACE_CHECK, app="someone-else"), None)):
+        run["id"] = 900
+        if api_surface_job_id(_checks(extra=[run])) != want:
+            failures.append(f"api_surface_job_id: an api-surface job that {label} gave "
+                            f"{api_surface_job_id(_checks(extra=[run]))!r}, not {want!r}")
+    if api_surface_job_id(_checks()) is not None:
+        failures.append("api_surface_job_id: found an api-surface job in check runs that carry none")
+    if gather_api_verdicts(REPO, [{"filename": "go/chtypes/transform.go"}],
+                           _checks(extra=[dict(_run(API_SURFACE_CHECK, conclusion="skipped"), id=901)]), SHA) != {}:
+        failures.append("gather_api_verdicts: a skipped api-surface job was read for a verdict")
+    expect("api-surface: a skipped job's (absent) verdict keeps binding source protected",
+           decide(**_with(files=[{"filename": "go/chtypes/transform.go", "status": "modified"}],
+                          check_runs=_checks(extra=[dict(_run(API_SURFACE_CHECK, conclusion="skipped"), id=901)]),
+                          api_verdicts=gather_api_verdicts(
+                              REPO, [{"filename": "go/chtypes/transform.go"}],
+                              _checks(extra=[dict(_run(API_SURFACE_CHECK, conclusion="skipped"), id=901)]), SHA))),
+           "protected")
     for bad in ((_good_pr()["node_id"], "abc", "7"), (_good_pr()["node_id"], SHA.upper(), "7"),
                 ("", SHA, "7"), ("PR_x y", SHA, "7"), (_good_pr()["node_id"], SHA, "7; rm")):
         if bot_args_problem(*bad) is None:
@@ -1970,7 +2534,14 @@ def selftest() -> int:
           "CONTRIBUTING.md guide block are both derived from their source, never hand-set; test-counts "
           "(chtypes#285 §1b) refuses a single-suite drop even while another suite rises, a missing count on "
           "either side, a ran-to-skipped shift, and a golden-case-count drop, passes an equal or rising count, "
-          "and is skipped entirely — at zero API cost — for a pull request that touches no test or fixture path")
+          "and is skipped entirely — at zero API cost — for a pull request that touches no test or fixture path; "
+          "binding source (chtypes#285 §1) passes on its own binding's changed=false, read from a job log, and "
+          "refuses on changed=true, a missing, tool-error or unparseable verdict, a verdict for another head or "
+          "quoted mid-line, a later false after a true, and a second touched binding without its own false; the "
+          "security carve-out and rust/build.rs refuse whatever every verdict says; test-counts still applies; the "
+          "api-surface job must exist under the name read and be non-blocking, and a skipped, failed, timed-out, "
+          "unfinished or foreign-app one is never read (no verdict, still protected); and the carve-out's derivation "
+          "catches verification code outside it and an entry that covers nothing")
     return 0
 
 
@@ -2006,6 +2577,8 @@ def main(argv: list[str]) -> int:
         return cmd_check_guide()
     if argv == ["--check-mint-scope"]:
         return cmd_check_mint_scope()
+    if argv == ["--check-carve-out"]:
+        return cmd_check_carve_out()
     parser = argparse.ArgumentParser(prog="policy-merge-check.py")
     sub = parser.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("gate", help="every condition but the byte comparison")

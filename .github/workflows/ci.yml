@@ -65,11 +65,14 @@ name: ci
 # merge_group (checks_requested): the merge queue's own candidate combination
 # — a pull request's changes merged with main's CURRENT tip, not the
 # possibly-older main its own pull_request run tested — must run and
-# conclude every required job here or the queue waits forever. No job below
-# reads github.event.pull_request.*, github.base_ref or github.head_ref (the
-# only github.ref use is the concurrency group below, which is unique per
-# merge_group entry same as it is per pull request), so nothing needed a
-# merge_group-specific branch; this audit is recorded in
+# conclude every required job here or the queue waits forever. No REQUIRED
+# job below reads github.event.pull_request.*, github.base_ref or
+# github.head_ref (the only github.ref use is the concurrency group below,
+# which is unique per merge_group entry same as it is per pull request), so
+# nothing needed a merge_group-specific branch. The one job that reads the
+# event's commits is the non-blocking `api-surface`, which names both
+# events' base and head explicitly (its own comment says why); this audit is
+# recorded in
 # .github/workflows/policy-merge.yml's header and in scripts/policy-merge-
 # check.py's module docstring (ENQUEUE, NOT MERGE), which also explains why
 # it exists. .github/workflows/policy-merge.yml explicitly ignores a
@@ -222,6 +225,15 @@ jobs:
         run: scripts/policy-merge-check.py --check-mint-scope
       - name: CONTRIBUTING.md's protected-glob block matches PROTECTED_GLOBS exactly
         run: scripts/policy-merge-check.py --check-guide
+      # The security carve-out (chtypes#285 §1): signature and checksum
+      # verification code stays protected whatever its binding's api-surface
+      # verdict says. The list is pinned in PROTECTED_GLOBS, and this derives
+      # it again from the tree — every binding file holding a verification
+      # primitive or a trust anchor must be covered, and every entry must
+      # still cover a file — so code that moves cannot quietly leave the
+      # carve-out behind. No network, no artifact.
+      - name: the security carve-out covers every binding file that holds verification code, and no entry has gone stale
+        run: scripts/policy-merge-check.py --check-carve-out
       # scripts/check-suite.sh, scripts/lib/provenance.py (called from inside
       # check-suite.sh's own --selftest) and scripts/published-lines.sh each
       # had a --selftest mode that no workflow step ever invoked (chtypes#268)
@@ -1092,6 +1104,85 @@ jobs:
             exit 1
           fi
           echo "artifacts: all five passed"
+
+  api-surface:
+    # NON-BLOCKING, on purpose (chtypes#285 §1), and deliberately not a
+    # required check: a pull request that changes a binding's exported API on
+    # purpose is not wrong, only a manual merge, so it must not show red.
+    # This job MEASURES. For each binding whose source the diff touches it
+    # compares the pull request's merge base with main (never main's tip)
+    # against its head, with one pinned tool per binding, and prints one
+    # verdict line per binding into this job's log:
+    #
+    #   chtypes-api-surface binding=<b> head=<sha> changed=<true|false|error>
+    #
+    # scripts/policy-merge-check.py reads those lines, and a pull request that
+    # touches binding source enqueues itself only on that binding's
+    # `changed=false`. Before any verdict, every tool must pass its fixture
+    # proof on tests/fixtures/api-surface/ (an addition, a removal and a
+    # signature change read changed; an unexported change reads unchanged).
+    # A tool that fails either way turns the job red, and a red job's log is
+    # never read for a verdict — so a broken tool holds every binding's
+    # source for a human, which is the safe side to fail on. The tools,
+    # their pins, and why none of them runs anything from the judged head are
+    # in scripts/api-surface.py's own header.
+    #
+    # The two commits compared come from the event, as data through env: the
+    # pull request's base and head, or a merge group's. A push to main or a
+    # dispatch has neither, so it runs the fixture proofs alone; that keeps
+    # main showing the tools work, and it is the only run that may save the
+    # tool cache (#295's rule, the same as the artifacts cache above).
+    name: "api-surface — every touched binding's exported API, merge base against head (report only)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: the merge base, and both commits' trees, are read
+          # from git (`git archive`), never checked out.
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false          # the module is stdlib-only: there is no go.sum to cache
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          # No version here on purpose: pnpm/action-setup reads packageManager
+          # from ts/package.json, so the pin lives in exactly one place.
+          package_json_file: ts/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      # Stable, for `cargo install cargo-public-api`; the pinned nightly that
+      # tool needs for rustdoc JSON is installed by the script itself.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+      # The installed tools (apidiff, cargo-public-api), each under a
+      # directory named by its pinned version. Restore-only here; saved from
+      # a push to main (below). A changed script restores the newest older
+      # entry and installs only what that entry lacks.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: api-tools
+        with:
+          path: ~/.cache/chtypes/api-surface
+          key: chtypes-api-surface-tools-${{ hashFiles('scripts/api-surface.py') }}
+          restore-keys: chtypes-api-surface-tools-
+      - name: selftest — the verdict lines round-trip through the checker's reader, and a missing or failing tool is never `changed=false`
+        run: scripts/api-surface.py --selftest
+      - name: every tool's fixture proof, then one verdict per touched binding (merge base against head)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: scripts/api-surface.py run --base "$BASE_SHA" --head "$HEAD_SHA" --tools "$HOME/.cache/chtypes/api-surface"
+      - name: save the tool cache (push to main only, and only on an exact miss)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.api-tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/chtypes/api-surface
+          key: ${{ steps.api-tools.outputs.cache-primary-key }}
 
   # ── Lint / supply-chain jobs below ─────────────────────────────────
   #

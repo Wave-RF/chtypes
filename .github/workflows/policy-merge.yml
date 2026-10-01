@@ -15,8 +15,15 @@
 #   4. GitHub reports no merge conflict, and no review conversation — no
 #      requested changes, no review comment — exists;
 #   5. no file the pull request touches (its current path, or for a rename
-#      its old path too; a deletion counts) matches a glob in
-#      scripts/policy-merge-check.py's PROTECTED_GLOBS;
+#      its old path too; a deletion counts) matches an unconditional glob in
+#      scripts/policy-merge-check.py's PROTECTED_GLOBS — and for each
+#      binding whose source tree it touches (chtypes#285 §1), that binding's
+#      verdict in the `api-surface` job's log names the judged head and says
+#      `changed=false`. A missing, unparseable or errored verdict, or an
+#      api-surface job that did not complete with success, counts as
+#      changed. The security carve-out (signature and checksum verification
+#      code, the trust policy, the release key) stays protected whatever the
+#      verdict says;
 #   6. ONLY when docs/support.md is part of the diff: it was MODIFIED, and
 #      scripts/support-matrix.sh, from main's own checkout and against the
 #      live served index, produces a docs/support.md byte-identical to the
@@ -107,7 +114,10 @@
 # regex for two integers — never executed, sourced or parsed as code. The
 # jobs read are provably main's own, because `protected` (evaluated before
 # both `checks` and `test-counts`) already refuses a pull request that edited
-# `.github/**` or `scripts/**`.
+# `.github/**` or `scripts/**`. Condition 5's binding-source half
+# (chtypes#285 §1) reads one more log the same way, the `api-surface` job's,
+# after that same refusal: one fixed-regex verdict line per binding, anchored
+# to the start of a log line and naming the judged head's own sha.
 # The `enqueue` job checks out one file of main and reads nothing of the head
 # at all. One step that executed head code here would hand every fork a write
 # token to this repository.
@@ -121,7 +131,8 @@
 #     is on): this can enqueue only what anyone with write access could, and
 #     the queue merges only what its own required checks pass.
 #   - The `automerge` job only reads (contents, pull-requests, checks and —
-#     chtypes#285 §1b, for condition 7's job-log reads only — actions: read).
+#     for the job-log reads of condition 7 and of condition 5's api-surface
+#     verdicts, chtypes#285 — actions: read).
 #     The enqueue is made by the merge-bot GitHub App from the
 #     `enqueue` job, because an entry the built-in token enqueues gets no
 #     merge_group run of `ci` and stalls (measured on #289, chtypes#291). The
@@ -189,13 +200,15 @@ jobs:
     timeout-minutes: 10
     # This job only READS: it judges, and hands the judged head to the
     # `enqueue` job below. It holds no write permission and no App token.
-    # `actions: read` (chtypes#285 §1b) is for the `test-counts` condition
-    # alone: GET .../actions/jobs/{id}/logs and GET .../actions/runs/{id}/jobs,
+    # `actions: read` (chtypes#285) is for two job-log reads: the
+    # `test-counts` condition's (§1b) and condition 5's api-surface verdicts
+    # (§1). GET .../actions/jobs/{id}/logs and GET .../actions/runs/{id}/jobs,
     # both read-only, both needed because a check run's own `output.summary`
     # is NOT populated for a GitHub-Actions-authored job (measured; see
     # scripts/policy-merge-check.py's module docstring) — the job's console
     # log is the only place a read-only token can read the chtypes-count
-    # lines scripts/check-suite.sh and scripts/check-standalone.sh print.
+    # lines scripts/check-suite.sh and scripts/check-standalone.sh print, and
+    # the chtypes-api-surface lines scripts/api-surface.py prints.
     permissions:
       contents: read
       pull-requests: read
@@ -221,14 +234,16 @@ jobs:
       # must still name exactly ci.yml's blocking jobs, and the
       # CONTRIBUTING.md guide must still match PROTECTED_GLOBS, or an enqueue
       # could be judged against the wrong list, or a contributor could read a
-      # stale guide. None of the three needs the network.
-      - name: selftest, the pinned required checks, and the CONTRIBUTING.md guide all still agree with the code
+      # stale guide; and the security carve-out must still cover main's own
+      # verification code. None of them needs the network.
+      - name: selftest, the pinned required checks, the CONTRIBUTING.md guide and the carve-out all still agree with the code
         run: |
           set -euo pipefail
           scripts/policy-merge-check.py --selftest
           scripts/policy-merge-check.py --check-ci-names
           scripts/policy-merge-check.py --check-mint-scope
           scripts/policy-merge-check.py --check-guide
+          scripts/policy-merge-check.py --check-carve-out
       - name: gate — every condition except the docs/support.md byte comparison, from API reads alone
         id: gate
         env:
