@@ -103,7 +103,7 @@ export class InitConflictError extends RegistryError {
  * `code` is ALWAYS a real ClickHouse error code. "This build declines to
  * answer" is a DIFFERENT CLASS — `UnsupportedError` — never this one carrying
  * a sentinel, so no `SchemaError` ever holds `CODE_UNSUPPORTED`
- * (docs/reference/bindings.md rule 12).
+ * (docs/reference/bindings.md §The error split).
  */
 export class SchemaError extends ChtypesError {
   readonly code: number;
@@ -173,7 +173,7 @@ export class UnsupportedError extends ChtypesError {
  * The ONE place an ABI error code becomes an error object, so the
  * refusal/decline split cannot be decided differently in two files.
  *
- * The SIGN decides (docs/reference/bindings.md rule 12, the C ABI contract §Error model): a
+ * The SIGN decides (docs/reference/bindings.md §The error split, the C ABI contract §Error model): a
  * positive code is the server's own refusal and rides through verbatim; any
  * negative code is this library declining (`-2` "I will not guess", `-1` a
  * guarded exception, and a binding's own missing-symbol sentinel) and becomes

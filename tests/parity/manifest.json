@@ -17,7 +17,7 @@
     "filter": "The revision 3/4 filter and block surface (§Revision 3, §Revision 4).",
     "results": "The result types every binding hands back (§Result types).",
     "vocabulary": "Shared value sets. These carry a `value`: the four bindings must answer with the same bytes, not merely have a symbol.",
-    "errors": "The refusal/decline split and the artifact error family (§Conformance rule 12, docs/guides/fetch.md §6).",
+    "errors": "The refusal/decline split (docs/reference/bindings.md §The error split) and the artifact error family (docs/guides/fetch.md §6).",
     "discovery": "The three canonical connect-time queries and their parsers (§Discovery).",
     "fetch": "Installing and verifying artifacts (docs/guides/fetch.md).",
     "cli": "The `chtypes` command every SDK ships."
@@ -398,7 +398,7 @@
       "id": "schema.merge-tree-settings-option",
       "group": "schema",
       "kind": "option",
-      "what": "Declare MergeTree settings on the same engine call; an unknown name is the server's 115 and a declined value is -2, never flattened (§The object model, rule 12)",
+      "what": "Declare MergeTree settings on the same engine call; an unknown name is the server's 115 and a declined value is -2, never flattened (§The object model, §The error split)",
       "go": "WithMergeTreeSettings",
       "python": "Schema.set_engine",
       "ts": "EngineOptions",
@@ -1134,7 +1134,7 @@
     {
       "id": "const.code-unsupported",
       "group": "vocabulary", "kind": "constant", "value": -2,
-      "what": "CHS_CODE_UNSUPPORTED — the wire sentinel row-level results still carry. No error VALUE carries it (rule 12)",
+      "what": "CHS_CODE_UNSUPPORTED — the wire sentinel row-level results still carry. No error VALUE carries it (§The error split)",
       "go": "CodeUnsupported", "python": "CODE_UNSUPPORTED", "ts": "CODE_UNSUPPORTED", "rust": "CODE_UNSUPPORTED"
     },
     {
@@ -1178,7 +1178,7 @@
       "id": "errors.refusal",
       "group": "errors",
       "kind": "type",
-      "what": "The REFUSAL type: the server itself would refuse this. Carries the server's own code and message verbatim (rule 12, rc > 0)",
+      "what": "The REFUSAL type: the server itself would refuse this. Carries the server's own code and message verbatim (§The error split, rc > 0)",
       "go": "SchemaError",
       "python": "SchemaError",
       "ts": "SchemaError",
@@ -1188,7 +1188,7 @@
       "id": "errors.decline",
       "group": "errors",
       "kind": "type",
-      "what": "The DECLINE type, a PEER of the refusal type and never a subtype of it (rule 12, rc < 0). A decline satisfying the refusal's catch converts every decline into a rejection SILENTLY",
+      "what": "The DECLINE type, a PEER of the refusal type and never a subtype of it (§The error split, rc < 0). A decline satisfying the refusal's catch converts every decline into a rejection SILENTLY",
       "go": "UnsupportedError",
       "python": "UnsupportedError",
       "ts": "UnsupportedError",
@@ -1198,8 +1198,8 @@
       "id": "errors.base",
       "group": "errors",
       "kind": "type",
-      "what": "A shared BASE type both arms descend from — catching it is an explicit choice to handle both, which is not the forget-to-check failure rule 12 exists to prevent",
-      "go": {"absent": "Go's two arms are independent types and errors.As is the idiom; there is no base to inherit from, and rule 12 requires only that a decline never satisfies errors.As(&SchemaError{})."},
+      "what": "A shared BASE type both arms descend from — catching it is an explicit choice to handle both, which is not the forget-to-check failure §The error split exists to prevent",
+      "go": {"absent": "Go's two arms are independent types and errors.As is the idiom; there is no base to inherit from, and §The error split requires only that a decline never satisfies errors.As(&SchemaError{})."},
       "python": "ChtypesError",
       "ts": "ChtypesError",
       "rust": {"absent": "Error is one enum, so its variants share a type by construction; Error::is_unsupported is the explicit both-arms predicate."}

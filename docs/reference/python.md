@@ -125,7 +125,7 @@ The ed25519 verifier is pure stdlib, like the rest of the package.
 
 **Errors** — `ChtypesError` (base), `RegistryError`, `InitConflictError` (a `RegistryError`; `.path`, `.have`, `.want`), `SchemaError`, `UnsupportedError` (a **peer**), `CODE_UNSUPPORTED` (`-2`).
 
-**One image per file.** `chs_init` runs at most once per `dlopen`'d image, and the image is the FILE — its device and inode, from a stat that follows symlinks — so a symlink, another spelling or a hardlink of an open artifact is that same image, by any `Registry`. Asking for it under a different timezone raises `InitConflictError` rather than re-timezoning the live libraries; a path that cannot be stat'ed raises `RegistryError` rather than being guessed at.
+**One image per file.** `chs_init` runs at most once per `dlopen`'d image, and the image is the FILE — its device and inode, from a stat that follows symlinks — so a symlink, another spelling or a hardlink of an open artifact is that same image, by any `Registry`. Asking for it under a different timezone raises `InitConflictError` rather than re-timezoning the live libraries; a path that cannot be stat'ed raises `RegistryError` rather than being guessed at. **Why the comparison is by spelling, not by canonical zone:** [`bindings.md` §The init-timezone guard compares spellings, deliberately](bindings.md#the-init-timezone-guard-compares-spellings-deliberately).
 
 **Plumbing** — `RawNumber` (exact-text numerics), `quote_bare_denormals`, `ABI_REVISION`.
 

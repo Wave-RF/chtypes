@@ -1701,7 +1701,7 @@ func (s *LoadedSchema) RowWithSettings(format Format, raw []byte, settings map[s
 		unlock()
 		// A missing symbol is the DECLINE type, not a plain error: "this
 		// artifact predates the feature" degrades to unsupported at call time
-		// (docs/reference/bindings.md Level 1; rule 12's missing-symbol arm). A plain
+		// (docs/reference/bindings.md Level 1; §The error split's missing-symbol arm). A plain
 		// error here read as a caller fault and could not be handled as the
 		// decline it is.
 		return RowResult{}, &UnsupportedError{Msg: "this artifact predates chs_row (rebuild it)"}

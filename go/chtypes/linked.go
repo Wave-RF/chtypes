@@ -517,7 +517,7 @@ func CompileDDL(v Version, ddl string, opts ...CompileOption) (*CompiledSchema, 
 			msg = C.GoString(cErr)
 			C.chs_free(cErr)
 		}
-		// No column is attributed, deliberately (docs/reference/bindings.md rule 12):
+		// No column is attributed, deliberately (docs/reference/bindings.md §The error split):
 		// chs_schema_compile's structured answer is a code and a message,
 		// nothing more, and the longest-declared-name-in-the-message guess
 		// this call used to make added no information (the library's own
@@ -716,7 +716,7 @@ type Filter struct {
 // ReplaceQueryParameterVisitor, run before analysis, exactly where a real
 // server runs it.
 //
-// Errors follow rule 12's split: a *SchemaError when ClickHouse itself
+// Errors follow §The error split: a *SchemaError when ClickHouse itself
 // refuses the expression (unknown identifier 47, unknown function, a
 // NO_COMMON_TYPE the analyzer raises — and, since ABI revision 4, the
 // server's own parameter refusals: an UNBOUND `{name:Type}` is 456

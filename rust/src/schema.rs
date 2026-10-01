@@ -176,7 +176,7 @@ impl Schema {
     /// # Errors
     ///
     /// Two KINDS of failure travel through one return, told apart by the C
-    /// return's **sign** (`docs/reference/bindings.md` rule 12) — never flatten them:
+    /// return's **sign** (`docs/reference/bindings.md` §The error split) — never flatten them:
     ///
     /// * [`crate::Error::Schema`] — positive code: **the server refused**.
     ///   This DDL can never exist and the tenant must be told. Today `115`
@@ -728,7 +728,7 @@ impl Schema {
     ///
     /// # Errors
     ///
-    /// Rule 12's split (`docs/reference/bindings.md`):
+    /// §The error split (`docs/reference/bindings.md`):
     ///
     /// * [`crate::Error::Schema`] — ClickHouse itself refuses the expression:
     ///   unknown identifier (47), unknown function, a `NO_COMMON_TYPE` the
