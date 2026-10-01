@@ -18,9 +18,6 @@ Speaks the same ABI revision as 0.4.0. This release refuses a schema-2 lock file
 ### Changed
 
 - **`fetch`'s patch matching now follows Decision 7 everywhere**, not only where it already did: a spelling with no channel suffix (`25.8.28.1`) matches an installed or served patch on any channel (`25.8.28.1-lts`); a spelled channel matches only itself. This is the one matching rule for the registry, the release, the lock and `scripts/fetch.sh` (`patchMatches`, unexported).
-
-### Changed
-
 - **Docs: plain `CSV`/`TSV` input also honors `input_format_csv_detect_header` / `input_format_tsv_detect_header`, exactly as a real server does**, because the body is read by ClickHouse's own vendored row readers. The behavior arrived with 0.3.0's switch to those readers; it is now documented (#299).
 
 ### Fixed
