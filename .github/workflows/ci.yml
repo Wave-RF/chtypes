@@ -297,12 +297,6 @@ jobs:
           # release tag (git show <tag>:include/chtypes.h), and the default
           # single-commit checkout carries neither.
           fetch-depth: 0
-      # Selftest first, same discipline as `abi`, `public` and `divergences`:
-      # a checker nobody has seen fail is not a checker. Needs no network and
-      # no tags from this checkout — it builds its own fixture repo and its
-      # own served index fresh, against this very script.
-      - name: "selftest — the Support column renders supported/served-unsupported, an absent key adds no column, an empty list marks every line unsupported"
-        run: scripts/support-matrix.sh --selftest
       - name: docs/support.md matches the manifests and the live index
         run: |
           if ! scripts/support-matrix.sh --check; then
@@ -1408,6 +1402,16 @@ jobs:
       # belongs beside index-diff.sh's own selftest above rather than in a
       # fifth job.
       - run: scripts/readback-decide.sh --selftest
+      # scripts/support-matrix.sh's Support column (chtypes#281) has its own
+      # selftest too, and it belongs here rather than in `docs`: `docs` is
+      # NON-BLOCKING (see its own header) because the matrix names whatever
+      # ClickHouse lines the release happens to publish, a cross-repo event
+      # this repository cannot fix by itself — but a REGRESSION in the
+      # GENERATOR itself is exactly this repository's own fault, and
+      # `continue-on-error` would let one merge silently. Needs no network
+      # and no served index: it builds a throwaway fixture repo and a
+      # file://-served index itself, against this very script.
+      - run: scripts/support-matrix.sh --selftest
 
   prose:
     # BLOCKING. It was report-only while the tree was still hard-wrapped, which
