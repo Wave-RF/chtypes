@@ -55,7 +55,15 @@ The rules genuinely differ: `256` into a `UInt8` column stores `0`, while `x = 2
 
 No read-side security may be enforced on the filter surface until a release explicitly lifts this limitation — the CHANGELOG will say so, and until it does, assume it has not. Until then the surface is for shadow and replay: run it beside your existing enforcement and compare, do not replace.
 
-The parse-once block twin does not change that — it is a performance shape, not a maturity signal, and sits under the same gate.
+The parse-once block twin does not change that — it is a performance shape, not a maturity signal, and sits under the same gate. This is the canonical statement of the gate; `docs/guides/filters.md` points here rather than restating the criterion.
+
+**The gate lifts per `(ClickHouse line, platform)`, never all at once.** A pair's warning lifts once that pair has **three consecutive records with zero over-admits and zero over-hides against a real server, and no open filter divergences for it** (see [Known divergences](#known-divergences) below). A pair that diverges again after being lifted gets the warning back — a lift is a state, not a one-way promotion, and lifting one pair says nothing about any other.
+
+**Each lift is announced in the CHANGELOG, by `(line, platform)`, as its own entry** — the fixed shape is in [`CONTRIBUTING.md`](../CONTRIBUTING.md#changelog-entries). There is no other record of a lift: a pair stays gated until its own CHANGELOG entry says otherwise.
+
+**Today no `(line, platform)` pair is lifted.** Every supported line, on every published platform, is still under the gate above.
+
+This criterion is scored against the artifact producer's own differential comparison against real servers, and the per-`(line, platform)` state it produces is not served yet — the served `index.json` carries no such field today. Once the artifact producer serves one, this page reads it directly, the same principle [`support.md`](support.md)'s generated block already follows for line support (`supported_lines`) rather than listing lines by hand. Until then, do not infer a lift from anything but a CHANGELOG entry naming the pair.
 
 ## Some formats depend on the artifact, not the binding
 
