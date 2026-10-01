@@ -27,22 +27,22 @@ Both loaders are `dlopen`, so all four bindings are Unix-only. There is no Windo
 
 ## ClickHouse lines
 
-One artifact per ClickHouse line, each carrying that release's own C++. A line is supported when it has passed the artifact producer's comparison against a real server and the release publishes it:
+One artifact per ClickHouse line, each carrying that release's own C++. A line is published once it has passed the artifact producer's comparison against a real server and the release includes it. Separately, chtypes supports a ClickHouse line exactly as long as upstream does — see [Served, unsupported ClickHouse lines](#served-unsupported-clickhouse-lines) below for what a line reads once upstream's own support for it ends:
 
-| Line | Platforms |
-|---|---|
-| `24.8` | all |
-| `25.3` | all |
-| `25.8` | all |
-| `25.10` | all |
-| `26.2` | all |
-| `26.3` | all |
-| `26.4` | all |
-| `26.5` | all |
-| `26.6` | all |
-| `26.7` | all |
-| `26.8` | all |
-| `26.9` | all |
+| Line | Platforms | Support |
+|---|---|---|
+| `24.8` | all | served, unsupported |
+| `25.3` | all | served, unsupported |
+| `25.8` | all | served, unsupported |
+| `25.10` | all | served, unsupported |
+| `26.2` | all | served, unsupported |
+| `26.3` | all | supported |
+| `26.4` | all | served, unsupported |
+| `26.5` | all | served, unsupported |
+| `26.6` | all | served, unsupported |
+| `26.7` | all | supported |
+| `26.8` | all | supported |
+| `26.9` | all | supported |
 
 The exact ClickHouse patch each line is built from is in its artifact's `manifest.json` and in the served `index.json` (`clickhouse_version`); it moves with every upstream patch release, so it is not repeated here.
 Ask for a line, never a nearest match: `for("25.8")` resolves the newest build of that line and fails if it is absent, rather than quietly handing back a neighbor whose answers differ.
@@ -122,6 +122,14 @@ Every line/platform pairing above either has a build for every revision the inde
 A line appears above once it has passed the artifact producer's comparison against a real server and the release publishes the artifact. Lines are added as they pass it, so this page is a snapshot of a moving list — `curl -s https://artifacts.wavehouse.dev/artifacts/index.json` is always the live answer, and `scripts/fetch.sh --all` reads it rather than restating it.
 
 Nothing is removed to make room. Since 2026-09-30 the release is append-only: every build it publishes stays listed in `index.json` and the signed `SHA256SUMS`, so a machine holding an older patch keeps working. Rows that the earlier retention rule dropped before that date are re-listed only where a release-signed `SHA256SUMS` proves their bytes; the rest stay unlisted.
+
+## Served, unsupported ClickHouse lines
+
+**chtypes supports a ClickHouse line exactly as long as upstream does.** When upstream's own support for a line ends, the artifact producer retires it: no new builds and no new ABI revisions, ever, for that line — but its existing served artifacts stay, append-only, exactly like every other build. The Support column in the table above marks a retired line **served, unsupported** rather than removing it.
+
+A served, unsupported line keeps resolving and loading exactly as it does today: nothing about `for()`, fetch, or load-time ABI matching changes. What changes is scoped to the future, one ABI revision at a time. A retired line stays fetchable by every SDK release whose ABI revision it was built for — today that is revisions 5 and 6 — because the artifact producer never builds it for a revision it does not already have a build for. The first SDK release on a *later* ABI revision therefore cannot fetch that line at all: there is no build of it to find. That is intended, not a gap — it follows directly from supporting a line exactly as long as upstream does, since a future ABI revision will not include a line upstream had already retired.
+
+A line with no `Support` column entry at all (the column is absent from the whole table) means the served index does not yet carry a `supported_lines` field — the state is **unknown**, never "unsupported": nothing here says the line has lost support, only that the release has not said one way or the other yet.
 
 ## Checking from your own machine
 
