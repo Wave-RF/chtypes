@@ -26,6 +26,16 @@ This repository is public, and two more jobs block on that being true. `scripts/
 
 Run any of these locally with the same command CI uses; each job's step name in `.github/workflows/ci.yml` names the exact invocation.
 
+## Changelog entries
+
+Most CHANGELOG bullets describe themselves. One has a fixed shape, because its criterion lives elsewhere and must not drift into a second, competing description: an **enforcement-gate lift** on the filter surface (`docs/limitations.md` → [Filters are for comparison, not enforcement, for now](docs/limitations.md#filters-are-for-comparison-not-enforcement-for-now)).
+
+When a `(ClickHouse line, platform)` pair meets that page's lift criterion, announce it as its own bullet under an existing `### Changed` heading in each affected binding's CHANGELOG — never a new `### Changed` heading for it, which would fail markdownlint's MD024 — in this shape:
+
+- **Enforcement gate lifted** for `<line>` on `<platform>`.
+
+That bullet is the only record of a lift: nothing elsewhere — a comment, an issue, a dashboard — lifts the gate. A `(line, platform)` pair stays under the gate until its own CHANGELOG entry, in this shape, says otherwise, and a pair that diverges again after being lifted gets a fresh entry the same way.
+
 ## Policy merge
 
 A pull request enqueues itself to main's merge queue once every condition below holds — `.github/workflows/policy-merge.yml`, whose decision is entirely `scripts/policy-merge-check.py` (chtypes#280). An agent, or a maintainer, is needed only when a condition fails: a check is red, the pull request touches a file in a protected class, or it changes a binding's exported API.
