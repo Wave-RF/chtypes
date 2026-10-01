@@ -388,7 +388,7 @@ func (n *compiledSchemaNative) release() {
 	n.blocks = nil
 	if n.handle != nil {
 		C.chs_schema_free(n.handle)
-		noteFreed(testhook.FreedSchema, unsafe.Pointer(n.handle))
+		noteFreed(testhook.FreedSchema, unsafe.Pointer(n))
 		n.handle = nil
 	}
 }
@@ -407,7 +407,7 @@ func (c *compiledFilterNative) freeLocked() {
 		return
 	}
 	C.chs_filter_free(c.handle)
-	noteFreed(testhook.FreedFilter, unsafe.Pointer(c.handle))
+	noteFreed(testhook.FreedFilter, unsafe.Pointer(c))
 	c.handle = nil
 	delete(c.schema.filters, c)
 }
@@ -426,7 +426,7 @@ func (c *compiledBlockNative) freeLocked() {
 		return
 	}
 	C.chs_block_free(c.handle)
-	noteFreed(testhook.FreedBlock, unsafe.Pointer(c.handle))
+	noteFreed(testhook.FreedBlock, unsafe.Pointer(c))
 	c.handle = nil
 	delete(c.schema.blocks, c)
 }

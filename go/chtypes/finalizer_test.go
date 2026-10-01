@@ -4,10 +4,19 @@
 //
 // Every assertion here is made through C frees, never through timing: the
 // package reports each chs_schema_free / chs_filter_free / chs_block_free it
-// makes to go/internal/testhook.NativeFreed, with the handle it freed, and
-// these tests count those reports. A test that waited on the Go object alone
-// would pass for a schema whose object was collected while its C handle
-// leaked.
+// makes to go/internal/testhook.NativeFreed, naming the native half that held
+// the handle, and these tests count those reports. A test that waited on the
+// Go object alone would pass for a schema whose object was collected while
+// its C handle leaked.
+//
+// A test may hold a native half without holding its LoadedSchema, filter or
+// block: the native half points at none of them, which is the whole of the
+// fix for #375. Holding it means no later allocation can take its address;
+// counting only the reports made after it was allocated (family.born) means
+// no EARLIER owner of that address is counted either — another test's
+// abandoned object can be reported, collected, and its address handed to a
+// new native half while this test runs. Together they make "freed exactly
+// once" mean exactly that.
 package chtypes
 
 import (
@@ -17,6 +26,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/wave-rf/chtypes/go/internal/testhook"
 )
@@ -26,10 +36,11 @@ import (
 // well under a second.
 const reclaimN = 100
 
-// freeKey is one native handle as testhook.NativeFreed reports it.
+// freeKey is one free as testhook.NativeFreed reports it: which C free, and
+// the native half that owned the handle.
 type freeKey struct {
-	kind   testhook.NativeKind
-	handle uintptr
+	kind  testhook.NativeKind
+	owner uintptr
 }
 
 // freeLog records every native free the package reports while a test runs,
@@ -45,10 +56,10 @@ type freeLog struct {
 func observeFrees(t *testing.T) *freeLog {
 	t.Helper()
 	l := &freeLog{at: map[freeKey][]int{}}
-	fn := func(kind testhook.NativeKind, h uintptr) {
+	fn := func(kind testhook.NativeKind, owner uintptr) {
 		l.mu.Lock()
 		l.seq++
-		k := freeKey{kind, h}
+		k := freeKey{kind, owner}
 		l.at[k] = append(l.at[k], l.seq)
 		l.mu.Unlock()
 	}
@@ -59,22 +70,22 @@ func observeFrees(t *testing.T) *freeLog {
 	return l
 }
 
-// now is the current position in the sequence: a free recorded at or before
-// it happened before whatever the caller does next.
+// now is the current position in the sequence.
 func (l *freeLog) now() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.seq
 }
 
-// freesAfter answers how many times (kind, h) was freed after position born,
-// and the position of the first such free (0 when none). Frees at or before
-// born belong to an earlier allocation at the same address, never to the
-// handle the caller is asking about: two live handles cannot share one.
-func (l *freeLog) freesAfter(kind testhook.NativeKind, h uintptr, born int) (n, first int) {
+// frees answers how many times the handle owned by owner was freed as kind
+// after position born, and the position of the first such free (0 when
+// none). A report at or before born came from an earlier owner of the same
+// address: an owner is reported while it is still reachable, so its address
+// cannot be reused until after its report is recorded.
+func (l *freeLog) frees(kind testhook.NativeKind, owner unsafe.Pointer, born int) (n, first int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for _, at := range l.at[freeKey{kind, h}] {
+	for _, at := range l.at[freeKey{kind, uintptr(owner)}] {
 		if at > born {
 			if n == 0 {
 				first = at
@@ -85,12 +96,14 @@ func (l *freeLog) freesAfter(kind testhook.NativeKind, h uintptr, born int) (n, 
 	return n, first
 }
 
-// family is one schema's native handles, with its children's when it has
-// them (0 when it does not), and the sequence position before which none of
-// them existed.
+// family is one schema's native half, with its children's when it has them
+// (nil when it does not), and the sequence position read once all of them
+// existed. Holding these keeps none of the Go objects alive.
 type family struct {
-	schema, filter, block uintptr
-	born                  int
+	schema *loadedSchemaNative
+	filter *loadedFilterNative
+	block  *loadedBlockNative
+	born   int
 }
 
 // gcLibrary is the library every test here builds on: the first line the
@@ -105,16 +118,16 @@ func gcLibrary(t *testing.T) *Library {
 }
 
 // openFamily compiles one schema and, when children is true, an open filter
-// and an open block over it, recording their native handles.
+// and an open block over it, recording their native halves.
 func openFamily(t *testing.T, lib *Library, log *freeLog, children bool) (*LoadedSchema, *LoadedFilter, *LoadedBlock, family) {
 	t.Helper()
-	fam := family{born: log.now()}
 	s, err := lib.CompileDDL("x UInt8, y String")
 	if err != nil {
 		t.Fatalf("%s: CompileDDL: %v", lib.Version, err)
 	}
-	fam.schema = schemaHandleOf(s)
+	fam := family{schema: s.n}
 	if !children {
+		fam.born = log.now()
 		return s, nil, nil, fam
 	}
 	f, err := s.CompileFilter("x > 3")
@@ -133,7 +146,8 @@ func openFamily(t *testing.T, lib *Library, log *freeLog, children bool) (*Loade
 		}
 		t.Fatalf("%s: ParseBlock: %v", lib.Version, err)
 	}
-	fam.filter, fam.block = filterHandleOf(f), blockHandleOf(b)
+	fam.filter, fam.block = f.n, b.n
+	fam.born = log.now()
 	return s, f, b, fam
 }
 
@@ -160,20 +174,20 @@ type reclaimed struct {
 func (l *freeLog) tally(fams []family) reclaimed {
 	var r reclaimed
 	for _, fam := range fams {
-		sn, sAt := l.freesAfter(testhook.FreedSchema, fam.schema, fam.born)
+		sn, sAt := l.frees(testhook.FreedSchema, unsafe.Pointer(fam.schema), fam.born)
 		if sn > 0 {
 			r.schemas++
 			r.extra += sn - 1
 		}
 		for _, c := range []struct {
 			kind  testhook.NativeKind
-			h     uintptr
+			owner unsafe.Pointer
 			count *int
-		}{{testhook.FreedFilter, fam.filter, &r.filters}, {testhook.FreedBlock, fam.block, &r.blocks}} {
-			if c.h == 0 {
+		}{{testhook.FreedFilter, unsafe.Pointer(fam.filter), &r.filters}, {testhook.FreedBlock, unsafe.Pointer(fam.block), &r.blocks}} {
+			if c.owner == nil {
 				continue
 			}
-			n, at := l.freesAfter(c.kind, c.h, fam.born)
+			n, at := l.frees(c.kind, c.owner, fam.born)
 			if n > 0 {
 				*c.count++
 				r.extra += n - 1
@@ -382,23 +396,4 @@ func TestConcurrentCloseFreesOnce(t *testing.T) {
 		wg.Wait()
 		requireFreedOnceInOrder(t, log, fam)
 	}
-}
-
-// The native handles, read under the lock that guards them.
-func schemaHandleOf(s *LoadedSchema) uintptr {
-	unlock := s.lock()
-	defer unlock()
-	return uintptr(s.n.handle)
-}
-
-func filterHandleOf(f *LoadedFilter) uintptr {
-	unlock := f.schema.lock()
-	defer unlock()
-	return uintptr(f.n.handle)
-}
-
-func blockHandleOf(b *LoadedBlock) uintptr {
-	unlock := b.schema.lock()
-	defer unlock()
-	return uintptr(b.n.handle)
 }

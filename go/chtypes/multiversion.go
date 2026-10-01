@@ -1148,7 +1148,7 @@ func (n *loadedSchemaNative) release() {
 		return
 	}
 	C.chs_lib_schema_free(&n.lib.lib, n.handle)
-	noteFreed(testhook.FreedSchema, n.handle)
+	noteFreed(testhook.FreedSchema, unsafe.Pointer(n))
 	n.handle = nil
 }
 
@@ -1166,7 +1166,7 @@ func (c *loadedFilterNative) freeLocked() {
 		return
 	}
 	C.chs_lib_filter_free(&c.schema.lib.lib, c.handle)
-	noteFreed(testhook.FreedFilter, c.handle)
+	noteFreed(testhook.FreedFilter, unsafe.Pointer(c))
 	c.handle = nil
 	delete(c.schema.filters, c)
 }
@@ -1185,16 +1185,17 @@ func (c *loadedBlockNative) freeLocked() {
 		return
 	}
 	C.chs_lib_block_free(&c.schema.lib.lib, c.handle)
-	noteFreed(testhook.FreedBlock, c.handle)
+	noteFreed(testhook.FreedBlock, unsafe.Pointer(c))
 	c.handle = nil
 	delete(c.schema.blocks, c)
 }
 
 // noteFreed reports one native free to a test's observer, if one is
-// installed (go/internal/testhook.NativeFreed); nil costs one atomic load.
-func noteFreed(kind testhook.NativeKind, h unsafe.Pointer) {
+// installed (go/internal/testhook.NativeFreed), naming the native half that
+// owned the handle; nil costs one atomic load.
+func noteFreed(kind testhook.NativeKind, owner unsafe.Pointer) {
 	if fn := testhook.NativeFreed.Load(); fn != nil {
-		(*fn)(kind, uintptr(h))
+		(*fn)(kind, uintptr(owner))
 	}
 }
 
