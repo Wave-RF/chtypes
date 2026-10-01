@@ -75,6 +75,55 @@
 # The before=/after= extraction uses the exact same pattern the workflow used
 # inline before this script existed, so this extraction changes nothing about
 # what counts as a `generated_at:` line.
+#
+# --- the seed-time decision (telling a genuine first run from a lost
+# baseline) ---
+#
+#   scripts/readback-decide.sh --seed <read-ok 0|1> <found 0|1> [<prior-ts>]
+#
+# This is the SEPARATE pure decision for the workflow's `seed` step, which
+# only ever runs on a cache miss. An `actions: write` dispatch token (the
+# artifact producer's, scoped to `actions: write` alone — filed
+# producer-side) can DELETE the Actions-cache baseline, and a deleted
+# baseline looks identical, from `cache-matched-key` alone, to this being
+# the very first run ever. The workflow tells them apart by asking whether
+# #73 already carries a comment this workflow posted (every comment it
+# posts carries a first-line `<!-- artifacts-readback: generated_at <v> -->`
+# marker) — see the workflow's own header for the full reasoning.
+#
+# <read-ok>    1 if the workflow's one paginated read of #73's prior
+#              comments succeeded and was parseable, 0 if it did not (a
+#              non-2xx response, or output `gh api --jq` could not parse).
+#              0 ALWAYS wins over <found>/<prior-ts>, whatever they say —
+#              an outage must never be read as "no prior comment", because
+#              that would silently take the quiet first-run path.
+# <found>      1 if, and only if, read-ok=1 AND at least one prior marked
+#              comment was found. Ignored when read-ok=0.
+# <prior-ts>   the newest prior marked comment's `generated_at` value.
+#              Required when found=1 (a usage error otherwise); ignored
+#              otherwise.
+#
+# Prints, in the same $GITHUB_OUTPUT shape as decide() above:
+#
+#   outcome=seed-quiet | seed-loud-fail | fail-closed
+#   prior_generated_at=<value, or empty>
+#
+#   seed-quiet      read-ok=1, found=0. A genuine first run: the caller
+#                   snapshots a fresh baseline, posts nothing, exits 0.
+#   seed-loud-fail  read-ok=1, found=1. The cache is gone despite this
+#                   workflow having run before — the baseline was LOST, not
+#                   absent. The caller still snapshots a fresh baseline (so
+#                   the NEXT run has something to compare against), but
+#                   posts the loss to #73 — naming prior_generated_at, since
+#                   removals between then and now cannot be proven absent by
+#                   this run — and fails the run (exit 1) on purpose.
+#   fail-closed     read-ok=0. The read itself failed, so nothing here is
+#                   known: not whether a prior comment exists, and not what
+#                   it would have named. The caller seeds nothing and posts
+#                   nothing (there is no generated_at to name honestly) and
+#                   just fails — the same "an outage must never read as a
+#                   quiet index" reasoning decide()'s own fail-no-post
+#                   already uses, one layer up.
 set -euo pipefail
 
 die() { echo "readback-decide: $*" >&2; exit 1; }
@@ -125,6 +174,26 @@ decide() {
     printf 'outcome=skip-fail\nbefore=%s\nafter=%s\nreason=\n' "$before" "$after"
   else
     printf 'outcome=post-fail\nbefore=%s\nafter=%s\nreason=\n' "$before" "$after"
+  fi
+}
+
+# decide_seed <read-ok 0|1> <found 0|1> [<prior-ts>] — the seed-step decision
+# (see the header above). <prior-ts> is required when found=1 (a usage
+# error otherwise, exactly like decide()'s own missing-out-file check); it
+# is ignored otherwise, including when read-ok=0.
+decide_seed() {
+  local read_ok="$1" found="$2" prior_ts="${3:-}"
+
+  if [ "$read_ok" != 1 ]; then
+    printf 'outcome=fail-closed\nprior_generated_at=\n'
+    return 0
+  fi
+
+  if [ "$found" = 1 ]; then
+    [ -n "$prior_ts" ] || die "decide_seed: found=1 but no <prior-ts> given"
+    printf 'outcome=seed-loud-fail\nprior_generated_at=%s\n' "$prior_ts"
+  else
+    printf 'outcome=seed-quiet\nprior_generated_at=\n'
   fi
 }
 
@@ -253,11 +322,63 @@ EOF
     fail=1
   fi
 
+  # --- decide_seed(): telling a genuine first run from a lost baseline ---
+
+  # check_seed <name> <expected-outcome> <read-ok> <found> <prior-ts-or-''>
+  #            <expected-prior-generated-at-or-''>
+  check_seed() {
+    local name="$1" want="$2" read_ok="$3" found="$4" prior_ts="$5" want_prior="$6"
+    local got got_outcome got_prior
+    got="$(decide_seed "$read_ok" "$found" "$prior_ts")"
+    got_outcome="$(printf '%s\n' "$got" | sed -n 's/^outcome=//p')"
+    got_prior="$(printf '%s\n' "$got" | sed -n 's/^prior_generated_at=//p')"
+    if [ "$got_outcome" != "$want" ] || [ "$got_prior" != "$want_prior" ]; then
+      echo "SELFTEST FAILED ($name): wanted outcome=$want prior_generated_at=$want_prior, got:" >&2
+      printf '%s\n' "$got" >&2
+      fail=1
+      return
+    fi
+    echo "readback-decide: selftest ok — $name"
+  }
+
+  # 9. read ok, no prior marked comment on #73: a genuine first run, seeds
+  #    quietly.
+  check_seed "seed: read ok, no prior comment -> seed-quiet" seed-quiet 1 0 "" ""
+
+  # 10. read ok, a prior marked comment exists: the cache is gone despite
+  #     this workflow having run before -- seed loud and fail, naming the
+  #     prior comment's generated_at.
+  check_seed "seed: read ok, prior comment found -> seed-loud-fail, names it" \
+    seed-loud-fail 1 1 "2026-09-29T23:34:28Z" "2026-09-29T23:34:28Z"
+
+  # 11 (THE read-failure case). The #73 read itself failed: this must be
+  #     fail-closed, never seed-quiet — an outage must never be read as "no
+  #     prior comment".
+  check_seed "seed: read failed, no comment on record -> fail-closed, not seed-quiet" \
+    fail-closed 0 0 "" ""
+
+  # 12. read-ok=0 must win even when `found`/`prior-ts` say a comment WAS
+  #     found — read-ok is checked first and ignores the rest, so a caller
+  #     bug that sets found=1 alongside a failed read still fails closed
+  #     rather than posting a claim built on an unread comment.
+  check_seed "seed: read failed, found=1 anyway -> still fail-closed (read-ok wins)" \
+    fail-closed 0 1 "2026-09-29T23:34:28Z" ""
+
+  # 13. found=1 with no prior-ts is a usage error (a caller bug), not a
+  #     decision — symmetrical with decide()'s own missing-out-file check
+  #     (case 7, above). Run in a subshell: die() calls exit.
+  if (decide_seed 1 1 "") >/dev/null 2>&1; then
+    echo "SELFTEST FAILED (seed: found=1 with no prior-ts): decide_seed() should have failed" >&2
+    fail=1
+  else
+    echo "readback-decide: selftest ok — seed: found=1 with no prior-ts is a usage error, not a decision"
+  fi
+
   if [ "$fail" -ne 0 ]; then
     rm -rf "$tmp"
     return 1
   fi
-  echo "readback-decide: selftest ok — a first drop posts, an identical repeat skips but still fails, a new generated_at posts again, a fetch failure posts nothing, a bad exit code posts nothing with its own reason, exit 0's quiet/post-advance split is untouched by the last-drop file, and a real append-only (#283) REMOVED-row verdict still decides post-fail"
+  echo "readback-decide: selftest ok — a first drop posts, an identical repeat skips but still fails, a new generated_at posts again, a fetch failure posts nothing, a bad exit code posts nothing with its own reason, exit 0's quiet/post-advance split is untouched by the last-drop file, a real append-only (#283) REMOVED-row verdict still decides post-fail, and decide_seed tells a genuine first run from a lost baseline from a failed #73 read, with read-ok taking precedence over found/prior-ts"
   rm -rf "$tmp"
   return 0
 }
@@ -267,7 +388,13 @@ main() {
     selftest
     return $?
   fi
-  [ $# -ge 2 ] || die "usage: readback-decide.sh <ec> <out-file> [<last-drop-file>]  (or --selftest)"
+  if [ "${1:-}" = "--seed" ]; then
+    shift
+    [ $# -ge 2 ] || die "usage: readback-decide.sh --seed <read-ok 0|1> <found 0|1> [<prior-ts>]"
+    decide_seed "$1" "$2" "${3:-}"
+    return $?
+  fi
+  [ $# -ge 2 ] || die "usage: readback-decide.sh <ec> <out-file> [<last-drop-file>]  (or --seed ... / --selftest)"
   decide "$1" "$2" "${3:-}"
 }
 

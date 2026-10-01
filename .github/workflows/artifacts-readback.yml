@@ -85,10 +85,62 @@
 # way this step always did, and is exercised locally, with no network, by its
 # own `--selftest`), and this step only acts on the `outcome=` it prints.
 #
+# ⚠️ A DELETED CACHE READS AS A QUIET FRESH START -- UNLESS #73 SAYS
+# OTHERWISE. The artifact producer dispatches this workflow with an
+# `actions: write`-scoped GitHub App token (filed producer-side) so a
+# read-back can run right after each publish instead of waiting for the
+# next :11/:41 cron tick. That same scope can also DELETE a cache --
+# deliberately or by accident -- and a deleted baseline is, from
+# `cache-matched-key` alone, indistinguishable from a baseline that simply
+# aged out, or from this being the very first run ever: both read as
+# "nothing cached". Those are not the same thing. A genuine first run has
+# nothing to lose; a lost baseline means every removal between whenever it
+# was last read and now goes unreported, silently, forever -- the exact
+# failure this whole workflow exists to prevent for the served index
+# itself, one layer up, on itself.
+#
+# This workflow tells the two apart the only way it can without a second
+# channel of its own: by asking #73. Every comment this workflow has ever
+# posted carries a first-line marker,
+# `<!-- artifacts-readback: generated_at <value> -->` (the `<!--
+# to:chtypes-sdk -->` footer and chtypes#270's lastdrop bookkeeping are not
+# this check -- only the FIRST line counts). On a cache miss, ONE paginated
+# `gh api` call reads every comment #73 has from `github-actions[bot]` and
+# keeps the ones whose first line matches that marker. No match at all:
+# this really is the first run, so it seeds quietly, exactly as before. A
+# match: the cache is gone despite this workflow having already run, so the
+# baseline was LOST -- a fresh one is still seeded, so the NEXT run has
+# something to compare against, but THIS run posts the loss to #73 (naming
+# the newest matched comment's `generated_at`, and saying plainly that
+# removals between then and now cannot be proven absent by this run) and
+# FAILS on purpose, the same "a red run is the alarm" reasoning as every
+# other finding here. And if the #73 read itself fails -- a non-2xx
+# response, or output `gh api --jq` cannot parse -- that is ALSO treated as
+# baseline-lost, never as a first run: fail closed, post nothing (there is
+# no `generated_at` to name honestly, and posting a half-known claim would
+# misrepresent an outage as a finding, the same reasoning
+# scripts/readback-decide.sh's own fail-no-post already uses for the
+# compare step). This decision -- read-failed / prior-comment-found /
+# neither, mapped to fail-closed / seed-loud-and-fail / seed-quiet -- is
+# `scripts/readback-decide.sh --seed`, a pure function exercised with no
+# network by the same `--selftest` as the compare-step decision below.
+#
 # PER-OUTCOME BEHAVIOR:
-#   no cache restored (first run, or the prior baseline aged out)
+#   no cache restored, and #73 carries no prior artifacts-readback comment
+#   (a genuine first run)
 #     -> snapshot a fresh baseline, note "seeded" in the job summary,
 #        post nothing, save the baseline, exit 0.
+#   no cache restored, and #73 DOES carry a prior artifacts-readback
+#   comment (the baseline was deleted or aged out -- not a first run)
+#     -> snapshot a fresh baseline anyway, so the NEXT run has something to
+#        compare against; post the loss to #73, naming the prior comment's
+#        generated_at and this run's URL; save the baseline; then FAIL the
+#        run (exit 1) on purpose.
+#   no cache restored, and reading #73's prior comments itself failed
+#   (non-2xx, or `gh api --jq` could not parse the response)
+#     -> fail closed: nothing is seeded, nothing is posted (there is no
+#        generated_at to name honestly), exit 1. Never treated as a first
+#        run.
 #   --compare exits 1 WITH a generated_at line, and `after` differs from the
 #   last POSTED drop's recorded value (a new drop, or none on record)
 #     -> post to #73; only once that succeeds, record `after` as the new
@@ -126,10 +178,27 @@
 # so this does not queue behind every other repository's :00/:30 cron on
 # GitHub's shared scheduler infrastructure (the same reasoning
 # support-matrix-refresh.yml's own header gives for its own off-the-hour
-# slot). `workflow_dispatch` is also wired in, so the two states below can
-# be exercised on demand after this merges. GitHub's scheduler can run
-# late; that costs nothing here, because every run compares against stored
-# state rather than a wall-clock expectation.
+# slot). `workflow_dispatch` is also wired in, so the states above can be
+# exercised on demand after this merges — including by the artifact
+# producer, right after a publish. GitHub's scheduler can run late; that
+# costs nothing here, because every run compares against stored state
+# rather than a wall-clock expectation.
+#
+# DISPATCH INPUTS (informational only). `workflow_dispatch` takes two
+# OPTIONAL strings, `generated_at` and `index_sha256`, for the artifact
+# producer to pass along what it just published -- its own timestamp and
+# the served index's sha256. Logged to the job summary and used for
+# NOTHING else: this workflow always re-reads the served index itself and
+# decides everything from that read, never from what a caller claims about
+# it -- an input here is a convenience for whoever reads the run, not a
+# second source of truth. Each is validated with a strict regex (ISO-8601 Z
+# for `generated_at`, 64 hex characters for `index_sha256`) before it is
+# echoed anywhere; anything that does not match is dropped, with a note
+# saying so, rather than logged as given. Neither input is ever
+# interpolated directly into a `run:` script — both reach shell only
+# through `env:`, the same discipline every other attacker-controlled
+# workflow input in this repository is held to (`lint-actions.sh`'s
+# actionlint pass checks for exactly this).
 #
 # EXERCISING THIS AFTER MERGE (scheduled workflows only run from the
 # default branch, so this cannot run before merge): `gh workflow run
@@ -143,6 +212,15 @@ on:
   schedule:
     - cron: "11,41 * * * *"
   workflow_dispatch:
+    inputs:
+      generated_at:
+        description: "informational only, from the artifact producer's publish (ISO-8601 Z); logged, never used to decide anything"
+        required: false
+        type: string
+      index_sha256:
+        description: "informational only, from the artifact producer's publish (64 hex characters); logged, never used to decide anything"
+        required: false
+        type: string
 
 permissions: {}
 
@@ -172,6 +250,46 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Informational only (see DISPATCH INPUTS above): validated with a
+      # strict regex and logged to the job summary, never used to decide
+      # anything below, and never interpolated into a `run:` script --
+      # both inputs reach this step only through `env:`.
+      - name: log the artifact producer's publish info, if any (informational only)
+        env:
+          IN_GENERATED_AT: ${{ inputs.generated_at }}
+          IN_INDEX_SHA256: ${{ inputs.index_sha256 }}
+        run: |
+          {
+            echo "### artifacts-readback — producer-supplied publish info (informational only; never used to decide anything)"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          ts_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+          sha_re='^[0-9a-fA-F]{64}$'
+          logged=0
+
+          if [ -n "${IN_GENERATED_AT:-}" ]; then
+            if [[ "$IN_GENERATED_AT" =~ $ts_re ]]; then
+              echo "- generated_at: $IN_GENERATED_AT" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- generated_at: dropped — did not match ISO-8601 Z" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            logged=1
+          fi
+
+          if [ -n "${IN_INDEX_SHA256:-}" ]; then
+            if [[ "$IN_INDEX_SHA256" =~ $sha_re ]]; then
+              echo "- index_sha256: $IN_INDEX_SHA256" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- index_sha256: dropped — did not match 64 hex characters" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            logged=1
+          fi
+
+          if [ "$logged" = 0 ]; then
+            echo "(none supplied — a schedule run, or a manual dispatch with no inputs)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: restore the last-seen baseline from the Actions cache
         id: restore
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -200,22 +318,134 @@ jobs:
 
       # cache-matched-key is empty only when NEITHER the exact key NOR any
       # restore-keys prefix matched anything — a genuine "nothing cached at
-      # all" state (the very first run, or a baseline that aged out after 7
-      # days with no access). A partial (restore-keys) match still populates
-      # cache-matched-key, which is exactly the "newest entry wins" behavior
-      # this is here for.
-      - name: first run (or the prior baseline aged out) — seed a fresh baseline
-        id: seed
+      # all" state (the very first run, a baseline that aged out after 7
+      # days with no access, OR a baseline an actions:write token deleted).
+      # A partial (restore-keys) match still populates cache-matched-key,
+      # which is exactly the "newest entry wins" behavior this is here for.
+      #
+      # This read is ONE paginated `gh api` call (internally following every
+      # page `--paginate` finds, never one call per comment) against #73's
+      # comments, kept to the ones posted by this workflow itself
+      # (github-actions[bot]) whose FIRST line is the
+      # `artifacts-readback: generated_at <v>` marker every comment this
+      # workflow posts carries — see the file header for why only the first
+      # line counts. `sort=created&direction=asc` (the list endpoint's own
+      # default, named explicitly rather than relied on) means the LAST
+      # matching line is the newest. A non-2xx response or output `--jq`
+      # cannot parse makes `gh api` itself exit non-zero, which is read
+      # below as read_ok=0 — never a quiet "no prior comment".
+      - name: read #73's prior artifacts-readback comments (one paginated call) — tells a genuine first run from a lost baseline
+        id: read-comments
         if: steps.restore.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p .artifacts-readback
+          OUT=.artifacts-readback/marked-comments.txt
+          ERR=.artifacts-readback/marked-comments-err.txt
+
+          # UNPIPED: this script's own exit code, never a pipeline's.
+          ec=0
+          # shellcheck disable=SC2016 # $first/$ts inside the single-quoted
+          # --jq program are jq's OWN variables (an `as $first` binding and a
+          # named capture group), never shell variables -- the single quotes
+          # are deliberate, so this jq program reaches the API unexpanded.
+          gh api --paginate -f sort=created -f direction=asc \
+            "repos/${GITHUB_REPOSITORY}/issues/73/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | (.body | split("\n")[0]) as $first | select($first | test("^<!-- artifacts-readback: generated_at .+ -->$")) | ($first | capture("^<!-- artifacts-readback: generated_at (?<ts>.+) -->$").ts)' \
+            >"$OUT" 2>"$ERR" || ec=$?
+
+          if [ "$ec" -ne 0 ]; then
+            # A failed API call must never look like a quiet repo: clear
+            # whatever partial output a later page's failure left behind,
+            # so a half-read is never mistaken for "no prior comment".
+            : > "$OUT"
+            echo "artifacts-readback: reading #73's prior comments failed (gh api exit $ec) -- treated as baseline-lost, never a quiet first run:" >&2
+            cat "$ERR" >&2
+            echo "read_ok=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "read_ok=1" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -s "$OUT" ]; then
+            echo "found=1" >> "$GITHUB_OUTPUT"
+            prior="$(tail -n1 "$OUT" | tr -d '"')"
+            echo "prior_generated_at=$prior" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=0" >> "$GITHUB_OUTPUT"
+            echo "prior_generated_at=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # scripts/readback-decide.sh --seed (see its own header, and this
+      # file's ⚠️ A DELETED CACHE READS AS A QUIET FRESH START section
+      # above) decides seed-quiet / seed-loud-fail / fail-closed from the
+      # read-comments step's own outputs; this step only acts on it.
+      - name: decide whether this is a genuine first run or a lost baseline, and act on it
+        id: seed
+        if: steps.restore.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          READ_OK: ${{ steps.read-comments.outputs.read_ok }}
+          FOUND: ${{ steps.read-comments.outputs.found }}
+          PRIOR_GENERATED_AT: ${{ steps.read-comments.outputs.prior_generated_at }}
+        run: |
+          mkdir -p .artifacts-readback
+
+          decision="$(scripts/readback-decide.sh --seed "$READ_OK" "$FOUND" "$PRIOR_GENERATED_AT")"
+          outcome="$(printf '%s\n' "$decision" | sed -n 's/^outcome=//p')"
+          prior="$(printf '%s\n' "$decision" | sed -n 's/^prior_generated_at=//p')"
+
+          if [ "$outcome" = fail-closed ]; then
+            {
+              echo "### artifacts-readback — could not tell a first run from a lost baseline"
+              echo
+              echo "No baseline was found in the Actions cache, and reading #73's prior comments to tell a genuine first run from a lost one itself failed (a non-2xx response, or unparseable output). This is an outage, not a finding: nothing was seeded, nothing was posted (there is no generated_at to name honestly), and this run fails on purpose rather than silently taking the quiet first-run path."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "artifacts-readback: could not read #73's prior comments while the baseline cache was missing -- failing without seeding or posting." >&2
+            exit 1
+          fi
+
+          # Both remaining outcomes snapshot a fresh baseline — the only
+          # difference is whether a prior comment on record means this
+          # cache is LOST (post + fail) rather than genuinely first (quiet).
           scripts/index-diff.sh --snapshot .artifacts-readback/baseline.json
-          {
-            echo "### artifacts-readback — seeded"
-            echo
-            echo "No baseline was found in the Actions cache (first run, or the prior baseline aged out past the 7-day no-access eviction window). A fresh baseline was snapshotted from the served index just now and will be saved to the cache at the end of this run. Nothing was posted to #73 — the next run compares against this baseline."
-          } >> "$GITHUB_STEP_SUMMARY"
           echo "save=1" >> "$GITHUB_OUTPUT"
+
+          if [ "$outcome" = seed-quiet ]; then
+            {
+              echo "### artifacts-readback — seeded"
+              echo
+              echo "No baseline was found in the Actions cache, and #73 carries no prior artifacts-readback comment — a genuine first run. A fresh baseline was snapshotted from the served index just now and will be saved to the cache at the end of this run. Nothing was posted to #73 — the next run compares against this baseline."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # seed-loud-fail: #73 already carries a comment this workflow
+          # posted, yet the cache is gone — deleted (an actions:write
+          # dispatch token can do that) or aged out. Post the loss, then
+          # fail this run on purpose; the baseline just snapshotted is
+          # still saved below so the NEXT run has something to compare.
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          new_generated_at="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("generated_at", "(none)"))' .artifacts-readback/baseline.json)"
+
+          body_file="$(mktemp)"
+          {
+            echo "<!-- artifacts-readback: generated_at $new_generated_at -->"
+            echo
+            echo "The Actions-cache baseline this workflow compares against is gone — no cache entry matched (deleted, or aged out past the 7-day no-access eviction window) — yet #73 already carries a prior artifacts-readback comment recorded at generated_at $prior. Removals between $prior and now CANNOT be proven absent by this run: a fresh baseline was just snapshotted (generated_at $new_generated_at) so the next run can compare again, but anything dropped in between is unverified. Run: $run_url"
+            echo
+            echo "<!-- to:chtypes-sdk -->"
+          } > "$body_file"
+
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/73/comments" -F body=@"$body_file"
+
+          {
+            echo "### artifacts-readback — baseline LOST"
+            echo
+            echo "#73 carries a prior artifacts-readback comment (generated_at $prior), but the Actions-cache baseline was missing this run. Posted the loss to #73; failing this run on purpose (a red run is the alarm). A fresh baseline (generated_at $new_generated_at) was still saved for the next run."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "artifacts-readback: baseline lost (last recorded generated_at $prior); posted to #73 and failing on purpose." >&2
+          exit 1
 
       - name: compare the served index against the restored baseline, and post/advance per the outcome
         id: compare
@@ -316,15 +546,20 @@ jobs:
           echo "save=1" >> "$GITHUB_OUTPUT"
           echo "artifacts-readback: posted; generated_at $before -> $after; baseline advanced" | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # Runs after `seed` (mode: nothing to compare against yet) or after a
-      # `compare` that posted a generated_at move and wants it kept. Neither
-      # `if:` below names success()/failure()/always(), so each is implicitly
-      # ANDed with success() -- meaning a compare step that exited 1 (posted,
-      # then failed on purpose) skips this automatically, which is exactly
-      # how exit 1 avoids ever advancing the baseline: no separate guard is
-      # needed here for that case.
+      # Runs after `seed` (either outcome that snapshots: quiet-first-run, or
+      # loud-baseline-lost which still seeds so the NEXT run has something to
+      # compare) or after a `compare` that posted a generated_at move and
+      # wants it kept. `always()` is required here now: the loud-baseline-lost
+      # outcome (readback-decide.sh --seed's seed-loud-fail) sets save=1 and
+      # THEN deliberately exits 1, and without always() the implicit success()
+      # every other `if:` would otherwise get skips this step right when the
+      # freshly-seeded baseline most needs saving. This does not change
+      # `compare`'s own behavior: a compare step that exited 1 (fail-no-post,
+      # skip-fail, post-fail) never sets steps.compare.outputs.save, so the
+      # condition below still evaluates false for all three, always() or not
+      # -- that is still how exit 1 avoids ever advancing the baseline there.
       - name: save the baseline to the Actions cache
-        if: steps.seed.outputs.save == '1' || steps.compare.outputs.save == '1'
+        if: always() && (steps.seed.outputs.save == '1' || steps.compare.outputs.save == '1')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .artifacts-readback/baseline.json
