@@ -13,6 +13,7 @@ The four bindings in this repository are released together and give one answer, 
 ### Changed
 
 - `Schema::rows_export_with`'s settings-slice form is superseded by `Schema::rows_export_with_options_and_filter` and is a candidate for removal in the next breaking release; it is unchanged otherwise and keeps working exactly as released (docs only — no behavior change).
+- **Every build the release publishes stays fetchable.** 0.3.2 said an older build stays fetchable only until that line's next publish evicts it under retention. That no longer holds: since 2026-09-30 the release is append-only and lists every build it publishes, and selection takes the newest at this SDK's ABI revision (`docs/guides/fetch.md` §2). Builds dropped before that date are re-listed only where a release-signed `SHA256SUMS` proves them.
 
 ## [0.5.0] — 2026-10-01
 

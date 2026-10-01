@@ -120,7 +120,7 @@ Every line/platform pairing above either has a build for every revision the inde
 
 A line appears above once it has passed the artifact producer's comparison against a real server and the release publishes the artifact. Lines are added as they pass it, so this page is a snapshot of a moving list — `curl -s https://artifacts.wavehouse.dev/artifacts/index.json` is always the live answer, and `scripts/fetch.sh --all` reads it rather than restating it.
 
-Nothing is removed to make room. The index keeps every patch row ever published, so a machine holding an older patch keeps working.
+Nothing is removed to make room. Since 2026-09-30 the release is append-only: every build it publishes stays listed in `index.json` and the signed `SHA256SUMS`, so a machine holding an older patch keeps working. Rows that the earlier retention rule dropped before that date are re-listed only where a release-signed `SHA256SUMS` proves their bytes; the rest stay unlisted.
 
 ## Checking from your own machine
 
