@@ -75,43 +75,55 @@
 #                                              found.
 #   scripts/index-diff.sh --selftest          prove every hard-stop rule
 #                                              below actually fires, and that
-#                                              a build-only reshape does NOT,
+#                                              a pure addition does NOT,
 #                                              against fixtures this script
 #                                              builds itself
+#
+# THE CHANNEL IS APPEND-ONLY (2026-09-30, chtypes#283). The artifact
+# producer's publish now refuses to shrink the served listing: every tarball
+# it has ever published stays in the signed SHA256SUMS and in index.json,
+# tarball names are unique per build, and selection still takes the newest
+# row. Under that contract, a row key or a SHA256SUMS filename disappearing,
+# or a tarball's bytes changing, can no longer happen legitimately — every
+# one of those is now a hard failure, not the informational "reshape" this
+# script used to report before the channel was append-only.
 #
 # What --compare reports, reading only the two sides themselves — never
 # anything hard-coded about what they ought to contain:
 #
-#   - rows TRUE-DROPPED: a (clickhouse_minor, os, arch) triplet served
-#     before and entirely absent now — no row for it survives under ANY
-#     build. THIS IS A HARD FAILURE, named by exact row.
-#   - rows RESHAPED: the same (clickhouse_minor, os, arch) triplet still has
-#     at least one row after, but the set of "build" values it carries
-#     changed (a row's build key moved, e.g. from absent to a real number).
-#     Reported in full, by triplet, with the before and after build values —
-#     but this is information, NOT a failure. The 13 rows the index
-#     currently carries with no "build" field at all are exactly the shape
-#     of row this exists to describe correctly: when they come back keyed
-#     under a real build number instead, that is a reshape of an existing
-#     triplet, not a loss of one, and must not read as the bug above.
-#   - rows added: a (…, build) key that is new and that no reshape above
-#     already explains — a genuinely new row.
+#   - rows REMOVED: any (clickhouse_minor, os, arch, build) row key served
+#     before and absent now — whether its whole (clickhouse_minor, os, arch)
+#     triplet lost every build (nothing survives for it at all) or only some
+#     of its builds vanished while others remain (what this script used to
+#     call a "reshape" and treat as benign, back when retention legitimately
+#     dropped older builds). Under an append-only channel neither shape can
+#     happen legitimately, so BOTH ARE NOW A HARD FAILURE, named by exact row
+#     key, with the triplet's remaining (or "none left") build values for
+#     context.
+#   - rows added: a (…, build) key that is new — a genuinely new row. Still
+#     information, never a failure; the channel is append-only, not frozen.
 #   - the signed SHA256SUMS's row for sdk-fetch-fixtures.tar.gz — the
 #     release-level fetch-fixtures asset, never an artifacts[] row — present
 #     or missing, before and after. Missing it in the CURRENT manifest IS A
-#     HARD FAILURE, at the same tier as a true-dropped row, named on its own
-#     line. SHA256SUMS's total line count is also reported before/after, but
-#     a line-count change alone is information, not a failure.
+#     HARD FAILURE, at the same tier as a removed row, named on its own line.
+#     SHA256SUMS's total line count is also reported before/after, but a
+#     line-count change alone is information, not a failure.
 #   - every OTHER line SHA256SUMS carries, by filename: assets ADDED (a new
-#     filename), REMOVED (a filename no longer served), and HASH-CHANGED
-#     (same filename, different hash — the bytes behind it were
-#     republished). A changed hash is reported PROMINENTLY, named, and is
-#     NOT a failure — republishing is routine, and it is exactly the third
-#     gap named at the top of this file: the one way a suite's expectations
-#     can change with no commit in this repository. Only
-#     sdk-fetch-fixtures.tar.gz going missing (above) is a hard stop; a bare
-#     add/remove/hash-change anywhere else is reported the same way
-#     everything else here is — information, never failure.
+#     filename, information), REMOVED (a filename no longer served — ANY
+#     removal is now A HARD FAILURE, named, the same append-only reasoning as
+#     the row keys above: nothing published is ever supposed to stop being
+#     listed), and HASH-CHANGED (same filename, different hash — the bytes
+#     behind it were republished). HASH-CHANGED is split by the filename's
+#     own shape: a TARBALL (`chtypes-*.tar.gz`, named per build) changing
+#     bytes IS A HARD FAILURE — tarball names are unique per build under the
+#     append-only contract, so its bytes never change once published. A
+#     release-level file (index.json, sdk-goldens.json,
+#     sdk-fetch-fixtures.tar.gz, SHA256SUMS itself, release notes,
+#     support-matrix.md, or anything else that is not a per-build tarball)
+#     changing bytes stays information, NOT a failure — republishing those is
+#     routine, and reading the hash column for them is exactly the third gap
+#     named at the top of this file: the one way a suite's expectations can
+#     change with no commit in this repository.
 #   - abi_revision coverage, before and after, broken down by build: how many
 #     of that build's rows carry an abi_revision.
 #   - the top-level "unbuildable" array: presence and contents, before and
@@ -128,12 +140,12 @@
 #     it in full, for someone reading locally.
 #   - each document's own generated_at.
 #
-# A hard failure (a true-dropped row, or a missing fixtures manifest row) is
-# never reported as a mere diff line. --compare exits non-zero and NAMES
-# every one of them — not a count — on the verdict itself, in this
-# repository's usual style (scripts/check-suite.sh, scripts/check-standalone.sh):
-# a summary a census can read off the exit code and the output together,
-# nothing else required.
+# A hard failure (a removed row key, a removed SHA256SUMS filename, a missing
+# fixtures manifest row, or a tarball HASH-CHANGED) is never reported as a
+# mere diff line. --compare exits non-zero and NAMES every one of them — not
+# a count — on the verdict itself, in this repository's usual style
+# (scripts/check-suite.sh, scripts/check-standalone.sh): a summary a census
+# can read off the exit code and the output together, nothing else required.
 #
 # NOT a substitute for scripts/fetch.sh's verification chain (the ed25519
 # signature over SHA256SUMS, the sha256 cross-checks down to the installed
@@ -153,13 +165,14 @@
 # current line or platform set, not a build number. The baseline file IS the
 # expectation; this script compares two documents and knows nothing about
 # what they ought to contain. --selftest proves every rule above fires (and
-# that a reshape does NOT) by planting each fault in fixtures this script
-# builds fresh every run, never by asserting today's real numbers. In
+# that a pure addition does NOT) by planting each fault in fixtures this
+# script builds fresh every run, never by asserting today's real numbers. In
 # particular, this script does NOT normalize a missing "build" field to 0 to
-# make a reshape look like "no change" — the producer's own documentation of
-# that convention lives outside this repository and is unverified from here;
-# reporting the reshape explicitly, by triplet, is what lets a human compare
-# it against what they predicted.
+# make a removed row key look like "no change" — the producer's own
+# documentation of that convention lives outside this repository and is
+# unverified from here; naming the removed row key explicitly, by triplet
+# with its remaining builds (if any), is what lets a human compare it against
+# what they predicted.
 #
 # A baseline taken by an older copy of this script (or any bare index.json,
 # such as a document saved some other way) still works with --compare for
@@ -184,7 +197,7 @@ SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$SCRIPTS/$(basename "${BASH_SOURCE[0]}")"
 die()  { echo "index-diff: $*" >&2; exit 1; }
 say()  { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
-usage() { sed -n '2,180p' "$SELF"; exit 2; }
+usage() { sed -n '2,193p' "$SELF"; exit 2; }
 
 command -v curl >/dev/null 2>&1 || die "curl is not on PATH"
 command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH"
@@ -361,41 +374,31 @@ after_by_triplet = {}
 for a in after["artifacts"]:
     after_by_triplet.setdefault(triplet(a), set()).add(build_label(a))
 
-# Classification runs at the TRIPLET level, per (clickhouse_minor, os,
-# arch): a triplet that still has any row after, under any build, is
-# reshaped, not dropped — only a triplet with NOTHING left under it is a
-# true drop. This is deliberate: the index accumulates builds over time
-# (the same triplet legitimately carries many historical build values at
-# once), so "a specific build's row vanished" is routine and "the whole
-# triplet vanished" is the actual signal a wholesale overwrite would leave.
-true_drops = []             # full keys whose triplet is entirely gone now
-reshaped = []                # (triplet, removed build labels, added build labels)
-reshape_consumed_added = {}  # triplet -> build labels already explained by a reshape
-
+# Classification is now a flat row-key diff: under the append-only channel
+# (chtypes#283) a row key served before and missing now can never happen
+# legitimately, whether its whole (clickhouse_minor, os, arch) triplet lost
+# every build or only some of its builds vanished while others remain — what
+# this script used to call a "reshape" and treat as benign, back when
+# retention legitimately dropped older builds. Both shapes are now removed,
+# reported the same way, grouped by triplet purely for readability (the
+# remaining builds, if any, are useful context for a human reading this).
+removed = []  # (triplet, removed build labels, remaining build labels)
 for t, b_builds in before_by_triplet.items():
     a_builds = after_by_triplet.get(t, set())
-    if not a_builds:
-        for b in b_builds:
-            true_drops.append(t + (b,))
-        continue
-    removed = b_builds - a_builds
-    if removed:
-        added_here = a_builds - b_builds
-        reshaped.append((t, removed, added_here))
-        reshape_consumed_added[t] = added_here
+    gone = b_builds - a_builds
+    if gone:
+        removed.append((t, gone, a_builds))
+removed.sort(key=lambda r: fmt_triplet(r[0]))
 
-added_new = []
-for k in after_rows:
-    if k in before_rows:
-        continue
-    t, b = k[:3], k[3]
-    if b in reshape_consumed_added.get(t, set()):
-        continue
-    added_new.append(k)
+removed_keys = sorted(
+    (t + (b,) for t, gone, _ in removed for b in gone),
+    key=fmt_full,
+)
 
-true_drops.sort(key=fmt_full)
-added_new.sort(key=fmt_full)
-reshaped.sort(key=lambda r: fmt_triplet(r[0]))
+# Additions are no longer filtered against anything a "reshape" might
+# explain — a new row key is simply new, whether or not its triplet also
+# lost some other build in the same comparison.
+added_new = sorted((k for k in after_rows if k not in before_rows), key=fmt_full)
 
 
 def abi_coverage(doc):
@@ -514,6 +517,21 @@ def parse_sums(lines):
 fixtures_before = sums_has(before_sums, FIXTURES_ASSET) if before_sums is not None else None
 fixtures_after = sums_has(after_sums, FIXTURES_ASSET)
 
+
+def is_tarball_asset(name):
+    # The per-build artifact shape (docs/guides/fetch.md §2):
+    # chtypes-<version>-<os>-<arch>[-b<N>].tar.gz — unique per build under
+    # the append-only channel, so its bytes never change once published.
+    # Every OTHER served file (index.json, sdk-goldens.json,
+    # sdk-fetch-fixtures.tar.gz, SHA256SUMS itself, release notes,
+    # support-matrix.md, or anything else the producer serves) is
+    # release-level and is identified by NOT matching this shape — derived
+    # from the filename, never a hand-listed set of release-level names, so a
+    # new release-level file the producer adds later is still read correctly
+    # with no change here.
+    return name.startswith("chtypes-") and name.endswith(".tar.gz")
+
+
 # Per-asset hash diff over the WHOLE manifest — not just the fixtures asset
 # above. This is the check issue #173 asked for: a regeneration can replace
 # an asset's bytes (a goldens or fixtures republish) while the row set, the
@@ -527,32 +545,35 @@ after_assets = parse_sums(after_sums)
 if before_assets is not None:
     assets_added = sorted(set(after_assets) - set(before_assets))
     assets_removed = sorted(set(before_assets) - set(after_assets))
-    assets_hash_changed = sorted(
+    assets_hash_changed_all = sorted(
         name for name in (set(before_assets) & set(after_assets))
         if before_assets[name] != after_assets[name]
     )
+    # Split by filename shape: a tarball's bytes changing is now a HARD
+    # FAILURE (append-only, unique per build); a release-level file's bytes
+    # changing stays information — that half is routine and unchanged from
+    # before #283.
+    tarball_hash_changed = [n for n in assets_hash_changed_all if is_tarball_asset(n)]
+    release_hash_changed = [n for n in assets_hash_changed_all if not is_tarball_asset(n)]
 else:
-    assets_added = assets_removed = assets_hash_changed = None
+    assets_added = assets_removed = assets_hash_changed_all = None
+    tarball_hash_changed = release_hash_changed = None
 
 print("index-diff: %s (before) vs %s (after)" % (baseline_path, current_index_path))
 print("  generated_at: before=%s  after=%s" % (before.get("generated_at", "(none)"), after.get("generated_at", "(none)")))
 print("  rows: before=%d  after=%d" % (len(before_rows), len(after_rows)))
 
-print("  rows added (new key, no reshape explains it): %d" % len(added_new))
+print("  rows added (new key): %d" % len(added_new))
 for k in added_new:
     print("    + %s" % fmt_full(k))
 
-print("  rows reshaped (same clickhouse_minor/os/arch, build key changed — NOT a failure): %d" % len(reshaped))
-for t, removed, added_here in reshaped:
-    print("    RESHAPED %s: build %s -> build %s" % (
+print("  rows REMOVED (row key present before, absent after — HARD FAILURE: the channel is append-only, so this can never happen legitimately): %d" % len(removed_keys))
+for t, gone, remaining in removed:
+    print("    REMOVED %s: build %s no longer present (remaining: %s)" % (
         fmt_triplet(t),
-        "/".join(sorted(removed, key=build_sort_key)),
-        "/".join(sorted(added_here, key=build_sort_key)) if added_here else "(none)",
+        "/".join(sorted(gone, key=build_sort_key)),
+        "/".join(sorted(remaining, key=build_sort_key)) if remaining else "(none — triplet entirely gone)",
     ))
-
-print("  rows TRUE-DROPPED (clickhouse_minor/os/arch entirely absent now): %d" % len(true_drops))
-for k in true_drops:
-    print("    - %s" % fmt_full(k))
 
 print("  abi_revision coverage by build:")
 for b in all_builds:
@@ -579,30 +600,43 @@ else:
     print("  SHA256SUMS assets added (new filename): %d" % len(assets_added))
     for name in assets_added:
         print("    + %s" % name)
-    print("  SHA256SUMS assets removed (filename no longer served): %d" % len(assets_removed))
+    print("  SHA256SUMS assets REMOVED (filename no longer served — HARD FAILURE: the channel is append-only, so this can never happen legitimately): %d" % len(assets_removed))
     for name in assets_removed:
         print("    - %s" % name)
-    print("  SHA256SUMS assets HASH-CHANGED (same filename, different bytes — republished, NOT a failure): %d" % len(assets_hash_changed))
-    for name in assets_hash_changed:
+    print("  SHA256SUMS assets HASH-CHANGED, release-level (same filename, different bytes — republished, NOT a failure): %d" % len(release_hash_changed))
+    for name in release_hash_changed:
+        print("    HASH-CHANGED %s" % name)
+    print("  SHA256SUMS assets HASH-CHANGED, TARBALL (same per-build filename, different bytes — HARD FAILURE: a build's tarball name is unique and its bytes never change once published): %d" % len(tarball_hash_changed))
+    for name in tarball_hash_changed:
         print("    HASH-CHANGED %s" % name)
 
 problems = []
-if true_drops:
-    problems.append("%d row(s) TRUE-DROPPED (clickhouse_minor/os/arch entirely absent now)" % len(true_drops))
+if removed_keys:
+    problems.append("%d row key(s) REMOVED (present before, absent after)" % len(removed_keys))
+if before_assets is not None and assets_removed:
+    problems.append("%d SHA256SUMS filename(s) REMOVED (present before, absent after)" % len(assets_removed))
 if not fixtures_after:
     problems.append("SHA256SUMS no longer carries a row for %s" % FIXTURES_ASSET)
+if before_assets is not None and tarball_hash_changed:
+    problems.append("%d tarball(s) HASH-CHANGED (bytes changed for a filename that is unique per build)" % len(tarball_hash_changed))
 
 if problems:
     print("VERDICT: FAIL — %s:" % "; ".join(problems))
-    for k in true_drops:
-        print("  TRUE DROP %s" % fmt_full(k))
+    for k in removed_keys:
+        print("  REMOVED %s" % fmt_full(k))
+    if before_assets is not None:
+        for name in assets_removed:
+            print("  REMOVED SHA256SUMS filename: %s" % name)
     if not fixtures_after:
         print("  MISSING SHA256SUMS row: %s — every binding's fetch suite here reads this fixture" % FIXTURES_ASSET)
+    if before_assets is not None:
+        for name in tarball_hash_changed:
+            print("  TARBALL HASH-CHANGED: %s" % name)
     sys.exit(1)
 
 unchanged = len(set(before_rows) & set(after_rows))
-print("VERDICT: ok — nothing was dropped (%d row(s) added, %d reshaped, %d unchanged), and %s is present in SHA256SUMS"
-      % (len(added_new), len(reshaped), unchanged, FIXTURES_ASSET))
+print("VERDICT: ok — nothing was removed (%d row(s) added, %d unchanged), and %s is present in SHA256SUMS"
+      % (len(added_new), unchanged, FIXTURES_ASSET))
 sys.exit(0)
 PY
 }
@@ -686,7 +720,9 @@ if [ "$ACTION" = selftest ]; then
     "$tmp/regen-reshaped/artifacts" \
     "$tmp/regen-fixtures-dropped/artifacts" \
     "$tmp/regen-unbuildable-reason/artifacts" \
-    "$tmp/regen-hash-changed/artifacts"
+    "$tmp/regen-hash-changed/artifacts" \
+    "$tmp/regen-goldens-removed/artifacts" \
+    "$tmp/regen-tarball-hash-changed/artifacts"
 
   # The needle for the elision selftest below comes from scripts/lint-public.sh
   # --print-rules, FETCHED LIVE — never a hand-written list (issue #159
@@ -706,6 +742,12 @@ if [ "$ACTION" = selftest ]; then
   RULES_OUT="$("$SCRIPTS/lint-public.sh" --print-rules)"
   NEEDLE="$(printf '%s\n' "$RULES_OUT" | awk -F'\t' '$1 == "LITERAL" { print $2; exit }')"
   [ -n "$NEEDLE" ] || die "could not obtain a needle from scripts/lint-public.sh --print-rules"
+
+  # The tarball filename regen-tarball-hash-changed below republishes with a
+  # different hash — "chtypes-<clickhouse_minor>-<os>-<arch>.tar.gz" for the
+  # 25.3/linux/amd64 row, built the same way the python fixture below names
+  # it (row()'s own "file" field), never re-derived twice.
+  TARBALL_NAME="chtypes-25.3-linux-amd64.tar.gz"
 
   NEEDLE="$NEEDLE" python3 - "$tmp" <<'PY'
 import json, os, sys
@@ -759,9 +801,14 @@ def write(rel, d):
         json.dump(d, f)
 
 
-def write_sums(rel, rows, include_fixtures=True, goldens_hash=None, fixtures_hash=None):
-    lines = ["%s  %s" % ("2" * 64, r["file"]) for r in rows]
-    lines.append("%s  sdk-goldens.json" % (goldens_hash or "3" * 64))
+def write_sums(
+    rel, rows, include_fixtures=True, include_goldens=True,
+    goldens_hash=None, fixtures_hash=None, tarball_hashes=None,
+):
+    tarball_hashes = tarball_hashes or {}
+    lines = ["%s  %s" % (tarball_hashes.get(r["file"], "2" * 64), r["file"]) for r in rows]
+    if include_goldens:
+        lines.append("%s  sdk-goldens.json" % (goldens_hash or "3" * 64))
     if include_fixtures:
         lines.append("%s  sdk-fetch-fixtures.tar.gz" % (fixtures_hash or "4" * 64))
     with open(os.path.join(tmp, rel), "w", encoding="utf-8") as f:
@@ -781,18 +828,22 @@ write("regen-ok/artifacts/index.json", doc(
 ))
 write_sums("regen-ok/artifacts/SHA256SUMS", regen_ok_rows)
 
-# regen-dropped: a TRUE DROP — the bug this script exists to catch — one
-# triplet's only row silently missing (an "--assemble" that overwrote rather
-# than unioned), nothing else disturbed.
+# regen-dropped: a whole triplet REMOVED — the bug this script exists to
+# catch — one triplet's only row silently missing (an "--assemble" that
+# overwrote rather than unioned), nothing else disturbed.
 regen_dropped_rows = [r for r in ROWS if not (r["clickhouse_minor"] == "25.3" and r["os"] == "darwin")]
 regen_dropped_rows.append(row("26.2", "linux", "amd64", build=2000, abi=5))
 write("regen-dropped/artifacts/index.json", doc(regen_dropped_rows, "2026-01-02T00:00:00Z"))
 write_sums("regen-dropped/artifacts/SHA256SUMS", regen_dropped_rows)
 
-# regen-reshaped: the shape a correct regeneration gives the rows that
-# CURRENTLY have no "build" field at all — the same triplet comes back keyed
-# under a real build number instead. Same triplet, nothing lost: must be
-# reported as a reshape, never as a drop.
+# regen-reshaped: the shape a PRE-#283 regeneration used to give the rows
+# that CURRENTLY have no "build" field at all — the same triplet comes back
+# keyed under a real build number instead, with the old build-less key gone.
+# Before the channel was append-only this was benign (a reshape of an
+# existing triplet, not a loss of one); under the append-only contract a row
+# key is never supposed to disappear at all, reshape or not — this is now
+# the row-key-removed failure this script exists to catch, same as a whole
+# triplet vanishing.
 regen_reshaped_rows = [
     row("24.8", "linux", "amd64", build=5000) if (r["clickhouse_minor"] == "24.8" and r.get("build") is None) else r
     for r in ROWS
@@ -805,6 +856,28 @@ write_sums("regen-reshaped/artifacts/SHA256SUMS", regen_reshaped_rows)
 # SHA256SUMS guard from the row-level checks entirely.
 write("regen-fixtures-dropped/artifacts/index.json", doc(ROWS, "2026-01-02T00:00:00Z"))
 write_sums("regen-fixtures-dropped/artifacts/SHA256SUMS", ROWS, include_fixtures=False)
+
+# regen-goldens-removed: every index row AND the fixtures row are UNCHANGED —
+# only the SHA256SUMS row for sdk-goldens.json (a release-level file that is
+# NOT the dedicated fixtures asset above) vanishes. Isolates the general
+# "any SHA256SUMS filename removed is a hard failure" rule (#283) from the
+# fixtures-specific check above, which only ever reads
+# sdk-fetch-fixtures.tar.gz by name.
+write("regen-goldens-removed/artifacts/index.json", doc(ROWS, "2026-01-02T00:00:00Z"))
+write_sums("regen-goldens-removed/artifacts/SHA256SUMS", ROWS, include_goldens=False)
+
+# regen-tarball-hash-changed: every row key AND every SHA256SUMS filename is
+# UNCHANGED — only one TARBALL's bytes differ (same per-build filename, new
+# hash). Under the append-only channel a build's tarball name is unique and
+# its bytes never change once published, so this is now a hard failure —
+# unlike a release-level file's hash changing (regen-hash-changed below),
+# which stays information.
+_changed_tarball_row = next(r for r in ROWS if r["clickhouse_minor"] == "25.3" and r["os"] == "linux")
+write("regen-tarball-hash-changed/artifacts/index.json", doc(ROWS, "2026-01-02T00:00:00Z"))
+write_sums(
+    "regen-tarball-hash-changed/artifacts/SHA256SUMS", ROWS,
+    tarball_hashes={_changed_tarball_row["file"]: "7" * 64},
+)
 
 # regen-unbuildable-reason: every index row is UNCHANGED — only a new
 # "unbuildable" entry appears, whose free-text "reason" carries a needle from
@@ -848,15 +921,15 @@ PY
   [ -f "$tmp/baseline.json" ] || fail "--snapshot did not write $tmp/baseline.json" "$out"
 
   # 2) --compare against the SAME channel: must exit 0 and say plainly that
-  #    nothing was dropped.
+  #    nothing was removed.
   rc=0
   out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/served" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] || fail "--compare against an UNCHANGED channel exited $rc; it must exit 0" "$out"
   case "$out" in
-    *"nothing was dropped"*) ;;
-    *) fail "an unchanged compare did not say plainly that nothing was dropped" "$out" ;;
+    *"nothing was removed"*) ;;
+    *) fail "an unchanged compare did not say plainly that nothing was removed" "$out" ;;
   esac
-  echo "  unchanged channel: exit 0, \"nothing was dropped\" — as required"
+  echo "  unchanged channel: exit 0, \"nothing was removed\" — as required"
 
   # 3) --compare against a channel that correctly UNIONED (kept every old row
   #    and added one): still exit 0, the new row is reported as added, and
@@ -879,37 +952,52 @@ PY
   echo "  correct union regeneration: exit 0, the added row and the unbuildable array's structural fields are reported, reason elided"
 
   # 4) --compare against a channel that RESHAPED one row (same triplet, only
-  #    the build key changed — exactly the transition the 13 build-less rows
-  #    in the real index are expected to get): must exit 0, must name the
-  #    triplet with its before/after build values, and must NOT be reported
-  #    as a drop of any kind.
+  #    the build key changed — the old row key gone, a new one present under
+  #    the same triplet — exactly the transition the 13 build-less rows in
+  #    the real index used to get under the old, non-append-only retention).
+  #    Under the append-only channel (#283) this must now FAIL: exit
+  #    non-zero, name the old row key as REMOVED, and — THE PIN — must never
+  #    again read as the old "RESHAPED ... NOT a failure" benign case. This
+  #    is the case chtypes#283 asks for by name: fails if a reshape is ever
+  #    read as benign again.
   rc=0
   out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-reshaped" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
-  [ "$rc" -eq 0 ] || fail "a build-only reshape was reported as a failure (exit $rc)" "$out"
+  [ "$rc" -ne 0 ] || fail "a build-only reshape was NOT caught as a failure (exit 0) -- under an append-only channel a row key moving from one build to another can never happen legitimately" "$out"
   case "$out" in
-    *"RESHAPED clickhouse_minor=24.8 os=linux arch=amd64: build none -> build 5000"*) ;;
-    *) fail "the reshape was not reported by triplet with its before/after build values" "$out" ;;
+    *"REMOVED clickhouse_minor=24.8 os=linux arch=amd64 build=none"*) ;;
+    *) fail "the reshaped triplet's old (now-removed) row key was not named" "$out" ;;
   esac
-  must_not_contain "$out" "TRUE DROP " "a build-only reshape was also reported as a TRUE DROP"
-  echo "  build-only reshape (clickhouse_minor=24.8 os=linux arch=amd64, build none -> 5000): exit 0, reported as RESHAPED, not dropped"
+  case "$out" in
+    *"    REMOVED clickhouse_minor=24.8 os=linux arch=amd64: build none no longer present (remaining: 5000)"*) ;;
+    *) fail "the reshape was not reported by triplet with its removed/remaining build values" "$out" ;;
+  esac
+  # THE PIN: a reshape must never again be describable as benign. Both the
+  # old per-row tag and the old section heading's own wording are checked —
+  # either one coming back would mean a reshape is reading as benign again.
+  must_not_contain "$out" "RESHAPED" "a reshape was reported with the old RESHAPED tag -- it must be reported as a removed row key, not as its own benign category"
+  must_not_contain "$out" "rows reshaped" "a reshape still has its own 'rows reshaped' section -- it must be folded into the removed-row-key failure reporting"
+  echo "  build-only reshape (clickhouse_minor=24.8 os=linux arch=amd64, build none -> 5000): now caught as a FAILURE, old row key named, never reported as RESHAPED/benign"
 
-  # 5) --compare against a channel that TRUE-DROPPED an entire triplet (no
+  # 5) --compare against a channel where an entire triplet was REMOVED (no
   #    build covers it any more): the one outcome that must never pass
-  #    quietly. Exit non-zero, and name it as a TRUE DROP.
+  #    quietly, whether under the old retention rule or the new append-only
+  #    one. Exit non-zero, and name it as REMOVED.
   rc=0
   out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-dropped" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
-  [ "$rc" -ne 0 ] || fail "the planted TRUE DROP was NOT caught — exited 0" "$out"
+  [ "$rc" -ne 0 ] || fail "the planted whole-triplet removal was NOT caught — exited 0" "$out"
   case "$out" in
-    *"TRUE DROP clickhouse_minor=25.3 os=darwin arch=arm64 build=1000"*) ;;
-    *) fail "the TRUE DROP fired (exit $rc) but did not name the row" "$out" ;;
+    *"REMOVED clickhouse_minor=25.3 os=darwin arch=arm64 build=1000"*) ;;
+    *) fail "the removed row fired (exit $rc) but did not name the row" "$out" ;;
   esac
-  echo "  TRUE DROP (clickhouse_minor=25.3 os=darwin arch=arm64 build=1000): caught, exit $rc, row named"
+  echo "  whole triplet REMOVED (clickhouse_minor=25.3 os=darwin arch=arm64 build=1000): caught, exit $rc, row named"
 
   # 6) --compare against a channel where ONLY the SHA256SUMS fixtures row
   #    vanished (every index row unchanged): the hard stop this addition
   #    exists for — a row-set diff over index.json alone cannot see this at
   #    all. Exit non-zero, name the asset, and keep it isolated from the
-  #    row-level checks.
+  #    row-level checks. This filename's removal is now ALSO caught by the
+  #    general "any SHA256SUMS filename removed" rule (#283), so both the
+  #    fixtures-specific message and the general one are expected.
   rc=0
   out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-fixtures-dropped" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
   [ "$rc" -ne 0 ] || fail "a missing SHA256SUMS fixtures row was NOT caught — exited 0" "$out"
@@ -917,8 +1005,32 @@ PY
     *"MISSING SHA256SUMS row: sdk-fetch-fixtures.tar.gz"*) ;;
     *) fail "the missing fixtures row fired (exit $rc) but did not name the asset" "$out" ;;
   esac
-  must_not_contain "$out" "TRUE DROP " "a fixtures-only failure was also reported as a row-level TRUE DROP"
-  echo "  SHA256SUMS fixtures row (sdk-fetch-fixtures.tar.gz) missing: caught, exit $rc, asset named, isolated from row-level checks"
+  case "$out" in
+    *"REMOVED SHA256SUMS filename: sdk-fetch-fixtures.tar.gz"*) ;;
+    *) fail "the missing fixtures row was not also reported by the general SHA256SUMS-filename-removed rule" "$out" ;;
+  esac
+  must_not_contain "$out" "REMOVED clickhouse_minor" "a fixtures-only failure was also reported as a row-level REMOVED key"
+  echo "  SHA256SUMS fixtures row (sdk-fetch-fixtures.tar.gz) missing: caught, exit $rc, asset named (both the fixtures-specific and the general removed-filename message), isolated from row-level checks"
+
+  # 6b) --compare against a channel where a DIFFERENT SHA256SUMS filename
+  #     (sdk-goldens.json, not the dedicated fixtures asset) was removed:
+  #     proves the general "any SHA256SUMS filename removed is a failure"
+  #     rule (#283) fires on its own, not only for the one filename check 6
+  #     above already covers by name.
+  rc=0
+  out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-goldens-removed" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
+  [ "$rc" -ne 0 ] || fail "a removed SHA256SUMS filename (sdk-goldens.json) was NOT caught — exited 0" "$out"
+  case "$out" in
+    *"SHA256SUMS assets REMOVED (filename no longer served — HARD FAILURE: the channel is append-only, so this can never happen legitimately): 1"*) ;;
+    *) fail "the removed-assets count was not reported as 1" "$out" ;;
+  esac
+  case "$out" in
+    *"REMOVED SHA256SUMS filename: sdk-goldens.json"*) ;;
+    *) fail "the removed filename (sdk-goldens.json) was not named on the verdict" "$out" ;;
+  esac
+  must_not_contain "$out" "MISSING SHA256SUMS row" "a goldens-only removal was also reported as the fixtures row missing"
+  must_not_contain "$out" "REMOVED clickhouse_minor" "a SHA256SUMS-filename-only failure was also reported as a row-level REMOVED key"
+  echo "  SHA256SUMS filename removed, not the fixtures asset (sdk-goldens.json): caught, exit $rc, filename named, isolated from the fixtures-specific and row-level checks"
 
   # 7) --compare against a channel whose only change is a new "unbuildable"
   #    entry with a "reason" carrying a needle from
@@ -952,17 +1064,18 @@ PY
   echo "  --show-reasons: the full reason text is printed, needle present, same exit code"
 
   # 8) --compare against a channel where the row set AND the SHA256SUMS line
-  #    count are both UNCHANGED — only two assets' hashes differ (same
-  #    filename, new bytes): the exact gap issue #173 reported, which a
-  #    row-set diff and a line-count check both miss entirely. Must exit 0 (a
-  #    changed hash alone is never a failure) and must NAME each asset, and
-  #    must not be reported as added, removed, or a TRUE DROP of any kind.
+  #    count are both UNCHANGED — only two RELEASE-LEVEL assets' hashes
+  #    differ (same filename, new bytes): the exact gap issue #173 reported,
+  #    which a row-set diff and a line-count check both miss entirely. Must
+  #    exit 0 (a release-level hash change alone is never a failure) and must
+  #    NAME each asset, and must not be reported as added, removed, or a
+  #    REMOVED row key of any kind.
   rc=0
   out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-hash-changed" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
-  [ "$rc" -eq 0 ] || fail "an asset hash change alone was reported as a failure (exit $rc)" "$out"
+  [ "$rc" -eq 0 ] || fail "a release-level asset hash change alone was reported as a failure (exit $rc)" "$out"
   case "$out" in
-    *"SHA256SUMS assets HASH-CHANGED (same filename, different bytes — republished, NOT a failure): 2"*) ;;
-    *) fail "the hash-changed count was not reported as 2" "$out" ;;
+    *"SHA256SUMS assets HASH-CHANGED, release-level (same filename, different bytes — republished, NOT a failure): 2"*) ;;
+    *) fail "the release-level hash-changed count was not reported as 2" "$out" ;;
   esac
   case "$out" in
     *"    HASH-CHANGED sdk-goldens.json"*) ;;
@@ -973,20 +1086,49 @@ PY
     *) fail "the changed sdk-fetch-fixtures.tar.gz hash was not named" "$out" ;;
   esac
   case "$out" in
+    *"SHA256SUMS assets HASH-CHANGED, TARBALL (same per-build filename, different bytes — HARD FAILURE: a build's tarball name is unique and its bytes never change once published): 0"*) ;;
+    *) fail "a release-level-only hash change was also reported as a nonzero tarball hash change" "$out" ;;
+  esac
+  case "$out" in
     *"SHA256SUMS assets added (new filename): 0"*) ;;
     *) fail "a hash-only change was also reported as an asset addition" "$out" ;;
   esac
   case "$out" in
-    *"SHA256SUMS assets removed (filename no longer served): 0"*) ;;
+    *"SHA256SUMS assets REMOVED (filename no longer served — HARD FAILURE: the channel is append-only, so this can never happen legitimately): 0"*) ;;
     *) fail "a hash-only change was also reported as an asset removal" "$out" ;;
   esac
-  must_not_contain "$out" "TRUE DROP " "an asset hash change alone was also reported as a TRUE DROP"
-  must_not_contain "$out" "MISSING SHA256SUMS row" "an asset hash change alone was also reported as a missing SHA256SUMS row"
+  must_not_contain "$out" "REMOVED clickhouse_minor" "a release-level asset hash change alone was also reported as a REMOVED row key"
+  must_not_contain "$out" "MISSING SHA256SUMS row" "a release-level asset hash change alone was also reported as a missing SHA256SUMS row"
   case "$out" in
-    *"nothing was dropped"*) ;;
-    *) fail "an asset hash change alone did not read as a clean verdict" "$out" ;;
+    *"nothing was removed"*) ;;
+    *) fail "a release-level asset hash change alone did not read as a clean verdict" "$out" ;;
   esac
-  echo "  SHA256SUMS asset hash changed, row set and line count unchanged (sdk-goldens.json, sdk-fetch-fixtures.tar.gz): exit 0, both named HASH-CHANGED, not added/removed/dropped"
+  echo "  SHA256SUMS release-level asset hash changed, row set and line count unchanged (sdk-goldens.json, sdk-fetch-fixtures.tar.gz): exit 0, both named HASH-CHANGED, not added/removed"
+
+  # 8b) --compare against a channel where the row set, the SHA256SUMS line
+  #     count, AND every filename are all UNCHANGED — only one TARBALL's
+  #     bytes differ. Unlike check 8 above, this must now FAIL: under the
+  #     append-only channel a build's tarball name is unique and its bytes
+  #     never change once published (#283), so a same-filename hash change on
+  #     one is no longer the routine republish a release-level file's is.
+  rc=0
+  out="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-tarball-hash-changed" "$SELF" --compare "$tmp/baseline.json" 2>&1)" || rc=$?
+  [ "$rc" -ne 0 ] || fail "a tarball hash change was NOT caught as a failure (exit 0)" "$out"
+  case "$out" in
+    *"SHA256SUMS assets HASH-CHANGED, TARBALL (same per-build filename, different bytes — HARD FAILURE: a build's tarball name is unique and its bytes never change once published): 1"*) ;;
+    *) fail "the tarball hash-changed count was not reported as 1" "$out" ;;
+  esac
+  case "$out" in
+    *"TARBALL HASH-CHANGED: $TARBALL_NAME"*) ;;
+    *) fail "the changed tarball was not named on the verdict" "$out" ;;
+  esac
+  case "$out" in
+    *"SHA256SUMS assets HASH-CHANGED, release-level (same filename, different bytes — republished, NOT a failure): 0"*) ;;
+    *) fail "a tarball-only hash change was also reported as a nonzero release-level hash change" "$out" ;;
+  esac
+  must_not_contain "$out" "REMOVED clickhouse_minor" "a tarball hash change alone was also reported as a REMOVED row key"
+  must_not_contain "$out" "REMOVED SHA256SUMS filename" "a tarball hash change alone was also reported as a removed SHA256SUMS filename"
+  echo "  tarball HASH-CHANGED ($TARBALL_NAME): caught as a FAILURE, named, isolated from row-level and release-level checks"
 
   # 9) --keep-current: compare against regen-ok (check 3 above — a correct
   #    union regeneration, six rows added relative to baseline.json) with
@@ -1008,11 +1150,11 @@ PY
   out2="$(CHTYPES_ARTIFACTS_URL="file://$tmp/regen-ok" "$SELF" --compare "$tmp/kept-current.json" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] || fail "a second --compare using the kept-current file as its OWN baseline, against the same channel, was not clean (exit $rc)" "$out2"
   case "$out2" in
-    *"nothing was dropped"*) ;;
+    *"nothing was removed"*) ;;
     *) fail "a second --compare using the kept-current file as its OWN baseline did not read as unchanged" "$out2" ;;
   esac
   echo "  --keep-current: the file kept from a compare against regen-ok is a valid baseline, and IS the after-side (a second --compare against the same channel reports nothing changed)"
 
-  echo "index-diff: selftest ok — unchanged/union/reshaped channels pass, a true triplet drop is caught by name, a missing SHA256SUMS fixtures row is caught by name, a served unbuildable reason is elided by default and shown only with --show-reasons, a same-filename hash change is named without being treated as a failure, and --keep-current writes a valid, genuinely-current baseline"
+  echo "index-diff: selftest ok — unchanged/union channels pass, a reshape is now caught as a failure and never read as benign, a whole-triplet removal is caught by name, a removed SHA256SUMS filename (the fixtures asset and any other) is caught by name, a served unbuildable reason is elided by default and shown only with --show-reasons, a release-level hash change is named without being treated as a failure while a TARBALL hash change is a failure, and --keep-current writes a valid, genuinely-current baseline"
   exit 0
 fi
