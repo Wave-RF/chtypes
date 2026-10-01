@@ -340,7 +340,12 @@ def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str],
             "tsdocMessageReporting": {"default": {"logLevel": "none"}},
         },
     }
-    config_path = ctx.scratch("ts", label) / "api-extractor.json"
+    # Beside the project's package.json, which api-extractor finds from the
+    # config file's own folder (measured: from anywhere else it refuses with
+    # "Unable to find a package.json file for the project being analyzed").
+    # `project` is always a scratch copy — a fixture copy or a tree extracted
+    # by `git archive` — never this checkout.
+    config_path = project / f"api-extractor.{label}.json"
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     run(["pnpm", "dlx", f"@microsoft/api-extractor@{API_EXTRACTOR_VERSION}", "run", "--local", "--config",
          config_path], cwd=ctx.neutral)
