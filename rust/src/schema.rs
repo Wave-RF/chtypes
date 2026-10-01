@@ -544,6 +544,18 @@ impl Schema {
     /// ([`RowResult::verdict`]) and, for rows whose verdict is
     /// [`crate::Verdict::True`], the export bytes.
     ///
+    /// `options` is the same [`RowOptions`] [`Schema::rows_export_with_options`]
+    /// takes — including [`RowOptions::columns`], the revision-5 INSERT
+    /// column list (issue #304): the C ABI's `chs_rows` already carries both
+    /// `columns_json` and the attached filter as independent trailing
+    /// parameters on the one call, and this method now passes `options`
+    /// through to [`Schema::rows_through_filtered`] rather than hardcoding
+    /// `columns: None`, so a column list composes with a filter here exactly
+    /// as it already does on [`Schema::rows_export_with_options`] — matching
+    /// Python's `rows(..., columns=, row_filter=)` and TypeScript's
+    /// `rows(..., {columns, rowFilter})`, which already let a caller combine
+    /// the two.
+    ///
     /// [`crate::Verdict::Error`] (the predicate threw) and
     /// [`crate::Verdict::Decline`] (declined — including a row whose own
     /// parse outcome was not [`crate::Outcome::Accepted`]) are NEVER
@@ -572,11 +584,11 @@ impl Schema {
     ///
     /// [`crate::Error::CrossLibrarySchema`], plus every error
     /// [`Schema::rows_export`] can return.
-    pub fn rows_export_with<K: AsRef<str>, V: AsRef<str>>(
+    pub fn rows_export_with(
         &self,
         format: Format,
         body: &[u8],
-        settings: &[(K, V)],
+        options: &RowOptions,
         export: Option<Format>,
         doc_flags: DocFlags,
         filter: &Filter<'_>,
@@ -588,17 +600,7 @@ impl Schema {
             });
         }
         let export_code = export.map_or(EXPORT_NONE, Format::code);
-        self.rows_through_filtered(
-            format,
-            body,
-            &RowOptions {
-                settings: owned_pairs(settings),
-                columns: None,
-            },
-            export_code,
-            doc_flags,
-            filter.handle,
-        )
+        self.rows_through_filtered(format, body, options, export_code, doc_flags, filter.handle)
     }
 
     /// Compile one boolean SQL expression over this schema's PHYSICAL columns
