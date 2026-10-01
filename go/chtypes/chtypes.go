@@ -181,6 +181,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // Version selects which ClickHouse semantics to emulate, e.g. "25.10.7.6".
@@ -742,10 +743,49 @@ func schemaErr(code int, msg, column string) error {
 	return &SchemaError{Column: column, Code: code, Msg: msg}
 }
 
-// Timezone is the server timezone assumed for bare DateTime/DateTime64
-// columns. A stock ClickHouse container is UTC; without pinning it the host's
-// TZ would leak into every result. Change it before the first call.
-var Timezone = "UTC"
+// timezoneMu guards timezoneDefault, the process-wide default server
+// timezone a Registry uses when it is not given WithTimezone. Timezone used
+// to be a bare exported `var`, assignable as `chtypes.Timezone = "..."` with
+// no synchronization at all against openLibrary's read of it — a data race
+// under Go's memory model whenever one goroutine set it while another opened
+// a not-yet-loaded artifact (issue #300). A package-level var cannot be
+// guarded against a caller's direct, unsynchronized assignment to it, so the
+// fix is the accessor pair below rather than a lock wrapped around the old
+// var: every read and write now goes through timezoneMu, with no path left
+// that bypasses it.
+var (
+	timezoneMu      sync.RWMutex
+	timezoneDefault = "UTC"
+)
+
+// Timezone returns the server timezone assumed for bare DateTime/DateTime64
+// columns by a Registry that is not given WithTimezone. A stock ClickHouse
+// container is UTC; without pinning it the host's TZ would leak into every
+// result. Safe for concurrent use.
+func Timezone() string {
+	timezoneMu.RLock()
+	defer timezoneMu.RUnlock()
+	return timezoneDefault
+}
+
+// SetTimezone changes the process-wide default server timezone returned by
+// Timezone — call it before opening a Registry that relies on the default
+// rather than passing WithTimezone. Safe for concurrent use: unlike the
+// exported var this replaced, SetTimezone and a concurrent Timezone (or an
+// artifact open that reads it) can no longer race (issue #300).
+//
+// SetTimezone does not retroactively re-timezone anything already chs_init'd
+// under the previous default: dlopen refcounts one image per artifact path,
+// and chs_init runs AT MOST ONCE PER PROCESS PER PATH (openLibrary). A later
+// open of a path already live under a different timezone — whether that
+// zone came from the old default, WithTimezone, or a new default set here —
+// is refused loudly rather than silently answered with the stale zone; see
+// WithTimezone.
+func SetTimezone(tz string) {
+	timezoneMu.Lock()
+	defer timezoneMu.Unlock()
+	timezoneDefault = tz
+}
 
 // ABIRevision is the chs_* ABI revision this package was COMPILED against —
 // CHS_ABI_REVISION from chtypes.h, read through cgo so the two can never drift.

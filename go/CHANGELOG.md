@@ -6,6 +6,14 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- **`WithTimezone` registry option** — the server timezone a `Registry`'s libraries are `chs_init`'d with, overriding the process-wide default for just that registry: parity with Python's `Registry(timezone=…)`, TypeScript's `RegistryOptions.timezone` and Rust's `RegistryOptions::timezone`. A path already `chs_init`'d under a different timezone — by another registry, `WithTimezone`, or the process-wide default — is refused loudly instead of silently reused, matching the refusal Python, TypeScript and Rust already give (closes #300).
+
+### Changed
+
+- **`Timezone` is now a function, `Timezone()`, with a new `SetTimezone(tz)` to change it — not a package-level `var`.** The var was read with no synchronization against a concurrent write to it, a data race `go test -race` can now prove was real; both are safe for concurrent use. `chtypes.Timezone = "…"` no longer compiles — read the default with `chtypes.Timezone()` and change it with `chtypes.SetTimezone("…")`, or prefer `WithTimezone` on the registries that need a different zone (#300).
+
 ## [0.5.0] — 2026-10-01
 
 **Upgrade together if you share a lock: 0.4.x and earlier refuse a schema-2 lock, and this release writes one.** Schema-1 locks are still read and are converted the next time the lock is written. A server's exact ClickHouse patch now loads when it is installed, or published and autofetch is on; otherwise the newest installed patch of the same line loads, flagged as not exact and warned once per pair, and no request ever crosses to another line. Several patches of one line coexist: the patch a line request selects installs flat as before, and every other patch installs under `patches/<minor>/<version>/`, where an older flat patch is moved rather than deleted. `--frozen` now installs exactly the pinned file, even while a newer one is served. Same ABI revision as 0.4.0 (6), so the artifacts 0.4.0 loads are the ones this release loads.

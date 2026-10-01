@@ -73,7 +73,7 @@ func section9Static(iso []byte, basic, bestEffort map[string]string) {
 func section14() {
 	section(14, "The static path (Go only)")
 	kv("chtypes.BuiltVersion()", string(chtypes.BuiltVersion())+"  (the lib/build artifact this binary linked)")
-	kv("chtypes.Timezone", chtypes.Timezone+"  (package default for bare DateTime; set before first call)")
+	kv("chtypes.Timezone()", chtypes.Timezone()+"  (package default for bare DateTime; see also WithTimezone)")
 
 	canon, err := chtypes.ValidateType(chtypes.BuiltVersion(), "Decimal(18,4)")
 	kv("ValidateType", "Decimal(18,4) -> "+okOr(err, canon))

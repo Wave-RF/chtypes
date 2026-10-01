@@ -442,11 +442,18 @@ type Library struct {
 	errorCodes errorCodeCache
 }
 
-// initMu guards dlopen + chs_init and the loadedLibs table below. Held only at
-// load time, never on a call path, so it costs a startup mutex and nothing else.
+// initMu guards dlopen + chs_init and the loadedLibs/loadedTimezones tables
+// below. Held only at load time, never on a call path, so it costs a startup
+// mutex and nothing else.
 var (
 	initMu     sync.Mutex
 	loadedLibs = map[string]*Library{}
+	// loadedTimezones records the timezone each loaded image's chs_init call
+	// actually used, keyed exactly like loadedLibs (the resolved artifact
+	// path). It is what lets a later open of the SAME image with a
+	// DIFFERENT timezone be refused loudly rather than silently reusing the
+	// first one's zone (WithTimezone, issue #300).
+	loadedTimezones = map[string]string{}
 )
 
 // Registry holds one Library per ClickHouse version and dispatches by
@@ -495,6 +502,20 @@ type Registry struct {
 	verify    bool     // re-hash each library against its manifest before dlopen
 	preload   []string // the lines opened at construction (WithPreload)
 	fetch     FetchOptions
+	// timezone is this registry's own server timezone (WithTimezone), "" when
+	// not given — effectiveTimezone then falls back to the process-wide
+	// default, Timezone().
+	timezone string
+}
+
+// effectiveTimezone is the timezone this registry's libraries are chs_init'd
+// with: WithTimezone's value when given, else the process-wide default
+// (Timezone/SetTimezone).
+func (r *Registry) effectiveTimezone() string {
+	if r.timezone != "" {
+		return r.timezone
+	}
+	return Timezone()
 }
 
 // RegistryOption configures NewRegistry.
@@ -504,6 +525,29 @@ type RegistryOption func(*Registry)
 // (CHTYPES_AUTOFETCH=1 turns it on for every registry). Off by default: a
 // production process must not begin a 250 MB download inside a request.
 func WithAutoFetch(on bool) RegistryOption { return func(r *Registry) { r.autoFetch = on } }
+
+// WithTimezone sets the server timezone this registry's libraries are
+// chs_init'd with, overriding the process-wide default (Timezone/SetTimezone)
+// for just this registry — parity with Python's `Registry(timezone=…)`,
+// TypeScript's `RegistryOptions.timezone` and Rust's
+// `RegistryOptions::timezone` (docs/reference/bindings.md's "Server
+// timezone" row; issue #300).
+//
+// An empty string is treated as WithTimezone not having been passed at all —
+// chs_init would refuse an empty name as an unknown timezone, so there is no
+// real request this costs.
+//
+// dlopen refcounts ONE image per resolved artifact path, and chs_init is not
+// idempotent over the timezone it was first called with: it unconditionally
+// rebuilds the refuse-list and resets DateLUT's default, so openLibrary runs
+// it AT MOST ONCE PER PROCESS PER PATH (see openLibrary's doc comment). A
+// path already live under a DIFFERENT timezone — opened by this registry,
+// another registry, or the process-wide default — is refused loudly rather
+// than silently answered with the stale zone, exactly as Python's
+// Registry(timezone=…) and Rust's Registry::with_timezone already refuse
+// (docs/guides/multi-version.md: "a second chs_init with a different
+// timezone is refused rather than silently re-timezoning a live library").
+func WithTimezone(tz string) RegistryOption { return func(r *Registry) { r.timezone = tz } }
 
 // WithFetchOptions sets the options a lazy fetch runs with — the source,
 // the trust list, a lock file, progress output. Dest defaults to the
@@ -730,7 +774,9 @@ func verifyArtifactLibrary(path string) error {
 }
 
 // openLibrary dlopens and chs_inits one artifact AT MOST ONCE PER PROCESS,
-// keyed on its path, and hands back the same *Library to every later caller.
+// keyed on its path, and hands back the same *Library to every later caller —
+// PROVIDED later caller asks for the same timezone the first one used; a
+// different one is refused loudly rather than silently honored (see below).
 //
 // The deduplication is a correctness requirement, not a cache. dlopen is
 // refcounted per path: opening one artifact twice yields ONE address space and
@@ -742,10 +788,17 @@ func verifyArtifactLibrary(path string) error {
 // Initializing once removes that hazard at the source, which is better than
 // putting a process-wide lock on every call to tolerate it.
 //
+// That same "at most once" rule is why a second request for an already-live
+// image naming a DIFFERENT timezone cannot be honored either silently or by
+// re-running chs_init: both would either lie about which zone is live or hit
+// the live-reader hazard above. It is refused instead — the same shape
+// Python's Registry(timezone=…) and Rust's Registry::with_timezone already
+// refuse (docs/guides/multi-version.md, issue #300's WithTimezone).
+//
 // This is also what makes Library.mu's write side trivially safe: chs_init runs
 // while the Library is still unreachable by any other goroutine, so nothing can
 // hold the read lock during it.
-func openLibrary(path string) (*Library, error) {
+func openLibrary(path, timezone string) (*Library, error) {
 	initMu.Lock()
 	defer initMu.Unlock()
 
@@ -762,6 +815,12 @@ func openLibrary(path string) (*Library, error) {
 		}
 	}
 	if lib, ok := loadedLibs[key]; ok {
+		if have := loadedTimezones[key]; have != timezone {
+			return nil, fmt.Errorf(
+				"chtypes: %s is already initialized with timezone %q; cannot use %q "+
+					"(one image per path — chs_init runs at most once per process)",
+				path, have, timezone)
+		}
 		return lib, nil
 	}
 
@@ -794,7 +853,7 @@ func openLibrary(path string) (*Library, error) {
 	}
 
 	// Each library keeps its own DateLUT and its own refuse-list.
-	tz := C.CString(Timezone)
+	tz := C.CString(timezone)
 	defer C.free(unsafe.Pointer(tz))
 	ul := ""
 	if b, err := os.ReadFile(filepath.Join(filepath.Dir(path), "unsafe_families.txt")); err == nil {
@@ -813,6 +872,7 @@ func openLibrary(path string) (*Library, error) {
 	}
 
 	loadedLibs[key] = lib
+	loadedTimezones[key] = timezone
 	return lib, nil
 }
 

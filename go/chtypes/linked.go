@@ -115,7 +115,7 @@ func ensureInit() error {
 					"from a different artifact than chtypes.h)", got, ABIRevision)
 			return
 		}
-		ctz := C.CString(Timezone)
+		ctz := C.CString(Timezone())
 		defer C.free(unsafe.Pointer(ctz))
 
 		// The refuse-list is generated at build time by probing every family in

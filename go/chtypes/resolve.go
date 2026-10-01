@@ -189,7 +189,7 @@ func (r *Registry) load(path string) (*Library, error) {
 			return nil, err
 		}
 	}
-	lib, err := openLibrary(path)
+	lib, err := openLibrary(path, r.effectiveTimezone())
 	if err != nil {
 		return nil, err
 	}
