@@ -17,13 +17,12 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["default_bases", "env_bases", "base_separator", "allowed_schemes",
-                   "goldens_repository_suffix", "fixtures_repository_suffix"],
+                   "fixtures_repository_suffix"],
       "properties": {
         "default_bases": {"type": "array", "items": {"type": "string", "format": "uri"}, "minItems": 1},
         "env_bases": {"type": "string"},
         "base_separator": {"type": "string", "minLength": 1, "maxLength": 1},
         "allowed_schemes": {"type": "array", "items": {"type": "string", "enum": ["https", "http", "file"]}},
-        "goldens_repository_suffix": {"type": "string", "pattern": "^/"},
         "fixtures_repository_suffix": {"type": "string", "pattern": "^/"}
       }
     },

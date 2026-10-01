@@ -88,7 +88,7 @@ Every one of the checks above runs **in this order**, and a failure at any step 
 
 <!-- BEGIN GENERATED: fetch-v1 constants -->
 
-Generated from `spec/fetch-v1/constants.json` (sha256:`8a2d5b1cf61539df42b504b81326190d383f3814a5b3e13ccfde18d5ee59d673`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
+Generated from `spec/fetch-v1/constants.json` (sha256:`bf19d75118f2d10a1aac28e7e4e44022d59d36d7bbea2f9c7b0c327dcc5a73fc`) by `scripts/fetch-v1/gen-constants.py`; do not hand-edit between the markers. Covers this guide's §7 and §8, plus a quick reference for the media types, predicate types and default trust key introduced in earlier sections.
 
 ## Reference
 

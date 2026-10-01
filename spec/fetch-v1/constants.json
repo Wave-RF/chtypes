@@ -6,7 +6,6 @@
     "env_bases": "CHTYPES_ARTIFACTS_URL",
     "base_separator": ",",
     "allowed_schemes": ["https", "http", "file"],
-    "goldens_repository_suffix": "/sdk-goldens",
     "fixtures_repository_suffix": "/sdk-fetch-fixtures"
   },
   "env": {
