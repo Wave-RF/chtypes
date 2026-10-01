@@ -1544,33 +1544,37 @@ func (s *LoadedSchema) rowsThrough(format Format, body []byte, settings map[stri
 // a filter admits"). RowsExport's own signature never moves; this is a NEW
 // entry point because RowsExport's variadic parameter is already spent, not
 // an option riding it. WithRowFilter attaches the filter; WithDocFlags
-// selects the document groups. With no WithRowFilter this behaves exactly
-// like RowsExport — same one chs_rows call, same rowsThrough.
+// selects the document groups; WithColumns (issue #304) names the revision-5
+// INSERT column list, composing with an attached filter in the same call —
+// the C ABI's chs_rows already carries both parameters on one call, and
+// Python/TypeScript already let a caller combine them. With no WithRowFilter
+// this behaves exactly like RowsExport — same one chs_rows call, same
+// rowsThrough.
 func (s *LoadedSchema) RowsExportWith(format Format, body []byte, settings map[string]string, exportFormat Format, opts ...RowsOption) (BatchResult, error) {
 	var cfg rowsExportWithConfig
 	for _, o := range opts {
-		o(&cfg)
+		o.applyRowsExportWith(&cfg)
 	}
 	if cfg.filter == nil {
-		return s.rowsThrough(format, body, settings, exportFormat, cfg.flags, nil)
+		return s.rowsThrough(format, body, settings, exportFormat, cfg.flags, cfg.columns)
 	}
 	if cfg.filter.schema.lib != s.lib {
 		return BatchResult{}, fmt.Errorf("chtypes: filter (ClickHouse %s) and schema (ClickHouse %s) come from different libraries", cfg.filter.schema.lib.Version, s.lib.Version)
 	}
-	return s.rowsThroughWithFilter(format, body, settings, exportFormat, cfg.flags, cfg.filter)
+	return s.rowsThroughWithFilter(format, body, settings, exportFormat, cfg.flags, cfg.columns, cfg.filter)
 }
 
 // rowsThroughWithFilter is rowsThrough's twin for an attached filter: the
-// same one chs_rows call, with the filter's handle as the tenth argument.
-// Locking mirrors LoadedFilter.Eval's cross-schema case: when the filter's
-// schema is this same handle, one lock covers both (a filter call is a use
-// of its schema handle too, and chs_rows already is one for s); when it
-// differs — same library, different LoadedSchema, the case the C layer
-// answers rejected/1002 for — both handle locks are taken in a fixed global
-// order under the library's shared read lock, exactly as Eval does, so a
-// crossed call cannot deadlock against a concurrent one running the other
-// way.
-func (s *LoadedSchema) rowsThroughWithFilter(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags, f *LoadedFilter) (BatchResult, error) {
+// same one chs_rows call, with the column list as the ninth argument and the
+// filter's handle as the tenth. Locking mirrors LoadedFilter.Eval's
+// cross-schema case: when the filter's schema is this same handle, one lock
+// covers both (a filter call is a use of its schema handle too, and chs_rows
+// already is one for s); when it differs — same library, different
+// LoadedSchema, the case the C layer answers rejected/1002 for — both handle
+// locks are taken in a fixed global order under the library's shared read
+// lock, exactly as Eval does, so a crossed call cannot deadlock against a
+// concurrent one running the other way.
+func (s *LoadedSchema) rowsThroughWithFilter(format Format, body []byte, settings map[string]string, exportFormat Format, flags DocFlags, columns []string, f *LoadedFilter) (BatchResult, error) {
 	fs := f.schema
 	sj := settingsJSON(settings)
 	csj := C.CString(sj)
@@ -1582,6 +1586,11 @@ func (s *LoadedSchema) rowsThroughWithFilter(format Format, body []byte, setting
 	} else {
 		pbody = C.CString("")
 		defer C.free(unsafe.Pointer(pbody))
+	}
+
+	pcols := columnsCArgLoaded(columns)
+	if pcols != nil {
+		defer C.free(unsafe.Pointer(pcols))
 	}
 
 	var ob *C.chs_lib_bytes
@@ -1616,7 +1625,7 @@ func (s *LoadedSchema) rowsThroughWithFilter(format Format, body []byte, setting
 		return BatchResult{}, fmt.Errorf("chtypes: filter is closed")
 	}
 	out := C.chs_lib_rows_export_filtered(&s.lib.lib, s.handle, C.int(format), pbody, C.size_t(len(body)), csj,
-		C.int(exportFormat), C.uint(flags), ob, nil, f.handle)
+		C.int(exportFormat), C.uint(flags), ob, pcols, f.handle)
 	runtime.KeepAlive(body)
 	// Copy-then-free the export buffer inside the critical section, exactly
 	// as rowsThrough does.

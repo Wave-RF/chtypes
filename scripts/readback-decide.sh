@@ -5,10 +5,16 @@
 # locally with stubbed inputs instead of only by a scheduled run against the
 # live served index.
 #
-# THE PROBLEM THIS CLOSES. Every exit-1 compare (a real drop, or the
-# sdk-fetch-fixtures.tar.gz manifest row gone missing) posted to the public
-# issue and failed the run — correct, because a red scheduled run is the
-# alarm and the baseline must never advance on a real loss. But nothing told
+# THE PROBLEM THIS CLOSES. Every exit-1 compare (a row key removed, a
+# SHA256SUMS filename removed — including, but no longer limited to,
+# sdk-fetch-fixtures.tar.gz going missing — or, since the channel went
+# append-only, a tarball's bytes changing too; see scripts/index-diff.sh's
+# own header for the exact append-only rule, chtypes#283) posted to the
+# public issue and failed the run — correct, because a red scheduled run is
+# the alarm and the baseline must never advance on a real loss. This script
+# itself never re-derives WHICH of those fired — it only reads index-diff.sh's
+# own `generated_at:` line, so a tighter or looser failure rule there changes
+# nothing here (pinned below). But nothing told
 # a BRAND NEW drop apart from the same drop still sitting there three runs
 # later: a persistent outage re-posted an identical comment on every single
 # scheduled run (measured: 2026-09-29T23:56Z and 2026-09-30T05:25Z both
@@ -214,11 +220,44 @@ selftest() {
     echo "readback-decide: selftest ok — a missing out-file is a usage error, not a decision"
   fi
 
+  # 8. THE PIN for chtypes#283: this script's decision must not depend on
+  #    WHICH of index-diff.sh's failure classes fired — only on the
+  #    `generated_at:` line and the exit code. Fixture text shaped like the
+  #    REAL output of the tighter, append-only verdict (a REMOVED row key —
+  #    the wording #283 introduced, never the old "TRUE-DROPPED"/"RESHAPED,
+  #    NOT a failure" text this script was never supposed to key off of
+  #    either), not the generic placeholder write_out() above uses elsewhere
+  #    in this file. If a future change to index-diff.sh's wording ever made
+  #    this script parse the verdict line itself instead of the
+  #    `generated_at:` line, this is what would catch it.
+  out8="$tmp/out8.txt"
+  cat > "$out8" <<'EOF'
+index-diff: /tmp/baseline.json (before) vs /tmp/current-index.json (after)
+  generated_at: before=2026-09-30T00:00:00Z  after=2026-09-30T01:00:00Z
+  rows: before=4  after=3
+  rows added (new key): 0
+  rows REMOVED (row key present before, absent after — HARD FAILURE: the channel is append-only, so this can never happen legitimately): 1
+    REMOVED clickhouse_minor=25.3 os=darwin arch=arm64: build 1000 no longer present (remaining: none — triplet entirely gone)
+VERDICT: FAIL — 1 row key(s) REMOVED (present before, absent after):
+  REMOVED clickhouse_minor=25.3 os=darwin arch=arm64 build=1000
+EOF
+  got8="$(decide 1 "$out8" "")"
+  outcome8="$(printf '%s\n' "$got8" | sed -n 's/^outcome=//p')"
+  before8="$(printf '%s\n' "$got8" | sed -n 's/^before=//p')"
+  after8="$(printf '%s\n' "$got8" | sed -n 's/^after=//p')"
+  if [ "$outcome8" = post-fail ] && [ "$before8" = "2026-09-30T00:00:00Z" ] && [ "$after8" = "2026-09-30T01:00:00Z" ]; then
+    echo "readback-decide: selftest ok — a real append-only REMOVED-row verdict (#283's tighter failure, never the old TRUE-DROPPED/RESHAPED wording) still decides post-fail from the generated_at line alone, whatever index-diff.sh's verdict prose says"
+  else
+    echo "SELFTEST FAILED (real append-only verdict shape): wanted outcome=post-fail before=2026-09-30T00:00:00Z after=2026-09-30T01:00:00Z, got:" >&2
+    printf '%s\n' "$got8" >&2
+    fail=1
+  fi
+
   if [ "$fail" -ne 0 ]; then
     rm -rf "$tmp"
     return 1
   fi
-  echo "readback-decide: selftest ok — a first drop posts, an identical repeat skips but still fails, a new generated_at posts again, a fetch failure posts nothing, a bad exit code posts nothing with its own reason, and exit 0's quiet/post-advance split is untouched by the last-drop file"
+  echo "readback-decide: selftest ok — a first drop posts, an identical repeat skips but still fails, a new generated_at posts again, a fetch failure posts nothing, a bad exit code posts nothing with its own reason, exit 0's quiet/post-advance split is untouched by the last-drop file, and a real append-only (#283) REMOVED-row verdict still decides post-fail"
   rm -rf "$tmp"
   return 0
 }
