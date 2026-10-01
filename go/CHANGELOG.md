@@ -8,12 +8,15 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Added
 
+- **`WithTimezone` registry option** — the server timezone a `Registry`'s libraries are `chs_init`'d with, overriding the process-wide default for just that registry: parity with Python's `Registry(timezone=…)`, TypeScript's `RegistryOptions.timezone` and Rust's `RegistryOptions::timezone`. A path already `chs_init`'d under a different timezone — by another registry, `WithTimezone`, or the process-wide default — is refused loudly instead of silently reused, matching the refusal Python, TypeScript and Rust already give (closes #300).
+- **`DefaultTimezone()` / `SetDefaultTimezone(tz)`** — a synchronized way to read or change the process-wide default `Timezone`, so a goroutine changing it and a concurrent library open (which reads it) no longer race. `go test -race` can now prove that race was real.
 - **`WithColumns` now composes with `RowsExportWith`**, so the revision-5 INSERT column list can be attached to the same call as `WithRowFilter` (closes #304). `RowsOption` is now an interface a `RowOption` (`WithColumns`) satisfies too — the same shape `RowsExportOption` already gives `RowsExport` — rather than a plain function type; every existing `WithRowFilter`/`WithDocFlags` call site is unaffected. The C ABI's `chs_rows` already carries `columns_json` and the attached filter as two independent trailing parameters on one call; this binding previously hardcoded the column list to `nil` on `RowsExportWith` alone, where Python's and TypeScript's `rows(..., columns=, row_filter=)` already let a caller combine the two.
 
 - **`LoadedSchema` now carries a GC finalizer backup**, matching the existing `LoadedFilter`/`LoadedBlock` ones: a schema nobody explicitly `Close()`'d no longer leaks its C handle for the life of the process. `Close()` stays the only deterministic release path — the finalizer is a backstop, not a replacement (closes #302).
 
 ### Changed
 
+- **`Timezone` is superseded, not removed, and still compiles.** `WithTimezone` (per registry) and `SetDefaultTimezone`/`DefaultTimezone` (process-wide, synchronized) are the recommended way to set or read the server timezone now; `Timezone` remains a plain `var` for a downstream consumer that already assigns it directly, and is a candidate for removal in a future deliberate breaking release. `chtypes.Timezone = "…"` is unchanged and still safe before the first library opens, exactly as its doc comment has always said (#300).
 - **Every build the release publishes stays fetchable.** 0.3.2 said an older build stays fetchable only until that line's next publish evicts it under retention. That no longer holds: since 2026-09-30 the release is append-only and lists every build it publishes, and selection takes the newest at this SDK's ABI revision (`docs/guides/fetch.md` §2). Builds dropped before that date are re-listed only where a release-signed `SHA256SUMS` proves them.
 
 ## [0.5.0] — 2026-10-01
