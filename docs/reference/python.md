@@ -27,7 +27,7 @@ Row-level verdicts are **returned, never raised**: a rejected row is a `RowResul
 
 `verify_hashes=True` re-hashes each line against its manifest at load. Off by default: once files are in a registry directory the loader trusts the directory, exactly as a runtime trusts `node_modules`.
 
-**Exact-patch resolution (SDK#284).** A minor line (`"25.8"`) always resolves to the newest patch this registry can reach, pinned for as long as the registry stays open. An exact patch (`"25.8.28.1-lts"`) loads that patch when it is installed, or — with `autofetch` on — published; otherwise it falls back to the newest patch of the same line, `exact=False`, and raises `PatchFallbackWarning` once per (requested, actual) pair per process (the pair is recorded before the warning is raised, so a `warnings.filterwarnings("error", ...)` cannot cause a retry to warn again). Never crosses to another line — that failure is still `ArtifactMissingError`. A fallen-back patch is re-checked against the search path at most once every 60 seconds per (destination, requested patch), so a patch installed later is picked up with no restart. Several patches of one line can be open in this process at once, each its own `dlopen`'d image; `libraries()` lists them in full numeric version order, not just by line.
+**Exact-patch resolution (SDK#284).** A minor line (`"26.8"`) always resolves to the newest patch this registry can reach, pinned for as long as the registry stays open. An exact patch (`"26.8.15.10-lts"`) loads that patch when it is installed, or — with `autofetch` on — published; otherwise it falls back to the newest patch of the same line, `exact=False`, and raises `PatchFallbackWarning` once per (requested, actual) pair per process (the pair is recorded before the warning is raised, so a `warnings.filterwarnings("error", ...)` cannot cause a retry to warn again). Never crosses to another line — that failure is still `ArtifactMissingError`. A fallen-back patch is re-checked against the search path at most once every 60 seconds per (destination, requested patch), so a patch installed later is picked up with no restart. Several patches of one line can be open in this process at once, each its own `dlopen`'d image; `libraries()` lists them in full numeric version order, not just by line.
 
 ## Library
 
@@ -91,7 +91,7 @@ The export channel is keyword-only on `rows`: `export=Format.JSON_COMPACT_EACH_R
 The command:
 
 ```sh
-python -m chtypes fetch 25.8     # or the `chtypes` console script; also verify, list, where
+python -m chtypes fetch 26.8     # or the `chtypes` console script; also verify, list, where
 ```
 
 The ed25519 verifier is pure stdlib, like the rest of the package.

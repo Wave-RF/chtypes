@@ -23,7 +23,7 @@ discovery-kit section (11) runs offline, against CANNED bytes shaped exactly
 like a real server's responses.
 
     uv run demo.py                        # newest vendored version
-    CHTYPES_VERSION=25.8 uv run demo.py   # pick a line
+    CHTYPES_VERSION=26.8 uv run demo.py   # pick a line
     ../chplay.sh python                   # same, with prerequisite checks
 
 Nothing here is a test — the real suites live in python/tests.
@@ -158,7 +158,7 @@ def section1() -> tuple[Registry, chtypes.Library]:
     try:
         registry = Registry(directory)
     except chtypes.RegistryError as err:
-        fatal(f"open registry {directory!r}: {err}\n\nFetch an artifact first: `scripts/fetch.sh 25.8`.")
+        fatal(f"open registry {directory!r}: {err}\n\nFetch an artifact first: `scripts/fetch.sh 26.8`.")
 
     versions = list(registry.versions())
     kv("registry dir", directory)
@@ -168,8 +168,8 @@ def section1() -> tuple[Registry, chtypes.Library]:
         note("only one artifact is built; the tour still runs, and section 12's")
         note("cross-version sweeps will degrade gracefully. More: `scripts/fetch.sh 26.7`")
 
-    # Version selection: a minor line ("25.8") and an exact patch
-    # ("25.8.28.1-lts") both resolve. Docker tags drift, so an
+    # Version selection: a minor line ("26.8") and an exact patch
+    # ("26.8.15.10-lts") both resolve. Docker tags drift, so an
     # exact-match-only lookup would silently lose a whole version line.
     want = os.environ.get("CHTYPES_VERSION")
     if want:

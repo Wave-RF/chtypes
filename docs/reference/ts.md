@@ -30,7 +30,7 @@ The two are **peers**. A decline never satisfies `instanceof SchemaError`.
 
 `for()` / `resolve()` are synchronous and never fetch; `open()` / `openResolution()` are the async twins that can.
 
-**A patch request (`"25.8.28.1-lts"`) that is not installed, or not published, falls back to the newest patch of the SAME line** — never another line, which stays the one `ArtifactMissingError` — and `resolve()` / `openResolution()` report it as `exact: false`. `for()` and `open()` still warn: one `process.emitWarning` (`type: 'PatchFallbackWarning'`, `code: 'CHTYPES_PATCH_FALLBACK'`) per (requested, actual) pair per process, naming the fetch command that would install the exact patch. A minor-line request never falls back and is always `exact: true`. Two patches of one line are two loaded libraries — nothing is ever unloaded — see [`guides/multi-version.md`](../guides/multi-version.md).
+**A patch request (`"26.8.15.10-lts"`) that is not installed, or not published, falls back to the newest patch of the SAME line** — never another line, which stays the one `ArtifactMissingError` — and `resolve()` / `openResolution()` report it as `exact: false`. `for()` and `open()` still warn: one `process.emitWarning` (`type: 'PatchFallbackWarning'`, `code: 'CHTYPES_PATCH_FALLBACK'`) per (requested, actual) pair per process, naming the fetch command that would install the exact patch. A minor-line request never falls back and is always `exact: true`. Two patches of one line are two loaded libraries — nothing is ever unloaded — see [`guides/multi-version.md`](../guides/multi-version.md).
 
 ## Library
 
@@ -115,7 +115,7 @@ An unknown name, an `ALIAS` column, or a repeated name is the server's own refus
 The command is `bin: chtypes`:
 
 ```sh
-npx @wavehouse/chtypes fetch 25.8    # also verify, list, where
+npx @wavehouse/chtypes fetch 26.8    # also verify, list, where
 ```
 
 ## Discovery

@@ -8,10 +8,10 @@ Two things: this package, and at least one **artifact** — the per-version nati
 
 ```sh
 go get github.com/wave-rf/chtypes/go
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8
+go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
 ```
 
-The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/25.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
+The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/26.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
 
 The default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing, includes no header and needs no build tree. That is what `go get` gives you.
 
@@ -32,7 +32,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	lib, err := reg.For("25.8") // a line or an exact patch; never a nearest match
+	lib, err := reg.For("26.8") // a line or an exact patch; never a nearest match
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -95,7 +95,7 @@ scripts/check-standalone.sh           # proves the first from a bare copy of go/
 
 ## Tests
 
-`go test ./...`. Every test that needs an artifact **skips loudly by name** without a registry on the search path, and a suite that ran nothing fails — `scripts/check-standalone.sh` reads its verdict off a `go test -json` census rather than an exit code. `scripts/fetch.sh 25.8` fills the cache and the plain command then runs everything.
+`go test ./...`. Every test that needs an artifact **skips loudly by name** without a registry on the search path, and a suite that ran nothing fails — `scripts/check-standalone.sh` reads its verdict off a `go test -json` census rather than an exit code. `scripts/fetch.sh 26.8` fills the cache and the plain command then runs everything.
 
 ## License
 

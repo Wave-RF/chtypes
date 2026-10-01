@@ -85,7 +85,7 @@ require_artifacts() {
     say "chplay: no chtypes artifacts under $REGISTRY"
     say ""
     say "  Fetch one first (verified, into the per-user cache):"
-    say "      ../scripts/fetch.sh 25.8"
+    say "      ../scripts/fetch.sh 26.8"
     say ""
     say "  Or point \$CHTYPES_REGISTRY at a directory that has them."
     exit 1

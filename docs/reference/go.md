@@ -95,7 +95,7 @@ The frozen numbers the default build hardcodes (`Format`, `DocFlags`, `CodeUnsup
 The command is `go/cmd/chtypes`, runnable without installing anything:
 
 ```sh
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8
+go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
 ```
 
 The implementation is stdlib only — `crypto/ed25519`, `crypto/sha256`, `archive/tar`, `net/http`.

@@ -8,7 +8,7 @@ Every artifact is opened with `RTLD_NOW | RTLD_LOCAL`. `RTLD_LOCAL` is the entir
 
 The cost, measured: **about 120 MB resident per loaded version** (160–300 MB on disk). Load the lines you serve, not every line published. Seven artifacts in one directory, opened from one process: **1.096 s and 351 MB resident** to open them all, against **1 ms and 66.8 MB** to open none.
 
-**Each patch is its own library, not only each line (chtypes#284).** A process that follows its servers through upgrades loads one library for every EXACT patch it is asked for — two patches of one line, `25.8.28.1-lts` and `25.8.33.5-lts` say, are two separate `dlopen`s, each with its own `chs_init`, DateLUT and refuse-list, at about the same ~120 MB each — and no binding ever unloads one on its own. `Libraries()` lists what is actually open, in full numeric version order, not deduplicated by line. Budget for the patches you actually serve at the same time, not the lines, and after a fleet-wide upgrade completes, restart or roll long-lived processes so the patches nobody asks for any more are released. That a second patch of the SAME line costs about the same as a different line is **inferred** — it is the same build class — not separately measured.
+**Each patch is its own library, not only each line (chtypes#284).** A process that follows its servers through upgrades loads one library for every EXACT patch it is asked for — two patches of one line, `26.8.14.3-lts` and `26.8.15.10-lts` say, are two separate `dlopen`s, each with its own `chs_init`, DateLUT and refuse-list, at about the same ~120 MB each — and no binding ever unloads one on its own. `Libraries()` lists what is actually open, in full numeric version order, not deduplicated by line. Budget for the patches you actually serve at the same time, not the lines, and after a fleet-wide upgrade completes, restart or roll long-lived processes so the patches nobody asks for any more are released. That a second patch of the SAME line costs about the same as a different line is **inferred** — it is the same build class — not separately measured.
 
 **Loading is lazy per line, in every binding and in every constructor.** Constructing a registry — with a directory or without one — reads `manifest.json` files and dlopens nothing. **Nothing in these libraries opens an artifact except a request for a specific version, or an explicit `preload`.** Not `versions()`, not `libraries()`, not a membership test, not formatting the registry.
 
@@ -20,10 +20,10 @@ A deployment that knows which lines it serves can open them at construction, and
 
 | SDK        | spelling                                                                                      |
 | ---------- | --------------------------------------------------------------------------------------------- |
-| Go         | `chtypes.NewRegistry(dir, chtypes.WithPreload("25.8", "26.7"))`                               |
-| Python     | `Registry(dir, preload=["25.8", "26.7"])`                                                     |
-| TypeScript | `new Registry(dir, { preload: ['25.8', '26.7'] })`                                            |
-| Rust       | `Registry::open(dir, RegistryOptions { preload: vec!["25.8".into()], ..Default::default() })` |
+| Go         | `chtypes.NewRegistry(dir, chtypes.WithPreload("26.8", "26.7"))`                               |
+| Python     | `Registry(dir, preload=["26.8", "26.7"])`                                                     |
+| TypeScript | `new Registry(dir, { preload: ['26.8', '26.7'] })`                                            |
+| Rust       | `Registry::open(dir, RegistryOptions { preload: vec!["26.8".into()], ..Default::default() })` |
 
 Checksum verification (`WithVerifyChecksums` / `verify_hashes` / `verifyChecksums` / `verify_checksums`) is a policy on the registry and not a property of that list: **a library's checksum is computed immediately before that library is dlopen'd, and at no other time** — at construction for the preloaded lines, at first use for the rest, never for a line nobody asks for.
 
@@ -77,13 +77,13 @@ println!("{:?}", registry.versions());
 
 ## Resolution: the exact patch, else its line — never another line
 
-A registry resolves a **minor line** (`25.8`) or an **exact patch** (`25.8.28.1-lts`). `For`/`for_version`/`for`/`open` return the `Library`; the new `Resolve`/`resolve`/`resolve`/`resolve` (chtypes#284) return a small `Resolution` carrying the same `Library` plus what was requested, what actually loaded, and whether it was exact:
+A registry resolves a **minor line** (`26.8`) or an **exact patch** (`26.8.15.10-lts`). `For`/`for_version`/`for`/`open` return the `Library`; the new `Resolve`/`resolve`/`resolve`/`resolve` (chtypes#284) return a small `Resolution` carrying the same `Library` plus what was requested, what actually loaded, and whether it was exact:
 
 <details open><summary><b>Go</b></summary>
 
 ```go
-r, _ := reg.Resolve("25.8.30.16")   // not built yet; the release has 25.8.28.1-lts
-fmt.Println(r.Requested, r.Version, r.Exact)   // 25.8.30.16 25.8.28.1-lts false
+r, _ := reg.Resolve("26.8.16.1")   // not built yet; the release has 26.8.15.10-lts
+fmt.Println(r.Requested, r.Version, r.Exact)   // 26.8.16.1 26.8.15.10-lts false
 ```
 
 </details>
@@ -91,8 +91,8 @@ fmt.Println(r.Requested, r.Version, r.Exact)   // 25.8.30.16 25.8.28.1-lts false
 <details><summary><b>Python</b></summary>
 
 ```python
-r = registry.resolve("25.8.30.16")
-print(r.requested, r.version, r.exact)   # 25.8.30.16 25.8.28.1-lts False
+r = registry.resolve("26.8.16.1")
+print(r.requested, r.version, r.exact)   # 26.8.16.1 26.8.15.10-lts False
 ```
 
 </details>
@@ -100,8 +100,8 @@ print(r.requested, r.version, r.exact)   # 25.8.30.16 25.8.28.1-lts False
 <details><summary><b>TypeScript</b></summary>
 
 ```ts
-const r = registry.resolve('25.8.30.16');   // synchronous, never fetches
-console.log(r.requested, r.version, r.exact);   // 25.8.30.16 25.8.28.1-lts false
+const r = registry.resolve('26.8.16.1');   // synchronous, never fetches
+console.log(r.requested, r.version, r.exact);   // 26.8.16.1 26.8.15.10-lts false
 ```
 
 </details>
@@ -109,8 +109,8 @@ console.log(r.requested, r.version, r.exact);   // 25.8.30.16 25.8.28.1-lts fals
 <details><summary><b>Rust</b></summary>
 
 ```rust
-let r = registry.resolve("25.8.30.16")?;
-println!("{} {} {}", r.requested, r.version, r.exact);   // 25.8.30.16 25.8.28.1-lts false
+let r = registry.resolve("26.8.16.1")?;
+println!("{} {} {}", r.requested, r.version, r.exact);   // 26.8.16.1 26.8.15.10-lts false
 ```
 
 </details>
@@ -120,7 +120,7 @@ println!("{} {} {}", r.requested, r.version, r.exact);   // 25.8.30.16 25.8.28.1
 **A PATCH request resolves to that exact patch when it is installed, or published with autofetch on. Otherwise it falls back to the newest installed or published patch of the SAME line — never another line — flagged `Exact = false`, and warns once per (requested, actual) pair per process:**
 
 ```text
-ClickHouse 25.8.30.16 is not installed for darwin-arm64; using 25.8.28.1-lts, the newest installed patch of 25.8. Behavior can differ between patches. If 25.8.30.16 is published, install it with: python -m chtypes fetch 25.8.30.16
+ClickHouse 26.8.16.1 is not installed for darwin-arm64; using 26.8.15.10-lts, the newest installed patch of 26.8. Behavior can differ between patches. If 26.8.16.1 is published, install it with: python -m chtypes fetch 26.8.16.1
 ```
 
 The fallback is re-checked, not memoized: a patch installed later — by `fetch`, or by another process — is picked up from the next call on, without a restart. `fetch`/`ensure` never do this substitution themselves: a fetch for an unpublished exact patch is still `CHTYPES_ARTIFACT_UNPUBLISHED` ([`fetch.md`](fetch.md#7-the-one-error)); only the registry's resolution falls back, and only for a load.
