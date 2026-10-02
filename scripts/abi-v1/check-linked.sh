@@ -100,7 +100,11 @@ PLANT_WANT=(
   # correctly-fired error entirely, failing the selftest over a wording
   # mismatch rather than a missing diagnostic.
   "incompatible.*pointer type|cannot use"
-  "use of undeclared identifier|implicit declaration|undefined reference"
+  # clang: "use of undeclared identifier 'X'". gcc: "'X' undeclared (first
+  # use in this function)" -- no "use of ... identifier" substring at all.
+  # Measured the same way as the plant above: match the one word both
+  # compilers actually share.
+  "undeclared|implicit declaration|undefined reference"
 )
 
 apply() {
