@@ -151,6 +151,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "selftest — stubs.json paths are relative and resolve after a relocation"
+        run: scripts/abi-v1/build-stubs.sh --selftest
       - name: build the stub libraries and run the stub's handle-rule self-test
         run: scripts/abi-v1/build-stubs.sh --out "$RUNNER_TEMP/abi-v1-stubs"
       - name: upload the stub libraries and manifest for v1-abi-conformance

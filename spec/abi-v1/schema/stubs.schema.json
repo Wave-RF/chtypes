@@ -16,7 +16,12 @@
         "additionalProperties": false,
         "required": ["path", "predicate", "reason"],
         "properties": {
-          "path": {"type": "string", "minLength": 1},
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/]+$",
+            "description": "RELATIVE to the directory holding this stubs.json file (today: just the library's bare file name, since every variant sits next to the manifest, never in a subdirectory) — NEVER absolute. The directory build-stubs.sh writes into (a CI job's own $RUNNER_TEMP) is never the directory a later job downloads the same artifact into, so an absolute path would be stale there; a reader joins this value with dirname(stubs.json)."
+          },
           "predicate": {
             "type": "object",
             "description": "The build_info-shaped predicate this variant should be loaded under: byte-for-byte the 'ok' build's own fields, except ctor-marker (glibc_floor overridden to an impossible value, to prove a loader's step 1 refuses before ever calling dlopen).",
