@@ -2164,8 +2164,18 @@
       "expect": {
         "reason": "glibc_floor"
       },
-      "id": "loader.ctor-marker",
+      "id": "loader.ctor-marker.linux",
       "kind": "loader",
+      "os": "linux",
+      "variant": "ctor-marker"
+    },
+    {
+      "expect": {
+        "reason": "accepted"
+      },
+      "id": "loader.ctor-marker.darwin",
+      "kind": "loader",
+      "os": "darwin",
       "variant": "ctor-marker"
     },
     {
