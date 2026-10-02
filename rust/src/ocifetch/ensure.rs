@@ -245,18 +245,29 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
     if options.lock_write || options.update {
         if let Some(path) = &options.lock_path {
             let mut lock = lock.unwrap_or_default();
-            lock.set_entry(
-                request,
-                &res.platform,
-                LockEntry {
-                    version: resolved.version.clone(),
-                    build: resolved.build.clone(),
-                    manifest: resolved.digests.manifest.clone(),
-                    layer: resolved.digests.layer.clone(),
-                    bundle: resolved.digests.bundle.clone().unwrap_or_default(),
-                    index: resolved.digests.index.clone(),
-                },
-            );
+            if options.lock_write {
+                // Plan §6: "Writing a lock for every platform the index
+                // offers... downloads and verifies every platform's bundle
+                // but fetches the layer only for the host's own platform."
+                for (platform, entry) in
+                    lock_entries_for_all_platforms(&res, &version_request, &resolved)?
+                {
+                    lock.set_entry(request, &platform, entry);
+                }
+            } else {
+                lock.set_entry(
+                    request,
+                    &res.platform,
+                    LockEntry {
+                        version: resolved.version.clone(),
+                        build: resolved.build.clone(),
+                        manifest: resolved.digests.manifest.clone(),
+                        layer: resolved.digests.layer.clone(),
+                        bundle: resolved.digests.bundle.clone().unwrap_or_default(),
+                        index: resolved.digests.index.clone(),
+                    },
+                );
+            }
             lock::write(path, &lock)?;
         }
     }
@@ -398,6 +409,83 @@ fn ensure_online(
     Err(Error::ArtifactCorrupt(
         "install succeeded but no verified.json was written".to_string(),
     ))
+}
+
+/// `lock_write`'s "every platform the index offers" rule (plan §6): the
+/// host's own platform reuses `host_resolved` (already fetched and
+/// verified, no extra request); every other platform has its manifest
+/// fetched by digest and its signature verified — but never its layer, so
+/// `lock-write-all-platforms`'s "zero layer GETs for non-host platforms"
+/// holds.
+fn lock_entries_for_all_platforms(
+    res: &Resources,
+    version_request: &VersionRequest,
+    host_resolved: &Resolved,
+) -> Result<Vec<(String, LockEntry)>> {
+    let source = Source {
+        bases: &res.bases,
+        client: &res.client,
+        auth: &res.auth,
+    };
+    let fetched_index = oci::fetch_by_tag(&source, &version_request.tag())?;
+    let index: oci::Index = serde_json::from_slice(&fetched_index.bytes)?;
+
+    let mut out = Vec::new();
+    for d in &index.manifests {
+        let Some(p) = &d.platform else { continue };
+        let Some(platform) = constants::PLATFORMS
+            .iter()
+            .find(|pl| pl.os == p.os && pl.architecture == p.architecture)
+        else {
+            continue;
+        };
+        if platform.key == res.platform {
+            out.push((
+                platform.key.to_string(),
+                LockEntry {
+                    version: host_resolved.version.clone(),
+                    build: host_resolved.build.clone(),
+                    manifest: host_resolved.digests.manifest.clone(),
+                    layer: host_resolved.digests.layer.clone(),
+                    bundle: host_resolved.digests.bundle.clone().unwrap_or_default(),
+                    index: host_resolved.digests.index.clone(),
+                },
+            ));
+            continue;
+        }
+        let manifest_fetched =
+            oci::fetch_by_digest(&source, &d.digest, constants::MANIFEST_MAX_BYTES)?;
+        let manifest: oci::Manifest = serde_json::from_slice(&manifest_fetched.bytes)?;
+        let [layer] = manifest.layers.as_slice() else {
+            return Err(Error::ArtifactCorrupt(format!(
+                "platform manifest {} has {} layers, want exactly 1",
+                d.digest,
+                manifest.layers.len()
+            )));
+        };
+        let stmt = referrers::find_trusted_statement(&source, &d.digest, &res.trust)?;
+        if stmt.subject_sha256 != strip_sha256(&layer.digest)? {
+            return Err(Error::ArtifactCorrupt(format!(
+                "signed subject {} does not match the manifest's layer {}",
+                stmt.subject_sha256, layer.digest
+            )));
+        }
+        out.push((
+            platform.key.to_string(),
+            LockEntry {
+                version: stmt.predicate["clickhouse_version"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
+                build: stmt.predicate["build"].as_str().unwrap_or("").to_string(),
+                manifest: d.digest.clone(),
+                layer: layer.digest.clone(),
+                bundle: stmt.bundle_layer_digest.clone(),
+                index: None,
+            },
+        ));
+    }
+    Ok(out)
 }
 
 fn ensure_frozen(
