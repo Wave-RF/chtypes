@@ -1,0 +1,398 @@
+"""ts/src/abi1/decls.gen.ts and ts/src/abi1/errmap.gen.ts: the TS binding's
+generated view of the ABI description.
+
+THE TS TRAP (plan §3.3) decides this emitter's shape. ffi-rs 1.3.7's only way
+to CALL a C function is `define({key: {library, funcName, retType,
+paramsType}})` / `load(...)`, resolved by (library key, symbol NAME) — it has
+no API to call an arbitrary already-resolved function POINTER (there is no
+"call this JsExternal as a function" primitive; `DataType.Function` is for the
+other direction, passing a JS callback INTO C). So a loader cannot do
+"dlsym this symbol, then call what dlsym returned" through ffi-rs alone, which
+is exactly what steps 3-4 of the loader need for `chs_abi_version` and
+`chs_build_info` BEFORE the library is known to speak ABI v1 at all.
+
+The resolution (ts/src/abi1/loader.ts): declare `dlopen`/`dlsym`/`dlerror`
+(plus `strlen` and `gnu_get_libc_version`, needed for step 1 and for reading
+owned/borrowed C strings byte-safely) through ffi-rs AGAINST THE PROCESS'S OWN
+LIBC — ordinary, always-resolvable symbols, so ffi-rs's normal by-name
+resolution is fine for THEM. Steps 2-6 do their OWN `dlopen(path,
+RTLD_NOW|RTLD_LOCAL)` through that libc declaration, which — unlike ffi-rs's
+`open()`, which goes through libloading with `RTLD_LAZY | RTLD_LOCAL`
+(measured in v0 `ts/src/registry.ts`'s header comment) — eagerly binds every
+relocation, so the `unbound` stub variant (an unresolved external symbol)
+correctly FAILS to load under this path, on both glibc and darwin. Once that
+succeeds, the image is fully resident and bound; only THEN does the loader
+`open()` the SAME path through ffi-rs (a harmless re-open of an
+already-mapped image, confirmed by dlopen's own refcount-by-path contract)
+and declare the full typed call table on it. Steps 3-6 beyond chs_abi_version/
+chs_build_info are PRESENCE checks only (`dlsym(handle, name) != NULL`), which
+need no typed call at all.
+
+SO THIS EMITTER PRODUCES NO PER-FUNCTION TS CODE. Given ffi-rs can only call a
+symbol it already knows the NAME of, and every chs_* name is known statically
+from spec/abi-v1/abi.json, there is no benefit to generating 38 nearly
+identical TS wrapper functions (one per chs_* call) the way emit/stub.py
+generates 38 C bodies (the STUB has per-function C semantics to special-case;
+a TS CALLER never does — it only marshals). Instead this emitter produces
+DATA:
+
+  * `FUNCTION_SPECS`: every function's parameter and return shape, exactly
+    model.py's own Param/Return fields, as plain JSON — so hand code can
+    build the right ffi-rs paramsType/retType and know how to decode a
+    result, for ANY function, from one small generic routine
+    (ts/src/abi1/raw.ts's `rawCall`, hand-written, which is the "invoke by
+    name" dispatcher the plan names: it takes a chs_* name string and a
+    resolved argument array and does the marshal/call/decode generically,
+    reading NOTHING about any function except what FUNCTION_SPECS says);
+  * `SYMBOL`: every described chs_* name, as a named export
+    (`SYMBOL.BUF_FREE === "chs_buf_free"`), so hand code NEVER spells a
+    `chs_` identifier itself (the rule this whole file exists to satisfy:
+    "the emitter is the only author of chs_* declarations" — the name
+    strings, not just a typed signature around them);
+  * `CAMEL_NAMES`: chs_* name -> the key ffi-rs's `define()` table uses for
+    it (chs_buf_data -> bufData), so two call sites can never spell two
+    different keys for the same symbol;
+  * `HANDLE_INFO`: per chs_* handle, its free function and the handle kinds
+    it `holds` (D2's "a child holds its parents alive"), for
+    ts/src/abi1/handles.ts's wrapper classes;
+  * `STATUS_NAMES`/`STATUS_VALUES`: the chs_status enum, both directions;
+  * `DESCRIBED_SYMBOLS`: every exported symbol, sorted — the loader's step 6
+    resolve-all sweep.
+
+errmap.gen.ts is the one place sdk.json's status/class and
+loader-refusal/class tables become code: `errorForStatus` (a CALL's
+chs_status -> one of SchemaError/UnsupportedError/UsageError/InternalError)
+and `loaderErrorClassFor` (a loader refusal's reason -> artifact_incompatible
+or artifact_corrupt), both over the hand-written error classes in
+ts/src/abi1/errors.ts.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+
+from model import BUF_HANDLE
+
+from . import Output, banner
+
+DECLS_PATH = "ts/src/abi1/decls.gen.ts"
+ERRMAP_PATH = "ts/src/abi1/errmap.gen.ts"
+
+_WORD = re.compile(r"[A-Za-z0-9]+")
+
+
+def _strip_prefix(name: str, prefix: str) -> str:
+    if not name.startswith(prefix):
+        raise ValueError(f"{name!r} does not start with {prefix!r}")
+    return name[len(prefix) :]
+
+
+def camel_name(prefix: str, name: str) -> str:
+    """chs_buf_data -> bufData (the ffi-rs define() table key)."""
+    words = _WORD.findall(_strip_prefix(name, prefix))
+    if not words:
+        raise ValueError(f"{name!r}: nothing left after stripping {prefix!r}")
+    return words[0].lower() + "".join(w.capitalize() for w in words[1:])
+
+
+def const_name(prefix: str, name: str) -> str:
+    """chs_buf_data -> BUF_DATA (a SYMBOL.* key)."""
+    words = _WORD.findall(_strip_prefix(name, prefix))
+    return "_".join(w.upper() for w in words)
+
+
+def pascal_name(prefix: str, name: str) -> str:
+    """chs_buf -> Buf (a handle wrapper class's base name)."""
+    c = camel_name(prefix, name)
+    return c[0].upper() + c[1:]
+
+
+def _param_spec(p) -> dict:
+    return {
+        "name": p.name,
+        "kind": p.kind,
+        "type": p.type,
+        "nullable": p.nullable,
+        "content": p.content,
+    }
+
+
+def _return_spec(r) -> dict:
+    return {
+        "kind": r.kind,
+        "type": r.type,
+        "owned": r.owned,
+        "nullable": r.nullable,
+        "content": r.content,
+        "borrows": r.borrows,
+        "constant": r.constant,
+    }
+
+
+def function_specs(model) -> dict:
+    out: dict[str, dict] = {}
+    for fn in model.functions:
+        out[fn.name] = {
+            "cls": fn.cls,
+            "thread": fn.thread,
+            "params": [_param_spec(p) for p in fn.params],
+            "returns": _return_spec(fn.returns),
+            "mayReturn": list(fn.may_return),
+        }
+    return out
+
+
+def symbol_table(model) -> dict:
+    return {const_name(model.prefix, fn.name): fn.name for fn in model.functions}
+
+
+def camel_table(model) -> dict:
+    return {fn.name: camel_name(model.prefix, fn.name) for fn in model.functions}
+
+
+def handle_info(model) -> dict:
+    return {
+        name: {"free": h.free, "holds": list(h.holds), "class": pascal_name(model.prefix, name)}
+        for name, h in model.handles.items()
+    }
+
+
+def cross_check_table(model) -> list[dict]:
+    return [
+        {"buildInfo": f["build_info"], "predicate": f["predicate"], "compare": f["compare"]}
+        for f in model.sdk["cross_check"]
+    ]
+
+
+def status_tables(model) -> tuple[dict, dict]:
+    status = model.enums["chs_status"]
+    names: dict[int, str] = {}
+    values: dict[str, int] = {}
+    for v in status.values:
+        assert v.name is not None
+        names[v.value] = v.name
+        values[v.name] = v.value
+    return names, values
+
+
+def _json_block(obj) -> str:
+    """Deterministic JSON, embeddable directly as a TS object/array literal
+    (valid JSON is valid TS). Sorted keys: FUNCTION_SPECS/SYMBOL/etc. are
+    looked up by name, never iterated for order, except DESCRIBED_SYMBOLS,
+    which is built pre-sorted as a JSON array (order survives)."""
+    return json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=True)
+
+
+def render_decls(model) -> str:
+    specs = function_specs(model)
+    symbols = symbol_table(model)
+    camel = camel_table(model)
+    handles = handle_info(model)
+    status_names, status_values = status_tables(model)
+    described = model.symbols()  # sorted, per model.Model.symbols()
+    cross_check = cross_check_table(model)
+
+    parts: list[str] = [
+        f"/* {banner(model)} */",
+        "/*",
+        " * The ABI description as DATA: every described symbol's name, its parameter and return",
+        " * shape, and the chs_status enum, both directions. See this emitter's module docstring",
+        " * (scripts/abi-v1/emit/ts.py) for why this file carries no ffi-rs declare() calls: those",
+        " * live in the hand-written ts/src/abi1/raw.ts, which is driven entirely by this data and",
+        " * therefore never hand-spells a chs_* name of its own.",
+        " *",
+        " * SYMBOL.<NAME> is the canonical way hand code refers to a described function by name",
+        " * without ever writing the literal `chs_` prefix itself: `rawCall(raw, SYMBOL.BUF_FREE, ...)`.",
+        " * CAMEL_NAMES maps the same chs_* name to the key ts/src/abi1/raw.ts's define() table uses.",
+        " */",
+        "",
+        "export type ParamKind = 'scalar' | 'enum' | 'bytes_in' | 'handle' | 'out_handle' | 'out_error' | 'out_scalar';",
+        "export type ReturnKind = 'status' | 'void' | 'scalar' | 'enum' | 'handle';",
+        "",
+        "export interface ParamSpec {",
+        "  readonly name: string;",
+        "  readonly kind: ParamKind;",
+        "  readonly type: string | null;",
+        "  readonly nullable: boolean;",
+        "  readonly content: string | null;",
+        "}",
+        "",
+        "export interface ReturnSpec {",
+        "  readonly kind: ReturnKind;",
+        "  readonly type: string | null;",
+        "  readonly owned: boolean;",
+        "  readonly nullable: boolean;",
+        "  readonly content: string | null;",
+        "  readonly borrows: string | null;",
+        "  readonly constant: string | null;",
+        "}",
+        "",
+        "export interface FunctionSpec {",
+        "  readonly cls: 'handshake' | 'tombstone' | 'api' | 'tooling';",
+        "  readonly thread: string;",
+        "  readonly params: readonly ParamSpec[];",
+        "  readonly returns: ReturnSpec;",
+        "  readonly mayReturn: readonly string[];",
+        "}",
+        "",
+        "/** Every described function's shape, keyed by its chs_* name. */",
+        f"export const FUNCTION_SPECS: Readonly<Record<string, FunctionSpec>> = {_json_block(specs)} as const;",
+        "",
+        "/** chs_* name -> the key ts/src/abi1/raw.ts's ffi-rs define() table uses for it. */",
+        f"export const CAMEL_NAMES: Readonly<Record<string, string>> = {_json_block(camel)} as const;",
+        "",
+        "/**",
+        " * Every described chs_* name, reachable WITHOUT spelling it: hand code writes",
+        " * `SYMBOL.BUF_FREE`, never the string `\"chs_buf_free\"`. Generated so the one place that",
+        " * spells a chs_* name is this file, machine-checked against spec/abi-v1/abi.json.",
+        " *",
+        " * Deliberately NOT typed `Record<string, string>`: each key's value is its own string",
+        " * LITERAL type, so a known key (`SYMBOL.BUF_FREE`) is never widened to `string | undefined`",
+        " * by `noUncheckedIndexedAccess` the way an index signature would be. Nothing here is ever",
+        " * looked up with a variable key — `CAMEL_NAMES` and `FUNCTION_SPECS` are, and keep their",
+        " * `Record` types for that reason.",
+        " */",
+        f"export const SYMBOL = {_json_block(symbols)} as const;",
+        "",
+        "export interface HandleInfo {",
+        "  readonly free: string;",
+        "  readonly holds: readonly string[];",
+        "  readonly className: string;",
+        "}",
+        "",
+        "/** Every described handle kind: its free function (a SYMBOL.* value) and what it holds. */",
+        "export const HANDLE_INFO: Readonly<Record<string, HandleInfo>> = "
+        + _json_block({name: {"free": h["free"], "holds": h["holds"], "className": h["class"]} for name, h in handles.items()})
+        + " as const;",
+        "",
+        "/** chs_status, both directions (the wire int32 and its C name). */",
+        f"export const STATUS_NAMES: Readonly<Record<number, string>> = {_json_block(status_names)} as const;",
+        f"export const STATUS_VALUES: Readonly<Record<string, number>> = {_json_block(status_values)} as const;",
+        "",
+        "/** Every exported symbol, sorted — the loader's step 6 resolve-all sweep. */",
+        f"export const DESCRIBED_SYMBOLS: readonly string[] = {_json_block(described)};",
+        "",
+        "/**",
+        " * The buf handle's own chs_* name (D2/D3's universal owned-output type), named so hand",
+        " * code can compare `ParamSpec.type`/`ReturnSpec.type` against it without ever spelling",
+        " * the literal itself (a literal would read as a hand-written chs_ reference to",
+        " * scripts/abi-v1/check-no-hand-decls.py once this file's own `define(`-adjacent code also",
+        " * names it — see ts/src/abi1/raw.ts's module comment).",
+        " */",
+        f"export const BUF_HANDLE: {BUF_HANDLE!r} = {BUF_HANDLE!r};",
+        "",
+        "/**",
+        " * This binding's own compiled-in ABI identity (D1.1/§1.7's \"one computation, copied",
+        " * everywhere else\" — never recomputed, byte-compared against a loaded library's",
+        " * chs_build_info().abi_fingerprint at loader step 4).",
+        " */",
+        f"export const ABI_VERSION = {json.dumps(model.abi)};",
+        f"export const ABI_FINGERPRINT = {json.dumps(model.fingerprint)};",
+        "",
+        "export interface CrossCheckField {",
+        "  readonly buildInfo: string;",
+        "  readonly predicate: string;",
+        "  readonly compare: 'bytes' | 'int';",
+        "}",
+        "",
+        "/** spec/abi-v1/sdk.json's cross_check table: loader step 5's nine fields. */",
+        f"export const CROSS_CHECK: readonly CrossCheckField[] = {_json_block(cross_check)};",
+        "",
+    ]
+    return "\n".join(parts)
+
+
+def render_errmap(model) -> str:
+    status_map: dict[str, str | None] = model.sdk["errors"]["status"]
+    class_names: dict[str, dict] = model.sdk["errors"]["classes"]
+    loader_refusals: list[dict] = model.sdk["loader"]["refusals"]
+
+    ts_class_of = {cls: info["ts"] for cls, info in class_names.items()}
+
+    lines: list[str] = [
+        f"/* {banner(model)} */",
+        "/*",
+        " * spec/abi-v1/sdk.json's two error tables, as code: a CALL's chs_status -> one of",
+        " * SchemaError/UnsupportedError/UsageError/InternalError (errors.status), and a LOADER",
+        " * refusal's reason -> artifact_incompatible or artifact_corrupt (loader.refusals). Both",
+        " * read spec/abi-v1/sdk.json; regenerate rather than hand-editing either table.",
+        " */",
+        "",
+        "import {",
+    ]
+    # One sorted-by-name list (value and type imports interleaved): biome's
+    # import-sort assist orders named specifiers alphabetically regardless of
+    # the `type` modifier, and this is a generated, banner-checked file, so
+    # it must already satisfy that sort rather than relying on `--write`
+    # (biome has no opinion on a generated file's CONTENT, only its own
+    # formatting of whatever text is there).
+    classes_used = {ts_class_of[c] for c in status_map.values() if c is not None} | {"InternalError"}
+    specifiers = sorted([(c, False) for c in classes_used] + [("CallErrorFields", True), ("ChtypesAbi1Error", True)])
+    for name, is_type in specifiers:
+        lines.append(f"  {'type ' if is_type else ''}{name},")
+    lines += [
+        "} from './errors.js';",
+        "",
+        "/**",
+        " * A call's chs_status name -> the mapped error instance (spec/abi-v1/sdk.json's",
+        " * errors.status table). CHS_OK has no entry: a caller checks the status name for",
+        " * 'CHS_OK' before ever calling this. An unrecognized status (impossible under a matching",
+        " * fingerprint; see spec/abi-v1/docs.md's chs_status section) maps to InternalError, naming",
+        " * the raw value, exactly like every other binding's generated table.",
+        " */",
+        "export function errorForStatus(statusName: string, fields: CallErrorFields): ChtypesAbi1Error {",
+        "  switch (statusName) {",
+    ]
+    for status, cls in sorted(status_map.items()):
+        if status in ("CHS_OK", "unknown") or cls is None:
+            continue
+        lines.append(f"    case {status!r}:")
+        lines.append(f"      return new {ts_class_of[cls]}(fields);")
+    lines += [
+        "    default:",
+        "      return new InternalError({",
+        "        ...fields,",
+        "        messageBytes: Buffer.from(",
+        "          `chtypes: unrecognized chs_status ${statusName}: ${fields.messageBytes.toString('utf8')}`,",
+        "          'utf8',",
+        "        ),",
+        "      });",
+        "  }",
+        "}",
+        "",
+        "export type LoaderErrorClass = 'artifact_incompatible' | 'artifact_corrupt';",
+        "",
+        "/**",
+        " * A loader refusal reason (spec/abi-v1/sdk.json's loader.refusals vocabulary, a",
+        " * `missing_symbol:<name>` or `build_info_mismatch:<field>` reason included, via its",
+        " * prefix before the first ':') -> which artifact error class the C ABI contract §Loading",
+        " * error map says it is.",
+        " */",
+        "export function loaderErrorClassFor(reason: string): LoaderErrorClass {",
+        "  const prefix = reason.split(':', 1)[0];",
+        "  switch (prefix) {",
+    ]
+    seen_reasons: set[str] = set()
+    for refusal in loader_refusals:
+        reason = refusal["reason"]
+        if reason in seen_reasons:
+            continue
+        seen_reasons.add(reason)
+        lines.append(f"    case {reason!r}:")
+        lines.append(f"      return {refusal['error']!r};")
+    lines += [
+        "    default:",
+        "      throw new Error(`chtypes abi1: no sdk.json loader refusal class for reason ${reason}`);",
+        "  }",
+        "}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def outputs(model) -> list[Output]:
+    return [
+        Output(DECLS_PATH, content=render_decls(model)),
+        Output(ERRMAP_PATH, content=render_errmap(model)),
+    ]
