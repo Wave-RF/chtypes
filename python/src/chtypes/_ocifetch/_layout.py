@@ -36,8 +36,8 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _expand_template(template: str) -> str:
-    """``${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/v1``: a small, deliberately
-    narrow expansion (bash ``:-`` default plus plain ``$VAR``) rather than a
+    """`${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/v1`: a small, deliberately
+    narrow expansion (bash `:-` default plus plain `$VAR`) rather than a
     shell call, so this never depends on a shell being present."""
     xdg = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
     mapping = {"HOME": os.path.expanduser("~")}
@@ -46,8 +46,8 @@ def _expand_template(template: str) -> str:
 
 
 def resolve_cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:
-    """``CHTYPES_CACHE`` (or an explicit override) names the layout directory
-    ITSELF, not a parent `chtypes/` to append to (constants: ``cache.root_template``)."""
+    """`CHTYPES_CACHE` (or an explicit override) names the layout directory
+    ITSELF, not a parent `chtypes/` to append to (constants: `cache.root_template`)."""
     if cache_dir is not None:
         return Path(cache_dir)
     env = os.environ.get(C.ENV_CACHE_NAME)

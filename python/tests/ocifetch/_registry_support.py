@@ -83,7 +83,7 @@ def build_tree(
     seed: bytes | None = None,
     extra_index_manifests: list[dict] | None = None,
 ) -> BuiltTree:
-    """Write ``<tmp_path>/v2/chtypes/v1/…`` and return its digests."""
+    """Write `<tmp_path>/v2/chtypes/v1/…` and return its digests."""
     root = tmp_path / "v2" / "chtypes" / "v1"
     (root / "manifests").mkdir(parents=True)
     (root / "blobs").mkdir(parents=True)

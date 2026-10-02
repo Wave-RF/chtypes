@@ -59,16 +59,16 @@ def unpack_tar_zst(
     max_unpacked_bytes: int = C.MAX_UNPACKED_BYTES,
     window_log_max: int = C.ZSTD_WINDOW_LOG_MAX,
 ) -> None:
-    """Decompress and extract ``compressed_path`` (already hash/size-verified
-    by the caller) into ``dest_dir`` (a fresh, caller-owned temp directory —
+    """Decompress and extract `compressed_path` (already hash/size-verified
+    by the caller) into `dest_dir` (a fresh, caller-owned temp directory —
     this never renames anything into the cache itself; `_layout.py` does
     that once this returns successfully).
 
     Raises `ArtifactCorruptError` for: a zstd window above
-    ``window_log_max``, any tar member that is not a plain file or
+    `window_log_max`, any tar member that is not a plain file or
     directory, an absolute or `..`-escaping path, a duplicate entry, total
-    extracted bytes over ``max_unpacked_bytes``, or a library whose own
-    content disagrees with ``library_sha256``/``library_bytes``.
+    extracted bytes over `max_unpacked_bytes`, or a library whose own
+    content disagrees with `library_sha256`/`library_bytes`.
     """
     os.makedirs(dest_dir, exist_ok=True)
     seen_names: set[str] = set()

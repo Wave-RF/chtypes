@@ -58,8 +58,8 @@ def build_bundle(
     extra_signatures: list[dict] | None = None,
 ) -> dict:
     """A minimal key-only Sigstore bundle v0.3 document (layout-v2 spec §4.2):
-    no certificate, no transparency log entry, just ``{"publicKey": {"hint":
-    keyid}}`` and a DSSE envelope."""
+    no certificate, no transparency log entry, just `{"publicKey": {"hint":
+    keyid}}` and a DSSE envelope."""
     doc = (
         statement
         if statement is not None

@@ -80,8 +80,8 @@ __all__ = [
 
 @dataclass(frozen=True)
 class Request:
-    """A floating or exact version spelling: ``"26.8"``, ``"26.8.15"`` or
-    ``"26.8.15.10"`` (constants: ``spelling.regex``)."""
+    """A floating or exact version spelling: `26.8`, `26.8.15` or
+    `26.8.15.10` (constants: `spelling.regex`)."""
 
     spelling: str
 
@@ -93,7 +93,7 @@ class Request:
 class Options:
     """Everything `ensure`/`resolve_installed`/etc. need beyond the request.
 
-    ``platform`` is the TARGET platform key (``"linux-arm64"`` etc.);
+    `platform` is the TARGET platform key (`"linux-arm64"` etc.);
     `ensure` defaults to the running host's when unset, which is the normal
     end-user case. `resolve_installed` takes platform as its own explicit
     argument instead, since cache introspection (and `--lock`, which checks
@@ -292,8 +292,8 @@ def _monotonic_warnings(roots: Sequence[Path], platform_key: str, predicate: dic
 
 
 def _tmp_dir_under(root: Path, subdir: str) -> str:
-    """A temp directory on the SAME filesystem as ``root`` / ``subdir``, so
-    the final install is a same-filesystem ``os.replace`` (never a copy)."""
+    """A temp directory on the SAME filesystem as `root` / `subdir`, so
+    the final install is a same-filesystem `os.replace` (never a copy)."""
     parent = root / subdir
     parent.mkdir(parents=True, exist_ok=True)
     return tempfile.mkdtemp(dir=str(parent), prefix=".tmp-")
@@ -308,7 +308,7 @@ def _find_verified_signature(
     trusted_keys: tuple[TrustedKey, ...],
     scratch_root: Path,
 ):
-    """Try every referrer bundle of ``manifest_digest`` until one verifies.
+    """Try every referrer bundle of `manifest_digest` until one verifies.
 
     Tolerates a malformed or wrongly-typed referrer and moves to the next —
     PLAN §3.2's "multiple-referrers-one-valid" and "hint-names-unknown-key-
@@ -637,18 +637,18 @@ def _ensure_frozen(
 
 
 def ensure(request: Request, options: Options) -> Resolved:
-    """Make sure a verified, unpacked library for ``request`` is on disk,
+    """Make sure a verified, unpacked library for `request` is on disk,
     fetching it if needed (docs/guides/fetch-v1.md "The seam").
 
     Lock precedence (`decided-here`; constants/PLAN §0's lock row states the
     two ends — "`--frozen` makes no lookups; `update` re-resolves" — but not
     the default in between, which the real conformance fixtures, not yet
     available in this worktree, will pin down): when a lock file exists AND
-    pins this exact (request, platform) AND ``options.update`` is not set,
+    pins this exact (request, platform) AND `options.update` is not set,
     a plain `ensure()` follows the pin by digest (the same path `--frozen`
-    uses), rather than re-resolving the floating tag. ``--frozen`` differs
+    uses), rather than re-resolving the floating tag. `--frozen` differs
     from this default only in refusing outright when no pin exists, instead
-    of falling back to a floating resolve. ``update=True`` always ignores
+    of falling back to a floating resolve. `update=True` always ignores
     any existing pin and resolves the floating tag fresh.
     """
     platform_key = options.resolved_platform()
@@ -752,16 +752,16 @@ def verify_installed(options: Options) -> list[VerifyResult]:
 
 
 def fetch_signed(repository: str, ref: str, predicate_type: str, options: Options) -> dict:
-    """A generic signed-artifact fetch: goldens (``ref`` is the referrer
+    """A generic signed-artifact fetch: goldens (`ref` is the referrer
     digest discovered against a platform manifest) and fetch fixtures
-    (``ref`` is the pinned digest; §7.7 — no tag fallback is ever tried for
-    fixtures). ``repository`` is a path suffix joined onto every configured
-    base (``""`` for the same repository as the platform artifact,
-    ``constants.FIXTURES_REPO_SUFFIX`` for fixtures).
+    (`ref` is the pinned digest; §7.7 — no tag fallback is ever tried for
+    fixtures). `repository` is a path suffix joined onto every configured
+    base (`""` for the same repository as the platform artifact,
+    `constants.FIXTURES_REPO_SUFFIX` for fixtures).
 
-    Returns ``{"path": <verified layer bytes on disk>, "statement": <predicate
+    Returns `{"path": <verified layer bytes on disk>, "statement": <predicate
     dict, or None under allow-unsigned>, "digests": {"manifest", "layer",
-    "bundle"}}``. Never dlopens or interprets the content — that is for the
+    "bundle"}}`. Never dlopens or interprets the content — that is for the
     caller.
     """
     bases = tuple(b.rstrip("/") + repository for b in options.resolved_bases())

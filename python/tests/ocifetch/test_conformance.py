@@ -1,18 +1,18 @@
 """TestConformanceV1 — the Python v1 conformance runner (docs/guides/fetch-v1.md
-"Conformance", PLAN §3.3): ``uv run --python <v> pytest -q
-tests/ocifetch/test_conformance.py``.
+"Conformance", PLAN §3.3): `uv run --python <v> pytest -q
+tests/ocifetch/test_conformance.py`.
 
-Reads ``CHTYPES_V1_CONFORMANCE=<absolute tests/fixtures/fetch-v1 path>``.
-Unset, or a fixtures tree with no ``cases.json`` yet, every case here is
+Reads `CHTYPES_V1_CONFORMANCE=<absolute tests/fixtures/fetch-v1 path>`.
+Unset, or a fixtures tree with no `cases.json` yet, every case here is
 skipped LOUDLY, by name — the lane 0B fixtures/server/parity lane owns that
 tree and has not merged into this worktree, so a run here today skips
 everything by design (PLAN §4 Lane Python: "conformance stays red until 0B
 merges; that's expected" — RED here specifically because v1.yml's
 `v1-constants`/`v1-fixtures`/`v1-parity` require real cases.json contents
-``parity.py`` can check; an entirely-skipped run is what proves this file is
+`parity.py` can check; an entirely-skipped run is what proves this file is
 WIRED, not what makes the merge gate green).
 
-Writes ``CHTYPES_V1_REPORT`` (schema `spec/fetch-v1/schema/report.schema.json`)
+Writes `CHTYPES_V1_REPORT` (schema `spec/fetch-v1/schema/report.schema.json`)
 when both env vars are set, so a hosted CI run always leaves a report behind
 for the parity gate even on a run this file cannot fully drive without
 lane 0B's server and route trees.

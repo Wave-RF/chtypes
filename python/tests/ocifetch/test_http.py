@@ -156,7 +156,7 @@ def test_fetch_from_bases_no_bases_is_unreachable() -> None:
 class _Server:
     """A minimal scripted HTTP server: `routes[path]` is a list of response
     callables, consumed in order (the last repeats), each returning
-    ``(status, headers, body)``."""
+    `(status, headers, body)`."""
 
     def __init__(self) -> None:
         self.routes: dict[str, list[Callable[[], tuple[int, dict[str, str], bytes]]]] = {}

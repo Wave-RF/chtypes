@@ -2,14 +2,14 @@
 
 docs/guides/fetch-v1.md "Sources": an ordered base list with fallback, one
 retry table (the generated constants are its normative copy), redirects that
-drop ``Authorization`` on every hop, the anonymous Bearer-token flow for
-mirrors, a static ``CHTYPES_DOWNLOAD_TOKEN`` bearer, ``HTTPS_PROXY``/
-``NO_PROXY`` and the system certificate store, and size caps.
+drop `Authorization` on every hop, the anonymous Bearer-token flow for
+mirrors, a static `CHTYPES_DOWNLOAD_TOKEN` bearer, `HTTPS_PROXY`/
+`NO_PROXY` and the system certificate store, and size caps.
 
 Nothing here decides fetch-layer policy (tag vs. digest 404 semantics,
 UNPUBLISHED vs. SOURCE_UNREACHABLE): this module raises a small, untyped-by-
 meaning set of internal exceptions and leaves translating them to the
-higher-level ``_oci``/``_referrers``/``_ensure`` modules, because the same
+higher-level `_oci`/`_referrers`/`_ensure` modules, because the same
 HTTP outcome (a 404) means a different thing depending on whether the path
 was a tag or a digest (layout-v2 spec §7.5/§10 A5).
 """
@@ -107,7 +107,7 @@ class Clock:
 
 @dataclass(frozen=True)
 class RetryPolicy:
-    """The one retry table every v1 fetcher shares (constants: ``retry``)."""
+    """The one retry table every v1 fetcher shares (constants: `retry`)."""
 
     attempts: int = C.RETRY_ATTEMPTS
     first_wait_s: float = C.RETRY_FIRST_WAIT_S
@@ -118,14 +118,14 @@ class RetryPolicy:
     )
 
     def wait_before_attempt(self, attempt_index: int) -> float:
-        """The planned backoff before retry number ``attempt_index`` (0-based:
+        """The planned backoff before retry number `attempt_index` (0-based:
         0 is the wait before the second overall attempt)."""
         return self.first_wait_s * (self.multiplier**attempt_index)
 
     def remaining_budget_s(self, attempt_index: int) -> float:
-        """The sum of every planned wait from ``attempt_index`` through the
+        """The sum of every planned wait from `attempt_index` through the
         last retry. A `Retry-After` that exceeds this is refused outright
-        (constants: ``retry_after_over_budget: "refuse"``) rather than
+        (constants: `retry_after_over_budget: "refuse"`) rather than
         shortened — `decided-here`, since the spec states the rule but not
         the exact budget arithmetic: the remaining planned schedule is the
         only number already fixed by the shared retry table."""
@@ -252,7 +252,7 @@ def _parse_retry_after(headers: Mapping[str, str], clock: Clock) -> float | None
 
 
 def _parse_bearer_challenge(header: str) -> dict[str, str] | None:
-    """``WWW-Authenticate: Bearer realm="...",service="...",scope="..."``."""
+    """`WWW-Authenticate: Bearer realm="...",service="...",scope="..."`."""
     header = header.strip()
     if not header.lower().startswith("bearer"):
         return None
@@ -433,24 +433,24 @@ def fetch_from_bases(
     retry: RetryPolicy,
     query: str | None = None,
 ) -> HttpResponse:
-    """GET ``path`` off the first base that serves it, in order.
+    """GET `path` off the first base that serves it, in order.
 
-    ``query`` (a raw, already-encoded query string, no leading ``?``) is
-    appended only for an ``http``/``https`` base — PLAN §3.2's "Client rules
+    `query` (a raw, already-encoded query string, no leading `?`) is
+    appended only for an `http`/`https` base — PLAN §3.2's "Client rules
     this forces": "never append a query string to a `file://` URL". A
     file-served route tree therefore sees the plain path only; server-side
     `artifactType` filtering is an HTTP-only convenience on top of this
     fetcher's own client-side filter, never something a `file://` fixture
     needs to understand.
 
-    ``mode`` is ``"tag"`` or ``"digest"`` (layout-v2 spec §7.5 / §10 A5):
+    `mode` is `"tag"` or `"digest"` (layout-v2 spec §7.5 / §10 A5):
 
-    - ``tag``: a 404 moves to the next base; if every base 404s, the final
+    - `tag`: a 404 moves to the next base; if every base 404s, the final
       exception is `NotFoundHttpError` (the caller raises
-      ``ArtifactUnpublishedError``). A transient failure also moves to the
+      `ArtifactUnpublishedError`). A transient failure also moves to the
       next base; if every base is unreachable, the final exception is
       `UnreachableHttpError`.
-    - ``digest``: a 404 moves to the next base, except on the LAST base,
+    - `digest`: a 404 moves to the next base, except on the LAST base,
       where it is retried within the shared budget before giving up — a
       listed digest that 404s is a host fault, never "unpublished", so the
       final exception for this mode is always `UnreachableHttpError`.

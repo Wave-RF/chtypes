@@ -50,7 +50,7 @@ class Descriptor:
 
 
 def parse_digest(digest: str) -> str:
-    """Validate ``sha256:<64 hex>`` and return the raw hex part."""
+    """Validate `sha256:<64 hex>` and return the raw hex part."""
     m = _DIGEST_RE.match(digest)
     if not m:
         raise ArtifactCorruptError(f"malformed digest {digest!r}, want sha256:<64 hex>")
@@ -59,7 +59,7 @@ def parse_digest(digest: str) -> str:
 
 def validate_spelling(spelling: str) -> None:
     """Refuse a v0-era or decorated spelling before any network call
-    (constants: ``spelling.regex`` / ``refuse_hint_regex``). This is a
+    (constants: `spelling.regex` / `refuse_hint_regex`). This is a
     client-side input error, not a fetch-layer error code."""
     if re.match(C.SPELLING_REFUSE_HINT_REGEX, spelling) or not re.match(C.SPELLING_REGEX, spelling):
         raise ValueError(
@@ -88,7 +88,7 @@ def verify_json_descriptor(body: bytes, descriptor: Descriptor, *, what: str) ->
     """Check a downloaded JSON document's bytes against its own descriptor,
     BEFORE any further parsing — size and sha256, exactly as §7.3 requires
     for the layer, applied here to the smaller JSON objects too. Use this
-    only when ``descriptor.size`` came from an independent source (an
+    only when `descriptor.size` came from an independent source (an
     index's manifest descriptor, a layer descriptor) — never construct a
     descriptor from the body being checked, which would make the size check
     vacuous."""
@@ -116,7 +116,7 @@ def verify_body_matches_digest(body: bytes, digest: str, *, what: str) -> None:
 
 def resolve_platform_manifest(index_doc: dict, platform_key: str) -> Descriptor:
     """Pick the one manifest descriptor in an OCI image index matching
-    ``platform_key`` (e.g. "linux-arm64"), refusing a duplicate or absent
+    `platform_key` (e.g. "linux-arm64"), refusing a duplicate or absent
     platform (layout-v2 spec §7.1; PLAN §3.2 "index-duplicate-platform")."""
     media_type = index_doc.get("mediaType")
     if media_type != C.MEDIA_TYPE_INDEX:
@@ -165,10 +165,10 @@ def manifest_single_layer(
 ) -> Descriptor:
     """The single layer of any OCI image manifest — a platform artifact
     manifest (one tar+zstd layer) or a referrer manifest (one bundle/JSON
-    layer carrying its actual payload). ``expected_media_type`` is checked
+    layer carrying its actual payload). `expected_media_type` is checked
     only when given; a referrer's layer media type is not pinned by the
     generated constants, so callers that accept more than one shape pass
-    ``None``."""
+    `None`."""
     media_type = manifest_doc.get("mediaType")
     if media_type != C.MEDIA_TYPE_MANIFEST:
         raise SourceIncompatibleError(
@@ -244,12 +244,12 @@ def fetch_blob_to_path(
     retry: RetryPolicy,
     max_bytes: int,
 ) -> None:
-    """``GET blobs/<digest>``, verified against ``descriptor`` (size and
+    """`GET blobs/<digest>`, verified against `descriptor` (size and
     sha256) BEFORE the caller does anything else with the bytes — in
     particular, before any decompression (layout-v2 spec §7.3: "Check size
     and sha256 before decompressing").
 
-    Writes to ``dest_path`` by temp-then-rename within the same directory,
+    Writes to `dest_path` by temp-then-rename within the same directory,
     and removes the temp file on any verification failure, so a tampered
     download never leaves a partial artifact for a later step to trip over
     (PLAN §3.2 "tampered-layer": "the temp is removed")."""
@@ -280,7 +280,7 @@ def fetch_blob_to_path(
 def fetch_blob_bytes(
     bases, digest: str, *, policy: FetchPolicy, retry: RetryPolicy, max_bytes: int
 ) -> bytes:
-    """``GET blobs/<digest>``, verified by content hash alone (no separately
+    """`GET blobs/<digest>`, verified by content hash alone (no separately
     known size — used for `--frozen`, where the lock pins only the digest,
     never a size)."""
     resp = fetch_from_bases(

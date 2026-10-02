@@ -6,7 +6,7 @@ encoding plus one ed25519 check, reusing the primitive the binding already
 ships. Here that primitive is `chtypes._ed25519` (imported, never copied).
 
 Trust is a brute-force check against every trusted key's raw bytes, not a
-lookup by the envelope's own ``keyid``/``publicKey.hint``: those are hints a
+lookup by the envelope's own `keyid`/`publicKey.hint`: those are hints a
 bundle author chooses, and whether the producer's hint derivation matches
 this SDK's `KEYID_ALGORITHM` is still an open question on the delivery side
 (layout-v2 spec §6 A15). A bundle that *names* an unrecognized hint but
@@ -84,7 +84,7 @@ def fixture_trusted_keys() -> tuple[TrustedKey, ...]:
 
 def pae_encode(payload_type: str, payload: bytes) -> bytes:
     """DSSE's Pre-Authentication Encoding (secure-systems-lab/dsse):
-    ``"DSSEv1" SP LEN(type) SP type SP LEN(body) SP body``, all as raw bytes
+    `"DSSEv1" SP LEN(type) SP type SP LEN(body) SP body`, all as raw bytes
     with a single ASCII space as separator, lengths spelled in decimal."""
     type_bytes = payload_type.encode("utf-8")
     return (
@@ -111,8 +111,8 @@ def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
 
 
 def loads_no_duplicate_keys(data: bytes) -> dict:
-    """``json.loads`` that refuses a duplicate key anywhere in the document
-    (recursively, since ``object_pairs_hook`` runs for every nested object).
+    """`json.loads` that refuses a duplicate key anywhere in the document
+    (recursively, since `object_pairs_hook` runs for every nested object).
     PLAN "Lane Python": the predicate's own fields are covered by the same
     pass, because `predicate` is a nested object of the statement."""
     try:
@@ -155,7 +155,7 @@ def _parse_statement(payload: bytes) -> Statement:
 
 
 def verify_bundle(bundle: dict, trusted_keys: tuple[TrustedKey, ...]) -> VerifiedBundle | None:
-    """Verify a Sigstore bundle v0.3 JSON document against ``trusted_keys``.
+    """Verify a Sigstore bundle v0.3 JSON document against `trusted_keys`.
 
     Returns `None` — never raises for an untrusted or malformed signature —
     when no signature in the envelope verifies under any trusted key, so a

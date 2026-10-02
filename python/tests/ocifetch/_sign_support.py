@@ -47,13 +47,13 @@ def _public_key_for(seed: bytes) -> bytes:
 
 
 def generate_keypair() -> tuple[bytes, bytes]:
-    """Returns ``(seed, public_key)``, 32 raw bytes each."""
+    """Returns `(seed, public_key)`, 32 raw bytes each."""
     seed = os.urandom(32)
     return seed, _public_key_for(seed)
 
 
 def sign(seed: bytes, message: bytes) -> bytes:
-    """The 64-byte ed25519 signature of ``message`` under ``seed``.
+    """The 64-byte ed25519 signature of `message` under `seed`.
 
     Self-checks with `chtypes._ed25519.verify` before returning, so a bug
     here fails the test that calls it rather than silently producing a bundle

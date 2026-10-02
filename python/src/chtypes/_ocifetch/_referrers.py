@@ -113,8 +113,8 @@ def discover_referrers(
     policy: FetchPolicy,
     retry: RetryPolicy,
 ) -> list[Descriptor]:
-    """Every referrer of ``subject_digest`` whose `artifactType` equals
-    ``artifact_type``, from the referrers API, the fallback tag, or both.
+    """Every referrer of `subject_digest` whose `artifactType` equals
+    `artifact_type`, from the referrers API, the fallback tag, or both.
 
     Always filters by `artifactType` itself (never trusts the server's own
     filter alone), and always tries the fallback when the API's own answer

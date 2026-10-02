@@ -1,20 +1,20 @@
 """v1 fetch-layer errors (docs/guides/fetch-v1.md "Errors").
 
-Scoped to ``chtypes._ocifetch``: the stable, public exception types live in
-``chtypes.errors`` (the v0 SHA256SUMS-era fetch), which this module never
+Scoped to `chtypes._ocifetch`: the stable, public exception types live in
+`chtypes.errors` (the v0 SHA256SUMS-era fetch), which this module never
 imports from or edits. A future switch lane decides how (or whether) these
 become public types; until then every name here is private.
 
-Every exception carries a ``.code`` string from one of the ten codes
-``spec/fetch-v1/constants.json``'s ``errors`` map assigns an exit status to
-(the generated ``ERROR_EXIT_CODES`` table), so a CLI added later needs no
-second mapping — it is the same lookup v0's ``__main__.py`` does today.
+Every exception carries a `.code` string from one of the ten codes
+`spec/fetch-v1/constants.json`'s `errors` map assigns an exit status to
+(the generated `ERROR_EXIT_CODES` table), so a CLI added later needs no
+second mapping — it is the same lookup v0's `__main__.py` does today.
 
-``CHTYPES_ARTIFACT_INCOMPATIBLE`` is reserved for the FFI loader (the
-``abi_fingerprint`` / ``chs_build_info()`` cross-check after ``dlopen``,
+`CHTYPES_ARTIFACT_INCOMPATIBLE` is reserved for the FFI loader (the
+`abi_fingerprint` / `chs_build_info()` cross-check after `dlopen`,
 docs/guides/fetch-v1.md "The seam"): this transport-only layer never raises
 it. An unrecognized manifest media type is a transport-side incompatibility
-(``CHTYPES_SOURCE_INCOMPATIBLE``), not an artifact-side one.
+(`CHTYPES_SOURCE_INCOMPATIBLE`), not an artifact-side one.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ assert set(_CODES_USED_HERE) <= set(ERROR_EXIT_CODES), (
 
 
 class FetchError(Exception):
-    """Base of every v1 fetch-layer error. ``code`` is one of the constants above."""
+    """Base of every v1 fetch-layer error. `code` is one of the constants above."""
 
     code: str = ""
 
@@ -99,7 +99,7 @@ class ArtifactCorruptError(FetchError):
     an index, a tampered manifest or layer (size/sha256 mismatch), a
     statement whose subject does not equal the manifest's layer digest, a
     duplicate JSON key in a DSSE payload, an unsafe tar member (symlink,
-    hardlink, device, absolute path, ``..`` traversal, a repeated entry), an
+    hardlink, device, absolute path, `..` traversal, a repeated entry), an
     oversize zstd window, unpacked bytes over the cap, or a library whose
     re-hash disagrees with the signed predicate.
     """
@@ -108,7 +108,7 @@ class ArtifactCorruptError(FetchError):
 
 
 class ArtifactPinnedError(FetchError):
-    """``--frozen`` found a release that differs from what the lock file pins."""
+    """`--frozen` found a release that differs from what the lock file pins."""
 
     code = CODE_ARTIFACT_PINNED
 
@@ -121,16 +121,16 @@ class ArtifactUnpublishedError(FetchError):
 
 class SourceUnreachableError(FetchError):
     """The source could not be read: exhausted retries, a digest 404 on the
-    last base (a host fault, never ``UNPUBLISHED``), or ``offline`` with
+    last base (a host fault, never `UNPUBLISHED`), or `offline` with
     nothing installed and nothing to verify against.
 
     Attributes:
         retryable: whether this was a transient condition (a retry-table
             status, or a connection-level failure) as opposed to, say,
-            ``offline`` with no cache hit.
+            `offline` with no cache hit.
         retry_after: the source's own requested wait in seconds, when a
-            ``Retry-After`` was both present and within budget. Always
-            ``None`` when the wait was refused as over budget.
+            `Retry-After` was both present and within budget. Always
+            `None` when the wait was refused as over budget.
     """
 
     code = CODE_SOURCE_UNREACHABLE
@@ -144,7 +144,7 @@ class SourceUnreachableError(FetchError):
 
 
 class SourceUnauthorizedError(FetchError):
-    """A configured ``CHTYPES_DOWNLOAD_TOKEN`` was itself rejected (401)."""
+    """A configured `CHTYPES_DOWNLOAD_TOKEN` was itself rejected (401)."""
 
     code = CODE_SOURCE_UNAUTHORIZED
 
@@ -157,6 +157,6 @@ class SourceForbiddenError(FetchError):
 
 class SourceIncompatibleError(FetchError):
     """The source served something this fetcher does not know how to read:
-    an index or manifest ``mediaType`` outside the generated constants."""
+    an index or manifest `mediaType` outside the generated constants."""
 
     code = CODE_SOURCE_INCOMPATIBLE
