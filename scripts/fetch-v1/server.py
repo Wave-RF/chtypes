@@ -98,17 +98,26 @@ FIXTURES: Path = Path(".")  # set by main() / run_server()
 
 
 class ScriptState:
-    """Per-(case id, method, path) response-sequence cursor, shared by both
-    origins' handler threads for one case id."""
+    """Per-(case id, origin, method, path) response-sequence cursor, shared
+    by both origins' handler threads for one case id.
+
+    `origin` is part of the key deliberately (measured, lane 0B,
+    2026-10-02): a mirror-failover case's `second_origin_routes` entry can
+    share the exact same (method, path) as its primary `routes` entry — the
+    whole point of the second origin being a mirror of the same repository
+    path — and without `origin` in the key, a request to the second origin
+    would advance (and read from) the FIRST origin's cursor. That is the
+    cursor sharing mirror-failover-5xx and mirror-failover-digest-404 both
+    shipped with."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._cursor: dict[tuple[str, str, str], int] = defaultdict(int)
+        self._cursor: dict[tuple[str, str, str, str], int] = defaultdict(int)
         self.request_log: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self.issued_tokens: dict[str, str] = {}
 
-    def next_response(self, case_id: str, method: str, path: str, responses: list[dict]) -> dict:
-        key = (case_id, method, path)
+    def next_response(self, case_id: str, origin: str, method: str, path: str, responses: list[dict]) -> dict:
+        key = (case_id, origin, method, path)
         with self._lock:
             i = self._cursor[key]
             self._cursor[key] = min(i + 1, len(responses) - 1)
@@ -225,7 +234,7 @@ class Handler(BaseHTTPRequestHandler):
             routes = script["second_origin_routes"] if self.origin_label == "second" else script["routes"]
             for route in routes:
                 if route["method"] == method and route["path"] == script_path:
-                    resp = self.state.next_response(case_id, method, script_path, route["responses"])
+                    resp = self.state.next_response(case_id, self.origin_label, method, script_path, route["responses"])
                     self._serve_scripted(case, resp)
                     return
 

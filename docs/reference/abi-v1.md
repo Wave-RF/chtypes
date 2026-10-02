@@ -52,7 +52,7 @@ Every binding loads a library in the same steps, and refuses at the first that f
 6. Resolve every described symbol; all are mandatory.
 7. Then, and only then, anything the provisional initialization contract adds.
 
-Until step 6 passes, only the handshake set may be called. The loader never unloads a library. Each refusal reason, and the error class it maps to in each binding, is in `spec/abi-v1/sdk.json`.
+Until step 6 passes, only the handshake set may be called. The loader never unloads a library. An absent handshake symbol other than `chs_abi_version` is refused as `missing_symbol:<name>` at whichever step first resolves it (step 4 for `chs_build_info`), not folded into step 3's `not_v1`, which is reserved for a missing `chs_abi_version` alone. Each refusal reason, and the error class it maps to in each binding, is in `spec/abi-v1/sdk.json`.
 
 ## Reusing a v0 name, and the tombstone
 
@@ -412,7 +412,7 @@ CHS_API int32_t chs_abi_version(void);
 
 - Class `handshake`, thread `any`, FIRM.
 
-The ABI generation this library implements: always 1 for this header. A loader resolves and calls it right after opening the library. A library without the symbol is not an ABI v1 artifact, and any other value is refused, naming both values.
+The ABI generation this library implements: always 1 for this header. A loader resolves and calls it right after opening the library. A library without the symbol is not an ABI v1 artifact, and any other value is refused, naming both values. An absent handshake symbol other than this one is refused as `missing_symbol:<name>` instead, at whichever step first resolves it — only this symbol's absence means the library is not an ABI v1 artifact at all.
 
 #### `chs_build_info`
 

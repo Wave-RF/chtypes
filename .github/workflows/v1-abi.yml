@@ -15,7 +15,20 @@ name: v1-abi
 #   v1-abi-linked    required once the Go lane lands
 #   v1-abi-rust      required once the Rust lane lands
 #   v1-abi-stubs and v1-abi-conformance feed parity and are not required themselves.
-# Until a lane fills a job's body, that job fails loudly saying so.
+#
+# v1-abi-conformance, v1-abi-linked and v1-abi-rust each DISPATCH to a
+# per-binding script rather than embedding that binding's own logic here:
+# scripts/abi-v1/conformance/<binding>.sh for conformance, and one script
+# each under scripts/abi-v1 named for its own job (check-linked.sh,
+# check-rust.sh) for the other two. Toolchain setup for every
+# binding already lives in this file (v1-abi-conformance's steps are each
+# gated `if: matrix.binding == '<b>'`), so a binding lane adding its v1 FFI
+# directory (go/internal/abi1 and so on) and its one script is a COMPLETE
+# change that never touches this workflow — the four lanes landing in
+# parallel no longer race to edit the same `case` block. Until a lane adds
+# its script, the dispatch fails loudly naming exactly which file is
+# missing, the same "a checker nobody has seen fail is not a checker"
+# discipline as everywhere else in this repository.
 #
 # Hosted runners, no secrets. Network is used only to install pinned tools.
 
@@ -138,10 +151,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "selftest — stubs.json paths are relative and resolve after a relocation"
+        run: scripts/abi-v1/build-stubs.sh --selftest
       - name: build the stub libraries and run the stub's handle-rule self-test
-        run: |
-          echo "::error::v1-abi-stubs (${{ matrix.platform }}): not yet provided (lane F-B)"
-          exit 1
+        run: scripts/abi-v1/build-stubs.sh --out "$RUNNER_TEMP/abi-v1-stubs"
+      - name: upload the stub libraries and manifest for v1-abi-conformance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: v1-abi-stubs-${{ matrix.platform }}
+          path: ${{ runner.temp }}/abi-v1-stubs
+          retention-days: 7
 
   v1-abi-conformance:
     name: "v1-abi-conformance (${{ matrix.binding }} ${{ matrix.toolchain }} ${{ matrix.os }})"
@@ -156,7 +175,11 @@ jobs:
           - {binding: python, toolchain: "3.14", os: linux-amd64, runner: ubuntu-latest}
           - {binding: ts, toolchain: node-22.21.0, os: linux-amd64, runner: ubuntu-latest}
           - {binding: ts, toolchain: node-24, os: linux-amd64, runner: ubuntu-latest}
-          - {binding: rust, toolchain: "1.85", os: linux-amd64, runner: ubuntu-latest}
+          # "msrv", not a hardcoded number: resolved at run time from
+          # rust/Cargo.toml's own rust-version, by the "the MSRV from
+          # rust/Cargo.toml" step below, so a future MSRV bump in that one
+          # file flows through here without a workflow edit.
+          - {binding: rust, toolchain: msrv, os: linux-amd64, runner: ubuntu-latest}
           - {binding: rust, toolchain: stable, os: linux-amd64, runner: ubuntu-latest}
           - {binding: go, toolchain: go.mod, os: darwin-arm64, runner: macos-latest}
           - {binding: python, toolchain: "3.13", os: darwin-arm64, runner: macos-latest}
@@ -166,10 +189,144 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: run every ABI case through the binding against the stubs, and upload the report
+      - name: download this leg's stub libraries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: v1-abi-stubs-${{ matrix.os }}
+          path: ${{ runner.temp }}/abi1-stubs
+
+      # Toolchain setup, one binding at a time, each gated so only the
+      # matching leg pays for it. This lives HERE rather than in each
+      # binding's own scripts/abi-v1/conformance/<binding>.sh so that adding
+      # a binding lane never means editing this workflow (every binding
+      # lane editing the same `case` block here was exactly the merge
+      # conflict this shape avoids). Pins match ci.yml's own no-artifacts
+      # jobs — one source of truth per action.
+      - name: set up Go
+        if: matrix.binding == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false
+      - name: set up uv, at this leg's Python version
+        if: matrix.binding == 'python'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.toolchain }}
+          # Same as v1-abi-gen's own setup-uv step above: the $dir-absent
+          # skip means uv may never actually run in this job (no binding has
+          # landed yet), so auto-caching's post-job save step fails loudly
+          # on a cache directory that was never created ("Cache path ...
+          # does not exist on disk", measured on this PR). Nothing here is
+          # expensive enough to need the cache anyway.
+          enable-cache: false
+      - name: this leg's Node version (the ts toolchain label minus its "node-" prefix)
+        if: matrix.binding == 'ts'
+        id: ts-version
         run: |
-          echo "::error::v1-abi-conformance (${{ matrix.binding }} ${{ matrix.toolchain }} ${{ matrix.os }}): not yet provided (lane F-B)"
-          exit 1
+          v="${{ matrix.toolchain }}"
+          echo "version=${v#node-}" >> "$GITHUB_OUTPUT"
+      - name: set up pnpm
+        if: matrix.binding == 'ts'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          # No version here on purpose: pnpm/action-setup reads packageManager
+          # from ts/package.json, the same as ci.yml's own ts job.
+          package_json_file: ts/package.json
+      - name: set up Node, at this leg's version
+        if: matrix.binding == 'ts'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.ts-version.outputs.version }}
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - name: the MSRV from rust/Cargo.toml (so a future bump needs no workflow edit)
+        if: matrix.binding == 'rust' && matrix.toolchain == 'msrv'
+        id: msrv
+        # The same pattern scripts/support-matrix.sh already reads
+        # rust/Cargo.toml with, restated here rather than shared, since a
+        # workflow step cannot import that script's Python helper.
+        run: |
+          v="$(grep -oE '^rust-version[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+"' rust/Cargo.toml | grep -oE '[0-9]+\.[0-9]+')"
+          if [ -z "$v" ]; then
+            echo "::error::could not read rust-version from rust/Cargo.toml"
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: set up Rust, at this leg's toolchain
+        if: matrix.binding == 'rust'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: ${{ matrix.toolchain == 'msrv' && steps.msrv.outputs.version || matrix.toolchain }}
+
+      - name: run every ABI case through the binding against the stubs, and upload the report
+        id: run
+        env:
+          CHTYPES_ABI1_STUBS: ${{ runner.temp }}/abi1-stubs
+          CHTYPES_ABI1_REPORT: ${{ runner.temp }}/abi1-report.json
+          CHTYPES_ABI1_TOOLCHAIN: ${{ matrix.toolchain }}
+        run: |
+          case "${{ matrix.binding }}" in
+            go) dir="go/internal/abi1" ;;
+            python) dir="python/src/chtypes/_abi1" ;;
+            ts) dir="ts/src/abi1" ;;
+            rust) dir="rust/src/abi1" ;;
+            *) echo "::error::v1-abi-conformance: unknown binding ${{ matrix.binding }}"; exit 1 ;;
+          esac
+          # No binding's v1 FFI lane has landed yet (F-Go/F-Py/F-TS/F-Rust, per
+          # the lane plan). Until one adds "$dir", this leg skips LOUDLY by
+          # name rather than failing or silently passing, exactly as every
+          # other no-registry test in this repository does.
+          if [ ! -d "$dir" ]; then
+            echo "v1-abi-conformance (${{ matrix.binding }} ${{ matrix.toolchain }} ${{ matrix.os }}): skipping loudly — $dir does not exist yet; this binding's v1 ABI lane has not landed"
+            echo "report=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The lane that adds "$dir" also adds this script (never edits this
+          # workflow): it can assume its toolchain is already on PATH (set up
+          # above) and CHTYPES_ABI1_STUBS/CHTYPES_ABI1_REPORT/
+          # CHTYPES_ABI1_TOOLCHAIN are exported. It should load its generated
+          # invoke-by-name dispatcher and loader, point them at
+          # CHTYPES_ABI1_STUBS (stubs.json there has each variant's path and
+          # predicate), run tests/fixtures/abi-v1/cases.json's cases, and
+          # write a spec/abi-v1/schema/report.schema.json-shaped report to
+          # CHTYPES_ABI1_REPORT. Its own exit code is this step's exit code;
+          # the report is uploaded whenever CHTYPES_ABI1_REPORT exists
+          # afterward, pass or fail, so a partial report from a failing run
+          # is still visible to a human reading the artifact.
+          script="scripts/abi-v1/conformance/${{ matrix.binding }}.sh"
+          if [ ! -f "$script" ]; then
+            echo "::error::v1-abi-conformance: $dir exists but $script is missing — the lane that added $dir must add $script"
+            exit 1
+          fi
+          # Selftest first, same discipline as v1-abi-linked/v1-abi-rust
+          # above, but conditional: unlike those two single-purpose scripts,
+          # a conformance script is not REQUIRED to declare --selftest. Only
+          # run it when the script actually looks like it declares one (the
+          # same declaration shapes scripts/check-selftests-wired.py itself
+          # recognizes for a .sh file), so this never calls an unsupported
+          # flag on a script that never promised one.
+          if command grep -qE '"\$\{1:-\}"[[:space:]]*=[[:space:]]*"--selftest"|^[[:space:]]*--selftest\)' "$script"; then
+            bash "$script" --selftest
+          fi
+          if bash "$script"; then
+            rc=0
+          else
+            rc=$?
+          fi
+          if [ -f "$CHTYPES_ABI1_REPORT" ]; then
+            echo "report=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "report=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$rc"
+      - name: upload this leg's report
+        if: always() && steps.run.outputs.report == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: v1-abi-conformance-${{ matrix.binding }}-${{ matrix.toolchain }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/abi1-report.json
+          retention-days: 7
 
   v1-abi-linked:
     name: "v1-abi-linked — Go linked mode type-checks against the v1 header"
@@ -177,10 +334,35 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false
+      # No separate C-compiler install: ubuntu-latest ships gcc and clang
+      # already, which v1-abi-gen's header-syntax step above already relies
+      # on the same way.
+      #
+      # Two steps, selftest first — the same shape ci.yml uses for
+      # check-linked-build.sh — so scripts/check-selftests-wired.py sees
+      # this script's own --selftest actually invoked, not just declared.
+      # The lane that adds go/internal/abi1 (F-Go) also adds this script
+      # (never edits this workflow): a cgo type-check of linked_gen.go
+      # against include/v1/chtypes.h, no artifact (plan §2.4's v1 successor
+      # of check-linked-build.sh), under scripts/abi-v1 and named for this
+      # job (below: check-${check}.sh).
+      - name: "selftest — the linked-mode check's own fixtures, once it exists"
+        run: |
+          check="linked"
+          script="scripts/abi-v1/check-${check}.sh"
+          if [ ! -f "$script" ]; then
+            echo "::error::v1-abi-linked: not yet provided (lane F-Go) — add $script"
+            exit 1
+          fi
+          bash "$script" --selftest
       - name: type-check the generated linked table against include/v1/chtypes.h
         run: |
-          echo "::error::v1-abi-linked: not yet provided (lane F-Go)"
-          exit 1
+          check="linked"
+          bash "scripts/abi-v1/check-${check}.sh"
 
   v1-abi-rust:
     name: "v1-abi-rust — clippy/fmt/test --features abi-v1"
@@ -188,10 +370,39 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # stable only, deliberately not a {msrv, stable} matrix like
+      # v1-abi-conformance's rust legs: this job's name is one of the
+      # spelled-exactly check contexts named at the top of this file
+      # ("required once the Rust lane lands"), and a matrix here would split
+      # it into two context names to keep in sync with branch protection for
+      # no proof this job itself needs — the MSRV legs of the actual
+      # conformance cases already run in v1-abi-conformance's
+      # `rust msrv`/`rust stable` matrix. If a later lane wants MSRV coverage
+      # of clippy/fmt/test too, add a matrix here then and update the header
+      # comment's context list in the same change.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          components: clippy, rustfmt
+      # Two steps, selftest first — the same shape as v1-abi-linked above and
+      # ci.yml's check-linked-build.sh — so scripts/check-selftests-wired.py
+      # sees this script's own --selftest actually invoked. The lane that
+      # adds rust/src/abi1 (F-Rust) also adds this script (never edits this
+      # workflow): `cargo clippy`/`fmt --check`/`test` with `--features
+      # abi-v1`, default-feature output byte-unchanged; under scripts/abi-v1
+      # and named for this job, the same way as v1-abi-linked's script above.
+      - name: "selftest — the clippy/fmt/test check's own fixtures, once it exists"
+        run: |
+          check="rust"
+          script="scripts/abi-v1/check-${check}.sh"
+          if [ ! -f "$script" ]; then
+            echo "::error::v1-abi-rust: not yet provided (lane F-Rust) — add $script"
+            exit 1
+          fi
+          bash "$script" --selftest
       - name: clippy, fmt and the unit tests with the abi-v1 feature
         run: |
-          echo "::error::v1-abi-rust: not yet provided (lane F-Rust)"
-          exit 1
+          check="rust"
+          bash "scripts/abi-v1/check-${check}.sh"
 
   v1-abi-parity:
     name: "v1-abi-parity — every enrolled binding passes every ABI case"
@@ -201,7 +412,22 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - name: download every leg's report, if any binding is enrolled yet
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: v1-abi-conformance-*
+          path: ${{ runner.temp }}/abi1-reports
+          merge-multiple: true
+        # Every v1-abi-conformance leg skips loudly today (no binding lane has
+        # landed), so there is nothing to download yet; parity.py's own
+        # 0-reports-dir handling (load_reports) covers that, and this must not
+        # fail the job over "no artifacts found" once that is also true for a
+        # run with zero MATCHING legs rather than zero REPORTS.
+        continue-on-error: true
+      - name: selftest — MISSING, FAILED, EXTRA and STALE each refuse, and 0-enrolled is green, on a fabricated tree
+        run: uv run --no-project --python 3.11 scripts/abi-v1/parity.py --selftest
       - name: every enrolled binding has a passing report per leg, for the same cases
-        run: |
-          echo "::error::v1-abi-parity: not yet provided (lane F-B)"
-          exit 1
+        run: uv run --no-project --python 3.11 scripts/abi-v1/parity.py --reports-dir "$RUNNER_TEMP/abi1-reports"
