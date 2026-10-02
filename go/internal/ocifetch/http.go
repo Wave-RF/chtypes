@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -160,12 +161,25 @@ type client struct {
 	idleReadTimeout time.Duration
 	token           string   // CHTYPES_DOWNLOAD_TOKEN, sent only to tokenHosts
 	tokenHosts      []string // exact host:port matches (the configured bases)
+	// onRequest, when set, is called with every outgoing request just
+	// before it is sent (after auth/Accept headers are attached, before
+	// redirects are followed) — test-only, for a conformance runner to
+	// count requests and inspect headers without a server-side log.
+	onRequest func(*http.Request)
 }
 
-func newClient(clock Clock, connectTimeout, idleReadTimeout time.Duration, token string, tokenHosts []string) *client {
+func newClient(clock Clock, connectTimeout, idleReadTimeout time.Duration, token string, tokenHosts []string, onRequest func(*http.Request)) *client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = http.ProxyFromEnvironment
 	transport.DialContext = (&net.Dialer{Timeout: connectTimeout}).DialContext
+	// file:// bases (the conformance suite's file transport, §2 of the
+	// guide) are served through the same retry/redirect/Accept-header
+	// pipeline as http(s): registering it here, rather than special-casing
+	// the scheme anywhere else, is what keeps every other file in this
+	// package transport-agnostic. The root is "/": a file base is already
+	// an absolute path (file:///abs/...), and http.Dir resolves the
+	// request's URL.Path against it unchanged.
+	transport.RegisterProtocol("file", http.NewFileTransport(http.Dir("/")))
 	return &client{
 		http: &http.Client{
 			Transport: transport,
@@ -181,6 +195,7 @@ func newClient(clock Clock, connectTimeout, idleReadTimeout time.Duration, token
 		idleReadTimeout: idleReadTimeout,
 		token:           token,
 		tokenHosts:      tokenHosts,
+		onRequest:       onRequest,
 	}
 }
 
@@ -223,6 +238,20 @@ var manifestAccept = MediaTypeIndex + ", " + MediaTypeManifest
 // result whose status may be any value the caller must interpret (200, 401,
 // 403, 404, …) — only a transport failure or an exhausted retry budget
 // produces an error, always a *FetchError.
+// permanentTransportError marks a failure that retrying the SAME base will
+// never fix: a connection refused (nothing is listening), a redirect with
+// no Location, or more hops than limits.max_redirects. doGet returns on the
+// first one of these, consuming none of the retry schedule.
+type permanentTransportError struct{ err error }
+
+func (e *permanentTransportError) Error() string { return e.err.Error() }
+func (e *permanentTransportError) Unwrap() error { return e.err }
+
+func isPermanentTransportError(err error) bool {
+	var perm *permanentTransportError
+	return errors.As(err, &perm)
+}
+
 func (c *client) doGet(ctx context.Context, rawURL string, opts requestOptions) (*httpResult, error) {
 	policy := defaultRetryPolicy()
 	var lastErr error
@@ -231,6 +260,23 @@ func (c *client) doGet(ctx context.Context, rawURL string, opts requestOptions) 
 		attemptCtx, cancel := context.WithTimeout(ctx, c.connectTimeout+c.idleReadTimeout)
 		result, status, retryAfter, err := c.attemptWithRedirects(attemptCtx, rawURL, opts)
 		cancel()
+
+		// A permanent, base-specific condition (connection refused — no
+		// server to retry against; too many redirects or a malformed
+		// Location — a protocol violation that will recur identically on
+		// every retry) is never worth sleeping for: it fails this base
+		// immediately, consuming no part of the retry schedule, so
+		// fetchAcrossBases moves on to the next base (if any) without
+		// delay — same treatment as a 404 (§2: "tried in order on a
+		// temporary error … never on a verification failure", and a
+		// permanent local error is not something retrying the same base
+		// could ever fix).
+		if isPermanentTransportError(err) {
+			if errors.Is(err, errBodyTooLarge) {
+				return nil, newError(CodeArtifactCorrupt, "", "", rawURL, err, "fetching %s: %v", rawURL, err)
+			}
+			return nil, newError(CodeSourceUnreachable, "", "", rawURL, err, "fetching %s: %v", rawURL, err)
+		}
 
 		// The anonymous Bearer-token flow (mirrors): a 401 with no static
 		// CHTYPES_DOWNLOAD_TOKEN configured and a Bearer challenge is an
@@ -299,18 +345,24 @@ func (c *client) attemptWithRedirects(ctx context.Context, rawURL string, opts r
 		if opts.accept != "" {
 			req.Header.Set("Accept", opts.accept)
 		}
+		if c.onRequest != nil {
+			c.onRequest(req)
+		}
 		resp, err := c.http.Do(req)
 		if err != nil {
+			if errors.Is(err, syscall.ECONNREFUSED) {
+				return nil, 0, nil, &permanentTransportError{err}
+			}
 			return nil, 0, nil, err
 		}
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			loc := resp.Header.Get("Location")
 			_ = resp.Body.Close()
 			if loc == "" {
-				return nil, 0, nil, errors.New("redirect response with no Location header")
+				return nil, 0, nil, &permanentTransportError{errors.New("redirect response with no Location header")}
 			}
 			if hop+1 >= MaxRedirects {
-				return nil, 0, nil, fmt.Errorf("more than %d redirects", MaxRedirects)
+				return nil, 0, nil, &permanentTransportError{fmt.Errorf("more than %d redirects", MaxRedirects)}
 			}
 			next, err := u.Parse(loc)
 			if err != nil {
@@ -323,6 +375,16 @@ func (c *client) attemptWithRedirects(ctx context.Context, rawURL string, opts r
 		body, readErr := readLimited(resp.Body, opts.maxBytes)
 		closeErr := resp.Body.Close()
 		if readErr != nil {
+			if errors.Is(readErr, errBodyTooLarge) {
+				// A real response the server sent, just oversized — a
+				// content problem, never a connection one. Retrying would
+				// read the identical oversized body again, so this is
+				// permanent, but it is CHTYPES_ARTIFACT_CORRUPT rather
+				// than CHTYPES_SOURCE_UNREACHABLE: doGet checks for this
+				// sentinel before applying the generic permanent-transport
+				// classification.
+				return nil, 0, nil, &permanentTransportError{readErr}
+			}
 			return nil, 0, nil, readErr
 		}
 		if closeErr != nil {
@@ -353,6 +415,12 @@ func (c *client) setAuth(req *http.Request, u *url.URL, opts requestOptions) {
 	}
 }
 
+// errBodyTooLarge is readLimited's sentinel for an oversized response body
+// (errors.Is-able), so doGet can tell "the server sent real content, just
+// too much of it" apart from every other transport failure and map it to
+// CHTYPES_ARTIFACT_CORRUPT rather than CHTYPES_SOURCE_UNREACHABLE.
+var errBodyTooLarge = errors.New("response exceeds the byte cap")
+
 // readLimited reads at most maxBytes+1 bytes and fails if that is exceeded,
 // so a caller can distinguish "within the cap" from "over" without buffering
 // an attacker-controlled amount of data. maxBytes<=0 means unlimited.
@@ -366,7 +434,7 @@ func readLimited(r io.Reader, maxBytes int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(b)) > maxBytes {
-		return nil, fmt.Errorf("response exceeds the %d byte cap", maxBytes)
+		return nil, fmt.Errorf("%w: %d bytes over the %d byte cap", errBodyTooLarge, int64(len(b))-maxBytes, maxBytes)
 	}
 	return b, nil
 }

@@ -11,6 +11,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,10 +42,11 @@ type Options struct {
 	LockPath              string // defaults to LockDefaultFile
 	LockWrite             bool
 	Update                bool
-	Clock                 *Clock        // nil means DefaultClock()
-	ConnectTimeout        time.Duration // 0 means ConnectTimeoutSeconds
-	IdleReadTimeout       time.Duration // 0 means IdleReadTimeoutSeconds
-	HookBeforeIndexRename func()        // test-only: simulates a concurrent cache writer
+	Clock                 *Clock              // nil means DefaultClock()
+	ConnectTimeout        time.Duration       // 0 means ConnectTimeoutSeconds
+	IdleReadTimeout       time.Duration       // 0 means IdleReadTimeoutSeconds
+	HookBeforeIndexRename func()              // test-only: simulates a concurrent cache writer
+	OnRequest             func(*http.Request) // test-only: observes every outgoing request
 }
 
 // Resolved is what every successful resolution returns (§1.3).
@@ -101,6 +103,7 @@ type resolvedOptions struct {
 	connectTimeout        time.Duration
 	idleReadTimeout       time.Duration
 	hookBeforeIndexRename func()
+	onRequest             func(*http.Request)
 }
 
 func resolveOptions(o *Options) (resolvedOptions, error) {
@@ -203,6 +206,7 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 		ro.idleReadTimeout = o.IdleReadTimeout
 	}
 	ro.hookBeforeIndexRename = o.HookBeforeIndexRename
+	ro.onRequest = o.OnRequest
 	return ro, nil
 }
 
@@ -274,7 +278,7 @@ type session struct {
 
 func newSession(ro resolvedOptions) *session {
 	return &session{
-		client:                newClient(ro.clock, ro.connectTimeout, ro.idleReadTimeout, ro.token, ro.tokenHosts),
+		client:                newClient(ro.clock, ro.connectTimeout, ro.idleReadTimeout, ro.token, ro.tokenHosts, ro.onRequest),
 		hookBeforeIndexRename: ro.hookBeforeIndexRename,
 	}
 }
@@ -387,6 +391,30 @@ func (s *session) ensureOnline(ctx context.Context, ro resolvedOptions, l *layou
 		return nil, err
 	}
 
+	// Monotonicity (§6, "monotonic-warning"): "a HIGHER build is already
+	// installed than what the live registry now offers; the existing
+	// (newer) install is kept, with a warning." Checked as soon as the
+	// candidate's own (signed) version/build are known, and before the
+	// layer is ever fetched — there is no point downloading and unpacking
+	// bytes this call is about to discard. Only covers the signed path:
+	// without a verified predicate there is no version/build to compare
+	// without an extra, otherwise-unneeded config fetch, so an
+	// allow-unsigned candidate falls through to the normal install below.
+	if stmt != nil {
+		candidateVersion := stringPredicate(stmt.Statement.Predicate, "clickhouse_version")
+		candidateBuild := stringPredicate(stmt.Statement.Predicate, "build")
+		if existing, found := newerAlreadyInstalled(l, platform.Key, manifestDigest, candidateVersion, candidateBuild); found {
+			warnings = append(warnings, fmt.Sprintf(
+				"chtypes: a newer build is already installed locally (%s build %s, monotonic check) than the registry just resolved (%s build %s) — keeping the existing install",
+				existing.rec.Version, existing.rec.Build, candidateVersion, candidateBuild))
+			// The candidate manifest is discarded, never installed, so no
+			// blob and no index entry is written for it — only the
+			// already-installed (newer) entry's own index entry, which is
+			// already there, stays.
+			return recordToResolved(&existing.rec, existing.dir, platform.Key, req.Spelling, indexDigest, true, base, warnings), nil
+		}
+	}
+
 	layerResult, layerBase, err := s.fetchAcrossBases(ctx, ro.bases, "blobs/"+string(layerDesc.Digest), notFoundRetryOnLast, requestOptions{})
 	if err != nil {
 		return nil, err
@@ -396,8 +424,11 @@ func (s *session) ensureOnline(ctx context.Context, ro resolvedOptions, l *layou
 		return nil, newError(CodeArtifactCorrupt, req.Spelling, platform.Key, layerResult.url, verr, "layer: %v", verr)
 	}
 
-	libraryRelPath, _ := predicateLibraryPath(stmt)
-	resolved, err := s.installManifest(l, req, platform, manifestDigest, *desc, manifestBody, layerDesc, layerResult.body, stmt, libraryRelPath, indexDigest, base, warnings)
+	libraryRelPath, unsignedConfig, lerr := s.libraryPathFor(ctx, ro.bases, manifest, stmt)
+	if lerr != nil {
+		return nil, lerr
+	}
+	resolved, err := s.installManifest(l, req, platform, manifestDigest, *desc, manifestBody, layerDesc, layerResult.body, stmt, libraryRelPath, unsignedConfig, indexDigest, base, warnings)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +443,7 @@ func (s *session) ensureOnline(ctx context.Context, ro resolvedOptions, l *layou
 
 // installManifest unpacks layerBody and installs it under l, returning the
 // Resolved value (§1.3's guarantees).
-func (s *session) installManifest(l *layout, req Request, platform Platform, manifestDigest Digest, desc Descriptor, manifestBody []byte, layerDesc Descriptor, layerBody []byte, stmt *verifiedStatement, libraryRelPath string, indexDigest Digest, base string, warnings []string) (*Resolved, error) {
+func (s *session) installManifest(l *layout, req Request, platform Platform, manifestDigest Digest, desc Descriptor, manifestBody []byte, layerDesc Descriptor, layerBody []byte, stmt *verifiedStatement, libraryRelPath string, unsignedConfig map[string]any, indexDigest Digest, base string, warnings []string) (*Resolved, error) {
 	if err := l.writeBlob(desc.Digest, manifestBody); err != nil {
 		return nil, err
 	}
@@ -435,9 +466,18 @@ func (s *session) installManifest(l *layout, req Request, platform Platform, man
 	var predicate map[string]any
 	var signedBy string
 	var version, channel, build string
-	if stmt != nil {
+	switch {
+	case stmt != nil:
 		predicate = stmt.Statement.Predicate
 		signedBy = stmt.KeyID
+	case unsignedConfig != nil:
+		// CHTYPES_ALLOW_UNSIGNED: no predicate was ever verified, so the
+		// only source of these fields is the manifest's own config blob
+		// (layout-v2 spec §4.1, value-equal to the predicate by
+		// definition — there is nothing to cross-check it against here).
+		predicate = unsignedConfig
+	}
+	if predicate != nil {
 		version, _ = predicate["clickhouse_version"].(string)
 		channel, _ = predicate["channel"].(string)
 		build, _ = predicate["build"].(string)
@@ -520,6 +560,69 @@ func predicateLibraryPath(stmt *verifiedStatement) (string, bool) {
 	return v, ok
 }
 
+// libraryPathFor finds the library's path within the tarball: the signed
+// predicate's own "library" field when there is one, or — under
+// CHTYPES_ALLOW_UNSIGNED, where no predicate was ever verified — the same
+// field read from the manifest's own config blob instead (layout-v2 spec
+// §4.1: "the tarball's own manifest.json, which is also the OCI config
+// blob, carries the same fields, value-equal"). The fetch layer otherwise
+// never fetches the config blob at all (§3: "without yet trusting
+// either") — this is the one path that needs it, because there is no
+// other source of truth once a fetch proceeds unsigned.
+// libraryPathFor returns the library's path within the tarball, and — only
+// when there was no signed predicate to begin with (unsignedConfig is nil
+// otherwise) — the config blob's own parsed fields, so the caller can still
+// report version/channel/build for an artifact that was never verified.
+func (s *session) libraryPathFor(ctx context.Context, bases []string, manifest *ImageManifest, stmt *verifiedStatement) (path string, unsignedConfig map[string]any, err error) {
+	if p, ok := predicateLibraryPath(stmt); ok {
+		return p, nil, nil
+	}
+	result, _, err := s.fetchAcrossBases(ctx, bases, "blobs/"+string(manifest.Config.Digest), notFoundRetryOnLast, requestOptions{})
+	if err != nil {
+		return "", nil, err
+	}
+	if verr := verifyDescriptor(result.body, manifest.Config); verr != nil {
+		return "", nil, newError(CodeArtifactCorrupt, "", "", result.url, verr, "config blob: %v", verr)
+	}
+	var cfg map[string]any
+	if uerr := strictUnmarshal(result.body, &cfg); uerr != nil {
+		return "", nil, newError(CodeArtifactCorrupt, "", "", result.url, uerr, "config blob is not valid JSON: %v", uerr)
+	}
+	p, _ := cfg["library"].(string)
+	if p == "" {
+		return "", nil, newError(CodeArtifactCorrupt, "", "", result.url, nil, "config blob names no library")
+	}
+	return p, cfg, nil
+}
+
+// newerAlreadyInstalled reports whether l already has an installed entry,
+// other than excludeManifest, for platformKey whose (version, build) is
+// strictly newer than (version, build) — the monotonic-warning check (§6):
+// "a HIGHER build is already installed than what the live registry now
+// offers; the existing (newer) install is kept, with a warning." The
+// returned entry is the existing (newer) install itself, so the caller can
+// return it in place of whatever the registry just resolved.
+func newerAlreadyInstalled(l *layout, platformKey string, excludeManifest Digest, version, build string) (*installedEntry, bool) {
+	entries, err := listUnpacked(l.dir)
+	if err != nil {
+		return nil, false
+	}
+	for i, e := range entries {
+		if e.rec.Platform != platformKey || e.rec.Digests.Manifest == excludeManifest {
+			continue
+		}
+		switch {
+		case e.rec.Version == version:
+			if e.rec.Build > build {
+				return &entries[i], true
+			}
+		case versionLess(version, e.rec.Version):
+			return &entries[i], true
+		}
+	}
+	return nil, false
+}
+
 // readInstalledRecord reads the verified.json record for manifestDigest from
 // l, if present.
 func readInstalledRecord(l *layout, manifestDigest Digest) (*verifiedRecord, string, bool) {
@@ -535,6 +638,7 @@ func readInstalledRecord(l *layout, manifestDigest Digest) (*verifiedRecord, str
 // branch of Ensure: search the user cache, then each read-only system
 // directory in order, never touching the network.
 func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey string) (*Resolved, error) {
+	cacheLayout := newLayout(ro.cacheDir, false)
 	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
 	for i, dir := range dirs {
 		readOnly := i > 0
@@ -551,8 +655,19 @@ func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey strin
 			return recordToResolved(&best.rec, best.dir, platformKey, req.Spelling, "", true, source, nil), nil
 		}
 		// A pre-seeded index.json entry with no verified.json yet: verify
-		// and unpack it now, entirely from local blobs (§1).
-		if res, err := verifyPreseededEntry(l, req, platformKey, ro.trustedKeys); err == nil && res != nil {
+		// and unpack it now, entirely from local blobs (§1). A read-only
+		// system directory is only ever read here — the result lands in
+		// the user's own (writable) cache, never back into the system dir.
+		dst := l
+		source := "cache (pre-seeded)"
+		if readOnly {
+			dst = cacheLayout
+			if err := dst.ensureSkeleton(); err != nil {
+				continue
+			}
+			source = "system:" + dir + " (pre-seeded, installed into the cache)"
+		}
+		if res, err := verifyPreseededEntry(l, dst, req, platformKey, ro.trustedKeys, source); err == nil && res != nil {
 			return res, nil
 		}
 	}
@@ -646,16 +761,24 @@ func verifyOne(e installedEntry) VerifyResult {
 // for a bundle-artifactType entry and treats that as the manifest's
 // referrer, exactly what `oras copy -r --to-oci-layout` is expected to have
 // pulled alongside the subject manifest.
-func verifyPreseededEntry(l *layout, req Request, platformKey string, trustedKeys []ed25519.PublicKey) (*Resolved, error) {
+// verifyPreseededEntry scans srcLayout's index.json for a platform-matching
+// entry with no verified.json yet, and verifies and unpacks it entirely from
+// srcLayout's own local blobs. The result (the unpacked library and its
+// verified.json record) is written into dstLayout, which must be writable —
+// srcLayout itself is only ever read from, so this is safe to call with a
+// read-only system directory as the source and the user cache as the
+// destination (§1 of the guide: "read-only system directories … never
+// written to"). For the user cache itself, src and dst are the same layout.
+func verifyPreseededEntry(srcLayout, dstLayout *layout, req Request, platformKey string, trustedKeys []ed25519.PublicKey, source string) (*Resolved, error) {
 	platform, ok := platformByKey(platformKey)
 	if !ok {
 		return nil, nil
 	}
-	for _, desc := range l.readIndexEntries() {
+	for _, desc := range srcLayout.readIndexEntries() {
 		if desc.Platform == nil || desc.Platform.OS != platform.OS || desc.Platform.Architecture != platform.Architecture {
 			continue
 		}
-		manifestBody, ok := l.readBlob(desc.Digest)
+		manifestBody, ok := srcLayout.readBlob(desc.Digest)
 		if !ok {
 			continue
 		}
@@ -667,7 +790,7 @@ func verifyPreseededEntry(l *layout, req Request, platformKey string, trustedKey
 			continue
 		}
 		layerDesc := m.Layers[0]
-		layerBody, ok := l.readBlob(layerDesc.Digest)
+		layerBody, ok := srcLayout.readBlob(layerDesc.Digest)
 		if !ok {
 			continue
 		}
@@ -675,12 +798,15 @@ func verifyPreseededEntry(l *layout, req Request, platformKey string, trustedKey
 			continue
 		}
 		manifestDigest := desc.Digest
-		stmt := findLocalBundle(l, trustedKeys, layerDesc.Digest, platform, req.Spelling)
+		stmt := findLocalBundle(srcLayout, trustedKeys, manifestDigest, layerDesc.Digest, &platform, req.Spelling)
 		if stmt == nil {
 			continue
 		}
 		libraryRelPath, _ := predicateLibraryPath(stmt)
-		up, err := unpackLibrary(layerBody, filepath.Join(l.dir, UnpackedDirName()), libraryRelPath)
+		if err := os.MkdirAll(filepath.Join(dstLayout.dir, UnpackedDirName()), 0o755); err != nil {
+			continue
+		}
+		up, err := unpackLibrary(layerBody, filepath.Join(dstLayout.dir, UnpackedDirName()), libraryRelPath)
 		if err != nil {
 			continue
 		}
@@ -700,28 +826,111 @@ func verifyPreseededEntry(l *layout, req Request, platformKey string, trustedKey
 				BundleManifest: stmt.BundleManifestDigest,
 			},
 		}
-		dir, already, werr := l.writeVerifiedRecord(manifestDigest, up.dir, rec)
+		dir, already, werr := dstLayout.writeVerifiedRecord(manifestDigest, up.dir, rec)
 		if werr != nil {
 			continue
 		}
-		return recordToResolved(&rec, dir, platform.Key, req.Spelling, "", already, "cache (pre-seeded)", nil), nil
+		return recordToResolved(&rec, dir, platform.Key, req.Spelling, "", already, source, nil), nil
 	}
 	return nil, nil
 }
 
+// installPreseededByDigest verifies and unpacks ONE pre-seeded index.json
+// entry identified by its own manifest digest, entirely from l's local
+// blobs, regardless of platform or any particular request. This is not part
+// of the seam; it exists for test setup — a conformance cache fixture names
+// manifest digests, in its own installed.json, that must already be
+// installed (not merely present) before a case's clock starts
+// (docs/guides/fetch-v1.md §10, "Cache fixtures and installed.json").
+func installPreseededByDigest(l *layout, manifestDigest Digest, trustedKeys []ed25519.PublicKey) error {
+	entries := l.readIndexEntries()
+	var target *Descriptor
+	for i := range entries {
+		if entries[i].Digest == manifestDigest {
+			target = &entries[i]
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("chtypes: installed.json names %s, which is not in index.json", manifestDigest)
+	}
+	manifestBody, ok := l.readBlob(target.Digest)
+	if !ok {
+		return fmt.Errorf("chtypes: manifest blob %s is missing", target.Digest)
+	}
+	if verr := verifyDescriptor(manifestBody, *target); verr != nil {
+		return verr
+	}
+	var m ImageManifest
+	if uerr := strictUnmarshal(manifestBody, &m); uerr != nil {
+		return uerr
+	}
+	if len(m.Layers) != 1 {
+		return fmt.Errorf("chtypes: manifest %s carries %d layers, expected 1", target.Digest, len(m.Layers))
+	}
+	layerDesc := m.Layers[0]
+	layerBody, ok := l.readBlob(layerDesc.Digest)
+	if !ok {
+		return fmt.Errorf("chtypes: layer blob %s is missing", layerDesc.Digest)
+	}
+	if verr := verifyDescriptor(layerBody, layerDesc); verr != nil {
+		return verr
+	}
+	var platformKey string
+	if target.Platform != nil {
+		platformKey = target.Platform.OS + "-" + target.Platform.Architecture
+	}
+	stmt := findLocalBundle(l, trustedKeys, target.Digest, layerDesc.Digest, nil, "")
+	if stmt == nil {
+		return fmt.Errorf("chtypes: no local referrer verifies manifest %s", target.Digest)
+	}
+	libraryRelPath, _ := predicateLibraryPath(stmt)
+	if err := os.MkdirAll(filepath.Join(l.dir, UnpackedDirName()), 0o755); err != nil {
+		return err
+	}
+	up, err := unpackLibrary(layerBody, filepath.Join(l.dir, UnpackedDirName()), libraryRelPath)
+	if err != nil {
+		return err
+	}
+	rec := verifiedRecord{
+		Schema:      1,
+		Platform:    platformKey,
+		Version:     stringPredicate(stmt.Statement.Predicate, "clickhouse_version"),
+		Channel:     stringPredicate(stmt.Statement.Predicate, "channel"),
+		Build:       stringPredicate(stmt.Statement.Predicate, "build"),
+		LibraryPath: up.libraryPath,
+		SignedBy:    stmt.KeyID,
+		Predicate:   stmt.Statement.Predicate,
+		Digests: Digests{
+			Manifest:       target.Digest,
+			Layer:          layerDesc.Digest,
+			Bundle:         stmt.BundleDigest,
+			BundleManifest: stmt.BundleManifestDigest,
+		},
+	}
+	_, _, werr := l.writeVerifiedRecord(manifestDigest, up.dir, rec)
+	return werr
+}
+
 // findLocalBundle scans l's own index.json for a bundle-artifactType entry
 // that verifies manifestLayerDigest's statement, entirely from local blobs.
-func findLocalBundle(l *layout, trustedKeys []ed25519.PublicKey, layerDigest Digest, platform Platform, request string) *verifiedStatement {
-	for _, cand := range l.readIndexEntries() {
-		if cand.ArtifactType != MediaTypeBundle {
-			continue
-		}
-		refBody, ok := l.readBlob(cand.Digest)
+// platform nil skips the platform/version check (§4's validateStatement),
+// for installing a pre-seeded entry by its own digest rather than against a
+// live request.
+func findLocalBundle(l *layout, trustedKeys []ed25519.PublicKey, manifestDigest, layerDigest Digest, platform *Platform, request string) *verifiedStatement {
+	for _, blobDigest := range l.listAllBlobDigests() {
+		refBody, ok := l.readBlob(blobDigest)
 		if !ok {
 			continue
 		}
 		var refManifest ImageManifest
-		if uerr := strictUnmarshal(refBody, &refManifest); uerr != nil || len(refManifest.Layers) != 1 {
+		if uerr := strictUnmarshal(refBody, &refManifest); uerr != nil {
+			continue
+		}
+		if refManifest.ArtifactType != MediaTypeBundle || refManifest.Subject == nil || refManifest.Subject.Digest != manifestDigest {
+			continue
+		}
+		if len(refManifest.Layers) != 1 {
 			continue
 		}
 		bundleBody, ok := l.readBlob(refManifest.Layers[0].Digest)
@@ -732,10 +941,10 @@ func findLocalBundle(l *layout, trustedKeys []ed25519.PublicKey, layerDigest Dig
 		if verr != nil || !vr.verified {
 			continue
 		}
-		if cerr := validateStatement(vr.statement, PredicateTypeArtifact, layerDigest, &platform, request); cerr != nil {
+		if cerr := validateStatement(vr.statement, PredicateTypeArtifact, layerDigest, platform, request); cerr != nil {
 			continue
 		}
-		return &verifiedStatement{KeyID: vr.keyID, Statement: *vr.statement, BundleDigest: refManifest.Layers[0].Digest, BundleManifestDigest: cand.Digest}
+		return &verifiedStatement{KeyID: vr.keyID, Statement: *vr.statement, BundleDigest: refManifest.Layers[0].Digest, BundleManifestDigest: blobDigest}
 	}
 	return nil
 }
@@ -891,8 +1100,11 @@ func (s *session) ensureFrozen(ctx context.Context, ro resolvedOptions, l *layou
 	} else {
 		warnings = []string{"chtypes: the locked bundle is unsigned or untrusted; CHTYPES_ALLOW_UNSIGNED is set, continuing unsigned"}
 	}
-	libraryRelPath, _ := predicateLibraryPath(stmt)
-	return s.installManifest(l, req, platform, pin.Manifest, desc, manifestResult.body, m.Layers[0], layerResult.body, stmt, libraryRelPath, pin.Index, base, warnings)
+	libraryRelPath, unsignedConfig, lerr := s.libraryPathFor(ctx, ro.bases, &m, stmt)
+	if lerr != nil {
+		return nil, lerr
+	}
+	return s.installManifest(l, req, platform, pin.Manifest, desc, manifestResult.body, m.Layers[0], layerResult.body, stmt, libraryRelPath, unsignedConfig, pin.Index, base, warnings)
 }
 
 // writeLockForRequest builds pins for every platform idx offers (downloading
@@ -900,6 +1112,11 @@ func (s *session) ensureFrozen(ctx context.Context, ro resolvedOptions, l *layou
 // only for the host's own platform — "lock-write-all-platforms" asserts zero
 // layer GETs for the others) and merges them into the lock at ro.lockPath.
 func (s *session) writeLockForRequest(ctx context.Context, ro resolvedOptions, l *layout, idx *ImageIndex, req Request, hostPlatform Platform, hostResolved *Resolved) error {
+	// The index digest is never recorded, even for the host platform: it is
+	// informational only (§6 of the guide — the index is computed by the
+	// host, not stored, so a by-digest GET of it is not guaranteed to be
+	// served), and the fixtures lane's own expected-lock fixtures never
+	// carry one.
 	pins := map[string]LockPin{
 		hostPlatform.Key: {
 			Version:  hostResolved.Version,
@@ -907,7 +1124,6 @@ func (s *session) writeLockForRequest(ctx context.Context, ro resolvedOptions, l
 			Manifest: hostResolved.Digests.Manifest,
 			Layer:    hostResolved.Digests.Layer,
 			Bundle:   hostResolved.Digests.Bundle,
-			Index:    hostResolved.Digests.Index,
 		},
 	}
 	for i := range idx.Manifests {

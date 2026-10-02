@@ -2,31 +2,29 @@ package ocifetch
 
 // conformance_test.go — TestConformanceV1, the runner v1.yml's
 // v1-conformance job invokes (`go test -count=1 -run '^TestConformanceV1$'
-// ./internal/ocifetch/`; plan §3.3). It reads CHTYPES_V1_CONFORMANCE and
-// skips loudly when unset, so a bare-copy `go test ./...` (scripts/check-
-// standalone.sh) still passes with nothing to fetch.
-//
-// PROVISIONAL: lane 0B (fixtures, the scripted HTTP server, the parity gate)
-// has not landed on this branch yet, so cases.json and the scripted server
-// it adds under scripts/fetch-v1/ do not exist to test this against. This
-// file implements the documented contract (plan §3.2's case shape,
-// spec/fetch-v1/schema/cases.schema.json and report.schema.json) as
-// precisely as it can be read today; expect to iterate once 0B merges and a
-// real conformance run can drive it — see MERGE NOTES.
+// ./internal/ocifetch/`; docs/guides/fetch-v1.md §10). It reads
+// CHTYPES_V1_CONFORMANCE and skips loudly when unset, so a bare-copy
+// `go test ./...` (scripts/check-standalone.sh) still passes with nothing to
+// fetch.
 
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -101,11 +99,15 @@ type confReport struct {
 }
 
 // TestConformanceV1 is the v1 fetch-layer conformance runner for the Go
-// binding (plan §3.3).
+// binding (docs/guides/fetch-v1.md §10).
 func TestConformanceV1(t *testing.T) {
 	fixturesDir := os.Getenv("CHTYPES_V1_CONFORMANCE")
 	if fixturesDir == "" {
 		t.Skip("CHTYPES_V1_CONFORMANCE is not set; skipping the v1 conformance suite (docs/guides/fetch-v1.md §10)")
+	}
+	abs, err := filepath.Abs(fixturesDir)
+	if err == nil {
+		fixturesDir = abs
 	}
 
 	raw, err := os.ReadFile(filepath.Join(fixturesDir, "cases.json"))
@@ -164,9 +166,7 @@ func goToolchainID() string {
 }
 
 // startFixtureServer starts the fixtures lane's scripted server (under
-// scripts/fetch-v1/, lane 0B) and parses its "LISTENING <port> <port2>"
-// line. It is written against the shape the plan documents (§3.3); it has
-// not run against the real script yet.
+// scripts/fetch-v1/) and parses its "LISTENING <port> <port2>" line.
 func startFixtureServer(t *testing.T, fixturesDir string) (port, port2 int, stop func()) {
 	t.Helper()
 	scriptPath := findServerScript(t)
@@ -175,6 +175,7 @@ func startFixtureServer(t *testing.T, fixturesDir string) (port, port2 int, stop
 	if err != nil {
 		t.Fatalf("StdoutPipe: %v", err)
 	}
+	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting %s: %v", scriptPath, err)
 	}
@@ -212,15 +213,15 @@ func findServerScript(t *testing.T) string {
 	// go/internal/ocifetch -> repository root -> scripts/fetch-v1/ -> server.py
 	candidate := filepath.Join("..", "..", "..", "scripts", "fetch-v1", "server.py")
 	if _, err := os.Stat(candidate); err != nil {
-		t.Fatalf("the fixtures lane's scripted server was not found at %s (lane 0B has not landed on this branch): %v", candidate, err)
+		t.Fatalf("the fixtures lane's scripted server was not found at %s: %v", candidate, err)
 	}
 	return candidate
 }
 
-// expandBase turns one of a case's request.bases templates ("{base}") into
-// a real base URL for transport (plan §3.2).
-func expandBase(template, transport, fixturesDir, tree, caseID, registryBase string, port, port2 int) (string, error) {
-	_ = port2
+// expandBase turns one of a case's request.bases templates ("{base}", or
+// "{base}" embedded in a longer string such as "{base}/does-not-exist") into
+// a real base URL for transport (docs/guides/fetch-v1.md §2, §10).
+func expandBase(template, transport, fixturesDir, tree, caseID, registryBase string, port int) (string, error) {
 	switch transport {
 	case "file":
 		abs, err := filepath.Abs(filepath.Join(fixturesDir, "trees", tree, "v2", "chtypes", "v1"))
@@ -241,16 +242,13 @@ func expandBase(template, transport, fixturesDir, tree, caseID, registryBase str
 }
 
 // runOneCase executes c against one transport and returns its report row.
-// It configures a session from c.Request/c.Setup/c.Env exactly as the
-// corresponding real binding code would, drives Ensure (or ResolveInstalled
-// for an offline-only case), and compares the outcome to c.Expect.
 func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase string, c confCase, transport string) reportResult {
 	t.Helper()
 	row := reportResult{ID: c.ID, Transport: transport}
 
 	bases := make([]string, 0, len(c.Request.Bases))
 	for _, tmpl := range c.Request.Bases {
-		b, err := expandBase(tmpl, transport, fixturesDir, c.Tree, c.ID, registryBase, port, port2)
+		b, err := expandBase(tmpl, transport, fixturesDir, c.Tree, c.ID, registryBase, port)
 		if err != nil {
 			row.Verdict, row.Detail = "fail", err.Error()
 			return row
@@ -260,8 +258,45 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 
 	cacheDir := t.TempDir()
 	if c.Setup.Cache != "" && c.Setup.Cache != "empty" {
-		if err := seedCache(fixturesDir, c.Setup.Cache, cacheDir); err != nil {
+		if err := copyDir(filepath.Join(fixturesDir, "layouts", c.Setup.Cache), cacheDir); err != nil {
 			row.Verdict, row.Detail = "fail", fmt.Sprintf("seeding the cache fixture %q: %v", c.Setup.Cache, err)
+			return row
+		}
+	}
+
+	var systemDirs []string
+	for _, name := range c.Setup.SystemDirs {
+		sysDir := t.TempDir()
+		if err := copyDir(filepath.Join(fixturesDir, "layouts", name), sysDir); err != nil {
+			row.Verdict, row.Detail = "fail", fmt.Sprintf("seeding the system-dir fixture %q: %v", name, err)
+			return row
+		}
+		systemDirs = append(systemDirs, sysDir)
+	}
+
+	trustedKeysHex := []string{}
+	if c.Request.Trust == "test" {
+		trustedKeysHex = []string{testKeyHexForConformance(t, fixturesDir)}
+	}
+	for k, v := range c.Env {
+		if k == EnvTrustedKeysName {
+			trustedKeysHex = append(trustedKeysHex, strings.Split(v, ",")...)
+		}
+	}
+	preInstallKeys, err := resolvePreInstallKeys(trustedKeysHex)
+	if err != nil {
+		row.Verdict, row.Detail = "fail", err.Error()
+		return row
+	}
+
+	// "Cache fixtures and installed.json" (docs/guides/fetch-v1.md §10): a
+	// layout fixture that carries installed.json names manifest digests
+	// that must already be INSTALLED, not merely present, before the
+	// case's clock starts — verified and unpacked now, offline, from local
+	// blobs, for every one of this case's cache/system directories.
+	for _, dir := range append([]string{cacheDir}, systemDirs...) {
+		if err := preInstallFromDir(dir, preInstallKeys); err != nil {
+			row.Verdict, row.Detail = "fail", err.Error()
 			return row
 		}
 	}
@@ -274,60 +309,221 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 		},
 	}
 
-	opts := &Options{
-		Bases:         bases,
-		CacheDir:      cacheDir,
-		AllowUnsigned: c.Request.AllowUnsigned,
-		Offline:       c.Request.Offline,
-		Frozen:        c.Request.Frozen,
-		LockWrite:     c.Request.LockWrite,
-		Update:        c.Request.Update,
-		Clock:         &clock,
-	}
-	if c.Request.Trust == "test" {
-		opts.TrustedKeys = []string{testKeyHexForConformance(t, fixturesDir)}
-	}
-	if c.Setup.Lock != nil {
-		lockPath := filepath.Join(cacheDir, "chtypes.lock")
-		src, err := os.ReadFile(filepath.Join(fixturesDir, "locks", *c.Setup.Lock+".json"))
-		if err == nil {
-			_ = os.WriteFile(lockPath, src, 0o644)
-			opts.LockPath = lockPath
+	var reqMu sync.Mutex
+	var reqTexts []string
+	sawAuthOnSecondOrigin := false
+	secondOriginHost := fmt.Sprintf("127.0.0.1:%d", port2)
+	onRequest := func(req *http.Request) {
+		reqMu.Lock()
+		defer reqMu.Unlock()
+		reqTexts = append(reqTexts, req.Method+" "+req.URL.String())
+		if req.URL.Host == secondOriginHost && req.Header.Get("Authorization") != "" {
+			sawAuthOnSecondOrigin = true
 		}
 	}
+
+	lockPath := filepath.Join(cacheDir, "chtypes.lock")
+	if c.Setup.Lock != nil {
+		src, rerr := os.ReadFile(filepath.Join(fixturesDir, "locks", "inputs", *c.Setup.Lock+".json"))
+		if rerr != nil {
+			row.Verdict, row.Detail = "fail", fmt.Sprintf("reading input lock %q: %v", *c.Setup.Lock, rerr)
+			return row
+		}
+		if werr := os.WriteFile(lockPath, src, 0o644); werr != nil {
+			row.Verdict, row.Detail = "fail", werr.Error()
+			return row
+		}
+	}
+
+	opts := &Options{
+		Bases:      bases,
+		CacheDir:   cacheDir,
+		SystemDirs: systemDirs,
+		// "stall-timeout-retried" needs its stall actually detected
+		// quickly: the production defaults (30s connect, 60s idle-read)
+		// would blow through this function's own 30s ctx deadline on the
+		// FIRST attempt, which then makes every subsequent attempt fail
+		// instantly too (the parent context is already past its
+		// deadline) — exhausting the retry budget without the real retry
+		// ever being exercised. A short, test-only timeout keeps every
+		// case's wall-clock time trivial and lets a real stall resolve
+		// through a real retry instead.
+		ConnectTimeout:  2 * time.Second,
+		IdleReadTimeout: 2 * time.Second,
+		AllowUnsigned:   c.Request.AllowUnsigned,
+		Offline:         c.Request.Offline,
+		Frozen:          c.Request.Frozen,
+		LockWrite:       c.Request.LockWrite,
+		Update:          c.Request.Update,
+		LockPath:        lockPath,
+		Clock:           &clock,
+		OnRequest:       onRequest,
+		TrustedKeys:     trustedKeysHex,
+	}
+
+	if c.Setup.BeforeIndexRenameHook != nil {
+		opts.HookBeforeIndexRename = indexRenameHookFor(*c.Setup.BeforeIndexRenameHook, cacheDir)
+	}
+
 	for k, v := range c.Env {
 		switch k {
 		case EnvCacheName:
 			opts.CacheDir = v
 		case EnvTokenName:
 			opts.Token = v
-		case EnvTrustedKeysName:
-			opts.TrustedKeys = append(opts.TrustedKeys, strings.Split(v, ",")...)
 		case EnvAllowUnsignedName:
 			opts.AllowUnsigned = v == "1"
 		}
 	}
 
-	req := Request{Spelling: c.Request.Spelling, Platform: c.Request.Platform}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	resolved, err := Ensure(ctx, req, opts)
 
-	if detail := compareOutcome(c.Expect, resolved, err, sleeps); detail != "" {
+	var resolvedManifest, resolvedLibrarySHA256 string
+	var resolvedVersion, resolvedBuild *string
+	var warnings []string
+	var runErr error
+
+	switch {
+	case strings.HasPrefix(c.ID, "goldens-"):
+		// genericcases.go's own convention: request.spelling is the SUBJECT
+		// (a platform manifest) a goldens object is a referrer of, not the
+		// goldens object's own digest — fetch_signed's "ref" is that
+		// referrer's digest, so this is a two-step resolution: find the
+		// goldens-artifactType referrer of the subject, then fetch_signed
+		// on what that discovery returns.
+		ro, rerr := resolveOptions(opts)
+		if rerr != nil {
+			runErr = rerr
+			break
+		}
+		s := newSession(ro)
+		candidates := s.findReferrers(ctx, bases, Digest(c.Request.Spelling), GoldensArtifactType)
+		if len(candidates) == 0 {
+			runErr = newError(CodeArtifactMissing, c.Request.Spelling, "", "", nil, "no goldens referrer of %s", c.Request.Spelling)
+			break
+		}
+		signed, ferr := FetchSigned(ctx, "", string(candidates[0].Digest), PredicateTypeGoldens, opts)
+		runErr = ferr
+		if ferr == nil {
+			sum := sha256.Sum256(signed.Bytes)
+			resolvedManifest, resolvedLibrarySHA256 = string(signed.Digests.Manifest), hex.EncodeToString(sum[:])
+			warnings = signed.Warnings
+		}
+	case strings.HasPrefix(c.ID, "fixtures-"):
+		// The fixtures repository is a sibling path under the same base
+		// (FixturesRepoSuffix), reached directly by digest — no referrer
+		// indirection, unlike goldens.
+		signed, ferr := FetchSigned(ctx, FixturesRepoSuffix, c.Request.Spelling, PredicateTypeFixtures, opts)
+		runErr = ferr
+		if ferr == nil {
+			sum := sha256.Sum256(signed.Bytes)
+			resolvedManifest, resolvedLibrarySHA256 = string(signed.Digests.Manifest), hex.EncodeToString(sum[:])
+			warnings = signed.Warnings
+		}
+	default:
+		resolved, ferr := Ensure(ctx, Request{Spelling: c.Request.Spelling, Platform: c.Request.Platform}, opts)
+		runErr = ferr
+		if ferr == nil {
+			resolvedManifest = string(resolved.Digests.Manifest)
+			resolvedLibrarySHA256 = sha256FileHex(resolved.LibraryPath)
+			resolvedVersion, resolvedBuild = &resolved.Version, &resolved.Build
+			warnings = resolved.Warnings
+		}
+	}
+
+	if detail := compareOutcome(c.Expect, runErr, resolvedVersion, resolvedBuild, resolvedManifest, resolvedLibrarySHA256, warnings, sleeps); detail != "" {
 		row.Verdict, row.Detail = "fail", detail
 		return row
 	}
+
+	reqMu.Lock()
+	reqSnapshot := append([]string(nil), reqTexts...)
+	reqMu.Unlock()
+	if detail := checkRequests(c.Expect.Requests, reqSnapshot, sawAuthOnSecondOrigin); detail != "" {
+		row.Verdict, row.Detail = "fail", detail
+		return row
+	}
+
+	if c.Expect.LockAfter != nil {
+		if detail := checkLockAfter(fixturesDir, *c.Expect.LockAfter, lockPath); detail != "" {
+			row.Verdict, row.Detail = "fail", detail
+			return row
+		}
+	}
+
 	row.Verdict = "pass"
 	return row
 }
 
-// seedCache copies a named cache fixture (tests/fixtures/fetch-v1/layouts/
-// or .../caches/<name>/) into dir. The exact fixture directory layout is
-// lane 0B's to define; this best-effort join covers the shape the plan
-// names (plan §3.2's "layouts/<name>/").
-func seedCache(fixturesDir, name, dir string) error {
-	src := filepath.Join(fixturesDir, "layouts", name)
-	return copyDir(src, dir)
+// resolvePreInstallKeys resolves the trust list a case's installed.json
+// pre-install step verifies against: the same keys Options.TrustedKeys will
+// carry for the real call, falling back to the default release keys when
+// none are configured (an installed.json fixture under "trust": "release"
+// never occurs today, but this keeps the two trust resolutions consistent).
+func resolvePreInstallKeys(hexKeys []string) ([]ed25519.PublicKey, error) {
+	if len(hexKeys) > 0 {
+		return parseHexKeys(hexKeys)
+	}
+	keys := make([]ed25519.PublicKey, 0, len(ReleaseKeys))
+	for _, rk := range ReleaseKeys {
+		pk, err := hexToPublicKey(rk.Ed25519Hex)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, pk)
+	}
+	return keys, nil
+}
+
+// preInstallFromDir reads dir/installed.json, if present, and verifies and
+// unpacks every manifest digest it names, offline, from dir's own local
+// blobs (docs/guides/fetch-v1.md §10).
+func preInstallFromDir(dir string, trustedKeys []ed25519.PublicKey) error {
+	data, err := os.ReadFile(filepath.Join(dir, "installed.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var doc struct {
+		Installed []string `json:"installed"`
+	}
+	if uerr := strictUnmarshal(data, &doc); uerr != nil {
+		return fmt.Errorf("parsing %s/installed.json: %w", dir, uerr)
+	}
+	l := newLayout(dir, false)
+	for _, digestStr := range doc.Installed {
+		if err := installPreseededByDigest(l, Digest(digestStr), trustedKeys); err != nil {
+			return fmt.Errorf("pre-installing %s from %s/installed.json: %w", digestStr, dir, err)
+		}
+	}
+	return nil
+}
+
+// indexRenameHookFor builds the runner-side race hook a case's
+// before_index_rename_hook names (docs/guides/fetch-v1.md §10: "the name of
+// a race hook the RUNNER installs"). "index-race-reapply" is the only one
+// any case uses today: it simulates a second process completing its own
+// index.json write between this fetch's read and its own rename, so the
+// read-check-rename loop (layout.go's addIndexEntry) must observe the
+// change and re-merge onto it rather than clobbering it.
+func indexRenameHookFor(name, cacheDir string) func() {
+	if name != "index-race-reapply" {
+		return nil
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			competing := Descriptor{
+				MediaType: MediaTypeManifest,
+				Digest:    Digest("sha256:" + strings.Repeat("c0ffee00", 8)),
+				Size:      1,
+			}
+			_ = newLayout(cacheDir, false).addIndexEntry(competing, nil)
+		})
+	}
 }
 
 func copyDir(src, dst string) error {
@@ -360,31 +556,52 @@ func testKeyHexForConformance(t *testing.T, fixturesDir string) string {
 	return strings.TrimSpace(string(b))
 }
 
-// compareOutcome checks (resolved, err, sleeps) against expect and returns
-// an empty string on a match, or the failed assertion otherwise.
-func compareOutcome(expect confExpect, resolved *Resolved, err error, sleeps []time.Duration) string {
+func sha256FileHex(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// compareOutcome checks the outcome of one Ensure/FetchSigned call against
+// expect and returns an empty string on a match, or the failed assertion
+// otherwise.
+func compareOutcome(expect confExpect, runErr error, version, build *string, manifest, librarySHA256 string, warnings []string, sleeps []time.Duration) string {
 	if expect.OK {
-		if err != nil {
-			return fmt.Sprintf("expected ok, got error: %v", err)
+		if runErr != nil {
+			return fmt.Sprintf("expected ok, got error: %v", runErr)
 		}
-		if expect.Version != nil && resolved.Version != *expect.Version {
-			return fmt.Sprintf("version = %q, want %q", resolved.Version, *expect.Version)
+		if expect.Version != nil && (version == nil || *version != *expect.Version) {
+			got := "<nil>"
+			if version != nil {
+				got = *version
+			}
+			return fmt.Sprintf("version = %q, want %q", got, *expect.Version)
 		}
-		if expect.Build != nil && resolved.Build != *expect.Build {
-			return fmt.Sprintf("build = %q, want %q", resolved.Build, *expect.Build)
+		if expect.Build != nil && (build == nil || *build != *expect.Build) {
+			got := "<nil>"
+			if build != nil {
+				got = *build
+			}
+			return fmt.Sprintf("build = %q, want %q", got, *expect.Build)
 		}
-		if expect.Manifest != nil && string(resolved.Digests.Manifest) != *expect.Manifest {
-			return fmt.Sprintf("manifest digest = %q, want %q", resolved.Digests.Manifest, *expect.Manifest)
+		if expect.Manifest != nil && manifest != *expect.Manifest {
+			return fmt.Sprintf("manifest digest = %q, want %q", manifest, *expect.Manifest)
 		}
-	} else if err == nil {
+		if expect.LibrarySHA256 != nil && librarySHA256 != *expect.LibrarySHA256 {
+			return fmt.Sprintf("library_sha256 = %q, want %q", librarySHA256, *expect.LibrarySHA256)
+		}
+	} else if runErr == nil {
 		return "expected a failure, got ok"
 	} else if expect.Code != nil {
 		var fe *FetchError
-		if !fetchErrorAs(err, &fe) {
-			return fmt.Sprintf("expected code %s, got a non-FetchError: %v", *expect.Code, err)
+		if !fetchErrorAs(runErr, &fe) {
+			return fmt.Sprintf("expected code %s, got a non-FetchError: %v", *expect.Code, runErr)
 		}
 		if string(fe.Code) != *expect.Code {
-			return fmt.Sprintf("code = %s, want %s", fe.Code, *expect.Code)
+			return fmt.Sprintf("code = %s, want %s: %v", fe.Code, *expect.Code, runErr)
 		}
 	}
 	if expect.Sleeps != nil {
@@ -396,6 +613,97 @@ func compareOutcome(expect confExpect, resolved *Resolved, err error, sleeps []t
 				return fmt.Sprintf("sleeps[%d] = %v, want %gs", i, sleeps[i], want)
 			}
 		}
+	}
+	for _, want := range expect.Warnings {
+		found := false
+		for _, got := range warnings {
+			if strings.Contains(got, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Sprintf("warnings %v do not contain a warning matching %q", warnings, want)
+		}
+	}
+	return ""
+}
+
+// checkRequests applies expect.requests against the observed request log
+// (every request this process itself made, across every retry and
+// redirect — §10's "GET /_log/s-<id>" need, served here by an OnRequest
+// hook instead, which also works for the file transport, which has no such
+// endpoint).
+func checkRequests(expect confRequestsExpect, reqTexts []string, sawAuthOnSecondOrigin bool) string {
+	if expect.Max != nil && len(reqTexts) > *expect.Max {
+		return fmt.Sprintf("made %d requests, want at most %d: %v", len(reqTexts), *expect.Max, reqTexts)
+	}
+	for _, pattern := range expect.NoneMatching {
+		for _, text := range reqTexts {
+			if noneMatchingViolated(pattern, text) {
+				return fmt.Sprintf("request %q matches the forbidden pattern %q", text, pattern)
+			}
+		}
+	}
+	if expect.AuthOnSecondOrigin != sawAuthOnSecondOrigin {
+		return fmt.Sprintf("auth_on_second_origin = %v, want %v", sawAuthOnSecondOrigin, expect.AuthOnSecondOrigin)
+	}
+	return ""
+}
+
+// noneMatchingViolated reports whether text matches pattern. Go's RE2
+// engine (encoding/regexp) cannot compile a negative lookahead such as
+// "GET .*/manifests/(?!sha256:)" (cases.json's one use of the shape, for
+// fixtures-digest-pin-no-tag-fallback), so that one shape — "<prefix>(?!
+// <negated>)" — is handled by hand: the prefix must match, and what follows
+// it must not start with the negated text. Any other pattern is a plain
+// RE2 regex.
+func noneMatchingViolated(pattern, text string) bool {
+	if idx := strings.Index(pattern, "(?!"); idx >= 0 {
+		end := strings.Index(pattern[idx:], ")")
+		if end < 0 {
+			return false
+		}
+		prefix := pattern[:idx]
+		negated := pattern[idx+3 : idx+end]
+		re, err := regexp.Compile("^" + prefix)
+		if err != nil {
+			return false
+		}
+		loc := re.FindStringIndex(text)
+		if loc == nil {
+			return false
+		}
+		return !strings.HasPrefix(text[loc[1]:], negated)
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return false
+	}
+	return re.MatchString(text)
+}
+
+// checkLockAfter compares the lock file this case wrote (if any) against
+// its named expected-lock fixture, structurally (field order never
+// matters).
+func checkLockAfter(fixturesDir, name, lockPath string) string {
+	wantBytes, err := os.ReadFile(filepath.Join(fixturesDir, "locks", "expected", name+".json"))
+	if err != nil {
+		return fmt.Sprintf("reading expected lock %q: %v", name, err)
+	}
+	gotBytes, err := os.ReadFile(lockPath)
+	if err != nil {
+		return fmt.Sprintf("reading the written lock at %s: %v", lockPath, err)
+	}
+	var want, got any
+	if err := json.Unmarshal(wantBytes, &want); err != nil {
+		return fmt.Sprintf("expected lock %q is not valid JSON: %v", name, err)
+	}
+	if err := json.Unmarshal(gotBytes, &got); err != nil {
+		return fmt.Sprintf("written lock is not valid JSON: %v", err)
+	}
+	if !reflect.DeepEqual(want, got) {
+		return fmt.Sprintf("written lock does not match expected %q:\n got: %s\nwant: %s", name, gotBytes, wantBytes)
 	}
 	return ""
 }

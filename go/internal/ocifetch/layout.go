@@ -230,6 +230,30 @@ func (l *layout) readIndexEntries() []Descriptor {
 	return parseIndexOrEmpty(b).Manifests
 }
 
+// listAllBlobDigests lists every blob l's own blobs/sha256/ directory
+// holds, as "sha256:<hex>" digests — not only the ones index.json's
+// top-level "manifests" array names. A referrer manifest (one with its own
+// "subject" field) is a real blob in a plain OCI layout, but a layout
+// generated directly from fixture content, rather than by `oras copy -r`
+// against a live registry, has no obligation to also list it in index.json
+// — discovering it locally means scanning every blob (layout.go's
+// findLocalBundle), the same way layer/config blobs are already found by
+// digest rather than by a directory listing.
+func (l *layout) listAllBlobDigests() []Digest {
+	entries, err := os.ReadDir(filepath.Join(l.dir, "blobs", "sha256"))
+	if err != nil {
+		return nil
+	}
+	out := make([]Digest, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		out = append(out, Digest("sha256:"+e.Name()))
+	}
+	return out
+}
+
 // writeVerifiedRecord creates a fresh unpacked directory for manifestDigest
 // by renaming unpackDir (already populated by unpackLibrary) into place,
 // then writes verified.json inside it. If the directory already exists
@@ -337,6 +361,24 @@ func newestMatching(entries []installedEntry, platform, request string) (*instal
 	})
 	best := candidates[len(candidates)-1]
 	return &best, true
+}
+
+// sortPlatformKeys orders keys by their position in the canonical Platforms
+// list (constants_gen.go), not alphabetically — the fixtures lane's own
+// expected-lock fixtures use this order (linux-amd64, linux-arm64,
+// darwin-arm64), and a lock file is for a reader to compare, not a sorted
+// index. A key not in Platforms (should not happen) sorts after every
+// known one, stably.
+func sortPlatformKeys(keys []string) {
+	rank := func(key string) int {
+		for i, p := range Platforms {
+			if p.Key == key {
+				return i
+			}
+		}
+		return len(Platforms)
+	}
+	sort.SliceStable(keys, func(i, j int) bool { return rank(keys[i]) < rank(keys[j]) })
 }
 
 // versionLess compares two four-part version strings numerically, component

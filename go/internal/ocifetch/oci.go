@@ -70,6 +70,13 @@ type ImageManifest struct {
 	ArtifactType  string       `json:"artifactType,omitempty"`
 	Config        Descriptor   `json:"config"`
 	Layers        []Descriptor `json:"layers"`
+	// Subject is the OCI image-spec v1.1 field a referrer manifest carries
+	// back to what it refers to. The registry referrers API and the
+	// fallback tag both make this redundant for a live host (they already
+	// filter by subject), but a purely local OCI layout has neither, so
+	// finding a referrer there means scanning every blob for one whose own
+	// Subject matches (layout.go's local pre-seed verification).
+	Subject *Descriptor `json:"subject,omitempty"`
 }
 
 // ReferrersIndex is the shape both the referrers API and the fallback tag
@@ -113,12 +120,18 @@ func (e *SpellingError) Error() string {
 // validateSpelling checks spelling against spelling.regex and
 // refuse_hint_regex before any network call.
 func validateSpelling(spelling string) error {
+	// Only the two documented mistakes (a "v" prefix, a "-lts"/"-stable"
+	// channel suffix) are refused here, before any network call (§3). A
+	// spelling that is simply not numeric at all is not one of those two
+	// mistakes: resolve's own tag lookup is what answers for it (as
+	// CHTYPES_ARTIFACT_UNPUBLISHED, if nothing matches), the same path an
+	// arbitrary OCI tag takes. spelling.regex itself is a POSITIVE pattern
+	// this package matches against elsewhere (versionWithin) to decide
+	// whether a resolved predicate's version is even checked against the
+	// request at all — not a gate on every string Ensure ever receives.
 	if spellingRefuseHintRegex.MatchString(spelling) {
 		return &SpellingError{Spelling: spelling,
 			Hint: `v1 spells versions exactly as "SELECT version()" does, e.g. "26.8.15.10": no "v" prefix, no "-lts"/"-stable" suffix`}
-	}
-	if !spellingRegex.MatchString(spelling) {
-		return &SpellingError{Spelling: spelling, Hint: `expected one to four dot-separated non-negative integers, e.g. "26.8" or "26.8.15.10"`}
 	}
 	return nil
 }

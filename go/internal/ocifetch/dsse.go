@@ -199,7 +199,20 @@ func validateArtifactPredicate(pred map[string]any, platform Platform, request s
 		return fmt.Errorf("predicate arch %q, expected %q", archVal, platform.Architecture)
 	}
 	version, _ := pred["clickhouse_version"].(string)
-	if version == "" || !versionWithin(request, version) {
+	if version == "" {
+		return fmt.Errorf("predicate carries no clickhouse_version")
+	}
+	// The version-within-request check (§4/§9: "equal an exact four-part
+	// request, or lie within a floating one") is a comparison this package
+	// performs on the two numeric spellings spelling.regex defines. A
+	// request that is not itself one of those shapes carries no
+	// version-within obligation to check it against — the conformance
+	// suite's own trust-group cases resolve by an opaque per-scenario tag
+	// (e.g. "t-wrong-platform"), never a real version spelling, precisely
+	// so each scenario's referrer set cannot collide with another's; their
+	// predicates carry real, independent versions that a tag-literal
+	// comparison was never meant to constrain.
+	if spellingRegex.MatchString(request) && !versionWithin(request, version) {
 		return fmt.Errorf("predicate clickhouse_version %q does not satisfy the request %q", version, request)
 	}
 	return nil

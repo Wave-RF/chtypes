@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
 )
 
 // LockPin is one declared platform's resolved pin for one requested
@@ -81,7 +80,7 @@ func (l *Lock) Pin(spelling, platform string) (LockPin, bool) {
 func writeLock(path string, lock *Lock) error {
 	sorted := *lock
 	sorted.Platforms = append([]string(nil), lock.Platforms...)
-	sort.Strings(sorted.Platforms)
+	sortPlatformKeys(sorted.Platforms)
 	out, err := json.MarshalIndent(&sorted, "", "  ")
 	if err != nil {
 		return err
@@ -115,7 +114,7 @@ func mergeLockRequest(existing *Lock, spelling string, pins map[string]LockPin) 
 	for p := range platformSet {
 		out.Platforms = append(out.Platforms, p)
 	}
-	sort.Strings(out.Platforms)
+	sortPlatformKeys(out.Platforms)
 	return out
 }
 
@@ -134,6 +133,6 @@ func rewriteLockForUpdate(freshResults map[string]map[string]LockPin) *Lock {
 	for p := range platformSet {
 		out.Platforms = append(out.Platforms, p)
 	}
-	sort.Strings(out.Platforms)
+	sortPlatformKeys(out.Platforms)
 	return out
 }

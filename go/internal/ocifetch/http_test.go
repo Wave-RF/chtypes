@@ -93,7 +93,7 @@ func newTestClient() (*client, *[]time.Duration) {
 			sleeps = append(sleeps, d)
 		},
 	}
-	return newClient(clock, 2*time.Second, 2*time.Second, "", nil), &sleeps
+	return newClient(clock, 2*time.Second, 2*time.Second, "", nil, nil), &sleeps
 }
 
 func TestDoGetRetries5xxThenSucceeds(t *testing.T) {
@@ -207,6 +207,34 @@ func TestDoGetExhaustsAndFails(t *testing.T) {
 	}
 	if len(*sleeps) != RetryAttempts-1 {
 		t.Fatalf("sleeps = %d entries, want %d", len(*sleeps), RetryAttempts-1)
+	}
+}
+
+func TestTooManyRedirectsFailsWithZeroSleeps(t *testing.T) {
+	var calls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		next := r.URL.Path + "x"
+		http.Redirect(w, r, next, http.StatusFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, sleeps := newTestClient()
+	_, err := c.doGet(context.Background(), srv.URL+"/a", requestOptions{})
+	if err == nil {
+		t.Fatalf("doGet should fail once MaxRedirects is exceeded")
+	}
+	var fe *FetchError
+	if !errors.As(err, &fe) || fe.Code != CodeSourceUnreachable {
+		t.Fatalf("error = %v, want a CHTYPES_SOURCE_UNREACHABLE FetchError", err)
+	}
+	if len(*sleeps) != 0 {
+		t.Fatalf("sleeps = %v, want none: too-many-redirects is permanent, never retried", *sleeps)
+	}
+	if calls != MaxRedirects {
+		t.Fatalf("calls = %d, want %d (the initial request plus MaxRedirects-1 follows, refused on the hop that would be the MaxRedirects'th)", calls, MaxRedirects)
 	}
 }
 

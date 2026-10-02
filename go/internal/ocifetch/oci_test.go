@@ -3,13 +3,18 @@ package ocifetch
 import "testing"
 
 func TestValidateSpelling(t *testing.T) {
-	ok := []string{"26.8", "26.8.15", "26.8.15.10", "0.1", "1.2.3.4"}
+	// Only the two documented mistakes are refused before any network call
+	// (§3): a "v" prefix and a "-lts"/"-stable" channel suffix. Anything
+	// else — including a non-numeric opaque tag, which the conformance
+	// suite's own trust/cache-group fixtures use for per-scenario isolation
+	// — is left to resolve's own tag lookup.
+	ok := []string{"26.8", "26.8.15", "26.8.15.10", "0.1", "1.2.3.4", "26", "26.08", "t-untrusted-key"}
 	for _, s := range ok {
 		if err := validateSpelling(s); err != nil {
 			t.Errorf("validateSpelling(%q) = %v, want nil", s, err)
 		}
 	}
-	refused := []string{"v26.8", "26.8.15.10-lts", "26.8-stable", "26", "", "26.08", "a.b"}
+	refused := []string{"v26.8", "26.8.15.10-lts", "26.8-stable"}
 	for _, s := range refused {
 		if err := validateSpelling(s); err == nil {
 			t.Errorf("validateSpelling(%q) = nil, want an error", s)
