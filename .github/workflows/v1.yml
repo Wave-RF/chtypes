@@ -312,22 +312,61 @@ jobs:
             "registry.test:5443/chtypes/v1:26.8.15.10" \
             "$RUNNER_TEMP/bundle.json:application/vnd.dev.sigstore.bundle.v0.3+json"
       - name: record registry:2's referrers behavior — measured, not assumed
+        # Distribution 2.x answers a GET for an OCI index with 404
+        # MANIFEST_UNKNOWN when Accept does not list the OCI index media
+        # type — the exact reason every binding's own manifest GET carries
+        # Accept (manifest-accept-header, above). The first version of this
+        # step sent no Accept header at all, so an earlier run's "fallback
+        # tag also 404s" reading was the probe's own flaw, not necessarily
+        # the host's: oras's default (unknown) --distribution-spec writes
+        # the sha256-<hex> fallback tag itself whenever it detects the
+        # referrers API is absent, so the tag most likely already existed
+        # and this step simply could not see it.
         run: |
           MANIFEST_DIGEST=$(jq -r '
             .manifests[] | select(.platform.os=="linux" and .platform.architecture=="arm64") | .digest
           ' "tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1/manifests/26.8.15.10")
-          REF_STATUS=$(curl -s -o "$RUNNER_TEMP/referrers.json" -w "%{http_code}" \
+          ACCEPT="application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json"
+
+          REF_STATUS=$(curl -s -H "Accept: $ACCEPT" -o "$RUNNER_TEMP/referrers.json" -w "%{http_code}" \
             "https://registry.test:5443/v2/chtypes/v1/referrers/$MANIFEST_DIGEST")
           echo "GET /v2/chtypes/v1/referrers/$MANIFEST_DIGEST -> HTTP $REF_STATUS"
           cat "$RUNNER_TEMP/referrers.json" || true
+          echo
+
           FALLBACK_TAG="sha256-${MANIFEST_DIGEST#sha256:}"
-          FB_STATUS=$(curl -s -o "$RUNNER_TEMP/fallback.json" -w "%{http_code}" \
+          FB_STATUS=$(curl -s -H "Accept: $ACCEPT" -o "$RUNNER_TEMP/fallback.json" -w "%{http_code}" \
             "https://registry.test:5443/v2/chtypes/v1/manifests/$FALLBACK_TAG")
           echo "GET /v2/chtypes/v1/manifests/$FALLBACK_TAG -> HTTP $FB_STATUS"
+          echo "--- fallback tag body ---"
+          cat "$RUNNER_TEMP/fallback.json" || true
+          echo
+
+          # Assert what this measures, rather than only record it: if the
+          # fallback tag answers 200, it must actually name the signature
+          # bundle referrer this job attached — anything else here is a
+          # real defect to fail on, not a fact to shrug past. If the
+          # fallback genuinely is still 404 even with the header, that is
+          # itself the measurement — report it plainly and let the job
+          # stay green (this check is report-only; v1-parity never reads
+          # it, per plan §2.2).
+          if [ "$FB_STATUS" = "200" ]; then
+            BUNDLE_HIT=$(jq -r '
+              .manifests[]? | select(.artifactType=="application/vnd.dev.sigstore.bundle.v0.3+json") | .artifactType
+            ' "$RUNNER_TEMP/fallback.json" | head -1)
+            if [ "$BUNDLE_HIT" != "application/vnd.dev.sigstore.bundle.v0.3+json" ]; then
+              echo "::error::fallback tag answered 200 but names no application/vnd.dev.sigstore.bundle.v0.3+json referrer" >&2
+              exit 1
+            fi
+            FALLBACK_RESULT="HTTP 200, naming the signature bundle referrer"
+          else
+            FALLBACK_RESULT="HTTP $FB_STATUS — absent even with the Accept header"
+          fi
+
           {
-            echo "### registry:2 referrers behavior (measured, oras ${ORAS_VERSION})"
+            echo "### registry:2 referrers behavior (measured, oras ${ORAS_VERSION}, Accept: $ACCEPT)"
             echo "- \`GET /v2/chtypes/v1/referrers/<digest>\`: HTTP $REF_STATUS"
-            echo "- fallback tag \`sha256-<hex>\`: HTTP $FB_STATUS"
+            echo "- fallback tag \`sha256-<hex>\`: $FALLBACK_RESULT"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: start tinyproxy with logging
         run: |
