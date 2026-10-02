@@ -1,0 +1,17 @@
+{
+  "abi": 1,
+  "abi_fingerprint": "sha256:c4415089873be7cea12b2626f8393db654ce1213803b6ecd6c88c4db52402551",
+  "clickhouse_version": "26.10.1.1",
+  "channel": "lts",
+  "clickhouse_minor": "26.10",
+  "clickhouse_commit": "4eadf843ddee2d03475ca9b31b91a916813c2e82",
+  "os": "linux",
+  "arch": "arm64",
+  "build": "20261010.000001",
+  "core_commit": "cf11cdca5e5a77729c46dde21e242ef25b9ae44f",
+  "inputs_sha256": "eb3520562f7ad6c8c7f6d212e5f43a895dda21ad46cb4ff0145470a67083a02e",
+  "library": "libchtypes.so",
+  "library_sha256": "c0b1880cbf5bc5b80c34e8691d617996c3faa47e462a82c927b8c2b05a9da7ef",
+  "library_bytes": 90,
+  "glibc_floor": "2.17"
+}

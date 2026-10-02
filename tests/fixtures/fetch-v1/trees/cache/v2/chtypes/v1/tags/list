@@ -1,0 +1,9 @@
+{
+  "name": "chtypes/v1",
+  "tags": [
+    "c-offline-hit",
+    "c-existing-install-noop",
+    "c-system-dir-readonly",
+    "c-index-race-reapply"
+  ]
+}

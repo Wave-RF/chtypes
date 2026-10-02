@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "retry-after-seconds",
+  "tree": "http-basic",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "status": 429,
+          "headers": {
+            "Retry-After": "2"
+          }
+        },
+        {
+          "from_tree": true
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}
