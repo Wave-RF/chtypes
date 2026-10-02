@@ -782,9 +782,12 @@ pub fn fetch_signed(
     repository_bases: &[String],
     reference: &str,
     expected_predicate_type: &str,
-    options: &Options,
+    options: &mut Options,
 ) -> Result<(Vec<u8>, serde_json::Value, Digests)> {
-    let clock: Box<dyn Clock> = Box::new(super::http::RealClock);
+    let clock = options
+        .clock
+        .take()
+        .unwrap_or_else(|| Box::new(super::http::RealClock));
     let client = Client::with_clock(clock);
     let token = options
         .token

@@ -20,12 +20,35 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use ocifetch::ensure::{self, Options};
 use serde::Deserialize;
 
 const ENV_FIXTURES: &str = "CHTYPES_V1_CONFORMANCE";
 const ENV_REPORT: &str = "CHTYPES_V1_REPORT";
+
+/// An injected `Clock` (`ocifetch::http::Clock`) that never really sleeps —
+/// it only records the duration asked for — so a retry/backoff case runs in
+/// microseconds instead of real seconds, and `expect.sleeps` can be checked
+/// exactly against what it recorded. `now()` stays real: nothing here needs
+/// a virtual clock, only a non-blocking `sleep`, and the `Retry-After`-date
+/// case computes its delta from the response's own `Date` header, never
+/// from `now()`.
+struct FakeClock {
+    sleeps: Arc<Mutex<Vec<f64>>>,
+}
+
+impl ocifetch::http::Clock for FakeClock {
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+
+    fn sleep(&self, seconds: f64) {
+        self.sleeps.lock().unwrap().push(seconds);
+    }
+}
 
 // ---- cases.json (spec/fetch-v1/schema/cases.schema.json) -----------------
 
@@ -337,6 +360,20 @@ fn execute_case(
         unsafe { std::env::set_var(k, v) };
     }
 
+    // A real Clock would make every retry/backoff case actually sleep its
+    // real duration — seconds per case, and the suite has a few dozen
+    // retry-shaped ones, which is how a CI job's timeout gets hit. The
+    // plan's own seam takes an injected sleep(seconds)/now() specifically
+    // "so retry cases run instantly" (plan §1.1.1); FakeClock is that
+    // injection, and it doubles as the exact collector `expect.sleeps`
+    // checks against.
+    let recorded_sleeps = Arc::new(Mutex::new(Vec::new()));
+    let fake_clock = || -> Box<dyn ocifetch::http::Clock> {
+        Box::new(FakeClock {
+            sleeps: recorded_sleeps.clone(),
+        })
+    };
+
     let is_generic_fetch = case.id.starts_with("goldens-") || case.id.starts_with("fixtures-");
     let mut outcome = if is_generic_fetch {
         let predicate_type = if case.id.starts_with("goldens-") {
@@ -344,7 +381,7 @@ fn execute_case(
         } else {
             ocifetch::constants::PREDICATE_TYPE_FIXTURES
         };
-        let options = Options {
+        let mut options = Options {
             platform: Some(case.request.platform.clone()),
             bases: Some(bases.clone()),
             cache_dir: Some(cache_dir.path().to_string_lossy().to_string()),
@@ -357,9 +394,10 @@ fn execute_case(
             allow_unsigned: case.request.allow_unsigned,
             trust_test_keys: case.request.trust == "test",
             token: None,
-            clock: None,
+            clock: Some(fake_clock()),
         };
-        let result = ensure::fetch_signed(&bases, &case.request.spelling, predicate_type, &options);
+        let result =
+            ensure::fetch_signed(&bases, &case.request.spelling, predicate_type, &mut options);
         check_generic_expectation(&case.expect, result)
     } else {
         let result = ensure::ensure(
@@ -377,7 +415,7 @@ fn execute_case(
                 allow_unsigned: case.request.allow_unsigned,
                 trust_test_keys: case.request.trust == "test",
                 token: None,
-                clock: None,
+                clock: Some(fake_clock()),
             },
         );
         check_expectation(&case.expect, result).and_then(|()| match &case.expect.lock_after {
@@ -388,6 +426,16 @@ fn execute_case(
 
     for k in case.env.keys() {
         unsafe { std::env::remove_var(k) };
+    }
+
+    if outcome.is_ok() {
+        let got_sleeps = recorded_sleeps.lock().unwrap().clone();
+        if got_sleeps != case.expect.sleeps {
+            outcome = Err(format!(
+                "sleeps = {got_sleeps:?}, want {:?}",
+                case.expect.sleeps
+            ));
+        }
     }
 
     // `requests.max`/`none_matching` (http transport only — there is no
