@@ -1,0 +1,252 @@
+{
+  "_note": "Every chs_* prototype in include/chtypes.h at every released tag (the four bindings, v0.x), extracted by scripts/abi-v1/gen.py --extract-v0. Types are normalized; parameter names are dropped. The D1.3 check compares each described function against every v0 signature of its name.",
+  "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"],
+  "symbols": {
+    "chs_abi_revision": [
+      {
+        "returns": "int",
+        "params": [],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_block_free": [
+      {
+        "returns": "void",
+        "params": ["chs_block *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_block_parse": [
+      {
+        "returns": "chs_block *",
+        "params": ["const chs_schema *", "int", "const char *", "size_t", "const char *", "int *", "char **"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2"]
+      },
+      {
+        "returns": "chs_block *",
+        "params": ["const chs_schema *", "int", "const char *", "size_t", "const char *", "int *", "char **", "const char *"],
+        "tags": ["go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_clickhouse_version": [
+      {
+        "returns": "const char *",
+        "params": [],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_error_codes": [
+      {
+        "returns": "char *",
+        "params": [],
+        "tags": ["go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_filter_compile": [
+      {
+        "returns": "chs_filter *",
+        "params": ["const chs_schema *", "const char *", "const char *", "int *", "char **"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_filter_eval": [
+      {
+        "returns": "char *",
+        "params": ["const chs_filter *", "const chs_block *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_filter_free": [
+      {
+        "returns": "void",
+        "params": ["chs_filter *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_filter_rows": [
+      {
+        "returns": "char *",
+        "params": ["const chs_filter *", "int", "const char *", "size_t", "const char *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_free": [
+      {
+        "returns": "void",
+        "params": ["char *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_function_flags": [
+      {
+        "returns": "char *",
+        "params": [],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_init": [
+      {
+        "returns": "int",
+        "params": ["const char *", "const char *", "char **"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_quote_identifier": [
+      {
+        "returns": "int",
+        "params": ["const char *", "size_t", "char **", "char **"],
+        "tags": ["go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_quote_identifier_if_needed": [
+      {
+        "returns": "int",
+        "params": ["const char *", "size_t", "char **", "char **"],
+        "tags": ["go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_quote_literal": [
+      {
+        "returns": "int",
+        "params": ["const char *", "size_t", "char **", "char **"],
+        "tags": ["go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_reference_type": [
+      {
+        "returns": "char *",
+        "params": ["const char *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_registered_families": [
+      {
+        "returns": "char *",
+        "params": [],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_row": [
+      {
+        "returns": "char *",
+        "params": ["const chs_schema *", "int", "const char *", "size_t", "const char *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2"]
+      },
+      {
+        "returns": "char *",
+        "params": ["const chs_schema *", "int", "const char *", "size_t", "const char *", "const char *"],
+        "tags": ["go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_rows": [
+      {
+        "returns": "char *",
+        "params": ["const chs_schema *", "int", "const char *", "size_t", "const char *", "int", "unsigned", "chs_bytes *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2"]
+      },
+      {
+        "returns": "char *",
+        "params": ["const chs_schema *", "int", "const char *", "size_t", "const char *", "int", "unsigned", "chs_bytes *", "const char *", "const chs_filter *"],
+        "tags": ["go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_column_count": [
+      {
+        "returns": "int",
+        "params": ["const chs_schema *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_column_default_expr": [
+      {
+        "returns": "const char *",
+        "params": ["const chs_schema *", "int"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_column_default_is_literal": [
+      {
+        "returns": "int",
+        "params": ["const chs_schema *", "int"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_column_default_kind": [
+      {
+        "returns": "const char *",
+        "params": ["const chs_schema *", "int"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_column_name": [
+      {
+        "returns": "const char *",
+        "params": ["const chs_schema *", "int"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_column_type": [
+      {
+        "returns": "const char *",
+        "params": ["const chs_schema *", "int"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_compile": [
+      {
+        "returns": "chs_schema *",
+        "params": ["const char *", "const char *", "int", "int *", "char **"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_engine": [
+      {
+        "returns": "int",
+        "params": ["chs_schema *", "const char *", "const char *", "const char *", "char **"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_free": [
+      {
+        "returns": "void",
+        "params": ["chs_schema *"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_partition_by": [
+      {
+        "returns": "int",
+        "params": ["chs_schema *", "const char *", "char **"],
+        "tags": ["go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_schema_ttl": [
+      {
+        "returns": "int",
+        "params": ["chs_schema *", "const char *", "char **"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_set_default_settings": [
+      {
+        "returns": "int",
+        "params": ["const char *", "char **"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_shutdown": [
+      {
+        "returns": "void",
+        "params": [],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ],
+    "chs_validate_type": [
+      {
+        "returns": "int",
+        "params": ["const char *", "char **", "int *", "char **"],
+        "tags": ["go/v0.1.0", "python/v0.1.0", "rust/v0.1.0", "ts/v0.1.0", "go/v0.1.1", "python/v0.1.1", "rust/v0.1.1", "ts/v0.1.1", "go/v0.1.2", "python/v0.1.2", "rust/v0.1.2", "ts/v0.1.2", "go/v0.2.0", "python/v0.2.0", "rust/v0.2.0", "ts/v0.2.0", "go/v0.2.1", "python/v0.2.1", "rust/v0.2.1", "ts/v0.2.1", "go/v0.2.2", "python/v0.2.2", "rust/v0.2.2", "ts/v0.2.2", "go/v0.3.0", "python/v0.3.0", "rust/v0.3.0", "ts/v0.3.0", "go/v0.3.1", "python/v0.3.1", "rust/v0.3.1", "ts/v0.3.1", "go/v0.3.2", "python/v0.3.2", "rust/v0.3.2", "ts/v0.3.2", "go/v0.4.0", "python/v0.4.0", "rust/v0.4.0", "ts/v0.4.0", "go/v0.5.0", "python/v0.5.0", "rust/v0.5.0", "ts/v0.5.0", "go/v0.5.1", "python/v0.5.1", "rust/v0.5.1", "ts/v0.5.1", "go/v0.5.2", "python/v0.5.2", "rust/v0.5.2", "ts/v0.5.2"]
+      }
+    ]
+  }
+}

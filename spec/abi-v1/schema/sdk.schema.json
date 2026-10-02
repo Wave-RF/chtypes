@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wave-rf/chtypes/spec/abi-v1/schema/sdk.schema.json",
+  "title": "chtypes SDK policy over ABI v1, format 1",
+  "description": "The shape of spec/abi-v1/sdk.json: SDK-side policy the generator reads but does not fingerprint. Cross-references (every chs_status value has an error class, every cross-check field is a build_info property) are checked by scripts/abi-v1/model.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sdk_schema", "reuse_v0_names", "provisional_markers", "errors", "loader", "cross_check", "naming"],
+  "properties": {
+    "sdk_schema": {"const": 1},
+    "reuse_v0_names": {
+      "type": "boolean",
+      "description": "D1.3. While false, no described function may reuse a v0 name with a different signature. Whatever its value, no v0 name may be reused without the chs_abi_revision tombstone."
+    },
+    "provisional_markers": {
+      "type": "object",
+      "propertyNames": {"pattern": "^(A[0-9]+|Q-[a-z]|confirm)$"},
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields", "codes", "classes", "status"],
+      "properties": {
+        "fields": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "codes": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "pattern": "^CHTYPES_[A-Z_]+$"}
+        },
+        "classes": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[a-z][a-z_]*$"},
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["go", "python", "ts", "rust", "new"],
+            "properties": {
+              "go": {"type": "string"},
+              "python": {"type": "string"},
+              "ts": {"type": "string"},
+              "rust": {"type": "string"},
+              "new": {"type": "boolean"}
+            }
+          }
+        },
+        "status": {
+          "type": "object",
+          "required": ["unknown"],
+          "additionalProperties": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "loader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dlopen_flags", "unverified_env", "refusals"],
+      "properties": {
+        "dlopen_flags": {"type": "array", "items": {"enum": ["RTLD_NOW", "RTLD_LOCAL"]}},
+        "unverified_env": {"type": "string", "pattern": "^CHTYPES_[A-Z_]+$"},
+        "refusals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["step", "reason", "error"],
+            "properties": {
+              "step": {"type": "integer", "minimum": 1, "maximum": 7},
+              "reason": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+              "suffix": {"enum": ["field", "symbol"]},
+              "error": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "cross_check": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["build_info", "predicate", "compare"],
+        "properties": {
+          "build_info": {"type": "string"},
+          "predicate": {"type": "string"},
+          "compare": {"enum": ["bytes", "int"]}
+        }
+      }
+    },
+    "naming": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["go", "python", "ts", "rust"],
+      "properties": {
+        "go": {"type": "object", "additionalProperties": {"type": "string"}},
+        "python": {"type": "object", "additionalProperties": {"type": "string"}},
+        "ts": {"type": "object", "additionalProperties": {"type": "string"}},
+        "rust": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    }
+  }
+}
