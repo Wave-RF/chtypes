@@ -39,7 +39,7 @@ THREE CASE KINDS, per function (`scripts/abi-v1/emit/stub.classify`):
     return value, a tombstone value, or nothing testable generically — see
     HANDWRITTEN_CASES) — the generic echo/status shape does not apply to
     them, by construction (that is what "special" means).
-  * "generic" functions (about three quarters of the description) get:
+  * "generic" functions (about half of the description today: 20 of 38) get:
       - one "echo" case, with one parameter carrying ADVERSARIAL bytes (a
         NUL and an invalid-UTF-8 byte) so the sha256/head_hex round-trip is
         actually exercised, not just a plain ASCII placeholder;

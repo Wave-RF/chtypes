@@ -62,21 +62,26 @@ exercised against real memory).
     from five atomic counters (incremented on mint, decremented the instant
     a handle's refcount reaches zero), never by walking a registry.
 
-THE SEVEN HAND-SPECIAL FUNCTIONS. Fourteen of the described functions have
-return-value semantics a generic template cannot express (what a function
-returns on a BAD handle when it has no status/error channel at all) and are
-written out directly in `_SPECIAL`: the three handshake calls, the tombstone,
-`chs_buf_data`/`chs_buf_len` (NULL/0 on a bad buffer), `chs_error_status`
-(CHS_INVALID_ARGUMENT on a bad error) and `chs_error_ch_code` (0 on a bad
-error), and the three owned-buffer text accessors
-(chs_error_ch_name/message/column, NULL on a bad error or allocation
-failure). Every free function (five handles plus `chs_shutdown`) is ALSO
-generated, by one shared structural template (`_gen_free`), not hand-written,
-since all six share one shape. Everything else — about three-quarters of the
-described functions — goes through ONE generic template, `_gen_generic`,
-driven purely by the function's `params`/`returns` shape, so a new
-provisional call needs no new emitter code as long as it stays within the
-closed parameter-kind vocabulary model.py already enforces.
+THE TWELVE HAND-WRITTEN FUNCTIONS (today; `classify()` reports the exact
+split against the tree's own description). Each has return-value semantics,
+or a job, a generic template cannot express — mostly "what does a function
+return on a BAD handle when it has no status/error channel at all" — and is
+written out directly, by name, in `_special()`: the three handshake calls
+(`chs_abi_version`, `chs_clickhouse_version`, and `chs_build_info`, the last
+of which also switches on `CHS_STUB_BUILD_INFO_MODE` in its own section), the
+tombstone (`chs_abi_revision`), `chs_buf_data`/`chs_buf_len` (NULL/0 on a bad
+buffer), `chs_error_status` (CHS_INVALID_ARGUMENT on a bad error) and
+`chs_error_ch_code` (0 on a bad error), the three owned-buffer text accessors
+(`chs_error_ch_name`/`chs_error_message`/`chs_error_column`, NULL on a bad
+error or allocation failure), and `chs_live_handles` (the real per-kind
+counters, not an echo of its own argument-less call). Every free function
+(five handles plus `chs_shutdown`) is ALSO generated, by one shared
+structural template (`_gen_free`/`is_free_like`), not hand-written, since all
+six share one shape. Everything else — about HALF of the described functions
+today (20 of 38) — goes through ONE generic template, `_gen_generic`, driven
+purely by the function's `params`/`returns` shape, so a new provisional call
+needs no new emitter code as long as it stays within the closed
+parameter-kind vocabulary model.py already enforces.
 """
 
 from __future__ import annotations
