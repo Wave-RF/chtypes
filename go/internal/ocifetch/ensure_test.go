@@ -13,11 +13,10 @@ import (
 // fakeRegistry is a minimal OCI distribution server built directly from
 // this package's own wire types, so Ensure's full pipeline (resolve, trust,
 // bytes, cache) runs against something that actually speaks the protocol —
-// not a stand-in for it. It is deliberately independent of
-// scripts/fetch-v1/server.py (lane 0B's fixture server, not yet on this
-// branch): this is a self-contained check that this binding's own client
-// logic is internally consistent, not a substitute for the conformance
-// suite that server drives.
+// not a stand-in for it. It is deliberately independent of the fixtures
+// lane's own scripted server (lane 0B's, not yet on this branch): this is a
+// self-contained check that this binding's own client logic is internally
+// consistent, not a substitute for the conformance suite that server drives.
 type fakeRegistry struct {
 	routes map[string][]byte
 }

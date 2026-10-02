@@ -324,6 +324,45 @@ func TestAnonymousTokenFlow(t *testing.T) {
 	}
 }
 
+func TestDoGetSendsAcceptHeaderWhenSet(t *testing.T) {
+	var sawAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAccept = r.Header.Get("Accept")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient()
+	if _, err := c.doGet(context.Background(), srv.URL, requestOptions{accept: manifestAccept}); err != nil {
+		t.Fatalf("doGet: %v", err)
+	}
+	if sawAccept != manifestAccept {
+		t.Fatalf("Accept header = %q, want %q", sawAccept, manifestAccept)
+	}
+}
+
+func TestDoGetSendsNoAcceptHeaderWhenUnset(t *testing.T) {
+	var sawAccept string
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		sawAccept = r.Header.Get("Accept")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient()
+	if _, err := c.doGet(context.Background(), srv.URL, requestOptions{}); err != nil {
+		t.Fatalf("doGet: %v", err)
+	}
+	if !called {
+		t.Fatalf("server was never called")
+	}
+	if sawAccept != "" {
+		t.Fatalf("Accept header = %q, want empty (net/http's own default) when opts.accept is unset", sawAccept)
+	}
+}
+
 func TestDownloadToken401SkipsAnonymousFlow(t *testing.T) {
 	// A static CHTYPES_DOWNLOAD_TOKEN that gets a 401 is a real auth
 	// failure: the anonymous-token exchange must never fire for it.

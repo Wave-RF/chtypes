@@ -274,7 +274,7 @@ func (s *session) fetchAcrossBases(ctx context.Context, bases []string, suffix s
 // against).
 func (s *session) resolveIndex(ctx context.Context, bases []string, spelling string) (*ImageIndex, Digest, string, error) {
 	result, base, err := s.fetchAcrossBases(ctx, bases, "manifests/"+spelling, notFoundUnpublished,
-		requestOptions{maxBytes: ManifestMaxBytes})
+		requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -327,7 +327,7 @@ func selectPlatformDescriptor(idx *ImageIndex, platformKey string) (*Descriptor,
 // inside them (docs/guides/fetch-v1.md §3 step 2).
 func (s *session) fetchManifestByDigest(ctx context.Context, bases []string, desc Descriptor) (*ImageManifest, []byte, string, error) {
 	result, base, err := s.fetchAcrossBases(ctx, bases, "manifests/"+string(desc.Digest), notFoundRetryOnLast,
-		requestOptions{maxBytes: ManifestMaxBytes})
+		requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
 	if err != nil {
 		return nil, nil, "", err
 	}

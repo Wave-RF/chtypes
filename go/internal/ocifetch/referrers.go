@@ -12,14 +12,16 @@ package ocifetch
 // itself — it never assumes a referrers listing holds only one kind of
 // object (§4).
 //
-// PM rule (2026-10-01, measured on the staging registry): a referrers-API
-// response of 200 with no entry of the artifactType being searched for — an
-// empty list, or a list that holds only (for example) the goldens referrer —
-// is treated exactly like the API not being served at all: the fallback tag
-// is tried too, before concluding nothing exists. Staging was observed
-// serving an empty referrers index, cached for up to 300s, for a manifest
-// that had just been pushed; a client that stopped at "the API answered"
-// would read that lag as CHTYPES_ARTIFACT_UNTRUSTED.
+// PM rule (2026-10-01): a referrers-API response of 200 with no entry of the
+// artifactType being searched for — an empty list, or a list that holds only
+// (for example) the goldens referrer — is treated exactly like the API not
+// being served at all: the fallback tag is tried too, before concluding
+// nothing exists. The host's referrers endpoint is served no-store, so this
+// is not about a cache lagging a just-pushed manifest on our own host — it
+// is for mirrors, which may serve only the fallback tag and never the
+// referrers API at all (§4 of the guide: "both are implemented in every
+// binding — never only one, because which a given host serves is a property
+// of that host, not of this fetcher").
 
 import (
 	"context"
@@ -35,13 +37,13 @@ import (
 // already been fetched successfully, so the honest outcome of finding
 // nothing at all is CHTYPES_ARTIFACT_UNTRUSTED from the caller, not a fetch
 // error blamed on this lookup.
-func (s *session) fetchAuxIndex(ctx context.Context, bases []string, suffix string) (*ReferrersIndex, bool) {
+func (s *session) fetchAuxIndex(ctx context.Context, bases []string, suffix, accept string) (*ReferrersIndex, bool) {
 	for _, base := range bases {
 		u, err := buildRequestURL(base, suffix)
 		if err != nil {
 			continue
 		}
-		result, err := s.client.doGet(ctx, u, requestOptions{maxBytes: ManifestMaxBytes})
+		result, err := s.client.doGet(ctx, u, requestOptions{maxBytes: ManifestMaxBytes, accept: accept})
 		if err != nil || result.status != http.StatusOK {
 			continue
 		}
@@ -60,11 +62,15 @@ func (s *session) fetchAuxIndex(ctx context.Context, bases []string, suffix stri
 // MaxReferrers.
 func (s *session) findReferrers(ctx context.Context, bases []string, subjectDigest Digest, artifactType string) []Descriptor {
 	var matches []Descriptor
-	if idx, ok := s.fetchAuxIndex(ctx, bases, "referrers/"+string(subjectDigest)); ok {
+	// The referrers API is not a manifests/<ref> GET, so it carries no
+	// Accept header requirement here.
+	if idx, ok := s.fetchAuxIndex(ctx, bases, "referrers/"+string(subjectDigest), ""); ok {
 		matches = appendMatchingArtifactType(matches, idx, artifactType)
 	}
 	if len(matches) == 0 {
-		if idx, ok := s.fetchAuxIndex(ctx, bases, "manifests/"+fallbackTag(subjectDigest)); ok {
+		// The fallback tag IS a manifests/<ref> GET (ref being the
+		// sha256-<hex> tag), so it sends manifestAccept like every other one.
+		if idx, ok := s.fetchAuxIndex(ctx, bases, "manifests/"+fallbackTag(subjectDigest), manifestAccept); ok {
 			matches = appendMatchingArtifactType(matches, idx, artifactType)
 		}
 	}
@@ -91,7 +97,7 @@ func appendMatchingArtifactType(into []Descriptor, idx *ReferrersIndex, artifact
 // ("bundle_manifest").
 func (s *session) fetchReferrerContent(ctx context.Context, bases []string, desc Descriptor) (body []byte, layerDigest, manifestDigest Digest, err error) {
 	result, _, err := s.fetchAcrossBases(ctx, bases, "manifests/"+string(desc.Digest), notFoundRetryOnLast,
-		requestOptions{maxBytes: ManifestMaxBytes})
+		requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
 	if err != nil {
 		return nil, "", "", err
 	}

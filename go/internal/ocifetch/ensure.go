@@ -757,7 +757,7 @@ func FetchSigned(ctx context.Context, repositorySuffix, ref, predicateType strin
 	if !Digest(ref).Valid() {
 		policy = notFoundUnpublished
 	}
-	result, base, err := s.fetchAcrossBases(ctx, bases, "manifests/"+ref, policy, requestOptions{maxBytes: ManifestMaxBytes})
+	result, base, err := s.fetchAcrossBases(ctx, bases, "manifests/"+ref, policy, requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
 	if err != nil {
 		return nil, err
 	}
@@ -834,7 +834,7 @@ func (s *session) ensureFrozen(ctx context.Context, ro resolvedOptions, l *layou
 			"lock file %s names no entry for %s/%s; re-lock with `fetch --lock`", ro.lockPath, req.Spelling, platform.Key)
 	}
 
-	manifestResult, base, err := s.fetchAcrossBases(ctx, ro.bases, "manifests/"+string(pin.Manifest), notFoundRetryOnLast, requestOptions{maxBytes: ManifestMaxBytes})
+	manifestResult, base, err := s.fetchAcrossBases(ctx, ro.bases, "manifests/"+string(pin.Manifest), notFoundRetryOnLast, requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
 	if err != nil {
 		return nil, err
 	}

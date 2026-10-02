@@ -7,9 +7,9 @@ package ocifetch
 // standalone.sh) still passes with nothing to fetch.
 //
 // PROVISIONAL: lane 0B (fixtures, the scripted HTTP server, the parity gate)
-// has not landed on this branch yet, so cases.json and
-// scripts/fetch-v1/server.py do not exist to test this against. This file
-// implements the documented contract (plan §3.2's case shape,
+// has not landed on this branch yet, so cases.json and the scripted server
+// it adds under scripts/fetch-v1/ do not exist to test this against. This
+// file implements the documented contract (plan §3.2's case shape,
 // spec/fetch-v1/schema/cases.schema.json and report.schema.json) as
 // precisely as it can be read today; expect to iterate once 0B merges and a
 // real conformance run can drive it — see MERGE NOTES.
@@ -163,9 +163,10 @@ func goToolchainID() string {
 	return runtime.Version()
 }
 
-// startFixtureServer starts scripts/fetch-v1/server.py (lane 0B) and parses
-// its "LISTENING <port> <port2>" line. It is written against the shape the
-// plan documents (§3.3); it has not run against a real server.py yet.
+// startFixtureServer starts the fixtures lane's scripted server (under
+// scripts/fetch-v1/, lane 0B) and parses its "LISTENING <port> <port2>"
+// line. It is written against the shape the plan documents (§3.3); it has
+// not run against the real script yet.
 func startFixtureServer(t *testing.T, fixturesDir string) (port, port2 int, stop func()) {
 	t.Helper()
 	scriptPath := findServerScript(t)
@@ -208,10 +209,10 @@ func startFixtureServer(t *testing.T, fixturesDir string) (port, port2 int, stop
 
 func findServerScript(t *testing.T) string {
 	t.Helper()
-	// go/internal/ocifetch -> repository root -> scripts/fetch-v1/server.py
+	// go/internal/ocifetch -> repository root -> scripts/fetch-v1/ -> server.py
 	candidate := filepath.Join("..", "..", "..", "scripts", "fetch-v1", "server.py")
 	if _, err := os.Stat(candidate); err != nil {
-		t.Fatalf("scripts/fetch-v1/server.py not found at %s (lane 0B has not landed on this branch): %v", candidate, err)
+		t.Fatalf("the fixtures lane's scripted server was not found at %s (lane 0B has not landed on this branch): %v", candidate, err)
 	}
 	return candidate
 }

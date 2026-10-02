@@ -207,7 +207,16 @@ type requestOptions struct {
 	// only by the digest-fetch-on-last-base path (§7 A5: digest 404 retries
 	// on the last base rather than failing immediately).
 	extraRetryStatuses []int
+	// accept, when set, becomes the request's Accept header. Every
+	// manifests/<ref> GET (by tag or by digest) sets manifestAccept: our
+	// host ignores it, but a mirror may need it for content negotiation
+	// (the delivery side's review).
+	accept string
 }
+
+// manifestAccept is the Accept header every GET …/manifests/<ref> sends,
+// whether <ref> is a tag or a digest.
+var manifestAccept = MediaTypeIndex + ", " + MediaTypeManifest
 
 // doGet performs one logical GET against rawURL: redirects, retries,
 // Retry-After and the token policy, all in one place. It returns the final
@@ -286,6 +295,9 @@ func (c *client) attemptWithRedirects(ctx context.Context, rawURL string, opts r
 		}
 		if includeAuth {
 			c.setAuth(req, u, opts)
+		}
+		if opts.accept != "" {
+			req.Header.Set("Accept", opts.accept)
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
