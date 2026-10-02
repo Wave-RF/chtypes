@@ -1,0 +1,34 @@
+{
+  "schema": 3,
+  "abi": 1,
+  "platforms": [
+    "linux-amd64",
+    "linux-arm64",
+    "darwin-arm64"
+  ],
+  "requests": {
+    "26.10.3.1": {
+      "darwin-arm64": {
+        "version": "26.10.3.1",
+        "build": "20261010.000003",
+        "manifest": "sha256:8589af659a471cdf4ac0ed73b6baeecad18fd1957d02f5cd0cae877609a33b5b",
+        "layer": "sha256:090e9f7e340202f9db2498a9c518f746582bc0d4b83bfb7b7ecd1de6d8341f62",
+        "bundle": "sha256:2330ec99900fe582f2ae7174764efd751418dc22830c945d1f615836fc13bafa"
+      },
+      "linux-amd64": {
+        "version": "26.10.3.1",
+        "build": "20261010.000003",
+        "manifest": "sha256:b219f0b151a70fbd17b86486cb59df46055d50922cbbc77b615bf14ba0be7112",
+        "layer": "sha256:308fd2737616274205a094675bf790c5919e7a391322742c3597b98174b049c1",
+        "bundle": "sha256:bb0e80a0d6fb481efcecf14466dadc6c8fe104ab9172d4e261fdbfe03d8fc1d8"
+      },
+      "linux-arm64": {
+        "version": "26.10.3.1",
+        "build": "20261010.000003",
+        "manifest": "sha256:31b2d6b76f449286843373cebdff5caf691a19a374c57f6d926e9dac3fc5b04d",
+        "layer": "sha256:0347830f87dafd07807a1b9c709f31003085127600cf74dc77cb50a8f1591baa",
+        "bundle": "sha256:a8d6a3a72854ab8f7f7752b57a386ed682a93a17e49eb5f4d8c004d8f92fed8a"
+      }
+    }
+  }
+}
