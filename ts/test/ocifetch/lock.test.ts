@@ -100,7 +100,7 @@ describe('readLock / writeLock round-trip', () => {
   });
 
   it('round-trips a lock unchanged', async () => {
-    dir = await mkdtemp(path.join(tmpdir(), 'chtypes-v1-lock-'));
+    dir = await mkdtemp(path.join(tmpdir(), 'ocifetch-v1-lock-'));
     const lockPath = path.join(dir, 'chtypes.lock');
     const lock = withPin(emptyLock(), '26.8', 'linux-arm64', GOOD_PIN);
     await writeLock(lockPath, lock);
@@ -109,7 +109,7 @@ describe('readLock / writeLock round-trip', () => {
   });
 
   it('readLock returns undefined for a missing file', async () => {
-    dir = await mkdtemp(path.join(tmpdir(), 'chtypes-v1-lock-'));
+    dir = await mkdtemp(path.join(tmpdir(), 'ocifetch-v1-lock-'));
     const read = await readLock(path.join(dir, 'does-not-exist.lock'));
     expect(read).toBeUndefined();
   });

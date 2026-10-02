@@ -5,6 +5,12 @@
  * extensively in `../fetch.test.ts`) is unaffected. Builds tiny ustar
  * archives by hand; no gzip/zstd involved, since `extractTarStream` takes an
  * already-decompressed stream.
+ *
+ * `extractTarStream` lives in the shared v0 `tar.ts`, so it throws v0's own
+ * `ArtifactCorruptError` (`../../src/errors.js`) — a different class from
+ * `../../src/ocifetch/errors.js`'s, despite the identical name.
+ * `unpack.ts`'s caller re-wraps it into the v1 class; this file asserts
+ * against `extractTarStream` directly, so it checks the v0 class.
  */
 
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -13,7 +19,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { extractTarStream } from '../../src/tar.js';
-import { ArtifactCorruptError } from '../../src/ocifetch/errors.js';
+import { ArtifactCorruptError } from '../../src/errors.js';
 
 const BLOCK = 512;
 
@@ -58,7 +64,7 @@ afterEach(async () => {
 });
 
 async function freshDir(): Promise<string> {
-  tmp = await mkdtemp(path.join(tmpdir(), 'chtypes-v1-tar-'));
+  tmp = await mkdtemp(path.join(tmpdir(), 'ocifetch-v1-tar-'));
   return tmp;
 }
 

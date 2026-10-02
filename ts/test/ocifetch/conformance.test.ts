@@ -6,8 +6,9 @@
  * seam, and writes `CHTYPES_V1_REPORT`. Unset, it **skips loudly by name** —
  * the fixtures tree does not exist yet (lane 0B, building in parallel), so
  * this suite is a real implementation of the runner CONTRACT, not yet
- * exercised against real fixtures. `scripts/fetch-v1/parity.py` (also lane
- * 0B) is what finally proves every `(case, transport)` pair passes.
+ * exercised against real fixtures. The parity gate under `scripts/fetch-v1/`
+ * (also lane 0B, not yet landed) is what finally proves every
+ * `(case, transport)` pair passes.
  *
  * CI runs this exact command (plan §3.3):
  * `cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts`.
@@ -181,7 +182,7 @@ async function runOne(
     const sleeps: number[] = [];
     const { mkdtemp, rm } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
-    const cacheDir = await mkdtemp(path.join(tmpdir(), 'chtypes-v1-conformance-'));
+    const cacheDir = await mkdtemp(path.join(tmpdir(), 'ocifetch-v1-conformance-'));
     try {
       const resolved = await ensure(c.request.spelling, {
         bases,
