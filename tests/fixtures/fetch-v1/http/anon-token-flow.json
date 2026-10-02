@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "anon-token-flow",
+  "tree": "http-basic",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "status": 401,
+          "headers": {
+            "WWW-Authenticate": "Bearer realm=\"http://{server}/s-anon-token-flow/chtypes/v1/token\""
+          }
+        },
+        {
+          "from_tree": true
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/token",
+      "responses": [
+        {
+          "status": 200,
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}

@@ -51,6 +51,7 @@
       {"step": 3, "reason": "abi_version", "error": "artifact_incompatible"},
       {"step": 4, "reason": "build_info_malformed", "error": "artifact_corrupt"},
       {"step": 4, "reason": "fingerprint", "error": "artifact_incompatible"},
+      {"step": 4, "reason": "missing_symbol", "suffix": "symbol", "error": "artifact_incompatible"},
       {"step": 5, "reason": "build_info_mismatch", "suffix": "field", "error": "artifact_corrupt"},
       {"step": 6, "reason": "missing_symbol", "suffix": "symbol", "error": "artifact_incompatible"}
     ]

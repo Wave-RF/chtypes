@@ -130,7 +130,7 @@ The column declarations reconstructed from a server's `system.columns` rows, for
 
 ### chs_abi_version
 
-The ABI generation this library implements: always 1 for this header. A loader resolves and calls it right after opening the library. A library without the symbol is not an ABI v1 artifact, and any other value is refused, naming both values.
+The ABI generation this library implements: always 1 for this header. A loader resolves and calls it right after opening the library. A library without the symbol is not an ABI v1 artifact, and any other value is refused, naming both values. An absent handshake symbol other than this one is refused as `missing_symbol:<name>` instead, at whichever step first resolves it — only this symbol's absence means the library is not an ABI v1 artifact at all.
 
 ### chs_build_info
 

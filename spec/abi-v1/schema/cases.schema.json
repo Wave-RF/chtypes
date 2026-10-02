@@ -20,6 +20,10 @@
           "kind": {"enum": ["handshake", "echo", "status", "loader"]},
           "fn": {"type": "string", "pattern": "^chs_[a-z0-9_]+$"},
           "variant": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+          "os": {
+            "enum": ["linux", "darwin"],
+            "description": "Present only on a loader case whose expected reason differs by platform (ctor-marker: D3's glibc floor step is Linux-only, so the same library is refused on Linux but accepted on darwin). Absent means the case applies on every platform. A conformance runner must skip, never fail, a case whose os does not match its own."
+          },
           "args": {"type": "array", "items": {"$ref": "#/$defs/arg"}},
           "expect": {"type": "object"}
         },
