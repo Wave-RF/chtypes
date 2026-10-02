@@ -94,10 +94,14 @@ def build_tree(
     _write(root / "blobs" / layer_digest, layer_bytes)
 
     config_descriptor = {
-        "mediaType": C.MEDIA_TYPE_EMPTY_CONFIG, "digest": EMPTY_CONFIG_DIGEST, "size": 2,
+        "mediaType": C.MEDIA_TYPE_EMPTY_CONFIG,
+        "digest": EMPTY_CONFIG_DIGEST,
+        "size": 2,
     }
     layer_descriptor = {
-        "mediaType": C.MEDIA_TYPE_LAYER, "digest": layer_digest, "size": len(layer_bytes),
+        "mediaType": C.MEDIA_TYPE_LAYER,
+        "digest": layer_digest,
+        "size": len(layer_bytes),
     }
     manifest_doc = {
         "schemaVersion": 2,
@@ -158,10 +162,14 @@ def build_tree(
     _write(root / "blobs" / bundle_digest, bundle_bytes)
 
     bundle_layer_descriptor = {
-        "mediaType": C.MEDIA_TYPE_BUNDLE, "digest": bundle_digest, "size": len(bundle_bytes),
+        "mediaType": C.MEDIA_TYPE_BUNDLE,
+        "digest": bundle_digest,
+        "size": len(bundle_bytes),
     }
     subject_descriptor = {
-        "mediaType": C.MEDIA_TYPE_MANIFEST, "digest": manifest_digest, "size": len(manifest_bytes),
+        "mediaType": C.MEDIA_TYPE_MANIFEST,
+        "digest": manifest_digest,
+        "size": len(manifest_bytes),
     }
     referrer_manifest_doc = {
         "schemaVersion": 2,

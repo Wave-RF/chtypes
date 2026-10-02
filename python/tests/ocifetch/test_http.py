@@ -86,7 +86,9 @@ def test_parse_bearer_challenge() -> None:
     header = 'Bearer realm="https://auth.example/token",service="registry",scope="repo:pull"'
     params = _parse_bearer_challenge(header)
     assert params == {
-        "realm": "https://auth.example/token", "service": "registry", "scope": "repo:pull",
+        "realm": "https://auth.example/token",
+        "service": "registry",
+        "scope": "repo:pull",
     }
 
 
@@ -108,8 +110,11 @@ def test_fetch_from_bases_file_scheme_success(tmp_path: Path) -> None:
     (tmp_path / "manifests" / "26.8").write_bytes(b'{"ok": true}')
     policy = FetchPolicy(clock=FakeClock())
     resp = fetch_from_bases(
-        (f"file://{tmp_path}",), "/manifests/26.8", mode="tag",
-        policy=policy, retry=RetryPolicy(),
+        (f"file://{tmp_path}",),
+        "/manifests/26.8",
+        mode="tag",
+        policy=policy,
+        retry=RetryPolicy(),
     )
     assert resp.body == b'{"ok": true}'
 
@@ -118,8 +123,11 @@ def test_fetch_from_bases_file_scheme_missing_is_not_found(tmp_path: Path) -> No
     policy = FetchPolicy(clock=FakeClock())
     with pytest.raises(NotFoundHttpError):
         fetch_from_bases(
-            (f"file://{tmp_path}",), "/manifests/26.8", mode="tag",
-            policy=policy, retry=RetryPolicy(),
+            (f"file://{tmp_path}",),
+            "/manifests/26.8",
+            mode="tag",
+            policy=policy,
+            retry=RetryPolicy(),
         )
 
 
@@ -127,7 +135,11 @@ def test_fetch_from_bases_rejects_disallowed_scheme() -> None:
     policy = FetchPolicy(clock=FakeClock())
     with pytest.raises(UnreachableHttpError, match="scheme"):
         fetch_from_bases(
-            ("ftp://example.com",), "/x", mode="tag", policy=policy, retry=RetryPolicy(),
+            ("ftp://example.com",),
+            "/x",
+            mode="tag",
+            policy=policy,
+            retry=RetryPolicy(),
         )
 
 
@@ -204,7 +216,11 @@ def test_http_basic_success(server: _Server) -> None:
     server.routes["/manifests/26.8"] = [_ok(b'{"ok":1}')]
     policy = FetchPolicy(clock=FakeClock())
     resp = fetch_from_bases(
-        (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=RetryPolicy(),
+        (server.base_url,),
+        "/manifests/26.8",
+        mode="tag",
+        policy=policy,
+        retry=RetryPolicy(),
     )
     assert resp.body == b'{"ok":1}'
 
@@ -213,7 +229,11 @@ def test_http_tag_404_raises_not_found(server: _Server) -> None:
     policy = FetchPolicy(clock=FakeClock())
     with pytest.raises(NotFoundHttpError):
         fetch_from_bases(
-            (server.base_url,), "/manifests/26.99", mode="tag", policy=policy, retry=RetryPolicy(),
+            (server.base_url,),
+            "/manifests/26.99",
+            mode="tag",
+            policy=policy,
+            retry=RetryPolicy(),
         )
 
 
@@ -223,8 +243,11 @@ def test_http_digest_404_on_only_base_is_retried_then_unreachable(server: _Serve
     retry = RetryPolicy(attempts=3, first_wait_s=0.01, multiplier=2.0)
     with pytest.raises(UnreachableHttpError):
         fetch_from_bases(
-            (server.base_url,), "/blobs/sha256:" + "a" * 64, mode="digest",
-            policy=policy, retry=retry,
+            (server.base_url,),
+            "/blobs/sha256:" + "a" * 64,
+            mode="digest",
+            policy=policy,
+            retry=retry,
         )
     assert clock.sleeps == [0.01, 0.02]
 
@@ -243,7 +266,11 @@ def test_http_retries_503_then_succeeds(server: _Server) -> None:
     policy = FetchPolicy(clock=clock)
     retry = RetryPolicy(attempts=5, first_wait_s=0.01, multiplier=2.0)
     resp = fetch_from_bases(
-        (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=retry,
+        (server.base_url,),
+        "/manifests/26.8",
+        mode="tag",
+        policy=policy,
+        retry=retry,
     )
     assert resp.body == b"finally"
     assert clock.sleeps == [0.01, 0.02]
@@ -267,7 +294,11 @@ def test_http_retry_after_seconds_is_honored(server: _Server) -> None:
     policy = FetchPolicy(clock=clock)
     retry = RetryPolicy(attempts=5, first_wait_s=10.0, multiplier=2.0)
     fetch_from_bases(
-        (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=retry,
+        (server.base_url,),
+        "/manifests/26.8",
+        mode="tag",
+        policy=policy,
+        retry=retry,
     )
     assert clock.sleeps == [1.0]
 
@@ -279,7 +310,11 @@ def test_http_retry_after_over_budget_refuses_without_sleeping(server: _Server) 
     retry = RetryPolicy(attempts=5, first_wait_s=1.0, multiplier=2.0)
     with pytest.raises(UnreachableHttpError, match="exceeds"):
         fetch_from_bases(
-            (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=retry,
+            (server.base_url,),
+            "/manifests/26.8",
+            mode="tag",
+            policy=policy,
+            retry=retry,
         )
     assert clock.sleeps == []
 
@@ -290,7 +325,11 @@ def test_http_no_retry_on_400(server: _Server) -> None:
     policy = FetchPolicy(clock=clock)
     with pytest.raises(UnreachableHttpError, match="not retryable"):
         fetch_from_bases(
-            (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=RetryPolicy(),
+            (server.base_url,),
+            "/manifests/26.8",
+            mode="tag",
+            policy=policy,
+            retry=RetryPolicy(),
         )
     assert clock.sleeps == []
 
@@ -300,7 +339,11 @@ def test_http_download_token_401_is_unauthorized(server: _Server) -> None:
     policy = FetchPolicy(token="my-token", clock=FakeClock())
     with pytest.raises(UnauthorizedHttpError):
         fetch_from_bases(
-            (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=RetryPolicy(),
+            (server.base_url,),
+            "/manifests/26.8",
+            mode="tag",
+            policy=policy,
+            retry=RetryPolicy(),
         )
 
 
@@ -309,7 +352,11 @@ def test_http_download_token_403_is_forbidden(server: _Server) -> None:
     policy = FetchPolicy(token="my-token", clock=FakeClock())
     with pytest.raises(ForbiddenHttpError):
         fetch_from_bases(
-            (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=RetryPolicy(),
+            (server.base_url,),
+            "/manifests/26.8",
+            mode="tag",
+            policy=policy,
+            retry=RetryPolicy(),
         )
 
 
@@ -317,7 +364,11 @@ def test_http_download_token_is_sent(server: _Server) -> None:
     server.routes["/manifests/26.8"] = [_ok()]
     policy = FetchPolicy(token="my-secret-token", clock=FakeClock())
     fetch_from_bases(
-        (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=RetryPolicy(),
+        (server.base_url,),
+        "/manifests/26.8",
+        mode="tag",
+        policy=policy,
+        retry=RetryPolicy(),
     )
     _path, headers = server.requests[-1]
     assert headers.get("Authorization") == "Bearer my-secret-token"
@@ -337,7 +388,11 @@ def test_http_anon_token_flow(server: _Server) -> None:
     server.routes["/token"] = [lambda: (200, {}, b'{"token": "anon-tok-123"}')]
     policy = FetchPolicy(clock=FakeClock())  # no static token: eligible for the anon flow
     resp = fetch_from_bases(
-        (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=RetryPolicy(),
+        (server.base_url,),
+        "/manifests/26.8",
+        mode="tag",
+        policy=policy,
+        retry=RetryPolicy(),
     )
     assert resp.body == b"with-token"
     _path, token_req_headers = server.requests[-2]
@@ -354,7 +409,11 @@ def test_http_redirect_drops_authorization(server: _Server) -> None:
         other.routes["/elsewhere"] = [_ok(b"redirected")]
         policy = FetchPolicy(token="should-not-cross", clock=FakeClock())
         resp = fetch_from_bases(
-            (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=RetryPolicy(),
+            (server.base_url,),
+            "/manifests/26.8",
+            mode="tag",
+            policy=policy,
+            retry=RetryPolicy(),
         )
         assert resp.body == b"redirected"
         _path, headers = other.requests[-1]
@@ -370,7 +429,11 @@ def test_http_redirect_limit(server: _Server) -> None:
     policy = FetchPolicy(clock=FakeClock(), max_redirects=2)
     with pytest.raises(UnreachableHttpError, match="redirects"):
         fetch_from_bases(
-            (server.base_url,), "/manifests/26.8", mode="tag", policy=policy, retry=RetryPolicy(),
+            (server.base_url,),
+            "/manifests/26.8",
+            mode="tag",
+            policy=policy,
+            retry=RetryPolicy(),
         )
 
 
@@ -383,8 +446,11 @@ def test_mirror_failover_on_digest_404_no_sleeps(server: _Server) -> None:
         clock = FakeClock()
         policy = FetchPolicy(clock=clock)
         resp = fetch_from_bases(
-            (server.base_url, other.base_url), "/blobs/sha256:" + "a" * 64, mode="digest",
-            policy=policy, retry=RetryPolicy(),
+            (server.base_url, other.base_url),
+            "/blobs/sha256:" + "a" * 64,
+            mode="digest",
+            policy=policy,
+            retry=RetryPolicy(),
         )
         assert resp.body == b"from-second-base"
         assert clock.sleeps == []
@@ -421,6 +487,10 @@ def test_manifest_requests_send_both_media_types_in_accept(server: _Server) -> N
     fallback_tag = f"sha256-{digest.split(':', 1)[1]}"
     server.routes[f"/manifests/{fallback_tag}"] = [_ok(index_body)]
     discover_referrers(
-        (server.base_url,), digest, C.MEDIA_TYPE_BUNDLE, policy=policy, retry=retry,
+        (server.base_url,),
+        digest,
+        C.MEDIA_TYPE_BUNDLE,
+        policy=policy,
+        retry=retry,
     )
     assert server.requests[-1][1].get("Accept") == want_accept

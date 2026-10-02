@@ -154,8 +154,12 @@ def _run_case(
 
     bases = tuple(
         _expand_base(
-            b, transport=transport, fixtures_root=fixtures_root, tree=case["tree"],
-            case_id=case["id"], http_port=http_port,
+            b,
+            transport=transport,
+            fixtures_root=fixtures_root,
+            tree=case["tree"],
+            case_id=case["id"],
+            http_port=http_port,
         )
         for b in req["bases"]
     )
@@ -234,7 +238,10 @@ def test_conformance_v1(
             http_port = http_server[0] if http_server else None
             try:
                 verdict, detail = _run_case(
-                    case, transport, fixtures_root=fixtures_root, tmp_path=case_tmp,
+                    case,
+                    transport,
+                    fixtures_root=fixtures_root,
+                    tmp_path=case_tmp,
                     http_port=http_port,
                 )
             except pytest.skip.Exception:

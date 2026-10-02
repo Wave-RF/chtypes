@@ -85,9 +85,7 @@ def unpack_tar_zst(
                     for member in tar:
                         _reject_unsafe(member)
                         if member.name in seen_names:
-                            raise ArtifactCorruptError(
-                                f"duplicate tar entry {member.name!r}"
-                            )
+                            raise ArtifactCorruptError(f"duplicate tar entry {member.name!r}")
                         seen_names.add(member.name)
                         dest_path = os.path.join(dest_dir, member.name)
                         if member.isdir():
@@ -130,6 +128,5 @@ def unpack_tar_zst(
     actual_sha256 = library_hash.hexdigest()
     if actual_sha256 != library_sha256:
         raise ArtifactCorruptError(
-            f"library sha256 {actual_sha256} disagreed with the signed predicate's "
-            f"{library_sha256}"
+            f"library sha256 {actual_sha256} disagreed with the signed predicate's {library_sha256}"
         )

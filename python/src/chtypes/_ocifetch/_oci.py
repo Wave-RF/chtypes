@@ -61,9 +61,7 @@ def validate_spelling(spelling: str) -> None:
     """Refuse a v0-era or decorated spelling before any network call
     (constants: ``spelling.regex`` / ``refuse_hint_regex``). This is a
     client-side input error, not a fetch-layer error code."""
-    if re.match(C.SPELLING_REFUSE_HINT_REGEX, spelling) or not re.match(
-        C.SPELLING_REGEX, spelling
-    ):
+    if re.match(C.SPELLING_REFUSE_HINT_REGEX, spelling) or not re.match(C.SPELLING_REGEX, spelling):
         raise ValueError(
             f"chtypes: {spelling!r} is not a v1 version spelling. "
             f"Use the bare ClickHouse version, e.g. '26.8', '26.8.15' or "
@@ -86,9 +84,7 @@ def version_within_request(predicate_version: str, requested_spelling: str) -> b
     return pred[: len(req)] == req
 
 
-def verify_json_descriptor(
-    body: bytes, descriptor: Descriptor, *, what: str
-) -> None:
+def verify_json_descriptor(body: bytes, descriptor: Descriptor, *, what: str) -> None:
     """Check a downloaded JSON document's bytes against its own descriptor,
     BEFORE any further parsing — size and sha256, exactly as §7.3 requires
     for the layer, applied here to the smaller JSON objects too. Use this
@@ -140,9 +136,10 @@ def resolve_platform_manifest(index_doc: dict, platform_key: str) -> Descriptor:
         plat = m.get("platform") or {}
         key = f"{plat.get('os')}-{plat.get('architecture')}"
         offered.append(key)
-        if plat.get("os") == platform_spec["os"] and plat.get("architecture") == platform_spec[
-            "architecture"
-        ]:
+        if (
+            plat.get("os") == platform_spec["os"]
+            and plat.get("architecture") == platform_spec["architecture"]
+        ):
             matches.append(m)
     if not matches:
         raise ArtifactUnpublishedError(
@@ -226,8 +223,13 @@ def fetch_manifest_by_tag(
     """GET manifests/<tag>; returns (doc, raw_bytes, resolved_digest)."""
     accept = (C.MEDIA_TYPE_INDEX, C.MEDIA_TYPE_MANIFEST)
     doc, resp = get_json(
-        bases, f"/manifests/{tag}", mode="tag", accept=accept, max_bytes=max_bytes,
-        policy=policy, retry=retry,
+        bases,
+        f"/manifests/{tag}",
+        mode="tag",
+        accept=accept,
+        max_bytes=max_bytes,
+        policy=policy,
+        retry=retry,
     )
     digest = f"sha256:{hashlib.sha256(resp.body).hexdigest()}"
     return doc, resp.body, digest
@@ -282,8 +284,13 @@ def fetch_blob_bytes(
     known size — used for `--frozen`, where the lock pins only the digest,
     never a size)."""
     resp = fetch_from_bases(
-        bases, f"/blobs/{digest}", mode="digest", accept=None, max_bytes=max_bytes,
-        policy=policy, retry=retry,
+        bases,
+        f"/blobs/{digest}",
+        mode="digest",
+        accept=None,
+        max_bytes=max_bytes,
+        policy=policy,
+        retry=retry,
     )
     verify_body_matches_digest(resp.body, digest, what=f"blob {digest}")
     return resp.body
@@ -300,8 +307,13 @@ def fetch_manifest_by_digest(
     """GET manifests/<digest>, verified against the digest requested."""
     accept = (C.MEDIA_TYPE_INDEX, C.MEDIA_TYPE_MANIFEST)
     doc, resp = get_json(
-        bases, f"/manifests/{digest}", mode="digest", accept=accept, max_bytes=max_bytes,
-        policy=policy, retry=retry,
+        bases,
+        f"/manifests/{digest}",
+        mode="digest",
+        accept=accept,
+        max_bytes=max_bytes,
+        policy=policy,
+        retry=retry,
     )
     verify_body_matches_digest(resp.body, digest, what="manifest")
     return doc, resp.body

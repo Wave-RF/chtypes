@@ -325,16 +325,18 @@ def _find_verified_signature(
             referrer_doc, _raw = fetch_manifest_by_digest(
                 bases, ref.digest, policy=policy, retry=retry
             )
-            blob_desc = manifest_single_layer(
-                referrer_doc, expected_media_type=C.MEDIA_TYPE_BUNDLE
-            )
+            blob_desc = manifest_single_layer(referrer_doc, expected_media_type=C.MEDIA_TYPE_BUNDLE)
         except (TransportError, FetchError):
             continue
         tmp_dir = tempfile.mkdtemp(dir=str(scratch_root))
         try:
             bundle_path = os.path.join(tmp_dir, "bundle.json")
             fetch_blob_to_path(
-                bases, blob_desc, bundle_path, policy=policy, retry=retry,
+                bases,
+                blob_desc,
+                bundle_path,
+                policy=policy,
+                retry=retry,
                 max_bytes=C.BUNDLE_MAX_BYTES,
             )
             with open(bundle_path, "rb") as f:
@@ -376,7 +378,11 @@ def _unpack_and_install(
     try:
         layer_path = os.path.join(tmp_dir, "layer")
         fetch_blob_to_path(
-            bases, layer_desc, layer_path, policy=policy, retry=retry,
+            bases,
+            layer_desc,
+            layer_path,
+            policy=policy,
+            retry=retry,
             max_bytes=C.MAX_UNPACKED_BYTES,
         )
         unpack_dest = os.path.join(tmp_dir, "unpacked")
@@ -446,8 +452,11 @@ def _ensure_floating(
     existing_record = read_verified_record(existing_dir)
     if existing_record is not None and existing_record.platform == platform_key:
         resolved = _record_to_resolved(
-            existing_dir, existing_record, request_spelling=request.spelling,
-            already_installed=True, source="cache",
+            existing_dir,
+            existing_record,
+            request_spelling=request.spelling,
+            already_installed=True,
+            source="cache",
         )
         if options.lock_write:
             _write_lock_pin(options, lock, request.spelling, platform_key, resolved)
@@ -460,7 +469,11 @@ def _ensure_floating(
 
     trusted_keys = options.resolved_trusted_keys()
     found = _find_verified_signature(
-        bases, platform_desc.digest, policy=policy, retry=retry, trusted_keys=trusted_keys,
+        bases,
+        platform_desc.digest,
+        policy=policy,
+        retry=retry,
+        trusted_keys=trusted_keys,
         scratch_root=scratch_root,
     )
 
@@ -470,9 +483,7 @@ def _ensure_floating(
             raise ArtifactUntrustedError(
                 f"chtypes: no trusted signature for {request.spelling} ({platform_key})"
             )
-        warnings.append(
-            "CHTYPES_ALLOW_UNSIGNED: no trusted signature found; proceeding unsigned"
-        )
+        warnings.append("CHTYPES_ALLOW_UNSIGNED: no trusted signature found; proceeding unsigned")
         config_desc = manifest_config_descriptor(manifest_doc)
         if config_desc is None:
             raise ArtifactCorruptError(
@@ -502,10 +513,20 @@ def _ensure_floating(
     warnings.extend(_monotonic_warnings(roots, platform_key, predicate))
 
     dest_dir = _unpack_and_install(
-        cache_root_path=cache_root_path, scratch_root=scratch_root, bases=bases,
-        layer_desc=layer_desc, manifest_digest=platform_desc.digest, layer_digest=layer_desc.digest,
-        bundle_digest=bundle_digest, index_digest=index_digest, platform_key=platform_key,
-        predicate=predicate, signed_by=signed_by, policy=policy, retry=retry, warnings=warnings,
+        cache_root_path=cache_root_path,
+        scratch_root=scratch_root,
+        bases=bases,
+        layer_desc=layer_desc,
+        manifest_digest=platform_desc.digest,
+        layer_digest=layer_desc.digest,
+        bundle_digest=bundle_digest,
+        index_digest=index_digest,
+        platform_key=platform_key,
+        predicate=predicate,
+        signed_by=signed_by,
+        policy=policy,
+        retry=retry,
+        warnings=warnings,
     )
     record = read_verified_record(dest_dir)
     assert record is not None
@@ -519,7 +540,10 @@ def _ensure_floating(
         pass  # index.json is an oras-interop convenience; correctness never depends on it.
 
     resolved = _record_to_resolved(
-        dest_dir, record, request_spelling=request.spelling, already_installed=False,
+        dest_dir,
+        record,
+        request_spelling=request.spelling,
+        already_installed=False,
         source=bases[0] if bases else "cache",
     )
     if options.lock_write:
@@ -549,8 +573,11 @@ def _ensure_frozen(
     existing_record = read_verified_record(existing_dir)
     if existing_record is not None and existing_record.platform == platform_key:
         return _record_to_resolved(
-            existing_dir, existing_record, request_spelling=request.spelling,
-            already_installed=True, source="cache",
+            existing_dir,
+            existing_record,
+            request_spelling=request.spelling,
+            already_installed=True,
+            source="cache",
         )
 
     manifest_doc, _raw = fetch_manifest_by_digest(bases, pin.manifest, policy=policy, retry=retry)
@@ -583,15 +610,28 @@ def _ensure_frozen(
         )
 
     dest_dir = _unpack_and_install(
-        cache_root_path=cache_root_path, scratch_root=scratch_root, bases=bases,
-        layer_desc=layer_desc, manifest_digest=pin.manifest, layer_digest=pin.layer,
-        bundle_digest=pin.bundle, index_digest=pin.index, platform_key=platform_key,
-        predicate=predicate, signed_by=verified.signed_by, policy=policy, retry=retry, warnings=[],
+        cache_root_path=cache_root_path,
+        scratch_root=scratch_root,
+        bases=bases,
+        layer_desc=layer_desc,
+        manifest_digest=pin.manifest,
+        layer_digest=pin.layer,
+        bundle_digest=pin.bundle,
+        index_digest=pin.index,
+        platform_key=platform_key,
+        predicate=predicate,
+        signed_by=verified.signed_by,
+        policy=policy,
+        retry=retry,
+        warnings=[],
     )
     record = read_verified_record(dest_dir)
     assert record is not None
     return _record_to_resolved(
-        dest_dir, record, request_spelling=request.spelling, already_installed=False,
+        dest_dir,
+        record,
+        request_spelling=request.spelling,
+        already_installed=False,
         source=bases[0] if bases else "cache",
     )
 
@@ -652,7 +692,10 @@ def resolve_installed(request: Request, platform: str, options: Options) -> Reso
         candidates, key=lambda item: (spelling_components(item[1].version), item[1].build)
     )
     return _record_to_resolved(
-        dir_path, record, request_spelling=request.spelling, already_installed=True,
+        dir_path,
+        record,
+        request_spelling=request.spelling,
+        already_installed=True,
         source=_source_for_dir(dir_path, roots),
     )
 
@@ -663,7 +706,10 @@ def list_installed(options: Options) -> list[Resolved]:
     roots = search_roots(options.cache_dir)
     return [
         _record_to_resolved(
-            dir_path, record, request_spelling=record.version, already_installed=True,
+            dir_path,
+            record,
+            request_spelling=record.version,
+            already_installed=True,
             source=_source_for_dir(dir_path, roots),
         )
         for dir_path, record in list_verified_records(roots)
@@ -690,7 +736,11 @@ def verify_installed(options: Options) -> list[VerifyResult]:
         if len(data) != expected_bytes or actual_sha != expected_sha:
             out.append(
                 VerifyResult(
-                    dir_path, record.platform, record.version, record.build, False,
+                    dir_path,
+                    record.platform,
+                    record.version,
+                    record.build,
+                    False,
                     "on-disk library no longer matches its verified record",
                 )
             )
@@ -729,7 +779,11 @@ def fetch_signed(repository: str, ref: str, predicate_type: str, options: Option
     layer_desc = manifest_single_layer(doc)
     trusted_keys = options.resolved_trusted_keys()
     found = _find_verified_signature(
-        bases, manifest_digest, policy=policy, retry=retry, trusted_keys=trusted_keys,
+        bases,
+        manifest_digest,
+        policy=policy,
+        retry=retry,
+        trusted_keys=trusted_keys,
         scratch_root=scratch_root,
     )
     bundle_digest: str | None = None
@@ -759,6 +813,8 @@ def fetch_signed(repository: str, ref: str, predicate_type: str, options: Option
         "path": dest_path,
         "statement": statement_predicate,
         "digests": {
-            "manifest": manifest_digest, "layer": layer_desc.digest, "bundle": bundle_digest,
+            "manifest": manifest_digest,
+            "layer": layer_desc.digest,
+            "bundle": bundle_digest,
         },
     }

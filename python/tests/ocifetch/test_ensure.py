@@ -100,7 +100,9 @@ def test_ensure_untrusted_signature_raises(tmp_path: Path) -> None:
     tree = build_tree(tmp_path / "registry")
     other_key = TrustedKey(keyid="someone-else", public_key=b"\x00" * 32)
     options = Options(
-        bases=(tree.base_url,), cache_dir=tmp_path / "cache", trusted_keys=(other_key,),
+        bases=(tree.base_url,),
+        cache_dir=tmp_path / "cache",
+        trusted_keys=(other_key,),
         platform="linux-arm64",
     )
     with pytest.raises(ArtifactUntrustedError):
@@ -111,8 +113,11 @@ def test_ensure_allow_unsigned_falls_back_to_config_blob(tmp_path: Path) -> None
     tree = build_tree(tmp_path / "registry")
     other_key = TrustedKey(keyid="someone-else", public_key=b"\x00" * 32)
     options = Options(
-        bases=(tree.base_url,), cache_dir=tmp_path / "cache", trusted_keys=(other_key,),
-        allow_unsigned=True, platform="linux-arm64",
+        bases=(tree.base_url,),
+        cache_dir=tmp_path / "cache",
+        trusted_keys=(other_key,),
+        allow_unsigned=True,
+        platform="linux-arm64",
     )
     # The config blob in this test tree is the OCI empty-config shape
     # ("{}"), so allow-unsigned here has nothing to recover a library name
@@ -218,7 +223,11 @@ def test_ensure_with_lock_write_then_frozen_reads_the_pin(tmp_path: Path) -> Non
     assert pin.manifest == tree.manifest_digest
 
     frozen_options = _options(
-        tree, tmp_path, platform="linux-arm64", lock_path=lock_path, frozen=True,
+        tree,
+        tmp_path,
+        platform="linux-arm64",
+        lock_path=lock_path,
+        frozen=True,
     )
     resolved = ensure(Request("26.8"), frozen_options)
     assert resolved.version == "26.8.15.10"
@@ -268,7 +277,11 @@ def test_ensure_update_ignores_the_pin_and_re_resolves(
     monkeypatch.setattr(ensure_module, "fetch_manifest_by_tag", _spy)
 
     update_options = _options(
-        tree, tmp_path, platform="linux-arm64", lock_path=lock_path, update=True,
+        tree,
+        tmp_path,
+        platform="linux-arm64",
+        lock_path=lock_path,
+        update=True,
     )
     ensure(Request("26.8"), update_options)
     assert called["tag"] is True

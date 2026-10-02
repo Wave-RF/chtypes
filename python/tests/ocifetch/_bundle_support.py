@@ -60,8 +60,12 @@ def build_bundle(
     """A minimal key-only Sigstore bundle v0.3 document (layout-v2 spec §4.2):
     no certificate, no transparency log entry, just ``{"publicKey": {"hint":
     keyid}}`` and a DSSE envelope."""
-    doc = statement if statement is not None else build_statement(
-        subject_sha256=subject_sha256, predicate=predicate, predicate_type=predicate_type
+    doc = (
+        statement
+        if statement is not None
+        else build_statement(
+            subject_sha256=subject_sha256, predicate=predicate, predicate_type=predicate_type
+        )
     )
     payload = json.dumps(doc).encode("utf-8")
     pae = pae_encode(C.DSSE_PAYLOAD_TYPE, payload)

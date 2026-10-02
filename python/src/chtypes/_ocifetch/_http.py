@@ -129,9 +129,7 @@ class RetryPolicy:
         shortened — `decided-here`, since the spec states the rule but not
         the exact budget arithmetic: the remaining planned schedule is the
         only number already fixed by the shared retry table."""
-        return sum(
-            self.wait_before_attempt(i) for i in range(attempt_index, self.attempts - 1)
-        )
+        return sum(self.wait_before_attempt(i) for i in range(attempt_index, self.attempts - 1))
 
 
 @dataclass(frozen=True)
@@ -514,7 +512,13 @@ def get_json(
     and referrer listings. Raises `OversizeHttpError` via the body cap and
     lets a `json.JSONDecodeError` propagate (the caller maps it to CORRUPT)."""
     resp = fetch_from_bases(
-        bases, path, mode=mode, accept=accept, max_bytes=max_bytes, policy=policy, retry=retry,
+        bases,
+        path,
+        mode=mode,
+        accept=accept,
+        max_bytes=max_bytes,
+        policy=policy,
+        retry=retry,
         query=query,
     )
     return json.loads(resp.body.decode("utf-8")), resp
