@@ -82,9 +82,11 @@ def _repo_root(fixtures_root: Path) -> Path:
 
 @pytest.fixture(scope="module")
 def http_server(fixtures_root: Path):
-    """Starts `scripts/fetch-v1/server.py` once for the module. Yields
-    `(port, second_origin_port)`, or `None` when the script does not exist
-    yet (lane 0B), in which case every http-transport case is skipped."""
+    """Starts the fixtures/server/parity lane's scripted HTTP server (its
+    path is computed below, not cited here, since this tree does not carry
+    that file yet) once for the module. Yields `(port, second_origin_port)`,
+    or `None` when the server does not exist yet (lane 0B), in which case
+    every http-transport case is skipped."""
     server_script = _repo_root(fixtures_root) / "scripts" / "fetch-v1" / "server.py"
     if not server_script.is_file():
         yield None
@@ -100,7 +102,7 @@ def http_server(fixtures_root: Path):
         parts = line.split()
         if len(parts) < 3 or parts[0] != "LISTENING":
             proc.terminate()
-            raise RuntimeError(f"scripts/fetch-v1/server.py: unexpected startup line {line!r}")
+            raise RuntimeError(f"{server_script.name}: unexpected startup line {line!r}")
         yield (int(parts[1]), int(parts[2]))
     finally:
         proc.terminate()
@@ -125,7 +127,7 @@ def _expand_base(
         return f"file://{fixtures_root}/trees/{tree}/v2/chtypes/v1"
     if transport == "http":
         if http_port is None:
-            pytest.skip("scripts/fetch-v1/server.py is not available yet (lane 0B)")
+            pytest.skip("the fixtures/server/parity lane's HTTP server is not available yet")
         return f"http://127.0.0.1:{http_port}/s-{case_id}/chtypes/v1"
     if transport == "registry":
         pytest.skip("the registry transport runs only in the v1-network CI job")
