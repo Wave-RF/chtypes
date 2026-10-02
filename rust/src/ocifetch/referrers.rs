@@ -190,3 +190,70 @@ pub fn find_content_referrer(
         ))),
     }
 }
+
+/// Find a trusted signature referrer of `subject_digest` **entirely from
+/// local blobs** — no referrers API, no fallback tag, no network at all.
+///
+/// A plain OCI image layout's `index.json` lists only the artifact
+/// manifest itself (docs/guides/fetch-v1.md §10, "Cache fixtures and
+/// `installed.json`": "it never carries a pre-populated... record" — nor
+/// does it list the referrer). The referrer manifest is still present as
+/// an ordinary content-addressed blob, so it is found by scanning every
+/// blob under `layout_root/blobs/sha256/`, parsing each as an OCI manifest,
+/// and keeping the ones whose own `subject.digest` equals `subject_digest`
+/// — exactly how a real OCI 1.1 client reconstructs referrers from a
+/// layout with no referrers index.
+pub fn find_local_referrer(
+    layout_root: &std::path::Path,
+    subject_digest: &str,
+    trust: &[TrustedKey],
+) -> Result<VerifiedStatement> {
+    let blobs_dir = layout_root.join("blobs").join("sha256");
+    let entries = std::fs::read_dir(&blobs_dir)
+        .map_err(|e| Error::SourceUnreachable(format!("{}: {e}", blobs_dir.display())))?;
+
+    let mut last_untrusted: Option<Error> = None;
+    for entry in entries {
+        let entry = entry?;
+        let Ok(bytes) = std::fs::read(entry.path()) else {
+            continue;
+        };
+        let Ok(manifest) = serde_json::from_slice::<oci::Manifest>(&bytes) else {
+            continue;
+        };
+        let Some(subject) = &manifest.subject else {
+            continue;
+        };
+        if subject.digest != subject_digest {
+            continue;
+        }
+        if manifest.artifact_type.as_deref() != Some(constants::MEDIA_TYPE_BUNDLE) {
+            continue;
+        }
+        let [layer] = manifest.layers.as_slice() else {
+            continue;
+        };
+        if layer.media_type != constants::MEDIA_TYPE_BUNDLE {
+            continue;
+        }
+        let referrer_digest = format!("sha256:{}", entry.file_name().to_string_lossy());
+        let Some(blob) = super::layout::read_blob(layout_root, &layer.digest)? else {
+            continue;
+        };
+        match dsse::verify_bundle(&blob, trust, constants::STATEMENT_TYPE) {
+            Ok(mut stmt) => {
+                stmt.bundle_manifest_digest = referrer_digest;
+                stmt.bundle_layer_digest = layer.digest.clone();
+                return Ok(stmt);
+            }
+            Err(Error::ArtifactUntrusted(e)) => last_untrusted = Some(Error::ArtifactUntrusted(e)),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last_untrusted.unwrap_or_else(|| {
+        Error::ArtifactUntrusted(format!(
+            "no local blob is a referrer of {subject_digest} with a {} signature that verifies under a trusted key",
+            constants::MEDIA_TYPE_BUNDLE
+        ))
+    }))
+}

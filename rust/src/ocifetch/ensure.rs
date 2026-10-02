@@ -546,9 +546,30 @@ fn resolve_offline(
                     true,
                 ));
             }
+            // Not yet unpacked: the lock still names an exact digest, so
+            // install it from local blobs only (`offline-frozen`) — no
+            // need for find_index_candidate's annotation search, the lock
+            // already says exactly which manifest.
+            let resolved = install_from_local_blobs(
+                &res.root,
+                &res.root,
+                &entry.manifest,
+                &res.platform,
+                &res.trust,
+            )?;
+            return Ok(Resolved {
+                request: request.to_string(),
+                ..resolved
+            });
         }
     }
-    match find_installed(&res.root, &res.system_dirs, version_request, &res.platform)? {
+    match find_installed(
+        &res.root,
+        &res.system_dirs,
+        version_request,
+        &res.platform,
+        &res.trust,
+    )? {
         Some((dir, record, source)) => Ok(record_to_resolved(
             request,
             &res.platform,
@@ -574,7 +595,13 @@ pub fn resolve_installed(
     let version_request = VersionRequest::parse(request)?;
     options.platform = Some(platform.to_string());
     let res = resources(&mut options)?;
-    match find_installed(&res.root, &res.system_dirs, &version_request, &res.platform)? {
+    match find_installed(
+        &res.root,
+        &res.system_dirs,
+        &version_request,
+        &res.platform,
+        &res.trust,
+    )? {
         Some((dir, record, source)) => Ok(Some(record_to_resolved(
             request,
             &res.platform,
@@ -893,12 +920,18 @@ fn version_key(version: &str) -> [u64; 4] {
 
 /// Scan the cache, then each system directory in order, for the record with
 /// the newest (version, then build) matching `version_request` for
-/// `platform`.
+/// `platform`. When nothing is already verified, also try a **pre-seeded**
+/// `index.json` entry (plan §1, docs/guides/fetch-v1.md §1: "a pre-seeded
+/// layout has entries in `index.json` with no corresponding `unpacked/`
+/// directory... the first request for one verifies it against its
+/// signature exactly as a freshly downloaded layer would, then unpacks
+/// it") — entirely offline, from local blobs only.
 fn find_installed(
     root: &Path,
     system_dirs: &[PathBuf],
     version_request: &VersionRequest,
     platform: &str,
+    trust: &[TrustedKey],
 ) -> Result<Option<(PathBuf, VerifiedRecord, String)>> {
     let mut best: Option<(PathBuf, VerifiedRecord, String)> = None;
     let mut consider = |dir: PathBuf, record: VerifiedRecord, source: String| {
@@ -925,7 +958,165 @@ fn find_installed(
             consider(dir, record, source);
         }
     }
-    Ok(best)
+    if best.is_some() {
+        return Ok(best);
+    }
+
+    // Nothing already unpacked: look for a pre-seeded index.json entry, in
+    // the cache first, then each system directory, and install it from
+    // local blobs only (no network, regardless of caller).
+    if let Some(digest) = find_index_candidate(root, version_request, platform)? {
+        let resolved = install_from_local_blobs(root, root, &digest, platform, trust)?;
+        if let Some(record) = layout::read_verified(&resolved.dir)? {
+            return Ok(Some((resolved.dir, record, "cache".to_string())));
+        }
+    }
+    for sysdir in system_dirs {
+        let Some(digest) = find_index_candidate(sysdir, version_request, platform)? else {
+            continue;
+        };
+        // Read blobs from the (read-only) system directory; write the
+        // unpacked result into the writable cache root.
+        let resolved = install_from_local_blobs(sysdir, root, &digest, platform, trust)?;
+        if let Some(record) = layout::read_verified(&resolved.dir)? {
+            return Ok(Some((
+                resolved.dir,
+                record,
+                format!("system:{}", sysdir.display()),
+            )));
+        }
+    }
+    Ok(None)
+}
+
+/// The newest `index.json` entry (by the manifest's own
+/// `org.opencontainers.image.ref.name` annotation, per OCI convention —
+/// `genfixtures` and a real `oras copy` both set it) matching `platform`
+/// and lying within `version_request`, or `None` if `index.json` does not
+/// exist or nothing matches.
+fn find_index_candidate(
+    layout_root: &Path,
+    version_request: &VersionRequest,
+    platform: &str,
+) -> Result<Option<String>> {
+    let index_path = layout_root.join("index.json");
+    let bytes = match std::fs::read(&index_path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let index: oci::Index = serde_json::from_slice(&bytes)?;
+    let plat = constants::PLATFORMS
+        .iter()
+        .find(|p| p.key == platform)
+        .ok_or_else(|| Error::InvalidInput(format!("unknown platform {platform:?}")))?;
+    let mut best: Option<(String, String)> = None; // (version, digest)
+    for d in &index.manifests {
+        let Some(p) = &d.platform else { continue };
+        if p.os != plat.os || p.architecture != plat.architecture {
+            continue;
+        }
+        let Some(version) = d
+            .annotations
+            .as_ref()
+            .and_then(|a| a.get("org.opencontainers.image.ref.name"))
+        else {
+            continue;
+        };
+        if !version_request.matches(version) {
+            continue;
+        }
+        let better = match &best {
+            None => true,
+            Some((v, _)) => version_key(version) > version_key(v),
+        };
+        if better {
+            best = Some((version.clone(), d.digest.clone()));
+        }
+    }
+    Ok(best.map(|(_, digest)| digest))
+}
+
+/// Verify and unpack one manifest **entirely from local blobs** — no
+/// network — reading `manifest_digest`, its layer and its signature
+/// referrer from `layout_root/blobs/sha256/<hex>`, and writing the result
+/// under `cache_root/unpacked/sha256/<hex>` (which may be the same
+/// directory as `layout_root`, or different when `layout_root` is a
+/// read-only system directory). This is the "pre-seeded `index.json` entry"
+/// path (plan §1) and also what the conformance runner itself uses to
+/// honor a fixture's `installed.json` test-setup convention
+/// (docs/guides/fetch-v1.md §10, "Cache fixtures and `installed.json`").
+pub fn install_from_local_blobs(
+    layout_root: &Path,
+    cache_root: &Path,
+    manifest_digest: &str,
+    platform: &str,
+    trust: &[TrustedKey],
+) -> Result<Resolved> {
+    let already = is_fully_installed(&layout::unpacked_dir(cache_root, manifest_digest)?)?;
+    let dir = if already {
+        layout::unpacked_dir(cache_root, manifest_digest)?
+    } else {
+        let manifest_bytes = layout::read_blob(layout_root, manifest_digest)?.ok_or_else(|| {
+            Error::ArtifactMissing(format!("no local blob for manifest {manifest_digest}"))
+        })?;
+        oci::verify_digest(&manifest_bytes, manifest_digest)?;
+        let manifest: oci::Manifest = serde_json::from_slice(&manifest_bytes)?;
+        let [layer] = manifest.layers.as_slice() else {
+            return Err(Error::ArtifactCorrupt(format!(
+                "manifest {manifest_digest} has {} layers, want exactly 1",
+                manifest.layers.len()
+            )));
+        };
+        let stmt = referrers::find_local_referrer(layout_root, manifest_digest, trust)?;
+        if stmt.subject_sha256 != strip_sha256(&layer.digest)? {
+            return Err(Error::ArtifactCorrupt(format!(
+                "signed subject {} does not match the manifest's layer {}",
+                stmt.subject_sha256, layer.digest
+            )));
+        }
+        let (library_sha256, library_bytes, library_name) = library_fields(&stmt.predicate)?;
+        let layer_bytes = layout::read_blob(layout_root, &layer.digest)?.ok_or_else(|| {
+            Error::ArtifactMissing(format!("no local blob for layer {}", layer.digest))
+        })?;
+        oci::verify_digest(&layer_bytes, &layer.digest)?;
+        let decompressed = unpack::decompress_zstd(&layer_bytes)?;
+        let record = VerifiedRecord {
+            platform: platform.to_string(),
+            version: stmt.predicate["clickhouse_version"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            build: stmt.predicate["build"].as_str().unwrap_or("").to_string(),
+            channel: stmt.predicate["channel"].as_str().map(str::to_string),
+            manifest_digest: manifest_digest.to_string(),
+            layer_digest: layer.digest.clone(),
+            bundle_digest: Some(stmt.bundle_layer_digest.clone()),
+            bundle_manifest_digest: Some(stmt.bundle_manifest_digest.clone()),
+            signed_by: stmt.signed_by.to_string(),
+            library: library_name.clone(),
+            library_sha256: library_sha256.clone(),
+            library_bytes,
+            predicate: stmt.predicate.clone(),
+        };
+        layout::install_unpacked(cache_root, manifest_digest, |tmp| {
+            unpack::unpack_tar(&decompressed, tmp)?;
+            verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
+            layout::write_atomic(
+                &tmp.join(constants::CACHE_VERIFIED_RECORD),
+                &serde_json::to_vec(&record)?,
+            )
+        })?
+    };
+    let record = layout::read_verified(&dir)?.ok_or_else(|| {
+        Error::ArtifactCorrupt(format!(
+            "{}: missing verified.json after a local-blob install",
+            dir.display()
+        ))
+    })?;
+    Ok(record_to_resolved(
+        "", platform, &dir, record, "cache", already,
+    ))
 }
 
 fn record_to_resolved(

@@ -142,7 +142,7 @@ fn conformance() {
         .unwrap_or_else(|e| panic!("parsing {}: {e}", cases_path.display()));
     assert_eq!(cases_file.schema, 1, "cases.json schema");
 
-    let mut server = ServerHandle::start(&fixtures_root);
+    let server = ServerHandle::start(&fixtures_root);
     let mut results = Vec::new();
 
     for case in &cases_file.cases {
@@ -150,7 +150,7 @@ fn conformance() {
             if !case.transports.iter().any(|t| t == transport) {
                 continue;
             }
-            let (verdict, detail) = run_case(case, transport, &fixtures_root, server.as_mut());
+            let (verdict, detail) = run_case(case, transport, &fixtures_root, server.as_ref());
             results.push(ReportResult {
                 id: case.id.clone(),
                 transport: transport.to_string(),
@@ -206,7 +206,7 @@ fn run_case(
     case: &Case,
     transport: &str,
     fixtures_root: &Path,
-    server: Option<&mut ServerHandle>,
+    server: Option<&ServerHandle>,
 ) -> (&'static str, String) {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         execute_case(case, transport, fixtures_root, server)
@@ -229,26 +229,60 @@ fn execute_case(
     case: &Case,
     transport: &str,
     fixtures_root: &Path,
-    server: Option<&mut ServerHandle>,
+    server: Option<&ServerHandle>,
 ) -> Result<(), String> {
-    let base = match transport {
-        "file" => format!(
-            "file://{}/trees/{}/v2/chtypes/v1",
-            fixtures_root.display(),
-            case.tree
-        ),
+    // `{base}`'s per-transport expansion (docs/guides/fetch-v1.md §10). For
+    // http, successive occurrences of the token across `request.bases`
+    // resolve to DIFFERENT origins — the primary server for the first, the
+    // second server for the next — which is how a fixture with two
+    // textually identical `"{base}"` entries (`mirror-failover-5xx`,
+    // `mirror-failover-digest-404`) can express "this base fails, the next
+    // one serves the real content": the second origin's own `http-script`
+    // routes are empty for those case ids, so it falls straight through to
+    // the tree. For file, there is only one tree per case, so every
+    // occurrence resolves to it; a literal suffix after the token (e.g.
+    // `{base}/does-not-exist`) is what makes a SECOND file-transport base
+    // meaningfully different, not a second origin.
+    let (primary_base, second_base) = match transport {
+        "file" => {
+            let b = format!(
+                "file://{}/trees/{}/v2/chtypes/v1",
+                fixtures_root.display(),
+                case.tree
+            );
+            (b.clone(), b)
+        }
         "http" => {
             let server =
                 server.ok_or_else(|| "http transport but the server did not start".to_string())?;
-            format!("http://127.0.0.1:{}/s-{}/chtypes/v1", server.port, case.id)
+            (
+                format!("http://127.0.0.1:{}/s-{}/chtypes/v1", server.port, case.id),
+                format!(
+                    "http://127.0.0.1:{}/s-{}/chtypes/v1",
+                    server.second_port, case.id
+                ),
+            )
         }
         other => return Err(format!("unsupported transport {other:?}")),
     };
+    let mut base_occurrence = 0u32;
     let bases: Vec<String> = case
         .request
         .bases
         .iter()
-        .map(|b| b.replace("{base}", &base))
+        .map(|template| {
+            if template.contains("{base}") {
+                base_occurrence += 1;
+                let origin = if base_occurrence == 1 {
+                    &primary_base
+                } else {
+                    &second_base
+                };
+                template.replace("{base}", origin)
+            } else {
+                template.clone()
+            }
+        })
         .collect();
 
     let cache_dir = stage_cache(fixtures_root, &case.setup.cache)
@@ -263,12 +297,37 @@ fn execute_case(
     if let Some(lock_name) = &case.setup.lock {
         let src = fixtures_root
             .join("locks")
+            .join("inputs")
             .join(format!("{lock_name}.json"));
         std::fs::copy(&src, &lock_path)
             .map_err(|e| format!("staging lock {:?}: {e} (from {})", lock_name, src.display()))?;
     }
     if case.setup.before_index_rename_hook.is_some() {
         return Err("before_index_rename_hook is not implemented by this runner yet".to_string());
+    }
+
+    // The `installed.json` test-setup convention (docs/guides/fetch-v1.md
+    // §10, "Cache fixtures and `installed.json`"): some cache fixtures need
+    // one or more manifests already INSTALLED (unpacked, with a
+    // verified.json record), not merely present as blobs, before the case
+    // begins. Install each listed digest from the staged cache's own local
+    // blobs, offline, before starting the case proper.
+    let installed_marker = cache_dir.path().join("installed.json");
+    if let Ok(bytes) = std::fs::read(&installed_marker) {
+        let marker: InstalledMarker = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("parsing {}: {e}", installed_marker.display()))?;
+        let trust = ocifetch::dsse::trusted_keys(case.request.trust == "test")
+            .map_err(|e| format!("building the pre-seed trust list: {e}"))?;
+        for digest in &marker.installed {
+            ocifetch::ensure::install_from_local_blobs(
+                cache_dir.path(),
+                cache_dir.path(),
+                digest,
+                &case.request.platform,
+                &trust,
+            )
+            .map_err(|e| format!("pre-seeding installed digest {digest}: {e}"))?;
+        }
     }
 
     for (k, v) in &case.env {
@@ -278,13 +337,18 @@ fn execute_case(
         unsafe { std::env::set_var(k, v) };
     }
 
-    let result = ensure::ensure(
-        &case.request.spelling,
-        Options {
+    let is_generic_fetch = case.id.starts_with("goldens-") || case.id.starts_with("fixtures-");
+    let mut outcome = if is_generic_fetch {
+        let predicate_type = if case.id.starts_with("goldens-") {
+            ocifetch::constants::PREDICATE_TYPE_GOLDENS
+        } else {
+            ocifetch::constants::PREDICATE_TYPE_FIXTURES
+        };
+        let options = Options {
             platform: Some(case.request.platform.clone()),
-            bases: Some(bases),
+            bases: Some(bases.clone()),
             cache_dir: Some(cache_dir.path().to_string_lossy().to_string()),
-            system_dirs,
+            system_dirs: system_dirs.clone(),
             offline: case.request.offline,
             frozen: case.request.frozen,
             lock_path: Some(lock_path.clone()),
@@ -294,14 +358,56 @@ fn execute_case(
             trust_test_keys: case.request.trust == "test",
             token: None,
             clock: None,
-        },
-    );
+        };
+        let result = ensure::fetch_signed(&bases, &case.request.spelling, predicate_type, &options);
+        check_generic_expectation(&case.expect, result)
+    } else {
+        let result = ensure::ensure(
+            &case.request.spelling,
+            Options {
+                platform: Some(case.request.platform.clone()),
+                bases: Some(bases),
+                cache_dir: Some(cache_dir.path().to_string_lossy().to_string()),
+                system_dirs,
+                offline: case.request.offline,
+                frozen: case.request.frozen,
+                lock_path: Some(lock_path.clone()),
+                lock_write: case.request.lock_write,
+                update: case.request.update,
+                allow_unsigned: case.request.allow_unsigned,
+                trust_test_keys: case.request.trust == "test",
+                token: None,
+                clock: None,
+            },
+        );
+        check_expectation(&case.expect, result)
+    };
 
     for k in case.env.keys() {
         unsafe { std::env::remove_var(k) };
     }
 
-    check_expectation(&case.expect, result)
+    // `requests.max`/`none_matching` (http transport only — there is no
+    // request log for `file://`; see `fetch_request_log`'s doc).
+    if transport == "http" {
+        if let Some(server) = server {
+            match fetch_request_log(server.port, &case.id) {
+                Ok(log) if outcome.is_ok() => {
+                    outcome = check_request_log(&case.expect.requests, &log)
+                }
+                Ok(_) => {}
+                Err(e) if outcome.is_ok() => outcome = Err(format!("reading the request log: {e}")),
+                Err(_) => {}
+            }
+        }
+    }
+
+    outcome
+}
+
+#[derive(Deserialize)]
+struct InstalledMarker {
+    installed: Vec<String>,
 }
 
 fn check_expectation(
@@ -343,9 +449,10 @@ fn check_expectation(
                 ));
             }
             if expect.lock_after.is_some() {
-                // The expected-lock fixture comparison needs 0B's
-                // `locks/<name>.json` fixtures to diff against; recorded as
-                // a known gap (see this PR's MERGE NOTES).
+                // The expected-lock fixture comparison
+                // (locks/expected/<name>.json) is not implemented by this
+                // runner yet; recorded as a known gap in this PR's MERGE
+                // NOTES.
                 return Err(
                     "lock_after comparison is not implemented by this runner yet".to_string(),
                 );
@@ -370,6 +477,136 @@ fn check_expectation(
             expect.code, resolved.version
         )),
     }
+}
+
+/// The "generic-fetch convention" (docs/guides/fetch-v1.md §10): a
+/// `goldens-`/`fixtures-` case exercises `fetch_signed` instead of
+/// `ensure()`. `expect.manifest`/`expect.library_sha256` name the fetched
+/// artifact's OWN manifest digest and content hash — there is no "library"
+/// file at all for this content, so `library_sha256` is checked against the
+/// fetched bytes themselves, not against a predicate field.
+fn check_generic_expectation(
+    expect: &Expect,
+    result: Result<(Vec<u8>, serde_json::Value, ensure::Digests), ocifetch::error::Error>,
+) -> Result<(), String> {
+    match (expect.ok, result) {
+        (true, Ok((bytes, _predicate, digests))) => {
+            if let Some(want) = &expect.manifest {
+                if &digests.manifest != want {
+                    return Err(format!(
+                        "manifest digest = {:?}, want {want:?}",
+                        digests.manifest
+                    ));
+                }
+            }
+            if let Some(want) = &expect.library_sha256 {
+                let got = ocifetch::oci::sha256_hex(&bytes);
+                if &got != want {
+                    return Err(format!("content sha256 = {got:?}, want {want:?}"));
+                }
+            }
+            Ok(())
+        }
+        (false, Err(e)) => {
+            let Some(want_code) = &expect.code else {
+                return Err(format!(
+                    "case expects failure with no code, got {e} ({})",
+                    e.code()
+                ));
+            };
+            if e.code() != want_code {
+                return Err(format!("error code = {}, want {want_code}: {e}", e.code()));
+            }
+            Ok(())
+        }
+        (true, Err(e)) => Err(format!("expected ok, got {e} ({})", e.code())),
+        (false, Ok(_)) => Err(format!("expected failure {:?}, got ok", expect.code)),
+    }
+}
+
+/// One entry of the scripted server's per-case request log
+/// (`GET /_log/s-<case-id>`, docs/guides/fetch-v1.md §10).
+#[derive(Deserialize)]
+struct RequestLogEntry {
+    method: String,
+    path: String,
+    #[allow(dead_code)]
+    origin: String,
+    #[allow(dead_code)]
+    headers: HashMap<String, String>,
+}
+
+/// Read a case's request log from the scripted server's primary origin
+/// (the log is shared process-wide, so either origin answers it the same
+/// way). `file://` cases never call this — there is no request log for a
+/// filesystem read, so `requests.max`/`none_matching` are vacuously true
+/// there (the schema's default expectation: unset `max`, an empty
+/// `none_matching`).
+fn fetch_request_log(primary_port: u16, case_id: &str) -> Result<Vec<RequestLogEntry>, String> {
+    let url = format!("http://127.0.0.1:{primary_port}/_log/s-{case_id}");
+    let agent = ureq::Agent::new_with_defaults();
+    let mut resp = agent
+        .get(&url)
+        .call()
+        .map_err(|e| format!("GET {url}: {e}"))?;
+    let body = resp
+        .body_mut()
+        .read_to_vec()
+        .map_err(|e| format!("GET {url}: reading body: {e}"))?;
+    serde_json::from_slice(&body).map_err(|e| format!("GET {url}: parsing JSON: {e}"))
+}
+
+/// `expect.requests` against one case's logged HTTP requests. `none_matching`
+/// is a small, fixed vocabulary of patterns this fixture set actually uses
+/// (a `GET .*<suffix>` wildcard, a bare substring, or the one negative-
+/// lookahead pattern `fixtures-digest-pin-no-tag-fallback` needs) — never a
+/// general regex engine, which this crate has no dependency on.
+fn check_request_log(expect: &RequestsExpect, log: &[RequestLogEntry]) -> Result<(), String> {
+    if let Some(max) = expect.max {
+        if log.len() as u64 > max {
+            return Err(format!(
+                "{} request(s) logged, want at most {max}: {}",
+                log.len(),
+                log.iter()
+                    .map(|e| format!("{} {}", e.method, e.path))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    for pattern in &expect.none_matching {
+        if pattern_matches_any(log, pattern) {
+            return Err(format!(
+                "a logged request matched the forbidden pattern {pattern:?}: {}",
+                log.iter()
+                    .map(|e| format!("{} {}", e.method, e.path))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn pattern_matches_any(log: &[RequestLogEntry], pattern: &str) -> bool {
+    if pattern.contains("(?!") {
+        // "GET .*/manifests/(?!sha256:)": a GET to a manifest route whose
+        // reference is NOT a digest (i.e. a tag-shaped lookup happened when
+        // none should have).
+        return log.iter().any(|e| {
+            e.method == "GET"
+                && e.path
+                    .find("/manifests/")
+                    .is_some_and(|i| !e.path[i + "/manifests/".len()..].starts_with("sha256:"))
+        });
+    }
+    if let Some(rest) = pattern.strip_prefix("GET .*") {
+        return log
+            .iter()
+            .any(|e| e.method == "GET" && e.path.contains(rest));
+    }
+    log.iter()
+        .any(|e| format!("{} {}", e.method, e.path).contains(pattern) || e.path.contains(pattern))
 }
 
 /// `setup.cache`: `"empty"` is a fresh temp directory; any other name is a
@@ -398,19 +635,16 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The scripted HTTP server lane 0B provides under `scripts/fetch-v1/`, a
-/// Python script named `server.py`, invoked as `--fixtures … --port 0`,
-/// started once and reused for every `http`-transport case (plan §3.3: "It
-/// starts … once"). Prints `LISTENING <port> <port2>` on stdout once ready;
-/// `<port2>` is the second origin for cross-origin redirect cases.
-///
-/// Not yet in this tree (`locate_server_script` returns `None` until lane
-/// 0B merges), so every `http`-transport case fails loudly rather than
-/// silently reporting nothing — see `ServerHandle::start`'s doc.
+/// The scripted HTTP server (`scripts/fetch-v1/server.py`), invoked as
+/// `--fixtures … --port 0`, started once and reused for every
+/// `http`-transport case (plan §3.3: "It starts … once"). Prints `LISTENING
+/// <port> <port2>` on stdout once ready. `<port2>` (`second_port`) is a
+/// true second origin: used for cross-origin-redirect cases, and also as
+/// the second base a mirror-failover case's `{base}` resolves to — see
+/// `execute_case`'s doc.
 struct ServerHandle {
     child: Child,
     port: u16,
-    #[allow(dead_code)]
     second_port: u16,
 }
 
@@ -462,10 +696,6 @@ impl Drop for ServerHandle {
 }
 
 fn locate_server_script() -> Option<PathBuf> {
-    // Not a single string literal on purpose: lane 0B has not merged this
-    // file yet, and `scripts/lint-cited-paths.sh` refuses a dead repository
-    // path cited as one contiguous token, which this forward reference
-    // would otherwise be read as.
     let candidate = repo_root()?
         .join("scripts")
         .join("fetch-v1")
