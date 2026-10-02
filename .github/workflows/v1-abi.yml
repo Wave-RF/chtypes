@@ -151,6 +151,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "selftest — stubs.json paths are relative and resolve after a relocation"
+        run: scripts/abi-v1/build-stubs.sh --selftest
       - name: build the stub libraries and run the stub's handle-rule self-test
         run: scripts/abi-v1/build-stubs.sh --out "$RUNNER_TEMP/abi-v1-stubs"
       - name: upload the stub libraries and manifest for v1-abi-conformance
@@ -297,6 +299,16 @@ jobs:
             echo "::error::v1-abi-conformance: $dir exists but $script is missing — the lane that added $dir must add $script"
             exit 1
           fi
+          # Selftest first, same discipline as v1-abi-linked/v1-abi-rust
+          # above, but conditional: unlike those two single-purpose scripts,
+          # a conformance script is not REQUIRED to declare --selftest. Only
+          # run it when the script actually looks like it declares one (the
+          # same declaration shapes scripts/check-selftests-wired.py itself
+          # recognizes for a .sh file), so this never calls an unsupported
+          # flag on a script that never promised one.
+          if command grep -qE '"\$\{1:-\}"[[:space:]]*=[[:space:]]*"--selftest"|^[[:space:]]*--selftest\)' "$script"; then
+            bash "$script" --selftest
+          fi
           if bash "$script"; then
             rc=0
           else
@@ -329,20 +341,28 @@ jobs:
       # No separate C-compiler install: ubuntu-latest ships gcc and clang
       # already, which v1-abi-gen's header-syntax step above already relies
       # on the same way.
-      - name: type-check the generated linked table against include/v1/chtypes.h
+      #
+      # Two steps, selftest first — the same shape ci.yml uses for
+      # check-linked-build.sh — so scripts/check-selftests-wired.py sees
+      # this script's own --selftest actually invoked, not just declared.
+      # The lane that adds go/internal/abi1 (F-Go) also adds this script
+      # (never edits this workflow): a cgo type-check of linked_gen.go
+      # against include/v1/chtypes.h, no artifact (plan §2.4's v1 successor
+      # of check-linked-build.sh), under scripts/abi-v1 and named for this
+      # job (below: check-${check}.sh).
+      - name: "selftest — the linked-mode check's own fixtures, once it exists"
         run: |
-          # The lane that adds go/internal/abi1 (F-Go) also adds this script
-          # (never edits this workflow): a cgo type-check of linked_gen.go
-          # against include/v1/chtypes.h, no artifact (plan §2.4's v1
-          # successor of check-linked-build.sh), under scripts/abi-v1 and
-          # named for this job (below: check-${check}.sh).
           check="linked"
           script="scripts/abi-v1/check-${check}.sh"
           if [ ! -f "$script" ]; then
             echo "::error::v1-abi-linked: not yet provided (lane F-Go) — add $script"
             exit 1
           fi
-          bash "$script"
+          bash "$script" --selftest
+      - name: type-check the generated linked table against include/v1/chtypes.h
+        run: |
+          check="linked"
+          bash "scripts/abi-v1/check-${check}.sh"
 
   v1-abi-rust:
     name: "v1-abi-rust — clippy/fmt/test --features abi-v1"
@@ -363,20 +383,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
         with:
           components: clippy, rustfmt
-      - name: clippy, fmt and the unit tests with the abi-v1 feature
+      # Two steps, selftest first — the same shape as v1-abi-linked above and
+      # ci.yml's check-linked-build.sh — so scripts/check-selftests-wired.py
+      # sees this script's own --selftest actually invoked. The lane that
+      # adds rust/src/abi1 (F-Rust) also adds this script (never edits this
+      # workflow): `cargo clippy`/`fmt --check`/`test` with `--features
+      # abi-v1`, default-feature output byte-unchanged; under scripts/abi-v1
+      # and named for this job, the same way as v1-abi-linked's script above.
+      - name: "selftest — the clippy/fmt/test check's own fixtures, once it exists"
         run: |
-          # The lane that adds rust/src/abi1 (F-Rust) also adds this script
-          # (never edits this workflow): `cargo clippy`/`fmt --check`/`test`
-          # with `--features abi-v1`, default-feature output byte-unchanged;
-          # under scripts/abi-v1 and named for this job, the same way as
-          # v1-abi-linked's script above.
           check="rust"
           script="scripts/abi-v1/check-${check}.sh"
           if [ ! -f "$script" ]; then
             echo "::error::v1-abi-rust: not yet provided (lane F-Rust) — add $script"
             exit 1
           fi
-          bash "$script"
+          bash "$script" --selftest
+      - name: clippy, fmt and the unit tests with the abi-v1 feature
+        run: |
+          check="rust"
+          bash "scripts/abi-v1/check-${check}.sh"
 
   v1-abi-parity:
     name: "v1-abi-parity — every enrolled binding passes every ABI case"

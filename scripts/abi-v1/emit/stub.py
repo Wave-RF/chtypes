@@ -703,9 +703,17 @@ def _fill_outputs(model, fn) -> list[str]:
             body += [
                 f"{indent}chs_sb args; chs_sb_init(&args);",
                 *[f"{indent}{line}" for line in _args_echo_code(fn)],
-                f'{indent}chs_sb out_json; chs_sb_init(&out_json);',
-                f'{indent}chs_sb_fmt(&out_json, "{{\\"args\\":[%s],\\"fn\\":\\"%s\\",\\"out\\":\\"%s\\"}}", '
-                f'args.buf, {_c_str(fn.name)}, {_c_str(p.name)});',
+                f"{indent}chs_sb out_json; chs_sb_init(&out_json);",
+                # Built by direct concatenation (chs_sb_cat), NEVER chs_sb_fmt:
+                # chs_sb_fmt formats through a fixed char tmp[256] (vsnprintf),
+                # and args.buf is unbounded (chs_preview_row/chs_preview_batch/
+                # chs_filter_eval_body's echoed bytes_in arguments alone exceed
+                # 256 bytes), so a %s of it there would silently truncate the
+                # echo. fn/out are always short compile-time literals, safe to
+                # embed directly.
+                f'{indent}chs_sb_cat(&out_json, "{{\\"args\\":[");',
+                f"{indent}chs_sb_cat(&out_json, args.buf);",
+                f'{indent}chs_sb_cat(&out_json, "],\\"fn\\":\\"{fn.name}\\",\\"out\\":\\"{p.name}\\"}}");',
                 f"{indent}free(args.buf);",
                 f"{indent}*{p.name} = chs_stub_finish_buf(&out_json);",
             ]
@@ -890,7 +898,13 @@ def classify(model) -> dict[str, str]:
 
 
 def render_stub_c(model) -> str:
-    parts = [_preamble(model), _build_info_section(model), _ctor_section(), _unbound_section()]
+    bi_begin, bi_end = _omit_guard("chs_build_info")
+    parts = [
+        _preamble(model),
+        f"{bi_begin}\n{_build_info_section(model)}\n{bi_end}",
+        _ctor_section(),
+        _unbound_section(),
+    ]
     # chs_build_info and chs_abi_version need their own omit/override handling,
     # woven around the hand-written and special bodies below.
     specials = _special(model)
@@ -908,7 +922,7 @@ def render_stub_c(model) -> str:
             body_by_name[fn.name] = abi_version_body
             continue
         if fn.name == "chs_build_info":
-            continue  # already emitted in _build_info_section, unconditionally present
+            continue  # already emitted above, inside its own omit guard
         if kinds[fn.name] == "special":
             body_by_name[fn.name] = specials[fn.name]
         elif kinds[fn.name] == "free":
@@ -919,9 +933,9 @@ def render_stub_c(model) -> str:
     out = parts
     out.append("\n/* ----------------------------------------------------------- functions */\n")
     out.append(
-        "/* chs_build_info is defined unconditionally above (its own CHS_STUB_BUILD_INFO_MODE\n"
-        "   variants cover its malformations; it has no missing-symbol variant worth a separate\n"
-        "   build since every other variant already proves step 4 runs on whatever it returns). */"
+        "/* chs_build_info is defined above (inside its own omit guard, alongside its\n"
+        "   CHS_STUB_BUILD_INFO_MODE malformation variants and the missing-chs_build_info\n"
+        "   variant that omits it entirely), not down here with the rest. */"
     )
     for fn in model.functions:
         if fn.name == "chs_build_info":

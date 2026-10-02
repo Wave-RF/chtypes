@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "id": "redirect-cross-origin-drops-auth",
+  "tree": "http-basic",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "status": 302,
+          "headers": {
+            "Location": "http://{second-origin}/s-redirect-cross-origin-drops-auth/chtypes/v1/manifests/26.12"
+          }
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "from_tree": true
+        }
+      ]
+    }
+  ]
+}
