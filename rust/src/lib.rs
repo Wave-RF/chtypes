@@ -89,6 +89,8 @@
 #[cfg(not(unix))]
 compile_error!("chtypes loads artifacts with dlopen and supports unix targets only");
 
+#[cfg(feature = "abi-v1")]
+mod abi1;
 mod compile;
 mod digest;
 mod discover;

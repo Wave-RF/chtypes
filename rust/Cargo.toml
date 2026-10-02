@@ -67,6 +67,10 @@ fetch = [
   "dep:tar",
   "dep:flate2",
 ]
+# ABI v1's generated FFI layer and loader (`src/abi1/**`), gated off by
+# default while it coexists with the v0 ABI: no new dependency, since
+# libloading and serde_json are already unconditional above.
+abi-v1 = []
 
 [[bin]]
 name = "chtypes"
@@ -78,6 +82,13 @@ required-features = ["fetch"]
 [[test]]
 name = "fetch"
 required-features = ["fetch"]
+
+# The ABI v1 conformance suite re-declares src/abi1's module tree with
+# #[path] (rust/src/abi1/mod.rs explains why) and needs the abi-v1 feature's
+# generated layer and loader to exist at all.
+[[test]]
+name = "abi1_conformance"
+required-features = ["abi-v1"]
 
 [dev-dependencies]
 # The integration tests read manifest.json themselves, to prove the loader took
