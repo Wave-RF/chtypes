@@ -1,5 +1,5 @@
 {
-  "name": "chtypes-v1-refcheck-js",
+  "name": "ocifetch-v1-refcheck-js",
   "private": true,
   "version": "0.0.0",
   "description": "report-only: does @sigstore/verify accept this repository's ed25519 key-only Sigstore bundle v0.3? (docs/guides/fetch-v1.md §10, plan §2.2/§4.3). A standalone package, not part of ts/'s pnpm workspace or published surface.",

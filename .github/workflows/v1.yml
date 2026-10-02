@@ -117,21 +117,98 @@ jobs:
             toolchain: "3.14"
           - binding: ts
             toolchain: node22.21.0
+            node_version: "22.21.0"
           - binding: ts
             toolchain: node24
+            node_version: "24"
           - binding: rust
-            toolchain: "1.85"
+            # 1.87, not 1.85 — the PM's MSRV ruling; the matrix line also
+            # moves in the Rust lane's own PR, expect a trivial merge there.
+            toolchain: "1.87"
           - binding: rust
             toolchain: stable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: not yet provided (the binding lane for ${{ matrix.binding }})
+
+      # Each binding's own conformance runner file does not exist on this
+      # branch until that binding's lane lands (plan §3.3's seam is frozen;
+      # the runners themselves are each lane's own PR). Every step below is
+      # gated on this check so an unmerged binding's leg skips loudly and
+      # uploads nothing, rather than failing the matrix — v1-parity reads
+      # "no report" as "not enrolled", never as a failure.
+      - name: does this binding's conformance runner exist on this branch yet?
+        id: runner_file
         run: |
-          echo "v1-conformance (${{ matrix.binding }} ${{ matrix.toolchain }}): not yet provided —" >&2
-          echo "toolchain setup, egress cut and the conformance runner (plan §3.3) land on a" >&2
-          echo "later PR into v1, once scripts/fetch-v1/gen-constants.py's outputs (this PR) and" >&2
-          echo "the fixtures (lane 0B) both exist." >&2
-          exit 1
+          case "${{ matrix.binding }}" in
+            go) f="go/internal/ocifetch/conformance_test.go" ;;
+            python) f="python/tests/ocifetch/test_conformance.py" ;;
+            ts) f="ts/test/ocifetch/conformance.test.ts" ;;
+            rust) f="rust/tests/ocifetch_conformance.rs" ;;
+          esac
+          echo "runner_file_path=$f" >> "$GITHUB_OUTPUT"
+          if [ -f "$f" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "v1-conformance (${{ matrix.binding }} ${{ matrix.toolchain }}): SKIPPED — $f does not exist on this branch yet (that binding's own lane has not merged)." >&2
+          fi
+
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'python'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.toolchain }}
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'ts'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'ts'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node_version }}
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'rust'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: install dependencies (the last step with network access)
+        if: steps.runner_file.outputs.exists == 'true'
+        run: |
+          case "${{ matrix.binding }}" in
+            go) (cd go && go mod download) ;;
+            python) (cd python && uv sync --locked --group dev) ;;
+            ts) (cd ts && pnpm install --frozen-lockfile) ;;
+            rust) (cd rust && cargo fetch --locked) ;;
+          esac
+
+      - name: cut egress — loopback only, so "no network in the conformance suite" is mechanical
+        if: steps.runner_file.outputs.exists == 'true'
+        run: sudo iptables -A OUTPUT ! -o lo -j REJECT
+
+      - name: run the conformance suite and write CHTYPES_V1_REPORT
+        if: steps.runner_file.outputs.exists == 'true'
+        env:
+          CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
+          CHTYPES_V1_REPORT: ${{ runner.temp }}/report-${{ matrix.binding }}-${{ matrix.toolchain }}.json
+        run: |
+          case "${{ matrix.binding }}" in
+            go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/) ;;
+            python) uv run --offline --project python --python "${{ matrix.toolchain }}" pytest -q python/tests/ocifetch/test_conformance.py ;;
+            ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
+            rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
+          esac
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: report-${{ matrix.binding }}-${{ matrix.toolchain }}
+          path: ${{ runner.temp }}/report-${{ matrix.binding }}-${{ matrix.toolchain }}.json
+          if-no-files-found: ignore
 
   v1-network:
     name: "v1-network — registry:2 over TLS via the system CA store, through HTTPS_PROXY"
@@ -213,7 +290,14 @@ jobs:
           BUNDLE_LAYER_DIGEST=$(jq -r '.layers[0].digest' \
             "tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1/manifests/$BUNDLE_MANIFEST_DIGEST")
           cp "tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1/blobs/$BUNDLE_LAYER_DIGEST" "$RUNNER_TEMP/bundle.json"
-          oras attach --artifact-type application/vnd.dev.sigstore.bundle.v0.3+json \
+          # oras 1.3.4 refuses an absolute file-path argument by default
+          # (measured, lane 0B, run 36957: "Error: absolute file path
+          # detected"), unrelated to registry:2 or the referrers API —
+          # purely its own client-side path-traversal guard against a path
+          # it did not compute itself. $RUNNER_TEMP is always absolute, so
+          # name the escape hatch explicitly rather than relocate the file.
+          oras attach --disable-path-validation \
+            --artifact-type application/vnd.dev.sigstore.bundle.v0.3+json \
             --platform linux/arm64 \
             "registry.test:5443/chtypes/v1:26.8.15.10" \
             "$RUNNER_TEMP/bundle.json:application/vnd.dev.sigstore.bundle.v0.3+json"

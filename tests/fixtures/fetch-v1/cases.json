@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "892d16e9d19876b8ff6ac11a6ab493a24311ff08",
+    "generator_commit": "1794b75b0f0b742501cb66d2db0a175e7ac9fe92",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -3695,7 +3695,7 @@
         "before_index_rename_hook": null
       },
       "request": {
-        "spelling": "sha256:b603804f00837b6944fec21292f3e045ede2b6a8479caa1999418fa6259a8b5d",
+        "spelling": "sha256:ab8d66a2c16722d5e98e3d25ec158649328d71fe3669dcd35b0ae349488ec625",
         "platform": "linux-arm64",
         "offline": false,
         "frozen": false,
@@ -3712,7 +3712,7 @@
         "ok": true,
         "version": null,
         "build": null,
-        "manifest": "sha256:b603804f00837b6944fec21292f3e045ede2b6a8479caa1999418fa6259a8b5d",
+        "manifest": "sha256:ab8d66a2c16722d5e98e3d25ec158649328d71fe3669dcd35b0ae349488ec625",
         "library_sha256": "6654170966ffaeb78957abc57ded1eaf11fa7c0384d1a654d8f5c4f3cc18aa1a",
         "code": null,
         "sleeps": [],

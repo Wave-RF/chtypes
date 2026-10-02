@@ -1,5 +1,7 @@
 package main
 
+import "encoding/base64"
+
 // genericcases.go — the generic signed-artifact fetch (`fetch_signed`),
 // which goldens and the SDK's own fetch fixtures reuse (plan §1.3/§7.7;
 // docs/guides/fetch-v1.md §9, §10).
@@ -87,6 +89,10 @@ func goldensOnlyLayerDigest(tree *Tree, goldensManifestDesc Descriptor) string {
 // shares the same empty-config, one-layer manifest shape every referrer
 // here uses.
 func buildReferrerManifestStandalone(tree *Tree, artifactType string, layerDesc Descriptor) Descriptor {
+	// The empty config must exist as a real blob, not only as an embedded
+	// `data` convenience — see buildReferrerManifest's comment (measured
+	// against a real registry host, 2026-10-02: BLOB_UNKNOWN otherwise).
+	tree.PutBlob(C.MediaTypes.EmptyConfig, emptyConfigBlob)
 	manifest := ImageManifest{
 		SchemaVersion: 2,
 		MediaType:     ociManifestMediaType,
@@ -95,6 +101,7 @@ func buildReferrerManifestStandalone(tree *Tree, artifactType string, layerDesc 
 			MediaType: C.MediaTypes.EmptyConfig,
 			Digest:    digestOf(emptyConfigBlob),
 			Size:      int64(len(emptyConfigBlob)),
+			Data:      base64.StdEncoding.EncodeToString(emptyConfigBlob),
 		},
 		Layers: []Descriptor{layerDesc},
 	}

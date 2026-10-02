@@ -17,7 +17,7 @@
   ],
   "subject": {
     "mediaType": "application/vnd.oci.image.manifest.v1+json",
-    "digest": "sha256:b603804f00837b6944fec21292f3e045ede2b6a8479caa1999418fa6259a8b5d",
-    "size": 545
+    "digest": "sha256:ab8d66a2c16722d5e98e3d25ec158649328d71fe3669dcd35b0ae349488ec625",
+    "size": 565
   }
 }

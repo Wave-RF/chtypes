@@ -186,6 +186,13 @@ func attachSignatureReferrer(tree *Tree, subjectDesc Descriptor, bundleJSON []by
 // (never by tag — a referrer is found only by being listed for its
 // subject, exactly like the real API).
 func buildReferrerManifest(tree *Tree, subjectDesc Descriptor, artifactType string, layerDesc Descriptor) Descriptor {
+	// The embedded `data` field is a convenience some clients use to skip a
+	// GET; it does NOT excuse the blob from existing in the tree. Measured
+	// against a real registry host (the artifact producer's push, 2026-10-02):
+	// a manifest PUT whose config digest has no backing blob is refused
+	// 400 BLOB_UNKNOWN, `data` field or not. PutBlob is idempotent on
+	// identical content, so calling it once per referrer manifest is fine.
+	tree.PutBlob(C.MediaTypes.EmptyConfig, emptyConfigBlob)
 	emptyConfigDesc := Descriptor{
 		MediaType: C.MediaTypes.EmptyConfig,
 		Digest:    digestOf(emptyConfigBlob),

@@ -102,6 +102,12 @@ func copyArtifactBlobsIntoLayout(layout *Layout, tree *Tree, art PlatformArtifac
 		if err := unmarshalJSON(mustGetManifest(tree, ref.Digest), &refManifest); err != nil {
 			panic(err)
 		}
+		// The referrer's own config (always the empty `{}` blob for every
+		// referrer this generator builds) must exist as a real blob too,
+		// never only as the descriptor's embedded `data` field — measured
+		// against a real registry host, 2026-10-02: a manifest PUT whose
+		// config digest has no backing blob is refused 400 BLOB_UNKNOWN.
+		layout.addBlob(refManifest.Config.Digest, mustGetBlob(tree, refManifest.Config.Digest))
 		for _, l := range refManifest.Layers {
 			layout.addBlob(l.Digest, mustGetBlob(tree, l.Digest))
 		}

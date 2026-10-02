@@ -146,7 +146,7 @@ def substitute_headers(headers: dict[str, str], origin: str, second_origin: str)
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "chtypes-v1-fixture-server/1"
+    server_version = "ocifetch-v1-fixture-server/1"
 
     # set per-instance by the server factory below
     origin_label: str = "primary"
