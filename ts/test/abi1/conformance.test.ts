@@ -44,6 +44,7 @@ interface CaseEntry {
   readonly kind: 'handshake' | 'echo' | 'status' | 'loader';
   readonly fn?: string;
   readonly variant?: string;
+  readonly os?: 'linux' | 'darwin';
   readonly args?: readonly ArgExpr[];
   readonly expect: any;
 }
@@ -93,6 +94,13 @@ function canonicalJson(value: unknown): string {
 
 function platformOf(predicate: Predicate): string {
   return `${predicate.os}-${predicate.arch}`;
+}
+
+/** This process's OS, in cases.json's `os` vocabulary ("linux" | "darwin") — the v1 platforms (plan: only linux-amd64, linux-arm64, darwin-arm64 exist). */
+function currentOs(): 'linux' | 'darwin' {
+  if (process.platform === 'linux') return 'linux';
+  if (process.platform === 'darwin') return 'darwin';
+  throw new Error(`conformance: unsupported platform ${process.platform}`);
 }
 
 // ------------------------------------------------------------- arg resolution
@@ -255,6 +263,14 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
   describe('loader', () => {
     it.each(casesOfKind('loader'))('$id', (c: CaseEntry) => {
       record(c.id, () => {
+        // cases.schema.json: "Present only on a loader case whose expected
+        // reason differs by platform [...] A conformance runner must skip,
+        // never fail, a case whose os does not match its own." A skipped
+        // case still needs a result (parity.py requires every case id
+        // present), and report.schema.json's "pass" is a plain boolean with
+        // no third state, so "skip" here means "trivially satisfied on this
+        // platform" — reported as a pass without ever loading anything.
+        if (c.os !== undefined && c.os !== currentOs()) return;
         const doc = stubsDoc as StubsDoc;
         const variant = doc.variants[c.variant as string];
         if (variant === undefined) throw new Error(`conformance: ${c.id}: no stub variant ${c.variant}`);

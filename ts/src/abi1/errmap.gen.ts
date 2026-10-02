@@ -70,10 +70,10 @@ export function loaderErrorClassFor(reason: string): LoaderErrorClass {
       return 'artifact_corrupt';
     case 'fingerprint':
       return 'artifact_incompatible';
-    case 'build_info_mismatch':
-      return 'artifact_corrupt';
     case 'missing_symbol':
       return 'artifact_incompatible';
+    case 'build_info_mismatch':
+      return 'artifact_corrupt';
     default:
       throw new Error(`chtypes abi1: no sdk.json loader refusal class for reason ${reason}`);
   }
