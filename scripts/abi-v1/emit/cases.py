@@ -51,7 +51,16 @@ THREE CASE KINDS, per function (`scripts/abi-v1/emit/stub.classify`):
         silently dropped.
 
 Plus one "loader" case per `scripts/abi-v1/emit/_stubshared.py` plan()
-entry: `{"variant": "<name>", "expect": {"reason": "<reason>"}}`.
+entry: `{"variant": "<name>", "expect": {"reason": "<reason>"}}` — except
+"ctor-marker", which is OS-CONDITIONAL and gets two cases instead of one,
+each carrying an `"os"` field ("linux" or "darwin") a conformance runner
+must check against its own platform before asserting anything, skipping
+(never failing) a case whose `os` does not match. D3's loader step 1 (the
+glibc floor) is Linux-only ("darwin: skip" — the spec, not a guess), so the
+predicate's impossible glibc_floor only forces a refusal on Linux;
+on darwin the library loads exactly like "ok" (measured: both RTLD_NOW
+and a manual dlopen() succeed on darwin-arm64, and the ctor marker file
+appears, proving dlopen genuinely ran rather than being refused first).
 
 A handle-typed parameter is resolved through HANDLE_RECIPE (schema, filter,
 block — the only three the description has today; a fourth handle kind
@@ -236,11 +245,38 @@ HANDWRITTEN_CASES = [
 ]
 
 
+CTOR_MARKER_VARIANT = "ctor-marker"
+
+
 def _loader_cases(model) -> list[dict]:
-    return [
-        {"id": f"loader.{v.name}", "kind": "loader", "variant": v.name, "expect": {"reason": v.reason}}
-        for v in _stubshared.plan(model)
-    ]
+    cases = []
+    for v in _stubshared.plan(model):
+        if v.name == CTOR_MARKER_VARIANT:
+            # Linux: the predicate's glibc_floor "99.0" refuses before dlopen
+            # ever runs (v.reason, from _stubshared.plan(), is "glibc_floor").
+            # Darwin: step 1 is skipped entirely by spec, so the library
+            # loads like "ok" — "accepted", not a refusal.
+            cases.append(
+                {
+                    "id": f"loader.{v.name}.linux",
+                    "kind": "loader",
+                    "variant": v.name,
+                    "os": "linux",
+                    "expect": {"reason": v.reason},
+                }
+            )
+            cases.append(
+                {
+                    "id": f"loader.{v.name}.darwin",
+                    "kind": "loader",
+                    "variant": v.name,
+                    "os": "darwin",
+                    "expect": {"reason": "accepted"},
+                }
+            )
+            continue
+        cases.append({"id": f"loader.{v.name}", "kind": "loader", "variant": v.name, "expect": {"reason": v.reason}})
+    return cases
 
 
 def build_cases(model) -> list[dict]:

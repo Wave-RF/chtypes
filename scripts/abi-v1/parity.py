@@ -265,6 +265,23 @@ def selftest() -> int:
 
                 shutil.copy2(src, dst)
 
+        # Start from an EMPTY enrolled/ directory, independent of whatever is
+        # actually enrolled in the live tree. The copytree above just carried
+        # over spec/abi-v1/enrolled/ as it exists for real right now (only
+        # .gitkeep today) — but once any binding lane lands for real, this
+        # fixture would silently start including its genuine enrollment file
+        # too, and "exactly one enrolled" / "clean report must pass" below
+        # would begin failing or passing for the wrong reason the day a real
+        # lane merges, not because of anything this selftest actually tests.
+        # Every case below enrolls (or doesn't) exactly what IT needs via
+        # enroll(), never the live tree's own state.
+        import shutil
+
+        enrolled_dir = root / ENROLLED_DIR
+        if enrolled_dir.is_dir():
+            shutil.rmtree(enrolled_dir)
+        enrolled_dir.mkdir(parents=True)
+
         cases = _fake_cases()
         _write(root / CASES_PATH, cases)
         cases_hash = compute_cases_hash(cases)

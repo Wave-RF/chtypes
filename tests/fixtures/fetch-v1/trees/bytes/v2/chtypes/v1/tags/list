@@ -1,0 +1,17 @@
+{
+  "name": "chtypes/v1",
+  "tags": [
+    "b-tampered-layer",
+    "b-tampered-manifest",
+    "b-library-hash-mismatch",
+    "b-symlink",
+    "b-hardlink",
+    "b-device",
+    "b-abspath",
+    "b-dotdot",
+    "b-dupentry",
+    "b-zstd-multiframe",
+    "b-zstd-window-too-large",
+    "b-unpacked-over-cap"
+  ]
+}

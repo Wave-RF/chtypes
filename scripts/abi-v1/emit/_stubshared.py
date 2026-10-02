@@ -18,11 +18,15 @@ process-level traps), and one missing-<sym> per exported symbol. Three
 consumers need the identical list and none of them is allowed to recompute
 it independently:
 
-  * build-stubs.sh (bash) gets it as TSV by running this file as a script:
-      python3 scripts/abi-v1/emit/_stubshared.py --list-variants
-    one line per variant: name, a comma-joined list of `MACRO` or
-    `MACRO=value` defines, the expected loader-refusal reason (sdk.json's
-    vocabulary, or "accepted" for ok/ok-b);
+  * build-stubs.sh (bash) gets it as "|"-delimited lines by running this
+    file as a script: python3 scripts/abi-v1/emit/_stubshared.py
+    --list-variants — one line per variant: name, a comma-joined list of
+    `MACRO` or `MACRO=value` defines, the expected loader-refusal reason
+    (sdk.json's vocabulary, or "accepted" for ok/ok-b), and
+    link_allow_undefined ("0"/"1"). "|", not a tab: bash's `read` collapses
+    a run of IFS whitespace (which a tab counts as), silently dropping
+    ok/ok-b's empty `defines` field and shifting every later field by one;
+    "|" is a strict single-character delimiter there;
   * emit/stub.py reads VARIANT_DEFINE_SYMBOL to know which preprocessor guard
     name a described symbol's omission uses (it emits the guard around every
     function's definition);
@@ -53,6 +57,17 @@ HEAD_BYTES = 16
 # not a v1 artifact at all" from "a v1 artifact is missing one symbol".
 ABI_VERSION_SYMBOL = "chs_abi_version"
 
+# PM ruling: chs_build_info (and every other handshake symbol except
+# chs_abi_version — chs_clickhouse_version included) is NOT folded into
+# not_v1 when absent. chs_abi_version answering 1 is what makes a library
+# "an ABI v1+ artifact" at all (step 3); if it is present and correct, the
+# library genuinely IS one, so refusing it as not_v1 over a DIFFERENT
+# missing symbol would be a false message. sdk.json already has the reason
+# that fits — missing_symbol plus the symbol's own name — raised at
+# whichever step first needs to resolve that symbol (step 4 for
+# chs_build_info, since step 4 is the first to call it), not only at step
+# 6's generic sweep. not_v1 stays reserved for chs_abi_version alone.
+
 
 def omit_define(symbol: str) -> str:
     """The preprocessor guard macro that omits `symbol`'s definition from the
@@ -80,7 +95,9 @@ def plan(model) -> list[Variant]:
     deterministic order: the two happy-path copies, the ten named
     loader-refusal and process-trap shapes, then one missing-<sym> per
     exported symbol (sorted), omitting chs_abi_version (already covered by
-    "no-abi-version")."""
+    "no-abi-version", the only symbol whose absence means not_v1). Every
+    other missing symbol, chs_build_info and chs_clickhouse_version
+    included, is missing_symbol:<name>."""
     out = [
         Variant("ok", (), "accepted"),
         Variant("ok-b", (), "accepted"),  # a second, byte-identical build: proves cross-image handling
@@ -127,7 +144,15 @@ def _main(argv: list[str]) -> int:
     m = abimodel.load(ROOT)
     for v in plan(m):
         defines = ",".join(f"{k}" if val is None else f"{k}={val}" for k, val in v.defines)
-        print("\t".join([v.name, defines, v.reason, "1" if v.link_allow_undefined else "0"]))
+        # "|", not a tab: bash's `read` treats a tab as "IFS whitespace" and
+        # COLLAPSES a run of them, silently dropping the empty `defines`
+        # field "ok"/"ok-b" have (no -D flags) and shifting every field
+        # after it by one — measured (build-stubs.sh wrote "reason": "0" for
+        # "ok" in stubs.json, the link_allow_undefined flag, one field over).
+        # "|" never appears in a name, a defines list or a reason string, and
+        # bash's `read` does not collapse runs of a non-whitespace IFS
+        # character, so an empty field stays empty.
+        print("|".join([v.name, defines, v.reason, "1" if v.link_allow_undefined else "0"]))
     return 0
 
 
