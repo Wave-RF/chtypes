@@ -79,8 +79,16 @@ func NewFixturesRepoTree(name string) *Tree {
 	return newTreeWithRepo(name, fixturesRepoPath())
 }
 
+// allTrees is every tree any case-building function has started, keyed by
+// name — so a cross-cutting check (checkOnlineTagsExist, in cases.go) can
+// look up "the tree a given case names" without every category file having
+// to thread its own trees back out to buildAll(). Registration happens
+// once per tree, in newTreeWithRepo; nothing ever removes an entry except
+// the selftest's own cleanup of its throwaway fake tree.
+var allTrees = map[string]*Tree{}
+
 func newTreeWithRepo(name, repoPath string) *Tree {
-	return &Tree{
+	t := &Tree{
 		Name:             name,
 		RepoPath:         repoPath,
 		ReferrersMode:    referrersNormal,
@@ -92,6 +100,11 @@ func newTreeWithRepo(name, repoPath string) *Tree {
 		modeOverride:     map[string]referrersMode{},
 		fallbackOverride: map[string]fallbackTagMode{},
 	}
+	if _, exists := allTrees[name]; exists {
+		panic("genfixtures: tree name " + name + " is already in use")
+	}
+	allTrees[name] = t
+	return t
 }
 
 // SetReferrerServing overrides how referrers of subjectDigest are served,

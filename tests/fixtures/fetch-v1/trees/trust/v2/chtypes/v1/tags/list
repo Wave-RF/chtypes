@@ -5,7 +5,7 @@
     "t-bad-signature",
     "t-subject-not-layer",
     "t-wrong-platform",
-    "t-wrong-version",
+    "26.8.1.5",
     "t-abi-revision",
     "t-predicate-type",
     "t-dup-key",

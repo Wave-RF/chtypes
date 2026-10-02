@@ -1,5 +1,10 @@
 package main
 
+import (
+	"fmt"
+	"strings"
+)
+
 // httpcases.go — the HTTP-transport-only case group: retries, redirects,
 // the anonymous token flow, download-token auth, mirror failover
 // (docs/guides/fetch-v1.md §2, §7; plan §3.2). Every http_script here
@@ -22,6 +27,8 @@ func buildHTTPCases(fs *FileSet) []Case {
 	manifestPath := "/v2/chtypes/v1/manifests/26.12"
 
 	putScript := func(id string, routes []httpRoute, secondOriginRoutes []httpRoute) {
+		validateLocationHeaders(id, routes)
+		validateLocationHeaders(id, secondOriginRoutes)
 		fs.Put("http/"+id+".json", canonicalJSON(HTTPScript{
 			Schema: 1, ID: id, Tree: "http-basic",
 			Routes:             routes,
@@ -166,9 +173,19 @@ func buildHTTPCases(fs *FileSet) []Case {
 
 	// --- redirect-cross-origin-drops-auth: a redirect to the second origin
 	// must not carry Authorization across it.
+	//
+	// The Location template below was wrong twice over (lane 0B, measured
+	// by the Go and Python fetch lanes against cases.json on v1,
+	// 2026-10-02): `{second-origin}` already expands to a full
+	// `http://host:port` (server.py's own docstring and selftest fixture
+	// spell it with no scheme prefix of their own), so prepending a literal
+	// `http://` doubled the scheme; and the path was missing the `/v2`
+	// every client-facing URL in this server carries ahead of
+	// `s-<case-id>` (server.py's own routing comment: a request path is
+	// always `/v2/s-<case-id>/...`).
 	putScript("redirect-cross-origin-drops-auth", []httpRoute{
 		{Method: "GET", Path: manifestPath, Responses: []httpResponse{
-			{Status: intp(302), Headers: map[string]string{"Location": "http://{second-origin}/s-redirect-cross-origin-drops-auth/chtypes/v1/manifests/26.12"}},
+			{Status: intp(302), Headers: map[string]string{"Location": "{second-origin}/v2/s-redirect-cross-origin-drops-auth/chtypes/v1/manifests/26.12"}},
 		}},
 	}, []httpRoute{
 		{Method: "GET", Path: manifestPath, Responses: []httpResponse{{FromTree: true}}},
@@ -179,36 +196,64 @@ func buildHTTPCases(fs *FileSet) []Case {
 	cases = append(cases, redirectDrops)
 
 	// --- redirect-limit: more redirect hops than limits.max_redirects.
-	loopRoutes := []httpRoute{}
-	path := manifestPath
+	//
+	// Two bugs here, measured by the Go and Python fetch lanes against
+	// cases.json on v1 (2026-10-02): `"http://{origin}" + next` doubled the
+	// scheme (`{origin}` already carries it), and `next` — the script
+	// ROUTE's own path, which is matched AFTER server.py strips
+	// `/v2/s-<case-id>/` from the incoming request — was reused verbatim
+	// as the Location HEADER value a real client follows, which never had
+	// that prefix stripped from it and so 404s on hop 2 (the router cannot
+	// find `s-redirect-limit` in it). A route's `.Path` and a Location
+	// header's value are two different representations of the same hop —
+	// one server-relative, one client-facing absolute — and must not share
+	// one variable.
+	const redirectLimitID = "redirect-limit"
+	var loopRoutes []httpRoute
+	scriptPath := manifestPath // "/v2/chtypes/v1/manifests/26.12" — what server.py's router matches on
 	for i := 0; i < C.Limits.MaxRedirects+2; i++ {
-		next := manifestPath + "-hop" + itoa(i+1)
-		loopRoutes = append(loopRoutes, httpRoute{Method: "GET", Path: path, Responses: []httpResponse{
-			{Status: intp(302), Headers: map[string]string{"Location": "http://{origin}" + next}},
+		nextScriptPath := manifestPath + "-hop" + itoa(i+1)
+		nextClientPath := "/v2/s-" + redirectLimitID + nextScriptPath[len("/v2"):]
+		loopRoutes = append(loopRoutes, httpRoute{Method: "GET", Path: scriptPath, Responses: []httpResponse{
+			{Status: intp(302), Headers: map[string]string{"Location": "{origin}" + nextClientPath}},
 		}})
-		path = next
+		scriptPath = nextScriptPath
 	}
-	putScript("redirect-limit", loopRoutes, nil)
-	cases = append(cases, addCase("redirect-limit", []float64{}, false, "CHTYPES_SOURCE_UNREACHABLE"))
+	putScript(redirectLimitID, loopRoutes, nil)
+	cases = append(cases, addCase(redirectLimitID, []float64{}, false, "CHTYPES_SOURCE_UNREACHABLE"))
 
-	// --- mirror-failover-5xx / mirror-failover-digest-404 /
-	// mirror-no-failover-on-verify-fail: two bases; base[0] fails
-	// (transiently, or by 404), base[1] serves the real content. These use
-	// the SAME tree for both bases (the generic fetch layer does not care
-	// that both URLs happen to resolve to the same bytes on disk; what it
-	// is proving is which base it ends up asking).
+	// --- mirror-failover-5xx / mirror-failover-digest-404: base[0] fails
+	// (transiently, or by 404), base[1] serves the real content.
+	//
+	// Both originally used `bases: ["{base}", "{base}"]` — two IDENTICAL
+	// URLs. Measured by the Go and Python fetch lanes against cases.json on
+	// v1 (2026-10-02): the script cursor was keyed by (case id, method,
+	// path) alone, so "failing over" to base[1] re-read the SAME,
+	// already-exhausted cursor as base[0] and kept getting the scripted
+	// failure's own last entry repeated forever — a mirror that never
+	// succeeds is not a failover case. `server.py`'s cursor now also keys
+	// on origin (see its own comment), and `{base2}` (decided here, lane
+	// 0B — documented in docs/guides/fetch-v1.md) is a SECOND, genuinely
+	// distinct base for exactly this: the http transport's own second
+	// origin (`server.py`'s LISTENING line's second port), same case id
+	// and repository path, with its own `second_origin_routes` script
+	// entry that succeeds immediately.
 	putScript("mirror-failover-5xx", []httpRoute{
 		{Method: "GET", Path: manifestPath, Responses: []httpResponse{{Status: intp(503)}, {Status: intp(503)}, {Status: intp(503)}, {Status: intp(503)}, {Status: intp(503)}}},
-	}, nil)
+	}, []httpRoute{
+		{Method: "GET", Path: manifestPath, Responses: []httpResponse{{FromTree: true}}},
+	})
 	failoverCase := addCase("mirror-failover-5xx", []float64{4, 8, 16, 32}, true, "")
-	failoverCase.Request.Bases = []string{"{base}", "{base}"}
+	failoverCase.Request.Bases = []string{"{base}", "{base2}"}
 	cases = append(cases, failoverCase)
 
 	putScript("mirror-failover-digest-404", []httpRoute{
 		{Method: "GET", Path: manifestPath, Responses: []httpResponse{{Status: intp(404)}}},
-	}, nil)
+	}, []httpRoute{
+		{Method: "GET", Path: manifestPath, Responses: []httpResponse{{FromTree: true}}},
+	})
 	failoverDigest := addCase("mirror-failover-digest-404", []float64{}, true, "")
-	failoverDigest.Request.Bases = []string{"{base}", "{base}"}
+	failoverDigest.Request.Bases = []string{"{base}", "{base2}"}
 	cases = append(cases, failoverDigest)
 
 	// mirror-no-failover-on-verify-fail: base[0] serves a TAMPERED layer
@@ -268,6 +313,50 @@ func buildHTTPCases(fs *FileSet) []Case {
 	cases = append(cases, addCase("manifest-accept-header", []float64{}, true, ""))
 
 	return cases
+}
+
+// validateLocationHeaders is genfixtures' own self-check for the exact
+// defect class redirect-cross-origin-drops-auth and redirect-limit both
+// shipped with (measured, the Go and Python fetch lanes against cases.json
+// on v1, 2026-10-02): a Location header built from the {origin}/
+// {second-origin} placeholder, either with a literal scheme pasted in front
+// of it (server.py's own docstring and selftest fixture already carry the
+// scheme in the substituted value — doubling it) or missing the router's
+// own "/v2/s-<script-id>/" prefix that every client-facing path in this
+// server needs (server.py strips exactly that prefix before matching a
+// route, so a Location value without it 404s on the next hop). Called from
+// putScript for every route list this file builds, so a future case cannot
+// ship the same shape of bug unnoticed.
+func validateLocationHeaders(scriptID string, routes []httpRoute) {
+	wantPrefix := "/v2/s-" + scriptID + "/"
+	for _, route := range routes {
+		for _, resp := range route.Responses {
+			loc, ok := resp.Headers["Location"]
+			if !ok {
+				continue
+			}
+			if strings.Contains(loc, "://{origin}") || strings.Contains(loc, "://{second-origin}") {
+				panic(fmt.Sprintf(
+					"genfixtures: script %q's Location header %q has a literal scheme pasted in front of "+
+						"{origin}/{second-origin}, which already expands to a full http://host:port — "+
+						"doubled scheme", scriptID, loc))
+			}
+			rest, found := strings.CutPrefix(loc, "{origin}")
+			if !found {
+				rest, found = strings.CutPrefix(loc, "{second-origin}")
+			}
+			if !found {
+				continue // not a templated redirect target
+			}
+			if !strings.HasPrefix(rest, wantPrefix) {
+				panic(fmt.Sprintf(
+					"genfixtures: script %q's Location header %q does not continue with the router's own "+
+						"%q prefix right after the origin placeholder — a real client 404s on this hop "+
+						"(server.py strips exactly that prefix before route-matching)",
+					scriptID, loc, wantPrefix))
+			}
+		}
+	}
 }
 
 func secondOriginRoutesOrEmpty(r []httpRoute) []httpRoute {
