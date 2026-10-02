@@ -320,24 +320,14 @@ fn ensure_online(
         validate_predicate(&predicate, &res.platform, version_request)?;
     }
 
-    let already = layout::unpacked_dir(&res.root, &descriptor.digest)?
-        .join(constants::CACHE_VERIFIED_RECORD)
-        .exists();
+    let already = is_fully_installed(&layout::unpacked_dir(&res.root, &descriptor.digest)?)?;
 
     let (library_sha256, library_bytes, library_name) = if predicate.is_null() {
+        // Only reachable via the explicit, warned `allow_unsigned` path:
+        // there is no verified predicate to read these from at all.
         (String::new(), 0u64, "library".to_string())
     } else {
-        (
-            predicate["library_sha256"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-            predicate["library_bytes"].as_u64().unwrap_or_default(),
-            predicate["library"]
-                .as_str()
-                .unwrap_or("library")
-                .to_string(),
-        )
+        library_fields(&predicate)?
     };
 
     let dir = if already {
@@ -367,18 +357,7 @@ fn ensure_online(
         layout::install_unpacked(&res.root, &descriptor.digest, |tmp| {
             unpack::unpack_tar(&decompressed, tmp)?;
             if !library_sha256.is_empty() {
-                let lib_path = tmp.join(&library_name);
-                let lib_bytes = std::fs::read(&lib_path).map_err(|e| {
-                    Error::ArtifactCorrupt(format!("library {}: {e}", lib_path.display()))
-                })?;
-                oci::verify_digest(&lib_bytes, &format!("sha256:{library_sha256}"))?;
-                if lib_bytes.len() as u64 != library_bytes {
-                    return Err(Error::ArtifactCorrupt(format!(
-                        "library is {} bytes, the signed predicate says {}",
-                        lib_bytes.len(),
-                        library_bytes
-                    )));
-                }
+                verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
             }
             layout::write_atomic(
                 &tmp.join(constants::CACHE_VERIFIED_RECORD),
@@ -429,9 +408,7 @@ fn ensure_frozen(
         client: &res.client,
         auth: &res.auth,
     };
-    let already = layout::unpacked_dir(&res.root, &entry.manifest)?
-        .join(constants::CACHE_VERIFIED_RECORD)
-        .exists();
+    let already = is_fully_installed(&layout::unpacked_dir(&res.root, &entry.manifest)?)?;
     if already {
         let dir = layout::unpacked_dir(&res.root, &entry.manifest)?;
         let record = layout::read_verified(&dir)?.ok_or_else(|| {
@@ -494,15 +471,11 @@ fn ensure_frozen(
     let fetched_layer =
         oci::fetch_blob_by_digest(&source, &layer.digest, constants::MAX_UNPACKED_BYTES)?;
     let decompressed = unpack::decompress_zstd(&fetched_layer.bytes)?;
-    let library_sha256 = predicate["library_sha256"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    let library_bytes = predicate["library_bytes"].as_u64().unwrap_or_default();
-    let library_name = predicate["library"]
-        .as_str()
-        .unwrap_or("library")
-        .to_string();
+    let (library_sha256, library_bytes, library_name) = if predicate.is_null() {
+        (String::new(), 0u64, "library".to_string())
+    } else {
+        library_fields(&predicate)?
+    };
     let record = VerifiedRecord {
         platform: platform.to_string(),
         version: entry.version.clone(),
@@ -520,6 +493,9 @@ fn ensure_frozen(
     };
     let dir = layout::install_unpacked(&res.root, &entry.manifest, |tmp| {
         unpack::unpack_tar(&decompressed, tmp)?;
+        if !library_sha256.is_empty() {
+            verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
+        }
         layout::write_atomic(
             &tmp.join(constants::CACHE_VERIFIED_RECORD),
             &serde_json::to_vec(&record)?,
@@ -758,6 +734,68 @@ fn strip_sha256(digest: &str) -> Result<String> {
         .ok_or_else(|| Error::ArtifactCorrupt(format!("digest {digest:?} is not sha256:<hex>")))
 }
 
+/// Whether `dir` holds a complete install: `verified.json` **and** the
+/// library file it names, both present. A record surviving alone (the
+/// library removed or corrupted out of band) must not short-circuit a
+/// re-fetch, or `ensure()`'s "the library file exists on disk" guarantee
+/// (plan §1.3) would not hold on the cache-hit path.
+fn is_fully_installed(dir: &Path) -> Result<bool> {
+    let Some(record) = layout::read_verified(dir)? else {
+        return Ok(false);
+    };
+    Ok(dir.join(&record.library).is_file())
+}
+
+/// Pull `library`/`library_sha256`/`library_bytes` out of a verified,
+/// non-null predicate. Each is required: a signed predicate missing one is
+/// malformed, and silently skipping the hash/size check it exists for would
+/// accept unverified library bytes — this fails loudly instead.
+fn library_fields(predicate: &serde_json::Value) -> Result<(String, u64, String)> {
+    let library_sha256 = predicate
+        .get("library_sha256")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            Error::ArtifactCorrupt("signed predicate has no library_sha256".to_string())
+        })?
+        .to_string();
+    let library_bytes = predicate
+        .get("library_bytes")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| {
+            Error::ArtifactCorrupt("signed predicate has no library_bytes".to_string())
+        })?;
+    let library_name = predicate
+        .get("library")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| Error::ArtifactCorrupt("signed predicate has no library".to_string()))?
+        .to_string();
+    Ok((library_sha256, library_bytes, library_name))
+}
+
+/// Re-hash the just-unpacked library against the signed predicate's
+/// `library_sha256`/`library_bytes`, inside the install's temp directory
+/// (before the atomic rename that makes it visible as installed).
+fn verify_unpacked_library(
+    tmp: &Path,
+    library_name: &str,
+    library_sha256: &str,
+    library_bytes: u64,
+) -> Result<()> {
+    let lib_path = tmp.join(library_name);
+    let lib_bytes = std::fs::read(&lib_path)
+        .map_err(|e| Error::ArtifactCorrupt(format!("library {}: {e}", lib_path.display())))?;
+    oci::verify_digest(&lib_bytes, &format!("sha256:{library_sha256}"))?;
+    if lib_bytes.len() as u64 != library_bytes {
+        return Err(Error::ArtifactCorrupt(format!(
+            "library is {} bytes, the signed predicate says {library_bytes}",
+            lib_bytes.len()
+        )));
+    }
+    Ok(())
+}
+
 /// `predicate.abi` must be the JSON integer `1` (never the v0 field
 /// `abi_revision`), and `os`/`arch` must equal `platform`, and the version
 /// must lie within `version_request` (plan §1.3's guarantees).
@@ -819,7 +857,7 @@ fn monotonic_warning(res: &Resources, tag: &str, record: &VerifiedRecord) -> Res
         if !other.version.starts_with(tag) {
             continue;
         }
-        if build_key(&other.build) > build_key(&record.build) {
+        if version_key(&other.version) > version_key(&record.version) {
             warnings.push(format!(
                 "a newer build ({} at {}) is already installed for {tag}/{}; resolving to the source's offer ({} at {}) anyway",
                 other.version, other.build, record.platform, record.version, record.build
@@ -833,6 +871,24 @@ fn monotonic_warning(res: &Resources, tag: &str, record: &VerifiedRecord) -> Res
 /// §3.2's `offline-newest-build`.
 fn build_key(build: &str) -> &str {
     build
+}
+
+/// A 4-component version's numeric sort key. ClickHouse version components
+/// are not zero-padded, so `"26.10.1.5"` must sort after `"26.9.3.38"` even
+/// though `'1' < '9'` as a byte — a plain string compare gets this backwards
+/// the moment any component crosses a digit-width boundary (9 -> 10, 99 ->
+/// 100), which is routine here. A version that fails to parse this way
+/// sorts lowest, rather than panicking or being silently preferred.
+fn version_key(version: &str) -> [u64; 4] {
+    let mut out = [0u64; 4];
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() != 4 {
+        return out;
+    }
+    for (i, p) in parts.iter().enumerate() {
+        out[i] = p.parse().unwrap_or(0);
+    }
+    out
 }
 
 /// Scan the cache, then each system directory in order, for the record with
@@ -852,8 +908,8 @@ fn find_installed(
         let better = match &best {
             None => true,
             Some((_, b, _)) => {
-                (record.version.as_str(), build_key(&record.build))
-                    > (b.version.as_str(), build_key(&b.build))
+                (version_key(&record.version), build_key(&record.build))
+                    > (version_key(&b.version), build_key(&b.build))
             }
         };
         if better {
