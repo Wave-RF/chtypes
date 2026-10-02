@@ -99,6 +99,8 @@ while IFS=$'\t' read -r name defines reason link_allow_undefined; do
         args+=("-DCHS_STUB_CTOR_MARKER_PATH=\"$MARKER_PATH\"")
     fi
     if [ "$link_allow_undefined" = "1" ] && [ "$HOST_OS" = "darwin" ]; then
+        # shellcheck disable=SC2054  # one -Wl argument with embedded commas (the linker's own
+        # sub-option syntax), not three array elements
         args+=(-Wl,-undefined,dynamic_lookup)
     fi
     out_path="$OUT/$name.so"
