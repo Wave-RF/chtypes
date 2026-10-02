@@ -57,21 +57,16 @@ HEAD_BYTES = 16
 # not a v1 artifact at all" from "a v1 artifact is missing one symbol".
 ABI_VERSION_SYMBOL = "chs_abi_version"
 
-# chs_build_info is class "handshake" too (abi.json), the same class as
-# chs_abi_version — and per the plan's two-phase table design (§2.2: "The
-# generated Handshake type holds only the four handshake symbols [...] The
-# full Api type is constructible only by the loader's step 6"), all of
-# chs_abi_version/chs_build_info/chs_clickhouse_version/chs_abi_revision are
-# resolved together, early, as that Handshake type — before step 3 even
-# checks chs_abi_version's return value, and well before step 6's sweep.
-# Step 6's own description enumerates "api, tooling and tombstone", pointedly
-# never "handshake", for exactly this reason: a missing handshake symbol is
-# not step 6's concern. So a library missing chs_build_info fails the same
-# way as one missing chs_abi_version: `not_v1`, not `missing_symbol:...`.
-# `inferred`, not `measured` — the loader itself is each binding's own lane,
-# and this detail of the provisional ABI is not pinned down in so many
-# words; if a binding's own loader disagrees, this is the line to revisit.
-BUILD_INFO_SYMBOL = "chs_build_info"
+# PM ruling: chs_build_info (and every other handshake symbol except
+# chs_abi_version — chs_clickhouse_version included) is NOT folded into
+# not_v1 when absent. chs_abi_version answering 1 is what makes a library
+# "an ABI v1+ artifact" at all (step 3); if it is present and correct, the
+# library genuinely IS one, so refusing it as not_v1 over a DIFFERENT
+# missing symbol would be a false message. sdk.json already has the reason
+# that fits — missing_symbol plus the symbol's own name — raised at
+# whichever step first needs to resolve that symbol (step 4 for
+# chs_build_info, since step 4 is the first to call it), not only at step
+# 6's generic sweep. not_v1 stays reserved for chs_abi_version alone.
 
 
 def omit_define(symbol: str) -> str:
@@ -100,9 +95,9 @@ def plan(model) -> list[Variant]:
     deterministic order: the two happy-path copies, the ten named
     loader-refusal and process-trap shapes, then one missing-<sym> per
     exported symbol (sorted), omitting chs_abi_version (already covered by
-    "no-abi-version"). missing-chs_build_info keeps its name but is expected
-    to refuse the same way as no-abi-version (`not_v1`, see
-    BUILD_INFO_SYMBOL above), not with `missing_symbol:chs_build_info`."""
+    "no-abi-version", the only symbol whose absence means not_v1). Every
+    other missing symbol, chs_build_info and chs_clickhouse_version
+    included, is missing_symbol:<name>."""
     out = [
         Variant("ok", (), "accepted"),
         Variant("ok-b", (), "accepted"),  # a second, byte-identical build: proves cross-image handling
@@ -124,8 +119,7 @@ def plan(model) -> list[Variant]:
     for sym in model.symbols():
         if sym == ABI_VERSION_SYMBOL:
             continue
-        reason = "not_v1" if sym == BUILD_INFO_SYMBOL else f"missing_symbol:{sym}"
-        out.append(Variant(f"missing-{sym}", ((omit_define(sym), None),), reason))
+        out.append(Variant(f"missing-{sym}", ((omit_define(sym), None),), f"missing_symbol:{sym}"))
     return out
 
 
