@@ -1,17 +1,21 @@
 /**
  * Referrer discovery (`docs/guides/fetch-v1.md` §4): the OCI referrers API,
- * **and** the tag-schema fallback (`sha256-<hex>`) — both implemented always,
- * never only one, because which a host serves is a property of that host,
- * not of this fetcher.
+ * **and** the tag-schema fallback (`sha256-<hex>`) — both implemented, never
+ * only one, because which a host serves is a property of that host, not of
+ * this fetcher.
  *
- * **Both are tried, every time** — never only when the referrers API is
- * absent. A referrers index can read back empty (200, no matching entries)
- * for a manifest that does have a signature, on our own host too, not only a
- * mirror — so "the API answered 200" is not the same claim as "the API's
- * answer is complete". This module always gathers candidates from both
- * paths and lets the caller try every one, stopping at the first that
- * verifies (`dsse.ts` decides "verifies"; this module only gathers
- * descriptors to try).
+ * **The fallback tag is consulted only when the referrers API's own answer
+ * has no bundle of the trusted signature artifactType** — an empty list, a
+ * list holding only other artifactTypes (goldens, say), or the API itself
+ * unsupported (errors, or any non-200). When the referrers API already
+ * names a candidate of that artifactType, the fallback tag is never fetched
+ * — this keeps the request count the same shape as Go, Python and Rust's
+ * lanes, which conformance cases assert on (a case can require "no fallback
+ * request" for a referrers-API-only host). A referrers-API 404 reads the
+ * same as "unsupported": fall back at once, with no retry — this is a
+ * discovery probe, not a promise that a specific digest exists (unlike a
+ * by-digest manifest/blob fetch, which does retry a 404 on the last base;
+ * `oci.ts`'s `retryOn404`).
  */
 
 import { asString, field, items, type Json, parseJsonValue } from '../json.js';
@@ -86,10 +90,11 @@ function numberField(json: Json, key: string): number {
 
 /**
  * Every referrer of `artifactType` for `digest` within `repositoryRoot`,
- * from the referrers API alone (`[]` when the API is absent, errors, or
- * matches nothing — all three read the same to a caller, since
- * `discoverSignatureCandidates` always checks the fallback tag too
- * regardless of which of the three this was).
+ * from the referrers API alone. `[]` whenever the API's own answer has no
+ * bundle of this `artifactType` — an empty list, a list of only other
+ * artifactTypes, a 404 (treated as "unsupported here", not retried — see
+ * this module's header), or any other error — and in every one of those
+ * cases `discoverSignatureCandidates` then also tries the fallback tag.
  */
 export async function discoverReferrers(
   repositoryRoot: string,
@@ -107,8 +112,8 @@ export async function discoverReferrers(
       }
     }
   } catch {
-    // The referrers API is not guaranteed on every host (mirrors) — fall
-    // through to the tag schema below exactly as if it had answered empty.
+    // The referrers API is not guaranteed on every host (mirrors) — read as
+    // "no candidates here", exactly as an empty or goldens-only answer would.
   }
   return fromApi;
 }
@@ -116,7 +121,9 @@ export async function discoverReferrers(
 /**
  * The fallback tag's own referrer list for `digest` (the tag-schema index,
  * `GET manifests/<tag>` — always with the manifest `Accept` header), filtered
- * the same way as the referrers API.
+ * the same way as the referrers API. Only ever called by
+ * `discoverSignatureCandidates` when the referrers API found nothing of the
+ * trusted artifactType.
  */
 export async function discoverFallbackTag(
   repositoryRoot: string,
@@ -132,9 +139,12 @@ export async function discoverFallbackTag(
 }
 
 /**
- * The combined, ordered candidate list a caller should try verifying in
- * order, stopping at the first success: referrers-API descriptors, then (not
- * instead of — see this module's header) the fallback tag's.
+ * The candidate list a caller should try verifying in order, stopping at
+ * the first success. Queries the referrers API first; the fallback tag is
+ * fetched **only** when the referrers API named no candidate of
+ * `artifactType` at all (see this module's header) — never unconditionally,
+ * so a referrers-API-only host sees exactly one discovery request, matching
+ * Go, Python and Rust.
  */
 export async function discoverSignatureCandidates(
   repositoryRoot: string,
@@ -143,14 +153,6 @@ export async function discoverSignatureCandidates(
   options: RequestOptions,
 ): Promise<ReferrerDescriptor[]> {
   const fromApi = await discoverReferrers(repositoryRoot, digest, artifactType, options);
-  const fromFallback = await discoverFallbackTag(repositoryRoot, digest, artifactType, options);
-  const seen = new Set(fromApi.map((d) => d.digest));
-  const merged = [...fromApi];
-  for (const d of fromFallback) {
-    if (!seen.has(d.digest)) {
-      merged.push(d);
-      seen.add(d.digest);
-    }
-  }
-  return merged;
+  if (fromApi.length > 0) return fromApi;
+  return discoverFallbackTag(repositoryRoot, digest, artifactType, options);
 }
