@@ -16,7 +16,7 @@ import pytest
 
 from chtypes._abi1 import _decls, _loader
 
-from .conftest import build_args, cases_of_kind, strip_ids
+from .conftest import build_args, cases_of_kind, strip_ids, stub_path
 
 _CASES, _IDS = cases_of_kind("handshake", "echo", "status")
 
@@ -24,7 +24,7 @@ _CASES, _IDS = cases_of_kind("handshake", "echo", "status")
 @pytest.fixture(scope="session")
 def ok_api(stubs_dir, stubs_manifest):
     entry = stubs_manifest["variants"]["ok"]
-    result = _loader.open(entry["path"], entry["predicate"])
+    result = _loader.open(stub_path(stubs_dir, "ok"), entry["predicate"])
     return result.api
 
 

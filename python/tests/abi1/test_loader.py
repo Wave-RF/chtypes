@@ -14,7 +14,7 @@ import pytest
 
 from chtypes._abi1 import _decls, _errmap, _errors, _loader
 
-from .conftest import cases_of_kind
+from .conftest import cases_of_kind, stub_path
 
 _CASES, _IDS = cases_of_kind("loader")
 
@@ -36,20 +36,21 @@ def _expected_reason(variant: str, declared_reason: str) -> str:
 
 
 @pytest.mark.parametrize("case", _CASES, ids=_IDS)
-def test_case(case: dict, stubs_manifest: dict) -> None:
+def test_case(case: dict, stubs_dir, stubs_manifest: dict) -> None:
     variant = case["variant"]
     entry = stubs_manifest["variants"][variant]
+    path = stub_path(stubs_dir, variant)
     reason = _expected_reason(variant, case["expect"]["reason"])
 
     if reason == "accepted":
-        result = _loader.open(entry["path"], entry["predicate"])
+        result = _loader.open(path, entry["predicate"])
         assert result.api is not None
         assert result.build_info["abi_fingerprint"] == _decls.CHS_ABI_FINGERPRINT
         return
 
     exc_cls = _errmap.loader_error_class(reason)
     with pytest.raises(exc_cls) as exc_info:
-        _loader.open(entry["path"], entry["predicate"])
+        _loader.open(path, entry["predicate"])
     assert exc_info.value.reason == reason, (
         f"{case['id']}: want reason {reason!r}, got {exc_info.value.reason!r}"
     )
@@ -60,34 +61,34 @@ def test_api_two_phase_construction_is_private(stubs_dir, stubs_manifest) -> Non
     loader's step 6 ... in Python it is a private constructor checked in a
     test." Calling Api() directly, bypassing resolve_all(), must refuse."""
     entry = stubs_manifest["variants"]["ok"]
-    result = _loader.open(entry["path"], entry["predicate"])
+    result = _loader.open(stub_path(stubs_dir, "ok"), entry["predicate"])
     with pytest.raises(TypeError):
         _decls.Api(result.api._lib, {}, object())
 
 
-def test_open_unverified_needs_both_the_flag_and_the_env_var(monkeypatch, stubs_manifest) -> None:
-    entry = stubs_manifest["variants"]["ok"]
+def test_open_unverified_needs_both_the_flag_and_the_env_var(monkeypatch, stubs_dir) -> None:
+    path = stub_path(stubs_dir, "ok")
     monkeypatch.delenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", raising=False)
 
     with pytest.raises(_errors.ArtifactIncompatibleError):
-        _loader.open_unverified(entry["path"], allow=False)
+        _loader.open_unverified(path, allow=False)
     with pytest.raises(_errors.ArtifactIncompatibleError):
-        _loader.open_unverified(entry["path"], allow=True)  # env var still unset
+        _loader.open_unverified(path, allow=True)  # env var still unset
 
     monkeypatch.setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
     with pytest.raises(_errors.ArtifactIncompatibleError):
-        _loader.open_unverified(entry["path"], allow=False)  # flag still false
+        _loader.open_unverified(path, allow=False)  # flag still false
 
-    result = _loader.open_unverified(entry["path"], allow=True)
+    result = _loader.open_unverified(path, allow=True)
     assert result.api is not None
 
 
-def test_open_unverified_skips_step1_with_no_predicate(monkeypatch, stubs_manifest) -> None:
+def test_open_unverified_skips_step1_with_no_predicate(monkeypatch, stubs_dir) -> None:
     """No predicate given: step 1 (glibc) is skipped outright, per plan
     section 3.1 -- proven by loading the ctor-marker variant (whose ONLY
     defect is an impossible glibc_floor in its predicate) unverified, with no
     predicate at all, and it must succeed."""
     monkeypatch.setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
-    entry = stubs_manifest["variants"]["ctor-marker"]
-    result = _loader.open_unverified(entry["path"], predicate=None, allow=True)
+    path = stub_path(stubs_dir, "ctor-marker")
+    result = _loader.open_unverified(path, predicate=None, allow=True)
     assert result.api is not None

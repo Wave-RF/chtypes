@@ -80,6 +80,24 @@ def stubs_manifest(stubs_dir: Path) -> dict:
     return json.loads(manifest.read_text(encoding="utf-8"))
 
 
+def stub_path(stubs_dir: Path, variant: str) -> str:
+    """The on-disk path of one stub variant, reconstructed from
+    `stubs_dir` and `build-stubs.sh`'s own naming (`$OUT/$name.so`) --
+    deliberately NOT `stubs_manifest["variants"][variant]["path"]`, which is
+    an ABSOLUTE path baked in on the runner that BUILT the stubs
+    (`v1-abi-stubs`'s `$RUNNER_TEMP/abi-v1-stubs`). `.github/workflows/v1-abi.yml`'s
+    `v1-abi-conformance` job downloads that same artifact into a
+    DIFFERENTLY NAMED directory (`$RUNNER_TEMP/abi1-stubs`, no hyphen before
+    "v1") on a different runner entirely, so the manifest's baked-in path
+    never exists there (`measured`: every stub load failed
+    "cannot open shared object file" on linux-amd64/linux-arm64 CI legs until
+    this was added; darwin-arm64 happened to pass locally only because stubs
+    were built and read from the one, same, already-absolute directory).
+    Reconstructing the path from `stubs_dir` is correct on EVERY platform,
+    including the one this bug does not currently reach."""
+    return str(stubs_dir / f"{variant}.so")
+
+
 def host_os_arch() -> str:
     os_name = {"Linux": "linux", "Darwin": "darwin"}.get(
         platform.system(), platform.system().lower()
