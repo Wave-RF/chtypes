@@ -175,21 +175,15 @@ func load(in LoadInput) (*Table, *LoadError) {
 		return nil, &LoadError{Reason: "dlopen", Path: in.LibraryPath, Got: errmsg}
 	}
 
-	// Step 3: chs_abi_version AND chs_build_info, resolved TOGETHER, early --
-	// a judgment call (ruled on the stub's own fixtures, `inferred` not
-	// `measured`): the plan's two-phase table design (§2.2) scopes step 6's
-	// sweep to "api, tooling and tombstone", pointedly never "handshake", so
-	// a missing handshake-class symbol is not step 6's to report. Either one
-	// absent reads as "not an ABI v1+ artifact" (not_v1), the same as today's
-	// chs_abi_version-only check; chs_clickhouse_version is NOT resolved here
-	// (it is never called before step 6 and is left to that sweep, like
-	// every non-handshake symbol -- confirmed against the stub's own
-	// missing-chs_clickhouse_version case, which expects
-	// "missing_symbol:chs_clickhouse_version", not "not_v1").
+	// Step 3: chs_abi_version ALONE. PM ruling (reverses an earlier `inferred`
+	// call): chs_abi_version answering 1 is what makes a library "an ABI v1+
+	// artifact" at all; if it is present and correct, refusing it as not_v1
+	// over a DIFFERENT missing symbol would be a false message. not_v1 stays
+	// reserved for chs_abi_version alone -- every other handshake symbol,
+	// chs_build_info and chs_clickhouse_version included, is reported as
+	// missing_symbol:<name> at whichever step first needs it (sdk.json now
+	// carries that reason at both step 4 and step 6).
 	if missing := t.ResolveAbiVersion(); missing != "" {
-		return nil, &LoadError{Reason: "not_v1", Path: in.LibraryPath, Got: "missing " + missing}
-	}
-	if missing := t.ResolveBuildInfo(); missing != "" {
 		return nil, &LoadError{Reason: "not_v1", Path: in.LibraryPath, Got: "missing " + missing}
 	}
 	if v := t.AbiVersion(); v != ChsAbiVersion {
@@ -199,8 +193,15 @@ func load(in LoadInput) (*Table, *LoadError) {
 		}
 	}
 
-	// Step 4: chs_build_info() (already resolved above), parsed strictly and
-	// fingerprint-compared.
+	// Step 4: chs_build_info ALONE, then parsed strictly and
+	// fingerprint-compared. A missing symbol here is step 4's own
+	// missing_symbol row (sdk.json), not build_info_malformed: the artifact
+	// is not malformed, a described export is simply absent, the same
+	// vocabulary step 6's generic sweep would use if nothing resolved it
+	// sooner.
+	if missing := t.ResolveBuildInfo(); missing != "" {
+		return nil, &LoadError{Reason: "missing_symbol:" + missing, Path: in.LibraryPath}
+	}
 	biRaw := t.BuildInfo()
 	if biRaw == "" {
 		return nil, &LoadError{Reason: "build_info_malformed", Path: in.LibraryPath, Got: "NULL"}
