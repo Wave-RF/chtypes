@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wave-rf/chtypes/spec/abi-v1/schema/cases.schema.json",
+  "title": "tests/fixtures/abi-v1/cases.json, format 1",
+  "description": "The committed, generated (scripts/abi-v1/emit/cases.py) conformance cases every enrolled binding's v1-abi-conformance leg runs against the stub libraries scripts/abi-v1/build-stubs.sh builds. See that emitter's module docstring for the four case kinds (handshake, echo, status, loader) and the three argument-expression shapes (int, bytes_hex, handle). This schema is checked by scripts/abi-v1/parity.py before it trusts the file, using the same restricted JSON Schema subset spec/abi-v1/abi.json's own schema uses (scripts/abi-v1/model.py's validate()); it is not part of gen.py's abi.json/sdk.json pipeline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_generated", "schema", "cases"],
+  "properties": {
+    "_generated": {"type": "string", "minLength": 1},
+    "schema": {"const": 1},
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "expect"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["handshake", "echo", "status", "loader"]},
+          "fn": {"type": "string", "pattern": "^chs_[a-z0-9_]+$"},
+          "variant": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+          "os": {
+            "enum": ["linux", "darwin"],
+            "description": "Present only on a loader case whose expected reason differs by platform (ctor-marker: D3's glibc floor step is Linux-only, so the same library is refused on Linux but accepted on darwin). Absent means the case applies on every platform. A conformance runner must skip, never fail, a case whose os does not match its own."
+          },
+          "args": {"type": "array", "items": {"$ref": "#/$defs/arg"}},
+          "expect": {"type": "object"}
+        },
+        "oneOf": [
+          {"required": ["kind", "fn"], "properties": {"kind": {"const": "handshake"}}},
+          {"required": ["kind", "fn", "args"], "properties": {"kind": {"const": "echo"}}},
+          {"required": ["kind", "fn", "args"], "properties": {"kind": {"const": "status"}}},
+          {"required": ["kind", "variant"], "properties": {"kind": {"const": "loader"}}}
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "arg": {
+      "type": "object",
+      "oneOf": [
+        {"required": ["int"], "properties": {"int": {"type": "integer"}}},
+        {"required": ["bytes_hex"], "properties": {"bytes_hex": {"type": "string", "pattern": "^([0-9a-f]{2})*$"}}},
+        {"required": ["handle"], "properties": {"handle": {"type": "object", "required": ["fn", "args"]}}},
+        {"required": ["null_handle"], "properties": {"null_handle": {"const": true}}}
+      ]
+    }
+  }
+}

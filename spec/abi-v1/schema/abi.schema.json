@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wave-rf/chtypes/spec/abi-v1/schema/abi.schema.json",
+  "title": "chtypes ABI description, format 1",
+  "description": "The shape of spec/abi-v1/abi.json. Structure only: cross-references (a handle's free function exists, a status is a chs_status value, a FIRM function names nothing provisional, docs.md covers every symbol) are checked by scripts/abi-v1/model.py. Uses only the keywords that validator implements; it refuses any other.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["description_schema", "abi", "library", "scalars", "handles", "enums", "constants", "documents", "build_info", "functions"],
+  "properties": {
+    "description_schema": {"const": 1, "description": "The version of this format."},
+    "abi": {"type": "integer", "minimum": 1, "description": "The ABI generation: CHS_ABI_VERSION, and what chs_abi_version() returns."},
+    "library": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stem", "prefix"],
+      "properties": {
+        "stem": {"const": "libchtypes", "description": "Frozen (D1.3)."},
+        "prefix": {"const": "chs_", "description": "Frozen (D1.3): nothing else is exported."}
+      }
+    },
+    "scalars": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/scalar"}
+    },
+    "handles": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/c_type_name"},
+      "additionalProperties": {"$ref": "#/$defs/handle"}
+    },
+    "enums": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"oneOf": [{"$ref": "#/$defs/int_enum"}, {"$ref": "#/$defs/string_enum"}]}
+    },
+    "constants": {
+      "type": "object",
+      "propertyNames": {"pattern": "^CHS_[A-Z0-9_]+$"},
+      "additionalProperties": {"$ref": "#/$defs/constant"}
+    },
+    "documents": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"$ref": "#/$defs/document"}
+    },
+    "build_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema"],
+      "properties": {
+        "schema": {"type": "object", "description": "A JSON Schema (the subset model.py implements) of the object chs_build_info() returns (D4)."},
+        "provisional_fields": {
+          "type": "object",
+          "description": "build_info properties whose CONTENT is provisional, though the field itself is FIRM.",
+          "additionalProperties": {"$ref": "#/$defs/markers"}
+        }
+      }
+    },
+    "functions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/function"}
+    }
+  },
+  "$defs": {
+    "c_type_name": {"type": "string", "pattern": "^chs_[a-z0-9_]+$"},
+    "c_ident": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "markers": {
+      "description": "Present = PROVISIONAL, waiting on each named marker (sdk.json provisional_markers has the legend). Absent = FIRM.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^(A[0-9]+|Q-[a-z]|confirm)$"}
+    },
+    "scalar": {"enum": ["void", "int", "int32", "uint32", "int64", "uint64", "size", "u8ptr_const", "cstr_static"]},
+    "content": {
+      "description": "What a counted byte string carries. Every one is a byte string, never a C string: NUL and invalid UTF-8 pass through. A document:<name> content names an entry in documents.",
+      "type": "string",
+      "pattern": "^(bytes|name|sql|message|ascii|json_object_string_values|json_array_names|document:[a-z][a-z0-9_]*)$"
+    },
+    "handle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["free", "holds"],
+      "properties": {
+        "free": {"$ref": "#/$defs/c_type_name"},
+        "holds": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/c_type_name"}},
+        "provisional": {"$ref": "#/$defs/markers"}
+      }
+    },
+    "int_enum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repr", "values"],
+      "properties": {
+        "repr": {"const": "int32"},
+        "closed": {"type": "boolean", "description": "No value may be added within this ABI generation."},
+        "frozen": {"type": "boolean", "description": "No value may be renumbered or removed."},
+        "fields": {"$ref": "#/$defs/value_fields"},
+        "fallback": {"type": "string"},
+        "provisional": {"$ref": "#/$defs/markers"},
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "value"],
+            "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+            "properties": {
+              "name": {"type": "string", "pattern": "^CHS_[A-Z0-9_]+$"},
+              "value": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647}
+            }
+          }
+        }
+      }
+    },
+    "string_enum": {
+      "description": "A document vocabulary: the strings a JSON document carries, with per-value facts a binding reads instead of deriving.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repr", "values"],
+      "properties": {
+        "repr": {"const": "string"},
+        "closed": {"type": "boolean"},
+        "frozen": {"type": "boolean"},
+        "fields": {"$ref": "#/$defs/value_fields"},
+        "fallback": {"type": "string", "description": "The value whose meaning an unrecognized spelling takes: the fail-closed arm."},
+        "provisional": {"$ref": "#/$defs/markers"},
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["value"],
+            "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+            "properties": {
+              "value": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+            }
+          }
+        }
+      }
+    },
+    "value_fields": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"enum": ["string", "boolean", "integer"]}
+    },
+    "constant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"enum": ["int32", "uint32", "int64", "uint64"]},
+        "value": {"type": "integer"},
+        "provisional": {"$ref": "#/$defs/markers"}
+      }
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["carries_names"],
+      "properties": {
+        "carries_names": {"type": "boolean", "description": "The document carries column names, which are byte strings: how a non-UTF-8 name is carried inside JSON is open (marker A12)."},
+        "schema": {"type": "object"},
+        "provisional": {"$ref": "#/$defs/markers"}
+      }
+    },
+    "function": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "class", "thread", "returns", "params"],
+      "properties": {
+        "name": {"$ref": "#/$defs/c_type_name"},
+        "class": {"enum": ["handshake", "tombstone", "api", "tooling"]},
+        "thread": {"enum": ["any", "handle_serial", "process_once", "process_serial"]},
+        "provisional": {"$ref": "#/$defs/markers"},
+        "returns": {"$ref": "#/$defs/return"},
+        "may_return": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^CHS_[A-Z_]+$"}
+        },
+        "params": {"type": "array", "items": {"$ref": "#/$defs/param"}}
+      }
+    },
+    "return": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind"],
+          "properties": {"kind": {"enum": ["status", "void"]}}
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "type"],
+          "properties": {
+            "kind": {"const": "scalar"},
+            "type": {"$ref": "#/$defs/scalar"},
+            "borrows": {"$ref": "#/$defs/c_ident"},
+            "constant": {"type": "string", "pattern": "^CHS_[A-Z0-9_]+$"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "type"],
+          "properties": {"kind": {"const": "enum"}, "type": {"$ref": "#/$defs/c_ident"}}
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "type", "owned"],
+          "properties": {
+            "kind": {"const": "handle"},
+            "type": {"$ref": "#/$defs/c_type_name"},
+            "owned": {"const": true},
+            "nullable": {"type": "boolean"},
+            "content": {"$ref": "#/$defs/content"}
+          }
+        }
+      ]
+    },
+    "param": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["name", "kind", "type"],
+          "properties": {
+            "name": {"$ref": "#/$defs/c_ident"},
+            "kind": {"enum": ["scalar", "out_scalar"]},
+            "type": {"$ref": "#/$defs/scalar"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["name", "kind", "type"],
+          "properties": {
+            "name": {"$ref": "#/$defs/c_ident"},
+            "kind": {"const": "enum"},
+            "type": {"$ref": "#/$defs/c_ident"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["name", "kind", "content"],
+          "properties": {
+            "name": {"$ref": "#/$defs/c_ident"},
+            "kind": {"const": "bytes_in"},
+            "content": {"$ref": "#/$defs/content"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["name", "kind", "type"],
+          "properties": {
+            "name": {"$ref": "#/$defs/c_ident"},
+            "kind": {"const": "handle"},
+            "type": {"$ref": "#/$defs/c_type_name"},
+            "const": {"type": "boolean"},
+            "nullable": {"type": "boolean"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["name", "kind", "type"],
+          "properties": {
+            "name": {"$ref": "#/$defs/c_ident"},
+            "kind": {"const": "out_handle"},
+            "type": {"$ref": "#/$defs/c_type_name"},
+            "nullable": {"type": "boolean"},
+            "content": {"$ref": "#/$defs/content"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["name", "kind"],
+          "properties": {
+            "name": {"$ref": "#/$defs/c_ident"},
+            "kind": {"const": "out_error"}
+          }
+        }
+      ]
+    }
+  }
+}
