@@ -126,13 +126,15 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> None:
     if call.excinfo is None:
         _RESULTS[case_id] = (True, "")
     elif call.excinfo.errisinstance(pytest.skip.Exception):
-        # cases.schema.json: "A conformance runner must skip, never fail, a
-        # case whose os does not match its own" (loader.ctor-marker.linux /
-        # .darwin). report.schema.json has no third "skipped" state, so this
-        # records it as a PASS with the skip reason in `detail`: the case
-        # genuinely does not apply on this host, which is not a failure, and
-        # parity.py needs a result for every case id regardless.
-        _RESULTS[case_id] = (True, f"skipped: {call.excinfo.value}")
+        # PM ruling: a case whose "os" does not match this leg is OMITTED
+        # from the report entirely -- never reported as a pass, because a
+        # pass that never ran is exactly the pattern this repository
+        # refuses. scripts/abi-v1/parity.py and cases.schema.json are being
+        # updated (a small follow-up PR into v1) to expect the omission
+        # rather than require every case id on every leg; until that lands,
+        # an os-mismatched case's ABSENCE here is correct even though
+        # current parity.py would read it as MISSING.
+        return
     else:
         _RESULTS[case_id] = (False, str(call.excinfo.value)[:2000])
 

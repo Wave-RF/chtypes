@@ -25,10 +25,11 @@ _HOST_OS = {"Linux": "linux", "Darwin": "darwin"}.get(platform.system())
 def test_case(case: dict, stubs_dir, stubs_manifest: dict) -> None:
     # cases.schema.json: an "os" field is present only when the case's
     # expected reason differs by platform (loader.ctor-marker.linux/.darwin:
-    # D3's glibc floor step is Linux-only). "A conformance runner must skip,
-    # never fail, a case whose os does not match its own" -- conftest.py's
-    # pytest_runtest_makereport turns this skip into a PASS with a detail
-    # note in the report, since report.schema.json has no third state.
+    # D3's glibc floor step is Linux-only). PM ruling: this leg must SKIP,
+    # never report a pass for, a case whose os does not match its own (a
+    # pass that never ran is the pattern this repository refuses) --
+    # conftest.py's pytest_runtest_makereport OMITS the case id entirely
+    # from the report for exactly that reason.
     case_os = case.get("os")
     if case_os is not None and case_os != _HOST_OS:
         pytest.skip(f"{case['id']}: os={case_os!r} does not match this host ({_HOST_OS!r})")
