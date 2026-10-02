@@ -186,9 +186,46 @@ jobs:
             rust) (cd rust && cargo fetch --locked) ;;
           esac
 
-      - name: cut egress — loopback only, so "no network in the conformance suite" is mechanical
+      - name: cut egress for the test process only — never the runner's own connectivity
+        # A blanket `iptables -A OUTPUT ! -o lo -j REJECT` cuts the Actions
+        # runner's own connection to GitHub too, not just the conformance
+        # suite — measured, PR #400: both `ts` legs (the first legs ever to
+        # reach this step; every earlier leg skipped for lack of a runner
+        # file) timed out at 20 minutes with the "install dependencies"
+        # step's own completion update stuck queued, because the egress cut
+        # landed before the runner could report it finished — `BlobNotFound`
+        # in both logs is exactly what a runner that lost its link looks
+        # like. ci.yml's own `ts` job installs the identical lockfile in
+        # seconds, so the lockfile was never the problem.
+        #
+        # Fix: cut egress for a dedicated group only, and run the
+        # conformance process (next step) as that group — never the runner
+        # process itself, which keeps its normal route. Proved in both
+        # directions below, not assumed: the group must NOT reach GitHub,
+        # and must STILL reach loopback (server.py binds 127.0.0.1).
         if: steps.runner_file.outputs.exists == 'true'
-        run: sudo iptables -A OUTPUT ! -o lo -j REJECT
+        run: |
+          sudo groupadd -f noegress
+          sudo iptables -A OUTPUT -m owner --gid-owner noegress ! -o lo -j REJECT
+
+          if sudo -g noegress curl -fsS --max-time 5 https://github.com >/dev/null 2>&1; then
+            echo "::error::the noegress group can still reach https://github.com — the iptables rule did not take effect" >&2
+            exit 1
+          fi
+          echo "confirmed: https://github.com is unreachable for the noegress group"
+
+          python3 -m http.server 18080 --bind 127.0.0.1 >/dev/null 2>&1 &
+          LOOPBACK_PID=$!
+          trap 'kill "$LOOPBACK_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 10); do
+            if curl -fsS --max-time 2 http://127.0.0.1:18080/ >/dev/null 2>&1; then break; fi
+            sleep 0.5
+          done
+          if ! sudo -g noegress curl -fsS --max-time 5 http://127.0.0.1:18080/ >/dev/null 2>&1; then
+            echo "::error::the noegress group cannot reach 127.0.0.1 — loopback must stay open for the http transport" >&2
+            exit 1
+          fi
+          echo "confirmed: loopback (127.0.0.1) is reachable for the noegress group"
 
       - name: run the conformance suite and write CHTYPES_V1_REPORT
         if: steps.runner_file.outputs.exists == 'true'
@@ -196,6 +233,13 @@ jobs:
           CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
           CHTYPES_V1_REPORT: ${{ runner.temp }}/report-${{ matrix.binding }}-${{ matrix.toolchain }}.json
         run: |
+          # Written to a file, then run under the noegress group, rather
+          # than inlined into a `sudo ... bash -c '...'` one-liner: the Go
+          # leg's own command already needs single quotes
+          # (`-run '^TestConformanceV1$'`), which cannot nest inside
+          # another single-quoted -c string.
+          cat > "$RUNNER_TEMP/run-conformance.sh" <<'SCRIPT'
+          set -e
           case "${{ matrix.binding }}" in
             go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/) ;;
             python)
@@ -212,6 +256,9 @@ jobs:
             ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
             rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
           esac
+          SCRIPT
+          chmod +x "$RUNNER_TEMP/run-conformance.sh"
+          sudo -E -g noegress env PATH="$PATH" bash "$RUNNER_TEMP/run-conformance.sh"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
