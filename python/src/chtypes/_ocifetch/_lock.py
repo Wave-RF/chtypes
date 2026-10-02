@@ -133,7 +133,7 @@ def load_lock(path: str | os.PathLike[str]) -> Lock:
 def save_lock(path: str | os.PathLike[str], lock: Lock) -> None:
     data = json.dumps(lock.to_json(), indent=2, sort_keys=True).encode("utf-8") + b"\n"
     directory = os.path.dirname(os.path.abspath(path)) or "."
-    fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=".chtypes-lock-")
+    fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=".ocifetch-lock-")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)

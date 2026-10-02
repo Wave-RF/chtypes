@@ -263,7 +263,7 @@ def fetch_blob_to_path(
         retry=retry,
     )
     directory = os.path.dirname(os.path.abspath(dest_path)) or "."
-    fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=".chtypes-blob-")
+    fd, tmp_name = tempfile.mkstemp(dir=directory, prefix=".ocifetch-blob-")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(resp.body)
