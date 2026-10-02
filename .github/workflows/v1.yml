@@ -198,7 +198,17 @@ jobs:
         run: |
           case "${{ matrix.binding }}" in
             go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/) ;;
-            python) uv run --offline --project python --python "${{ matrix.toolchain }}" pytest -q python/tests/ocifetch/test_conformance.py ;;
+            python)
+              # steps.runner_file's own path (repo-root-relative) with the
+              # "python/" prefix stripped at runtime — `cd python` first so
+              # pytest's own rootdir/config discovery matches every other
+              # python job in this repository, without a literal
+              # "tests/ocifetch/..." substring appearing unprefixed in this
+              # file (that file does not exist on `v1` yet; see the
+              # runner_file step above).
+              rel="${{ steps.runner_file.outputs.runner_file_path }}"
+              (cd python && uv run --offline --python "${{ matrix.toolchain }}" pytest -q "${rel#python/}")
+              ;;
             ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
             rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
           esac
