@@ -369,12 +369,22 @@ fn predicate_map(v: &Value) -> Result<serde_json::Map<String, Value>, String> {
         .ok_or_else(|| format!("predicate is not an object: {v}"))
 }
 
-fn load_variant(variant: &Value) -> Result<Loaded, Refusal> {
+/// Resolve one stub variant's library, BY FILE NAME, under `stubs_dir` — the
+/// real `CHTYPES_ABI1_STUBS` directory for THIS job. `stubs.json`'s own
+/// `path` field was written by the (separate) `v1-abi-stubs` build job, under
+/// ITS OWN `$RUNNER_TEMP`; once the artifact crosses jobs (download-artifact
+/// into this job's `${{ runner.temp }}/abi1-stubs`, a different path on a
+/// different runner), that field's directory component is stale — only its
+/// file name still names a real file here. Taking the file name alone is
+/// also forward-compatible with a future `stubs.json` that records a
+/// relative file name directly (F-B tracking this under a separate fix).
+fn load_variant(stubs_dir: &Path, variant: &Value) -> Result<Loaded, Refusal> {
     let path_str = variant
         .get("path")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let path = PathBuf::from(path_str);
+    let file_name = Path::new(path_str).file_name().unwrap_or(path_str.as_ref());
+    let path = stubs_dir.join(file_name);
     let predicate =
         predicate_map(variant.get("predicate").unwrap_or(&Value::Null)).unwrap_or_default();
     loader::load(LoadInput {
@@ -385,7 +395,11 @@ fn load_variant(variant: &Value) -> Result<Loaded, Refusal> {
 
 /// Loader steps 1-6's exact reason word (never the `Display`-formatted
 /// sentence) a `loader`-kind case's `expect.reason` compares against.
-fn run_loader_case(case: &Value, variants: &serde_json::Map<String, Value>) -> Result<(), String> {
+fn run_loader_case(
+    stubs_dir: &Path,
+    case: &Value,
+    variants: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
     let variant_name = case
         .get("variant")
         .and_then(Value::as_str)
@@ -408,7 +422,7 @@ fn run_loader_case(case: &Value, variants: &serde_json::Map<String, Value>) -> R
     let variant = variants
         .get(variant_name)
         .ok_or_else(|| format!("stubs.json has no variant named {variant_name:?}"))?;
-    match load_variant(variant) {
+    match load_variant(stubs_dir, variant) {
         Ok(_loaded) => {
             if want_reason == "accepted" {
                 Ok(())
@@ -544,7 +558,7 @@ fn abi1_conformance() {
             ));
             None
         }
-        Some(ok_variant) => match load_variant(ok_variant) {
+        Some(ok_variant) => match load_variant(&stubs_dir, ok_variant) {
             Ok(loaded) => Some(loaded.api),
             Err(e) => {
                 results.push(("ok-load".to_string(), false, Some(e.to_string())));
@@ -562,7 +576,7 @@ fn abi1_conformance() {
         let kind = case.get("kind").and_then(Value::as_str).unwrap_or("");
         let expect = case.get("expect").cloned().unwrap_or(Value::Null);
         let verdict: Result<(), String> = if kind == "loader" {
-            run_loader_case(case, variants)
+            run_loader_case(&stubs_dir, case, variants)
         } else {
             match &ok_api {
                 None => Err("the \"ok\" stub did not load; see the ok-load result".to_string()),
