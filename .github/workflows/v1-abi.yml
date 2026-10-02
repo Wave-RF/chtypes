@@ -350,7 +350,7 @@ jobs:
       # against include/v1/chtypes.h, no artifact (plan §2.4's v1 successor
       # of check-linked-build.sh), under scripts/abi-v1 and named for this
       # job (below: check-${check}.sh).
-      - name: "selftest — scripts/abi-v1/check-linked.sh's own fixtures, once it exists"
+      - name: "selftest — the linked-mode check's own fixtures, once it exists"
         run: |
           check="linked"
           script="scripts/abi-v1/check-${check}.sh"
@@ -390,7 +390,7 @@ jobs:
       # workflow): `cargo clippy`/`fmt --check`/`test` with `--features
       # abi-v1`, default-feature output byte-unchanged; under scripts/abi-v1
       # and named for this job, the same way as v1-abi-linked's script above.
-      - name: "selftest — scripts/abi-v1/check-rust.sh's own fixtures, once it exists"
+      - name: "selftest — the clippy/fmt/test check's own fixtures, once it exists"
         run: |
           check="rust"
           script="scripts/abi-v1/check-${check}.sh"
