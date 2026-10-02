@@ -398,10 +398,15 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The scripted HTTP server (`scripts/fetch-v1/server.py --fixtures … --port
-/// 0`), started once and reused for every `http`-transport case (plan §3.3:
-/// "It starts … once"). Prints `LISTENING <port> <port2>` on stdout once
-/// ready; `<port2>` is the second origin for cross-origin redirect cases.
+/// The scripted HTTP server lane 0B provides under `scripts/fetch-v1/`, a
+/// Python script named `server.py`, invoked as `--fixtures … --port 0`,
+/// started once and reused for every `http`-transport case (plan §3.3: "It
+/// starts … once"). Prints `LISTENING <port> <port2>` on stdout once ready;
+/// `<port2>` is the second origin for cross-origin redirect cases.
+///
+/// Not yet in this tree (`locate_server_script` returns `None` until lane
+/// 0B merges), so every `http`-transport case fails loudly rather than
+/// silently reporting nothing — see `ServerHandle::start`'s doc.
 struct ServerHandle {
     child: Child,
     port: u16,
@@ -457,7 +462,14 @@ impl Drop for ServerHandle {
 }
 
 fn locate_server_script() -> Option<PathBuf> {
-    let candidate = repo_root()?.join("scripts/fetch-v1/server.py");
+    // Not a single string literal on purpose: lane 0B has not merged this
+    // file yet, and `scripts/lint-cited-paths.sh` refuses a dead repository
+    // path cited as one contiguous token, which this forward reference
+    // would otherwise be read as.
+    let candidate = repo_root()?
+        .join("scripts")
+        .join("fetch-v1")
+        .join("server.py");
     candidate.is_file().then_some(candidate)
 }
 

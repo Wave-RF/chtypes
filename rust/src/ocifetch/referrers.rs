@@ -8,16 +8,16 @@
 //! never rely on server-side `?artifactType=` filtering, which not every
 //! host applies.
 //!
-//! **Staleness rule** (measured on the staging registry, 2026-10-02): a
-//! just-pushed manifest's referrers can read back as an empty list — or a
-//! list holding only the goldens referrer — for up to 300s after the push,
-//! because the Referrers API response is itself cached at the edge. So a
-//! 200 response with zero matching-`artifactType` entries is **not**
-//! evidence the referrer does not exist; [`find_candidates`] always also
-//! tries the fallback tag in that case, before the caller is allowed to
-//! conclude the referrer is genuinely absent (e.g. `ArtifactUntrusted`).
-//! This is in addition to the existing API/no-API split (a mirror with no
-//! Referrers API at all also lands on the fallback tag).
+//! **A 200 with zero matching-`artifactType` entries is not, on its own,
+//! evidence the referrer does not exist on every host that could be
+//! serving it.** [`find_candidates`] always also tries the fallback tag in
+//! that case — not only when the referrers API errors or is unsupported —
+//! before the caller is allowed to conclude a referrer is genuinely absent
+//! (e.g. `ArtifactUntrusted`): a mirror may answer the referrers API with an
+//! incomplete or empty result (it is not guaranteed to proxy it faithfully)
+//! while its fallback tag is complete. This is in addition to the existing
+//! API/no-API split (a mirror with no Referrers API at all lands on the
+//! fallback tag too).
 
 use super::constants;
 use super::dsse::{self, TrustedKey, VerifiedStatement};
@@ -86,8 +86,15 @@ fn try_fallback_tag(source: &Source<'_>, subject_digest: &str) -> Result<Option<
         )));
     };
     let suffix = format!("manifests/sha256-{hex}");
+    let accept = oci::manifest_accept_header();
     for base in source.bases {
-        match oci::get_from_base(source, base, &suffix, &[], constants::MANIFEST_MAX_BYTES) {
+        match oci::get_from_base(
+            source,
+            base,
+            &suffix,
+            &accept,
+            constants::MANIFEST_MAX_BYTES,
+        ) {
             Ok((200, bytes)) => {
                 let index: Index = serde_json::from_slice(&bytes).map_err(|e| {
                     Error::ArtifactCorrupt(format!("{base}: fallback-tag index: {e}"))

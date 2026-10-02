@@ -240,14 +240,16 @@ fn fetch_bytes_by_digest(
     )))
 }
 
-fn manifest_accept_header() -> Vec<(String, String)> {
+/// Every `GET …/manifests/<ref>` — by tag or by digest, the fallback tag
+/// included — sends this (delivery-side review, 2026-10-02): our own host
+/// ignores it, but a mirror may need it to answer with the right shape.
+pub fn manifest_accept_header() -> Vec<(String, String)> {
     vec![(
         "Accept".to_string(),
         format!(
-            "{}, {}, {}",
+            "{}, {}",
             constants::MEDIA_TYPE_INDEX,
-            constants::MEDIA_TYPE_MANIFEST,
-            constants::MEDIA_TYPE_BUNDLE
+            constants::MEDIA_TYPE_MANIFEST
         ),
     )]
 }
