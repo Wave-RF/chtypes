@@ -262,15 +262,18 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
 
   describe('loader', () => {
     it.each(casesOfKind('loader'))('$id', (c: CaseEntry) => {
+      // cases.schema.json: "Present only on a loader case whose expected
+      // reason differs by platform [...] A conformance runner must skip,
+      // never fail, a case whose os does not match its own." The ruling
+      // (PM, round 2 correction): a skip OMITS the case from the report
+      // entirely — never record() it as a pass, which would be exactly the
+      // "a pass that never ran" pattern this repository refuses elsewhere.
+      // So this check sits OUTSIDE record(), before the case's id is ever
+      // added to `results`; the vitest test itself still completes (and is
+      // reported as passing to vitest, which is a different thing from the
+      // JSON report parity.py reads).
+      if (c.os !== undefined && c.os !== currentOs()) return;
       record(c.id, () => {
-        // cases.schema.json: "Present only on a loader case whose expected
-        // reason differs by platform [...] A conformance runner must skip,
-        // never fail, a case whose os does not match its own." A skipped
-        // case still needs a result (parity.py requires every case id
-        // present), and report.schema.json's "pass" is a plain boolean with
-        // no third state, so "skip" here means "trivially satisfied on this
-        // platform" — reported as a pass without ever loading anything.
-        if (c.os !== undefined && c.os !== currentOs()) return;
         const doc = stubsDoc as StubsDoc;
         const variant = doc.variants[c.variant as string];
         if (variant === undefined) throw new Error(`conformance: ${c.id}: no stub variant ${c.variant}`);
