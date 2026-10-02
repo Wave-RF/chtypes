@@ -70,6 +70,18 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(file), "..", "..", "..")
 }
 
+// stubLibraryPath resolves a stub variant's library under THIS job's own
+// CHTYPES_ABI1_STUBS directory, by file name only -- never variant.Path
+// verbatim. stubs.json's path is written by the v1-abi-stubs job, on a
+// DIFFERENT runner (and a different $RUNNER_TEMP) than the
+// v1-abi-conformance job that downloads the artifact and sets
+// CHTYPES_ABI1_STUBS, so a path recorded there (absolute or not) does not
+// generally resolve here; only its file name does, and that is stable
+// however build-stubs.sh spells the "path" field.
+func stubLibraryPath(stubsDir string, variant stubVariant) string {
+	return filepath.Join(stubsDir, filepath.Base(variant.Path))
+}
+
 // canonicalJSON is RFC-8785-adjacent, not the real thing: sorted object keys
 // (encoding/json.Marshal's own rule for map[string]interface{}) and compact,
 // unescaped-HTML output. It needs to agree with scripts/abi-v1/parity.py's
@@ -161,7 +173,7 @@ func TestConformance(t *testing.T) {
 		t.Fatalf("marshaling the %q variant's predicate: %v", "ok", err)
 	}
 	tbl, lerr := Load(LoadInput{
-		LibraryPath: okVariant.Path,
+		LibraryPath: stubLibraryPath(stubsDir, okVariant),
 		Predicate:   okPredicate,
 		Platform:    fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH),
 	})
@@ -179,7 +191,7 @@ func TestConformance(t *testing.T) {
 			case "echo", "status":
 				pass, detail = runEchoOrStatusCase(tbl, c)
 			case "loader":
-				pass, detail = runLoaderCase(manifest, c)
+				pass, detail = runLoaderCase(stubsDir, manifest, c)
 			default:
 				pass, detail = false, fmt.Sprintf("unknown case kind %q", c.Kind)
 			}
@@ -386,7 +398,7 @@ func matchExpected(expected, actual interface{}) error {
 // exactly as specified, not a gap in it; this is the one case it is true of
 // today (the only glibc-specific reason scripts/abi-v1/emit/_stubshared.py's
 // variant plan exercises).
-func runLoaderCase(manifest stubsManifest, c caseJSON) (bool, string) {
+func runLoaderCase(stubsDir string, manifest stubsManifest, c caseJSON) (bool, string) {
 	variant, ok := manifest.Variants[c.Variant]
 	if !ok {
 		return false, fmt.Sprintf("stubs.json has no variant %q", c.Variant)
@@ -396,7 +408,7 @@ func runLoaderCase(manifest stubsManifest, c caseJSON) (bool, string) {
 		return false, fmt.Sprintf("marshaling the predicate: %v", err)
 	}
 	_, lerr := Load(LoadInput{
-		LibraryPath: variant.Path,
+		LibraryPath: stubLibraryPath(stubsDir, variant),
 		Predicate:   predJSON,
 		Platform:    fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH),
 	})

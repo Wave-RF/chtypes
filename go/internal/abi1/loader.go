@@ -253,9 +253,9 @@ func load(in LoadInput) (*Table, *LoadError) {
 // decodeStrictJSONObject parses data as a single JSON object: ASCII-only
 // bytes, no duplicate keys at any nesting level, numbers preserved as
 // json.Number (never silently widened to float64) -- the same strictness
-// spec/abi-v1/jcs.py applies to abi.json, applied here to chs_build_info()'s
-// own text and to the predicate, both of which a loader must refuse to
-// guess about rather than parse leniently.
+// scripts/abi-v1/jcs.py applies to abi.json, applied here to
+// chs_build_info()'s own text and to the predicate, both of which a loader
+// must refuse to guess about rather than parse leniently.
 func decodeStrictJSONObject(data []byte) (map[string]interface{}, error) {
 	for _, b := range data {
 		if b > 0x7f {
