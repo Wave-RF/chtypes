@@ -184,19 +184,23 @@ func TestConformance(t *testing.T) {
 
 	results := make([]reportResult, 0, len(doc.Cases))
 	for _, c := range doc.Cases {
+		// cases.schema.json's "os" field (added for loader.ctor-marker, which
+		// refuses on linux but loads fine on darwin, D3's glibc step being
+		// linux-only): a case naming an "os" that is not this leg's own is
+		// OMITTED from the report entirely -- never run, never a result at
+		// all, PASS included. A reported pass for a case that never ran is
+		// exactly the pattern this repository refuses everywhere else (a
+		// registry-gated test that "passes" by skipping is the house
+		// example); it still runs as a Go subtest that skips, so `go test
+		// -v` shows it, but no reportResult is appended for it.
+		if c.OS != "" && c.OS != runtime.GOOS {
+			t.Run(c.ID, func(t *testing.T) {
+				t.Skipf("omitted: this case is os:%s, this leg is %s", c.OS, runtime.GOOS)
+			})
+			continue
+		}
 		pass, detail := true, ""
 		t.Run(c.ID, func(t *testing.T) {
-			// cases.schema.json's "os" field (added for loader.ctor-marker,
-			// which refuses on linux but loads fine on darwin, D3's glibc
-			// step being linux-only): a case naming an "os" that is not this
-			// leg's own is skipped, never failed, and still reported pass
-			// (parity.py requires a result for every case id; "missing"
-			// would be the wrong diagnosis for "not applicable here").
-			if c.OS != "" && c.OS != runtime.GOOS {
-				detail = fmt.Sprintf("skipped: this case is os:%s, this leg is %s", c.OS, runtime.GOOS)
-				t.Skip(detail)
-				return
-			}
 			switch c.Kind {
 			case "handshake":
 				pass, detail = runHandshakeCase(tbl, c)

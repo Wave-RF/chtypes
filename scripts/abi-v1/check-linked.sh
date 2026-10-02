@@ -94,7 +94,12 @@ PLANT_REPL=(
   "/* chs_abi_version dropped by the plant */"
 )
 PLANT_WANT=(
-  "incompatible (function )?pointer types|cannot use"
+  # clang: "incompatible function pointer types" (plural). gcc: "incompatible
+  # pointer type" (singular, no "function"). Measured on CI (ubuntu-latest's
+  # gcc): a regex anchored to clang's exact plural wording missed gcc's real,
+  # correctly-fired error entirely, failing the selftest over a wording
+  # mismatch rather than a missing diagnostic.
+  "incompatible.*pointer type|cannot use"
   "use of undeclared identifier|implicit declaration|undefined reference"
 )
 
