@@ -187,16 +187,18 @@ jobs:
           esac
 
       - name: cut egress for the test process only — never the runner's own connectivity
-        # A blanket `iptables -A OUTPUT ! -o lo -j REJECT` cuts the Actions
-        # runner's own connection to GitHub too, not just the conformance
-        # suite — measured, PR #400: both `ts` legs (the first legs ever to
-        # reach this step; every earlier leg skipped for lack of a runner
-        # file) timed out at 20 minutes with the "install dependencies"
-        # step's own completion update stuck queued, because the egress cut
-        # landed before the runner could report it finished — `BlobNotFound`
-        # in both logs is exactly what a runner that lost its link looks
-        # like. ci.yml's own `ts` job installs the identical lockfile in
-        # seconds, so the lockfile was never the problem.
+        # measured, PR #400: both `ts` legs (the first legs ever to reach
+        # this step; every earlier leg skipped for lack of a runner file)
+        # timed out at 20 minutes, twice, with `BlobNotFound` in both logs.
+        # ci.yml's own `ts` job installs the identical lockfile in seconds,
+        # so the lockfile was never the problem.
+        #
+        # inferred: the mechanism. A blanket `iptables -A OUTPUT ! -o lo -j
+        # REJECT` cuts the Actions runner's own connection to GitHub too,
+        # not just the conformance suite — `BlobNotFound` is consistent
+        # with the runner losing its own link before it could report the
+        # "install dependencies" step's completion, which is why it reads
+        # as stuck rather than failed.
         #
         # Fix: cut egress for a dedicated group only, and run the
         # conformance process (next step) as that group — never the runner
