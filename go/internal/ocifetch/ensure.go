@@ -266,10 +266,17 @@ func hostPlatformKey() (string, bool) {
 // network-touching helper in this package uses.
 type session struct {
 	client *client
+	// hookBeforeIndexRename is test-only: it lets a conformance case
+	// (index-race-reapply) simulate a concurrent cache writer completing
+	// between this call's index.json read and its rename.
+	hookBeforeIndexRename func()
 }
 
 func newSession(ro resolvedOptions) *session {
-	return &session{client: newClient(ro.clock, ro.connectTimeout, ro.idleReadTimeout, ro.token, ro.tokenHosts)}
+	return &session{
+		client:                newClient(ro.clock, ro.connectTimeout, ro.idleReadTimeout, ro.token, ro.tokenHosts),
+		hookBeforeIndexRename: ro.hookBeforeIndexRename,
+	}
 }
 
 // Ensure resolves req against the registry (unless offline), verifies its
@@ -369,7 +376,7 @@ func (s *session) ensureOnline(ctx context.Context, ro resolvedOptions, l *layou
 		if err := l.writeBlob(desc.Digest, manifestBody); err != nil {
 			return nil, err
 		}
-		if err := l.addIndexEntry(*desc, nil); err != nil {
+		if err := l.addIndexEntry(*desc, s.hookBeforeIndexRename); err != nil {
 			return nil, err
 		}
 		return recordToResolved(rec, dir, platform.Key, req.Spelling, indexDigest, true, base, nil), nil
@@ -412,7 +419,7 @@ func (s *session) installManifest(l *layout, req Request, platform Platform, man
 	if err := l.writeBlob(layerDesc.Digest, layerBody); err != nil {
 		return nil, err
 	}
-	if err := l.addIndexEntry(desc, nil); err != nil {
+	if err := l.addIndexEntry(desc, s.hookBeforeIndexRename); err != nil {
 		return nil, err
 	}
 

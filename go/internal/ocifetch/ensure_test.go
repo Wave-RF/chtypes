@@ -178,6 +178,29 @@ func TestEnsureHappyPath(t *testing.T) {
 	}
 }
 
+func TestEnsureInvokesHookBeforeIndexRename(t *testing.T) {
+	// Options.HookBeforeIndexRename must actually reach the cache's
+	// index.json write during a real Ensure call — this is what the
+	// index-race-reapply conformance case relies on to simulate a
+	// concurrent cache writer. Caught by code review before this test
+	// existed: the hook was parsed into resolvedOptions but never threaded
+	// into the real addIndexEntry call sites.
+	reg, _ := buildFakeRegistry(t)
+	srv := httptest.NewServer(reg.handler())
+	defer srv.Close()
+
+	var hookCalls int
+	opts := testOptions(t, srv.URL)
+	opts.HookBeforeIndexRename = func() { hookCalls++ }
+
+	if _, err := Ensure(context.Background(), Request{Spelling: "26.8", Platform: "linux-arm64"}, opts); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if hookCalls == 0 {
+		t.Fatalf("HookBeforeIndexRename was never invoked during Ensure")
+	}
+}
+
 func TestEnsureSecondCallIsAlreadyInstalled(t *testing.T) {
 	reg, _ := buildFakeRegistry(t)
 	srv := httptest.NewServer(reg.handler())
