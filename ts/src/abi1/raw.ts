@@ -15,9 +15,11 @@
  * parameter-kind branches 38 times.
  *
  * Every chs_* name this file ever sees comes from `./decls.gen.ts` (as a
- * `FUNCTION_SPECS`/`SYMBOL`/`CAMEL_NAMES` value) or from a caller's own
- * runtime data (cases.json, parsed at runtime); this file's own source never
- * spells one.
+ * `FUNCTION_SPECS`/`SYMBOL` value — `FUNCTION_SPECS`'s own keys, read
+ * through `Object.entries`, double as the `define()` table's keys; see
+ * `defineRawFunctions`'s own comment for why that must be the REAL chs_*
+ * name) or from a caller's own runtime data (cases.json, parsed at
+ * runtime); this file's own source never spells one.
  */
 
 import {
@@ -31,7 +33,7 @@ import {
   PointerType,
   restorePointer,
 } from 'ffi-rs';
-import { BUF_HANDLE, CAMEL_NAMES, FUNCTION_SPECS, type FunctionSpec, type ParamSpec, STATUS_NAMES, SYMBOL } from './decls.gen.js';
+import { BUF_HANDLE, FUNCTION_SPECS, type FunctionSpec, type ParamSpec, STATUS_NAMES, SYMBOL } from './decls.gen.js';
 import type { CallErrorFields } from './errors.js';
 import { readCString } from './libc.js';
 
@@ -103,17 +105,24 @@ export type RawApi = Readonly<Record<string, RawFn>>;
  * (`libraryKey`, via `./libc.ts`'s `ffiOpen` — call that FIRST). One call
  * builds every chs_* function this image exposes; `rawCall` below is the
  * only thing that ever invokes the result.
+ *
+ * The table is keyed by each function's OWN chs_* name, never
+ * `CAMEL_NAMES`: `define()`'s per-entry type
+ * (`Omit<FFIParams, 'paramsValue' | 'funcName'>`) OMITS `funcName`
+ * entirely (measured against the installed ffi-rs 1.3.7 package) — the
+ * symbol `define()` resolves IS the table entry's own key, so a
+ * `funcName` alongside a differently-spelled key is silently ignored and
+ * the real call fails at run time ("Cannot find `<key>` function"), not
+ * at compile time (TypeScript's excess-property check does not see it
+ * through this `table` variable). Every chs_* name here comes from
+ * `Object.entries(FUNCTION_SPECS)` — this file's own source never spells
+ * one (scripts/abi-v1/check-no-hand-decls.py's rule 3 matches a LITERAL
+ * `chs_x: {`, never a key built from a loop variable).
  */
 export function defineRawFunctions(libraryKey: string): RawApi {
-  const table: Record<string, { library: string; funcName: string; retType: DataType; paramsType: DataType[] }> = {};
+  const table: Record<string, { library: string; retType: DataType; paramsType: DataType[] }> = {};
   for (const [name, spec] of Object.entries(FUNCTION_SPECS)) {
-    const paramsType = spec.params.flatMap((p) => paramDataTypes(p));
-    table[CAMEL_NAMES[name] as string] = {
-      library: libraryKey,
-      funcName: name,
-      retType: retDataType(spec),
-      paramsType,
-    };
+    table[name] = { library: libraryKey, retType: retDataType(spec), paramsType: spec.params.flatMap((p) => paramDataTypes(p)) };
   }
   return define(table) as unknown as RawApi;
 }
@@ -161,9 +170,8 @@ export const NULL_EXTERNAL: JsExternal = (() => {
 // --------------------------------------------------------------- buf reading
 
 function rawFn(raw: RawApi, chsName: string): RawFn {
-  const camel = CAMEL_NAMES[chsName];
-  if (camel === undefined) throw new Error(`chtypes abi1: ${chsName} is not a described symbol`);
-  const fn = raw[camel];
+  if (FUNCTION_SPECS[chsName] === undefined) throw new Error(`chtypes abi1: ${chsName} is not a described symbol`);
+  const fn = raw[chsName];
   if (fn === undefined) throw new Error(`chtypes abi1: ${chsName} was not declared on this image`);
   return fn;
 }
@@ -244,14 +252,21 @@ export function rawCall(raw: RawApi, name: string, args: readonly unknown[]): Ra
   for (const p of spec.params) {
     if (p.kind === 'out_handle' || p.kind === 'out_error') {
       const slot = u64Slot();
-      paramsValue.push(slot);
+      // `slot` is the length-1 JsExternal[] createPointer returns: SPREAD it
+      // into paramsValue (one positional arg), never pushed as the array
+      // itself — measured: pushing the array gives ffi-rs an Object where it
+      // expects an External ("expect External, got: Object"). v0's own
+      // ts/src/ffi.ts calls every slot this same way (`...errSlot`).
+      paramsValue.push(...slot);
       outSlots.push({ param: p, slot });
       continue;
     }
     const v = args[i++];
     if (p.kind === 'bytes_in') {
       const b = v as Buffer;
-      paramsValue.push(b, BigInt(b.length));
+      // DataType.U64 maps to a plain JS `number` (ffi-rs's own DataTypeToType),
+      // not `bigint` — measured: passing a BigInt here throws "NumberExpected".
+      paramsValue.push(b, b.length);
     } else {
       paramsValue.push(v);
     }

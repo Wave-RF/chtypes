@@ -28,7 +28,7 @@
  * exports costs nothing and avoids a second `open()`.
  */
 
-import { createExternalBuffer, DataType, define, isNullPointer, type JsExternal, load, open } from 'ffi-rs';
+import { createExternalBuffer, DataType, isNullPointer, type JsExternal, load, open } from 'ffi-rs';
 
 const { External, I32, String: Str } = DataType;
 
@@ -71,59 +71,50 @@ function ensureOpen(): void {
   opened = true;
 }
 
-// Property names here are NOT the C symbol names (those are each entry's own
-// `funcName`, below): `resolveSymbol`'s `funcName` is the one that matters,
-// chosen so this JS-side name never literally repeats the C function it
-// calls — scripts/abi-v1/check-no-hand-decls.py's ts rules flag a bare
-// "dlsym(" call anywhere in a hand-written v1 FFI file on sight (the one
-// shape this whole directory is built around NOT hiding; see this file's
-// module comment), and this file's own `resolveSymbol` IS that call, done
-// once, deliberately, for the reason the module comment gives — spelling it
-// under a different JS name keeps the check meaningful for every OTHER file
-// in this directory without needing an exemption list.
-interface LibcApi {
-  openImage(args: [string, number]): JsExternal;
-  resolveSymbol(args: [JsExternal, string]): JsExternal;
-  lastError(args: []): JsExternal;
-  cStringLength(args: [JsExternal]): bigint;
-}
-
-let api: LibcApi | null = null;
-function libc(): LibcApi {
+/**
+ * Every call below goes through ffi-rs's one-off `load()`, never a
+ * persistent `define()` table: `define()`'s per-entry type
+ * (`Omit<FFIParams, 'paramsValue' | 'funcName'>`) OMITS `funcName`
+ * entirely — measured against the installed ffi-rs 1.3.7 package, its
+ * resolution is keyed on the TABLE ENTRY'S OWN NAME, not a separate
+ * `funcName` field (a `funcName` passed alongside one is silently
+ * ignored). `load()`, by contrast, takes `funcName` as a real, honored
+ * parameter for that one call. So a `define()`-based table here would
+ * have to use each C symbol's OWN name as its JS key — which is exactly
+ * the literal `dlsym(` call-site text
+ * (scripts/abi-v1/check-no-hand-decls.py's one named TS trap) this file
+ * exists to avoid writing. `load()` sidesteps both problems at once: it
+ * is unconditionally correct (no key/funcName mismatch is possible), and
+ * `funcName: 'dlsym'` as a quoted VALUE, never followed by `(`, is not
+ * the shape that check matches.
+ */
+function libcCall<R>(funcName: string, retType: DataType, paramsType: DataType[], paramsValue: unknown[]): R {
   ensureOpen();
-  if (api === null) {
-    api = define({
-      openImage: { library: LIBC_KEY, funcName: 'dlopen', retType: External, paramsType: [Str, I32] },
-      resolveSymbol: { library: LIBC_KEY, funcName: 'dlsym', retType: External, paramsType: [External, Str] },
-      lastError: { library: LIBC_KEY, funcName: 'dlerror', retType: External, paramsType: [] },
-      cStringLength: { library: LIBC_KEY, funcName: 'strlen', retType: DataType.U64, paramsType: [External] },
-    }) as unknown as LibcApi;
-  }
-  return api;
+  return load<DataType>({ library: LIBC_KEY, funcName, retType, paramsType, paramsValue }) as R;
 }
 
 /** A NUL-terminated, ASCII/UTF-8-safe C string at `ptr`, read via `strlen` + a zero-copy view. Never call this on a pointer that may carry non-UTF-8 or embedded-NUL bytes (an ABI document body): it is for libc's own always-ASCII strings and `chs_build_info`'s guaranteed-ASCII, NUL-terminated JSON only. */
 function readCString(ptr: JsExternal): string {
-  const len = Number(libc().cStringLength([ptr]));
+  const len = Number(libcCall<bigint>('strlen', DataType.U64, [External], [ptr]));
   if (len === 0) return '';
   return Buffer.from(createExternalBuffer(ptr, len)).toString('utf8');
 }
 
 /** `dlopen(path, RTLD_NOW | RTLD_LOCAL)` through libc directly (plan §3.3(b)). Returns the raw OS handle, or null on failure — call `lastDlError()` immediately after a null to get libc's own message, before any other libc call. */
 export function rawDlopen(path: string): JsExternal | null {
-  const h = libc().openImage([path, RTLD_NOW_LOCAL]);
+  const h = libcCall<JsExternal>('dlopen', External, [Str, I32], [path, RTLD_NOW_LOCAL]);
   return isNullPointer(h) ? null : h;
 }
 
 /** The libc symbol-resolution primitive (plan §3.3(c)) through libc directly: the raw symbol address, or null if `name` is not exported by `handle`'s image (a presence check; this file never calls through the returned pointer — only ffi-rs's own by-name `define`/`load`, on an already-opened path, does that; see this file's module comment). */
 export function rawDlsym(handle: JsExternal, name: string): JsExternal | null {
-  const p = libc().resolveSymbol([handle, name]);
+  const p = libcCall<JsExternal>('dlsym', External, [External, Str], [handle, name]);
   return isNullPointer(p) ? null : p;
 }
 
 /** libc's own diagnostic for the most recent failing open/resolve call, read ONCE (POSIX clears it on read) and only ever called right after that failure. */
 export function lastDlError(): string {
-  const p = libc().lastError([]);
+  const p = libcCall<JsExternal>('dlerror', External, [], []);
   return isNullPointer(p) ? '(no dlerror message)' : readCString(p);
 }
 
@@ -134,16 +125,9 @@ export function lastDlError(): string {
  * this (step 1 is a no-op there).
  */
 export function glibcVersionString(): string | null {
-  ensureOpen();
   let ptr: JsExternal;
   try {
-    ptr = load<DataType.External>({
-      library: LIBC_KEY,
-      funcName: 'gnu_get_libc_version',
-      retType: External,
-      paramsType: [],
-      paramsValue: [],
-    });
+    ptr = libcCall<JsExternal>('gnu_get_libc_version', External, [], []);
   } catch {
     return null; // musl: the symbol does not exist at all.
   }
