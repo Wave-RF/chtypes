@@ -1,0 +1,362 @@
+/* stubtest.c: the stub's own self-test, driving scripts/abi-v1/emit/stub.py's
+ * generated handle-rule logic entirely THROUGH the real chs_* ABI, through
+ * dlopen+dlsym, never by reaching into the stub's internals. That matters
+ * for one check in particular: the SHA-256 the stub's echo reports is proven
+ * correct by calling a real function with a known-plaintext argument and
+ * checking the well-known digest appears in its output, rather than by
+ * calling the stub's internal sha256 routine directly with a hand-picked
+ * input — the same "drive it from the real computation, not a hand-set
+ * value" rule that governs every other test in this tree.
+ *
+ * Hand-written (not generated): the acceptance criterion is "the D2
+ * self-test passes", and this is that self-test.
+ *
+ *     scripts/abi-v1/stubtest <dir>
+ *
+ * `<dir>` must contain ok.so and ok-b.so (two separately dlopen'd, byte
+ * identical builds of the stub, which is what proves cross-image handling:
+ * each gets its own static image-identity marker). unbound.so, if present,
+ * is checked for refusal under RTLD_NOW. Exits 0 and prints a summary line
+ * on success; on any failure, prints each failing check to stderr and exits
+ * 1 — never a zero-run: main() counts both passes and failures and refuses
+ * to report success on zero checks.
+ */
+#include "chtypes.h"
+
+#include <dlfcn.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int g_pass = 0, g_fail = 0;
+
+#define CHECK(cond, ...)                                                                                             \
+    do {                                                                                                              \
+        if (cond) {                                                                                                   \
+            g_pass++;                                                                                                 \
+        } else {                                                                                                      \
+            g_fail++;                                                                                                 \
+            fprintf(stderr, "stubtest: FAIL %s:%d: ", __FILE__, __LINE__);                                            \
+            fprintf(stderr, __VA_ARGS__);                                                                             \
+            fprintf(stderr, "\n");                                                                                    \
+        }                                                                                                              \
+    } while (0)
+
+/* ----------------------------------------------------------- symbol tables */
+
+typedef int32_t (*fn_abi_version)(void);
+typedef const char *(*fn_cstr_static)(void);
+typedef int (*fn_abi_revision)(void);
+typedef const uint8_t *(*fn_buf_data)(const chs_buf *);
+typedef size_t (*fn_buf_len)(const chs_buf *);
+typedef void (*fn_buf_free)(chs_buf *);
+typedef chs_status (*fn_error_status)(const chs_error *);
+typedef int32_t (*fn_error_ch_code)(const chs_error *);
+typedef chs_buf *(*fn_error_text)(const chs_error *);
+typedef void (*fn_error_free)(chs_error *);
+typedef chs_status (*fn_live_handles)(chs_buf **, chs_error **);
+typedef chs_status (*fn_quote_string)(const uint8_t *, size_t, chs_buf **, chs_error **);
+typedef chs_status (*fn_schema_create)(const uint8_t *, size_t, const uint8_t *, size_t, chs_schema **, chs_error **);
+typedef void (*fn_schema_free)(chs_schema *);
+typedef chs_status (*fn_filter_create)(
+    const chs_schema *, const uint8_t *, size_t, const uint8_t *, size_t, chs_filter **, chs_error **);
+typedef void (*fn_filter_free)(chs_filter *);
+typedef chs_status (*fn_filter_eval_body)(
+    const chs_filter *, chs_format, const uint8_t *, size_t, const uint8_t *, size_t, chs_buf **, chs_error **);
+
+typedef struct {
+    void *handle;
+    const char *path;
+    fn_abi_version abi_version;
+    fn_cstr_static build_info;
+    fn_cstr_static clickhouse_version;
+    fn_abi_revision abi_revision;
+    fn_buf_data buf_data;
+    fn_buf_len buf_len;
+    fn_buf_free buf_free;
+    fn_error_status error_status;
+    fn_error_ch_code error_ch_code;
+    fn_error_text error_message;
+    fn_error_free error_free;
+    fn_live_handles live_handles;
+    fn_quote_string quote_string;
+    fn_schema_create schema_create;
+    fn_schema_free schema_free;
+    fn_filter_create filter_create;
+    fn_filter_free filter_free;
+    fn_filter_eval_body filter_eval_body;
+} lib_t;
+
+#define SYM(l, field, name)                                                                                           \
+    do {                                                                                                              \
+        (l).field = (void *) dlsym((l).handle, name);                                                                 \
+        if ((l).field == NULL) {                                                                                      \
+            fprintf(stderr, "stubtest: %s: dlsym(%s) failed: %s\n", (l).path, name, dlerror());                       \
+            exit(2);                                                                                                  \
+        }                                                                                                              \
+    } while (0)
+
+static lib_t load_lib(const char *path) {
+    lib_t l;
+    memset(&l, 0, sizeof l);
+    l.path = path;
+    l.handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (l.handle == NULL) {
+        fprintf(stderr, "stubtest: dlopen(%s) failed: %s\n", path, dlerror());
+        exit(2);
+    }
+    SYM(l, abi_version, "chs_abi_version");
+    SYM(l, build_info, "chs_build_info");
+    SYM(l, clickhouse_version, "chs_clickhouse_version");
+    SYM(l, abi_revision, "chs_abi_revision");
+    SYM(l, buf_data, "chs_buf_data");
+    SYM(l, buf_len, "chs_buf_len");
+    SYM(l, buf_free, "chs_buf_free");
+    SYM(l, error_status, "chs_error_status");
+    SYM(l, error_ch_code, "chs_error_ch_code");
+    SYM(l, error_message, "chs_error_message");
+    SYM(l, error_free, "chs_error_free");
+    SYM(l, live_handles, "chs_live_handles");
+    SYM(l, quote_string, "chs_quote_string");
+    SYM(l, schema_create, "chs_schema_create");
+    SYM(l, schema_free, "chs_schema_free");
+    SYM(l, filter_create, "chs_filter_create");
+    SYM(l, filter_free, "chs_filter_free");
+    SYM(l, filter_eval_body, "chs_filter_eval_body");
+    return l;
+}
+
+/* A tiny reader for this stub's own flat, single-level JSON (never a general
+   parser): finds "key": and parses the integer that follows. */
+static long json_field_int(const char *json, const char *key) {
+    char needle[128];
+    snprintf(needle, sizeof needle, "\"%s\":", key);
+    const char *p = strstr(json, needle);
+    if (p == NULL) {
+        fprintf(stderr, "stubtest: json_field_int: no %s in %s\n", needle, json);
+        exit(2);
+    }
+    return strtol(p + strlen(needle), NULL, 10);
+}
+
+static long live_count(lib_t *l, const char *kind) {
+    chs_buf *out = NULL;
+    chs_error *err = NULL;
+    chs_status st = l->live_handles(&out, &err);
+    CHECK(st == CHS_OK && out != NULL, "chs_live_handles: status %d", (int) st);
+    char tmp[512];
+    size_t n = l->buf_len(out);
+    if (n >= sizeof tmp) n = sizeof tmp - 1;
+    memcpy(tmp, l->buf_data(out), n);
+    tmp[n] = 0;
+    long v = json_field_int(tmp, kind);
+    l->buf_free(out);
+    (void) err;
+    return v;
+}
+
+/* --------------------------------------------------------------- the checks */
+
+static void test_handshake(lib_t *l) {
+    CHECK(l->abi_version() == CHS_ABI_VERSION, "chs_abi_version() = %d, want %d", l->abi_version(), CHS_ABI_VERSION);
+    const char *bi = l->build_info();
+    CHECK(bi != NULL && strstr(bi, "\"schema\":1") != NULL, "chs_build_info(): %s", bi ? bi : "(null)");
+    CHECK(bi != NULL && strstr(bi, "\"abi_fingerprint\":\"sha256:") != NULL, "chs_build_info() has no abi_fingerprint: %s", bi);
+    const char *cv = l->clickhouse_version();
+    CHECK(cv != NULL && cv[0] != 0, "chs_clickhouse_version(): empty");
+}
+
+static void test_tombstone(lib_t *l) {
+    CHECK(l->abi_revision() == CHS_ABI_REVISION_TOMBSTONE, "chs_abi_revision() = %d, want %d", l->abi_revision(),
+          CHS_ABI_REVISION_TOMBSTONE);
+}
+
+/* Proves the stub's internal SHA-256 (used nowhere else in this file) is
+   correct, by calling the REAL chs_quote_string with known plaintexts and
+   checking the well-known RFC 6234 digests appear in its echoed output —
+   never by calling an internal sha256 routine with a hand-picked input. */
+static void test_sha256_via_echo(lib_t *l) {
+    chs_buf *out = NULL;
+    chs_error *err = NULL;
+
+    CHECK(l->quote_string((const uint8_t *) "abc", 3, &out, &err) == CHS_OK, "chs_quote_string(\"abc\")");
+    char tmp[1024];
+    size_t n = l->buf_len(out);
+    memcpy(tmp, l->buf_data(out), n < sizeof tmp ? n : sizeof tmp - 1);
+    tmp[n < sizeof tmp ? n : sizeof tmp - 1] = 0;
+    CHECK(strstr(tmp, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") != NULL,
+          "sha256(\"abc\") not found in echo: %s", tmp);
+    CHECK(strstr(tmp, "\"head_hex\":\"616263\"") != NULL, "head_hex of \"abc\" not found in echo: %s", tmp);
+    l->buf_free(out);
+
+    CHECK(l->quote_string(NULL, 0, &out, &err) == CHS_OK, "chs_quote_string(\"\")");
+    n = l->buf_len(out);
+    memcpy(tmp, l->buf_data(out), n < sizeof tmp ? n : sizeof tmp - 1);
+    tmp[n < sizeof tmp ? n : sizeof tmp - 1] = 0;
+    CHECK(strstr(tmp, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") != NULL,
+          "sha256(\"\") not found in echo: %s", tmp);
+    l->buf_free(out);
+}
+
+/* Drives every chs_status value through the "!S:" injection a cases.json
+   case will also use, and checks all four error fields round-trip. */
+static void test_status_injection(lib_t *l) {
+    static const struct {
+        const char *name;
+        chs_status want;
+    } statuses[] = {
+        {"CHS_REJECTED", CHS_REJECTED},
+        {"CHS_DECLINED", CHS_DECLINED},
+        {"CHS_INVALID_ARGUMENT", CHS_INVALID_ARGUMENT},
+        {"CHS_INTERNAL", CHS_INTERNAL},
+    };
+    for (size_t i = 0; i < sizeof statuses / sizeof statuses[0]; i++) {
+        char msg[128];
+        snprintf(msg, sizeof msg, "!S:%s:42:TEST_CODE:boom: with a colon", statuses[i].name);
+        chs_buf *out = NULL;
+        chs_error *err = NULL;
+        chs_status st = l->quote_string((const uint8_t *) msg, strlen(msg), &out, &err);
+        CHECK(st == statuses[i].want, "injected %s: got status %d", statuses[i].name, (int) st);
+        CHECK(err != NULL, "injected %s: no error set", statuses[i].name);
+        if (err != NULL) {
+            CHECK(l->error_status(err) == statuses[i].want, "injected %s: chs_error_status mismatch", statuses[i].name);
+            CHECK(l->error_ch_code(err) == 42, "injected %s: chs_error_ch_code = %d, want 42", statuses[i].name,
+                  l->error_ch_code(err));
+            chs_buf *message = l->error_message(err);
+            CHECK(message != NULL, "injected %s: chs_error_message is NULL", statuses[i].name);
+            if (message != NULL) {
+                char mtmp[128];
+                size_t n = l->buf_len(message);
+                memcpy(mtmp, l->buf_data(message), n < sizeof mtmp ? n : sizeof mtmp - 1);
+                mtmp[n < sizeof mtmp ? n : sizeof mtmp - 1] = 0;
+                CHECK(strcmp(mtmp, "boom: with a colon") == 0, "injected %s: message = %s", statuses[i].name, mtmp);
+                l->buf_free(message);
+            }
+            l->error_free(err);
+        }
+    }
+}
+
+/* free(NULL) and a double free are no-ops; a freed buf gives NULL/0, exactly
+   as include/v1/chtypes.h documents for chs_buf_data/chs_buf_len. */
+static void test_free_rules(lib_t *l) {
+    l->buf_free(NULL); /* must not crash */
+
+    chs_buf *out = NULL;
+    chs_error *err = NULL;
+    CHECK(l->quote_string((const uint8_t *) "x", 1, &out, &err) == CHS_OK, "chs_quote_string(\"x\")");
+    CHECK(l->buf_len(out) > 0, "a fresh buf reports zero length");
+    l->buf_free(out);
+    CHECK(l->buf_len(out) == 0, "chs_buf_len on a freed buf did not give 0");
+    CHECK(l->buf_data(out) == NULL, "chs_buf_data on a freed buf did not give NULL");
+    l->buf_free(out); /* a double free: still a no-op */
+    CHECK(l->buf_len(out) == 0, "a double free changed the freed buf's reported length");
+}
+
+/* A chs_error* handed to a chs_buf-typed call is the wrong kind: chs_buf_len
+   must refuse it (give 0) exactly as it does a NULL or freed buf. */
+static void test_wrong_kind(lib_t *l) {
+    chs_buf *out = NULL;
+    chs_error *err = NULL;
+    CHECK(l->quote_string((const uint8_t *) "!S:CHS_INTERNAL:0:X:boom", 24, &out, &err) == CHS_INTERNAL,
+          "status injection for the wrong-kind setup failed");
+    CHECK(err != NULL, "no error produced for the wrong-kind setup");
+    size_t wrong_len = l->buf_len((const chs_buf *) (const void *) err);
+    CHECK(wrong_len == 0, "chs_buf_len on a chs_error* (wrong kind) = %zu, want 0", wrong_len);
+    l->error_free(err);
+}
+
+/* The core of D2: a filter HOLDS its schema, so freeing the schema first
+   does not stop the filter from working, and both disappear from
+   chs_live_handles only once every reference (the caller's AND the
+   filter's) is gone. */
+static void test_holds_and_live(lib_t *l) {
+    long schema_before = live_count(l, "chs_schema");
+    long filter_before = live_count(l, "chs_filter");
+
+    chs_schema *schema = NULL;
+    chs_error *err = NULL;
+    CHECK(l->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
+    CHECK(live_count(l, "chs_schema") == schema_before + 1, "live chs_schema did not increase by one on create");
+
+    chs_filter *filter = NULL;
+    CHECK(l->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, &filter, &err) == CHS_OK, "chs_filter_create");
+    CHECK(live_count(l, "chs_filter") == filter_before + 1, "live chs_filter did not increase by one on create");
+
+    l->schema_free(schema); /* the caller's own reference; the filter still holds one */
+    CHECK(live_count(l, "chs_schema") == schema_before + 1,
+          "live chs_schema dropped after freeing the schema while a filter still holds it");
+
+    chs_buf *out = NULL;
+    CHECK(l->filter_eval_body(filter, CHS_JSON_EACH_ROW, (const uint8_t *) "{}", 2, NULL, 0, &out, &err) == CHS_OK,
+          "chs_filter_eval_body after its schema was freed by the caller");
+    if (out != NULL) l->buf_free(out);
+
+    l->filter_free(filter); /* drops the filter's own hold on the schema too */
+    CHECK(live_count(l, "chs_filter") == filter_before, "live chs_filter did not return to its baseline after free");
+    CHECK(live_count(l, "chs_schema") == schema_before,
+          "live chs_schema did not return to its baseline once the filter that held it was also freed");
+}
+
+/* Two SEPARATELY dlopen'd, byte-identical builds (RTLD_LOCAL: each gets its
+   own static image-identity marker) must refuse each other's handles. */
+static void test_cross_image(lib_t *a, lib_t *b) {
+    chs_buf *out = NULL;
+    chs_error *err = NULL;
+    CHECK(a->quote_string((const uint8_t *) "y", 1, &out, &err) == CHS_OK, "chs_quote_string on lib a");
+    CHECK(b->buf_len(out) == 0, "lib b's chs_buf_len accepted lib a's buf (cross-image not caught)");
+    a->buf_free(out);
+
+    chs_schema *schema = NULL;
+    CHECK(a->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create on lib a");
+    chs_filter *filter = NULL;
+    chs_status st = b->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, &filter, &err);
+    CHECK(st == CHS_INVALID_ARGUMENT, "lib b's chs_filter_create over lib a's schema gave %d, want CHS_INVALID_ARGUMENT",
+          (int) st);
+    if (err != NULL) b->error_free(err);
+    a->schema_free(schema);
+}
+
+static void test_unbound_refuses_rtld_now(const char *dir) {
+    char path[4096];
+    snprintf(path, sizeof path, "%s/unbound.so", dir);
+    FILE *probe = fopen(path, "rb");
+    if (probe == NULL) return; /* build-stubs.sh did not build this variant for this run; nothing to check */
+    fclose(probe);
+    void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    CHECK(h == NULL, "unbound.so opened under RTLD_NOW; it must fail to resolve an undefined symbol eagerly");
+    if (h != NULL) dlclose(h);
+}
+
+int main(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "usage: stubtest <dir containing ok.so and ok-b.so>\n");
+        return 2;
+    }
+    char a_path[4096], b_path[4096];
+    snprintf(a_path, sizeof a_path, "%s/ok.so", argv[1]);
+    snprintf(b_path, sizeof b_path, "%s/ok-b.so", argv[1]);
+    lib_t a = load_lib(a_path);
+    lib_t b = load_lib(b_path);
+
+    test_handshake(&a);
+    test_tombstone(&a);
+    test_sha256_via_echo(&a);
+    test_status_injection(&a);
+    test_free_rules(&a);
+    test_wrong_kind(&a);
+    test_holds_and_live(&a);
+    test_cross_image(&a, &b);
+    test_unbound_refuses_rtld_now(argv[1]);
+
+    if (g_pass == 0) {
+        fprintf(stderr, "stubtest: zero checks ran; that is a failure, not a pass\n");
+        return 1;
+    }
+    if (g_fail > 0) {
+        fprintf(stderr, "stubtest: %d failed, %d passed\n", g_fail, g_pass);
+        return 1;
+    }
+    printf("stubtest: ok (%d checks passed)\n", g_pass);
+    return 0;
+}
