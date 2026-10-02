@@ -25,6 +25,7 @@ pub struct VerifiedRecord {
     pub manifest_digest: String,
     pub layer_digest: String,
     pub bundle_digest: Option<String>,
+    pub bundle_manifest_digest: Option<String>,
     pub signed_by: String,
     /// The library's file name, relative to the unpacked directory.
     pub library: String,

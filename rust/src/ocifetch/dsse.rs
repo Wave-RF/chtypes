@@ -89,6 +89,12 @@ pub struct VerifiedStatement {
     pub predicate: serde_json::Value,
     /// The keyid of the trusted key that verified this bundle.
     pub signed_by: &'static str,
+    /// The digest of the referrer manifest that carried this bundle, and of
+    /// its one layer (the bundle bytes this function verified). Filled in
+    /// by the caller (`referrers.rs`), which is the one that fetched them;
+    /// empty here because [`verify_bundle`] only ever sees the layer bytes.
+    pub bundle_manifest_digest: String,
+    pub bundle_layer_digest: String,
 }
 
 /// DSSE's Pre-Authentication Encoding (the DSSE spec):
@@ -204,6 +210,8 @@ pub fn verify_bundle(
         predicate_type: statement.predicate_type,
         predicate: statement.predicate,
         signed_by,
+        bundle_manifest_digest: String::new(),
+        bundle_layer_digest: String::new(),
     })
 }
 

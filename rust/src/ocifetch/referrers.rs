@@ -138,7 +138,10 @@ fn verify_one(
         )));
     }
     let blob = oci::fetch_blob_by_digest(source, &layer.digest, constants::BUNDLE_MAX_BYTES)?;
-    dsse::verify_bundle(&blob.bytes, trust, constants::STATEMENT_TYPE)
+    let mut stmt = dsse::verify_bundle(&blob.bytes, trust, constants::STATEMENT_TYPE)?;
+    stmt.bundle_manifest_digest = descriptor.digest.clone();
+    stmt.bundle_layer_digest = layer.digest.clone();
+    Ok(stmt)
 }
 
 /// Find a referrer of `subject_digest` whose bundle verifies under a

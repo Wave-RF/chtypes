@@ -21,7 +21,11 @@ pub struct Digests {
     pub index: Option<String>,
     pub manifest: String,
     pub layer: String,
+    /// The bundle's own layer digest — the signed bytes a trust check
+    /// verified (`dsse::verify_bundle`'s input).
     pub bundle: Option<String>,
+    /// The referrer manifest that carried the bundle layer above.
+    pub bundle_manifest: Option<String>,
 }
 
 /// The result of a successful [`ensure`], [`resolve_installed`] or one entry
@@ -283,26 +287,34 @@ fn ensure_online(
     };
 
     let trust_result = referrers::find_trusted_statement(&source, &descriptor.digest, &res.trust);
-    let (predicate, signed_by, bundle_digest, mut warnings) = match trust_result {
-        Ok(stmt) => {
-            if stmt.subject_sha256 != strip_sha256(&layer.digest)? {
-                return Err(Error::ArtifactCorrupt(format!(
-                    "signed subject {} does not match the manifest's layer {}",
-                    stmt.subject_sha256, layer.digest
-                )));
+    let (predicate, signed_by, bundle_layer_digest, bundle_manifest_digest, mut warnings) =
+        match trust_result {
+            Ok(stmt) => {
+                if stmt.subject_sha256 != strip_sha256(&layer.digest)? {
+                    return Err(Error::ArtifactCorrupt(format!(
+                        "signed subject {} does not match the manifest's layer {}",
+                        stmt.subject_sha256, layer.digest
+                    )));
+                }
+                (
+                    stmt.predicate,
+                    stmt.signed_by.to_string(),
+                    Some(stmt.bundle_layer_digest),
+                    Some(stmt.bundle_manifest_digest),
+                    Vec::new(),
+                )
             }
-            (stmt.predicate, stmt.signed_by.to_string(), None, Vec::new())
-        }
-        Err(Error::ArtifactUntrusted(detail)) if options.allow_unsigned => (
-            serde_json::Value::Null,
-            String::new(),
-            None,
-            vec![format!(
-                "proceeding WITHOUT a verified signature (CHTYPES_ALLOW_UNSIGNED): {detail}"
-            )],
-        ),
-        Err(e) => return Err(e),
-    };
+            Err(Error::ArtifactUntrusted(detail)) if options.allow_unsigned => (
+                serde_json::Value::Null,
+                String::new(),
+                None,
+                None,
+                vec![format!(
+                    "proceeding WITHOUT a verified signature (CHTYPES_ALLOW_UNSIGNED): {detail}"
+                )],
+            ),
+            Err(e) => return Err(e),
+        };
 
     if !options.allow_unsigned {
         validate_predicate(&predicate, &res.platform, version_request)?;
@@ -344,7 +356,8 @@ fn ensure_online(
             channel: predicate["channel"].as_str().map(str::to_string),
             manifest_digest: descriptor.digest.clone(),
             layer_digest: layer.digest.clone(),
-            bundle_digest: bundle_digest.clone(),
+            bundle_digest: bundle_layer_digest.clone(),
+            bundle_manifest_digest: bundle_manifest_digest.clone(),
             signed_by: signed_by.clone(),
             library: library_name.clone(),
             library_sha256: library_sha256.clone(),
@@ -390,6 +403,7 @@ fn ensure_online(
                 manifest: descriptor.digest.clone(),
                 layer: layer.digest.clone(),
                 bundle: record.bundle_digest,
+                bundle_manifest: record.bundle_manifest_digest,
             },
             predicate: record.predicate,
             signed_by: record.signed_by,
@@ -437,6 +451,7 @@ fn ensure_frozen(
                 manifest: entry.manifest.clone(),
                 layer: entry.layer.clone(),
                 bundle: Some(entry.bundle.clone()),
+                bundle_manifest: record.bundle_manifest_digest.clone(),
             },
             predicate: record.predicate,
             signed_by: record.signed_by,
@@ -462,11 +477,17 @@ fn ensure_frozen(
     }
 
     let stmt = referrers::find_trusted_statement(&source, &entry.manifest, &res.trust);
-    let (predicate, signed_by) = match stmt {
-        Ok(s) => (s.predicate, s.signed_by.to_string()),
-        Err(e) if options.allow_unsigned => {
-            (serde_json::Value::Null, format!("UNSIGNED (allowed): {e}"))
-        }
+    let (predicate, signed_by, bundle_manifest_digest) = match stmt {
+        Ok(s) => (
+            s.predicate,
+            s.signed_by.to_string(),
+            Some(s.bundle_manifest_digest),
+        ),
+        Err(e) if options.allow_unsigned => (
+            serde_json::Value::Null,
+            format!("UNSIGNED (allowed): {e}"),
+            None,
+        ),
         Err(e) => return Err(e),
     };
 
@@ -490,6 +511,7 @@ fn ensure_frozen(
         manifest_digest: entry.manifest.clone(),
         layer_digest: entry.layer.clone(),
         bundle_digest: Some(entry.bundle.clone()),
+        bundle_manifest_digest: bundle_manifest_digest.clone(),
         signed_by: signed_by.clone(),
         library: library_name.clone(),
         library_sha256: library_sha256.clone(),
@@ -518,6 +540,7 @@ fn ensure_frozen(
             manifest: entry.manifest.clone(),
             layer: entry.layer.clone(),
             bundle: Some(entry.bundle.clone()),
+            bundle_manifest: bundle_manifest_digest,
         },
         predicate,
         signed_by,
@@ -722,7 +745,8 @@ pub fn fetch_signed(
             index: None,
             manifest: manifest_digest,
             layer: layer.digest.clone(),
-            bundle: None,
+            bundle: Some(stmt.bundle_layer_digest),
+            bundle_manifest: Some(stmt.bundle_manifest_digest),
         },
     ))
 }
@@ -870,6 +894,7 @@ fn record_to_resolved(
             manifest: record.manifest_digest,
             layer: record.layer_digest,
             bundle: record.bundle_digest,
+            bundle_manifest: record.bundle_manifest_digest,
         },
         predicate: record.predicate,
         signed_by: record.signed_by,
