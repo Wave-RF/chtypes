@@ -126,6 +126,23 @@ function isRetryableStatus(status: number): boolean {
 }
 
 /**
+ * A connection-level failure meaning "nothing is answering here at all" —
+ * refused, no route, or DNS failed to resolve a name — as opposed to a
+ * timeout waiting for a slow or stalled peer. The retry table's backoff
+ * schedule is for a peer that IS there but answering badly (a status code,
+ * or a stall); a dead host gets **zero** sleep and fails this base
+ * immediately, so the caller's multi-base loop moves on at once
+ * (`connection-refused-then-next-base`: sleeps `[]`, not `[4]`). A timeout
+ * (this server's own `connect timeout` on a stalled socket, `ETIMEDOUT`,
+ * `ECONNRESET` mid-stream) stays in the normal backoff-and-retry path
+ * (`stall-timeout-retried`: sleeps `[4]`).
+ */
+function isDeadHostError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  return code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EHOSTUNREACH' || code === 'ENETUNREACH';
+}
+
+/**
  * `Retry-After`, in both forms (`docs/guides/fetch-v1.md` §7): a delta in
  * seconds, or an HTTP-date, for which the delay is the date minus the
  * response's own `Date` header (or `clock.now()` when absent).
@@ -347,7 +364,7 @@ export async function requestBuffered(startUrl: string, options: RequestOptions)
         return {
           outcome: {
             ok: false,
-            retryable: true,
+            retryable: !isDeadHostError(err),
             status: undefined,
             retryAfterSeconds: undefined,
             message: `${method} ${url.toString()} failed: ${(err as Error).message}`,
@@ -475,7 +492,7 @@ export async function requestToSink(
         return {
           outcome: {
             ok: false,
-            retryable: true,
+            retryable: !isDeadHostError(err),
             status: undefined,
             retryAfterSeconds: undefined,
             message: `GET ${url.toString()} failed: ${(err as Error).message}`,

@@ -36,8 +36,27 @@ export function systemDirs(override?: readonly string[]): readonly string[] {
   return override ?? SYSTEM_CACHE_DIRS;
 }
 
-function blobsDir(root: string): string {
+export function blobsDir(root: string): string {
   return path.join(root, 'blobs', 'sha256');
+}
+
+/** Reads a local blob by its hex digest, `undefined` when it is not there — never throws on ENOENT. */
+export async function readLocalBlob(root: string, hex: string): Promise<Buffer | undefined> {
+  try {
+    return await readFile(path.join(blobsDir(root), hex));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+}
+
+/** Every blob hex name present under `blobs/sha256/` — `[]` when the directory does not exist. */
+export async function listLocalBlobHexes(root: string): Promise<readonly string[]> {
+  try {
+    return await readdir(blobsDir(root));
+  } catch {
+    return [];
+  }
 }
 
 export function unpackedDir(root: string, manifestDigestHex: string): string {
@@ -90,10 +109,12 @@ export async function installBlob(root: string, digestHex: string, bytes: Buffer
 
 // ------------------------------------------------------------- index.json
 
-interface IndexDescriptor {
+export interface IndexDescriptor {
   readonly mediaType: string;
   readonly digest: string;
   readonly size: number;
+  readonly artifactType?: string;
+  readonly platform?: { readonly os: string; readonly architecture: string };
   readonly annotations?: Readonly<Record<string, string>>;
 }
 

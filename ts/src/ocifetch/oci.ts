@@ -146,24 +146,38 @@ async function fetchByDigestAcrossBases(
   extraHeaders?: Readonly<Record<string, string>>,
 ): Promise<Buffer> {
   if (bases.length === 0) throw new Error('chtypes: no base URLs configured');
+  let lastUnreachable: SourceUnreachableError | undefined;
   for (let i = 0; i < bases.length; i++) {
     const base = bases[i]!;
     const isLast = i === bases.length - 1;
     const url = endpointUrl(base, pathFor(descriptor.digest));
     const maxBytes = descriptor.size ?? defaultMaxBytes;
-    const res = url.startsWith('file:')
-      ? await readFileUrl(url, maxBytes)
-      : await requestBuffered(url, {
-          ...options,
-          maxBytes,
-          retryOn404: isLast,
-          headers: { ...options.headers, ...extraHeaders },
-        });
+    let res: { status: number; body: Buffer };
+    try {
+      res = url.startsWith('file:')
+        ? await readFileUrl(url, maxBytes)
+        : await requestBuffered(url, {
+            ...options,
+            maxBytes,
+            retryOn404: isLast,
+            headers: { ...options.headers, ...extraHeaders },
+          });
+    } catch (err) {
+      // A temporary error (guide §2: a timeout, a 5xx exhausted, a dead
+      // host) moves to the next base — never a verification failure, which
+      // propagates immediately (`mirror-no-failover-on-verify-fail`).
+      if (err instanceof SourceUnreachableError && !isLast) {
+        lastUnreachable = err;
+        continue;
+      }
+      throw err;
+    }
     if (res.status === 404) continue;
     if (res.status !== 200) throw new SourceUnreachableError(`chtypes: ${url} returned status ${res.status}`);
     verifyDescriptor(descriptor, res.body, what);
     return res.body;
   }
+  if (lastUnreachable !== undefined) throw lastUnreachable;
   // Unreachable through an ordinary persistent 404 on the last base: that
   // already throws `SourceUnreachableError` from inside `requestBuffered`
   // (via `retryOn404`) before control returns here. This covers only an
@@ -211,23 +225,33 @@ export interface ByteSink {
 export async function fetchBlobToSink(bases: readonly string[], descriptor: Descriptor, options: RequestOptions, sink: ByteSink): Promise<void> {
   if (bases.length === 0) throw new Error('chtypes: no base URLs configured');
   const maxBytes = descriptor.size ?? MAX_UNPACKED_BYTES;
+  let lastUnreachable: SourceUnreachableError | undefined;
   for (let i = 0; i < bases.length; i++) {
     const base = bases[i]!;
     const isLast = i === bases.length - 1;
     const url = endpointUrl(base, `/blobs/${descriptor.digest}`);
-    if (url.startsWith('file:')) {
-      const res = await readFileUrl(url, maxBytes);
+    try {
+      if (url.startsWith('file:')) {
+        const res = await readFileUrl(url, maxBytes);
+        if (res.status === 404) continue;
+        if (res.status !== 200) throw new SourceUnreachableError(`chtypes: ${url} returned status ${res.status}`);
+        sink.reset();
+        sink.write(res.body);
+        return;
+      }
+      const res = await requestToSink(url, { ...options, maxBytes, retryOn404: isLast }, sink);
       if (res.status === 404) continue;
-      if (res.status !== 200) throw new SourceUnreachableError(`chtypes: ${url} returned status ${res.status}`);
-      sink.reset();
-      sink.write(res.body);
+      if (res.status !== 200 && res.status !== 206) throw new SourceUnreachableError(`chtypes: ${url} returned status ${res.status}`);
       return;
+    } catch (err) {
+      if (err instanceof SourceUnreachableError && !isLast) {
+        lastUnreachable = err;
+        continue;
+      }
+      throw err;
     }
-    const res = await requestToSink(url, { ...options, maxBytes, retryOn404: isLast }, sink);
-    if (res.status === 404) continue;
-    if (res.status !== 200 && res.status !== 206) throw new SourceUnreachableError(`chtypes: ${url} returned status ${res.status}`);
-    return;
   }
+  if (lastUnreachable !== undefined) throw lastUnreachable;
   throw new SourceUnreachableError(`chtypes: blob ${descriptor.digest} was not found on any configured base`);
 }
 
@@ -261,9 +285,25 @@ export async function resolveTag(
   if (bases.length === 0) throw new Error('chtypes: no base URLs configured');
   const info = platformInfo(platform);
   const triedBases: string[] = [];
-  for (const base of bases) {
+  for (let baseIndex = 0; baseIndex < bases.length; baseIndex++) {
+    const base = bases[baseIndex]!;
+    const isLastBase = baseIndex === bases.length - 1;
     const url = endpointUrl(base, `/manifests/${spelling}`);
-    const { status, body, json } = await getJsonAt(url, MANIFEST_MAX_BYTES, options);
+    let status: number;
+    let body: Buffer;
+    let json: Json | null;
+    try {
+      ({ status, body, json } = await getJsonAt(url, MANIFEST_MAX_BYTES, options));
+    } catch (err) {
+      // A temporary error (guide §2: a timeout, a 5xx exhausted, a dead
+      // host) moves to the next base, same as a tag 404 — never a
+      // verification failure, which propagates immediately.
+      if (err instanceof SourceUnreachableError && !isLastBase) {
+        triedBases.push(base);
+        continue;
+      }
+      throw err;
+    }
     if (status === 404) {
       triedBases.push(base);
       continue;

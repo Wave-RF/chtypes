@@ -2,40 +2,45 @@
  * The v1 conformance runner (`docs/guides/fetch-v1.md` §10, the v1
  * fetch-layer plan's §3.3): `CHTYPES_V1_CONFORMANCE=<path to
  * tests/fixtures/fetch-v1>` runs every case in `cases.json` on every
- * transport it lists, against this binding's own `ensure`/`resolveInstalled`
- * seam, and writes `CHTYPES_V1_REPORT`. Unset, it **skips loudly by name** —
- * the fixtures tree does not exist yet (lane 0B, building in parallel), so
- * this suite is a real implementation of the runner CONTRACT, not yet
- * exercised against real fixtures. The parity gate under `scripts/fetch-v1/`
- * (also lane 0B, not yet landed) is what finally proves every
- * `(case, transport)` pair passes.
+ * transport it lists for this binding (`file`, `http`; `registry` is the
+ * `v1-network` job's own leg, not attempted here), against this binding's
+ * `ensure`/`fetchSigned` seam, and writes `CHTYPES_V1_REPORT`. Unset, it
+ * **skips loudly by name**.
  *
- * CI runs this exact command (plan §3.3):
+ * CI runs this exact command (plan §3.3, `.github/workflows/v1.yml`):
  * `cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts`.
  */
 
-import { writeFile } from 'node:fs/promises';
+import { type ChildProcessByStdio, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ensure } from '../../src/ocifetch/ensure.js';
+import { ensure, fetchSigned } from '../../src/ocifetch/ensure.js';
+import { FIXTURES_REPO_SUFFIX, PREDICATE_TYPE_FIXTURES, PREDICATE_TYPE_GOLDENS, RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
 import type { FetchV1ErrorCode } from '../../src/ocifetch/errors.js';
+import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
+import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
 import type { Clock, PlatformKey } from '../../src/ocifetch/types.js';
 
 const CONFORMANCE_DIR = process.env['CHTYPES_V1_CONFORMANCE'];
 const REPORT_PATH = process.env['CHTYPES_V1_REPORT'];
+
+// ---------------------------------------------------------------- the shapes
 
 interface CaseFile {
   readonly schema: 1;
   readonly cases: readonly ConformanceCase[];
 }
 
+type Transport = 'file' | 'http' | 'registry';
+
 interface ConformanceCase {
   readonly id: string;
   readonly tree: string;
-  readonly transports: readonly ('file' | 'http' | 'registry')[];
+  readonly transports: readonly Transport[];
   readonly http_script: string | null;
   readonly setup: {
     readonly cache: string;
@@ -71,13 +76,19 @@ interface ConformanceCase {
 
 interface ReportResult {
   readonly id: string;
-  readonly transport: 'file' | 'http' | 'registry';
+  readonly transport: Transport;
   readonly verdict: 'pass' | 'fail';
   readonly detail: string;
 }
 
+interface RequestLogEntry {
+  readonly method: string;
+  readonly path: string;
+  readonly origin: string;
+  readonly headers: Record<string, string>;
+}
+
 function toolchainId(): string {
-  // "v22.21.0" -> "node22.21.0", matching the report schema's example.
   return `node${process.version.replace(/^v/, '')}`;
 }
 
@@ -90,22 +101,14 @@ function recordingClock(sleeps: number[]): Clock {
   };
 }
 
-/** `{base}` expansion for one case/transport, per the plan's §3.2. */
-function expandBase(template: string, transport: 'file' | 'http' | 'registry', serverPort: number | undefined, caseId: string, tree: string, conformanceDir: string): string {
-  if (template !== '{base}') return template;
-  if (transport === 'file') {
-    return `file://${path.resolve(conformanceDir, 'trees', tree, 'v2', 'chtypes', 'v1')}`;
-  }
-  if (transport === 'http') {
-    return `http://127.0.0.1:${serverPort}/s-${caseId}/chtypes/v1`;
-  }
-  return 'https://registry.test:5443/chtypes/v1';
-}
+// ----------------------------------------------------------- the http server
 
-async function startServer(conformanceDir: string): Promise<{ proc: ChildProcessByStdio<null, Readable, Readable>; port: number } | undefined> {
+type ServerProcess = ChildProcessByStdio<null, Readable, Readable>;
+
+async function startServer(conformanceDir: string): Promise<{ proc: ServerProcess; port: number } | undefined> {
   const scriptPath = path.resolve(conformanceDir, '..', '..', '..', 'scripts', 'fetch-v1', 'server.py');
   return new Promise((resolve) => {
-    let proc: ChildProcessByStdio<null, Readable, Readable>;
+    let proc: ServerProcess;
     try {
       proc = spawn('python3', [scriptPath, '--fixtures', conformanceDir, '--port', '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
     } catch {
@@ -127,83 +130,211 @@ async function startServer(conformanceDir: string): Promise<{ proc: ChildProcess
   });
 }
 
+async function fetchRequestLog(port: number, caseId: string): Promise<readonly RequestLogEntry[]> {
+  const res = await fetch(`http://127.0.0.1:${port}/_log/s-${caseId}`);
+  if (!res.ok) return [];
+  return (await res.json()) as readonly RequestLogEntry[];
+}
+
+/** `{base}` expansion for one case/transport (plan §3.2, guide §10's "{base} per transport"). */
+function expandBase(template: string, transport: Transport, serverPort: number | undefined, caseId: string, tree: string, conformanceDir: string): string {
+  if (!template.includes('{base}')) return template;
+  const base =
+    transport === 'file'
+      ? `file://${path.resolve(conformanceDir, 'trees', tree, 'v2', 'chtypes', 'v1')}`
+      : transport === 'http'
+        ? `http://127.0.0.1:${serverPort}/s-${caseId}/chtypes/v1`
+        : 'https://registry.test:5443/chtypes/v1';
+  return template.replace('{base}', base);
+}
+
+// --------------------------------------------------------------- lock compare
+
+/** Structural equality for a lock, ignoring `platforms`' array order (the schema does not require one). */
+function locksEqual(a: LockFile, b: LockFile): boolean {
+  if (a.schema !== b.schema || a.abi !== b.abi) return false;
+  if ([...a.platforms].sort().join(',') !== [...b.platforms].sort().join(',')) return false;
+  return deepEqual(a.requests, b.requests);
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  const ak = Object.keys(a as Record<string, unknown>).sort();
+  const bk = Object.keys(b as Record<string, unknown>).sort();
+  if (ak.join(',') !== bk.join(',')) return false;
+  return ak.every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
+// ------------------------------------------------------------------ the suite
+
 describe.skipIf(CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '')('v1 conformance', () => {
   let caseFile: CaseFile;
   let casesSha256: string;
-  let server: { proc: ChildProcessByStdio<null, Readable, Readable>; port: number } | undefined;
+  let server: { proc: ServerProcess; port: number } | undefined;
   const results: ReportResult[] = [];
 
   beforeAll(async () => {
     if (CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '') return;
-    const { readFile } = await import('node:fs/promises');
     const raw = await readFile(path.join(CONFORMANCE_DIR, 'cases.json'));
     casesSha256 = createHash('sha256').update(raw).digest('hex');
     caseFile = JSON.parse(raw.toString('utf8')) as CaseFile;
     if (caseFile.cases.some((c) => c.transports.includes('http'))) {
       server = await startServer(CONFORMANCE_DIR);
     }
-  });
+  }, 30_000);
 
   afterAll(async () => {
     server?.proc.kill();
     if (REPORT_PATH !== undefined && REPORT_PATH !== '' && caseFile !== undefined) {
       const report = { schema: 1, binding: 'ts', toolchain: toolchainId(), cases_sha256: casesSha256, results };
+      await mkdir(path.dirname(REPORT_PATH), { recursive: true });
       await writeFile(REPORT_PATH, JSON.stringify(report, null, 2));
     }
   });
 
-  it('every case in cases.json runs on every transport it lists', async () => {
+  it('every case in cases.json passes on every transport it lists (file, http)', async () => {
     if (CONFORMANCE_DIR === undefined) return;
     for (const c of caseFile.cases) {
       for (const transport of c.transports) {
-        if (transport === 'registry' && process.env['CHTYPES_V1_REGISTRY_BASE'] === undefined) {
-          // The v1-network job's own leg supplies a reachable registry.test;
-          // elsewhere this transport is not attempted (see this lane's
-          // MERGE NOTES — the exact wiring is lane 0B/merge's to confirm).
-          continue;
-        }
-        const detail = await runOne(c, transport, CONFORMANCE_DIR, server?.port);
+        if (transport === 'registry') continue; // the v1-network job's own leg.
+        const detail = await runOne(c, transport, CONFORMANCE_DIR, server?.port).catch(
+          (err: unknown) => `runner threw: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
+        );
         results.push({ id: c.id, transport, verdict: detail === '' ? 'pass' : 'fail', detail });
       }
     }
     const failures = results.filter((r) => r.verdict === 'fail');
     expect(failures, failures.map((f) => `${f.id}/${f.transport}: ${f.detail}`).join('\n')).toEqual([]);
-  });
+  }, 300_000);
 });
 
-async function runOne(
-  c: ConformanceCase,
-  transport: 'file' | 'http' | 'registry',
-  conformanceDir: string,
-  serverPort: number | undefined,
-): Promise<string> {
+// ------------------------------------------------------------------ one case
+
+async function runOne(c: ConformanceCase, transport: Transport, conformanceDir: string, serverPort: number | undefined): Promise<string> {
+  const work = await mkdtemp(path.join(tmpdir(), 'ocifetch-v1-case-'));
   try {
-    const bases = c.request.bases.map((b) => expandBase(b, transport, serverPort, c.id, c.tree, conformanceDir));
-    const sleeps: number[] = [];
-    const { mkdtemp, rm } = await import('node:fs/promises');
-    const { tmpdir } = await import('node:os');
-    const cacheDir = await mkdtemp(path.join(tmpdir(), 'ocifetch-v1-conformance-'));
+    const cacheDir = path.join(work, 'cache');
+    await mkdir(cacheDir, { recursive: true });
+    if (c.setup.cache !== 'empty') {
+      await cp(path.join(conformanceDir, 'layouts', c.setup.cache), cacheDir, { recursive: true });
+    }
+
+    const trustedKeys =
+      c.request.trust === 'test'
+        ? [{ keyid: TEST_KEYS[0]!.keyid, ed25519Hex: TEST_KEYS[0]!.ed25519Hex }]
+        : RELEASE_KEYS.map((k) => ({ keyid: k.keyid, ed25519Hex: k.ed25519Hex }));
+
+    // installed.json: pre-install exactly these digests, offline, from local
+    // blobs, before the timed part of the case (plan §3.2's `installed.json`
+    // convention, guide §10's "Cache fixtures and installed.json").
+    const installedPath = path.join(cacheDir, 'installed.json');
     try {
-      const resolved = await ensure(c.request.spelling, {
-        bases,
-        platform: c.request.platform,
-        offline: c.request.offline,
-        frozen: c.request.frozen,
-        allowUnsigned: c.request.allow_unsigned,
-        clock: recordingClock(sleeps),
-        cacheDir,
-      });
-      if (!c.expect.ok) return `expected failure ${c.expect.code}, got ok with version ${resolved.version}`;
-      if (c.expect.version !== null && resolved.version !== c.expect.version) {
-        return `version ${resolved.version} != expected ${c.expect.version}`;
+      const raw = JSON.parse(await readFile(installedPath, 'utf8')) as { installed: readonly string[] };
+      for (const digest of raw.installed) {
+        await verifyAndInstallFromLocalBlobs(cacheDir, cacheDir, digest, c.request.platform, trustedKeys);
       }
-      if (c.expect.sleeps.length > 0 && sleeps.join(',') !== c.expect.sleeps.join(',')) {
+    } catch {
+      // No installed.json for this fixture — nothing to pre-install.
+    }
+
+    const systemDirRoots: string[] = [];
+    for (const name of c.setup.system_dirs) {
+      const sysDir = path.join(work, 'system', name);
+      await mkdir(sysDir, { recursive: true });
+      await cp(path.join(conformanceDir, 'layouts', name), sysDir, { recursive: true });
+      systemDirRoots.push(sysDir);
+    }
+
+    const lockPath = path.join(work, 'chtypes.lock');
+    if (c.setup.lock !== null) {
+      await cp(path.join(conformanceDir, 'locks', 'inputs', `${c.setup.lock}.json`), lockPath);
+    }
+
+    const beforeIndexRename = c.setup.before_index_rename_hook === null ? undefined : indexRenameHook(c.setup.before_index_rename_hook, cacheDir);
+
+    const sleeps: number[] = [];
+    const bases = c.request.bases.map((b) => expandBase(b, transport, serverPort, c.id, c.tree, conformanceDir));
+    const token = c.env['CHTYPES_DOWNLOAD_TOKEN'];
+
+    const baseOptions = {
+      bases,
+      platform: c.request.platform,
+      offline: c.request.offline,
+      frozen: c.request.frozen,
+      allowUnsigned: c.request.allow_unsigned,
+      clock: recordingClock(sleeps),
+      cacheDir,
+      systemDirs: systemDirRoots,
+      lockPath,
+      trustedKeys,
+      ...(token !== undefined ? { token } : {}),
+      ...(beforeIndexRename !== undefined ? { beforeIndexRename } : {}),
+    };
+
+    let resultDetail: string;
+    if (c.id.startsWith('goldens-') || c.id.startsWith('fixtures-')) {
+      resultDetail = await runGenericFetch(c, bases, baseOptions);
+    } else {
+      resultDetail = await runEnsure(c, baseOptions, lockPath, conformanceDir);
+    }
+    if (resultDetail !== '') return resultDetail;
+
+    if (c.expect.sleeps.length > 0 || sleeps.length > 0) {
+      if (sleeps.join(',') !== c.expect.sleeps.join(',')) {
         return `sleeps [${sleeps.join(',')}] != expected [${c.expect.sleeps.join(',')}]`;
       }
-      return '';
-    } finally {
-      await rm(cacheDir, { recursive: true, force: true });
     }
+
+    if (transport === 'http' && serverPort !== undefined) {
+      const logDetail = await checkRequestLog(serverPort, c);
+      if (logDetail !== '') return logDetail;
+    }
+
+    return '';
+  } finally {
+    await rm(work, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+type EnsureOptions = Parameters<typeof ensure>[1];
+
+async function runEnsure(c: ConformanceCase, baseOptions: EnsureOptions, lockPath: string, conformanceDir: string): Promise<string> {
+  try {
+    const resolved = await ensure(c.request.spelling, {
+      ...baseOptions,
+      lockWrite: c.request.lock_write,
+      lockAllPlatforms: c.request.lock_write,
+      update: c.request.update,
+    });
+    if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got ok with version ${resolved.version}`;
+    if (c.expect.version !== null && resolved.version !== c.expect.version) {
+      return `version ${resolved.version} != expected ${c.expect.version}`;
+    }
+    if (c.expect.build !== null && resolved.build !== c.expect.build) {
+      return `build ${resolved.build} != expected ${c.expect.build}`;
+    }
+    if (c.expect.manifest !== null && resolved.digests.manifest !== c.expect.manifest) {
+      return `manifest ${resolved.digests.manifest} != expected ${c.expect.manifest}`;
+    }
+    if (c.expect.library_sha256 !== null && resolved.predicate.library_sha256 !== c.expect.library_sha256) {
+      return `library_sha256 ${resolved.predicate.library_sha256} != expected ${c.expect.library_sha256}`;
+    }
+    for (const w of c.expect.warnings) {
+      if (!resolved.warnings.some((have) => have.includes(w))) {
+        return `expected a warning containing ${JSON.stringify(w)}, got [${resolved.warnings.join(' | ')}]`;
+      }
+    }
+    if (c.expect.lock_after !== null) {
+      const expectedRaw = await readFile(path.join(conformanceDir, 'locks', 'expected', `${c.expect.lock_after}.json`), 'utf8');
+      const expected = JSON.parse(expectedRaw) as LockFile;
+      const actual = await readLock(lockPath);
+      if (actual === undefined) return `expected a lock to be written at ${lockPath}, found none`;
+      if (!locksEqual(actual, expected)) {
+        return `lock_after mismatch:\n  got: ${JSON.stringify(actual)}\n  want: ${JSON.stringify(expected)}`;
+      }
+    }
+    return '';
   } catch (err) {
     if (c.expect.ok) return `unexpected throw: ${err instanceof Error ? err.message : String(err)}`;
     const code = (err as { code?: string }).code;
@@ -212,4 +343,87 @@ async function runOne(
     }
     return '';
   }
+}
+
+async function runGenericFetch(c: ConformanceCase, bases: readonly string[], baseOptions: EnsureOptions): Promise<string> {
+  const isGoldens = c.id.startsWith('goldens-');
+  const repository = isGoldens ? bases[0]! : `${bases[0]}${FIXTURES_REPO_SUFFIX}`;
+  const predicateType = isGoldens ? PREDICATE_TYPE_GOLDENS : PREDICATE_TYPE_FIXTURES;
+  try {
+    const result = await fetchSigned(repository, c.request.spelling, predicateType, baseOptions);
+    if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got ok`;
+    if (c.expect.manifest !== null && result.digests.manifest !== c.expect.manifest) {
+      return `manifest ${result.digests.manifest} != expected ${c.expect.manifest}`;
+    }
+    if (c.expect.library_sha256 !== null) {
+      const bytes = await readFile(result.path);
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      if (sha256 !== c.expect.library_sha256) return `fetched content sha256 ${sha256} != expected ${c.expect.library_sha256}`;
+    }
+    return '';
+  } catch (err) {
+    if (c.expect.ok) return `unexpected throw: ${err instanceof Error ? err.message : String(err)}`;
+    const code = (err as { code?: string }).code;
+    if (c.expect.code !== null && code !== c.expect.code) {
+      return `code ${code} != expected ${c.expect.code} (${err instanceof Error ? err.message : String(err)})`;
+    }
+    return '';
+  }
+}
+
+// --------------------------------------------------------------- the request log
+
+async function checkRequestLog(serverPort: number, c: ConformanceCase): Promise<string> {
+  const log = await fetchRequestLog(serverPort, c.id);
+  if (c.expect.requests.max !== null && log.length > c.expect.requests.max) {
+    return `${log.length} requests were made, expected at most ${c.expect.requests.max}`;
+  }
+  for (const pattern of c.expect.requests.none_matching) {
+    const re = new RegExp(pattern);
+    for (const entry of log) {
+      const line = `${entry.method} ${entry.path}`;
+      if (re.test(line)) return `request ${JSON.stringify(line)} matched the forbidden pattern ${JSON.stringify(pattern)}`;
+    }
+  }
+  const secondOriginAuthed = log.some((e) => e.origin === 'second' && e.headers['authorization'] !== undefined);
+  if (c.expect.requests.auth_on_second_origin !== secondOriginAuthed) {
+    return `auth_on_second_origin: expected ${c.expect.requests.auth_on_second_origin}, got ${secondOriginAuthed}`;
+  }
+  return '';
+}
+
+// ------------------------------------------------------------------- hooks
+
+/**
+ * `before_index_rename_hook` (plan §3.2): a test-setup instruction naming a
+ * race scenario this runner itself simulates — never a fixture file. Each
+ * named hook writes a competing `index.json` directly (bypassing this
+ * binding's own writer) between this call and the real atomic rename, so
+ * `layout.ts`'s optimistic-concurrency re-read-and-reapply loop has
+ * something real to survive (`index-race-reapply`, guide §1).
+ */
+function indexRenameHook(name: string, cacheDir: string): () => Promise<void> {
+  if (name === 'index-race-reapply') {
+    let fired = false;
+    return async () => {
+      if (fired) return; // the retry loop calls this again on its second pass; race once.
+      fired = true;
+      const competing = {
+        schemaVersion: 2,
+        mediaType: 'application/vnd.oci.image.index.v1+json',
+        manifests: [
+          {
+            mediaType: 'application/vnd.oci.image.manifest.v1+json',
+            digest: `sha256:${'0'.repeat(64)}`,
+            size: 1,
+            artifactType: 'application/vnd.wavehouse.chtypes.artifact.v1',
+            platform: { os: 'linux', architecture: 'arm64' },
+            annotations: { 'org.opencontainers.image.ref.name': '0.0.0.0' },
+          },
+        ],
+      };
+      await writeFile(path.join(cacheDir, 'index.json'), JSON.stringify(competing));
+    };
+  }
+  return async () => {};
 }

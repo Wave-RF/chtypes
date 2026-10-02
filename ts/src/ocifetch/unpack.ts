@@ -127,6 +127,31 @@ async function* decompressAllZstdFrames(compressed: Buffer, windowLogMax: number
 }
 
 /**
+ * Verifies already-in-memory layer bytes against their own descriptor, then
+ * zstd-decodes and unpacks into `destDir` (guide §5, steps 1-4) — the shared
+ * core both `fetchVerifyAndUnpackLayer` (downloaded bytes) and
+ * `localverify.ts` (bytes read straight from a local `blobs/sha256/<hex>`,
+ * for a pre-seeded cache entry) build on.
+ */
+export async function verifyAndUnpackLayerBytes(layerBytes: Buffer, layer: Descriptor, destDir: string): Promise<readonly ExtractedEntry[]> {
+  const sha256 = createHash('sha256').update(layerBytes).digest('hex');
+  // Size and sha256 against the descriptor, BEFORE any decompression
+  // (guide §5 step 1) — `tampered-layer` must show no unpack attempted.
+  verifyDigestAndSize(layer, sha256, layerBytes.length, `layer ${layer.digest}`);
+
+  const decompressed = Readable.from(decompressAllZstdFrames(layerBytes, ZSTD_WINDOW_LOG_MAX));
+  try {
+    return await extractTarStream([decompressed], destDir, {
+      refuseDuplicateNames: true,
+      maxTotalBytes: MAX_UNPACKED_BYTES,
+    });
+  } catch (err) {
+    if (err instanceof ArtifactCorruptError) throw err;
+    throw new ArtifactCorruptError(`chtypes: layer ${layer.digest} failed to decode or unpack: ${errorText(err)}`, { cause: err });
+  }
+}
+
+/**
  * Downloads `layer` (verified against its own descriptor) and unpacks it
  * into `destDir`, which must already exist and be empty. `tempLayerPath` is
  * a caller-owned scratch file for the compressed bytes (removed by the
@@ -148,20 +173,7 @@ export async function fetchVerifyAndUnpackLayer(
     sink.abort();
     throw err;
   }
-  // Size and sha256 against the descriptor, BEFORE any decompression
-  // (guide §5 step 1) — `tampered-layer` must show no unpack attempted.
-  verifyDigestAndSize(layer, downloaded.sha256, downloaded.size, `layer ${layer.digest}`);
-
-  const decompressed = Readable.from(decompressAllZstdFrames(downloaded.bytes, ZSTD_WINDOW_LOG_MAX));
-  try {
-    return await extractTarStream([decompressed], destDir, {
-      refuseDuplicateNames: true,
-      maxTotalBytes: MAX_UNPACKED_BYTES,
-    });
-  } catch (err) {
-    if (err instanceof ArtifactCorruptError) throw err;
-    throw new ArtifactCorruptError(`chtypes: layer ${layer.digest} failed to decode or unpack: ${errorText(err)}`, { cause: err });
-  }
+  return verifyAndUnpackLayerBytes(downloaded.bytes, layer, destDir);
 }
 
 /** Re-hashes the installed library against the signed predicate's `library_sha256`/`library_bytes` (guide §5 step 5). */

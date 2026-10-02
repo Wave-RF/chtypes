@@ -30,8 +30,10 @@ import {
   commitStaging,
   ensureLayout,
   freshStagingDir,
+  type IndexDescriptor,
   installBlob,
   listVerified,
+  readIndexEntries,
   readVerifiedRecord,
   removeStaging,
   systemDirs,
@@ -40,6 +42,7 @@ import {
   type VerifiedRecord,
   writeVerifiedRecord,
 } from './layout.js';
+import { verifyAndInstallFromLocalBlobs } from './localverify.js';
 import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, resolveTag } from './oci.js';
 import { emptyLock, getPin, type LockFile, readLock, withPin, writeLock } from './lock.js';
 import { digestOfHex, hexOfDigest, platformInfo, realClock, resolvePlatformOption } from './types.js';
@@ -117,10 +120,13 @@ function resolvedFromRecord(
 /**
  * Never touches the network (guide §9). The source of truth is the
  * immutable `unpacked/sha256/*\/verified.json` records (guide §6) — never
- * `index.json`. Picks the newest match (version, then build, both compared
- * as fixed-width strings per the guide's monotonicity rule) among records
- * whose platform matches and whose `clickhouse_version` lies within
- * `request`.
+ * `index.json` directly, though a pre-seeded `index.json` entry with no
+ * `verified.json` of its own yet is verified and unpacked from local blobs
+ * first (guide §1), exactly once, so every call after the first reads the
+ * same way `verified.json`-backed entries always have. Picks the newest
+ * match (version, then build, both compared as fixed-width strings per the
+ * guide's monotonicity rule) among records whose platform matches and whose
+ * `clickhouse_version` lies within `request`.
  */
 export async function resolveInstalled(
   request: string,
@@ -128,23 +134,56 @@ export async function resolveInstalled(
   options: FetchV1Options = {},
 ): Promise<Resolved | undefined> {
   const root = cacheRoot(options.cacheDir);
+  const trustedKeys = defaultTrustedKeys(options);
+  await verifyPreseededEntries(root, root, platform, trustedKeys);
+  for (const sysDir of systemDirs(options.systemDirs)) {
+    await verifyPreseededEntries(sysDir, root, platform, trustedKeys);
+  }
+
   const candidates: { record: VerifiedRecord; dir: string; source: string }[] = [];
   for (const { dir, record } of await listVerified(root)) {
     if (record.predicate.os !== platformInfo(platform).os || record.predicate.arch !== platformInfo(platform).architecture) continue;
     if (!withinRequest(record.predicate.clickhouse_version, request)) continue;
     candidates.push({ record, dir, source: 'cache' });
   }
-  for (const sysDir of systemDirs(options.systemDirs)) {
-    for (const { dir, record } of await listVerified(sysDir)) {
-      if (record.predicate.os !== platformInfo(platform).os || record.predicate.arch !== platformInfo(platform).architecture) continue;
-      if (!withinRequest(record.predicate.clickhouse_version, request)) continue;
-      candidates.push({ record, dir, source: `system:${sysDir}` });
-    }
-  }
   if (candidates.length === 0) return undefined;
   candidates.sort((a, b) => compareVersionThenBuild(b.record.predicate, a.record.predicate));
   const best = candidates[0]!;
   return resolvedFromRecord(best.record, platform, request, best.dir, best.source, true, []);
+}
+
+/**
+ * For every `index.json` entry in `sourceDir` matching `platform` that has
+ * no `verified.json` under `writeRoot` yet, attempts a local-blob
+ * verify-and-install (`localverify.ts`), reading from `sourceDir` and
+ * writing into `writeRoot` — the same directory for the user's own cache,
+ * always `writeRoot` (never `sourceDir`) for a read-only system directory
+ * (`system-dir-readonly`: "the system dir is never written"). Every
+ * platform-matching entry is verified unconditionally (not pre-filtered by
+ * the index's own unverified `org.opencontainers.image.ref.name`
+ * annotation) — a real cache's pre-seeded set is small, and verifying one
+ * extra irrelevant entry is cheap next to the alternative of trusting
+ * unverified metadata to decide what is even worth checking.
+ */
+async function verifyPreseededEntries(
+  sourceDir: string,
+  writeRoot: string,
+  platform: PlatformKey,
+  trustedKeys: readonly TrustedKey[],
+): Promise<void> {
+  const info = platformInfo(platform);
+  let entries: readonly IndexDescriptor[];
+  try {
+    entries = await readIndexEntries(sourceDir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.platform !== undefined && (entry.platform.os !== info.os || entry.platform.architecture !== info.architecture)) continue;
+    const already = await readVerifiedRecord(unpackedDir(writeRoot, hexOfDigest(entry.digest)));
+    if (already !== undefined) continue;
+    await verifyAndInstallFromLocalBlobs(sourceDir, writeRoot, entry.digest, platform, trustedKeys);
+  }
 }
 
 function withinRequest(actualVersion: string, requestedSpelling: string): boolean {
@@ -164,6 +203,32 @@ function compareVersionThenBuild(a: ArtifactPredicate, b: ArtifactPredicate): nu
     if (diff !== 0) return diff;
   }
   return a.build.localeCompare(b.build);
+}
+
+/**
+ * `monotonic-warning`: installing a version/build **lower** than one
+ * already installed for the same platform is not an error (requests float
+ * to a specific registry answer, and a mirror or a rollback can legitimately
+ * offer an older build) — but it is surprising enough to warn about loudly,
+ * once, naming nothing more specific than that it happened.
+ */
+async function checkMonotonic(
+  root: string,
+  platform: PlatformKey,
+  incoming: ArtifactPredicate,
+): Promise<{ readonly warning: string; readonly existing: VerifiedRecord; readonly dir: string } | undefined> {
+  const info = platformInfo(platform);
+  for (const { dir, record } of await listVerified(root)) {
+    if (record.predicate.os !== info.os || record.predicate.arch !== info.architecture) continue;
+    if (compareVersionThenBuild(incoming, record.predicate) < 0) {
+      return {
+        warning: 'chtypes: the registry offered a version/build older than one already installed for this platform (monotonic warning); keeping the newer install',
+        existing: record,
+        dir,
+      };
+    }
+  }
+  return undefined;
 }
 
 // ------------------------------------------------------------------ listInstalled
@@ -230,6 +295,7 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
 
   const existing = await readVerifiedRecord(finalDir);
   let record: VerifiedRecord;
+  let recordDir = finalDir;
   let warnings: string[] = [];
   let alreadyInstalled: boolean;
 
@@ -268,53 +334,66 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
       signedBy = trust.signedBy;
     }
 
-    const staging = await freshStagingDir(root);
-    const tempLayerPath = path.join(root, `.tmp-layer-${process.pid}-${randomBytes(6).toString('hex')}`);
-    try {
-      const entries = await fetchVerifyAndUnpackLayer(
-        [resolveResult.repositoryRoot],
-        resolveResult.manifest.layer,
-        tempLayerPath,
-        staging,
-        { ...baseReqOptions, maxBytes: 0 },
-      );
-      if (!entries.some((e) => e.name === predicate.library)) {
-        throw new ArtifactUnpublishedError(`chtypes: the layer does not contain its own predicate's library ${JSON.stringify(predicate.library)}`);
+    const monotonic = await checkMonotonic(root, platform, predicate);
+    if (monotonic !== undefined) {
+      // The registry is offering something OLDER than what is already
+      // installed for this platform (`monotonic-warning`): warn loudly, but
+      // never replace a newer install with an older one it was not asked to
+      // roll back to — hand back the existing, newer record instead of
+      // downloading and installing the one just resolved.
+      record = monotonic.existing;
+      recordDir = monotonic.dir;
+      alreadyInstalled = true;
+      warnings = [...warnings, monotonic.warning];
+    } else {
+      const staging = await freshStagingDir(root);
+      const tempLayerPath = path.join(root, `.tmp-layer-${process.pid}-${randomBytes(6).toString('hex')}`);
+      try {
+        const entries = await fetchVerifyAndUnpackLayer(
+          [resolveResult.repositoryRoot],
+          resolveResult.manifest.layer,
+          tempLayerPath,
+          staging,
+          { ...baseReqOptions, maxBytes: 0 },
+        );
+        if (!entries.some((e) => e.name === predicate.library)) {
+          throw new ArtifactUnpublishedError(`chtypes: the layer does not contain its own predicate's library ${JSON.stringify(predicate.library)}`);
+        }
+        await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
+        const newRecord: VerifiedRecord = {
+          schema: 1,
+          manifestDigest: resolveResult.manifest.digest,
+          layerDigest: resolveResult.manifest.layer.digest,
+          bundleDigest: trust === undefined ? '' : digestOfHex(hexOfDigest(resolveResult.manifest.layer.digest)),
+          signedBy,
+          predicate,
+          library: predicate.library,
+        };
+        await writeVerifiedRecord(staging, newRecord);
+        await commitStaging(staging, finalDir);
+        record = newRecord;
+      } catch (err) {
+        await removeStaging(staging);
+        throw err;
+      } finally {
+        await unlink(tempLayerPath).catch(() => {});
       }
-      await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
-      const newRecord: VerifiedRecord = {
-        schema: 1,
-        manifestDigest: resolveResult.manifest.digest,
-        layerDigest: resolveResult.manifest.layer.digest,
-        bundleDigest: trust === undefined ? '' : digestOfHex(hexOfDigest(resolveResult.manifest.layer.digest)),
-        signedBy,
-        predicate,
-        library: predicate.library,
-      };
-      await writeVerifiedRecord(staging, newRecord);
-      await commitStaging(staging, finalDir);
-      record = newRecord;
-    } catch (err) {
-      await removeStaging(staging);
-      throw err;
-    } finally {
-      await unlink(tempLayerPath).catch(() => {});
-    }
 
-    const manifestDescriptor: Descriptor = { mediaType: MEDIA_TYPE_MANIFEST, digest: resolveResult.manifest.digest };
-    await upsertIndexEntry(
-      root,
-      { ...manifestDescriptor, size: resolveResult.manifest.bytes.length, annotations: { [`${CACHE_ANNOTATION_PREFIX}request`]: request } },
-      options.beforeIndexRename,
-    );
-    alreadyInstalled = false;
+      const manifestDescriptor: Descriptor = { mediaType: MEDIA_TYPE_MANIFEST, digest: resolveResult.manifest.digest };
+      await upsertIndexEntry(
+        root,
+        { ...manifestDescriptor, size: resolveResult.manifest.bytes.length, annotations: { [`${CACHE_ANNOTATION_PREFIX}request`]: request } },
+        options.beforeIndexRename,
+      );
+      alreadyInstalled = false;
+    }
   }
 
   if (options.lockWrite === true) {
     await writeLockEntry(request, platform, record, options, resolveResult.repositoryRoot, resolveResult.indexBytes, baseReqOptions);
   }
 
-  return resolvedFromRecord(record, platform, request, finalDir, resolveResult.repositoryRoot, alreadyInstalled, warnings);
+  return resolvedFromRecord(record, platform, request, recordDir, resolveResult.repositoryRoot, alreadyInstalled, warnings);
 }
 
 /**

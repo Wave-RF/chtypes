@@ -245,14 +245,21 @@ export function versionWithinRequest(actualVersion: string, requestedSpelling: s
 export interface ArtifactStatementCheck {
   readonly os: string;
   readonly arch: string;
-  readonly requestedSpelling: string;
+  /**
+   * Omit only when there is no one request to check against yet —
+   * `localverify.ts`'s local-blob scan verifies a pre-seeded entry on its
+   * own terms first, and the caller checks the resulting predicate's own
+   * `clickhouse_version` against whatever request prompted the scan
+   * afterward. Every other caller always supplies this.
+   */
+  readonly requestedSpelling?: string;
 }
 
 /**
  * The full statement check for a **platform artifact** manifest (guide §4):
  * predicateType, subject digest, `abi` (never `abi_revision`), os/arch and
- * the version-within-request rule. Throws `ArtifactCorruptError` naming the
- * first failing check.
+ * — when `check.requestedSpelling` is given — the version-within-request
+ * rule. Throws `ArtifactCorruptError` naming the first failing check.
  */
 export function checkArtifactStatement(
   statement: Statement,
@@ -281,7 +288,10 @@ export function checkArtifactStatement(
     );
   }
   const version = p['clickhouse_version'];
-  if (typeof version !== 'string' || !versionWithinRequest(version, check.requestedSpelling)) {
+  if (typeof version !== 'string') {
+    throw new ArtifactCorruptError(`chtypes: statement predicate.clickhouse_version ${JSON.stringify(version)} is not a string`);
+  }
+  if (check.requestedSpelling !== undefined && !versionWithinRequest(version, check.requestedSpelling)) {
     throw new ArtifactCorruptError(
       `chtypes: statement predicate.clickhouse_version ${JSON.stringify(version)} does not lie within requested ${JSON.stringify(check.requestedSpelling)}`,
     );
