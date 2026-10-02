@@ -97,7 +97,7 @@ jobs:
           - binding: ts
             toolchain: node24
           - binding: rust
-            toolchain: "1.85"
+            toolchain: "1.87"
           - binding: rust
             toolchain: stable
     steps:
