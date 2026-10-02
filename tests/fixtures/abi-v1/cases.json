@@ -2234,7 +2234,7 @@
     },
     {
       "expect": {
-        "reason": "missing_symbol:chs_build_info"
+        "reason": "not_v1"
       },
       "id": "loader.missing-chs_build_info",
       "kind": "loader",

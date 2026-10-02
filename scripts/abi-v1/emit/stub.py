@@ -898,7 +898,13 @@ def classify(model) -> dict[str, str]:
 
 
 def render_stub_c(model) -> str:
-    parts = [_preamble(model), _build_info_section(model), _ctor_section(), _unbound_section()]
+    bi_begin, bi_end = _omit_guard("chs_build_info")
+    parts = [
+        _preamble(model),
+        f"{bi_begin}\n{_build_info_section(model)}\n{bi_end}",
+        _ctor_section(),
+        _unbound_section(),
+    ]
     # chs_build_info and chs_abi_version need their own omit/override handling,
     # woven around the hand-written and special bodies below.
     specials = _special(model)
@@ -916,7 +922,7 @@ def render_stub_c(model) -> str:
             body_by_name[fn.name] = abi_version_body
             continue
         if fn.name == "chs_build_info":
-            continue  # already emitted in _build_info_section, unconditionally present
+            continue  # already emitted above, inside its own omit guard
         if kinds[fn.name] == "special":
             body_by_name[fn.name] = specials[fn.name]
         elif kinds[fn.name] == "free":
@@ -927,9 +933,9 @@ def render_stub_c(model) -> str:
     out = parts
     out.append("\n/* ----------------------------------------------------------- functions */\n")
     out.append(
-        "/* chs_build_info is defined unconditionally above (its own CHS_STUB_BUILD_INFO_MODE\n"
-        "   variants cover its malformations; it has no missing-symbol variant worth a separate\n"
-        "   build since every other variant already proves step 4 runs on whatever it returns). */"
+        "/* chs_build_info is defined above (inside its own omit guard, alongside its\n"
+        "   CHS_STUB_BUILD_INFO_MODE malformation variants and the missing-chs_build_info\n"
+        "   variant that omits it entirely), not down here with the rest. */"
     )
     for fn in model.functions:
         if fn.name == "chs_build_info":
