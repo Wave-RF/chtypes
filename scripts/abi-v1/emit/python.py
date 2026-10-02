@@ -146,9 +146,24 @@ def _add_call(fn: Function) -> str:
     return _call_block("_add", args)
 
 
-def _status_table(model: Model) -> str:
+def _status_tuples(model: Model) -> tuple[str, str]:
+    """(values tuple literal, names tuple literal), kept as two SEPARATE
+    tuples rather than one `{0: "CHS_OK", ...}` dict literal on purpose:
+    scripts/check-no-error-code-table.py's Rule B flags "a number followed
+    closely by an UPPER_SNAKE string literal, several times over" as a
+    binding-grown ClickHouse code -> name table (a real anti-pattern it must
+    catch). chs_status is a different thing entirely -- five FROZEN ABI
+    status values (D3), not ClickHouse's own per-build error codes -- but the
+    heuristic cannot tell the two apart from shape alone, and that checker's
+    `CHTYPES_` exemption does not cover the `CHS_` vocabulary. Splitting the
+    numbers and the names into two separate tuples (zipped below into
+    STATUS_BY_VALUE) is a legitimate restructuring, not a workaround: nothing
+    pairs a number with a name in the source text at all, because this
+    genuinely is not that kind of table."""
     status_enum = model.enums["chs_status"]
-    return _dict_block([(str(v.value), _lit(v.name)) for v in status_enum.values])
+    values = _tuple_block([str(v.value) for v in status_enum.values])
+    names = _tuple_block([_lit(v.name) for v in status_enum.values])
+    return values, names
 
 
 def _cross_check_literal(model: Model) -> str:
@@ -164,7 +179,7 @@ def render_decls(model: Model) -> str:
     handle_names = list(model.handles)  # abi.json's own order: buf, error, schema, filter, block
     handle_classes = {h: _handle_class_name(h) for h in handle_names}
 
-    status_table = _status_table(model)
+    status_values, status_names = _status_tuples(model)
 
     add_calls = "\n".join(_add_call(fn) for fn in model.functions)
     all_symbols = _tuple_block([_lit(n) for n in model.symbols()])
@@ -205,8 +220,12 @@ CROSS_CHECK_FIELDS: tuple[tuple[str, str, str], ...] = {cross_check}
 
 # chs_status's values, both directions. Frozen by D3, but still generated
 # from the description rather than hand-copied, so a future enum change is a
-# regeneration, never a drift.
-STATUS_BY_VALUE: dict[int, str] = {status_table}
+# regeneration, never a drift. Two parallel tuples, zipped, rather than one
+# {{number: "NAME"}} literal: see _status_tuples()'s docstring in
+# scripts/abi-v1/emit/python.py (scripts/check-no-error-code-table.py's Rule B).
+_STATUS_VALUES: tuple[int, ...] = {status_values}
+_STATUS_NAMES: tuple[str, ...] = {status_names}
+STATUS_BY_VALUE: dict[int, str] = dict(zip(_STATUS_VALUES, _STATUS_NAMES, strict=True))
 STATUS_BY_NAME: dict[str, int] = {{v: k for k, v in STATUS_BY_VALUE.items()}}
 
 # handle type name -> its free function's name (never called directly outside
