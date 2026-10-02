@@ -1,0 +1,618 @@
+//! The Rust leg of `v1-abi-conformance`: every case in
+//! `tests/fixtures/abi-v1/cases.json`, run against the stub libraries
+//! `scripts/abi-v1/build-stubs.sh` built, through this binding's generated
+//! invoke-by-name dispatcher and hand-written loader.
+//!
+//! WHY THIS FILE RE-DECLARES `rust/src/abi1`'s MODULES WITH `#[path]`.
+//! `rust/src/lib.rs` declares `abi1` as `mod abi1;` (not `pub`): it is not
+//! part of this crate's public API, same as every v0 internal module. An
+//! integration test under `rust/tests/` is a SEPARATE crate with only this
+//! crate's PUBLIC items visible — `rust/tests/abi_revision.rs` reaches only
+//! `chtypes::Registry`, for instance — so `chtypes::abi1::*` is not a path
+//! this file can use. Instead the three files are re-declared here with
+//! `#[path]`, so they are compiled twice (once, unreached, inside the
+//! library; once here, where this test actually calls them) from the
+//! IDENTICAL source — nothing is duplicated by hand, and `decls.rs`'s and
+//! `invoke_gen.rs`'s own `use super::decls::...` resolve the same way in
+//! both compilations, since both place `decls` as a sibling of `invoke_gen`
+//! one level down from a crate root.
+//!
+//! WHAT RUNS. `CHTYPES_ABI1_STUBS` unset: this test prints a loud skip on
+//! stderr and passes trivially (every test here skips loudly by name; it
+//! never passes silently and never fails, per the lane brief). Set: the
+//! `"ok"` stub is loaded once through the real loader (proving the loader
+//! itself, not just the dispatcher), and every `handshake`/`echo`/`status`
+//! case in `cases.json` runs against that one `Api`; every `loader` case
+//! loads its OWN named stub variant fresh and checks the loader's refusal
+//! reason (or acceptance) against `_stubshared.py`'s plan. A
+//! `spec/abi-v1/schema/report.schema.json`-shaped report is written to
+//! `CHTYPES_ABI1_REPORT` before the final assertion, so a partial result is
+//! visible even when some cases fail.
+//!
+//! ONE KNOWN CROSS-BINDING DISCREPANCY (MERGE NOTES): the `loader.ctor-marker`
+//! case's `expect.reason` in `cases.json` is `"glibc_floor"` unconditionally,
+//! but loader step 1 is Linux-only by spec (`§3.2`: "darwin: skip"), so on a
+//! non-Linux leg that stub is expected to load cleanly instead. This file
+//! treats that one case's expectation as OS-conditional rather than failing
+//! darwin unconditionally; see `run_loader_case` below.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+
+#[path = "../src/abi1/decls.rs"]
+mod decls;
+#[path = "../src/abi1/invoke_gen.rs"]
+mod invoke_gen;
+#[path = "../src/abi1/loader.rs"]
+mod loader;
+
+use decls::Api;
+use invoke_gen::{MintedHandle, Outcome, ResolvedArg, invoke};
+use loader::{LoadInput, Loaded, Refusal};
+
+/// A loud announcement on the REAL stderr, uncaptured by `cargo test` even
+/// without `--nocapture` — the same mechanism `rust/tests/fetch.rs` and
+/// `rust/tests/abi_revision.rs` use for their own skip messages.
+fn announce(message: &str) {
+    let _ = std::io::stderr().write_all(message.as_bytes());
+    let _ = std::io::stderr().write_all(b"\n");
+    let _ = std::io::stderr().flush();
+}
+
+// ------------------------------------------------------------- case parsing
+
+#[derive(Debug)]
+enum CaseArgSpec {
+    Int(i64),
+    Bytes(Vec<u8>),
+    NullHandle,
+    Handle(Box<CaseCallSpec>),
+}
+
+#[derive(Debug)]
+struct CaseCallSpec {
+    fn_name: String,
+    args: Vec<CaseArgSpec>,
+}
+
+fn decode_hex(s: &str) -> Result<Vec<u8>, String> {
+    if s.len() & 1 != 0 {
+        return Err(format!("odd-length hex string {s:?}"));
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
+        .collect()
+}
+
+fn parse_arg(v: &Value) -> Result<CaseArgSpec, String> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| format!("a case argument must be an object, got {v}"))?;
+    if let Some(i) = obj.get("int") {
+        return Ok(CaseArgSpec::Int(
+            i.as_i64().ok_or("\"int\" must be an integer")?,
+        ));
+    }
+    if let Some(h) = obj.get("bytes_hex") {
+        let s = h.as_str().ok_or("\"bytes_hex\" must be a string")?;
+        return Ok(CaseArgSpec::Bytes(decode_hex(s)?));
+    }
+    if obj.contains_key("null_handle") {
+        return Ok(CaseArgSpec::NullHandle);
+    }
+    if let Some(h) = obj.get("handle") {
+        return Ok(CaseArgSpec::Handle(Box::new(parse_call(h)?)));
+    }
+    Err(format!("unrecognized case argument shape: {v}"))
+}
+
+fn parse_call(v: &Value) -> Result<CaseCallSpec, String> {
+    let fn_name = v
+        .get("fn")
+        .and_then(Value::as_str)
+        .ok_or("a call needs \"fn\"")?
+        .to_string();
+    let raw_args = v
+        .get("args")
+        .and_then(Value::as_array)
+        .ok_or("a call needs \"args\"")?;
+    let args = raw_args
+        .iter()
+        .map(parse_arg)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(CaseCallSpec { fn_name, args })
+}
+
+// --------------------------------------------------------- recursive calls
+
+/// Resolve one case argument, recursively minting any nested `{"handle": …}`
+/// recipe first. Every `out_handle` any nested call produces (not only the
+/// one fed onward) is appended to `minted`, so the top-level case can free
+/// everything exactly once at the end (D2: any free order is safe).
+fn resolve_arg(
+    api: &Api,
+    spec: &CaseArgSpec,
+    minted: &mut Vec<MintedHandle>,
+) -> Result<ResolvedArg, String> {
+    match spec {
+        CaseArgSpec::Int(i) => Ok(ResolvedArg::Int(*i)),
+        CaseArgSpec::Bytes(b) => Ok(ResolvedArg::Bytes(b.clone())),
+        CaseArgSpec::NullHandle => Ok(ResolvedArg::Null),
+        CaseArgSpec::Handle(call) => {
+            let outcome = resolve_and_call(api, call, minted)?;
+            let Outcome::Call {
+                status, outputs, ..
+            } = outcome
+            else {
+                return Err(format!(
+                    "{}: a handle recipe must be a status call",
+                    call.fn_name
+                ));
+            };
+            if status != "CHS_OK" {
+                return Err(format!(
+                    "{}: handle recipe did not return CHS_OK ({status})",
+                    call.fn_name
+                ));
+            }
+            let handle = outputs.get("out").copied().ok_or_else(|| {
+                format!("{}: no \"out\" output to mint a handle from", call.fn_name)
+            })?;
+            Ok(handle.as_resolved_arg())
+        }
+    }
+}
+
+/// Resolve every argument of `call` (recursively), then dispatch it through
+/// the generated `invoke`. Every `out_handle` the call itself produces is
+/// also appended to `minted`.
+fn resolve_and_call(
+    api: &Api,
+    call: &CaseCallSpec,
+    minted: &mut Vec<MintedHandle>,
+) -> Result<Outcome, String> {
+    let mut args = Vec::with_capacity(call.args.len());
+    for a in &call.args {
+        args.push(resolve_arg(api, a, minted)?);
+    }
+    // SAFETY: every `ResolvedArg::Handle` above was minted by this same
+    // `api` (`resolve_arg` only ever builds one from an `outputs` entry this
+    // same api's own `invoke` just returned), and `api` completed loader
+    // step 6 before any case runs (see `abi1_conformance`, below).
+    let outcome = unsafe { invoke(api, &call.fn_name, &args) }?;
+    if let Outcome::Call { outputs, .. } = &outcome {
+        for h in outputs.values() {
+            minted.push(*h);
+        }
+    }
+    Ok(outcome)
+}
+
+/// Free one minted handle through this same `api`'s own free function.
+fn free_handle(api: &Api, h: MintedHandle) {
+    // SAFETY: every `MintedHandle` reaching here was minted by this same
+    // `api`, read (a `chs_buf`) or passed on as a borrowed `handle` argument
+    // and never otherwise used, and is freed here exactly once per case.
+    unsafe {
+        match h {
+            MintedHandle::Buf(p) => (api.chs_buf_free)(p),
+            MintedHandle::Schema(p) => (api.chs_schema_free)(p),
+            MintedHandle::Filter(p) => (api.chs_filter_free)(p),
+            MintedHandle::Block(p) => (api.chs_block_free)(p),
+        }
+    }
+}
+
+/// Read (never free) a minted `chs_buf`'s bytes.
+fn read_buf_bytes(api: &Api, h: &MintedHandle) -> Result<Vec<u8>, String> {
+    let MintedHandle::Buf(p) = h else {
+        return Err(format!(
+            "expected a chs_buf output, found a {}",
+            h.kind_name()
+        ));
+    };
+    // SAFETY: `p` is a live `chs_buf *` this same `api` minted and has not
+    // yet been freed (freeing happens only after every case in this run has
+    // read what it needs).
+    unsafe {
+        let data = (api.chs_buf_data)(*p as *const decls::ChsBuf);
+        let len = (api.chs_buf_len)(*p as *const decls::ChsBuf);
+        if data.is_null() || len == 0 {
+            Ok(Vec::new())
+        } else {
+            Ok(std::slice::from_raw_parts(data, len).to_vec())
+        }
+    }
+}
+
+// --------------------------------------------------------------- matching
+
+/// `expect` is a SUBSET of `got`: every key `expect` names (recursively)
+/// must be present in `got` with an equal value; `got` may carry extra keys
+/// `expect` does not mention (a minted handle's unpredictable `"id"`, next
+/// to its `"kind"` — see `emit/cases.py`'s own docstring on why a handle
+/// recipe's expected echo never names `id`). A scalar or string compares
+/// exactly; `null` matches only `null`.
+fn subset_match(expect: &Value, got: &Value) -> Result<(), String> {
+    match expect {
+        Value::Object(map) => {
+            let got_map = got
+                .as_object()
+                .ok_or_else(|| format!("expected an object, got {got}"))?;
+            for (k, v) in map {
+                let got_v = got_map
+                    .get(k)
+                    .ok_or_else(|| format!("missing key {k:?} in {got}"))?;
+                subset_match(v, got_v).map_err(|e| format!("{k}.{e}"))?;
+            }
+            Ok(())
+        }
+        Value::Array(items) => {
+            let got_items = got
+                .as_array()
+                .ok_or_else(|| format!("expected an array, got {got}"))?;
+            if items.len() != got_items.len() {
+                return Err(format!(
+                    "array length: want {}, got {}",
+                    items.len(),
+                    got_items.len()
+                ));
+            }
+            for (i, (e, g)) in items.iter().zip(got_items).enumerate() {
+                subset_match(e, g).map_err(|err| format!("[{i}]{err}"))?;
+            }
+            Ok(())
+        }
+        other => {
+            if other == got {
+                Ok(())
+            } else {
+                Err(format!(": want {other}, got {got}"))
+            }
+        }
+    }
+}
+
+fn check_handshake(outcome: &Outcome, expect: &Value) -> Result<(), String> {
+    if let Some(want) = expect.get("int") {
+        let want_i = want.as_i64().ok_or("expect.int is not an integer")?;
+        return match outcome {
+            Outcome::Int(got) if *got == want_i => Ok(()),
+            Outcome::Int(got) => Err(format!("want int {want_i}, got {got}")),
+            _ => Err("expected an int outcome".to_string()),
+        };
+    }
+    if let Some(sub) = expect.get("contains") {
+        let sub_s = sub.as_str().ok_or("expect.contains is not a string")?;
+        return match outcome {
+            Outcome::Str(s) if s.contains(sub_s) => Ok(()),
+            Outcome::Str(s) => Err(format!("{s:?} does not contain {sub_s:?}")),
+            _ => Err("expected a string outcome".to_string()),
+        };
+    }
+    if expect.get("non_empty").and_then(Value::as_bool) == Some(true) {
+        return match outcome {
+            Outcome::Str(s) if !s.is_empty() => Ok(()),
+            Outcome::Str(s) => Err(format!("expected non-empty, got {s:?}")),
+            _ => Err("expected a string outcome".to_string()),
+        };
+    }
+    Err(format!("unrecognized handshake expectation: {expect}"))
+}
+
+fn check_call(api: &Api, outcome: &Outcome, expect: &Value) -> Result<(), String> {
+    let Outcome::Call {
+        status,
+        error,
+        outputs,
+    } = outcome
+    else {
+        return Err("expected a status-call outcome".to_string());
+    };
+    let want_status = expect
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or("expect.status is missing")?;
+    if *status != want_status {
+        return Err(format!("status: want {want_status}, got {status}"));
+    }
+    if let Some(want_err) = expect.get("error") {
+        let want_obj = want_err
+            .as_object()
+            .ok_or("expect.error is not an object")?;
+        let got_err = error
+            .as_ref()
+            .ok_or("expected an error; the call set none")?;
+        for (field, want_v) in want_obj {
+            let got_v = match field.as_str() {
+                "ch_code" => Value::from(got_err.ch_code),
+                "ch_name" => Value::from(got_err.ch_name.clone()),
+                "message" => Value::from(got_err.message.clone()),
+                "column" => Value::from(got_err.column.clone()),
+                other => return Err(format!("expect.error names an unknown field {other:?}")),
+            };
+            if &got_v != want_v {
+                return Err(format!("error.{field}: want {want_v}, got {got_v}"));
+            }
+        }
+    }
+    if let Some(want_outputs) = expect.get("outputs") {
+        let want_obj = want_outputs
+            .as_object()
+            .ok_or("expect.outputs is not an object")?;
+        for (name, want_shape) in want_obj {
+            let minted = outputs
+                .get(name)
+                .ok_or_else(|| format!("no output named {name:?}"))?;
+            let bytes = read_buf_bytes(api, minted).map_err(|e| format!("outputs.{name}: {e}"))?;
+            let got_json: Value = serde_json::from_slice(&bytes).map_err(|e| {
+                format!(
+                    "outputs.{name}: not valid JSON ({e}): {:?}",
+                    String::from_utf8_lossy(&bytes)
+                )
+            })?;
+            subset_match(want_shape, &got_json).map_err(|e| format!("outputs.{name}{e}"))?;
+        }
+    }
+    Ok(())
+}
+
+// ------------------------------------------------------------------ loader
+
+fn predicate_map(v: &Value) -> Result<serde_json::Map<String, Value>, String> {
+    v.as_object()
+        .cloned()
+        .ok_or_else(|| format!("predicate is not an object: {v}"))
+}
+
+fn load_variant(variant: &Value) -> Result<Loaded, Refusal> {
+    let path_str = variant
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let path = PathBuf::from(path_str);
+    let predicate =
+        predicate_map(variant.get("predicate").unwrap_or(&Value::Null)).unwrap_or_default();
+    loader::load(LoadInput {
+        library_path: &path,
+        predicate,
+    })
+}
+
+/// Loader steps 1-6's exact reason word (never the `Display`-formatted
+/// sentence) a `loader`-kind case's `expect.reason` compares against.
+fn run_loader_case(case: &Value, variants: &serde_json::Map<String, Value>) -> Result<(), String> {
+    let variant_name = case
+        .get("variant")
+        .and_then(Value::as_str)
+        .ok_or("loader case has no \"variant\"")?;
+    let expect = case.get("expect").ok_or("loader case has no \"expect\"")?;
+    let mut want_reason = expect
+        .get("reason")
+        .and_then(Value::as_str)
+        .ok_or("expect.reason is missing")?
+        .to_string();
+
+    // See this file's own module doc: loader step 1 (glibc) is Linux-only by
+    // spec, so "ctor-marker" — which proves step 1 refuses BEFORE dlopen —
+    // has nothing to prove on a non-Linux leg, where the library is expected
+    // to load cleanly instead.
+    if variant_name == "ctor-marker" && !cfg!(target_os = "linux") {
+        want_reason = "accepted".to_string();
+    }
+
+    let variant = variants
+        .get(variant_name)
+        .ok_or_else(|| format!("stubs.json has no variant named {variant_name:?}"))?;
+    match load_variant(variant) {
+        Ok(_loaded) => {
+            if want_reason == "accepted" {
+                Ok(())
+            } else {
+                Err(format!("want refusal {want_reason:?}, the library loaded"))
+            }
+        }
+        Err(refusal) => {
+            if refusal.reason == want_reason {
+                Ok(())
+            } else {
+                Err(format!(
+                    "want refusal {want_reason:?}, got {:?} ({refusal})",
+                    refusal.reason
+                ))
+            }
+        }
+    }
+}
+
+// --------------------------------------------------------------- generic
+
+fn run_generic_case(api: &Api, case: &Value, kind: &str, expect: &Value) -> Result<(), String> {
+    let fn_name = case
+        .get("fn")
+        .and_then(Value::as_str)
+        .ok_or("case has no \"fn\"")?;
+    if kind == "handshake" {
+        // SAFETY: a handshake/tombstone call takes no arguments.
+        let outcome = unsafe { invoke(api, fn_name, &[]) }?;
+        return check_handshake(&outcome, expect);
+    }
+    let raw_args = case
+        .get("args")
+        .and_then(Value::as_array)
+        .ok_or("case has no \"args\"")?;
+    let specs = raw_args
+        .iter()
+        .map(parse_arg)
+        .collect::<Result<Vec<_>, _>>()?;
+    let call = CaseCallSpec {
+        fn_name: fn_name.to_string(),
+        args: specs,
+    };
+    let mut minted = Vec::new();
+    let outcome = resolve_and_call(api, &call, &mut minted);
+    let verdict = match &outcome {
+        Ok(o) => check_call(api, o, expect),
+        Err(e) => Err(e.clone()),
+    };
+    for h in minted {
+        free_handle(api, h);
+    }
+    verdict
+}
+
+// ------------------------------------------------------------------ report
+
+/// sha256 of the sorted, compact JSON of `cases`, matching
+/// `scripts/abi-v1/parity.py`'s `compute_cases_hash` byte for byte:
+/// `serde_json::Value`'s object type is a `BTreeMap` by construction (this
+/// crate enables no `preserve_order` feature anywhere), so key order is
+/// already sorted, and `serde_json::to_string` is already the compact
+/// `(",", ":")` separator form Python's `sort_keys=True,
+/// separators=(",", ":")` produces for this ASCII, integer-only dataset.
+fn compute_cases_hash(cases: &Value) -> String {
+    let text = serde_json::to_string(cases).expect("cases serialize");
+    let digest = Sha256::digest(text.as_bytes());
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        use std::fmt::Write;
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
+}
+
+fn host_os_arch() -> (&'static str, &'static str) {
+    let os = match std::env::consts::OS {
+        "linux" => "linux",
+        "macos" => "darwin",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    (os, arch)
+}
+
+#[test]
+fn abi1_conformance() {
+    let Some(stubs_dir) = std::env::var_os("CHTYPES_ABI1_STUBS") else {
+        announce(
+            "SKIP: CHTYPES_ABI1_STUBS is unset; the abi1 conformance suite needs the stub \
+             libraries scripts/abi-v1/build-stubs.sh produces",
+        );
+        return;
+    };
+    let stubs_dir = PathBuf::from(stubs_dir);
+    let report_path = std::env::var_os("CHTYPES_ABI1_REPORT").map(PathBuf::from);
+    let toolchain =
+        std::env::var("CHTYPES_ABI1_TOOLCHAIN").unwrap_or_else(|_| "unknown".to_string());
+
+    let stubs_text = std::fs::read_to_string(stubs_dir.join("stubs.json"))
+        .expect("read CHTYPES_ABI1_STUBS/stubs.json");
+    let stubs: Value = serde_json::from_str(&stubs_text).expect("parse stubs.json");
+    let variants = stubs
+        .get("variants")
+        .and_then(Value::as_object)
+        .expect("stubs.json has no \"variants\"");
+
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("rust/ has a parent directory");
+    let cases_path = repo_root.join("tests/fixtures/abi-v1/cases.json");
+    let cases_text = std::fs::read_to_string(&cases_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", cases_path.display()));
+    let cases_doc: Value = serde_json::from_str(&cases_text).expect("parse cases.json");
+    let cases = cases_doc
+        .get("cases")
+        .and_then(Value::as_array)
+        .expect("cases.json has no \"cases\"");
+
+    let mut results: Vec<(String, bool, Option<String>)> = Vec::new();
+
+    let ok_api: Option<Api> = match variants.get("ok") {
+        None => {
+            results.push((
+                "ok-load".to_string(),
+                false,
+                Some("stubs.json has no \"ok\" variant".to_string()),
+            ));
+            None
+        }
+        Some(ok_variant) => match load_variant(ok_variant) {
+            Ok(loaded) => Some(loaded.api),
+            Err(e) => {
+                results.push(("ok-load".to_string(), false, Some(e.to_string())));
+                None
+            }
+        },
+    };
+
+    for case in cases {
+        let id = case
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("<no id>")
+            .to_string();
+        let kind = case.get("kind").and_then(Value::as_str).unwrap_or("");
+        let expect = case.get("expect").cloned().unwrap_or(Value::Null);
+        let verdict: Result<(), String> = if kind == "loader" {
+            run_loader_case(case, variants)
+        } else {
+            match &ok_api {
+                None => Err("the \"ok\" stub did not load; see the ok-load result".to_string()),
+                Some(api) => run_generic_case(api, case, kind, &expect),
+            }
+        };
+        match verdict {
+            Ok(()) => results.push((id, true, None)),
+            Err(detail) => results.push((id, false, Some(detail))),
+        }
+    }
+
+    let (os, arch) = host_os_arch();
+    let results_json: Vec<Value> = results
+        .iter()
+        .map(|(id, pass, detail)| {
+            let mut o = serde_json::Map::new();
+            o.insert("id".to_string(), Value::String(id.clone()));
+            o.insert("pass".to_string(), Value::Bool(*pass));
+            if let Some(d) = detail {
+                o.insert("detail".to_string(), Value::String(d.clone()));
+            }
+            Value::Object(o)
+        })
+        .collect();
+    let report = serde_json::json!({
+        "schema": 1,
+        "binding": "rust",
+        "toolchain": toolchain,
+        "os": format!("{os}-{arch}"),
+        "cases_sha256": compute_cases_hash(&Value::Array(cases.clone())),
+        "results": results_json,
+    });
+
+    if let Some(path) = &report_path {
+        let text = serde_json::to_string_pretty(&report).expect("serialize report");
+        std::fs::write(path, text).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+    } else {
+        announce("CHTYPES_ABI1_REPORT is unset; the report was built but not written to a file");
+    }
+
+    let failed: Vec<&str> = results
+        .iter()
+        .filter(|(_, pass, _)| !pass)
+        .map(|(id, _, _)| id.as_str())
+        .collect();
+    assert!(
+        failed.is_empty(),
+        "{} of {} abi1 conformance case(s) failed: {failed:?}",
+        failed.len(),
+        results.len()
+    );
+}

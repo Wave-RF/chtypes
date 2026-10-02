@@ -1,0 +1,7 @@
+{
+  "required_legs": [
+    {"toolchain": "msrv", "os": "linux-amd64"},
+    {"toolchain": "stable", "os": "linux-amd64"},
+    {"toolchain": "stable", "os": "darwin-arm64"}
+  ]
+}

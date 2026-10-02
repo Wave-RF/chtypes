@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# conformance/rust.sh: the Rust leg of v1-abi-conformance
+# (.github/workflows/v1-abi.yml). Dispatched once per (toolchain, os) matrix
+# entry, with the toolchain already selected on PATH by that job's own setup
+# steps (`msrv`, resolved from rust/Cargo.toml's rust-version, or `stable`).
+#
+#     CHTYPES_ABI1_STUBS=<dir> CHTYPES_ABI1_REPORT=<file> \
+#       CHTYPES_ABI1_TOOLCHAIN=<label> scripts/abi-v1/conformance/rust.sh
+#
+# Runs rust/tests/abi1_conformance.rs, which reads the three env vars above
+# itself, loads the stub libraries CHTYPES_ABI1_STUBS names, runs every case
+# in tests/fixtures/abi-v1/cases.json, and writes a
+# spec/abi-v1/schema/report.schema.json-shaped report to CHTYPES_ABI1_REPORT
+# before its final assertion — so a partial report is on disk even when some
+# cases fail. This script's own exit code is the test binary's.
+set -euo pipefail
+
+: "${CHTYPES_ABI1_STUBS:?CHTYPES_ABI1_STUBS must be set, to the v1-abi-stubs artifact directory}"
+: "${CHTYPES_ABI1_REPORT:?CHTYPES_ABI1_REPORT must be set, to the path this leg writes its report to}"
+: "${CHTYPES_ABI1_TOOLCHAIN:?CHTYPES_ABI1_TOOLCHAIN must be set, to this leg toolchain label}"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"
+
+cd "$ROOT/rust"
+exec cargo test --locked --features abi-v1 --test abi1_conformance -- --nocapture
