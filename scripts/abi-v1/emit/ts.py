@@ -11,22 +11,36 @@ other direction, passing a JS callback INTO C). So a loader cannot do
 is exactly what steps 3-4 of the loader need for `chs_abi_version` and
 `chs_build_info` BEFORE the library is known to speak ABI v1 at all.
 
-The resolution (ts/src/abi1/loader.ts): declare `dlopen`/`dlsym`/`dlerror`
-(plus `strlen` and `gnu_get_libc_version`, needed for step 1 and for reading
-owned/borrowed C strings byte-safely) through ffi-rs AGAINST THE PROCESS'S OWN
-LIBC — ordinary, always-resolvable symbols, so ffi-rs's normal by-name
-resolution is fine for THEM. Steps 2-6 do their OWN `dlopen(path,
-RTLD_NOW|RTLD_LOCAL)` through that libc declaration, which — unlike ffi-rs's
-`open()`, which goes through libloading with `RTLD_LAZY | RTLD_LOCAL`
-(measured in v0 `ts/src/registry.ts`'s header comment) — eagerly binds every
-relocation, so the `unbound` stub variant (an unresolved external symbol)
-correctly FAILS to load under this path, on both glibc and darwin. Once that
-succeeds, the image is fully resident and bound; only THEN does the loader
-`open()` the SAME path through ffi-rs (a harmless re-open of an
+The resolution (ts/src/abi1/libc.gen.ts, this emitter's third output):
+declare `dlopen`/`dlsym`/`dlerror`/`gnu_get_libc_version`/`strlen` (needed for
+step 1 and for reading owned/borrowed C strings byte-safely) through ffi-rs
+AGAINST THE PROCESS'S OWN LIBC — ordinary, always-resolvable symbols, so
+ffi-rs's normal by-name resolution is fine for THEM. Steps 2-6 do their OWN
+`dlopen(path, RTLD_NOW|RTLD_LOCAL)` through that libc declaration, which —
+unlike ffi-rs's `open()`, which goes through libloading with `RTLD_LAZY |
+RTLD_LOCAL` (measured in v0 `ts/src/registry.ts`'s header comment) — eagerly
+binds every relocation, so the `unbound` stub variant (an unresolved external
+symbol) correctly FAILS to load under this path, on both glibc and darwin.
+Once that succeeds, the image is fully resident and bound; only THEN does the
+loader `open()` the SAME path through ffi-rs (a harmless re-open of an
 already-mapped image, confirmed by dlopen's own refcount-by-path contract)
 and declare the full typed call table on it. Steps 3-6 beyond chs_abi_version/
 chs_build_info are PRESENCE checks only (`dlsym(handle, name) != NULL`), which
 need no typed call at all.
+
+**Why the libc declarations are GENERATED, not hand-written** (lead's ruling,
+2026-10-02): `scripts/abi-v1/check-no-hand-decls.py`'s ts rules flag a bare
+`dlsym(` call anywhere in a hand-written v1 FFI file — the check's INTENT is
+that every raw symbol lookup lives in generated code, exempt by construction
+(the generated banner), never worked around with a renamed table key or a
+call site shaped to dodge the text match. So `libc.gen.ts` declares
+`dlopen`/`dlsym`/`dlerror`/`gnu_get_libc_version`/`strlen` by their real C
+names (this file needs no disguise: it IS the generated code the check
+expects) and exports `resolveSymbol` — THE one symbol-lookup helper
+(`dlsym` plus the null check) — alongside the other four as plain
+typed-array-argument functions. Hand-written `ts/src/abi1/libc.ts` calls
+only these exports, by name, and never declares or looks up a symbol
+itself.
 
 SO THIS EMITTER PRODUCES NO PER-FUNCTION TS CODE. Given ffi-rs can only call a
 symbol it already knows the NAME of, and every chs_* name is known statically
@@ -78,6 +92,7 @@ from . import Output, banner
 
 DECLS_PATH = "ts/src/abi1/decls.gen.ts"
 ERRMAP_PATH = "ts/src/abi1/errmap.gen.ts"
+LIBC_PATH = "ts/src/abi1/libc.gen.ts"
 
 _WORD = re.compile(r"[A-Za-z0-9]+")
 
@@ -391,8 +406,112 @@ def render_errmap(model) -> str:
     return "\n".join(lines)
 
 
+def render_libc(model) -> str:
+    """ts/src/abi1/libc.gen.ts: the libc declarations plus the one
+    symbol-lookup helper, per the lead's 2026-10-02 ruling — see this
+    module's docstring for why these live here rather than in the
+    hand-written loader. Static content: nothing here reads `model` beyond
+    the banner/fingerprint, but it is generated, not hand-written, by the
+    same rule check-no-hand-decls.py enforces everywhere else.
+    """
+    lines = [
+        f"/* {banner(model)} */",
+        "/*",
+        " * The libc primitives ts/src/abi1/libc.ts needs for plan §3.3's TS-trap fix: dlopen,",
+        " * dlsym, dlerror, gnu_get_libc_version and strlen, declared through ffi-rs's define()",
+        " * against the PROCESS'S OWN libc, by their real C names. This file carries the generated",
+        " * banner, so scripts/abi-v1/check-no-hand-decls.py exempts it outright — the check's own",
+        " * intent (every raw symbol lookup lives in generated code) is satisfied for real here,",
+        " * never worked around with a renamed key or a disguised call site in a hand file. See",
+        " * scripts/abi-v1/emit/ts.py's module docstring.",
+        " *",
+        " * `resolveSymbol` is THE ONE symbol-lookup helper hand code uses (dlsym plus the null",
+        " * check); the other four exports are the raw primitives dlopen/dlerror/gnu_get_libc_version/",
+        " * strlen need, each with its own null handling where the C function can return NULL.",
+        " */",
+        "",
+        "import { DataType, define, isNullPointer, type JsExternal, open } from 'ffi-rs';",
+        "",
+        "const { External, I32, U64, String: Str } = DataType;",
+        "",
+        "const LIBC_KEY = 'chtypes_abi1_libc';",
+        "",
+        "function libcPath(): string {",
+        "  if (process.platform === 'darwin') return '/usr/lib/libSystem.B.dylib';",
+        "  if (process.platform === 'linux') return 'libc.so.6';",
+        "  throw new Error(`chtypes abi1: unsupported platform ${process.platform}; only linux and darwin are v1 platforms`);",
+        "}",
+        "",
+        "let opened = false;",
+        "function ensureOpen(): void {",
+        "  if (opened) return;",
+        "  open({ library: LIBC_KEY, path: libcPath() });",
+        "  opened = true;",
+        "}",
+        "",
+        "interface LibcFns {",
+        "  dlopen(args: [string, number]): JsExternal;",
+        "  dlsym(args: [JsExternal, string]): JsExternal;",
+        "  dlerror(args: []): JsExternal;",
+        "  gnu_get_libc_version(args: []): JsExternal;",
+        "  strlen(args: [JsExternal]): bigint;",
+        "}",
+        "",
+        "let fns: LibcFns | null = null;",
+        "function libc(): LibcFns {",
+        "  ensureOpen();",
+        "  if (fns === null) {",
+        "    fns = define({",
+        "      dlopen: { library: LIBC_KEY, retType: External, paramsType: [Str, I32] },",
+        "      dlsym: { library: LIBC_KEY, retType: External, paramsType: [External, Str] },",
+        "      dlerror: { library: LIBC_KEY, retType: External, paramsType: [] },",
+        "      gnu_get_libc_version: { library: LIBC_KEY, retType: External, paramsType: [] },",
+        "      strlen: { library: LIBC_KEY, retType: U64, paramsType: [External] },",
+        "    }) as unknown as LibcFns;",
+        "  }",
+        "  return fns;",
+        "}",
+        "",
+        "/** dlopen(path, flags) against the process's own libc. Null on failure. */",
+        "export function dlopen(path: string, flags: number): JsExternal | null {",
+        "  const h = libc().dlopen([path, flags]);",
+        "  return isNullPointer(h) ? null : h;",
+        "}",
+        "",
+        "/** THE one symbol-lookup helper: dlsym(handle, name). Null if `name` is not exported by `handle`'s image. */",
+        "export function resolveSymbol(handle: JsExternal, name: string): JsExternal | null {",
+        "  const p = libc().dlsym([handle, name]);",
+        "  return isNullPointer(p) ? null : p;",
+        "}",
+        "",
+        "/** dlerror(). Null if there is no pending error (POSIX clears it on read, so call this ONCE, right after a failure). */",
+        "export function dlerror(): JsExternal | null {",
+        "  const p = libc().dlerror([]);",
+        "  return isNullPointer(p) ? null : p;",
+        "}",
+        "",
+        "/** gnu_get_libc_version(). Null if the symbol does not resolve at all (musl) or the call itself returns null. */",
+        "export function gnuGetLibcVersion(): JsExternal | null {",
+        "  try {",
+        "    const p = libc().gnu_get_libc_version([]);",
+        "    return isNullPointer(p) ? null : p;",
+        "  } catch {",
+        "    return null;",
+        "  }",
+        "}",
+        "",
+        "/** strlen(ptr): the length of a NUL-terminated C string, for a byte-safe read via createExternalBuffer. */",
+        "export function cStringLength(ptr: JsExternal): number {",
+        "  return Number(libc().strlen([ptr]));",
+        "}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def outputs(model) -> list[Output]:
     return [
         Output(DECLS_PATH, content=render_decls(model)),
         Output(ERRMAP_PATH, content=render_errmap(model)),
+        Output(LIBC_PATH, content=render_libc(model)),
     ]

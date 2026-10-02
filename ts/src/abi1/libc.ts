@@ -14,25 +14,20 @@
  * The fix: do the REAL `dlopen(path, RTLD_NOW | RTLD_LOCAL)` ourselves,
  * through libc directly, before ffi-rs ever touches the path. `RTLD_NOW`
  * binds every relocation immediately, so `unbound` fails exactly where it
- * must. ffi-rs can still declare and call `dlopen`/`dlsym`/`dlerror`
- * (ordinary, always-resolvable libc symbols) by its normal name-based
- * mechanism — it is not being asked to call anything through a flag ffi-rs
- * does not expose, only to resolve THESE three names on THIS always-loaded
- * library, which lazy-vs-eager binding cannot affect (libc's own exports are
- * already fully resolved the moment this process started).
+ * must.
  *
- * `strlen` and `gnu_get_libc_version` ride along on the same declared
- * library for the same reason v0 declares `strlen` through the artifact's
- * own dependency graph (`ts/src/ffi.ts`'s header comment): libc is already
- * linked into every Node process, so declaring one more of its ordinary
- * exports costs nothing and avoids a second `open()`.
+ * This file is HAND-WRITTEN and declares nothing itself: the actual libc
+ * declarations and the symbol-lookup primitive live in the GENERATED
+ * `./libc.gen.ts` (scripts/abi-v1/emit/ts.py — see its module docstring).
+ * That split is the lead's 2026-10-02 ruling: check-no-hand-decls.py's
+ * `dlsym(` rule exists so every raw symbol lookup lives in generated code,
+ * exempt by construction, rather than being worked around in a hand file
+ * with a renamed table key or a call site shaped to dodge the text match.
+ * This file calls the generated exports only, by their own names.
  */
 
-import { createExternalBuffer, DataType, isNullPointer, type JsExternal, load, open } from 'ffi-rs';
-
-const { External, I32, String: Str } = DataType;
-
-const LIBC_KEY = 'chtypes_abi1_libc';
+import { createExternalBuffer, type JsExternal, open } from 'ffi-rs';
+import { cStringLength, dlerror, dlopen, gnuGetLibcVersion, resolveSymbol } from './libc.gen.js';
 
 /**
  * RTLD_NOW | RTLD_LOCAL, read from this platform's own headers, not from
@@ -57,65 +52,27 @@ const RTLD: { readonly NOW: number; readonly LOCAL: number } =
 
 export const RTLD_NOW_LOCAL = RTLD.NOW | RTLD.LOCAL;
 
-/** The process's own libc, by platform (plan §3.3(a)). */
-function libcPath(): string {
-  if (process.platform === 'darwin') return '/usr/lib/libSystem.B.dylib';
-  if (process.platform === 'linux') return 'libc.so.6';
-  throw new Error(`chtypes abi1: unsupported platform ${process.platform}; only linux and darwin are v1 platforms`);
-}
-
-let opened = false;
-function ensureOpen(): void {
-  if (opened) return;
-  open({ library: LIBC_KEY, path: libcPath() });
-  opened = true;
-}
-
-/**
- * Every call below goes through ffi-rs's one-off `load()`, never a
- * persistent `define()` table: `define()`'s per-entry type
- * (`Omit<FFIParams, 'paramsValue' | 'funcName'>`) OMITS `funcName`
- * entirely — measured against the installed ffi-rs 1.3.7 package, its
- * resolution is keyed on the TABLE ENTRY'S OWN NAME, not a separate
- * `funcName` field (a `funcName` passed alongside one is silently
- * ignored). `load()`, by contrast, takes `funcName` as a real, honored
- * parameter for that one call. So a `define()`-based table here would
- * have to use each C symbol's OWN name as its JS key — which is exactly
- * the literal `dlsym(` call-site text
- * (scripts/abi-v1/check-no-hand-decls.py's one named TS trap) this file
- * exists to avoid writing. `load()` sidesteps both problems at once: it
- * is unconditionally correct (no key/funcName mismatch is possible), and
- * `funcName: 'dlsym'` as a quoted VALUE, never followed by `(`, is not
- * the shape that check matches.
- */
-function libcCall<R>(funcName: string, retType: DataType, paramsType: DataType[], paramsValue: unknown[]): R {
-  ensureOpen();
-  return load<DataType>({ library: LIBC_KEY, funcName, retType, paramsType, paramsValue }) as R;
-}
-
-/** A NUL-terminated, ASCII/UTF-8-safe C string at `ptr`, read via `strlen` + a zero-copy view. Never call this on a pointer that may carry non-UTF-8 or embedded-NUL bytes (an ABI document body): it is for libc's own always-ASCII strings and `chs_build_info`'s guaranteed-ASCII, NUL-terminated JSON only. */
+/** A NUL-terminated, ASCII/UTF-8-safe C string at `ptr`, read via the generated `cStringLength` (strlen) + a zero-copy view. Never call this on a pointer that may carry non-UTF-8 or embedded-NUL bytes (an ABI document body): it is for libc's own always-ASCII strings and `chs_build_info`'s guaranteed-ASCII, NUL-terminated JSON only. */
 function readCString(ptr: JsExternal): string {
-  const len = Number(libcCall<bigint>('strlen', DataType.U64, [External], [ptr]));
+  const len = cStringLength(ptr);
   if (len === 0) return '';
   return Buffer.from(createExternalBuffer(ptr, len)).toString('utf8');
 }
 
-/** `dlopen(path, RTLD_NOW | RTLD_LOCAL)` through libc directly (plan §3.3(b)). Returns the raw OS handle, or null on failure — call `lastDlError()` immediately after a null to get libc's own message, before any other libc call. */
+/** `dlopen(path, RTLD_NOW | RTLD_LOCAL)` through the generated primitive (plan §3.3(b)). Returns the raw OS handle, or null on failure — call `lastDlError()` immediately after a null to get libc's own message, before any other libc call. */
 export function rawDlopen(path: string): JsExternal | null {
-  const h = libcCall<JsExternal>('dlopen', External, [Str, I32], [path, RTLD_NOW_LOCAL]);
-  return isNullPointer(h) ? null : h;
+  return dlopen(path, RTLD_NOW_LOCAL);
 }
 
-/** The libc symbol-resolution primitive (plan §3.3(c)) through libc directly: the raw symbol address, or null if `name` is not exported by `handle`'s image (a presence check; this file never calls through the returned pointer — only ffi-rs's own by-name `define`/`load`, on an already-opened path, does that; see this file's module comment). */
+/** The loader's symbol-presence check (plan §3.3(c)), through the generated `resolveSymbol` helper: the raw symbol address, or null if `name` is not exported by `handle`'s image (this file never calls through the returned pointer — only ffi-rs's own by-name `define`/`load`, on an already-opened path, does that). */
 export function rawDlsym(handle: JsExternal, name: string): JsExternal | null {
-  const p = libcCall<JsExternal>('dlsym', External, [External, Str], [handle, name]);
-  return isNullPointer(p) ? null : p;
+  return resolveSymbol(handle, name);
 }
 
 /** libc's own diagnostic for the most recent failing open/resolve call, read ONCE (POSIX clears it on read) and only ever called right after that failure. */
 export function lastDlError(): string {
-  const p = libcCall<JsExternal>('dlerror', External, [], []);
-  return isNullPointer(p) ? '(no dlerror message)' : readCString(p);
+  const p = dlerror();
+  return p === null ? '(no dlerror message)' : readCString(p);
 }
 
 /**
@@ -125,14 +82,8 @@ export function lastDlError(): string {
  * this (step 1 is a no-op there).
  */
 export function glibcVersionString(): string | null {
-  let ptr: JsExternal;
-  try {
-    ptr = libcCall<JsExternal>('gnu_get_libc_version', External, [], []);
-  } catch {
-    return null; // musl: the symbol does not exist at all.
-  }
-  if (isNullPointer(ptr)) return null;
-  return readCString(ptr);
+  const ptr = gnuGetLibcVersion();
+  return ptr === null ? null : readCString(ptr);
 }
 
 /**
@@ -153,7 +104,7 @@ export function compareDottedVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Open the target library's path through ffi-rs, under `libraryKey`, for typed calls (plan §3.3(d)). A harmless re-open when `path` is already the image our own `rawDlopen` just bound: dlopen (and the libloading ffi-rs uses underneath) dedupes by canonical path, returning the same already-mapped, already-bound image rather than re-relocating it. */
+/** Open the target library's path through ffi-rs, under `libraryKey`, for typed calls (plan §3.3(d)). A harmless re-open when `path` is already the image our own `rawDlopen` just bound: dlopen (and the libloading ffi-rs uses underneath) dedupes by canonical path, returning the same already-mapped, already-bound image rather than re-relocating it. Declares no symbol of its own — `open()` only registers a path under a key for a later `define()` — so it is unaffected by the generated/hand-written split above. */
 export function ffiOpen(libraryKey: string, path: string): void {
   open({ library: libraryKey, path });
 }
