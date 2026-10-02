@@ -220,8 +220,14 @@ func findServerScript(t *testing.T) string {
 
 // expandBase turns one of a case's request.bases templates ("{base}", or
 // "{base}" embedded in a longer string such as "{base}/does-not-exist") into
-// a real base URL for transport (docs/guides/fetch-v1.md §2, §10).
-func expandBase(template, transport, fixturesDir, tree, caseID, registryBase string, port int) (string, error) {
+// a real base URL for transport (docs/guides/fetch-v1.md §2, §10). "{base2}"
+// (http transport only, lane 0B 2026-10-02) is the same "s-<case-id>/chtypes/v1"
+// suffix rooted at server.py's SECOND origin (its "LISTENING <port> <port2>"
+// line) — a case needing two genuinely independent bases over the same case
+// id, such as mirror-failover-5xx/-digest-404, whose base[1] is served from
+// the script's own second_origin_routes with its own response-sequence
+// cursor.
+func expandBase(template, transport, fixturesDir, tree, caseID, registryBase string, port, port2 int) (string, error) {
 	switch transport {
 	case "file":
 		abs, err := filepath.Abs(filepath.Join(fixturesDir, "trees", tree, "v2", "chtypes", "v1"))
@@ -230,7 +236,9 @@ func expandBase(template, transport, fixturesDir, tree, caseID, registryBase str
 		}
 		return strings.ReplaceAll(template, "{base}", "file://"+abs), nil
 	case "http":
-		return strings.ReplaceAll(template, "{base}", fmt.Sprintf("http://127.0.0.1:%d/s-%s/chtypes/v1", port, caseID)), nil
+		out := strings.ReplaceAll(template, "{base}", fmt.Sprintf("http://127.0.0.1:%d/s-%s/chtypes/v1", port, caseID))
+		out = strings.ReplaceAll(out, "{base2}", fmt.Sprintf("http://127.0.0.1:%d/s-%s/chtypes/v1", port2, caseID))
+		return out, nil
 	case "registry":
 		if registryBase == "" {
 			return "", fmt.Errorf("registry transport requested with no CHTYPES_V1_REGISTRY_BASE set")
@@ -248,7 +256,7 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 
 	bases := make([]string, 0, len(c.Request.Bases))
 	for _, tmpl := range c.Request.Bases {
-		b, err := expandBase(tmpl, transport, fixturesDir, c.Tree, c.ID, registryBase, port)
+		b, err := expandBase(tmpl, transport, fixturesDir, c.Tree, c.ID, registryBase, port, port2)
 		if err != nil {
 			row.Verdict, row.Detail = "fail", err.Error()
 			return row
