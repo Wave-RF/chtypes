@@ -31,21 +31,9 @@ pub struct Platform {
 
 /// The v1 platform set (layout-v2 spec §0, A18): darwin-amd64 is not built.
 pub const PLATFORMS: &[Platform] = &[
-    Platform {
-        key: "linux-amd64",
-        os: "linux",
-        architecture: "amd64",
-    },
-    Platform {
-        key: "linux-arm64",
-        os: "linux",
-        architecture: "arm64",
-    },
-    Platform {
-        key: "darwin-arm64",
-        os: "darwin",
-        architecture: "arm64",
-    },
+    Platform { key: "linux-amd64", os: "linux", architecture: "amd64" },
+    Platform { key: "linux-arm64", os: "linux", architecture: "arm64" },
+    Platform { key: "darwin-arm64", os: "darwin", architecture: "arm64" },
 ];
 
 pub const MEDIA_TYPE_INDEX: &str = "application/vnd.oci.image.index.v1+json";
@@ -80,10 +68,9 @@ pub struct ReleaseKey {
 
 /// The default trust list: today's release key, unrotated for v1
 /// (layout-v2 spec §0/§4.2, D8).
-pub const RELEASE_KEYS: &[ReleaseKey] = &[ReleaseKey {
-    keyid: "deb275922dbff76e",
-    ed25519_hex: "fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc",
-}];
+pub const RELEASE_KEYS: &[ReleaseKey] = &[
+    ReleaseKey { keyid: "deb275922dbff76e", ed25519_hex: "fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc" },
+];
 
 /// A fixture-only ed25519 public key, never in the default trust list.
 pub struct TestKey {
@@ -94,11 +81,9 @@ pub struct TestKey {
 
 /// Fixture-generator signing keys (tests/fixtures/fetch-v1/test-key/). A
 /// conformance case trusts one only by explicitly naming it.
-pub const TEST_KEYS: &[TestKey] = &[TestKey {
-    keyid: "6c3468e4ec653ac0",
-    ed25519_hex: "b9b314491f92f6c4b93fc69f932164739a619965ed79dbbcea7a4ae2da611ce2",
-    trusted_by_default: false,
-}];
+pub const TEST_KEYS: &[TestKey] = &[
+    TestKey { keyid: "6c3468e4ec653ac0", ed25519_hex: "b9b314491f92f6c4b93fc69f932164739a619965ed79dbbcea7a4ae2da611ce2", trusted_by_default: false },
+];
 
 pub const RETRY_ATTEMPTS: u32 = 5;
 pub const RETRY_FIRST_WAIT_S: f64 = 4.0;
@@ -142,44 +127,14 @@ pub struct ErrorExitCode {
 /// exit_code_for; Go, Python and TypeScript agree); the four new v1-only
 /// codes are assigned here, not inherited.
 pub const ERROR_EXIT_CODES: &[ErrorExitCode] = &[
-    ErrorExitCode {
-        code: "CHTYPES_ARTIFACT_MISSING",
-        exit_code: 1,
-    },
-    ErrorExitCode {
-        code: "CHTYPES_ARTIFACT_UNTRUSTED",
-        exit_code: 1,
-    },
-    ErrorExitCode {
-        code: "CHTYPES_ARTIFACT_CORRUPT",
-        exit_code: 1,
-    },
-    ErrorExitCode {
-        code: "CHTYPES_ARTIFACT_PINNED",
-        exit_code: 1,
-    },
-    ErrorExitCode {
-        code: "CHTYPES_ARTIFACT_UNPUBLISHED",
-        exit_code: 4,
-    },
-    ErrorExitCode {
-        code: "CHTYPES_SOURCE_UNREACHABLE",
-        exit_code: 3,
-    },
-    ErrorExitCode {
-        code: "CHTYPES_SOURCE_UNAUTHORIZED",
-        exit_code: 5,
-    },
-    ErrorExitCode {
-        code: "CHTYPES_SOURCE_FORBIDDEN",
-        exit_code: 6,
-    },
-    ErrorExitCode {
-        code: "CHTYPES_SOURCE_INCOMPATIBLE",
-        exit_code: 7,
-    },
-    ErrorExitCode {
-        code: "CHTYPES_ARTIFACT_INCOMPATIBLE",
-        exit_code: 8,
-    },
+    ErrorExitCode { code: "CHTYPES_ARTIFACT_MISSING", exit_code: 1 },
+    ErrorExitCode { code: "CHTYPES_ARTIFACT_UNTRUSTED", exit_code: 1 },
+    ErrorExitCode { code: "CHTYPES_ARTIFACT_CORRUPT", exit_code: 1 },
+    ErrorExitCode { code: "CHTYPES_ARTIFACT_PINNED", exit_code: 1 },
+    ErrorExitCode { code: "CHTYPES_ARTIFACT_UNPUBLISHED", exit_code: 4 },
+    ErrorExitCode { code: "CHTYPES_SOURCE_UNREACHABLE", exit_code: 3 },
+    ErrorExitCode { code: "CHTYPES_SOURCE_UNAUTHORIZED", exit_code: 5 },
+    ErrorExitCode { code: "CHTYPES_SOURCE_FORBIDDEN", exit_code: 6 },
+    ErrorExitCode { code: "CHTYPES_SOURCE_INCOMPATIBLE", exit_code: 7 },
+    ErrorExitCode { code: "CHTYPES_ARTIFACT_INCOMPATIBLE", exit_code: 8 },
 ];
