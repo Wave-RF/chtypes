@@ -19,7 +19,7 @@ import platform as _platform_module
 import shutil
 import tempfile
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from chtypes._ocifetch import _constants as C
@@ -32,10 +32,24 @@ from chtypes._ocifetch._errors import (
     ArtifactCorruptError,
     ArtifactMissingError,
     ArtifactPinnedError,
+    ArtifactUnpublishedError,
     ArtifactUntrustedError,
     FetchError,
+    SourceForbiddenError,
+    SourceUnauthorizedError,
+    SourceUnreachableError,
 )
-from chtypes._ocifetch._http import Clock, FetchPolicy, RetryPolicy, TransportError
+from chtypes._ocifetch._http import (
+    Clock,
+    FetchPolicy,
+    ForbiddenHttpError,
+    NotFoundHttpError,
+    OversizeHttpError,
+    RetryPolicy,
+    TransportError,
+    UnauthorizedHttpError,
+    UnreachableHttpError,
+)
 from chtypes._ocifetch._layout import (
     VerifiedRecord,
     list_verified_records,
@@ -266,29 +280,39 @@ def _check_predicate_matches_request(predicate: dict, platform_key: str, spellin
         raise ArtifactCorruptError("signed predicate missing integer field 'library_bytes'")
 
 
-def _compare_version_build(v1: str, b1: str, v2: str, b2: str) -> int:
-    c1, c2 = spelling_components(v1), spelling_components(v2)
-    if c1 != c2:
-        return -1 if c1 < c2 else 1
-    if b1 == b2:
-        return 0
-    return -1 if b1 < b2 else 1  # build is a fixed-width UTC string: lexicographic == chronological
+def _newer_installed(
+    roots: Sequence[Path], platform_key: str, predicate: dict
+) -> tuple[Path, VerifiedRecord, str] | None:
+    """PLAN "monotonic-warning": "an installed HIGHER build; the registry
+    offers a LOWER one; ok plus a warning." — the existing (newer) install
+    is KEPT, not replaced by the one the registry just offered, so this
+    returns the winning (dir, record) alongside the warning text rather
+    than a warning alone; the caller resolves to it instead of installing
+    what it just verified.
 
-
-def _monotonic_warnings(roots: Sequence[Path], platform_key: str, predicate: dict) -> list[str]:
+    Scoped to the SAME declared `clickhouse_version` only (not "any
+    lexicographically higher version is cached somewhere") — a build
+    regression under one unchanged version tag is what this guards
+    against; a cache entry for a genuinely different, unrelated version
+    (a different floating family the caller is now intentionally
+    switching to) must never shadow it.
+    """
     new_version = predicate.get("clickhouse_version")
     new_build = predicate.get("build")
-    out = []
-    for _dir, record in list_verified_records(roots):
-        if record.platform != platform_key:
+    for dir_, record in list_verified_records(roots):
+        if record.platform != platform_key or record.version != new_version:
             continue
-        if _compare_version_build(record.version, record.build, new_version, new_build) > 0:
-            out.append(
-                f"an already-installed build ({record.version}/{record.build}) is newer "
-                f"than the one just resolved ({new_version}/{new_build})"
+        if record.build == new_build:
+            continue
+        # build is a fixed-width UTC string: lexicographic == chronological.
+        if record.build > new_build:
+            warning = (
+                f"monotonic warning: an already-installed build ({record.version}/"
+                f"{record.build}) is newer than the one just resolved "
+                f"({new_version}/{new_build})"
             )
-            break
-    return out
+            return dir_, record, warning
+    return None
 
 
 def _tmp_dir_under(root: Path, subdir: str) -> str:
@@ -314,8 +338,17 @@ def _find_verified_signature(
     PLAN §3.2's "multiple-referrers-one-valid" and "hint-names-unknown-key-
     but-valid" cases both depend on one bad or irrelevant referrer never
     stopping the search for a good one. Returns `None`, never raises, when
-    nothing verifies; the caller decides whether that is UNTRUSTED or an
-    allow-unsigned fallback.
+    nothing verifies and every failure was merely "didn't verify" or a
+    transport hiccup; the caller then decides whether that is UNTRUSTED or
+    an allow-unsigned fallback.
+
+    A referrer whose bundle is itself STRUCTURALLY broken (bad base64, no
+    envelope, a duplicate JSON key — `_dsse.verify_bundle`'s own
+    `ArtifactCorruptError`) is not "try the next one" territory per that
+    function's docstring: it is the same bundle either way, so that error
+    propagates immediately rather than being swallowed into a misleading
+    UNTRUSTED verdict (`statement-duplicate-key` expects
+    `CHTYPES_ARTIFACT_CORRUPT`, not `CHTYPES_ARTIFACT_UNTRUSTED`).
     """
     referrers = discover_referrers(
         bases, manifest_digest, C.MEDIA_TYPE_BUNDLE, policy=policy, retry=retry
@@ -326,6 +359,8 @@ def _find_verified_signature(
                 bases, ref.digest, policy=policy, retry=retry
             )
             blob_desc = manifest_single_layer(referrer_doc, expected_media_type=C.MEDIA_TYPE_BUNDLE)
+        except ArtifactCorruptError:
+            raise
         except (TransportError, FetchError):
             continue
         tmp_dir = tempfile.mkdtemp(dir=str(scratch_root))
@@ -342,6 +377,8 @@ def _find_verified_signature(
             with open(bundle_path, "rb") as f:
                 bundle_json = json.loads(f.read())
             verified = verify_bundle(bundle_json, trusted_keys)
+        except ArtifactCorruptError:
+            raise
         except (TransportError, FetchError, json.JSONDecodeError):
             continue
         finally:
@@ -416,7 +453,13 @@ def _unpack_and_install(
 
 
 def _write_lock_pin(
-    options: Options, lock: Lock | None, spelling: str, platform_key: str, resolved: Resolved
+    options: Options,
+    lock: Lock | None,
+    spelling: str,
+    platform_key: str,
+    resolved: Resolved,
+    *,
+    extra_pins: dict[str, LockPin] | None = None,
 ) -> None:
     if options.lock_path is None:
         raise ValueError("chtypes: lock_write requires options.lock_path")
@@ -427,9 +470,140 @@ def _write_lock_pin(
         manifest=resolved.digests["manifest"],
         layer=resolved.digests["layer"],
         bundle=resolved.digests["bundle"] or "",
-        index=resolved.digests.get("index"),
+        # docs/guides/fetch-v1.md §6: "the index digest is informational
+        # only" — never used for `--frozen` resolution, so the lock never
+        # records it at all (the fixtures' expected lock_after documents
+        # omit the field entirely, not just an unread one).
+        index=None,
     )
-    save_lock(options.lock_path, base.with_pin(spelling, platform_key, pin))
+    # `lock-write-all-platforms`'s expected fixture orders its "platforms"
+    # array the same way docs/guides/fetch-v1.md's own reference table
+    # does (`C.PLATFORMS`'s declared order), not "the host's platform
+    # first, then whichever order the index happened to list the rest" —
+    # applying every pin from one call in that canonical order (rather
+    # than host-first) is what makes a from-scratch all-platforms write
+    # match it; an incremental single-platform write is unaffected, since
+    # `Lock.with_pin` only appends a platform the lock doesn't already
+    # carry.
+    all_pins = {platform_key: pin, **(extra_pins or {})}
+    updated = base
+    for p in C.PLATFORMS:
+        key = p["key"]
+        if key in all_pins:
+            updated = updated.with_pin(spelling, key, all_pins[key])
+    save_lock(options.lock_path, updated)
+
+
+def _resolve_other_platform_pins(
+    *,
+    index_doc: dict,
+    host_platform_key: str,
+    request_spelling: str,
+    index_digest: str | None,
+    bases: Sequence[str],
+    policy: FetchPolicy,
+    retry: RetryPolicy,
+    trusted_keys: tuple[TrustedKey, ...],
+    scratch_root: Path,
+) -> dict[str, LockPin]:
+    """docs/guides/fetch-v1.md §6: "Writing a lock for every platform the
+    index offers... downloads and verifies every platform's bundle but
+    fetches the layer only for the host's own platform." For every OTHER
+    platform in the index: fetch its manifest BY DIGEST (small JSON; never
+    its layer blob), verify its own signature, and build a `LockPin` from
+    digests alone."""
+    pins: dict[str, LockPin] = {}
+    for m in index_doc.get("manifests") or []:
+        plat = m.get("platform") or {}
+        key = next(
+            (
+                p["key"]
+                for p in C.PLATFORMS
+                if p["os"] == plat.get("os") and p["architecture"] == plat.get("architecture")
+            ),
+            None,
+        )
+        if key is None or key == host_platform_key:
+            continue
+        manifest_digest = m["digest"]
+        other_manifest_doc, _raw = fetch_manifest_by_digest(
+            bases, manifest_digest, policy=policy, retry=retry
+        )
+        layer_desc = manifest_layer_descriptor(other_manifest_doc)
+        found = _find_verified_signature(
+            bases,
+            manifest_digest,
+            policy=policy,
+            retry=retry,
+            trusted_keys=trusted_keys,
+            scratch_root=scratch_root,
+        )
+        if found is None:
+            raise ArtifactUntrustedError(
+                f"chtypes: --lock: no trusted signature for {request_spelling} ({key})"
+            )
+        verified, bundle_digest, _referrer_digest = found
+        statement = verified.statement
+        if statement.predicate_type != C.PREDICATE_TYPE_ARTIFACT:
+            raise ArtifactCorruptError(
+                f"--lock: {key}'s signed predicateType was {statement.predicate_type!r}, want "
+                f"{C.PREDICATE_TYPE_ARTIFACT!r}"
+            )
+        layer_hex = parse_digest(layer_desc.digest)
+        if layer_hex not in statement.subject_sha256:
+            raise ArtifactCorruptError(f"--lock: {key}'s signed subject did not match its layer")
+        _check_predicate_matches_request(statement.predicate, key, request_spelling)
+        pins[key] = LockPin(
+            version=statement.predicate["clickhouse_version"],
+            build=statement.predicate["build"],
+            manifest=manifest_digest,
+            layer=layer_desc.digest,
+            bundle=bundle_digest,
+            # never recorded — see _write_lock_pin.
+            index=None,
+        )
+    return pins
+
+
+def _maybe_write_lock(
+    options: Options,
+    lock: Lock | None,
+    request: Request,
+    platform_key: str,
+    resolved: Resolved,
+    *,
+    index_doc: dict,
+    index_digest: str | None,
+    bases: Sequence[str],
+    policy: FetchPolicy,
+    retry: RetryPolicy,
+    scratch_root: Path,
+) -> None:
+    """Writes the lock when `--lock` was asked for, OR when `update` just
+    re-resolved an entry that must be rewritten in place (docs/guides/
+    fetch-v1.md §6: "`update` re-resolves every locked request against the
+    current index and rewrites the lock") — `update` alone, with no
+    `lock_write`, still means a lock on disk gets a fresh entry. Only a
+    `lock_write` ("`fetch --lock`") additionally writes every OTHER
+    platform's pin; a plain `update` only touches the one (request,
+    platform) it was asked about.
+    """
+    if not (options.lock_write or options.update):
+        return
+    extra_pins = None
+    if options.lock_write:
+        extra_pins = _resolve_other_platform_pins(
+            index_doc=index_doc,
+            host_platform_key=platform_key,
+            request_spelling=request.spelling,
+            index_digest=index_digest,
+            bases=bases,
+            policy=policy,
+            retry=retry,
+            trusted_keys=options.resolved_trusted_keys(),
+            scratch_root=scratch_root,
+        )
+    _write_lock_pin(options, lock, request.spelling, platform_key, resolved, extra_pins=extra_pins)
 
 
 def _ensure_floating(
@@ -458,8 +632,19 @@ def _ensure_floating(
             already_installed=True,
             source="cache",
         )
-        if options.lock_write:
-            _write_lock_pin(options, lock, request.spelling, platform_key, resolved)
+        _maybe_write_lock(
+            options,
+            lock,
+            request,
+            platform_key,
+            resolved,
+            index_doc=index_doc,
+            index_digest=index_digest,
+            bases=bases,
+            policy=policy,
+            retry=retry,
+            scratch_root=scratch_root,
+        )
         return resolved
 
     manifest_doc, _manifest_bytes = fetch_manifest_by_digest(
@@ -510,7 +695,31 @@ def _ensure_floating(
         signed_by = verified.signed_by
 
     _check_predicate_matches_request(predicate, platform_key, request.spelling)
-    warnings.extend(_monotonic_warnings(roots, platform_key, predicate))
+    newer = _newer_installed(roots, platform_key, predicate)
+    if newer is not None:
+        newer_dir, newer_record, warning = newer
+        resolved = _record_to_resolved(
+            newer_dir,
+            newer_record,
+            request_spelling=request.spelling,
+            already_installed=True,
+            source="cache",
+        )
+        resolved = replace(resolved, warnings=(*resolved.warnings, warning))
+        _maybe_write_lock(
+            options,
+            lock,
+            request,
+            platform_key,
+            resolved,
+            index_doc=index_doc,
+            index_digest=index_digest,
+            bases=bases,
+            policy=policy,
+            retry=retry,
+            scratch_root=scratch_root,
+        )
+        return resolved
 
     dest_dir = _unpack_and_install(
         cache_root_path=cache_root_path,
@@ -532,7 +741,8 @@ def _ensure_floating(
     assert record is not None
 
     def _add_entry(doc: dict) -> dict:
-        return {**doc, "manifests": [*doc.get("manifests", []), {"digest": platform_desc.digest}]}
+        entries = [*(doc.get("manifests") or []), {"digest": platform_desc.digest}]
+        return {**doc, "manifests": entries}
 
     try:
         update_index_json(cache_root_path, _add_entry, before_rename=options.before_index_rename)
@@ -546,8 +756,19 @@ def _ensure_floating(
         already_installed=False,
         source=bases[0] if bases else "cache",
     )
-    if options.lock_write:
-        _write_lock_pin(options, lock, request.spelling, platform_key, resolved)
+    _maybe_write_lock(
+        options,
+        lock,
+        request,
+        platform_key,
+        resolved,
+        index_doc=index_doc,
+        index_digest=index_digest,
+        bases=bases,
+        policy=policy,
+        retry=retry,
+        scratch_root=scratch_root,
+    )
     return resolved
 
 
@@ -636,6 +857,30 @@ def _ensure_frozen(
     )
 
 
+def _translate_transport_error(e: TransportError) -> FetchError:
+    """`_http.py`'s internal transport exceptions are untyped-by-meaning on
+    purpose (its own docstring: the same HTTP outcome means different things
+    depending on context) — but by the time one reaches a caller of the
+    seam, the context has already been applied (`fetch_from_bases`'s own
+    tag/digest 404 handling never lets a bare digest-404 escape as
+    `NotFoundHttpError`), so a straight type-to-code mapping is safe here:
+    a bare `NotFoundHttpError` can only come from a TAG lookup (every
+    digest-mode caller already turns a persistent digest-404 into
+    `UnreachableHttpError`), so it is always `CHTYPES_ARTIFACT_UNPUBLISHED`,
+    never `SOURCE_UNREACHABLE`."""
+    if isinstance(e, NotFoundHttpError):
+        return ArtifactUnpublishedError(f"chtypes: {e}")
+    if isinstance(e, UnauthorizedHttpError):
+        return SourceUnauthorizedError(f"chtypes: {e}")
+    if isinstance(e, ForbiddenHttpError):
+        return SourceForbiddenError(f"chtypes: {e}")
+    if isinstance(e, OversizeHttpError):
+        return ArtifactCorruptError(f"chtypes: {e}")
+    if isinstance(e, UnreachableHttpError):
+        return SourceUnreachableError(f"chtypes: {e}", retryable=getattr(e, "retryable", True))
+    return SourceUnreachableError(f"chtypes: {e}")
+
+
 def ensure(request: Request, options: Options) -> Resolved:
     """Make sure a verified, unpacked library for `request` is on disk,
     fetching it if needed (docs/guides/fetch-v1.md "The seam").
@@ -656,21 +901,162 @@ def ensure(request: Request, options: Options) -> Resolved:
     if options.lock_path is not None and os.path.exists(options.lock_path):
         lock = load_lock(options.lock_path)
 
-    if options.offline:
-        resolved = resolve_installed(request, platform_key, options)
-        if resolved is None:
-            raise ArtifactMissingError(
-                f"chtypes: no installed artifact for {request.spelling} ({platform_key}); offline"
+    try:
+        if options.offline:
+            resolved = resolve_installed(request, platform_key, options)
+            if resolved is None:
+                raise ArtifactMissingError(
+                    f"chtypes: no installed artifact for {request.spelling} "
+                    f"({platform_key}); offline"
+                )
+            return resolved
+
+        if options.frozen:
+            return _ensure_frozen(request, platform_key, options, lock)
+
+        if lock is not None and not options.update and lock.pin_for(request.spelling, platform_key):
+            return _ensure_frozen(request, platform_key, options, lock)
+
+        return _ensure_floating(request, platform_key, options, lock)
+    except TransportError as e:
+        raise _translate_transport_error(e) from e
+
+
+def _verify_and_install_from_local_blobs(
+    *,
+    source_root: Path,
+    manifest_digest: str,
+    cache_write_root: Path,
+    trusted_keys: tuple[TrustedKey, ...],
+) -> VerifiedRecord | None:
+    """docs/guides/fetch-v1.md §1/§6: "A pre-seeded layout has entries in
+    `index.json` with no corresponding `unpacked/` directory yet; the first
+    request for one verifies it against its signature exactly as a freshly
+    downloaded layer would, then unpacks it" — and for `--offline`
+    specifically, "a pre-seeded `index.json` entry with no corresponding
+    `unpacked/` directory is the ONE case `--offline` still verifies and
+    unpacks before answering." Entirely local: every byte comes from
+    `source_root/blobs/sha256/*`, never the network. Returns `None` — never
+    raises — for a missing, unreadable or untrusted entry, the same
+    tolerant shape `_find_verified_signature` uses for a network referrer:
+    a bad pre-seed is "nothing usable here," not a crash."""
+    blobs_dir = source_root / "blobs" / "sha256"
+    if not blobs_dir.is_dir():
+        return None
+    manifest_hex = parse_digest(manifest_digest)
+    manifest_path = blobs_dir / manifest_hex
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest_doc = json.loads(manifest_path.read_bytes())
+        layer_desc = manifest_layer_descriptor(manifest_doc)
+    except (ValueError, OSError, FetchError):
+        return None
+
+    verified = None
+    bundle_digest = None
+    for blob_path in blobs_dir.iterdir():
+        try:
+            doc = json.loads(blob_path.read_bytes())
+        except (ValueError, OSError, UnicodeDecodeError):
+            continue
+        if not isinstance(doc, dict) or doc.get("mediaType") != C.MEDIA_TYPE_MANIFEST:
+            continue
+        subject = doc.get("subject") or {}
+        if subject.get("digest") != manifest_digest:
+            continue
+        try:
+            referrer_layer = manifest_single_layer(doc, expected_media_type=C.MEDIA_TYPE_BUNDLE)
+            bundle_bytes = (blobs_dir / parse_digest(referrer_layer.digest)).read_bytes()
+            candidate = verify_bundle(json.loads(bundle_bytes), trusted_keys)
+        except (ValueError, OSError, FetchError):
+            continue
+        if candidate is not None:
+            verified = candidate
+            bundle_digest = referrer_layer.digest
+            break
+    if verified is None:
+        return None
+
+    predicate = verified.statement.predicate
+    layer_hex = parse_digest(layer_desc.digest)
+    if layer_hex not in verified.statement.subject_sha256:
+        return None
+    platform_key = next(
+        (
+            p["key"]
+            for p in C.PLATFORMS
+            if p["os"] == predicate.get("os") and p["architecture"] == predicate.get("arch")
+        ),
+        None,
+    )
+    if platform_key is None:
+        return None
+    layer_path = blobs_dir / layer_hex
+    if not layer_path.is_file():
+        return None
+
+    scratch = _scratch_root(cache_write_root)
+    tmp_dir = tempfile.mkdtemp(dir=str(scratch))
+    try:
+        unpacked_dir = os.path.join(tmp_dir, "unpacked")
+        unpack_tar_zst(
+            str(layer_path),
+            unpacked_dir,
+            library_name=predicate["library"],
+            library_sha256=predicate["library_sha256"],
+            library_bytes=predicate["library_bytes"],
+        )
+        record = VerifiedRecord(
+            schema=1,
+            manifest=manifest_digest,
+            layer=layer_desc.digest,
+            bundle=bundle_digest or "",
+            index=None,
+            platform=platform_key,
+            version=predicate["clickhouse_version"],
+            build=predicate["build"],
+            channel=predicate.get("channel"),
+            predicate=predicate,
+            signed_by=verified.signed_by,
+            library=predicate["library"],
+        )
+        write_verified_install(
+            cache_write_root, manifest_digest, record, unpacked_tmp_dir=unpacked_dir
+        )
+        return record
+    except (ArtifactCorruptError, OSError):
+        return None
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _verify_preseeded_entries(roots: Sequence[Path], trusted_keys: tuple[TrustedKey, ...]) -> None:
+    """Scans every root's `index.json` for an entry with no `verified.json`
+    anywhere yet, and verifies+unpacks it from that root's OWN local blobs,
+    writing the result into `roots[0]` (the writable cache) regardless of
+    which root — including a read-only system directory — the blobs came
+    from."""
+    cache_write_root = roots[0]
+    already_verified = {record.manifest for _dir, record in list_verified_records(roots)}
+    for root in roots:
+        index_path = root / "index.json"
+        try:
+            index_doc = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for m in index_doc.get("manifests") or []:
+            digest = m.get("digest")
+            if not digest or digest in already_verified:
+                continue
+            record = _verify_and_install_from_local_blobs(
+                source_root=root,
+                manifest_digest=digest,
+                cache_write_root=cache_write_root,
+                trusted_keys=trusted_keys,
             )
-        return resolved
-
-    if options.frozen:
-        return _ensure_frozen(request, platform_key, options, lock)
-
-    if lock is not None and not options.update and lock.pin_for(request.spelling, platform_key):
-        return _ensure_frozen(request, platform_key, options, lock)
-
-    return _ensure_floating(request, platform_key, options, lock)
+            if record is not None:
+                already_verified.add(digest)
 
 
 def resolve_installed(request: Request, platform: str, options: Options) -> Resolved | None:
@@ -678,9 +1064,14 @@ def resolve_installed(request: Request, platform: str, options: Options) -> Reso
 
     The source of truth is the immutable `unpacked/sha256/*/verified.json`
     records (PLAN §3.4), never `index.json` — a lost `index.json` race costs
-    only `oras` interop, never correctness here.
+    only `oras` interop, never correctness here. The ONE exception
+    (docs/guides/fetch-v1.md §1/§6): a pre-seeded `index.json` entry with no
+    `verified.json` of its own yet is verified-then-unpacked from local
+    blobs before matching, so `--offline` still answers for a cache that
+    was only ever pre-seeded (`oras copy --to-oci-layout`), never fetched.
     """
     roots = search_roots(options.cache_dir)
+    _verify_preseeded_entries(roots, options.resolved_trusted_keys())
     candidates = [
         (dir_path, record)
         for dir_path, record in list_verified_records(roots)
@@ -752,32 +1143,55 @@ def verify_installed(options: Options) -> list[VerifyResult]:
 
 
 def fetch_signed(repository: str, ref: str, predicate_type: str, options: Options) -> dict:
-    """A generic signed-artifact fetch: goldens (`ref` is the referrer
-    digest discovered against a platform manifest) and fetch fixtures
-    (`ref` is the pinned digest; §7.7 — no tag fallback is ever tried for
-    fixtures). `repository` is a path suffix joined onto every configured
-    base (`""` for the same repository as the platform artifact,
+    """A generic signed-artifact fetch, for goldens and fetch fixtures.
+    `repository` is a path suffix joined onto every configured base (`""`
+    for the same repository as the platform artifact,
     `constants.FIXTURES_REPO_SUFFIX` for fixtures).
+
+    What `ref` means depends on `predicate_type` (`decided-here`, since the
+    frozen seam does not spell this split itself): goldens are an OCI
+    REFERRER of a platform manifest (D7), never fetched by their own
+    digest/tag directly, so when `predicate_type` is
+    `constants.PREDICATE_TYPE_GOLDENS`, `ref` is the SUBJECT (the platform
+    manifest)'s digest, and this discovers the one goldens referrer of it.
+    For every other predicate type (fixtures today), `ref` is the artifact's
+    OWN digest or tag to fetch directly — fixtures are pinned by digest with
+    no tag fallback ever tried (§7.7).
 
     Returns `{"path": <verified layer bytes on disk>, "statement": <predicate
     dict, or None under allow-unsigned>, "digests": {"manifest", "layer",
     "bundle"}}`. Never dlopens or interprets the content — that is for the
     caller.
     """
+    try:
+        return _fetch_signed_impl(repository, ref, predicate_type, options)
+    except TransportError as e:
+        raise _translate_transport_error(e) from e
+
+
+def _fetch_signed_impl(repository: str, ref: str, predicate_type: str, options: Options) -> dict:
     bases = tuple(b.rstrip("/") + repository for b in options.resolved_bases())
     policy = FetchPolicy(token=options.token, clock=options.clock)
     retry = options.retry
     cache_root_path = resolve_cache_root(options.cache_dir)
     scratch_root = _scratch_root(cache_root_path)
+    trusted_keys = options.resolved_trusted_keys()
 
-    if ref.startswith("sha256:"):
+    if predicate_type == C.PREDICATE_TYPE_GOLDENS:
+        referrers = discover_referrers(
+            bases, ref, C.GOLDENS_ARTIFACT_TYPE, policy=policy, retry=retry
+        )
+        if not referrers:
+            raise ArtifactUnpublishedError(f"chtypes: no goldens referrer for {ref}")
+        manifest_digest = referrers[0].digest
+        doc, _raw = fetch_manifest_by_digest(bases, manifest_digest, policy=policy, retry=retry)
+    elif ref.startswith("sha256:"):
         doc, _raw = fetch_manifest_by_digest(bases, ref, policy=policy, retry=retry)
         manifest_digest = ref
     else:
         doc, _raw, manifest_digest = fetch_manifest_by_tag(bases, ref, policy=policy, retry=retry)
 
     layer_desc = manifest_single_layer(doc)
-    trusted_keys = options.resolved_trusted_keys()
     found = _find_verified_signature(
         bases,
         manifest_digest,

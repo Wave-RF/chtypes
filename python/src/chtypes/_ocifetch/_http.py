@@ -201,9 +201,20 @@ def _single_request(
             e.close()
         return HttpResponse(status=e.code, headers=dict(e.headers or {}), body=body, url=url)
     except urllib.error.URLError as e:
-        raise UnreachableHttpError(f"{url}: {e.reason}", retryable=True) from e
+        # docs/guides/fetch-v1.md §2 lists "a timeout... [or] a connection
+        # refusal" together as reasons bases are tried in order, but
+        # `connection-refused-then-next-base` (sleeps: []) vs
+        # `stall-timeout-retried` (sleeps: [4]) draw a real line within
+        # that: nothing is even listening on a refused port — waiting and
+        # retrying the SAME base cannot change that — so it skips this
+        # base's own backoff schedule entirely and fails over immediately,
+        # while a stall/timeout (the remote may just be slow) still gets
+        # the standard retry table first.
+        retryable = not isinstance(e.reason, ConnectionRefusedError)
+        raise UnreachableHttpError(f"{url}: {e.reason}", retryable=retryable) from e
     except (TimeoutError, ConnectionError, OSError) as e:
-        raise UnreachableHttpError(f"{url}: {e}", retryable=True) from e
+        retryable = not isinstance(e, ConnectionRefusedError)
+        raise UnreachableHttpError(f"{url}: {e}", retryable=retryable) from e
 
 
 def _read_capped(fp, max_bytes: int | None) -> bytes:  # noqa: ANN001
@@ -313,8 +324,8 @@ def _http_get_once(
     while True:
         try:
             resp = _single_request(current_url, headers=headers, policy=policy, max_bytes=max_bytes)
-        except UnreachableHttpError:
-            if attempt >= retry.attempts - 1:
+        except UnreachableHttpError as e:
+            if not e.retryable or attempt >= retry.attempts - 1:
                 raise
             policy.clock.sleep(retry.wait_before_attempt(attempt))
             attempt += 1
@@ -412,6 +423,21 @@ def _file_path_for(base: str, path: str) -> str:
     return url2pathname(urlsplit(joined).path)
 
 
+def _v2_url(base: str, path: str) -> str:
+    """The OCI distribution-spec prefix: every http(s) request's wire path is
+    `<scheme>://<authority>/v2<base-path><path>` — the client splices `/v2/`
+    in itself, immediately after the authority, the same place a real
+    repository name sits (docs/guides/fetch-v1.md §10 "`{base}` per
+    transport"). `constants.json`'s `default_bases` carries no `/v2/` for
+    the same reason: it is the fixed distribution-spec prefix every request
+    carries, not part of the repository-qualified base. `file://` bases are
+    not run through this — their own base string already bakes in the
+    equivalent path segment."""
+    parts = urlsplit(base)
+    base_path = parts.path.rstrip("/")
+    return urlunsplit((parts.scheme, parts.netloc, f"/v2{base_path}{path}", "", ""))
+
+
 def _fetch_file(base: str, path: str, *, max_bytes: int | None) -> HttpResponse:
     fs_path = _file_path_for(base, path)
     try:
@@ -474,7 +500,7 @@ def fetch_from_bases(
                 return _fetch_file(base, path, max_bytes=max_bytes)
             full_path = f"{path}?{query}" if query else path
             return _http_get_once(
-                base.rstrip("/") + full_path,
+                _v2_url(base, full_path),
                 accept=accept,
                 max_bytes=max_bytes,
                 policy=policy,

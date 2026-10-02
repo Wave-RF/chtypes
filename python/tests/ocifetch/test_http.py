@@ -180,6 +180,13 @@ class _Server:
             def do_GET(self) -> None:  # noqa: N802
                 server.requests.append((self.path, dict(self.headers.items())))
                 route_path = self.path.split("?", 1)[0]
+                # Every real request carries the OCI distribution-spec `/v2`
+                # prefix the client splices in itself (docs/guides/fetch-v1.md
+                # §10); route keys below are repository-relative, so strip it
+                # here. A request with no `/v2` prefix is a client bug and
+                # correctly 404s, same as an unmatched route.
+                if route_path.startswith("/v2/") or route_path == "/v2":
+                    route_path = route_path[len("/v2") :]
                 responses = server.routes.get(route_path)
                 if not responses:
                     self.send_response(404)

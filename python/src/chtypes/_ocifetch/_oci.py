@@ -58,10 +58,25 @@ def parse_digest(digest: str) -> str:
 
 
 def validate_spelling(spelling: str) -> None:
-    """Refuse a v0-era or decorated spelling before any network call
-    (constants: `spelling.regex` / `refuse_hint_regex`). This is a
-    client-side input error, not a fetch-layer error code."""
-    if re.match(C.SPELLING_REFUSE_HINT_REGEX, spelling) or not re.match(C.SPELLING_REGEX, spelling):
+    """Refuse a v0-era, decorated spelling before any network call
+    (constants: `refuse_hint_regex` — a leading `v` or a `-lts`/`-stable`
+    suffix). This is a client-side input error, not a fetch-layer error
+    code.
+
+    `spelling.regex` (the dotted N/N.N/N.N.N/N.N.N.N shape) is NOT enforced
+    here as a rejection gate: a request is, at the wire level, simply the
+    tag `GET manifests/<tag>` names, and an opaque, non-version-shaped tag
+    (a mirror's own `b<build>` convention, §7.7; this suite's own mnemonic
+    fixture tags) is a legitimate tag to resolve — refusing it would be
+    rejecting something the server might perfectly well serve. Component
+    matching for such a tag is simply skipped (`version_within_request`
+    below), the same way a digest-pinned `fetch_signed` ref has nothing to
+    cross-check either."""
+    # re.search, not re.match: the pattern is "^v|-(lts|stable)$" — each
+    # alternative carries its OWN anchor, so re.match's own start-anchoring
+    # would require the second alternative's leading "-" to sit at index 0,
+    # which it never does ("26.8.15.10-lts" would silently NOT match).
+    if re.search(C.SPELLING_REFUSE_HINT_REGEX, spelling):
         raise ValueError(
             f"chtypes: {spelling!r} is not a v1 version spelling. "
             f"Use the bare ClickHouse version, e.g. '26.8', '26.8.15' or "
@@ -76,7 +91,15 @@ def spelling_components(spelling: str) -> tuple[int, ...]:
 def version_within_request(predicate_version: str, requested_spelling: str) -> bool:
     """layout-v2 spec §7.2 / PLAN M4: the predicate's version must lie
     within a floating request (a component prefix) and equal an exact one.
-    A four-part request is exact; fewer parts is a prefix match."""
+    A four-part request is exact; fewer parts is a prefix match.
+
+    A request that is not itself a recognizable N/N.N/N.N.N/N.N.N.N spelling
+    (an opaque tag — see `validate_spelling`) has no numeric structure to
+    cross-check against, so this returns `True` unconditionally: trust for
+    an opaque tag rests entirely on the signature, exactly as it does for a
+    digest-pinned `fetch_signed` ref."""
+    if not re.match(C.SPELLING_REGEX, requested_spelling):
+        return True
     pred = spelling_components(predicate_version)
     req = spelling_components(requested_spelling)
     if len(req) == 4:

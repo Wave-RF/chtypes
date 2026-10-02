@@ -32,13 +32,21 @@ def test_validate_spelling_accepts_v1_shapes(spelling: str) -> None:
     validate_spelling(spelling)  # does not raise
 
 
-@pytest.mark.parametrize(
-    "spelling",
-    ["v26.8", "26.8.15.10-lts", "26.8-stable", "26.8.15.10-b20261001", "latest", "", "26.08"],
-)
+@pytest.mark.parametrize("spelling", ["v26.8", "26.8.15.10-lts", "26.8-stable"])
 def test_validate_spelling_refuses_v0_and_decorated_shapes(spelling: str) -> None:
     with pytest.raises(ValueError, match="v1 version spelling"):
         validate_spelling(spelling)
+
+
+@pytest.mark.parametrize(
+    "spelling", ["26.8.15.10-b20261001", "latest", "26.08", "t-untrusted-key", "c-offline-hit"]
+)
+def test_validate_spelling_accepts_an_opaque_tag(spelling: str) -> None:
+    """Not `refuse_hint_regex`-shaped, and not a recognizable version either
+    — still accepted: a request is, at the wire level, simply the tag to
+    resolve (docs/guides/fetch-v1.md §3; a mirror's own `b<build>` tag, or
+    this suite's own mnemonic fixture tags, are real examples)."""
+    validate_spelling(spelling)  # does not raise
 
 
 def test_spelling_components() -> None:
@@ -56,6 +64,11 @@ def test_spelling_components() -> None:
         ("26.8.15.10", "26.8.16", False),
         ("26.8.15.10", "26.8.15.11", False),
         ("26.9.1.1", "26.8", False),
+        # An opaque (non-spelling-shaped) request has nothing to cross-check
+        # against, so it is always "within" — trust rests on the signature
+        # alone, same as a digest-pinned fetch_signed ref.
+        ("26.8.1.10", "t-hint-unknown", True),
+        ("1.2.3.4", "c-offline-hit", True),
     ],
 )
 def test_version_within_request(predicate_version: str, requested: str, expected: bool) -> None:
