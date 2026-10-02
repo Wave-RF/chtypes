@@ -1,5 +1,10 @@
 package main
 
+import (
+	"fmt"
+	"os"
+)
+
 // cachecases.go — §1/§6's "Cache" case group (docs/guides/fetch-v1.md §1,
 // §6). Every layout here is a plain OCI image layout (oci-layout,
 // index.json, blobs/sha256/<hex>) copied byte-for-byte from a tree this
@@ -73,7 +78,7 @@ func buildCacheCases(fs *FileSet) []Case {
 	// locally by digest — zero LAYER requests, though the manifest/bundle
 	// may still be re-resolved over the network. --------------------------
 	artNoop := newArtifact("26.1.4.4", "20260104.000004", "cache-noop")
-	tagArtifact("c-existing-install-noop", artNoop)
+	tagArtifact("26.1.4.4", artNoop)
 	layoutNoop := NewLayout("existing-install-noop")
 	copyArtifactIntoLayout(layoutNoop, tree, artNoop, "26.1.4.4")
 	layoutNoop.SetInstalled(artNoop.ManifestDesc.Digest)
@@ -130,7 +135,7 @@ func buildCacheCases(fs *FileSet) []Case {
 	// index.json write against this fixture's normal online resolve;
 	// both entries must survive the atomic rename. -------------------------
 	artRace := newArtifact("26.1.7.7", "20260107.000007", "cache-race")
-	tagArtifact("c-index-race-reapply", artRace)
+	tagArtifact("26.1.7.7", artRace)
 	raceCase := newCase("index-race-reapply", "cache", "file", "http")
 	raceCase.Request.Spelling = "26.1.7.7"
 	raceCase.Setup.Cache = "empty"
@@ -141,20 +146,43 @@ func buildCacheCases(fs *FileSet) []Case {
 	raceCase.Expect.LibrarySHA256 = strp(artRace.Predicate.LibrarySHA256)
 	cases = append(cases, raceCase)
 
-	// --- preseed-oras: PENDING. layouts/oras-preseed/ is written ONLY by a
-	// real `oras copy -r --platform linux/arm64 --to-oci-layout` in the
-	// v1-oras-preseed job (workflow_dispatch only; plan §3.2/§4 lane 0B).
-	// This generator never writes it (lane 0B's MERGE NOTES record whether
-	// that job has been dispatched yet). The case is declared now so the
-	// contract is complete and no binding needs a second wiring pass once
-	// the layout lands.
-	preseed := newCase("preseed-oras", "cache", "file")
-	preseed.Request.Spelling = "26.1"
-	preseed.Request.Offline = true
-	preseed.Setup.Cache = "oras-preseed"
-	preseed.Expect.OK = true
-	preseed.Expect.Requests.Max = intp(0)
-	cases = append(cases, preseed)
+	// --- preseed-oras: layouts/oras-preseed/ is written ONLY by a real
+	// `oras copy -r --platform linux/arm64 --to-oci-layout` in the
+	// v1-oras-preseed job (workflow_dispatch only; plan §3.2/§4 lane 0B) —
+	// never by this generator.
+	//
+	// Measured (three fetch lanes independently, 2026-10-02): that job had
+	// not landed the layout in this tree, so the case was shipped in
+	// cases.json anyway, naming a setup.cache no binding could ever
+	// satisfy — every runner either 404'd/ENOENT'd on it or had to invent
+	// its own special-case to avoid doing so, for a GENERATOR reason, not a
+	// binding defect.
+	//
+	// Fixed here: gate the case's very existence on the layout's presence,
+	// checked fresh on every --write/--check/--selftest
+	// (layoutPresentOnDisk, main.go). Absent, it is skipped LOUDLY (stderr,
+	// every run, never silent — the same discipline
+	// CHTYPES_V1_CONFORMANCE unset already follows, docs/guides/fetch-v1.md
+	// §10) and left out of cases.json entirely, so no binding is ever asked
+	// to pass a case that cannot succeed and `parity.py`'s required-pairs
+	// completeness check never has a hole to paper over. Once the real job
+	// lands the directory, the very next regeneration picks the case back
+	// up with no second wiring pass. checkCacheLayoutsExist (cases.go) is
+	// this same invariant's second, independent check: it would catch a
+	// future edit that re-adds this case unconditionally.
+	if layoutPresentOnDisk("oras-preseed") {
+		preseed := newCase("preseed-oras", "cache", "file")
+		preseed.Request.Spelling = "26.1"
+		preseed.Request.Offline = true
+		preseed.Setup.Cache = "oras-preseed"
+		preseed.Expect.OK = true
+		preseed.Expect.Requests.Max = intp(0)
+		cases = append(cases, preseed)
+	} else {
+		fmt.Fprintln(os.Stderr, "genfixtures: SKIPPING preseed-oras — tests/fixtures/fetch-v1/layouts/oras-preseed/ "+
+			"is not on disk (written only by the workflow_dispatch-only v1-oras-preseed job); dispatch it and "+
+			"commit its output, then re-run this generator to pick the case back up")
+	}
 
 	flushTrees(fs, tree, monoTree)
 	for _, l := range []*Layout{layoutHit, layoutMiss, layoutTwoVersions, layoutTwoBuilds, layoutNoop, layoutMono, layoutSys} {

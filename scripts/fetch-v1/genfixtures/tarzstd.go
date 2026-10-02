@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"bytes"
+	"fmt"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -132,12 +133,85 @@ func buildMultiFrameZstd(plaintext []byte) []byte {
 	return out.Bytes()
 }
 
-// buildOversizeWindowZstd encodes plaintext with a window size above
-// limits.zstd_window_log_max (27, i.e. 128 MiB) — zstd-window-too-large
-// must be refused from the frame header alone, before the decoder commits
-// to allocating a window that large.
+// zstdMagicNumber is the 4-byte little-endian frame magic every zstd frame
+// starts with (RFC 8878 §3.1.1).
+var zstdMagicNumber = []byte{0x28, 0xB5, 0x2F, 0xFD}
+
+// buildOversizeWindowZstd encodes plaintext normally, then hand-patches the
+// frame's own Window_Descriptor byte so it genuinely declares a windowLog
+// above limits.zstd_window_log_max (27) — zstd-window-too-large must be
+// refused from the frame header alone, before the decoder commits to
+// allocating a window that large.
+//
+// zstd.WithWindowSize alone does not produce this: klauspost's encoder
+// sizes the ACTUAL declared window to what the content needs (rounded up to
+// the next power of two), not to the configured ceiling, so for this
+// fixture's small plaintext the shipped frame declared a small window
+// regardless of WithWindowSize(1<<28) — a correct client accepted it
+// (measured: the Go and Python fetch lanes, independently, against
+// cases.json on v1, 2026-10-02). Patching the header byte directly makes
+// the DECLARATION itself oversized, independent of what the body needs.
 func buildOversizeWindowZstd(plaintext []byte) []byte {
-	return zstdEncode(plaintext, zstd.WithWindowSize(1<<28), zstd.WithSingleSegment(false))
+	frame := zstdEncode(plaintext, zstd.WithSingleSegment(false))
+	patched := append([]byte(nil), frame...)
+	patchZstdWindowDescriptor(patched, 25) // windowLog 35 (10+25) — far past the 27 cap
+	mustDeclareOversizeWindow(patched)
+	return patched
+}
+
+// patchZstdWindowDescriptor overwrites a frame's Window_Descriptor byte
+// (frame offset 5, directly after the 4-byte magic number and the 1-byte
+// Frame_Header_Descriptor) to declare windowLog = 10+exponent, mantissa 0.
+// Per RFC 8878 §3.1.1, Window_Descriptor — when present at all — always
+// immediately follows Frame_Header_Descriptor, before any Dictionary_ID or
+// Frame_Content_Size field, so offset 5 does not depend on whether this
+// frame carries either of those. Panics if the frame has no
+// Window_Descriptor byte to patch (Single_Segment_flag is set).
+func patchZstdWindowDescriptor(frame []byte, exponent byte) {
+	if len(frame) < 6 || !bytes.Equal(frame[:4], zstdMagicNumber) {
+		panic("genfixtures: patchZstdWindowDescriptor: not a zstd frame")
+	}
+	if frame[4]&0x20 != 0 { // Frame_Header_Descriptor bit 5: Single_Segment_flag
+		panic("genfixtures: patchZstdWindowDescriptor: frame has Single_Segment_flag set, " +
+			"so it has no Window_Descriptor byte at offset 5")
+	}
+	frame[5] = exponent << 3
+}
+
+// parseZstdWindowLog reads back the windowLog a frame's header declares.
+// ok is false if the frame has no Window_Descriptor byte (Single_Segment_flag
+// set) — the same shape patchZstdWindowDescriptor refuses to patch.
+func parseZstdWindowLog(frame []byte) (windowLog int, ok bool) {
+	if len(frame) < 6 || !bytes.Equal(frame[:4], zstdMagicNumber) {
+		panic("genfixtures: parseZstdWindowLog: not a zstd frame")
+	}
+	if frame[4]&0x20 != 0 {
+		return 0, false
+	}
+	exponent := frame[5] >> 3
+	return 10 + int(exponent), true
+}
+
+// mustDeclareOversizeWindow is genfixtures' own self-check for the exact
+// defect buildOversizeWindowZstd exists to fix: it parses the frame it is
+// about to ship and panics unless the frame genuinely declares a windowLog
+// above limits.zstd_window_log_max. Called every time this fixture is
+// built (buildAll, --write and --check alike), so a regression here cannot
+// silently ship again; selftestZstdWindowDeclaration (selftest.go) plants
+// both a too-small window and a Single_Segment frame to prove this function
+// actually panics on each.
+func mustDeclareOversizeWindow(frame []byte) {
+	gotLog, ok := parseZstdWindowLog(frame)
+	if !ok {
+		panic("genfixtures: zstd-window-too-large's frame has no Window_Descriptor byte " +
+			"(Single_Segment_flag is set) — there is nothing to patch, and a Single_Segment frame's " +
+			"window is defined to equal the content size, so it could never be oversized")
+	}
+	if gotLog <= C.Limits.ZstdWindowLogMax {
+		panic(fmt.Sprintf("genfixtures: zstd-window-too-large's frame declares windowLog %d, which is "+
+			"NOT above limits.zstd_window_log_max (%d) — the fixture would not actually exercise the "+
+			"refusal it is named for", gotLog, C.Limits.ZstdWindowLogMax))
+	}
 }
 
 // buildZipBombTarZstd streams totalSize bytes of a single repeated byte as
