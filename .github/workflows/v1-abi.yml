@@ -1,0 +1,207 @@
+name: v1-abi
+
+# ABI v1's generated FFI layer, on the v1 branch only (docs/reference/abi-v1.md).
+#
+# spec/abi-v1/abi.json describes the whole ABI and scripts/abi-v1/gen.py
+# generates every file that states it: the C header, the export list, the
+# reference block, and (as their lanes land) each binding's declaration layer,
+# the test stub and the conformance cases. This workflow proves those agree,
+# then that every binding passes the same ABI cases against the stub.
+#
+# The job names below are check contexts, some of them required on v1, so
+# they are spelled exactly and never renamed casually:
+#   v1-abi-gen       required: the description, the header and every generated file agree
+#   v1-abi-parity    required (the merge gate): every enrolled binding passes every ABI case
+#   v1-abi-linked    required once the Go lane lands
+#   v1-abi-rust      required once the Rust lane lands
+#   v1-abi-stubs and v1-abi-conformance feed parity and are not required themselves.
+# Until a lane fills a job's body, that job fails loudly saying so.
+#
+# Hosted runners, no secrets. Network is used only to install pinned tools.
+
+on:
+  pull_request:
+    branches: [v1]
+  push:
+    branches: [v1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v1-abi-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  v1-abi-gen:
+    name: "v1-abi-gen — the description, the header and every generated file agree"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      # Python 3.11 is the generator's floor, and it uses the standard library
+      # only: running on 3.11 with no project and no dependencies proves both.
+      - name: selftest — every refusal fires on planted copies of the tree, and --write is deterministic
+        run: uv run --no-project --python 3.11 scripts/abi-v1/gen.py --selftest
+      - name: every generated file matches spec/abi-v1/ (gen.py --check)
+        run: uv run --no-project --python 3.11 scripts/abi-v1/gen.py --check
+      # The fingerprint is computed in exactly one place, scripts/abi-v1/jcs.py.
+      # Recompute it with an independent RFC 8785 implementation and require
+      # the same bytes, for the description, for every other JSON input, and
+      # for the self-test's own vectors: a derivation checked against itself
+      # proves nothing.
+      - name: the fingerprint and the canonical forms, recomputed by an independent RFC 8785 implementation
+        run: |
+          ours="$(uv run --no-project --python 3.11 scripts/abi-v1/gen.py --fingerprint)"
+          uv run --no-project --python 3.12 --with 'rfc8785==0.1.4' python - "$ours" <<'PY'
+          import hashlib, json, subprocess, sys
+          import rfc8785
+          sys.path.insert(0, "scripts/abi-v1")
+          import gen, jcs
+          ours = sys.argv[1]
+          bad = 0
+          with open("spec/abi-v1/abi.json", "rb") as f:
+              theirs = "sha256:" + hashlib.sha256(rfc8785.dumps(json.load(f))).hexdigest()
+          print(f"jcs.py: {ours}\nrfc8785: {theirs}")
+          if ours != theirs:
+              print("::error::CHS_ABI_FINGERPRINT differs between scripts/abi-v1/jcs.py and rfc8785")
+              bad += 1
+          for path in ("spec/abi-v1/abi.json", "spec/abi-v1/sdk.json", "spec/abi-v1/v0-symbols.json",
+                       "spec/abi-v1/schema/abi.schema.json", "spec/abi-v1/schema/sdk.schema.json"):
+              with open(path, "rb") as f:
+                  data = f.read()
+              if jcs.canonicalize(jcs.loads(data)) != rfc8785.dumps(json.loads(data)):
+                  print(f"::error file={path}::canonical form differs between jcs.py and rfc8785")
+                  bad += 1
+          for text, want in gen.JCS_VECTORS:
+              got = rfc8785.dumps(json.loads(text)).decode()
+              if got != want:
+                  print(f"::error::self-test vector {text!r}: rfc8785 gives {got!r}, gen.py expects {want!r}")
+                  bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+          {
+            echo "### ABI v1"
+            echo
+            echo "\`CHS_ABI_FINGERPRINT\` = \`$ours\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # The schemas, checked by a second validator: the description and the
+      # policy file validate, both schemas are valid 2020-12 schemas, and a
+      # planted violation is refused by the schema itself, not only by
+      # scripts/abi-v1/model.py's validator.
+      - name: the description validates under an independent JSON Schema validator, which also refuses a planted violation
+        run: |
+          cj=(uvx --from 'check-jsonschema==0.33.3' check-jsonschema)
+          "${cj[@]}" --check-metaschema spec/abi-v1/schema/abi.schema.json spec/abi-v1/schema/sdk.schema.json
+          "${cj[@]}" --schemafile spec/abi-v1/schema/abi.schema.json spec/abi-v1/abi.json
+          "${cj[@]}" --schemafile spec/abi-v1/schema/sdk.schema.json spec/abi-v1/sdk.json
+          python3 -c 'import json,sys; d=json.load(open("spec/abi-v1/abi.json")); d["surprise"]=1; json.dump(d, open(sys.argv[1], "w"))' "$RUNNER_TEMP/planted.json"
+          if "${cj[@]}" --schemafile spec/abi-v1/schema/abi.schema.json "$RUNNER_TEMP/planted.json"; then
+            echo "::error::the schema accepted a description with an unknown top-level key"
+            exit 1
+          fi
+      - name: selftest — a hand-written chs_ declaration is caught in all four bindings, and generated files are exempt
+        run: uv run --no-project --python 3.11 scripts/abi-v1/check-no-hand-decls.py --selftest
+      - name: no hand-written chs_ declaration or lookup in the v1 directories
+        run: uv run --no-project --python 3.11 scripts/abi-v1/check-no-hand-decls.py --scope v1
+      - name: the header compiles as C11 and as C++20 (gcc and clang)
+        run: |
+          for c in gcc clang; do
+            "$c" -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c include/v1/chtypes.h
+          done
+          for cxx in g++ clang++; do
+            "$cxx" -std=c++20 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c++ include/v1/chtypes.h
+          done
+          echo "include/v1/chtypes.h: C11 and C++20, gcc and clang, -Wall -Wextra -Werror -pedantic"
+
+  v1-abi-stubs:
+    name: "v1-abi-stubs (${{ matrix.platform }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-arm64
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: build the stub libraries and run the stub's handle-rule self-test
+        run: |
+          echo "::error::v1-abi-stubs (${{ matrix.platform }}): not yet provided (lane F-B)"
+          exit 1
+
+  v1-abi-conformance:
+    name: "v1-abi-conformance (${{ matrix.binding }} ${{ matrix.toolchain }} ${{ matrix.os }})"
+    needs: v1-abi-stubs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {binding: go, toolchain: go.mod, os: linux-amd64, runner: ubuntu-latest}
+          - {binding: python, toolchain: "3.11", os: linux-amd64, runner: ubuntu-latest}
+          - {binding: python, toolchain: "3.13", os: linux-amd64, runner: ubuntu-latest}
+          - {binding: python, toolchain: "3.14", os: linux-amd64, runner: ubuntu-latest}
+          - {binding: ts, toolchain: node-22.21.0, os: linux-amd64, runner: ubuntu-latest}
+          - {binding: ts, toolchain: node-24, os: linux-amd64, runner: ubuntu-latest}
+          - {binding: rust, toolchain: "1.85", os: linux-amd64, runner: ubuntu-latest}
+          - {binding: rust, toolchain: stable, os: linux-amd64, runner: ubuntu-latest}
+          - {binding: go, toolchain: go.mod, os: darwin-arm64, runner: macos-latest}
+          - {binding: python, toolchain: "3.13", os: darwin-arm64, runner: macos-latest}
+          - {binding: ts, toolchain: node-24, os: darwin-arm64, runner: macos-latest}
+          - {binding: rust, toolchain: stable, os: darwin-arm64, runner: macos-latest}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: run every ABI case through the binding against the stubs, and upload the report
+        run: |
+          echo "::error::v1-abi-conformance (${{ matrix.binding }} ${{ matrix.toolchain }} ${{ matrix.os }}): not yet provided (lane F-B)"
+          exit 1
+
+  v1-abi-linked:
+    name: "v1-abi-linked — Go linked mode type-checks against the v1 header"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: type-check the generated linked table against include/v1/chtypes.h
+        run: |
+          echo "::error::v1-abi-linked: not yet provided (lane F-Go)"
+          exit 1
+
+  v1-abi-rust:
+    name: "v1-abi-rust — clippy/fmt/test --features abi-v1"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: clippy, fmt and the unit tests with the abi-v1 feature
+        run: |
+          echo "::error::v1-abi-rust: not yet provided (lane F-Rust)"
+          exit 1
+
+  v1-abi-parity:
+    name: "v1-abi-parity — every enrolled binding passes every ABI case"
+    needs: v1-abi-conformance
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: every enrolled binding has a passing report per leg, for the same cases
+        run: |
+          echo "::error::v1-abi-parity: not yet provided (lane F-B)"
+          exit 1
