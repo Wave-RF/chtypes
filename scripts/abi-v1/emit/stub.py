@@ -703,9 +703,17 @@ def _fill_outputs(model, fn) -> list[str]:
             body += [
                 f"{indent}chs_sb args; chs_sb_init(&args);",
                 *[f"{indent}{line}" for line in _args_echo_code(fn)],
-                f'{indent}chs_sb out_json; chs_sb_init(&out_json);',
-                f'{indent}chs_sb_fmt(&out_json, "{{\\"args\\":[%s],\\"fn\\":\\"%s\\",\\"out\\":\\"%s\\"}}", '
-                f'args.buf, {_c_str(fn.name)}, {_c_str(p.name)});',
+                f"{indent}chs_sb out_json; chs_sb_init(&out_json);",
+                # Built by direct concatenation (chs_sb_cat), NEVER chs_sb_fmt:
+                # chs_sb_fmt formats through a fixed char tmp[256] (vsnprintf),
+                # and args.buf is unbounded (chs_preview_row/chs_preview_batch/
+                # chs_filter_eval_body's echoed bytes_in arguments alone exceed
+                # 256 bytes), so a %s of it there would silently truncate the
+                # echo. fn/out are always short compile-time literals, safe to
+                # embed directly.
+                f'{indent}chs_sb_cat(&out_json, "{{\\"args\\":[");',
+                f"{indent}chs_sb_cat(&out_json, args.buf);",
+                f'{indent}chs_sb_cat(&out_json, "],\\"fn\\":\\"{fn.name}\\",\\"out\\":\\"{p.name}\\"}}");',
                 f"{indent}free(args.buf);",
                 f"{indent}*{p.name} = chs_stub_finish_buf(&out_json);",
             ]

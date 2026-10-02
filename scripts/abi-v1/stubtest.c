@@ -63,6 +63,9 @@ typedef chs_status (*fn_filter_create)(
 typedef void (*fn_filter_free)(chs_filter *);
 typedef chs_status (*fn_filter_eval_body)(
     const chs_filter *, chs_format, const uint8_t *, size_t, const uint8_t *, size_t, chs_buf **, chs_error **);
+typedef chs_status (*fn_preview_row)(
+    const chs_schema *, chs_format, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t,
+    chs_buf **, chs_error **);
 
 typedef struct {
     void *handle;
@@ -85,6 +88,7 @@ typedef struct {
     fn_filter_create filter_create;
     fn_filter_free filter_free;
     fn_filter_eval_body filter_eval_body;
+    fn_preview_row preview_row;
 } lib_t;
 
 #define SYM(l, field, name)                                                                                           \
@@ -123,6 +127,7 @@ static lib_t load_lib(const char *path) {
     SYM(l, filter_create, "chs_filter_create");
     SYM(l, filter_free, "chs_filter_free");
     SYM(l, filter_eval_body, "chs_filter_eval_body");
+    SYM(l, preview_row, "chs_preview_row");
     return l;
 }
 
@@ -196,6 +201,45 @@ static void test_sha256_via_echo(lib_t *l) {
     CHECK(strstr(tmp, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") != NULL,
           "sha256(\"\") not found in echo: %s", tmp);
     l->buf_free(out);
+}
+
+/* Regression for the chs_sb_fmt truncation bug: the wrapping
+   {"args":[...],"fn":...,"out":...} object used to be built through
+   chs_sb_fmt's fixed `char tmp[256]` (vsnprintf), so any echo whose args
+   array alone exceeds ~230 bytes was silently cut off. chs_preview_row's
+   three bytes_in arguments push the echo well past 256 bytes on their own
+   (each {"head_hex","len","sha256"} object is well over 100 bytes), so this
+   proves the wrapper is now built by chs_sb_cat concatenation instead. */
+static void test_long_echo_not_truncated(lib_t *l) {
+    chs_schema *schema = NULL;
+    chs_error *err = NULL;
+    CHECK(l->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK,
+          "chs_schema_create for the long-echo test");
+
+    const char *body = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const char *settings = "{\"setting_one\":\"value_one\",\"setting_two\":\"value_two\"}";
+    const char *columns = "[\"col_a\",\"col_b\",\"col_c\",\"col_d\",\"col_e\"]";
+
+    chs_buf *out = NULL;
+    chs_status st = l->preview_row(
+        schema, CHS_JSON_EACH_ROW, (const uint8_t *) body, strlen(body), (const uint8_t *) settings,
+        strlen(settings), (const uint8_t *) columns, strlen(columns), &out, &err);
+    CHECK(st == CHS_OK, "chs_preview_row for the long-echo test: status %d", (int) st);
+    if (out != NULL) {
+        size_t n = l->buf_len(out);
+        CHECK(n > 256, "the echo was not long enough to exercise the truncation bug (got %zu bytes)", n);
+        char tmp[4096];
+        size_t copy = n < sizeof tmp - 1 ? n : sizeof tmp - 1;
+        memcpy(tmp, l->buf_data(out), copy);
+        tmp[copy] = 0;
+        /* A truncated echo (the chs_sb_fmt bug) cuts this off mid-field or
+           drops the closing brace entirely; all three must survive. */
+        CHECK(strstr(tmp, "\"fn\":\"chs_preview_row\"") != NULL, "echo missing fn field (likely truncated): %s", tmp);
+        CHECK(strstr(tmp, "\"out\":\"out\"") != NULL, "echo missing out field (likely truncated): %s", tmp);
+        CHECK(tmp[copy - 1] == '}', "echo does not end with '}' (truncated): last char is '%c'", tmp[copy - 1]);
+        l->buf_free(out);
+    }
+    l->schema_free(schema);
 }
 
 /* Drives every chs_status value through the "!S:" injection a cases.json
@@ -342,6 +386,7 @@ int main(int argc, char **argv) {
     test_handshake(&a);
     test_tombstone(&a);
     test_sha256_via_echo(&a);
+    test_long_echo_not_truncated(&a);
     test_status_injection(&a);
     test_free_rules(&a);
     test_wrong_kind(&a);
