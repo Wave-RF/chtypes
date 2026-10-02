@@ -7,6 +7,9 @@
 **/*.test
 examples/go/playground
 examples/go/ingest-demo/ingest-demo
+# `go build ./...` from scripts/fetch-v1/genfixtures writes a binary named
+# after the directory (it's a package main) — never checked in.
+scripts/fetch-v1/genfixtures/genfixtures
 
 # Python
 __pycache__/

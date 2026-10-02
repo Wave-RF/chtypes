@@ -36,6 +36,19 @@ func repoRoot() string {
 
 const fixturesRelPath = "tests/fixtures/fetch-v1"
 
+// layoutPresentOnDisk reports whether tests/fixtures/fetch-v1/layouts/<name>
+// is physically present in this checkout right now, by checking for that
+// layout's own "oci-layout" marker file (the one file every OCI image
+// layout has, real or synthetic). Used only for externally-provided
+// layouts this generator never writes itself (excludedFromManagement,
+// below) — a case that depends on one of those must be gated on this, so
+// it is never emitted into cases.json while the directory is absent (see
+// cachecases.go's preseed-oras, and checkCacheLayoutsExist in cases.go).
+func layoutPresentOnDisk(name string) bool {
+	info, err := os.Stat(filepath.Join(repoRoot(), fixturesRelPath, "layouts", name, "oci-layout"))
+	return err == nil && !info.IsDir()
+}
+
 // managedPrefixes are the fixture subtrees this generator owns outright:
 // cleared and rewritten on --write, diffed in full on --check. "layouts" is
 // managed too, EXCEPT layouts/oras-preseed/ (excludedFromManagement),

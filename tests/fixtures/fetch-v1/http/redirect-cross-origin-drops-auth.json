@@ -10,7 +10,7 @@
         {
           "status": 302,
           "headers": {
-            "Location": "http://{second-origin}/s-redirect-cross-origin-drops-auth/chtypes/v1/manifests/26.12"
+            "Location": "{second-origin}/v2/s-redirect-cross-origin-drops-auth/chtypes/v1/manifests/26.12"
           }
         }
       ]
