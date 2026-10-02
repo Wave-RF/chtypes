@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.index.v1+json",
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.index.v1+json",
+      "digest": "sha256:afe44d91e96949a2ab973bd001cd187345fe86a1463c056afb82d64bd38a29cb",
+      "size": 1131,
+      "annotations": {
+        "org.opencontainers.image.ref.name": "26.8.15.10"
+      }
+    }
+  ]
+}

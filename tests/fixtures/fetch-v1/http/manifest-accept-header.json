@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "manifest-accept-header",
+  "tree": "http-basic",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "from_tree": true
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}
