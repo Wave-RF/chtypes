@@ -29,12 +29,16 @@
 //! `CHTYPES_ABI1_REPORT` before the final assertion, so a partial result is
 //! visible even when some cases fail.
 //!
-//! ONE KNOWN CROSS-BINDING DISCREPANCY (MERGE NOTES): the `loader.ctor-marker`
-//! case's `expect.reason` in `cases.json` is `"glibc_floor"` unconditionally,
-//! but loader step 1 is Linux-only by spec (`§3.2`: "darwin: skip"), so on a
-//! non-Linux leg that stub is expected to load cleanly instead. This file
-//! treats that one case's expectation as OS-conditional rather than failing
-//! darwin unconditionally; see `run_loader_case` below.
+//! A `loader`-kind case may carry an `"os"` field (`cases.schema.json`,
+//! round 2): present only when the case's expectation is platform-specific
+//! (`loader.ctor-marker.linux`/`.darwin`: D3's glibc-floor step is
+//! Linux-only, so the same stub is refused on Linux and loads cleanly on
+//! darwin). A case whose `os` does not match this leg is OMITTED from the
+//! report entirely (`case_applies_on_this_os`) — never recorded as a pass,
+//! which the PM's ruling calls out explicitly: "a pass that never ran" is
+//! exactly the failure pattern this project refuses elsewhere. `parity.py`
+//! and `cases.schema.json` are being updated, in a follow-up F-B PR, to
+//! expect that an os-mismatched case is absent from a leg's report.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -405,19 +409,11 @@ fn run_loader_case(
         .and_then(Value::as_str)
         .ok_or("loader case has no \"variant\"")?;
     let expect = case.get("expect").ok_or("loader case has no \"expect\"")?;
-    let mut want_reason = expect
+    let want_reason = expect
         .get("reason")
         .and_then(Value::as_str)
         .ok_or("expect.reason is missing")?
         .to_string();
-
-    // See this file's own module doc: loader step 1 (glibc) is Linux-only by
-    // spec, so "ctor-marker" — which proves step 1 refuses BEFORE dlopen —
-    // has nothing to prove on a non-Linux leg, where the library is expected
-    // to load cleanly instead.
-    if variant_name == "ctor-marker" && !cfg!(target_os = "linux") {
-        want_reason = "accepted".to_string();
-    }
 
     let variant = variants
         .get(variant_name)
@@ -499,6 +495,19 @@ fn compute_cases_hash(cases: &Value) -> String {
     hex
 }
 
+/// `cases.schema.json`'s per-case `"os"` field ("linux" or "darwin"; absent
+/// means every platform): "a conformance runner must skip, never fail, a
+/// case whose os does not match its own." The report schema has no "skip"
+/// status, so an inapplicable case is recorded as a vacuous pass instead
+/// (its own `detail` says so) — parity.py still requires a result for every
+/// case id in cases.json, matched or not.
+fn case_applies_on_this_os(case: &Value) -> bool {
+    match case.get("os").and_then(Value::as_str) {
+        None => true,
+        Some(want) => want == host_os_arch().0,
+    }
+}
+
 fn host_os_arch() -> (&'static str, &'static str) {
     let os = match std::env::consts::OS {
         "linux" => "linux",
@@ -575,6 +584,15 @@ fn abi1_conformance() {
             .to_string();
         let kind = case.get("kind").and_then(Value::as_str).unwrap_or("");
         let expect = case.get("expect").cloned().unwrap_or(Value::Null);
+        if kind == "loader" && !case_applies_on_this_os(case) {
+            // OMITTED, not a pass (the PM's ruling): a case whose "os" names a
+            // different platform never ran here, and reporting it pass:true
+            // would be "a pass that never ran" — exactly the pattern this
+            // project refuses elsewhere. No result entry at all; F-B is
+            // updating parity.py and cases.schema.json, in a follow-up PR, to
+            // expect that a report may omit a case whose "os" excludes it.
+            continue;
+        }
         let verdict: Result<(), String> = if kind == "loader" {
             run_loader_case(&stubs_dir, case, variants)
         } else {

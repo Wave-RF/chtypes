@@ -134,13 +134,24 @@ pub(crate) fn load(input: LoadInput<'_>) -> Result<Loaded, Refusal> {
     let lib = unsafe { UnixLibrary::open(Some(path), RTLD_NOW | RTLD_LOCAL) }
         .map_err(|e| Refusal::with_detail("dlopen", path, e.to_string()))?;
 
-    // Step 3: chs_abi_version.
+    // Step 3: chs_abi_version. `Handshake::resolve` also resolves
+    // chs_build_info (step 4 needs it next), so its error names whichever of
+    // the two is missing — and only chs_abi_version's absence means the
+    // library is not an ABI v1+ artifact at all (not_v1). Every OTHER
+    // handshake symbol, chs_build_info included, is refused as
+    // missing_symbol:<name> at the step that first needs it (the PM's
+    // round-2 ruling; sdk.json carries a step-4 missing_symbol row for this).
     // SAFETY: `lib` was just opened above and is never dlclose'd (this
     // function either returns it inside `Api` or lets it leak, never drops
     // it), so a `Handshake` resolved from it stays valid for the process's
     // life, which is all `Handshake::resolve`'s own contract requires.
-    let handshake: Handshake =
-        unsafe { Handshake::resolve(&lib) }.map_err(|_| Refusal::new("not_v1", path))?;
+    let handshake: Handshake = unsafe { Handshake::resolve(&lib) }.map_err(|missing| {
+        if missing == "chs_abi_version" {
+            Refusal::new("not_v1", path)
+        } else {
+            Refusal::new(format!("missing_symbol:{missing}"), path)
+        }
+    })?;
     // SAFETY: chs_abi_version takes no arguments and is documented callable
     // before any other check (D1.2, the handshake class).
     let version = unsafe { (handshake.chs_abi_version)() };
@@ -328,15 +339,15 @@ fn check_glibc(
 
     // `Library::this()` is a safe wrapper over the already-loaded process
     // image (no new library is opened, so D2's dlopen-flag rule does not
-    // apply here).
+    // apply here). The actual symbol lookup lives in generated, banner-exempt
+    // code (decls::resolve_glibc_version) per the PM's round-2 ruling: every
+    // raw symbol lookup, the glibc probe included, is generated.
     let this = UnixLibrary::this();
-    // SAFETY: the symbol below is called with the exact zero-argument,
-    // `const char *`-returning signature glibc documents for
-    // `gnu_get_libc_version`.
+    // SAFETY: `this` wraps the running process and is never dlclose'd.
     let version_fn: Symbol<decls::FnGlibcVersion> =
-        match unsafe { this.get(b"gnu_get_libc_version\0") } {
-            Ok(f) => f,
-            Err(_) => return Err(Refusal::new("no_glibc", path)),
+        match unsafe { decls::resolve_glibc_version(&this) } {
+            Some(f) => f,
+            None => return Err(Refusal::new("no_glibc", path)),
         };
     // SAFETY: the symbol above resolved against the documented signature.
     let version_ptr = unsafe { version_fn() };

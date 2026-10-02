@@ -131,6 +131,21 @@ pub(crate) struct ChsBlock {
 /// stays inside a file `check-no-hand-decls.py` exempts.
 pub(crate) type FnGlibcVersion = unsafe extern "C" fn() -> *const c_char;
 
+/// Resolve `gnu_get_libc_version` from the PROCESS image itself (`lib`
+/// is `UnixLibrary::this()`, never a loaded artifact) — loader step 1.
+/// `None` when the symbol cannot be resolved (musl, or no such libc
+/// symbol at all). The PM's ruling (round 2): every raw symbol lookup,
+/// the glibc probe included, lives in generated, banner-exempt code;
+/// hand-written code calls this helper by name, never `.get()` itself.
+///
+/// # Safety
+/// `lib` must be a `Library` that is never `dlclose`d (D2); here that is
+/// always true, since it wraps the running process, not a loaded image.
+pub(crate) unsafe fn resolve_glibc_version(lib: &UnixLibrary) -> Option<Symbol<FnGlibcVersion>> {
+    // SAFETY: the caller's `# Safety` clause.
+    unsafe { lib.get(b"gnu_get_libc_version\0").ok() }
+}
+
 // ------------------------------------------------------- function pointers
 
 pub(crate) type FnChsAbiVersion = unsafe extern "C" fn() -> i32;
