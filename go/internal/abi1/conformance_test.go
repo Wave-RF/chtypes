@@ -25,6 +25,7 @@ type caseJSON struct {
 	Kind    string                 `json:"kind"`
 	Fn      string                 `json:"fn"`
 	Variant string                 `json:"variant"`
+	OS      string                 `json:"os,omitempty"`
 	Args    []Arg                  `json:"args"`
 	Expect  map[string]interface{} `json:"expect"`
 }
@@ -185,6 +186,17 @@ func TestConformance(t *testing.T) {
 	for _, c := range doc.Cases {
 		pass, detail := true, ""
 		t.Run(c.ID, func(t *testing.T) {
+			// cases.schema.json's "os" field (added for loader.ctor-marker,
+			// which refuses on linux but loads fine on darwin, D3's glibc
+			// step being linux-only): a case naming an "os" that is not this
+			// leg's own is skipped, never failed, and still reported pass
+			// (parity.py requires a result for every case id; "missing"
+			// would be the wrong diagnosis for "not applicable here").
+			if c.OS != "" && c.OS != runtime.GOOS {
+				detail = fmt.Sprintf("skipped: this case is os:%s, this leg is %s", c.OS, runtime.GOOS)
+				t.Skip(detail)
+				return
+			}
 			switch c.Kind {
 			case "handshake":
 				pass, detail = runHandshakeCase(tbl, c)
@@ -387,17 +399,13 @@ func matchExpected(expected, actual interface{}) error {
 
 // runLoaderCase loads the named stub variant under its own predicate and
 // compares the refusal reason (or "accepted") against the case's
-// expectation.
-//
-// ONE DOCUMENTED EXCEPTION. D3's step 1 (glibc) applies only to a predicate
-// that declares itself linux ("darwin: skip"); scripts/abi-v1/build-stubs.sh
-// derives every variant's predicate.os from the HOST it runs on, so on a
-// darwin leg the "ctor-marker" variant's predicate also reads os=darwin and
-// step 1 never runs -- the library loads, correctly, "accepted" rather than
-// cases.json's platform-generic "glibc_floor". That is the loader behaving
-// exactly as specified, not a gap in it; this is the one case it is true of
-// today (the only glibc-specific reason scripts/abi-v1/emit/_stubshared.py's
-// variant plan exercises).
+// expectation. The one case whose correct answer differs by platform
+// (loader.ctor-marker.{linux,darwin}: D3's glibc step is linux-only, so the
+// same impossible glibc_floor refuses on linux but loads fine on darwin) is
+// now TWO cases, each carrying its own "os" and already-correct "expect" --
+// the caller (TestConformance) skips whichever one does not match this leg
+// before this function is ever reached, so nothing platform-specific is
+// decided here.
 func runLoaderCase(stubsDir string, manifest stubsManifest, c caseJSON) (bool, string) {
 	variant, ok := manifest.Variants[c.Variant]
 	if !ok {
@@ -418,12 +426,6 @@ func runLoaderCase(stubsDir string, manifest stubsManifest, c caseJSON) (bool, s
 	}
 
 	want, _ := c.Expect["reason"].(string)
-	if want == "glibc_floor" {
-		if predOS, _ := variant.Predicate["os"].(string); predOS != "linux" {
-			want = "accepted"
-		}
-	}
-
 	if got != want {
 		return false, fmt.Sprintf("Load(%s) reason = %q, want %q", c.Variant, got, want)
 	}
