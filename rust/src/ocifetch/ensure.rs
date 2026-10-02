@@ -238,7 +238,11 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
 
     let resolved = ensure_online(&res, &version_request, request, &options)?;
 
-    if options.lock_write {
+    // `update` always rewrites the lock (it exists to refresh a stale
+    // entry), even when `lock_write` was not separately requested — plan
+    // §6: "update re-resolves every locked request... and rewrites the
+    // lock; it never merges a stale entry with a fresh one."
+    if options.lock_write || options.update {
         if let Some(path) = &options.lock_path {
             let mut lock = lock.unwrap_or_default();
             lock.set_entry(

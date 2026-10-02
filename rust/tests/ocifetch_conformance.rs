@@ -380,7 +380,10 @@ fn execute_case(
                 clock: None,
             },
         );
-        check_expectation(&case.expect, result)
+        check_expectation(&case.expect, result).and_then(|()| match &case.expect.lock_after {
+            Some(name) => check_lock_after(fixtures_root, name, &lock_path),
+            None => Ok(()),
+        })
     };
 
     for k in case.env.keys() {
@@ -448,15 +451,9 @@ fn check_expectation(
                     expect.warnings
                 ));
             }
-            if expect.lock_after.is_some() {
-                // The expected-lock fixture comparison
-                // (locks/expected/<name>.json) is not implemented by this
-                // runner yet; recorded as a known gap in this PR's MERGE
-                // NOTES.
-                return Err(
-                    "lock_after comparison is not implemented by this runner yet".to_string(),
-                );
-            }
+            // expect.lock_after is checked by the caller (execute_case),
+            // which has the fixtures root and the staged lock path; this
+            // function only sees the resolve outcome.
             Ok(())
         }
         (false, Err(e)) => {
@@ -477,6 +474,31 @@ fn check_expectation(
             expect.code, resolved.version
         )),
     }
+}
+
+/// `expect.lock_after`: the lock file the case just wrote must equal
+/// `locks/expected/<name>.json` byte-for-structure (key order does not
+/// matter — both are parsed as JSON before comparing).
+fn check_lock_after(fixtures_root: &Path, name: &str, lock_path: &Path) -> Result<(), String> {
+    let expected_path = fixtures_root
+        .join("locks")
+        .join("expected")
+        .join(format!("{name}.json"));
+    let expected_bytes = std::fs::read(&expected_path)
+        .map_err(|e| format!("reading {}: {e}", expected_path.display()))?;
+    let expected: serde_json::Value = serde_json::from_slice(&expected_bytes)
+        .map_err(|e| format!("parsing {}: {e}", expected_path.display()))?;
+    let got_bytes = std::fs::read(lock_path)
+        .map_err(|e| format!("reading the written lock {}: {e}", lock_path.display()))?;
+    let got: serde_json::Value = serde_json::from_slice(&got_bytes)
+        .map_err(|e| format!("parsing the written lock {}: {e}", lock_path.display()))?;
+    if got != expected {
+        return Err(format!(
+            "the written lock does not match {}:\n  got:      {got}\n  expected: {expected}",
+            expected_path.display()
+        ));
+    }
+    Ok(())
 }
 
 /// The "generic-fetch convention" (docs/guides/fetch-v1.md §10): a
