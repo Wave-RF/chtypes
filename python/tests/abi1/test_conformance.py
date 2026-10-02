@@ -24,7 +24,7 @@ _CASES, _IDS = cases_of_kind("handshake", "echo", "status")
 @pytest.fixture(scope="session")
 def ok_api(stubs_dir, stubs_manifest):
     entry = stubs_manifest["variants"]["ok"]
-    result = _loader.open(stub_path(stubs_dir, "ok"), entry["predicate"])
+    result = _loader.open(stub_path(stubs_dir, entry), entry["predicate"])
     return result.api
 
 

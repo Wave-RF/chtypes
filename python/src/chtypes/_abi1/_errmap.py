@@ -34,8 +34,8 @@ LOADER_REFUSAL_CLASS_KEY: dict[str, str] = {
     "abi_version": "artifact_incompatible",
     "build_info_malformed": "artifact_corrupt",
     "fingerprint": "artifact_incompatible",
-    "build_info_mismatch": "artifact_corrupt",
     "missing_symbol": "artifact_incompatible",
+    "build_info_mismatch": "artifact_corrupt",
 }
 
 # sdk.json error-class key -> the actual exception class.

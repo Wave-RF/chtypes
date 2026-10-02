@@ -18,29 +18,25 @@ from .conftest import cases_of_kind, stub_path
 
 _CASES, _IDS = cases_of_kind("loader")
 
-
-def _expected_reason(variant: str, declared_reason: str) -> str:
-    """scripts/abi-v1/emit/_stubshared.py's "ctor-marker" variant proves
-    loader step 1 (glibc) refuses BEFORE dlopen -- but step 1 is Linux-only
-    by design (plan section 3.2, "darwin: skip"), so on darwin this exact
-    predicate (an impossible glibc_floor) never gets checked at all, and
-    loading the library legitimately SUCCEEDS there. cases.json does not
-    parametrize this one case by OS (a gap worth raising upstream: every
-    binding's "darwin: skip" step 1 hits the identical mismatch), so this
-    test applies the platform-aware adjustment the spec itself requires
-    rather than either skip the case (parity.py would then read it as
-    MISSING) or fail it (the loader would be WRONG to refuse here)."""
-    if variant == "ctor-marker" and platform.system() != "Linux":
-        return "accepted"
-    return declared_reason
+_HOST_OS = {"Linux": "linux", "Darwin": "darwin"}.get(platform.system())
 
 
 @pytest.mark.parametrize("case", _CASES, ids=_IDS)
 def test_case(case: dict, stubs_dir, stubs_manifest: dict) -> None:
+    # cases.schema.json: an "os" field is present only when the case's
+    # expected reason differs by platform (loader.ctor-marker.linux/.darwin:
+    # D3's glibc floor step is Linux-only). "A conformance runner must skip,
+    # never fail, a case whose os does not match its own" -- conftest.py's
+    # pytest_runtest_makereport turns this skip into a PASS with a detail
+    # note in the report, since report.schema.json has no third state.
+    case_os = case.get("os")
+    if case_os is not None and case_os != _HOST_OS:
+        pytest.skip(f"{case['id']}: os={case_os!r} does not match this host ({_HOST_OS!r})")
+
     variant = case["variant"]
     entry = stubs_manifest["variants"][variant]
-    path = stub_path(stubs_dir, variant)
-    reason = _expected_reason(variant, case["expect"]["reason"])
+    path = stub_path(stubs_dir, entry)
+    reason = case["expect"]["reason"]
 
     if reason == "accepted":
         result = _loader.open(path, entry["predicate"])
@@ -61,13 +57,16 @@ def test_api_two_phase_construction_is_private(stubs_dir, stubs_manifest) -> Non
     loader's step 6 ... in Python it is a private constructor checked in a
     test." Calling Api() directly, bypassing resolve_all(), must refuse."""
     entry = stubs_manifest["variants"]["ok"]
-    result = _loader.open(stub_path(stubs_dir, "ok"), entry["predicate"])
+    result = _loader.open(stub_path(stubs_dir, entry), entry["predicate"])
     with pytest.raises(TypeError):
         _decls.Api(result.api._lib, {}, object())
 
 
-def test_open_unverified_needs_both_the_flag_and_the_env_var(monkeypatch, stubs_dir) -> None:
-    path = stub_path(stubs_dir, "ok")
+def test_open_unverified_needs_both_the_flag_and_the_env_var(
+    monkeypatch, stubs_dir, stubs_manifest
+) -> None:
+    entry = stubs_manifest["variants"]["ok"]
+    path = stub_path(stubs_dir, entry)
     monkeypatch.delenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", raising=False)
 
     with pytest.raises(_errors.ArtifactIncompatibleError):
@@ -83,12 +82,15 @@ def test_open_unverified_needs_both_the_flag_and_the_env_var(monkeypatch, stubs_
     assert result.api is not None
 
 
-def test_open_unverified_skips_step1_with_no_predicate(monkeypatch, stubs_dir) -> None:
+def test_open_unverified_skips_step1_with_no_predicate(
+    monkeypatch, stubs_dir, stubs_manifest
+) -> None:
     """No predicate given: step 1 (glibc) is skipped outright, per plan
     section 3.1 -- proven by loading the ctor-marker variant (whose ONLY
     defect is an impossible glibc_floor in its predicate) unverified, with no
     predicate at all, and it must succeed."""
     monkeypatch.setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
-    path = stub_path(stubs_dir, "ctor-marker")
+    entry = stubs_manifest["variants"]["ctor-marker"]
+    path = stub_path(stubs_dir, entry)
     result = _loader.open_unverified(path, predicate=None, allow=True)
     assert result.api is not None

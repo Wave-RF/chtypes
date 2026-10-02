@@ -80,22 +80,19 @@ def stubs_manifest(stubs_dir: Path) -> dict:
     return json.loads(manifest.read_text(encoding="utf-8"))
 
 
-def stub_path(stubs_dir: Path, variant: str) -> str:
-    """The on-disk path of one stub variant, reconstructed from
-    `stubs_dir` and `build-stubs.sh`'s own naming (`$OUT/$name.so`) --
-    deliberately NOT `stubs_manifest["variants"][variant]["path"]`, which is
-    an ABSOLUTE path baked in on the runner that BUILT the stubs
-    (`v1-abi-stubs`'s `$RUNNER_TEMP/abi-v1-stubs`). `.github/workflows/v1-abi.yml`'s
-    `v1-abi-conformance` job downloads that same artifact into a
-    DIFFERENTLY NAMED directory (`$RUNNER_TEMP/abi1-stubs`, no hyphen before
-    "v1") on a different runner entirely, so the manifest's baked-in path
-    never exists there (`measured`: every stub load failed
-    "cannot open shared object file" on linux-amd64/linux-arm64 CI legs until
-    this was added; darwin-arm64 happened to pass locally only because stubs
-    were built and read from the one, same, already-absolute directory).
-    Reconstructing the path from `stubs_dir` is correct on EVERY platform,
-    including the one this bug does not currently reach."""
-    return str(stubs_dir / f"{variant}.so")
+def stub_path(stubs_dir: Path, entry: dict) -> str:
+    """The on-disk path of one stub variant: `stubs_dir` joined with the
+    FILE NAME of the manifest entry's own `path` (never that `path` used
+    literally). build-stubs.sh now writes `path` as a name relative to its
+    own directory, but taking only its file name is correct whether `path`
+    is relative or (on an older stub set) still absolute: an absolute path
+    baked in on the runner that BUILT the stubs would not exist once the
+    artifact is uploaded/downloaded into a differently named directory on a
+    different runner (`measured`: every stub load failed "cannot open shared
+    object file" on the linux legs before this lane's first fix; the agreed
+    rule afterward, round 2, is the file name, not a reconstruction from
+    build-stubs.sh's own naming convention)."""
+    return str(stubs_dir / Path(entry["path"]).name)
 
 
 def host_os_arch() -> str:
@@ -128,6 +125,14 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> None:
         return
     if call.excinfo is None:
         _RESULTS[case_id] = (True, "")
+    elif call.excinfo.errisinstance(pytest.skip.Exception):
+        # cases.schema.json: "A conformance runner must skip, never fail, a
+        # case whose os does not match its own" (loader.ctor-marker.linux /
+        # .darwin). report.schema.json has no third "skipped" state, so this
+        # records it as a PASS with the skip reason in `detail`: the case
+        # genuinely does not apply on this host, which is not a failure, and
+        # parity.py needs a result for every case id regardless.
+        _RESULTS[case_id] = (True, f"skipped: {call.excinfo.value}")
     else:
         _RESULTS[case_id] = (False, str(call.excinfo.value)[:2000])
 

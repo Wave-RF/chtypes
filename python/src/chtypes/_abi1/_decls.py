@@ -35,24 +35,14 @@ CROSS_CHECK_FIELDS: tuple[tuple[str, str, str], ...] = (
 
 # chs_status's values, both directions. Frozen by D3, but still generated
 # from the description rather than hand-copied, so a future enum change is a
-# regeneration, never a drift. Two parallel tuples, zipped, rather than one
-# {number: "NAME"} literal: see _status_tuples()'s docstring in
-# scripts/abi-v1/emit/python.py (scripts/check-no-error-code-table.py's Rule B).
-_STATUS_VALUES: tuple[int, ...] = (
-    0,
-    1,
-    2,
-    3,
-    4,
-)
-_STATUS_NAMES: tuple[str, ...] = (
-    "CHS_OK",
-    "CHS_REJECTED",
-    "CHS_DECLINED",
-    "CHS_INVALID_ARGUMENT",
-    "CHS_INTERNAL",
-)
-STATUS_BY_VALUE: dict[int, str] = dict(zip(_STATUS_VALUES, _STATUS_NAMES, strict=True))
+# regeneration, never a drift.
+STATUS_BY_VALUE: dict[int, str] = {
+    0: "CHS_OK",
+    1: "CHS_REJECTED",
+    2: "CHS_DECLINED",
+    3: "CHS_INVALID_ARGUMENT",
+    4: "CHS_INTERNAL",
+}
 STATUS_BY_NAME: dict[str, int] = {v: k for k, v in STATUS_BY_VALUE.items()}
 
 # handle type name -> its free function's name (never called directly outside

@@ -146,24 +146,15 @@ def _add_call(fn: Function) -> str:
     return _call_block("_add", args)
 
 
-def _status_tuples(model: Model) -> tuple[str, str]:
-    """(values tuple literal, names tuple literal), kept as two SEPARATE
-    tuples rather than one `{0: "CHS_OK", ...}` dict literal on purpose:
-    scripts/check-no-error-code-table.py's Rule B flags "a number followed
-    closely by an UPPER_SNAKE string literal, several times over" as a
-    binding-grown ClickHouse code -> name table (a real anti-pattern it must
-    catch). chs_status is a different thing entirely -- five FROZEN ABI
-    status values (D3), not ClickHouse's own per-build error codes -- but the
-    heuristic cannot tell the two apart from shape alone, and that checker's
-    `CHTYPES_` exemption does not cover the `CHS_` vocabulary. Splitting the
-    numbers and the names into two separate tuples (zipped below into
-    STATUS_BY_VALUE) is a legitimate restructuring, not a workaround: nothing
-    pairs a number with a name in the source text at all, because this
-    genuinely is not that kind of table."""
+def _status_table(model: Model) -> str:
+    """The natural `{0: "CHS_OK", 1: "CHS_REJECTED", ...}` dict literal.
+    scripts/check-no-error-code-table.py's Rule B now exempts any file
+    carrying the generated banner (this one), so there is no need to reshape
+    this into something a lint heuristic can't see -- that pattern is never
+    used here (the PM's ruling, round 2): every raw table lives in
+    generated, banner-exempt code, in its natural shape."""
     status_enum = model.enums["chs_status"]
-    values = _tuple_block([str(v.value) for v in status_enum.values])
-    names = _tuple_block([_lit(v.name) for v in status_enum.values])
-    return values, names
+    return _dict_block([(str(v.value), _lit(v.name)) for v in status_enum.values])
 
 
 def _cross_check_literal(model: Model) -> str:
@@ -179,7 +170,7 @@ def render_decls(model: Model) -> str:
     handle_names = list(model.handles)  # abi.json's own order: buf, error, schema, filter, block
     handle_classes = {h: _handle_class_name(h) for h in handle_names}
 
-    status_values, status_names = _status_tuples(model)
+    status_table = _status_table(model)
 
     add_calls = "\n".join(_add_call(fn) for fn in model.functions)
     all_symbols = _tuple_block([_lit(n) for n in model.symbols()])
@@ -220,12 +211,8 @@ CROSS_CHECK_FIELDS: tuple[tuple[str, str, str], ...] = {cross_check}
 
 # chs_status's values, both directions. Frozen by D3, but still generated
 # from the description rather than hand-copied, so a future enum change is a
-# regeneration, never a drift. Two parallel tuples, zipped, rather than one
-# {{number: "NAME"}} literal: see _status_tuples()'s docstring in
-# scripts/abi-v1/emit/python.py (scripts/check-no-error-code-table.py's Rule B).
-_STATUS_VALUES: tuple[int, ...] = {status_values}
-_STATUS_NAMES: tuple[str, ...] = {status_names}
-STATUS_BY_VALUE: dict[int, str] = dict(zip(_STATUS_VALUES, _STATUS_NAMES, strict=True))
+# regeneration, never a drift.
+STATUS_BY_VALUE: dict[int, str] = {status_table}
 STATUS_BY_NAME: dict[str, int] = {{v: k for k, v in STATUS_BY_VALUE.items()}}
 
 # handle type name -> its free function's name (never called directly outside
@@ -588,7 +575,15 @@ def render_errmap(model: Model) -> str:
         if status != "unknown"
     ]
     unknown_class = sdk["errors"]["status"]["unknown"]
-    refusal_pairs = [(_lit(r["reason"]), _lit(r["error"])) for r in sdk["loader"]["refusals"]]
+    # A reason can appear on more than one refusal row (e.g. "missing_symbol"
+    # at both step 4 and step 6: sdk.json names the step a refusal is FIRST
+    # raised at, not a second axis of the mapping) -- always the same error
+    # class for the same reason, so dedupe by reason, first occurrence wins,
+    # rather than emit a repeated dict key literal.
+    refusal_by_reason: dict[str, str] = {}
+    for r in sdk["loader"]["refusals"]:
+        refusal_by_reason.setdefault(r["reason"], r["error"])
+    refusal_pairs = [(_lit(reason), _lit(error)) for reason, error in refusal_by_reason.items()]
     class_pairs = [(_lit(key), f"_errors.{c['python']}") for key, c in sdk["errors"]["classes"].items()]
     code_pairs = [(_lit(k), _lit(v)) for k, v in sdk["errors"]["codes"].items()]
 
