@@ -43,7 +43,18 @@ check() {
   # of include/v1/chtypes.h into CGO_CFLAGS so editing it invalidates the
   # cgo package's build cache entry instead of replaying a stale verdict.
   stamp="$(cksum < "$tree/include/v1/chtypes.h" | awk '{print $1}')"
-  local -x CGO_CFLAGS="$base_cflags -DCHTYPES_ABI1_HEADER_STAMP=${stamp}u"
+  # -Werror: unlike v0's check-linked-build.sh (whose plants are GO-level
+  # type mismatches at a cgo call site, caught by the Go compiler on every
+  # toolchain alike), this file's own type checking happens entirely INSIDE
+  # the cgo preamble -- chtypes_abi1_linked_fill assigns real C function
+  # addresses into typed struct fields via an explicit cast, so a mismatch
+  # is a C diagnostic, not a Go one. Measured: Apple clang already treats
+  # -Wincompatible-function-pointer-types as an error by default, but
+  # ubuntu-latest's gcc (this job's actual runner) only WARNS by default --
+  # a plant there passed silently until this was added. -Werror makes the
+  # check behave the same on every C compiler instead of borrowing whichever
+  # one happens to be strict today.
+  local -x CGO_CFLAGS="$base_cflags -Werror -DCHTYPES_ABI1_HEADER_STAMP=${stamp}u"
 
   if ! listed="$(cd "$tree/go" && go list -tags "$TAG" -f '{{range .CgoFiles}}{{.}}{{"\n"}}{{end}}' "$PKG")"; then
     echo "check-linked: go list failed under -tags $TAG — nothing was checked" >&2
