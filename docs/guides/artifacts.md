@@ -73,4 +73,4 @@ Artifacts are **Elastic License 2.0**, a different license from the Apache 2.0 b
 
 **macOS artifacts are for development; Linux is the reference.** The darwin artifacts exist so you can develop and run the suites on a laptop. Their `long double` is 53-bit, which makes some float parses diverge from a real server, so a float expectation is taken from Linux or from a live ClickHouse, never from a Mac. See [`../limitations.md`](../limitations.md).
 
-**Which lines exist is a question the registry answers.** `chtypes list` prints the lines it publishes, and [`../support.md`](../support.md) says what this repository can and cannot claim about them: the v1 channel carries no statement of which lines are supported, so a line's support reads unknown, never unsupported.
+**Which lines exist is a question the registry answers.** `chtypes list` prints the lines it publishes, and [`../support-v1.md`](../support-v1.md) says what this repository can and cannot claim about them: the v1 channel carries no statement of which lines are supported, so a line's support reads unknown, never unsupported.

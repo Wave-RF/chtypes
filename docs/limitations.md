@@ -63,7 +63,7 @@ The parse-once block twin does not change that — it is a performance shape, no
 
 **Today no `(line, platform)` pair is lifted.** Every supported line, on every published platform, is still under the gate above.
 
-This criterion is scored against the artifact producer's own differential comparison against real servers, and the per-`(line, platform)` state it produces is not served yet — the served `index.json` carries no such field today. Once the artifact producer serves one, this page reads it directly, the same principle [`support.md`](support.md) follows for line support: it states what the registry says rather than listing lines by hand. Until then, do not infer a lift from anything but a CHANGELOG entry naming the pair.
+This criterion is scored against the artifact producer's own differential comparison against real servers, and the per-`(line, platform)` state it produces is not served yet — the served `index.json` carries no such field today. Once the artifact producer serves one, this page reads it directly, the same principle [`support-v1.md`](support-v1.md) follows for line support: it states what the registry says rather than listing lines by hand. Until then, do not infer a lift from anything but a CHANGELOG entry naming the pair.
 
 ## Some formats depend on the artifact, not the binding
 
@@ -116,7 +116,7 @@ The ClickHouse setting `allow_introspection_functions` defaults to disabled. At 
 | this library  | compiles the schema and stores the function's answer, at either setting value |
 | a real server | refuses the `CREATE TABLE` itself, error 446, at the default setting          |
 
-The artifact producer's relink at build `1790845279` made this library refuse the same `CREATE TABLE` with 446 on every **supported** line — 26.3, 26.7, 26.8 and 26.9 — so the over-accept no longer reproduces there. It is unchanged on `24.8` and `25.10`: both are **served, unsupported** lines (see [ClickHouse lines](support.md#clickhouse-lines)), upstream's own support for them has ended, and the artifact producer builds no new artifact for a retired line, ever — so their library half is still the pre-relink build and `demangle`'s DEFAULT still compiles and stores the demangled name there. On those two lines the divergence is permanent: a retired line gets no new builds and no new ABI revisions, so no fix will ever be served for it, and this entry stays registered for them for as long as they are served. On ABI revision 6, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` are declined (`unsupported`) at insert time on every served line, so they do not diverge and carry no entry here.
+The artifact producer's relink at build `1790845279` made this library refuse the same `CREATE TABLE` with 446 on every **supported** line — 26.3, 26.7, 26.8 and 26.9 — so the over-accept no longer reproduces there. It is unchanged on `24.8` and `25.10`: both are **served, unsupported** lines (see [ClickHouse lines](support-v1.md#clickhouse-lines)), upstream's own support for them has ended, and the artifact producer builds no new artifact for a retired line, ever — so their library half is still the pre-relink build and `demangle`'s DEFAULT still compiles and stores the demangled name there. On those two lines the divergence is permanent: a retired line gets no new builds and no new ABI revisions, so no fix will ever be served for it, and this entry stays registered for them for as long as they are served. On ABI revision 6, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` are declined (`unsupported`) at insert time on every served line, so they do not diverge and carry no entry here.
 
 **Measured**: this library's own answer, in this repository, against the published ABI revision 6 artifacts. `demangle`'s DEFAULT still compiles and stores the demangled name on `25.10` (darwin-arm64, build `1790767905`) and, by CI's linux-amd64 job, on `24.8` (no darwin artifact is published for that line). On `26.3`, `26.8` and `26.9` (darwin-arm64, build `1790845279`) this library now refuses the `CREATE TABLE` itself with code 446, matching a real server; `26.7` was not part of this check's line list before and is not added by this measurement. The server half — a 446 refusal of the `CREATE TABLE` at the default setting — was measured by the artifact producer against stock ClickHouse servers pinned to each line's exact patch, not measured here.
 
@@ -213,6 +213,6 @@ For a TSV `String` that contains a raw NUL byte, the third detector can report `
 
 ## Pre-1.0
 
-How a library and the SDK opening it are matched before 1.0 is in [`support.md`](support.md#pre-10).
+How a library and the SDK opening it are matched before 1.0 is in [`support-v1.md`](support-v1.md#pre-10).
 
 Anything else may still move before 1.0. Each binding's own CHANGELOG carries its list.

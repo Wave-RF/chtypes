@@ -22,7 +22,7 @@
   <a href="docs/">Docs</a> ·
   <a href="#install">Install</a> ·
   <a href="#quickstart">Quickstart</a> ·
-  <a href="docs/support.md">Supported versions</a> ·
+  <a href="docs/support-v1.md">Supported versions</a> ·
   <a href="#how-it-compares">How it compares</a> ·
   <a href="examples/">Examples</a>
 </p>
@@ -59,7 +59,7 @@ npx @wavehouse/chtypes fetch 26.8
 cargo install chtypes && chtypes fetch 26.8
 ```
 
-A signature over the library's statement and the sha256 of every byte are checked before anything is unpacked, and the library's own build record is checked again when it loads. `chtypes list` shows the lines the registry publishes. Which lines are supported is not stated by the registry yet, so [docs/support.md](docs/support.md) says "support unknown" rather than guessing.
+A signature over the library's statement and the sha256 of every byte are checked before anything is unpacked, and the library's own build record is checked again when it loads. `chtypes list` shows the lines the registry publishes. Which lines are supported is not stated by the registry yet, so [docs/support-v1.md](docs/support-v1.md) says "support unknown" rather than guessing.
 
 ## Quickstart
 
@@ -159,7 +159,7 @@ A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying
 
 ## What is supported
 
-Three axes — the language you call from, the platform you run on, and the ClickHouse line you want answers for. **[docs/support.md](docs/support.md)** states them by hand: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64` and `darwin-arm64` (Unix only — the loaders are `dlopen`); and the ClickHouse lines the registry publishes, which `chtypes list` prints. The v1 channel carries no statement of which lines are supported, so a line's support reads **unknown**, never unsupported.
+Three axes — the language you call from, the platform you run on, and the ClickHouse line you want answers for. **[docs/support-v1.md](docs/support-v1.md)** states them by hand: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64` and `darwin-arm64` (Unix only — the loaders are `dlopen`); and the ClickHouse lines the registry publishes, which `chtypes list` prints. The v1 channel carries no statement of which lines are supported, so a line's support reads **unknown**, never unsupported.
 
 ## Known gaps in 1.0
 
@@ -172,12 +172,12 @@ A short list of places where 1.0 does less than you might expect, each with what
 | [Install](docs/install.md) · [Quickstart](docs/quickstart.md) | getting a binding and a library, and the first program                          |
 | [Guides](docs/guides/)                                        | fetching, settings, batches, filters, discovery, multi-version, transformations |
 | [Reference](docs/reference/)                                  | per-language API, the C ABI contract, the binding contract                      |
-| [Supported versions](docs/support.md)                         | languages, platforms, ClickHouse lines                                          |
+| [Supported versions](docs/support-v1.md)                      | languages, platforms, ClickHouse lines                                          |
 | [Examples](examples/)                                         | four side-by-side runnable tours, same sections in every language               |
 
 ## Project status
 
-The `v1` line is the 1.0 release in progress, and the ABI stays provisional until it is confirmed. The badges above read the live version from each registry. What that means for you is in [`docs/support.md`](docs/support.md#pre-10).
+The `v1` line is the 1.0 release in progress, and the ABI stays provisional until it is confirmed. The badges above read the live version from each registry. What that means for you is in [`docs/support-v1.md`](docs/support-v1.md#pre-10).
 
 This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the libraries themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — belongs to the artifact producer, under its own license. The bindings here contain no ClickHouse code: they load a library and speak the ABI. Libraries carry their own license; see the `LICENSE` inside each one.
 
