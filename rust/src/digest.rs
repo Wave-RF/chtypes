@@ -1,15 +1,8 @@
-//! The one sha256 in this crate.
-//!
-//! It is UNCONDITIONAL — not behind the `fetch` feature — because two callers
-//! need it and only one of them is the downloader. The other is the loader:
-//! `RegistryOptions::verify_checksums` re-hashes a library against its
-//! `manifest.json` before `dlopen` (`docs/reference/artifact.md`
-//! §Verification), and a consumer who builds `--no-default-features` (no
-//! downloader; artifacts arriving by a path this crate never sees) is exactly
-//! the one who most needs that check. One implementation, so the loader and
-//! the fetch chain can never hash differently; `crate::fetch::trust`
-//! re-exports these two names, which is where the published
-//! `fetch::sha256_file` / `fetch::sha256_hex` paths still resolve.
+//! The one sha256 of the v0 `fetch` module (and so behind its feature): the
+//! downloader hashes every byte it installs. `crate::fetch::trust` re-exports
+//! these two names, which is where the published `fetch::sha256_file` /
+//! `fetch::sha256_hex` paths still resolve. The v1 fetch layer hashes inside
+//! `ocifetch`. Deleted with the v0 fetch module by the switch lane.
 
 use std::io::Read;
 use std::path::Path;

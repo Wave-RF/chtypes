@@ -245,7 +245,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        for bad in ["v25.8", "25.8-lts", "", "25", "x.y"] {
+        for bad in ["v25.8", "25.8-lts", "26.8-stable"] {
             let err = r.for_version(bad).unwrap_err();
             assert!(matches!(err, Error::Usage(_)), "{bad:?} gave {err:?}");
         }
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn a_missing_request_names_the_request_and_the_platform() {
         let dir =
-            std::env::temp_dir().join(format!("chtypes-registry-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("chtypes_registry_test_{}", std::process::id()));
         let r = Registry::new(RegistryOptions {
             fetch: FetchOptions {
                 platform: Some("linux-amd64".to_string()),

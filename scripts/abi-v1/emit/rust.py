@@ -1,5 +1,16 @@
-"""rust/src/abi1/decls.rs and rust/src/abi1/invoke_gen.rs: the generated Rust
-FFI layer for ABI v1 — `extern "C"` type aliases, opaque handle structs, the
+"""The generated Rust layer for ABI v1: `rust/src/abi1/decls.rs`,
+`invoke_gen.rs`, `calls_gen.rs`, `vocab_gen.rs` and `errmap_gen.rs`.
+
+`calls_gen.rs` is the typed, memory-safe call layer the crate's public API
+calls (one method per status-returning `api` call, named without the `chs_`
+prefix, copying and freeing every `chs_buf` and `chs_error` inside the call
+that produced it, plus a Drop-freed wrapper per minted handle). `vocab_gen.rs`
+generates every vocabulary (formats, statuses, outcomes, verdicts, reasons with
+their `lossy` fact, sources with their `is_stored` fact, default kinds, document
+groups), and `errmap_gen.rs` the sdk.json error tables. None of the three is
+edited by hand.
+
+The two files below are the FFI layer for ABI v1 — `extern "C"` type aliases, opaque handle structs, the
 `Api` symbol table (built by `Api::resolve_all`, loader step 6), the small
 `Handshake` table (the two symbols the loader's steps 3-4 need before the rest
 of the table is safe to resolve, D1.2's "nothing before the checks"), and a
@@ -176,7 +187,7 @@ def render_decls(model) -> str:
         "",
         "// --------------------------------------------------------------- identity",
         "",
-        f"/// `CHS_ABI_VERSION`: what a v1 artifact's `chs_abi_version()` must answer.",
+        "/// `CHS_ABI_VERSION`: what a v1 artifact's `chs_abi_version()` must answer.",
         f"pub(crate) const CHS_ABI_VERSION: i32 = {model.abi};",
         "",
         "/// `CHS_ABI_FINGERPRINT`: `sha256:` + the sha256 of the RFC 8785 canonical",
@@ -732,7 +743,7 @@ def render_invoke(model) -> str:
         out += arm(fn.name, body)
 
     out += [
-        f'        other => Err(format!("invoke: {{other}} is not a function this generation describes, or '
+        '        other => Err(format!("invoke: {other} is not a function this generation describes, or '
         'it is a \\"free\\"-classified function no case ever calls by name")),',
         "    }",
         "}",
@@ -931,7 +942,7 @@ def render_calls(model) -> str:
             f"unsafe impl Sync for {wrapper} {{}}",
             "",
             f"impl {wrapper} {{",
-            f"    /// The raw pointer, for passing to a call that reads this handle.",
+            "    /// The raw pointer, for passing to a call that reads this handle.",
             f"    pub(crate) fn as_ptr(&self) -> *const {rt} {{",
             "        self.ptr",
             "    }",
@@ -939,7 +950,7 @@ def render_calls(model) -> str:
             "",
             f"impl Drop for {wrapper} {{",
             "    fn drop(&mut self) {",
-            f"        // SAFETY: `ptr` came from this table's own constructor call and is freed",
+            "        // SAFETY: `ptr` came from this table's own constructor call and is freed",
             f"        // exactly once, here; `{h.free}` accepts it (it is non-null).",
             f"        unsafe {{ (self.api.{h.free})(self.ptr) }}",
             "    }",
@@ -1036,8 +1047,8 @@ def _render_method(model, fn) -> list[str]:
     for line in prelude:
         lines.append(f"        {line}")
     lines += [
-        f"        // SAFETY: every input is a live borrow for the whole call, every output",
-        f"        // pointer is this call's own local, and the table is fully resolved.",
+        "        // SAFETY: every input is a live borrow for the whole call, every output",
+        "        // pointer is this call's own local, and the table is fully resolved.",
         f"        let status = unsafe {{ (self.{fn.name})({', '.join(call)}) }};",
         "        if status != 0 {",
         "            // SAFETY: `err` is null or a `chs_error *` this call just received.",
@@ -1225,7 +1236,6 @@ def render_vocab(model) -> str:
         out.append(f"            Verdict::{VERDICT_NAMES[v.value]} => '{v.value}',")
     out += ["        }", "    }", "}", ""]
 
-    kind = model.enums["default_kind"]
     out += _string_enum(
         model,
         "default_kind",
