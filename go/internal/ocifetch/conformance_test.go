@@ -162,8 +162,17 @@ func TestConformanceV1(t *testing.T) {
 func goToolchainID() string {
 	// A short, stable identity for the report's "toolchain" field
 	// (report.schema.json); v1.yml's matrix names the exact leg separately.
-	return runtime.Version()
+	// v1.yml's matrix names the Go leg by minor line ("go1.27.x") and
+	// parity.py requires that exact string, while runtime.Version() is
+	// the patch release ("go1.27.1"); report the matrix's spelling.
+	v := runtime.Version()
+	if m := goMinorRE.FindStringSubmatch(v); m != nil {
+		return m[1] + ".x"
+	}
+	return v
 }
+
+var goMinorRE = regexp.MustCompile(`^(go\d+\.\d+)(?:\.\d+|rc\d+|beta\d+)?`)
 
 // startFixtureServer starts the fixtures lane's scripted server (under
 // scripts/fetch-v1/) and parses its "LISTENING <port> <port2>" line.
