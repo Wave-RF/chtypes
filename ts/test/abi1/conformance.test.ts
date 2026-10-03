@@ -21,8 +21,8 @@ import path from 'node:path';
 import type { JsExternal } from 'ffi-rs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { HANDLE_INFO, SYMBOL } from '../../src/abi1/decls.gen.js';
-import { ArtifactCorruptError, ArtifactIncompatibleError } from '../../src/abi1/errors.js';
-import { Library, type LoadInput, openAbi1, type Predicate } from '../../src/abi1/loader.js';
+import { ArtifactIncompatibleError, LoaderCorruptError } from '../../src/abi1/errors.js';
+import { LoadedImage, type LoadInput, openAbi1, type Predicate } from '../../src/abi1/loader.js';
 import { freeHandle, type HandleRef, NULL_EXTERNAL, type RawApi, type RawCallResult, rawCall } from '../../src/abi1/raw.js';
 
 const STUBS_DIR = process.env.CHTYPES_ABI1_STUBS;
@@ -405,7 +405,7 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
         const expectedReason = c.expect?.reason as string;
         if (expectedReason === 'accepted') {
           const lib = openAbi1(input);
-          expect(lib).toBeInstanceOf(Library);
+          expect(lib).toBeInstanceOf(LoadedImage);
           return;
         }
         let caught: unknown;
@@ -415,10 +415,10 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
           caught = err;
         }
         expect(caught).toBeDefined();
-        const isLoaderError = caught instanceof ArtifactIncompatibleError || caught instanceof ArtifactCorruptError;
+        const isLoaderError = caught instanceof ArtifactIncompatibleError || caught instanceof LoaderCorruptError;
         expect(isLoaderError).toBe(true);
         if (!isLoaderError) return;
-        const reason = (caught as ArtifactIncompatibleError | ArtifactCorruptError).reason;
+        const reason = (caught as ArtifactIncompatibleError | LoaderCorruptError).reason;
         expect(reason).toBe(expectedReason);
       });
     });

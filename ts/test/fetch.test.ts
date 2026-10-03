@@ -45,50 +45,36 @@ import {
   ArtifactUntrustedError,
   artifactMissingMessage,
   ChtypesError,
-  cacheRegistryDir,
+  FetchError,
+  RegistryError,
+  SourceUnreachableError,
+} from '../src/errors.js';
+import {
   compareVersions,
   type EnsureOptions,
   ensure,
   ensureAll,
-  extractTarGz,
-  FetchError,
   type FetchEvent,
-  fetchDestination,
-  hostPlatform,
   keyId,
   LOCK_SCHEMA,
   listArtifacts,
-  looksLikeRegistry,
   parseSignatureFile,
   parseVersionSpelling,
   RELEASE_PUBLIC_KEYS,
-  Registry,
-  RegistryError,
   readLock,
-  registrySearchPath,
-  resolveRegistryDir,
-  SourceUnreachableError,
   sha256File,
   trustedKeys,
   verifyEd25519,
   verifyInstalled,
-} from '../src/index.js';
+} from '../src/fetch.js';
+import { cacheRegistryDir, fetchDestination, hostPlatform, registrySearchPath } from '../src/paths.js';
+import { extractTarGz } from '../src/tar.js';
 import { fixtureAbiRevision } from './fixture-revision.js';
-import { REAL_ARTIFACT_TIMEOUT_MS } from './real-artifact-timeout.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC_FIXTURES = path.resolve(HERE, '..', '..', 'tests', 'fixtures', 'fetch');
 const PLATFORM = hostPlatform();
 const [HOST_OS, HOST_ARCH] = PLATFORM.split('-') as [string, string];
-
-// The real registry, resolved before any test touches the environment.
-const REAL_REGISTRY = resolveRegistryDir();
-const HAVE_REGISTRY = REAL_REGISTRY !== null && looksLikeRegistry(REAL_REGISTRY);
-if (!HAVE_REGISTRY) {
-  console.warn(
-    '\n[chtypes] fetch tests that need a real artifact registry are SKIPPED: none on the search path (CHTYPES_REGISTRY / the per-user cache) — scripts/fetch.sh 25.8 installs one (docs/guides/fetch.md).\n',
-  );
-}
 
 // ------------------------------------------------------------ helpers
 
@@ -1114,171 +1100,6 @@ describe('ArtifactError: one catchable type for all six artifact conditions', ()
     expect(missing).not.toBeInstanceOf(FetchError);
     for (const err of verdicts) expect(err).toBeInstanceOf(FetchError);
   });
-});
-
-// ------------------------------------------------------------ registry
-
-describe('the registry: the search path, the missing-artifact error and autofetch', () => {
-  it('spells the one error verbatim', () => {
-    expect(artifactMissingMessage('25.8', 'linux-arm64', ['/a', '/b'])).toBe(
-      'chtypes: no artifact for ClickHouse 25.8 (linux-arm64). Looked in: /a, /b.\n' +
-        'Install it:  npx @wavehouse/chtypes fetch 25.8\n' +
-        'or set CHTYPES_AUTOFETCH=1 to fetch on first use.',
-    );
-    const err = new ArtifactMissingError('25.8', 'linux-arm64', ['/a']);
-    expect(err.code).toBe('CHTYPES_ARTIFACT_MISSING');
-    expect(err).toBeInstanceOf(RegistryError);
-    expect(err.name).toBe('ArtifactMissingError');
-    expect(err.line).toBe('25.8');
-    expect(err.lookedIn).toEqual(['/a']);
-  });
-
-  it('accepts an UPPERCASE library_sha256 — a hex digest is the same digest in either case', () => {
-    // Go lower-cases (strings.ToLower) and Rust lower-cases (.to_ascii_lowercase())
-    // before comparing; TypeScript and Python once compared raw, so an uppercase
-    // manifest digest was accepted by two bindings and refused by two.
-    // docs/reference/artifact.md asserts all four behave alike, so this pins it.
-    const dir = scratch('upper');
-    const verdir = path.join(dir, '25.8');
-    mkdirSync(verdir, { recursive: true });
-    const payload = Buffer.from('not really a library');
-    writeFileSync(path.join(verdir, 'libchtypes.so'), payload);
-    writeFileSync(
-      path.join(verdir, 'manifest.json'),
-      JSON.stringify({
-        library: 'libchtypes.so',
-        library_bytes: payload.byteLength,
-        library_sha256: createHash('sha256').update(payload).digest('hex').toUpperCase(),
-      }),
-    );
-    // The hash must PASS, so the failure that follows is dlopen's, not sha256's.
-    // Asserting "no sha256 error" is the whole point: a passing load would prove
-    // nothing if the check had simply been skipped.
-    let thrown: unknown;
-    try {
-      new Registry(dir, { verifyChecksums: true, preload: ['25.8'] });
-    } catch (e) {
-      thrown = e;
-    }
-    expect(thrown).toBeDefined(); // a text file is not a library: dlopen must fail
-    expect(String((thrown as Error).message)).not.toMatch(/does not match manifest/);
-  });
-
-  it('a named directory that does not exist is an error naming it; with autofetch it is the destination-to-be', () => {
-    process.env['XDG_CACHE_HOME'] = scratch('xdg');
-    delete process.env['CHTYPES_REGISTRY'];
-    const missing = path.join(scratch('reg'), 'absent');
-    expect(() => new Registry(missing)).toThrow(new RegExp(`cannot read registry ${missing.replaceAll('.', '\\.')}`));
-    const lazy = new Registry(missing, { autofetch: true });
-    expect(lazy.dir).toBe(missing);
-    expect(lazy.versions()).toEqual([]);
-    expect(lazy.searchPath[0]).toBe(missing);
-    expect(() => lazy.for('25.8')).toThrow(ArtifactMissingError);
-    // Nothing anywhere and autofetch off: an error listing every directory looked in.
-    const empty = scratch('empty');
-    expect(() => new Registry(empty)).toThrow(/no artifacts in any registry directory\. Looked in: .*Install one:  npx @wavehouse\/chtypes fetch <line>/s);
-  });
-
-  it.skipIf(!HAVE_REGISTRY)('a line the primary lacks is taken from the first later directory that has it, on request', () => {
-    const real = new Registry(REAL_REGISTRY!);
-    try {
-      const lines = real.versions();
-      if (lines.length < 2) {
-        console.warn('[chtypes] search-path layering needs two installed lines; only one found — SKIPPED');
-        return;
-      }
-      const [first, second] = [lines[0]!, lines[1]!];
-      const primary = scratch('primary');
-      const secondary = scratch('secondary');
-      symlinkSync(path.join(real.dir, first), path.join(primary, first), 'dir');
-      symlinkSync(path.join(real.dir, second), path.join(secondary, second), 'dir');
-      process.env['CHTYPES_REGISTRY'] = secondary;
-      process.env['XDG_CACHE_HOME'] = scratch('xdg');
-      const layered = new Registry(primary);
-      try {
-        expect(layered.dir).toBe(primary);
-        expect(layered.searchPath.slice(0, 2)).toEqual([primary, secondary]);
-        // versions() is every line this registry CAN answer for, loaded or
-        // merely discovered — so the layered line is in it from construction,
-        // before anything is opened. libraries() is the half that grows.
-        const bothLines = [first, second].sort(compareVersions);
-        expect(layered.versions()).toEqual(bothLines);
-        expect(layered.libraries()).toEqual([]);
-        expect(layered.has(second)).toBe(true);
-        expect(layered.has('19.1')).toBe(false);
-        expect(layered.for(second).minor).toBe(second);
-        expect(layered.versions()).toEqual(bothLines);
-        expect(layered.libraries()).toHaveLength(1);
-        try {
-          layered.for('19.1');
-          throw new Error('unreachable');
-        } catch (err) {
-          expect(err).toBeInstanceOf(ArtifactMissingError);
-          expect((err as ArtifactMissingError).message).toBe(artifactMissingMessage('19.1', PLATFORM, layered.searchPath));
-        }
-      } finally {
-        layered.close();
-      }
-      // An explicit directory that exists but holds nothing falls through to the next that does.
-      const hollow = scratch('hollow');
-      const fell = new Registry(hollow);
-      try {
-        expect(fell.dir).toBe(secondary);
-        expect(fell.versions()).toEqual([second]);
-        expect(fell.libraries()).toEqual([]);
-      } finally {
-        fell.close();
-      }
-    } finally {
-      real.close();
-    }
-  }, REAL_ARTIFACT_TIMEOUT_MS);
-
-  it.skipIf(!HAVE_REGISTRY)('open(): a missing line rejects with the §7 error unless autofetch is on, which fetches once and then loads', async () => {
-    const release = makeRelease({ artifacts: [{ minor: '19.1', version: '19.1.16.79' }] });
-    const server = await serve(release.dir);
-    const dest = scratch('autofetch-dest');
-    try {
-      const off = new Registry(REAL_REGISTRY!, { fetch: { url: server.url, dest, trustedKeys: [KEY.hex] } });
-      try {
-        await expect(off.open('19.1')).rejects.toBeInstanceOf(ArtifactMissingError);
-        expect(server.hits.size).toBe(0);
-        await expect(off.open(off.versions()[0]!)).resolves.toBe(off.for(off.versions()[0]!));
-      } finally {
-        off.close();
-      }
-
-      process.env['CHTYPES_AUTOFETCH'] = '1';
-      const on = new Registry(REAL_REGISTRY!, { fetch: { url: server.url, dest, trustedKeys: [KEY.hex] } });
-      try {
-        // Two concurrent opens: one download. The fake library then fails to
-        // dlopen — loudly, from the directory the fetch installed into — which
-        // is the proof that ensure ran and landed where the search path says.
-        const settled = await Promise.allSettled([on.open('19.1'), on.open('19.1')]);
-        for (const s of settled) {
-          expect(s.status).toBe('rejected');
-          const err = (s as PromiseRejectedResult).reason as Error;
-          expect(err).toBeInstanceOf(RegistryError);
-          expect(err).not.toBeInstanceOf(ArtifactMissingError);
-          expect(err.message).toMatch(new RegExp(`cannot load ${path.join(dest, '19.1').replaceAll('.', '\\.')}`));
-        }
-        expect(server.hits.get(release.files.get('19.1')!.file)).toBe(1);
-        expect(existsSync(path.join(dest, '19.1', 'manifest.json'))).toBe(true);
-        // A fetch verdict comes through open() as itself.
-        const bad = makeRelease({ artifacts: [{ minor: '19.2', version: '19.2.1.1' }], sign: 'other' });
-        const strict = new Registry(REAL_REGISTRY!, { autofetch: true, fetch: { url: bad.url, dest, trustedKeys: [KEY.hex] } });
-        try {
-          await expect(strict.open('19.2')).rejects.toBeInstanceOf(ArtifactUntrustedError);
-        } finally {
-          strict.close();
-        }
-      } finally {
-        on.close();
-      }
-    } finally {
-      await server.close();
-    }
-  }, REAL_ARTIFACT_TIMEOUT_MS);
 });
 
 // ----------------------------------------------------------------- CLI

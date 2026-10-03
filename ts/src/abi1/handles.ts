@@ -12,6 +12,7 @@
 
 import type { JsExternal } from 'ffi-rs';
 import { HANDLE_INFO } from './decls.gen.js';
+import { usageError } from './errors.js';
 import { freeHandle, type RawApi } from './raw.js';
 
 /** A live handle over one opened image. `close()` is safe to call more than once and safe to never call explicitly (the registry calls it if this object is abandoned). */
@@ -26,9 +27,11 @@ export abstract class Abi1Handle {
     this.kind = kind;
   }
 
-  /** The raw pointer, for passing to `rawCall` as a `handle` argument. Throws once this handle has been closed. */
+  /** The raw pointer, for passing to `rawCall` as a `handle` argument. A closed handle raises a `UsageError` before any C call: a closed handle is never passed to C as NULL. */
   get ptr(): JsExternal {
-    if (this.#ptr === null) throw new Error(`chtypes abi1: this ${this.kind} handle was already closed`);
+    if (this.#ptr === null) {
+      throw usageError(`this ${HANDLE_INFO[this.kind]?.className ?? this.kind} was already closed`);
+    }
     return this.#ptr;
   }
 

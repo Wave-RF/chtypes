@@ -106,7 +106,12 @@ export function compareDottedVersions(a: string, b: string): number {
 
 /** Open the target library's path through ffi-rs, under `libraryKey`, for typed calls (plan §3.3(d)). A harmless re-open when `path` is already the image our own `rawDlopen` just bound: dlopen (and the libloading ffi-rs uses underneath) dedupes by canonical path, returning the same already-mapped, already-bound image rather than re-relocating it. Declares no symbol of its own — `open()` only registers a path under a key for a later `define()` — so it is unaffected by the generated/hand-written split above. */
 export function ffiOpen(libraryKey: string, path: string): void {
+  // Once per key: a load that failed after this point (a cross-check mismatch, a missing symbol) and is retried reaches here again for the same image.
+  if (ffiOpened.has(libraryKey)) return;
   open({ library: libraryKey, path });
+  ffiOpened.add(libraryKey);
 }
+
+const ffiOpened = new Set<string>();
 
 export { readCString };

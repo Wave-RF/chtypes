@@ -8,7 +8,7 @@
 
 import {
   type CallErrorFields,
-  type ChtypesAbi1Error,
+  type ChtypesError,
   InternalError,
   SchemaError,
   UnsupportedError,
@@ -16,27 +16,27 @@ import {
 } from './errors.js';
 
 /**
- * A call's chs_status name -> the mapped error instance (spec/abi-v1/sdk.json's
- * errors.status table). CHS_OK has no entry: a caller checks the status name for
- * 'CHS_OK' before ever calling this. An unrecognized status (impossible under a matching
- * fingerprint; see spec/abi-v1/docs.md's chs_status section) maps to InternalError, naming
- * the raw value, exactly like every other binding's generated table.
+ * A call's raw chs_status value -> the mapped error instance (spec/abi-v1/sdk.json's
+ * errors.status table). A caller checks for the OK value before ever calling this. A
+ * status outside the closed set (impossible under a matching fingerprint; see
+ * spec/abi-v1/docs.md's chs_status section) maps to InternalError, naming the raw
+ * value, exactly like every other binding's generated table.
  */
-export function errorForStatus(statusName: string, fields: CallErrorFields): ChtypesAbi1Error {
-  switch (statusName) {
-    case 'CHS_DECLINED':
-      return new UnsupportedError(fields);
-    case 'CHS_INTERNAL':
-      return new InternalError(fields);
-    case 'CHS_INVALID_ARGUMENT':
-      return new UsageError(fields);
-    case 'CHS_REJECTED':
+export function errorForStatus(status: number, fields: CallErrorFields): ChtypesError {
+  switch (status) {
+    case 1: // CHS_REJECTED
       return new SchemaError(fields);
+    case 2: // CHS_DECLINED
+      return new UnsupportedError(fields);
+    case 3: // CHS_INVALID_ARGUMENT
+      return new UsageError(fields);
+    case 4: // CHS_INTERNAL
+      return new InternalError(fields);
     default:
       return new InternalError({
         ...fields,
         messageBytes: Buffer.from(
-          `chtypes: unrecognized chs_status ${statusName}: ${fields.messageBytes.toString('utf8')}`,
+          `chtypes: unrecognized call status ${status}: ${fields.messageBytes.toString('utf8')}`,
           'utf8',
         ),
       });

@@ -22,7 +22,10 @@
  *   5. the nine `CROSS_CHECK` fields (`spec/abi-v1/sdk.json`) against
  *      `LoadInput.predicate`.
  *   6. every OTHER described symbol, present (`dlsym` only — no call).
- *   7. a no-op hook (`onLoaded`); A5 is unsettled, so nothing lives here yet.
+ *   7. `chs_initialize(zone)`, then `chs_set_defaults(defaults)` when there are
+ *      any, once per image, from the process setup the caller passes in
+ *      (`LoadInput.timezone` / `defaults`). A failure here is the CALL's own
+ *      error, mapped by the status table — never a loader refusal reason.
  *
  * No `dlclose`, ever (plan: "v0 measured a segfault on reopen"). Images are
  * deduplicated by realpath + `dev:ino` (plan §3.2), re-implemented here
@@ -37,15 +40,15 @@
 
 import { realpathSync, statSync } from 'node:fs';
 import type { JsExternal } from 'ffi-rs';
+import { type BuildInfo, decodeBuildInfo } from './buildinfo.js';
+import { Calls } from './calls.gen.js';
 import { ABI_FINGERPRINT, CROSS_CHECK, DESCRIBED_SYMBOLS, SYMBOL } from './decls.gen.js';
-import { errorForStatus } from './errmap.gen.js';
-import { ArtifactCorruptError, ArtifactIncompatibleError } from './errors.js';
+import { ArtifactIncompatibleError, LoaderCorruptError, UsageError, usageError } from './errors.js';
 import { compareDottedVersions, ffiOpen, glibcVersionString, lastDlError, rawDlopen, rawDlsym } from './libc.js';
 import { defineRawFunctions, type RawApi, rawCall } from './raw.js';
 
-/** The predicate a loaded artifact is checked against: the verified signed statement's own fields, passed through verbatim (plan §3.1 — "predicate is passed verbatim, as the seam promises"). Only the fields this loader reads are typed; a real predicate carries more. */
+/** The predicate a loaded artifact is checked against: the verified signed statement's own fields, passed through verbatim (plan §3.1 — "predicate is passed verbatim, as the seam promises"). Only the fields this loader reads are typed; a real predicate carries more, and the fetch layer's own `ArtifactPredicate` satisfies this shape as it is. */
 export interface Predicate {
-  readonly schema: number;
   readonly abi: number;
   readonly abi_fingerprint: string;
   readonly clickhouse_version: string;
@@ -55,30 +58,40 @@ export interface Predicate {
   readonly arch: string;
   readonly core_commit: string;
   readonly inputs_sha256: string;
-  readonly glibc_floor?: string;
+  readonly glibc_floor?: string | undefined;
 }
 
-/** The loader's own input, decoupled from the fetch layer's `Resolved` type (plan §3.1): a three-line adapter joins them in wave C. */
-export interface LoadInput {
+/** The process setup step 7 applies to every image: the image zone and the default settings. */
+export interface ImageSetup {
+  /** The image zone `chs_initialize` is given (an IANA name); absent or empty means UTC. */
+  readonly timezone?: string;
+  /** Seeded once with `chs_set_defaults` when there are any. */
+  readonly defaults?: Readonly<Record<string, string>>;
+}
+
+/** The loader's own input, decoupled from the fetch layer's `Resolved` type: the adapter in `../registry.ts` joins them and passes the predicate verbatim. */
+export interface LoadInput extends ImageSetup {
   readonly libraryPath: string;
   readonly predicate: Predicate;
   readonly platform: string;
-  /** The image zone `chs_initialize` is given at step 7 (an IANA name); absent or empty means UTC. The public setup API arrives in wave C; until then only a test supplies one. */
-  readonly timezone?: string;
 }
 
-/** One opened, verified ABI v1 image. */
-export class Library {
+/** One opened, verified ABI v1 image: the resolved raw table, its typed call wrappers, and the decoded build info. */
+export class LoadedImage {
   readonly path: string;
   readonly raw: RawApi;
-  readonly buildInfo: Readonly<Record<string, unknown>>;
-  readonly version: string;
+  readonly calls: Calls;
+  readonly buildInfo: BuildInfo;
 
-  constructor(path: string, raw: RawApi, buildInfo: Readonly<Record<string, unknown>>, version: string) {
+  constructor(path: string, raw: RawApi, buildInfo: BuildInfo) {
     this.path = path;
     this.raw = raw;
+    this.calls = new Calls(raw);
     this.buildInfo = buildInfo;
-    this.version = version;
+  }
+
+  get version(): string {
+    return this.buildInfo.clickhouseVersion;
   }
 }
 
@@ -87,12 +100,14 @@ function refuseIncompatible(path: string, reason: string, want?: string, got?: s
 }
 
 function refuseCorrupt(path: string, reason: string, want?: string, got?: string): never {
-  throw new ArtifactCorruptError({ reason, path, want, got });
+  throw new LoaderCorruptError({ reason, path, want, got });
 }
 
 // --------------------------------------------------------------- image cache
 
-const loadedByKey = new Map<string, Library>();
+const loadedByKey = new Map<string, LoadedImage>();
+/** The typed call table per image, so a load retried after a late refusal declares it once. */
+const rawTables = new Map<string, RawApi>();
 const keyBySpelling = new Map<string, string>();
 
 /** The key `dlopen` will dedupe this path to (realpath + dev:ino, or an already-known spelling's key), per plan §3.2. */
@@ -142,100 +157,23 @@ function openImage(path: string): JsExternal {
   return handle;
 }
 
-// ------------------------------------------------------------------- step 4
-
-/**
- * `chs_build_info()`'s text, parsed: ASCII-only, no duplicate keys at ANY
- * nesting depth (a hand-rolled scan — `JSON.parse` has already silently
- * folded a duplicate key to its last value by the time any reviver could
- * see it, so this runs over the raw text first), `schema === 1`.
- */
-function isAsciiOnly(text: string): boolean {
-  for (let i = 0; i < text.length; i++) {
-    if ((text.charCodeAt(i) as number) > 0x7f) return false;
-  }
-  return true;
-}
-
-function parseBuildInfo(path: string, text: string): Readonly<Record<string, unknown>> {
-  if (!isAsciiOnly(text)) {
-    refuseCorrupt(path, 'build_info_malformed', 'ASCII only', 'a non-ASCII byte');
-  }
-  const dup = firstDuplicateKey(text);
-  if (dup !== null) {
-    refuseCorrupt(path, 'build_info_malformed', 'no duplicate keys', `"${dup}" appears twice in one object`);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    refuseCorrupt(path, 'build_info_malformed', 'valid JSON', 'a parse error');
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    refuseCorrupt(path, 'build_info_malformed', 'a JSON object', typeof parsed);
-  }
-  const obj = parsed as Record<string, unknown>;
-  if (obj.schema !== 1) {
-    refuseCorrupt(path, 'build_info_malformed', 'schema === 1', JSON.stringify(obj.schema));
-  }
-  return obj;
-}
-
-/** The first key repeated within the SAME enclosing `{...}` object in `text` (any nesting depth), or null. A minimal JSON scanner: tracks string literals (with escapes) and `{`/`}` nesting; a quoted token immediately followed by `:` is unambiguously an object key in valid JSON, in both array and object contexts. */
-function firstDuplicateKey(text: string): string | null {
-  const stack: Set<string>[] = [];
-  let i = 0;
-  const n = text.length;
-  while (i < n) {
-    const c = text[i];
-    if (c === '"') {
-      const start = i + 1;
-      let j = start;
-      while (j < n) {
-        if (text[j] === '\\') {
-          j += 2;
-          continue;
-        }
-        if (text[j] === '"') break;
-        j++;
-      }
-      const raw = text.slice(start, j);
-      let k = j + 1;
-      while (k < n && /\s/.test(text[k] as string)) k++;
-      if (text[k] === ':' && stack.length > 0) {
-        const top = stack[stack.length - 1] as Set<string>;
-        if (top.has(raw)) return raw;
-        top.add(raw);
-      }
-      i = j + 1;
-      continue;
-    }
-    if (c === '{') {
-      stack.push(new Set());
-      i++;
-      continue;
-    }
-    if (c === '}') {
-      stack.pop();
-      i++;
-      continue;
-    }
-    i++;
-  }
-  return null;
-}
-
 // ------------------------------------------------------------------- step 5
+
+/** `abi_fingerprint` -> `abiFingerprint`: the decoded `BuildInfo`'s own spelling of a build-info key. */
+function camelOf(key: string): string {
+  return key.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+}
 
 function crossCheckField(got: unknown, want: unknown, compare: 'bytes' | 'int'): boolean {
   if (compare === 'int') return Number(got) === Number(want);
   return String(got) === String(want);
 }
 
-function checkCrossFields(path: string, buildInfo: Readonly<Record<string, unknown>>, predicate: Predicate): void {
+function checkCrossFields(path: string, buildInfo: BuildInfo, predicate: Predicate): void {
   const pred = predicate as unknown as Record<string, unknown>;
+  const info = buildInfo as unknown as Record<string, unknown>;
   for (const field of CROSS_CHECK) {
-    const got = buildInfo[field.buildInfo];
+    const got = info[camelOf(field.buildInfo)];
     const want = pred[field.predicate];
     if (!crossCheckField(got, want, field.compare)) {
       refuseCorrupt(path, `build_info_mismatch:${field.buildInfo}`, JSON.stringify(want), JSON.stringify(got));
@@ -245,41 +183,39 @@ function checkCrossFields(path: string, buildInfo: Readonly<Record<string, unkno
 
 // ---------------------------------------------------------------- the whole
 
-/** Load, verify and open one ABI v1 artifact (plan §3.2, steps 1-7). Returns the SAME `Library` object for a path, a hardlink, a symlink or a second spelling of an already-loaded image (plan: "S3 runs once per image"). */
-export function openAbi1(input: LoadInput): Library {
-  const path = input.libraryPath;
-  const key = resolveImageKey(path);
-  const cached = loadedByKey.get(key);
-  if (cached !== undefined) return cached;
-
-  checkGlibc(path, input.predicate, input.platform); // step 1
-
+/**
+ * Steps 2-4 and 6, shared by the verified and the unverified path: open the
+ * image `RTLD_NOW`, prove the generation, read and decode the build info and
+ * compare its fingerprint, resolve every other described symbol for presence.
+ */
+function openAndCheck(path: string, key: string): { raw: RawApi; buildInfo: BuildInfo } {
   const osHandle = openImage(path); // step 2
 
   // step 3: chs_abi_version present, then (through ffi-rs, now safe) === 1.
   if (rawDlsym(osHandle, SYMBOL.ABI_VERSION) === null) {
-    refuseIncompatible(path, 'not_v1', '1', '(chs_abi_version is not exported)');
+    refuseIncompatible(path, 'not_v1', '1', '(the generation handshake is not exported)');
   }
   ffiOpen(key, path); // plan §3.3(d): only now, after RTLD_NOW already bound the image.
-  const raw = defineRawFunctions(key);
+  let raw = rawTables.get(key);
+  if (raw === undefined) {
+    raw = defineRawFunctions(key);
+    rawTables.set(key, raw);
+  }
   const abiVersionCall = rawCall(raw, SYMBOL.ABI_VERSION, []);
   const abiVersion = abiVersionCall.outcome === 'value' ? Number(abiVersionCall.value) : Number.NaN;
   if (abiVersion !== 1) refuseIncompatible(path, 'abi_version', '1', String(abiVersion));
 
-  // step 4: chs_build_info present, parses, fingerprint matches.
+  // step 4: the build info present, decoded (malformed is corrupt), fingerprint matches.
   if (rawDlsym(osHandle, SYMBOL.BUILD_INFO) === null) {
-    refuseIncompatible(path, `missing_symbol:${SYMBOL.BUILD_INFO}`, undefined, '(chs_build_info is not exported)');
+    refuseIncompatible(path, `missing_symbol:${SYMBOL.BUILD_INFO}`, undefined, `(${SYMBOL.BUILD_INFO} is not exported)`);
   }
   const buildInfoCall = rawCall(raw, SYMBOL.BUILD_INFO, []);
   const buildInfoText = buildInfoCall.outcome === 'value' ? (buildInfoCall.value as string | null) : null;
   if (buildInfoText === null) refuseCorrupt(path, 'build_info_malformed', 'a JSON object', 'null');
-  const buildInfo = parseBuildInfo(path, buildInfoText);
-  if (buildInfo.abi_fingerprint !== ABI_FINGERPRINT) {
-    refuseIncompatible(path, 'fingerprint', ABI_FINGERPRINT, String(buildInfo.abi_fingerprint));
+  const buildInfo = decodeBuildInfo(path, buildInfoText);
+  if (buildInfo.abiFingerprint !== ABI_FINGERPRINT) {
+    refuseIncompatible(path, 'fingerprint', ABI_FINGERPRINT, buildInfo.abiFingerprint);
   }
-
-  // step 5: the nine cross-check fields.
-  checkCrossFields(path, buildInfo, input.predicate);
 
   // step 6: every other described symbol, present.
   for (const sym of DESCRIBED_SYMBOLS) {
@@ -288,34 +224,55 @@ export function openAbi1(input: LoadInput): Library {
       refuseIncompatible(path, `missing_symbol:${sym}`, undefined, `(${sym} is not exported)`);
     }
   }
-
-  // step 7: chs_initialize(timezone), once per image (a process-once call).
-  onLoaded(path, raw, input.timezone ?? '');
-
-  const library = new Library(path, raw, buildInfo, String(buildInfo.clickhouse_version ?? ''));
-  loadedByKey.set(key, library);
-  return library;
+  return { raw, buildInfo };
 }
 
-function onLoaded(path: string, raw: RawApi, timezone: string): void {
-  // `chs_initialize` is process_once: a repeat with the same spelling is OK, a
-  // different spelling is CHS_INVALID_ARGUMENT. A zero-length zone means UTC.
-  const call = rawCall(raw, SYMBOL.INITIALIZE, [Buffer.from(timezone, 'utf8')]);
-  if (call.outcome !== 'status' || call.statusName !== 'CHS_OK') {
-    // Not a loader refusal (sdk.json has no step-7 reason): chs_initialize's own
-    // call error, mapped by the status table. The zone asked for, and whatever
-    // the library said about the zone it already holds, go in the message.
-    const status = call.outcome === 'status' ? call.statusName : 'CHS_INTERNAL';
-    const base = call.outcome === 'status' && call.error !== null ? call.error : null;
-    const note = `chs_initialize(timezone ${JSON.stringify(timezone === '' ? 'UTC' : timezone)}) failed for ${path}: ${status}`;
-    const library = base === null ? '' : `: ${base.messageBytes.toString('utf8')}`;
-    throw errorForStatus(status, {
-      status,
-      chCode: base?.chCode ?? 0,
-      chName: base?.chName ?? '',
-      messageBytes: Buffer.from(note + library, 'utf8'),
-      column: base?.column ?? Buffer.alloc(0),
-    });
+/**
+ * Load, verify and open one ABI v1 artifact (plan §3.2, steps 1-7). Returns
+ * the SAME `LoadedImage` for a path, a hardlink, a symlink or a second
+ * spelling of an already-loaded image: steps 2-4, 6 and 7 run once per image.
+ * An already-open image is still checked against every new signed statement a
+ * request brings (steps 1 and 5; step 4's fingerprint is the binding's own
+ * constant, which the first load already matched): a mismatch refuses that
+ * request and leaves the image open for the requests it did match.
+ */
+export function openAbi1(input: LoadInput): LoadedImage {
+  const path = input.libraryPath;
+  const key = resolveImageKey(path);
+  const cached = loadedByKey.get(key);
+  if (cached !== undefined) {
+    checkGlibc(path, input.predicate, input.platform); // step 1
+    checkCrossFields(path, cached.buildInfo, input.predicate); // step 5
+    return cached;
+  }
+
+  checkGlibc(path, input.predicate, input.platform); // step 1
+  const { raw, buildInfo } = openAndCheck(path, key); // steps 2-4, 6
+  checkCrossFields(path, buildInfo, input.predicate); // step 5, before step 7 touches the image
+
+  const image = new LoadedImage(path, raw, buildInfo);
+  initializeImage(image, input); // step 7
+  loadedByKey.set(key, image);
+  return image;
+}
+
+/** Step 7: `chs_initialize(zone)`, then `chs_set_defaults` when there are defaults. A failure is the call's own error, mapped by the status table; the zone asked for is named in the message either way. */
+function initializeImage(image: LoadedImage, setup: ImageSetup): void {
+  const timezone = setup.timezone ?? '';
+  try {
+    image.calls.initialize(Buffer.from(timezone, 'utf8'));
+  } catch (err) {
+    if (err instanceof UsageError) {
+      // The library names the spelling it already holds; name the one asked for too.
+      throw usageError(
+        `a different image zone was asked for (${JSON.stringify(timezone === '' ? 'UTC' : timezone)}) than the one this image already holds: ${err.messageBytes.toString('utf8')}`,
+      );
+    }
+    throw err;
+  }
+  const defaults = setup.defaults;
+  if (defaults !== undefined && Object.keys(defaults).length > 0) {
+    image.calls.setDefaults(Buffer.from(JSON.stringify(defaults), 'utf8'));
   }
 }
 
@@ -325,19 +282,15 @@ const UNVERIFIED_ENV = 'CHTYPES_ALLOW_UNVERIFIED_LIBRARY';
 
 /**
  * Load `path` with NO predicate: skips step 1 (nothing to check a floor
- * against) and step 5 (nothing to cross-check), still runs 2/3/4/6 (plan
- * §3.1). Refuses unless BOTH `explicit` is true AND
+ * against) and step 5 (nothing to cross-check), still runs 2, 3, 4, 6 and 7.
+ * Refuses with a `UsageError` unless BOTH `options.allow` is true AND
  * `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1` is set; warns loudly, once per path,
- * when it proceeds. Never the default path — core's own local builds and
- * the linked mode are its only callers.
+ * when it proceeds. Never the default path — a local, trusted build is its
+ * only caller.
  */
-export function openUnverified(path: string, options: { readonly explicit: boolean }): Library {
-  if (!options.explicit || process.env[UNVERIFIED_ENV] !== '1') {
-    throw new ArtifactIncompatibleError({
-      reason: 'dlopen',
-      path,
-      got: `openUnverified requires BOTH the explicit flag and ${UNVERIFIED_ENV}=1`,
-    });
+export function openUnverified(path: string, options: { readonly allow: boolean } & ImageSetup): LoadedImage {
+  if (!options.allow || process.env[UNVERIFIED_ENV] !== '1') {
+    throw usageError(`opening ${path} unverified requires BOTH allow: true and ${UNVERIFIED_ENV}=1`);
   }
   warnUnverifiedOnce(path);
 
@@ -345,34 +298,11 @@ export function openUnverified(path: string, options: { readonly explicit: boole
   const cached = loadedByKey.get(key);
   if (cached !== undefined) return cached;
 
-  const osHandle = openImage(path); // step 2
-  if (rawDlsym(osHandle, SYMBOL.ABI_VERSION) === null) {
-    refuseIncompatible(path, 'not_v1', '1', '(chs_abi_version is not exported)');
-  }
-  ffiOpen(key, path);
-  const raw = defineRawFunctions(key);
-  const abiVersionCall = rawCall(raw, SYMBOL.ABI_VERSION, []);
-  const abiVersion = abiVersionCall.outcome === 'value' ? Number(abiVersionCall.value) : Number.NaN;
-  if (abiVersion !== 1) refuseIncompatible(path, 'abi_version', '1', String(abiVersion));
-
-  if (rawDlsym(osHandle, SYMBOL.BUILD_INFO) === null) {
-    refuseIncompatible(path, `missing_symbol:${SYMBOL.BUILD_INFO}`, undefined, '(chs_build_info is not exported)');
-  }
-  const buildInfoCall = rawCall(raw, SYMBOL.BUILD_INFO, []);
-  const buildInfoText = buildInfoCall.outcome === 'value' ? (buildInfoCall.value as string | null) : null;
-  const buildInfo = buildInfoText === null ? {} : parseBuildInfo(path, buildInfoText);
-
-  for (const sym of DESCRIBED_SYMBOLS) {
-    if (sym === SYMBOL.ABI_VERSION || sym === SYMBOL.BUILD_INFO) continue;
-    if (rawDlsym(osHandle, sym) === null) {
-      refuseIncompatible(path, `missing_symbol:${sym}`, undefined, `(${sym} is not exported)`);
-    }
-  }
-
-  onLoaded(path, raw, '');
-  const library = new Library(path, raw, buildInfo, String(buildInfo.clickhouse_version ?? ''));
-  loadedByKey.set(key, library);
-  return library;
+  const { raw, buildInfo } = openAndCheck(path, key);
+  const image = new LoadedImage(path, raw, buildInfo);
+  initializeImage(image, options);
+  loadedByKey.set(key, image);
+  return image;
 }
 
 const warnedPaths = new Set<string>();

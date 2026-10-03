@@ -1,59 +1,79 @@
 /**
- * The ABI v1 error model, local to this `abi1` directory (plan §3.4: "Errors
- * stay abi1-local until wave C. Waves A and B touch NO v0 file; the public
- * mapping lands with the public API."). These classes are deliberately NOT
- * the v0 error hierarchy in `../errors.ts` — independent until the cutover
- * unifies them — so nothing in this directory needs an edit to any v0 file.
+ * The v1 error model (`docs/reference/bindings-v1.md` §4), over the fetch
+ * layer's own error family.
  *
  * Two shapes (spec/abi-v1/sdk.json's two tables):
  *
- *   - a CALL error (`CallErrorFields`): the four fields a `chs_error`
- *     carries, plus the status name that produced it, per sdk.json
- *     `errors.fields` — `errorForStatus` in `./errmap.gen.ts` picks the
- *     class from `status`.
- *   - a LOADER error (`LoaderErrorFields`): a refusal reason, the path, and
- *     the want/got pair where the reason has one (spec/abi-v1/sdk.json
- *     `loader.refusals`).
+ *   - a CALL error: the five fields of the library's error object, read
+ *     verbatim. `errorForStatus` in `./errmap.gen.ts` picks the class from the
+ *     raw status. The four classes are PEERS, never one a subtype of another:
+ *     a decline that satisfied `instanceof SchemaError` would let a handler
+ *     that forgot the distinction turn every decline into a rejection. They
+ *     share one abstract base, `CallError`, under `ChtypesError`, which is the
+ *     explicit way to catch all four.
+ *   - a LOADER error: a refusal reason, the path, and the want/got pair where
+ *     the reason has one (sdk.json `loader.refusals`). These extend the fetch
+ *     layer's own classes, so a caller catching `ArtifactCorruptError` catches
+ *     the fetch layer's corruption and the loader's step 5 alike, and every
+ *     artifact error (fetch or loader) is an `ArtifactError`.
  *
- * `message` and `column` are raw bytes, never assumed UTF-8 (the header's
- * own words for `chs_error_message`/`chs_error_column`: "may carry any
- * byte" / "NUL and invalid UTF-8 are legal"). `chName` is a plain string:
- * `chs_error_ch_name`'s content is guaranteed ASCII.
+ * `messageBytes` and `column` are raw bytes, never assumed UTF-8. `chName` is
+ * a plain string: its content is ASCII by the ABI's own promise. `message`
+ * (the string every `Error` has) is the one lossy display form.
  */
 
-/** Base of every error this directory throws. */
-export abstract class ChtypesAbi1Error extends Error {
+import { ArtifactCorruptError, FetchV1Error } from '../ocifetch/index.js';
+import { Status } from './vocab.gen.js';
+
+/** The base of every call error. The fetch and loader errors live under `ArtifactError` instead; `isChtypesError` is true for all of them. */
+export abstract class ChtypesError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = new.target.name;
   }
 }
 
-/** The four `chs_error` fields plus the status that produced them. */
+/** The base of every fetch error and every loader refusal: the fetch layer's own base class, re-exported under the name the rest of the family uses. */
+export { FetchV1Error as ArtifactError };
+
+/** Re-exported unchanged: the fetch layer's corruption error, which the loader's step-5 refusal extends. */
+export { ArtifactCorruptError };
+
+/** True for any error this package throws on purpose: a call error, a fetch error or a loader refusal. */
+export function isChtypesError(err: unknown): err is ChtypesError | FetchV1Error {
+  return err instanceof ChtypesError || err instanceof FetchV1Error;
+}
+
+/** The five fields of a library error object, read verbatim. */
 export interface CallErrorFields {
-  readonly status: string;
+  /** The raw status value; compare with `Status`. */
+  readonly status: number;
+  /** ClickHouse's own code; nonzero only for a refusal. */
   readonly chCode: number;
+  /** The name this build's vendored table gives the code; ASCII; empty if none. */
   readonly chName: string;
+  /** ClickHouse's own message for a refusal, the library's otherwise; bytes. */
   readonly messageBytes: Buffer;
+  /** The column concerned, empty if none; bytes. */
   readonly column: Buffer;
 }
 
-function renderCallMessage(prefix: string, f: CallErrorFields): string {
+function renderCallMessage(label: string, f: CallErrorFields): string {
   const msg = f.messageBytes.toString('utf8');
   const col = f.column.length > 0 ? ` (column ${JSON.stringify(f.column.toString('utf8'))})` : '';
-  return f.chCode !== 0 ? `chtypes: ${prefix}: [${f.chCode}] ${f.chName}: ${msg}${col}` : `chtypes: ${prefix}: ${msg}${col}`;
+  return f.chCode !== 0 ? `chtypes: ${label}: [${f.chCode}] ${f.chName}: ${msg}${col}` : `chtypes: ${label}: ${msg}${col}`;
 }
 
-/** `CHS_REJECTED`: ClickHouse's own refusal, carrying its own code and name. */
-export class SchemaError extends ChtypesAbi1Error implements CallErrorFields {
-  readonly status: string;
+/** The abstract base of the four call classes, under `ChtypesError`: catching it is the explicit way to catch all four. */
+export abstract class CallError extends ChtypesError implements CallErrorFields {
+  readonly status: number;
   readonly chCode: number;
   readonly chName: string;
   readonly messageBytes: Buffer;
   readonly column: Buffer;
 
-  constructor(f: CallErrorFields) {
-    super(renderCallMessage('rejected', f));
+  protected constructor(label: string, f: CallErrorFields) {
+    super(renderCallMessage(label, f));
     this.status = f.status;
     this.chCode = f.chCode;
     this.chName = f.chName;
@@ -62,58 +82,46 @@ export class SchemaError extends ChtypesAbi1Error implements CallErrorFields {
   }
 }
 
-/** `CHS_DECLINED`: this build will not answer; a server might accept. */
-export class UnsupportedError extends ChtypesAbi1Error implements CallErrorFields {
-  readonly status: string;
-  readonly chCode: number;
-  readonly chName: string;
-  readonly messageBytes: Buffer;
-  readonly column: Buffer;
-
+/** The library answered `rejected`: ClickHouse's own refusal, which a server would also give, carrying its own code and name. */
+export class SchemaError extends CallError {
   constructor(f: CallErrorFields) {
-    super(renderCallMessage('declined', f));
-    this.status = f.status;
-    this.chCode = f.chCode;
-    this.chName = f.chName;
-    this.messageBytes = f.messageBytes;
-    this.column = f.column;
+    super('rejected', f);
   }
 }
 
-/** `CHS_INVALID_ARGUMENT`: caller misuse (a bad handle, a malformed input). */
-export class UsageError extends ChtypesAbi1Error implements CallErrorFields {
-  readonly status: string;
-  readonly chCode: number;
-  readonly chName: string;
-  readonly messageBytes: Buffer;
-  readonly column: Buffer;
-
+/** The library answered `declined`: this build will not answer; a server might accept. Never a refusal. */
+export class UnsupportedError extends CallError {
   constructor(f: CallErrorFields) {
-    super(renderCallMessage('invalid argument', f));
-    this.status = f.status;
-    this.chCode = f.chCode;
-    this.chName = f.chName;
-    this.messageBytes = f.messageBytes;
-    this.column = f.column;
+    super('declined', f);
   }
 }
 
-/** `CHS_INTERNAL`, or any status outside the closed set: a library bug. */
-export class InternalError extends ChtypesAbi1Error implements CallErrorFields {
-  readonly status: string;
-  readonly chCode: number;
-  readonly chName: string;
-  readonly messageBytes: Buffer;
-  readonly column: Buffer;
-
+/** Caller misuse: the library's invalid-argument answer, or a misuse the binding detected itself before any call. */
+export class UsageError extends CallError {
   constructor(f: CallErrorFields) {
-    super(renderCallMessage('internal error', f));
-    this.status = f.status;
-    this.chCode = f.chCode;
-    this.chName = f.chName;
-    this.messageBytes = f.messageBytes;
-    this.column = f.column;
+    super('invalid argument', f);
   }
+}
+
+/** The library answered `internal`, or sent a status outside the closed set, or a document that does not decode: a library bug. */
+export class InternalError extends CallError {
+  constructor(f: CallErrorFields) {
+    super('internal error', f);
+  }
+}
+
+function binding(status: number, message: string): CallErrorFields {
+  return { status, chCode: 0, chName: '', messageBytes: Buffer.from(message, 'utf8'), column: Buffer.alloc(0) };
+}
+
+/** A misuse the binding detects itself: it carries the invalid-argument status, ch_code 0 and an empty name and column, so a handler sees one shape whichever side caught it. */
+export function usageError(message: string): UsageError {
+  return new UsageError(binding(Status.InvalidArgument, message));
+}
+
+/** A document or a value that breaks the library's own contract. */
+export function internalError(message: string): InternalError {
+  return new InternalError(binding(Status.Internal, message));
 }
 
 /** A loader refusal's fields: the reason, the artifact path, and want/got where the reason has one. */
@@ -129,18 +137,15 @@ function renderLoaderMessage(label: string, f: LoaderErrorFields): string {
   return `chtypes: ${f.path}: ${label}: ${f.reason}${detail}`;
 }
 
-/**
- * A loader step 1-4/6 refusal: the artifact is not one this binding can
- * speak to (wrong ABI generation, a missing symbol, an unresolved link).
- */
-export class ArtifactIncompatibleError extends ChtypesAbi1Error implements LoaderErrorFields {
+/** A loader step 1-4 or 6 refusal: the artifact is not one this binding can speak to (wrong ABI generation, a different fingerprint, a missing symbol, an unresolvable link). */
+export class ArtifactIncompatibleError extends FetchV1Error implements LoaderErrorFields {
   readonly reason: string;
   readonly path: string;
   readonly want: string | undefined;
   readonly got: string | undefined;
 
   constructor(f: LoaderErrorFields) {
-    super(renderLoaderMessage('incompatible artifact', f));
+    super('CHTYPES_ARTIFACT_INCOMPATIBLE', renderLoaderMessage('incompatible artifact', f));
     this.reason = f.reason;
     this.path = f.path;
     this.want = f.want;
@@ -149,11 +154,12 @@ export class ArtifactIncompatibleError extends ChtypesAbi1Error implements Loade
 }
 
 /**
- * A loader step 4 (malformed `chs_build_info`) or step 5 (a cross-check
- * mismatch) refusal: the artifact's own signed statement and its bytes
- * disagree, so the artifact is internally inconsistent.
+ * A loader step 4 (malformed build info) or step 5 (a cross-check mismatch)
+ * refusal: the artifact's own signed statement and its bytes disagree. It
+ * extends the fetch layer's `ArtifactCorruptError`, so the two are one class
+ * to a caller who catches it.
  */
-export class ArtifactCorruptError extends ChtypesAbi1Error implements LoaderErrorFields {
+export class LoaderCorruptError extends ArtifactCorruptError implements LoaderErrorFields {
   readonly reason: string;
   readonly path: string;
   readonly want: string | undefined;

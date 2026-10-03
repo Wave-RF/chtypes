@@ -1,42 +1,10 @@
 /**
- * Result-document JSON, **over bytes**, with three obligations no `JSON.parse`
- * can meet.
- *
- * 1. **The bytes are the answer.** A ClickHouse `String`, `FixedString` or
- *    `AggregateFunction` value holds arbitrary bytes, and the library emits them
- *    into the result document verbatim (`writeJSONString` escapes the control
- *    bytes and passes everything else through). Decoding that document into a JS
- *    string replaces every invalid byte with U+FFFD, which then reads downstream
- *    as a silent transformation that never happened — an *invented* answer, the
- *    failure mode this product exists to prevent (the C ABI contract §Per-column
- *    fields: "`stored` and `ref` MUST be handled as raw bytes / raw JSON"; the
- *    reference implementation keeps `json.RawMessage`). So the document is parsed
- *    from a `Buffer`, and every value remembers the exact slice it was cut from.
- *
- * 2. **Numbers must keep their exact text.** ClickHouse integers go to 2^256.
- *    `JSON.parse` turns 18446744073709551615 into 18446744073709552000 and an
- *    Int256 into -5.78960446186581e+76 — a value difference no scorer can tell
- *    from a real coercion defect. A number is never converted here: it *is* its
- *    own source bytes.
- *
- * 3. **Duplicate keys and escape spellings survive.** ClickHouse can store a
- *    `Map` with a repeated key (`{"a":1,"a":2}`), and it writes the escape
- *    `\\u000B` where a JS re-serialization writes `\\u000b`. `JSON.parse` collapses
- *    the first and loses the second, and either reports bytes the table does not
- *    hold.
- *    Object members are therefore kept as an ordered key/value list, and nothing
- *    is ever re-rendered: `rawBytes` hands back the library's own slice.
- *
- * The bare-denormal repair is the one edit made to the bytes, and it is
- * required, not optional: ClickHouse's `serializeTextJSON` writes IEEE denormals
- * as the bare tokens `inf`, `-inf` and `nan` unless
- * `output_format_json_quote_denormals` is set. That is faithful ClickHouse
- * output and it is not valid JSON — one QBit column full of infinities took an
- * entire result document down and cost 18 arbiter cases at once.
- * `repairBareDenormals` is the port of `quoteBareDenormals`
- * (go/chtypes/chtypes.go): it quotes the token and changes nothing
- * else, and it runs before any slice is cut, so the reference implementation and
- * this one end up holding the same bytes.
+ * The fetch layer's JSON plumbing: a parser over bytes whose values remember the
+ * exact slice they were cut from, with duplicate keys kept in source order (the
+ * fetch layer's own duplicate-key refusals read them). The result documents of
+ * the C layer no longer use it: they are decoded with the stock `JSON.parse`
+ * (`./documents.ts`), because the library's documents are valid RFC 8259 JSON.
+ * It is the switch lane's to fold into the fetch layer.
  */
 
 import { isUtf8 } from 'node:buffer';
@@ -370,18 +338,6 @@ class Parser {
 }
 
 /**
- * Parse a `chs_row` / `chs_rows` document: denormals repaired, every value
- * carrying the exact bytes the library wrote.
- */
-export function parseDocument(bytes: Buffer): Json {
-  const p = new Parser(repairBareDenormals(bytes));
-  const v = p.value();
-  p.skipSpace();
-  if (!p.atEnd()) p.fail('unexpected data after the document');
-  return v;
-}
-
-/**
  * Is this supplied text **one JSON value**? A spec rule rather than a language
  * default (docs/reference/bindings.md §detectors, measured 2026-08-17): the text is a JSON
  * value only if a strict parse consumes **all** of it, with whitespace being
@@ -407,70 +363,6 @@ export function parseJsonValue(bytes: Buffer): Json | null {
   } catch {
     return null;
   }
-}
-
-/**
- * Quote the bare `inf` / `-inf` / `nan` tokens ClickHouse writes outside JSON
- * strings. Port of `quoteBareDenormals`; the stored text is preserved exactly and
- * only the quoting is added, so the slices this module hands out are the bytes
- * ClickHouse would have written.
- */
-export function repairBareDenormals(text: Buffer): Buffer {
-  // Fast path: nothing that could be a bare denormal token.
-  if (!text.includes('inf') && !text.includes('nan')) return text;
-
-  const startsWith = (word: string, at: number): boolean => {
-    for (let k = 0; k < word.length; k++) {
-      if (text[at + k] !== word.charCodeAt(k)) return false;
-    }
-    return true;
-  };
-
-  const out: number[] = [];
-  let inString = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i]!;
-    if (inString) {
-      out.push(c);
-      if (c === BACKSLASH && i + 1 < text.length) {
-        i++;
-        out.push(text[i]!);
-      } else if (c === QUOTE) {
-        inString = false;
-      }
-      continue;
-    }
-    if (c === QUOTE) {
-      inString = true;
-      out.push(c);
-      continue;
-    }
-    // A value can only start right after one of these structural bytes.
-    if (out.length > 0) {
-      const prev = out[out.length - 1]!;
-      if (prev !== COLON && prev !== COMMA && prev !== ARRAY_OPEN && !isSpace(prev)) {
-        out.push(c);
-        continue;
-      }
-    }
-    let token = 0;
-    if (startsWith('-inf', i)) token = 4;
-    else if (startsWith('inf', i)) token = 3;
-    else if (startsWith('nan', i)) token = 3;
-
-    if (token > 0) {
-      const after = text[i + token];
-      if (after === undefined || after === COMMA || after === OBJECT_CLOSE || after === ARRAY_CLOSE) {
-        out.push(QUOTE);
-        for (let k = 0; k < token; k++) out.push(text[i + k]!);
-        out.push(QUOTE);
-        i += token - 1;
-        continue;
-      }
-    }
-    out.push(c);
-  }
-  return Buffer.from(out);
 }
 
 // ------------------------------------------------------------------ accessors
@@ -512,11 +404,6 @@ function keyIs(key: Buffer, want: string): boolean {
   return true;
 }
 
-/** Is this key present at all? `"stored": null` is a value; absence is not. */
-export function hasField(value: Json | undefined, key: string): boolean {
-  return field(value, key) !== undefined;
-}
-
 /** The elements of an array (or an object's values); `[]` for anything else. */
 export function items(value: Json | undefined): readonly Json[] {
   return value === undefined ? NO_ITEMS : value.items;
@@ -525,50 +412,4 @@ export function items(value: Json | undefined): readonly Json[] {
 /** A JSON string's text, decoded as UTF-8. `''` for any other kind. */
 export function asString(value: Json | undefined): string {
   return value !== undefined && value.kind === 'string' ? value.bytes.toString('utf8') : '';
-}
-
-/** A JSON string's **unescaped bytes** — authoritative where `asString` is not. */
-export function asBytes(value: Json | undefined): Buffer {
-  return value !== undefined && value.kind === 'string' ? value.bytes : EMPTY;
-}
-
-export function asStringArray(value: Json | undefined): string[] {
-  return items(value).map((v) => asString(v));
-}
-
-export function asInt(value: Json | undefined): number {
-  if (value !== undefined && value.kind === 'number') {
-    const n = Number(value.raw.toString('utf8'));
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
-}
-
-export function asBool(value: Json | undefined): boolean {
-  return value !== undefined && value.kind === 'bool' && value.raw[0] === LOWER_T;
-}
-
-/**
- * The exact source bytes of a value — the equivalent of holding a
- * `json.RawMessage`. Duplicate keys, escape spellings and 256-bit digits all
- * survive, because nothing is re-rendered.
- *
- * Not the same thing as `asBytes`, and the difference decides correctness: for
- * the string `"a\\u000Bb"` this returns all nine bytes **including the quotes and
- * the escape**, which is what a stored value's rendering is, while `asBytes`
- * returns the three bytes the escape stands for, which is what a *field of the
- * document* (`input`, `name`, `err`) means.
- */
-export function rawBytes(value: Json | undefined): Buffer {
-  return value === undefined ? EMPTY : value.raw;
-}
-
-/**
- * `rawBytes` decoded as UTF-8, for logs, comparisons and messages. **Lossy when
- * the value is not valid UTF-8** — a ClickHouse `String` column holds arbitrary
- * bytes, `isValidUtf8(rawBytes(v))` says whether this text is exact, and
- * `rawBytes` is the authority.
- */
-export function rawText(value: Json | undefined): string {
-  return rawBytes(value).toString('utf8');
 }
