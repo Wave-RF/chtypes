@@ -177,7 +177,7 @@ PY
     echo "build-stubs.sh: built $built stub libraries into $OUT (manifest: $OUT/stubs.json)"
 
     echo "build-stubs.sh: compiling and running the D2 self-test (stubtest.c)"
-    "$CC" -std=c11 -Wall -Wextra -I "$INCLUDE_DIR" "$HERE/stubtest.c" -o "$OUT/stubtest"
+    "$CC" -std=c11 -Wall -Wextra -pthread -I "$INCLUDE_DIR" "$HERE/stubtest.c" -o "$OUT/stubtest"
     "$OUT/stubtest" "$OUT"
 }
 

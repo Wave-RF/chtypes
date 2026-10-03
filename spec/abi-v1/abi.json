@@ -27,27 +27,18 @@
     },
     "chs_schema": {
       "free": "chs_schema_free",
-      "holds": [],
-      "provisional": [
-        "A8"
-      ]
+      "holds": []
     },
     "chs_filter": {
       "free": "chs_filter_free",
       "holds": [
         "chs_schema"
-      ],
-      "provisional": [
-        "A9"
       ]
     },
     "chs_block": {
       "free": "chs_block_free",
       "holds": [
         "chs_schema"
-      ],
-      "provisional": [
-        "A9"
       ]
     }
   },
@@ -150,10 +141,6 @@
     },
     "transform_reason": {
       "repr": "string",
-      "provisional": [
-        "A10",
-        "A11"
-      ],
       "fields": {
         "lossy": "boolean"
       },
@@ -259,10 +246,6 @@
     },
     "value_src": {
       "repr": "string",
-      "provisional": [
-        "A10",
-        "A11"
-      ],
       "fields": {
         "is_stored": "boolean"
       },
@@ -277,6 +260,10 @@
         },
         {
           "value": "default_substituted",
+          "is_stored": true
+        },
+        {
+          "value": "default_generated",
           "is_stored": true
         },
         {
@@ -311,9 +298,6 @@
     },
     "row_outcome": {
       "repr": "string",
-      "provisional": [
-        "A10"
-      ],
       "fallback": "unsupported",
       "values": [
         {
@@ -335,9 +319,6 @@
     },
     "batch_outcome": {
       "repr": "string",
-      "provisional": [
-        "A10"
-      ],
       "fallback": "unsupported",
       "values": [
         {
@@ -356,10 +337,6 @@
     },
     "filter_outcome": {
       "repr": "string",
-      "provisional": [
-        "A9",
-        "A10"
-      ],
       "fallback": "unsupported",
       "values": [
         {
@@ -375,10 +352,6 @@
     },
     "filter_verdict": {
       "repr": "string",
-      "provisional": [
-        "A9",
-        "A10"
-      ],
       "fields": {
         "answered": "boolean"
       },
@@ -401,6 +374,42 @@
           "answered": false
         }
       ]
+    },
+    "discover_query_param": {
+      "repr": "string",
+      "fields": {
+        "ch_type": "string"
+      },
+      "values": [
+        {
+          "value": "database",
+          "ch_type": "String"
+        },
+        {
+          "value": "table",
+          "ch_type": "String"
+        }
+      ]
+    },
+    "default_kind": {
+      "repr": "string",
+      "values": [
+        {
+          "value": ""
+        },
+        {
+          "value": "DEFAULT"
+        },
+        {
+          "value": "MATERIALIZED"
+        },
+        {
+          "value": "ALIAS"
+        },
+        {
+          "value": "EPHEMERAL"
+        }
+      ]
     }
   },
   "constants": {
@@ -410,45 +419,32 @@
     },
     "CHS_EXPORT_NONE": {
       "type": "int32",
-      "value": -1,
-      "provisional": [
-        "A10"
-      ]
+      "value": -1
     },
     "CHS_DOC_VALUES": {
       "type": "uint32",
-      "value": 1,
-      "provisional": [
-        "A10"
-      ]
+      "value": 1
     },
     "CHS_DOC_TRANSFORMS": {
       "type": "uint32",
-      "value": 2,
-      "provisional": [
-        "A10"
-      ]
+      "value": 2
     },
     "CHS_DOC_DEFAULTS": {
       "type": "uint32",
-      "value": 4,
-      "provisional": [
-        "A10"
-      ]
+      "value": 4
     },
     "CHS_DOC_ALL": {
       "type": "uint32",
-      "value": 7,
-      "provisional": [
-        "A10"
-      ]
+      "value": 7
     }
+  },
+  "column_names": {
+    "text": "name",
+    "bytes": "name_b64",
+    "bytes_encoding": "base64"
   },
   "documents": {
     "live_handles": {
-      "provisional": [
-        "confirm"
-      ],
       "carries_names": false,
       "schema": {
         "type": "object",
@@ -459,45 +455,286 @@
       }
     },
     "error_code_table": {
-      "provisional": [
-        "Q-c"
-      ],
-      "carries_names": false
+      "carries_names": false,
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "code",
+            "name"
+          ],
+          "properties": {
+            "code": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        }
+      }
     },
     "schema_description": {
-      "provisional": [
-        "A12"
-      ],
       "carries_names": true
     },
     "row": {
-      "provisional": [
-        "A10",
-        "A11",
-        "A12"
-      ],
-      "carries_names": true
+      "carries_names": true,
+      "schema": {
+        "$defs": {
+          "span": {
+            "type": "object",
+            "required": [
+              "off",
+              "len"
+            ],
+            "properties": {
+              "off": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "len": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "col": {
+            "type": "object",
+            "required": [
+              "null"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+              },
+              "null": {
+                "type": "boolean"
+              },
+              "input": {
+                "type": "string"
+              },
+              "stored": {
+                "type": "string"
+              }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "name"
+                ]
+              },
+              {
+                "required": [
+                  "name_b64"
+                ]
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "input_span"
+        ],
+        "properties": {
+          "input_span": {
+            "$ref": "#/$defs/span"
+          },
+          "cols": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/col"
+            }
+          }
+        }
+      }
     },
     "batch": {
-      "provisional": [
-        "A10",
-        "A11",
-        "A12"
-      ],
-      "carries_names": true
+      "carries_names": true,
+      "schema": {
+        "$defs": {
+          "span": {
+            "type": "object",
+            "required": [
+              "off",
+              "len"
+            ],
+            "properties": {
+              "off": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "len": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "named": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+              }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "name"
+                ]
+              },
+              {
+                "required": [
+                  "name_b64"
+                ]
+              }
+            ]
+          },
+          "row": {
+            "type": "object",
+            "required": [
+              "input_span"
+            ],
+            "properties": {
+              "input_span": {
+                "$ref": "#/$defs/span"
+              },
+              "cols": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/col"
+                }
+              }
+            }
+          },
+          "col": {
+            "type": "object",
+            "required": [
+              "null"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+              },
+              "null": {
+                "type": "boolean"
+              },
+              "input": {
+                "type": "string"
+              },
+              "stored": {
+                "type": "string"
+              }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "name"
+                ]
+              },
+              {
+                "required": [
+                  "name_b64"
+                ]
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "unconsumed",
+          "framing"
+        ],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/row"
+            }
+          },
+          "unconsumed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/span"
+            }
+          },
+          "framing": {
+            "type": "object",
+            "required": [
+              "bom_skipped",
+              "container",
+              "header"
+            ],
+            "properties": {
+              "bom_skipped": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "container": {
+                "enum": [
+                  "array",
+                  "stream",
+                  null
+                ]
+              },
+              "header": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "consumed",
+                      "lines",
+                      "names"
+                    ],
+                    "properties": {
+                      "consumed": {
+                        "type": "boolean"
+                      },
+                      "lines": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "names": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/$defs/named"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     },
     "filter_result": {
-      "provisional": [
-        "A9",
-        "A10"
-      ],
       "carries_names": false
     },
     "discovery": {
-      "provisional": [
-        "A11",
-        "A12"
-      ],
       "carries_names": true
     }
   },
@@ -576,7 +813,8 @@
           "required": [
             "input_formats",
             "export_formats",
-            "doc_flags"
+            "doc_flags",
+            "features"
           ],
           "properties": {
             "input_formats": {
@@ -596,15 +834,16 @@
               "items": {
                 "type": "string"
               }
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         }
       }
-    },
-    "provisional_fields": {
-      "capabilities": [
-        "A4"
-      ]
     }
   },
   "functions": [
@@ -652,7 +891,7 @@
     {
       "name": "chs_buf_data",
       "class": "api",
-      "thread": "any",
+      "thread": "shared",
       "returns": {
         "kind": "scalar",
         "type": "u8ptr_const",
@@ -670,7 +909,7 @@
     {
       "name": "chs_buf_len",
       "class": "api",
-      "thread": "any",
+      "thread": "shared",
       "returns": {
         "kind": "scalar",
         "type": "size"
@@ -703,7 +942,7 @@
     {
       "name": "chs_error_status",
       "class": "api",
-      "thread": "any",
+      "thread": "shared",
       "returns": {
         "kind": "enum",
         "type": "chs_status"
@@ -720,7 +959,7 @@
     {
       "name": "chs_error_ch_code",
       "class": "api",
-      "thread": "any",
+      "thread": "shared",
       "returns": {
         "kind": "scalar",
         "type": "int32"
@@ -737,7 +976,7 @@
     {
       "name": "chs_error_ch_name",
       "class": "api",
-      "thread": "any",
+      "thread": "shared",
       "returns": {
         "kind": "handle",
         "type": "chs_buf",
@@ -752,15 +991,12 @@
           "type": "chs_error",
           "const": true
         }
-      ],
-      "provisional": [
-        "Q-c"
       ]
     },
     {
       "name": "chs_error_message",
       "class": "api",
-      "thread": "any",
+      "thread": "shared",
       "returns": {
         "kind": "handle",
         "type": "chs_buf",
@@ -775,15 +1011,12 @@
           "type": "chs_error",
           "const": true
         }
-      ],
-      "provisional": [
-        "Q-c"
       ]
     },
     {
       "name": "chs_error_column",
       "class": "api",
-      "thread": "any",
+      "thread": "shared",
       "returns": {
         "kind": "handle",
         "type": "chs_buf",
@@ -798,9 +1031,6 @@
           "type": "chs_error",
           "const": true
         }
-      ],
-      "provisional": [
-        "Q-c"
       ]
     },
     {
@@ -960,17 +1190,20 @@
       },
       "params": [
         {
+          "name": "timezone",
+          "kind": "bytes_in",
+          "content": "timezone"
+        },
+        {
           "name": "err",
           "kind": "out_error"
         }
       ],
       "may_return": [
         "CHS_OK",
+        "CHS_REJECTED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A5"
       ]
     },
     {
@@ -997,9 +1230,6 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A6"
       ]
     },
     {
@@ -1009,10 +1239,7 @@
       "returns": {
         "kind": "void"
       },
-      "params": [],
-      "provisional": [
-        "A13"
-      ]
+      "params": []
     },
     {
       "name": "chs_type_validate",
@@ -1044,9 +1271,6 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A6"
       ]
     },
     {
@@ -1077,9 +1301,6 @@
         "CHS_OK",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "confirm"
       ]
     },
     {
@@ -1110,9 +1331,6 @@
         "CHS_OK",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "confirm"
       ]
     },
     {
@@ -1143,9 +1361,6 @@
         "CHS_OK",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "confirm"
       ]
     },
     {
@@ -1182,10 +1397,6 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A6",
-        "A8"
       ]
     },
     {
@@ -1202,15 +1413,12 @@
           "type": "chs_schema",
           "nullable": true
         }
-      ],
-      "provisional": [
-        "A8"
       ]
     },
     {
       "name": "chs_schema_describe",
       "class": "api",
-      "thread": "handle_serial",
+      "thread": "shared",
       "returns": {
         "kind": "status"
       },
@@ -1236,16 +1444,12 @@
         "CHS_OK",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A8",
-        "A12"
       ]
     },
     {
       "name": "chs_preview_row",
       "class": "api",
-      "thread": "handle_serial",
+      "thread": "shared",
       "returns": {
         "kind": "status"
       },
@@ -1293,18 +1497,12 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A8",
-        "A10",
-        "A11",
-        "A12"
       ]
     },
     {
       "name": "chs_preview_batch",
       "class": "api",
-      "thread": "handle_serial",
+      "thread": "shared",
       "returns": {
         "kind": "status"
       },
@@ -1376,19 +1574,12 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A8",
-        "A9",
-        "A10",
-        "A11",
-        "A12"
       ]
     },
     {
       "name": "chs_filter_create",
       "class": "api",
-      "thread": "handle_serial",
+      "thread": "shared",
       "returns": {
         "kind": "status"
       },
@@ -1410,6 +1601,11 @@
           "content": "json_object_string_values"
         },
         {
+          "name": "settings",
+          "kind": "bytes_in",
+          "content": "json_object_string_values"
+        },
+        {
           "name": "out",
           "kind": "out_handle",
           "type": "chs_filter"
@@ -1425,10 +1621,6 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A8",
-        "A9"
       ]
     },
     {
@@ -1445,15 +1637,12 @@
           "type": "chs_filter",
           "nullable": true
         }
-      ],
-      "provisional": [
-        "A9"
       ]
     },
     {
       "name": "chs_filter_eval_body",
       "class": "api",
-      "thread": "handle_serial",
+      "thread": "shared",
       "returns": {
         "kind": "status"
       },
@@ -1496,16 +1685,12 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A9",
-        "A10"
       ]
     },
     {
       "name": "chs_block_create",
       "class": "api",
-      "thread": "handle_serial",
+      "thread": "shared",
       "returns": {
         "kind": "status"
       },
@@ -1552,12 +1737,6 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A8",
-        "A9",
-        "A10",
-        "A12"
       ]
     },
     {
@@ -1574,15 +1753,12 @@
           "type": "chs_block",
           "nullable": true
         }
-      ],
-      "provisional": [
-        "A9"
       ]
     },
     {
       "name": "chs_filter_eval_block",
       "class": "api",
-      "thread": "handle_serial",
+      "thread": "shared",
       "returns": {
         "kind": "status"
       },
@@ -1616,10 +1792,6 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A9",
-        "A10"
       ]
     },
     {
@@ -1645,11 +1817,6 @@
         "CHS_OK",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A6",
-        "A11",
-        "Q-f"
       ]
     },
     {
@@ -1682,11 +1849,6 @@
         "CHS_DECLINED",
         "CHS_INVALID_ARGUMENT",
         "CHS_INTERNAL"
-      ],
-      "provisional": [
-        "A6",
-        "A11",
-        "A12"
       ]
     }
   ]
