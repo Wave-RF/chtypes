@@ -24,6 +24,7 @@
 #include "chtypes.h"
 
 #include <dlfcn.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,7 +60,8 @@ typedef chs_status (*fn_quote_string)(const uint8_t *, size_t, chs_buf **, chs_e
 typedef chs_status (*fn_schema_create)(const uint8_t *, size_t, const uint8_t *, size_t, chs_schema **, chs_error **);
 typedef void (*fn_schema_free)(chs_schema *);
 typedef chs_status (*fn_filter_create)(
-    const chs_schema *, const uint8_t *, size_t, const uint8_t *, size_t, chs_filter **, chs_error **);
+    const chs_schema *, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t, chs_filter **,
+    chs_error **);
 typedef void (*fn_filter_free)(chs_filter *);
 typedef chs_status (*fn_filter_eval_body)(
     const chs_filter *, chs_format, const uint8_t *, size_t, const uint8_t *, size_t, chs_buf **, chs_error **);
@@ -324,7 +326,7 @@ static void test_holds_and_live(lib_t *l) {
     CHECK(live_count(l, "chs_schema") == schema_before + 1, "live chs_schema did not increase by one on create");
 
     chs_filter *filter = NULL;
-    CHECK(l->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, &filter, &err) == CHS_OK, "chs_filter_create");
+    CHECK(l->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err) == CHS_OK, "chs_filter_create");
     CHECK(live_count(l, "chs_filter") == filter_before + 1, "live chs_filter did not increase by one on create");
 
     l->schema_free(schema); /* the caller's own reference; the filter still holds one */
@@ -342,6 +344,100 @@ static void test_holds_and_live(lib_t *l) {
           "live chs_schema did not return to its baseline once the filter that held it was also freed");
 }
 
+/* Exactly one CREATE TABLE statement: the stub's stand-in for the rule
+   (scripts/abi-v1/emit/_stubshared.py ONE_CREATE) refuses a second
+   statement with its error intact, and a trailing semicolon is not one. */
+static void test_one_create(lib_t *l) {
+    static const char two[] = "CREATE TABLE a (x Int32) ENGINE = Memory; CREATE TABLE b (y Int32) ENGINE = Memory";
+    static const char one[] = "CREATE TABLE a (x Int32) ENGINE = Memory;\n";
+    chs_schema *schema = NULL;
+    chs_error *err = NULL;
+    chs_status st = l->schema_create((const uint8_t *) two, sizeof two - 1, NULL, 0, &schema, &err);
+    CHECK(st == CHS_REJECTED, "two CREATE statements gave status %d, want CHS_REJECTED", (int) st);
+    CHECK(schema == NULL, "two CREATE statements still produced a schema");
+    CHECK(err != NULL && l->error_ch_code(err) == 62, "two CREATE statements: ch_code %d, want 62",
+          err != NULL ? l->error_ch_code(err) : -1);
+    if (err != NULL) l->error_free(err);
+    err = NULL;
+    st = l->schema_create((const uint8_t *) one, sizeof one - 1, NULL, 0, &schema, &err);
+    CHECK(st == CHS_OK && schema != NULL, "one CREATE statement with a trailing semicolon gave status %d", (int) st);
+    if (schema != NULL) l->schema_free(schema);
+}
+
+/* Decision 1: a `shared` call is safe from many threads at once on the SAME
+   handle. Eight threads each preview rows and compile filters over one
+   schema, and evaluate one filter; every call must succeed, and once every
+   thread's own handles are freed the live counts are back where they were. */
+#define CONC_THREADS 8
+#define CONC_CALLS 200
+
+typedef struct {
+    lib_t *l;
+    const chs_schema *schema;
+    const chs_filter *filter;
+    int failures;
+} conc_arg;
+
+static void *conc_worker(void *p) {
+    conc_arg *a = (conc_arg *) p;
+    static const char body[] = "{\"x\":1}";
+    static const char settings[] = "{\"session_timezone\":\"America/Los_Angeles\"}";
+    for (int i = 0; i < CONC_CALLS; i++) {
+        chs_buf *out = NULL;
+        chs_error *err = NULL;
+        if (a->l->preview_row(a->schema, CHS_JSON_EACH_ROW, (const uint8_t *) body, sizeof body - 1,
+                              (const uint8_t *) settings, sizeof settings - 1, NULL, 0, &out, &err) != CHS_OK) {
+            a->failures++;
+        }
+        if (out != NULL) a->l->buf_free(out);
+        chs_filter *f = NULL;
+        if (a->l->filter_create(a->schema, (const uint8_t *) "x = 1", 5, NULL, 0, (const uint8_t *) settings,
+                                sizeof settings - 1, &f, &err) != CHS_OK) {
+            a->failures++;
+        }
+        if (f != NULL) a->l->filter_free(f);
+        out = NULL;
+        if (a->l->filter_eval_body(a->filter, CHS_JSON_EACH_ROW, (const uint8_t *) body, sizeof body - 1, NULL, 0,
+                                   &out, &err) != CHS_OK) {
+            a->failures++;
+        }
+        if (out != NULL) a->l->buf_free(out);
+    }
+    return NULL;
+}
+
+static void test_concurrent_shared(lib_t *l) {
+    long schema_before = live_count(l, "chs_schema");
+    long filter_before = live_count(l, "chs_filter");
+    long buf_before = live_count(l, "chs_buf");
+
+    chs_schema *schema = NULL;
+    chs_error *err = NULL;
+    CHECK(l->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
+    chs_filter *filter = NULL;
+    CHECK(l->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err) == CHS_OK,
+          "chs_filter_create");
+
+    pthread_t threads[CONC_THREADS];
+    conc_arg args[CONC_THREADS];
+    for (int i = 0; i < CONC_THREADS; i++) {
+        args[i] = (conc_arg){l, schema, filter, 0};
+        CHECK(pthread_create(&threads[i], NULL, conc_worker, &args[i]) == 0, "pthread_create %d", i);
+    }
+    int failures = 0;
+    for (int i = 0; i < CONC_THREADS; i++) {
+        pthread_join(threads[i], NULL);
+        failures += args[i].failures;
+    }
+    CHECK(failures == 0, "%d of %d concurrent shared calls failed", failures, CONC_THREADS * CONC_CALLS * 3);
+
+    l->filter_free(filter);
+    l->schema_free(schema);
+    CHECK(live_count(l, "chs_schema") == schema_before, "live chs_schema did not return to its baseline");
+    CHECK(live_count(l, "chs_filter") == filter_before, "live chs_filter did not return to its baseline");
+    CHECK(live_count(l, "chs_buf") == buf_before, "live chs_buf did not return to its baseline");
+}
+
 /* Two SEPARATELY dlopen'd, byte-identical builds (RTLD_LOCAL: each gets its
    own static image-identity marker) must refuse each other's handles. */
 static void test_cross_image(lib_t *a, lib_t *b) {
@@ -354,7 +450,7 @@ static void test_cross_image(lib_t *a, lib_t *b) {
     chs_schema *schema = NULL;
     CHECK(a->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create on lib a");
     chs_filter *filter = NULL;
-    chs_status st = b->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, &filter, &err);
+    chs_status st = b->filter_create(schema, (const uint8_t *) "1", 1, NULL, 0, NULL, 0, &filter, &err);
     CHECK(st == CHS_INVALID_ARGUMENT, "lib b's chs_filter_create over lib a's schema gave %d, want CHS_INVALID_ARGUMENT",
           (int) st);
     if (err != NULL) b->error_free(err);
@@ -391,6 +487,8 @@ int main(int argc, char **argv) {
     test_free_rules(&a);
     test_wrong_kind(&a);
     test_holds_and_live(&a);
+    test_one_create(&a);
+    test_concurrent_shared(&a);
     test_cross_image(&a, &b);
     test_unbound_refuses_rtld_now(argv[1]);
 

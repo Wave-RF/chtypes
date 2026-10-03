@@ -66,7 +66,22 @@ SCALARS: dict[str, str] = {
 PARAM_KINDS = ("scalar", "enum", "bytes_in", "handle", "out_handle", "out_error", "out_scalar")
 RETURN_KINDS = ("status", "void", "scalar", "enum", "handle")
 CLASSES = ("handshake", "tombstone", "api", "tooling")
-THREADS = ("any", "handle_serial", "process_once", "process_serial")
+# The thread classes: what a caller may run at the same time as a call. Every
+# function names one; the emitters print these descriptions (no second copy),
+# and the schema pins the same set. The rule tying a class to a function's
+# shape (decision 1, "concurrent reads on one handle, everywhere it is safe")
+# is checked in load(): a call that reads a caller's handle is `shared`, a
+# free is `handle_serial`, and nothing else is either.
+THREADS: dict[str, str] = {
+    "any": "reads no caller handle: safe from any thread, concurrently with any call",
+    "shared": "reads one or more caller handles and never changes them: safe concurrently with any call, "
+    "on the same handles too, except a free of one of those handles",
+    "handle_serial": "a free: releases the caller's reference, so it must not overlap any other call "
+    "that uses the same handle",
+    "process_once": "process setup, once per image: the first call sets process state, and a repeat with "
+    "the same arguments is a no-op that is safe at any time",
+    "process_serial": "process-level: must not overlap any other call into the same library image",
+}
 # What a counted byte string carries. Every one is a byte string, never a C
 # string; the description says which, so a binding picks a byte-safe type for
 # a name and the stub and the cases know what a valid input looks like. The
@@ -78,7 +93,8 @@ CONTENTS: dict[str, str] = {
     "message": "a ClickHouse message: may quote input bytes, so may carry any byte",
     "ascii": "guaranteed ASCII",
     "json_object_string_values": "a JSON object whose values are JSON strings (settings, query parameters)",
-    "json_array_names": "a JSON array of column names (the encoding of a non-UTF-8 name is provisional: A12)",
+    "json_array_names": "a JSON array of column names, each an object carrying the name as column_names says",
+    "timezone": "a time zone name, validated by ClickHouse's own DateLUT; length 0 means UTC",
 }
 STATUS_ENUM = "chs_status"
 ERROR_HANDLE = "chs_error"
@@ -424,6 +440,7 @@ class Model:
     enums: dict[str, Enum]
     constants: dict[str, Constant]
     documents: dict[str, Document]
+    column_names: dict[str, str]
     build_info_schema: dict[str, Any]
     build_info_provisional: dict[str, tuple[str, ...]]
     functions: tuple[Function, ...]
@@ -742,6 +759,15 @@ def load(root: Path) -> Model:
             f"{sorted(SCALARS)}; a scalar is an emitter change in every lane"
         )
 
+    # ---- the thread vocabulary, which the schema pins too
+    schema_threads = (_read_json(root, ABI_SCHEMA, problems) or {}).get("$defs", {}).get("function", {})
+    schema_threads = schema_threads.get("properties", {}).get("thread", {}).get("enum", [])
+    if set(schema_threads) != set(THREADS):
+        problems.append(
+            f"{ABI_SCHEMA}: the thread enum {sorted(schema_threads)} differs from the classes model.py "
+            f"describes {sorted(THREADS)}"
+        )
+
     # ---- functions
     functions: list[Function] = []
     fnames: set[str] = set()
@@ -886,6 +912,25 @@ def load(root: Path) -> Model:
             )
         if set(fr.provisional) != set(h.provisional):
             problems.append(f"handle {h.name}: {h.free}'s provisional markers must equal the handle's")
+    # ---- thread classes follow the shape (decision 1: concurrent reads on one
+    # handle, everywhere it is safe). A handle is immutable once made (decision 4),
+    # so every call that reads a caller's handle is `shared`; only a free, which
+    # releases the caller's reference, is `handle_serial`.
+    frees = {h.free for h in handles.values()}
+    for fn in functions:
+        reads = [p.name for p in fn.params if p.kind == "handle"]
+        where = f"function {fn.name}"
+        if fn.name in frees:
+            if fn.thread != "handle_serial":
+                problems.append(f"{where}: a handle's free is thread class `handle_serial`, not `{fn.thread}`")
+        elif reads and fn.thread != "shared":
+            problems.append(
+                f"{where}: reads the caller's handle(s) {reads}, so its thread class must be `shared` "
+                f"(concurrent reads on one handle), not `{fn.thread}`"
+            )
+        elif not reads and fn.thread in ("shared", "handle_serial"):
+            problems.append(f"{where}: thread class `{fn.thread}` applies only to a call that takes a handle")
+
     # ---- docs coverage: exactly one section per symbol
     required = set(handles) | set(enums) | set(fmap)
     optional = set(constants) | {f"document:{d}" for d in documents}
@@ -995,6 +1040,7 @@ def load(root: Path) -> Model:
         enums=enums,
         constants=constants,
         documents=documents,
+        column_names=dict(raw["column_names"]),
         build_info_schema=bi["schema"],
         build_info_provisional=bi_prov,
         functions=tuple(functions),
