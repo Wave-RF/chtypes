@@ -427,6 +427,20 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 			resolvedManifest, resolvedLibrarySHA256 = string(signed.Digests.Manifest), hex.EncodeToString(sum[:])
 			warnings = signed.Warnings
 		}
+	case strings.HasPrefix(c.ID, "resolve-installed-"):
+		// The cache-only seam entry (docs/guides/fetch-v1.md §10): a miss is
+		// reported as CHTYPES_ARTIFACT_MISSING, the code --offline gives.
+		resolved, ferr := ResolveInstalled(Request{Spelling: c.Request.Spelling, Platform: c.Request.Platform}, c.Request.Platform, opts)
+		if ferr == nil && resolved == nil {
+			ferr = newError(CodeArtifactMissing, c.Request.Spelling, c.Request.Platform, "", nil, "no installed artifact satisfies %s", c.Request.Spelling)
+		}
+		runErr = ferr
+		if ferr == nil {
+			resolvedManifest = string(resolved.Digests.Manifest)
+			resolvedLibrarySHA256 = sha256FileHex(resolved.LibraryPath)
+			resolvedVersion, resolvedBuild = &resolved.Version, &resolved.Build
+			warnings = resolved.Warnings
+		}
 	default:
 		resolved, ferr := Ensure(ctx, Request{Spelling: c.Request.Spelling, Platform: c.Request.Platform}, opts)
 		runErr = ferr

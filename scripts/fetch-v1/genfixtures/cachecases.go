@@ -184,8 +184,73 @@ func buildCacheCases(fs *FileSet) []Case {
 			"commit its output, then re-run this generator to pick the case back up")
 	}
 
+	// --- installed-request-*: a build that is merely PRESENT must never
+	// answer a request it does not satisfy (docs/guides/fetch-v1.md §4, §9: the
+	// predicate's version equals an exact request or lies within a floating
+	// one, on EVERY resolution path). The cache holds one signed build,
+	// 26.8.15.10, installed and listed in index.json; each request is run
+	// through ensure with `offline`, through resolve_installed (the
+	// `resolve-installed-` id prefix, docs/guides/fetch-v1.md §10), and through
+	// ensure with `frozen` against a lock that pins only the two matching
+	// spellings. A non-matching request is MISSING (offline, resolve_installed:
+	// §6, the offline-miss precedent) or PINNED (frozen: §6, no lock entry);
+	// it is never the installed build. ---------------------------------------
+	artInst := newArtifact("26.8.15.10", "20260815.000010", "cache-installed-request")
+	layoutInst := NewLayout("installed-request")
+	copyArtifactIntoLayout(layoutInst, tree, artInst, "26.8")
+	layoutInst.SetInstalled(artInst.ManifestDesc.Digest)
+	instLock := Lock3{Schema: 3, ABI: 1, Platforms: []string{"linux-arm64"},
+		Requests: map[string]map[string]LockPin{
+			"26.8":       {"linux-arm64": pinFor(artInst, artInst.BundleDigest, "")},
+			"26.8.15.10": {"linux-arm64": pinFor(artInst, artInst.BundleDigest, "")},
+		}}
+	putInputLock(fs, "installed-request", instLock)
+	instRequests := []struct {
+		slug, spelling string
+		match          bool
+	}{
+		{"1-1", "1.1", false},
+		{"26-9", "26.9", false},
+		{"wrong-patch", "26.8.15.9", false},
+		{"26-8", "26.8", true},
+		{"exact", "26.8.15.10", true},
+	}
+	for _, r := range instRequests {
+		for _, mode := range []string{"offline", "resolve", "frozen"} {
+			id := "installed-request-" + r.slug + "-" + mode
+			if mode == "resolve" {
+				id = "resolve-installed-request-" + r.slug
+			}
+			c := newCase(id, "cache", "file", "http")
+			c.Request.Spelling = r.spelling
+			c.Setup.Cache = "installed-request"
+			switch mode {
+			case "offline", "resolve":
+				c.Request.Offline = true
+				c.Expect.Requests.Max = intp(0)
+			case "frozen":
+				c.Request.Frozen = true
+				c.Setup.Lock = strp("installed-request")
+			}
+			if r.match {
+				c.Expect.OK = true
+				c.Expect.Version = strp(artInst.Predicate.ClickHouseVersion)
+				c.Expect.Build = strp(artInst.Predicate.Build)
+				c.Expect.LibrarySHA256 = strp(artInst.Predicate.LibrarySHA256)
+			} else {
+				c.Expect.OK = false
+				if mode == "frozen" {
+					c.Expect.Code = strp("CHTYPES_ARTIFACT_PINNED")
+				} else {
+					c.Expect.Code = strp("CHTYPES_ARTIFACT_MISSING")
+				}
+			}
+			cases = append(cases, c)
+		}
+	}
+
 	flushTrees(fs, tree, monoTree)
-	for _, l := range []*Layout{layoutHit, layoutMiss, layoutTwoVersions, layoutTwoBuilds, layoutNoop, layoutMono, layoutSys} {
+	for _, l := range []*Layout{layoutInst, layoutHit, layoutMiss, layoutTwoVersions, layoutTwoBuilds, layoutNoop, layoutMono, layoutSys} {
 		l.Flush(fs)
 	}
 	return cases

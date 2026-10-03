@@ -1,0 +1,27 @@
+{
+  "schema": 3,
+  "abi": 1,
+  "platforms": [
+    "linux-arm64"
+  ],
+  "requests": {
+    "26.8": {
+      "linux-arm64": {
+        "version": "26.8.15.10",
+        "build": "20260815.000010",
+        "manifest": "sha256:61f4f3cb30d316414c86e042422474debea1ce76e80f18145091d202b711737e",
+        "layer": "sha256:3d162c265f09d224357b95b1fd85ae201c58f2803e7bb20d12ecabc865440860",
+        "bundle": "sha256:ff4713adb1f66ba2daed970f4d985455584b9f96208f3d966933fbd87a658776"
+      }
+    },
+    "26.8.15.10": {
+      "linux-arm64": {
+        "version": "26.8.15.10",
+        "build": "20260815.000010",
+        "manifest": "sha256:61f4f3cb30d316414c86e042422474debea1ce76e80f18145091d202b711737e",
+        "layer": "sha256:3d162c265f09d224357b95b1fd85ae201c58f2803e7bb20d12ecabc865440860",
+        "bundle": "sha256:ff4713adb1f66ba2daed970f4d985455584b9f96208f3d966933fbd87a658776"
+      }
+    }
+  }
+}

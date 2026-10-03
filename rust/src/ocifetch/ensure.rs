@@ -1323,6 +1323,17 @@ fn install_from_local_blobs_for(
             dir.display()
         ))
     })?;
+    // The request is checked against the SIGNED version on EVERY path, the
+    // already-unpacked one included: a build that is merely present in the
+    // cache must never answer a request it does not satisfy.
+    if let Some(request) = request {
+        if record.platform != platform || !request.matches(&record.version) {
+            return Err(Error::ArtifactMissing(format!(
+                "installed {} ({}) does not satisfy the request",
+                record.version, record.platform
+            )));
+        }
+    }
     Ok(record_to_resolved(
         "", platform, &dir, record, "cache", already,
     ))
