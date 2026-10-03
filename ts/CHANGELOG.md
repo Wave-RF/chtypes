@@ -6,6 +6,15 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Changed (v1: breaking)
+
+- **The public API is rebuilt over the ABI v1 generated layer** (`docs/reference/bindings-v1.md`). `setup()` replaces the registry timezone option; `Registry.open()`, `for()` and `installed()` are async and resolve through the fetch layer; `compileTable` takes exactly one `CREATE TABLE` statement; every name, SQL text, message and rendered value is a `Buffer`; the four call errors (`SchemaError`, `UnsupportedError`, `UsageError`, `InternalError`) carry the library's five error fields, under the abstract `CallError`; the loader's refusals are `ArtifactIncompatibleError` and `ArtifactCorruptError`, one family with the fetch layer's errors.
+- **The vocabularies are generated from the description** (`Format`, `Status`, `Outcome`, `FilterOutcome`, `Verdict`, `Reason`, `Source`, `DefaultKind`, `DocFlags`), each fact (`Transform.lossy`, `Value.isStored`, `verdictAnswered`) read from it.
+
+### Removed
+
+- The hand FFI table and the presence and per-format probes, the transform classifier and its numeric helpers, the hand JSON reader's denormal repair, discovery reconstruction (`discoverQuery` and `discoverColumns` replace it), the error-code table parsers, the v0 loader halves (search path, manifests, revision gate, checksum re-hash, `Resolve`), `Registry#close`, `Library#shutdown`, `setDefaultSettings`, `InitConflictError`, `ABI_REVISION` and `CODE_UNSUPPORTED` from the public API, and numeric settings values.
+
 ### Fixed
 
 - **The tar reader now refuses a symlink, hardlink, device or FIFO entry instead of silently skipping it.** `extractTarGz` treated anything that was not a regular file or directory as "skip, never follow", so an artifact tarball carrying one of those installed everything else around it with no error. It now throws `ArtifactCorruptError`, naming the entry and its type, matching the other three bindings' install refusal for the same shapes.
