@@ -883,9 +883,9 @@ mod tests {
     fn a_schema_description_reads_the_default_kind_vocabulary() {
         let d = schema_description(
             br#"{"columns":[
-                {"name":"a","type":"UInt8","default_kind":"","default_expr":""},
-                {"name":"b","type":"DateTime","default_kind":"MATERIALIZED","default_expr":"now()"},
-                {"name_b64":"AP8=","type":"String","default_kind":"EPHEMERAL","default_expr":""}]}"#,
+                {"name":"a","type":"UInt8","default_kind":"","default_expression":""},
+                {"name":"b","type":"DateTime","default_kind":"MATERIALIZED","default_expression":"now()"},
+                {"name_b64":"AP8=","type":"String","default_kind":"EPHEMERAL","default_expression":""}]}"#,
         )
         .unwrap();
         assert_eq!(d.columns[0].default_kind, DefaultKind::None);
