@@ -315,18 +315,22 @@ fn ensure_online(
                 )
             }
             Err(Error::ArtifactUntrusted(detail)) if options.allow_unsigned => (
-                serde_json::Value::Null,
+                unsigned_config(&source, &manifest)?,
                 String::new(),
                 None,
                 None,
                 vec![format!(
-                    "proceeding WITHOUT a verified signature (CHTYPES_ALLOW_UNSIGNED): {detail}"
+                    "chtypes: no verified signature found; CHTYPES_ALLOW_UNSIGNED is set, continuing unsigned: {detail}"
                 )],
             ),
             Err(e) => return Err(e),
         };
+    // An empty `signed_by` means nothing verified: `predicate` is then the
+    // manifest's own (untrusted) config blob, so none of the signed-only
+    // checks below apply to it.
+    let signed = !signed_by.is_empty();
 
-    if !predicate.is_null() {
+    if signed {
         validate_predicate(&predicate, &res.platform, Some(version_request))?;
     }
 
@@ -337,7 +341,7 @@ fn ensure_online(
     // kept, with a warning. Decided as soon as the candidate's own signed
     // version/build are known and before its layer is fetched — there is no
     // point downloading bytes this call is about to discard.
-    if !already && !predicate.is_null() {
+    if !already && signed {
         if let Some((dir, record)) =
             newer_installed(res, version_request, &descriptor.digest, &predicate)?
         {
@@ -355,13 +359,7 @@ fn ensure_online(
         }
     }
 
-    let (library_sha256, library_bytes, library_name) = if predicate.is_null() {
-        // Only reachable via the explicit, warned `allow_unsigned` path:
-        // there is no verified predicate to read these from at all.
-        (String::new(), 0u64, "library".to_string())
-    } else {
-        library_fields(&predicate)?
-    };
+    let (library_sha256, library_bytes, library_name) = library_fields(&predicate)?;
 
     let dir = if already {
         layout::unpacked_dir(&res.root, &descriptor.digest)?
@@ -389,9 +387,7 @@ fn ensure_online(
         };
         layout::install_unpacked(&res.root, &descriptor.digest, |tmp| {
             unpack::unpack_tar(&decompressed, tmp)?;
-            if !library_sha256.is_empty() {
-                verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
-            }
+            verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
             layout::write_atomic(
                 &tmp.join(constants::CACHE_VERIFIED_RECORD),
                 &serde_json::to_vec(&record)?,
@@ -567,6 +563,7 @@ fn ensure_frozen(
     // through the referrers API or the fallback tag.
     let bundle = oci::fetch_blob_by_digest(&source, &entry.bundle, constants::BUNDLE_MAX_BYTES)?;
     let verified = dsse::verify_bundle(&bundle.bytes, &res.trust, constants::STATEMENT_TYPE);
+    let mut warnings: Vec<String> = Vec::new();
     let (predicate, signed_by, bundle_manifest_digest) = match verified {
         Ok(stmt) => {
             check_artifact_statement(&stmt, &layer.digest)?;
@@ -577,22 +574,19 @@ fn ensure_frozen(
             )?;
             (stmt.predicate, stmt.signed_by.to_string(), None)
         }
-        Err(Error::ArtifactUntrusted(detail)) if options.allow_unsigned => (
-            serde_json::Value::Null,
-            format!("UNSIGNED (allowed): {detail}"),
-            None,
-        ),
+        Err(Error::ArtifactUntrusted(detail)) if options.allow_unsigned => {
+            warnings.push(format!(
+                "chtypes: the locked bundle does not verify; CHTYPES_ALLOW_UNSIGNED is set, continuing unsigned: {detail}"
+            ));
+            (unsigned_config(&source, &manifest)?, String::new(), None)
+        }
         Err(e) => return Err(e),
     };
 
     let fetched_layer =
         oci::fetch_blob_by_digest(&source, &layer.digest, constants::MAX_UNPACKED_BYTES)?;
     let decompressed = unpack::decompress_zstd(&fetched_layer.bytes)?;
-    let (library_sha256, library_bytes, library_name) = if predicate.is_null() {
-        (String::new(), 0u64, "library".to_string())
-    } else {
-        library_fields(&predicate)?
-    };
+    let (library_sha256, library_bytes, library_name) = library_fields(&predicate)?;
     let record = VerifiedRecord {
         platform: platform.to_string(),
         version: entry.version.clone(),
@@ -610,9 +604,7 @@ fn ensure_frozen(
     };
     let dir = layout::install_unpacked(&res.root, &entry.manifest, |tmp| {
         unpack::unpack_tar(&decompressed, tmp)?;
-        if !library_sha256.is_empty() {
-            verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
-        }
+        verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
         layout::write_atomic(
             &tmp.join(constants::CACHE_VERIFIED_RECORD),
             &serde_json::to_vec(&record)?,
@@ -635,15 +627,11 @@ fn ensure_frozen(
             bundle: Some(entry.bundle.clone()),
             bundle_manifest: bundle_manifest_digest,
         },
-        predicate: predicate.clone(),
+        predicate,
         signed_by,
         source: fetched_manifest.base,
         already_installed: false,
-        warnings: if predicate.is_null() {
-            vec!["chtypes: the locked bundle is unsigned or untrusted; CHTYPES_ALLOW_UNSIGNED is set, continuing unsigned".to_string()]
-        } else {
-            Vec::new()
-        },
+        warnings,
     })
 }
 
@@ -1004,6 +992,26 @@ fn validate_predicate(
         }
     }
     Ok(())
+}
+
+/// Under `allow_unsigned`, with no signature to read the library's name and
+/// hashes from: the manifest's own config blob, which carries the same
+/// fields value-for-value (layout-v2 §4.1) but was never verified — which is
+/// exactly why the caller reports it as unsigned and never as signed.
+fn unsigned_config(source: &Source<'_>, manifest: &oci::Manifest) -> Result<serde_json::Value> {
+    let config = manifest
+        .config
+        .as_ref()
+        .ok_or_else(|| Error::ArtifactCorrupt("manifest has no config descriptor".to_string()))?;
+    let fetched = oci::fetch_blob_by_digest(source, &config.digest, constants::MANIFEST_MAX_BYTES)?;
+    let value: serde_json::Value = serde_json::from_slice(&fetched.bytes)
+        .map_err(|e| Error::ArtifactCorrupt(format!("config blob is not valid JSON: {e}")))?;
+    if !value.is_object() {
+        return Err(Error::ArtifactCorrupt(
+            "config blob is not a JSON object".to_string(),
+        ));
+    }
+    Ok(value)
 }
 
 /// What a signed artifact statement must satisfy before anything in it is
