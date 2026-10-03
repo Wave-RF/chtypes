@@ -851,7 +851,7 @@ def _go_str(s: str) -> str:
 
 def render_invoke_gen(model) -> str:
     out = [f"// {banner(model)}", "", "package abi1", "", "import ("]
-    out += [f'{TAB}"bytes"', f'{TAB}"encoding/hex"', f'{TAB}"encoding/json"', f'{TAB}"fmt"']
+    out += [f'{TAB}"bytes"', f'{TAB}"encoding/hex"', f'{TAB}"encoding/json"', f'{TAB}"fmt"', f'{TAB}"unicode/utf8"']
     out += [")", ""]
 
     out.append(
@@ -943,7 +943,9 @@ def render_invoke_gen(model) -> str:
                 "every chs_buf a generic function's out_handle fills holds the stub's echo\n"
                 "document (emit/stub.py), a JSON object. Numbers decode as json.Number, so a\n"
                 "canonical re-encoding (canonicalJSON, in conformance_test.go) matches\n"
-                "cases.json's own literal digits exactly."
+                "cases.json's own literal digits exactly. A buffer that is not valid UTF-8\n"
+                "is an error, never decoded: every v1 document is valid UTF-8 JSON (the\n"
+                "byte_strings rule), and encoding/json would otherwise replace the bytes."
             )
         )
     )
@@ -952,6 +954,9 @@ def render_invoke_gen(model) -> str:
     out.append(f"{TAB}n := t.BufLen(b)")
     out.append(f"{TAB}raw := copyBytes(data, int(n))")
     out.append(f"{TAB}b.Close()")
+    out.append(f"{TAB}if !utf8.Valid(raw) {{")
+    out.append(f'{TAB}{TAB}return nil, fmt.Errorf("bufJSON: the document is not valid UTF-8 (raw: %q)", raw)')
+    out.append(f"{TAB}}}")
     out.append(f"{TAB}dec := json.NewDecoder(bytes.NewReader(raw))")
     out.append(f"{TAB}dec.UseNumber()")
     out.append(f"{TAB}var v interface{{}}")

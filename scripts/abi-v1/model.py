@@ -93,7 +93,7 @@ CONTENTS: dict[str, str] = {
     "message": "a ClickHouse message: may quote input bytes, so may carry any byte",
     "ascii": "guaranteed ASCII",
     "json_object_string_values": "a JSON object whose values are JSON strings (settings, query parameters)",
-    "json_array_names": "a JSON array of column names, each an object carrying the name as column_names says",
+    "json_array_names": "a JSON array of column names, each an object carrying the name as byte_strings says",
     "timezone": "a time zone name, validated by ClickHouse's own DateLUT; length 0 means UTC",
 }
 STATUS_ENUM = "chs_status"
@@ -417,6 +417,170 @@ class Document:
     carries_names: bool
     schema: Any
     doc: str
+    byte_fields: tuple[str, ...] = ()
+    value_entries: tuple[str, ...] = ()
+
+
+# ------------------------------------------------------------- byte strings
+#
+# The byte_strings rule (abi.json): a data-derived string F is the member F
+# (valid UTF-8) or F_b64 (standard base64), never both. A document lists every
+# such field in byte_fields, as a path; this section checks that the
+# document's own JSON Schema says exactly that for each one, so the list a
+# binding generates a decoder from and the schema a reviewer reads (and the
+# validator enforces) can never disagree.
+
+_B64_PATTERN = "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+
+
+def byte_rule(field: str, suffix: str, required: bool) -> dict[str, Any]:
+    """The canonical subschema for one byte field: exactly one of F and F_b64
+    (`required`), or at most one."""
+    b = field + suffix
+    if required:
+        return {"oneOf": [{"required": [field]}, {"required": [b]}]}
+    return {
+        "oneOf": [
+            {"required": [field], "properties": {b: False}},
+            {"required": [b], "properties": {field: False}},
+            {"properties": {field: False, b: False}},
+        ]
+    }
+
+
+def _deref(schema: dict[str, Any], node: Any) -> Any:
+    seen = 0
+    while isinstance(node, dict) and "$ref" in node:
+        ref = node["$ref"]
+        if not ref.startswith("#/$defs/") or seen > 32:
+            return None
+        node = schema.get("$defs", {}).get(ref[len("#/$defs/") :])
+        seen += 1
+    return node
+
+
+def _holder(schema: dict[str, Any], node: Any, name: str) -> Any:
+    """`node` (dereferenced), or the one oneOf/anyOf branch of it that
+    declares the member `name` (a nullable object is `oneOf: [null, object]`)."""
+    node = _deref(schema, node)
+    if not isinstance(node, dict):
+        return None
+    if name in node.get("properties", {}):
+        return node
+    for key in ("oneOf", "anyOf"):
+        hits = [b for b in (_deref(schema, x) for x in node.get(key, ())) if isinstance(b, dict)]
+        hits = [b for b in hits if name in b.get("properties", {})]
+        if len(hits) == 1:
+            return hits[0]
+    return None
+
+
+def resolve_path(schema: dict[str, Any], path: str) -> tuple[Any, str] | None:
+    """(the object schema holding the path's last member, that member), or
+    None. Every `[]` steps into `items`; every other step into `properties`."""
+    parts = path.split(".")
+    node: Any = schema
+    for part in parts[:-1]:
+        name, levels = part.rstrip("[]"), part.count("[]")
+        node = _holder(schema, node, name)
+        if node is None:
+            return None
+        node = node["properties"][name]
+        for _ in range(levels):
+            node = _deref(schema, node)
+            if not isinstance(node, dict) or "items" not in node:
+                return None
+            node = node["items"]
+    last = parts[-1]
+    if last.endswith("[]"):
+        name, levels = last.rstrip("[]"), last.count("[]")
+        node = _holder(schema, node, name)
+        if node is None:
+            return None
+        node = node["properties"][name]
+        for _ in range(levels):
+            node = _deref(schema, node)
+            if not isinstance(node, dict) or "items" not in node:
+                return None
+            node = node["items"]
+        return _deref(schema, node), ""
+    node = _holder(schema, node, last)
+    return None if node is None else (node, last)
+
+
+def _object_schemas(schema: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Every object schema in a document schema, with where it sits."""
+    out: list[tuple[str, dict[str, Any]]] = []
+
+    def walk(node: Any, where: str) -> None:
+        if isinstance(node, dict):
+            # A byte rule's branches (no "type") constrain their parent
+            # object; only a schema that declares itself an object is one.
+            if "properties" in node and node.get("type") == "object":
+                out.append((where, node))
+            for k, v in node.items():
+                if k in ("properties", "$defs"):
+                    for name, sub in v.items():
+                        walk(sub, f"{where}/{k}/{name}")
+                elif k in ("items", "additionalProperties"):
+                    walk(v, f"{where}/{k}")
+                elif k in ("oneOf", "anyOf", "allOf"):
+                    for i, sub in enumerate(v):
+                        walk(sub, f"{where}/{k}/{i}")
+
+    walk(schema, "#")
+    return out
+
+
+def byte_field_problems(doc: Document, suffix: str, value_member: str) -> list[str]:
+    where = f"document {doc.name}"
+    if doc.schema is None:
+        if doc.byte_fields or doc.value_entries:
+            return [f"{where}: lists byte_fields or value_entries but fixes no schema to check them against"]
+        return []
+    problems: list[str] = []
+    claimed: set[tuple[int, str]] = set()
+    for path in doc.byte_fields:
+        got = resolve_path(doc.schema, path)
+        if got is None or not got[1]:
+            problems.append(f"{where}: byte field {path!r} does not resolve to a member in the document's schema")
+            continue
+        obj, field = got
+        props = obj.get("properties", {})
+        b = field + suffix
+        if props.get(field) != {"type": "string"}:
+            problems.append(f"{where}: byte field {path!r}: the member {field!r} must be {{\"type\": \"string\"}}")
+        if props.get(b) != {"type": "string", "pattern": _B64_PATTERN}:
+            problems.append(f"{where}: byte field {path!r}: the member {b!r} must be a standard-base64 string")
+        rules = obj.get("allOf", [])
+        if byte_rule(field, suffix, True) not in rules and byte_rule(field, suffix, False) not in rules:
+            problems.append(
+                f"{where}: byte field {path!r}: the object's allOf has no rule allowing exactly (or at most) one "
+                f"of {field!r} and {b!r}"
+            )
+        claimed.add((id(obj), field))
+    valued: set[int] = set()
+    for path in doc.value_entries:
+        got = resolve_path(doc.schema, path)
+        if got is None or got[1]:
+            problems.append(f"{where}: value entry {path!r} does not resolve to an array's entries")
+            continue
+        obj = got[0]
+        if obj.get("properties", {}).get(value_member) != {"type": "string", "pattern": _B64_PATTERN}:
+            problems.append(f"{where}: value entry {path!r} has no standard-base64 {value_member!r} member")
+        if (id(obj), "stored") not in claimed:
+            problems.append(f"{where}: value entry {path!r} carries no `stored` byte field beside {value_member!r}")
+        valued.add(id(obj))
+    # Nothing carries the rule's members unlisted: every *_b64 member is a
+    # listed byte field's sibling, or the value member of a listed entry.
+    for at, obj in _object_schemas(doc.schema):
+        for name in obj.get("properties", {}):
+            if name == value_member:
+                if id(obj) not in valued:
+                    problems.append(f"{where}: {at} has {value_member!r}, but no value_entries path names it")
+            elif name.endswith(suffix) and (id(obj), name[: -len(suffix)]) not in claimed:
+                problems.append(f"{where}: {at} has {name!r}, but no byte_fields path names {name[: -len(suffix)]!r}")
+    return problems
 
 
 @dataclass(frozen=True)
@@ -440,7 +604,7 @@ class Model:
     enums: dict[str, Enum]
     constants: dict[str, Constant]
     documents: dict[str, Document]
-    column_names: dict[str, str]
+    byte_strings: dict[str, str]
     build_info_schema: dict[str, Any]
     build_info_provisional: dict[str, tuple[str, ...]]
     functions: tuple[Function, ...]
@@ -733,7 +897,22 @@ def load(root: Path) -> Model:
         schema = d.get("schema")
         if schema is not None:
             problems += [f"document {name}: {p}" for p in schema_keyword_problems(schema)]
-        documents[name] = Document(name, _markers(d), bool(d["carries_names"]), schema, doc(f"document:{name}"))
+        documents[name] = Document(
+            name,
+            _markers(d),
+            bool(d["carries_names"]),
+            schema,
+            doc(f"document:{name}"),
+            tuple(d.get("byte_fields", ())),
+            tuple(d.get("value_entries", ())),
+        )
+    bs = raw["byte_strings"]
+    for document in documents.values():
+        problems += byte_field_problems(document, bs["suffix"], bs["value"])
+        if document.carries_names and not any(
+            f == "name" or f.endswith(".name") or f.endswith("].name") for f in document.byte_fields
+        ):
+            problems.append(f"document {document.name}: carries names, but no byte field is a `name`")
 
     def content_check(where: str, content: str | None) -> None:
         if content and content.startswith("document:") and content[len("document:") :] not in documents:
@@ -1040,7 +1219,7 @@ def load(root: Path) -> Model:
         enums=enums,
         constants=constants,
         documents=documents,
-        column_names=dict(raw["column_names"]),
+        byte_strings=dict(raw["byte_strings"]),
         build_info_schema=bi["schema"],
         build_info_provisional=bi_prov,
         functions=tuple(functions),
