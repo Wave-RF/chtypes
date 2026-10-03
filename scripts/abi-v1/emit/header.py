@@ -219,16 +219,24 @@ def render_header(model) -> str:
         "thread classes",
     )
 
-    cn = model.column_names
-    out += _section("column names in JSON")
+    bs = model.byte_strings
+    out += _section("byte strings in JSON")
+    lines = []
+    for d in model.documents.values():
+        if d.byte_fields:
+            lines.append(f"- {d.name}: " + ", ".join(d.byte_fields) + ".")
     out += block_comment(
-        f"A column name is a byte string. Wherever a JSON document, input or output, carries one, it is the "
-        f"member `{cn['text']}`, a JSON string, when the name's bytes are valid UTF-8 (a NUL written as the "
-        f"JSON escape for U+0000), and otherwise the member `{cn['bytes']}`, the raw bytes in standard "
-        f"{cn['bytes_encoding']} with padding. Exactly one of the two is present. In an array of names, each "
-        "element is an object carrying one of them. A byte-returning accessor such as chs_error_column returns "
-        "the raw bytes instead.",
-        "column names",
+        "Every data-derived string a JSON document carries (a column name, a value's rendering, a type, SQL "
+        f"text, a message) is a byte string, so one rule carries them all. The member F is a JSON string when "
+        f"the bytes are valid UTF-8 (a NUL written as the JSON escape for U+0000), and otherwise the member "
+        f"F{bs['suffix']} holds the raw bytes in standard {bs['encoding']} with padding. Never both; a member "
+        "that names an entry (a column name) is always present in one of its two forms. Every document is "
+        "therefore valid UTF-8 JSON. Where a list or a map would hold a bare data-derived string, it holds an "
+        f"object instead, so the rule applies to its members. An entry that reports a stored value carries "
+        f"`{bs['value']}`, the raw bytes of a scalar String or FixedString value, beside its rendering. A "
+        "byte-returning accessor such as chs_error_column returns the raw bytes instead.\n\n"
+        "The data-derived fields, by document:\n\n" + "\n".join(lines),
+        "byte strings",
     )
 
     out += _section("handles")

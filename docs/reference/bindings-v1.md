@@ -175,7 +175,7 @@ The two zones, spelled in each binding:
 - **A Go `string` is a byte string.** Go has no separate byte-string type, and a `string` holds any bytes, NUL included. The rule is only that it is built from copied bytes (`string(b)`), never through `C.GoString`, which stops at the first NUL.
 - **A `str` or `string` input is encoded as UTF-8**, because that is the only way a text value becomes bytes. That is not an assumption about the payload: a caller with non-UTF-8 bytes passes them as `bytes`, `Uint8Array` or `&[u8]`. A body never accepts the text type, as in v0.
 - **Rust keeps v0's `RawText`** (the bytes, `as_bytes()`, `as_str() -> Option<&str>` and a lossy `Display`) for every byte output, so it is the one byte-out type in that binding.
-- **Settings values are strings, and only strings.** The binding serializes the map into a JSON object of string values with the language's stock encoder and passes it verbatim. It never rewrites a value: no boolean or integer spelling, no float (the v0 Python and TypeScript encoders are deleted, §7). A non-string value is the language's own type error: a compile error in Go and Rust, `TypeError` in Python and TypeScript.
+- **Settings values are strings, and only strings.** The binding serializes the map into a JSON object of string values with the language's stock encoder and passes it verbatim. It never rewrites a value: no boolean or integer spelling, no float (the v0 Python and TypeScript encoders are deleted, §7). A non-string value is the language's own type error: a compile error in Go and Rust, `TypeError` in Python and TypeScript. A value whose bytes are not valid UTF-8 cannot be passed as a setting or a query parameter in 1.0; the workaround is to inline it in the SQL as `unhex('<hex>')`, built from hex digits only, which cannot break out of the quoted literal.
 - **A zone name is text**, because ClickHouse's zone names are, and a name `DateLUT` cannot load is refused by the library whatever its bytes. It crosses the ABI as counted bytes (`chs_initialize`) or as a JSON string (`session_timezone`), UTF-8 encoded.
 - **A list of column names** (the `columns` option) is serialized as a JSON array of names under the name encoding of §5.
 
@@ -279,11 +279,12 @@ A misuse the binding detects itself carries `status` `CHS_INVALID_ARGUMENT`, `ch
 
 ### The rules every decoder follows
 
-1. **Stock JSON only.** Each document is decoded by the language's own parser (Go `encoding/json`, Python `json`, `JSON.parse`, `serde_json`). That rests on the documents being valid RFC 8259 JSON: no bare `inf` or `nan`, integers beyond 2^53 as strings, ClickHouse's renderings carried as JSON strings, and names that are not valid UTF-8 in the byte-safe form of rule 5. Those are part of the description's document contract, in the regeneration that freezes the fingerprint (§8 question 2), and they are what lets the hand JSON readers go.
+1. **Stock JSON only.** Each document is decoded by the language's own parser (Go `encoding/json`, Python `json`, `JSON.parse`, `serde_json`). That rests on the documents being valid RFC 8259 JSON: no bare `inf` or `nan`, integers beyond 2^53 as strings, ClickHouse's renderings carried as JSON strings, and every data-derived string in the byte-safe form of rule 5, so every document is valid UTF-8 and a strict parser reads it. Those are part of the description's document contract, in the regeneration that freezes the fingerprint (§8 question 2), and they are what lets the hand JSON readers go.
 2. **Absent is the default; unknown keys are ignored.** A key the decoder does not know is skipped, so the library can add a field without breaking a binding.
 3. **A duplicate key, or a value of the wrong JSON type, is an `InternalError`** naming the document and the key. The loader's strict object reader for `build_info` already does this in every binding; the decoders reuse it rather than each language keeping its own duplicate-key behavior.
 4. **Nothing is computed.** Every field below is a document field or an output buffer, with its source named. A vocabulary fact (whether a reason is lossy, a source is stored, a verdict is an answer) is read from the generated vocabulary table the description defines for it, keyed by the value the document carries, never from a list the binding keeps. §3, The generated vocabularies, gives the one answer for a value the table does not list.
-5. **Names are bytes.** Wherever a document carries a column name, it is `"name": "<string>"` when the bytes are valid UTF-8 (NUL written `\u0000`, as RFC 8259 allows), and otherwise `"name"` is absent and `"name_b64"` carries the standard base64 of the raw bytes; exactly one of the two is present, and the same rule holds for every name-carrying key (`<key>` or `<key>_b64`). The decoder surfaces the name as the byte type of §3 either way: the UTF-8 encoding of the string, or the decoded base64. A document with both or neither is an `InternalError`. The `columns` input list is encoded the same way, and `chs_error_column` returns the raw bytes, with no encoding at all.
+5. **Data-derived strings are bytes.** Every string a document carries that comes from data, DDL or ClickHouse's text (a column name, a rendering, a type, SQL, a message) follows the description's `byte_strings` rule: the member `<key>` is a JSON string when the bytes are valid UTF-8 (NUL written `\u0000`, as RFC 8259 allows), and otherwise `<key>` is absent and `<key>_b64` carries the standard base64 of the raw bytes. The two are never both present, and a name is always present in one form. The decoder surfaces the field as the byte type of §3 either way: the UTF-8 encoding of the string, or the decoded base64. Both forms present, a name in neither, or base64 outside the standard padded alphabet is an `InternalError`. Each document's `byte_fields` in [`spec/abi-v1/abi.json`](../../spec/abi-v1/abi.json) lists every such field, so the set a decoder handles is the description's, not a list kept here. A list of names (`unknown_fields`, `unsupported_settings`, `framing.header.names`) holds `{"name"}` or `{"name_b64"}` objects, and an engine row is a list of cells, never an object keyed by a name. The `columns` input list is encoded the same way. `chs_error_column`, `chs_error_message` and the export buffer return raw bytes, with no encoding at all.
+6. **String values carry their raw bytes.** Every entry that reports a stored value (`cols`, `computed`, an engine row's cells) carries `value_b64` beside its rendering when the column is a scalar `String` or `FixedString` (`Nullable` and `LowCardinality` included) and the value is not NULL, whether or not the bytes are valid UTF-8. The decoder surfaces it as `value`, the decoded bytes, absent otherwise. `text` is always ClickHouse's rendering. A value nested in another type (`Array(String)`, `Map`, `Tuple`) has no `value` in 1.0; that is a recorded gap.
 
 Every table below lists a document's fields as the regenerated description draws them; a field it adds or drops is one row. The canonical field names are `snake_case`, spelled per language by the rule of §1.
 
@@ -314,54 +315,55 @@ Every table below lists a document's fields as the regenerated description draws
 | ---------------------- | ------------------------------------------------------------------ | ------------------- |
 | `outcome`              | `outcome`, already final: the library applies every promotion (D6) | `Outcome`           |
 | `err_code`             | `code`                                                             | int32               |
-| `err_msg`              | `err`                                                              | bytes               |
+| `err_msg`              | `err` (rule 5)                                                     | bytes               |
 | `columns`              | `cols`, every entry, in document order                             | list of `Value`     |
 | `values`               | the entries of `cols` whose `src` is stored, in order              | list of `Value`     |
 | `transformed`          | `transformed`, computed by the library (D6)                        | list of `Transform` |
-| `unknown_fields`       | `unknown_fields`                                                   | list of bytes       |
-| `unsupported_settings` | `unsupported_settings`                                             | list of ASCII text  |
+| `unknown_fields`       | `unknown_fields`, name objects (rule 5)                            | list of bytes       |
+| `unsupported_settings` | `unsupported_settings`, name objects (rule 5)                      | list of bytes       |
 | `computed`             | `computed`                                                         | list of `Computed`  |
 | `verdict`              | `verdict`, present only with an attached filter                    | optional `Verdict`  |
 | `verdict_code`         | `verdict_code`                                                     | int32               |
-| `verdict_err`          | `verdict_err`                                                      | bytes               |
-| `partition_id`         | `partition_id`                                                     | optional ASCII text |
+| `verdict_err`          | `verdict_err` (rule 5)                                             | bytes               |
+| `partition_id`         | `partition_id` (rule 5)                                            | optional bytes      |
 | `input_span`           | `input_span`: the bytes the reader consumed for this record        | optional `Span`     |
 
 `values` filters on `Value.is_stored`, which is the description's own `is_stored` fact for the entry's `src`; it consults no list the binding keeps, which is the whole difference from v0's "exclude `skipped` and `ephemeral_input`" rule. `columns` is new, and it is how a caller still sees the entries that are never stored (an `ephemeral_input` column, an unresolved DEFAULT).
 
-| type        | fields, each from the same-named key unless noted                                                                                                                                                                                                                              |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Value`     | `column` (bytes, from `name` or `name_b64`), `text` (bytes, from `stored`: ClickHouse's own rendering), `null` (bool, from `null`: the library decides it, poison included), `source` (text, from `src`), `is_stored` (bool: the `value_src` table's `is_stored` for `source`) |
-| `Transform` | `column` (bytes, from `column` or `column_b64`), `input` (bytes), `stored` (bytes), `reason` (text, a `transform_reason` value), `lossy` (bool: the `transform_reason` table's `lossy` for `reason`), `row` (int: the row's index in the body, 0 in a single-row result)       |
-| `Computed`  | `column` (bytes, from `name` or `name_b64`), `kind` (ASCII text), `text` (bytes, from `stored`)                                                                                                                                                                                |
-| `Span`      | `off`, `len` (unsigned 64-bit)                                                                                                                                                                                                                                                 |
+| type         | fields, each from the same-named key unless noted                                                                                                                                                                                                                                                                                                  |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Value`      | `column` (bytes, from `name` or `name_b64`), `text` (bytes, from `stored` or `stored_b64`: ClickHouse's own rendering), `value` (optional bytes, from `value_b64`: rule 6), `null` (bool, from `null`: the library decides it, poison included), `source` (text, from `src`), `is_stored` (bool: the `value_src` table's `is_stored` for `source`) |
+| `Transform`  | `column` (bytes, from `column` or `column_b64`), `input` (bytes, rule 5), `stored` (bytes, rule 5), `reason` (text, a `transform_reason` value), `lossy` (bool: the `transform_reason` table's `lossy` for `reason`), `row` (int: the row's index in the body, 0 in a single-row result)                                                           |
+| `Computed`   | `column` (bytes, from `name` or `name_b64`), `kind` (ASCII text), `text` (bytes, from `stored` or `stored_b64`), `value` (optional bytes, from `value_b64`: rule 6)                                                                                                                                                                                |
+| `EngineCell` | `column` (bytes, from `name` or `name_b64`), `text` (bytes, from `stored` or `stored_b64`), `null` (bool), `value` (optional bytes, from `value_b64`: rule 6)                                                                                                                                                                                      |
+| `Span`       | `off`, `len` (unsigned 64-bit)                                                                                                                                                                                                                                                                                                                     |
 
 The transform entry keeps v0's shape (`column`, `input`, `stored`, `reason`, `row`), which the library now fills, and `reason` is one of the description's `transform_reason` values. `Transform.lossy` and `Value.is_stored` are the generated tables' facts for the value the document carries, never a list in the binding, and `Transform.lossy` becomes a field in all four, where Go and Rust had a method.
 
 ### `BatchResult`, from the `batch` document and the export buffer
 
-| field                     | from                                                                                                                     | type                     |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| `outcome`                 | `outcome`, final                                                                                                         | `Outcome`                |
-| `err_code`, `err_msg`     | `code`, `err`                                                                                                            | int32, bytes             |
-| `rows`                    | `rows`, each decoded as a `RowResult`                                                                                    | list of `RowResult`      |
-| `rows_read`               | `rows_read`                                                                                                              | unsigned 64-bit          |
-| `rows_skipped`            | `rows_skipped`                                                                                                           | unsigned 64-bit          |
-| `transformed`             | `transformed`: every transform in the batch with its `row`, storage transforms (TTL) included, as the library lists them | list of `Transform`      |
-| `engine_rows`             | `engine_rows`: each stored row after the engine's insert-time merge, as ClickHouse rendered it                           | optional list of bytes   |
-| `payload`                 | the `out_export` buffer, present only when an export was asked for                                                       | optional payload         |
-| `spans`                   | `row_spans`: each exported row's place in `payload`                                                                      | optional list of `Span`  |
-| `export_declined`         | `export_declined`                                                                                                        | ASCII text               |
-| `rows_passed`, `rows_cut` | `rows_passed`, `rows_cut`, with an attached filter                                                                       | unsigned 64-bit          |
-| `partition_count`         | `partition_count`                                                                                                        | optional unsigned 64-bit |
-| `unconsumed`              | `unconsumed`: the byte ranges the reader's error recovery skipped                                                        | list of `Span`           |
-| `framing`                 | `framing`: what the reader decided about the body's framing                                                              | optional `Framing`       |
+| field                     | from                                                                                                                     | type                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| `outcome`                 | `outcome`, final                                                                                                         | `Outcome`                                          |
+| `err_code`, `err_msg`     | `code`, `err` (rule 5)                                                                                                   | int32, bytes                                       |
+| `rows`                    | `rows`, each decoded as a `RowResult`                                                                                    | list of `RowResult`                                |
+| `rows_read`               | `rows_read`                                                                                                              | unsigned 64-bit                                    |
+| `rows_skipped`            | `rows_skipped`                                                                                                           | unsigned 64-bit                                    |
+| `transformed`             | `transformed`: every transform in the batch with its `row`, storage transforms (TTL) included, as the library lists them | list of `Transform`                                |
+| `engine_rows`             | `engine_rows`: each stored row after the engine's insert-time merge, a list of cells                                     | optional list of rows, each a list of `EngineCell` |
+| `payload`                 | the `out_export` buffer, present only when an export was asked for                                                       | optional payload                                   |
+| `spans`                   | `row_spans`: each exported row's place in `payload`                                                                      | optional list of `Span`                            |
+| `export_declined`         | `export_declined` (rule 5)                                                                                               | bytes                                              |
+| `rows_passed`, `rows_cut` | `rows_passed`, `rows_cut`, with an attached filter                                                                       | unsigned 64-bit                                    |
+| `partition_count`         | `partition_count`                                                                                                        | optional unsigned 64-bit                           |
+| `unconsumed`              | `unconsumed`: the byte ranges the reader's error recovery skipped                                                        | list of `Span`                                     |
+| `framing`                 | `framing`: what the reader decided about the body's framing                                                              | optional `Framing`                                 |
 
 `Framing` is `bom_skipped`, `container` and `header`, each the vendored reader's own state:
 
 - `bom_skipped` is true, false, or **unknown**;
 - `container` is `array`, `stream`, or none (ASCII text);
-- `header` is a `Header` (`consumed` (bool), `lines` (int), `names` (list of bytes, each a `name` or `name_b64` entry under rule 5)), or **unknown**.
+- `header` is a `Header` (`consumed` (bool), `lines` (int), `names` (list of bytes, each a `{name}` or `{name_b64}` object under rule 5)), or **unknown**.
 
 The document writes unknown as JSON `null`: the vendored reader does not expose the fact for TSV, TSVWithNames and Values, while CSV and the two JSON formats fill both. **Unknown is never false and never empty**, in any binding: Go `*bool` and `*Header` (nil), Python `Optional[bool]` and `Optional[Header]` (`None`), TypeScript `boolean | null` and `Header | null`, Rust `Option<bool>` and `Option<Header>`. A decoder that read `null` as `false` would tell a caller no BOM was skipped when nobody knows. A caller that needs a contract over the body's records declines the body when `unconsumed` is non-empty, and never counts records itself.
 
@@ -384,27 +386,28 @@ A column whose DEFAULT calls one of the random or UUID generators this build adm
 | field                  | from                                                                       | type                     |
 | ---------------------- | -------------------------------------------------------------------------- | ------------------------ |
 | `outcome`              | `outcome`                                                                  | `FilterOutcome`          |
-| `err_code`, `err_msg`  | `code`, `err`                                                              | int32, bytes             |
+| `err_code`, `err_msg`  | `code`, `err` (rule 5)                                                     | int32, bytes             |
 | `rows_read`            | `rows_read`                                                                | unsigned 64-bit          |
-| `unsupported_settings` | `unsupported_settings`                                                     | list of ASCII text       |
+| `unsupported_settings` | `unsupported_settings`, name objects (rule 5)                              | list of bytes            |
 | `verdicts`             | `verdicts`: one character per row, each mapped through the generated table | list of `Verdict`        |
-| `errors`               | `errors`: `row` (int), `code` (int32), `msg` (bytes, from `err`)           | list of `FilterRowError` |
+| `errors`               | `errors`: `row` (int), `code` (int32), `msg` (bytes, from `err`, rule 5)   | list of `FilterRowError` |
 
 `e` and `d` are never answers, and a caller enforcing visibility fails closed on both; `Verdict.answered` says which. A non-ok outcome's verdicts are whatever the document holds: v0's rule that a binding empties them is the library's now.
 
 ### `SchemaDescription`, from the `schema_description` document
 
-| field     | from                                                                                                                                                            | type             |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `columns` | `columns`, in declared order. Each `Column`: `name` (bytes, rule 5), `type` (bytes: the canonical type), `default_kind` (`DefaultKind`), `default_expr` (bytes) | list of `Column` |
+| field     | from                                                                                                                                                                                                       | type             |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `columns` | `columns`, in declared order. Each `Column`: `name` (bytes, rule 5), `type` (bytes, rule 5: the canonical type), `default_kind` (`DefaultKind`), `default_expr` (bytes, rule 5, from `default_expression`) | list of `Column` |
 
 `default_kind` (`""`, `DEFAULT`, `MATERIALIZED`, `ALIAS`, `EPHEMERAL`) is a description vocabulary, added in the regeneration that freezes the fingerprint (§8 question 3), and is generated into all four as `DefaultKind` like `Outcome`; no binding keeps the list by hand, as each did in v0. The canonical type spelling can differ between ClickHouse lines, as in v0, so a cross-line schema hash is taken over the caller's own statement, never over `columns`.
 
 ### `Discovery`, from the `discovery` document
 
-| field     | from                                                                                                                                                                                  | type                       |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `columns` | `columns`, in `system.columns` position order. Each `DiscoveredColumn`: `name` (bytes, rule 5), `declaration` (bytes: the column declaration as ClickHouse's own formatter writes it) | list of `DiscoveredColumn` |
+| field         | from                                                                                                                                                                                          | type                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `columns`     | `columns`, in `system.columns` position order. Each `DiscoveredColumn`: `name` (bytes, rule 5), `declaration` (bytes, rule 5: the column declaration as ClickHouse's own formatter writes it) | list of `DiscoveredColumn` |
+| `columns_sql` | `columns_sql` (rule 5): the declarations joined for a `CREATE TABLE`                                                                                                                          | bytes                      |
 
 `discover_query()` returns the query, which selects exactly the `system.columns` fields `discover_columns()` reads, `FORMAT JSONEachRow`, with two ClickHouse query parameters, `{database:String}` and `{table:String}`. The caller runs it against its server with its own client, binding the two parameters the client's own way (over HTTP, `param_database` and `param_table`), and hands the answer to `discover_columns()`. No binding holds or builds SQL, and no binding splices a database or table name into the text.
 
