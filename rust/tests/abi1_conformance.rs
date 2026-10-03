@@ -376,6 +376,34 @@ fn check_call(api: &Api, outcome: &Outcome, expect: &Value) -> Result<(), String
             subset_match(want_shape, &got_json).map_err(|e| format!("outputs.{name}{e}"))?;
         }
     }
+    // A "document" case: each named output parses as STRICT UTF-8 JSON
+    // (serde_json::from_slice refuses invalid UTF-8) and equals the expected
+    // document exactly, every member and no more, so a member present in
+    // both its plain and its _b64 form fails.
+    if let Some(want_docs) = expect.get("documents") {
+        let want_obj = want_docs
+            .as_object()
+            .ok_or("expect.documents is not an object")?;
+        if want_obj.is_empty() {
+            return Err("expect.documents names no output".to_string());
+        }
+        for (name, want_doc) in want_obj {
+            let minted = outputs
+                .get(name)
+                .ok_or_else(|| format!("no output named {name:?}"))?;
+            let bytes =
+                read_buf_bytes(api, minted).map_err(|e| format!("documents.{name}: {e}"))?;
+            let got_doc: Value = serde_json::from_slice(&bytes).map_err(|e| {
+                format!(
+                    "documents.{name}: not valid UTF-8 JSON ({e}): {:?}",
+                    String::from_utf8_lossy(&bytes)
+                )
+            })?;
+            if &got_doc != want_doc {
+                return Err(format!("documents.{name}: want {want_doc}, got {got_doc}"));
+            }
+        }
+    }
     Ok(())
 }
 

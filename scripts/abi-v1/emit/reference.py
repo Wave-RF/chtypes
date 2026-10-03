@@ -58,6 +58,20 @@ def table(headers: list[str], rows: list[list[str]]) -> list[str]:
     return [line(cells[0]), "| " + " | ".join("-" * w for w in widths) + " |", *(line(r) for r in cells[1:])]
 
 
+def compact_json(v, indent: int = 0, width: int = 100) -> str:
+    """JSON with a value on one line wherever it fits in `width`, nested
+    otherwise; keys keep the description's order."""
+    one = json.dumps(v, separators=(", ", ": "))
+    if len(one) + indent <= width or not isinstance(v, (dict, list)) or not v:
+        return one
+    pad = " " * (indent + 2)
+    if isinstance(v, dict):
+        items = [f"{pad}{json.dumps(k)}: {compact_json(x, indent + 2, width)}" for k, x in v.items()]
+        return "{\n" + ",\n".join(items) + "\n" + " " * indent + "}"
+    items = [f"{pad}{compact_json(x, indent + 2, width)}" for x in v]
+    return "[\n" + ",\n".join(items) + "\n" + " " * indent + "]"
+
+
 def _marks(ms: tuple[str, ...]) -> str:
     return ", ".join(ms) if ms else "FIRM"
 
@@ -135,17 +149,38 @@ def render(model) -> str:
         ],
     )
 
-    cn = model.column_names
+    bs = model.byte_strings
     out += [
         "",
-        "### Column names in JSON",
+        "### Byte strings in JSON",
         "",
-        f"A column name is a byte string. Wherever a JSON document, input or output, carries one, it is the member "
-        f"`{cn['text']}`, a JSON string, when the name's bytes are valid UTF-8 (a NUL written as the JSON escape `\\u0000`), "
-        f"and otherwise the member `{cn['bytes']}`, the raw bytes in standard {cn['bytes_encoding']} with padding. "
-        f"Exactly one of the two is present. In an array of names, each element is an object carrying one of them. "
-        f"A byte-returning accessor, such as `chs_error_column`, returns the raw bytes instead.",
+        "Every data-derived string a JSON document carries (a column name, a value's rendering, a type, SQL text, "
+        "a message) is a byte string, and one rule carries them all, in every output document and in the input column "
+        "list. The member `F` is a JSON string "
+        "when the bytes are valid UTF-8 (a NUL written as the JSON escape `\\u0000`), and otherwise the member "
+        f"`F{bs['suffix']}` holds the raw bytes in standard {bs['encoding']} with padding. Never both; a member that "
+        "names an entry (a column name) is always present in one of its two forms. Every document is therefore valid "
+        "UTF-8 JSON that a strict parser reads. Where a list or a map would hold a bare data-derived string, it holds "
+        "an object instead, so the rule applies to its members. An entry that reports a stored value carries "
+        f"`{bs['value']}`, the raw bytes of a scalar String or FixedString value (Nullable and LowCardinality "
+        "wrappers included), whenever the value is not NULL, beside its rendering. A byte-returning accessor, such as "
+        "`chs_error_column`, returns the raw bytes instead.",
+        "",
+        "The data-derived fields and the entries carrying "
+        f"`{bs['value']}`, by document (a path joins members with `.`, and `[]` steps into an array):",
+        "",
     ]
+    out += table(
+        ["document", "data-derived fields", f"entries with `{bs['value']}`"],
+        [
+            [
+                _code(d.name),
+                ", ".join(_code(f) for f in d.byte_fields) or "-",
+                ", ".join(_code(f) for f in d.value_entries) or "-",
+            ]
+            for d in model.documents.values()
+        ],
+    )
 
     out += ["", "### Handles", ""]
     out += table(
@@ -211,7 +246,7 @@ def render(model) -> str:
                 "The fields the description fixes, as JSON Schema; the document may carry more:",
                 "",
                 "```json",
-                json.dumps(d.schema, indent=2),
+                compact_json(d.schema),
                 "```",
             ]
         else:

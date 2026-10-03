@@ -464,6 +464,55 @@ def _selftest_build_info(model: abimodel.Model) -> list[str]:
     return fails
 
 
+def _selftest_byte_strings(model: abimodel.Model) -> list[str]:
+    """The byte_strings rule as the description's own document schemas
+    enforce it: one form or the other, never both, a name always present,
+    base64 only in its standard alphabet."""
+    good = {
+        "outcome": "accepted",
+        "input_span": {"off": 0, "len": 6},
+        "unknown_fields": [{"name": "u"}, {"name_b64": "/w=="}],
+        "cols": [
+            {"name": "s", "null": False, "stored_b64": "/wCA", "input_b64": "/wCA", "value_b64": "/wCA"},
+            {"name_b64": "/2s=", "null": False, "stored": "x", "value_b64": "eA=="},
+        ],
+        "err_b64": "/w==",
+    }
+    schema = model.documents["row"].schema
+    fails = []
+    errs = abimodel.validate(good, schema)
+    if errs:
+        fails.append(f"byte_strings: a well-formed row document was refused: {errs}")
+    bad = {
+        "a rendering in both forms": lambda d: d["cols"][0].update(stored="x"),
+        "a message in both forms": lambda d: d.update(err="boom"),
+        "a column with no name in either form": lambda d: d["cols"][0].pop("name"),
+        "a column name in both forms": lambda d: d["cols"][1].update(name="k"),
+        "an unknown field as a bare string": lambda d: d["unknown_fields"].append("raw"),
+        "base64 outside the standard alphabet": lambda d: d["cols"][0].update(stored_b64="_-8"),
+        "unpadded base64": lambda d: d["cols"][0].update(value_b64="/wC"),
+    }
+    for what, mutate in bad.items():
+        d = json.loads(json.dumps(good))
+        mutate(d)
+        if not abimodel.validate(d, schema):
+            fails.append(f"byte_strings: {what} was accepted")
+    batch = model.documents["batch"].schema
+    gb = {
+        "rows": [good],
+        "unconsumed": [],
+        "framing": {"bom_skipped": None, "container": None, "header": {"consumed": True, "lines": 1, "names": [{"name_b64": "/w=="}]}},
+        "engine_rows": [[{"name": "s", "null": False, "stored_b64": "/wCA", "value_b64": "/wCA"}]],
+    }
+    errs = abimodel.validate(gb, batch)
+    if errs:
+        fails.append(f"byte_strings: a well-formed batch document was refused: {errs}")
+    gb["engine_rows"] = [{"s": "x"}]
+    if not abimodel.validate(gb, batch):
+        fails.append("byte_strings: an engine row keyed by column name (rev-6's shape) was accepted")
+    return fails
+
+
 def _copy_inputs(src: Path, dst: Path, outs: list[emit.Output]) -> None:
     paths = {"spec/abi-v1", "scripts/abi-v1", PMC} | {o.path for o in outs}
     for rel in sorted(paths):
@@ -695,6 +744,31 @@ def _selftest_tree() -> list[str]:
             lambda w: _json_edit(w / abi, lambda d: _fn_entry(d, "chs_quote_string").update(thread="shared")),
             "applies only to a call that takes a handle",
         )
+        def drop_sibling(w: Path) -> None:
+            def mutate(d: dict) -> None:
+                del d["documents"]["row"]["schema"]["$defs"]["col"]["properties"]["stored_b64"]
+
+            _json_edit(w / abi, mutate)
+
+        plant("a byte field with no _b64 sibling", drop_sibling, "must be a standard-base64 string")
+
+        def unlisted(w: Path) -> None:
+            _json_edit(w / abi, lambda d: d["documents"]["row"]["byte_fields"].remove("cols[].wire"))
+
+        plant("a _b64 member no byte_fields path names", unlisted, "but no byte_fields path names 'wire'")
+
+        def no_rule(w: Path) -> None:
+            def mutate(d: dict) -> None:
+                d["documents"]["filter_result"]["schema"]["$defs"]["filter_error"].pop("allOf")
+
+            _json_edit(w / abi, mutate)
+
+        plant("a byte field whose object has no one-of-two rule", no_rule, "has no rule allowing exactly (or at most) one")
+        plant(
+            "a byte field that resolves to nothing",
+            lambda w: _json_edit(w / abi, lambda d: d["documents"]["batch"]["byte_fields"].append("rows[].nowhere")),
+            "does not resolve",
+        )
         plant(
             "a thread class the model does not describe",
             lambda w: _json_edit(
@@ -757,7 +831,9 @@ def selftest() -> int:
     fails = _selftest_jcs() + _selftest_validator()
     if not fails:
         try:
-            fails += _selftest_build_info(abimodel.load(ROOT))
+            m = abimodel.load(ROOT)
+            fails += _selftest_build_info(m)
+            fails += _selftest_byte_strings(m)
         except abimodel.ModelError as e:
             fails += [f"the tree's own description does not load: {p}" for p in e.problems]
     if not fails:
@@ -768,7 +844,8 @@ def selftest() -> int:
         return 1
     print(
         "gen.py --selftest: ok: RFC 8785 vectors and refusals, the schema validator, --write deterministic, "
-        "and every planted drift, schema, JCS, D1.3, tombstone, docs, prose, marker, thread-class, needle and stale case refused"
+        "the byte_strings rule, and every planted drift, schema, JCS, D1.3, tombstone, docs, prose, marker, thread-class, "
+        "byte-field, needle and stale case refused"
     )
     return 0
 
