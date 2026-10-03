@@ -8,9 +8,15 @@
 #   ./chplay.sh --require-all  a missing toolchain is a FAILURE, not a skip
 #   ./chplay.sh --locked       every tour honors its committed lockfile
 #
-# Every tour is OFFLINE: it needs only that language's toolchain plus the
-# artifacts in the registry (scripts/fetch.sh, or a core-repository build).
-# No Docker, no ClickHouse server, no network.
+# Each tour runs against a real library from the v1 cache. Before a tour runs,
+# this script fetches one line through THAT binding's own command line
+# (`chtypes fetch <line>`: resolve over OCI, verify the signed statement, unpack
+# into the cache), so a tour exercises the same fetch path a user gets. The line
+# is $CHPLAY_LINE (default 26.8); $CHPLAY_FETCH_ARGS adds flags to the fetch,
+# for example `--offline` on a machine whose cache is already seeded. The cache
+# is the binding's default (${XDG_CACHE_HOME:-~/.cache}/chtypes/v1), or the
+# directory $CHTYPES_CACHE names. The tours need the network only for that
+# fetch. No Docker, no ClickHouse server.
 #
 # A missing toolchain is a SKIP with instructions, never a failure. A tour
 # that crashes is a failure and makes this script exit nonzero.
@@ -24,26 +30,16 @@
 # release with every gate green. --require-all turns a skip into a failure;
 # --locked makes each tour use its lockfile as committed and fail if it no
 # longer resolves. CI passes both; neither changes what a tour prints.
-#
-# The one thing here that DOES want a server — go/ingest-demo — is not run by
-# this script at all; see go/ingest-demo/README.md (the optional online demo).
 set -u -o pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# The registry: $CHTYPES_REGISTRY, else the per-user artifact cache every SDK
-# here defaults to (scripts/fetch.sh installs there), keyed by the ABI
-# revision the SDKs speak — this tree's own include/chtypes.h — and then by
-# platform, <arch> spelled the artifact way.
-_arch="$(uname -m)"; case "$_arch" in x86_64|amd64) _arch=amd64 ;; arm64|aarch64) _arch=arm64 ;; esac
-_abi="$(sed -n 's/^#define CHS_ABI_REVISION \([0-9][0-9]*\)$/\1/p' "$HERE/../include/chtypes.h" 2>/dev/null)"
-case "$_abi" in
-  ''|*[!0-9]*)
-    if [ -z "${CHTYPES_REGISTRY:-}" ]; then
-      printf 'chplay: cannot read one CHS_ABI_REVISION from %s; set CHTYPES_REGISTRY\n' "$HERE/../include/chtypes.h" >&2
-      exit 2
-    fi ;;
-esac
-REGISTRY="${CHTYPES_REGISTRY:-${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/abi$_abi/$(uname -s | tr '[:upper:]' '[:lower:]')-$_arch}"
+# The v1 cache every binding shares, and the line each tour's fetch asks for.
+# Neither is read from include/chtypes.h: ABI v1 has no revision number, and
+# each binding checks its own ABI fingerprint when it loads a library.
+CACHE_ROOT="${CHTYPES_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/v1}"
+LINE="${CHPLAY_LINE:-26.8}"
+# Every tour prints this many numbered section banners when it ran in full.
+EXPECTED_SECTIONS=17
 ALL_LANGS=(go python ts rust)
 
 # Both default off: the interactive run is the forgiving one.
@@ -54,43 +50,23 @@ bold()  { printf '\033[1m%s\033[0m' "$1"; }
 say()   { printf '%s\n' "$*"; }
 
 usage() {
-  sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
-# ---------------------------------------------------------------- artifacts
+# ------------------------------------------------------------------- fetch
 #
-# Everything below needs at least one built artifact. Check once, up front,
-# with an actionable message — not four times with a stack trace each.
-#
-# Two levels count (chtypes#284, "Layout rule"): the flat <minor>/ holding a
-# line's currently newest patch, and patches/<minor>/<clickhouse_version>/
-# holding any OTHER installed exact patch — a registry with only the latter
-# must not read as empty.
-artifact_count() {
-  local n=0 d
-  for d in "$REGISTRY"/*/; do
-    [ "$(basename "$d")" = patches ] && continue
-    [ -e "${d}libchtypes.dylib" ] || [ -e "${d}libchtypes.so" ] && n=$((n + 1))
-  done
-  for d in "$REGISTRY"/patches/*/*/; do
-    [ -d "$d" ] || continue
-    [ -e "${d}libchtypes.dylib" ] || [ -e "${d}libchtypes.so" ] && n=$((n + 1))
-  done
-  echo "$n"
-}
+# Per language, `fetch_<lang>` runs that binding's own command line from its own
+# directory. A failed fetch fails that language's tour; it is never a skip.
 
-require_artifacts() {
-  if [ ! -d "$REGISTRY" ] || [ "$(artifact_count)" -eq 0 ]; then
-    say "chplay: no chtypes artifacts under $REGISTRY"
-    say ""
-    say "  Fetch one first (verified, into the per-user cache):"
-    say "      ../scripts/fetch.sh 26.8"
-    say ""
-    say "  Or point \$CHTYPES_REGISTRY at a directory that has them."
-    exit 1
-  fi
-}
+# shellcheck disable=SC2086  # CHPLAY_FETCH_ARGS is a word list on purpose
+fetch_go() { (cd "$HERE/../go" && go run ./cmd/chtypes fetch $CHPLAY_FETCH_ARGS "$LINE"); }
+# shellcheck disable=SC2086
+fetch_python() { (cd "$HERE/../python" && uv run python -m chtypes fetch $CHPLAY_FETCH_ARGS "$LINE"); }
+# shellcheck disable=SC2086
+fetch_ts() { (cd "$HERE/../ts" && pnpm install --frozen-lockfile --silent && pnpm build >/dev/null && pnpm exec chtypes fetch $CHPLAY_FETCH_ARGS "$LINE"); }
+# shellcheck disable=SC2086
+fetch_rust() { (cd "$HERE/../rust" && cargo run --quiet --locked --bin chtypes -- fetch $CHPLAY_FETCH_ARGS "$LINE"); }
 
 # ---------------------------------------------------------------- languages
 #
@@ -155,8 +131,7 @@ for arg in "$@"; do
   --require-all) REQUIRE_ALL=1 ;;
   --locked) LOCKED=1 ;;
   --list)
-    require_artifacts
-    say "artifacts: $(artifact_count) version(s) under $REGISTRY"
+    say "cache: $CACHE_ROOT   line: $LINE"
     for l in "${ALL_LANGS[@]}"; do
       SKIP_REASON=""
       if "have_$l"; then say "  $l: ready"; else say "  $l: would skip — $SKIP_REASON"; fi
@@ -172,8 +147,8 @@ for arg in "$@"; do
 done
 [ ${#langs[@]} -eq 0 ] && langs=("${ALL_LANGS[@]}")
 
-require_artifacts
-say "chplay: $(artifact_count) artifact version(s) under $REGISTRY"
+CHPLAY_FETCH_ARGS="${CHPLAY_FETCH_ARGS:-}"
+say "chplay: cache $CACHE_ROOT, fetching line $LINE through each binding's own CLI"
 [ "$REQUIRE_ALL" -eq 1 ] && say "chplay: --require-all — a missing toolchain fails this run"
 [ "$LOCKED" -eq 1 ] && say "chplay: --locked — every tour must resolve its committed lockfile"
 [ -n "${CHTYPES_VERSION:-}" ] && say "chplay: CHTYPES_VERSION=$CHTYPES_VERSION (tours will select it)"
@@ -204,23 +179,26 @@ for l in "${langs[@]}"; do
   say ""
   say "$(bold "-- $l: running")  ($HERE/$l)"
   log="$logdir/$l.out"
+  if ! { "fetch_$l" 2>&1 | tee "$log"; }; then
+    results+=("$l: FAILED — \`$l\` CLI fetch of line $LINE failed")
+    failed=1
+    continue
+  fi
   if "run_$l" 2>&1 | tee "$log"; then
     rc=0
   else
     rc=$?
   fi
   # Never trust the exit code alone: count the numbered section banners the
-  # tour actually printed. 17 means the whole tour ran (15, 16 and 17 — the
-  # revision-3 export and filter sections and the revision-5 column list —
-  # PRINT even when they degrade on an artifact that predates the surface).
+  # tour actually printed. EXPECTED_SECTIONS means the whole tour ran.
   sections=$(grep -c '^=== ' "$log" 2>/dev/null || true)
-  if [ "$rc" -eq 0 ] && [ "${sections:-0}" -ge 17 ]; then
-    results+=("$l: ok — $sections/17 sections ran")
+  if [ "$rc" -eq 0 ] && [ "${sections:-0}" -ge "$EXPECTED_SECTIONS" ]; then
+    results+=("$l: ok — $sections/$EXPECTED_SECTIONS sections ran")
   elif [ "$rc" -eq 0 ]; then
-    results+=("$l: FAILED — exited 0 but only ${sections:-0}/17 sections printed")
+    results+=("$l: FAILED — exited 0 but only ${sections:-0}/$EXPECTED_SECTIONS sections printed")
     failed=1
   else
-    results+=("$l: FAILED — exit $rc after ${sections:-0}/17 sections")
+    results+=("$l: FAILED — exit $rc after ${sections:-0}/$EXPECTED_SECTIONS sections")
     failed=1
   fi
 done
