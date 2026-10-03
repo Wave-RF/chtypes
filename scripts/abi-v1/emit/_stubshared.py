@@ -51,6 +51,92 @@ ROOT = SCRIPTS_ABI_V1.parent.parent  # repository root
 
 HEAD_BYTES = 16
 
+# DOCUMENT MODE: the byte_strings rule as the stub models it. A call to one of
+# DOC_FUNCTIONS whose `param` begins DOC_PREFIX returns a small document of
+# that kind instead of its echo, built from the rest of the parameter (the
+# "payload") by the template below. The template is the ONE source of the
+# document's layout: emit/stub.py compiles it to C, and doc_render() renders
+# it in Python for emit/cases.py's expectation. What the two do NOT share is
+# the rule itself: the C side decides UTF-8 validity and spells base64 with
+# its own code (emit/stub.py's preamble), the Python side with the standard
+# library, and a conformance case compares the two documents exactly. So a
+# case proves the stub's rule, and every binding's strict JSON decoding of a
+# document that carries `_b64` members and `value_b64`, end to end.
+#
+# Template steps:
+#   ("raw", text)          JSON text, ASCII, emitted verbatim;
+#   ("len",)               the whole parameter's length, in decimal;
+#   ("member", key, src)   the byte_strings rule: "key":"<text>" for valid
+#                          UTF-8, "key_b64":"<base64>" otherwise;
+#   ("b64", src)           a JSON string holding src's standard base64;
+# where src is ("lit", bytes) or ("payload", suffix_bytes): the payload with
+# the suffix appended.
+DOC_PREFIX = b"!D:"
+_COL = ("lit", b"s")
+DOC_TEMPLATES = {
+    "row": [
+        ("raw", '{"outcome":"accepted","input_span":{"off":0,"len":'),
+        ("len",),
+        ("raw", '},"unknown_fields":[],"unsupported_settings":[],"cols":[{'),
+        ("member", "name", _COL),
+        ("raw", ","),
+        ("member", "type", ("lit", b"String")),
+        ("raw", ',"src":"input",'),
+        ("member", "input", ("payload", b"")),
+        ("raw", ","),
+        ("member", "stored", ("payload", b"")),
+        ("raw", ',"null":false,"value_b64":'),
+        ("b64", ("payload", b"")),
+        ("raw", '}],"transformed":[]}'),
+    ],
+    "discovery": [
+        ("raw", '{"columns":[{'),
+        ("member", "name", ("payload", b"")),
+        ("raw", ',"type":"String","default_kind":"","default_expression":"",'),
+        ("member", "declaration", ("payload", b" String")),
+        ("raw", "}],"),
+        ("member", "columns_sql", ("payload", b" String")),
+        ("raw", "}"),
+    ],
+}
+# function -> (its bytes_in parameter that carries the prefix, the template)
+DOC_FUNCTIONS = {
+    "chs_preview_row": ("body", "row"),
+    "chs_discover_columns": ("rows", "discovery"),
+}
+
+
+def _doc_src(src: tuple, payload: bytes) -> bytes:
+    return src[1] if src[0] == "lit" else payload + src[1]
+
+
+def doc_render(template: str, param: bytes) -> dict:
+    """The document the stub returns for `param` (which starts DOC_PREFIX),
+    rendered in Python from the same template the stub's C is compiled from."""
+    import base64
+    import json
+
+    payload = param[len(DOC_PREFIX) :]
+    out: list[str] = []
+    for step in DOC_TEMPLATES[template]:
+        op = step[0]
+        if op == "raw":
+            out.append(step[1])
+        elif op == "len":
+            out.append(str(len(param)))
+        elif op == "member":
+            data = _doc_src(step[2], payload)
+            try:
+                out.append(json.dumps(step[1]) + ":" + json.dumps(data.decode("utf-8")))
+            except UnicodeDecodeError:
+                out.append(json.dumps(step[1] + "_b64") + ":" + json.dumps(base64.b64encode(data).decode("ascii")))
+        elif op == "b64":
+            out.append(json.dumps(base64.b64encode(_doc_src(step[1], payload)).decode("ascii")))
+        else:
+            raise ValueError(f"DOC_TEMPLATES: unknown step {op!r}")
+    return json.loads("".join(out))
+
+
 # The one-CREATE rule (chs_schema_create takes exactly one CREATE TABLE
 # statement), as the stub models it and as the case that probes it expects
 # it: emit/stub.py generates the C check from this dict and emit/cases.py the

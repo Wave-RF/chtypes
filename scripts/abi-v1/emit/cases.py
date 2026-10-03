@@ -36,7 +36,7 @@ this file is the stub's behavior restated as data, not a second guess at it:
     injection fixes: `ch_code`, `ch_name`, `message`, `column` (always "",
     since the magic injection format carries no column).
 
-SIX CASE KINDS. The first three are per function
+SEVEN CASE KINDS. The first three are per function
 (`scripts/abi-v1/emit/stub.classify`):
   * "special" and "free" functions get one small case each (a handshake
     return value, a tombstone value, or nothing testable generically — see
@@ -55,6 +55,15 @@ SIX CASE KINDS. The first three are per function
 
 THE DECISION CASES (`_decision_cases`), for what the ABI's confirmation
 added beyond the per-function shapes:
+  * "document" cases (`DOCUMENT_CASES`): the byte_strings rule end to end. The
+    stub's document mode (_stubshared.DOC_TEMPLATES) returns a real row or
+    discovery document built from the call's bytes; the case expects that
+    document EXACTLY, in `expect.documents.<output>`. A runner decodes the
+    output as STRICT UTF-8 (a replacement character is a failure, never a
+    pass) and compares the parsed document for equality, every member and no
+    more, so a field present in both its plain and its `_b64` form fails. A
+    binary String (FF 00 80) must arrive as `stored_b64`, `input_b64` and
+    `value_b64`, each exactly the base64 of those bytes;
   * the one-CREATE rule: a second statement refused with the error intact
     (a "status" case), a trailing semicolon accepted (an "echo" case); the
     stub's stand-in and this case both read `_stubshared.ONE_CREATE`;
@@ -101,8 +110,10 @@ match its function's input parameters, kind for kind).
 
 from __future__ import annotations
 
+import base64
 import json
 
+import model as abimodel
 from model import BUF_HANDLE
 
 from . import Output, banner, stub, _stubshared
@@ -329,9 +340,56 @@ def _decision_cases(model) -> list[dict]:
         ),
         _overridden_echo_case(model, "image_zone.initialize", "chs_initialize", {"timezone": b"Europe/Berlin"}),
     ]
+    cases += _document_cases(model)
     cases += _lifecycle_cases(model)
     cases += _concurrent_cases(model)
     return cases
+
+
+# The byte_strings cases (document mode, _stubshared.DOC_TEMPLATES): each
+# payload is the bytes a document field carries.
+DOCUMENT_CASES = [
+    # A binary String value: 0xFF and 0x80 are not UTF-8, so the renderings
+    # travel as stored_b64 / input_b64, and value_b64 carries the raw bytes.
+    ("document.preview_row.binary_string", "chs_preview_row", b"\xff\x00\x80"),
+    # Valid UTF-8 with a NUL: plain members (NUL written as an escape), and
+    # value_b64 all the same, since a String value always carries it.
+    ("document.preview_row.utf8_with_nul", "chs_preview_row", b"a\x00b"),
+    # SQL text: a column name that is not UTF-8 makes the name, the
+    # declaration and the joined columns_sql all travel as _b64.
+    ("document.discover_columns.binary_name", "chs_discover_columns", b"\xffcol"),
+]
+
+
+def _document_cases(model) -> list[dict]:
+    """A "document" case: the call's named output must parse as STRICT UTF-8
+    JSON and equal the expected document EXACTLY (no extra member, so an
+    `F` beside its `F_b64` fails). The expectation is rendered in Python from
+    the same template the stub's C is compiled from, and checked against the
+    description's own schema for that document before it is written."""
+    out = []
+    for case_id, fn_name, payload in DOCUMENT_CASES:
+        param, template = _stubshared.DOC_FUNCTIONS[fn_name]
+        data = _stubshared.DOC_PREFIX + payload
+        case = _overridden_echo_case(model, case_id, fn_name, {param: data})
+        doc = _stubshared.doc_render(template, data)
+        problems = abimodel.validate(doc, model.documents[template].schema)
+        if problems:
+            raise ValueError(f"{case_id}: the expected document fails documents.{template}.schema: {problems}")
+        if template == "row":
+            got = base64.b64decode(doc["cols"][0]["value_b64"], validate=True)
+            if got != payload:
+                raise ValueError(f"{case_id}: value_b64 decodes to {got!r}, not the payload {payload!r}")
+        out.append(
+            {
+                "id": case_id,
+                "kind": "document",
+                "fn": fn_name,
+                "args": case["args"],
+                "expect": {"status": "CHS_OK", "documents": {"out": doc}},
+            }
+        )
+    return out
 
 
 def _live(**counts: int) -> dict:
