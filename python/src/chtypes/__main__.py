@@ -187,8 +187,8 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
         raise ValueError("chtypes: name at least one version, or pass --all")
     if args.update and not args.lock:
         raise ValueError("chtypes: --update requires --lock")
-    if args.update and args.frozen:
-        raise ValueError("chtypes: --update and --frozen cannot be combined")
+    if args.update and (args.frozen or args.offline):
+        raise ValueError("chtypes: --update cannot be combined with --frozen or --offline")
     platform = args.platform or detect_host_platform()
     if platform not in {p["key"] for p in C.PLATFORMS}:
         raise ValueError(f"chtypes: unknown platform {platform!r}")
@@ -220,21 +220,14 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
 
 def _cmd_verify(args: argparse.Namespace) -> int:
     results = fetch_layer.verify_installed(FetchOptions(cache_dir=args.cache)._to_options())
-    if not results:
-        _say(f"chtypes: nothing installed under {resolve_cache_root(args.cache)}")
-        return EXIT_OK
     failed = 0
     for r in results:
-        status = "ok" if r.ok else "FAILED"
-        sys.stdout.write(f"{r.version:<14} {r.platform:<13} {status:<7} {r.dir}\n")
         if not r.ok:
             failed += 1
-            _say(f"  {r.detail}")
-    sys.stdout.flush()
+            _say(f"chtypes: FAILED {r.version} {r.platform} {r.dir}: {r.detail}")
     if failed:
         _say(f"chtypes: {failed} of {len(results)} installed build(s) FAILED verification")
         return C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_CORRUPT"]
-    _say(f"chtypes: {len(results)} installed build(s) verified")
     return EXIT_OK
 
 
