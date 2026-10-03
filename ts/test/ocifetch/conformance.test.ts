@@ -89,8 +89,16 @@ interface RequestLogEntry {
   readonly headers: Record<string, string>;
 }
 
+/**
+ * The leg's name, exactly as `v1.yml`'s matrix and `parity.py`'s `TOOLCHAINS`
+ * spell it: `node22.21.0` (the pinned floor, full version) and `node24` (the
+ * moving major) — a bare `process.version` would read `node24.21.0` and parity
+ * would call the report missing.
+ */
 function toolchainId(): string {
-  return `node${process.version.replace(/^v/, '')}`;
+  const full = process.version.replace(/^v/, '');
+  const major = full.split('.')[0];
+  return major === '22' ? `node${full}` : `node${major}`;
 }
 
 function recordingClock(sleeps: number[]): Clock {
