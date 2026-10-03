@@ -4,4 +4,6 @@ go 1.27
 
 require github.com/wave-rf/chtypes/go v0.0.0
 
+require github.com/klauspost/compress v1.20.1 // indirect
+
 replace github.com/wave-rf/chtypes/go => ../../go
