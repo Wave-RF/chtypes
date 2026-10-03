@@ -255,6 +255,30 @@ describe.skipIf(!stubsAvailable)('the public API over the stub library', () => {
     expect(counts).toEqual(Object.fromEntries(Object.keys(counts).map((k) => [k, 0])));
   });
 
+  it('decodes the stub\'s real document mode: a string with bytes FF 00 80 comes out as exact bytes, NUL included', () => {
+    const { library } = openStub('ok');
+    const schema = library.compileTable(CREATE);
+    const binary = schema.row(Format.JSONEachRow, Buffer.from([0x21, 0x44, 0x3a, 0xff, 0x00, 0x80]));
+    const v = binary.columns[0];
+    expect(v?.column.toString()).toBe('s');
+    expect([...(v?.text ?? [])]).toEqual([0xff, 0x00, 0x80]);
+    expect([...(v?.value ?? [])]).toEqual([0xff, 0x00, 0x80]);
+    expect(binary.outcome).toBe('accepted');
+    expect(binary.inputSpan).toEqual({ off: 0, len: 6 });
+    const text = schema.row(Format.JSONEachRow, Buffer.from([0x21, 0x44, 0x3a, 0x61, 0x00, 0x62]));
+    expect([...(text.columns[0]?.text ?? [])]).toEqual([0x61, 0x00, 0x62]);
+    expect([...(text.columns[0]?.value ?? [])]).toEqual([0x61, 0x00, 0x62]);
+    schema.close();
+  });
+
+  it('decodes the stub\'s discovery document with a non-UTF-8 name and joined declarations', () => {
+    const { library } = openStub('ok');
+    const d = library.discoverColumns(Buffer.from([0x21, 0x44, 0x3a, 0xff, 0x63, 0x6f, 0x6c]));
+    expect([...(d.columns[0]?.name ?? [])]).toEqual([0xff, 0x63, 0x6f, 0x6c]);
+    expect([...(d.columns[0]?.declaration ?? [])]).toEqual([...Buffer.from('/2NvbCBTdHJpbmc=', 'base64')]);
+    expect([...d.columnsSql]).toEqual([...Buffer.from('/2NvbCBTdHJpbmc=', 'base64')]);
+  });
+
   it('refuses an unverified open unless BOTH allow and the environment variable say so, with a UsageError', () => {
     const saved = process.env.CHTYPES_ALLOW_UNVERIFIED_LIBRARY;
     try {

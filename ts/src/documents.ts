@@ -10,11 +10,15 @@
  *      JSON, or a value of the wrong JSON type is an `InternalError` naming the
  *      document and the key.
  *   2. Absent is the default, and an unknown key is ignored.
- *   3. Names, and every data-derived string, are BYTES. A document carries one
+ *   3. Names, and every data-derived string (a rendering, a type, SQL, a
+ *      message, a partition, a setting name), are BYTES. A document carries one
  *      as `<key>` (a JSON string, when the bytes are valid UTF-8) or as
  *      `<key>_b64` (standard base64 of the raw bytes, otherwise), and the
  *      decoder surfaces a `Buffer` either way. Both present is an
- *      `InternalError`; for a name, neither present is too.
+ *      `InternalError`; for a name, neither present is too. A list of names
+ *      (`unknown_fields`, `unsupported_settings`, header names) holds `{name}`
+ *      or `{name_b64}` objects, never a bare string. `value_b64` is a scalar
+ *      String or FixedString value's raw bytes (rule 6), surfaced as `value`.
  *   4. A vocabulary fact (`Transform.lossy`, `Value.isStored`, a verdict's
  *      `answered`) is read from the generated vocabulary table, never from a
  *      list kept here.
@@ -59,7 +63,16 @@ export interface Value {
   readonly source: string;
   /** Whether a value of this `source` is stored: the description's own fact for it. */
   readonly isStored: boolean;
-  /** The raw bytes of a scalar String or FixedString value, when the document carries them. */
+  /** The raw bytes of a scalar String or FixedString value (rule 6), when the document carries them. */
+  readonly value: Buffer | undefined;
+}
+
+/** One cell of an engine row: ClickHouse's rendering of a stored value after the engine's insert-time merge. */
+export interface EngineCell {
+  readonly column: Buffer;
+  readonly text: Buffer;
+  readonly null: boolean;
+  /** The raw bytes of a scalar String or FixedString value (rule 6), when the document carries them. */
   readonly value: Buffer | undefined;
 }
 
@@ -81,6 +94,8 @@ export interface Computed {
   readonly column: Buffer;
   readonly kind: string;
   readonly text: Buffer;
+  /** The raw bytes of a scalar String or FixedString value (rule 6), when the document carries them. */
+  readonly value: Buffer | undefined;
 }
 
 export interface RowResult {
@@ -93,13 +108,13 @@ export interface RowResult {
   readonly values: readonly Value[];
   readonly transformed: readonly Transform[];
   readonly unknownFields: readonly Buffer[];
-  readonly unsupportedSettings: readonly string[];
+  readonly unsupportedSettings: readonly Buffer[];
   readonly computed: readonly Computed[];
   /** Present only with an attached filter. */
   readonly verdict: Verdict | undefined;
   readonly verdictCode: number;
   readonly verdictErr: Buffer;
-  readonly partitionId: string | undefined;
+  readonly partitionId: Buffer | undefined;
   /** The bytes the reader consumed for this record. */
   readonly inputSpan: Span | undefined;
 }
@@ -127,7 +142,8 @@ export interface BatchResult {
   readonly rowsSkipped: number;
   /** Every transform in the batch, with its `row`, as the library lists them. */
   readonly transformed: readonly Transform[];
-  readonly engineRows: readonly Buffer[] | undefined;
+  /** Each stored row after the engine's insert-time merge, as a list of cells. */
+  readonly engineRows: readonly (readonly EngineCell[])[] | undefined;
   /** The export buffer, present only when an export was asked for. */
   readonly payload: Buffer | undefined;
   /** Each exported row's place in `payload`. */
@@ -152,7 +168,7 @@ export interface FilterResult {
   readonly errCode: number;
   readonly errMsg: Buffer;
   readonly rowsRead: number;
-  readonly unsupportedSettings: readonly string[];
+  readonly unsupportedSettings: readonly Buffer[];
   /** One verdict per row, each read through the generated table. `error` and `decline` are never answers. */
   readonly verdicts: readonly Verdict[];
   readonly errors: readonly FilterRowError[];
@@ -178,6 +194,8 @@ export interface DiscoveredColumn {
 
 export interface Discovery {
   readonly columns: readonly DiscoveredColumn[];
+  /** The declarations joined for a `CREATE TABLE`. */
+  readonly columnsSql: Buffer;
 }
 
 export interface ErrorCodeEntry {
@@ -300,13 +318,6 @@ function optInt(doc: string, o: Obj, key: string): number | undefined {
   return v === undefined || v === null ? undefined : intOf(doc, key, v);
 }
 
-function strListOf(doc: string, o: Obj, key: string): readonly string[] {
-  return listOf(doc, o, key).map((e) => {
-    if (typeof e !== 'string') bad(doc, `${key}[]`, 'a string', e);
-    return e;
-  });
-}
-
 function decodeB64(doc: string, key: string, text: string): Buffer {
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 !== 0) bad(doc, key, 'standard base64', text);
   return Buffer.from(text, 'base64');
@@ -341,12 +352,17 @@ function nameOf(doc: string, o: Obj, key: string): Buffer {
   return b;
 }
 
-/** A list of byte strings: each element a string, or an object carrying `name` or `name_b64`. */
+/** A list of names: each element an object carrying exactly one of `name` and `name_b64`. A bare string is an `InternalError`. */
 function bytesListOf(doc: string, o: Obj, key: string): readonly Buffer[] {
-  return listOf(doc, o, key).map((e) => {
-    if (typeof e === 'string') return Buffer.from(e, 'utf8');
-    return nameOf(doc, asObject(doc, `${key}[]`, e), 'name');
-  });
+  return listOf(doc, o, key).map((e) => nameOf(doc, asObject(doc, `${key}[]`, e), 'name'));
+}
+
+/** One cell of an engine row. */
+function engineCellOf(doc: string, v: unknown): EngineCell {
+  const o = asObject(doc, 'engine_rows[][]', v);
+  const nullFlag = o.null;
+  if (typeof nullFlag !== 'boolean') bad(doc, 'engine_rows[][].null', 'a boolean', nullFlag);
+  return { column: nameOf(doc, o, 'name'), text: bytesOr(doc, o, 'stored'), null: nullFlag, value: bytesField(doc, o, 'value') };
 }
 
 function spanOf(doc: string, key: string, v: unknown): Span {
@@ -390,7 +406,7 @@ function transformOf(doc: string, v: unknown): Transform {
 
 function computedOf(doc: string, v: unknown): Computed {
   const o = asObject(doc, 'computed[]', v);
-  return { column: nameOf(doc, o, 'name'), kind: strOr(doc, o, 'kind', ''), text: bytesOr(doc, o, 'stored') };
+  return { column: nameOf(doc, o, 'name'), kind: strOr(doc, o, 'kind', ''), text: bytesOr(doc, o, 'stored'), value: bytesField(doc, o, 'value') };
 }
 
 function rowOf(doc: string, o: Obj): RowResult {
@@ -401,7 +417,7 @@ function rowOf(doc: string, o: Obj): RowResult {
   const verdictRaw = optStr(doc, o, 'verdict');
   const verdict = verdictRaw === undefined ? undefined : verdictOf(verdictRaw);
   const spanRaw = o.input_span;
-  const partitionId = optStr(doc, o, 'partition_id');
+  const partitionId = bytesField(doc, o, 'partition_id');
   return {
     outcome,
     errCode: intOr(doc, o, 'code', 0),
@@ -410,7 +426,7 @@ function rowOf(doc: string, o: Obj): RowResult {
     values: columns.filter((c) => c.isStored),
     transformed: listOf(doc, o, 'transformed').map((t) => transformOf(doc, t)),
     unknownFields: bytesListOf(doc, o, 'unknown_fields'),
-    unsupportedSettings: strListOf(doc, o, 'unsupported_settings'),
+    unsupportedSettings: bytesListOf(doc, o, 'unsupported_settings'),
     computed: listOf(doc, o, 'computed').map((c) => computedOf(doc, c)),
     verdict,
     verdictCode: intOr(doc, o, 'verdict_code', 0),
@@ -465,7 +481,10 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
     rowsRead: intOr(doc, o, 'rows_read', 0),
     rowsSkipped: intOr(doc, o, 'rows_skipped', 0),
     transformed: listOf(doc, o, 'transformed').map((t) => transformOf(doc, t)),
-    engineRows: engineRaw === undefined ? undefined : bytesListOf(doc, o, 'engine_rows'),
+    engineRows:
+      engineRaw === undefined
+        ? undefined
+        : asArray(doc, 'engine_rows', engineRaw).map((row) => asArray(doc, 'engine_rows[]', row).map((c) => engineCellOf(doc, c))),
     payload,
     spans: spansRaw === undefined ? undefined : asArray(doc, 'row_spans', spansRaw).map((s) => spanOf(doc, 'row_spans[]', s)),
     exportDeclined: strOr(doc, o, 'export_declined', ''),
@@ -497,7 +516,7 @@ export function decodeFilterResult(bytes: Uint8Array): FilterResult {
     errCode: intOr(doc, o, 'code', 0),
     errMsg: bytesOr(doc, o, 'err'),
     rowsRead: intOr(doc, o, 'rows_read', 0),
-    unsupportedSettings: strListOf(doc, o, 'unsupported_settings'),
+    unsupportedSettings: bytesListOf(doc, o, 'unsupported_settings'),
     verdicts,
     errors: listOf(doc, o, 'errors').map((e) => {
       const eo = asObject(doc, 'errors[]', e);
@@ -520,7 +539,7 @@ export function decodeSchemaDescription(bytes: Uint8Array): SchemaDescription {
       if (defaultKind === undefined) {
         throw internalError(`the ${doc} document: columns[].default_kind: ${JSON.stringify(kindRaw)} is not a default kind`);
       }
-      return { name: nameOf(doc, co, 'name'), type: bytesOr(doc, co, 'type'), defaultKind, defaultExpr: bytesOr(doc, co, 'default_expr') };
+      return { name: nameOf(doc, co, 'name'), type: bytesOr(doc, co, 'type'), defaultKind, defaultExpr: bytesOr(doc, co, 'default_expression') };
     }),
   };
 }
@@ -534,6 +553,7 @@ export function decodeDiscovery(bytes: Uint8Array): Discovery {
       const co = asObject(doc, 'columns[]', c);
       return { name: nameOf(doc, co, 'name'), declaration: bytesOr(doc, co, 'declaration') };
     }),
+    columnsSql: bytesOr(doc, o, 'columns_sql'),
   };
 }
 

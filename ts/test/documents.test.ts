@@ -32,9 +32,9 @@ describe('the row document', () => {
       { name: 'd', null: true, src: 'skipped' },
     ],
     transformed: [{ column: 'a', input: '300', stored: '44', reason: 'overflow_wrap', row: 0 }],
-    unknown_fields: ['zz'],
+    unknown_fields: [{ name: 'zz' }],
     unsupported_settings: [],
-    computed: [{ name: 'm', kind: 'materialized', stored: '9' }],
+    computed: [{ name: 'm', kind: 'materialized', stored: '9', value_b64: b64([0x39]) }],
     verdict: 't',
     verdict_code: 0,
     partition_id: '202601',
@@ -60,7 +60,8 @@ describe('the row document', () => {
     expect(r.computed[0]?.text.toString()).toBe('9');
     expect(r.unknownFields.map((b) => b.toString())).toEqual(['zz']);
     expect(r.verdict).toBe(Verdict.True);
-    expect(r.partitionId).toBe('202601');
+    expect(r.partitionId?.toString()).toBe('202601');
+    expect(r.computed[0]?.value?.toString()).toBe('9');
     expect(r.inputSpan).toEqual({ off: 0, len: 12 });
   });
 
@@ -174,7 +175,7 @@ describe('the batch document', () => {
         rows_read: 1,
         rows_skipped: 0,
         transformed: [{ column: 'a', input: '1', stored: '1', reason: 'reformat', row: 0 }],
-        engine_rows: ['1'],
+        engine_rows: [[{ name: 'a', stored: '1', null: false, value_b64: b64([0x31]) }, { name_b64: b64([0xff]), stored_b64: b64([0x00, 0x80]), null: false }]],
         row_spans: [{ off: 0, len: 8 }],
         export_declined: '',
         rows_passed: 1,
@@ -189,7 +190,13 @@ describe('the batch document', () => {
     expect(b.rows).toHaveLength(1);
     expect(b.rows[0]?.values).toHaveLength(1);
     expect(b.transformed[0]?.lossy).toBe(false);
-    expect(b.engineRows?.map((e) => e.toString())).toEqual(['1']);
+    expect(b.engineRows).toHaveLength(1);
+    const cells = b.engineRows?.[0] ?? [];
+    expect(cells[0]?.text.toString()).toBe('1');
+    expect(cells[0]?.value?.toString()).toBe('1');
+    expect([...(cells[1]?.column ?? [])]).toEqual([0xff]);
+    expect([...(cells[1]?.text ?? [])]).toEqual([0x00, 0x80]);
+    expect(cells[1]?.value).toBeUndefined();
     expect(b.payload).toBe(payload);
     expect(b.spans).toEqual([{ off: 0, len: 8 }]);
     expect(b.partitionCount).toBe(1);
@@ -256,8 +263,8 @@ describe('the schema description, discovery, error-code and live-handle document
     const d = decodeSchemaDescription(
       enc({
         columns: [
-          { name: 'a', type: 'Int32', default_kind: '', default_expr: '' },
-          { name_b64: b64([0xff]), type: 'String', default_kind: 'MATERIALIZED', default_expr: 'lower(a)' },
+          { name: 'a', type: 'Int32', default_kind: '', default_expression: '' },
+          { name_b64: b64([0xff]), type: 'String', default_kind: 'MATERIALIZED', default_expression: 'lower(a)' },
         ],
       }),
     );
@@ -272,8 +279,9 @@ describe('the schema description, discovery, error-code and live-handle document
   });
 
   it('decodes discovered columns', () => {
-    const d = decodeDiscovery(enc({ columns: [{ name: 'a', declaration: '`a` Int32' }] }));
+    const d = decodeDiscovery(enc({ columns: [{ name: 'a', declaration: '`a` Int32' }], columns_sql_b64: b64([0xff, 0x61]) }));
     expect(d.columns[0]?.declaration.toString()).toBe('`a` Int32');
+    expect([...d.columnsSql]).toEqual([0xff, 0x61]);
   });
 
   it('builds the error-code table from the library entries only: exact names, unknown absent', () => {
@@ -292,5 +300,36 @@ describe('the schema description, discovery, error-code and live-handle document
 
   it('decodes the live handle counts', () => {
     expect(decodeLiveHandles(enc({ chs_schema: 2, chs_filter: 0 }))).toEqual({ chs_schema: 2, chs_filter: 0 });
+  });
+});
+
+describe('name lists and engine rows (rule 5)', () => {
+  it('reads unknown_fields and unsupported_settings as name objects in either form', () => {
+    const r = decodeRow(
+      enc({ outcome: 'accepted', unknown_fields: [{ name: 'a' }, { name_b64: b64([0xff, 0x00]) }], unsupported_settings: [{ name: 'x' }] }),
+    );
+    expect(r.unknownFields.map((b) => [...b])).toEqual([[0x61], [0xff, 0x00]]);
+    expect(r.unsupportedSettings.map((b) => b.toString())).toEqual(['x']);
+  });
+
+  it('refuses a bare string in a name list, an element carrying both forms, and one carrying neither', () => {
+    expect(() => decodeRow(enc({ outcome: 'accepted', unknown_fields: ['zz'] }))).toThrow(InternalError);
+    expect(() => decodeRow(enc({ outcome: 'accepted', unsupported_settings: ['zz'] }))).toThrow(InternalError);
+    expect(() => decodeRow(enc({ outcome: 'accepted', unknown_fields: [{ name: 'a', name_b64: 'YQ==' }] }))).toThrow(InternalError);
+    expect(() => decodeRow(enc({ outcome: 'accepted', unknown_fields: [{}] }))).toThrow(InternalError);
+  });
+
+  it('refuses an engine row that is an object keyed by name, or a cell with no name', () => {
+    expect(() => decodeBatch(enc({ outcome: 'accepted', engine_rows: [{ a: '1' }] }), undefined)).toThrow(InternalError);
+    expect(() => decodeBatch(enc({ outcome: 'accepted', engine_rows: [[{ stored: '1', null: false }]] }), undefined)).toThrow(InternalError);
+  });
+
+  it('reads the message, partition and filter setting names as bytes from either form', () => {
+    const r = decodeRow(enc({ outcome: 'rejected', err_b64: b64([0xc3]), verdict_err_b64: b64([0xfe]), partition_id_b64: b64([0xff]) }));
+    expect([...r.errMsg]).toEqual([0xc3]);
+    expect([...r.verdictErr]).toEqual([0xfe]);
+    expect([...(r.partitionId ?? [])]).toEqual([0xff]);
+    const f = decodeFilterResult(enc({ outcome: 'ok', unsupported_settings: [{ name_b64: b64([0xff]) }] }));
+    expect([...(f.unsupportedSettings[0] ?? [])]).toEqual([0xff]);
   });
 });

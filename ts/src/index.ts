@@ -51,6 +51,7 @@ export {
   type Column,
   type Computed,
   type DiscoveredColumn,
+  type EngineCell,
   type Discovery,
   type ErrorCodeEntry,
   ErrorCodeTable,
