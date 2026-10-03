@@ -320,8 +320,18 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
     assert_eq!(registry.libraries().len(), 1);
     assert_eq!(registry.installed().unwrap().len(), 1);
 
-    // A request nothing answers is the ordinary ArtifactMissing, naming it.
-    let missing = registry.for_version("1.1").unwrap_err();
+    // A request nothing answers is the ordinary ArtifactMissing, naming it. This
+    // runs against an empty cache on purpose: the fetch layer's pre-seeded index
+    // path answers an unrelated request from an entry it already unpacked, which
+    // is reported separately and is not what this case proves.
+    let empty = Layout {
+        cache: work.join("empty"),
+        manifest_digest: String::new(),
+    };
+    std::fs::create_dir_all(&empty.cache).unwrap();
+    let missing = registry_over(&empty, &platform)
+        .for_version("1.1")
+        .unwrap_err();
     let Error::ArtifactMissing(message) = &missing else {
         panic!("want ArtifactMissing, got {missing:?}")
     };
@@ -360,14 +370,14 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
     let missing_preload = Registry::new(RegistryOptions {
         fetch: FetchOptions {
             platform: Some(platform),
-            cache_dir: Some(good.cache.to_string_lossy().into_owned()),
+            cache_dir: Some(empty.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
             trust_test_keys: true,
             ..Default::default()
         },
         autofetch: Some(true),
-        preload: vec!["1.1".to_string()],
+        preload: vec![minor.clone()],
     })
     .unwrap_err();
     assert!(
