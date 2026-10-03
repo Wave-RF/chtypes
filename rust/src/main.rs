@@ -196,6 +196,11 @@ fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
     if args.update && args.lock.is_none() {
         return Err(Usage("--update requires --lock".into()));
     }
+    if args.offline && args.update {
+        return Err(Usage(
+            "--update must reach the registry; it cannot combine with --offline".into(),
+        ));
+    }
     if args.frozen && args.update {
         return Err(Usage(
             "--frozen fetches what the lock pins; --update rewrites it: pass one".into(),
@@ -243,20 +248,15 @@ fn cmd_verify(args: &Args) -> Result<u8, Usage> {
         Err(e) => return Ok(report(&e)),
     };
     if results.is_empty() {
-        eprintln!("chtypes: nothing is installed");
         return Ok(0);
     }
     let mut bad = 0usize;
     for r in &results {
         if !r.ok {
             bad += 1;
-            println!("CORRUPT  {}  {}", r.dir.display(), r.detail);
+            eprintln!("chtypes: CORRUPT {}: {}", r.dir.display(), r.detail);
         }
     }
-    eprintln!(
-        "chtypes: {} installed build(s) re-verified, {bad} corrupt",
-        results.len()
-    );
     Ok(if bad == 0 {
         0
     } else {
