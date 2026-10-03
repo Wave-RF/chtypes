@@ -51,6 +51,26 @@ ROOT = SCRIPTS_ABI_V1.parent.parent  # repository root
 
 HEAD_BYTES = 16
 
+# The one-CREATE rule (chs_schema_create takes exactly one CREATE TABLE
+# statement), as the stub models it and as the case that probes it expects
+# it: emit/stub.py generates the C check from this dict and emit/cases.py the
+# case, so the two can never disagree. The stub is a test double, not
+# ClickHouse: it refuses when a `;` is followed by any byte other than ASCII
+# whitespace or another `;`, with no notion of quoting or comments. That is
+# enough to prove a binding passes the whole statement through unsplit and
+# maps the refusal to its schema-error class with every field intact; what a
+# real library answers is ClickHouse's own parser's refusal of a second
+# statement in one query (the code and name below are that refusal's, read
+# from ClickHouse's parseQuery source, not measured here).
+ONE_CREATE = {
+    "fn": "chs_schema_create",
+    "param": "create_table",
+    "status": "CHS_REJECTED",
+    "ch_code": 62,
+    "ch_name": "SYNTAX_ERROR",
+    "message": "Multi-statements are not allowed",
+}
+
 # The symbol a loader checks before any other (step 3): it gets its own named
 # variant ("no-abi-version", reason "not_v1") rather than folding into the
 # generic missing-<sym> sweep, because a real loader distinguishes "this is
