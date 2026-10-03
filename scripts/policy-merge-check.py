@@ -1906,6 +1906,7 @@ REQUIRED_CHECKS = (
     "python — ruff, import, suite (no artifacts)",
     "ts — build, typecheck, suite (no artifacts)",
     "rust — build, clippy, fmt, suite (no artifacts)",
+    "examples — every binding's tour runs every section (skips by name until enrolled)",
     "lint-go — golangci-lint (go/.golangci.yml)",
     "lint-ts — biome (ts/biome.json)",
     "lint-actions — actionlint + shellcheck",

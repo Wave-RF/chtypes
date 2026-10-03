@@ -442,6 +442,36 @@ jobs:
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts rust
 
+  examples:
+    name: "examples — every binding's tour runs every section (skips by name until enrolled)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # REQUIRED. The v0 `artifacts` job was the only required check that ran
+    # examples/chplay.sh; retiring it left the tours gating nothing, and a tour
+    # that was broken (0 of 17 sections) went unnoticed. This is its successor.
+    # A binding whose tour is not yet on the v1 API is SKIPPED LOUDLY by name
+    # (scripts/check-examples-v1.sh has the enrollment rule); an enrolled one
+    # must run every section or the job fails. Selftest first, same discipline
+    # as every other gate here.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: selftest — unenrolled tours skip by name, an enrolled passing tour runs, an enrolled failing tour fails
+        run: scripts/check-examples-v1.sh --selftest
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false          # the module is stdlib-only: there is no go.sum to cache
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+      - name: every enrolled tour runs every section; every other tour is skipped by name
+        run: scripts/check-examples-v1.sh
+
   api-surface:
     # NON-BLOCKING, on purpose (chtypes#285 §1), and deliberately not a
     # required check: a pull request that changes a binding's exported API on
