@@ -1,0 +1,2011 @@
+"""Fetching, verifying and installing artifacts — docs/guides/fetch.md, in Python.
+
+    import chtypes
+    chtypes.ensure("25.8")            # installed and verified, or an ArtifactError
+
+`ensure` is idempotent: an already-installed line whose library hashes what
+the release says is a no-op; otherwise the release is fetched through the
+five-link chain (§3) — signature over ``SHA256SUMS`` first, ``index.json``
+cross-checked against it, the tarball hashed before it is unpacked, the
+manifest inside cross-checked, the installed library re-hashed in place —
+and installed atomically into the first registry directory fetch writes to
+(§1). Nothing here is a verdict but the chain: not an exit code, not a
+``Content-Length``, not "download finished".
+
+The source is ``CHTYPES_ARTIFACTS_URL`` (default the public artifacts host)
+plus a release tag, or any ``--url`` base: an ``http(s)://`` host, a
+``file://`` URL or a plain directory. Only the standard library is used —
+``urllib`` for HTTP, ``tarfile`` for the archive, and ``_ed25519`` for the
+signature — so the binding stays zero-dependency.
+"""
+
+from __future__ import annotations
+
+import base64
+import contextlib
+import datetime
+import email.utils
+import hashlib
+import http.client
+import json
+import logging
+import os
+import re
+import shutil
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import warnings
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from typing import Any, Final, TypeVar
+
+from ._ed25519 import verify as _ed25519_verify
+from ._manifest import (
+    Manifest,
+    cache_registry_dir,
+    host_platform,
+    minor_of,
+    read_manifest,
+    verify_library,
+)
+from ._native import ABI_REVISION
+from .errors import (
+    FETCH_COMMAND,
+    ArtifactCorruptError,
+    ArtifactPinnedError,
+    ArtifactUnpublishedError,
+    ArtifactUntrustedError,
+    SourceUnreachableError,
+    UnsignedArtifactWarning,
+)
+
+__all__ = [
+    "DEFAULT_ARTIFACTS_URL",
+    "DEFAULT_TAG",
+    "ENV_ALLOW_UNSIGNED",
+    "ENV_ARTIFACTS_URL",
+    "ENV_AUTOFETCH",
+    "ENV_TRUSTED_KEYS",
+    "LOCK_SCHEMA",
+    "LOCK_SCHEMAS_READABLE",
+    "PATCHES_DIRNAME",
+    "PLATFORMS",
+    "RELEASE_KEY_ID",
+    "RELEASE_PUBLIC_KEY",
+    "SYSTEM_REGISTRY_ROOTS",
+    "Fetcher",
+    "InstalledPatch",
+    "Release",
+    "ReleaseEntry",
+    "ensure",
+    "fetch_lines",
+    "fetch_destination",
+    "installed_lines",
+    "installed_patches",
+    "parse_signature_file",
+    "read_lock",
+    "registry_search_path",
+    "trusted_keys",
+    "verify_registry",
+    "write_lock",
+]
+
+DEFAULT_ARTIFACTS_URL: Final = "https://artifacts.wavehouse.dev"
+DEFAULT_TAG: Final = "artifacts"
+ENV_ARTIFACTS_URL: Final = "CHTYPES_ARTIFACTS_URL"
+ENV_TRUSTED_KEYS: Final = "CHTYPES_TRUSTED_KEYS"
+ENV_ALLOW_UNSIGNED: Final = "CHTYPES_ALLOW_UNSIGNED"
+ENV_AUTOFETCH: Final = "CHTYPES_AUTOFETCH"
+ENV_REGISTRY: Final = "CHTYPES_REGISTRY"
+#: An optional bearer token sent to an HTTP source (the delivery Worker's
+#: download tokens); the other three bindings and `scripts/fetch.sh` send the
+#: same header (chtypes#365 audit — this binding did not, until now).
+ENV_DOWNLOAD_TOKEN: Final = "CHTYPES_DOWNLOAD_TOKEN"
+
+#: How many times `Fetcher.release` reads an ``http(s)`` release before giving
+#: up, and the BASE delay before the first retry — each later retry doubles it,
+#: so the default 5 attempts sleep 4+8+16+32 = 60s (~70s wall with network
+#: time). That is chosen to outlast the artifacts host's edge cache (observed
+#: ``Cache-Control: max-age=60`` on the mutable release objects, so a stale
+#: pairing of any of them can persist up to 60s), while a genuine few-second
+#: mid-publish window still clears on the second attempt.
+RELEASE_LOAD_ATTEMPTS: Final = 5
+RELEASE_RETRY_DELAY: Final = 4
+
+#: HTTP statuses worth retrying through the budget above (chtypes#365): any
+#: 5xx, plus 408 (Request Timeout) and 429 (Too Many Requests). 404 and 410
+#: are deliberately absent — `_Source._open` answers those as "not found",
+#: never an exception, so they never reach this check at all.
+_RETRYABLE_STATUSES: Final = frozenset({408, 429}) | frozenset(range(500, 600))
+#: `Retry-After` (RFC 9110 §10.2.3) is honored only for these two — the pair
+#: this contract documents it for.
+_RETRY_AFTER_STATUSES: Final = frozenset({429, 503})
+
+#: The served golden set: a release-level file, and a row in the signed
+#: SHA256SUMS, installed beside the artifacts as ``<registry>/sdk-goldens.json``.
+GOLDENS_ASSET: Final = "sdk-goldens.json"
+
+#: The ``-b<N>`` a current artifact file name ends with. A name without one is
+#: an old row, which is build 0 by definition.
+_BUILD_SUFFIX: Final = re.compile(r"-b([0-9]+)\.tar\.gz$")
+
+#: The release signing key (docs/guides/fetch.md §4): the raw 32-byte ed25519 public
+#: key, hex, and its id — the first 16 hex characters of sha256 over the raw
+#: key. Every SDK embeds this constant; `CHTYPES_TRUSTED_KEYS` replaces it.
+RELEASE_PUBLIC_KEY: Final = "fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc"
+RELEASE_KEY_ID: Final = "deb275922dbff76e"
+
+#: Slot 4 of the search path: system locations, reserved for the deferred
+#: system packages and for images that bake artifacts in. Never written to.
+SYSTEM_REGISTRY_ROOTS: Final = ("/usr/local/share/chtypes/artifacts", "/opt/chtypes/artifacts")
+
+PLATFORMS: Final = ("linux-arm64", "linux-amd64", "darwin-arm64", "darwin-amd64")
+#: The schema every SDK WRITES (SDK#284): keyed ``<os-arch>/<clickhouse_version>``
+#: (the exact patch), so several patches of one line each get their own pin.
+LOCK_SCHEMA: Final = 2
+#: Every schema a reader accepts. Schema 1 (keyed ``<os-arch>/<minor>``) is still
+#: read and is converted to schema-2 keys in memory (docs/guides/fetch.md §5);
+#: the first write into a schema-1 file rewrites it as schema 2 wholesale.
+LOCK_SCHEMAS_READABLE: Final = (1, 2)
+#: The lock file ``--frozen`` reads when no ``--lock`` names one (docs/guides/fetch.md,
+#: Decisions): relative, so it resolves against the working directory.
+DEFAULT_LOCK_FILE: Final = "chtypes.lock"
+#: The sibling tree holding every installed patch that is NOT the one a line
+#: request currently selects (SDK#284, "Layout rule"): ``patches/<minor>/
+#: <clickhouse_version>/``, beside the flat ``<minor>/`` slot. A released
+#: (pre-#284) reader ignores it — measured against v0.4.0 of all four
+#: bindings and `scripts/fetch.sh` — so it needs no migration.
+PATCHES_DIRNAME: Final = "patches"
+
+_USER_AGENT = "chtypes-python (+https://github.com/wave-rf/chtypes)"
+_HTTP_TIMEOUT = 60.0
+
+_T = TypeVar("_T")
+_CHUNK = 1 << 20
+
+log = logging.getLogger("chtypes.fetch")
+
+Progress = Callable[[str], None]
+
+
+def _retry_budget() -> float:
+    """The total sleep time the default doubling schedule spends across every
+    attempt but the last — 60s for the default 5 attempts (`docs/guides/fetch.md`
+    §3a) — and the cap chtypes#365 puts on a source's own `Retry-After`:
+    honored only as long as honoring it still fits inside this, so a 503
+    asking for far longer than this budget was ever sized for fails fast
+    instead of blocking for it."""
+    if RELEASE_LOAD_ATTEMPTS <= 1:
+        return 0.0
+    return RELEASE_RETRY_DELAY * ((1 << (RELEASE_LOAD_ATTEMPTS - 1)) - 1)
+
+
+def _retry_after_seconds(status: int, header: str | None) -> float | None:
+    """Parses a ``Retry-After`` header (RFC 9110 §10.2.3): delta-seconds or an
+    HTTP-date, honored only for 503 and 429 (`_RETRY_AFTER_STATUSES`). `None`
+    when the status does not carry one, the header is absent, or it does not
+    parse as either form."""
+    if status not in _RETRY_AFTER_STATUSES or not header:
+        return None
+    header = header.strip()
+    try:
+        return max(0.0, float(int(header)))
+    except ValueError:
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(header)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.UTC)
+    return max(0.0, (when - datetime.datetime.now(datetime.UTC)).total_seconds())
+
+
+def _attempt_word(n: int) -> str:
+    """``1 attempt`` or ``<n> attempts``, for a message naming how many were made."""
+    return "1 attempt" if n == 1 else f"{n} attempts"
+
+
+def _append_retry_note(exc: SourceUnreachableError, note: str) -> SourceUnreachableError:
+    """Appends `note` to a retryable `SourceUnreachableError`'s own message, in
+    place — `.code`, `.retryable` and `.retry_after` are unchanged, and it is
+    the SAME object (so re-raising it never manufactures a self-referential
+    ``__context__``); only the text grows."""
+    if exc.args:
+        exc.args = (str(exc.args[0]) + note, *exc.args[1:])
+    return exc
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+#: TEST-ONLY. When set, the ABI revision fetch selects release rows at, in place
+#: of `ABI_REVISION` (docs/guides/fetch.md §2). Not part of the public contract:
+#: the fetch-fixture suites set it to the revision their fixture release carries
+#: — derived from that release's own ``index.json`` — so a binding whose own
+#: revision has moved ahead of the fixtures still exercises the whole chain.
+#: It changes WHICH rows are eligible and nothing else: the default registry
+#: directory stays ``abi<ABI_REVISION>/``, and the loader still refuses an
+#: artifact of another revision.
+_ABI_REVISION_OVERRIDE: int | None = None
+
+
+def _fetch_abi_revision() -> int:
+    """The one ABI revision whose rows fetch may install: this binding's own."""
+    return ABI_REVISION if _ABI_REVISION_OVERRIDE is None else _ABI_REVISION_OVERRIDE
+
+
+def _revision_of(value: object) -> int | None:
+    """A row's ``abi_revision`` when it is a JSON integer, else None. The artifact
+    producer writes the field from the revision that introduced it onward, so a
+    row without one is an older revision; a value that is not an integer is
+    read the same way rather than failing the whole listing."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+#: Rows that carry no ``abi_revision``, named with the reason: the artifact
+#: producer records the field from the revision that introduced it onward. Every
+#: unpublished message, ``--all`` warning and ``list`` note says this in these
+#: words rather than that the release serves "none".
+_BUILT_BEFORE: Final = "(built before revisions were recorded)"
+_NO_RECORDED_REVISION: Final = f"rows that record no ABI revision {_BUILT_BEFORE}"
+
+
+def _served(entries: Sequence[ReleaseEntry], noun: str) -> str:
+    """What the release DOES have for ``noun``, for an unpublished message: the
+    ABI revision(s) its rows carry, or that it has none at any revision."""
+    if not entries:
+        return f"the release does not have {noun} at any ABI revision"
+    revs = sorted({e.abi_revision for e in entries if e.abi_revision is not None})
+    if not revs:
+        return f"the release has {noun} only in {_NO_RECORDED_REVISION}"
+    said = (
+        f"ABI revision {revs[0]}"
+        if len(revs) == 1
+        else "ABI revisions " + ", ".join(str(r) for r in revs)
+    )
+    if any(e.abi_revision is None for e in entries):
+        said += f" and in {_NO_RECORDED_REVISION}"
+    return f"the release has {noun} only at {said}"
+
+
+def _skipped_lines(on_platform: Sequence[ReleaseEntry], platform: str, rev: int) -> list[str]:
+    """One message per line the release has for ``platform`` only at another ABI
+    revision, or only in rows that record none — the lines ``--all`` installs
+    nothing for — in numeric line order."""
+    by_line: dict[str, list[ReleaseEntry]] = {}
+    for e in on_platform:
+        by_line.setdefault(e.minor, []).append(e)
+    return [
+        f"ClickHouse line {line} on {platform} is not installed: "
+        f"{_served(rows, f'that line for {platform}')}, and this SDK speaks ABI revision {rev}"
+        for line, rows in sorted(by_line.items(), key=lambda kv: _minor_key(kv[0]))
+        if not any(e.abi_revision == rev for e in rows)
+    ]
+
+
+def _not_shown(on_platform: Sequence[ReleaseEntry], rev: int) -> str | None:
+    """``list``'s one line naming the platform's rows at another ABI revision,
+    which it does not show (docs/guides/fetch.md §6); None when none were
+    hidden. Rows that carry no ``abi_revision`` are named for what they are —
+    built before revisions were recorded — never as a revision called "none"."""
+    hidden = [e for e in on_platform if e.abi_revision != rev]
+    if not hidden:
+        return None
+    declared = [e.abi_revision for e in hidden if e.abi_revision is not None]
+    undeclared = len(hidden) - len(declared)
+    parts = []
+    if declared:
+        revs = ", ".join(str(r) for r in sorted(set(declared)))
+        parts.append(f"{len(declared)} row(s) at ABI revision(s) {revs}")
+    if undeclared:
+        parts.append(f"{undeclared} row(s) that record no ABI revision " + _BUILT_BEFORE)
+    return f"{' and '.join(parts)} not shown; this SDK speaks {rev}"
+
+
+# ------------------------------------------------------------------ §1 paths
+
+
+def registry_search_path(
+    explicit: str | os.PathLike[str] | None = None, *, platform: str | None = None
+) -> tuple[Path, ...]:
+    """The registry search path (docs/guides/fetch.md §1), in order: the explicit
+    path, ``$CHTYPES_REGISTRY``, the per-user cache, then the system
+    locations. Directories need not exist; a lookup takes the first one that
+    holds the requested line. De-duplicated, order preserved.
+
+    ``$CHTYPES_REGISTRY`` is a directory this host dlopens from, so it is on
+    the path for the host's platform only: another platform's artifacts
+    (``fetch --platform``) go to that platform's own cache directory
+    (docs/guides/fetch.md, Decisions)."""
+    plat = platform or host_platform()
+    candidates: list[str] = []
+    if explicit is not None:
+        candidates.append(os.fspath(explicit))
+    env = os.environ.get(ENV_REGISTRY)
+    if env and plat == host_platform():
+        candidates.append(env)
+    candidates.append(cache_registry_dir(plat))
+    candidates.extend(os.path.join(root, plat) for root in SYSTEM_REGISTRY_ROOTS)
+    seen: dict[Path, None] = {}
+    for c in candidates:
+        seen.setdefault(Path(c).expanduser(), None)
+    return tuple(seen)
+
+
+def fetch_destination(
+    explicit: str | os.PathLike[str] | None = None, *, platform: str | None = None
+) -> Path:
+    """Where fetch writes (docs/guides/fetch.md §1): the explicit path, else
+    ``$CHTYPES_REGISTRY``, else the per-user cache — never a system location."""
+    return registry_search_path(explicit, platform=platform)[0]
+
+
+def installed_lines(registry: str | os.PathLike[str]) -> dict[str, tuple[Path, Manifest]]:
+    """Every installed line under one registry directory: minor line ->
+    (version directory, manifest), in release order. Cheap — reads the
+    manifests, loads nothing."""
+    root = Path(registry)
+    found: dict[str, tuple[Path, Manifest]] = {}
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:
+        return found
+    for entry in entries:
+        if entry.name.startswith(".") or not entry.is_dir():
+            continue
+        manifest = read_manifest(entry)
+        if manifest is None:
+            continue
+        minor = manifest.clickhouse_minor or minor_of(manifest.clickhouse_version) or entry.name
+        found.setdefault(minor, (entry, manifest))
+    return dict(sorted(found.items(), key=lambda kv: _minor_key(kv[0])))
+
+
+@dataclass(frozen=True, slots=True)
+class InstalledPatch:
+    """One installed patch under a registry directory (SDK#284): either the
+    flat slot the patch a LINE request selects installs to, or one of the
+    other patches of that line under ``patches/<minor>/<clickhouse_version>/``
+    (docs/guides/fetch.md "Layout rule"). ``version`` is the manifest's own
+    ``clickhouse_version`` — what actually loads, never a directory name."""
+
+    minor: str
+    version: str
+    directory: Path
+    manifest: Manifest
+    #: True for the flat ``<minor>/`` slot; False for a ``patches/`` sibling.
+    flat: bool
+
+
+def installed_patches(registry: str | os.PathLike[str]) -> list[InstalledPatch]:
+    """Every installed PATCH under one registry directory — the flat line
+    install at ``<minor>/`` and every other installed patch at
+    ``patches/<minor>/<clickhouse_version>/`` (SDK#284) — release order, flat
+    slot first within each line. Cheap — reads the manifests, loads nothing.
+
+    Supersedes `installed_lines` as the fetch-level listing: that function
+    still answers "the one patch a line request loads", one per line; this
+    one answers "every patch this destination holds"."""
+    root = Path(registry)
+    by_line: dict[str, list[InstalledPatch]] = {}
+    try:
+        top = sorted(root.iterdir())
+    except OSError:
+        return []
+    for entry in top:
+        if entry.name.startswith(".") or not entry.is_dir() or entry.name == PATCHES_DIRNAME:
+            continue
+        manifest = read_manifest(entry)
+        if manifest is None:
+            continue
+        minor = manifest.clickhouse_minor or minor_of(manifest.clickhouse_version) or entry.name
+        by_line.setdefault(minor, []).append(
+            InstalledPatch(minor, manifest.clickhouse_version or minor, entry, manifest, True)
+        )
+    patches_root = root / PATCHES_DIRNAME
+    try:
+        minor_dirs = sorted(patches_root.iterdir())
+    except OSError:
+        minor_dirs = []
+    for minor_dir in minor_dirs:
+        if minor_dir.name.startswith(".") or not minor_dir.is_dir():
+            continue
+        try:
+            version_dirs = sorted(minor_dir.iterdir())
+        except OSError:
+            continue
+        for version_dir in version_dirs:
+            if version_dir.name.startswith(".") or not version_dir.is_dir():
+                continue
+            manifest = read_manifest(version_dir)
+            if manifest is None:
+                continue
+            minor = (
+                manifest.clickhouse_minor or minor_of(manifest.clickhouse_version) or minor_dir.name
+            )
+            version = manifest.clickhouse_version or version_dir.name
+            by_line.setdefault(minor, []).append(
+                InstalledPatch(minor, version, version_dir, manifest, False)
+            )
+    out: list[InstalledPatch] = []
+    for minor in sorted(by_line, key=_minor_key):
+        out.extend(sorted(by_line[minor], key=lambda p: (_version_key(p.version), not p.flat)))
+    return out
+
+
+def verify_registry(
+    registry: str | os.PathLike[str],
+) -> list[tuple[str, Path, ArtifactCorruptError | None]]:
+    """Re-hash every installed PATCH against its own manifest (the
+    ``chtypes verify`` command, SDK#284): ``[(label, dir, None | error), …]``.
+    ``label`` is the minor line for the flat slot — unchanged from before this
+    change — and ``"<minor>/<clickhouse_version>"`` for any other installed
+    patch, so an existing caller keying on the flat rows alone sees the same
+    labels as before."""
+    report: list[tuple[str, Path, ArtifactCorruptError | None]] = []
+    for patch in installed_patches(registry):
+        label = patch.minor if patch.flat else f"{patch.minor}/{patch.version}"
+        try:
+            verify_library(patch.directory)
+        except Exception as exc:  # RegistryError from verify_library, or an OSError
+            report.append((label, patch.directory, ArtifactCorruptError(str(exc))))
+        else:
+            report.append((label, patch.directory, None))
+    return report
+
+
+def _minor_key(minor: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(p) for p in minor.split("."))
+    except ValueError:
+        return (1 << 30,)
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return _minor_key(version.split("-", 1)[0])
+
+
+def _patch_matches(requested: str, candidate: str) -> bool:
+    """fetch.md Decision 7, the one patch-matching rule shared everywhere a
+    patch is matched: a spelling that carries a channel (``25.8.28.1-lts``)
+    matches only that exact spelling; one that carries none
+    (``25.8.28.1``) matches that patch number on ANY channel. Patch
+    ordering elsewhere is numeric, component by component, with the channel
+    ignored — this function only answers "does this one candidate match",
+    never picks among several.
+
+    Server-driven spellings carry no channel (``SELECT version()`` answers
+    e.g. ``25.8.28.1``), so without this rule every server-driven request
+    would miss an installed/published ``-lts``/``-stable`` row.
+    """
+    if "-" in requested:
+        return candidate == requested
+    return candidate.split("-", 1)[0] == requested
+
+
+# -------------------------------------------------------- §4 two-level layout
+
+
+def _iter_patch_dirs(root: Path, minor: str) -> Iterable[tuple[str, Path, bool]]:
+    """Every installed patch of ``minor`` directly reachable from ``root``:
+    the flat slot ``root/<minor>/`` (the patch a LINE request selects, if
+    any) and every sibling under ``root/patches/<minor>/<version>/`` (SDK#284
+    "Layout rule"). Yields ``(clickhouse_version, directory, is_flat)``, flat
+    first. Reads manifests only; loads nothing."""
+    flat = root / minor
+    manifest = read_manifest(flat)
+    if manifest is not None:
+        flat_minor = manifest.clickhouse_minor or minor_of(manifest.clickhouse_version) or minor
+        if flat_minor == minor:
+            yield (manifest.clickhouse_version or minor, flat, True)
+    patches_root = root / PATCHES_DIRNAME / minor
+    try:
+        entries = sorted(patches_root.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name.startswith(".") or not entry.is_dir():
+            continue
+        pm = read_manifest(entry)
+        if pm is None:
+            continue
+        p_minor = pm.clickhouse_minor or minor_of(pm.clickhouse_version)
+        if p_minor != minor:
+            continue
+        yield (pm.clickhouse_version or entry.name, entry, False)
+
+
+# --------------------------------------------------------------- §4 signature
+
+
+def trusted_keys(explicit: Iterable[str] | None = None) -> tuple[bytes, ...]:
+    """The raw public keys a release may be signed with: the explicit list,
+    else ``$CHTYPES_TRUSTED_KEYS`` (comma-separated hex), else the embedded
+    release key. Each REPLACES the next (docs/guides/fetch.md §4)."""
+    if explicit is None:
+        env = os.environ.get(ENV_TRUSTED_KEYS, "")
+        explicit = [k for k in env.split(",") if k.strip()] if env.strip() else None
+    if explicit is None:
+        explicit = [RELEASE_PUBLIC_KEY]
+    keys: list[bytes] = []
+    for hexkey in explicit:
+        try:
+            raw = bytes.fromhex(hexkey.strip())
+        except ValueError:
+            raise ValueError(f"chtypes: trusted key {hexkey!r} is not hex") from None
+        if len(raw) != 32:
+            raise ValueError(f"chtypes: trusted key {hexkey!r} is not a 32-byte ed25519 key")
+        keys.append(raw)
+    if not keys:
+        raise ValueError("chtypes: no trusted keys given")
+    return tuple(keys)
+
+
+_resolve_keys = trusted_keys  # the parameter of the same name shadows it in Fetcher
+
+
+def key_id(raw_public_key: bytes) -> str:
+    """The key id docs/guides/fetch.md §4 defines: sha256 over the raw key, first 16 hex."""
+    return hashlib.sha256(raw_public_key).hexdigest()[:16]
+
+
+def parse_signature_file(sig: bytes) -> tuple[str, bytes]:
+    """``SHA256SUMS.sig`` -> (the comment line, the 64 signature bytes)."""
+    comment = ""
+    body: list[str] = []
+    for raw in sig.decode("utf-8", "replace").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("untrusted comment:"):
+            comment = line[len("untrusted comment:") :].strip()
+            continue
+        body.append(line)
+    try:
+        signature = base64.b64decode("".join(body), validate=True)
+    except (ValueError, TypeError):
+        raise ArtifactUntrustedError("chtypes: SHA256SUMS.sig is not a base64 signature") from None
+    if len(signature) != 64:
+        raise ArtifactUntrustedError(
+            f"chtypes: SHA256SUMS.sig carries {len(signature)} bytes, an ed25519 signature is 64"
+        )
+    return comment, signature
+
+
+def verify_sums_signature(sums: bytes, sig: bytes, keys: Sequence[bytes], source: str) -> str:
+    """Step 0 of the chain: the signature over the EXACT bytes of ``SHA256SUMS``
+    with one of the trusted keys. Returns the id of the key that verified;
+    raises `ArtifactUntrustedError` otherwise."""
+    comment, signature = parse_signature_file(sig)
+    for raw in keys:
+        if _ed25519_verify(raw, sums, signature):
+            return key_id(raw)
+    trusted = ", ".join(key_id(k) for k in keys)
+    raise ArtifactUntrustedError(
+        f"chtypes: SHA256SUMS at {source} is not signed by a trusted key "
+        f"(signature says {comment!r}; trusted: {trusted}). "
+        f"Not installing anything from it."
+    )
+
+
+# ------------------------------------------------------------------ §5 lock
+
+
+#: ``chtypes-<version>-<os>-<arch>[-b<N>].tar.gz`` (docs/reference/artifact.md's
+#: asset grammar) — used only to convert a schema-1 lock KEY (``<os-arch>/
+#: <minor>``) into the schema-2 shape (``<os-arch>/<clickhouse_version>``) by
+#: recovering ``<version>`` from the entry's own ``file``, since schema 1 never
+#: recorded the exact patch it pinned.
+def _schema1_key_to_schema2(key: str, file: str, lockpath: Path) -> str:
+    if "/" not in key:
+        raise ValueError(f"chtypes: {lockpath}: entry {key!r} is not '<os-arch>/<minor>'")
+    platform, minor = key.split("/", 1)
+    pattern = re.compile(rf"^chtypes-(?P<version>.+)-{re.escape(platform)}(?:-b[0-9]+)?\.tar\.gz$")
+    m = pattern.match(file)
+    if m is None:
+        raise ValueError(
+            f"chtypes: {lockpath}: entry {key!r} names {file!r}, which does not parse as a "
+            f"chtypes artifact file name for {platform!r} — cannot convert this schema-1 lock "
+            f"entry to schema 2"
+        )
+    version = m.group("version")
+    if minor_of(version) != minor:
+        raise ValueError(
+            f"chtypes: {lockpath}: entry {key!r} names {file!r} (ClickHouse {version}), whose "
+            f"line is not {minor!r} — cannot convert this schema-1 lock entry to schema 2"
+        )
+    return f"{platform}/{version}"
+
+
+def read_lock(path: str | os.PathLike[str]) -> dict[str, dict[str, Any]]:
+    """The pins in a lock file, always in the schema-2 shape: ``{"<os>-<arch>/
+    <clickhouse_version>": {"file", "sha256", "abi_revision"?}}``; ``{}`` when
+    the file does not exist. ``abi_revision`` is optional and additive
+    (docs/guides/fetch.md §5) — an entry written before this SDK recorded it
+    simply has none, read the same way `_revision_of` reads an index row that
+    carries none. A malformed file, or an unreadable schema, is a `ValueError`.
+
+    Schema 1 (keyed ``<os-arch>/<minor>``, one pin per LINE) is still read: a
+    schema-1 key converts to its schema-2 shape by recovering the exact
+    ``clickhouse_version`` from the entry's own ``file`` name
+    (`_schema1_key_to_schema2`), since schema 1 never recorded which patch of
+    the line it pinned any other way. The first WRITE through this entry
+    point (`write_lock`, called by `Fetcher._record_pin`) rewrites the whole
+    file as schema 2 — schema is a property of the file, not of one entry, so
+    there is no "write schema 1 when it still fits"."""
+    p = Path(path)
+    try:
+        doc = json.loads(p.read_bytes())
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"chtypes: cannot read lock file {p}: {exc}") from exc
+    schemas = "/".join(str(s) for s in LOCK_SCHEMAS_READABLE)
+    if not isinstance(doc, dict) or doc.get("schema") not in LOCK_SCHEMAS_READABLE:
+        raise ValueError(f"chtypes: {p} is not a chtypes lock file (schema {schemas})")
+    schema = doc["schema"]
+    artifacts = doc.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError(f"chtypes: {p} has no 'artifacts' object")
+    pins: dict[str, dict[str, Any]] = {}
+    for key, entry in artifacts.items():
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("file"), str)
+            or not isinstance(entry.get("sha256"), str)
+        ):
+            raise ValueError(f"chtypes: {p}: entry {key!r} needs 'file' and 'sha256'")
+        pin: dict[str, Any] = {"file": entry["file"], "sha256": entry["sha256"]}
+        rev = _revision_of(entry.get("abi_revision"))
+        if rev is not None:
+            pin["abi_revision"] = rev
+        if schema == 2:
+            # A schema-2 key is keyed by the EXACT patch (§6); a hand-written
+            # or hand-edited file that still spells a LINE there is refused,
+            # naming the key, rather than silently keyed wrong forever after.
+            if "/" not in key:
+                raise ValueError(
+                    f"chtypes: {p}: entry {key!r} is not '<os-arch>/<clickhouse_version>'"
+                )
+            _platform, version = key.split("/", 1)
+            try:
+                _, exact = parse_spelling(version)
+            except ValueError:
+                exact = None
+            if exact is None:
+                raise ValueError(
+                    f"chtypes: {p}: entry {key!r} is keyed by a LINE, not an exact patch — "
+                    f"schema 2 pins the exact ClickHouse version (docs/guides/fetch.md §5)"
+                )
+            out_key = key
+        else:
+            out_key = _schema1_key_to_schema2(key, entry["file"], p)
+        pins[out_key] = pin
+    return pins
+
+
+def write_lock(path: str | os.PathLike[str], pins: dict[str, dict[str, Any]]) -> None:
+    """Write a lock file atomically (temp sibling + rename), schema `LOCK_SCHEMA`
+    (2), keys sorted. Always schema 2, whatever schema was read: writing is
+    the moment a schema-1 file converts (see `read_lock`)."""
+    p = Path(path)
+    doc = {"schema": LOCK_SCHEMA, "artifacts": dict(sorted(pins.items()))}
+    text = json.dumps(doc, indent=2, sort_keys=False) + "\n"
+    fd, tmp = tempfile.mkstemp(prefix=f".{p.name}.", dir=p.parent or ".")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+        os.replace(tmp, p)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+# ----------------------------------------------------------------- the release
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseEntry:
+    """One row of ``index.json``: one artifact for one platform."""
+
+    file: str
+    sha256: str
+    bytes: int
+    clickhouse_version: str
+    clickhouse_minor: str
+    library: str
+    library_sha256: str
+    os: str
+    arch: str
+    #: The wrapper build for this ClickHouse version. A rebuild of the same
+    #: version is a NEW row beside the old one, never a swap, so this is what
+    #: separates them. 0 on a row published before builds existed.
+    build: int = 0
+    #: The core commit the wrapper was built from; ``""`` on an old row.
+    core_commit: str = ""
+    #: The chs_* ABI revision the artifact was built from, or None when the row
+    #: declares none (or declares something that is not an integer). Fetch
+    #: installs only a row at this binding's own `ABI_REVISION`
+    #: (docs/guides/fetch.md §2): any other would be refused at load.
+    abi_revision: int | None = None
+
+    @property
+    def platform(self) -> str:
+        return f"{self.os}-{self.arch}"
+
+    @property
+    def build_number(self) -> int:
+        """The row's own ``build`` when it has one, else the ``-b<N>`` suffix of
+        the file name, else 0 — an old row, which is build 0 by definition."""
+        if self.build > 0:
+            return self.build
+        m = _BUILD_SUFFIX.search(self.file)
+        return int(m.group(1)) if m else 0
+
+    @property
+    def rank(self) -> tuple[tuple[int, ...], int]:
+        """Sort key for "which row wins": newest ClickHouse version, then the
+        highest wrapper build. Without the build half a rebuild's older sibling
+        could win on nothing but its position in the index."""
+        return (_version_key(self.clickhouse_version), self.build_number)
+
+    @property
+    def minor(self) -> str:
+        return self.clickhouse_minor or minor_of(self.clickhouse_version)
+
+
+@dataclass(frozen=True, slots=True)
+class Release:
+    """A release as the chain saw it: its entries, the SIGNED sums, and who signed."""
+
+    source: str
+    tag: str
+    entries: tuple[ReleaseEntry, ...]
+    sums: dict[str, str]
+    signed_by: str | None  # key id, or None when CHTYPES_ALLOW_UNSIGNED skipped step 0
+    license: str = ""
+    license_url: str = ""
+
+    def offered(self, platform: str) -> list[ReleaseEntry]:
+        """Every line published for a platform at this binding's ABI revision,
+        newest patch per line (then highest build), release order. Rows of any
+        other revision, and rows that record none, are not offered: fetch never
+        installs them (docs/guides/fetch.md §2)."""
+        rev = _fetch_abi_revision()
+        best: dict[str, ReleaseEntry] = {}
+        for e in self.entries:
+            if e.platform != platform or e.abi_revision != rev:
+                continue
+            cur = best.get(e.minor)
+            if cur is None or e.rank > cur.rank:
+                best[e.minor] = e
+        return [best[m] for m in sorted(best, key=_minor_key)]
+
+    def platforms(self) -> list[str]:
+        return sorted({e.platform for e in self.entries})
+
+    def select(self, spelling: str, platform: str) -> ReleaseEntry:
+        """A line (``25.8``) resolves to the one patch published for it; an
+        exact patch (``25.8.28.1-lts``) is a hard requirement (§2). Either way,
+        only rows at this binding's ABI revision are considered, FIRST: nothing
+        at that revision is `ArtifactUnpublishedError`, never another
+        revision's row."""
+        line, exact = parse_spelling(spelling)
+        rev = _fetch_abi_revision()
+        on_platform = [e for e in self.entries if e.platform == platform]
+        if not on_platform:
+            raise ArtifactUnpublishedError(
+                f"chtypes: {self.source} publishes nothing for {platform} "
+                f"(it has: {', '.join(self.platforms()) or 'nothing'})."
+            )
+        have = ", ".join(e.clickhouse_version for e in on_platform if e.abi_revision == rev)
+        if exact is not None:
+            bare = exact.split("-", 1)[0]
+            # A rebuild publishes the same clickhouse_version twice, so an exact
+            # request can match more than one row: take the highest build, never
+            # whichever the index happens to list first.
+            any_revision = [
+                e
+                for e in on_platform
+                if e.clickhouse_version == exact
+                or ("-" not in exact and e.clickhouse_version.split("-", 1)[0] == bare)
+            ]
+            hits = [e for e in any_revision if e.abi_revision == rev]
+            if hits:
+                return max(hits, key=lambda e: e.rank)
+            raise ArtifactUnpublishedError(
+                f"chtypes: you asked for exactly ClickHouse {exact} on {platform} at ABI "
+                f"revision {rev} (this SDK's) and {self.source} does not publish it at that "
+                f"revision: {_served(any_revision, f'that patch for {platform}')}; at ABI "
+                f"revision {rev} the release has: {have or 'nothing'}. "
+                f"Ask for the line ({line}) to take what was published."
+            )
+        for e in self.offered(platform):
+            if e.minor == line:
+                return e
+        any_revision = [e for e in on_platform if e.minor == line]
+        raise ArtifactUnpublishedError(
+            f"chtypes: no artifact for ClickHouse line {line} on {platform} at ABI revision "
+            f"{rev} (this SDK's) at {self.source}: "
+            f"{_served(any_revision, f'that line for {platform}')}"
+            f"; at ABI revision {rev} the release has: {have or 'nothing'}."
+        )
+
+
+def parse_spelling(spelling: str) -> tuple[str, str | None]:
+    """``25.8`` -> (``25.8``, None); ``v25.8.28.1-lts`` -> (``25.8``, ``25.8.28.1-lts``).
+
+    The caller's own spelling decides whether a patch is a hard requirement:
+    four dotted components name a patch, fewer name a line."""
+    s = spelling.strip()
+    if s.startswith("v"):
+        s = s[1:]
+    bare = s.split("-", 1)[0]
+    parts = bare.split(".")
+    if len(parts) < 2 or not all(p.isdigit() for p in parts):
+        raise ValueError(f"chtypes: cannot make a ClickHouse version out of {spelling!r}")
+    line = f"{parts[0]}.{parts[1]}"
+    return line, (s if len(parts) >= 4 else None)
+
+
+def _parse_index(raw: bytes, source: str) -> tuple[list[ReleaseEntry], str, str, str]:
+    try:
+        doc = json.loads(raw)
+    except ValueError as exc:
+        raise ArtifactCorruptError(f"chtypes: index.json at {source} is not JSON: {exc}") from exc
+    if not isinstance(doc, dict) or doc.get("schema") != 1:
+        raise ArtifactCorruptError(
+            f"chtypes: index.json at {source} has schema "
+            f"{doc.get('schema') if isinstance(doc, dict) else '?'!r}; this chtypes reads schema 1"
+        )
+    entries: list[ReleaseEntry] = []
+    for row in doc.get("artifacts") or []:
+        if not isinstance(row, dict):
+            raise ArtifactCorruptError(f"chtypes: index.json at {source} has a malformed row")
+        try:
+            entries.append(
+                ReleaseEntry(
+                    file=str(row["file"]),
+                    sha256=str(row["sha256"]).lower(),
+                    bytes=int(row["bytes"]),
+                    clickhouse_version=str(row["clickhouse_version"]),
+                    clickhouse_minor=str(row.get("clickhouse_minor") or ""),
+                    library=str(row["library"]),
+                    library_sha256=str(row["library_sha256"]).lower(),
+                    os=str(row["os"]),
+                    arch=str(row["arch"]),
+                    build=int(row.get("build") or 0),
+                    core_commit=str(row.get("core_commit") or ""),
+                    abi_revision=_revision_of(row.get("abi_revision")),
+                )
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ArtifactCorruptError(
+                f"chtypes: index.json at {source}: row {row.get('file')!r} is missing {exc}"
+            ) from None
+    return (
+        entries,
+        str(doc.get("release_tag") or ""),
+        str(doc.get("license") or ""),
+        str(doc.get("license_url") or ""),
+    )
+
+
+def _parse_sums(raw: bytes) -> dict[str, str]:
+    sums: dict[str, str] = {}
+    for line in raw.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        digest, name = parts
+        sums[name.lstrip("*").strip()] = digest.lower()
+    return sums
+
+
+# ------------------------------------------------------------------ the source
+
+
+class _Source:
+    """One release base: ``http(s)://…``, ``file://…`` or a plain directory.
+
+    `read` answers None for "not there" (a 404, a missing file) and raises
+    `SourceUnreachableError` for a fault reaching the source at all; the
+    caller decides which of those is a broken release and which is no release.
+    """
+
+    def __init__(self, base: str, progress: Progress) -> None:
+        self.base = base.rstrip("/")
+        self.progress = progress
+        parsed = urllib.parse.urlparse(base)
+        if parsed.scheme in ("http", "https"):
+            self.kind = "http"
+            self.root: Path | None = None
+        elif parsed.scheme == "file":
+            self.kind = "file"
+            self.root = Path(urllib.request.url2pathname(parsed.path))
+        elif parsed.scheme == "":
+            self.kind = "file"
+            self.root = Path(base).expanduser()
+        else:
+            raise ValueError(f"chtypes: unsupported source URL scheme in {base!r}")
+
+    def __str__(self) -> str:
+        return self.base if self.kind == "http" else str(self.root)
+
+    def read(self, name: str) -> bytes | None:
+        if self.kind == "file":
+            assert self.root is not None
+            path = self.root / name
+            try:
+                return path.read_bytes()
+            except FileNotFoundError:
+                return None
+            except OSError as exc:
+                raise SourceUnreachableError(f"chtypes: cannot read {path}: {exc}") from exc
+        with self._open(name) as resp:
+            if resp is None:
+                return None
+            return resp.read()
+
+    def download(self, name: str, into: Path, expected_bytes: int) -> tuple[int, str]:
+        """One attempt: stream one asset to ``into``, hashing as it goes:
+        (bytes, sha256 hex). Retried, through the §3a budget, by
+        `Fetcher._download_with_retry` — never here, so a retry is always a
+        fresh ``_open`` and a fresh stream, never a resume."""
+        if self.kind == "file":
+            assert self.root is not None
+            src = self.root / name
+            if not src.is_file():
+                raise ArtifactCorruptError(
+                    f"chtypes: {self} names {name} but does not contain it — a broken release"
+                )
+            return self._copy(src.open("rb"), into, expected_bytes, name)
+        with self._open(name) as resp:
+            if resp is None:
+                raise ArtifactCorruptError(
+                    f"chtypes: {self} names {name} but does not serve it — a broken release"
+                )
+            return self._copy(resp, into, expected_bytes, name)
+
+    def _copy(self, stream: Any, into: Path, expected_bytes: int, name: str) -> tuple[int, str]:
+        digest = hashlib.sha256()
+        total = 0
+        started = last_said = time.monotonic()
+        try:
+            with into.open("wb") as out:
+                while True:
+                    chunk = stream.read(_CHUNK)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    out.write(chunk)
+                    total += len(chunk)
+                    now = time.monotonic()
+                    if now - last_said >= 1.0:
+                        last_said = now
+                        self.progress(_progress_line(name, total, expected_bytes, now - started))
+        finally:
+            stream.close()
+        self.progress(_progress_line(name, total, expected_bytes, time.monotonic() - started))
+        return total, digest.hexdigest()
+
+    def _open(self, name: str) -> _Response:
+        """One attempt: `None` for a 404/410 (not found; never retried), the
+        response for a 200, and `SourceUnreachableError` for anything else —
+        `.retryable` set (chtypes#365) for an HTTP 5xx/408/429 or a
+        connection-level failure reaching the host at all (refused, reset,
+        timed out, DNS — ``urllib``/``http.client``/``OSError`` do not
+        distinguish these any further, so none are singled out), `.retry_after`
+        set alongside it when the source sent one (503/429 only). Retried, when
+        `.retryable`, by `Fetcher._retry_publish_window` or
+        `Fetcher._download_with_retry` — never here, so a retry always re-reads
+        the whole consistent set (or re-opens the whole download) from scratch."""
+        assert self.kind == "http"
+        url = f"{self.base}/{urllib.parse.quote(name)}"
+        headers = {"User-Agent": _USER_AGENT}
+        token = os.environ.get(ENV_DOWNLOAD_TOKEN)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            return _Response(urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT))
+        except urllib.error.HTTPError as exc:
+            if exc.code in (404, 410):
+                exc.close()
+                return _Response(None)
+            retryable = exc.code in _RETRYABLE_STATUSES
+            retry_after = None
+            if retryable:
+                retry_after = _retry_after_seconds(exc.code, exc.headers.get("Retry-After"))
+            message = f"chtypes: cannot reach {url}: {exc}"
+            exc.close()
+            raise SourceUnreachableError(
+                message, retryable=retryable, retry_after=retry_after
+            ) from exc
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+            raise SourceUnreachableError(
+                f"chtypes: cannot reach {url}: {exc}", retryable=True
+            ) from exc
+
+
+class _Response:
+    """A context manager around an HTTP response that may be "not found" (None)."""
+
+    def __init__(self, resp: Any) -> None:
+        self._resp = resp
+
+    def __enter__(self) -> Any:
+        return self._resp
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        if self._resp is not None:
+            self._resp.close()
+
+
+def _progress_line(name: str, got: int, want: int, seconds: float) -> str:
+    rate = got / seconds / 1e6 if seconds > 0 else 0.0
+    if want >= 1e6:
+        pct = 100 * got / want
+        return f"  {name}: {got / 1e6:.1f} / {want / 1e6:.1f} MB ({pct:.0f}%, {rate:.1f} MB/s)"
+    if want:
+        return f"  {name}: {got} / {want} bytes"
+    return f"  {name}: {got / 1e6:.1f} MB ({rate:.1f} MB/s)"
+
+
+# ------------------------------------------------------------------- the chain
+
+
+class Fetcher:
+    """The resolved options for one fetch operation, and the chain itself.
+
+    Construct once, then `ensure` one or more lines: the release (signature,
+    sums, index) is read from the source once and every line installs
+    through it. `ensure()` and `fetch()` are the one-call conveniences.
+    """
+
+    def __init__(
+        self,
+        *,
+        dest: str | os.PathLike[str] | None = None,
+        platform: str | None = None,
+        url: str | None = None,
+        tag: str | None = None,
+        lock: str | os.PathLike[str] | None = None,
+        frozen: bool = False,
+        force: bool = False,
+        offline: bool = False,
+        trusted_keys: Iterable[str] | None = None,
+        allow_unsigned: bool | None = None,
+        progress: Progress | None = None,
+    ) -> None:
+        self.platform = platform or host_platform()
+        if self.platform not in PLATFORMS:
+            raise ValueError(
+                f"chtypes: not a known platform key: {self.platform!r} "
+                f"(one of {', '.join(PLATFORMS)})"
+            )
+        if url and tag:
+            raise ValueError(
+                "chtypes: --url names a full base; --tag selects a release on the artifacts host"
+                " — pass one"
+            )
+        if frozen and lock is None:
+            # --frozen alone reads ./chtypes.lock (docs/guides/fetch.md, Decisions).
+            lock = DEFAULT_LOCK_FILE
+        self.dest = fetch_destination(dest, platform=self.platform)
+        self.tag = tag or DEFAULT_TAG
+        host = (os.environ.get(ENV_ARTIFACTS_URL) or DEFAULT_ARTIFACTS_URL).rstrip("/")
+        base = url or f"{host}/{self.tag}"
+        self.progress: Progress = progress or (lambda line: None)
+        self._progress_given = progress is not None
+        self.source = _Source(base, self._say)
+        self.lock = Path(lock) if lock is not None else None
+        self.frozen = frozen
+        self.force = force
+        self.offline = offline
+        self.keys = _resolve_keys(trusted_keys)
+        self.allow_unsigned = (
+            allow_unsigned if allow_unsigned is not None else _env_flag(ENV_ALLOW_UNSIGNED)
+        )
+        self._release: Release | None = None
+        self._pins: dict[str, dict[str, Any]] | None = None
+
+    # ------------------------------------------------------------ plumbing
+
+    def _say(self, line: str) -> None:
+        log.info("%s", line)
+        self.progress(line)
+
+    def _warn(self, message: str) -> None:
+        """A loud line, never silent: through ``progress`` when the caller gave
+        one (the CLI does), else straight to stderr."""
+        line = f"chtypes: WARNING: {message}"
+        # Not log.warning: logging's last-resort handler would print it a
+        # second time on stderr for a process that configured no logging.
+        log.info("%s", line)
+        if self._progress_given:
+            self.progress(line)
+        else:
+            sys.stderr.write(line + "\n")
+            sys.stderr.flush()
+
+    def _lock_pins(self) -> dict[str, dict[str, Any]]:
+        if self._pins is None:
+            if self.lock is None:
+                self._pins = {}
+            else:
+                if self.frozen and not self.lock.is_file():
+                    raise ArtifactPinnedError(
+                        f"chtypes: --frozen, but there is no lock file at {self.lock}; "
+                        f"nothing is pinned, so nothing is installed"
+                    )
+                self._pins = read_lock(self.lock)
+        return self._pins
+
+    def _candidates(self, line: str, exact: str | None) -> list[tuple[str, dict[str, Any], str]]:
+        """§6 F1: the lock as the CANDIDATE SET, in place of the release's
+        rows. Every pinned entry for this platform whose version is of
+        ``line`` — and, for a patch spelling, that matches it under Decision 7
+        (`_patch_matches`) — as ``(key, pin, version)``. No release access."""
+        pins = self._lock_pins()
+        prefix = f"{self.platform}/"
+        out: list[tuple[str, dict[str, Any], str]] = []
+        for key, pin in pins.items():
+            if not key.startswith(prefix):
+                continue
+            version = key[len(prefix) :]
+            if minor_of(version) != line:
+                continue
+            if exact is not None and not _patch_matches(exact, version):
+                continue
+            out.append((key, pin, version))
+        return out
+
+    def _revision_note_for(self, pin: dict[str, Any], remedy_spelling: str) -> str:
+        """The one sentence appended to a PINNED or UNPUBLISHED message when
+        the lock's own candidate entry exists but names no ABI revision at
+        all — written by an SDK before this field existed. ``""`` when there
+        is nothing to add."""
+        if pin.get("abi_revision") is not None:
+            return ""
+        return (
+            f" {self.lock} records no ABI revision (written by an older SDK); this SDK "
+            f"speaks ABI revision {_fetch_abi_revision()} — re-lock with: {FETCH_COMMAND} "
+            f"{remedy_spelling} --lock {self.lock}"
+        )
+
+    def _check_candidate_revision(
+        self, key: str, pin: dict[str, Any], remedy_spelling: str
+    ) -> None:
+        """F2: before the release is read, a candidate whose lock entry names
+        an ABI revision other than this binding's own is refused — no network
+        access, and no chance to read as a bare drifted pin or an unpublished
+        line once the SDK has moved to another revision."""
+        rev = pin.get("abi_revision")
+        if rev is None or rev == _fetch_abi_revision():
+            return
+        raise ArtifactPinnedError(
+            f"chtypes: {self.lock} pins {key} at ABI revision {rev}; this SDK speaks ABI "
+            f"revision {_fetch_abi_revision()} — re-lock with: {FETCH_COMMAND} "
+            f"{remedy_spelling} --lock {self.lock}"
+        )
+
+    def _resolve_frozen_row(
+        self, release: Release, key: str, pin: dict[str, Any], remedy_spelling: str
+    ) -> ReleaseEntry:
+        """F3/F5: look the candidate's pinned ``file`` up in both the
+        platform's `index.json` rows and the verified `SHA256SUMS`, and
+        settle every drift the design still models. Never looks at any OTHER
+        row: a frozen fetch installs what the lock says, full stop."""
+        file = pin["file"]
+        note = self._revision_note_for(pin, remedy_spelling)
+        rows = [e for e in release.entries if e.platform == self.platform and e.file == file]
+        sums_sha = release.sums.get(file)
+        if not rows or sums_sha is None:
+            raise ArtifactUnpublishedError(
+                f"chtypes: the release at {release.source} does not list {file}, which "
+                f"{self.lock} pins for {key}.{note}"
+            )
+        row = max(rows, key=lambda e: e.build_number)
+        rev = _fetch_abi_revision()
+        if row.abi_revision != rev:
+            raise ArtifactPinnedError(
+                f"chtypes: {self.lock} pins {key} to {file}, published at ABI revision "
+                f"{row.abi_revision}; this SDK speaks ABI revision {rev} — re-lock with: "
+                f"{FETCH_COMMAND} {remedy_spelling} --lock {self.lock}{note}"
+            )
+        if sums_sha != row.sha256:
+            raise ArtifactCorruptError(
+                f"chtypes: index.json says {file} is {row.sha256} but SHA256SUMS says "
+                f"{sums_sha} — the release disagrees with itself; not installing it"
+            )
+        if pin["sha256"].lower() != row.sha256:
+            raise ArtifactPinnedError(
+                f"chtypes: {self.lock} pins {key} to {file} (sha256 {pin['sha256']}) but the "
+                f"release's {file} hashes {row.sha256}. Refusing the drift; re-run without "
+                f"--frozen and with --lock to re-pin deliberately.{note}"
+            )
+        return row
+
+    def _ensure_frozen(self, spelling: str, line: str, exact: str | None) -> Path:
+        """§6 F1–F5: the lock picks the candidate, entirely before the release
+        is read (F2); the release is then read only to find that one file."""
+        candidates = self._candidates(line, exact)
+        if not candidates:
+            raise ArtifactPinnedError(
+                f"chtypes: {self.lock} pins nothing for {self.platform}/{spelling}"
+            )
+        key, pin, version = max(candidates, key=lambda c: _version_key(c[2]))
+        self._check_candidate_revision(key, pin, spelling)
+        entry = self._resolve_frozen_row(self.release(), key, pin, spelling)
+        installed = self.install(entry, line_request=exact is None)
+        self.install_goldens()
+        return installed
+
+    def _ensure_all_frozen(self) -> list[Path]:
+        """F6: every line the lock pins for this platform, at its newest
+        pinned patch. A line the release has that the lock does not pin is
+        simply not installed — not a `--frozen` refusal, because nothing
+        pinned it."""
+        pins = self._lock_pins()
+        prefix = f"{self.platform}/"
+        by_line: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
+        for key, pin in pins.items():
+            if not key.startswith(prefix):
+                continue
+            version = key[len(prefix) :]
+            by_line.setdefault(minor_of(version), []).append((key, pin, version))
+        if not by_line:
+            raise ArtifactPinnedError(f"chtypes: {self.lock} pins nothing for {self.platform}")
+        chosen: dict[str, tuple[str, dict[str, Any], str]] = {}
+        for line, candidates in by_line.items():
+            key, pin, version = max(candidates, key=lambda c: _version_key(c[2]))
+            self._check_candidate_revision(key, pin, line)
+            chosen[line] = (key, pin, version)
+        release = self.release()
+        out: list[Path] = []
+        for line in sorted(chosen, key=_minor_key):
+            key, pin, _version = chosen[line]
+            entry = self._resolve_frozen_row(release, key, pin, line)
+            out.append(self.install(entry, line_request=True))
+        self.install_goldens()
+        return out
+
+    # ------------------------------------------------------------ the release
+
+    def _retry_publish_window(self, load: Callable[[], _T]) -> _T:
+        """Runs ``load`` through the publish-window retry: on every attempt but
+        the last, a retryable symptom is logged and slept off before trying
+        again; any other exception, or the last attempt's, propagates
+        immediately.
+
+        A publish into the rolling release is three objects — ``SHA256SUMS``,
+        ``SHA256SUMS.sig``, ``index.json`` — plus, when ``load`` also reads it,
+        the served golden set — and object storage cannot swap them atomically.
+        The artifacts host's edge cache widens that window from "between two
+        uploads" to "as long as any one object can still be served stale from
+        cache" (observed ``Cache-Control: max-age=60`` on all four).
+
+        Retried: a signature under no trusted key; an index that disagrees
+        with the sums; a release-level file whose hash disagrees with its own
+        SHA256SUMS row (or that the sums list but the source does not yet
+        serve); and, since chtypes#365, a `SourceUnreachableError` whose
+        `.retryable` is set — an HTTP 5xx/408/429 or a connection-level
+        failure reaching the host at all. A `.retry_after` the source sent
+        (``Retry-After`` on a 503 or 429) is honored in place of the doubling
+        schedule's own delay, capped so the total never exceeds `_retry_budget`
+        — one that does not fit fails at once, naming the requested delay,
+        rather than blocking for it. Each retry calls ``load`` again from
+        scratch — the whole consistent set is re-read together, never one
+        freshly re-fetched object checked against another attempt's stale one.
+        Nothing else is retried, and neither are these once the attempts (or
+        the budget) run out: the same exception surfaces, with the same exit
+        code, naming how many attempts were made. A 404/410, and a tarball
+        whose hash is wrong, are never retried — the release lying about a
+        byte, or simply not having the thing, is not a transient blip.
+
+        Only an ``http(s)`` source can be mid-publish, so a ``file://`` or
+        directory source runs ``load`` exactly once."""
+        attempts = RELEASE_LOAD_ATTEMPTS if self.source.kind == "http" else 1
+        delay = RELEASE_RETRY_DELAY
+        elapsed = 0.0
+        for attempt in range(1, attempts + 1):
+            try:
+                return load()
+            except (ArtifactUntrustedError, ArtifactCorruptError) as exc:
+                if attempt >= attempts:
+                    raise
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
+                    f"published (or briefly unreachable) looks like from outside; retrying in "
+                    f"{delay}s"
+                )
+                time.sleep(delay)
+                elapsed += delay
+                delay *= 2
+            except SourceUnreachableError as exc:
+                if not exc.retryable:
+                    raise
+                if attempt >= attempts:
+                    raise _append_retry_note(
+                        exc, f" — giving up after {_attempt_word(attempt)}"
+                    ) from None
+                wait = exc.retry_after if exc.retry_after is not None else delay
+                if elapsed + wait > _retry_budget():
+                    raise _append_retry_note(
+                        exc,
+                        f" — the source asked to wait {wait:g}s before retrying, which would "
+                        f"exceed the {_retry_budget():g}s retry budget; giving up after "
+                        f"{_attempt_word(attempt)}",
+                    ) from None
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
+                    f"published (or briefly unreachable) looks like from outside; retrying in "
+                    f"{wait}s"
+                )
+                time.sleep(wait)
+                elapsed += wait
+                delay *= 2
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _download_with_retry(self, name: str, into: Path, expected_bytes: int) -> tuple[int, str]:
+        """`_Source.download`, retried through the same §3a budget and schedule
+        `_retry_publish_window` uses (chtypes#365): an HTTP 5xx/408/429 or a
+        connection-level failure reaching the host at all is exactly the
+        symptom that budget exists for, and a transient blip mid download
+        deserves the same treatment a blip reading the metadata gets. Every
+        retry is a fresh `_Source._open` and a fresh stream — never a resume.
+
+        A 404/410 (`ArtifactCorruptError`, raised by `_Source.download` when
+        `_Source._open` answers "not found" for a file the index just listed)
+        and a tarball hash or size mismatch (raised by this method's own
+        caller, after it returns) are never retried."""
+        attempts = RELEASE_LOAD_ATTEMPTS if self.source.kind == "http" else 1
+        delay = RELEASE_RETRY_DELAY
+        elapsed = 0.0
+        for attempt in range(1, attempts + 1):
+            try:
+                return self.source.download(name, into, expected_bytes)
+            except SourceUnreachableError as exc:
+                if not exc.retryable:
+                    raise
+                if attempt >= attempts:
+                    raise _append_retry_note(
+                        exc, f" — giving up after {_attempt_word(attempt)}"
+                    ) from None
+                wait = exc.retry_after if exc.retry_after is not None else delay
+                if elapsed + wait > _retry_budget():
+                    raise _append_retry_note(
+                        exc,
+                        f" — the source asked to wait {wait:g}s before retrying, which would "
+                        f"exceed the {_retry_budget():g}s retry budget; giving up after "
+                        f"{_attempt_word(attempt)}",
+                    ) from None
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — retrying the download of {name} "
+                    f"in {wait}s"
+                )
+                time.sleep(wait)
+                elapsed += wait
+                delay *= 2
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def release(self) -> Release:
+        """Steps 0–1, retried through a publish window (`_retry_publish_window`).
+        Read once per `Fetcher`: a second call returns the memoized result."""
+        if self._release is not None:
+            return self._release
+        self._release, _, _ = self._retry_publish_window(lambda: self._load_release())
+        return self._release
+
+    def _read_goldens_or_raise(self, want: str) -> bytes:
+        """One read of ``sdk-goldens.json``, verified against ``want`` (its row
+        in an already-verified SHA256SUMS). Raises `ArtifactCorruptError` for
+        either half of the new window symptom — a hash mismatch, or the sums
+        listing it while the source does not (yet) serve it — and
+        `SourceUnreachableError` for a plain I/O fault."""
+        src = str(self.source)
+        try:
+            blob = self.source.read(GOLDENS_ASSET)
+        except OSError as exc:
+            raise SourceUnreachableError(
+                f"chtypes: could not read {GOLDENS_ASSET} from {src}: {exc}"
+            ) from exc
+        if blob is None:
+            raise ArtifactCorruptError(
+                f"chtypes: SHA256SUMS lists {GOLDENS_ASSET} but {src} does not serve it "
+                f"— the release disagrees with itself; not installing it"
+            )
+        got = hashlib.sha256(blob).hexdigest()
+        if got != want:
+            raise ArtifactCorruptError(
+                f"chtypes: {GOLDENS_ASSET} hashes to {got} but the signed SHA256SUMS "
+                f"says {want} — not installing it"
+            )
+        return blob
+
+    def _load_release(self, *, want_goldens: bool = False) -> tuple[Release, bytes | None, bool]:
+        """One read of the release's three small files, plus — when
+        ``want_goldens`` — the served golden set, as part of the SAME read.
+        Never memoizes: the caller does that, and only on success."""
+        if self.offline:
+            raise SourceUnreachableError(
+                f"chtypes: offline — not reading the release at {self.source}"
+            )
+        src = str(self.source)
+        sums_raw = self.source.read("SHA256SUMS")
+        if sums_raw is None:
+            raise SourceUnreachableError(f"chtypes: no SHA256SUMS at {src} — not a chtypes release")
+        sig_raw = self.source.read("SHA256SUMS.sig")
+        signed_by: str | None
+        if self.allow_unsigned:
+            what = (
+                "no SHA256SUMS.sig is published"
+                if sig_raw is None
+                else "its signature was NOT checked"
+            )
+            message = (
+                f"chtypes: {ENV_ALLOW_UNSIGNED}=1 — installing from {src} WITHOUT verifying "
+                f"the release signature ({what}). Only for a source you already trust."
+            )
+            warnings.warn(message, UnsignedArtifactWarning, stacklevel=3)
+            self._say("WARNING: " + message)
+            signed_by = None
+        elif sig_raw is None:
+            raise ArtifactUntrustedError(
+                f"chtypes: the release at {src} is unsigned (no SHA256SUMS.sig). "
+                f"Not installing anything from it; {ENV_ALLOW_UNSIGNED}=1 overrides, loudly."
+            )
+        else:
+            signed_by = verify_sums_signature(sums_raw, sig_raw, self.keys, src)
+            self._say(f"SHA256SUMS signature verified (ed25519 key {signed_by})")
+        index_raw = self.source.read("index.json")
+        if index_raw is None:
+            raise SourceUnreachableError(f"chtypes: no index.json at {src} — not a chtypes release")
+        entries, tag, license_, license_url = _parse_index(index_raw, src)
+        sums = _parse_sums(sums_raw)
+        release = Release(
+            source=src,
+            tag=tag or self.tag,
+            entries=tuple(entries),
+            sums=sums,
+            signed_by=signed_by,
+            license=license_,
+            license_url=license_url,
+        )
+        # §3 step 2 for the whole release, not just the asset being installed.
+        # `install` still checks its own asset; this runs here so a disagreement
+        # is seen while `release` can still fix it by reading all three again.
+        for entry in release.entries:
+            listed = release.sums.get(entry.file)
+            if listed is not None and listed != entry.sha256:
+                raise ArtifactCorruptError(
+                    f"chtypes: index.json says {entry.file} is {entry.sha256} but SHA256SUMS "
+                    f"says {listed} — the release disagrees with itself; not installing it"
+                )
+        # The served golden set, read as part of the SAME set as the three
+        # objects above: it is a row in SHA256SUMS exactly like a tarball, so a
+        # stale pairing of it against the sums (or against nothing, if the sums
+        # row landed before the file itself is visible) is the same publish
+        # window, not a separate failure mode. A release that never lists it
+        # simply predates the served set — not a window symptom, so not raised.
+        goldens_blob: bytes | None = None
+        goldens_listed = False
+        if want_goldens:
+            want = sums.get(GOLDENS_ASSET)
+            goldens_listed = want is not None
+            if want is not None:
+                goldens_blob = self._read_goldens_or_raise(want)
+        if license_:
+            self._say(
+                f"artifacts are licensed under {license_}{' ' + license_url if license_url else ''}"
+                f" — LICENSE and NOTICE ship beside them"
+            )
+        return release, goldens_blob, goldens_listed
+
+    # --------------------------------------------------------------- ensure
+
+    def ensure(self, spelling: str) -> Path:
+        """One line or exact patch through the chain (R5/R6: still a hard
+        requirement — the registry falls back within a line, `ensure` never
+        does). A line installs FLAT at ``<registry>/<minor>``, demoting
+        whatever patch was there before into ``patches/<minor>/<its
+        version>/`` (SDK#284 "Layout rule"); any other exact patch installs
+        straight into ``patches/<minor>/<clickhouse_version>/`` — unless it is
+        already the flat slot's own patch, in which case that is what is
+        verified and returned."""
+        line, exact = parse_spelling(spelling)
+        if self.offline:
+            return self._ensure_offline(line, exact)
+        if self.frozen:
+            return self._ensure_frozen(spelling, line, exact)
+        entry = self.release().select(spelling, self.platform)
+        installed = self.install(entry, line_request=exact is None)
+        self.install_goldens()
+        return installed
+
+    def ensure_all(self) -> list[Path]:
+        """Every line the release publishes for the platform at this binding's
+        ABI revision, each installed FLAT (§6 F6 under ``--frozen``, where
+        this instead installs the newest patch the lock pins per line). A
+        line it has only at another revision is not installed, and is named
+        in one loud warning line; the rest go on."""
+        if self.frozen:
+            return self._ensure_all_frozen()
+        release = self.release()
+        offered = release.offered(self.platform)
+        rev = _fetch_abi_revision()
+        on_platform = [e for e in release.entries if e.platform == self.platform]
+        if not offered:
+            raise ArtifactUnpublishedError(
+                f"chtypes: {release.source} publishes nothing for {self.platform} at ABI "
+                f"revision {rev} (this SDK's): "
+                f"{_served(on_platform, f'rows for {self.platform}')}"
+            )
+        for message in _skipped_lines(on_platform, self.platform, rev):
+            self._warn(message)
+        out = [self.install(entry, line_request=True) for entry in offered]
+        self.install_goldens()
+        return out
+
+    def install_goldens(self) -> Path | None:
+        """Install the served golden set, if this release publishes one.
+
+        ``sdk-goldens.json`` is a release-level file like ``index.json`` and a
+        row in the signed ``SHA256SUMS`` like a tarball, so it verifies through
+        the same chain and lands beside the artifacts, where every binding's
+        golden test reads it offline.
+
+        The first look reuses `release`'s already-verified sums — cheap, and
+        right on the overwhelmingly common case that nothing is mid-publish.
+        Only a disagreement (a hash mismatch, or the sums listing it while the
+        source does not yet serve it) is retried, and a retry re-reads the
+        WHOLE consistent set fresh — SHA256SUMS, its signature, index.json and
+        the golden set together — never the golden set alone against the first
+        look's by-then possibly-stale sums.
+
+        Never raises: a release with no such row simply predates the served set,
+        a mismatch that never heals leaves the golden tests skipping loudly —
+        which is their job when there is nothing trustworthy to read — and a
+        set that cannot be written does the same. What it will not do is
+        install bytes the signed ``SHA256SUMS`` does not describe.
+        """
+        attempts = RELEASE_LOAD_ATTEMPTS if self.source.kind == "http" else 1
+        delay = RELEASE_RETRY_DELAY
+        elapsed = 0.0
+        sums = self.release().sums
+        listed = False
+        blob: bytes | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                if attempt == 1:
+                    want = sums.get(GOLDENS_ASSET)
+                    listed = want is not None
+                    blob = self._read_goldens_or_raise(want) if want is not None else None
+                else:
+                    # A retry: the earlier `sums` may itself be stale by now, so
+                    # this re-reads everything, not just the golden set.
+                    _, blob, listed = self._load_release(want_goldens=True)
+                break
+            except (ArtifactUntrustedError, ArtifactCorruptError) as exc:
+                if attempt >= attempts:
+                    self._say(f"{exc} — the golden tests will skip")
+                    return None
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
+                    f"published (or briefly unreachable) looks like from outside; retrying in "
+                    f"{delay}s"
+                )
+                time.sleep(delay)
+                elapsed += delay
+                delay *= 2
+            except SourceUnreachableError as exc:
+                if not exc.retryable or attempt >= attempts:
+                    self._say(f"{exc} — the golden tests will skip")
+                    return None
+                wait = exc.retry_after if exc.retry_after is not None else delay
+                if elapsed + wait > _retry_budget():
+                    self._say(
+                        f"{exc} — the source asked to wait {wait:g}s before retrying, which "
+                        f"would exceed the {_retry_budget():g}s retry budget; the golden tests "
+                        f"will skip"
+                    )
+                    return None
+                self._say(
+                    f"{exc} (attempt {attempt}/{attempts}) — this is what a release being "
+                    f"published (or briefly unreachable) looks like from outside; retrying in "
+                    f"{wait}s"
+                )
+                time.sleep(wait)
+                elapsed += wait
+                delay *= 2
+        if not listed:
+            self._say(
+                f"this release does not publish {GOLDENS_ASSET} "
+                f"(the SDKs' golden tests will skip until it does)"
+            )
+            return None
+        assert blob is not None  # listed and no exception implies bytes were read
+        try:
+            self.dest.mkdir(parents=True, exist_ok=True)
+            path = self.dest / GOLDENS_ASSET
+            path.write_bytes(blob)
+        except OSError as exc:
+            self._say(f"could not write {GOLDENS_ASSET}: {exc} — the golden tests will skip")
+            return None
+        self._say(f"golden set verified and installed: {path}")
+        return path
+
+    def _ensure_offline(self, line: str, exact: str | None) -> Path:
+        """The contract is unchanged by SDK#284 (§6 "--offline --frozen"): no
+        source is ever read, and the lock is never consulted. A line is
+        satisfied by the newest installed patch of the line in this
+        destination (flat or `patches/`); an exact patch by that patch,
+        matched under Decision 7 (`_patch_matches`) — never a fallback, a
+        fetch is always a hard requirement (R5)."""
+        candidates = list(_iter_patch_dirs(self.dest, line))
+        if exact is None:
+            if not candidates:
+                raise SourceUnreachableError(
+                    f"chtypes: offline — ClickHouse {line} ({self.platform}) is not installed "
+                    f"in {self.dest} and nothing may be fetched from {self.source}"
+                )
+            _version, install, _flat = max(candidates, key=lambda c: _version_key(c[0]))
+        else:
+            matches = [c for c in candidates if _patch_matches(exact, c[0])]
+            if not matches:
+                raise SourceUnreachableError(
+                    f"chtypes: offline — ClickHouse {exact} ({self.platform}) is not installed "
+                    f"in {self.dest} and nothing may be fetched from {self.source}"
+                )
+            _version, install, _flat = matches[0]
+        self._verify_in_place(install, expected_sha=None)
+        self._say(f"installed (offline: verified against its own manifest): {install}")
+        return install
+
+    def install(self, entry: ReleaseEntry, *, line_request: bool) -> Path:
+        """Steps 2–4 for one release entry, plus the lock and the atomic move.
+
+        ``line_request`` decides the TARGET (SDK#284 "Layout rule"), never the
+        pin: a line fetch targets the flat ``<minor>/`` slot, demoting
+        whatever patch sat there before into ``patches/<minor>/<its
+        version>/`` — atomically, same filesystem, before the incoming patch
+        takes the flat slot. An exact-patch fetch targets
+        ``patches/<minor>/<clickhouse_version>/``, unless that exact patch is
+        already what the flat slot holds, in which case the flat slot IS the
+        target (no duplicate copy). Either way the LOCK key is always the
+        exact patch (`entry.clickhouse_version`), never the line: schema 2 is
+        keyed per patch (§6).
+
+        Under ``--frozen`` the pin has already been picked, checked and
+        resolved to this exact ``entry`` by `_ensure_frozen` /
+        `_ensure_all_frozen` before this is ever called, so nothing here
+        enforces a pin — it only records one when NOT frozen (`_record_pin`).
+        """
+        release = self.release()
+        minor = entry.minor
+        flat = self.dest / minor
+        self._say(
+            f"{entry.file}  ({entry.bytes} bytes, ClickHouse {entry.clickhouse_version}, "
+            f"library {entry.library})"
+        )
+
+        pin_key = f"{self.platform}/{entry.clickhouse_version}"
+        flat_manifest = read_manifest(flat)
+        flat_matches = (
+            flat_manifest is not None
+            and flat_manifest.clickhouse_version == entry.clickhouse_version
+        )
+        patches_target = self.dest / PATCHES_DIRNAME / minor / entry.clickhouse_version
+        target = flat if (line_request or flat_matches) else patches_target
+
+        # Idempotence: installed and hashing what the release says is a no-op.
+        if not self.force and self._installed_matches(target, entry):
+            self._say(f"already installed and verified: {target / entry.library}")
+            self._record_pin(pin_key, entry)
+            return target
+
+        # §3 step 2: the signed SHA256SUMS must agree with index.json.
+        sums_sha = release.sums.get(entry.file)
+        if sums_sha is None:
+            raise ArtifactCorruptError(
+                f"chtypes: SHA256SUMS at {release.source} has no line for {entry.file} — "
+                f"the release disagrees with itself; not installing it"
+            )
+        if sums_sha != entry.sha256:
+            raise ArtifactCorruptError(
+                f"chtypes: index.json says {entry.file} is {entry.sha256} but SHA256SUMS says "
+                f"{sums_sha} — the release disagrees with itself; not installing it"
+            )
+
+        self.dest.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix=f".{minor}.incoming.", dir=self.dest))
+        try:
+            # §3 step 3: the tarball is hashed BEFORE it is unpacked.
+            tarball = work / entry.file
+            self._say(f"downloading {entry.file} from {release.source}")
+            got_bytes, got_sha = self._download_with_retry(entry.file, tarball, entry.bytes)
+            if got_bytes != entry.bytes:
+                raise ArtifactCorruptError(
+                    f"chtypes: {entry.file} is {got_bytes} bytes, the release says {entry.bytes} "
+                    f"— NOT unpacking it"
+                )
+            if got_sha != entry.sha256:
+                raise ArtifactCorruptError(
+                    f"chtypes: {entry.file} FAILED its sha256: got {got_sha}, want {entry.sha256} "
+                    f"— NOT unpacking it"
+                )
+            self._say(f"sha256 verified before unpacking: {got_sha}")
+
+            # §3 step 4: the manifest inside names the library and its sha256.
+            stage = work / "stage"
+            stage.mkdir()
+            _extract(tarball, stage, entry.file)
+            tarball.unlink()
+            manifest = read_manifest(stage)
+            if manifest is None:
+                raise ArtifactCorruptError(
+                    f"chtypes: {entry.file} contains no usable manifest.json at its root"
+                )
+            claims = (
+                manifest.library,
+                manifest.clickhouse_version,
+                manifest.clickhouse_minor or minor_of(manifest.clickhouse_version),
+                manifest.library_sha256.lower(),
+            )
+            expect = (entry.library, entry.clickhouse_version, minor, entry.library_sha256)
+            if claims != expect:
+                raise ArtifactCorruptError(
+                    f"chtypes: manifest.json inside {entry.file} disagrees with index.json "
+                    f"({'/'.join(claims)} vs {'/'.join(expect)}) — the index was built from a "
+                    f"different artifact; not installing it"
+                )
+            if not (stage / manifest.library).is_file():
+                raise ArtifactCorruptError(
+                    f"chtypes: {entry.file} names library {manifest.library} but does not "
+                    f"contain it"
+                )
+            self._verify_in_place(stage, expected_sha=entry.library_sha256)
+
+            # Demotion (SDK#284): a LINE fetch that is about to change which
+            # patch sits in the flat slot moves the outgoing install aside
+            # FIRST, atomically and on the same filesystem, into
+            # patches/<minor>/<its version>/ — never deleted. Only when the
+            # flat slot currently holds a DIFFERENT patch than the one about
+            # to land: the same-version repair/--force path below still
+            # replaces the flat slot in place, exactly as before this change.
+            demoted: tuple[Path, Path] | None = None
+            if (
+                target == flat
+                and flat_manifest is not None
+                and flat_manifest.clickhouse_version
+                and flat_manifest.clickhouse_version != entry.clickhouse_version
+            ):
+                demote_to = self.dest / PATCHES_DIRNAME / minor / flat_manifest.clickhouse_version
+                demote_to.parent.mkdir(parents=True, exist_ok=True)
+                if demote_to.exists() or demote_to.is_symlink():
+                    shutil.rmtree(demote_to, ignore_errors=True)
+                os.rename(flat, demote_to)
+                demoted = (flat, demote_to)
+                self._say(
+                    f"demoted ClickHouse {flat_manifest.clickhouse_version} to {demote_to} "
+                    f"— superseded by {entry.clickhouse_version} as {minor}'s installed patch"
+                )
+
+            # Atomic: the fully verified sibling is renamed into place; the
+            # previous install, if any, is moved aside first and removed
+            # after. (After a demotion, `target` — the flat slot — is empty,
+            # so there is nothing left here to move aside.)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            replaced: Path | None = None
+            if target.exists() or target.is_symlink():
+                replaced = self.dest / f".{minor}.replaced.{os.getpid()}.{work.name[-6:]}"
+                os.rename(target, replaced)
+            try:
+                os.rename(stage, target)
+            except OSError:
+                if replaced is not None:
+                    os.rename(replaced, target)
+                if demoted is not None:
+                    was, now = demoted
+                    os.rename(now, was)
+                raise
+            if replaced is not None:
+                shutil.rmtree(replaced, ignore_errors=True)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+        # The installed library is hashed again, in place — everything before
+        # this proved the bytes were right somewhere else.
+        self._verify_in_place(target, expected_sha=entry.library_sha256)
+        self._say(f"installed and verified: {target}")
+        self._say(f"    {entry.library} sha256 {entry.library_sha256}")
+        self._say(
+            f"    ClickHouse {entry.clickhouse_version} — Registry({str(self.dest)!r}) "
+            f"now serves {minor}"
+        )
+        self._record_pin(pin_key, entry)
+        return target
+
+    def _record_pin(self, key: str, entry: ReleaseEntry) -> None:
+        if self.lock is None or self.frozen:
+            return
+        pins = self._lock_pins()
+        rev = _fetch_abi_revision()
+        want: dict[str, Any] = {"file": entry.file, "sha256": entry.sha256, "abi_revision": rev}
+        if pins.get(key) == want:
+            return
+        pins[key] = want
+        write_lock(self.lock, pins)
+        self._say(f"pinned {key} -> {entry.file} (ABI revision {rev}) in {self.lock}")
+
+    def _installed_matches(self, install: Path, entry: ReleaseEntry) -> bool:
+        manifest = read_manifest(install)
+        if manifest is None or manifest.library != entry.library:
+            return False
+        path = install / manifest.library
+        if not path.is_file():
+            return False
+        have = _sha256_file(path)
+        if have == entry.library_sha256:
+            return True
+        self._say(
+            f"{path} is present but hashes {have} (the release says {entry.library_sha256})"
+            f" — replacing"
+        )
+        return False
+
+    @staticmethod
+    def _verify_in_place(directory: Path, *, expected_sha: str | None) -> None:
+        try:
+            verify_library(directory)
+        except Exception as exc:  # RegistryError; the message names the mismatch
+            raise ArtifactCorruptError(str(exc)) from None
+        if expected_sha is not None:
+            manifest = read_manifest(directory)
+            assert manifest is not None
+            if manifest.library_sha256.lower() != expected_sha:
+                raise ArtifactCorruptError(
+                    f"chtypes: {directory / manifest.library} hashes {manifest.library_sha256}, "
+                    f"the release says {expected_sha}"
+                )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _extract(tarball: Path, into: Path, name: str) -> None:
+    """Unpack a verified tarball with no path traversal, no links, no devices."""
+    try:
+        with tarfile.open(tarball, "r:gz") as tar:
+            members = []
+            for member in tar:
+                path = PurePosixPath(member.name)
+                if path.is_absolute() or ".." in path.parts or "\\" in member.name:
+                    raise ArtifactCorruptError(
+                        f"chtypes: {name} contains an unsafe path {member.name!r}; not unpacking it"
+                    )
+                if member.isdir() or member.isfile():
+                    members.append(member)
+                    continue
+                raise ArtifactCorruptError(
+                    f"chtypes: {name} contains {member.name!r}, which is not a regular file "
+                    f"(links and devices are refused); not unpacking it"
+                )
+            if hasattr(tarfile, "data_filter"):
+                tar.extractall(into, members=members, filter="data")
+            else:  # pragma: no cover - Python < 3.11.4; members were vetted above
+                tar.extractall(into, members=members)
+    except (tarfile.TarError, EOFError, OSError) as exc:
+        raise ArtifactCorruptError(f"chtypes: {name} is not a readable tar.gz: {exc}") from exc
+
+
+# ------------------------------------------------------------- the two calls
+
+
+def ensure(
+    line: str,
+    *,
+    dest: str | os.PathLike[str] | None = None,
+    platform: str | None = None,
+    url: str | None = None,
+    tag: str | None = None,
+    lock: str | os.PathLike[str] | None = None,
+    frozen: bool = False,
+    force: bool = False,
+    offline: bool = False,
+    trusted_keys: Iterable[str] | None = None,
+    allow_unsigned: bool | None = None,
+    progress: Progress | None = None,
+) -> Path:
+    """Make sure one ClickHouse line is installed and verified; return its directory.
+
+    ``line`` is a minor line (``"25.8"``, resolving to the patch the release
+    publishes) or an exact patch (``"25.8.28.1-lts"``, a hard requirement).
+    Idempotent: installed-and-verified is a no-op. Options mirror the CLI
+    (docs/guides/fetch.md §6): ``dest`` (else ``$CHTYPES_REGISTRY``, else the
+    per-user cache), ``platform`` (this host's), ``url`` or ``tag``, ``lock``
+    with ``frozen``, ``force``, ``offline``; ``trusted_keys`` and
+    ``allow_unsigned`` default to the environment (§4). ``progress`` receives
+    human-readable lines (the CLI writes them to stderr); the
+    ``chtypes.fetch`` logger gets the same at INFO.
+
+    Raises the `ArtifactError` family: `ArtifactUntrustedError`,
+    `ArtifactCorruptError`, `ArtifactPinnedError`, `ArtifactUnpublishedError`,
+    `SourceUnreachableError` — each with `.code`; `ValueError` for a bad
+    option.
+    """
+    return Fetcher(
+        dest=dest,
+        platform=platform,
+        url=url,
+        tag=tag,
+        lock=lock,
+        frozen=frozen,
+        force=force,
+        offline=offline,
+        trusted_keys=trusted_keys,
+        allow_unsigned=allow_unsigned,
+        progress=progress,
+    ).ensure(line)
+
+
+def fetch_lines(
+    lines: Sequence[str] = (),
+    *,
+    all_lines: bool = False,
+    dest: str | os.PathLike[str] | None = None,
+    platform: str | None = None,
+    url: str | None = None,
+    tag: str | None = None,
+    lock: str | os.PathLike[str] | None = None,
+    frozen: bool = False,
+    force: bool = False,
+    offline: bool = False,
+    trusted_keys: Iterable[str] | None = None,
+    allow_unsigned: bool | None = None,
+    progress: Progress | None = None,
+) -> list[Path]:
+    """`ensure` for several lines, or with ``all_lines`` every line the release
+    publishes for the platform; the release is read once. Returns the
+    installed directories in the order installed."""
+    if all_lines and lines:
+        raise ValueError(
+            f"chtypes: --all installs every published line; drop the version argument "
+            f"({', '.join(lines)})"
+        )
+    if not all_lines and not lines:
+        raise ValueError("chtypes: a ClickHouse version is required (or --all)")
+    fetcher = Fetcher(
+        dest=dest,
+        platform=platform,
+        url=url,
+        tag=tag,
+        lock=lock,
+        frozen=frozen,
+        force=force,
+        offline=offline,
+        trusted_keys=trusted_keys,
+        allow_unsigned=allow_unsigned,
+        progress=progress,
+    )
+    if all_lines:
+        return fetcher.ensure_all()
+    return [fetcher.ensure(line) for line in lines]

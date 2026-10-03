@@ -1,0 +1,189 @@
+"""The artifact's own description of itself, and the paths every SDK agrees on.
+
+`manifest.json` (docs/reference/artifact.md) is the loader's single source of truth for
+the shared library's file name and the only integrity check that means
+anything. Shared by the loader (`registry.py`) and the fetcher (`fetch.py`),
+which is why it lives apart from both.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import platform as _platform
+from dataclasses import dataclass, fields
+from pathlib import Path
+
+from ._native import ABI_REVISION
+from .errors import RegistryError
+
+__all__ = [
+    "Manifest",
+    "cache_registry_dir",
+    "host_platform",
+    "minor_of",
+    "read_manifest",
+    "verify_library",
+]
+
+_ARCH = {"x86_64": "amd64", "AMD64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+
+
+def host_platform() -> str:
+    """This host's platform key, spelled the artifact way: ``darwin-arm64``,
+    ``linux-amd64`` (``<os>`` lowercased, ``aarch64 -> arm64``, ``x86_64 -> amd64``)."""
+    machine = _platform.machine()
+    return f"{_platform.system().lower()}-{_ARCH.get(machine, machine)}"
+
+
+def cache_registry_dir(platform: str | None = None) -> str:
+    """The per-user artifact cache for a platform — ``${XDG_CACHE_HOME:-~/.cache}/
+    chtypes/artifacts/abi<R>/<os>-<arch>``, R this binding's `ABI_REVISION`, this
+    host's platform by default. Where fetch installs, and slot 3 of the registry
+    search path (docs/guides/fetch.md §1); keyed by revision so two SDK versions
+    at different revisions never share it. A path, not a promise: it need not
+    exist yet."""
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(
+        base, "chtypes", "artifacts", f"abi{ABI_REVISION}", platform or host_platform()
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Manifest:
+    """`manifest.json`, of which only `library` is load-bearing for the loader.
+
+    Unknown fields are ignored rather than rejected, and no field is required
+    beyond `library`: the file is allowed to grow.
+    """
+
+    library: str
+    clickhouse_version: str = ""
+    clickhouse_minor: str = ""
+    clickhouse_commit: str = ""
+    os: str = ""
+    arch: str = ""
+    library_bytes: int = 0
+    library_sha256: str = ""
+    #: ``None`` when the field is ABSENT (a manifest predating it, or one that
+    #: simply omits it) — distinct from an empty string, which is a PRESENT,
+    #: valid empty refuse-list. `_resolve_unsafe_families` below is the only
+    #: thing that tells the two apart.
+    unsafe_families: str | None = None
+
+
+def read_manifest(version_dir: str | os.PathLike[str]) -> Manifest | None:
+    """Read one version directory's manifest, or None if there is not a usable one.
+
+    A registry may legitimately contain scratch directories, and a `.DS_Store` is
+    not a version: an unreadable or unparseable manifest means "skip this
+    directory", never an error.
+    """
+    path = Path(version_dir) / "manifest.json"
+    try:
+        doc = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict) or not isinstance(doc.get("library"), str):
+        return None
+    known = {f.name for f in fields(Manifest)}
+    try:
+        return Manifest(**{k: v for k, v in doc.items() if k in known})
+    except TypeError:  # pragma: no cover - a field of the wrong type
+        return None
+
+
+def _resolve_unsafe_families(version_dir: str | os.PathLike[str], manifest: Manifest) -> str:
+    """The refuse-list to pass to ``chs_init`` (docs/reference/artifact.md step 9):
+    ``unsafe_families.txt`` beside the library when that file is present, even
+    empty; otherwise the manifest's own ``unsafe_families`` field when IT is
+    present, even empty. Neither present is refused rather than falling back
+    to an empty guard — ``chs_init`` must never run with an empty refuse-list
+    by default.
+    """
+    try:
+        return (Path(version_dir) / "unsafe_families.txt").read_text().strip()
+    except OSError:
+        pass
+    if manifest.unsafe_families is not None:
+        return manifest.unsafe_families.strip()
+    raise RegistryError(
+        f"chtypes: {version_dir} has neither unsafe_families.txt nor manifest.json's "
+        "unsafe_families field; refusing to load without an explicit refuse-list"
+    )
+
+
+def check_library_bytes(
+    version_dir: str | os.PathLike[str], manifest: Manifest | None = None
+) -> None:
+    """Compare the shared library's on-disk size to the manifest's ``library_bytes``.
+
+    Unconditional on the load path, unlike ``verify_library``'s hash check
+    below (issue #82): nearly free (one ``stat``, never a re-hash of the
+    library's contents), and it catches the commonest shape of a broken
+    artifact directory -- a truncated or partially-written library file.
+
+    A manifest with no ``library_bytes`` (0, its default for one that
+    predates the field) is not asked, so this is a no-op for one: a
+    directory with no size to compare against must never become a new
+    reason a load fails.
+    """
+    directory = Path(version_dir)
+    if manifest is None:
+        manifest = read_manifest(directory)
+        if manifest is None:
+            raise RegistryError(f"chtypes: no usable manifest.json in {directory}")
+    if not manifest.library_bytes:
+        return
+    path = directory / manifest.library
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise RegistryError(f"chtypes: {path}: {exc}") from exc
+    if size != manifest.library_bytes:
+        raise RegistryError(
+            f"chtypes: {path} is {size} bytes, manifest says {manifest.library_bytes}"
+        )
+
+
+def verify_library(version_dir: str | os.PathLike[str]) -> None:
+    """Re-hash the shared library and compare it against the manifest.
+
+    The artifact carries its own checksum, so this is neither optional nor
+    expensive for anything that arrived over a network: a move that reported
+    success and truncated a 232 MB library looks identical to one that worked.
+    The size check ahead of the hash, ``check_library_bytes``, ALSO runs
+    unconditionally on the load path outside of verification (issue #82);
+    calling it here too keeps this function's own behavior unchanged for a
+    caller who invokes it directly.
+    """
+    directory = Path(version_dir)
+    manifest = read_manifest(directory)
+    if manifest is None:
+        raise RegistryError(f"chtypes: no usable manifest.json in {directory}")
+    check_library_bytes(directory, manifest)
+    path = directory / manifest.library
+    if not manifest.library_sha256:
+        raise RegistryError(
+            f"chtypes: {path} cannot be verified: manifest carries no library_sha256"
+        )
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    # Case-insensitive: a hex digest is the same digest in either case, and Go
+    # and Rust already lower-case before comparing. Comparing raw here made an
+    # uppercase manifest digest pass in two bindings and fail in two.
+    if digest.hexdigest() != manifest.library_sha256.lower():
+        raise RegistryError(
+            f"chtypes: {path} sha256 {digest.hexdigest()} != manifest {manifest.library_sha256}"
+        )
+
+
+def minor_of(version: str) -> str:
+    """The first two dot-separated components: "25.8.28.1-lts" -> "25.8"."""
+    parts = version.split(".", 2)
+    if len(parts) < 2:
+        return version
+    return f"{parts[0]}.{parts[1]}"
