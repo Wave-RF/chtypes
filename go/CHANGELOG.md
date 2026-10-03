@@ -8,11 +8,16 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Changed
 
+- **A `Value`'s optional raw bytes are a `*string`**, not `[]byte` (`Value.Value`, `Computed.Value`, `EngineCell.Value`): the byte type of `bindings-v1.md` section 3, nil where the document carries none.
 - **The v1 public API replaces v0.** `Setup`, `NewRegistry` (with `WithFetchOptions`, `WithAutoFetch`, `WithPreload`), `Registry.For`, `Library.CompileTable` and the `Schema`, `Filter` and `Block` objects, over the generated ABI layer and the v1 fetch layer. Results are 1:1 decodes of the library's documents, names and renderings are bytes, and the per-call zone is the `WithSessionTimezone` option. `chtypes.OpenLinked()` replaces the package-level linked API.
 
 ### Removed
 
-- Everything v0 that existed only because of binding-side logic or the v0 loader: the transform classifier, the discovery reconstruction, the hand FFI tables and presence probes, the error-table parser, the denormal repair, the v0 registry and fetch modules, `SetDefaultTimezone`, `ErrInitConflict`, `ABIRevision`, and the `cmd/chtypes` command; its v1 replacement is the switch's work.
+- Everything v0 that existed only because of binding-side logic or the v0 loader: the transform classifier, the discovery reconstruction, the hand FFI tables and presence probes, the error-table parser, the denormal repair, the v0 registry and fetch modules, `SetDefaultTimezone`, `ErrInitConflict`, `ABIRevision`, and `ExitCode` (the exit status is the command's, from the generated table).
+
+### Added
+
+- **`go/cmd/chtypes`, the v1 artifact tool** over the fetch layer: `fetch <spelling>... | --all` (with `--platform`, `--lock`, `--frozen`, `--offline`), `verify`, `list` and `where`. Usage errors exit 2 and a failure exits with the status of its error code in `spec/fetch-v1/constants.json`.
 
 ## [0.5.2] — 2026-10-01
 

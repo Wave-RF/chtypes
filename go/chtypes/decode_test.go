@@ -74,7 +74,7 @@ func TestDecodeRow(t *testing.T) {
 	if r.Columns[2].IsStored {
 		t.Errorf("ephemeral_input read as stored")
 	}
-	if v := r.Columns[3]; string(v.Value) != "\xff\x00\x80" || v.Text != "\xff\x00\x80" {
+	if v := r.Columns[3]; v.Value == nil || *v.Value != "\xff\x00\x80" || v.Text != "\xff\x00\x80" {
 		t.Errorf("a String value carries its raw bytes beside the rendering: %+v", v)
 	}
 	if r.Columns[0].Value != nil {
@@ -187,7 +187,7 @@ func TestDecodeBatch(t *testing.T) {
 	if len(b.EngineRows) != 1 || len(b.EngineRows[0]) != 3 {
 		t.Fatalf("EngineRows = %+v: each engine row is a list of cells", b.EngineRows)
 	}
-	if c := b.EngineRows[0][1]; c.Column != "\xff" || c.Text != "\xff\x00" || string(c.Value) != "\xff\x00" || c.Null {
+	if c := b.EngineRows[0][1]; c.Column != "\xff" || c.Text != "\xff\x00" || c.Value == nil || *c.Value != "\xff\x00" || c.Null {
 		t.Errorf("cell 1 = %+v", c)
 	}
 	if c := b.EngineRows[0][2]; !c.Null || c.Value != nil {

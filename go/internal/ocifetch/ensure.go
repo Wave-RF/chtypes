@@ -354,17 +354,33 @@ func resolveOffline(ro resolvedOptions, req Request, platform Platform) (*Resolv
 // ensureOnline is Ensure's normal (non-frozen, non-offline) path: resolve
 // the index, select the platform manifest, verify trust, unpack, install.
 func (s *session) ensureOnline(ctx context.Context, ro resolvedOptions, l *layout, req Request, platform Platform) (*Resolved, error) {
-	idx, indexDigest, base, err := s.resolveIndex(ctx, ro.bases, req.Spelling)
+	resolved, idx, err := s.resolveAndInstall(ctx, ro, l, req, platform)
 	if err != nil {
 		return nil, err
+	}
+	// The lock is written on every successful resolution, including one that
+	// found the build already installed: `fetch --lock` records what the
+	// registry resolves the request to, not whether this call downloaded it.
+	if ro.lockWrite {
+		if err := s.writeLockForRequest(ctx, ro, l, idx, req, platform, resolved); err != nil {
+			return nil, err
+		}
+	}
+	return resolved, nil
+}
+
+func (s *session) resolveAndInstall(ctx context.Context, ro resolvedOptions, l *layout, req Request, platform Platform) (*Resolved, *ImageIndex, error) {
+	idx, indexDigest, base, err := s.resolveIndex(ctx, ro.bases, req.Spelling)
+	if err != nil {
+		return nil, nil, err
 	}
 	desc, err := selectPlatformDescriptor(idx, platform.Key)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	manifest, manifestBody, base2, err := s.fetchManifestByDigest(ctx, ro.bases, *desc)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if base2 != "" {
 		base = base2
@@ -378,17 +394,17 @@ func (s *session) ensureOnline(ctx context.Context, ro resolvedOptions, l *layou
 	// existing-install-noop case, since nothing past this point runs.
 	if rec, dir, ok := readInstalledRecord(l, manifestDigest); ok {
 		if err := l.writeBlob(desc.Digest, manifestBody); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := l.addIndexEntry(*desc, s.hookBeforeIndexRename); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return recordToResolved(rec, dir, platform.Key, req.Spelling, indexDigest, true, base, nil), nil
+		return recordToResolved(rec, dir, platform.Key, req.Spelling, indexDigest, true, base, nil), idx, nil
 	}
 
 	stmt, warnings, err := s.verifyManifestTrust(ctx, ro.bases, manifestDigest, layerDesc.Digest, platform, req.Spelling, ro.trustedKeys, ro.allowUnsigned)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Monotonicity (§6, "monotonic-warning"): "a HIGHER build is already
@@ -411,34 +427,29 @@ func (s *session) ensureOnline(ctx context.Context, ro resolvedOptions, l *layou
 			// blob and no index entry is written for it — only the
 			// already-installed (newer) entry's own index entry, which is
 			// already there, stays.
-			return recordToResolved(&existing.rec, existing.dir, platform.Key, req.Spelling, indexDigest, true, base, warnings), nil
+			return recordToResolved(&existing.rec, existing.dir, platform.Key, req.Spelling, indexDigest, true, base, warnings), idx, nil
 		}
 	}
 
 	layerResult, layerBase, err := s.fetchAcrossBases(ctx, ro.bases, "blobs/"+string(layerDesc.Digest), notFoundRetryOnLast, requestOptions{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	base = layerBase
 	if verr := verifyDescriptor(layerResult.body, layerDesc); verr != nil {
-		return nil, newError(CodeArtifactCorrupt, req.Spelling, platform.Key, layerResult.url, verr, "layer: %v", verr)
+		return nil, nil, newError(CodeArtifactCorrupt, req.Spelling, platform.Key, layerResult.url, verr, "layer: %v", verr)
 	}
 
 	libraryRelPath, unsignedConfig, lerr := s.libraryPathFor(ctx, ro.bases, manifest, stmt)
 	if lerr != nil {
-		return nil, lerr
+		return nil, nil, lerr
 	}
 	resolved, err := s.installManifest(l, req, platform, manifestDigest, *desc, manifestBody, layerDesc, layerResult.body, stmt, libraryRelPath, unsignedConfig, indexDigest, base, warnings)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if ro.lockWrite {
-		if err := s.writeLockForRequest(ctx, ro, l, idx, req, platform, resolved); err != nil {
-			return nil, err
-		}
-	}
-	return resolved, nil
+	return resolved, idx, nil
 }
 
 // installManifest unpacks layerBody and installs it under l, returning the
