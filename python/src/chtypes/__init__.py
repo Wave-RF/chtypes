@@ -1,41 +1,38 @@
-"""chtypes — ClickHouse's own type system, per version, from Python.
+"""chtypes: ClickHouse's own type system, per version, from Python.
 
 One question, exactly: *if this row were inserted into this ClickHouse table on
 this ClickHouse version, what would happen?* The answer comes from ClickHouse's
-real C++ machinery (`DataTypeFactory`, `ISerialization`, `ReadHelpers`,
-`evaluateMissingDefaults`, the TTL algorithms, `MergeTreeDataWriter::mergeBlock`)
-vendored per release into a shared library behind the frozen `chs_*` C ABI.
-Nothing here reimplements a coercion rule, which is why the answers are exact by
-construction rather than approximately right.
+real C++ machinery, vendored per release into a shared library behind the frozen
+C ABI. Nothing here reimplements a coercion rule, which is why the answers are
+exact by construction rather than approximately right.
 
+    import chtypes
     from chtypes import Format, Registry
 
-    registry = Registry()                    # the search path: $CHTYPES_REGISTRY, the cache, …
-    library = registry.for_version("25.8")   # a minor line or an exact patch
-    with library.compile_ddl("ts DateTime, seq UInt8") as schema:
+    chtypes.setup(timezone="UTC")                # once, before the first open
+    registry = Registry(autofetch=True)
+    library = registry.for_version("26.8")       # a release line or an exact version
+    ddl = b"CREATE TABLE t (ts DateTime, seq UInt8) ENGINE = Memory"
+    with library.compile_table(ddl) as schema:
         batch = schema.rows(Format.JSON_EACH_ROW, b'{"ts":"2026-01-15 10:30:00","seq":256}\\n')
 
-    batch.outcome                 # Outcome.ACCEPTED — the insert would succeed
-    batch.rows[0].value("seq")    # Value(text='0', ...) — and store 0
-    batch.transformed             # Transform(column='seq', input='256', stored='0',
-                                  #           reason='overflow_wrap', row=0)
+    batch.outcome        # Outcome.ACCEPTED: the insert would succeed
+    batch.transformed    # the changes ClickHouse makes and reports as success
 
-Three things a caller must not skip, each of which cost this repository
-something to learn:
+The specification is docs/reference/bindings-v1.md. Names, SQL, messages and
+renderings come back as `bytes`: a name that is not valid UTF-8 round-trips
+exactly, and nothing here decodes one for you.
+
+Three things a caller must not skip:
 
 * **`transformed` is the product.** ClickHouse returns success for every one of
-  those changes. Reading `outcome` alone tells a tenant their row was accepted
-  and nothing about the value the table will hold.
-* **A row accepted per row may not be stored per batch.** `BatchResult.transformed`
-  folds in the storage layer's verdicts (`ttl_expired`, `ttl_column_expired`),
-  and `engine_rows` — when present — is the stored truth, not `rows`.
+  those changes. Reading `outcome` alone says a row was accepted and nothing
+  about the value the table will hold.
 * **`Outcome.UNSUPPORTED` is not a rejection.** It means a real server might well
-  have accepted this and this build declines to guess. Treating it as either a
-  rejection or an acceptance manufactures a wrong answer the product never gave.
-
-The specification in `docs/reference/` is normative; `go/chtypes` (Go) is the reference
-implementation. Where this binding and that package disagree, the package is
-right.
+  have accepted this and this build declines to answer.
+* **Insert the library's output, not your input**, when a row carries a
+  `Source.DEFAULT_GENERATED` column: ask `rows` for an `export` and insert its
+  `payload`.
 """
 
 from __future__ import annotations
@@ -43,180 +40,147 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError as _PackageNotFound
 from importlib.metadata import version as _package_version
 
-from ._error_codes import ErrorCodeEntry, ErrorCodeTable
-from ._native import ABI_REVISION
-from ._rawjson import RawNumber, quote_bare_denormals
-from .discover import (
-    QUERY_CHANGED_SETTINGS,
-    QUERY_SERVER_VERSION,
-    QUERY_TABLE_COLUMNS,
-    DiscoveredColumn,
-    ServerProfile,
-    parse_changed_settings_result,
-    parse_columns_result,
-    parse_version_result,
+from ._abi1._vocab import (
+    EXPORT_NONE,
+    DefaultKind,
+    DocFlags,
+    FilterOutcome,
+    Format,
+    Outcome,
+    Reason,
+    Source,
+    Status,
+    Verdict,
 )
+from ._input import BytesIn, Settings
+from ._setup import setup
 from .errors import (
     CODE_ARTIFACT_CORRUPT,
+    CODE_ARTIFACT_INCOMPATIBLE,
     CODE_ARTIFACT_MISSING,
     CODE_ARTIFACT_PINNED,
     CODE_ARTIFACT_UNPUBLISHED,
     CODE_ARTIFACT_UNTRUSTED,
+    CODE_SOURCE_FORBIDDEN,
+    CODE_SOURCE_INCOMPATIBLE,
+    CODE_SOURCE_UNAUTHORIZED,
     CODE_SOURCE_UNREACHABLE,
-    CODE_UNSUPPORTED,
-    FETCH_COMMAND,
     ArtifactCorruptError,
     ArtifactError,
+    ArtifactIncompatibleError,
     ArtifactMissingError,
     ArtifactPinnedError,
     ArtifactUnpublishedError,
     ArtifactUntrustedError,
+    CallError,
     ChtypesError,
-    InitConflictError,
-    PatchFallbackWarning,
-    RegistryError,
+    InternalError,
     SchemaError,
+    SourceForbiddenError,
+    SourceIncompatibleError,
+    SourceUnauthorizedError,
     SourceUnreachableError,
-    UnsignedArtifactWarning,
     UnsupportedError,
+    UsageError,
 )
-from .fetch import (
-    ENV_AUTOFETCH,
-    RELEASE_KEY_ID,
-    RELEASE_PUBLIC_KEY,
-    ensure,
-    fetch_destination,
-    fetch_lines,
-    registry_search_path,
-)
-from .registry import (
-    ENV_REGISTRY,
-    Block,
-    Filter,
-    Library,
-    Manifest,
-    Registry,
-    Resolution,
-    Schema,
-    default_registry_dir,
-    host_platform,
-    minor_of,
-    read_manifest,
-    verify_library,
-)
+from .library import Block, Filter, Library, Schema, open_unverified
+from .registry import FetchOptions, Registry, Resolved, TrustedKey
 from .results import (
-    COMPILE_DECLARED,
-    DOC_ALL,
-    DOC_DEFAULTS,
-    DOC_TRANSFORMS,
-    DOC_VALUES,
-    EXPORT_NONE,
-    LOSSLESS_REASONS,
     BatchResult,
+    BuildInfo,
+    Capabilities,
     Column,
     Computed,
-    DefaultKind,
-    FilterOutcome,
+    DiscoveredColumn,
+    Discovery,
+    EngineCell,
+    ErrorCodeEntry,
+    ErrorCodeTable,
     FilterResult,
     FilterRowError,
-    Format,
-    Outcome,
-    Reason,
+    Framing,
+    Header,
     RowResult,
-    Source,
+    SchemaDescription,
     Span,
-    Substitution,
     Transform,
     Value,
-    Verdict,
 )
 
 __all__ = [
-    "ABI_REVISION",
     "CODE_ARTIFACT_CORRUPT",
+    "CODE_ARTIFACT_INCOMPATIBLE",
     "CODE_ARTIFACT_MISSING",
     "CODE_ARTIFACT_PINNED",
     "CODE_ARTIFACT_UNPUBLISHED",
     "CODE_ARTIFACT_UNTRUSTED",
+    "CODE_SOURCE_FORBIDDEN",
+    "CODE_SOURCE_INCOMPATIBLE",
+    "CODE_SOURCE_UNAUTHORIZED",
     "CODE_SOURCE_UNREACHABLE",
-    "CODE_UNSUPPORTED",
-    "COMPILE_DECLARED",
-    "DOC_ALL",
-    "DOC_DEFAULTS",
-    "DOC_TRANSFORMS",
-    "DOC_VALUES",
-    "ENV_AUTOFETCH",
-    "ENV_REGISTRY",
-    "FETCH_COMMAND",
-    "default_registry_dir",
     "EXPORT_NONE",
-    "RELEASE_KEY_ID",
-    "RELEASE_PUBLIC_KEY",
-    "LOSSLESS_REASONS",
-    "QUERY_CHANGED_SETTINGS",
-    "QUERY_SERVER_VERSION",
-    "QUERY_TABLE_COLUMNS",
     "ArtifactCorruptError",
     "ArtifactError",
+    "ArtifactIncompatibleError",
     "ArtifactMissingError",
     "ArtifactPinnedError",
     "ArtifactUnpublishedError",
     "ArtifactUntrustedError",
     "BatchResult",
     "Block",
+    "BuildInfo",
+    "BytesIn",
+    "CallError",
+    "Capabilities",
     "ChtypesError",
     "Column",
     "Computed",
     "DefaultKind",
     "DiscoveredColumn",
+    "Discovery",
+    "EngineCell",
+    "DocFlags",
     "ErrorCodeEntry",
     "ErrorCodeTable",
+    "FetchOptions",
     "Filter",
     "FilterOutcome",
     "FilterResult",
     "FilterRowError",
     "Format",
-    "InitConflictError",
+    "Framing",
+    "Header",
+    "InternalError",
     "Library",
-    "Manifest",
     "Outcome",
-    "PatchFallbackWarning",
-    "RawNumber",
     "Reason",
     "Registry",
-    "RegistryError",
-    "Resolution",
+    "Resolved",
     "RowResult",
     "Schema",
+    "SchemaDescription",
     "SchemaError",
-    "ServerProfile",
+    "Settings",
     "Source",
+    "SourceForbiddenError",
+    "SourceIncompatibleError",
+    "SourceUnauthorizedError",
     "SourceUnreachableError",
     "Span",
-    "Substitution",
+    "Status",
     "Transform",
-    "UnsignedArtifactWarning",
+    "TrustedKey",
     "UnsupportedError",
+    "UsageError",
     "Value",
     "Verdict",
-    "ensure",
-    "fetch_destination",
-    "fetch_lines",
-    "host_platform",
-    "minor_of",
-    "parse_changed_settings_result",
-    "parse_columns_result",
-    "parse_version_result",
-    "quote_bare_denormals",
-    "read_manifest",
-    "registry_search_path",
-    "verify_library",
+    "open_unverified",
+    "setup",
 ]
 
 # Derived, never written twice. pyproject.toml is the single source of truth and
 # the build reads it from there; asking importlib for it means this attribute
-# cannot drift from the package it names. It did: 0.1.1 shipped reporting 0.1.0,
-# because a second hand-maintained copy has no way to know the first one moved.
+# cannot drift from the package it names.
 try:
     __version__ = _package_version("chtypes")
 except _PackageNotFound:  # a source tree that was never installed

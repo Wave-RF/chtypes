@@ -23,10 +23,6 @@ classifiers = [
 # dependencies. See README "Why ctypes".
 dependencies = ["backports.zstd>=1.7; python_version < '3.14'"]
 
-# `chtypes fetch 25.8` — the same surface as `python -m chtypes` (docs/guides/fetch.md §6).
-[project.scripts]
-chtypes = "chtypes.__main__:main"
-
 [project.urls]
 Homepage = "https://github.com/wave-rf/chtypes"
 Repository = "https://github.com/wave-rf/chtypes"

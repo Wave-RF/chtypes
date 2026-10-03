@@ -10,6 +10,7 @@ python/tests/abi1/test_loader.py's.
 
 from __future__ import annotations
 
+import base64
 import json
 import threading
 
@@ -79,10 +80,37 @@ def _check_result(case: dict, result, expect: dict) -> None:
         assert got == want_doc, f"{case['id']}: document {name!r}: want {want_doc!r}, got {got!r}"
 
 
+def _decode_document_case(case: dict, result) -> None:
+    """Hand the REAL round-2 document the stub produced to the public decoder: the
+    raw bytes (FF 00 80 and NUL included) must round-trip exactly."""
+    from chtypes import _decode
+
+    if case["fn"] == "chs_preview_row":
+        row = _decode.decode_row_document(result.outputs["out"])
+        (col,) = row.columns
+        want = case["expect"]["documents"]["out"]["cols"][0]
+        raw = bytes.fromhex(case["args"][2]["bytes_hex"])[3:]  # after the `!D:` prefix
+        assert col.column == b"s" and col.is_stored is True
+        assert col.value == raw and base64.b64decode(want["value_b64"]) == raw
+        assert col.text == (
+            base64.b64decode(want["stored_b64"])
+            if "stored_b64" in want
+            else want["stored"].encode()
+        )
+    elif case["fn"] == "chs_discover_columns":
+        disc = _decode.decode_discovery(result.outputs["out"])
+        want = case["expect"]["documents"]["out"]
+        assert disc.columns[0].name == base64.b64decode(want["columns"][0]["name_b64"])
+        assert disc.columns_sql == base64.b64decode(want["columns_sql_b64"])
+        assert disc.columns[0].declaration == disc.columns_sql
+
+
 def _run_echo_or_status(api, case: dict) -> None:
     args = build_args(api, case["args"])
     result = _decls.invoke_by_name(api, case["fn"], args)
     _check_result(case, result, case["expect"])
+    if case["kind"] == "document":
+        _decode_document_case(case, result)
 
 
 def _live(api) -> dict:
