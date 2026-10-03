@@ -346,19 +346,35 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y tinyproxy
       - name: generate a throwaway CA and TLS certificate for registry.test
+        # An RFC 5280-proper chain, because strict clients refuse less:
+        # measured on a Python 3.13 registry run, its default context sets
+        # VERIFY_X509_STRICT and rejected the earlier CA with "CA cert does not
+        # include key usage extension"; Go and Node were only more lenient.
         run: |
           mkdir -p "$RUNNER_TEMP/certs"
           cd "$RUNNER_TEMP/certs"
           openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 1 \
-            -subj "/CN=v1-fixture-ca"
+            -subj "/CN=v1-fixture-ca" -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign" -addext "subjectKeyIdentifier=hash"
           openssl req -newkey rsa:2048 -nodes -keyout registry.test.key -out registry.test.csr \
             -subj "/CN=registry.test"
-          printf 'subjectAltName = DNS:registry.test\n' > ext.cnf
+          printf '%s\n' 'basicConstraints = critical,CA:FALSE' \
+            'keyUsage = critical,digitalSignature,keyEncipherment' \
+            'extendedKeyUsage = serverAuth' \
+            'subjectAltName = DNS:registry.test' \
+            'subjectKeyIdentifier = hash' \
+            'authorityKeyIdentifier = keyid:always' > ext.cnf
           openssl x509 -req -in registry.test.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
             -out registry.test.crt -days 1 -extfile ext.cnf
           sudo cp ca.crt /usr/local/share/ca-certificates/v1-fixture-ca.crt
           sudo update-ca-certificates
           echo "127.0.0.1 registry.test" | sudo tee -a /etc/hosts
+      - name: the chain passes a STRICT verification (openssl -x509_strict), before anything uses it
+        run: |
+          cd "$RUNNER_TEMP/certs"
+          openssl verify -x509_strict -purpose sslserver -CAfile ca.crt registry.test.crt
+          openssl x509 -in ca.crt -noout -ext keyUsage,basicConstraints
+          openssl x509 -in registry.test.crt -noout -ext keyUsage,extendedKeyUsage,subjectAltName
       - name: start registry:2 with TLS
         run: |
           docker run -d --name v1-fixture-registry \
@@ -379,6 +395,15 @@ jobs:
             exit 1
           fi
           echo "registry up: HTTP $(curl -s -o /dev/null -w '%{http_code}' https://registry.test:5443/v2/)"
+      - name: a Python TLS handshake under the DEFAULT context (strict, OS store) succeeds, before any binding runs
+        run: |
+          python3 - <<'PY'
+          import ssl, urllib.request
+          ctx = ssl.create_default_context()
+          print("python", ssl.OPENSSL_VERSION, "verify_flags", ctx.verify_flags)
+          with urllib.request.urlopen("https://registry.test:5443/v2/", context=ctx, timeout=10) as r:
+              print("HTTP", r.status)
+          PY
       - name: push layouts/basic (the full multi-platform index) into registry:2
         run: |
           oras cp -r --from-oci-layout \
