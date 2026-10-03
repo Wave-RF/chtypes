@@ -35,6 +35,9 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 		{"fetch", "v26.8", "--offline"},
 		{"verify", "extra"},
 		{"list", "extra"},
+		{"list", "--platform", "linux-arm64"},
+		{"fetch", "26.8", "--update", "--frozen", "--lock", "x"},
+		{"fetch", "26.8", "--update"},
 		{"where", "extra"},
 		{"fetch", "--nope"},
 	} {
@@ -84,7 +87,7 @@ func TestOfflineMissIsArtifactMissing(t *testing.T) {
 
 func TestVerifyAndListOnAnEmptyCache(t *testing.T) {
 	env := map[string]string{"CHTYPES_CACHE": t.TempDir()}
-	if code, out, _ := runCLI(t, env, "verify"); code != 0 || !strings.Contains(out, "nothing installed") {
+	if code, out, _ := runCLI(t, env, "verify"); code != 0 || out != "" {
 		t.Errorf("verify = %d %q", code, out)
 	}
 	if code, out, _ := runCLI(t, env, "list", "--offline"); code != 0 || !strings.Contains(out, "not read (--offline)") {
@@ -119,7 +122,7 @@ func TestFetchVerifyListAgainstTheFixtureTree(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Errorf("the printed directory does not exist: %v", err)
 	}
-	if code, out, errText = runCLI(t, env, "verify"); code != 0 || !strings.Contains(out, "1 installed, 1 verified, 0 bad") {
+	if code, out, errText = runCLI(t, env, "verify"); code != 0 || out != "" {
 		t.Errorf("verify = %d %q %q", code, out, errText)
 	}
 	if code, out, errText = runCLI(t, env, "list"); code != 0 || !strings.Contains(out, "26.8.15.10") || !strings.Contains(out, "published lines (support unknown)") {
@@ -149,4 +152,57 @@ func TestFetchVerifyListAgainstTheFixtureTree(t *testing.T) {
 	if code, _, errText = runCLI(t, env, "fetch", "26.8"); code != 1 || !strings.Contains(errText, "CHTYPES_ARTIFACT_UNTRUSTED") {
 		t.Errorf("an untrusted tree = %d %q", code, errText)
 	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	code, out, _ := runCLI(t, nil, "--version")
+	if code != 0 || strings.TrimSpace(out) == "" {
+		t.Errorf("--version = %d %q", code, out)
+	}
+}
+
+func TestListOfflineIsInstalledOnly(t *testing.T) {
+	base, key := fixtureBase(t)
+	env := map[string]string{"CHTYPES_ARTIFACTS_URL": base, "CHTYPES_TRUSTED_KEYS": key, "CHTYPES_CACHE": t.TempDir(), "CHTYPES_TARGET": "linux-arm64"}
+	if code, _, e := runCLI(t, env, "fetch", "26.8"); code != 0 {
+		t.Fatal(e)
+	}
+	code, out, _ := runCLI(t, env, "list", "--offline")
+	if code != 0 || !strings.Contains(out, "26.8.15.10") || strings.Contains(out, "published lines") {
+		t.Errorf("list --offline = %d %q", code, out)
+	}
+}
+
+func TestFetchUpdateRewritesTheLock(t *testing.T) {
+	base, key := fixtureBase(t)
+	env := map[string]string{"CHTYPES_ARTIFACTS_URL": base, "CHTYPES_TRUSTED_KEYS": key, "CHTYPES_CACHE": t.TempDir(), "CHTYPES_TARGET": "linux-arm64"}
+	lock := filepath.Join(t.TempDir(), "chtypes.lock")
+	if code, _, e := runCLI(t, env, "fetch", "26.8", "--lock", lock); code != 0 {
+		t.Fatal(e)
+	}
+	if err := os.WriteFile(lock+".bak", mustRead(t, lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lock, mustRead(t, lock+".bak"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, e := runCLI(t, env, "fetch", "--update", "--lock", lock)
+	if code != 0 || strings.TrimSpace(out) == "" {
+		t.Fatalf("fetch --update = %d %q %q", code, out, e)
+	}
+	if string(mustRead(t, lock)) != string(mustRead(t, lock+".bak")) {
+		t.Error("an update against an unchanged registry must rewrite the same lock")
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

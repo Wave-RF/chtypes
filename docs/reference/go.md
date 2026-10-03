@@ -67,20 +67,23 @@ The library carries no exit status. `ErrorCode.ExitCode()` is a method of the sh
 go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
 ```
 
-| command                          | meaning                                                                                                                                                               |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fetch <spelling>... \| --all`   | resolve, verify and install each request (two, three or four parts), printing the installed directory of each alone on stdout. `--all` is every published line        |
-| `fetch ... --platform <os-arch>` | another platform than this host's, or `$CHTYPES_TARGET`                                                                                                               |
-| `fetch ... --lock <file>`        | resolve normally, then write the lock (schema 3). With `--frozen`, the lock to enforce; default `chtypes.lock`                                                        |
-| `fetch ... --frozen`             | fetch exactly what the lock pins, by digest, with no resolution; a request the lock does not pin is `CHTYPES_ARTIFACT_PINNED`                                         |
-| `fetch ... --offline`            | read the cache only; a miss is `CHTYPES_ARTIFACT_MISSING`                                                                                                             |
-| `verify`                         | re-hash every installed library against its own recorded digests                                                                                                      |
-| `list`                           | what is installed for this platform, and the published lines from the registry's `tags/list`; `--offline` skips the registry. Support is unknown, never "unsupported" |
-| `where`                          | the cache root (`$CHTYPES_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`); `--cache <dir>` overrides it on every command                                       |
+| command                          | meaning                                                                                                                                                        |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fetch <spelling>... \| --all`   | resolve, verify and install each request (two, three or four parts), printing the installed directory of each alone on stdout. `--all` is every published line |
+| `fetch ... --platform <os-arch>` | another platform than this host's, or `$CHTYPES_TARGET`                                                                                                        |
+| `fetch ... --lock <file>`        | resolve normally, then write the lock (schema 3). With `--frozen`, the lock to enforce; default `chtypes.lock`                                                 |
+| `fetch ... --frozen`             | fetch exactly what the lock pins, by digest, with no resolution; a request the lock does not pin is `CHTYPES_ARTIFACT_PINNED`                                  |
+| `fetch ... --update`             | re-resolve every locked request and rewrite the lock; requires `--lock`, and with `--frozen` it is a usage error                                               |
+| `fetch ... --offline`            | read the cache only; a miss is `CHTYPES_ARTIFACT_MISSING`                                                                                                      |
+| `verify`                         | re-hash every installed library against its own recorded digests                                                                                               |
+| `list`                           | what is installed, and the published lines from the registry's `tags/list`; `--offline` skips the registry. Support is unknown, never "unsupported"            |
+| `where`                          | the cache root (`$CHTYPES_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`); `--cache <dir>` overrides it on every command                                |
 
 Exit statuses: 0 for success, 2 for a usage error (an unknown command or flag, a refused spelling, `--all` with an argument), and for a failure the status of its error code in the table above (1 for the four verification failures, 3 unreachable, 4 unpublished, 5 unauthorized, 6 forbidden, 7 incompatible source, 8 incompatible artifact).
 
 Environment: `CHTYPES_ARTIFACTS_URL` (the bases, comma separated), `CHTYPES_CACHE`, `CHTYPES_TRUSTED_KEYS` (replaces the embedded release key), `CHTYPES_ALLOW_UNSIGNED=1` (skip verification, loudly), `CHTYPES_DOWNLOAD_TOKEN`, `CHTYPES_TARGET`.
+
+`chtypes --version` prints the binding's version.
 
 ## Concurrency and memory
 

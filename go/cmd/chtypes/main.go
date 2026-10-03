@@ -2,9 +2,9 @@
 // chtypes SDK spells identically (docs/guides/fetch-v1.md, sections 6 and 8):
 //
 //	chtypes fetch <spelling>... | --all [--platform <os-arch>] [--cache <dir>]
-//	                                    [--lock <file>] [--frozen] [--offline]
+//	                                    [--lock <file>] [--frozen] [--offline] [--update]
 //	chtypes verify [--cache <dir>]      re-verify the installed cache
-//	chtypes list   [--cache <dir>] [--platform <os-arch>] [--offline]
+//	chtypes list   [--cache <dir>] [--offline]
 //	                                    what is installed, and what is published
 //	chtypes where  [--cache <dir>]      the cache root
 //
@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -41,11 +42,12 @@ import (
 
 const usageText = `usage:
   chtypes fetch <spelling>... | --all [--platform <os-arch>] [--cache <dir>]
-                                      [--lock <file>] [--frozen] [--offline]
+                                      [--lock <file>] [--frozen] [--offline] [--update]
   chtypes verify [--cache <dir>]      re-verify the installed cache
-  chtypes list   [--cache <dir>] [--platform <os-arch>] [--offline]
+  chtypes list   [--cache <dir>] [--offline]
                                       what is installed, and what is published
   chtypes where  [--cache <dir>]      the cache root
+  chtypes --version
 
 exit statuses: 0 ok, 2 usage, otherwise the failure's own status (docs/guides/fetch-v1.md section 8)
 `
@@ -76,6 +78,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = cmdList(ctx, args[1:], stdout, stderr)
 	case "where":
 		err = cmdWhere(args[1:], stdout, stderr)
+	case "--version":
+		fmt.Fprintln(stdout, version())
+		return 0
 	case "help", "-h", "--help", "-help":
 		fmt.Fprint(stdout, usageText)
 		return 0
@@ -107,6 +112,14 @@ func exitStatus(err error) int {
 		return fe.Code.ExitCode()
 	}
 	return 2
+}
+
+// version is the binding's own version as the build reports it.
+func version() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return "devel"
 }
 
 func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
@@ -183,10 +196,11 @@ func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	fs := newFlagSet("fetch", stderr)
 	var cf commonFlags
 	cf.bind(fs, true, true)
-	var all, frozen bool
+	var all, frozen, update bool
 	var lock string
 	fs.BoolVar(&all, "all", false, "every line the registry publishes (or, with --frozen, every request the lock pins)")
 	fs.StringVar(&lock, "lock", "", "write the lock to this file after resolving (with --frozen: the lock to enforce; default chtypes.lock)")
+	fs.BoolVar(&update, "update", false, "re-resolve every locked request and rewrite the lock (requires --lock)")
 	fs.BoolVar(&frozen, "frozen", false, "fetch exactly what the lock pins, by digest, without resolving")
 	spellings, err := parseInterleaved(fs, args)
 	if err != nil {
@@ -197,9 +211,15 @@ func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		return err
 	}
 	switch {
+	case update && frozen:
+		return &usageError{"--update re-resolves and --frozen forbids resolving; pass one"}
+	case update && lock == "":
+		return &usageError{"--update requires --lock <file>"}
+	case update && cf.offline:
+		return &usageError{"--update resolves against the registry and --offline forbids the network; pass one"}
 	case all && len(spellings) > 0:
 		return &usageError{fmt.Sprintf("--all fetches every line; drop the version arguments (%s)", strings.Join(spellings, " "))}
-	case !all && len(spellings) == 0:
+	case !all && !update && len(spellings) == 0:
 		return &usageError{"a ClickHouse version spelling is required (or --all)"}
 	case frozen && cf.offline:
 		return &usageError{"--frozen fetches by digest and --offline forbids the network; pass one"}
@@ -208,7 +228,14 @@ func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if lock != "" && !frozen {
 		opts.LockWrite = true
 	}
-	if all {
+	opts.Update = update
+	if update {
+		// An update's requests are the lock's own, whatever was named.
+		spellings, err = allSpellings(ctx, opts, true, lock)
+		if err != nil {
+			return err
+		}
+	} else if all {
 		spellings, err = allSpellings(ctx, opts, frozen, lock)
 		if err != nil {
 			return err
@@ -288,20 +315,13 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	root, _ := ocifetch.CacheRoot(&ocifetch.Options{CacheDir: cf.cache})
-	if len(results) == 0 {
-		fmt.Fprintf(stdout, "nothing installed under %s\n", root)
-		return nil
-	}
 	bad := 0
 	for _, r := range results {
-		if r.OK {
-			fmt.Fprintf(stdout, "ok       %-16s %-14s %s\n", r.Version, r.Platform, r.Dir)
-			continue
+		if !r.OK {
+			bad++
+			fmt.Fprintf(stderr, "MISMATCH %-16s %-14s %s: %s\n", r.Version, r.Platform, r.Dir, r.Detail)
 		}
-		bad++
-		fmt.Fprintf(stdout, "MISMATCH %-16s %-14s %s: %s\n", r.Version, r.Platform, r.Dir, r.Detail)
 	}
-	fmt.Fprintf(stdout, "%d installed, %d verified, %d bad (%s)\n", len(results), len(results)-bad, bad, root)
 	if bad > 0 {
 		return &ocifetch.FetchError{Code: ocifetch.CodeArtifactCorrupt,
 			Msg: fmt.Sprintf("chtypes: %d of %d installed build(s) under %s do not match what was verified when they were installed [%s]",
@@ -313,7 +333,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newFlagSet("list", stderr)
 	var cf commonFlags
-	cf.bind(fs, true, true)
+	cf.bind(fs, false, true)
 	if rest, err := parseInterleaved(fs, args); err != nil {
 		return err
 	} else if len(rest) > 0 {
