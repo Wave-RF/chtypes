@@ -786,12 +786,11 @@ def _return_go_type(r) -> str:
 
 def render_linked_gen(model) -> str:
     out = [f"// {banner(model)}", "", "//go:build chtypes_linked", "", "package abi1", "", "/*"]
-    out.append("// The header is this repository's own include/v1/chtypes.h (until wave C's")
-    out.append("// cutover moves it to include/chtypes.h) -- the SDK owns the contract, as")
-    out.append("// go/chtypes/linked.go's own preamble explains for v0. A full LINK (never")
-    out.append("// needed by scripts/abi-v1/check-linked.sh's type-check alone) additionally")
-    out.append("// needs CGO_LDFLAGS naming where libchtypes lives, the same as v0.")
-    out.append("#cgo CFLAGS: -I${SRCDIR}/../../../include/v1")
+    out.append("// The header is this repository's own include/chtypes.h -- the SDK owns the")
+    out.append("// contract. A full LINK (never needed by scripts/abi-v1/check-linked.sh's")
+    out.append("// type-check alone) additionally needs CGO_LDFLAGS naming where libchtypes")
+    out.append("// lives.")
+    out.append("#cgo CFLAGS: -I${SRCDIR}/../../../include")
     out.append("#cgo LDFLAGS: -lchtypes")
     out.append('#include "abi1_table.h"')
     out.append('#include "chtypes.h"')

@@ -13,7 +13,7 @@ functions, the build_info shape, the document vocabularies. The SDK owns it
 canonical form (D1.1, scripts/abi-v1/jcs.py), is the ABI's identity. Every
 other file that states the ABI is GENERATED from it by the emitters under
 scripts/abi-v1/emit/, one module per output family, discovered by file name:
-the C header include/v1/chtypes.h, the export list, the generated block of
+the C header include/chtypes.h, the export list, the generated block of
 docs/reference/abi-v1.md, and each binding's declaration layer, stub and
 conformance cases as those emitters land. Python 3.11+, standard library only.
 

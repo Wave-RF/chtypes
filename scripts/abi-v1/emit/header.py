@@ -1,4 +1,4 @@
-"""The C header, include/v1/chtypes.h, and the sorted export list.
+"""The C header, include/chtypes.h, and the sorted export list.
 
 The header is the artifact producer's input (it pins it by commit and hash)
 and the one place a C reader sees the whole ABI, so it carries every fact the
@@ -24,7 +24,7 @@ from model import CONTENTS, THREADS
 
 from . import Output, banner, marker_key
 
-HEADER = "include/v1/chtypes.h"
+HEADER = "include/chtypes.h"
 EXPORTS = "spec/abi-v1/generated/exports.txt"
 WIDTH = 100
 

@@ -1,6 +1,6 @@
 # chtypes ABI v1: the prose for the description
 
-This file holds the prose for `spec/abi-v1/abi.json`, one `###` section per handle, enum, function and (optionally) constant or document. `scripts/abi-v1/gen.py` copies each section into the comment above its declaration in `include/v1/chtypes.h` and into the generated block of `docs/reference/abi-v1.md`, and `gen.py --check` fails when a symbol has no section or a section names no symbol.
+This file holds the prose for `spec/abi-v1/abi.json`, one `###` section per handle, enum, function and (optionally) constant or document. `scripts/abi-v1/gen.py` copies each section into the comment above its declaration in `include/chtypes.h` and into the generated block of `docs/reference/abi-v1.md`, and `gen.py --check` fails when a symbol has no section or a section names no symbol.
 
 Prose is deliberately outside the fingerprint: editing this file never changes `CHS_ABI_FINGERPRINT`, so it never invalidates a built library. The rule that follows is that anything a binding or the artifact producer must act on is structured in `abi.json` (a nullability, an ownership, a status a call may return, a thread class, a vocabulary), never only stated here.
 
