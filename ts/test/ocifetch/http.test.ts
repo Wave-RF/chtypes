@@ -5,9 +5,12 @@
  * exactly" rule. No network, no fixtures tree.
  */
 
+import { readFileSync } from 'node:fs';
+import * as http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
-import { parseRetryAfterSeconds, RETRY_AFTER_BUDGET_S, withRetry } from '../../src/ocifetch/http.js';
 import { SourceUnreachableError } from '../../src/ocifetch/errors.js';
+import { parseRetryAfterSeconds, RETRY_AFTER_BUDGET_S, requestBuffered, USER_AGENT, withRetry } from '../../src/ocifetch/http.js';
 import type { Clock } from '../../src/ocifetch/types.js';
 
 function recordingClock(): Clock & { sleeps: number[] } {
@@ -120,5 +123,36 @@ describe('parseRetryAfterSeconds', () => {
   it('never returns a negative delay for a date already in the past', () => {
     const seconds = parseRetryAfterSeconds('Wed, 30 Sep 2026 00:00:00 GMT', undefined, clock);
     expect(seconds).toBe(0);
+  });
+});
+
+describe('User-Agent', () => {
+  it('is chtypes-ts/<package.json version> and matches the delivery pattern', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+    expect(USER_AGENT).toMatch(/^chtypes-(go|python|ts|rust)\/[0-9A-Za-z.+-]+$/);
+    expect(USER_AGENT).toBe(`chtypes-ts/${manifest.version}`);
+  });
+
+  it('is sent on every hop of a redirect chain', async () => {
+    const seen: Array<string | undefined> = [];
+    const server = http.createServer((req, res) => {
+      seen.push(req.headers['user-agent']);
+      if (req.url === '/start') {
+        res.writeHead(302, { location: '/end' });
+        res.end();
+        return;
+      }
+      res.writeHead(200);
+      res.end('ok');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const clock: Clock = { now: () => 0, sleep: async () => {} };
+      await requestBuffered(`http://127.0.0.1:${port}/start`, { maxBytes: 1024, clock });
+      expect(seen).toEqual([USER_AGENT, USER_AGENT]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

@@ -345,6 +345,9 @@ func (c *client) attemptWithRedirects(ctx context.Context, rawURL string, opts r
 		if opts.accept != "" {
 			req.Header.Set("Accept", opts.accept)
 		}
+		// Every hop (first request, redirects, token exchanges) is built
+		// here, so this is the one place the agent is set.
+		req.Header.Set("User-Agent", userAgent())
 		if c.onRequest != nil {
 			c.onRequest(req)
 		}

@@ -72,6 +72,24 @@ pub struct AuthConfig {
     pub static_token: Option<String>,
 }
 
+/// Stands in for the package version when none is available; the header is
+/// never omitted.
+const USER_AGENT_DEV_VERSION: &str = "0.0.0-dev";
+
+/// `chtypes-rust/<version>`, the `User-Agent` on every request this module
+/// makes (docs/guides/fetch-v1.md section 2): delivery hosts may refuse a
+/// generic library agent (ureq's own is `ureq/<version>`). The version is
+/// this crate's own, from `CARGO_PKG_VERSION`.
+pub fn user_agent() -> String {
+    let v = option_env!("CARGO_PKG_VERSION").unwrap_or(USER_AGENT_DEV_VERSION);
+    let v = if v.is_empty() {
+        USER_AGENT_DEV_VERSION
+    } else {
+        v
+    };
+    format!("chtypes-rust/{v}")
+}
+
 /// The blocking HTTP client used by every `https`/`http` request this module
 /// makes. `file://` bases never reach this type; see `oci.rs`'s source
 /// dispatch.
@@ -98,6 +116,7 @@ impl Client {
             .tls_config(tls)
             .http_status_as_error(false)
             .max_redirects(0)
+            .user_agent(user_agent())
             .timeout_connect(Some(Duration::from_secs_f64(constants::CONNECT_TIMEOUT_S)))
             .timeout_recv_response(Some(Duration::from_secs_f64(
                 constants::IDLE_READ_TIMEOUT_S,
@@ -271,10 +290,18 @@ impl Client {
         headers: &[(String, String)],
         max_bytes: u64,
     ) -> std::result::Result<HttpResponse, TransportOutcome> {
+        // The one place a request is built: manifests, blobs, referrers, tag
+        // lists, token exchanges and every redirect hop all pass through
+        // here, so the agent is set here (replacing any caller-supplied one)
+        // and the agent config above only backs it up.
         let mut builder = self.agent.get(url.to_string());
         for (k, v) in headers {
+            if k.eq_ignore_ascii_case("user-agent") {
+                continue;
+            }
             builder = builder.header(k.as_str(), v.as_str());
         }
+        builder = builder.header("User-Agent", user_agent());
         match builder.call() {
             Ok(mut resp) => {
                 let status = resp.status().as_u16();
@@ -493,6 +520,67 @@ mod tests {
         assert_eq!(m.get("realm").unwrap(), "https://auth.example/token");
         assert_eq!(m.get("service").unwrap(), "registry.example");
         assert_eq!(m.get("scope").unwrap(), "repository:x:pull");
+    }
+
+    #[test]
+    fn user_agent_is_chtypes_rust_with_the_crate_version() {
+        let ua = user_agent();
+        assert_eq!(ua, format!("chtypes-rust/{}", env!("CARGO_PKG_VERSION")));
+        let (name, version) = ua.split_once('/').unwrap();
+        assert_eq!(name, "chtypes-rust");
+        assert!(!version.is_empty());
+        assert!(
+            version
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-')),
+            "version {version:?} outside [0-9A-Za-z.+-]"
+        );
+    }
+
+    #[test]
+    fn requests_carry_the_user_agent_on_every_hop() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let mut agents = Vec::new();
+            for hop in 0..2 {
+                let (mut sock, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let n = sock.read(&mut buf).unwrap();
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let agent = req
+                    .lines()
+                    .find_map(|l| {
+                        let (k, v) = l.split_once(':')?;
+                        k.eq_ignore_ascii_case("user-agent")
+                            .then(|| v.trim().to_string())
+                    })
+                    .unwrap_or_default();
+                agents.push(agent);
+                let resp = if hop == 0 {
+                    "HTTP/1.1 302 Found\r\nLocation: /end\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                };
+                sock.write_all(resp.as_bytes()).unwrap();
+            }
+            agents
+        });
+        let client = Client::new();
+        let resp = client
+            .get(
+                &format!("http://127.0.0.1:{port}/start"),
+                &[("User-Agent".to_string(), "Something-Else/1".to_string())],
+                &AuthConfig::default(),
+                1024,
+            )
+            .unwrap();
+        assert_eq!(resp.status, 200);
+        let agents = handle.join().unwrap();
+        assert_eq!(agents, vec![user_agent(), user_agent()]);
     }
 
     #[test]

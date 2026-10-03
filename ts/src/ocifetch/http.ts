@@ -15,6 +15,7 @@
  * — lane 0B).
  */
 
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import * as http from 'node:http';
 import * as https from 'node:https';
@@ -210,6 +211,26 @@ function defaultPort(u: URL): string {
   return u.protocol === 'https:' ? '443' : '80';
 }
 
+const USER_AGENT_DEV_VERSION = '0.0.0-dev';
+
+/** The package's own version, from its `package.json` (one level above `src/` and `dist/` alike). */
+function readPackageVersion(): string {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+    const v = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>)['version'] : undefined;
+    return typeof v === 'string' && /^[0-9A-Za-z.+-]+$/.test(v) ? v : USER_AGENT_DEV_VERSION;
+  } catch {
+    return USER_AGENT_DEV_VERSION;
+  }
+}
+
+/**
+ * `chtypes-ts/<version>`, the User-Agent on every request this module makes
+ * (`docs/guides/fetch-v1.md` §2): delivery hosts may refuse a generic library
+ * agent. Never omitted; `0.0.0-dev` when the version cannot be read.
+ */
+export const USER_AGENT = `chtypes-ts/${readPackageVersion()}`;
+
 interface RawResponse {
   readonly status: number;
   readonly headers: Record<string, string>;
@@ -217,7 +238,13 @@ interface RawResponse {
 }
 
 /** One connection attempt with no retry and no redirect following — the unit `requestBuffered`/`requestToSink` build on. */
-function rawRequest(url: URL, method: 'GET' | 'HEAD', headers: Record<string, string>): Promise<RawResponse> {
+function rawRequest(url: URL, method: 'GET' | 'HEAD', callerHeaders: Record<string, string>): Promise<RawResponse> {
+  // The one place a request is made: manifests, blobs, referrers, tag lists,
+  // token exchanges and every redirect hop come through here, so the agent is
+  // set here and nowhere else. It replaces any caller-supplied one.
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(callerHeaders)) if (k.toLowerCase() !== 'user-agent') headers[k] = v;
+  headers['user-agent'] = USER_AGENT;
   return new Promise((resolve, reject) => {
     const mod = url.protocol === 'https:' ? https : http;
     const agent = url.protocol === 'https:' ? httpsAgent() : httpAgent();
