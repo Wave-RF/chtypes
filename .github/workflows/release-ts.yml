@@ -8,6 +8,19 @@ name: release-ts
 on:
   push:
     tags: ["ts/v*"]
+  # A dry run: every step up to the publish (tag-name and package version agree, install, build,
+  # typecheck, `pnpm publish --dry-run`), and neither the publish nor the post-publish check.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the tag NAME to rehearse, e.g. ts/v1.0.0 (nothing is pushed or published)"
+        required: true
+        type: string
+      dry_run:
+        description: "rehearse only: skip the publish and the post-publish check"
+        required: true
+        type: boolean
+        default: true
 permissions:
   contents: read
 # Every run: step uses bash with -eo pipefail. GitHub's default for a step
@@ -41,11 +54,17 @@ jobs:
         run: node -e "const [a,b]=process.versions.node.split('.').map(Number); if (a<22||(a===22&&b<21)) { console.error('node '+process.versions.node+' is below the 22.21 floor'); process.exit(1) }"
 
       - name: the tag and the package agree on the version
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          tag="${GITHUB_REF_NAME#ts/v}"; ver="$(node -p "require('./ts/package.json').version")"
+          name="${TAG_NAME#ts/v}"; tag="$name"; ver="$(node -p "require('./ts/package.json').version")"
           [ "$tag" = "$ver" ] || { echo "::error::tag ts/v$tag but package.json says $ver"; exit 1; }
       - run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
+      - name: publish (dry run)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: cd ts && pnpm publish --dry-run --access public --no-git-checks
       - name: publish
+        if: github.event_name == 'push' || !inputs.dry_run
         run: cd ts && pnpm publish --provenance --access public --no-git-checks
   # A publish step exiting 0 does not mean anyone can install the package.
   # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
@@ -66,6 +85,7 @@ jobs:
   # write` here: this job only reads public registries anonymously.
   verify:
     needs: publish
+    if: github.event_name == 'push' || !inputs.dry_run
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -75,9 +95,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: "22.21" }
       - name: it installs from the public registry, anonymously, and its ABI fingerprint is the header's
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#ts/v}"
+          version="${TAG_NAME#ts/v}"
           want="$(sed -n 's/^#define CHS_ABI_FINGERPRINT "\(.*\)"$/\1/p' include/chtypes.h)"
           [ -n "$want" ] || { echo "::error::could not read CHS_ABI_FINGERPRINT from include/chtypes.h"; exit 1; }
           clean="$RUNNER_TEMP/clean"
