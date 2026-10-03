@@ -18,9 +18,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use chtypes::fetch::{self, EnsureOptions};
-use chtypes::{
-    CODE_ARTIFACT_UNPUBLISHED, CODE_SOURCE_UNREACHABLE, Error, host_platform, installed_patches,
-};
+use chtypes::legacy::error::{CODE_ARTIFACT_UNPUBLISHED, CODE_SOURCE_UNREACHABLE, Error};
+use chtypes::legacy::registry::{host_platform, installed_patches};
 
 const USAGE: &str = "\
 chtypes — fetch, verify and list ClickHouse artifacts for the chtypes SDKs

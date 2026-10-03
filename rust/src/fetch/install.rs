@@ -9,8 +9,8 @@ use super::release::IndexRow;
 use super::source::Source;
 use super::trust::{Hashing, sha256_file};
 use super::{Action, InstallSlot, Installed};
-use crate::error::{Error, Result};
-use crate::registry::Manifest;
+use crate::legacy::error::{Error, Result};
+use crate::legacy::registry::Manifest;
 
 /// Download `row.file` into `dest`, hashing as it streams (step 3), unpack it
 /// flat into a dot-prefixed staging sibling, and seat it at the directory

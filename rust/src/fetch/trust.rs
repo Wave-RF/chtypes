@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 pub(crate) use crate::digest::hex;
 pub use crate::digest::{sha256_file, sha256_hex};
-use crate::error::{Error, Result};
+use crate::legacy::error::{Error, Result};
 
 /// The release public key, raw, hex — `docs/guides/fetch.md` §4. Every SDK embeds
 /// this constant; `CHTYPES_TRUSTED_KEYS` replaces it.

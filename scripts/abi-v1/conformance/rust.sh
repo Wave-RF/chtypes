@@ -12,7 +12,14 @@
 # in tests/fixtures/abi-v1/cases.json, and writes a
 # spec/abi-v1/schema/report.schema.json-shaped report to CHTYPES_ABI1_REPORT
 # before its final assertion — so a partial report is on disk even when some
-# cases fail. This script's own exit code is the test binary's.
+# cases fail.
+#
+# The same cargo invocation also runs the public-API suites (api_v1,
+# api_v1_setup, api_v1_registry), which read the same CHTYPES_ABI1_STUBS and
+# prove the public layer's plumbing over the stubs: error mapping per status,
+# handle lifetimes and zero live handles, the process setup, and the registry
+# adapter over a real signed OCI layout. They write no report; this script's
+# own exit code is the worst of the test binaries.
 set -euo pipefail
 
 : "${CHTYPES_ABI1_STUBS:?CHTYPES_ABI1_STUBS must be set, to the v1-abi-stubs artifact directory}"
@@ -23,4 +30,4 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 
 cd "$ROOT/rust"
-exec cargo test --locked --features abi-v1 --test abi1_conformance -- --nocapture
+exec cargo test --locked --features abi-v1 --test abi1_conformance --test api_v1 --test api_v1_setup --test api_v1_registry -- --nocapture

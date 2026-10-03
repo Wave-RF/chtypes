@@ -4,7 +4,7 @@
 //!
 //! Unset `CHTYPES_V1_CONFORMANCE`, and this test skips LOUDLY (a clear
 //! stderr announcement, a report naming zero cases) rather than silently
-//! reporting nothing — the same discipline `tests/fetch.rs` and every other
+//! reporting nothing — the same discipline every other
 //! binding's fixture-backed suite in this repository follows.
 //!
 //! This file recompiles `src/ocifetch/` under its own crate root via

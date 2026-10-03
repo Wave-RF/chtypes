@@ -14,15 +14,21 @@
 //!   its owner is dropped, and this module never drops one; see
 //!   `rust/src/ffi.rs`'s identical v0 rule for why (a leaked `Context`'s
 //!   destructor order).
-//! * **`open_unverified`** (plan §3.1) is NOT implemented here: wave B has no
-//!   caller for it (core's own local-build path and the linked mode are
-//!   wave C's concern), and the two-gate rule (`unverified: true` plus
-//!   `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1`) belongs with whichever caller
-//!   first needs it, so it is not invented speculatively here.
-//! * **Errors stay abi1-local until wave C** (the common brief): [`Refusal`]
-//!   carries the same fields `sdk.json`'s loader-refusal table promises
-//!   (`reason`, `path`, `want`/`got`), but is not wired to this crate's
-//!   public `Error` enum — that mapping lands with the public API.
+//! * **`open_unverified`** is this loader with no signed statement: steps 1
+//!   and 5 are skipped (`LoadInput::predicate` is `None`), and the two-gate
+//!   rule (the caller's `allow` plus `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1`)
+//!   belongs to the public caller, which refuses before reaching here.
+//! * **Step 7 runs once per image**, under the process setup: `chs_initialize`
+//!   with the recorded zone, then `chs_set_defaults` when there are defaults.
+//!   A non-OK status from either is that call's own error ([`RawCallError`]),
+//!   mapped by the D3 status table in the public layer, never a refusal reason.
+//! * **Errors stay abi1-local**: [`Refusal`] carries the same fields
+//!   `sdk.json`'s loader-refusal table promises (`reason`, `path`,
+//!   `want`/`got`); the public layer maps it onto its own `Error`.
+
+// The conformance runner compiles this file a second time through `#[path]` and
+// reaches only `load`; the public layer reaches the rest.
+#![allow(dead_code)]
 
 use std::ffi::CStr;
 use std::path::{Path, PathBuf};
@@ -31,6 +37,9 @@ use std::path::{Path, PathBuf};
 use libloading::os::unix::Symbol;
 use libloading::os::unix::{Library as UnixLibrary, RTLD_LOCAL, RTLD_NOW};
 
+use std::sync::Arc;
+
+use super::calls_gen::RawCallError;
 use super::decls::{self, Api, CrossCheckKind, Handshake};
 
 /// One loader refusal: the `sdk.json` reason WORD, EXACTLY (`glibc_floor`,
@@ -41,13 +50,19 @@ use super::decls::{self, Api, CrossCheckKind, Handshake};
 /// free-form detail. `reason` is what a conformance case compares against
 /// `scripts/abi-v1/emit/_stubshared.py`'s variant plan verbatim; it is never
 /// decorated, so that comparison can be a plain string equality.
-#[derive(Debug, Clone)]
-pub(crate) struct Refusal {
-    pub(crate) reason: String,
-    pub(crate) path: PathBuf,
-    pub(crate) want: Option<String>,
-    pub(crate) got: Option<String>,
-    pub(crate) detail: Option<String>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    /// The `sdk.json` reason word, with `:<symbol>` or `:<field>` appended where
+    /// `sdk.json` gives a suffix.
+    pub reason: String,
+    /// The library the loader was opening.
+    pub path: PathBuf,
+    /// What the check wanted, where the refusal names both sides.
+    pub want: Option<String>,
+    /// What the check found, where the refusal names both sides.
+    pub got: Option<String>,
+    /// Free-form detail, where there is any.
+    pub detail: Option<String>,
 }
 
 impl Refusal {
@@ -101,104 +116,145 @@ impl std::fmt::Display for Refusal {
 }
 
 /// The loader's input (plan §3.1): decoupled from the fetch module's own
-/// `Resolved` type so this lane needs no fetch binding PR to merge first. The
-/// wave-C adapter is a three-line `Resolved -> LoadInput`.
+/// `Resolved` type; the public layer's adapter is three lines.
 pub(crate) struct LoadInput<'a> {
     pub(crate) library_path: &'a Path,
-    /// The verified predicate, as a parsed JSON object — passed verbatim,
-    /// never re-derived.
-    pub(crate) predicate: serde_json::Map<String, serde_json::Value>,
+    /// The verified predicate, exactly as the fetch layer returned it, never
+    /// re-derived or re-encoded. `None` is an unverified open: steps 1 and 5
+    /// (the signed statement's checks) are skipped.
+    pub(crate) predicate: Option<&'a serde_json::Value>,
     /// The image zone `chs_initialize` sets at step 7, as bytes: empty means
-    /// UTC. The public setup API is wave C's; until then a caller (today only
-    /// a test) supplies it, and every other caller passes an empty slice.
+    /// UTC.
     pub(crate) timezone: &'a [u8],
+    /// The default settings `chs_set_defaults` takes at step 7, as a JSON
+    /// object of string values; `None` when the setup has none.
+    pub(crate) defaults: Option<&'a [u8]>,
 }
 
-/// A library that passed every check (steps 1-6): its resolved symbol table.
+/// A library that passed every check (steps 1-6) and was set up (step 7).
 pub(crate) struct Loaded {
-    pub(crate) api: Api,
+    pub(crate) api: Arc<Api>,
+    /// The exact bytes `chs_build_info()` returned.
+    pub(crate) build_info_raw: Vec<u8>,
+    /// Its parsed form (a strict parse: ASCII, no duplicate key).
+    pub(crate) build_info: serde_json::Map<String, serde_json::Value>,
 }
 
 /// What a failed load reports: a step 1-6 refusal (`sdk.json` reasons), or —
-/// step 7 having no refusal reason by design — `chs_initialize`'s own call
-/// error, mapped by the D3 status table.
+/// step 7 having no refusal reason by design — `chs_initialize`'s or
+/// `chs_set_defaults`'s own call error, mapped by the D3 status table.
 pub(crate) enum LoadError {
     Refused(Refusal),
-    Initialize(InitializeError),
-}
-
-/// `chs_initialize`'s own call error: the status, the error class the D3
-/// table maps it to, and the library's own message (naming both zones for a
-/// zone conflict).
-pub(crate) struct InitializeError {
-    pub(crate) status: &'static str,
-    /// `usage` for `CHS_INVALID_ARGUMENT`, `internal` for `CHS_INTERNAL`,
-    /// `rejected` / `declined` for the other two.
-    pub(crate) class: &'static str,
-    pub(crate) message: String,
+    Call(RawCallError),
 }
 
 /// Run loader steps 1-7 against `input`. Step 7 calls `chs_initialize` once
 /// with the image zone (`process_once`: the same spelling again is OK, a
-/// different one is `CHS_INVALID_ARGUMENT`); a non-OK status is that call's
-/// own error, never a refusal reason.
+/// different one is `CHS_INVALID_ARGUMENT`), then `chs_set_defaults` when
+/// there are defaults; a non-OK status is that call's own error.
 pub(crate) fn load(input: LoadInput<'_>) -> Result<Loaded, LoadError> {
     let timezone = input.timezone;
-    let loaded = load_checked(input).map_err(LoadError::Refused)?;
-    let api = &loaded.api;
-    let mut err: *mut decls::ChsError = std::ptr::null_mut();
-    // SAFETY: steps 1-6 passed, so `api` is fully resolved; `timezone` is a
-    // live slice for the whole call and `err` is this call's own local.
-    let status = unsafe { (api.chs_initialize)(timezone.as_ptr(), timezone.len(), &mut err) };
-    let message = if err.is_null() {
-        String::new()
-    } else {
-        // SAFETY: a non-null `err` is a `chs_error *` this call just handed
-        // over; the message buffer is read then freed through this image,
-        // and the error is freed exactly once.
-        unsafe {
-            let buf = (api.chs_error_message)(err as *const decls::ChsError);
-            let text = if buf.is_null() {
-                String::new()
-            } else {
-                let data = (api.chs_buf_data)(buf as *const decls::ChsBuf);
-                let len = (api.chs_buf_len)(buf as *const decls::ChsBuf);
-                let t = if data.is_null() || len == 0 {
-                    String::new()
-                } else {
-                    String::from_utf8_lossy(std::slice::from_raw_parts(data, len)).into_owned()
-                };
-                (api.chs_buf_free)(buf);
-                t
-            };
-            (api.chs_error_free)(err);
-            text
-        }
-    };
-    if status != 0 {
-        let name = decls::status_name(status).unwrap_or("CHS_INTERNAL");
-        let class = match name {
-            "CHS_INVALID_ARGUMENT" => "usage",
-            "CHS_REJECTED" => "rejected",
-            "CHS_DECLINED" => "declined",
-            _ => "internal",
-        };
-        return Err(LoadError::Initialize(InitializeError {
-            status: name,
-            class,
-            message,
-        }));
+    let defaults = input.defaults;
+    let Checked {
+        api,
+        build_info_raw,
+        build_info,
+    } = load_checked(input).map_err(LoadError::Refused)?;
+    let api = Arc::new(api);
+    api.initialize(timezone).map_err(LoadError::Call)?;
+    if let Some(defaults) = defaults {
+        api.set_defaults(defaults).map_err(LoadError::Call)?;
     }
-    Ok(loaded)
+    Ok(Loaded {
+        api,
+        build_info_raw,
+        build_info,
+    })
+}
+
+/// Re-run the signed statement's checks (step 1, the glibc floor, and step 5,
+/// the cross-check) for a request that reaches an image this process already
+/// opened: the image is never loaded twice, but every new statement must still
+/// agree with it.
+pub(crate) fn recheck(
+    build_info: &serde_json::Map<String, serde_json::Value>,
+    predicate: &serde_json::Value,
+    path: &Path,
+) -> Result<(), Refusal> {
+    let predicate = predicate_object(predicate, path)?;
+    #[cfg(target_os = "linux")]
+    check_glibc(predicate, path)?;
+    cross_check(build_info, predicate, path)
+}
+
+fn predicate_object<'p>(
+    predicate: &'p serde_json::Value,
+    path: &Path,
+) -> Result<&'p serde_json::Map<String, serde_json::Value>, Refusal> {
+    predicate.as_object().ok_or_else(|| {
+        Refusal::with_detail(
+            "predicate_malformed",
+            path,
+            "the predicate is not a JSON object",
+        )
+    })
+}
+
+/// Step 5: the nine-field cross-check of `build_info` against the verified
+/// predicate.
+fn cross_check(
+    build_info: &serde_json::Map<String, serde_json::Value>,
+    predicate: &serde_json::Map<String, serde_json::Value>,
+    path: &Path,
+) -> Result<(), Refusal> {
+    for (bi_field, pred_field, kind) in decls::CROSS_CHECK_FIELDS {
+        let bi_value = build_info.get(*bi_field).ok_or_else(|| {
+            Refusal::with_detail("build_info_malformed", path, format!("missing {bi_field}"))
+        })?;
+        let pred_value = predicate.get(*pred_field).ok_or_else(|| {
+            Refusal::with_detail("predicate_malformed", path, format!("missing {pred_field}"))
+        })?;
+        let equal = match kind {
+            CrossCheckKind::Int => {
+                bi_value.as_i64().is_some() && bi_value.as_i64() == pred_value.as_i64()
+            }
+            CrossCheckKind::Bytes => {
+                bi_value.as_str().is_some() && bi_value.as_str() == pred_value.as_str()
+            }
+        };
+        if !equal {
+            return Err(Refusal::naming(
+                format!("build_info_mismatch:{bi_field}"),
+                path,
+                pred_value.to_string(),
+                bi_value.to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// What steps 1-6 produce: the resolved table and `build_info`, raw and parsed.
+struct Checked {
+    api: Api,
+    build_info_raw: Vec<u8>,
+    build_info: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Steps 1-6.
-fn load_checked(input: LoadInput<'_>) -> Result<Loaded, Refusal> {
+fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
     let path = input.library_path;
+    let predicate = match input.predicate {
+        Some(p) => Some(predicate_object(p, path)?),
+        None => None,
+    };
 
-    // Step 1: glibc, Linux only, BEFORE dlopen.
+    // Step 1: glibc, Linux only, BEFORE dlopen. Skipped with no signed
+    // statement (an unverified open).
     #[cfg(target_os = "linux")]
-    check_glibc(&input.predicate, path)?;
+    if let Some(predicate) = predicate {
+        check_glibc(predicate, path)?;
+    }
 
     // Step 2: dlopen(RTLD_NOW | RTLD_LOCAL).
     // SAFETY: the artifact is a self-contained chtypes v1 library (exports
@@ -282,30 +338,10 @@ fn load_checked(input: LoadInput<'_>) -> Result<Loaded, Refusal> {
         ));
     }
 
-    // Step 5: the nine-field cross-check against the verified predicate.
-    for (bi_field, pred_field, kind) in decls::CROSS_CHECK_FIELDS {
-        let bi_value = build_info.get(*bi_field).ok_or_else(|| {
-            Refusal::with_detail("build_info_malformed", path, format!("missing {bi_field}"))
-        })?;
-        let pred_value = input.predicate.get(*pred_field).ok_or_else(|| {
-            Refusal::with_detail("predicate_malformed", path, format!("missing {pred_field}"))
-        })?;
-        let equal = match kind {
-            CrossCheckKind::Int => {
-                bi_value.as_i64().is_some() && bi_value.as_i64() == pred_value.as_i64()
-            }
-            CrossCheckKind::Bytes => {
-                bi_value.as_str().is_some() && bi_value.as_str() == pred_value.as_str()
-            }
-        };
-        if !equal {
-            return Err(Refusal::naming(
-                format!("build_info_mismatch:{bi_field}"),
-                path,
-                pred_value.to_string(),
-                bi_value.to_string(),
-            ));
-        }
+    // Step 5: the nine-field cross-check against the verified predicate
+    // (skipped with no signed statement).
+    if let Some(predicate) = predicate {
+        cross_check(&build_info, predicate, path)?;
     }
 
     // Step 6: resolve every described symbol (api, tooling, the tombstone),
@@ -318,7 +354,11 @@ fn load_checked(input: LoadInput<'_>) -> Result<Loaded, Refusal> {
     let api = unsafe { Api::resolve_all(lib) }
         .map_err(|name| Refusal::new(format!("missing_symbol:{name}"), path))?;
 
-    Ok(Loaded { api })
+    Ok(Checked {
+        api,
+        build_info_raw: bytes.to_vec(),
+        build_info,
+    })
 }
 
 /// `chs_build_info()`'s text, parsed strictly (plan §3.2 step 4): ASCII
