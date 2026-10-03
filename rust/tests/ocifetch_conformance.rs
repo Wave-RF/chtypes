@@ -921,13 +921,27 @@ fn toolchain_string() -> String {
     if let Ok(v) = std::env::var("CHTYPES_V1_TOOLCHAIN") {
         return v;
     }
+    // The parity gate (scripts/fetch-v1/parity.py) names Rust's two legs by
+    // the matrix's own labels: the manifest's MSRV (`rust-version`) and
+    // `stable`. The label is derived, not typed: a compiler whose
+    // `major.minor` equals the manifest's `rust-version` is the MSRV leg,
+    // anything else is `stable`.
     let output = Command::new("rustc").arg("--version").output();
     let version = output
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.split_whitespace().nth(1).map(str::to_string));
-    format!("rust{}", version.unwrap_or_else(|| "unknown".to_string()))
+    let Some(version) = version else {
+        return "unknown".to_string();
+    };
+    let major_minor: Vec<&str> = version.split('.').take(2).collect();
+    let msrv = env!("CARGO_PKG_RUST_VERSION");
+    if !msrv.is_empty() && major_minor.join(".") == msrv {
+        msrv.to_string()
+    } else {
+        "stable".to_string()
+    }
 }
 
 /// A minimal `TempDir`: create-on-new, remove-on-drop. `src/ocifetch` has no
