@@ -11,8 +11,10 @@
 # (plan §2.2's table) — renaming one here is a protected-surface change, not
 # cosmetic. `v1-constants`, `v1-fixtures` and `v1-parity` are required;
 # `v1-conformance` and `v1-network` feed `v1-parity` (read, never required
-# themselves); `v1-refcheck` and `v1-oras-preseed` are report-only /
-# dispatch-only.
+# themselves); `v1-sandbox` proves the no-network sandbox those legs run in;
+# `v1-refcheck` is report-only; `v1-oras-preseed`, `v1-staging` and
+# `v1-staging-verdict` are dispatch-only (the last two never required, never
+# read by `v1-parity`).
 #
 # STATUS (lane 0A, first on `v1`): only `v1-constants` is live. Every other
 # job is a one-line placeholder that fails loudly with "not yet provided" —
@@ -32,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       registry_base:
-        description: "Base URL for a staging-registry conformance run (unused until the delivery side names one)"
+        description: "Staging-registry conformance run: the https base the v1-staging job points each enrolled binding at, repository path included (docs/guides/fetch-v1.md §10, The staging run). Empty: the job does not run."
         required: false
         type: string
         default: ""
@@ -98,6 +100,20 @@ jobs:
         run: python3 scripts/fetch-v1/schema_check.py --selftest && python3 scripts/fetch-v1/schema_check.py
       - name: "server.py --selftest — a real loopback server, driven by urllib.request"
         run: python3 scripts/fetch-v1/server.py --selftest
+
+  v1-sandbox:
+    name: "v1-sandbox — the no-network sandbox, proven on every pull request"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Every v1-conformance leg skips its sandbox step until that
+      # binding's runner file exists, so without this job the sandbox the
+      # suite depends on would be proven by nothing. Same script, same
+      # proofs; it also does one real loopback round trip through
+      # scripts/fetch-v1/server.py started inside the sandbox.
+      - name: "selftest — uid, curl exit 6 or 7 for github, loopback round trip through server.py"
+        run: scripts/fetch-v1/sandbox.sh --selftest
 
   v1-conformance:
     name: "v1-conformance (${{ matrix.binding }} ${{ matrix.toolchain }})"
@@ -186,9 +202,29 @@ jobs:
             rust) (cd rust && cargo fetch --locked) ;;
           esac
 
-      - name: cut egress — loopback only, so "no network in the conformance suite" is mechanical
+      - name: prove the no-network sandbox before the suite relies on it
+        # measured, PR #400: both `ts` legs (the first legs ever to reach
+        # the egress step; every earlier leg skipped for lack of a runner
+        # file) timed out at 20 minutes, twice, with `BlobNotFound` in both
+        # logs, after a blanket `iptables ... ! -o lo -j REJECT`.
+        # inferred: that rule cut the Actions runner's own link to GitHub,
+        # not just the suite's.
+        #
+        # measured, run 36980815013 (Go leg): the replacement, `sudo -g
+        # noegress ...`, failed in about a second with "cannot reach
+        # 127.0.0.1". inferred: the hosted runner's sudoers refuses run-as
+        # GROUP, so neither curl ever ran, and the "github is unreachable"
+        # proof passed falsely because it treated any nonzero result as
+        # "unreachable".
+        #
+        # Now: a network namespace holding only loopback, entered for the
+        # suite's process tree alone (scripts/fetch-v1/sandbox.sh). The
+        # runner's own connectivity is never touched. The proofs run
+        # curl INSIDE the sandbox and accept only curl's own "could not
+        # resolve / could not connect" codes, so a failing wrapper cannot
+        # read as success, and each prints its exit code.
         if: steps.runner_file.outputs.exists == 'true'
-        run: sudo iptables -A OUTPUT ! -o lo -j REJECT
+        run: scripts/fetch-v1/sandbox.sh --selftest
 
       - name: run the conformance suite and write CHTYPES_V1_REPORT
         if: steps.runner_file.outputs.exists == 'true'
@@ -196,6 +232,13 @@ jobs:
           CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
           CHTYPES_V1_REPORT: ${{ runner.temp }}/report-${{ matrix.binding }}-${{ matrix.toolchain }}.json
         run: |
+          # Written to a file, then run inside the no-network sandbox,
+          # rather than inlined into a `bash -c '...'` one-liner: the Go
+          # leg's own command already needs single quotes
+          # (`-run '^TestConformanceV1$'`), which cannot nest inside
+          # another single-quoted -c string.
+          cat > "$RUNNER_TEMP/run-conformance.sh" <<'SCRIPT'
+          set -e
           case "${{ matrix.binding }}" in
             go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/) ;;
             python)
@@ -212,6 +255,9 @@ jobs:
             ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
             rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
           esac
+          SCRIPT
+          chmod +x "$RUNNER_TEMP/run-conformance.sh"
+          scripts/fetch-v1/sandbox.sh -- bash "$RUNNER_TEMP/run-conformance.sh"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -539,3 +585,149 @@ jobs:
           name: oras-preseed
           path: /tmp/oras-preseed
           if-no-files-found: error
+
+  # Dispatch-only, and only when `registry_base` is non-empty. Never a
+  # required context and never an input to v1-parity: the verdict is
+  # information in the job summary (docs/guides/fetch-v1.md §10, "The staging
+  # run"). Each leg runs ONE binding's own conformance runner, unchanged, over
+  # the derived case table scripts/fetch-v1/staging.py emits, with the
+  # registry transport pointed at `registry_base`. A binding with no
+  # enrollment marker, or no runner file yet, skips loudly and uploads nothing.
+  v1-staging:
+    name: "v1-staging (${{ matrix.binding }})"
+    if: github.event_name == 'workflow_dispatch' && inputs.registry_base != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - binding: go
+            toolchain: go1.27.x
+          - binding: python
+            toolchain: "3.13"
+          - binding: ts
+            toolchain: node24
+            node_version: "24"
+          - binding: rust
+            toolchain: stable
+    env:
+      # Deliberately NOT inside scripts/fetch-v1/sandbox.sh: that namespace has
+      # loopback only, and this job exists to reach a live host over HTTPS.
+      # Through the environment, never interpolated into a script body.
+      REGISTRY_BASE: ${{ inputs.registry_base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: registry_base must be an https URL with no trailing slash
+        run: |
+          case "$REGISTRY_BASE" in
+            https://*/*) ;;
+            *) echo "::error::registry_base must be https://<host>/<repository path>, got: $REGISTRY_BASE" >&2; exit 1 ;;
+          esac
+          case "$REGISTRY_BASE" in
+            */) echo "::error::registry_base must not end in a slash" >&2; exit 1 ;;
+          esac
+      - name: is this binding enrolled, and does its runner exist yet?
+        id: gate
+        run: |
+          case "${{ matrix.binding }}" in
+            go) f="go/internal/ocifetch/conformance_test.go" ;;
+            python) f="python/tests/ocifetch/test_conformance.py" ;;
+            ts) f="ts/test/ocifetch/conformance.test.ts" ;;
+            rust) f="rust/tests/ocifetch_conformance.rs" ;;
+          esac
+          echo "runner_file_path=$f" >> "$GITHUB_OUTPUT"
+          if [ -f "spec/fetch-v1/enrolled/${{ matrix.binding }}" ] && [ -f "$f" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "v1-staging (${{ matrix.binding }}): SKIPPED — not enrolled (spec/fetch-v1/enrolled/${{ matrix.binding }}) or $f does not exist on this ref." >&2
+          fi
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'python'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.toolchain }}
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'ts'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'ts'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node_version }}
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'rust'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - name: install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          case "${{ matrix.binding }}" in
+            go) (cd go && go mod download) ;;
+            python) (cd python && uv sync --locked --group dev) ;;
+            ts) (cd ts && pnpm install --frozen-lockfile) ;;
+            rust) (cd rust && cargo fetch --locked) ;;
+          esac
+      - name: "derive the staging case table — the SDK test key is trusted here by explicit opt-in, and nowhere else"
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          scripts/fetch-v1/staging.py emit \
+            --out "$RUNNER_TEMP/staging-fixtures" \
+            --trust-test-key "$(cat tests/fixtures/fetch-v1/test-key/public.hex)"
+      - name: run the binding's own conformance runner against registry_base
+        if: steps.gate.outputs.run == 'true'
+        env:
+          CHTYPES_V1_CONFORMANCE: ${{ runner.temp }}/staging-fixtures
+          CHTYPES_V1_REGISTRY_BASE: ${{ inputs.registry_base }}
+          CHTYPES_V1_REPORT: ${{ runner.temp }}/staging-report-${{ matrix.binding }}.json
+        run: |
+          case "${{ matrix.binding }}" in
+            go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/) ;;
+            python)
+              rel="${{ steps.gate.outputs.runner_file_path }}"
+              (cd python && uv run --offline --python "${{ matrix.toolchain }}" pytest -q "${rel#python/}")
+              ;;
+            ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
+            rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
+          esac
+      # `staging-report-*`, never `report-*`: v1-parity downloads `report-*`
+      # and must never see a staging report.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.gate.outputs.run == 'true'
+        with:
+          name: staging-report-${{ matrix.binding }}
+          path: ${{ runner.temp }}/staging-report-${{ matrix.binding }}.json
+          if-no-files-found: ignore
+
+  v1-staging-verdict:
+    name: "v1-staging-verdict — what the staging run measured (job summary only)"
+    needs: [v1-staging]
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.registry_base != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "selftest — the case table's rules, the trust opt-in and the verdict's own failure modes"
+        run: scripts/fetch-v1/staging.py --selftest
+      - name: download every staging report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true # none exist while no binding is enrolled
+        with:
+          pattern: "staging-report-*"
+          path: ${{ runner.temp }}/staging-reports
+          merge-multiple: true
+      - name: verdict, to the job summary only (exit status is 0 whatever it says)
+        env:
+          REGISTRY_BASE: ${{ inputs.registry_base }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/staging-reports"
+          scripts/fetch-v1/staging.py emit --out "$RUNNER_TEMP/staging-fixtures" \
+            --trust-test-key "$(cat tests/fixtures/fetch-v1/test-key/public.hex)" >/dev/null
+          scripts/fetch-v1/staging.py verdict --derived "$RUNNER_TEMP/staging-fixtures" \
+            --reports-dir "$RUNNER_TEMP/staging-reports" --registry-base "$REGISTRY_BASE"

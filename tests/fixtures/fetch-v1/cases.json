@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "1794b75b0f0b742501cb66d2db0a175e7ac9fe92",
+    "generator_commit": "f03af2f7f5246e4b2093d8a1baf4d1d45ef76234",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -740,7 +740,7 @@
         "before_index_rename_hook": null
       },
       "request": {
-        "spelling": "t-wrong-version",
+        "spelling": "26.8.1.5",
         "platform": "linux-arm64",
         "offline": false,
         "frozen": false,
@@ -2220,50 +2220,6 @@
       }
     },
     {
-      "id": "preseed-oras",
-      "tree": "cache",
-      "transports": [
-        "file"
-      ],
-      "http_script": null,
-      "setup": {
-        "cache": "oras-preseed",
-        "system_dirs": [],
-        "lock": null,
-        "before_index_rename_hook": null
-      },
-      "request": {
-        "spelling": "26.1",
-        "platform": "linux-arm64",
-        "offline": true,
-        "frozen": false,
-        "lock_write": false,
-        "update": false,
-        "allow_unsigned": false,
-        "trust": "test",
-        "bases": [
-          "{base}"
-        ]
-      },
-      "env": {},
-      "expect": {
-        "ok": true,
-        "version": null,
-        "build": null,
-        "manifest": null,
-        "library_sha256": null,
-        "code": null,
-        "sleeps": [],
-        "warnings": [],
-        "requests": {
-          "max": 0,
-          "none_matching": [],
-          "auth_on_second_origin": false
-        },
-        "lock_after": null
-      }
-    },
-    {
       "id": "frozen-no-discovery",
       "tree": "lock-no-discovery",
       "transports": [
@@ -3337,7 +3293,7 @@
         "trust": "test",
         "bases": [
           "{base}",
-          "{base}"
+          "{base2}"
         ]
       },
       "env": {},
@@ -3387,7 +3343,7 @@
         "trust": "test",
         "bases": [
           "{base}",
-          "{base}"
+          "{base2}"
         ]
       },
       "env": {},
