@@ -1,8 +1,8 @@
 # Artifacts — getting one, and knowing you got the right one
 
-An **artifact** is one ClickHouse release compiled and wrapped in the `chs_*` C ABI: a single self-contained shared library of 160–300 MB that carries that release's real type machinery. A binding is a few thousand lines of glue; the artifact is the product. Nothing in this repository builds one — you download it, and you can prove you got the bytes the release was cut from.
+An **artifact** is one ClickHouse release compiled and wrapped in the `chs_*` C ABI: a single self-contained shared library of 160–300 MB that carries that release's real type machinery. A binding is a few thousand lines of glue; the artifact is the product. Nothing in this repository builds one — you fetch one.
 
-This page is what a consumer needs. [`fetch.md`](fetch.md) is the normative contract underneath it — the verification chain link by link, the signature format, the exit codes, the decisions where four implementations had to agree.
+This page is what a consumer needs. [`fetch-v1.md`](fetch-v1.md) is the normative contract underneath it: the verification chain link by link, the lock, the error codes and exit statuses. [`../reference/artifact.md`](../reference/artifact.md) is what the registry serves and what a loader relies on.
 
 ## Get one
 
@@ -15,184 +15,62 @@ npx @wavehouse/chtypes fetch 26.8                                    # TypeScrip
 cargo install chtypes && chtypes fetch 26.8                          # Rust
 ```
 
-`fetch --all` takes every line the release publishes for this platform. From a checkout, [`scripts/fetch.sh`](../../scripts/fetch.sh) is the reference implementation of the same contract.
+`fetch --all` takes every line the registry publishes for this platform. A spelling is two, three or four parts (`26.8`, `26.8.15`, `26.8.15.10`) with no `v` prefix and no channel suffix; a floating one resolves to the newest build inside it. The commands are spelled identically in all four bindings:
 
-All four print the installed directory alone on stdout and progress on stderr, so `dir="$(python -m chtypes fetch 26.8)"` composes. The other three subcommands are spelled identically everywhere:
+| command           | answers                                                                       |
+| ----------------- | ----------------------------------------------------------------------------- |
+| `fetch <line>...` | resolve, verify and install one or more lines (`--all` for every published)  |
+| `verify`          | re-verify every installed library against its own `verified.json` record      |
+| `list`            | the lines the registry publishes                                              |
+| `where`           | the cache directory a fetch would write to                                    |
 
-| command           | answers                                                     |
-| ----------------- | ----------------------------------------------------------- |
-| `fetch <line>...` | install one or more lines (`--all` for every published one) |
-| `verify`          | re-hash every installed line against its own manifest       |
-| `list`            | what is installed, and what the release offers              |
-| `where`           | the registry directory a fetch would write to               |
+`fetch` takes `--frozen`, `--offline` and `--lock <file>` ([Pinning](#pinning-for-ci-and-production)). Usage errors exit 2, and every other exit status comes from the error table in [`fetch-v1.md` §8](fetch-v1.md#8-errors), so a script can tell an unreachable registry from a refused signature.
 
-Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source unreachable · 4 not published for this platform or line.
-
-The same thing from code, when you would rather not shell out:
-
-<details open><summary><b>Go</b></summary>
-
-```go
-inst, err := chtypes.Ensure(ctx, "26.8", chtypes.FetchOptions{Progress: os.Stderr})
-// inst.Dir is <registry>/26.8; inst.AlreadyInstalled says whether any bytes moved
-```
-
-</details>
-
-<details><summary><b>Python</b></summary>
-
-```python
-import chtypes
-
-path = chtypes.ensure("26.8")   # returns the installed directory; idempotent
-```
-
-</details>
-
-<details><summary><b>TypeScript</b></summary>
-
-```ts
-import { ensure } from '@wavehouse/chtypes';
-
-const r = await ensure('26.8');   // r.dir is <registry>/26.8; r.installed says whether bytes moved
-```
-
-</details>
-
-<details><summary><b>Rust</b></summary>
-
-```rust
-use chtypes::{EnsureOptions, ensure};
-
-let installed = ensure("26.8", &EnsureOptions::default())?;   // installed.dir, installed.action
-```
-
-</details>
-
-`ensure` is idempotent in all four: a line that is installed and hashes what the signed release says is a no-op, and nothing is downloaded. Every flag of the command is a field or option of the function — `dest`, `platform`, `url`/`tag`, `lock`, `frozen`, `force`, `offline`, plus the trust policy.
+From code you do not need to shell out: a binding's `Registry` fetches on demand when its `autofetch` option is on (see [Lazy fetch](#lazy-fetch-is-opt-in)), and the fetch layer's own entry points are [`fetch-v1.md` §9](fetch-v1.md#9-the-seam).
 
 ## Where it lands, and where it is looked for
 
-A **registry** is a directory holding one subdirectory per ClickHouse minor line, looked for in the order [`fetch.md` §1](fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) defines.
+One cache, shared by all four bindings: an OCI image layout at `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/`, or the directory `CHTYPES_CACHE` names. Verified libraries are unpacked beside it under `unpacked/sha256/<manifest-hex>/`. Read-only system directories (`/usr/local/share/chtypes/v1`, then `/opt/chtypes/v1`) are searched after the user cache and never written to, which is how an image bakes libraries in. `CHTYPES_REGISTRY`, the variable the previous generation used, is retired: set, it produces one warning and is otherwise ignored. The cache layout, and how to pre-seed one for an offline machine with `oras copy`, are [`fetch-v1.md` §1](fetch-v1.md#1-the-cache).
 
-Inside, one directory per line, plus a `patches/` sibling tree for any OTHER installed exact patch of a line (chtypes#284, "Layout rule"):
+## What is checked
 
-```text
-<registry>/
-  26.8/                    the patch a LINE request selects — FLAT
-    manifest.json          the record — read this, infer nothing
-    libchtypes.dylib       (.so on Linux; the NAME comes from manifest.json)
-    CH_VERSION             the ClickHouse version, as plain text
-    unsafe_families.txt    this build's own refuse-list; empty is a valid list
-  26.7/
-...
-  patches/
-    26.8/
-      26.8.14.3-lts/       any OTHER exact patch of 26.8 — the same four files
-  sdk-goldens.json         the served golden set, if the release publishes one
-```
+Before anything is unpacked, a fetch checks, in order: the platform manifest's digest against the index, a **Sigstore bundle** signature over the statement under the release key, that the statement names the platform, the version and the ABI generation you asked for, and the layer's size and sha256. After the layer is unpacked, the library file is hashed again against the signed statement. After it is loaded, the binding's own ABI fingerprint is compared with the library's. Any failure removes whatever it produced; nothing half-installed is ever trusted by a later `--offline` read.
 
-Several patches of one line can be installed at once. **ONLY a line spelling (or `--all`) writes the flat `<minor>/` slot — exactly as before this existed.** An exact-patch spelling ALWAYS installs at `patches/<minor>/<clickhouse_version>/` instead, even when it happens to be the line's newest published patch and the flat slot is empty: placement depends on how the patch was asked for, never on whether it is the newest one the release has. The one exception is not a write at all — an exact request for a patch that already sits flat, verified, is a no-op that reports the flat directory. `patches/` is a sibling tree released SDKs through 0.4.x neither see nor touch — measured against v0.4.0 of all four bindings and `scripts/fetch.sh`, including `list` and `verify`. When a LATER line fetch changes which patch occupies the flat slot, the outgoing one is DEMOTED into `patches/`, atomically, never deleted. [`fetch.md` §1](fetch.md#1-where-artifacts-are-looked-for-the-registry-search-path) has the full rule, including what happens when an old and a new SDK share one cache.
-
-**The library's file name comes out of `manifest.json` and is never assumed.** The name `libchtypes` and the `chs_` prefix are frozen, but Linux artifacts built before the `_s1` suffix was dropped call the file `libchtypes_s1.so`, and such artifacts still circulate. Every loader here is manifest-driven and takes either.
-
-## Loading
-
-What a loader does with that directory, in order. This is the reference algorithm every binding implements; a binding may add to it but may not skip a step.
-
-1. Read the registry directory. For each entry that is a directory: a `patches/` entry is read ONE level deeper — each `patches/<minor>/<clickhouse_version>/` it holds is itself an entry, read exactly like a flat `<minor>/` below. Every other entry is a flat line install.
-2. Read `manifest.json`. **If it is missing or unparseable, skip the directory silently** — a registry may legitimately hold scratch directories, and a `.DS_Store` is not a version. A cache that holds only nested `patches/` installs is not empty because of this: both levels are checked before deciding a registry has nothing.
-3. `dlopen` the file `manifest.json`'s `library` field names, with `RTLD_NOW | RTLD_LOCAL`. A failure here **is** an error and aborts with the path and the `dlerror()` text: a directory that has a manifest and does not load is broken, not absent.
-4. Resolve the `chs_*` symbols by name. Four are **mandatory** — `chs_clickhouse_version`, `chs_init`, `chs_schema_compile`, `chs_rows`. If any is missing, `dlclose` and reject the library: it is not a chtypes artifact.
-5. Resolve `chs_abi_revision`. **Absent** means the artifact predates the probe: record revision `0` and continue under the rules below, because absence is ignorance, not incompatibility. **Present** means call it — and if it returns a value that is neither `0` nor the revision this binding was written against (`CHS_ABI_REVISION`), **reject the library**, naming both numbers. The artifact has positively stated that the binding's declarations do not describe it, and calling through them is undefined.
-6. Every other symbol is **optional**. A missing one means "this artifact predates the feature" and must degrade to an `unsupported` answer at call time, never to a load failure.
-7. Column introspection is **all-or-nothing**: the six `chs_schema_column_*` entry points shipped together, so if any is missing, treat the whole group as absent and leave the column list empty rather than partially populated.
-8. Ask the library its own version with `chs_clickhouse_version()`. **The library names itself; nothing is inferred from the path.** Derive the minor line from that string.
-9. Call `chs_init(timezone, unsafe_families)` once per library, with the contents of that version's own `unsafe_families.txt`. Each library keeps its own DateLUT and its own refuse-list.
-10. Index the library under its **exact version** always. Index it under its **minor line** too only when it is the newest published patch of that line found in the FIRST directory on the search path that holds any patch of it (chtypes#284, "Layout rule") — a patch loaded from `patches/` never silently answers a line request unless it is the one this rule picks.
-
-`RTLD_LOCAL` is not a detail: it is what keeps each library's ClickHouse symbols private, so two builds that both define `DB::DataTypeFactory` never collide. A loader that uses `RTLD_GLOBAL` will appear to work and answer with the wrong version's semantics. [`multi-version.md`](multi-version.md) is what that buys you.
-
-**Loading is lazy per line, in every binding and in every constructor**, and an eager set is asked for with `preload`. The cost of an open, measured: **about 120 MB resident per line**, so seven artifacts in one directory are 1.096 s and 351 MB to open at construction against 1 ms and 66.8 MB to open none. [`multi-version.md`](multi-version.md#how-it-works-and-what-it-costs) is the single-sourced statement of that rule and of `preload`'s four spellings.
-
-## Verification, and what it is not
-
-A fetch is a **verification chain, not a download**. Nothing is a verdict but the chain — not an exit code, not a `Content-Length`, not "download finished". In order:
-
-0. `SHA256SUMS.sig` is an ed25519 signature over the exact bytes of `SHA256SUMS`, checked against the release key each binding embeds (key id `deb275922dbff76e`). An unsigned or mis-signed release is `CHTYPES_ARTIFACT_UNTRUSTED`, and nothing is downloaded around it.
-1. `index.json` names the asset for this line and platform, and records its sha256.
-2. The now-authentic `SHA256SUMS` must list the same file with the same sha256.
-3. The tarball is hashed **before** it is unpacked.
-4. The installed library is re-hashed in place, against the `manifest.json` that came inside the tarball.
-
-The install is atomic — unpack into a temporary sibling, rename into place — so an interrupted fetch can never leave a half-installed line for a loader to find. Any mismatch is `CHTYPES_ARTIFACT_CORRUPT` and nothing is installed.
-
-The reason this is worth five steps rather than one: a truncated 300 MB library and a good one produce the same `curl` and `tar` status, and the failure being prevented is silent. A wrong or damaged library loaded into a gateway that then answers _authoritatively_ about types is exactly the outcome chtypes exists to stop.
-
-Two environment variables move the trust boundary, and both are deliberate:
-
-- `CHTYPES_TRUSTED_KEYS=<hex>[,<hex>…]` **replaces** the embedded key — for a mirror or a private registry signed by someone else.
-- `CHTYPES_ALLOW_UNSIGNED=1` skips step 0 with one loud warning naming the source. Never the default, never silent.
-
-**Once files are in a registry directory, the loader trusts the directory.** Verification is a fetch-time policy, not a load-time gate, exactly as a runtime trusts `node_modules`. Custom or locally built artifacts are installed by copying them in. If you want the check at load time anyway, Python and TypeScript take a constructor flag for it (`verify_hashes=True`, `verifyChecksums: true`), and `chtypes verify` re-hashes everything installed.
+- The default trust is the release key alone. `CHTYPES_TRUSTED_KEYS` **replaces** the list, never appends to it.
+- `CHTYPES_ALLOW_UNSIGNED=1` skips signature verification with one loud warning naming the source. Never the default, never silent.
+- `CHTYPES_DOWNLOAD_TOKEN`, when set, is sent as a bearer token to the configured registry hosts only, and never across a redirect.
 
 ## Pinning, for CI and production
 
-`fetch --lock chtypes.lock` records, per `<os>-<arch>/<clickhouse_version>` — the EXACT patch, not the line (schema 2, chtypes#284) — the asset file and sha256 that were installed, and the ABI revision the row carried. `fetch --frozen` then refuses anything else with `CHTYPES_ARTIFACT_PINNED` — checking the revision first, so a lock made for an ABI revision your SDK no longer speaks is named as that ([`fetch.md`](fetch.md) §5). It is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, CI fails on drift.
+`fetch --lock chtypes.lock` records, per platform, the request, the exact version and build that resolved, and the platform manifest, layer and bundle digests ([`fetch-v1.md` §6](fetch-v1.md#6-lock-schema-3-and---frozen---offline-update)). `fetch --frozen` then fetches by digest only and refuses anything the lock does not pin with `CHTYPES_ARTIFACT_PINNED`. It is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, CI fails on drift.
 
 ```sh
 npx @wavehouse/chtypes fetch 26.8 --lock chtypes.lock   # record
 npx @wavehouse/chtypes fetch 26.8 --frozen              # refuse anything the lock does not pin
 ```
 
-`--frozen` without `--lock` reads `./chtypes.lock`. A lock file that does not exist under `--frozen` is `CHTYPES_ARTIFACT_PINNED`: nothing is pinned, so nothing is installed.
-
-**The file you pin is the file you get — even while the channel serves something newer.** A lock entry selects among the release's rows by its own key; it is never compared against what else is served, so the refusal "pins X but the release offers Y" no longer exists. Rebuilds are included: the same ClickHouse version can be published more than once, each with a higher build number, and a lock pins a file name and a hash rather than a line or a bare version, so a rebuild does not silently become what you install.
+A lock records digests, never a host name, so it works against any mirror. A lock from the previous generation is refused, never reinterpreted. `--offline` reads only the cache and never touches the network.
 
 ## Lazy fetch is opt-in
 
-Opening a line or an exact patch that no directory on the search path holds can fetch it first, but only if you ask: the registry constructor's `autofetch` option, or `CHTYPES_AUTOFETCH=1` for every registry in the process. Off, the missing line or patch is the one error below.
-
-It is off by default because **a production process must not begin a 250 MB download inside a request**. With it on, a PATCH request fetches that patch first; only once the release has confirmed it does not publish that patch does the fetch fall back to the line, once per process per (destination, spelling) under one lock, so concurrent opens share the one download.
-
-In TypeScript the split is in the method names rather than a flag: `registry.for(v)` is synchronous and never fetches, `await registry.open(v)` is its twin that can.
+Opening a version that nothing on the search path holds can fetch it first, but only if you ask: the registry constructor's `autofetch` option, or `CHTYPES_AUTOFETCH=1` for every registry in the process. Off, the missing version is the one error below. It is off by default because **a production process must not begin a 250 MB download inside a request**.
 
 ## The one error
 
-A line or an exact patch no directory on the search path holds is one identifiable error in every binding — Go's `ErrArtifactMissing` (which works with `errors.Is`), Python's and TypeScript's `ArtifactMissingError`, Rust's `Error::ArtifactMissing` — carrying the same message everywhere apart from the bracketed parts:
+A version that nothing on the search path holds is one identifiable error in every binding, `CHTYPES_ARTIFACT_MISSING`, and it names the exact command that would fix it, because the alternative, a stack trace about a `NULL` handle, sends people to the wrong half of the system. The other codes a fetch raises are `CHTYPES_ARTIFACT_UNTRUSTED`, `CHTYPES_ARTIFACT_CORRUPT`, `CHTYPES_ARTIFACT_PINNED`, `CHTYPES_ARTIFACT_UNPUBLISHED`, the `CHTYPES_SOURCE_*` family and, from the loader, `CHTYPES_ARTIFACT_INCOMPATIBLE`; each is in the table in [`fetch-v1.md` §8](fetch-v1.md#8-errors).
 
-```text
-chtypes: no artifact for ClickHouse 26.8 (darwin-arm64). Looked in: /Users/me/.cache/chtypes/artifacts/abi<R>/darwin-arm64, /usr/local/share/chtypes/artifacts/darwin-arm64, /opt/chtypes/artifacts/darwin-arm64.
-Install it:  python -m chtypes fetch 26.8
-or set CHTYPES_AUTOFETCH=1 to fetch on first use.
-```
+**A version is never another line's answer.** Asking for `25.8` resolves that line or fails naming what is present; it never quietly hands back 26.7's semantics. Version behavior is not monotonic (25.10 rejects a DEFAULT that both 25.8 and 26.6 accept), so a different line's answer is not an approximation of the right one, it is a different answer.
 
-It names every directory it looked in and the exact command that would fix it, because the alternative — a stack trace about a `NULL` handle — sends people to the wrong half of the system. The fetch-time failures share a vocabulary of codes with it: `CHTYPES_ARTIFACT_MISSING`, `…_UNTRUSTED`, `…_CORRUPT`, `…_PINNED`, `…_UNPUBLISHED`, and `CHTYPES_SOURCE_UNREACHABLE`.
+## Loading
 
-**A version is never another LINE's answer.** Asking for `25.8` resolves that line or fails naming what is present; it never quietly hands back 26.7's semantics. Version behavior is not monotonic — 25.10 rejects a DEFAULT that both 25.8 and 26.6 accept — so a different line's answer is not an approximation of the right one, it is a different answer. **A missing exact patch is the one exception, and only within its own line** (chtypes#284): `registry.For("25.8.30.16")` for a patch the release has not built yet resolves to the newest installed or published patch of 25.8 instead, flagged `Exact = false` on the resolution and warned once per (requested, actual) pair — never silently, and never across a line boundary. [`multi-version.md`](multi-version.md#resolution-the-exact-patch-else-its-line--never-another-line) has the full resolution order and the warning text. `fetch`/`ensure` themselves never do this: a fetch for an unpublished exact patch is still `CHTYPES_ARTIFACT_UNPUBLISHED`, only the registry's `For`/`resolve` falls back.
-
-## What a release contains
-
-One release, one `index.json` (schema 1), and it is a **complete set rather than a delta**: read it and you see everything that tag offers. Asset names are
-
-```text
-chtypes-<clickhouse_version>-<os>-<arch>[-b<build>].tar.gz
-```
-
-where `<clickhouse_version>` is the manifest's own `clickhouse_version`, channel suffix included (`26.8.15.10-lts`, `26.7.3.19-stable`) — not the minor line, and not a repository version. `-b<build>` is the wrapper build for that ClickHouse version; a name without one is build 0.
-
-Two version axes meet here, and conflating them is the mistake to avoid. **The ClickHouse version** is a property of an artifact: it is in the asset name, in `manifest.json`, in `CH_VERSION`, and the library reports it itself. **The release tag** is a snapshot of this repository's code packaged with the set of ClickHouse artifacts current when it was cut. So one release carries N ClickHouse versions × M platforms.
-
-There are two kinds of release and only one of them is a version. The rolling `artifacts` release is a staging area whose membership changes as lines pass the artifact producer's comparison against a real server; a versioned `v*` tag says "these are the ones". **Pin the versioned one** — pointing CI at the rolling release is how a pipeline starts silently testing something new. A published `(tag, asset name)` never changes bytes: adding a line, adding a platform or rebuilding an artifact means a new tag, which is what keeps a consumer's recorded hash meaningful.
-
-Which lines exist is a question [`index.json`](https://artifacts.wavehouse.dev/artifacts/index.json) answers, and `fetch --all` reads it rather than restating a list. [`../support.md`](../support.md) renders the current answer, generated rather than typed.
+The loader trusts only what the fetch layer verified, and it never opens a path it was not handed by that layer (or one you name explicitly as unverified). After `dlopen` it reads the library's own `build_info` and refuses a mismatch with the verified statement or with the binding's compiled-in ABI fingerprint, naming both sides. The steps are [`../reference/abi-v1.md`](../reference/abi-v1.md#loading-a-library). Several versions can be open in one process: each library keeps its own ClickHouse state.
 
 ## Licensing
 
-Artifacts are **Elastic License 2.0** — a different license from the Apache 2.0 bindings that load them. `LICENSE` and `NOTICE` ship inside every release, `index.json` names the license, and a fetch says so once. Downloads are anonymous.
+Artifacts are **Elastic License 2.0**, a different license from the Apache 2.0 bindings that load them. The license text ships with each artifact, and downloads are anonymous.
 
 ## Two notes about platforms
 
 **macOS artifacts are for development; Linux is the reference.** The darwin artifacts exist so you can develop and run the suites on a laptop. Their `long double` is 53-bit, which makes some float parses diverge from a real server, so a float expectation is taken from Linux or from a live ClickHouse, never from a Mac. See [`../limitations.md`](../limitations.md).
 
-**Linux holds as many versions as you like.** An artifact needs no static thread-local storage, so a process may `dlopen` as many as it wants on glibc with no tunable set — the producer proves it per build. One historical exception, for anyone holding old files: the 24.8 and 25.3 artifacts published before 2026-09-10 carried one initial-exec TLS access and failed on the third load with `cannot allocate memory in static TLS block`. Re-fetch them.
+**Which lines exist is a question the registry answers.** `chtypes list` prints the lines it publishes, and [`../support.md`](../support.md) says what this repository can and cannot claim about them: the v1 channel carries no statement of which lines are supported, so a line's support reads unknown, never unsupported.
