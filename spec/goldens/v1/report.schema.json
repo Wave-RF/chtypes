@@ -1,0 +1,83 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "chtypes goldens v1 runner report",
+ "description": "What one binding's goldens runner emits, on one platform, for one goldens document. A runner EXECUTES the cases and RECORDS what the library returned; it never compares. scripts/goldens-v1/compare.py reads this report next to the goldens document and renders every verdict. Every byte field is standard base64 of the exact bytes the library returned.",
+ "type": "object",
+ "required": ["report_version", "binding", "binding_version", "platform", "goldens", "artifact", "cases"],
+ "additionalProperties": false,
+ "properties": {
+  "report_version": {"const": 1},
+  "binding": {"enum": ["go", "python", "ts", "rust"]},
+  "binding_version": {"type": "string", "minLength": 1, "description": "the binding's own version as it reports it"},
+  "platform": {"$ref": "#/$defs/platform", "description": "the platform the runner ran on; must be one of the goldens document's generated.checked_on"},
+  "goldens": {
+   "type": "object",
+   "description": "the identity of the goldens document the runner executed, copied from that document",
+   "required": ["clickhouse_version", "build", "revision", "sha256"],
+   "additionalProperties": false,
+   "properties": {
+    "clickhouse_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "build": {"type": "string", "pattern": "^[0-9]{8}\\.[0-9]{6}$"},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "sha256 of the document's exact bytes as fetched, lowercase hex with no prefix"}
+   }
+  },
+  "artifact": {
+   "type": "object",
+   "description": "the loaded library, read from the library itself and never from the manifest",
+   "required": ["build_info_b64", "abi_fingerprint"],
+   "additionalProperties": false,
+   "properties": {
+    "build_info_b64": {"$ref": "#/$defs/b64", "description": "the exact bytes chs_build_info returned"},
+    "abi_fingerprint": {"$ref": "#/$defs/digest", "description": "the loaded library's ABI fingerprint; must equal the goldens document's abi_fingerprint"}
+   }
+  },
+  "cases": {
+   "type": "array",
+   "description": "one entry per case of the goldens document, in any order; a case missing from this list is a FAIL, and so is an id the document does not name",
+   "items": {"$ref": "#/$defs/case"}
+  }
+ },
+ "$defs": {
+  "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+  "b64": {"type": "string", "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"},
+  "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,95}$"},
+  "platform": {"enum": ["darwin/arm64", "linux/amd64", "linux/arm64"]},
+  "status": {"enum": ["CHS_OK", "CHS_REJECTED", "CHS_DECLINED", "CHS_INVALID_ARGUMENT", "CHS_INTERNAL"]},
+  "error": {
+   "type": "object",
+   "description": "chs_error_ch_code, chs_error_ch_name, chs_error_message and chs_error_column, the last three as base64 bytes",
+   "required": ["ch_code", "ch_name_b64", "message_b64", "column_b64"],
+   "additionalProperties": false,
+   "properties": {
+    "ch_code": {"type": "integer"},
+    "ch_name_b64": {"$ref": "#/$defs/b64"},
+    "message_b64": {"$ref": "#/$defs/b64"},
+    "column_b64": {"$ref": "#/$defs/b64"}
+   }
+  },
+  "case": {
+   "type": "object",
+   "required": ["id", "setup", "result"],
+   "additionalProperties": false,
+   "properties": {
+    "id": {"$ref": "#/$defs/id", "description": "the goldens case id"},
+    "setup": {"$ref": "#/$defs/id", "description": "the id of the setup whose process ran the case"},
+    "result": {"enum": ["ran", "skipped"], "description": "skipped is allowed ONLY when the report's platform is not among the case's platforms; a skip anywhere else is a FAIL"},
+    "skip_reason": {"type": "string", "minLength": 1, "description": "required when skipped: the platforms exclusion, in words"},
+    "at": {"enum": ["schema_create", "filter_create", "call"], "description": "the step the call sequence stopped at: the first step that did not answer CHS_OK, else call"},
+    "status": {"$ref": "#/$defs/status", "description": "the status of that step"},
+    "error": {"$ref": "#/$defs/error", "description": "present exactly when status is not CHS_OK"},
+    "document_b64": {"$ref": "#/$defs/b64", "description": "present exactly when status is CHS_OK: the output document's exact bytes as the library returned them (for schema_create, chs_schema_describe's), never parsed and re-serialized, never trimmed"},
+    "export_b64": {"$ref": "#/$defs/b64", "description": "preview_batch with an export format other than -1 and status CHS_OK: out_export's exact bytes; absent otherwise"},
+    "decoded_ok": {"type": ["boolean", "null"], "description": "when status is CHS_OK, whether the binding's PUBLIC decoder accepted document_b64 without error (the same call a user makes); null when there is no document to decode"}
+   },
+   "allOf": [
+    {"if": {"properties": {"result": {"const": "skipped"}}}, "then": {"required": ["skip_reason"], "not": {"anyOf": [{"required": ["at"]}, {"required": ["status"]}, {"required": ["error"]}, {"required": ["document_b64"]}, {"required": ["export_b64"]}, {"required": ["decoded_ok"]}]}}},
+    {"if": {"properties": {"result": {"const": "ran"}}}, "then": {"required": ["at", "status", "decoded_ok"], "not": {"required": ["skip_reason"]}}},
+    {"if": {"properties": {"result": {"const": "ran"}, "status": {"const": "CHS_OK"}}, "required": ["result", "status"]}, "then": {"required": ["document_b64"], "not": {"required": ["error"]}}},
+    {"if": {"properties": {"result": {"const": "ran"}, "status": {"not": {"const": "CHS_OK"}}}, "required": ["result", "status"]}, "then": {"required": ["error"], "not": {"anyOf": [{"required": ["document_b64"]}, {"required": ["export_b64"]}]}}}
+   ]
+  }
+ }
+}

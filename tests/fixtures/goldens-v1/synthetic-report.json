@@ -1,0 +1,84 @@
+{
+ "report_version": 1,
+ "binding": "go",
+ "binding_version": "0.0.0-synthetic",
+ "platform": "linux/amd64",
+ "goldens": {
+  "clickhouse_version": "99.1.2.3",
+  "build": "20990101.000000",
+  "revision": 1,
+  "sha256": "299315b0e305329ccf7b31064e60a33a26b6888d688b098c3066a7c54ed91e4d"
+ },
+ "artifact": {
+  "build_info_b64": "eyJzeW50aGV0aWMiOnRydWV9",
+  "abi_fingerprint": "sha256:abababababababababababababababababababababababababababababababab"
+ },
+ "cases": [
+  {
+   "id": "schema-unknown-type",
+   "setup": "utc",
+   "result": "ran",
+   "at": "schema_create",
+   "status": "CHS_REJECTED",
+   "error": {
+    "ch_code": 50,
+    "ch_name_b64": "VU5LTk9XTl9UWVBF",
+    "message_b64": "VW5rbm93biBkYXRhIHR5cGUgZmFtaWx5OiBCb2d1cw==",
+    "column_b64": ""
+   },
+   "decoded_ok": null
+  },
+  {
+   "id": "row-uint8-wrap-string-bytes",
+   "setup": "utc",
+   "result": "ran",
+   "at": "call",
+   "status": "CHS_OK",
+   "document_b64": "eyJjb2RlIjowLCJjb2xzIjpbeyJiYXNlIjoiVUludDgiLCJpbnB1dCI6IjMwMCIsImlzX3N0b3JlZCI6dHJ1ZSwibmFtZSI6Im4iLCJudWxsIjpmYWxzZSwicmVmIjoiMzAwIiwicmVmX3R5cGUiOiJVSW50MTYiLCJzcmMiOiJpbnB1dCIsInN0b3JlZCI6IjQ0IiwidHlwZSI6IlVJbnQ4In0seyJiYXNlIjoiU3RyaW5nIiwiaW5wdXQiOiJcIm5hXFx1MDBlZnZlXCIiLCJpc19zdG9yZWQiOnRydWUsIm5hbWUiOiJzIiwibnVsbCI6ZmFsc2UsInNyYyI6ImlucHV0Iiwic3RvcmVkX2I2NCI6ImJtSERyM1psIiwidHlwZSI6IlN0cmluZyIsInZhbHVlX2I2NCI6ImJtSERyM1psIn1dLCJlcnIiOiIiLCJpbnB1dF9zcGFuIjp7ImxlbiI6MjEsIm9mZiI6MH0sIm91dGNvbWUiOiJhY2NlcHRlZCIsInRyYW5zZm9ybWVkIjpbeyJjb2x1bW4iOiJuIiwiaW5wdXQiOiIzMDAiLCJsb3NzeSI6dHJ1ZSwicmVhc29uIjoib3ZlcmZsb3dfd3JhcCIsInN0b3JlZCI6IjQ0In1dLCJ1bnN1cHBvcnRlZF9zZXR0aW5ncyI6W119",
+   "decoded_ok": true
+  },
+  {
+   "id": "row-default-rand",
+   "setup": "utc",
+   "result": "ran",
+   "at": "call",
+   "status": "CHS_OK",
+   "document_b64": "eyJjb2RlIjowLCJjb2xzIjpbeyJuYW1lIjoibiIsInNyYyI6ImlucHV0Iiwic3RvcmVkIjoiMSJ9LHsibmFtZSI6InIiLCJyZWYiOiIyNzE4MjgxODI4Iiwic3JjIjoiZGVmYXVsdF9nZW5lcmF0ZWQiLCJzdG9yZWQiOiIyNzE4MjgxODI4In1dLCJlcnIiOiIiLCJvdXRjb21lIjoiYWNjZXB0ZWQiLCJ1bnN1cHBvcnRlZF9zZXR0aW5ncyI6W119",
+   "decoded_ok": true
+  },
+  {
+   "id": "json-two-rows",
+   "setup": "utc",
+   "result": "ran",
+   "at": "call",
+   "status": "CHS_OK",
+   "document_b64": "eyJjb2RlIjowLCJlcnIiOiIiLCJmcmFtaW5nIjp7ImJvbV9za2lwcGVkIjpmYWxzZSwiY29udGFpbmVyIjoic3RyZWFtIiwiaGVhZGVyIjpudWxsfSwib3V0Y29tZSI6ImFjY2VwdGVkIiwicm93cyI6W3siY29kZSI6MCwiY29scyI6W3siYmFzZSI6IlVJbnQ4IiwiaW5wdXQiOiIxIiwiaXNfc3RvcmVkIjp0cnVlLCJuYW1lIjoibiIsIm51bGwiOmZhbHNlLCJzcmMiOiJpbnB1dCIsInN0b3JlZCI6IjEiLCJ0eXBlIjoiVUludDgifV0sImVyciI6IiIsImlucHV0X3NwYW4iOnsibGVuIjo4LCJvZmYiOjB9LCJvdXRjb21lIjoiYWNjZXB0ZWQiLCJ0cmFuc2Zvcm1lZCI6W10sInVuc3VwcG9ydGVkX3NldHRpbmdzIjpbXX0seyJjb2RlIjowLCJjb2xzIjpbeyJiYXNlIjoiVUludDgiLCJpbnB1dCI6IjIiLCJpc19zdG9yZWQiOnRydWUsIm5hbWUiOiJuIiwibnVsbCI6ZmFsc2UsInNyYyI6ImlucHV0Iiwic3RvcmVkIjoiMiIsInR5cGUiOiJVSW50OCJ9XSwiZXJyIjoiIiwiaW5wdXRfc3BhbiI6eyJsZW4iOjgsIm9mZiI6OH0sIm91dGNvbWUiOiJhY2NlcHRlZCIsInRyYW5zZm9ybWVkIjpbXSwidW5zdXBwb3J0ZWRfc2V0dGluZ3MiOltdfV0sInRyYW5zZm9ybWVkIjpbXSwidW5jb25zdW1lZCI6W119",
+   "export_b64": "eyJuIjoxfQp7Im4iOjJ9Cg==",
+   "decoded_ok": true
+  },
+  {
+   "id": "filter-simple",
+   "setup": "utc",
+   "result": "ran",
+   "at": "call",
+   "status": "CHS_OK",
+   "document_b64": "eyJjb2RlIjowLCJlcnIiOiIiLCJlcnJvcnMiOltdLCJvdXRjb21lIjoib2siLCJyb3dzX3JlYWQiOjIsInVuc3VwcG9ydGVkX3NldHRpbmdzIjpbXSwidmVyZGljdHMiOiJmdCJ9",
+   "decoded_ok": true
+  },
+  {
+   "id": "wire-tsv-array-null-element",
+   "setup": "utc",
+   "result": "ran",
+   "at": "call",
+   "status": "CHS_OK",
+   "document_b64": "eyJjb2RlIjowLCJjb2xzIjpbeyJiYXNlIjoiQXJyYXkoU3RyaW5nKSIsImlucHV0IjoiW05VTExdIiwiaXNfc3RvcmVkIjp0cnVlLCJuYW1lIjoiYSIsIm51bGwiOmZhbHNlLCJzcmMiOiJpbnB1dCIsInN0b3JlZCI6IltcIlwiXSIsInR5cGUiOiJBcnJheShTdHJpbmcpIiwid2lyZSI6IlsnJ10ifV0sImVyciI6IiIsImlucHV0X3NwYW4iOnsibGVuIjo3LCJvZmYiOjB9LCJvdXRjb21lIjoiYWNjZXB0ZWQiLCJ0cmFuc2Zvcm1lZCI6W3siY29sdW1uIjoiYSIsImlucHV0IjoiW05VTExdIiwibG9zc3kiOnRydWUsInJlYXNvbiI6InZhbHVlX2NoYW5nZWQiLCJzdG9yZWQiOiJbXCJcIl0ifV0sInVuc3VwcG9ydGVkX3NldHRpbmdzIjpbXX0=",
+   "decoded_ok": true
+  },
+  {
+   "id": "row-not-on-linux-amd64",
+   "setup": "utc",
+   "result": "skipped",
+   "skip_reason": "the case's platforms exclude linux/amd64"
+  }
+ ]
+}
