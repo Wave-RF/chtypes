@@ -360,7 +360,13 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
         if (!entries.some((e) => e.name === predicate.library)) {
           throw new ArtifactUnpublishedError(`chtypes: the layer does not contain its own predicate's library ${JSON.stringify(predicate.library)}`);
         }
-        await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
+        // Nothing signed names the library's hash or size on the unsigned
+        // path (`CHTYPES_ALLOW_UNSIGNED`), so there is nothing to compare to.
+        if (trust !== undefined) {
+          if (verified !== undefined) {
+      await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
+    }
+        }
         const newRecord: VerifiedRecord = {
           schema: 1,
           manifestDigest: resolveResult.manifest.digest,
@@ -513,7 +519,9 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
     if (!entries.some((e) => e.name === predicate.library)) {
       throw new ArtifactUnpublishedError(`chtypes: the layer does not contain its own predicate's library ${JSON.stringify(predicate.library)}`);
     }
-    await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
+    if (verified !== undefined) {
+      await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
+    }
     const record: VerifiedRecord = {
       schema: 1,
       manifestDigest: manifest.digest,
