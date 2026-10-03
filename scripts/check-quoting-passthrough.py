@@ -97,11 +97,12 @@ import tempfile
 # rust/tests wholesale, which now includes each binding's generated */abi1/*
 # declaration layer (scripts/abi-v1/gen.py's output). A generated file is
 # exempt from Rule A the same way scripts/check-no-error-code-table.py and
-# scripts/abi-v1/check-no-hand-decls.py exempt one: BANNER_RE, imported
-# rather than re-derived so all three checks agree on what "really
-# generated" means.
+# scripts/abi-v1/check-no-hand-decls.py exempt one: the path must be one of
+# gen.produced_outputs() AND carry BANNER_RE, both imported rather than
+# re-derived so all three checks agree on what "really generated" means.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "abi-v1"))
 from emit import BANNER_RE  # noqa: E402
+from gen import produced_outputs  # noqa: E402
 
 # --------------------------------------------------------------- what is scanned
 #
@@ -110,7 +111,9 @@ from emit import BANNER_RE  # noqa: E402
 
 SCAN_DIRS = ("go", "python", "ts/src", "ts/test", "rust/src", "rust/tests", "examples")
 SCAN_EXTS = (".go", ".py", ".ts", ".mjs", ".rs")
-SKIP_DIRS = {"node_modules", "target", "dist", ".venv", "build", "__pycache__"}
+# build and dist are walked on purpose: a banner copied into a hand-written file
+# under one is not exempt (the exemption needs a produced path).
+SKIP_DIRS = {"node_modules", "target", ".venv", "__pycache__"}
 
 # The FFI declaration source of each binding — the same files
 # scripts/check-abi-decls.py reads, plus Go's linked path, which calls the
@@ -258,8 +261,10 @@ def check_declarations(root: str) -> list[str]:
 # ------------------------------------------------------------------- the check
 
 
-def check(root: str) -> tuple[int, list[str]]:
+def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[str]]:
     files = scanned_files(root)
+    if produced is None:
+        produced = produced_outputs()
     lines: list[str] = []
     findings: list[str] = []
 
@@ -281,7 +286,7 @@ def check(root: str) -> tuple[int, list[str]]:
 
     for rel in files:
         text = open(os.path.join(root, rel), encoding="utf-8").read()
-        if BANNER_RE.search(text[:512]):
+        if rel in produced and BANNER_RE.search(text[:512]):
             continue  # scripts/abi-v1/gen.py's own output
         findings += scan_text(rel, text)
     findings += check_declarations(root)
@@ -421,10 +426,27 @@ def selftest(root: str) -> int:
         # The copy itself must still pass: a plant that fires against a tree
         # that was already failing proves nothing. This is ALSO the
         # generated-file exemption's "banner present -> silent" control.
-        n, lines = check(tmp)
+        # What the emitters produce, standing in for the real set (the real
+        # outputs, so a real generated file copied into the tree stays exempt) plus
+        # the fabricated file above.
+        produced = produced_outputs() | {GENERATED_GO_DECLS}
+        n, lines = check(tmp, produced)
         if n:
             print("SELFTEST FAILED: the copied tree does not pass\n" + "\n".join(lines), file=sys.stderr)
             return 1
+
+        # The same real banner and atom in a hand-written file under a build
+        # directory inside a binding, which is not a produced path: the walk
+        # must reach it and the exemption must refuse it.
+        built = os.path.join(tmp, "go", "internal", "abi1", "build", "decls.go")
+        os.makedirs(os.path.dirname(built), exist_ok=True)
+        open(built, "w", encoding="utf-8").write(GENERATED_BANNER_LINE + "\n" + GENERATED_QUOTE_ATOM)
+        n, lines = check(tmp, produced)
+        if n == 0 or "go/internal/abi1/build/decls.go" not in "\n".join(lines):
+            print("SELFTEST FAILED: a bannered hand-written file under build/ was exempted or never walked", file=sys.stderr)
+            return 1
+        print(f"  plant {'bannered hand-written file under build/':<28} caught")
+        os.remove(built)
 
         for label, rel, find, repl, want in PLANTS:
             path = os.path.join(tmp, rel)
@@ -438,7 +460,7 @@ def selftest(root: str) -> int:
                 return 1
             open(path, "w", encoding="utf-8").write(original.replace(find, repl))
             try:
-                n, lines = check(tmp)
+                n, lines = check(tmp, produced)
             finally:
                 open(path, "w", encoding="utf-8").write(original)
             report = "\n".join(lines)

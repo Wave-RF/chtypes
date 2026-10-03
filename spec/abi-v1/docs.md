@@ -16,6 +16,18 @@ Ownership. Every input string, statement, document and body is counted bytes, `(
 
 Errors. A fallible call returns a `chs_status` and, through an optional last `chs_error **err`, an owned error carrying the status, ClickHouse's own code and name, the message and the column. The status alone carries the verdict, so `err` may be NULL.
 
+Threads. Every function has a thread class, listed in the reference. A handle is immutable once made, so every call that only reads handles is `shared`: any number of threads may call it at once, on the same handles too. The one thing a caller must never overlap with a call is a free of a handle that call uses. Process setup (`chs_initialize`, then `chs_set_defaults`) runs before the traffic it configures.
+
+Time zones. A library image has one server zone, set once by `chs_initialize`. A type compiled into a schema binds that image zone, as a server's table does after a restart. Each call can also carry a zone of its own: the `session_timezone` key in the call's settings, which ClickHouse applies through its own query context. That zone governs parsing a zone-less `DateTime` or `DateTime64`, rendering and export, DEFAULT evaluation and a filter's literals; the image zone governs `timezoneOf` over a column, MATERIALIZED expressions, PARTITION BY and TTL. Every zone name is validated by ClickHouse's own `DateLUT` on every platform. On darwin the file system is case-insensitive, so `DateLUT` there accepts a spelling such as `utc` that a Linux server refuses; that difference is documented, not patched.
+
+Settings. Every settings input is a JSON object whose values are JSON strings, and a binding never rewrites one. A call's settings layer over the defaults set by `chs_set_defaults`, which layer over the build's own. No call reads a server's version or its changed settings: that discovery is a recorded gap in this generation, so a caller that wants a server's settings passes them explicitly, through `chs_set_defaults` or each call's settings.
+
+Documents. Every output document is valid JSON that a stock parser reads: every ClickHouse rendering (a stored value, an input value, an engine's row) is a JSON string, a number written bare is within plus or minus 2^53 (anything larger is a string), and there is never a bare `inf`, `-inf` or `nan`. Every column entry of a row carries `null`, the library's verdict that the stored value is NULL, poisoned cells included.
+
+Column names in JSON. A column name is a byte string, so a JSON document, input or output, carries it as one of two members: `name`, a JSON string, when the name's bytes are valid UTF-8 (a NUL written as the escape `\u0000`, as RFC 8259 allows), and otherwise `name_b64`, the raw bytes in standard base64. Exactly one of the two is present, and in an array of names each element is an object carrying one of them. A server accepts both kinds of name (measured on every supported line).
+
+Teardown. `chs_shutdown` stops what `chs_initialize` started. A loader never unloads a library: unloading or initializing an image again in one process is unsupported.
+
 ### chs_buf
 
 An owned, immutable byte buffer: every output of the library. Read it with `chs_buf_data` and `chs_buf_len`; the bytes are exactly what the library produced, with no terminator and no encoding promise beyond what the producing parameter's content says.
@@ -26,15 +38,15 @@ The error a fallible call reports when its status is not `CHS_OK`: the status, C
 
 ### chs_schema
 
-A compiled table: the columns, engine, keys and settings of one `CREATE TABLE` statement, immutable once created.
+A compiled table: the columns, engine, keys, TTL, settings and constraints of exactly one `CREATE TABLE` statement, immutable once created, so any number of threads may use it at once.
 
 ### chs_filter
 
-A compiled boolean SQL expression over a schema's columns, with its query parameters bound.
+A compiled boolean SQL expression over a schema's columns, with its query parameters bound. It holds a counted reference to its schema, so the schema stays alive for as long as the filter does, whatever order the caller frees them in.
 
 ### chs_block
 
-A body parsed once under a schema, for evaluating many filters without parsing again.
+A body parsed once under a schema, for evaluating many filters without parsing again. Like a filter, it holds a counted reference to its schema.
 
 ### chs_status
 
@@ -56,9 +68,19 @@ The input and export formats, numbered as they have been since the first release
 
 The reason a stored value differs from the supplied one, as the library reports it per column. `lossy` says whether information was lost; exactly four reasons are lossless (a representation change, a value filled from a DEFAULT or the type's zero, and a DEFAULT the library resolved from its own clock), and they are still reported because a preview must show what the table will hold. A binding reads `lossy` from here and never keeps a list of its own.
 
+### default_kind
+
+A column's default kind, as ClickHouse names it: `DEFAULT`, `MATERIALIZED`, `ALIAS` or `EPHEMERAL`, or the empty string for a column with none. The schema description carries one per column.
+
+### discover_query_param
+
+The query parameters in the SQL `chs_discover_query` returns, each with its ClickHouse type. The caller binds them when it runs the query (over HTTP, as `param_database` and `param_table`), so no binding builds SQL.
+
 ### value_src
 
 Where a column's value came from. `is_stored` says whether the row as stored carries a value for the column: a column the input named but the table never stores (an EPHEMERAL column, a skipped MATERIALIZED or ALIAS column) and a DEFAULT the library could not resolve carry none.
+
+`default_generated` marks a DEFAULT column whose expression calls a random or ID generator the build admits; a build that does this lists `default_generators` in `chs_build_info`'s `capabilities.features`. The label means: generated by chtypes, and it becomes the stored value when you insert this output. The library drew the value itself, with ClickHouse's own vendored function. So insert the library's output (the export of `chs_preview_batch`, or the stored values its documents report), not your original input: a server evaluates a DEFAULT only for a column the INSERT does not supply, and the original input, which omits the column, would make the server draw a different value. Generators are admitted only in DEFAULT expressions: a MATERIALIZED column is always computed by the server, and an EPHEMERAL column is not stored. No binding logic is involved; a binding reports the source as it reads it.
 
 ### row_outcome
 
@@ -102,27 +124,30 @@ Every `doc_flags` bit. A bit outside it is refused.
 
 ### document:live_handles
 
-A JSON object with one key per handle kind (its type name, such as `chs_schema`) and the number of live handles of that kind in this image.
+A JSON object with one key per handle kind (its type name, such as `chs_schema`) and the number of live handles of that kind in this image, counted before the document's own buffer exists.
 
 ### document:error_code_table
 
-ClickHouse's own error-code table for this build: every code the vendored table names, with its name, in ascending order. Its exact JSON shape is open.
+ClickHouse's own error-code table for this build: a JSON array of `{"code": int, "name": string}`, one entry per code the vendored table names, in ascending code order. A passthrough over the vendored table, never a copy.
 
 ### document:schema_description
 
-A schema's columns, in declared order, with each column's canonical type, its default kind and expression, and the facts a caller needs to build a row. Column names are byte strings; how a name that is not valid UTF-8 is carried inside JSON is open.
+A schema's columns, in declared order, with each column's canonical type, its `default_kind` (a value of the `default_kind` vocabulary) and default expression, and the facts a caller needs to build a row. Each column's name is carried as `name` or `name_b64`, by the rule for column names in JSON.
 
 ### document:row
 
-One row's verdict and, as the flags ask, its columns' stored values, provenance and transformations. The transformations come from the library, never from a binding.
+One row's verdict and, as the flags ask, its columns' stored values, provenance and transformations. Every entry of `cols` carries its name by the rule for column names in JSON, `null` (whether the stored value is NULL, poisoned cells included), and its renderings (`input`, `stored`) as JSON strings. The transformations come from the library, never from a binding: each is the `transformed` entry the SDK's parity fixtures pin, with its `reason` from `transform_reason`. `input_span` is `{off, len}`, the bytes of the input body the reader consumed for this record, read from the vendored reader's own position.
 
 ### document:batch
 
-A body's verdict, counts and per-row documents, and, when an export was asked for, where each accepted row sits in the export bytes.
+A body's verdict, counts and per-row documents (each a row document, with its own `input_span`), and, when an export was asked for, where each accepted row sits in the export bytes. Two further fields come from the vendored reader's own state, never from a tokenizer of the library's:
+
+- `unconsumed`: the byte ranges `{off, len}` of the input that the reader's error recovery skipped. A record swallowed there shows up as bytes here, so a caller that needs every record accounted for declines a body whose `unconsumed` is not empty, and never counts records itself.
+- `framing`: `bom_skipped` (whether the reader skipped a leading byte-order mark), `container` (`array` or `stream` for JSONEachRow, `null` for every other format), and `header` (`{consumed, lines, names}`, `names` as objects by the rule for column names in JSON). `bom_skipped` and `header` are `null` where the vendored reader does not expose the decision, and there `null` means not observable, never "no header": the TSV, TSVWithNames and Values readers keep both private (measured by the artifact producer in the source at every supported line). CSV, JSONEachRow and JSONCompactEachRow fill both from the reader's own hooks.
 
 ### document:filter_result
 
-A filter evaluation: the call's outcome, one verdict character per row, and each error or declined row itemized.
+A filter evaluation: the call's outcome, one verdict character per row (`filter_verdict`), and each error or declined row itemized.
 
 ### document:discovery
 
@@ -135,6 +160,8 @@ The ABI generation this library implements: always 1 for this header. A loader r
 ### chs_build_info
 
 What this library is, as static, NUL-terminated, ASCII-only JSON in the image's read-only data: never NULL, never freed, the same bytes on every call, and callable straight after opening the library. Its fields are listed under `build_info` in the reference, and `abi_fingerprint` is `CHS_ABI_FINGERPRINT` as the library was built, copied, never recomputed.
+
+`capabilities` is read from the build itself, never from a version number: `input_formats` and `export_formats` by ClickHouse's own format names from the build's FormatFactory, `doc_flags` as the document groups it honors, and `features`, an open list of build-level features, where a new feature is a new value and never a new field. `default_generators` in `features` means the library fills admitted generator DEFAULTs and the caller inserts the library's output (`default_generated` under `value_src`).
 
 A loader parses it (ASCII only, duplicate keys refused, `schema` equal to 1, every required field of its type), refuses when `abi_fingerprint` differs from its own compiled-in `CHS_ABI_FINGERPRINT` byte for byte, and then compares the fields listed in `spec/abi-v1/sdk.json` (`cross_check`) with the verified signed statement it fetched the library under, refusing on the first mismatch and naming the field. That comparison is mandatory. The file's own size, digest and glibc floor are not in it, because the file cannot carry facts measured on itself; they are in the signed statement.
 
@@ -170,7 +197,7 @@ ClickHouse's own error code, nonzero only when the status is `CHS_REJECTED`, and
 
 ### chs_error_ch_name
 
-A new buffer holding the name this build's vendored error table gives the code, the name a server prints after the code; empty when the build has none or the status is not `CHS_REJECTED`. The form of the three text accessors (a returned buffer, as here, or an out-parameter) is open.
+A new buffer holding the name this build's vendored error table gives the code, the name a server prints after the code; empty when the build has none or the status is not `CHS_REJECTED`. Like the other two text accessors, it returns NULL only for a NULL or invalid error.
 
 ### chs_error_message
 
@@ -178,7 +205,7 @@ A new buffer holding the message: ClickHouse's own text, verbatim, for `CHS_REJE
 
 ### chs_error_column
 
-A new buffer holding the name of the column the error concerns, empty when there is none. A column name is a byte string: NUL and invalid UTF-8 are legal in a name.
+A new buffer holding the name of the column the error concerns, as raw bytes, empty when there is none. A column name is a byte string: NUL and invalid UTF-8 are legal in a name.
 
 ### chs_error_free
 
@@ -190,7 +217,7 @@ A JSON document counting the live handles of each kind this image has made, take
 
 ### chs_error_codes
 
-ClickHouse's own error-code table for this build, as a JSON document: a passthrough over the vendored table, never a copy. The table belongs to the build, and one number can name different errors on two ClickHouse lines, so a caller that needs several lines asks each library. The name is v0's, with the v1 call shape; the tombstone keeps every v0 binding from reaching it.
+ClickHouse's own error-code table for this build, as a JSON array of `{"code", "name"}` in ascending code order: a passthrough over the vendored table, never a copy. The table belongs to the build, and one number can name different errors on two ClickHouse lines, so a caller that needs several lines asks each library. The name is v0's, with the v1 call shape; the tombstone keeps every v0 binding from reaching it.
 
 ### chs_registered_families
 
@@ -206,15 +233,19 @@ The widened reference type this build pairs with a type expression. A tooling ex
 
 ### chs_initialize
 
-Process setup for this image. The proposed form takes nothing: the time zone becomes per call rather than per process, and the list of type families the build must refuse is embedded when the library is built. Whether an initialization call survives at all is open; nothing before it in the load sequence needs it.
+Sets this image's server zone, once per process: the zone every compiled type binds, and the zone a call without its own `session_timezone` runs in. `timezone` is counted bytes, and length 0 means `UTC`. The name is validated by ClickHouse's own `DateLUT`, so a name it cannot load is `CHS_REJECTED` with `DateLUT`'s own code and message. A second call with the same spelling is a no-op that answers `CHS_OK`; a different spelling is `CHS_INVALID_ARGUMENT`, naming both. The spelling is compared byte for byte and never canonicalized, because it is observable: `timezoneOf` over a column reports the image zone exactly as spelled.
+
+The zone is process state, not a per-call parameter, because ClickHouse's own MergeTree code reads the server zone directly (`DateLUT::serverTimezoneInstance`). A per-call zone is the `session_timezone` setting instead. A loader calls this once, after the handshake checks and before any other call; the list of type families the build must refuse is embedded when the library is built, so nothing else is passed in.
 
 ### chs_set_defaults
 
-Seeds the settings every later call starts from, as a JSON object whose values are JSON strings (a binding never rewrites a value, a boolean included). A setting name the server would refuse is refused here, with ClickHouse's own code and message, and nothing is committed.
+Seeds the settings every later call starts from, as a JSON object whose values are JSON strings (a binding never rewrites a value, a boolean included). Each successful call replaces the previous defaults whole. A setting name the server would refuse is refused here, with ClickHouse's own code and message, and nothing is committed. `session_timezone` here is the default zone for later calls; it does not change the image zone that compiled types bind.
+
+Setup only. The defaults are immutable once this image has created its first `chs_schema` (a filter or a block needs one): from then on the call changes nothing and answers `CHS_INVALID_ARGUMENT`. No call ever reads defaults that change under it, so no binding needs a lock around them.
 
 ### chs_shutdown
 
-Stops the background work the library started and joins its threads. Safe to call when nothing was started. Whether teardown and unloading are supported at all is open; a loader never unloads a library.
+Stops what `chs_initialize` started (its background threads) and joins them. It is idempotent and safe before `chs_initialize`. After it, no call is valid except `chs_shutdown` again. Unloading the library, or initializing it again in the same process, is unsupported: a loader never unloads a library.
 
 ### chs_type_validate
 
@@ -234,7 +265,9 @@ A byte string spelled as a ClickHouse string literal by the vendored `quoteStrin
 
 ### chs_schema_create
 
-Compiles one whole `CREATE TABLE` statement (columns, engine, keys, TTL, settings and constraints) with ClickHouse's own parser and the checks a server's CREATE runs, under a profile of settings given as a JSON object of string values. The result is immutable. The proposed form replaces v0's column-list compile and its engine, TTL and partition-key setters.
+Compiles exactly one `CREATE TABLE` statement (columns, engine, keys, TTL, settings and constraints) with ClickHouse's own parser and the checks a server's CREATE runs, under a profile of settings given as a JSON object of string values. A trailing semicolon is allowed. A second statement is refused the way ClickHouse's own parser refuses one in a single query (`CHS_REJECTED`, with its code and message), and a statement of any other kind is `CHS_INVALID_ARGUMENT`.
+
+The result is immutable: nothing changes a schema after this call, so it replaces v0's column-list compile and its engine, TTL and partition-key setters, and any number of threads may use it at once. Its types bind the image zone set by `chs_initialize`, never the profile's `session_timezone`, which governs only this call's own evaluation.
 
 ### chs_schema_free
 
@@ -246,15 +279,19 @@ A JSON document describing the schema's columns, owned by the caller; it replace
 
 ### chs_preview_row
 
-Validates and coerces one row of `body` under the schema, as a server's INSERT would, and returns the row's document. `columns` is the INSERT column list, empty for none.
+Validates and coerces one row of `body` under the schema, as a server's INSERT would, and returns the row's document. `columns` is the INSERT column list, a JSON array of name objects by the rule for column names in JSON, and empty for none. `session_timezone` in `settings` is this call's zone.
+
+An INSERT whose input block has no column at all (every insertable column EPHEMERAL, and no column list) is declined: a server answers it (code 90, EMPTY_LIST_OF_COLUMNS_PASSED) from a statement inside its INSERT interpreter that the library cannot call, and a decline is never a wrong answer.
 
 ### chs_preview_batch
 
-Validates and coerces a whole body, which may hold many rows, and returns the batch document. Row separation and the server's error allowance are ClickHouse's own. `filter`, when given, is evaluated over each stored row in the same parse. `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write; with an export, `out_export` receives the accepted rows serialized once, and it may be NULL when no export is asked for. `doc_flags` chooses which groups the per-row documents carry.
+Validates and coerces a whole body, which may hold many rows, and returns the batch document, with the same declines as `chs_preview_row`. Row separation and the server's error allowance are ClickHouse's own, and the document's `unconsumed` and `framing` say what the reader skipped and how it framed the body. `filter`, when given, is evaluated over each stored row in the same parse. `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write; with an export, `out_export` receives the accepted rows serialized once, and it may be NULL when no export is asked for. `doc_flags` chooses which groups the per-row documents carry.
 
 ### chs_filter_create
 
-Compiles a boolean SQL expression over the schema's columns, binding its query parameters (a JSON object of string values) by ClickHouse's own substitution, so a value is never SQL text. Non-deterministic expressions are declined.
+Compiles a boolean SQL expression over the schema's columns, binding its query parameters (a JSON object of string values) by ClickHouse's own substitution, so a value is never SQL text. `settings` is the profile the expression is compiled under, so `session_timezone` there is the zone of its literals. Non-deterministic expressions are declined.
+
+A filter under a per-call `session_timezone` answers as the artifact producer has measured against live servers, including how the zone in an evaluation's settings combines with the zone the filter was compiled under. Until a path is measured to match a server it declines, which is never a wrong answer. The filter holds a counted reference to the schema.
 
 ### chs_filter_free
 
@@ -262,11 +299,11 @@ Releases the caller's reference to a filter. Freeing NULL does nothing.
 
 ### chs_filter_eval_body
 
-Evaluates the filter over every row of a body, returning one verdict per row.
+Evaluates the filter over every row of a body, returning one verdict per row. `settings` governs parsing the body, and `session_timezone` there is this call's zone.
 
 ### chs_block_create
 
-Parses a body once under the schema, for evaluating many filters over it.
+Parses a body once under the schema, for evaluating many filters over it. `settings` governs the parse, `session_timezone` there included, and `columns` is read as `chs_preview_row` reads it. The block holds a counted reference to the schema.
 
 ### chs_block_free
 
@@ -274,11 +311,11 @@ Releases the caller's reference to a block. Freeing NULL does nothing.
 
 ### chs_filter_eval_block
 
-Evaluates the filter over a parsed block, with the same answers `chs_filter_eval_body` gives for the same body. The filter and the block must come from the same schema.
+Evaluates the filter over a parsed block, with the same answers `chs_filter_eval_body` gives for the same body. It takes no settings: the filter brings the settings it was compiled under and the block those it was parsed under. The filter and the block must come from the same schema; a pair from two schemas is `CHS_INVALID_ARGUMENT`.
 
 ### chs_discover_query
 
-The query a caller runs against a server to read a table's `system.columns` rows, so that no binding holds SQL of its own.
+The query a caller runs against a server to read a table's `system.columns` rows, so that no binding holds SQL of its own. It is the connect-time way to rebuild a table's columns from a server; whether a server's `SHOW CREATE TABLE` output compiles under `chs_schema_create` instead is not yet measured. It takes no input. The SQL names the table through the query parameters in `discover_query_param` (`{database:String}` and `{table:String}`), which the caller binds when it runs the query; it selects exactly the `system.columns` fields `chs_discover_columns` reads, `FORMAT JSONEachRow`.
 
 ### chs_discover_columns
 

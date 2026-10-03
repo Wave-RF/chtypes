@@ -127,6 +127,15 @@ def expected_files(root: Path, outs: list[emit.Output]) -> dict[str, str]:
     return want
 
 
+def produced_outputs(root: Path = ROOT) -> frozenset[str]:
+    """The paths the emitters produce whole (the files that carry a banner), as repository-relative POSIX paths.
+
+    The three source checks that exempt generated files (check-no-hand-decls.py, check-no-error-code-table.py, check-quoting-passthrough.py) exempt a file only if it is in this set AND carries the banner. Membership, not the banner alone, because the stale-banner scan in check() skips SKIP_DIRS, so a hand-written file with a copied banner under such a directory would pass both. The set comes from the repository this script lives in, so a check run over a planted tree still names real output paths.
+    """
+    _, outs = build(root)
+    return frozenset(o.path for o in outs if o.content is not None)
+
+
 def banner_files(root: Path) -> list[str]:
     """Every file whose first 512 bytes carry a real generated banner."""
     found = []
@@ -428,6 +437,7 @@ def _selftest_build_info(model: abimodel.Model) -> list[str]:
             "input_formats": ["JSONEachRow", "CSV"],
             "export_formats": ["JSONCompactEachRow"],
             "doc_flags": ["values", "transforms", "defaults"],
+            "features": ["default_generators"],
         },
         "a_later_field": "accepted",
     }
@@ -443,6 +453,8 @@ def _selftest_build_info(model: abimodel.Model) -> list[str]:
         "a fingerprint without its prefix": lambda d: d.update(abi_fingerprint="4b" * 32),
         "abi as a string": lambda d: d.update(abi="1"),
         "capabilities without doc_flags": lambda d: d["capabilities"].pop("doc_flags"),
+        "capabilities without features": lambda d: d["capabilities"].pop("features"),
+        "a feature that is not a string": lambda d: d["capabilities"].update(features=[1]),
     }
     for what, mutate in bad.items():
         d = json.loads(json.dumps(good))
@@ -648,7 +660,15 @@ def _selftest_tree() -> list[str]:
         )
 
         def firm_on_provisional(w: Path) -> None:
-            _json_edit(w / abi, lambda d: _fn_entry(d, "chs_schema_describe").pop("provisional"))
+            # Nothing is provisional once the ABI is confirmed, so plant a
+            # provisional handle (and its free, whose markers must match) with
+            # a legend entry, and leave chs_schema_describe FIRM.
+            def mutate(d: dict) -> None:
+                d["handles"]["chs_schema"]["provisional"] = ["A99"]
+                _fn_entry(d, "chs_schema_free")["provisional"] = ["A99"]
+
+            _json_edit(w / abi, mutate)
+            _json_edit(w / sdk, lambda d: d["provisional_markers"].update(A99="a planted marker"))
 
         plant(
             "a FIRM function on a provisional handle",
@@ -659,6 +679,29 @@ def _selftest_tree() -> list[str]:
             "an undefined provisional marker",
             lambda w: _json_edit(w / abi, lambda d: _fn_entry(d, "chs_shutdown").update(provisional=["A99"])),
             "'A99' has no entry",
+        )
+        plant(
+            "a call that reads a handle but is not `shared`",
+            lambda w: _json_edit(w / abi, lambda d: _fn_entry(d, "chs_preview_row").update(thread="handle_serial")),
+            "its thread class must be `shared`",
+        )
+        plant(
+            "a free that is not `handle_serial`",
+            lambda w: _json_edit(w / abi, lambda d: _fn_entry(d, "chs_filter_free").update(thread="shared")),
+            "a handle's free is thread class `handle_serial`",
+        )
+        plant(
+            "`shared` on a call that takes no handle",
+            lambda w: _json_edit(w / abi, lambda d: _fn_entry(d, "chs_quote_string").update(thread="shared")),
+            "applies only to a call that takes a handle",
+        )
+        plant(
+            "a thread class the model does not describe",
+            lambda w: _json_edit(
+                w / "spec/abi-v1/schema/abi.schema.json",
+                lambda d: d["$defs"]["function"]["properties"]["thread"]["enum"].append("lockstep"),
+            ),
+            "differs from the classes model.py describes",
         )
 
         def needle(w: Path) -> None:
@@ -725,7 +768,7 @@ def selftest() -> int:
         return 1
     print(
         "gen.py --selftest: ok: RFC 8785 vectors and refusals, the schema validator, --write deterministic, "
-        "and every planted drift, schema, JCS, D1.3, tombstone, docs, prose, marker, needle and stale case refused"
+        "and every planted drift, schema, JCS, D1.3, tombstone, docs, prose, marker, thread-class, needle and stale case refused"
     )
     return 0
 
