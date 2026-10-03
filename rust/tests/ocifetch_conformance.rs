@@ -552,21 +552,10 @@ fn run_generic_fetch(
     options: &mut Options,
 ) -> Result<(Vec<u8>, serde_json::Value, ensure::Digests), ocifetch::error::Error> {
     if case.id.starts_with("goldens-") {
-        let client = ocifetch::http::Client::new();
-        let auth = ocifetch::http::AuthConfig {
-            static_token: std::env::var(ocifetch::constants::ENV_TOKEN_NAME).ok(),
-        };
-        let source = ocifetch::oci::Source {
-            bases,
-            client: &client,
-            auth: &auth,
-        };
-        let referrer = ocifetch::referrers::find_content_referrer(
-            &source,
-            &case.request.spelling,
-            ocifetch::constants::GOLDENS_ARTIFACT_TYPE,
-        )?;
-        ensure::fetch_signed(bases, &referrer.digest, predicate_type, options)
+        // `request.spelling` is the SUBJECT (a platform manifest):
+        // `fetch_signed` itself discovers its goldens referrers, verifies each
+        // and returns the highest revision (docs/guides/fetch-v1.md §9).
+        ensure::fetch_signed(bases, &case.request.spelling, predicate_type, options)
     } else {
         let fixture_bases: Vec<String> = bases
             .iter()

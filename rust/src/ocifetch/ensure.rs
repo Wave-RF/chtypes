@@ -792,9 +792,9 @@ fn verify_one_install(dir: &Path, record: &VerifiedRecord) -> VerifyResult {
 /// The generic signed-artifact fetch (plan §1.3): for a tag or digest fetched
 /// directly within `repository_bases` (the fixtures shape), find and verify
 /// its own signature referrer, then return the verified content bytes.
-/// For a goldens-shaped referrer-of-a-platform-manifest, first resolve the
-/// content descriptor with [`referrers::find_content_referrer`] and pass its
-/// digest as `reference`.
+/// For `expected_predicate_type` = `PREDICATE_TYPE_GOLDENS`, `reference` is a
+/// PLATFORM manifest digest and the result is its highest-`revision` verified
+/// goldens referrer ([`super::goldens::fetch_goldens`]).
 pub fn fetch_signed(
     repository_bases: &[String],
     reference: &str,
@@ -819,6 +819,14 @@ pub fn fetch_signed(
         client: &client,
         auth: &auth,
     };
+
+    if expected_predicate_type == constants::PREDICATE_TYPE_GOLDENS {
+        // Goldens are a referrer of a platform manifest (D7) and the registry
+        // is append-only, so `reference` names the PLATFORM manifest and the
+        // highest-revision verified goldens referrer is returned
+        // (docs/guides/fetch-v1.md §9; goldens.rs).
+        return super::goldens::fetch_goldens(&source, reference, &trust);
+    }
 
     let fetched = if reference.starts_with("sha256:") {
         oci::fetch_by_digest(&source, reference, constants::MANIFEST_MAX_BYTES)?
