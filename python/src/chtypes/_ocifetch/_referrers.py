@@ -21,6 +21,8 @@ caller tries each until one verifies (`_ensure.py`).
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._errors import ArtifactCorruptError
 from chtypes._ocifetch._http import FetchPolicy, NotFoundHttpError, RetryPolicy, get_json
@@ -73,7 +75,9 @@ def _referrers_api(
             # Never sent to a `file://` base (PLAN §3.2); server-side
             # filtering here is a convenience on top of our own client-side
             # filter below, never something a fixture tree must honor.
-            query=f"artifactType={artifact_type}",
+            # Percent-encoded: a raw `+` (in `...bundle.v0.3+json`) is a
+            # space to the real host, which then filters everything out.
+            query="artifactType=" + quote(artifact_type, safe=""),
         )
     except NotFoundHttpError:
         return []

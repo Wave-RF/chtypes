@@ -549,3 +549,22 @@ def test_user_agent_on_every_request_including_token_exchange_and_redirect(serve
             assert headers.get("User-Agent") == USER_AGENT, path
     finally:
         other.stop()
+
+
+def test_referrers_query_is_percent_encoded(server: _Server) -> None:
+    """The real host form-decodes the query, so a raw `+` in the signature
+    media type becomes a space and filters every referrer out."""
+    from chtypes._ocifetch import _constants as C
+    from chtypes._ocifetch._referrers import discover_referrers
+
+    digest = "sha256:" + "a" * 64
+    server.routes[f"/referrers/{digest}"] = [lambda: (200, {}, b'{"manifests": []}')]
+    discover_referrers(
+        (server.base_url,),
+        digest,
+        C.MEDIA_TYPE_BUNDLE,
+        policy=FetchPolicy(clock=FakeClock()),
+        retry=RetryPolicy(),
+    )
+    path = server.requests[0][0]
+    assert path.endswith("?artifactType=application%2Fvnd.dev.sigstore.bundle.v0.3%2Bjson"), path
