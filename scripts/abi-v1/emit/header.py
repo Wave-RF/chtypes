@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import textwrap
 
-from model import CONTENTS
+from model import CONTENTS, THREADS
 
 from . import Output, banner, marker_key
 
@@ -112,7 +112,7 @@ def _function_facts(model, fn) -> str:
         facts.append(
             f"Returns a new {r.type} the caller owns and frees with {model.handles[r.type].free}"
             + (f"; its content is {CONTENTS.get(r.content or '', r.content)}" if r.content else "")
-            + ("; NULL only on allocation failure or an invalid argument." if r.nullable else ".")
+            + ("; NULL only for a NULL or invalid argument." if r.nullable else ".")
         )
     if r.borrows:
         facts.append(f"The pointer is borrowed from `{r.borrows}` and valid until it is freed; copy before freeing.")
@@ -211,6 +211,25 @@ def render_header(model) -> str:
             "confirmed; one with no marker is FIRM. The markers:\n\n" + legend,
             "markers",
         )
+
+    out += _section("thread classes")
+    out += block_comment(
+        "Every function below names its thread class: what a caller may run at the same time as it.\n\n"
+        + "\n".join(f"- {k}: {v}." for k, v in THREADS.items()),
+        "thread classes",
+    )
+
+    cn = model.column_names
+    out += _section("column names in JSON")
+    out += block_comment(
+        f"A column name is a byte string. Wherever a JSON document, input or output, carries one, it is the "
+        f"member `{cn['text']}`, a JSON string, when the name's bytes are valid UTF-8 (a NUL written as the "
+        f"JSON escape for U+0000), and otherwise the member `{cn['bytes']}`, the raw bytes in standard "
+        f"{cn['bytes_encoding']} with padding. Exactly one of the two is present. In an array of names, each "
+        "element is an object carrying one of them. A byte-returning accessor such as chs_error_column returns "
+        "the raw bytes instead.",
+        "column names",
+    )
 
     out += _section("handles")
     for h in model.handles.values():

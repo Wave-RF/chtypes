@@ -1,21 +1,7 @@
 {
   "sdk_schema": 1,
   "reuse_v0_names": true,
-  "provisional_markers": {
-    "A4": "the content of build_info capabilities: which formats and document flags a build reports",
-    "A5": "process initialization and the time-zone contract: whether an init call survives, and where a zone is set",
-    "A6": "settings channels and process defaults: whether a context handle exists and which calls take it",
-    "A7": "the thread contract: the thread class of each call",
-    "A8": "schema construction: one call over a whole CREATE TABLE statement, and its settings input",
-    "A9": "how filters and blocks bind to a schema",
-    "A10": "the row, batch and filter result documents: fields, outcomes, vocabularies, and which refusals are call statuses",
-    "A11": "derived results computed in the library: the Transformed classifier and the discovery kit",
-    "A12": "column introspection, and how a column name that is not valid UTF-8 is carried inside a JSON document",
-    "A13": "teardown: shutdown, background threads, and unloading the library",
-    "Q-c": "the form of the error accessors' text results, and the error-code table's buffer format",
-    "Q-f": "whether the discovery call also returns the query text a caller runs against a server",
-    "confirm": "outside the decided set: the SDK's proposed form, waiting on the confirmation of the whole ABI"
-  },
+  "provisional_markers": {},
   "errors": {
     "fields": ["status", "ch_code", "ch_name", "message", "column"],
     "codes": {

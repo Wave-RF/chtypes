@@ -15,7 +15,9 @@ expression a runner evaluates bottom-up —
     calling `<name>` with its own (recursively, the same three shapes)
     argument list first, and use the handle it produces;
   * `{"null_handle": true}` — NULL, legal only where the parameter is
-    nullable.
+    nullable;
+  * `{"ref": "<name>"}` — inside a lifecycle case only: the handle an
+    earlier `let` step bound to that name.
 
 A case's `expect` mirrors exactly what `emit/stub.py`'s generic template
 (`scripts/abi-v1/emit/stub.py`'s `_gen_generic`/`_fill_outputs`) computes, so
@@ -34,7 +36,8 @@ this file is the stub's behavior restated as data, not a second guess at it:
     injection fixes: `ch_code`, `ch_name`, `message`, `column` (always "",
     since the magic injection format carries no column).
 
-THREE CASE KINDS, per function (`scripts/abi-v1/emit/stub.classify`):
+SIX CASE KINDS. The first three are per function
+(`scripts/abi-v1/emit/stub.classify`):
   * "special" and "free" functions get one small case each (a handshake
     return value, a tombstone value, or nothing testable generically — see
     HANDWRITTEN_CASES) — the generic echo/status shape does not apply to
@@ -45,10 +48,34 @@ THREE CASE KINDS, per function (`scripts/abi-v1/emit/stub.classify`):
         actually exercised, not just a plain ASCII placeholder;
       - one "status" case per `may_return` entry other than CHS_OK, via a
         `!S:` injection on the function's FIRST bytes_in parameter — so a
-        function with no bytes_in parameter at all (today: chs_initialize,
-        chs_discover_query, and the three tooling/table calls) gets only the
-        echo case, a known, documented limitation (MERGE NOTES), not a gap
-        silently dropped.
+        function with no bytes_in parameter at all (today:
+        chs_discover_query, chs_live_handles, chs_error_codes and two of the
+        tooling calls) gets only the echo case, a known, documented
+        limitation, not a gap silently dropped.
+
+THE DECISION CASES (`_decision_cases`), for what the ABI's confirmation
+added beyond the per-function shapes:
+  * the one-CREATE rule: a second statement refused with the error intact
+    (a "status" case), a trailing semicolon accepted (an "echo" case); the
+    stub's stand-in and this case both read `_stubshared.ONE_CREATE`;
+  * the per-call zone: echo cases whose settings carry `session_timezone`,
+    proving the bytes reach the library unmodified, and chs_initialize with
+    a zone name;
+  * "lifecycle" cases: ordered `steps` (`let` a handle from a call, `free`
+    a bound handle, `call` with an `expect`, `live_delta` over
+    chs_live_handles against the counts read when the case began), proving
+    a filter and a block hold a counted reference to their schema: the
+    schema outlives the caller's free of it, the child still answers, and
+    the schema goes only with its last child. A runner runs a lifecycle
+    case with no other case in flight;
+  * "concurrent" cases, one per `shared` function the stub implements
+    generically: the `args` are evaluated ONCE (each handle minted once),
+    then `threads` threads each make `calls` calls at the same time, every
+    call checked exactly as the echo case is checked, every produced handle
+    freed; afterwards the live counts must equal those read before the case.
+    A runtime that cannot call from two threads at once (Node, one isolate)
+    makes the calls in sequence and says `sequential` in the result's
+    detail. A runner runs a concurrent case with no other case in flight.
 
 Plus one "loader" case per `scripts/abi-v1/emit/_stubshared.py` plan()
 entry: `{"variant": "<name>", "expect": {"reason": "<reason>"}}` — except
@@ -65,7 +92,11 @@ appears, proving dlopen genuinely ran rather than being refused first).
 A handle-typed parameter is resolved through HANDLE_RECIPE (schema, filter,
 block — the only three the description has today; a fourth handle kind
 needs one more entry here, which `--check` cannot catch by itself, so a
-schema change that adds a handle kind should grep this file).
+schema change that adds a handle kind should grep this file). A recipe is a
+call, so a signature change to chs_schema_create, chs_filter_create or
+chs_block_create is also an edit here (generation fails loudly until it is
+made: `_check_calls` refuses any call in this file whose arguments do not
+match its function's input parameters, kind for kind).
 """
 
 from __future__ import annotations
@@ -92,7 +123,12 @@ def _schema_recipe() -> dict:
 def _filter_recipe() -> dict:
     return {
         "fn": "chs_filter_create",
-        "args": [{"handle": _schema_recipe()}, {"bytes_hex": b"x = 1".hex()}, {"bytes_hex": "{}".encode().hex()}],
+        "args": [
+            {"handle": _schema_recipe()},
+            {"bytes_hex": b"x = 1".hex()},
+            {"bytes_hex": "{}".encode().hex()},
+            {"bytes_hex": ""},
+        ],
     }
 
 
@@ -123,6 +159,7 @@ CONTENT_PLACEHOLDER: dict[str, bytes] = {
     "ascii": b"abc",
     "json_object_string_values": b"{}",
     "json_array_names": b"[]",
+    "timezone": b"UTC",
 }
 ADVERSARIAL_BYTES = b"a\x00\xffz"
 
@@ -227,6 +264,183 @@ def _status_cases(fn) -> list[dict]:
     return cases
 
 
+def _overridden_echo_case(model, case_id: str, fn_name: str, overrides: dict[str, bytes]) -> dict:
+    """An echo case for `fn_name` whose named bytes_in parameters carry the
+    given bytes instead of the generic placeholders (the first bytes_in still
+    carries ADVERSARIAL_BYTES unless it is overridden). The expectation is
+    computed from the same bytes, by the same helper the generic echo cases
+    use, so it cannot drift from what the stub echoes."""
+    fn = model.function(fn_name)
+    args, echo = _build_args(fn)
+    inputs = [p for p in fn.params if not p.is_out]
+    for name, data in overrides.items():
+        i = next((k for k, p in enumerate(inputs) if p.name == name and p.kind == "bytes_in"), None)
+        if i is None:
+            raise ValueError(f"{fn_name}: no bytes_in parameter {name!r} to override")
+        args[i] = {"bytes_hex": data.hex()}
+        echo[i] = _stubshared.echo_bytes_field(data)
+    outputs = {p.name: {"fn": fn.name, "out": p.name, "args": echo} for p in _buf_out_params(fn)}
+    expect: dict = {"status": "CHS_OK"}
+    if outputs:
+        expect["outputs"] = outputs
+    return {"id": case_id, "kind": "echo", "fn": fn.name, "args": args, "expect": expect}
+
+
+ZONE_SETTINGS = b'{"session_timezone":"America/Los_Angeles"}'
+ZONE_BODY = b'{"ts":"2026-01-01 05:00:00"}'
+
+
+def _decision_cases(model) -> list[dict]:
+    """The cases for the behavior the ABI's confirmation added, beyond the
+    generic per-function ones."""
+    rule = _stubshared.ONE_CREATE
+    two = b"CREATE TABLE a (x Int32) ENGINE = Memory; CREATE TABLE b (y Int32) ENGINE = Memory"
+    one = b"CREATE TABLE a (x Int32) ENGINE = Memory;\n"
+    cases = [
+        # Exactly one CREATE TABLE: a second statement is refused, the error
+        # intact, and a trailing semicolon is not a second statement.
+        {
+            "id": "one_create.second_statement_refused",
+            "kind": "status",
+            "fn": rule["fn"],
+            "args": [{"bytes_hex": two.hex()}, {"bytes_hex": ""}],
+            "expect": {
+                "status": rule["status"],
+                "error": {"ch_code": rule["ch_code"], "ch_name": rule["ch_name"], "message": rule["message"], "column": ""},
+            },
+        },
+        {
+            "id": "one_create.trailing_semicolon_accepted",
+            "kind": "echo",
+            "fn": rule["fn"],
+            "args": [{"bytes_hex": one.hex()}, {"bytes_hex": ""}],
+            "expect": {"status": "CHS_OK"},
+        },
+        # The per-call zone is the session_timezone key in the call's own
+        # settings: it reaches the library byte for byte, never rewritten.
+        _overridden_echo_case(
+            model, "session_timezone.preview_row", "chs_preview_row", {"body": ZONE_BODY, "settings": ZONE_SETTINGS}
+        ),
+        _overridden_echo_case(
+            model,
+            "session_timezone.filter_eval_body",
+            "chs_filter_eval_body",
+            {"body": ZONE_BODY, "settings": ZONE_SETTINGS},
+        ),
+        _overridden_echo_case(model, "image_zone.initialize", "chs_initialize", {"timezone": b"Europe/Berlin"}),
+    ]
+    cases += _lifecycle_cases(model)
+    cases += _concurrent_cases(model)
+    return cases
+
+
+def _live(**counts: int) -> dict:
+    """A live_delta step over every handle kind: the kinds not named must not
+    have moved either."""
+    return {"live_delta": {k: counts.get(k, 0) for k in ("chs_buf", "chs_error", "chs_schema", "chs_filter", "chs_block")}}
+
+
+def _lifecycle_cases(model) -> list[dict]:
+    """D2 plus decision 2, as steps: a filter (and a block) holds a counted
+    reference to its schema, so the schema outlives the caller's free of it,
+    the child still works, and the schema is released only with the last
+    child. Expectations come from the same helpers the echo cases use."""
+    for k in ("chs_buf", "chs_error", "chs_schema", "chs_filter", "chs_block"):
+        if k not in model.handles:
+            raise ValueError(f"_lifecycle_cases: the description has no handle {k!r}")
+    schema = _schema_recipe()
+    filt = {
+        "fn": "chs_filter_create",
+        "args": [{"ref": "s"}, {"bytes_hex": b"x = 1".hex()}, {"bytes_hex": b"{}".hex()}, {"bytes_hex": ""}],
+    }
+    block = {
+        "fn": "chs_block_create",
+        "args": [{"ref": "s"}, {"int": 0}, {"bytes_hex": b"{}".hex()}, {"bytes_hex": ""}, {"bytes_hex": ""}],
+    }
+    body = b'{"x":1}'
+    eval_body = {
+        "fn": "chs_filter_eval_body",
+        "args": [{"ref": "f"}, {"int": 0}, {"bytes_hex": body.hex()}, {"bytes_hex": ""}],
+    }
+    eval_body_expect = {
+        "status": "CHS_OK",
+        "outputs": {
+            "out": {
+                "fn": "chs_filter_eval_body",
+                "out": "out",
+                "args": [{"kind": "chs_filter"}, 0, _stubshared.echo_bytes_field(body), _stubshared.echo_bytes_field(b"")],
+            }
+        },
+    }
+    eval_block = {"fn": "chs_filter_eval_block", "args": [{"ref": "f"}, {"ref": "b"}]}
+    eval_block_expect = {
+        "status": "CHS_OK",
+        "outputs": {
+            "out": {"fn": "chs_filter_eval_block", "out": "out", "args": [{"kind": "chs_filter"}, {"kind": "chs_block"}]}
+        },
+    }
+    return [
+        {
+            "id": "lifecycle.filter_holds_schema",
+            "kind": "lifecycle",
+            "steps": [
+                {"let": "s", "call": schema},
+                {"let": "f", "call": filt},
+                _live(chs_schema=1, chs_filter=1),
+                {"free": "s"},
+                _live(chs_schema=1, chs_filter=1),
+                {"call": eval_body, "expect": eval_body_expect},
+                {"free": "f"},
+                _live(),
+            ],
+        },
+        {
+            "id": "lifecycle.block_and_filter_hold_schema",
+            "kind": "lifecycle",
+            "steps": [
+                {"let": "s", "call": schema},
+                {"let": "f", "call": filt},
+                {"let": "b", "call": block},
+                {"free": "s"},
+                _live(chs_schema=1, chs_filter=1, chs_block=1),
+                {"call": eval_block, "expect": eval_block_expect},
+                {"free": "f"},
+                _live(chs_schema=1, chs_block=1),
+                {"free": "b"},
+                _live(),
+            ],
+        },
+    ]
+
+
+CONCURRENT_THREADS = 8
+CONCURRENT_CALLS = 16
+
+
+def _concurrent_cases(model) -> list[dict]:
+    """Decision 1: every `shared` call the stub implements generically, made
+    from several threads at once on the SAME handles (each argument handle
+    minted once), every call answering exactly as its echo case does."""
+    kinds = stub.classify(model)
+    out = []
+    for fn in model.functions:
+        if fn.thread != "shared" or kinds.get(fn.name) != "generic":
+            continue
+        echo = _echo_case(fn)
+        out.append(
+            {
+                "id": f"{fn.name}.concurrent",
+                "kind": "concurrent",
+                "fn": fn.name,
+                "args": echo["args"],
+                "threads": CONCURRENT_THREADS,
+                "calls": CONCURRENT_CALLS,
+                "expect": echo["expect"],
+            }
+        )
+    return out
+
+
 HANDWRITTEN_CASES = [
     {"id": "chs_abi_version.handshake", "kind": "handshake", "fn": "chs_abi_version", "expect": {"int": 1}},
     {"id": "chs_abi_revision.tombstone", "kind": "handshake", "fn": "chs_abi_revision", "expect": {"int": 1001}},
@@ -279,6 +493,43 @@ def _loader_cases(model) -> list[dict]:
     return cases
 
 
+_ARG_FOR_KIND = {
+    "scalar": ("int",),
+    "enum": ("int",),
+    "bytes_in": ("bytes_hex",),
+    "handle": ("handle", "null_handle", "ref"),
+}
+
+
+def _check_call(model, fn_name: str, args: list, where: str) -> None:
+    fn = model.function(fn_name)
+    inputs = [p for p in fn.params if not p.is_out]
+    if len(args) != len(inputs):
+        raise ValueError(f"{where}: {fn_name} takes {len(inputs)} inputs, the case passes {len(args)}")
+    for p, a in zip(inputs, args, strict=True):
+        shape = next(iter(a))
+        if shape not in _ARG_FOR_KIND[p.kind]:
+            raise ValueError(f"{where}: {fn_name} parameter {p.name} is {p.kind}, the case passes {shape}")
+        if shape == "null_handle" and not p.nullable:
+            raise ValueError(f"{where}: {fn_name} parameter {p.name} is not nullable")
+        if shape == "handle":
+            _check_call(model, a["handle"]["fn"], a["handle"]["args"], where)
+
+
+def _check_calls(model, cases: list[dict]) -> None:
+    """Every call this file describes, recipes and lifecycle steps included,
+    matches its function's input parameters in number and kind, so a
+    signature change in the description fails generation here instead of in
+    four runners."""
+    for c in cases:
+        where = f"case {c['id']}"
+        if "fn" in c and "args" in c:
+            _check_call(model, c["fn"], c["args"], where)
+        for s in c.get("steps", ()):
+            if "call" in s:
+                _check_call(model, s["call"]["fn"], s["call"]["args"], where)
+
+
 def build_cases(model) -> list[dict]:
     kinds = stub.classify(model)
     cases = list(HANDWRITTEN_CASES)
@@ -287,7 +538,9 @@ def build_cases(model) -> list[dict]:
             continue
         cases.append(_echo_case(fn))
         cases += _status_cases(fn)
+    cases += _decision_cases(model)
     cases += _loader_cases(model)
+    _check_calls(model, cases)
     return cases
 
 
