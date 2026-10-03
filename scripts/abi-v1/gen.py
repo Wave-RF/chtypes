@@ -127,6 +127,15 @@ def expected_files(root: Path, outs: list[emit.Output]) -> dict[str, str]:
     return want
 
 
+def produced_outputs(root: Path = ROOT) -> frozenset[str]:
+    """The paths the emitters produce whole (the files that carry a banner), as repository-relative POSIX paths.
+
+    The three source checks that exempt generated files (check-no-hand-decls.py, check-no-error-code-table.py, check-quoting-passthrough.py) exempt a file only if it is in this set AND carries the banner. Membership, not the banner alone, because the stale-banner scan in check() skips SKIP_DIRS, so a hand-written file with a copied banner under such a directory would pass both. The set comes from the repository this script lives in, so a check run over a planted tree still names real output paths.
+    """
+    _, outs = build(root)
+    return frozenset(o.path for o in outs if o.content is not None)
+
+
 def banner_files(root: Path) -> list[str]:
     """Every file whose first 512 bytes carry a real generated banner."""
     found = []
