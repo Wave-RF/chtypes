@@ -269,8 +269,8 @@ def selftest() -> int:
         built.parent.mkdir(parents=True, exist_ok=True)
         built.write_text(gen.read_text().replace("func g()", "func b()"))
         # What the emitters produce, standing in for the real set (the real
-        # outputs are not source files yet): only the generated file above.
-        produced = frozenset({"go/internal/abi1/abi_gen.go"})
+        # outputs, so a real generated file stays exempt) plus the generated file above.
+        produced = produced_outputs() | {"go/internal/abi1/abi_gen.go"}
 
         flagged = {}
         for scope in ("v1", "all"):
