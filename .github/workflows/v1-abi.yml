@@ -446,7 +446,10 @@ jobs:
         run: |
           want="$(gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
             --jq '.artifacts[] | select(.expired == false) | select(.name | startswith("v1-abi-conformance-")) | .name' | sort -u | wc -l | tr -d ' ')"
-          have="$(find "$RUNNER_TEMP/abi1-reports" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
+          # The download dir is absent when no leg uploaded anything; under
+          # pipefail a find on a missing dir would fail this step silently.
+          mkdir -p "$RUNNER_TEMP/abi1-reports"
+          have="$(find "$RUNNER_TEMP/abi1-reports" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
           echo "v1-abi-conformance artifacts uploaded: $want; report files downloaded: $have"
           if [ "$have" -lt "$want" ]; then
             echo "::error::v1-abi-parity: $have report file(s) downloaded but $want v1-abi-conformance artifact(s) exist — a report was lost or overwritten"
