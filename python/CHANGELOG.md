@@ -13,6 +13,9 @@ The four bindings in this repository are released together and give one answer, 
 - **One error family.** `CallError` (under `ChtypesError`) carries `status`, `ch_code`, `ch_name`, `message` and `column`; `SchemaError`, `UnsupportedError`, `UsageError` and `InternalError` are peers. Fetch and loader errors are `ArtifactError` subclasses, one class per code.
 - **Each `Schema`, `Filter` and `Block` has a close guard**: `close` waits for calls already inside the object, and a call after close is a `UsageError` raised before any C call. No lock is taken around a call.
 
+- **`python -m chtypes` and the `chtypes` console script are back, over the v1 fetch layer**: `fetch <spelling>... | --all [--lock FILE] [--frozen] [--offline]`, `verify`, `list [--offline]` and `where`. Exit statuses are the `errors` table of `spec/fetch-v1/constants.json`, usage errors exit 2.
+- **`FetchOptions.system_dirs`** names the read-only directories searched after the cache (`None` keeps the default list, an empty sequence searches none), and `FetchOptions.to_options` is private. `CHTYPES_TRUSTED_KEYS` (comma-separated hex public keys) replaces the default trust list when set, as `docs/guides/fetch-v1.md` §4 says.
+
 ### Removed (v1)
 
 - `compile_ddl`, the engine, TTL and partition-key setters, `encode_settings`, the transform classifier, discovery reconstruction, the hand JSON readers, `quote_bare_denormals`, the hand error-code table parser, the manifest and revision machinery, the v0 fetch module and its `python -m chtypes` command line, `ABI_REVISION`, `COMPILE_DECLARED`, `Registry.shutdown`, `Library.close` and the `Registry` context manager.
