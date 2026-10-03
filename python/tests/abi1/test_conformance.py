@@ -19,7 +19,7 @@ from chtypes._abi1 import _decls, _loader
 
 from .conftest import build_args, cases_of_kind, strip_ids, stub_path
 
-_CASES, _IDS = cases_of_kind("handshake", "echo", "status", "lifecycle", "concurrent")
+_CASES, _IDS = cases_of_kind("handshake", "echo", "status", "lifecycle", "concurrent", "document")
 
 
 @pytest.fixture(scope="session")
@@ -70,6 +70,13 @@ def _check_result(case: dict, result, expect: dict) -> None:
             assert got == want_echo, (
                 f"{case['id']}: output {name!r}: want {want_echo!r}, got {got!r}"
             )
+    # A "document" case: the output decodes as STRICT UTF-8 (no replacement)
+    # and equals the expected document exactly, every member and no more.
+    for name, want_doc in expect.get("documents", {}).items():
+        raw = result.outputs.get(name)
+        assert raw is not None, f"{case['id']}: no output {name!r} in {result.outputs}"
+        got = json.loads(raw.decode("utf-8", errors="strict"))
+        assert got == want_doc, f"{case['id']}: document {name!r}: want {want_doc!r}, got {got!r}"
 
 
 def _run_echo_or_status(api, case: dict) -> None:
@@ -149,7 +156,7 @@ def test_case(case: dict, ok_api) -> None:
     kind = case["kind"]
     if kind == "handshake":
         _run_handshake(ok_api, case)
-    elif kind in ("echo", "status"):
+    elif kind in ("echo", "status", "document"):
         _run_echo_or_status(ok_api, case)
     elif kind == "lifecycle":
         _run_lifecycle(ok_api, case)

@@ -24,7 +24,11 @@ Settings. Every settings input is a JSON object whose values are JSON strings, a
 
 Documents. Every output document is valid JSON that a stock parser reads: every ClickHouse rendering (a stored value, an input value, an engine's row) is a JSON string, a number written bare is within plus or minus 2^53 (anything larger is a string), and there is never a bare `inf`, `-inf` or `nan`. Every column entry of a row carries `null`, the library's verdict that the stored value is NULL, poisoned cells included.
 
-Column names in JSON. A column name is a byte string, so a JSON document, input or output, carries it as one of two members: `name`, a JSON string, when the name's bytes are valid UTF-8 (a NUL written as the escape `\u0000`, as RFC 8259 allows), and otherwise `name_b64`, the raw bytes in standard base64. Exactly one of the two is present, and in an array of names each element is an object carrying one of them. A server accepts both kinds of name (measured on every supported line).
+Byte strings in JSON. Every data-derived string a JSON document carries is a byte string: a column name, a value's rendering, a type (an Enum label or a named Tuple element comes from the caller's DDL), SQL text, and a message (ClickHouse's messages quote input bytes). One rule carries them all, names included, in every output document and in the input column list. The member `F` is a JSON string when the bytes are valid UTF-8, a NUL written as the escape `\u0000` as RFC 8259 allows. Otherwise the member `F_b64` holds the raw bytes in standard base64, padded. The two are never both present, and a member that names an entry (a column name) is always present in one of its two forms. So every document is valid UTF-8 JSON that a strict parser reads, and no byte is lost or replaced. Where a list or a map would hold a bare data-derived string, it holds an object instead, so the rule applies to that object's members: a list of names is a list of `{name}` or `{name_b64}` objects, and an engine's row is a list of cells. Each document lists its data-derived fields (`byte_fields` in the reference); a binding decodes each one to bytes and never assumes UTF-8. A server accepts every kind of name (measured on every supported line). The byte-returning accessors (`chs_error_message`, `chs_error_column`, `chs_error_ch_name`) and the export bytes are raw buffers, not JSON, and are not affected.
+
+String values. Every entry that reports a stored value (a row's `cols`, `computed`, an engine row's cells, `storage_transforms`) carries `stored` or `stored_b64`, which is always ClickHouse's rendering of the value. For a scalar `String` or `FixedString` value, including one inside `Nullable` or `LowCardinality`, the entry also carries `value_b64`, the value's raw bytes in standard base64, whenever the value is not NULL, whether or not the bytes are valid UTF-8. A value nested in another type (`Array(String)`, `Map`, `Tuple`, and the like) carries no `value_b64`: that is a recorded gap in 1.0, and its rendering is the only form.
+
+Input values. A JSON input (`settings`, `query_params`) cannot carry a value that is not valid UTF-8 in 1.0. The workaround is to inline the value in the SQL as `unhex('<hex>')`, built from hex digits only, which keeps it injection-safe because hex digits cannot break out of the quoted literal. A later version would add an object form, `{"<key>": {"b64": ...}}`, never a `<key>_b64` member, which could collide with a real key.
 
 Teardown. `chs_shutdown` stops what `chs_initialize` started. A loader never unloads a library: unloading or initializing an image again in one process is unsupported.
 
@@ -132,26 +136,26 @@ ClickHouse's own error-code table for this build: a JSON array of `{"code": int,
 
 ### document:schema_description
 
-A schema's columns, in declared order, with each column's canonical type, its `default_kind` (a value of the `default_kind` vocabulary) and default expression, and the facts a caller needs to build a row. Each column's name is carried as `name` or `name_b64`, by the rule for column names in JSON.
+A schema's columns, in declared order, with each column's canonical type, its `default_kind` (a value of the `default_kind` vocabulary) and default expression, and the facts a caller needs to build a row. The document is `{"columns": [...]}`, and each entry carries `name`, `type`, `default_kind` (a value of the `default_kind` vocabulary), `default_expression` (empty when there is none) and `default_is_literal`; the name, the type and the expression follow the rule for byte strings in JSON.
 
 ### document:row
 
-One row's verdict and, as the flags ask, its columns' stored values, provenance and transformations. Every entry of `cols` carries its name by the rule for column names in JSON, `null` (whether the stored value is NULL, poisoned cells included), and its renderings (`input`, `stored`) as JSON strings. The transformations come from the library, never from a binding: each is the `transformed` entry the SDK's parity fixtures pin, with its `reason` from `transform_reason`. `input_span` is `{off, len}`, the bytes of the input body the reader consumed for this record, read from the vendored reader's own position.
+One row's verdict and, as the flags ask, its columns' stored values, provenance and transformations. Every entry of `cols` carries its name, `null` (whether the stored value is NULL, poisoned cells included), its renderings (`input`, `stored`, `ref`, `wire`) and its types (`type`, `base`, `ref_type`), all by the rule for byte strings in JSON, and `value_b64` for a String or FixedString value. `unknown_fields` and `unsupported_settings` are lists of name objects; `computed` entries carry a name, a kind and a stored value; `err`, `verdict_err` and `partition_id` follow the rule too. The transformations come from the library, never from a binding: each is the `transformed` entry the SDK's parity fixtures pin, with its `reason` from `transform_reason`. `input_span` is `{off, len}`, the bytes of the input body the reader consumed for this record, read from the vendored reader's own position.
 
 ### document:batch
 
-A body's verdict, counts and per-row documents (each a row document, with its own `input_span`), and, when an export was asked for, where each accepted row sits in the export bytes. Two further fields come from the vendored reader's own state, never from a tokenizer of the library's:
+A body's verdict, counts and per-row documents (each a row document, with its own `input_span`), and, when an export was asked for, where each accepted row sits in the export bytes. `engine_rows`, present when the table's engine merges rows at insert, is a list of rows, each a list of cells: `{name, stored, null}`, plus `value_b64` for a String or FixedString value. `storage_transforms` entries carry `row`, `column`, `reason` and `stored`, plus `value_b64`; `transformed` entries carry `row`, `column`, `input`, `stored`, `reason` and `lossy`. Every name, rendering, `err` and `export_declined` follows the rule for byte strings in JSON. Two further fields come from the vendored reader's own state, never from a tokenizer of the library's:
 
 - `unconsumed`: the byte ranges `{off, len}` of the input that the reader's error recovery skipped. A record swallowed there shows up as bytes here, so a caller that needs every record accounted for declines a body whose `unconsumed` is not empty, and never counts records itself.
-- `framing`: `bom_skipped` (whether the reader skipped a leading byte-order mark), `container` (`array` or `stream` for JSONEachRow, `null` for every other format), and `header` (`{consumed, lines, names}`, `names` as objects by the rule for column names in JSON). `bom_skipped` and `header` are `null` where the vendored reader does not expose the decision, and there `null` means not observable, never "no header": the TSV, TSVWithNames and Values readers keep both private (measured by the artifact producer in the source at every supported line). CSV, JSONEachRow and JSONCompactEachRow fill both from the reader's own hooks.
+- `framing`: `bom_skipped` (whether the reader skipped a leading byte-order mark), `container` (`array` or `stream` for JSONEachRow, `null` for every other format), and `header` (`{consumed, lines, names}`, `names` as name objects). `bom_skipped` and `header` are `null` where the vendored reader does not expose the decision, and there `null` means not observable, never "no header": the TSV, TSVWithNames and Values readers keep both private (measured by the artifact producer in the source at every supported line). CSV, JSONEachRow and JSONCompactEachRow fill both from the reader's own hooks.
 
 ### document:filter_result
 
-A filter evaluation: the call's outcome, one verdict character per row (`filter_verdict`), and each error or declined row itemized.
+A filter evaluation: the call's outcome, one verdict character per row (`filter_verdict`), and each error or declined row itemized as `{row, code, err}`. `err`, at the top level and per row, follows the rule for byte strings in JSON, and `unsupported_settings` is a list of name objects.
 
 ### document:discovery
 
-The column declarations reconstructed from a server's `system.columns` rows, formatted by ClickHouse's own formatter.
+The column declarations reconstructed from a server's `system.columns` rows, formatted by ClickHouse's own formatter: `{"columns": [...], "columns_sql"}`, where each entry carries `name`, `type`, `default_kind` and `default_expression` as the server spelled them and `declaration`, the formatted declaration, and `columns_sql` joins the declarations for a `CREATE TABLE`. Every one of these is server or DDL text, so each follows the rule for byte strings in JSON.
 
 ### chs_abi_version
 
@@ -279,7 +283,7 @@ A JSON document describing the schema's columns, owned by the caller; it replace
 
 ### chs_preview_row
 
-Validates and coerces one row of `body` under the schema, as a server's INSERT would, and returns the row's document. `columns` is the INSERT column list, a JSON array of name objects by the rule for column names in JSON, and empty for none. `session_timezone` in `settings` is this call's zone.
+Validates and coerces one row of `body` under the schema, as a server's INSERT would, and returns the row's document. `columns` is the INSERT column list, a JSON array of name objects (`{name}` or `{name_b64}`), and empty for none. `session_timezone` in `settings` is this call's zone.
 
 An INSERT whose input block has no column at all (every insertable column EPHEMERAL, and no column list) is declined: a server answers it (code 90, EMPTY_LIST_OF_COLUMNS_PASSED) from a statement inside its INSERT interpreter that the library cannot call, and a decline is never a wrong answer.
 
