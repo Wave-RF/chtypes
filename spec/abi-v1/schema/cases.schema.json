@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/wave-rf/chtypes/spec/abi-v1/schema/cases.schema.json",
   "title": "tests/fixtures/abi-v1/cases.json, format 1",
-  "description": "The committed, generated (scripts/abi-v1/emit/cases.py) conformance cases every enrolled binding's v1-abi-conformance leg runs against the stub libraries scripts/abi-v1/build-stubs.sh builds. See that emitter's module docstring for the six case kinds (handshake, echo, status, loader, lifecycle, concurrent) and the argument-expression shapes (int, bytes_hex, handle, null_handle, ref). This schema is checked by scripts/abi-v1/parity.py before it trusts the file, using the same restricted JSON Schema subset spec/abi-v1/abi.json's own schema uses (scripts/abi-v1/model.py's validate()); it is not part of gen.py's abi.json/sdk.json pipeline.",
+  "description": "The committed, generated (scripts/abi-v1/emit/cases.py) conformance cases every enrolled binding's v1-abi-conformance leg runs against the stub libraries scripts/abi-v1/build-stubs.sh builds. See that emitter's module docstring for the seven case kinds (handshake, echo, status, loader, lifecycle, concurrent, document) and the argument-expression shapes (int, bytes_hex, handle, null_handle, ref). This schema is checked by scripts/abi-v1/parity.py before it trusts the file, using the same restricted JSON Schema subset spec/abi-v1/abi.json's own schema uses (scripts/abi-v1/model.py's validate()); it is not part of gen.py's abi.json/sdk.json pipeline.",
   "type": "object",
   "additionalProperties": false,
   "required": ["_generated", "schema", "cases"],
@@ -17,7 +17,7 @@
         "required": ["id", "kind"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["handshake", "echo", "status", "loader", "lifecycle", "concurrent"]},
+          "kind": {"enum": ["handshake", "echo", "status", "loader", "lifecycle", "concurrent", "document"]},
           "fn": {"type": "string", "pattern": "^chs_[a-z0-9_]+$"},
           "variant": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
           "os": {
@@ -41,7 +41,8 @@
           {"required": ["kind", "fn", "args", "expect"], "properties": {"kind": {"const": "status"}}},
           {"required": ["kind", "variant", "expect"], "properties": {"kind": {"const": "loader"}}},
           {"required": ["kind", "steps"], "properties": {"kind": {"const": "lifecycle"}}},
-          {"required": ["kind", "fn", "args", "threads", "calls", "expect"], "properties": {"kind": {"const": "concurrent"}}}
+          {"required": ["kind", "fn", "args", "threads", "calls", "expect"], "properties": {"kind": {"const": "concurrent"}}},
+          {"required": ["kind", "fn", "args", "expect"], "properties": {"kind": {"const": "document"}, "expect": {"type": "object", "required": ["status", "documents"], "properties": {"documents": {"type": "object"}}}}}
         ]
       }
     }
