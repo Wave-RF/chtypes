@@ -4,7 +4,7 @@
   "manifests": [
     {
       "mediaType": "application/vnd.oci.image.manifest.v1+json",
-      "digest": "sha256:b4634e756f0086bf47ce64040980474e031c907db2407dc2af08ca4f767fe866",
+      "digest": "sha256:c336e168d5ddb3093686170c157eb22ddb1ea0e26808aa02ed878f4c0697ccb9",
       "size": 745,
       "artifactType": "application/vnd.dev.sigstore.bundle.v0.3+json"
     }

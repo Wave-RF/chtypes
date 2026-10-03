@@ -54,6 +54,7 @@ class Statement:
 class VerifiedBundle:
     statement: Statement
     signed_by: str  # the TrustedKey.keyid that verified, never the bundle's own hint
+    payload: bytes = b""  # the authenticated DSSE payload: the exact bytes the signature covers
 
 
 def _hex_to_bytes(s: str) -> bytes:
@@ -204,5 +205,5 @@ def verify_bundle(bundle: dict, trusted_keys: tuple[TrustedKey, ...]) -> Verifie
         for key in trusted_keys:
             if _ed25519.verify(key.public_key, pae, sig):
                 statement = _parse_statement(payload)
-                return VerifiedBundle(statement=statement, signed_by=key.keyid)
+                return VerifiedBundle(statement=statement, signed_by=key.keyid, payload=payload)
     return None

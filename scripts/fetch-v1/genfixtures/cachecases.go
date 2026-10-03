@@ -15,6 +15,7 @@ import (
 
 func buildCacheCases(fs *FileSet) []Case {
 	var cases []Case
+	var extraLayouts []*Layout
 	tree := NewTree("cache")
 
 	newArtifact := func(version, build, seed string) PlatformArtifact {
@@ -184,8 +185,122 @@ func buildCacheCases(fs *FileSet) []Case {
 			"commit its output, then re-run this generator to pick the case back up")
 	}
 
+	// --- installed-request-*: a build that is merely PRESENT must never
+	// answer a request it does not satisfy (docs/guides/fetch-v1.md §4, §9: the
+	// predicate's version equals an exact request or lies within a floating
+	// one, on EVERY resolution path). The cache holds one signed build,
+	// 26.8.15.10, installed and listed in index.json; each request is run
+	// through ensure with `offline`, through resolve_installed (the
+	// `resolve-installed-` id prefix, docs/guides/fetch-v1.md §10), and through
+	// ensure with `frozen` against a lock that pins only the two matching
+	// spellings. A non-matching request is MISSING (offline, resolve_installed:
+	// §6, the offline-miss precedent) or PINNED (frozen: §6, no lock entry);
+	// it is never the installed build. ---------------------------------------
+	artInst := newArtifact("26.8.15.10", "20260815.000010", "cache-installed-request")
+	layoutInst := NewLayout("installed-request")
+	copyArtifactIntoLayout(layoutInst, tree, artInst, "26.8")
+	layoutInst.SetInstalled(artInst.ManifestDesc.Digest)
+	instLock := Lock3{Schema: 3, ABI: 1, Platforms: []string{"linux-arm64"},
+		Requests: map[string]map[string]LockPin{
+			"26.8":       {"linux-arm64": pinFor(artInst, artInst.BundleDigest, "")},
+			"26.8.15.10": {"linux-arm64": pinFor(artInst, artInst.BundleDigest, "")},
+		}}
+	putInputLock(fs, "installed-request", instLock)
+	instRequests := []struct {
+		slug, spelling string
+		match          bool
+	}{
+		{"1-1", "1.1", false},
+		{"26-9", "26.9", false},
+		{"wrong-patch", "26.8.15.9", false},
+		{"26-8", "26.8", true},
+		{"exact", "26.8.15.10", true},
+	}
+	for _, r := range instRequests {
+		for _, mode := range []string{"offline", "resolve", "frozen"} {
+			id := "installed-request-" + r.slug + "-" + mode
+			if mode == "resolve" {
+				id = "resolve-installed-request-" + r.slug
+			}
+			c := newCase(id, "cache", "file", "http")
+			c.Request.Spelling = r.spelling
+			c.Setup.Cache = "installed-request"
+			switch mode {
+			case "offline", "resolve":
+				c.Request.Offline = true
+				c.Expect.Requests.Max = intp(0)
+			case "frozen":
+				c.Request.Frozen = true
+				c.Setup.Lock = strp("installed-request")
+			}
+			if r.match {
+				c.Expect.OK = true
+				c.Expect.Version = strp(artInst.Predicate.ClickHouseVersion)
+				c.Expect.Build = strp(artInst.Predicate.Build)
+				c.Expect.LibrarySHA256 = strp(artInst.Predicate.LibrarySHA256)
+			} else {
+				c.Expect.OK = false
+				if mode == "frozen" {
+					c.Expect.Code = strp("CHTYPES_ARTIFACT_PINNED")
+				} else {
+					c.Expect.Code = strp("CHTYPES_ARTIFACT_MISSING")
+				}
+			}
+			cases = append(cases, c)
+		}
+	}
+
+	// --- label-mismatch-*: no local LABEL may stand in for the signed
+	// version. The layout's index.json entry for the build is annotated with
+	// the ref name "26.9" (what a real `oras copy` of that tag writes), while
+	// the build's SIGNED predicate says 26.8.15.10. A request for 26.9 (the
+	// label) must not resolve to it; 26.8 (the signed version) is the
+	// control. Two layouts: one with the build already installed
+	// (installed.json), one only pre-seeded. A path component cannot carry a
+	// version at all (the unpacked directory is named by the manifest digest,
+	// and verified.json is written by the binding from the signed statement,
+	// never fabricated by this generator), so the index.json annotation is the
+	// one local label a fixture can plant. ------------------------------------
+	for _, kind := range []string{"installed", "preseeded"} {
+		layoutLbl := NewLayout("label-mismatch-" + kind)
+		copyArtifactIntoLayout(layoutLbl, tree, artInst, "26.9")
+		if kind == "installed" {
+			layoutLbl.SetInstalled(artInst.ManifestDesc.Digest)
+		}
+		extraLayouts = append(extraLayouts, layoutLbl)
+		for _, r := range []struct {
+			slug, spelling string
+			match          bool
+		}{{"label", "26.9", false}, {"signed", "26.8", true}} {
+			for _, mode := range []string{"offline", "resolve"} {
+				id := "label-mismatch-" + kind + "-" + r.slug + "-" + mode
+				if mode == "resolve" {
+					id = "resolve-installed-label-mismatch-" + kind + "-" + r.slug
+				}
+				c := newCase(id, "cache", "file", "http")
+				c.Request.Spelling = r.spelling
+				c.Request.Offline = true
+				c.Setup.Cache = "label-mismatch-" + kind
+				c.Expect.Requests.Max = intp(0)
+				if r.match {
+					c.Expect.OK = true
+					c.Expect.Version = strp(artInst.Predicate.ClickHouseVersion)
+					c.Expect.Build = strp(artInst.Predicate.Build)
+					c.Expect.LibrarySHA256 = strp(artInst.Predicate.LibrarySHA256)
+				} else {
+					c.Expect.OK = false
+					c.Expect.Code = strp("CHTYPES_ARTIFACT_MISSING")
+				}
+				cases = append(cases, c)
+			}
+		}
+	}
+
 	flushTrees(fs, tree, monoTree)
-	for _, l := range []*Layout{layoutHit, layoutMiss, layoutTwoVersions, layoutTwoBuilds, layoutNoop, layoutMono, layoutSys} {
+	for _, l := range extraLayouts {
+		l.Flush(fs)
+	}
+	for _, l := range []*Layout{layoutInst, layoutHit, layoutMiss, layoutTwoVersions, layoutTwoBuilds, layoutNoop, layoutMono, layoutSys} {
 		l.Flush(fs)
 	}
 	return cases

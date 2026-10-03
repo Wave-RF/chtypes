@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "artifactType": "application/vnd.wavehouse.chtypes.goldens.v1",
+  "config": {
+    "mediaType": "application/vnd.oci.empty.v1+json",
+    "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "size": 2,
+    "data": "e30="
+  },
+  "layers": [
+    {
+      "mediaType": "application/json",
+      "digest": "sha256:f781abefbce0f0895db3ede6b489a8f607a645926d47682cba89d4b9f5e3b202",
+      "size": 47
+    }
+  ],
+  "subject": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:3f87702ecc5a56424e9f36ac45fced05d79a9e5724fb7589e210e1ec90fb9fda",
+    "size": 552
+  }
+}

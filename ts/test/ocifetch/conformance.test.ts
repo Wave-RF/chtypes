@@ -18,9 +18,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ensure, fetchSigned, findReferrerDigests } from '../../src/ocifetch/ensure.js';
-import { FIXTURES_REPO_SUFFIX, GOLDENS_ARTIFACT_TYPE, PREDICATE_TYPE_FIXTURES, PREDICATE_TYPE_GOLDENS, RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
-import type { FetchV1ErrorCode } from '../../src/ocifetch/errors.js';
+import { ensure, fetchSigned, resolveInstalled } from '../../src/ocifetch/ensure.js';
+import { FIXTURES_REPO_SUFFIX, PREDICATE_TYPE_FIXTURES, PREDICATE_TYPE_GOLDENS, RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
+import { ArtifactMissingError, type FetchV1ErrorCode } from '../../src/ocifetch/errors.js';
 import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
 import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
 import type { Clock, PlatformKey } from '../../src/ocifetch/types.js';
@@ -346,12 +346,21 @@ type EnsureOptions = Parameters<typeof ensure>[1];
 
 async function runEnsure(c: ConformanceCase, baseOptions: EnsureOptions, lockPath: string, conformanceDir: string): Promise<string> {
   try {
-    const resolved = await ensure(c.request.spelling, {
-      ...baseOptions,
-      lockWrite: c.request.lock_write,
-      lockAllPlatforms: c.request.lock_write,
-      update: c.request.update,
-    });
+    let resolved: Awaited<ReturnType<typeof ensure>>;
+    if (c.id.startsWith('resolve-installed-')) {
+      // The cache-only seam entry (guide §10): a miss is reported as
+      // CHTYPES_ARTIFACT_MISSING, the code --offline gives.
+      const found = await resolveInstalled(c.request.spelling, c.request.platform as PlatformKey, baseOptions);
+      if (found === undefined) throw new ArtifactMissingError(`chtypes: no installed artifact satisfies ${c.request.spelling}`);
+      resolved = found;
+    } else {
+      resolved = await ensure(c.request.spelling, {
+        ...baseOptions,
+        lockWrite: c.request.lock_write,
+        lockAllPlatforms: c.request.lock_write,
+        update: c.request.update,
+      });
+    }
     if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got ok with version ${resolved.version}`;
     if (c.expect.version !== null && resolved.version !== c.expect.version) {
       return `version ${resolved.version} != expected ${c.expect.version}`;
@@ -395,17 +404,11 @@ async function runGenericFetch(c: ConformanceCase, bases: readonly string[], bas
   const repository = isGoldens ? bases[0]! : `${bases[0]}${FIXTURES_REPO_SUFFIX}`;
   const predicateType = isGoldens ? PREDICATE_TYPE_GOLDENS : PREDICATE_TYPE_FIXTURES;
   try {
-    // genericcases.go's own convention: a goldens case's `request.spelling`
-    // is the SUBJECT (a platform manifest) the goldens object is a referrer
-    // of, so it is a two-step resolution — find the goldens-artifactType
-    // referrer, then `fetchSigned` that referrer's own digest. A fixtures
+    // A goldens case's `request.spelling` is the SUBJECT (a platform
+    // manifest): `fetchSigned` itself discovers its goldens referrers,
+    // verifies each and returns the highest revision (guide §9). A fixtures
     // case names the object's digest directly.
-    let ref = c.request.spelling;
-    if (isGoldens) {
-      const found = await findReferrerDigests(repository, c.request.spelling, GOLDENS_ARTIFACT_TYPE, baseOptions);
-      if (found.length === 0) throw Object.assign(new Error(`chtypes: no goldens referrer of ${c.request.spelling}`), { code: 'CHTYPES_ARTIFACT_MISSING' });
-      ref = found[0]!;
-    }
+    const ref = c.request.spelling;
     const result = await fetchSigned(repository, ref, predicateType, baseOptions);
     if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got ok`;
     if (c.expect.manifest !== null && result.digests.manifest !== c.expect.manifest) {
