@@ -5,7 +5,7 @@
   "description": "The shape of spec/abi-v1/abi.json. Structure only: cross-references (a handle's free function exists, a status is a chs_status value, a FIRM function names nothing provisional, docs.md covers every symbol) are checked by scripts/abi-v1/model.py. Uses only the keywords that validator implements; it refuses any other.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["description_schema", "abi", "library", "scalars", "handles", "enums", "constants", "documents", "build_info", "functions"],
+  "required": ["description_schema", "abi", "library", "scalars", "handles", "enums", "constants", "column_names", "documents", "build_info", "functions"],
   "properties": {
     "description_schema": {"const": 1, "description": "The version of this format."},
     "abi": {"type": "integer", "minimum": 1, "description": "The ABI generation: CHS_ABI_VERSION, and what chs_abi_version() returns."},
@@ -37,6 +37,17 @@
       "type": "object",
       "propertyNames": {"pattern": "^CHS_[A-Z0-9_]+$"},
       "additionalProperties": {"$ref": "#/$defs/constant"}
+    },
+    "column_names": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "bytes", "bytes_encoding"],
+      "description": "How a JSON document (an input or an output) carries a column name, which is a byte string: the member `text` holds it as a JSON string when its bytes are valid UTF-8 (NUL written as an escape), and otherwise the member `bytes` holds the raw bytes in `bytes_encoding` (standard base64, with padding). Exactly one of the two is present wherever a name is carried; a byte-returning accessor such as chs_error_column returns the raw bytes instead.",
+      "properties": {
+        "text": {"$ref": "#/$defs/c_ident"},
+        "bytes": {"$ref": "#/$defs/c_ident"},
+        "bytes_encoding": {"enum": ["base64"]}
+      }
     },
     "documents": {
       "type": "object",
@@ -76,7 +87,7 @@
     "content": {
       "description": "What a counted byte string carries. Every one is a byte string, never a C string: NUL and invalid UTF-8 pass through. A document:<name> content names an entry in documents.",
       "type": "string",
-      "pattern": "^(bytes|name|sql|message|ascii|json_object_string_values|json_array_names|document:[a-z][a-z0-9_]*)$"
+      "pattern": "^(bytes|name|sql|message|ascii|json_object_string_values|json_array_names|timezone|document:[a-z][a-z0-9_]*)$"
     },
     "handle": {
       "type": "object",
@@ -134,7 +145,7 @@
             "required": ["value"],
             "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
             "properties": {
-              "value": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+              "value": {"type": "string", "pattern": "^[A-Za-z0-9_]*$", "description": "The exact string a document carries: ASCII letters, digits and underscores, and possibly empty (ClickHouse's own spellings, such as a default kind, are kept as ClickHouse spells them)."}
             }
           }
         }
@@ -160,8 +171,8 @@
       "additionalProperties": false,
       "required": ["carries_names"],
       "properties": {
-        "carries_names": {"type": "boolean", "description": "The document carries column names, which are byte strings: how a non-UTF-8 name is carried inside JSON is open (marker A12)."},
-        "schema": {"type": "object"},
+        "carries_names": {"type": "boolean", "description": "The document carries column names, which are byte strings, each carried as column_names says."},
+        "schema": {"type": "object", "description": "A JSON Schema (the subset model.py implements) of the fields of the document that the description fixes; a document may carry more, as docs.md describes."},
         "provisional": {"$ref": "#/$defs/markers"}
       }
     },
@@ -172,7 +183,7 @@
       "properties": {
         "name": {"$ref": "#/$defs/c_type_name"},
         "class": {"enum": ["handshake", "tombstone", "api", "tooling"]},
-        "thread": {"enum": ["any", "handle_serial", "process_once", "process_serial"]},
+        "thread": {"enum": ["any", "shared", "handle_serial", "process_once", "process_serial"], "description": "The thread class; scripts/abi-v1/model.py THREADS describes each, and load() ties it to the function's shape: `shared` exactly when the call reads a caller handle and is not a free, `handle_serial` exactly for a free."},
         "provisional": {"$ref": "#/$defs/markers"},
         "returns": {"$ref": "#/$defs/return"},
         "may_return": {
