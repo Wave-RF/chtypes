@@ -11,6 +11,7 @@ python/tests/abi1/test_loader.py's.
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -18,7 +19,7 @@ from chtypes._abi1 import _decls, _loader
 
 from .conftest import build_args, cases_of_kind, strip_ids, stub_path
 
-_CASES, _IDS = cases_of_kind("handshake", "echo", "status")
+_CASES, _IDS = cases_of_kind("handshake", "echo", "status", "lifecycle", "concurrent")
 
 
 @pytest.fixture(scope="session")
@@ -55,10 +56,7 @@ def _check_error(case: dict, result, expect_error: dict) -> None:
     assert result.error.column == expect_error["column"].encode(), case["id"]
 
 
-def _run_echo_or_status(api, case: dict) -> None:
-    args = build_args(api, case["args"])
-    result = _decls.invoke_by_name(api, case["fn"], args)
-    expect = case["expect"]
+def _check_result(case: dict, result, expect: dict) -> None:
     assert result.status == expect["status"], (
         f"{case['id']}: want status {expect['status']}, got {result.status}"
     )
@@ -74,6 +72,78 @@ def _run_echo_or_status(api, case: dict) -> None:
             )
 
 
+def _run_echo_or_status(api, case: dict) -> None:
+    args = build_args(api, case["args"])
+    result = _decls.invoke_by_name(api, case["fn"], args)
+    _check_result(case, result, case["expect"])
+
+
+def _live(api) -> dict:
+    result = _decls.invoke_by_name(api, _LIVE_FN, [])
+    assert result.status == "CHS_OK", f"live-handle read failed: {result.status}"
+    return json.loads(result.outputs["out"])
+
+
+_LIVE_FN = "chs_live_handles"
+
+
+def _run_lifecycle(api, case: dict) -> None:
+    base = _live(api)
+    refs: dict = {}
+    try:
+        for i, step in enumerate(case["steps"]):
+            where = f"{case['id']} step {i}"
+            if "let" in step:
+                call = step["call"]
+                result = _decls.invoke_by_name(api, call["fn"], build_args(api, call["args"], refs))
+                assert result.status == "CHS_OK", f"{where}: {call['fn']} gave {result.status}"
+                handles = list(result.out_handles.values())
+                assert len(handles) == 1, f"{where}: want one minted handle, got {handles}"
+                refs[step["let"]] = handles[0]
+            elif "call" in step:
+                call = step["call"]
+                result = _decls.invoke_by_name(api, call["fn"], build_args(api, call["args"], refs))
+                _check_result(case, result, step["expect"])
+            elif "free" in step:
+                refs.pop(step["free"]).close()
+            elif "live_delta" in step:
+                now = _live(api)
+                for kind, delta in step["live_delta"].items():
+                    got = now.get(kind, 0) - base.get(kind, 0)
+                    assert got == delta, f"{where}: live {kind} moved {got}, want {delta}"
+            else:
+                raise AssertionError(f"{where}: unrecognized step {step!r}")
+        assert not refs, f"{case['id']}: handles left bound: {sorted(refs)}"
+    finally:
+        for h in refs.values():
+            h.close()
+
+
+def _run_concurrent(api, case: dict) -> None:
+    args = build_args(api, case["args"])
+    errors: list[str] = []
+    barrier = threading.Barrier(case["threads"])
+
+    def worker() -> None:
+        try:
+            barrier.wait()
+            for _ in range(case["calls"]):
+                result = _decls.invoke_by_name(api, case["fn"], args)
+                _check_result(case, result, case["expect"])
+        except BaseException as e:  # noqa: BLE001 - reported to the main thread
+            errors.append(repr(e))
+
+    threads = [threading.Thread(target=worker) for _ in range(case["threads"])]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for a in args:
+        if hasattr(a, "close"):
+            a.close()
+    assert not errors, f"{case['id']}: {errors[:3]}"
+
+
 @pytest.mark.parametrize("case", _CASES, ids=_IDS)
 def test_case(case: dict, ok_api) -> None:
     kind = case["kind"]
@@ -81,5 +151,9 @@ def test_case(case: dict, ok_api) -> None:
         _run_handshake(ok_api, case)
     elif kind in ("echo", "status"):
         _run_echo_or_status(ok_api, case)
+    elif kind == "lifecycle":
+        _run_lifecycle(ok_api, case)
+    elif kind == "concurrent":
+        _run_concurrent(ok_api, case)
     else:
         raise AssertionError(f"{case['id']}: unrecognized case kind {kind!r}")

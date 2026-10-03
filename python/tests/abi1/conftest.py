@@ -161,20 +161,24 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # n
 # --------------------------------------------------------------- arg builder
 
 
-def build_args(api: Any, arg_specs: list[dict]) -> list[Any]:
-    return [build_arg(api, a) for a in arg_specs]
+def build_args(api: Any, arg_specs: list[dict], refs: dict[str, Any] | None = None) -> list[Any]:
+    return [build_arg(api, a, refs) for a in arg_specs]
 
 
-def build_arg(api: Any, a: dict) -> Any:
+def build_arg(api: Any, a: dict, refs: dict[str, Any] | None = None) -> Any:
     if "int" in a:
         return a["int"]
     if "bytes_hex" in a:
         return bytes.fromhex(a["bytes_hex"])
     if "null_handle" in a:
         return None
+    if "ref" in a:
+        name = a["ref"]
+        assert refs is not None and name in refs, f"ref {name!r} is not bound by an earlier step"
+        return refs[name]
     if "handle" in a:
         spec = a["handle"]
-        result = _decls.invoke_by_name(api, spec["fn"], build_args(api, spec.get("args", [])))
+        result = _decls.invoke_by_name(api, spec["fn"], build_args(api, spec.get("args", []), refs))
         assert result.status == "CHS_OK", (
             f"{spec['fn']}: building a handle recipe must succeed, got {result.status}"
         )

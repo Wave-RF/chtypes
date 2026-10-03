@@ -395,6 +395,13 @@ class Api:
     def abi_revision(self) -> int:
         return self._raw["chs_abi_revision"]()
 
+    def initialize(self, timezone: bytes = b"") -> InvokeResult:
+        """Loader step 7: the once-per-process image zone (length 0 = UTC).
+        process_once: the same spelling again is CHS_OK, a different one is
+        CHS_INVALID_ARGUMENT. Returns the generic result so _loader.py never
+        spells a chs_ name."""
+        return invoke_by_name(self, "chs_initialize", [timezone])
+
 
 _API_KEY = object()
 

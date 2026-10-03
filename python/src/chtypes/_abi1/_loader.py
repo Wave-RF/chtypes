@@ -18,8 +18,8 @@ resolve-all sweep run right after step 3, BEFORE step 4's
 `missing-chs_clickhouse_version` stub variants both expect the step 6
 `missing_symbol:<name>` reason, not a step 4 one, which is only possible if
 the full symbol sweep happens before chs_build_info is ever called). Step 7
-is the no-op hook plan section 3.2 describes; it is not built here (A5 is
-unsettled).
+calls the image's once-per-process zone setup (empty zone = UTC unless the
+caller supplies one).
 """
 
 from __future__ import annotations
@@ -146,7 +146,12 @@ def _parse_build_info(raw: bytes, path: str) -> dict:
 
 
 def _open(
-    path: str, predicate: Mapping[str, object], *, skip_step1: bool, skip_step5: bool
+    path: str,
+    predicate: Mapping[str, object],
+    *,
+    skip_step1: bool,
+    skip_step5: bool,
+    timezone: bytes = b"",
 ) -> LoadResult:
     if not skip_step1:
         _check_glibc(path, predicate)
@@ -186,21 +191,41 @@ def _open(
             if bi_val != pred_val:
                 _refuse(f"build_info_mismatch:{build_info_field}", path, want=pred_val, got=bi_val)
 
+    # Step 7: the once-per-process image zone (empty = UTC), after every
+    # handshake check and before any other call. A failure is the library's
+    # own refusal, surfaced as the call error its status maps to.
+    init = api.initialize(timezone)
+    if init.status != "CHS_OK":
+        cls = _errmap.call_error_class(init.status or "")
+        err = init.error
+        raise cls(
+            init.status,
+            err.ch_code if err else 0,
+            err.ch_name if err else b"",
+            err.message if err else b"",
+            err.column if err else b"",
+        )
+
     return LoadResult(api=api, build_info=info, path=path)
 
 
-def open(path: str, predicate: Mapping[str, object]) -> LoadResult:
+def open(path: str, predicate: Mapping[str, object], *, timezone: bytes = b"") -> LoadResult:
     """Load and verify a v1 artifact at `path` against its (already verified
-    elsewhere) signed `predicate`. Raises an `_errors.LoaderError` subclass
+    elsewhere) signed `predicate`, then set the image zone (`timezone`, empty
+    = UTC; step 7). Raises an `_errors.LoaderError` subclass
     naming the exact refusal on any failure."""
-    return _open(path, predicate, skip_step1=False, skip_step5=False)
+    return _open(path, predicate, skip_step1=False, skip_step5=False, timezone=timezone)
 
 
 _WARNED_PATHS: set[str] = set()
 
 
 def open_unverified(
-    path: str, *, predicate: Mapping[str, object] | None = None, allow: bool = False
+    path: str,
+    *,
+    predicate: Mapping[str, object] | None = None,
+    allow: bool = False,
+    timezone: bytes = b"",
 ) -> LoadResult:
     """For core's local builds and the linked mode ONLY (plan section 3.1,
     Q-b): skips step 1 when no predicate is given, and always skips step 5.
@@ -219,4 +244,10 @@ def open_unverified(
             "never use this outside a local build or core's own test suites",
             stacklevel=2,
         )
-    return _open(path, predicate or {}, skip_step1=predicate is None, skip_step5=True)
+    return _open(
+        path,
+        predicate or {},
+        skip_step1=predicate is None,
+        skip_step5=True,
+        timezone=timezone,
+    )
