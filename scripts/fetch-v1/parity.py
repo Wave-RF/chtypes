@@ -76,7 +76,7 @@ TOOLCHAINS: dict[str, tuple[str, ...]] = {
     "go": ("go1.27.x",),
     "python": ("3.11", "3.13", "3.14"),
     "ts": ("node22.21.0", "node24"),
-    "rust": ("1.85", "stable"),
+    "rust": ("1.87", "stable"),  # PM's MSRV ruling (v1.yml's own comment); was 1.85
 }
 NETWORK_TOOLCHAIN = "registry"
 
