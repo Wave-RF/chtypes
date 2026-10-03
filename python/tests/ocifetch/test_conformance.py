@@ -53,7 +53,11 @@ def _toolchain() -> str:
     # "python3.13"-prefixed example, but parity.py is the actual gate and
     # it does a plain membership test against the bare version, not that
     # illustrative string.
-    return f"{sys.version_info.major}.{sys.version_info.minor}"
+    # CHTYPES_V1_TOOLCHAIN (exported by v1.yml; "registry" in v1-network) wins.
+    return (
+        os.environ.get("CHTYPES_V1_TOOLCHAIN")
+        or f"{sys.version_info.major}.{sys.version_info.minor}"
+    )
 
 
 def _fixtures_root() -> Path:
