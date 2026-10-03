@@ -47,6 +47,8 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+#[path = "../src/abi1/calls_gen.rs"]
+mod calls_gen;
 #[path = "../src/abi1/decls.rs"]
 mod decls;
 #[path = "../src/abi1/invoke_gen.rs"]
@@ -381,12 +383,6 @@ fn check_call(api: &Api, outcome: &Outcome, expect: &Value) -> Result<(), String
 
 // ------------------------------------------------------------------ loader
 
-fn predicate_map(v: &Value) -> Result<serde_json::Map<String, Value>, String> {
-    v.as_object()
-        .cloned()
-        .ok_or_else(|| format!("predicate is not an object: {v}"))
-}
-
 /// Resolve one stub variant's library, BY FILE NAME, under `stubs_dir` — the
 /// real `CHTYPES_ABI1_STUBS` directory for THIS job. `stubs.json`'s own
 /// `path` field was written by the (separate) `v1-abi-stubs` build job, under
@@ -403,12 +399,14 @@ fn load_variant(stubs_dir: &Path, variant: &Value) -> Result<Loaded, LoadError> 
         .unwrap_or_default();
     let file_name = Path::new(path_str).file_name().unwrap_or(path_str.as_ref());
     let path = stubs_dir.join(file_name);
-    let predicate =
-        predicate_map(variant.get("predicate").unwrap_or(&Value::Null)).unwrap_or_default();
+    // The predicate goes to the loader exactly as `stubs.json` carries it,
+    // the same way the public layer passes the fetch layer's `Resolved.predicate`.
+    let predicate = variant.get("predicate").unwrap_or(&Value::Null);
     loader::load(LoadInput {
         library_path: &path,
-        predicate,
+        predicate: Some(predicate),
         timezone: &[],
+        defaults: None,
     })
 }
 
@@ -441,9 +439,11 @@ fn run_loader_case(
                 Err(format!("want refusal {want_reason:?}, the library loaded"))
             }
         }
-        Err(LoadError::Initialize(e)) => Err(format!(
-            "want {want_reason:?}, chs_initialize failed ({} / {}): {}",
-            e.status, e.class, e.message
+        Err(LoadError::Call(e)) => Err(format!(
+            "want {want_reason:?}, step 7 failed (status {} / {}): {}",
+            e.status,
+            e.ch_name,
+            String::from_utf8_lossy(&e.message)
         )),
         Err(LoadError::Refused(refusal)) => {
             if refusal.reason == want_reason {
@@ -829,7 +829,7 @@ fn abi1_conformance() {
 
     let mut results: Vec<(String, bool, Option<String>)> = Vec::new();
 
-    let ok_api: Option<Api> = match variants.get("ok") {
+    let ok_api: Option<std::sync::Arc<Api>> = match variants.get("ok") {
         None => {
             results.push((
                 "ok-load".to_string(),
@@ -843,8 +843,12 @@ fn abi1_conformance() {
             Err(e) => {
                 let detail = match e {
                     LoadError::Refused(r) => r.to_string(),
-                    LoadError::Initialize(i) => {
-                        format!("chs_initialize: {} ({})", i.status, i.message)
+                    LoadError::Call(c) => {
+                        format!(
+                            "step 7: status {} ({})",
+                            c.status,
+                            String::from_utf8_lossy(&c.message)
+                        )
                     }
                 };
                 results.push(("ok-load".to_string(), false, Some(detail)));

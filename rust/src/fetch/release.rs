@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use super::source::Source;
 use super::trust::TrustPolicy;
-use crate::error::{Error, Result};
+use crate::legacy::error::{Error, Result};
 
 /// One row of a release's `index.json` (schema 1): the asset for one
 /// ClickHouse version on one platform, and what is inside it.
@@ -53,7 +53,7 @@ pub struct IndexRow {
     /// is read as none rather than failing the whole listing. The artifact
     /// producer writes the field from the revision that introduced it onward,
     /// so a row without it is an older revision. Fetch installs only a row at
-    /// this crate's own [`crate::ABI_REVISION`] (`docs/guides/fetch.md` §2): any
+    /// this crate's own [`crate::legacy::error::ABI_REVISION`] (`docs/guides/fetch.md` §2): any
     /// other would be refused at load.
     #[serde(default, deserialize_with = "lenient_revision")]
     pub abi_revision: Option<i32>,
@@ -356,7 +356,7 @@ pub(crate) const RELEASE_LOAD_ATTEMPTS: u32 = 5;
 /// `CHTYPES_FETCH_TEST_RETRY_DELAY_MS` overrides it, in milliseconds — an
 /// internal, undocumented test hook, never part of the public contract
 /// (`docs/guides/fetch.md` documents no such variable for this crate). It exists
-/// because `tests/fetch.rs` is a separate crate that cannot reach this
+/// because an integration test is a separate crate that cannot reach this
 /// `pub(crate)` constant directly to shrink it; `rerun`'s isolated child
 /// environment sets it instead of mutating this process's own environment,
 /// which `cargo test`'s parallelism would make racy.
@@ -913,7 +913,7 @@ mod build_tests {
             library_sha256: "bb".into(),
             build,
             core_commit: String::new(),
-            abi_revision: Some(crate::ABI_REVISION),
+            abi_revision: Some(crate::legacy::error::ABI_REVISION),
         }
     }
 
@@ -940,7 +940,7 @@ mod build_tests {
 }
 
 /// `docs/guides/fetch.md` §2: only rows at the crate's own ABI revision are ever
-/// selected, FIRST. The revision under test is always [`crate::ABI_REVISION`]
+/// selected, FIRST. The revision under test is always [`crate::legacy::error::ABI_REVISION`]
 /// itself (or one past it), never a typed number.
 #[cfg(test)]
 mod revision_tests {
@@ -993,7 +993,7 @@ mod revision_tests {
     /// revision — in every listing order, for a line, an exact patch and --all.
     #[test]
     fn a_higher_build_at_another_revision_never_beats_the_own_revision() {
-        let own = crate::ABI_REVISION;
+        let own = crate::legacy::error::ABI_REVISION;
         let mine = row("25.8.28.1-lts", 10, Some(own));
         let higher_build_elsewhere = row("25.8.28.1-lts", 20, Some(own + 1));
         let newer_undeclared = row("25.8.33.6-lts", 30, None);
@@ -1029,7 +1029,7 @@ mod revision_tests {
     /// never a fallback, naming the crate's revision and the served one.
     #[test]
     fn only_another_revision_served_is_unpublished_naming_both() {
-        let own = crate::ABI_REVISION;
+        let own = crate::legacy::error::ABI_REVISION;
         let other = own + 1;
         let rel = release(vec![
             row("25.8.28.1-lts", 20, Some(other)),
@@ -1057,7 +1057,7 @@ mod revision_tests {
     /// line first; a line with a row at the crate's revision gets none.
     #[test]
     fn every_line_served_only_at_another_revision_is_named() {
-        let own = crate::ABI_REVISION;
+        let own = crate::legacy::error::ABI_REVISION;
         let rows = vec![
             row("26.7.3.19-stable", 1, Some(own + 1)),
             row("25.8.28.1-lts", 1, Some(own)),
@@ -1086,7 +1086,7 @@ mod revision_tests {
     /// nothing when it hid nothing.
     #[test]
     fn list_names_what_it_hides_and_nothing_else() {
-        let own = crate::ABI_REVISION;
+        let own = crate::legacy::error::ABI_REVISION;
         let mut rows = vec![row("25.8.28.1-lts", 1, Some(own))];
         assert_eq!(not_shown(&rows, PLATFORM, own), None);
         rows.push(row("26.7.3.19-stable", 1, Some(own + 1)));
@@ -1128,7 +1128,7 @@ mod revision_tests {
         assert!(
             message.contains(&format!(
                 "ABI revision {} (this SDK's)",
-                crate::ABI_REVISION
+                crate::legacy::error::ABI_REVISION
             )),
             "{message}"
         );
@@ -1138,7 +1138,7 @@ mod revision_tests {
         // What index.json can carry: the revision as a JSON integer is one; as
         // a string, a float, null or a bool it is not — and none of them fails
         // the rest of the row.
-        let own = crate::ABI_REVISION;
+        let own = crate::legacy::error::ABI_REVISION;
         for (raw, want) in [
             (serde_json::json!(own), Some(own)),
             (serde_json::json!(own.to_string()), None),

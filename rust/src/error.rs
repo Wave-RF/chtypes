@@ -1,744 +1,391 @@
-//! Errors, and the one sentinel that must never be confused with a rejection.
+//! The error classes (`docs/reference/bindings-v1.md` §4).
+//!
+//! Four **call** classes carry the five fields of the library's own error
+//! ([`CallError`]); two **artifact** classes carry a loader [`Refusal`]; the
+//! fetch layer's own codes are one variant each. They are one family: a caller
+//! matching [`Error::ArtifactCorrupt`] sees the fetch layer's corruption and
+//! the loader's step 5 alike.
+//!
+//! The refusal ([`Error::Schema`]) and the decline ([`Error::Unsupported`]) are
+//! PEERS, never one a subtype of the other: a handler that forgot the
+//! distinction must not be able to turn every decline into a rejection. Catching
+//! all four call classes is an explicit choice, [`Error::call_error`].
 
+use std::fmt;
 use std::path::PathBuf;
 
-/// `CHS_CODE_UNSUPPORTED` from `include/chtypes.h`: "this build refuses to
-/// answer", and never a real ClickHouse error code.
+use crate::abi1::calls_gen::RawCallError;
+use crate::abi1::errmap_gen::{ErrorClass, RefusalClass, refusal_class, status_class};
+use crate::abi1::vocab_gen::status;
+use crate::raw::RawText;
+
+pub use crate::abi1::loader::Refusal;
+
+/// The five fields of one `chs_error`, verbatim, and nothing synthesized.
 ///
-/// Mapping it onto a rejection manufactures an over-reject the product never
-/// made; mapping it onto an acceptance manufactures an over-accept, which is
-/// the cardinal sin. It is exposed here so a caller can branch on it.
-pub const CODE_UNSUPPORTED: i32 = -2;
-
-/// The `chs_*` ABI revision this crate was written against — `CHS_ABI_REVISION`
-/// in `include/chtypes.h`.
-///
-/// This crate `dlopen`s artifacts rather than compiling against the header, so
-/// this is a hand-kept mirror and MUST be bumped in the same cycle the header
-/// is. [`crate::Library`] refuses to load an artifact reporting a different
-/// nonzero revision; 0 means the artifact predates the probe, which is
-/// ignorance rather than incompatibility (`docs/reference/artifact.md` §Loading).
-///
-/// Revision 3 (2026-08-31): `chs_rows` gained `export_format` / `doc_flags` /
-/// `out_bytes`, and the `chs_filter_compile` / `chs_filter_free` /
-/// `chs_filter_rows` trio joined the surface.
-///
-/// Revision 4 (2026-08-31, the filter phase-2 cycle): `chs_filter_compile`
-/// gained `params_json` (`{name:Type}` query parameters), and the block twin
-/// joined — `chs_block_parse` / `chs_block_free` / `chs_filter_eval`. This
-/// crate therefore speaks 5 and refuses revision-4 artifacts: calling the
-/// 5-argument `chs_filter_compile` against the 4-argument revision-3 artifact
-/// is undefined behavior, which is exactly what this gate exists to refuse.
-///
-/// Revision 6 (the error-code table and the partition key): `chs_error_codes`
-/// and `chs_schema_partition_by` joined the surface. Purely additive, and
-/// still a new number: this crate speaks 6 and refuses revision-5 artifacts.
-pub const ABI_REVISION: i32 = 6;
-
-/// `CHTYPES_ARTIFACT_MISSING` — no installed artifact answers for the line
-/// (`docs/guides/fetch.md` §7). The code every SDK shares for [`Error::ArtifactMissing`].
-pub const CODE_ARTIFACT_MISSING: &str = "CHTYPES_ARTIFACT_MISSING";
-/// `CHTYPES_ARTIFACT_UNTRUSTED` — the release's `SHA256SUMS` is unsigned or
-/// mis-signed (§3 step 0); nothing was downloaded around it.
-pub const CODE_ARTIFACT_UNTRUSTED: &str = "CHTYPES_ARTIFACT_UNTRUSTED";
-/// `CHTYPES_ARTIFACT_CORRUPT` — any hash mismatch anywhere in the chain (§3).
-pub const CODE_ARTIFACT_CORRUPT: &str = "CHTYPES_ARTIFACT_CORRUPT";
-/// `CHTYPES_ARTIFACT_PINNED` — the release offers something other than what
-/// the lock file pins (§5).
-pub const CODE_ARTIFACT_PINNED: &str = "CHTYPES_ARTIFACT_PINNED";
-/// `CHTYPES_ARTIFACT_UNPUBLISHED` — the release publishes nothing for the
-/// requested line or exact patch on this platform (§2).
-pub const CODE_ARTIFACT_UNPUBLISHED: &str = "CHTYPES_ARTIFACT_UNPUBLISHED";
-/// `CHTYPES_SOURCE_UNREACHABLE` — the source could not be reached, or was not
-/// consulted because the fetch was offline.
-pub const CODE_SOURCE_UNREACHABLE: &str = "CHTYPES_SOURCE_UNREACHABLE";
-
-/// This SDK's fetch command, as the "Install it:" line of
-/// [`Error::ArtifactMissing`] spells it (`docs/guides/fetch.md` §6: the crate's
-/// `[[bin]]`, reached through `cargo install chtypes`).
-pub const FETCH_COMMAND: &str = "cargo install chtypes && chtypes fetch";
-
-/// `Result` with this crate's [`Error`].
-pub type Result<T> = std::result::Result<T, Error>;
-
-/// Everything that can go wrong loading an artifact or asking it a question.
-///
-/// Three different answers travel through this one type, and a caller must
-/// keep them apart (docs/limitations.md §The error model is normative):
-///
-/// * **A rejection** — [`Error::Schema`]: ClickHouse itself refused, with its
-///   own code and message. The DDL or profile can never exist on that server
-///   and the tenant has to be told.
-/// * **A decline** — [`Error::Unsupported`] / [`Error::PredatesFeature`]:
-///   this build refuses to answer ([`CODE_UNSUPPORTED`]). A real server might
-///   well have accepted the input, so the caller must fall back to the server
-///   (validate cautiously, forward unpreviewed) rather than report a tenant
-///   error. Mapping a decline onto a rejection manufactures an over-reject;
-///   both over-accepts and over-rejects are budgeted at zero.
-/// * **Everything else** is the machinery: loading, parsing, argument
-///   marshaling. No ClickHouse verdict was reached at all
-///   ([`Error::code`] answers `None`).
-///
-/// Note what is *not* an error: a row the server would reject comes back as
-/// `Ok` with [`crate::Outcome::Rejected`] in the result — the `Result` is
-/// about whether the question could be asked, and the verdict lives in the
-/// answer.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// The registry directory could not be read.
-    #[error("chtypes: registry {dir}: {source}")]
-    Registry {
-        /// The directory that could not be read.
-        dir: PathBuf,
-        /// The underlying I/O failure.
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// A library file could not be read (its size or its identity, or its
-    /// bytes while verifying) — the file, not the registry directory. A path
-    /// whose identity cannot be read is refused before anything is
-    /// `dlopen`ed, because which loaded image it names cannot be known.
-    #[error("chtypes: cannot read library {path}: {source}")]
-    LibraryRead {
-        /// The library file that could not be read.
-        path: PathBuf,
-        /// The underlying I/O error.
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// A directory carried a `manifest.json` and the library still would not
-    /// `dlopen`. That is broken, not absent, so it aborts the scan.
-    #[error("chtypes: dlopen {path}: {message}")]
-    Load {
-        /// The shared library that would not load.
-        path: PathBuf,
-        /// `dlerror()`'s text.
-        message: String,
-    },
-
-    /// The library loaded but does not export the four mandatory `chs_*`
-    /// symbols, so it is not a chtypes artifact.
-    #[error("chtypes: {path} does not export the chtypes C API (missing {symbol})")]
-    NotAnArtifact {
-        /// The library that loaded but is not a chtypes artifact.
-        path: PathBuf,
-        /// The first mandatory symbol found missing.
-        symbol: &'static str,
-    },
-
-    /// Neither `unsafe_families.txt` next to the library nor `manifest.json`'s
-    /// own `unsafe_families` field is present. `chs_init` must never run with
-    /// an empty refuse-list by default (docs/reference/artifact.md step 9), so
-    /// a directory with neither source is refused rather than loaded unguarded.
-    /// A file or field that IS present, even empty, is a valid empty list and
-    /// never raises this.
-    #[error(
-        "chtypes: {path}: neither unsafe_families.txt nor manifest.json's unsafe_families \
-         field is present; refusing to load without an explicit refuse-list"
-    )]
-    MissingUnsafeFamilies {
-        /// The artifact directory missing both sources.
-        path: PathBuf,
-    },
-
-    /// `manifest.library_bytes` disagrees with the file on disk. A move that
-    /// reported success and truncated a 232 MB library looks identical to one
-    /// that worked, which is exactly why this is checked.
-    #[error("chtypes: {path}: manifest says {expected} bytes, file is {actual}")]
-    CorruptArtifact {
-        /// The library whose size disagrees with its manifest.
-        path: PathBuf,
-        /// `manifest.library_bytes`.
-        expected: u64,
-        /// The size on disk.
-        actual: u64,
-    },
-
-    /// The library's bytes do not hash to `manifest.library_sha256`. Raised
-    /// only when the caller asked for the check
-    /// ([`crate::RegistryOptions::verify_checksums`]), and raised BEFORE
-    /// `dlopen`: nothing of this artifact is mapped.
-    #[error("chtypes: {path}: sha256 {actual} does not match manifest {expected}")]
-    ChecksumMismatch {
-        /// The library whose bytes disagree with its manifest.
-        path: PathBuf,
-        /// `manifest.library_sha256`.
-        expected: String,
-        /// What the file on disk actually hashes to.
-        actual: String,
-    },
-
-    /// `chs_clickhouse_version()` disagrees with `manifest.clickhouse_version`:
-    /// the right bytes in the wrong directory, the one corruption a checksum
-    /// cannot catch.
-    #[error("chtypes: {path}: library reports ClickHouse {reported}, manifest says {manifest}")]
-    VersionMismatch {
-        /// The library that disagrees with its manifest.
-        path: PathBuf,
-        /// What `chs_clickhouse_version()` said — the authority.
-        reported: String,
-        /// What `manifest.clickhouse_version` claimed.
-        manifest: String,
-    },
-
-    /// `chs_init` returned nonzero. The one reachable failure is an unknown
-    /// `timezone`, and `message` is ClickHouse's own text saying so — a bare
-    /// `rc` cannot say which name was rejected.
-    #[error("chtypes: chs_init failed for {path}: rc={rc}: {message}")]
-    Init {
-        /// The library whose initialization failed.
-        path: PathBuf,
-        /// `chs_init`'s nonzero return.
-        rc: i32,
-        /// ClickHouse's own message, from `chs_init`'s `out_err`.
-        message: String,
-    },
-
-    /// The same artifact image is already initialized with a different
-    /// configuration. `dlopen` maps one image per FILE, so `chs_init` runs at
-    /// most once per artifact image — a second load asking for a different
-    /// timezone cannot be honored and must not silently re-timezone the
-    /// first load's live libraries. A hardlink or symlink to a loaded
-    /// artifact is that same image and is refused the same way.
-    #[error(
-        "chtypes: {path} is already initialized with timezone {have:?}; \
-         cannot re-initialize with {want:?} (one image per file — a hardlink \
-         or symlink to a loaded artifact is the same image, and chs_init runs \
-         at most once)"
-    )]
-    InitConflict {
-        /// The artifact whose image is already initialized.
-        path: PathBuf,
-        /// The timezone the image was initialized with.
-        have: String,
-        /// The conflicting timezone this load requested.
-        want: String,
-    },
-
-    /// No directory this registry would look in holds a readable
-    /// `<minor>/manifest.json`. An empty registry is a configuration mistake,
-    /// not an empty result — and it is decidable from manifests alone, which
-    /// is why it is still a CONSTRUCTION error now that loading is lazy.
-    #[error(
-        "chtypes: no version artifacts in any registry directory (looked in: {})",
-        looked_in_display(looked_in)
-    )]
-    EmptyRegistry {
-        /// Every directory looked in, in order — the one directory of
-        /// [`crate::Registry::open`], or the whole `docs/guides/fetch.md` §1
-        /// search path. Named so the message is actionable, exactly as the
-        /// other three bindings' messages are.
-        looked_in: Vec<PathBuf>,
-    },
-
-    /// No artifact answers for the requested version. Naming what *is* loaded is
-    /// part of the contract: answering 26.7 semantics from a 25.8 artifact would
-    /// be a lie, so there is deliberately no nearest-match fallback.
-    ///
-    /// ⚠️ **No longer constructed by this crate, as of 0.3.0.** It was a
-    /// one-directory registry's answer for a line it had not loaded, and under
-    /// lazy loading "what IS loaded" is "nothing" — so that answer is
-    /// [`Error::ArtifactMissing`] now, which names the directory, the platform
-    /// and the fetch command, and is what the other three bindings give. The
-    /// variant is kept rather than removed so a caller matching it still
-    /// compiles; the arm is simply never taken.
-    #[error("chtypes: no vendored build for ClickHouse {requested} (have {loaded})")]
-    NoSuchVersion {
-        /// The version that was asked for.
-        requested: String,
-        /// The minor lines that *are* loaded.
-        loaded: String,
-    },
-
-    /// The environment variable naming a registry is unset.
-    #[error("chtypes: ${var} is not set")]
-    NoRegistryEnv {
-        /// The variable that is unset.
-        var: &'static str,
-    },
-
-    /// ClickHouse itself rejected the schema, with its own error code.
-    ///
-    /// `code` is ALWAYS a real ClickHouse error code: a decline is a
-    /// DIFFERENT variant ([`Error::Unsupported`] / [`Error::PredatesFeature`]),
-    /// never this one carrying a negative sentinel (docs/reference/bindings.md §The error split).
-    #[error("{}", schema_display(*code, message, column.as_deref()))]
-    Schema {
-        /// ClickHouse's own error code.
-        code: i32,
-        /// ClickHouse's own message.
-        message: String,
-        /// The offending column, when the failure is attributable to one.
-        /// Never guessed: populated only when the C layer's own structured
-        /// answer names one — which no schema-path entry point does today, so
-        /// the compile/engine/TTL/validate paths always carry `None` and a
-        /// message that names a column rides through verbatim in `message`.
-        /// The field stays for callers that KNOW a column (a gateway's
-        /// EPHEMERAL decline names columns it detected itself).
-        column: Option<String>,
-    },
-
-    /// This build refuses to answer: [`CODE_UNSUPPORTED`]. A real server might
-    /// well have accepted the input — this is not a rejection and MUST NOT be
-    /// reported as one.
-    ///
-    /// The rendered message keeps the frozen `[-2]` shape [`Error::Schema`]
-    /// renders its code with (docs/reference/bindings.md §The error split): the conformance
-    /// drivers put this exact string on the protocol wire as an `unsupported`
-    /// scope, so the rendering is part of the contract even though the
-    /// sentinel is not a field. Whatever negative integer the binding saw
-    /// internally (`-1` a guarded exception, `-2`), the rendered code is
-    /// always the header's `CHS_CODE_UNSUPPORTED`.
-    #[error("chtypes: [-2] {message}")]
-    Unsupported {
-        /// Why this build declines, in its own words.
-        message: String,
-    },
-
-    /// The artifact does not export a symbol this call needs, i.e. it predates
-    /// the feature. Reported as unsupported at call time, never as a load
-    /// failure. Renders with the same frozen `[-2]` shape as
-    /// [`Error::Unsupported`] — a binding-internal missing-symbol sentinel
-    /// must never leak into the rendering (docs/reference/bindings.md §The error split).
-    #[error("chtypes: [-2] this artifact predates {feature} (rebuild it)")]
-    PredatesFeature {
-        /// The symbol or capability the artifact does not export.
-        feature: &'static str,
-    },
-
-    /// The result document could not be parsed even after the bare-denormal
-    /// repair.
-    ///
-    /// This is a hard error on purpose: the previous behavior — retrying the
-    /// parse through `String::from_utf8_lossy` — silently replaced a `String`
-    /// column's bytes with U+FFFD, which then read downstream as a coercion that
-    /// never happened. A document this crate cannot read exactly is reported,
-    /// never approximated.
-    #[error("chtypes: bad result document at byte {offset}: {message}")]
-    BadDocument {
-        /// What the reader expected, in its own words.
-        message: String,
-        /// The byte offset in the (denormal-repaired) document.
-        offset: usize,
-    },
-
-    /// An entry point answered `NULL` where a document was due — today only
-    /// `chs_error_codes`, whose `NULL` is a guarded exception inside the
-    /// library. Neither a refusal nor a decline ([`Error::code`] answers
-    /// `None`), and transient: nothing was cached, so asking again is the
-    /// remedy.
-    #[error(
-        "chtypes: {feature} returned no document (a guarded exception inside the library); \
-         nothing was cached, so the next call asks again"
-    )]
-    NoDocument {
-        /// The entry point that answered `NULL`.
-        feature: &'static str,
-    },
-
-    /// A string argument contained an interior NUL, so it cannot cross the C
-    /// boundary.
-    #[error("chtypes: interior NUL byte in {what}")]
-    Nul {
-        /// Which argument carried the NUL.
-        what: &'static str,
-    },
-
-    /// A discovery-query result could not be parsed, or a discovered table
-    /// description could not be reconstructed into DDL (`crate::discover`).
-    /// Client-side and carries no ClickHouse code: the server never saw a
-    /// question it could reject.
-    #[error("chtypes: {message}")]
-    Discovery {
-        /// What went wrong, in the parser's own words.
-        message: String,
-    },
-
-    /// A [`crate::Filter`] and a [`crate::Block`] from two DIFFERENT loaded
-    /// libraries were paired in an eval — refused here, because no handle
-    /// ever crosses a `dlopen`'d image boundary. A pair from two schemas of
-    /// the SAME library is NOT this error: the C layer itself answers that
-    /// with a rejected result document, code 1002 (the C ABI contract §Blocks).
-    #[error(
-        "chtypes: filter (ClickHouse {filter_version}) and block (ClickHouse {block_version}) \
-         come from different libraries"
-    )]
-    CrossLibrary {
-        /// The filter's library, by its own reported version.
-        filter_version: String,
-        /// The block's library, by its own reported version.
-        block_version: String,
-    },
-
-    /// A [`crate::Filter`] passed to [`crate::Schema::rows_export_with`] and
-    /// the [`crate::Schema`] it was called on came from two DIFFERENT loaded
-    /// libraries — refused here, because no handle ever crosses a `dlopen`'d
-    /// image boundary. A filter from a DIFFERENT `Schema` of the SAME
-    /// library is NOT this error: the C layer itself answers that with a
-    /// rejected result document, code 1002 (the C ABI contract §Rows, "The
-    /// attached row filter").
-    #[error(
-        "chtypes: filter (ClickHouse {filter_version}) and schema (ClickHouse {schema_version}) \
-         come from different libraries"
-    )]
-    CrossLibrarySchema {
-        /// The filter's library, by its own reported version.
-        filter_version: String,
-        /// The schema's library, by its own reported version.
-        schema_version: String,
-    },
-
-    /// No installed artifact answers for the requested ClickHouse line on this
-    /// platform: the §1 search path was walked and none of its directories
-    /// holds `<line>/manifest.json` (`docs/guides/fetch.md` §7). The message is the
-    /// one every SDK renders, verbatim apart from the bracketed parts, and
-    /// [`Error::artifact_code`] answers [`CODE_ARTIFACT_MISSING`].
-    ///
-    /// Raised by the search-path registry ([`crate::Registry::from_search_path`])
-    /// with autofetch off; a registry over one explicit directory keeps
-    /// answering [`Error::NoSuchVersion`], which names what IS loaded.
-    #[error("{}", artifact_missing_display(line, platform, looked_in))]
-    ArtifactMissing {
-        /// The minor line that was asked for (`25.8`).
-        line: String,
-        /// `<os>-<arch>`, the artifact spelling (`linux-arm64`).
-        platform: String,
-        /// Every directory that was tried, in search order.
-        looked_in: Vec<PathBuf>,
-    },
-
-    /// The release's `SHA256SUMS` did not verify (`docs/guides/fetch.md` §3 step 0):
-    /// no `SHA256SUMS.sig`, a malformed one, or a signature under no trusted
-    /// key. Nothing was downloaded around it. Code [`CODE_ARTIFACT_UNTRUSTED`].
-    #[error("chtypes: {origin}: SHA256SUMS is not trusted: {reason}")]
-    ArtifactUntrusted {
-        /// The source the release was read from.
-        origin: String,
-        /// Why, in the verifier's own words.
-        reason: String,
-    },
-
-    /// A hash disagreed somewhere in the chain (`docs/guides/fetch.md` §3): the index
-    /// and `SHA256SUMS`, the downloaded tarball, the library inside it, or the
-    /// installed library re-hashed in place. Reported, never repaired. Code
-    /// [`CODE_ARTIFACT_CORRUPT`].
-    #[error("chtypes: {subject}: sha256 is {actual}, expected {expected}")]
-    ArtifactCorrupt {
-        /// What was hashed, or which two records disagree.
-        subject: String,
-        /// The sha256 the chain said it should be.
-        expected: String,
-        /// The sha256 that was found.
-        actual: String,
-    },
-
-    /// The release offers something other than what the lock file pins for
-    /// this `<os>-<arch>/<minor>` (`docs/guides/fetch.md` §5, `--frozen`). Code
-    /// [`CODE_ARTIFACT_PINNED`].
-    #[error("chtypes: {key}: {message}")]
-    ArtifactPinned {
-        /// The lock key, `<os>-<arch>/<minor>`.
-        key: String,
-        /// What was pinned and what was offered.
-        message: String,
-    },
-
-    /// The release publishes nothing for the requested line (or exact patch —
-    /// a hard requirement) on this platform (`docs/guides/fetch.md` §2). Code
-    /// [`CODE_ARTIFACT_UNPUBLISHED`].
-    #[error(
-        "chtypes: {origin} publishes no artifact for ClickHouse {requested} on {platform}: {offered}"
-    )]
-    ArtifactUnpublished {
-        /// The line or exact patch that was asked for.
-        requested: String,
-        /// `<os>-<arch>`.
-        platform: String,
-        /// The source that was consulted.
-        origin: String,
-        /// What the release does publish, as a clause for the message — `it
-        /// has …`, or, when the ABI revision decided it, what the release has
-        /// for the request and what it has at this crate's revision.
-        offered: String,
-    },
-
-    /// The source could not be reached — or was not consulted at all because
-    /// the fetch was offline. Code [`CODE_SOURCE_UNREACHABLE`].
-    #[error("chtypes: {origin}: {message}")]
-    SourceUnreachable {
-        /// The source that was (or would have been) contacted.
-        origin: String,
-        /// The transport's own words, or `offline`.
-        message: String,
-        /// Worth retrying through the `docs/guides/fetch.md` §3a budget
-        /// (chtypes#365): an HTTP 5xx/408/429, or a connection-level failure
-        /// reaching the host at all (refused, reset, timed out, DNS). Never
-        /// true for offline, a 404/410 (never routed through this variant —
-        /// `Source::open` answers `Ok(None)` for those), or any other
-        /// definite refusal.
-        retryable: bool,
-        /// The source's own requested wait — `Retry-After` on a 503 or 429
-        /// — when it sent one. Only ever `Some` while `retryable` is true.
-        retry_after: Option<std::time::Duration>,
-    },
-
-    /// Fetch machinery that reached no verdict: an unreadable release listing,
-    /// an unwritable install directory, an unusable option. No artifact code.
-    #[error("chtypes: fetch: {message}")]
-    Fetch {
-        /// What went wrong.
-        message: String,
-    },
+/// A misuse the binding detects itself carries the same shape: `status`
+/// `CHS_INVALID_ARGUMENT`, `ch_code` 0, an empty `ch_name` and `column`, and a
+/// message naming the misuse, so a handler sees one shape whichever side
+/// caught it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallError {
+    /// The raw `chs_status` value; compare with [`crate::status`].
+    pub status: i32,
+    /// ClickHouse's own error code; nonzero only for a refusal.
+    pub ch_code: i32,
+    /// The name this build's vendored table gives the code. ASCII; empty if none.
+    pub ch_name: String,
+    /// ClickHouse's own message for a refusal, the library's otherwise. Bytes:
+    /// it may quote input.
+    pub message: RawText,
+    /// The column concerned, empty if none. Bytes.
+    pub column: RawText,
 }
 
-impl Error {
-    /// The ClickHouse error code, or [`CODE_UNSUPPORTED`] for the two
-    /// unsupported shapes. `None` for loader-level failures, which have no code.
-    pub fn code(&self) -> Option<i32> {
-        match self {
-            Error::Schema { code, .. } => Some(*code),
-            Error::Unsupported { .. } | Error::PredatesFeature { .. } => Some(CODE_UNSUPPORTED),
-            _ => None,
+impl CallError {
+    /// A misuse this binding detected itself: `CHS_INVALID_ARGUMENT`.
+    pub(crate) fn usage(message: impl Into<String>) -> CallError {
+        CallError::detected(status::INVALID_ARGUMENT, message)
+    }
+
+    /// A library bug this binding detected itself (a document that does not
+    /// decode, a status outside the closed set): `CHS_INTERNAL`.
+    pub(crate) fn internal(message: impl Into<String>) -> CallError {
+        CallError::detected(status::INTERNAL, message)
+    }
+
+    fn detected(status: i32, message: impl Into<String>) -> CallError {
+        CallError {
+            status,
+            ch_code: 0,
+            ch_name: String::new(),
+            message: RawText::from(message.into()),
+            column: RawText::default(),
         }
     }
+}
 
-    /// Whether this is the "I decline to guess" sentinel rather than a
-    /// ClickHouse rejection.
-    pub fn is_unsupported(&self) -> bool {
-        self.code() == Some(CODE_UNSUPPORTED)
-    }
-
-    /// The shared artifact code (`docs/guides/fetch.md` §7) — `CHTYPES_ARTIFACT_MISSING`,
-    /// `…_UNTRUSTED`, `…_CORRUPT`, `…_PINNED`, `…_UNPUBLISHED` or
-    /// `CHTYPES_SOURCE_UNREACHABLE` — for the fetch and lookup failures, `None`
-    /// for everything else. Distinct from [`Error::code`], which is the
-    /// ClickHouse error code of a rejection.
-    pub fn artifact_code(&self) -> Option<&'static str> {
-        match self {
-            Error::ArtifactMissing { .. } => Some(CODE_ARTIFACT_MISSING),
-            Error::ArtifactUntrusted { .. } => Some(CODE_ARTIFACT_UNTRUSTED),
-            Error::ArtifactCorrupt { .. } => Some(CODE_ARTIFACT_CORRUPT),
-            Error::ArtifactPinned { .. } => Some(CODE_ARTIFACT_PINNED),
-            Error::ArtifactUnpublished { .. } => Some(CODE_ARTIFACT_UNPUBLISHED),
-            Error::SourceUnreachable { .. } => Some(CODE_SOURCE_UNREACHABLE),
-            _ => None,
+impl From<RawCallError> for CallError {
+    fn from(e: RawCallError) -> CallError {
+        CallError {
+            status: e.status,
+            ch_code: e.ch_code,
+            ch_name: e.ch_name,
+            message: RawText::from(e.message),
+            column: RawText::from(e.column),
         }
     }
+}
 
-    /// Build the right variant from a C code. The SIGN decides
-    /// (docs/reference/bindings.md §The error split): a positive
-    /// code is the server's own refusal and rides through verbatim; ANY
-    /// negative code is this library declining — `-2` "I will not guess",
-    /// `-1` a guarded exception, and any sentinel a later era adds — and
-    /// becomes [`Error::Unsupported`]. Keying on the sign rather than on
-    /// `== CODE_UNSUPPORTED` means a negative sentinel can never become
-    /// "an `Error::Schema` with a negative code", which that variant's own
-    /// contract forbids.
-    pub(crate) fn from_code(code: i32, message: String) -> Error {
-        if code < 0 {
-            Error::Unsupported { message }
+/// The one lossy display form each error has: invalid UTF-8 is replaced for
+/// printing only.
+impl fmt::Display for CallError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.ch_name.is_empty() {
+            write!(f, "status {}", self.status)?;
         } else {
-            Error::Schema {
-                code,
-                message,
-                column: None,
+            write!(f, "{} ({})", self.ch_name, self.ch_code)?;
+        }
+        write!(f, ": {}", self.message.to_lossy())?;
+        if !self.column.is_empty() {
+            write!(f, " [column {}]", self.column.to_lossy())?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for CallError {}
+
+/// Every failure this crate returns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    /// `CHS_REJECTED`: ClickHouse's own refusal, which a server would also give,
+    /// including a zone name `DateLUT` will not load.
+    Schema(CallError),
+    /// `CHS_DECLINED`: this build will not answer, where a server might accept.
+    /// Never read it as a rejection or as an acceptance.
+    Unsupported(CallError),
+    /// `CHS_INVALID_ARGUMENT`, and the misuse this binding detects before any
+    /// call (a refused version spelling, a conflicting setup, a zone given
+    /// twice, an unverified open without both opt-ins).
+    Usage(CallError),
+    /// `CHS_INTERNAL`; a status outside the closed set, naming its value; a
+    /// document that does not decode.
+    Internal(CallError),
+    /// A loader refusal at steps 1, 2, 3, 4 (the fingerprint) or 6.
+    ArtifactIncompatible(Refusal),
+    /// A loader refusal at step 5 or a malformed `build_info`, and the fetch
+    /// layer's own corruption.
+    ArtifactCorrupt(Refusal),
+    /// `CHTYPES_ARTIFACT_MISSING`: nothing installed answers the request.
+    ArtifactMissing(String),
+    /// `CHTYPES_ARTIFACT_UNTRUSTED`: no bundle verified under a trusted key.
+    ArtifactUntrusted(String),
+    /// `CHTYPES_ARTIFACT_PINNED`: frozen, and the lock does not pin the request.
+    ArtifactPinned(String),
+    /// `CHTYPES_ARTIFACT_UNPUBLISHED`: no source publishes the request.
+    ArtifactUnpublished(String),
+    /// `CHTYPES_SOURCE_UNREACHABLE`: every source was exhausted.
+    SourceUnreachable(String),
+    /// `CHTYPES_SOURCE_UNAUTHORIZED`: a source refused the credentials.
+    SourceUnauthorized(String),
+    /// `CHTYPES_SOURCE_FORBIDDEN`: a source refused the request outright.
+    SourceForbidden(String),
+    /// `CHTYPES_SOURCE_INCOMPATIBLE`: the source is unusable as configured.
+    SourceIncompatible(String),
+}
+
+/// A `Result` whose error is this crate's [`Error`].
+pub type Result<T> = std::result::Result<T, Error>;
+
+impl Error {
+    /// Whether this is a decline ([`Error::Unsupported`]): the build will not
+    /// answer, and a server might accept.
+    pub fn is_unsupported(&self) -> bool {
+        matches!(self, Error::Unsupported(_))
+    }
+
+    /// The five fields of the library's error, from any of the four call
+    /// classes; `None` for an artifact or fetch error.
+    pub fn call_error(&self) -> Option<&CallError> {
+        match self {
+            Error::Schema(c) | Error::Unsupported(c) | Error::Usage(c) | Error::Internal(c) => {
+                Some(c)
+            }
+            _ => None,
+        }
+    }
+
+    /// The `CHTYPES_*` code of an artifact or fetch error, as the fetch
+    /// constants spell it; `None` for a call error.
+    pub fn code(&self) -> Option<&'static str> {
+        Some(match self {
+            Error::ArtifactIncompatible(_) => "CHTYPES_ARTIFACT_INCOMPATIBLE",
+            Error::ArtifactCorrupt(_) => "CHTYPES_ARTIFACT_CORRUPT",
+            Error::ArtifactMissing(_) => "CHTYPES_ARTIFACT_MISSING",
+            Error::ArtifactUntrusted(_) => "CHTYPES_ARTIFACT_UNTRUSTED",
+            Error::ArtifactPinned(_) => "CHTYPES_ARTIFACT_PINNED",
+            Error::ArtifactUnpublished(_) => "CHTYPES_ARTIFACT_UNPUBLISHED",
+            Error::SourceUnreachable(_) => "CHTYPES_SOURCE_UNREACHABLE",
+            Error::SourceUnauthorized(_) => "CHTYPES_SOURCE_UNAUTHORIZED",
+            Error::SourceForbidden(_) => "CHTYPES_SOURCE_FORBIDDEN",
+            Error::SourceIncompatible(_) => "CHTYPES_SOURCE_INCOMPATIBLE",
+            _ => return None,
+        })
+    }
+
+    /// A misuse this binding detected itself.
+    pub(crate) fn usage(message: impl Into<String>) -> Error {
+        Error::Usage(CallError::usage(message))
+    }
+
+    /// A library bug this binding detected itself.
+    pub(crate) fn internal(message: impl Into<String>) -> Error {
+        Error::Internal(CallError::internal(message))
+    }
+
+    /// A call's own error, mapped by `sdk.json`'s status table. A status
+    /// outside the closed set is an internal error naming its value.
+    pub(crate) fn from_call(e: RawCallError) -> Error {
+        let known = [
+            status::REJECTED,
+            status::DECLINED,
+            status::INVALID_ARGUMENT,
+            status::INTERNAL,
+        ];
+        if !known.contains(&e.status) {
+            let mut call = CallError::from(e);
+            let original = call.message.to_lossy().into_owned();
+            call.message = RawText::from(format!(
+                "status {} is outside the closed set of call statuses; {original}",
+                call.status
+            ));
+            return Error::Internal(call);
+        }
+        let class = status_class(e.status);
+        let call = CallError::from(e);
+        match class {
+            Some(ErrorClass::Schema) => Error::Schema(call),
+            Some(ErrorClass::Unsupported) => Error::Unsupported(call),
+            Some(ErrorClass::Usage) => Error::Usage(call),
+            Some(ErrorClass::Internal) | None => Error::Internal(call),
+        }
+    }
+
+    /// A loader refusal, mapped by `sdk.json`'s refusal table.
+    pub(crate) fn from_refusal(r: Refusal) -> Error {
+        match refusal_class(&r.reason) {
+            RefusalClass::Incompatible => Error::ArtifactIncompatible(r),
+            RefusalClass::Corrupt => Error::ArtifactCorrupt(r),
+        }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Schema(c) => write!(f, "refused: {c}"),
+            Error::Unsupported(c) => write!(f, "declined: {c}"),
+            Error::Usage(c) => write!(f, "misuse: {c}"),
+            Error::Internal(c) => write!(f, "internal error: {c}"),
+            Error::ArtifactIncompatible(r) | Error::ArtifactCorrupt(r) => {
+                write!(f, "{}: {r}", self.code().unwrap_or_default())
+            }
+            Error::ArtifactMissing(m)
+            | Error::ArtifactUntrusted(m)
+            | Error::ArtifactPinned(m)
+            | Error::ArtifactUnpublished(m)
+            | Error::SourceUnreachable(m)
+            | Error::SourceUnauthorized(m)
+            | Error::SourceForbidden(m)
+            | Error::SourceIncompatible(m) => {
+                write!(f, "{}: {m}", self.code().unwrap_or_default())
             }
         }
     }
 }
 
-/// The frozen rendering the refusal variant shares with its peers in every
-/// SDK: `chtypes: [<code>] <msg>`, with `chtypes: column "<c>": …` when a
-/// column is attributed (docs/reference/bindings.md §The error split — the shape the conformance
-/// drivers put on the wire).
-fn schema_display(code: i32, message: &str, column: Option<&str>) -> String {
-    match column {
-        Some(c) => format!("chtypes: column {c:?}: [{code}] {message}"),
-        None => format!("chtypes: [{code}] {message}"),
+impl std::error::Error for Error {}
+
+impl From<crate::ocifetch::error::Error> for Error {
+    fn from(e: crate::ocifetch::error::Error) -> Error {
+        use crate::ocifetch::error::Error as F;
+        match e {
+            F::ArtifactMissing(m) => Error::ArtifactMissing(m),
+            F::ArtifactUntrusted(m) => Error::ArtifactUntrusted(m),
+            F::ArtifactCorrupt(m) => Error::ArtifactCorrupt(Refusal {
+                reason: "fetch".to_string(),
+                path: PathBuf::new(),
+                want: None,
+                got: None,
+                detail: Some(m),
+            }),
+            F::ArtifactPinned(m) => Error::ArtifactPinned(m),
+            F::ArtifactUnpublished(m) => Error::ArtifactUnpublished(m),
+            F::SourceUnreachable(m) => Error::SourceUnreachable(m),
+            F::SourceUnauthorized(m) => Error::SourceUnauthorized(m),
+            F::SourceForbidden(m) => Error::SourceForbidden(m),
+            F::SourceIncompatible(m) => Error::SourceIncompatible(m),
+            // A refused version spelling, an unreadable cache or lock file:
+            // misuse, which carries no fetch code of its own.
+            F::InvalidInput(m) => Error::usage(m),
+        }
     }
-}
-
-/// The directories an [`Error::EmptyRegistry`] looked in, comma-separated.
-fn looked_in_display(looked_in: &[PathBuf]) -> String {
-    looked_in
-        .iter()
-        .map(|d| d.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// The §7 message, verbatim apart from the bracketed parts: the line, the
-/// platform, the directories that were looked in, and this SDK's own fetch
-/// command ([`FETCH_COMMAND`]).
-fn artifact_missing_display(line: &str, platform: &str, looked_in: &[PathBuf]) -> String {
-    let dirs: Vec<String> = looked_in.iter().map(|d| d.display().to_string()).collect();
-    format!(
-        "chtypes: no artifact for ClickHouse {line} ({platform}). Looked in: {}.\n\
-         Install it:  {FETCH_COMMAND} {line}\n\
-         or set CHTYPES_AUTOFETCH=1 to fetch on first use.",
-        dirs.join(", ")
-    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn from_code_positive_is_schema_negative_is_unsupported() {
-        // A positive code is the server's own refusal, verbatim; ANY negative
-        // code is a decline — -2 "I will not guess", -1 a guarded exception,
-        // and any sentinel a later era adds. A negative Error::Schema must be
-        // unmakeable through the funnel (docs/reference/bindings.md §The error split).
-        assert!(matches!(
-            Error::from_code(115, "bad name".into()),
-            Error::Schema { code: 115, .. }
-        ));
-        assert!(matches!(
-            Error::from_code(50, "unknown family".into()),
-            Error::Schema { code: 50, .. }
-        ));
-        assert!(matches!(
-            Error::from_code(-2, "declined".into()),
-            Error::Unsupported { .. }
-        ));
-        assert!(matches!(
-            Error::from_code(-1, "guarded exception".into()),
-            Error::Unsupported { .. }
-        ));
-        assert!(matches!(
-            Error::from_code(-3, "future sentinel".into()),
-            Error::Unsupported { .. }
-        ));
-    }
-
-    #[test]
-    fn the_rendered_sentinel_shape_is_frozen() {
-        // The decline renders the header's -2 in the same shape the refusal
-        // renders its code — the conformance drivers put this exact string on
-        // the protocol wire as an `unsupported` scope (docs/reference/bindings.md rule
-        // 12). Internal sentinels never leak into the rendering.
-        let decline = Error::Unsupported {
-            message: "engine not modeled".into(),
-        };
-        assert_eq!(decline.to_string(), "chtypes: [-2] engine not modeled");
-        let predates = Error::PredatesFeature {
-            feature: "chs_schema_engine",
-        };
-        assert_eq!(
-            predates.to_string(),
-            "chtypes: [-2] this artifact predates chs_schema_engine (rebuild it)"
-        );
-        let refusal = Error::Schema {
-            code: 115,
-            message: "bad name".into(),
-            column: None,
-        };
-        assert_eq!(refusal.to_string(), "chtypes: [115] bad name");
-        // Column-attributed shape — for callers that KNOW one, never guessed.
-        let attributed = Error::Schema {
-            code: 469,
-            message: "constraint".into(),
-            column: Some("e".into()),
-        };
-        assert_eq!(
-            attributed.to_string(),
-            "chtypes: column \"e\": [469] constraint"
-        );
-    }
-
-    #[test]
-    fn the_artifact_missing_message_is_the_spec_s_verbatim() {
-        // docs/guides/fetch.md §7: one message in every SDK, verbatim apart from the
-        // bracketed parts; the "Install it:" line names THIS SDK's command.
-        // The per-user cache as the search path spells it: abi<R>/<os>-<arch>.
-        let cache = format!("/home/u/.cache/chtypes/artifacts/abi{ABI_REVISION}/linux-arm64");
-        let err = Error::ArtifactMissing {
-            line: "25.8".into(),
-            platform: "linux-arm64".into(),
-            looked_in: vec![
-                PathBuf::from(&cache),
-                PathBuf::from("/usr/local/share/chtypes/artifacts/linux-arm64"),
-                PathBuf::from("/opt/chtypes/artifacts/linux-arm64"),
-            ],
-        };
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "chtypes: no artifact for ClickHouse 25.8 (linux-arm64). Looked in: \
-                 {cache}, \
-                 /usr/local/share/chtypes/artifacts/linux-arm64, \
-                 /opt/chtypes/artifacts/linux-arm64.\n\
-                 Install it:  cargo install chtypes && chtypes fetch 25.8\n\
-                 or set CHTYPES_AUTOFETCH=1 to fetch on first use."
-            )
-        );
-        assert_eq!(err.artifact_code(), Some("CHTYPES_ARTIFACT_MISSING"));
-        // The ClickHouse-code accessor stays what it was: no verdict here.
-        assert_eq!(err.code(), None);
-    }
-
-    #[test]
-    fn every_artifact_code_is_the_shared_spelling() {
-        let cases: Vec<(Error, &str)> = vec![
-            (
-                Error::ArtifactUntrusted {
-                    origin: "s".into(),
-                    reason: "r".into(),
-                },
-                "CHTYPES_ARTIFACT_UNTRUSTED",
-            ),
-            (
-                Error::ArtifactCorrupt {
-                    subject: "x".into(),
-                    expected: "aa".into(),
-                    actual: "bb".into(),
-                },
-                "CHTYPES_ARTIFACT_CORRUPT",
-            ),
-            (
-                Error::ArtifactPinned {
-                    key: "linux-arm64/25.8".into(),
-                    message: "m".into(),
-                },
-                "CHTYPES_ARTIFACT_PINNED",
-            ),
-            (
-                Error::ArtifactUnpublished {
-                    requested: "25.8".into(),
-                    platform: "linux-arm64".into(),
-                    origin: "s".into(),
-                    offered: "nothing".into(),
-                },
-                "CHTYPES_ARTIFACT_UNPUBLISHED",
-            ),
-            (
-                Error::SourceUnreachable {
-                    origin: "s".into(),
-                    message: "offline".into(),
-                    retryable: false,
-                    retry_after: None,
-                },
-                "CHTYPES_SOURCE_UNREACHABLE",
-            ),
-        ];
-        for (err, code) in cases {
-            assert_eq!(err.artifact_code(), Some(code), "{err}");
-            assert_eq!(err.code(), None, "{err}");
+    fn raw(status: i32) -> RawCallError {
+        RawCallError {
+            status,
+            ch_code: 27,
+            ch_name: "CANNOT_PARSE_INPUT_ASSERTION_FAILED".to_string(),
+            message: b"boom".to_vec(),
+            column: b"c".to_vec(),
         }
-        let plain = Error::Fetch {
-            message: "m".into(),
+    }
+
+    #[test]
+    fn each_status_maps_to_its_own_class_and_the_five_fields_survive() {
+        assert!(matches!(
+            Error::from_call(raw(status::REJECTED)),
+            Error::Schema(_)
+        ));
+        assert!(matches!(
+            Error::from_call(raw(status::DECLINED)),
+            Error::Unsupported(_)
+        ));
+        assert!(matches!(
+            Error::from_call(raw(status::INVALID_ARGUMENT)),
+            Error::Usage(_)
+        ));
+        assert!(matches!(
+            Error::from_call(raw(status::INTERNAL)),
+            Error::Internal(_)
+        ));
+        let e = Error::from_call(raw(status::REJECTED));
+        let c = e.call_error().expect("a call error");
+        assert_eq!(c.status, status::REJECTED);
+        assert_eq!(c.ch_code, 27);
+        assert_eq!(c.ch_name, "CANNOT_PARSE_INPUT_ASSERTION_FAILED");
+        assert_eq!(c.message.as_bytes(), b"boom");
+        assert_eq!(c.column.as_bytes(), b"c");
+    }
+
+    #[test]
+    fn a_refusal_and_a_decline_are_peers_never_one_another() {
+        let refusal = Error::from_call(raw(status::REJECTED));
+        let decline = Error::from_call(raw(status::DECLINED));
+        assert!(!refusal.is_unsupported());
+        assert!(decline.is_unsupported());
+        assert!(!matches!(decline, Error::Schema(_)));
+    }
+
+    #[test]
+    fn a_status_outside_the_closed_set_is_internal_and_names_its_value() {
+        let e = Error::from_call(raw(99));
+        let Error::Internal(c) = e else {
+            panic!("want an internal error, got {e:?}")
         };
-        assert_eq!(plain.artifact_code(), None);
+        assert_eq!(c.status, 99);
+        assert!(c.message.to_lossy().contains("99"), "{c}");
+    }
+
+    #[test]
+    fn a_detected_misuse_carries_the_invalid_argument_shape() {
+        let Error::Usage(c) = Error::usage("closed") else {
+            panic!("want a usage error")
+        };
+        assert_eq!(c.status, status::INVALID_ARGUMENT);
+        assert_eq!(c.ch_code, 0);
+        assert!(c.ch_name.is_empty() && c.column.is_empty());
+        assert_eq!(c.message.as_bytes(), b"closed");
+    }
+
+    #[test]
+    fn loader_refusals_map_by_the_generated_table() {
+        let refusal = |reason: &str| Refusal {
+            reason: reason.to_string(),
+            path: PathBuf::from("/x"),
+            want: None,
+            got: None,
+            detail: None,
+        };
+        assert!(matches!(
+            Error::from_refusal(refusal("fingerprint")),
+            Error::ArtifactIncompatible(_)
+        ));
+        assert!(matches!(
+            Error::from_refusal(refusal("missing_symbol:chs_x")),
+            Error::ArtifactIncompatible(_)
+        ));
+        assert!(matches!(
+            Error::from_refusal(refusal("build_info_mismatch:os")),
+            Error::ArtifactCorrupt(_)
+        ));
+        assert!(matches!(
+            Error::from_refusal(refusal("build_info_malformed")),
+            Error::ArtifactCorrupt(_)
+        ));
+    }
+
+    #[test]
+    fn a_fetch_error_joins_the_one_family() {
+        use crate::ocifetch::error::Error as F;
         assert_eq!(
-            Error::Unsupported {
-                message: "m".into()
-            }
-            .artifact_code(),
-            None
+            Error::from(F::ArtifactCorrupt("bad digest".into())).code(),
+            Some("CHTYPES_ARTIFACT_CORRUPT")
+        );
+        assert!(matches!(
+            Error::from(F::InvalidInput("v25.8".into())),
+            Error::Usage(_)
+        ));
+        assert_eq!(
+            Error::from(F::SourceUnreachable("down".into())).code(),
+            Some("CHTYPES_SOURCE_UNREACHABLE")
         );
     }
 }

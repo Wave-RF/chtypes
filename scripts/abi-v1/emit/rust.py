@@ -44,7 +44,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from model import ERROR_HANDLE, SCALARS, STATUS_ENUM
+from model import BUF_HANDLE, ERROR_HANDLE, SCALARS, STATUS_ENUM
 
 from . import Output, banner, stub
 
@@ -742,8 +742,662 @@ def render_invoke(model) -> str:
     return "\n".join(out)
 
 
+# ------------------------------------------------------------- shared naming
+
+
+RUST_KEYWORDS = frozenset(
+    """as break const continue crate else enum extern false fn for if impl in let loop match mod move mut pub ref
+    return self Self static struct super trait true type unsafe use where while async await dyn abstract become box
+    do final macro override priv typeof unsized virtual yield try gen""".split()
+)
+
+
+def _ident(name: str) -> str:
+    """A parameter name as a Rust identifier: a keyword gains a trailing underscore."""
+    return name + "_" if name in RUST_KEYWORDS else name
+
+
+def _words(text: str) -> str:
+    """`accepted_poisoned` / `CHS_JSON_EACH_ROW` words to `AcceptedPoisoned` / `ChsJsonEachRow`."""
+    return "".join(part[:1].upper() + part[1:].lower() for part in text.split("_") if part)
+
+
+def _upper_snake(text: str) -> str:
+    return text.upper()
+
+
+def _doc(text: str, indent: str = "") -> list[str]:
+    return [f"{indent}/// {line}" if line else f"{indent}///" for line in text.splitlines()]
+
+
+def _handle_wrapper_name(handle: str) -> str:
+    """`chs_schema` -> `SchemaHandle`."""
+    assert handle.startswith("chs_"), handle
+    return _words(handle[len("chs_") :]) + "Handle"
+
+
+# --------------------------------------------------------------- calls_gen.rs
+
+CALLS_PATH = "rust/src/abi1/calls_gen.rs"
+VOCAB_PATH = "rust/src/abi1/vocab_gen.rs"
+ERRMAP_PATH = "rust/src/abi1/errmap_gen.rs"
+
+# The handles that get a Rust wrapper object with a Drop: every handle but the
+# two the generated read-out consumes itself (a buffer is copied then freed
+# inside the call that produced it, an error likewise).
+_PLAIN_HANDLES_EXCLUDED = (BUF_HANDLE, ERROR_HANDLE)
+
+
+def _wrapped_functions(model):
+    """The status-returning `api` functions that get a typed method. A call
+    taking a buffer or an error handle is the read-out's own plumbing and
+    never a public call."""
+    out = []
+    for fn in model.functions:
+        if fn.cls != "api" or fn.returns.kind != "status":
+            continue
+        if any(p.kind == "handle" and p.type in _PLAIN_HANDLES_EXCLUDED for p in fn.params):
+            continue
+        out.append(fn)
+    return out
+
+
+def _method_name(fn, model) -> str:
+    assert fn.name.startswith(model.prefix), fn.name
+    return fn.name[len(model.prefix) :]
+
+
+def render_calls(model) -> str:
+    out: list[str] = [
+        f"// {banner(model)}",
+        "//",
+        "// The typed, memory-safe call layer over `decls.rs`: one method per",
+        "// status-returning `api` call, named without the `chs_` prefix, that copies",
+        "// every `chs_buf` into a `Vec<u8>` and frees it in the same call, reads and",
+        "// frees every `chs_error` into a `RawCallError`, and wraps every minted",
+        "// handle in an object with a `Drop` that frees it. No `chs_buf` or",
+        "// `chs_error` ever leaves this file. See scripts/abi-v1/emit/rust.py.",
+        "#![allow(dead_code)]",
+        "",
+        "use std::sync::Arc;",
+        "",
+        "use super::decls::{",
+        "    Api,",
+    ]
+    out.append("    " + ", ".join(sorted({handle_rust_name(h) for h in model.handles})) + ",")
+    out += [
+        "};",
+        "",
+        "/// One call's error, read out of a `chs_error` verbatim and freed: the five",
+        "/// fields every call error carries, and nothing synthesized. `ch_name` is",
+        "/// ASCII by the description; `message` and `column` are bytes.",
+        "#[derive(Debug, Clone, PartialEq, Eq)]",
+        "pub(crate) struct RawCallError {",
+        "    pub(crate) status: i32,",
+        "    pub(crate) ch_code: i32,",
+        "    pub(crate) ch_name: String,",
+        "    pub(crate) message: Vec<u8>,",
+        "    pub(crate) column: Vec<u8>,",
+        "}",
+        "",
+        "/// Copy one owned `chs_buf *` into a `Vec<u8>` and free it. NULL reads as",
+        "/// empty (`chs_buf` accessors answer NULL only on allocation failure).",
+        "///",
+        "/// # Safety",
+        "/// `buf` must be null or a `chs_buf *` this same `api` handed over, not",
+        "/// yet freed.",
+        "unsafe fn copy_free_buf(api: &Api, buf: *mut ChsBuf) -> Vec<u8> {",
+        "    if buf.is_null() {",
+        "        return Vec::new();",
+        "    }",
+        "    // SAFETY: the caller's `# Safety` clause; the data pointer and length are",
+        "    // read before the single free, and the copy is made before it.",
+        "    unsafe {",
+        "        let data = (api.chs_buf_data)(buf as *const ChsBuf);",
+        "        let len = (api.chs_buf_len)(buf as *const ChsBuf);",
+        "        let bytes = if data.is_null() || len == 0 {",
+        "            Vec::new()",
+        "        } else {",
+        "            std::slice::from_raw_parts(data, len).to_vec()",
+        "        };",
+        "        (api.chs_buf_free)(buf);",
+        "        bytes",
+        "    }",
+        "}",
+        "",
+        "/// Read every field of one `chs_error *` and free it. A null `err` with a",
+        "/// non-OK status (never expected) still yields an error carrying the status.",
+        "///",
+        "/// # Safety",
+        "/// `err` must be null or a `chs_error *` this same `api` handed over, not",
+        "/// yet freed.",
+        "unsafe fn read_free_error(api: &Api, status: i32, err: *mut ChsError) -> RawCallError {",
+        "    if err.is_null() {",
+        "        return RawCallError {",
+        "            status,",
+        "            ch_code: 0,",
+        "            ch_name: String::new(),",
+        "            message: b\"the library returned a non-OK status with no error object\".to_vec(),",
+        "            column: Vec::new(),",
+        "        };",
+        "    }",
+        "    // SAFETY: the caller's `# Safety` clause; every accessor reads the live",
+        "    // error and the one free comes after every read.",
+        "    unsafe {",
+        "        let ch_code = (api.chs_error_ch_code)(err as *const ChsError);",
+        "        let ch_name = String::from_utf8_lossy(&copy_free_buf(api, (api.chs_error_ch_name)(err as *const ChsError)))",
+        "            .into_owned();",
+        "        let message = copy_free_buf(api, (api.chs_error_message)(err as *const ChsError));",
+        "        let column = copy_free_buf(api, (api.chs_error_column)(err as *const ChsError));",
+        "        (api.chs_error_free)(err);",
+        "        RawCallError { status, ch_code, ch_name, message, column }",
+        "    }",
+        "}",
+        "",
+        "/// What a call that must have minted an output reports when the library",
+        "/// answered OK and left the output NULL (never expected under a matching",
+        "/// fingerprint; still reported, never dereferenced).",
+        "fn missing_output(status: i32, what: &str) -> RawCallError {",
+        "    RawCallError {",
+        "        status,",
+        "        ch_code: 0,",
+        "        ch_name: String::new(),",
+        "        message: format!(\"the library answered OK and returned no {what}\").into_bytes(),",
+        "        column: Vec::new(),",
+        "    }",
+        "}",
+        "",
+    ]
+
+    for h in model.handles.values():
+        if h.name in _PLAIN_HANDLES_EXCLUDED:
+            continue
+        wrapper = _handle_wrapper_name(h.name)
+        rt = handle_rust_name(h.name)
+        out += [
+            f"/// One live `{h.name}`, freed by `{h.free}` when dropped. It keeps the",
+            "/// library's symbol table alive through its own `Arc`, so a handle can",
+            "/// never outlive the table that frees it.",
+            f"pub(crate) struct {wrapper} {{",
+            f"    ptr: *mut {rt},",
+            "    api: Arc<Api>,",
+            "}",
+            "",
+            "// SAFETY: the library makes every call on a compiled handle safe to run",
+            "// concurrently with any other call on it, except its own free; `Drop` runs",
+            "// only when no borrow of this wrapper remains, so it cannot overlap a call.",
+            f"unsafe impl Send for {wrapper} {{}}",
+            "// SAFETY: as above.",
+            f"unsafe impl Sync for {wrapper} {{}}",
+            "",
+            f"impl {wrapper} {{",
+            f"    /// The raw pointer, for passing to a call that reads this handle.",
+            f"    pub(crate) fn as_ptr(&self) -> *const {rt} {{",
+            "        self.ptr",
+            "    }",
+            "}",
+            "",
+            f"impl Drop for {wrapper} {{",
+            "    fn drop(&mut self) {",
+            f"        // SAFETY: `ptr` came from this table's own constructor call and is freed",
+            f"        // exactly once, here; `{h.free}` accepts it (it is non-null).",
+            f"        unsafe {{ (self.api.{h.free})(self.ptr) }}",
+            "    }",
+            "}",
+            "",
+        ]
+
+    out += ["impl Api {"]
+    for fn in _wrapped_functions(model):
+        out += _render_method(model, fn)
+    out += ["}", ""]
+    return "\n".join(out)
+
+
+def _render_method(model, fn) -> list[str]:
+    args: list[str] = []
+    call: list[str] = []
+    outs: list[tuple[str, str, bool]] = []  # (var, kind, nullable)
+    prelude: list[str] = []
+    for p in fn.params:
+        n = _ident(p.name)
+        if p.kind == "bytes_in":
+            args.append(f"{n}: &[u8]")
+            call += [f"{n}.as_ptr()", f"{n}.len()"]
+        elif p.kind == "enum":
+            args.append(f"{n}: i32")
+            call.append(n)
+        elif p.kind == "scalar":
+            args.append(f"{n}: {SCALAR_RUST[p.type]}")
+            call.append(n)
+        elif p.kind == "handle":
+            w = _handle_wrapper_name(p.type)
+            if p.nullable:
+                args.append(f"{n}: Option<&{w}>")
+                call.append(f"{n}.map_or(std::ptr::null(), |h| h.as_ptr())")
+            else:
+                args.append(f"{n}: &{w}")
+                call.append(f"{n}.as_ptr()")
+        elif p.kind == "out_handle":
+            rt = handle_rust_name(p.type)
+            var = f"out_{p.name}"
+            prelude.append(f"let mut {var}: *mut {rt} = std::ptr::null_mut();")
+            call.append(f"&mut {var}")
+            outs.append((p.name, p.type, p.nullable))
+        elif p.kind == "out_error":
+            prelude.append(f"let mut err: *mut {handle_rust_name(ERROR_HANDLE)} = std::ptr::null_mut();")
+            call.append("&mut err")
+        else:
+            raise ValueError(f"{fn.name}: no typed method for a {p.kind!r} parameter")
+    ret_types: list[str] = []
+    ret_exprs: list[str] = []
+    ok: list[str] = []
+    for name, htype, nullable in outs:
+        var = f"out_{name}"
+        if htype == BUF_HANDLE:
+            if nullable:
+                ret_types.append("Option<Vec<u8>>")
+                ret_exprs.append(f"copied_{name}")
+                ok.append(
+                    f"let copied_{name} = if {var}.is_null() {{\n"
+                    f"            None\n"
+                    f"        }} else {{\n"
+                    f"            // SAFETY: `{var}` is a buffer this call just received, freed once here.\n"
+                    f"            Some(unsafe {{ copy_free_buf(self, {var}) }})\n"
+                    f"        }};"
+                )
+            else:
+                ret_types.append("Vec<u8>")
+                ret_exprs.append(f"copied_{name}")
+                ok.append(
+                    f"// SAFETY: `{var}` is a buffer this call just received (or null), freed once here.\n"
+                    f"        let copied_{name} = unsafe {{ copy_free_buf(self, {var}) }};"
+                )
+        else:
+            w = _handle_wrapper_name(htype)
+            ret_types.append(w)
+            ok.append(
+                f"if {var}.is_null() {{\n            return Err(missing_output(status, {_rust_str(name)}));\n        }}"
+            )
+            ret_exprs.append(f"{w} {{ ptr: {var}, api: Arc::clone(self) }}")
+    if len(ret_types) == 0:
+        rty, rexpr = "()", "()"
+    elif len(ret_types) == 1:
+        rty, rexpr = ret_types[0], ret_exprs[0]
+    else:
+        rty, rexpr = "(" + ", ".join(ret_types) + ")", "(" + ", ".join(ret_exprs) + ")"
+    recv = "self: &Arc<Api>"
+    sig_args = ", ".join([recv] + args)
+    lines = [f"    /// `{fn.name}`, thread class `{fn.thread}`: typed, copy-then-free."]
+    lines += [
+        "    #[allow(clippy::too_many_arguments)]",
+        f"    pub(crate) fn {_method_name(fn, model)}({sig_args}) -> Result<{rty}, RawCallError> {{",
+    ]
+    for line in prelude:
+        lines.append(f"        {line}")
+    lines += [
+        f"        // SAFETY: every input is a live borrow for the whole call, every output",
+        f"        // pointer is this call's own local, and the table is fully resolved.",
+        f"        let status = unsafe {{ (self.{fn.name})({', '.join(call)}) }};",
+        "        if status != 0 {",
+        "            // SAFETY: `err` is null or a `chs_error *` this call just received.",
+        "            return Err(unsafe { read_free_error(self, status, err) });",
+        "        }",
+    ]
+    for block in ok:
+        lines.append(f"        {block}")
+    lines.append(f"        Ok({rexpr})")
+    lines += ["    }", ""]
+    return lines
+
+
+# --------------------------------------------------------------- vocab_gen.rs
+
+# The spellings of the one vocabulary whose wire values are single letters.
+# This is generator input, not binding state: the emitter refuses a
+# description that adds or drops a verdict without this table following.
+VERDICT_NAMES = {"t": "True", "f": "False", "e": "Error", "d": "Decline"}
+VERDICT_DOCS = {
+    "t": "The predicate is non-NULL and non-zero for this row.",
+    "f": "False or NULL: SQL's three-valued logic collapsed at the WHERE boundary.",
+    "e": "The predicate threw on this row's values. Not an answer; fail closed.",
+    "d": "This library declines to answer for this row. Not an answer; fail closed.",
+}
+
+
+def _string_enum(model, name: str, type_name: str, *, variant, doc: str, with_default: bool, extra_fields=()) -> list[str]:
+    enum = model.enums[name]
+    out: list[str] = []
+    out += _doc(doc)
+    derive = "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash"
+    derive += ", Default)]" if with_default else ")]"
+    out.append(derive)
+    out.append("#[non_exhaustive]")
+    out.append(f"pub enum {type_name} {{")
+    for v in enum.values:
+        vn = variant(v.value)
+        if with_default and v.value == enum.fallback:
+            out.append("    #[default]")
+        out.append(f"    /// The wire value `{v.value}`.")
+        out.append(f"    {vn},")
+    out += ["}", "", f"impl {type_name} {{"]
+    out += [
+        "    /// The wire spelling.",
+        "    pub fn as_str(self) -> &'static str {",
+        "        match self {",
+    ]
+    for v in enum.values:
+        out.append(f"            {type_name}::{variant(v.value)} => {_rust_str_any(v.value)},")
+    out += ["        }", "    }", ""]
+    fb = variant(enum.fallback) if enum.fallback is not None else None
+    out += [
+        "    /// Read one wire value; an unknown value reads as the description's fallback"
+        if fb
+        else "    /// Read one wire value; `None` for a value the description does not list.",
+        f"    pub(crate) fn from_wire(s: &str) -> {'Self' if fb else 'Option<Self>'} {{",
+        "        match s {",
+    ]
+    for v in enum.values:
+        arm = f"{type_name}::{variant(v.value)}"
+        out.append(f"            {_rust_str_any(v.value)} => {arm if fb else 'Some(' + arm + ')'},")
+    out.append(f"            _ => {('Self::' + fb) if fb else 'None'},")
+    out += ["        }", "    }"]
+    for field, ftype in extra_fields:
+        assert ftype == "boolean", ftype
+        out += [
+            "",
+            f"    /// The description's `{field}` fact for this value.",
+            f"    pub fn {field}(self) -> bool {{",
+            "        match self {",
+        ]
+        for v in enum.values:
+            out.append(f"            {type_name}::{variant(v.value)} => {'true' if v.fields[field] else 'false'},")
+        out += ["        }", "    }"]
+    out += ["}", ""]
+    out += [
+        f"impl std::fmt::Display for {type_name} {{",
+        "    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {",
+        "        f.write_str(self.as_str())",
+        "    }",
+        "}",
+        "",
+    ]
+    return out
+
+
+def _rust_str_any(s: str) -> str:
+    assert all(c.isascii() and c not in '"\\' for c in s), s
+    return f'"{s}"'
+
+
+def render_vocab(model) -> str:
+    out: list[str] = [
+        f"// {banner(model)}",
+        "//",
+        "// Every vocabulary of the description, as Rust: the `chs_format` and",
+        "// `chs_status` numbers, the document vocabularies (outcomes, verdicts,",
+        "// reasons with their `lossy` fact, sources with their `is_stored` fact,",
+        "// default kinds), and the document-group flags. No binding keeps a copy",
+        "// of its own. See scripts/abi-v1/emit/rust.py.",
+        "",
+        "// ----------------------------------------------------------------- format",
+        "",
+    ]
+    fmt = model.enums["chs_format"]
+    out += [
+        "/// The input (and export) encoding of a body, as the `chs_format` integer.",
+        "/// **The numbers are part of the ABI** (frozen) and are never renumbered.",
+        "/// Each carries `ch_name`, ClickHouse's own name for the format, which is how",
+        "/// a build's `capabilities` lists it.",
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]",
+        "#[repr(i32)]",
+        "pub enum Format {",
+    ]
+    for v in fmt.values:
+        out += [f"    /// `{v.fields['ch_name']}` (`{v.name}`).", f"    {_words(v.name[len('CHS_'):])} = {v.value},"]
+    out += ["}", "", "impl Format {", "    /// Every format, in numeric order.", f"    pub const ALL: [Format; {len(fmt.values)}] = ["]
+    for v in fmt.values:
+        out.append(f"        Format::{_words(v.name[len('CHS_'):])},")
+    out += [
+        "    ];",
+        "",
+        "    /// ClickHouse's own name for this format, as `capabilities` lists it.",
+        "    pub fn ch_name(self) -> &'static str {",
+        "        match self {",
+    ]
+    for v in fmt.values:
+        out.append(f"            Format::{_words(v.name[len('CHS_'):])} => {_rust_str_any(v.fields['ch_name'])},")
+    out += [
+        "        }",
+        "    }",
+        "",
+        "    /// The `chs_format` value that crosses the C boundary.",
+        "    pub(crate) fn code(self) -> i32 {",
+        "        self as i32",
+        "    }",
+        "}",
+        "",
+    ]
+
+    out += [
+        "/// The call statuses, as the `chs_status` integers (D3, frozen). A call error",
+        "/// carries the raw status; compare it with these.",
+        "pub mod status {",
+    ]
+    for v in model.enums[STATUS_ENUM].values:
+        out += [f"    /// `{v.name}`.", f"    pub const {v.name[len('CHS_'):]}: i32 = {v.value};"]
+    out += ["}", ""]
+
+    out += _string_enum(
+        model,
+        "row_outcome",
+        "Outcome",
+        variant=_words,
+        doc="A row's or a batch's outcome, as the library's document states it (already final: the library applies every promotion).\nAn unknown value reads as the description's fallback, `unsupported`.",
+        with_default=True,
+    )
+    out += _string_enum(
+        model,
+        "filter_outcome",
+        "FilterOutcome",
+        variant=_words,
+        doc="A filter evaluation's outcome. An unknown value reads as the description's fallback, `unsupported`.",
+        with_default=True,
+    )
+    verdict = model.enums["filter_verdict"]
+    assert {v.value for v in verdict.values} == set(VERDICT_NAMES), "filter_verdict changed; update VERDICT_NAMES"
+    out += _string_enum(
+        model,
+        "filter_verdict",
+        "Verdict",
+        variant=lambda w: VERDICT_NAMES[w],
+        doc="One row's filter verdict. `answered` says which are answers; `Error` and `Decline` are never answers, and a caller enforcing visibility fails closed on both.\nAn unknown value reads as the description's fallback, `d`.",
+        with_default=True,
+        extra_fields=[("answered", "boolean")],
+    )
+    out += [
+        "impl Verdict {",
+        "    /// The document character: `t`, `f`, `e` or `d`.",
+        "    pub fn as_char(self) -> char {",
+        "        match self {",
+    ]
+    for v in verdict.values:
+        out.append(f"            Verdict::{VERDICT_NAMES[v.value]} => '{v.value}',")
+    out += ["        }", "    }", "}", ""]
+
+    kind = model.enums["default_kind"]
+    out += _string_enum(
+        model,
+        "default_kind",
+        "DefaultKind",
+        variant=lambda w: _words(w) if w else "None",
+        doc="What a column's DEFAULT clause is. The empty wire value is `None`.",
+        with_default=False,
+    )
+
+    reason = model.enums["transform_reason"]
+    out += [
+        "/// The `transform_reason` vocabulary: the reason spellings a transformation",
+        "/// carries, and the `lossy` fact the description gives each.",
+        "pub mod reason {",
+    ]
+    for v in reason.values:
+        out += [f"    /// `{v.value}`.", f"    pub const {_upper_snake(v.value)}: &str = {_rust_str_any(v.value)};"]
+    fb = next(v for v in reason.values if v.value == reason.fallback)
+    out += [
+        "",
+        "    /// The description's `lossy` fact for a reason; a reason the description does",
+        "    /// not list takes the fallback's fact.",
+        "    pub fn is_lossy(reason: &str) -> bool {",
+        "        match reason {",
+    ]
+    for v in reason.values:
+        out.append(f"            {_rust_str_any(v.value)} => {'true' if v.fields['lossy'] else 'false'},")
+    out += [f"            _ => {'true' if fb.fields['lossy'] else 'false'},", "        }", "    }", "}", ""]
+
+    src = model.enums["value_src"]
+    out += [
+        "/// The `value_src` vocabulary: where a column's value came from, and whether",
+        "/// the description says it is stored.",
+        "pub mod source {",
+    ]
+    for v in src.values:
+        out += [f"    /// `{v.value}`.", f"    pub const {_upper_snake(v.value)}: &str = {_rust_str_any(v.value)};"]
+    out += [
+        "",
+        "    /// The description's `is_stored` fact for a source, or `None` for a value the",
+        "    /// description does not list (the vocabulary has no fallback).",
+        "    pub fn is_stored(src: &str) -> Option<bool> {",
+        "        match src {",
+    ]
+    for v in src.values:
+        out.append(f"            {_rust_str_any(v.value)} => Some({'true' if v.fields['is_stored'] else 'false'}),")
+    out += ["            _ => None,", "        }", "    }", "}", ""]
+
+    flags = [(c.name, c.value) for c in model.constants.values() if c.name.startswith("CHS_DOC_")]
+    out += [
+        "/// Which groups a `rows` document carries: values (`cols`), transformations",
+        "/// and defaults. Combine with `|`.",
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]",
+        "pub struct DocFlags(u32);",
+        "",
+        "impl DocFlags {",
+    ]
+    for name, value in flags:
+        out += [f"    /// `{name}`.", f"    pub const {name[len('CHS_DOC_'):]}: DocFlags = DocFlags({value});"]
+    out += [
+        "",
+        "    /// The raw bitmask, as it crosses the C boundary.",
+        "    pub fn bits(self) -> u32 {",
+        "        self.0",
+        "    }",
+        "",
+        "    /// A mask from raw bits, unvalidated on purpose: an unknown bit reaches the",
+        "    /// library, which refuses it loudly.",
+        "    pub fn from_bits(bits: u32) -> DocFlags {",
+        "        DocFlags(bits)",
+        "    }",
+        "}",
+        "",
+        "impl std::ops::BitOr for DocFlags {",
+        "    type Output = DocFlags;",
+        "    fn bitor(self, rhs: DocFlags) -> DocFlags {",
+        "        DocFlags(self.0 | rhs.0)",
+        "    }",
+        "}",
+        "",
+        "impl std::ops::BitOrAssign for DocFlags {",
+        "    fn bitor_assign(&mut self, rhs: DocFlags) {",
+        "        self.0 |= rhs.0;",
+        "    }",
+        "}",
+        "",
+    ]
+    export_none = model.constants["CHS_EXPORT_NONE"].value
+    out += [
+        "/// `export_format` when no export is asked for.",
+        f"pub(crate) const EXPORT_NONE: i32 = {export_none};",
+        "",
+        "/// The JSON member suffix that carries a name's raw bytes in base64, when the",
+        "/// plain member would not be valid UTF-8.",
+        f"pub(crate) const BYTES_SUFFIX: &str = {_rust_str_any(model.column_names['bytes'][len(model.column_names['text']):])};",
+        "",
+        "/// The text member of a name.",
+        f"pub(crate) const NAME_TEXT: &str = {_rust_str_any(model.column_names['text'])};",
+        "",
+    ]
+    return "\n".join(out)
+
+
+# -------------------------------------------------------------- errmap_gen.rs
+
+
+def render_errmap(model) -> str:
+    errors = model.sdk["errors"]
+    status_map = errors["status"]
+    classes = sorted({v for v in status_map.values() if v})
+    refusals = model.sdk["loader"]["refusals"]
+    by_reason: dict[str, str] = {}
+    for r in refusals:
+        assert by_reason.setdefault(r["reason"], r["error"]) == r["error"], r
+    ref_classes = sorted(set(by_reason.values()))
+    out: list[str] = [
+        f"// {banner(model)}",
+        "//",
+        "// spec/abi-v1/sdk.json's error table: which public error class each call",
+        "// status and each loader refusal maps to. See scripts/abi-v1/emit/rust.py.",
+        "#![allow(dead_code)]",
+        "",
+        "/// The call-error class a non-OK status maps to (D3).",
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+        "pub(crate) enum ErrorClass {",
+    ]
+    for c in classes:
+        out.append(f"    {_words(c)},")
+    out += [
+        "}",
+        "",
+        "/// The class for one `chs_status` value; `None` for `CHS_OK`. A value outside",
+        "/// the closed set reads as `sdk.json`'s `unknown` class.",
+        "pub(crate) fn status_class(status: i32) -> Option<ErrorClass> {",
+        "    match status {",
+    ]
+    for v in model.enums[STATUS_ENUM].values:
+        cls = status_map[v.name]
+        out.append(f"        {v.value} => {'Some(ErrorClass::' + _words(cls) + ')' if cls else 'None'},")
+    out += [f"        _ => Some(ErrorClass::{_words(status_map['unknown'])}),", "    }", "}", ""]
+    out += [
+        "/// The artifact-error class a loader refusal maps to.",
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+        "pub(crate) enum RefusalClass {",
+    ]
+    for c in ref_classes:
+        out.append(f"    {_words(c[len('artifact_'):])},")
+    out += [
+        "}",
+        "",
+        "/// The class for one loader refusal reason (`reason` or `reason:<suffix>`).",
+        "/// A reason the table does not list is `Incompatible`, the fail-closed side.",
+        "pub(crate) fn refusal_class(reason: &str) -> RefusalClass {",
+        "    let word = reason.split(':').next().unwrap_or(reason);",
+        "    match word {",
+    ]
+    for reason, cls in sorted(by_reason.items()):
+        out.append(f"        {_rust_str_any(reason)} => RefusalClass::{_words(cls[len('artifact_'):])},")
+    out += ["        _ => RefusalClass::Incompatible,", "    }", "}", ""]
+    out += [
+        "/// The environment variable that is the second opt-in of an unverified open.",
+        f"pub(crate) const UNVERIFIED_ENV: &str = {_rust_str_any(model.sdk['loader']['unverified_env'])};",
+        "",
+    ]
+    return "\n".join(out)
+
+
 def outputs(model) -> list[Output]:
     return [
         Output(DECLS_PATH, content=_rustfmt(render_decls(model))),
         Output(INVOKE_PATH, content=_rustfmt(render_invoke(model))),
+        Output(CALLS_PATH, content=_rustfmt(render_calls(model))),
+        Output(VOCAB_PATH, content=_rustfmt(render_vocab(model))),
+        Output(ERRMAP_PATH, content=_rustfmt(render_errmap(model))),
     ]
