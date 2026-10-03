@@ -35,11 +35,11 @@ A dry run does everything the tag path does up to the publish, and skips the pub
 
 **The User-Agent assertion.** The fetch layer sends `chtypes-<language>/<version>`, and the version is read at a different place in each binding, so each release workflow asserts that the version in the User-Agent equals the version being tagged, in the dry run AND on the tag path, before anything is published:
 
-| workflow             | what it reads                                                                                                      |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `release-go.yml`     | `userAgent()` (from the `bindingVersion` constant), through a throwaway test run inside the package               |
-| `release-python.yml` | `chtypes._ocifetch._http.USER_AGENT` from the BUILT wheel, installed into a clean venv                            |
-| `release-ts.yml`     | `USER_AGENT` from `dist/ocifetch/http.js` in the unpacked `pnpm pack` tarball                                      |
+| workflow             | what it reads                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `release-go.yml`     | `userAgent()` (from the `bindingVersion` constant), through a throwaway test run inside the package                       |
+| `release-python.yml` | `chtypes._ocifetch._http.USER_AGENT` from the BUILT wheel, installed into a clean venv                                    |
+| `release-ts.yml`     | `USER_AGENT` from `dist/ocifetch/http.js` in the unpacked `pnpm pack` tarball                                             |
 | `release-rust.yml`   | the unit test pinning `user_agent()` to `CARGO_PKG_VERSION` (it must report one pass), and the built binary's `--version` |
 
 A stale Go `bindingVersion` therefore fails the dry run, not a user. There is no ancestry check in any of the four workflows: they check that the tag name and the manifest agree, and nothing about which branch the tag sits on.
