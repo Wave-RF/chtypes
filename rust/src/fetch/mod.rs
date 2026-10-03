@@ -26,9 +26,9 @@ pub use trust::{
     sha256_hex, verify_signature,
 };
 
-use crate::error::{Error, FETCH_COMMAND, Result};
-pub(crate) use crate::library::minor_of;
-use crate::registry::{
+use crate::legacy::error::{Error, FETCH_COMMAND, Result};
+pub(crate) use crate::legacy::registry::minor_of;
+use crate::legacy::registry::{
     Manifest, host_platform, install_dir_for, locate_in, locate_patch_in, search_path_for,
 };
 use release::{Release, Request};
@@ -71,14 +71,14 @@ const ABI_REVISION_TEST_ENV: &str = "CHTYPES_FETCH_TEST_ABI_REVISION";
 /// crate's own fetch-fixture suite and nothing else.
 ///
 /// Sets, for the calling thread, the ABI revision fetch selects release rows
-/// at in place of [`crate::ABI_REVISION`] (`docs/guides/fetch.md` §2), and
+/// at in place of [`crate::legacy::error::ABI_REVISION`] (`docs/guides/fetch.md` §2), and
 /// returns the previous override. The fixture suite sets it to the revision
 /// its fixture release carries — derived from that release's own
 /// `index.json` — so a crate whose own revision has moved ahead of the
 /// fixtures still exercises the whole chain. It changes WHICH rows are
 /// eligible and nothing else: the default registry directory stays
 /// `abi<ABI_REVISION>/`, and the loader still refuses an artifact of another
-/// revision. `pub` only because `tests/fetch.rs` is a separate crate that
+/// revision. `pub` only because an integration test is a separate crate that
 /// cannot reach a `pub(crate)` item.
 #[doc(hidden)]
 pub fn __set_fetch_abi_revision_for_tests(revision: Option<i32>) -> Option<i32> {
@@ -107,15 +107,15 @@ pub(crate) fn fetch_abi_revision() -> i32 {
     std::env::var(ABI_REVISION_TEST_ENV)
         .ok()
         .and_then(|raw| raw.trim().parse().ok())
-        .unwrap_or(crate::ABI_REVISION)
+        .unwrap_or(crate::legacy::error::ABI_REVISION)
 }
 
 /// How [`ensure`] fetches. `Default` is what `chtypes fetch <line>` does with
 /// no flags: this host's platform, the artifacts host's rolling release, the
 /// environment's trust policy, no lock, quiet.
 ///
-/// `PartialEq` is derived so [`Registry::open`](crate::Registry::open) can
-/// tell whether [`RegistryOptions::fetch`](crate::RegistryOptions::fetch) was
+/// `PartialEq` is derived so the v0 `Registry::open` can
+/// tell whether the v0 `RegistryOptions::fetch` was
 /// left at its default — every field here is a `bool`, a `String`/`PathBuf`,
 /// or an `Option`/`Vec` of one, so the comparison is structural and exact,
 /// never a `Debug`-string comparison standing in for one.
@@ -242,7 +242,7 @@ pub struct ReleaseInfo {
 /// place. With a lock file ([`EnsureOptions::lock`]) the pin is recorded or,
 /// under `frozen`, enforced.
 ///
-/// The directory it returns is what [`crate::Registry::new`] loads.
+/// The directory it returns is what the v0 `Registry::new` loads.
 ///
 /// # Errors
 ///
@@ -816,7 +816,9 @@ fn ensure_all_frozen(
 /// the caller says so; an empty answer must never read as "all verified".
 pub fn verify_installed(dir: &Path) -> Vec<Verification> {
     let mut out = Vec::new();
-    for patch in crate::registry::installed_patches(std::slice::from_ref(&dir.to_path_buf())) {
+    for patch in
+        crate::legacy::registry::installed_patches(std::slice::from_ref(&dir.to_path_buf()))
+    {
         let sub = patch.dir;
         let line = patch.line;
         let inst = match InstalledDir::read(&sub) {

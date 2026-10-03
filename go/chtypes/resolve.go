@@ -1,3 +1,5 @@
+//go:build chtypes_v0_retired
+
 package chtypes
 
 // resolve.go — exact-patch resolution, the flat/patches split and the

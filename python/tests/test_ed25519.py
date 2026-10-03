@@ -12,8 +12,8 @@ import hashlib
 
 import pytest
 
-from chtypes import fetch as fetch_module
 from chtypes._ed25519 import verify
+from chtypes._ocifetch import _constants as fetch_constants
 
 # RFC 8032 §7.1 — TEST 1 (empty message), TEST 2 (one byte), TEST 3 (two bytes).
 RFC_VECTORS = [
@@ -35,7 +35,7 @@ RFC_VECTORS = [
 ]
 
 # docs/guides/fetch.md §4: the release key and its reference vector (openssl -rawin).
-RELEASE_KEY = bytes.fromhex(fetch_module.RELEASE_PUBLIC_KEY)
+RELEASE_KEY = bytes.fromhex(fetch_constants.RELEASE_KEYS[0]["ed25519_hex"])
 RELEASE_MESSAGE = b"hello\n"
 RELEASE_SIGNATURE = bytes.fromhex(
     "0fee686f7ed7c64b86a7dce0ffd66b15d1504178153c3b0cc118e2c9456afa6d"
@@ -62,8 +62,8 @@ def test_the_release_key_reference_vector() -> None:
 
 
 def test_the_embedded_key_id_is_sha256_of_the_raw_key() -> None:
-    assert hashlib.sha256(RELEASE_KEY).hexdigest()[:16] == fetch_module.RELEASE_KEY_ID
-    assert fetch_module.key_id(RELEASE_KEY) == "deb275922dbff76e"
+    assert hashlib.sha256(RELEASE_KEY).hexdigest()[:16] == fetch_constants.RELEASE_KEYS[0]["keyid"]
+    assert hashlib.sha256(RELEASE_KEY).hexdigest()[:16] == "deb275922dbff76e"
 
 
 def test_every_bit_of_the_signature_matters() -> None:

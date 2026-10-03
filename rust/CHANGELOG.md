@@ -6,6 +6,18 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Changed (v1, breaking)
+
+- **The public API is `docs/reference/bindings-v1.md`.** `chtypes::setup(SetupOptions)` fixes the image zone and the default settings once per process; `Registry::new(RegistryOptions)` opens a version through the v1 fetch layer (`resolve_installed`, then `ensure` when autofetch is on, then loader steps 1 to 7) and memoizes per request; `Registry::for_version`, `installed` and `libraries`; `Library::open_unverified(path, allow)`; `Library::compile_table` takes exactly one `CREATE TABLE` statement; `Schema`, `Filter` and `Block` are `Clone + Send + Sync + 'static`, and a filter or a block holds a counted reference to its schema in the library, so there is no borrow and no free order. Every call takes an options struct with public fields and `Default`. Every byte output is `RawText`.
+- **Errors are one family.** `Error::Schema`, `Unsupported`, `Usage` and `Internal` each carry a `CallError` (`status`, `ch_code`, `ch_name`, `message`, `column`); `Error::ArtifactIncompatible` and `ArtifactCorrupt` carry a `Refusal`; the fetch layer's codes are one variant each. A loader step 7 failure (`chs_initialize`) is the call's own error, mapped by the status table, never a refusal reason.
+- **Documents are decoded one to one with `serde_json`**; a duplicate key is `Error::Internal`; a name or a data-derived string surfaces as bytes whether it arrives plain or in its `_b64` form; `BatchResult::framing` keeps unknown as `None`, never false or empty. `Value::is_stored`, `Transform::lossy` and the vocabularies are generated from the ABI description (`scripts/abi-v1/emit/rust.py`), never kept here.
+- **The typed, copy-then-free call layer, the vocabularies and the error tables are generated** into `src/abi1/calls_gen.rs`, `vocab_gen.rs` and `errmap_gen.rs`.
+- The `fetch-v1` and `abi-v1` features remain as names only: the v1 fetch layer and the ABI v1 layer are unconditional. The v0 `chtypes::fetch` module and the `chtypes` binary remain until the switch, over a quarantined `legacy` module.
+
+### Removed (v1, breaking)
+
+- The v0 `Registry` (directory search path, manifest reads, revision gate, checksum re-hash), `Library::load`, `Resolution`, `ABI_REVISION`, `CODE_UNSUPPORTED`, the compile builder and `CompileMode`, `set_engine`, `set_ttl`, `set_partition_by`, the discovery reconstruction (`QUERY_*`, `parse_*_result`, `ServerProfile`), `registered_families`, `function_flags`, `reference_type`, `set_default_settings`, `shutdown`, `Substitution` and `RowResult::substituted`, the `rows_export` family (one `rows` with options), the hand FFI table and its presence probes, the binding-side classifier, the hand JSON readers, the hand error-code table parsers, `Error::InitConflict` and `Error::CrossLibrary`, and the `Filter<'s>` borrow.
+
 ### Changed
 
 - **MSRV raised from 1.85 to 1.87.** The crate's declared `rust-version` now reflects the new, opt-in `fetch-v1` feature (the v1 OCI + zstd fetch layer, `ocifetch`; not on by default and not reachable from this crate's public API yet). `ruzstd`, the v1 zstd decoder, declares `rust-version = "1.87"` on every release since 0.8.3, including the 0.9.0 this feature pins; `rustls-platform-verifier` 0.7.1, also new under this feature, declares 1.85 and does not raise the floor further. No code outside `fetch-v1` requires 1.87; the floor moves for the whole crate because `rust-version` is a single, package-wide field.

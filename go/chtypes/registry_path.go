@@ -1,3 +1,5 @@
+//go:build chtypes_v0_retired
+
 package chtypes
 
 // registry_path.go — where artifacts are looked for and where a fetch

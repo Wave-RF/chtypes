@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::error::{Error, Result};
+use crate::legacy::error::{Error, Result};
 
 /// The artifacts host, `CHTYPES_ARTIFACTS_URL`'s default.
 pub const DEFAULT_ARTIFACTS_URL: &str = "https://artifacts.wavehouse.dev";

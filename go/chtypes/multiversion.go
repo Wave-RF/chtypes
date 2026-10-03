@@ -1,3 +1,5 @@
+//go:build chtypes_v0_retired
+
 package chtypes
 
 // Runtime multi-version dispatch.

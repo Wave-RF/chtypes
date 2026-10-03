@@ -294,7 +294,7 @@ show_reasons = sys.argv[4] == "1"
 # The one release-level asset this script checks for by name: never an
 # artifacts[] row, so the row-set diff below cannot see it at all — it is
 # what every binding's fetch suite here runs its fetch-fixture and
-# ABI-revision-refusal tests against (docs/guides/fetch.md, scripts/abi-fixtures.sh).
+# ABI-revision-refusal tests against (docs/guides/fetch.md).
 FIXTURES_ASSET = "sdk-fetch-fixtures.tar.gz"
 
 
@@ -708,7 +708,7 @@ if [ "$ACTION" = selftest ]; then
   # Fixture channels this script builds itself, never anything read off the
   # real (or any earlier) index.json or SHA256SUMS — the negative-control
   # discipline of scripts/lint-spelling.sh --selftest and
-  # scripts/check-abi-decls.py --selftest: prove the checker fires on a
+  # scripts/check-quoting-passthrough.py --selftest: prove the checker fires on a
   # planted fault, using input it constructed, not input it was handed the
   # answer for.
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/chtypes-index-diff-selftest.XXXXXX")"

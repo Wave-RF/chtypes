@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::release::{IndexRow, Request, version_key};
-use crate::error::{Error, Result};
+use crate::legacy::error::{Error, Result};
 
 /// The lock file's default name, for `--frozen` without `--lock`.
 pub const DEFAULT_LOCK_FILE: &str = "chtypes.lock";
@@ -324,7 +324,7 @@ mod tests {
             library_sha256: "ff".into(),
             build: 0,
             core_commit: String::new(),
-            abi_revision: Some(crate::ABI_REVISION),
+            abi_revision: Some(crate::legacy::error::ABI_REVISION),
         }
     }
 
@@ -365,7 +365,7 @@ mod tests {
         );
         assert_eq!(
             doc["artifacts"]["linux-arm64/25.8.28.1-lts"]["abi_revision"],
-            crate::ABI_REVISION
+            crate::legacy::error::ABI_REVISION
         );
 
         let again = LockFile::load(&path, true).unwrap();

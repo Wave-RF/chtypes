@@ -1,3 +1,5 @@
+//go:build chtypes_v0_retired
+
 package chtypes
 
 // fetch_sign.go — the signature (docs/guides/fetch.md §4).

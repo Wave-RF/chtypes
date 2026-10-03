@@ -17,15 +17,18 @@ maintained notion of "did it pass".
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import platform
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from chtypes import _setup, library
 from chtypes._abi1 import _decls
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -200,3 +203,45 @@ def strip_ids(obj: Any) -> Any:
     if isinstance(obj, list):
         return [strip_ids(v) for v in obj]
     return obj
+
+
+# ------------------------------------------------- public-API fixtures
+
+
+@pytest.fixture
+def clean_process():
+    """No recorded setup, no cached image, before and after."""
+    _setup._reset_for_tests()
+    library._IMAGES.clear()
+    yield
+    gc.collect()
+    _setup._reset_for_tests()
+    library._IMAGES.clear()
+
+
+@pytest.fixture
+def stub_copy(stubs_dir: Path, stubs_manifest: dict, tmp_path: Path, clean_process):
+    """A factory: a fresh copy of the "ok" stub, as (path, predicate)."""
+    entry = stubs_manifest["variants"]["ok"]
+    source = stubs_dir / Path(entry["path"]).name
+    count = 0
+
+    def make() -> tuple[str, dict]:
+        nonlocal count
+        count += 1
+        target = tmp_path / f"ok-{count}.so"
+        shutil.copyfile(source, target)
+        target.chmod(0o755)
+        return str(target), dict(entry["predicate"])
+
+    return make
+
+
+@pytest.fixture
+def lib(stub_copy, monkeypatch):
+    """One opened stub Library (through the unverified path, which needs both
+    opt-ins and is not what these tests are about)."""
+    monkeypatch.setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
+    path, _ = stub_copy()
+    with pytest.warns(UserWarning, match="UNVERIFIED"):
+        return library.open_unverified(path, allow=True)

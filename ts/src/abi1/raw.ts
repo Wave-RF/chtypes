@@ -34,7 +34,9 @@ import {
   restorePointer,
 } from 'ffi-rs';
 import { BUF_HANDLE, FUNCTION_SPECS, type FunctionSpec, type ParamSpec, STATUS_NAMES, SYMBOL } from './decls.gen.js';
-import type { CallErrorFields } from './errors.js';
+import { type CallErrorFields, internalError } from './errors.js';
+import { errorForStatus } from './errmap.gen.js';
+import { Status } from './vocab.gen.js';
 import { readCString } from './libc.js';
 
 const { External, I32, U32, I64, U64, Void, U8Array } = DataType;
@@ -206,6 +208,7 @@ export type RawCallResult =
   | { readonly outcome: 'handle'; readonly handle: HandleRef }
   | {
       readonly outcome: 'status';
+      readonly status: number;
       readonly statusName: string;
       readonly outs: Readonly<Record<string, Buffer | HandleRef>>;
       readonly error: CallErrorFields | null;
@@ -215,7 +218,7 @@ function inputParams(spec: FunctionSpec): ParamSpec[] {
   return spec.params.filter((p) => p.kind !== 'out_handle' && p.kind !== 'out_error');
 }
 
-function decodeError(raw: RawApi, statusName: string, errSlot: Slot): CallErrorFields | null {
+function decodeError(raw: RawApi, status: number, errSlot: Slot): CallErrorFields | null {
   const errPtr = readExternalSlot(errSlot);
   if (isNullPointer(errPtr)) return null;
   const chCode = Number(rawFn(raw, SYMBOL.ERROR_CH_CODE)([errPtr]));
@@ -223,7 +226,7 @@ function decodeError(raw: RawApi, statusName: string, errSlot: Slot): CallErrorF
   const messageBytes = readOwnedBuf(raw, rawFn(raw, SYMBOL.ERROR_MESSAGE)([errPtr]) as JsExternal);
   const column = readOwnedBuf(raw, rawFn(raw, SYMBOL.ERROR_COLUMN)([errPtr]) as JsExternal);
   rawFn(raw, SYMBOL.ERROR_FREE)([errPtr]);
-  return { status: statusName, chCode, chName, messageBytes, column };
+  return { status, chCode, chName, messageBytes, column };
 }
 
 /**
@@ -279,18 +282,19 @@ export function rawCall(raw: RawApi, name: string, args: readonly unknown[]): Ra
       case 'void':
         return { outcome: 'void' };
       case 'status': {
-        const statusName = STATUS_NAMES[Number(result)] ?? `UNKNOWN(${String(result)})`;
+        const status = Number(result);
+        const statusName = STATUS_NAMES[status] ?? `UNKNOWN(${String(result)})`;
         const outs: Record<string, Buffer | HandleRef> = {};
         let error: CallErrorFields | null = null;
         for (const { param, slot } of outSlots) {
           if (param.kind === 'out_error') {
-            error = decodeError(raw, statusName, slot);
+            error = decodeError(raw, status, slot);
             continue;
           }
           const ptr = readExternalSlot(slot);
           outs[param.name] = param.type === BUF_HANDLE ? readOwnedBuf(raw, ptr) : { kind: param.type as string, ptr };
         }
-        return { outcome: 'status', statusName, outs, error };
+        return { outcome: 'status', status, statusName, outs, error };
       }
       case 'scalar':
         if (spec.returns.type === 'cstr_static') {
@@ -313,4 +317,24 @@ export function rawCall(raw: RawApi, name: string, args: readonly unknown[]): Ra
   } finally {
     for (const { slot } of outSlots) dropSlot(slot);
   }
+}
+
+/** A `Uint8Array` as the `Buffer` ffi-rs marshals, without copying. */
+export function asBuffer(bytes: Uint8Array): Buffer {
+  return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+/**
+ * The outputs of a status call that came back OK; anything else throws the
+ * class `spec/abi-v1/sdk.json`'s status table gives (`./errmap.gen.ts`). A
+ * non-OK status with no error object is the library's bug, never a silent
+ * success.
+ */
+export function checkStatus(result: RawCallResult): Readonly<Record<string, Buffer | HandleRef>> {
+  if (result.outcome !== 'status') throw internalError('a status call returned no status');
+  if (result.status === Status.Ok) return result.outs;
+  if (result.error === null) {
+    throw internalError(`the library answered status ${result.status} (${result.statusName}) with no error object`);
+  }
+  throw errorForStatus(result.status, result.error);
 }

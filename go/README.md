@@ -4,16 +4,11 @@
 
 ## Install
 
-Two things: this package, and at least one **artifact** — the per-version native library it `dlopen`s at runtime.
+Two things: this package, and at least one **artifact**, the per-version native library it `dlopen`s at runtime. The registry fetches, verifies and installs artifacts for you when autofetch is on (`WithAutoFetch(true)` or `CHTYPES_AUTOFETCH=1`); the default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing and needs no build tree.
 
 ```sh
 go get github.com/wave-rf/chtypes/go
-go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
 ```
-
-The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/26.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
-
-The default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing, includes no header and needs no build tree. That is what `go get` gives you.
 
 ## Quickstart
 
@@ -28,74 +23,66 @@ import (
 )
 
 func main() {
-	reg, err := chtypes.NewRegistry("") // "" = walk the search path
+	// Optional, and first: the image zone and default settings are fixed once per process.
+	if err := chtypes.Setup(chtypes.SetupOptions{Timezone: "UTC"}); err != nil {
+		log.Fatal(err)
+	}
+	reg, err := chtypes.NewRegistry(chtypes.WithAutoFetch(true))
 	if err != nil {
 		log.Fatal(err)
 	}
-	lib, err := reg.For("26.8") // a line or an exact patch; never a nearest match
+	lib, err := reg.For("26.8") // two, three or four parts; never a nearest match
 	if err != nil {
 		log.Fatal(err)
 	}
-	schema, err := lib.CompileDDL("x UInt8, ts DateTime DEFAULT now()")
+	schema, err := lib.CompileTable("CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer schema.Close()
 
-	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`), nil)
+	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`))
 	if err != nil {
 		log.Fatal(err)
 	}
 	row := batch.Rows[0]
 	fmt.Println(batch.Outcome)             // accepted
-	fmt.Println(row.Values[0].Text)        // 0             — what would actually be stored
-	fmt.Println(row.Transformed[0].Reason) // overflow_wrap — which is the product
-	fmt.Println(row.Substituted)           // ts: send it explicitly, or preview != stored
+	fmt.Println(row.Values[0].Text)        // 0             what would actually be stored
+	fmt.Println(row.Transformed[0].Reason) // overflow_wrap which is the product
 }
 ```
 
-The row is **accepted** and `256` is silently stored as `0`. That report — `Transformed` — is the one derived answer in the system and the reason it exists.
+The row is **accepted** and `256` is silently stored as `0`. The library reports that change; the binding only decodes it.
 
-`ts` was substituted rather than stored: send every substituted column as an explicit value in the real INSERT, or the server re-evaluates `now()` at its own instant and your preview is not what landed.
+A DEFAULT that calls a random or UUID generator is drawn by the library and reported with `SourceDefaultGenerated`: to insert it, ask `Rows` for an export (`WithExport`) and insert the `Payload`, never the original body.
 
-## Three outcomes, and conflating any two is a bug
+## Errors
 
-A bad **row** is a verdict, not an error: `Outcome` becomes `Rejected` with ClickHouse's own code and message. Go errors are for schema-level answers and for the machinery.
+A bad **row** is a verdict, not an error: `Outcome` becomes `Rejected` with ClickHouse's own code and message. Go errors are for the call as a whole.
 
-- `*SchemaError` — the server refused. `Code` is a real ClickHouse code.
-- `*UnsupportedError` — this build declines to answer, and a real server might well have accepted. **Fall back to the server**; never report a decline as a rejection.
-- a plain `error` — usage or environment: a closed handle, a bad artifact directory.
+- `*SchemaError`: the server refused. `ChCode` is a real ClickHouse code.
+- `*UnsupportedError`: this build declines to answer, and a real server might well have accepted. **Fall back to the server**; never report a decline as a rejection. It is a peer of `*SchemaError`, never a subtype.
+- `*UsageError`: misuse, such as a closed object, a refused version spelling or a conflicting `Setup`.
+- `*InternalError`: a library bug, or a document that does not decode.
+- `*ArtifactError`: fetch and load failures, with a `Code` and a sentinel per code for `errors.Is`.
 
-## Documentation
+`chtypes.AsCallError` reads the five fields every call error carries.
 
-|                                                                                                                                                                             |                                                                                   |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [Quickstart](https://github.com/wave-rf/chtypes/blob/main/docs/quickstart.md)                                                                                               | the same program in all four languages                                            |
-| [Go API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/go.md)                                                                                       | every symbol, the C entry point under it, what it returns and what it errors with |
-| [Artifacts](https://github.com/wave-rf/chtypes/blob/main/docs/guides/artifacts.md)                                                                                          | getting one, where it lands, verifying and pinning it                             |
-| [Batches](https://github.com/wave-rf/chtypes/blob/main/docs/guides/batches.md)                                                                                              | always `Rows`, and the two bad-row policies                                       |
-| [Transformations](https://github.com/wave-rf/chtypes/blob/main/docs/guides/transformations.md)                                                                              | the silent-change report, and the DEFAULTs you must echo back                     |
-| [Settings](https://github.com/wave-rf/chtypes/blob/main/docs/guides/settings.md) · [Discovery](https://github.com/wave-rf/chtypes/blob/main/docs/guides/discovery.md)       | the four channels; asking a real server what profile to validate under            |
-| [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process         |
-| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                                 |
+## Threads
 
-`go doc github.com/wave-rf/chtypes/go/chtypes` is the same surface with the full prose — every exported symbol carries its contract.
+Everything is safe for concurrent use and no call takes a lock. A `Schema`, `Filter` or `Block` has a close guard: `Close` waits for the calls already inside that object, and a later call is a `*UsageError`.
 
-## Two things specific to this binding
+## The linked build
 
-**The linked build is not a consumer path.** `-tags chtypes_linked` adds package-level `CompileDDL`, `ValidateType`, `ParseSchema`, `BuiltVersion` and `SetDefaultSettings`, linking `-lchtypes` out of the core repository's build tree at compile time (`CGO_LDFLAGS` says where) and answering for exactly that one artifact. It is a development and rig instrument. `undefined: chtypes.CompileDDL` means the tag is missing.
-
-**`SetDefaultSettings` exists only there.** It replaces a process-global that the row path reads by reference, so the ABI requires it to exclude everything else on the image — and a dlopen'd `Library` deliberately does not carry the symbol in its function-pointer table. Put those settings in the compile profile and the per-call map instead.
-
-```sh
-go build ./...                        # dlopen-only: what a consumer gets
-go build -tags chtypes_linked ./...   # + the linked path
-scripts/check-standalone.sh           # proves the first from a bare copy of go/
-```
+`-tags chtypes_linked` adds `chtypes.OpenLinked()`, which links `-lchtypes` out of the artifact producer's build tree at compile time (`CGO_LDFLAGS` says where) and answers for exactly that one artifact. It is a development and rig instrument, not a consumer path.
 
 ## Tests
 
-`go test ./...`. Every test that needs an artifact **skips loudly by name** without a registry on the search path, and a suite that ran nothing fails — `scripts/check-standalone.sh` reads its verdict off a `go test -json` census rather than an exit code. `scripts/fetch.sh 26.8` fills the cache and the plain command then runs everything.
+`go test ./...`. Every test that needs the ABI test stub (`CHTYPES_ABI1_STUBS`) skips loudly by name without it.
+
+## Documentation
+
+The public API is specified in [`docs/reference/bindings-v1.md`](../docs/reference/bindings-v1.md); `go doc github.com/wave-rf/chtypes/go/chtypes` is the same surface with the full prose.
 
 ## License
 

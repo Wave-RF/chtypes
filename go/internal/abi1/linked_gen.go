@@ -5,12 +5,11 @@
 package abi1
 
 /*
-// The header is this repository's own include/v1/chtypes.h (until wave C's
-// cutover moves it to include/chtypes.h) -- the SDK owns the contract, as
-// go/chtypes/linked.go's own preamble explains for v0. A full LINK (never
-// needed by scripts/abi-v1/check-linked.sh's type-check alone) additionally
-// needs CGO_LDFLAGS naming where libchtypes lives, the same as v0.
-#cgo CFLAGS: -I${SRCDIR}/../../../include/v1
+// The header is this repository's own include/chtypes.h -- the SDK owns the
+// contract. A full LINK (never needed by scripts/abi-v1/check-linked.sh's
+// type-check alone) additionally needs CGO_LDFLAGS naming where libchtypes
+// lives.
+#cgo CFLAGS: -I${SRCDIR}/../../../include
 #cgo LDFLAGS: -lchtypes
 #include "abi1_table.h"
 #include "chtypes.h"

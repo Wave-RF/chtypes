@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-linked.sh — the v1-abi-linked job body: type-check Go's STATICALLY
 # LINKED path (go/internal/abi1/linked_gen.go, `-tags chtypes_linked`)
-# against include/v1/chtypes.h, with no artifact.
+# against include/chtypes.h, with no artifact.
 #
 #   scripts/abi-v1/check-linked.sh            type-check the linked path
 #   scripts/abi-v1/check-linked.sh --selftest plant a mistyped call site and
@@ -9,19 +9,15 @@
 #                                              and prove each turns this RED
 #
 # WHY THIS IS SAFE WITHOUT AN ARTIFACT (measured 2026-09-21 for v0's own
-# scripts/check-linked-build.sh, true here for the identical reason): `go
+# linked-build check, true here for the identical reason): `go
 # build` and `go vet` of a NON-MAIN cgo package run the C compiler over the
 # translation unit and type-check every call site, and only PROBE the link;
 # a missing `-lchtypes` is recorded and deferred to whoever actually LINKS a
 # binary. So the type check needs a C compiler and this repository's own
 # in-tree header, and nothing else — no artifact, no library, no network.
 #
-# WHY A SEPARATE SCRIPT, NOT v0's check-linked-build.sh EXTENDED: v1 and v0
-# coexist on this branch (plan §2.4) — v0's linked.go/linked_abi_check.go
-# still need their own check against include/chtypes.h, unchanged, while
-# this one checks go/internal/abi1/linked_gen.go against include/v1/chtypes.h.
-# The two merge into one at the wave-C cutover, when v0's header and its
-# check are deleted.
+# This is the only linked-path check: v0's header and its check were
+# deleted at the cutover.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,11 +35,11 @@ check() {
   local base_cflags="${CGO_CFLAGS:--O2 -g}"
 
   # The same "a header reached through -I is outside the Go build cache's
-  # keys" trap scripts/check-linked-build.sh documents for v0: mix a digest
-  # of include/v1/chtypes.h into CGO_CFLAGS so editing it invalidates the
+  # keys" trap v0's linked-build check documented: mix a digest
+  # of include/chtypes.h into CGO_CFLAGS so editing it invalidates the
   # cgo package's build cache entry instead of replaying a stale verdict.
-  stamp="$(cksum < "$tree/include/v1/chtypes.h" | awk '{print $1}')"
-  # -Werror: unlike v0's check-linked-build.sh (whose plants are GO-level
+  stamp="$(cksum < "$tree/include/chtypes.h" | awk '{print $1}')"
+  # -Werror: unlike v0's linked-build check (whose plants are GO-level
   # type mismatches at a cgo call site, caught by the Go compiler on every
   # toolchain alike), this file's own type checking happens entirely INSIDE
   # the cgo preamble -- chtypes_abi1_linked_fill assigns real C function
@@ -71,7 +67,7 @@ check() {
   (cd "$tree/go" && go build -tags "$TAG" "$PKG") || return 1
 
   echo "check-linked: ok — $TAGGED_FILE compiled and vetted under -tags $TAG against"
-  echo "  include/v1/chtypes.h; every generated chtypes_abi1_linked_fill call site type-checked"
+  echo "  include/chtypes.h; every generated chtypes_abi1_linked_fill call site type-checked"
   echo "  by the compiler."
   return 0
 }
@@ -83,7 +79,7 @@ PLANT_LABEL=(
 )
 PLANT_FILE=(
   "go/internal/abi1/linked_gen.go"
-  "include/v1/chtypes.h"
+  "include/chtypes.h"
 )
 PLANT_FIND=(
   "t->chs_abi_version = (chtypes_abi1_fn_chs_abi_version) &chs_abi_version;"
@@ -134,7 +130,7 @@ selftest() {
   trap "rm -rf '$tmp'" EXIT
   mkdir -p "$tmp/include"
   cp -R "$ROOT/go" "$tmp/"
-  cp -R "$ROOT/include/v1" "$tmp/include/v1"
+  cp -R "$ROOT/include/chtypes.h" "$tmp/include/chtypes.h"
 
   if ! check "$tmp" >/dev/null 2>&1; then
     echo "SELFTEST FAILED: the copied tree does not pass; the copy, not the plant, is wrong." >&2

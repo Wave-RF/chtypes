@@ -42,7 +42,28 @@ typed-array-argument functions. Hand-written `ts/src/abi1/libc.ts` calls
 only these exports, by name, and never declares or looks up a symbol
 itself.
 
-SO THIS EMITTER PRODUCES NO PER-FUNCTION TS CODE. Given ffi-rs can only call a
+THE PUBLIC LAYER'S VIEW (wave C). Two further outputs sit over that data, so the
+public API never spells a described name or a vocabulary value itself:
+
+  * ts/src/abi1/calls.gen.ts: ONE typed, copy-then-free method per described
+    call (a class `Calls` over the resolved table), named without the `chs_`
+    prefix (`schemaCreate`, `previewBatch`, ...). Each marshals through the
+    generic `rawCall` (below), throws the class sdk.json's status table gives
+    for a non-OK status, and returns the owned buffers as `Buffer`s and the
+    new handles as wrapped handles; no `chs_buf` or `chs_error` ever escapes.
+    The accessors and the frees of the buf and error handles are the generic
+    engine's own business and get no method.
+  * ts/src/abi1/vocab.gen.ts: every vocabulary, with the description's numbers,
+    spellings, facts and fallbacks: `Format`, `Status`, `Outcome`,
+    `BatchOutcome`, `FilterOutcome`, `Verdict`, `Reason` (with `lossy`),
+    `Source` (with `isStored`), `DefaultKind`, `DiscoverQueryParam`,
+    `DocFlags`. A fact is read by a generated function keyed by the value the
+    document carries (`reasonLossy`, `sourceIsStored`, `verdictAnswered`),
+    and an unlisted value reads as the vocabulary's own fallback; a
+    vocabulary with no fallback answers `undefined`, which the decoder turns
+    into an internal error.
+
+SO THE CALL ENGINE ITSELF IS NOT GENERATED PER FUNCTION. Given ffi-rs can only call a
 symbol it already knows the NAME of, and every chs_* name is known statically
 from spec/abi-v1/abi.json, there is no benefit to generating 38 nearly
 identical TS wrapper functions (one per chs_* call) the way emit/stub.py
@@ -93,6 +114,8 @@ from . import Output, banner
 DECLS_PATH = "ts/src/abi1/decls.gen.ts"
 ERRMAP_PATH = "ts/src/abi1/errmap.gen.ts"
 LIBC_PATH = "ts/src/abi1/libc.gen.ts"
+VOCAB_PATH = "ts/src/abi1/vocab.gen.ts"
+CALLS_PATH = "ts/src/abi1/calls.gen.ts"
 
 _WORD = re.compile(r"[A-Za-z0-9]+")
 
@@ -322,6 +345,7 @@ def render_errmap(model) -> str:
     status_map: dict[str, str | None] = model.sdk["errors"]["status"]
     class_names: dict[str, dict] = model.sdk["errors"]["classes"]
     loader_refusals: list[dict] = model.sdk["loader"]["refusals"]
+    _, status_values = status_tables(model)
 
     ts_class_of = {cls: info["ts"] for cls, info in class_names.items()}
 
@@ -343,33 +367,33 @@ def render_errmap(model) -> str:
     # (biome has no opinion on a generated file's CONTENT, only its own
     # formatting of whatever text is there).
     classes_used = {ts_class_of[c] for c in status_map.values() if c is not None} | {"InternalError"}
-    specifiers = sorted([(c, False) for c in classes_used] + [("CallErrorFields", True), ("ChtypesAbi1Error", True)])
+    specifiers = sorted([(c, False) for c in classes_used] + [("CallErrorFields", True), ("ChtypesError", True)])
     for name, is_type in specifiers:
         lines.append(f"  {'type ' if is_type else ''}{name},")
     lines += [
         "} from './errors.js';",
         "",
         "/**",
-        " * A call's chs_status name -> the mapped error instance (spec/abi-v1/sdk.json's",
-        " * errors.status table). CHS_OK has no entry: a caller checks the status name for",
-        " * 'CHS_OK' before ever calling this. An unrecognized status (impossible under a matching",
-        " * fingerprint; see spec/abi-v1/docs.md's chs_status section) maps to InternalError, naming",
-        " * the raw value, exactly like every other binding's generated table.",
+        " * A call's raw chs_status value -> the mapped error instance (spec/abi-v1/sdk.json's",
+        " * errors.status table). A caller checks for the OK value before ever calling this. A",
+        " * status outside the closed set (impossible under a matching fingerprint; see",
+        " * spec/abi-v1/docs.md's chs_status section) maps to InternalError, naming the raw",
+        " * value, exactly like every other binding's generated table.",
         " */",
-        "export function errorForStatus(statusName: string, fields: CallErrorFields): ChtypesAbi1Error {",
-        "  switch (statusName) {",
+        "export function errorForStatus(status: number, fields: CallErrorFields): ChtypesError {",
+        "  switch (status) {",
     ]
-    for status, cls in sorted(status_map.items()):
+    for status, cls in sorted(status_map.items(), key=lambda kv: status_values.get(kv[0], -1)):
         if status in ("CHS_OK", "unknown") or cls is None:
             continue
-        lines.append(f"    case {status!r}:")
+        lines.append(f"    case {status_values[status]}: // {status}")
         lines.append(f"      return new {ts_class_of[cls]}(fields);")
     lines += [
         "    default:",
         "      return new InternalError({",
         "        ...fields,",
         "        messageBytes: Buffer.from(",
-        "          `chtypes: unrecognized chs_status ${statusName}: ${fields.messageBytes.toString('utf8')}`,",
+        "          `chtypes: unrecognized call status ${status}: ${fields.messageBytes.toString('utf8')}`,",
         "          'utf8',",
         "        ),",
         "      });",
@@ -509,9 +533,281 @@ def render_libc(model) -> str:
     return "\n".join(lines)
 
 
+# --------------------------------------------------------------- vocabularies
+
+# The TS spelling of each vocabulary's type name, keyed by the description's
+# own enum name. An enum this table does not name falls back to the PascalCase
+# of its name (prefix stripped), so a new vocabulary is generated rather than
+# dropped; only a value's NAME ever needs a table, and only where the value
+# itself is not a word (a one-letter verdict, the empty default kind).
+TS_VOCAB_NAMES = {
+    "chs_status": "Status",
+    "chs_format": "Format",
+    "row_outcome": "Outcome",
+    "batch_outcome": "BatchOutcome",
+    "filter_outcome": "FilterOutcome",
+    "filter_verdict": "Verdict",
+    "transform_reason": "Reason",
+    "value_src": "Source",
+    "default_kind": "DefaultKind",
+    "discover_query_param": "DiscoverQueryParam",
+}
+TS_VALUE_NAMES = {
+    "filter_verdict": {"t": "True", "f": "False", "e": "Error", "d": "Decline"},
+    "default_kind": {"": "None"},
+}
+DOC_PREFIX = "CHS_DOC_"
+
+
+def _pascal_words(text: str) -> str:
+    return "".join(w[:1].upper() + w[1:].lower() for w in _WORD.findall(text))
+
+
+def _lower_first(text: str) -> str:
+    return text[:1].lower() + text[1:]
+
+
+def ts_vocab_type(enum_name: str) -> str:
+    return TS_VOCAB_NAMES.get(enum_name) or _pascal_words(enum_name.removeprefix("chs_"))
+
+
+def ts_value_name(enum_name: str, value) -> str:
+    override = TS_VALUE_NAMES.get(enum_name, {})
+    if value in override:
+        return override[value]
+    name = _pascal_words(str(value))
+    if not name or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", name):
+        raise ValueError(f"emit/ts.py: no TS name for value {value!r} of {enum_name}; add one to TS_VALUE_NAMES")
+    return name
+
+
+def _ts_str(value: str) -> str:
+    return json.dumps(value, ensure_ascii=True)
+
+
+def _render_int_enum(enum, type_name: str) -> list[str]:
+    keys: dict[str, int] = {}
+    for v in enum.values:
+        if enum.name == "chs_format":
+            key = v.fields["ch_name"]
+        else:
+            assert v.name is not None
+            key = _pascal_words(v.name.removeprefix("CHS_"))
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", key) or key in keys:
+            raise ValueError(f"emit/ts.py: {enum.name}: cannot spell {v.name!r} as a TS key ({key!r})")
+        keys[key] = int(v.value)
+    out = [
+        f"/** {enum.name}: the description's own numbers. */",
+        f"export const {type_name} = {{",
+        *[f"  {k}: {v}," for k, v in keys.items()],
+        "} as const;",
+        f"export type {type_name} = (typeof {type_name})[keyof typeof {type_name}];",
+        "",
+    ]
+    if enum.name == "chs_format":
+        names = {int(v.value): v.fields["ch_name"] for v in enum.values}
+        out += [
+            "/** Each format's ClickHouse name, which is how `capabilities` lists one. */",
+            "export const FORMAT_CH_NAME: Readonly<Record<number, string>> = {",
+            *[f"  {n}: {_ts_str(c)}," for n, c in names.items()],
+            "};",
+            "",
+            "export function formatChName(format: number): string | undefined {",
+            "  return FORMAT_CH_NAME[format];",
+            "}",
+            "",
+        ]
+    return out
+
+
+def _render_string_vocab(enum) -> list[str]:
+    type_name = ts_vocab_type(enum.name)
+    upper = re.sub(r"(?<!^)(?=[A-Z])", "_", type_name).upper()
+    entries = {}
+    names: dict[str, str] = {}
+    for v in enum.values:
+        key = ts_value_name(enum.name, v.value)
+        if key in names:
+            raise ValueError(f"emit/ts.py: {enum.name}: {v.value!r} and {names[key]!r} both spell {key}")
+        names[key] = v.value
+        entries[v.value] = dict(v.fields)
+    out = [
+        f"/** {enum.name}: the description's own values. */",
+        f"export const {type_name} = {{",
+        *[f"  {k}: {_ts_str(v)}," for k, v in names.items()],
+        "} as const;",
+        f"export type {type_name} = (typeof {type_name})[keyof typeof {type_name}];",
+        "",
+        f"const {upper}_ENTRIES: Readonly<Record<string, Readonly<Record<string, boolean | string>>>> = {{",
+        *[f"  {_ts_str(v)}: {json.dumps(f, sort_keys=True)}," for v, f in entries.items()],
+        "};",
+        f"/** The description's fallback for a value it does not list, or null when it names none. */",
+        f"export const {upper}_FALLBACK: {type_name} | null = {_ts_str(enum.fallback) if enum.fallback is not None else 'null'};",
+        "",
+        f"/** The value when listed, else the description's fallback, else undefined (the decoder's internal error). */",
+        f"export function {_lower_first(type_name)}Of(value: string): {type_name} | undefined {{",
+        f"  if (Object.hasOwn({upper}_ENTRIES, value)) return value as {type_name};",
+        f"  return {upper}_FALLBACK ?? undefined;",
+        "}",
+        "",
+    ]
+    for field, kind in enum.fields.items():
+        ts_t = "boolean" if kind == "boolean" else "string"
+        fn = f"{_lower_first(type_name)}{_pascal_words(field)}"
+        out += [
+            f"/** The `{field}` fact for a value, read from the description; an unlisted value reads as the fallback's. */",
+            f"export function {fn}(value: string): {ts_t} | undefined {{",
+            f"  const key = Object.hasOwn({upper}_ENTRIES, value) ? value : {upper}_FALLBACK;",
+            "  if (key === null) return undefined;",
+            f"  return {upper}_ENTRIES[key]?.[{_ts_str(field)}] as {ts_t} | undefined;",
+            "}",
+            "",
+        ]
+    return out
+
+
+def render_vocab(model) -> str:
+    lines = [
+        f"/* {banner(model)} */",
+        "/*",
+        " * Every vocabulary the description defines, with its numbers, spellings, facts and",
+        " * fallbacks. A fact (a reason's `lossy`, a source's `isStored`, a verdict's `answered`)",
+        " * is read by the generated function keyed by the value a document carries; no binding",
+        " * keeps a list of its own.",
+        " */",
+        "",
+    ]
+    for enum in model.int_enums:
+        lines += _render_int_enum(enum, ts_vocab_type(enum.name))
+    for enum in model.vocabularies:
+        lines += _render_string_vocab(enum)
+    docs = {k: c for k, c in model.constants.items() if k.startswith(DOC_PREFIX)}
+    lines += [
+        "/** The document groups a batch call asks for (`CHS_DOC_*`), as bit flags. */",
+        "export const DocFlags = {",
+        *[f"  {_pascal_words(k.removeprefix(DOC_PREFIX))}: {c.value}," for k, c in docs.items()],
+        "} as const;",
+        "export type DocFlags = number;",
+        "",
+    ]
+    export_none = model.constants.get("CHS_EXPORT_NONE")
+    if export_none is not None:
+        lines += [
+            "/** The `export_format` of a batch preview that exports nothing. */",
+            f"export const EXPORT_NONE = {export_none.value};",
+            "",
+        ]
+    return "\n".join(lines)
+
+
+# ----------------------------------------------------------- typed call wrappers
+
+
+def _ts_param_name(name: str) -> str:
+    words = [w for w in name.split("_") if w]
+    return words[0] + "".join(w[:1].upper() + w[1:] for w in words[1:])
+
+
+def _handle_type_name(model, kind: str) -> str:
+    return f"{pascal_name(model.prefix, kind)}Handle"
+
+
+def _wrappable(model, fn) -> bool:
+    if fn.cls in ("handshake", "tombstone", "tooling"):
+        return False
+    if fn.returns.kind != "status":
+        return False
+    hidden = {model.handles[k].name for k in ("chs_buf", "chs_error") if k in model.handles}
+    return not any(p.kind == "handle" and p.type in hidden for p in fn.params)
+
+
+def render_calls(model) -> str:
+    owned_handles = [k for k in model.handles if k not in (BUF_HANDLE, "chs_error")]
+    lines = [
+        f"/* {banner(model)} */",
+        "/*",
+        " * One typed, copy-then-free method per described call, named without the `chs_` prefix.",
+        " * Each marshals through the generic `rawCall`, throws the error class sdk.json's status",
+        " * table gives for a non-OK status, returns every owned buffer as a Buffer (already copied",
+        " * and freed) and every new handle wrapped. No raw buffer or error handle ever escapes.",
+        " * The accessors and frees of those two kinds, and the handshake, tombstone and tooling",
+        " * exports, get no method: the generic engine and the loader own them.",
+        " */",
+        "",
+        "import { SYMBOL } from './decls.gen.js';",
+        "import { type Abi1Handle, wrapHandle } from './handles.js';",
+        "import { asBuffer, checkStatus, type HandleRef, NULL_EXTERNAL, type RawApi, rawCall } from './raw.js';",
+        "",
+    ]
+    for kind in owned_handles:
+        lines.append(f"export type {_handle_type_name(model, kind)} = Abi1Handle & {{ readonly kind: {_ts_str(kind)} }};")
+    lines += ["", "export class Calls {", "  readonly raw: RawApi;", "", "  constructor(raw: RawApi) {", "    this.raw = raw;", "  }", ""]
+    for fn in model.functions:
+        if not _wrappable(model, fn):
+            continue
+        method = camel_name(model.prefix, fn.name)
+        sym = const_name(model.prefix, fn.name)
+        ins = [p for p in fn.params if not p.is_out]
+        outs = [p for p in fn.params if p.kind == "out_handle"]
+        sig, args = [], []
+        for p in ins:
+            n = _ts_param_name(p.name)
+            if p.kind in ("scalar", "enum"):
+                sig.append(f"{n}: number")
+                args.append(n)
+            elif p.kind == "bytes_in":
+                sig.append(f"{n}: Uint8Array")
+                args.append(f"asBuffer({n})")
+            elif p.kind == "handle":
+                t = _handle_type_name(model, p.type)
+                if p.nullable:
+                    sig.append(f"{n}: {t} | null")
+                    args.append(f"{n} === null ? NULL_EXTERNAL : {n}.ptr")
+                else:
+                    sig.append(f"{n}: {t}")
+                    args.append(f"{n}.ptr")
+            else:
+                raise ValueError(f"emit/ts.py: unexpected input param kind {p.kind!r} on {fn.name}")
+
+        def out_expr(p):
+            key = _ts_str(p.name)
+            if p.type == BUF_HANDLE:
+                return f"outs[{key}] as Buffer"
+            return f"wrapHandle(this.raw, outs[{key}] as HandleRef) as {_handle_type_name(model, p.type)}"
+
+        def out_type(p):
+            return "Buffer" if p.type == BUF_HANDLE else _handle_type_name(model, p.type)
+
+        if len(outs) == 0:
+            ret_type = "void"
+        elif len(outs) == 1:
+            ret_type = out_type(outs[0])
+        else:
+            ret_type = "{ " + "; ".join(f"readonly {_ts_param_name(p.name)}: {out_type(p)}" for p in outs) + " }"
+        lines.append(f"  /** The generated call wrapper for {fn.name}. */")
+        lines.append(f"  {method}({', '.join(sig)}): {ret_type} {{")
+        call = f"rawCall(this.raw, SYMBOL.{sym}, [{', '.join(args)}])"
+        if not outs:
+            lines.append(f"    checkStatus({call});")
+        else:
+            lines.append(f"    const outs = checkStatus({call});")
+            if len(outs) == 1:
+                lines.append(f"    return {out_expr(outs[0])};")
+            else:
+                lines.append("    return {")
+                for p in outs:
+                    lines.append(f"      {_ts_param_name(p.name)}: {out_expr(p)},")
+                lines.append("    };")
+        lines += ["  }", ""]
+    lines += ["}", ""]
+    return "\n".join(lines)
+
+
 def outputs(model) -> list[Output]:
     return [
         Output(DECLS_PATH, content=render_decls(model)),
         Output(ERRMAP_PATH, content=render_errmap(model)),
         Output(LIBC_PATH, content=render_libc(model)),
+        Output(VOCAB_PATH, content=render_vocab(model)),
+        Output(CALLS_PATH, content=render_calls(model)),
     ]

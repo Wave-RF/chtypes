@@ -1,22 +1,10 @@
 /**
- * The error model, which is three outcomes that must never be conflated
- * (docs/limitations.md §The error model is normative):
- *
- *   - ClickHouse rejects        -> a real ClickHouse error code
- *   - this build refuses        -> CODE_UNSUPPORTED (-2), never a ClickHouse code
- *   - ClickHouse accepts but the value cannot be read back -> usually code 691; it
- *     is an ACCEPTED insert, surfaced through the row outcome rather than here.
- *
- * Mapping `unsupported` onto a rejection manufactures an over-reject the product
- * never made; mapping it onto an acceptance manufactures an over-accept, which
- * is the cardinal sin. So it gets its own sentinel on the wire and, since
- * 2026-08-26, its own ERROR CLASS here — `UnsupportedError`, a peer of
- * `SchemaError` rather than a subclass, so that a `catch` which handles only
- * `SchemaError` cannot silently swallow a decline as a rejection.
+ * The v0 fetch layer's error classes, kept only for the v0 fetch module, its
+ * CLI and their tests (`fetch.ts`, `cli.ts`, `paths.ts`, `tar.ts`), which the
+ * switch lane deletes together with this file. The v1 public error model is
+ * `./abi1/errors.ts` over `./ocifetch/errors.ts`, and nothing exported from
+ * `./index.ts` comes from here.
  */
-
-/** "This build refuses to answer." Never a real ClickHouse error code. */
-export const CODE_UNSUPPORTED = -2;
 
 /**
  * The chs_* ABI revision this binding was written against — `CHS_ABI_REVISION`
@@ -60,136 +48,6 @@ export class ChtypesError extends Error {
 
 /** A registry could not be loaded, or a version could not be resolved. */
 export class RegistryError extends ChtypesError {}
-
-/**
- * This artifact IMAGE is already initialized under a different timezone.
- *
- * `dlopen` maps one image per file, and `chs_init` runs at most once per
- * image, so a second load asking for another zone can be neither honored nor
- * silently ignored: re-running `chs_init` would move the zone under the first
- * load's live libraries. A hardlink or symlink to a loaded artifact is that
- * same image and is refused the same way.
- *
- * A `RegistryError`, because it is a reason the loader cannot serve this
- * request — so a `catch` written against `for()`'s documented `RegistryError`
- * keeps working — and matched with `instanceof InitConflictError`, like every
- * other class here. Not an `ArtifactError`: the artifact is fine, and none of
- * the shared fetch codes describes it.
- */
-export class InitConflictError extends RegistryError {
-  /** The artifact path this load asked for, as given. */
-  readonly path: string;
-  /** The timezone the image is live under. */
-  readonly have: string;
-  /** The timezone this load asked for, refused. */
-  readonly want: string;
-
-  constructor(path: string, have: string, want: string) {
-    super(
-      `chtypes: ${path} is already initialized with timezone ${JSON.stringify(have)}; ` +
-        `cannot re-initialize with ${JSON.stringify(want)} (one image per file — a hardlink ` +
-        'or symlink to a loaded artifact is the same image, and chs_init runs at most once)',
-    );
-    this.path = path;
-    this.have = have;
-    this.want = want;
-  }
-}
-
-/**
- * A REFUSAL: ClickHouse itself refused a type, a column list, an engine or a
- * TTL.
- *
- * `code` is ALWAYS a real ClickHouse error code. "This build declines to
- * answer" is a DIFFERENT CLASS — `UnsupportedError` — never this one carrying
- * a sentinel, so no `SchemaError` ever holds `CODE_UNSUPPORTED`
- * (docs/reference/bindings.md §The error split).
- */
-export class SchemaError extends ChtypesError {
-  readonly code: number;
-  readonly detail: string;
-  readonly column: string | undefined;
-
-  constructor(code: number, detail: string, column?: string) {
-    super(
-      column
-        ? `chtypes: column ${JSON.stringify(column)}: [${code}] ${detail}`
-        : `chtypes: [${code}] ${detail}`,
-    );
-    this.code = code;
-    this.detail = detail;
-    this.column = column;
-  }
-}
-
-/**
- * A DECLINE: "a real server might well have accepted this; I will not guess."
- * Never ClickHouse rejecting anything, so it carries no `code` property at all
- * — there is no code to carry.
- *
- * It is a PEER of `SchemaError`, deliberately NOT a subclass and deliberately
- * NOT matched by `err instanceof SchemaError`. A decline that still satisfied
- * "is a SchemaError" would be the sentinel problem wearing a class hierarchy:
- * every `catch` that forgot the predicate would keep silently turning declines
- * into rejections, which is a manufactured over-reject — data loss the product
- * never made, budgeted at zero. As a peer, forgetting throws on past the
- * handler, which is loud.
- *
- * ```ts
- * try {
- *   schema.setEngine(engine, orderBy);
- * } catch (err) {
- *   // validate cautiously; do NOT blame the tenant
- *   if (err instanceof UnsupportedError) return degradeToCarefulPath(err);
- *   // ClickHouse refused: err.code is its own code
- *   if (err instanceof SchemaError) return rejectWith(err.code, err.detail);
- *   throw err;
- * }
- * ```
- *
- * The MESSAGE still renders the ABI's `CODE_UNSUPPORTED` sentinel in the shape
- * `SchemaError` renders its code. The sentinel is not a property of this class
- * — it is the wire value the C ABI returned — but the rendering is frozen: the
- * conformance driver puts this exact string on the protocol wire as an
- * `unsupported` scope, and Python's `UnsupportedError` already spells it this
- * way. Changing the text would move rig records without changing a verdict.
- */
-export class UnsupportedError extends ChtypesError {
-  readonly detail: string;
-  readonly column: string | undefined;
-
-  constructor(detail: string, column?: string) {
-    super(
-      column
-        ? `chtypes: column ${JSON.stringify(column)}: [${CODE_UNSUPPORTED}] ${detail}`
-        : `chtypes: [${CODE_UNSUPPORTED}] ${detail}`,
-    );
-    this.detail = detail;
-    this.column = column;
-  }
-}
-
-/**
- * The ONE place an ABI error code becomes an error object, so the
- * refusal/decline split cannot be decided differently in two files.
- *
- * The SIGN decides (docs/reference/bindings.md §The error split): a
- * positive code is the server's own refusal and rides through verbatim; any
- * negative code is this library declining (`-2` "I will not guess", `-1` a
- * guarded exception, and a binding's own missing-symbol sentinel) and becomes
- * an `UnsupportedError`. Keying on the sign rather than on `=== CODE_UNSUPPORTED`
- * means a negative sentinel a later era adds can never become "a SchemaError
- * with a negative code", which the class's own contract forbids.
- *
- * Internal: not re-exported from the package index.
- */
-export function schemaErrorFor(
-  code: number,
-  detail: string,
-  column?: string,
-): SchemaError | UnsupportedError {
-  return code < 0 ? new UnsupportedError(detail, column) : new SchemaError(code, detail, column);
-}
 
 // ---------------------------------------------------------------- artifacts
 //

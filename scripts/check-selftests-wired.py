@@ -4,7 +4,7 @@ r"""check-selftests-wired.py — every script under scripts/ that DECLARES a
 (chtypes#268).
 
 WHY THIS EXISTS. A checker nobody has seen fail is not a checker — the house
-rule scripts/check-abi-decls.py, scripts/lint-public.sh and every other
+rule scripts/lint-public.sh, scripts/lint-spelling.sh and every other
 selftest-first gate in this repository already follow. Three scripts kept the
 letter of that rule (each has a `--selftest` mode, each passes it locally) and
 broke its spirit: scripts/check-suite.sh, scripts/lib/provenance.py and
@@ -35,7 +35,7 @@ form below is the exact shape an existing script in this tree uses today
 (confirmed by reading each one; see the PR that added this file):
 
   .sh   `if [ "${1:-}" = "--selftest" ]; then`   (the majority: abi-channel.sh,
-        check-linked-build.sh, check-standalone.sh, check-suite.sh,
+        check-standalone.sh, check-suite.sh,
         lint-cited-paths.sh, lint-public.sh, published-lines.sh)
         or a `case` arm spelled exactly `--selftest)` (index-diff.sh,
         lint-spelling.sh)

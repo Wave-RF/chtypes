@@ -7,22 +7,22 @@
 //! conformance runner, and — outside this module's v1 FFI scope — the public
 //! API).
 //!
-//! Nothing here is part of this crate's public API: `src/lib.rs` declares
-//! this as `mod abi1;`, not `pub mod abi1;`. The conformance runner
-//! (`rust/tests/abi1_conformance.rs`) therefore does not reach these modules
-//! through `chtypes::abi1::*` — an integration test is a separate crate with
-//! only this crate's PUBLIC items visible, the same as every other test
-//! under `rust/tests/` (`rust/tests/abi_revision.rs` reaches only
-//! `chtypes::Registry`, for instance). Instead it re-declares this same
-//! module tree with `#[path = "../src/abi1/<file>.rs"]`, so `decls.rs`,
-//! `invoke_gen.rs` and `loader.rs` are each compiled twice — once here,
-//! unreached until wave C wires a public `Library` onto it (hence this
-//! module's `#![allow(dead_code)]`s), and once inside the test binary, where
-//! the conformance runner actually calls them. Nothing is duplicated BY
-//! HAND: both compilations read the identical three files.
+//! `calls_gen` (the typed, copy-then-free call wrappers and the handle
+//! objects), `vocab_gen` (every vocabulary) and `errmap_gen` (the error-class
+//! tables) are generated too. The crate's public API (`rust/src/lib.rs` and
+//! its modules) calls only those prefix-less wrappers, never a raw symbol.
+//!
+//! The conformance runner (`rust/tests/abi1_conformance.rs`) does not reach
+//! these modules through the crate's public items: an integration test is a
+//! separate crate. Instead it re-declares the module tree it needs with
+//! `#[path = "../src/abi1/<file>.rs"]`, so those files are compiled twice, from
+//! the identical source.
 
 #![allow(dead_code)]
 
-mod decls;
+pub(crate) mod calls_gen;
+pub(crate) mod decls;
+pub(crate) mod errmap_gen;
 mod invoke_gen;
-mod loader;
+pub(crate) mod loader;
+pub(crate) mod vocab_gen;

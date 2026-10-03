@@ -6,6 +6,17 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Changed (v1, breaking)
+
+- **The public API is the one in `docs/reference/bindings-v1.md`, over the generated ABI v1 layer and the OCI fetch layer.** `setup(timezone=, defaults=)` is the one process setup; `Registry(*, fetch=, autofetch=, preload=)` is keyword-only and opens nothing at construction; `Registry.for_version`, `installed()` and `libraries()` replace the directory-scanning registry; `Library.compile_table` (exactly one `CREATE TABLE`) replaces `compile_ddl`; `open_unverified(path, allow=)` replaces `Load`.
+- **Names, SQL, messages and renderings are `bytes`.** Result types are one-to-one decodes of the library's documents (`RowResult.columns` is every entry, `values` the stored subset by the description's own `is_stored` fact), and every vocabulary (`Format`, `Outcome`, `Verdict`, `Reason`, `Source`, `DefaultKind`, `DocFlags`) is generated from the ABI description.
+- **One error family.** `CallError` (under `ChtypesError`) carries `status`, `ch_code`, `ch_name`, `message` and `column`; `SchemaError`, `UnsupportedError`, `UsageError` and `InternalError` are peers. Fetch and loader errors are `ArtifactError` subclasses, one class per code.
+- **Each `Schema`, `Filter` and `Block` has a close guard**: `close` waits for calls already inside the object, and a call after close is a `UsageError` raised before any C call. No lock is taken around a call.
+
+### Removed (v1)
+
+- `compile_ddl`, the engine, TTL and partition-key setters, `encode_settings`, the transform classifier, discovery reconstruction, the hand JSON readers, `quote_bare_denormals`, the hand error-code table parser, the manifest and revision machinery, the v0 fetch module and its `python -m chtypes` command line, `ABI_REVISION`, `COMPILE_DECLARED`, `Registry.shutdown`, `Library.close` and the `Registry` context manager.
+
 ### Fixed
 
 - **The crash-guard refuse-list is now sourced identically to the other three bindings, and an artifact with neither source refuses rather than loading unguarded.** This binding already fell back to the manifest's `unsafe_families` field when `unsafe_families.txt` was absent, but a manifest predating the field (or one that simply omitted it) was indistinguishable from a present, empty field, so `chs_init` silently ran with no refuse-list. `Manifest.unsafe_families` is now `None` when the field is absent rather than defaulting to `""`, and a directory with neither the file nor the field is refused, naming both, instead of loading unguarded (`docs/reference/artifact.md` step 9).

@@ -284,7 +284,7 @@ static void test_status_injection(lib_t *l) {
 }
 
 /* free(NULL) and a double free are no-ops; a freed buf gives NULL/0, exactly
-   as include/v1/chtypes.h documents for chs_buf_data/chs_buf_len. */
+   as include/chtypes.h documents for chs_buf_data/chs_buf_len. */
 static void test_free_rules(lib_t *l) {
     l->buf_free(NULL); /* must not crash */
 

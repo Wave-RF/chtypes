@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -72,6 +73,21 @@ func repoRoot(t *testing.T) string {
 		t.Fatal("conformance_test.go: runtime.Caller(0) failed")
 	}
 	return filepath.Join(filepath.Dir(file), "..", "..", "..")
+}
+
+// plainPredicate turns the stubs manifest's predicate (decoded with
+// json.Number, so no integer is widened) into what the fetch layer hands the
+// loader: the plain map json.Unmarshal builds, a float64 for every number.
+func plainPredicate(p map[string]interface{}) map[string]any {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		panic(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		panic(err)
+	}
+	return out
 }
 
 // stubLibraryPath resolves a stub variant's library under THIS job's own
@@ -172,13 +188,9 @@ func TestConformance(t *testing.T) {
 	if !haveOK {
 		t.Fatalf("%s: no %q variant", manifestPath, "ok")
 	}
-	okPredicate, err := json.Marshal(okVariant.Predicate)
-	if err != nil {
-		t.Fatalf("marshaling the %q variant's predicate: %v", "ok", err)
-	}
 	tbl, lerr := Load(LoadInput{
 		LibraryPath: stubLibraryPath(stubsDir, okVariant),
-		Predicate:   okPredicate,
+		Predicate:   plainPredicate(okVariant.Predicate),
 		Platform:    fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH),
 	})
 	if lerr != nil {
@@ -456,18 +468,18 @@ func runLoaderCase(stubsDir string, manifest stubsManifest, c caseJSON) (bool, s
 	if !ok {
 		return false, fmt.Sprintf("stubs.json has no variant %q", c.Variant)
 	}
-	predJSON, err := json.Marshal(variant.Predicate)
-	if err != nil {
-		return false, fmt.Sprintf("marshaling the predicate: %v", err)
-	}
 	_, lerr := Load(LoadInput{
 		LibraryPath: stubLibraryPath(stubsDir, variant),
-		Predicate:   predJSON,
+		Predicate:   plainPredicate(variant.Predicate),
 		Platform:    fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH),
 	})
 	got := "accepted"
 	if lerr != nil {
-		got = lerr.Reason
+		var le *LoadError
+		if !errors.As(lerr, &le) {
+			return false, fmt.Sprintf("Load(%s) failed with %T, not a refusal: %v", c.Variant, lerr, lerr)
+		}
+		got = le.Reason
 	}
 
 	want, _ := c.Expect["reason"].(string)
