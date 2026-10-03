@@ -17,11 +17,11 @@ That is the whole command: `uv` resolves `chtypes` as an editable path dependenc
 
 ## Knobs
 
-| variable            | effect                                                                                               |
-| ------------------- | ---------------------------------------------------------------------------------------------------- |
+| variable            | effect                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `CHTYPES_VERSION`   | which build the tour opens: a release line (`26.8`), a three-part or a four-part version. Default: the newest installed |
-| `CHTYPES_CACHE`     | the cache directory. Default: the per-user cache, `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`          |
-| `CHTYPES_AUTOFETCH` | `1` lets the first open fetch a missing build from the registry                                      |
+| `CHTYPES_CACHE`     | the cache directory. Default: the per-user cache, `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`                              |
+| `CHTYPES_AUTOFETCH` | `1` lets the first open fetch a missing build from the registry                                                         |
 
 ## What is Python-specific here
 
