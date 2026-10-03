@@ -18,6 +18,10 @@ type Value struct {
 	Column string
 	// Text is ClickHouse's own rendering of the stored value, from stored.
 	Text string
+	// Value is the raw bytes of a scalar String or FixedString value, from
+	// value_b64; nil otherwise (absent for NULL and for a value nested in
+	// another type, a recorded 1.0 gap). Text is always the rendering.
+	Value []byte
 	// Null is the library's own verdict, poison included.
 	Null bool
 	// Source is where the value came from, from src.
@@ -45,6 +49,17 @@ type Computed struct {
 	Column string
 	Kind   string
 	Text   string
+	// Value is the raw bytes, as Value.Value.
+	Value []byte
+}
+
+// EngineCell is one cell of a stored row after the engine's insert-time merge.
+type EngineCell struct {
+	Column string
+	Text   string
+	Null   bool
+	// Value is the raw bytes, as Value.Value.
+	Value []byte
 }
 
 // RowResult is one row's verdict and, as the flags ask, its columns.
@@ -65,7 +80,7 @@ type RowResult struct {
 	Verdict     *Verdict
 	VerdictCode int32
 	VerdictErr  string
-	// PartitionID is nil when the document carries none.
+	// PartitionID is nil when the document carries none; it is bytes.
 	PartitionID *string
 	// InputSpan is the bytes the reader consumed for this record.
 	InputSpan *Span
@@ -99,8 +114,9 @@ type BatchResult struct {
 	// Transformed is every transform in the batch with its Row, as the
 	// library lists them.
 	Transformed []Transform
-	// EngineRows is nil when the document carries none.
-	EngineRows [][]byte
+	// EngineRows is each stored row after the engine's insert-time merge, a
+	// list of cells; nil when the document carries none.
+	EngineRows [][]EngineCell
 	// Payload is the export buffer: nil when no export was asked for or it was
 	// declined, non-nil and empty for an accepted batch with zero rows.
 	Payload []byte
@@ -164,6 +180,8 @@ type DiscoveredColumn struct {
 // order.
 type Discovery struct {
 	Columns []DiscoveredColumn
+	// ColumnsSQL is the declarations joined for a CREATE TABLE.
+	ColumnsSQL string
 }
 
 // Capabilities is what a build supports, from its own build_info.

@@ -21,6 +21,7 @@ const rowDoc = `{
     {"name": "a", "src": "input", "null": false, "input": "1", "stored": "1"},
     {"name_b64": "/wA=", "src": "default_generated", "null": true, "stored": "x"},
     {"name": "e", "src": "ephemeral_input", "null": false, "stored": "9"},
+    {"name": "s", "src": "input", "null": false, "stored_b64": "/wCA", "value_b64": "/wCA"},
     {"name": "a\u0000b", "src": "absent", "null": false, "stored_b64": "/wE="}
   ],
   "transformed": [
@@ -28,8 +29,8 @@ const rowDoc = `{
     {"column_b64": "/w==", "input": "1.0", "stored": "1", "reason": "reformat", "row": 2},
     {"column": "z", "input": "q", "stored": "r", "reason": "a_reason_nobody_listed", "row": 3}
   ],
-  "unknown_fields": ["u1", {"name_b64": "/v8="}],
-  "unsupported_settings": ["s1"],
+  "unknown_fields": [{"name": "u1"}, {"name_b64": "/v8="}],
+  "unsupported_settings": [{"name": "s1"}],
   "computed": [{"name": "m", "kind": "materialized", "stored": "5"}],
   "verdict": "t",
   "verdict_code": 0,
@@ -44,23 +45,23 @@ func TestDecodeRow(t *testing.T) {
 	if r.Outcome != Accepted {
 		t.Errorf("Outcome = %q", r.Outcome)
 	}
-	if len(r.Columns) != 4 {
-		t.Fatalf("Columns = %d, want 4", len(r.Columns))
+	if len(r.Columns) != 5 {
+		t.Fatalf("Columns = %d, want 5", len(r.Columns))
 	}
 	// A name is bytes whichever way it arrives: base64 raw bytes, and NUL.
 	if got := r.Columns[1].Column; got != "\xff\x00" {
 		t.Errorf("name_b64 = %q, want the decoded raw bytes", got)
 	}
-	if got := r.Columns[3].Column; got != "a\x00b" {
+	if got := r.Columns[4].Column; got != "a\x00b" {
 		t.Errorf("name with NUL = %q", got)
 	}
-	if got := r.Columns[3].Text; got != "\xff\x01" {
+	if got := r.Columns[4].Text; got != "\xff\x01" {
 		t.Errorf("stored_b64 = %q", got)
 	}
 	// Values is the subset whose is_stored is true, in order: ephemeral_input
 	// is the one entry that is not.
-	if len(r.Values) != 3 {
-		t.Fatalf("Values = %d, want 3 (every entry but ephemeral_input)", len(r.Values))
+	if len(r.Values) != 4 {
+		t.Fatalf("Values = %d, want 4 (every entry but ephemeral_input)", len(r.Values))
 	}
 	for _, v := range r.Values {
 		if v.Source == SourceEphemeralInput {
@@ -72,6 +73,12 @@ func TestDecodeRow(t *testing.T) {
 	}
 	if r.Columns[2].IsStored {
 		t.Errorf("ephemeral_input read as stored")
+	}
+	if v := r.Columns[3]; string(v.Value) != "\xff\x00\x80" || v.Text != "\xff\x00\x80" {
+		t.Errorf("a String value carries its raw bytes beside the rendering: %+v", v)
+	}
+	if r.Columns[0].Value != nil {
+		t.Errorf("an entry with no value_b64 has no Value: %+v", r.Columns[0])
 	}
 	if len(r.Transformed) != 3 {
 		t.Fatalf("Transformed = %d", len(r.Transformed))
@@ -119,19 +126,20 @@ func TestDecodeRowAbsentIsDefault(t *testing.T) {
 
 func TestDecodeRowRefusals(t *testing.T) {
 	cases := map[string]string{
-		"duplicate key":          `{"outcome": "accepted", "outcome": "rejected"}`,
-		"duplicate key, nested":  `{"cols": [{"name": "a", "name": "b", "src": "input"}]}`,
-		"name both ways":         `{"cols": [{"name": "a", "name_b64": "YQ==", "src": "input"}]}`,
-		"name neither way":       `{"cols": [{"src": "input"}]}`,
-		"name, bad base64":       `{"cols": [{"name_b64": "!!", "src": "input"}]}`,
-		"wrong type":             `{"code": "7x"}`,
-		"cols not an array":      `{"cols": {"name": "a"}}`,
-		"source not in the list": `{"cols": [{"name": "a", "src": "no_such_source"}]}`,
-		"source absent":          `{"cols": [{"name": "a"}]}`,
-		"not an object":          `[1]`,
-		"not JSON":               `{`,
-		"trailing data":          `{} {}`,
-		"stored both ways":       `{"cols": [{"name": "a", "src": "input", "stored": "1", "stored_b64": "MQ=="}]}`,
+		"unknown field as a bare string": `{"unknown_fields": ["u"]}`,
+		"duplicate key":                  `{"outcome": "accepted", "outcome": "rejected"}`,
+		"duplicate key, nested":          `{"cols": [{"name": "a", "name": "b", "src": "input"}]}`,
+		"name both ways":                 `{"cols": [{"name": "a", "name_b64": "YQ==", "src": "input"}]}`,
+		"name neither way":               `{"cols": [{"src": "input"}]}`,
+		"name, bad base64":               `{"cols": [{"name_b64": "!!", "src": "input"}]}`,
+		"wrong type":                     `{"code": "7x"}`,
+		"cols not an array":              `{"cols": {"name": "a"}}`,
+		"source not in the list":         `{"cols": [{"name": "a", "src": "no_such_source"}]}`,
+		"source absent":                  `{"cols": [{"name": "a"}]}`,
+		"not an object":                  `[1]`,
+		"not JSON":                       `{`,
+		"trailing data":                  `{} {}`,
+		"stored both ways":               `{"cols": [{"name": "a", "src": "input", "stored": "1", "stored_b64": "MQ=="}]}`,
 	}
 	for name, doc := range cases {
 		_, err := decodeRow([]byte(doc))
@@ -152,7 +160,7 @@ func TestDecodeBatch(t *testing.T) {
 	  "rows_read": 2, "rows_skipped": 1,
 	  "rows": [{"outcome": "accepted", "input_span": {"off": 0, "len": 3}}, {"outcome": "skipped", "input_span": {"off": 3, "len": 4}, "err": "bad"}],
 	  "transformed": [{"column": "a", "input": "1", "stored": "2", "reason": "ttl_expired", "row": 1}],
-	  "engine_rows": ["{\"a\":1}"],
+	  "engine_rows": [[{"name":"a","stored":"1","null":false},{"name_b64":"/w==","stored_b64":"/wA=","value_b64":"/wA=","null":false},{"name":"n","null":true}]],
 	  "row_spans": [{"off": 0, "len": 5}],
 	  "export_declined": "",
 	  "rows_passed": 1, "rows_cut": 0,
@@ -176,8 +184,14 @@ func TestDecodeBatch(t *testing.T) {
 	if len(b.Transformed) != 1 || b.Transformed[0].Reason != ReasonTTLExpired || b.Transformed[0].Row != 1 {
 		t.Errorf("Transformed = %+v: the library's flat list, not stamped here", b.Transformed)
 	}
-	if len(b.EngineRows) != 1 || string(b.EngineRows[0]) != `{"a":1}` {
-		t.Errorf("EngineRows = %q", b.EngineRows)
+	if len(b.EngineRows) != 1 || len(b.EngineRows[0]) != 3 {
+		t.Fatalf("EngineRows = %+v: each engine row is a list of cells", b.EngineRows)
+	}
+	if c := b.EngineRows[0][1]; c.Column != "\xff" || c.Text != "\xff\x00" || string(c.Value) != "\xff\x00" || c.Null {
+		t.Errorf("cell 1 = %+v", c)
+	}
+	if c := b.EngineRows[0][2]; !c.Null || c.Value != nil {
+		t.Errorf("cell 2 = %+v", c)
 	}
 	if b.PartitionCount == nil || *b.PartitionCount != 4 {
 		t.Errorf("PartitionCount = %v", b.PartitionCount)
@@ -240,8 +254,20 @@ func TestUnknownOutcomesReadAsFallback(t *testing.T) {
 	}
 }
 
+func TestDecodeNameLists(t *testing.T) {
+	f, err := decodeFilterResult([]byte(`{"outcome":"ok","unsupported_settings":[{"name":"a"},{"name_b64":"/w=="}],"errors":[{"row":0,"code":1,"err_b64":"/w=="}]}`))
+	if err != nil || len(f.UnsupportedSettings) != 2 || f.UnsupportedSettings[1] != "\xff" || f.Errors[0].Msg != "\xff" {
+		t.Errorf("%+v, %v", f, err)
+	}
+	for _, bad := range []string{`{"unsupported_settings":[{"name":"a","name_b64":"YQ=="}]}`, `{"unsupported_settings":[{}]}`} {
+		if _, err := decodeFilterResult([]byte(bad)); err == nil {
+			t.Errorf("%s: both forms or neither is an InternalError", bad)
+		}
+	}
+}
+
 func TestDecodeFilterResult(t *testing.T) {
-	f, err := decodeFilterResult([]byte(`{"outcome":"ok","rows_read":3,"verdicts":"tfe","errors":[{"row":2,"code":53,"err":"x"}],"unsupported_settings":["s"]}`))
+	f, err := decodeFilterResult([]byte(`{"outcome":"ok","rows_read":3,"verdicts":"tfe","errors":[{"row":2,"code":53,"err":"x"}],"unsupported_settings":[{"name":"s"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +277,7 @@ func TestDecodeFilterResult(t *testing.T) {
 }
 
 func TestDecodeSchemaDescriptionAndDiscovery(t *testing.T) {
-	d, err := decodeSchemaDescription([]byte(`{"columns":[{"name":"a","type":"UInt8","default_kind":"DEFAULT","default_expr":"1"},{"name_b64":"/w==","type":"String","default_kind":""}]}`))
+	d, err := decodeSchemaDescription([]byte(`{"columns":[{"name":"a","type":"UInt8","default_kind":"DEFAULT","default_expression":"1"},{"name_b64":"/w==","type":"String","default_kind":""}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

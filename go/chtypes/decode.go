@@ -145,17 +145,62 @@ func byteField(m map[string]any, key, path string) (value string, present bool, 
 	return "", false, nil
 }
 
-// bytesElement reads one element of a list of byte strings: a plain string,
-// or an object carrying it as "name" or "name_b64".
-func (r *reader) bytesElement(v any, path string) string {
-	switch e := v.(type) {
-	case string:
-		return e
-	case map[string]any:
-		return r.name(e, "name", path)
+// nameList reads a list of names: each element a {"name"} or {"name_b64"}
+// object, never a bare string.
+func (r *reader) nameList(m map[string]any, key, path string) []string {
+	arr := r.array(r.field(m, key), path+"."+key)
+	if arr == nil {
+		return nil
 	}
-	r.fail(path, "want a string or a name object")
-	return ""
+	out := make([]string, 0, len(arr))
+	for i, e := range arr {
+		p := fmt.Sprintf("%s.%s[%d]", path, key, i)
+		em := r.object(e, p)
+		if em == nil {
+			return nil
+		}
+		out = append(out, r.name(em, "name", p))
+	}
+	return out
+}
+
+// rawValue reads value_b64: the raw bytes of a scalar String or FixedString
+// value, nil when absent.
+func (r *reader) rawValue(m map[string]any, path string) []byte {
+	v := r.field(m, "value_b64")
+	if v == nil {
+		return nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		r.fail(path+".value_b64", "want a JSON string")
+		return nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		r.fail(path+".value_b64", "not standard base64: %v", err)
+		return nil
+	}
+	if raw == nil {
+		raw = []byte{}
+	}
+	return raw
+}
+
+// optBytes reads a data-derived string that may be absent: nil when absent.
+func (r *reader) optBytes(m map[string]any, key, path string) *string {
+	if r.err != nil {
+		return nil
+	}
+	s, present, err := byteField(m, key, path)
+	if err != nil {
+		r.fail(path+"."+key, "%v", err)
+		return nil
+	}
+	if !present {
+		return nil
+	}
+	return &s
 }
 
 func (r *reader) number(v any, path string) (json.Number, bool) {
@@ -321,14 +366,10 @@ func (r *reader) row(m map[string]any, path string) RowResult {
 		ErrCode:             r.i32(m, "code", path),
 		ErrMsg:              r.bytes(m, "err", path),
 		Transformed:         r.transforms(m, "transformed", path),
-		UnsupportedSettings: r.textList(m, "unsupported_settings", path),
+		UnsupportedSettings: r.nameList(m, "unsupported_settings", path),
+		UnknownFields:       r.nameList(m, "unknown_fields", path),
 		VerdictCode:         r.i32(m, "verdict_code", path),
 		VerdictErr:          r.bytes(m, "verdict_err", path),
-	}
-	if arr := r.array(r.field(m, "unknown_fields"), path+".unknown_fields"); arr != nil {
-		for i, e := range arr {
-			res.UnknownFields = append(res.UnknownFields, r.bytesElement(e, fmt.Sprintf("%s.unknown_fields[%d]", path, i)))
-		}
 	}
 	if arr := r.array(r.field(m, "cols"), path+".cols"); arr != nil {
 		for i, e := range arr {
@@ -345,6 +386,7 @@ func (r *reader) row(m map[string]any, path string) RowResult {
 			v := Value{
 				Column:   r.name(cm, "name", p),
 				Text:     r.bytes(cm, "stored", p),
+				Value:    r.rawValue(cm, p),
 				Null:     r.boolean(cm, "null", p),
 				Source:   src,
 				IsStored: src.IsStored(),
@@ -366,6 +408,7 @@ func (r *reader) row(m map[string]any, path string) RowResult {
 				Column: r.name(cm, "name", p),
 				Kind:   r.text(cm, "kind", p),
 				Text:   r.bytes(cm, "stored", p),
+				Value:  r.rawValue(cm, p),
 			})
 		}
 	}
@@ -378,14 +421,7 @@ func (r *reader) row(m map[string]any, path string) RowResult {
 			res.Verdict = &verdict
 		}
 	}
-	if v := r.field(m, "partition_id"); v != nil {
-		s, ok := v.(string)
-		if !ok {
-			r.fail(path+".partition_id", "want a JSON string")
-		} else {
-			res.PartitionID = &s
-		}
-	}
+	res.PartitionID = r.optBytes(m, "partition_id", path)
 	if v := r.field(m, "input_span"); v != nil {
 		res.InputSpan = r.span(v, path+".input_span")
 	}
@@ -458,17 +494,28 @@ func decodeBatch(raw []byte, payload []byte) (BatchResult, error) {
 		}
 	}
 	if arr := r.array(r.field(m, "engine_rows"), "$.engine_rows"); arr != nil {
-		res.EngineRows = make([][]byte, 0, len(arr))
-		for i, e := range arr {
-			p := fmt.Sprintf("$.engine_rows[%d]", i)
-			switch ev := e.(type) {
-			case string:
-				res.EngineRows = append(res.EngineRows, []byte(ev))
-			case map[string]any:
-				res.EngineRows = append(res.EngineRows, []byte(r.bytes(ev, "stored", p)))
-			default:
-				r.fail(p, "want a string")
+		res.EngineRows = make([][]EngineCell, 0, len(arr))
+		for i, row := range arr {
+			rp := fmt.Sprintf("$.engine_rows[%d]", i)
+			cells := r.array(row, rp)
+			if cells == nil && r.err == nil {
+				cells = []any{}
 			}
+			out := make([]EngineCell, 0, len(cells))
+			for j, c := range cells {
+				p := fmt.Sprintf("%s[%d]", rp, j)
+				cm := r.object(c, p)
+				if cm == nil {
+					break
+				}
+				out = append(out, EngineCell{
+					Column: r.name(cm, "name", p),
+					Text:   r.bytes(cm, "stored", p),
+					Null:   r.boolean(cm, "null", p),
+					Value:  r.rawValue(cm, p),
+				})
+			}
+			res.EngineRows = append(res.EngineRows, out)
 		}
 	}
 	if v := r.field(m, "partition_count"); v != nil {
@@ -506,7 +553,7 @@ func decodeFilterResult(raw []byte) (FilterResult, error) {
 		ErrCode:             r.i32(m, "code", "$"),
 		ErrMsg:              r.bytes(m, "err", "$"),
 		RowsRead:            r.u64(m, "rows_read", "$"),
-		UnsupportedSettings: r.textList(m, "unsupported_settings", "$"),
+		UnsupportedSettings: r.nameList(m, "unsupported_settings", "$"),
 	}
 	for _, c := range r.text(m, "verdicts", "$") {
 		res.Verdicts = append(res.Verdicts, parseVerdict(string(c)))
@@ -552,7 +599,7 @@ func decodeSchemaDescription(raw []byte) (SchemaDescription, error) {
 				Name:        r.name(cm, "name", p),
 				Type:        r.bytes(cm, "type", p),
 				DefaultKind: kind,
-				DefaultExpr: r.bytes(cm, "default_expr", p),
+				DefaultExpr: r.bytes(cm, "default_expression", p),
 			})
 		}
 	}
@@ -566,7 +613,7 @@ func decodeDiscovery(raw []byte) (Discovery, error) {
 	}
 	r := &reader{doc: "discovery"}
 	m := r.object(v, "$")
-	var res Discovery
+	res := Discovery{ColumnsSQL: r.bytes(m, "columns_sql", "$")}
 	if arr := r.array(r.field(m, "columns"), "$.columns"); arr != nil {
 		for i, e := range arr {
 			p := fmt.Sprintf("$.columns[%d]", i)

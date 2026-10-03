@@ -430,3 +430,45 @@ func TestStubConcurrentCallsAndClose(t *testing.T) {
 		t.Errorf("a call failed with something other than a close-guard UsageError: %v", bad)
 	}
 }
+
+// TestStubRealDocuments drives the decoders with the documents the stub itself
+// builds on a `!D:` body (tests/fixtures/abi-v1/cases.json: document.*): not
+// the echo, and not a hand-written shape.
+func TestStubRealDocuments(t *testing.T) {
+	lib := openStub(t, "ok")
+	schema, err := lib.CompileTable("CREATE TABLE t (x Int32)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// document.preview_row.binary_string: invalid UTF-8 and NUL in a String.
+	r, err := schema.Row(JSONEachRow, []byte("!D:\xff\x00\x80"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Outcome != Accepted || len(r.Columns) != 1 {
+		t.Fatalf("row = %+v", r)
+	}
+	c := r.Columns[0]
+	if c.Column != "s" || c.Text != "\xff\x00\x80" || string(c.Value) != "\xff\x00\x80" || c.Source != SourceInput || !c.IsStored || c.Null {
+		t.Errorf("binary String = %+v", c)
+	}
+	if r.InputSpan == nil || r.InputSpan.Len != 6 {
+		t.Errorf("InputSpan = %v", r.InputSpan)
+	}
+	// document.preview_row.utf8_with_nul: a NUL in valid UTF-8 travels as text.
+	r, err = schema.Row(JSONEachRow, []byte("!D:a\x00b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := r.Columns[0]; c.Text != "a\x00b" || string(c.Value) != "a\x00b" {
+		t.Errorf("UTF-8 with NUL = %+v", c)
+	}
+	// document.discover_columns.binary_name: a column name that is not UTF-8.
+	d, err := lib.DiscoverColumns([]byte("!D:\xffcol"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Columns) != 1 || d.Columns[0].Name != "\xffcol" || d.Columns[0].Declaration != "\xffcol String" || d.ColumnsSQL != "\xffcol String" {
+		t.Errorf("discovery = %+v", d)
+	}
+}
