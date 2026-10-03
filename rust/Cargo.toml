@@ -69,6 +69,14 @@ name = "ocifetch_conformance"
 path = "tests/ocifetch_conformance.rs"
 required-features = ["fetch-v1"]
 
+# The v1 goldens runner (docs/guides/goldens-v1.md section 2). It has its own
+# `main` (harness = false) because it re-executes itself once per setup, and it
+# skips loudly, rather than failing, when its inputs are unset.
+[[test]]
+name = "goldens_v1_runner"
+path = "tests/goldens_v1_runner.rs"
+harness = false
+
 # The ABI v1 conformance suite re-declares src/abi1's module tree with
 # #[path] (rust/src/abi1/mod.rs explains why) and needs the abi-v1 feature's
 # generated layer and loader to exist at all.
