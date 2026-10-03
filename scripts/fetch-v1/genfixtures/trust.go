@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 // trust.go — §4's trust case group: one tree, "trust", with one tag per
 // scenario (docs/guides/fetch-v1.md §4). Each scenario builds its own
 // platform manifest so referrer sets never collide between cases.
@@ -66,15 +68,27 @@ func buildTrustCases(fs *FileSet) []Case {
 	attachSignatureReferrer(tree, art4.ManifestDesc, signBundle(testKey.KeyID, testKey.Private, st4))
 	cases = append(cases, addCase("predicate-wrong-platform", art4, "t-wrong-platform", false, "CHTYPES_ARTIFACT_CORRUPT"))
 
-	// predicate-wrong-version: requested under tag t-wrong-version (a 26.8
-	// spelling), predicate claims 26.7.1.1 — outside that prefix.
+	// predicate-wrong-version: requested under the artifact's OWN real
+	// version tag ("26.8.1.5"), while the signed predicate claims a
+	// different version ("26.7.1.1") — outside the request entirely, so
+	// §4's "lies within (or equals) the request" check has two real
+	// version numbers to compare and genuinely fires CORRUPT.
+	//
+	// Originally requested under the symbolic tag "t-wrong-version", which
+	// is not a version spelling at all: §4's check had nothing to compare
+	// the predicate against, so a correct client returned ok (measured by
+	// the Go and Python fetch lanes against cases.json on v1, 2026-10-02).
+	// PM ruling: fix the fixture, not the spec — do not add a
+	// config-vs-predicate cross-check that §4 does not call for.
 	art5, _ := mk("5")
+	realVersion5 := art5.Predicate.ClickHouseVersion // "26.8.1.5", before the override below
 	pred5 := art5.Predicate
 	pred5.ClickHouseVersion = "26.7.1.1"
 	pred5.ClickHouseMinor = "26.7"
 	st5 := statementFor(art5, C.PredicateTypes.Artifact, pred5)
 	attachSignatureReferrer(tree, art5.ManifestDesc, signBundle(testKey.KeyID, testKey.Private, st5))
-	wrongVersionCase := addCase("predicate-wrong-version", art5, "t-wrong-version", false, "CHTYPES_ARTIFACT_CORRUPT")
+	wrongVersionCase := addCase("predicate-wrong-version", art5, realVersion5, false, "CHTYPES_ARTIFACT_CORRUPT")
+	mustCompareTwoRealVersions("predicate-wrong-version", wrongVersionCase.Request.Spelling, pred5.ClickHouseVersion)
 	cases = append(cases, wrongVersionCase)
 
 	// predicate-abi-revision-not-abi: the statement carries "abi_revision"
@@ -198,6 +212,34 @@ func buildTrustCases(fs *FileSet) []Case {
 
 	flushTrees(fs, tree)
 	return cases
+}
+
+// mustCompareTwoRealVersions is genfixtures' own self-check for the exact
+// defect predicate-wrong-version shipped with (measured, the Go and Python
+// fetch lanes against cases.json on v1, 2026-10-02): requested and
+// predicateVersion must BOTH be real, parseable four-part versions, and
+// must differ — otherwise §4's "the predicate's version lies within (or
+// equals) the request" check has nothing comparable to evaluate (a
+// symbolic tag such as the original "t-wrong-version" is not a version at
+// all), and a correct client accepts a case that is supposed to refuse.
+func mustCompareTwoRealVersions(caseID, requested, predicateVersion string) {
+	if !fullVersionSpellingRe.MatchString(requested) {
+		panic(fmt.Sprintf(
+			"genfixtures: %s requests %q, which is not a real four-part version — the §4 wrong-version "+
+				"check has nothing to compare the predicate's claimed version against",
+			caseID, requested))
+	}
+	if !fullVersionSpellingRe.MatchString(predicateVersion) {
+		panic(fmt.Sprintf(
+			"genfixtures: %s's predicate claims version %q, which is not a real four-part version",
+			caseID, predicateVersion))
+	}
+	if requested == predicateVersion {
+		panic(fmt.Sprintf(
+			"genfixtures: %s requests %q and the predicate also claims %q — they must differ, or this "+
+				"case never actually exercises a version mismatch",
+			caseID, requested, predicateVersion))
+	}
 }
 
 // predicateAsMap round-trips a Predicate through JSON into a

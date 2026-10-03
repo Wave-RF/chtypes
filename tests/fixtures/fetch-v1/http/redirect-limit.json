@@ -10,7 +10,7 @@
         {
           "status": 302,
           "headers": {
-            "Location": "http://{origin}/v2/chtypes/v1/manifests/26.12-hop1"
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop1"
           }
         }
       ]
@@ -22,7 +22,7 @@
         {
           "status": 302,
           "headers": {
-            "Location": "http://{origin}/v2/chtypes/v1/manifests/26.12-hop2"
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop2"
           }
         }
       ]
@@ -34,7 +34,7 @@
         {
           "status": 302,
           "headers": {
-            "Location": "http://{origin}/v2/chtypes/v1/manifests/26.12-hop3"
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop3"
           }
         }
       ]
@@ -46,7 +46,7 @@
         {
           "status": 302,
           "headers": {
-            "Location": "http://{origin}/v2/chtypes/v1/manifests/26.12-hop4"
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop4"
           }
         }
       ]
@@ -58,7 +58,7 @@
         {
           "status": 302,
           "headers": {
-            "Location": "http://{origin}/v2/chtypes/v1/manifests/26.12-hop5"
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop5"
           }
         }
       ]
@@ -70,7 +70,7 @@
         {
           "status": 302,
           "headers": {
-            "Location": "http://{origin}/v2/chtypes/v1/manifests/26.12-hop6"
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop6"
           }
         }
       ]
@@ -82,7 +82,7 @@
         {
           "status": 302,
           "headers": {
-            "Location": "http://{origin}/v2/chtypes/v1/manifests/26.12-hop7"
+            "Location": "{origin}/v2/s-redirect-limit/chtypes/v1/manifests/26.12-hop7"
           }
         }
       ]
