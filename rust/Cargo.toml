@@ -2,7 +2,11 @@
 name = "chtypes"
 version = "0.5.2"
 edition = "2024"
-rust-version = "1.85"
+# 1.87, not 1.85: ruzstd (the v1 zstd decoder) declares rust-version = "1.87"
+# in every current release (0.8.3 and 0.9.0). v1 is a breaking 1.0 release, so
+# this floor moves with it; rustls-platform-verifier 0.7.1 (also new in this
+# release, for fetch-v1) declares 1.85, which is within the new floor.
+rust-version = "1.87"
 license = "Apache-2.0"
 repository = "https://github.com/wave-rf/chtypes"
 homepage = "https://github.com/wave-rf/chtypes"
@@ -57,6 +61,19 @@ base64 = { version = "0.23", optional = true }
 tar = { version = "0.4", optional = true, default-features = false }
 flate2 = { version = "1", optional = true }
 
+# --- the `fetch-v1` feature: the v1 OCI + zstd fetch layer (`ocifetch`, docs/guides/fetch-v1.md).
+# Isolated from `fetch` above: v0 and v1 ship side by side on the `v1` branch
+# until the switch, and `default` stays `["fetch"]` so a v0 build is
+# byte-for-byte unchanged with this feature off.
+#
+# ruzstd is the v1 zstd *decoder* (pure Rust, no system dependency), chosen
+# over flate2/libz because v1 artifacts are zstd-, not gzip-, compressed.
+# `ed25519-dalek`, `base64` and `tar` are shared with v0's `fetch` feature
+# (same crate, one copy). `ureq/platform-verifier` adds the system
+# certificate store as a root-cert source on top of the `fetch` feature's
+# plain rustls/webpki config.
+ruzstd = { version = "0.9.0", optional = true, default-features = false, features = ["std"] }
+
 [features]
 default = ["fetch"]
 # `chtypes::ensure`, the registry's autofetch option and the `chtypes` binary.
@@ -66,6 +83,17 @@ fetch = [
   "dep:base64",
   "dep:tar",
   "dep:flate2",
+]
+# The v1 OCI + zstd fetch layer (`chtypes::ocifetch`, not yet re-exported).
+# See docs/guides/fetch-v1.md for the contract; `rust/tests/ocifetch_conformance.rs`
+# is this feature's oracle.
+fetch-v1 = [
+  "dep:ureq",
+  "ureq/platform-verifier",
+  "dep:ed25519-dalek",
+  "dep:base64",
+  "dep:tar",
+  "dep:ruzstd",
 ]
 
 [[bin]]
@@ -78,6 +106,13 @@ required-features = ["fetch"]
 [[test]]
 name = "fetch"
 required-features = ["fetch"]
+
+# The v1 conformance suite (docs/guides/fetch-v1.md §10, plan §3.3). It reads
+# CHTYPES_V1_CONFORMANCE and skips loudly, rather than failing, when unset.
+[[test]]
+name = "ocifetch_conformance"
+path = "tests/ocifetch_conformance.rs"
+required-features = ["fetch-v1"]
 
 [dev-dependencies]
 # The integration tests read manifest.json themselves, to prove the loader took

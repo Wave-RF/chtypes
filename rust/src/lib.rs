@@ -100,6 +100,8 @@ pub mod fetch;
 mod ffi;
 mod json;
 mod library;
+#[cfg(feature = "fetch-v1")]
+mod ocifetch;
 mod raw;
 mod registry;
 mod result;
