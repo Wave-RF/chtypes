@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Changed
+
+- **MSRV raised from 1.85 to 1.87.** The crate's declared `rust-version` now reflects the new, opt-in `fetch-v1` feature (the v1 OCI + zstd fetch layer, `ocifetch`; not on by default and not reachable from this crate's public API yet). `ruzstd`, the v1 zstd decoder, declares `rust-version = "1.87"` on every release since 0.8.3, including the 0.9.0 this feature pins; `rustls-platform-verifier` 0.7.1, also new under this feature, declares 1.85 and does not raise the floor further. No code outside `fetch-v1` requires 1.87; the floor moves for the whole crate because `rust-version` is a single, package-wide field.
+
 ### Fixed
 
 - **The crash-guard refuse-list is now sourced identically to the other three bindings, and an artifact with neither source refuses rather than loading unguarded.** This crate read only `unsafe_families.txt` next to the library, so a directory missing that file silently called `chs_init` with an empty guard; `unsafe_families.txt` is still tried first, even when it is empty, but `manifest.json`'s own `unsafe_families` field is now the fallback when the file is absent, and present-but-empty wins in both places. A directory with neither source is now `Error::MissingUnsafeFamilies`, naming both, instead of loading with no refuse-list at all (`docs/reference/artifact.md` step 9).

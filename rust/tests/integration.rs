@@ -1476,7 +1476,7 @@ fn one_image_means_one_lock_across_registries() {
                 // Inert for an `a UInt8` row either way: what is exercised is the
                 // REPLACEMENT of the list, not its content.
                 let n = swaps_w.fetch_add(1, ord);
-                let pairs: Vec<(&str, &str)> = if n % 2 == 0 {
+                let pairs: Vec<(&str, &str)> = if n.is_multiple_of(2) {
                     vec![]
                 } else {
                     vec![("chtypes_default_eval_wall_nanos", "2000000000")]
