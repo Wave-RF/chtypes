@@ -7,7 +7,7 @@
   "clickhouse_version": "99.1.2.3",
   "build": "20990101.000000",
   "revision": 1,
-  "sha256": "299315b0e305329ccf7b31064e60a33a26b6888d688b098c3066a7c54ed91e4d"
+  "sha256": "ee54f8ba6faef611e8f967b7b0b97456e7804a7dd2041b4c827461796dfc3d53"
  },
  "artifact": {
   "build_info_b64": "eyJzeW50aGV0aWMiOnRydWV9",
@@ -29,16 +29,39 @@
    "decoded_ok": null
   },
   {
-   "id": "row-uint8-wrap-string-bytes",
+   "id": "schema-default-unknown-column",
+   "setup": "utc",
+   "result": "ran",
+   "at": "schema_create",
+   "status": "CHS_REJECTED",
+   "error": {
+    "ch_code": 47,
+    "ch_name_b64": "VU5LTk9XTl9JREVOVElGSUVS",
+    "message_b64": "VW5rbm93biBpZGVudGlmaWVyIHRtcF9jZDM0IGluIERFRkFVTFQ=",
+    "column_b64": "bg=="
+   },
+   "decoded_ok": null
+  },
+  {
+   "id": "json-overflow-wrap",
    "setup": "utc",
    "result": "ran",
    "at": "call",
    "status": "CHS_OK",
-   "document_b64": "eyJjb2RlIjowLCJjb2xzIjpbeyJiYXNlIjoiVUludDgiLCJpbnB1dCI6IjMwMCIsImlzX3N0b3JlZCI6dHJ1ZSwibmFtZSI6Im4iLCJudWxsIjpmYWxzZSwicmVmIjoiMzAwIiwicmVmX3R5cGUiOiJVSW50MTYiLCJzcmMiOiJpbnB1dCIsInN0b3JlZCI6IjQ0IiwidHlwZSI6IlVJbnQ4In0seyJiYXNlIjoiU3RyaW5nIiwiaW5wdXQiOiJcIm5hXFx1MDBlZnZlXCIiLCJpc19zdG9yZWQiOnRydWUsIm5hbWUiOiJzIiwibnVsbCI6ZmFsc2UsInNyYyI6ImlucHV0Iiwic3RvcmVkX2I2NCI6ImJtSERyM1psIiwidHlwZSI6IlN0cmluZyIsInZhbHVlX2I2NCI6ImJtSERyM1psIn1dLCJlcnIiOiIiLCJpbnB1dF9zcGFuIjp7ImxlbiI6MjEsIm9mZiI6MH0sIm91dGNvbWUiOiJhY2NlcHRlZCIsInRyYW5zZm9ybWVkIjpbeyJjb2x1bW4iOiJuIiwiaW5wdXQiOiIzMDAiLCJsb3NzeSI6dHJ1ZSwicmVhc29uIjoib3ZlcmZsb3dfd3JhcCIsInN0b3JlZCI6IjQ0In1dLCJ1bnN1cHBvcnRlZF9zZXR0aW5ncyI6W119",
+   "document_b64": "eyJjb2RlIjowLCJjb2xzIjpbeyJiYXNlIjoiVUludDgiLCJpbnB1dCI6IjMwMCIsImlzX3N0b3JlZCI6dHJ1ZSwibmFtZSI6Im4iLCJudWxsIjpmYWxzZSwicmVmIjoiMzAwIiwicmVmX3R5cGUiOiJVSW50MTYiLCJzcmMiOiJpbnB1dCIsInN0b3JlZF9iNjQiOiJORFE9IiwidHlwZSI6IlVJbnQ4In1dLCJlcnIiOiIiLCJpbnB1dF9zcGFuIjp7ImxlbiI6OCwib2ZmIjowfSwib3V0Y29tZSI6ImFjY2VwdGVkIiwidHJhbnNmb3JtZWQiOlt7ImNvbHVtbiI6Im4iLCJpbnB1dCI6IjMwMCIsImxvc3N5Ijp0cnVlLCJyZWFzb24iOiJvdmVyZmxvd193cmFwIiwic3RvcmVkIjoiNDQifV0sInVuc3VwcG9ydGVkX3NldHRpbmdzIjpbXX0=",
    "decoded_ok": true
   },
   {
-   "id": "row-default-rand",
+   "id": "row-tsv-nonutf8-string-bytes",
+   "setup": "utc",
+   "result": "ran",
+   "at": "call",
+   "status": "CHS_OK",
+   "document_b64": "eyJjb2RlIjowLCJjb2xzIjpbeyJiYXNlIjoiU3RyaW5nIiwiaW5wdXQiOiJcdTAwZmZcdTAwZmUiLCJpc19zdG9yZWQiOnRydWUsIm5hbWUiOiJzIiwibnVsbCI6ZmFsc2UsInNyYyI6ImlucHV0Iiwic3RvcmVkX2I2NCI6Ii8vND0iLCJ0eXBlIjoiU3RyaW5nIiwidmFsdWVfYjY0IjoiLy80PSJ9XSwiZXJyIjoiIiwiaW5wdXRfc3BhbiI6eyJsZW4iOjMsIm9mZiI6MH0sIm91dGNvbWUiOiJhY2NlcHRlZCIsInRyYW5zZm9ybWVkIjpbXSwidW5zdXBwb3J0ZWRfc2V0dGluZ3MiOltdfQ==",
+   "decoded_ok": true
+  },
+  {
+   "id": "row-json-default-rand",
    "setup": "utc",
    "result": "ran",
    "at": "call",
@@ -75,10 +98,28 @@
    "decoded_ok": true
   },
   {
+   "id": "wire-tsv-float32-precision",
+   "setup": "utc",
+   "result": "ran",
+   "at": "call",
+   "status": "CHS_OK",
+   "document_b64": "eyJjb2RlIjowLCJjb2xzIjpbeyJiYXNlIjoiRmxvYXQzMiIsImlucHV0IjoiMC4xIiwiaXNfc3RvcmVkIjp0cnVlLCJuYW1lIjoiZiIsIm51bGwiOmZhbHNlLCJzcmMiOiJpbnB1dCIsInN0b3JlZCI6IjAuMSIsInR5cGUiOiJGbG9hdDMyIiwid2lyZSI6IjAuMSJ9XSwiZXJyIjoiIiwiaW5wdXRfc3BhbiI6eyJsZW4iOjQsIm9mZiI6MH0sIm91dGNvbWUiOiJhY2NlcHRlZCIsInRyYW5zZm9ybWVkIjpbXSwidW5zdXBwb3J0ZWRfc2V0dGluZ3MiOltdfQ==",
+   "decoded_ok": true
+  },
+  {
    "id": "row-not-on-linux-amd64",
    "setup": "utc",
    "result": "skipped",
    "skip_reason": "the case's platforms exclude linux/amd64"
+  },
+  {
+   "id": "zone-image-datetime",
+   "setup": "kolkata",
+   "result": "ran",
+   "at": "call",
+   "status": "CHS_OK",
+   "document_b64": "eyJjb2RlIjowLCJjb2xzIjpbeyJiYXNlIjoiRGF0ZVRpbWUiLCJpbnB1dCI6IlwiMjA5OS0wMS0wMSAwMDowMDowMFwiIiwiaXNfc3RvcmVkIjp0cnVlLCJuYW1lIjoiZCIsIm51bGwiOmZhbHNlLCJzcmMiOiJpbnB1dCIsInN0b3JlZCI6IjIwOTgtMTItMzEgMTg6MzA6MDAiLCJ0eXBlIjoiRGF0ZVRpbWUifV0sImVyciI6IiIsImlucHV0X3NwYW4iOnsibGVuIjoyOCwib2ZmIjowfSwib3V0Y29tZSI6ImFjY2VwdGVkIiwidHJhbnNmb3JtZWQiOltdLCJ1bnN1cHBvcnRlZF9zZXR0aW5ncyI6W119",
+   "decoded_ok": true
   }
  ]
 }

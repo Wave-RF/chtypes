@@ -46,7 +46,34 @@
      }
     },
     {
-     "id": "row-uint8-wrap-string-bytes",
+     "id": "schema-default-unknown-column",
+     "kind": "schema",
+     "call": "schema_create",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKG4gVUludDggREVGQVVMVCB0bXBfYWIxMikgRU5HSU5FID0gTWVyZ2VUcmVlIE9SREVSIEJZIHR1cGxlKCk=",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "schema_create",
+      "status": "CHS_REJECTED",
+      "error": {
+       "ch_code": 47,
+       "ch_name_b64": "VU5LTk9XTl9JREVOVElGSUVS",
+       "message_b64": "VW5rbm93biBpZGVudGlmaWVyIHRtcF9hYjEyIGluIERFRkFVTFQ=",
+       "column_b64": "bg=="
+      },
+      "run_varying": [
+       "/error/message"
+      ]
+     }
+    },
+    {
+     "id": "json-overflow-wrap",
      "kind": "row",
      "call": "preview_row",
      "platforms": [
@@ -55,12 +82,12 @@
       "linux/arm64"
      ],
      "schema": {
-      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKG4gVUludDgsIHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKG4gVUludDgpIEVOR0lORSA9IE1lcmdlVHJlZSBPUkRFUiBCWSB0dXBsZSgp",
       "settings_b64": "e30="
      },
      "body": {
       "format": 0,
-      "body_b64": "eyJuIjozMDAsInMiOiJuYVx1MDBlZnZlIn0K",
+      "body_b64": "eyJuIjozMDB9Cg==",
       "settings_b64": "e30="
      },
      "expect": {
@@ -83,22 +110,11 @@
          "ref_type": "UInt16",
          "is_stored": true,
          "null": false
-        },
-        {
-         "name": "s",
-         "type": "String",
-         "base": "String",
-         "src": "input",
-         "input": "\"na\\u00efve\"",
-         "stored": "na\u00efve",
-         "is_stored": true,
-         "null": false,
-         "value_b64": "bmHDr3Zl"
         }
        ],
        "input_span": {
         "off": 0,
-        "len": 21
+        "len": 8
        },
        "transformed": [
         {
@@ -114,7 +130,55 @@
      }
     },
     {
-     "id": "row-default-rand",
+     "id": "row-tsv-nonutf8-string-bytes",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 2,
+      "body_b64": "//4K",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "base": "String",
+         "src": "input",
+         "input": "\u00ff\u00fe",
+         "is_stored": true,
+         "null": false,
+         "stored_b64": "//4=",
+         "value_b64": "//4="
+        }
+       ],
+       "input_span": {
+        "off": 0,
+        "len": 3
+       },
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    },
+    {
+     "id": "row-json-default-rand",
      "kind": "row",
      "call": "preview_row",
      "platforms": [
@@ -332,6 +396,54 @@
      }
     },
     {
+     "id": "wire-tsv-float32-precision",
+     "kind": "wire",
+     "call": "preview_row",
+     "platforms": [
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "platforms_reason": "synthetic: float rendering differs on darwin",
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKGYgRmxvYXQzMikgRU5HSU5FID0gTWVyZ2VUcmVlIE9SREVSIEJZIHR1cGxlKCk=",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 2,
+      "body_b64": "MC4xCg==",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "f",
+         "type": "Float32",
+         "base": "Float32",
+         "src": "input",
+         "input": "0.1",
+         "stored": "0.1",
+         "wire": "0.1",
+         "is_stored": true,
+         "null": false
+        }
+       ],
+       "input_span": {
+        "off": 0,
+        "len": 4
+       },
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    },
+    {
      "id": "row-not-on-linux-amd64",
      "kind": "row",
      "call": "preview_row",
@@ -372,6 +484,60 @@
        "input_span": {
         "off": 0,
         "len": 8
+       },
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "kolkata",
+   "image_zone_b64": "QXNpYS9Lb2xrYXRh",
+   "defaults_b64": "e30=",
+   "cases": [
+    {
+     "id": "zone-image-datetime",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKGQgRGF0ZVRpbWUpIEVOR0lORSA9IE1lcmdlVHJlZSBPUkRFUiBCWSB0dXBsZSgp",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "eyJkIjoiMjA5OS0wMS0wMSAwMDowMDowMCJ9Cg==",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "code": 0,
+       "err": "",
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "d",
+         "type": "DateTime",
+         "base": "DateTime",
+         "src": "input",
+         "input": "\"2099-01-01 00:00:00\"",
+         "stored": "2098-12-31 18:30:00",
+         "is_stored": true,
+         "null": false
+        }
+       ],
+       "input_span": {
+        "off": 0,
+        "len": 28
        },
        "transformed": []
       },

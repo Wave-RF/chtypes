@@ -29,7 +29,9 @@ REPORT-LEVEL RULES (this repository's, layered on the producer's):
     `platforms`; a skip anywhere else is a FAIL, and so is RUNNING a case the
     document excludes on that platform (its expectation is unproven there);
   * a case's `at` and `status` must equal the expectation's; for a non-OK case
-    the error's ch_code and its three byte fields must equal exactly;
+    the error is compared as a decoded tree (ch_code, and the name, message and
+    column bytes) after dropping run_varying members, which on a non-OK status
+    address the error as /error/<member> (schema.json, expect.run_varying);
   * for an OK case the document bytes are parsed as JSON and judged by the
     producer's rules, `decoded_ok` must be true (the binding's public decoder
     accepted the document), and the export bytes must equal export_b64, or be
@@ -254,6 +256,29 @@ def parse_json_bytes(raw):
     return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
 
 
+def judge_error(exp, got):
+    """(verdict, [reasons]) for a non-OK case's error. Like a document, the error is compared as a decoded
+    tree ({ch_code, ch_name, message, column}, the last three bytes), and run_varying pointers address its
+    members as /error/<member> (schema.json $defs.expect.run_varying): a message quoting a per-run name is dropped."""
+    if not isinstance(got, dict):
+        return FAIL, ["no error recorded for a %s case" % exp["status"]]
+    try:
+        for f in ("ch_code", "ch_name_b64", "message_b64", "column_b64"):
+            if f not in got:
+                return FAIL, ["error.%s missing" % f]
+        if type(got["ch_code"]) is not int:
+            return FAIL, ["error.ch_code %r is not an integer" % (got["ch_code"],)]
+        want_t, got_t = {"error": decode(copy.deepcopy(exp["error"]))}, {"error": decode(copy.deepcopy(got))}
+        for p in exp["run_varying"]:
+            drop(want_t, p)
+            drop(got_t, p)
+    except (Malformed, ValueError) as e:
+        return FAIL, ["malformed: %s" % e]
+    if strict_equal(want_t, got_t):
+        return PASS, []
+    return FAIL, ["error differs: " + (first_difference(want_t, got_t) or "?")]
+
+
 def judge_case(case, rc, platform):
     """(verdict, [reasons]) for one goldens case against its report entry (None when absent)."""
     if rc is None:
@@ -279,17 +304,7 @@ def judge_case(case, rc, platform):
         return FAIL, why
     try:
         if exp["status"] != "CHS_OK":
-            got, want = rc.get("error"), exp["error"]
-            if not isinstance(got, dict):
-                return FAIL, ["no error recorded for a %s case" % exp["status"]]
-            if got.get("ch_code") != want["ch_code"] or type(got.get("ch_code")) is not int:
-                why.append("ch_code %r, expected %r" % (got.get("ch_code"), want["ch_code"]))
-            for f in ("ch_name_b64", "message_b64", "column_b64"):
-                if f not in got:
-                    why.append("error.%s missing" % f)
-                elif b64(got[f]) != b64(want[f]):
-                    why.append("error.%s bytes %r, expected %r" % (f, b64(got[f]), b64(want[f])))
-            return (FAIL, why) if why else (PASS, [])
+            return judge_error(exp, rc.get("error"))
         if rc.get("decoded_ok") is not True:
             why.append("decoded_ok is %r: the binding's public decoder must accept the document" % (rc.get("decoded_ok"),))
         if "document_b64" not in rc:
@@ -477,9 +492,9 @@ def selftest(with_schema):
     for cid, c in cases.items():
         if "document" in c["expect"]:
             expect("%s: its own expected document passes" % cid, judge(c["expect"], c["expect"]["document"]), True)
-    row = cases["row-uint8-wrap-string-bytes"]["expect"]
+    row = cases["json-overflow-wrap"]["expect"]
     d = copy.deepcopy(row["document"])
-    d["cols"][1]["stored_b64"] = enc(d["cols"][1].pop("stored"))
+    d["cols"][0]["stored_b64"] = enc(d["cols"][0].pop("stored"))
     expect("the same bytes as F_b64 instead of F pass (bytes, not JSON text)", judge(row, d), True)
     d = copy.deepcopy(row["document"]); d["cols"][0]["stored"] = "300"
     expect("a changed stored rendering fails", judge(row, d), False)
@@ -487,22 +502,25 @@ def selftest(with_schema):
     expect("a changed transform reason fails", judge(row, d), False)
     d = copy.deepcopy(row["document"]); d["transformed"][0]["lossy"] = 1
     expect("lossy 1 is not lossy true (type-strict)", judge(row, d), False)
-    d = copy.deepcopy(row["document"]); d["cols"][1]["value_b64"] = enc("cafe")
-    expect("different value bytes fail", judge(row, d), False)
-    d = copy.deepcopy(row["document"]); d["cols"][0]["stored_b64"] = enc("0")
-    expect("F and F_b64 both present is malformed, not a pass", judge(row, d), False)
+    raw_row = cases["row-tsv-nonutf8-string-bytes"]["expect"]
+    d = copy.deepcopy(raw_row["document"]); d["cols"][0]["value_b64"] = enc("cafe")
+    expect("different value bytes fail", judge(raw_row, d), False)
+    d = copy.deepcopy(raw_row["document"]); d["cols"][0]["stored"] = "x"
+    expect("F and F_b64 both present is malformed, not a pass", judge(raw_row, d), False)
     d = copy.deepcopy(row["document"]); d["extra"] = True
     expect("an extra member fails a whole-document compare", judge(row, d), False)
-    d = copy.deepcopy(row["document"]); d["cols"].reverse()
-    expect("array order is significant", judge(row, d), False)
+    batch = cases["json-two-rows"]["expect"]
+    d = copy.deepcopy(batch["document"]); d["rows"].reverse()
+    expect("array order is significant", judge(batch, d), False)
     wire = cases["wire-tsv-array-null-element"]["expect"]
     d = copy.deepcopy(wire["document"]); d["transformed"] = []
     expect("a wire case without its transform fails", judge(wire, d), False)
     d = copy.deepcopy(wire["document"]); d["cols"][0]["wire"] = "[NULL]"
     expect("a wire case with a different wire rendering fails", judge(wire, d), False)
-    rnd = cases["row-default-rand"]["expect"]
+    rnd = cases["row-json-default-rand"]["expect"]
     actual = {"outcome": "accepted", "code": 0, "err": "", "cols": [
-        {"name": "n", "src": "input", "stored": "1"}, {"name": "r", "src": "default_generated", "stored": "2718281828"}]}
+        {"name": "n", "src": "input", "stored": "1"}, {"name": "r", "src": "default_generated", "stored": "2718281828"}],
+        "transformed": [{"column": "r", "stored": "2718281828", "reason": "default_filled", "lossy": False}]}
     expect("a generator case passes on any drawn value", judge(rnd, actual), True)
     actual["cols"][1]["src"] = "default"
     expect("a generator case fails when value_src differs", judge(rnd, actual), False)
@@ -516,6 +534,16 @@ def selftest(with_schema):
     vary = {"document": {"cols": [{"name": "r", "stored": "1"}]}, "run_varying": ["/cols/@%s/stored" % enc("r")]}
     expect("run_varying drops the member on both sides", judge(vary, {"cols": [{"name": "r", "stored": "99"}]}), True)
     expect("run_varying drops only what it names", judge(vary, {"cols": [{"name": "q", "stored": "1"}]}), False)
+
+    # 1b. run_varying on a non-OK status addresses /error/<member>
+    ev = cases["schema-default-unknown-column"]["expect"]
+    other = {"ch_code": 47, "ch_name_b64": enc("UNKNOWN_IDENTIFIER"), "message_b64": enc("Unknown identifier tmp_zz99 in DEFAULT"), "column_b64": enc("n")}
+    expect("an error whose run_varying message differs passes", judge_error(ev, other)[1], True)
+    expect("an error whose ch_code differs fails even with message dropped", judge_error(ev, dict(other, ch_code=48))[1], False)
+    expect("an error whose column differs fails even with message dropped", judge_error(ev, dict(other, column_b64=enc("m")))[1], False)
+    strict = dict(ev, run_varying=[])
+    expect("without run_varying the same message difference fails", judge_error(strict, other)[1], False)
+    expect("a run_varying pointer that is not under /error is malformed, not a pass", judge_error(dict(ev, run_varying=["/message"]), other)[1], False)
 
     # 2. the report-level rules, on in-memory mutations of the synthetic report
     def run(report, kinds=(), require=()):
@@ -561,8 +589,8 @@ def selftest(with_schema):
                  document_b64=enc(json.dumps(cases["row-not-on-linux-amd64"]["expect"]["document"])))
     expect("running a case the document excludes on this platform fails", run(mut(ran_excluded)), False)
     expect("a skip with no reason fails", run(mut(lambda r: case_of(r, "row-not-on-linux-amd64").pop("skip_reason"))), False)
-    expect("decoded_ok false on an OK case fails", run(mut(lambda r: case_of(r, "row-uint8-wrap-string-bytes").update(decoded_ok=False))), False)
-    expect("decoded_ok null on an OK case fails", run(mut(lambda r: case_of(r, "row-uint8-wrap-string-bytes").update(decoded_ok=None))), False)
+    expect("decoded_ok false on an OK case fails", run(mut(lambda r: case_of(r, "json-overflow-wrap").update(decoded_ok=False))), False)
+    expect("decoded_ok null on an OK case fails", run(mut(lambda r: case_of(r, "json-overflow-wrap").update(decoded_ok=None))), False)
     expect("a report for another build fails", run(mut(lambda r: r["goldens"].update(build="20990102.000000"))), False)
     expect("a report for another revision fails", run(mut(lambda r: r["goldens"].update(revision=2))), False)
     expect("a report for another version fails", run(mut(lambda r: r["goldens"].update(clickhouse_version="99.1.2.4"))), False)
@@ -589,7 +617,7 @@ def selftest(with_schema):
     expect("a --kinds subset whose cases are all absent from the report fails", run(mut(lambda r: r["cases"].remove(case_of(r, "json-two-rows"))), kinds=["batch"]), False)
     # the table
     _, _, table = evaluate(gold, sha, [base_report], set(), [])
-    expect("the table counts pass, fail and skipped per binding and kind", [] if table["go"]["row"] == [2, 0, 1] and table["go"]["wire"] == [1, 0, 0] else [repr(table)], True)
+    expect("the table counts pass, fail and skipped per binding and kind", [] if table["go"]["row"] == [4, 0, 1] and table["go"]["wire"] == [2, 0, 0] else [repr(table)], True)
 
     # 3. the schemas, when jsonschema is available and asked for (a skip here is printed, never silent)
     if with_schema:
@@ -601,7 +629,7 @@ def selftest(with_schema):
         expect("a rejected case with no error is refused by report.schema.json", schema_validate(mut(lambda r: case_of(r, "schema-unknown-type").pop("error")), "report.schema.json"), False)
         g = copy.deepcopy(gold); g["setups"][0]["cases"][0]["kind"] = "bogus"
         expect("a goldens document with an unknown kind is refused by schema.json", schema_validate(g, "schema.json"), False)
-        g = copy.deepcopy(gold); g["setups"][0]["cases"][6].pop("platforms_reason")
+        g = copy.deepcopy(gold); [c for c in g["setups"][0]["cases"] if c["id"] == "row-not-on-linux-amd64"][0].pop("platforms_reason")
         expect("a narrowed case with no platforms_reason is refused by schema.json", schema_validate(g, "schema.json"), False)
     else:
         print("note  schema cases NOT run (no --schema-validate); CI runs them")
