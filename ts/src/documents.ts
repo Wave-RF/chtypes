@@ -148,7 +148,8 @@ export interface BatchResult {
   readonly payload: Buffer | undefined;
   /** Each exported row's place in `payload`. */
   readonly spans: readonly Span[] | undefined;
-  readonly exportDeclined: string;
+  /** Why an asked-for export was declined, as bytes (`export_declined` or `export_declined_b64`); empty when none was. */
+  readonly exportDeclined: Buffer;
   readonly rowsPassed: number;
   readonly rowsCut: number;
   readonly partitionCount: number | undefined;
@@ -487,7 +488,7 @@ export function decodeBatch(bytes: Uint8Array, payload: Buffer | undefined): Bat
         : asArray(doc, 'engine_rows', engineRaw).map((row) => asArray(doc, 'engine_rows[]', row).map((c) => engineCellOf(doc, c))),
     payload,
     spans: spansRaw === undefined ? undefined : asArray(doc, 'row_spans', spansRaw).map((s) => spanOf(doc, 'row_spans[]', s)),
-    exportDeclined: strOr(doc, o, 'export_declined', ''),
+    exportDeclined: bytesOr(doc, o, 'export_declined'),
     rowsPassed: intOr(doc, o, 'rows_passed', 0),
     rowsCut: intOr(doc, o, 'rows_cut', 0),
     partitionCount: optInt(doc, o, 'partition_count'),

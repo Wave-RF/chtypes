@@ -1,16 +1,7 @@
 /**
- * The v1-only tar rules `../../src/tar.ts`'s `extractTarStream` adds on top
- * of v0's `extractTarGz`: refusing a duplicate entry name and capping total
- * unpacked bytes — both off by default, so v0's `extractTarGz` (tested
- * extensively in `../fetch.test.ts`) is unaffected. Builds tiny ustar
- * archives by hand; no gzip/zstd involved, since `extractTarStream` takes an
- * already-decompressed stream.
- *
- * `extractTarStream` lives in the shared v0 `tar.ts`, so it throws v0's own
- * `ArtifactCorruptError` (`../../src/errors.js`) — a different class from
- * `../../src/ocifetch/errors.js`'s, despite the identical name.
- * `unpack.ts`'s caller re-wraps it into the v1 class; this file asserts
- * against `extractTarStream` directly, so it checks the v0 class.
+ * The tar rules `extractTarStream` adds for v1: refusing a duplicate entry name and capping total
+ * unpacked bytes, both off unless asked for. Builds tiny ustar archives by hand; no zstd involved,
+ * since `extractTarStream` takes an already-decompressed stream.
  */
 
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -19,7 +10,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { extractTarStream } from '../../src/tar.js';
-import { ArtifactCorruptError } from '../../src/errors.js';
+import { ArtifactCorruptError } from '../../src/ocifetch/errors.js';
 
 const BLOCK = 512;
 
@@ -69,7 +60,7 @@ async function freshDir(): Promise<string> {
 }
 
 describe('extractTarStream', () => {
-  it('unpacks regular files, permissively by default (v0 compat)', async () => {
+  it('unpacks regular files, permissively by default', async () => {
     const dest = await freshDir();
     const tar = tarOf(fileEntry('manifest.json', '{}'), fileEntry('libchtypes.so', 'binary-stand-in'));
     const entries = await extractTarStream(Readable.from(tar), dest);
@@ -80,7 +71,7 @@ describe('extractTarStream', () => {
   it('refuses a duplicate entry name only when asked to (CORRUPT)', async () => {
     const dest = await freshDir();
     const tar = tarOf(fileEntry('libchtypes.so', 'first'), fileEntry('libchtypes.so', 'second'));
-    // Off by default — last one wins, exactly like `extractTarGz`.
+    // Off by default — last one wins, the stream extractor's default.
     const entries = await extractTarStream(Readable.from(tar), dest);
     expect(entries).toHaveLength(2);
     expect(await readFile(path.join(dest, 'libchtypes.so'), 'utf8')).toBe('second');

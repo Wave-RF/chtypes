@@ -1,0 +1,178 @@
+{
+ "schema": "https://artifacts.wavehouse.dev/spec/goldens/v1",
+ "by": "hand-written stub fixture for the TypeScript runner's own test",
+ "abi": 1,
+ "abi_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+ "clickhouse_version": "99.1.2.3",
+ "build": "20990101.000000",
+ "revision": 1,
+ "generated": {
+  "platform": "linux/amd64",
+  "checked_on": [
+   "darwin/arm64",
+   "linux/amd64",
+   "linux/arm64"
+  ]
+ },
+ "setups": [
+  {
+   "id": "utc",
+   "image_zone_b64": "",
+   "defaults_b64": "e30=",
+   "cases": [
+    {
+     "id": "stub-row-document",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZW1vcnk=",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IUQ6YWI=",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "input_span": {
+        "off": 0,
+        "len": 5
+       },
+       "unknown_fields": [],
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "src": "input",
+         "input": "ab",
+         "stored": "ab",
+         "null": false,
+         "value_b64": "YWI="
+        }
+       ],
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    },
+    {
+     "id": "stub-row-refused",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZW1vcnk=",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IVM6Q0hTX1JFSkVDVEVEOjI3OkNBTk5PVF9QQVJTRV9URVhUOmJvb20=",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_REJECTED",
+      "error": {
+       "ch_code": 27,
+       "ch_name_b64": "Q0FOTk9UX1BBUlNFX1RFWFQ=",
+       "message_b64": "Ym9vbQ==",
+       "column_b64": ""
+      },
+      "run_varying": []
+     }
+    },
+    {
+     "id": "stub-schema-refused",
+     "kind": "schema",
+     "call": "schema_create",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "IVM6Q0hTX1JFSkVDVEVEOjUwOlVOS05PV05fVFlQRTpubyBzdWNoIHR5cGU=",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "schema_create",
+      "status": "CHS_REJECTED",
+      "error": {
+       "ch_code": 50,
+       "ch_name_b64": "VU5LTk9XTl9UWVBF",
+       "message_b64": "bm8gc3VjaCB0eXBl",
+       "column_b64": ""
+      },
+      "run_varying": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "tokyo-defaults",
+   "image_zone_b64": "QXNpYS9Ub2t5bw==",
+   "defaults_b64": "eyJkYXRlX3RpbWVfaW5wdXRfZm9ybWF0IjoiYmVzdF9lZmZvcnQifQ==",
+   "cases": [
+    {
+     "id": "stub-row-document-tokyo",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZW1vcnk=",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IUQ6Y2Q=",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "input_span": {
+        "off": 0,
+        "len": 5
+       },
+       "unknown_fields": [],
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "src": "input",
+         "input": "cd",
+         "stored": "cd",
+         "null": false,
+         "value_b64": "Y2Q="
+        }
+       ],
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -4,11 +4,11 @@
  * fetch layer's own duplicate-key refusals read them). The result documents of
  * the C layer no longer use it: they are decoded with the stock `JSON.parse`
  * (`./documents.ts`), because the library's documents are valid RFC 8259 JSON.
- * It is the switch lane's to fold into the fetch layer.
+ * It is kept for the fetch layer's use only.
  */
 
 import { isUtf8 } from 'node:buffer';
-import { ChtypesError } from './errors.js';
+import { ArtifactCorruptError } from './ocifetch/errors.js';
 
 /** The six JSON kinds. `number` keeps its text; nothing is ever converted. */
 export type JsonKind = 'null' | 'bool' | 'number' | 'string' | 'array' | 'object';
@@ -90,7 +90,7 @@ class Parser {
   constructor(private readonly b: Buffer) {}
 
   fail(what: string): never {
-    throw new ChtypesError(`chtypes: bad result document: ${what} at offset ${this.i}`);
+    throw new ArtifactCorruptError(`chtypes: bad result document: ${what} at offset ${this.i}`);
   }
 
   skipSpace(): void {
@@ -137,10 +137,9 @@ class Parser {
 
   /**
    * A JSON number, strictly: no leading `+`, no bare `.5`, no `1.`, no leading
-   * zeros. The strictness is load-bearing rather than pedantic — `parseJsonValue`
-   * decides with this grammar whether a supplied CSV/TSV field *is* a JSON
-   * value, and a lenient reading invents transformations (docs/reference/bindings.md
-   * §detectors).
+   * zeros. The strictness is load-bearing rather than pedantic: the fetch layer
+   * reads signed statements and manifests with this grammar, and a lenient reading
+   * would accept bytes the signature never covered.
    */
   private number(): Json {
     const start = this.i;
@@ -338,20 +337,12 @@ class Parser {
 }
 
 /**
- * Is this supplied text **one JSON value**? A spec rule rather than a language
- * default (docs/reference/bindings.md §detectors, measured 2026-08-17): the text is a JSON
- * value only if a strict parse consumes **all** of it, with whitespace being
- * exactly JSON's four (space, tab, LF, CR).
+ * Is this byte string **one JSON value**? It is only if a strict parse consumes
+ * **all** of it, with whitespace being exactly JSON's four (space, tab, LF, CR).
+ * A numeric *prefix* does not count (`1.2.3.4` is not `1.2`), and U+FEFF is
+ * **not** whitespace, though JS's own `String.prototype.trim()` counts it as one.
  *
- * Both edges cost real false transforms. A numeric *prefix* must not count —
- * `1.2.3.4` is not `1.2` — and U+FEFF is **not** whitespace: JS's own
- * `String.prototype.trim()` counts `<ZWNBSP>` as `WhiteSpace`, so a
- * `trim()`-then-`JSON.parse` reading took a BOM-prefixed CSV field for the
- * number after it and reported 12 `reformat` transforms that never happened.
- * Deciding over bytes with this grammar makes both impossible.
- *
- * Returns `null` when the bytes are not a single JSON value (a TSV field, a bare
- * CSV token, raw bytes).
+ * Returns `null` when the bytes are not a single JSON value.
  */
 export function parseJsonValue(bytes: Buffer): Json | null {
   if (bytes.length === 0) return null;

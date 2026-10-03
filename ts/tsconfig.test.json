@@ -2,8 +2,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": ".",
-    "types": ["node"]
+    "rootDir": "..",
+    "types": ["node"],
+    "paths": { "@wavehouse/chtypes": ["./src/index.ts"] }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "../examples/ts/**/*.ts"],
+  "exclude": ["src/fetch.ts"]
 }
