@@ -263,7 +263,7 @@ jobs:
         id: run
         env:
           CHTYPES_ABI1_STUBS: ${{ runner.temp }}/abi1-stubs
-          CHTYPES_ABI1_REPORT: ${{ runner.temp }}/abi1-report.json
+          CHTYPES_ABI1_REPORT: ${{ runner.temp }}/abi1-report-${{ matrix.binding }}-${{ matrix.toolchain }}-${{ matrix.os }}.json
           CHTYPES_ABI1_TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
           case "${{ matrix.binding }}" in
@@ -299,6 +299,9 @@ jobs:
             echo "::error::v1-abi-conformance: $dir exists but $script is missing — the lane that added $dir must add $script"
             exit 1
           fi
+          # The report path is per leg (binding, toolchain, os): every leg
+          # used to write abi1-report.json, and v1-abi-parity's
+          # merge-multiple download let one leg's file overwrite the others'.
           # Selftest first, same discipline as v1-abi-linked/v1-abi-rust
           # above, but conditional: unlike those two single-purpose scripts,
           # a conformance script is not REQUIRED to declare --selftest. Only
@@ -325,7 +328,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: v1-abi-conformance-${{ matrix.binding }}-${{ matrix.toolchain }}-${{ matrix.os }}
-          path: ${{ runner.temp }}/abi1-report.json
+          path: ${{ runner.temp }}/abi1-report-${{ matrix.binding }}-${{ matrix.toolchain }}-${{ matrix.os }}.json
           retention-days: 7
 
   v1-abi-linked:
@@ -410,6 +413,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # actions: read lets the guard below list this run's artifacts.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -427,6 +434,27 @@ jobs:
         # fail the job over "no artifacts found" once that is also true for a
         # run with zero MATCHING legs rather than zero REPORTS.
         continue-on-error: true
+      # Guard: the downloaded report files must be as many as the
+      # v1-abi-conformance-* artifacts this run uploaded (listed from the
+      # Actions API, not from the download, which is the thing under test). A
+      # lower count means a report was lost or overwritten on the way here,
+      # and a leg reading MISSING for that reason is a harness defect, not a
+      # binding's.
+      - name: every uploaded leg report was downloaded (no report lost or overwritten)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          want="$(gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false) | select(.name | startswith("v1-abi-conformance-")) | .name' | sort -u | wc -l | tr -d ' ')"
+          # The download dir is absent when no leg uploaded anything; under
+          # pipefail a find on a missing dir would fail this step silently.
+          mkdir -p "$RUNNER_TEMP/abi1-reports"
+          have="$(find "$RUNNER_TEMP/abi1-reports" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
+          echo "v1-abi-conformance artifacts uploaded: $want; report files downloaded: $have"
+          if [ "$have" -lt "$want" ]; then
+            echo "::error::v1-abi-parity: $have report file(s) downloaded but $want v1-abi-conformance artifact(s) exist — a report was lost or overwritten"
+            exit 1
+          fi
       - name: selftest — MISSING, FAILED, EXTRA and STALE each refuse, and 0-enrolled is green, on a fabricated tree
         run: uv run --no-project --python 3.11 scripts/abi-v1/parity.py --selftest
       - name: every enrolled binding has a passing report per leg, for the same cases

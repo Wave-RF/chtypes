@@ -33,16 +33,20 @@ literal and a comment is nothing. Go, TypeScript and Rust are lexed a line at a
 time: comment LINES are skipped, so prose may name a code, while a comment that
 TRAILS code on the same line is still scanned.
 
-Also excluded: any file carrying scripts/abi-v1/gen.py's own generated banner
-in its first 512 bytes (emit/__init__.py's BANNER_RE — the same test
-scripts/abi-v1/check-no-hand-decls.py exempts generated files by). The
+Also excluded: a file that is one of the paths scripts/abi-v1/gen.py's emitters
+produce (gen.produced_outputs()) AND carries gen.py's generated banner in its
+first 512 bytes (emit/__init__.py's BANNER_RE — the same two-part test
+scripts/abi-v1/check-no-hand-decls.py exempts generated files by). Build and
+dist directories are walked, not skipped, so a copied banner under one of them
+is not exempt. The
 */abi1/* declaration layers gen.py emits pair D3's five frozen chs_status
 values with their UPPER_SNAKE names (CHS_OK, CHS_REJECTED, ...) — an ABI
 status table from spec/abi-v1/abi.json, not a ClickHouse error-code table —
 and Rule B cannot tell those apart from a hand-written one by shape alone.
-The banner cannot be forged: gen.py --check refuses any file that carries it
-and was not actually produced by an emitter, so this exemption cannot be used
-to smuggle a real error-code table past Rule A or B.
+The exemption cannot be forged: it needs the path to be a produced output, and
+gen.py --check refuses a produced path whose content differs from the
+emitter's, so it cannot be used to smuggle a real error-code table past Rule A
+or B.
 
 RULE A — no known ClickHouse error name as a string literal.
 
@@ -103,6 +107,7 @@ import tokenize
 # disagree about what counts as "really generated".
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "abi-v1"))
 from emit import BANNER_RE  # noqa: E402
+from gen import produced_outputs  # noqa: E402
 
 # --------------------------------------------------------------- what is scanned
 
@@ -112,9 +117,7 @@ SCAN_EXTS = (".go", ".py", ".ts", ".mts", ".mjs", ".js", ".rs")
 SKIP_DIRS = {
     "node_modules",
     "target",
-    "dist",
     ".venv",
-    "build",
     "__pycache__",
     "testdata",
     "tests",
@@ -460,8 +463,10 @@ def check_declarations(root: str) -> list[str]:
 # ------------------------------------------------------------------- the check
 
 
-def check(root: str) -> tuple[int, list[str]]:
+def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[str]]:
     files = scanned_files(root)
+    if produced is None:
+        produced = produced_outputs()
     findings: list[str] = []
 
     # A scanner that stopped seeing a binding must fail, not report success for
@@ -486,7 +491,7 @@ def check(root: str) -> tuple[int, list[str]]:
 
     for rel in files:
         text = open(os.path.join(root, rel), encoding="utf-8").read()
-        if BANNER_RE.search(text[:512]):
+        if rel in produced and BANNER_RE.search(text[:512]):
             continue  # scripts/abi-v1/gen.py's own output: see this module's docstring
         try:
             findings += scan_text(rel, text)
@@ -717,10 +722,27 @@ def selftest(root: str) -> int:
             GENERATED_BANNER_LINE + "\n" + GENERATED_STATUS_TABLE
         )
 
-        n, lines = check(tmp)
+        # What the emitters produce, standing in for the real set (the real
+        # outputs are not source files yet): only the fabricated file above.
+        produced = frozenset({GENERATED_RUST_DECLS})
+
+        n, lines = check(tmp, produced)
         if n:
             print("SELFTEST FAILED: the copied tree does not pass\n" + "\n".join(lines), file=sys.stderr)
             return 1
+
+        # The same real banner and table in a hand-written file under a
+        # build directory inside a binding, which is not a produced path:
+        # the walk must reach it and the exemption must refuse it.
+        built = os.path.join(tmp, "rust", "src", "build", "decls.rs")
+        os.makedirs(os.path.dirname(built), exist_ok=True)
+        open(built, "w", encoding="utf-8").write(GENERATED_BANNER_LINE + "\n" + GENERATED_STATUS_TABLE)
+        n, lines = check(tmp, produced)
+        if n == 0 or TABLE_FINDING not in "\n".join(lines) or "rust/src/build/decls.rs" not in "\n".join(lines):
+            print("SELFTEST FAILED: a bannered hand-written file under build/ was exempted or never walked", file=sys.stderr)
+            return 1
+        print(f"  plant   {'bannered hand-written file under build/':<52} caught")
+        os.remove(built)
 
         for label, rel, find, repl, want in PLANTS:
             path = os.path.join(tmp, rel)
@@ -728,7 +750,7 @@ def selftest(root: str) -> int:
             if original is None:
                 return 1
             try:
-                n, lines = check(tmp)
+                n, lines = check(tmp, produced)
             finally:
                 open(path, "w", encoding="utf-8").write(original)
             report = "\n".join(lines)
@@ -750,7 +772,7 @@ def selftest(root: str) -> int:
             if original is None:
                 return 1
             try:
-                n, lines = check(tmp)
+                n, lines = check(tmp, produced)
             finally:
                 open(path, "w", encoding="utf-8").write(original)
             if n:
@@ -766,7 +788,7 @@ def selftest(root: str) -> int:
     print(
         "check-no-error-code-table: selftest ok — a planted table, a name literal and a dropped "
         "declaration fire in every binding; a test file, prose, the CHTYPES_ vocabulary and a "
-        "real generated banner stay silent, and the same table fires once that banner is stripped"
+        "real generated file stay silent, and the same table fires once that banner is stripped or when the banner sits on a file no emitter produces"
     )
     return 0
 

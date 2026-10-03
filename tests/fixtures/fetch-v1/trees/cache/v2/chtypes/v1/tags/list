@@ -2,8 +2,8 @@
   "name": "chtypes/v1",
   "tags": [
     "c-offline-hit",
-    "c-existing-install-noop",
+    "26.1.4.4",
     "c-system-dir-readonly",
-    "c-index-race-reapply"
+    "26.1.7.7"
   ]
 }
