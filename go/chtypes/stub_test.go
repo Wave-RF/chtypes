@@ -449,7 +449,7 @@ func TestStubRealDocuments(t *testing.T) {
 		t.Fatalf("row = %+v", r)
 	}
 	c := r.Columns[0]
-	if c.Column != "s" || c.Text != "\xff\x00\x80" || string(c.Value) != "\xff\x00\x80" || c.Source != SourceInput || !c.IsStored || c.Null {
+	if c.Column != "s" || c.Text != "\xff\x00\x80" || c.Value == nil || *c.Value != "\xff\x00\x80" || c.Source != SourceInput || !c.IsStored || c.Null {
 		t.Errorf("binary String = %+v", c)
 	}
 	if r.InputSpan == nil || r.InputSpan.Len != 6 {
@@ -460,7 +460,7 @@ func TestStubRealDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := r.Columns[0]; c.Text != "a\x00b" || string(c.Value) != "a\x00b" {
+	if c := r.Columns[0]; c.Text != "a\x00b" || c.Value == nil || *c.Value != "a\x00b" {
 		t.Errorf("UTF-8 with NUL = %+v", c)
 	}
 	// document.discover_columns.binary_name: a column name that is not UTF-8.

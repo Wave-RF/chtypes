@@ -166,7 +166,7 @@ func (r *reader) nameList(m map[string]any, key, path string) []string {
 
 // rawValue reads value_b64: the raw bytes of a scalar String or FixedString
 // value, nil when absent.
-func (r *reader) rawValue(m map[string]any, path string) []byte {
+func (r *reader) rawValue(m map[string]any, path string) *string {
 	v := r.field(m, "value_b64")
 	if v == nil {
 		return nil
@@ -181,10 +181,8 @@ func (r *reader) rawValue(m map[string]any, path string) []byte {
 		r.fail(path+".value_b64", "not standard base64: %v", err)
 		return nil
 	}
-	if raw == nil {
-		raw = []byte{}
-	}
-	return raw
+	str := string(raw)
+	return &str
 }
 
 // optBytes reads a data-derived string that may be absent: nil when absent.
