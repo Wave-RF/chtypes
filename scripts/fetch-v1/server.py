@@ -20,7 +20,10 @@ fetch-v1.md §10). Python stdlib only.
         order and the request log shows both attempts; `close` resets the
         connection with no response; a cross-origin redirect is followed
         to the second origin; and the request log at `/_log/s-<id>` is
-        per-case (two different case ids never see each other's requests).
+        per-case (two different case ids never see each other's requests);
+        and a request whose User-Agent is not `chtypes-<binding>/<version>`
+        (urllib's default, or none) is answered 400 while a conforming one
+        is served, and the log records the agent either way.
         Exits nonzero and prints which assertion failed, same discipline
         as every other --selftest in this repository.
 
@@ -50,7 +53,15 @@ reason). The server:
      from `tests/fixtures/fetch-v1/trees/<tree>/v2/<repository-relative
      path>` as a static file, 404 if absent.
 
-Every request (method, path, headers, origin) is appended to that
+REFERRERS FILTER. `GET .../referrers/<digest>?artifactType=<t>` is answered
+as the real host does (form-decoded query, so an unencoded `+` in a media
+type matches nothing; `OCI-Filters-Applied: artifactType` when filtered).
+
+USER-AGENT. A request under `/v2/s-<case-id>/` whose `User-Agent` does not
+match `^chtypes-(go|python|ts|rust)/[0-9A-Za-z.+-]+$` is logged and then
+answered 400, before any routing, scripting or tree lookup.
+
+Every request (method, path, user_agent, headers, origin) is appended to that
 case id's own log, readable at `GET /_log/s-<case-id>` as a JSON array —
 never reset except by restarting the server, so a whole conformance run's
 request counts are inspectable after the fact.
@@ -92,9 +103,17 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 FIXTURES: Path = Path(".")  # set by main() / run_server()
+
+# docs/guides/fetch-v1.md §2: every request a binding's fetch layer makes
+# carries `User-Agent: chtypes-<binding>/<version>`, because delivery hosts
+# may refuse a generic library agent (Python-urllib, Go-http-client, ...).
+# The server answers 400 to anything else, so a binding that forgets the
+# header turns every http-transport case red instead of passing here and
+# failing against production.
+USER_AGENT_PATTERN = re.compile(r"^chtypes-(go|python|ts|rust)/[0-9A-Za-z.+-]+$")
 
 
 class ScriptState:
@@ -208,9 +227,16 @@ class Handler(BaseHTTPRequestHandler):
                 "method": method,
                 "path": path,
                 "origin": self.origin_label,
+                "user_agent": self.headers.get("User-Agent"),
                 "headers": dict(self.headers.items()),
             },
         )
+
+        agent = self.headers.get("User-Agent")
+        if agent is None or USER_AGENT_PATTERN.fullmatch(agent) is None:
+            # Logged above (so a test can see what was sent), then refused.
+            self._send_status(400)
+            return
 
         script_path = f"/v2/{repo_relative}"
 
@@ -309,15 +335,40 @@ class Handler(BaseHTTPRequestHandler):
         status = resp["status"]
         headers = substitute_headers(resp.get("headers", {}), self.origin_url, self.second_origin_url)
         body = b""
+        filtered = False
         if resp.get("body_from_tree"):
-            body = self._tree_bytes_for_request()
+            body, filtered = self._referrers_filter(self._tree_bytes_for_request())
         self.send_response(status)
         for k, v in headers.items():
             self.send_header(k, v)
+        if filtered:
+            self.send_header("OCI-Filters-Applied", "artifactType")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if self.command != "HEAD" and body:
             self.wfile.write(body)
+
+    def _referrers_filter(self, body: bytes) -> tuple[bytes, bool]:
+        """Answer the referrers API's `artifactType` filter the way the real
+        host does: the query is decoded as an HTML form (so a raw `+` is a
+        space and matches nothing; `%2B` is a plus), `manifests[]` is filtered
+        by exact `artifactType`, and `OCI-Filters-Applied: artifactType` is
+        sent when it filtered. A request with no filter is served unchanged,
+        so a binding that filters client-side still works."""
+        parsed = urlsplit(self.path)
+        if "/referrers/" not in parsed.path:
+            return body, False
+        wanted = parse_qs(parsed.query).get("artifactType")
+        if not wanted:
+            return body, False
+        try:
+            doc = json.loads(body)
+        except ValueError:
+            return body, False
+        if not isinstance(doc, dict) or not isinstance(doc.get("manifests"), list):
+            return body, False
+        doc["manifests"] = [m for m in doc["manifests"] if m.get("artifactType") == wanted[0]]
+        return json.dumps(doc, indent=2).encode("utf-8"), True
 
     def _tree_bytes_for_request(self) -> bytes:
         path = urlsplit(self.path).path
@@ -339,10 +390,12 @@ class Handler(BaseHTTPRequestHandler):
         if not f.is_file():
             self._send_status(404)
             return
-        body = f.read_bytes()
+        body, filtered = self._referrers_filter(f.read_bytes())
         content_type = "application/json" if _looks_like_json_route(repo_relative) else "application/octet-stream"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
+        if filtered:
+            self.send_header("OCI-Filters-Applied", "artifactType")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if self.command != "HEAD":
@@ -424,9 +477,27 @@ def _run_selftest(tmp: Path) -> None:
     import urllib.error
     import urllib.request
 
+    ua = {"User-Agent": "chtypes-python/0.0.0-dev"}
+
+    def get(u: str):  # noqa: ANN202 - selftest helper
+        return urllib.request.urlopen(urllib.request.Request(u, headers=ua), timeout=5)
+
     # A minimal two-case fixture tree, built the same way genfixtures
     # shapes one, without depending on genfixtures itself (server.py has
     # no dependency on the Go generator; it only reads what is on disk).
+    ref_dir = tmp / "trees" / "basic" / "v2" / "chtypes" / "v1" / "referrers"
+    ref_dir.mkdir(parents=True)
+    (ref_dir / "sha256:abc").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "manifests": [
+                    {"digest": "sha256:1", "artifactType": "application/vnd.dev.sigstore.bundle.v0.3+json"},
+                    {"digest": "sha256:2", "artifactType": "application/vnd.other"},
+                ],
+            }
+        )
+    )
     tree_dir = tmp / "trees" / "basic" / "v2" / "chtypes" / "v1" / "manifests"
     tree_dir.mkdir(parents=True)
     (tree_dir / "26.8").write_text('{"ok":true}')
@@ -535,7 +606,7 @@ def _run_selftest(tmp: Path) -> None:
 
         # 1. no-script: serves the tree verbatim.
         url = f"http://127.0.0.1:{port1}/v2/s-no-script/chtypes/v1/manifests/26.8"
-        with urllib.request.urlopen(url, timeout=5) as r:
+        with get(url) as r:
             assert r.status == 200, f"expected 200, got {r.status}"
             assert json.loads(r.read()) == {"ok": True}
 
@@ -543,35 +614,67 @@ def _run_selftest(tmp: Path) -> None:
         # shows exactly two requests for this case id.
         url = f"http://127.0.0.1:{port1}/v2/s-retry-then-ok/chtypes/v1/manifests/26.8"
         try:
-            urllib.request.urlopen(url, timeout=5)
+            get(url)
             raise AssertionError("expected the first request to 503")
         except urllib.error.HTTPError as e:
             assert e.code == 503, f"expected 503, got {e.code}"
-        with urllib.request.urlopen(url, timeout=5) as r:
+        with get(url) as r:
             assert r.status == 200
         log = json.loads(
-            urllib.request.urlopen(f"http://127.0.0.1:{port1}/_log/s-retry-then-ok", timeout=5).read()
+            get(f"http://127.0.0.1:{port1}/_log/s-retry-then-ok").read()
         )
         assert len(log) == 2, f"expected 2 logged requests, got {len(log)}: {log}"
 
         # 3. redirect-case: the client follows the 302 to the second
         # origin and gets the real content there.
         url = f"http://127.0.0.1:{port1}/v2/s-redirect-case/chtypes/v1/manifests/26.8"
-        with urllib.request.urlopen(url, timeout=5) as r:
+        with get(url) as r:
             assert r.status == 200
             assert json.loads(r.read()) == {"ok": True}
 
         # 4. closer: the connection resets with no HTTP response at all.
         url = f"http://127.0.0.1:{port1}/v2/s-closer/chtypes/v1/manifests/26.8"
         try:
-            urllib.request.urlopen(url, timeout=5)
+            get(url)
             raise AssertionError("expected the connection to reset, got a response")
         except (urllib.error.URLError, ConnectionError, OSError):
             pass
 
         # 5. per-case logs never cross-contaminate.
-        log_closer = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port1}/_log/s-closer", timeout=5).read())
+        log_closer = json.loads(get(f"http://127.0.0.1:{port1}/_log/s-closer").read())
         assert len(log_closer) == 1, f"expected 1 logged request for 'closer', got {len(log_closer)}"
+
+        # 6. User-Agent enforcement: urllib's own default and a missing
+        # header are both refused with 400 and logged; a conforming agent
+        # is served; the log records the agent either way.
+        url = f"http://127.0.0.1:{port1}/v2/s-no-script/chtypes/v1/manifests/26.8"
+        for bad in ("Python-urllib/3.13", "Go-http-client/1.1", "curl/8.0.0", "chtypes-go", "chtypes-go/", "chtypes-go/1.0 x"):
+            req = urllib.request.Request(url, headers={"User-Agent": bad})
+            try:
+                urllib.request.urlopen(req, timeout=5)
+                raise AssertionError(f"expected 400 for User-Agent {bad!r}")
+            except urllib.error.HTTPError as e:
+                assert e.code == 400, f"expected 400 for User-Agent {bad!r}, got {e.code}"
+        for good in ("chtypes-go/1.0.0", "chtypes-python/1.0.0", "chtypes-ts/1.0.0-rc.1", "chtypes-rust/0.0.0-dev"):
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": good}), timeout=5) as r:
+                assert r.status == 200, f"expected 200 for User-Agent {good!r}, got {r.status}"
+        # 7. Referrers filter: raw `+` is a space (0 manifests), `%2B` is a
+        # plus (the bundle), no filter serves everything.
+        rbase = f"http://127.0.0.1:{port1}/v2/s-no-script/chtypes/v1/referrers/sha256:abc"
+        for query, want, applied in (
+            ("artifactType=application/vnd.dev.sigstore.bundle.v0.3+json", 0, True),
+            ("artifactType=application%2Fvnd.dev.sigstore.bundle.v0.3%2Bjson", 1, True),
+            ("", 2, False),
+        ):
+            with get(rbase + ("?" + query if query else "")) as r:
+                got = json.loads(r.read())["manifests"]
+                assert len(got) == want, f"referrers {query!r}: expected {want}, got {len(got)}"
+                has = r.headers.get("OCI-Filters-Applied") == "artifactType"
+                assert has == applied, f"referrers {query!r}: OCI-Filters-Applied={has}, want {applied}"
+
+        log_ua = json.loads(get(f"http://127.0.0.1:{port1}/_log/s-no-script").read())
+        agents = [e["user_agent"] for e in log_ua]
+        assert "Python-urllib/3.13" in agents and "chtypes-go/1.0.0" in agents, f"agents not recorded: {agents}"
     finally:
         srv1.shutdown()
         srv2.shutdown()

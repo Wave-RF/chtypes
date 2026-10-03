@@ -16,7 +16,7 @@
  * inconsistency, never something to paper over by trying another referrer.
  */
 
-import { createPublicKey, verify as cryptoVerify } from 'node:crypto';
+import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { items, type Json, parseJsonValue } from '../json.js';
 import { ABI_GENERATION, DSSE_MAX_SIGNATURES, DSSE_PAYLOAD_TYPE, SPELLING_REGEX } from './constants.gen.js';
 import { ArtifactCorruptError } from './errors.js';
@@ -74,6 +74,11 @@ function toPlain(json: Json): unknown {
 // ------------------------------------------------------------------- ed25519
 
 /** DSSE's pre-authentication encoding (PAE): `DSSEv1 LEN(type) SP type LEN(body) SP body`. */
+/** A key's id: `sha256-first16hex`, the first 16 hex characters of sha256 over the raw 32-byte public key (`spec/fetch-v1/constants.json`, `trust.keyid_algorithm`). */
+export function keyIdOfRawKey(publicKeyHex: string): string {
+  return createHash('sha256').update(Buffer.from(publicKeyHex, 'hex')).digest('hex').slice(0, 16);
+}
+
 export function dssePAE(payloadType: string, payload: Buffer): Buffer {
   const typeBytes = Buffer.from(payloadType, 'utf8');
   return Buffer.concat([

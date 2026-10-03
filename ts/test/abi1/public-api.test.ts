@@ -135,7 +135,6 @@ describe.skipIf(!stubsAvailable)('the public API over the stub library', () => {
     const block = schema.parseBlock(Format.JSONEachRow, BODY);
     schema.close();
     schema.close(); // idempotent
-    expect(schema.isClosed).toBe(true);
     for (const use of [
       () => schema.describe(),
       () => schema.row(Format.JSONEachRow, BODY),

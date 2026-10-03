@@ -19,9 +19,11 @@ type Value struct {
 	// Text is ClickHouse's own rendering of the stored value, from stored.
 	Text string
 	// Value is the raw bytes of a scalar String or FixedString value, from
-	// value_b64; nil otherwise (absent for NULL and for a value nested in
-	// another type, a recorded 1.0 gap). Text is always the rendering.
-	Value []byte
+	// value_b64, as a byte string (bindings-v1.md section 3); nil otherwise
+	// (absent for NULL and for a value nested in another type, a recorded 1.0
+	// gap), so an absent value differs from an empty one. Text is always the
+	// rendering.
+	Value *string
 	// Null is the library's own verdict, poison included.
 	Null bool
 	// Source is where the value came from, from src.
@@ -50,7 +52,7 @@ type Computed struct {
 	Kind   string
 	Text   string
 	// Value is the raw bytes, as Value.Value.
-	Value []byte
+	Value *string
 }
 
 // EngineCell is one cell of a stored row after the engine's insert-time merge.
@@ -59,7 +61,7 @@ type EngineCell struct {
 	Text   string
 	Null   bool
 	// Value is the raw bytes, as Value.Value.
-	Value []byte
+	Value *string
 }
 
 // RowResult is one row's verdict and, as the flags ask, its columns.

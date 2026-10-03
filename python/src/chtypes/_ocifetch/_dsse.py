@@ -18,7 +18,9 @@ only reported back as `signed_by` once a real verification succeeds.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import os
 from dataclasses import dataclass
 
 from chtypes import _ed25519
@@ -30,6 +32,7 @@ __all__ = [
     "TrustedKey",
     "VerifiedBundle",
     "loads_no_duplicate_keys",
+    "env_trusted_keys",
     "pae_encode",
     "release_trusted_keys",
     "verify_bundle",
@@ -72,6 +75,25 @@ def release_trusted_keys() -> tuple[TrustedKey, ...]:
         TrustedKey(keyid=k["keyid"], public_key=_hex_to_bytes(k["ed25519_hex"]))
         for k in C.RELEASE_KEYS
     )
+
+
+def env_trusted_keys() -> tuple[TrustedKey, ...] | None:
+    """`CHTYPES_TRUSTED_KEYS` (comma-separated 32-byte public keys, hex): when
+    set and non-empty it REPLACES the default trust list, never extends it
+    (docs/guides/fetch-v1.md section 4). Unset or blank returns None. The key
+    id is the generated constants' algorithm, sha256-first16hex of the raw key."""
+    raw = os.environ.get(C.ENV_TRUSTED_KEYS_NAME, "")
+    items = [part.strip() for part in raw.split(",") if part.strip()]
+    if not items:
+        return None
+    keys = []
+    for item in items:
+        try:
+            public = _hex_to_bytes(item)
+        except ValueError as exc:
+            raise ValueError(f"chtypes: {C.ENV_TRUSTED_KEYS_NAME} holds a bad key: {exc}") from None
+        keys.append(TrustedKey(keyid=hashlib.sha256(public).hexdigest()[:16], public_key=public))
+    return tuple(keys)
 
 
 def fixture_trusted_keys() -> tuple[TrustedKey, ...]:

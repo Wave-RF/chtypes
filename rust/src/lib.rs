@@ -78,14 +78,7 @@ compile_error!("chtypes loads artifacts with dlopen and supports unix targets on
 
 mod abi1;
 mod decode;
-#[cfg(feature = "fetch")]
-mod digest;
 mod error;
-#[cfg(feature = "fetch")]
-pub mod fetch;
-#[cfg(feature = "fetch")]
-#[doc(hidden)]
-pub mod legacy;
 mod library;
 // The fetch layer's own documentation is its module docs; its record types are
 // re-exported below, undocumented field by field.

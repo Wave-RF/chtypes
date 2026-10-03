@@ -47,26 +47,20 @@ tar = { version = "0.4", default-features = false }
 # are zstd-compressed.
 ruzstd = { version = "0.9.0", default-features = false, features = ["std"] }
 
-# --- the v0 `fetch` module's own dependency: gzip for the v0 tarball. Removed
-# with the module by the switch lane.
-flate2 = { version = "1", optional = true }
-
 [features]
-default = ["fetch"]
-# The v0 `chtypes::fetch` module and the `chtypes` binary, kept until the
-# switch lane deletes them (the v1 fetch plan's §2.4). Nothing in the v1 public
-# API uses it.
-fetch = ["dep:flate2"]
+default = []
 # Retained names, no longer gating anything: the v1 fetch layer and the ABI v1
 # layer are unconditional. CI commands and `[[test]] required-features` below
 # still spell them.
 fetch-v1 = []
 abi-v1 = []
 
+# The v1 command line over the fetch layer (src/main.rs): fetch, verify, list
+# and where. The binary re-declares src/ocifetch with #[path], the same way
+# the conformance suites do, because the fetch layer is not public API.
 [[bin]]
 name = "chtypes"
 path = "src/main.rs"
-required-features = ["fetch"]
 
 # The v1 conformance suite (docs/guides/fetch-v1.md §10, plan §3.3). It reads
 # CHTYPES_V1_CONFORMANCE and skips loudly, rather than failing, when unset.
@@ -74,6 +68,14 @@ required-features = ["fetch"]
 name = "ocifetch_conformance"
 path = "tests/ocifetch_conformance.rs"
 required-features = ["fetch-v1"]
+
+# The v1 goldens runner (docs/guides/goldens-v1.md section 2). It has its own
+# `main` (harness = false) because it re-executes itself once per setup, and it
+# skips loudly, rather than failing, when its inputs are unset.
+[[test]]
+name = "goldens_v1_runner"
+path = "tests/goldens_v1_runner.rs"
+harness = false
 
 # The ABI v1 conformance suite re-declares src/abi1's module tree with
 # #[path] (rust/src/abi1/mod.rs explains why) and needs the abi-v1 feature's

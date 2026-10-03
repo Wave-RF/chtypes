@@ -324,6 +324,19 @@ describe('name lists and engine rows (rule 5)', () => {
     expect(() => decodeBatch(enc({ outcome: 'accepted', engine_rows: [[{ stored: '1', null: false }]] }), undefined)).toThrow(InternalError);
   });
 
+  it('reads export_declined as bytes from either form: text, or base64 decoded to its exact bytes', () => {
+    const text = decodeBatch(enc({ outcome: 'accepted', export_declined: 'no export for this format' }), undefined);
+    expect(text.exportDeclined.toString('utf8')).toBe('no export for this format');
+    const raw = [0xff, 0x00, 0xc3, 0x28, 0x80];
+    const b64Form = decodeBatch(enc({ outcome: 'accepted', export_declined_b64: b64(raw) }), undefined);
+    expect([...b64Form.exportDeclined]).toEqual(raw);
+    expect(decodeBatch(enc({ outcome: 'accepted' }), undefined).exportDeclined.length).toBe(0);
+  });
+
+  it('refuses an export_declined given in both forms (InternalError)', () => {
+    expect(() => decodeBatch(enc({ outcome: 'accepted', export_declined: 'x', export_declined_b64: b64([0x78]) }), undefined)).toThrow(InternalError);
+  });
+
   it('reads the message, partition and filter setting names as bytes from either form', () => {
     const r = decodeRow(enc({ outcome: 'rejected', err_b64: b64([0xc3]), verdict_err_b64: b64([0xfe]), partition_id_b64: b64([0xff]) }));
     expect([...r.errMsg]).toEqual([0xc3]);

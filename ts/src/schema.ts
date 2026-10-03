@@ -103,10 +103,6 @@ export class Filter {
     return decodeFilterResult(this.#calls.filterEvalBlock(this.#h, blockHandles.get(block) as BlockHandle));
   }
 
-  get isClosed(): boolean {
-    return this.#h.isClosed;
-  }
-
   /** Release this filter; idempotent. */
   close(): void {
     this.#h.close();
@@ -127,10 +123,6 @@ export class Block {
   constructor(handle: BlockHandle) {
     this.#h = handle;
     blockHandles.set(this, handle);
-  }
-
-  get isClosed(): boolean {
-    return this.#h.isClosed;
   }
 
   /** Release this block; idempotent. */
@@ -213,10 +205,6 @@ export class Schema {
         encodeColumns(options.columns),
       ),
     );
-  }
-
-  get isClosed(): boolean {
-    return this.#h.isClosed;
   }
 
   /** Release this schema; idempotent. Filters and blocks made from it keep working. */

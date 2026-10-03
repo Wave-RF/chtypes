@@ -59,15 +59,19 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 | [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process    |
 | [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                            |
 
-## Four things specific to this binding
+## Fetching from the command line
 
-**A settings value must never be a `float`.** `encode_settings` stringifies an `int` exactly and raises `TypeError` on a `float`: a 19-digit `chtypes_now_epoch_nanos` does not survive an IEEE double, and as a JSON number the setting would be silently ignored.
+`chtypes fetch 26.8` (or `python -m chtypes fetch 26.8`) resolves, verifies and installs a build into the per-user cache; `chtypes verify`, `chtypes list` and `chtypes where` complete the four commands. `--lock FILE` records what was installed and `--frozen` fetches only what the lock pins. See the [Python API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/python.md#the-command).
 
-**`substituted` is on `RowResult`, not on `BatchResult`.** Reach it through `batch.rows[i].substituted`. `BatchResult` does carry a batch-level `transformed`, which folds in the storage layer's own verdicts.
+## Things specific to this binding
 
-**`ctypes` releases the GIL for the whole duration of a foreign call**, so the GIL is not the exclusion. The package uses a writer-preferring readers-writer lock per loaded image plus one plain lock per `Schema`; `set_default_settings` and `close` take it exclusively, as the ABI requires. Measured under contention: 27,770 batch reads across 8 threads against 566 concurrent settings swaps, every answer byte-identical to the uncontended one.
+**A settings value is a string, and only a string.** `settings={"flatten_nested": "0"}`, never `0`: a non-string value is a `TypeError`, and nothing rewrites one for you.
 
-**The INSERT column list (ABI revision 5) is a keyword-only `columns` on the same calls** — `schema.row(fmt, raw, columns=["id", "e"])`, and the same argument on `Schema.rows` and `Schema.parse_block`. `None` or an empty sequence is the no-list behavior of every earlier revision; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored. The column list needs an artifact of revision 5 or later, and this binding loads only artifacts at its own `chtypes.ABI_REVISION` — any other is refused at load, naming both revisions.
+**`ctypes` releases the GIL for the whole of a foreign call**, so calls on compiled handles run in parallel across threads. The package takes no lock around a call; it keeps a close guard per handle and one setup guard.
+
+**The INSERT column list is a keyword-only `columns`** on `schema.row`, `schema.rows` and `schema.parse_block`: `schema.row(Format.JSON_EACH_ROW, body, columns=["id", "e"])`. `None` or an empty sequence is the no-list shape; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored.
+
+**Known gaps in 1.0** are listed, with workarounds, in [`docs/limitations.md`](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md#known-gaps-in-10).
 
 ## Tests
 

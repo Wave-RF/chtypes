@@ -37,6 +37,9 @@ const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
 const PREDICATE_TYPE: &str = "https://artifacts.wavehouse.dev/spec/artifact/v1";
 const LIBRARY_NAME: &str = "libchtypes.so";
 const TEST_KEYID: &str = "6c3468e4ec653ac0";
+/// The same key's public half (`constants.json`'s `test_keys`): the trust list
+/// a test names, since the default trust is the release key alone.
+const TEST_KEY_HEX: &str = "b9b314491f92f6c4b93fc69f932164739a619965ed79dbbcea7a4ae2da611ce2";
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -212,7 +215,7 @@ fn registry_over(layout: &Layout, platform: &str) -> Registry {
             cache_dir: Some(layout.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
-            trust_test_keys: true,
+            trusted_keys: Some(vec![TEST_KEY_HEX.to_string()]),
             ..Default::default()
         },
         autofetch: Some(false),
@@ -359,7 +362,7 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
             cache_dir: Some(good.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
-            trust_test_keys: true,
+            trusted_keys: Some(vec![TEST_KEY_HEX.to_string()]),
             ..Default::default()
         },
         autofetch: Some(true),
@@ -373,7 +376,7 @@ fn a_signed_layout_resolves_adapts_and_loads_and_a_mismatch_is_refused() {
             cache_dir: Some(empty.cache.to_string_lossy().into_owned()),
             system_dirs: Some(Vec::new()),
             offline: true,
-            trust_test_keys: true,
+            trusted_keys: Some(vec![TEST_KEY_HEX.to_string()]),
             ..Default::default()
         },
         autofetch: Some(true),

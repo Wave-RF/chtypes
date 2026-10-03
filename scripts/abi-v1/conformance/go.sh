@@ -31,3 +31,10 @@ export CHTYPES_ABI1_TOOLCHAIN="${CHTYPES_ABI1_TOOLCHAIN:-go.mod}"
 cd "$ROOT/go"
 echo "go.sh: go test ./internal/abi1/... -run TestConformance (CHTYPES_ABI1_STUBS=${CHTYPES_ABI1_STUBS:-<unset>})"
 go test ./internal/abi1/... -run TestConformance -v
+
+# The goldens runner's stub self-check (docs/guides/goldens-v1.md): with the same
+# CHTYPES_ABI1_STUBS it runs the hand-written stub goldens through the Go goldens
+# runner, then scripts/goldens-v1/compare.py, which must pass the runner's report
+# and refuse the same report with one planted wrong byte. -v prints the PASS line.
+echo "go.sh: go test ./chtypes -run TestGoldensV1StubSelfCheck"
+go test ./chtypes -run TestGoldensV1StubSelfCheck -count=1 -v

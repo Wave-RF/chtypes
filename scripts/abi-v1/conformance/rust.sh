@@ -20,6 +20,11 @@
 # handle lifetimes and zero live handles, the process setup, and the registry
 # adapter over a real signed OCI layout. They write no report; this script's
 # own exit code is the worst of the test binaries.
+#
+# goldens_v1_runner (docs/guides/goldens-v1.md) joins them: with only
+# CHTYPES_ABI1_STUBS set it runs the hand-written stub goldens through the
+# goldens runner, then scripts/goldens-v1/compare.py, which must pass the
+# runner's report and must refuse the same report with one planted wrong byte.
 set -euo pipefail
 
 : "${CHTYPES_ABI1_STUBS:?CHTYPES_ABI1_STUBS must be set, to the v1-abi-stubs artifact directory}"
@@ -30,4 +35,4 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 
 cd "$ROOT/rust"
-exec cargo test --locked --features abi-v1 --test abi1_conformance --test api_v1 --test api_v1_setup --test api_v1_registry -- --nocapture
+exec cargo test --locked --features abi-v1 --test abi1_conformance --test api_v1 --test api_v1_setup --test api_v1_registry --test goldens_v1_runner -- --nocapture

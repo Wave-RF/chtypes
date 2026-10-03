@@ -29,6 +29,9 @@ Repository = "https://github.com/wave-rf/chtypes"
 Documentation = "https://github.com/wave-rf/chtypes/blob/main/python/README.md"
 Changelog = "https://github.com/wave-rf/chtypes/releases"
 
+[project.scripts]
+chtypes = "chtypes.__main__:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

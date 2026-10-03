@@ -224,19 +224,6 @@ func (e *ArtifactError) Unwrap() error { return e.Err }
 // Is makes errors.Is(err, ErrArtifact...) true for the matching code.
 func (e *ArtifactError) Is(target error) bool { return target != nil && target == sentinel(e.Code) }
 
-// ExitCode maps an error to a process exit status: 0 for nil, the code's own
-// status for an *ArtifactError, and 1 for anything else.
-func ExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	var ae *ArtifactError
-	if errors.As(err, &ae) {
-		return ae.Code.ExitCode()
-	}
-	return 1
-}
-
 // fetchError wraps the fetch layer's error in this family. A fetch-layer error
 // that is not a *ocifetch.FetchError (a refused spelling, a platform outside
 // the set, a malformed option) is misuse.

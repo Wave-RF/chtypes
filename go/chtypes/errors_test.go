@@ -89,9 +89,6 @@ func TestLoaderRefusalsAreOneFamilyWithFetch(t *testing.T) {
 	if !errors.As(incompat, &ae) || ae.Reason != "fingerprint" || ae.Path != "/p" || ae.Want != "a" || ae.Got != "b" || ae.Code != CodeArtifactIncompatible {
 		t.Errorf("fields = %+v", ae)
 	}
-	if ExitCode(incompat) != 8 || ExitCode(nil) != 0 || ExitCode(errors.New("x")) != 1 {
-		t.Errorf("exit codes = %d %d %d", ExitCode(incompat), ExitCode(nil), ExitCode(errors.New("x")))
-	}
 	// A step 7 failure is the call's own error, never a refusal reason.
 	step7 := loadError(&abi1.CallError{Status: "CHS_INVALID_ARGUMENT", Message: "zone a vs zone b"})
 	var ue *UsageError

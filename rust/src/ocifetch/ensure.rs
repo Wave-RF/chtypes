@@ -81,8 +81,10 @@ pub struct Options {
     pub update: bool,
     /// Proceed, with a warning, when no bundle verifies.
     pub allow_unsigned: bool,
-    /// Also trust `constants::TEST_KEYS` (fixtures only; never the default).
-    pub trust_test_keys: bool,
+    /// The trust list: raw 32-byte ed25519 public keys as hex. Non-empty
+    /// REPLACES the default (else `$CHTYPES_TRUSTED_KEYS`, else the release
+    /// key); it never appends to it.
+    pub trusted_keys: Option<Vec<String>>,
     /// `$CHTYPES_DOWNLOAD_TOKEN` override.
     pub token: Option<String>,
     /// An injected clock, for the conformance suite's exact-sleep assertions.
@@ -109,7 +111,7 @@ impl Default for Options {
             lock_write: false,
             update: false,
             allow_unsigned: false,
-            trust_test_keys: false,
+            trusted_keys: None,
             token: None,
             clock: None,
             before_index_rename: None,
@@ -125,6 +127,27 @@ struct Resources {
     client: Client,
     auth: AuthConfig,
     trust: Vec<TrustedKey>,
+}
+
+/// The ordered base list one call uses: the options' own, else
+/// `$CHTYPES_ARTIFACTS_URL` (comma-separated), else the built-in default.
+pub fn configured_bases(options: &Options) -> Vec<String> {
+    options.bases.clone().unwrap_or_else(|| {
+        std::env::var(constants::ENV_BASES_NAME)
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                s.split(constants::BASE_SEPARATOR)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                constants::DEFAULT_BASES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            })
+    })
 }
 
 fn resources(options: &mut Options) -> Result<Resources> {
@@ -143,22 +166,7 @@ fn resources(options: &mut Options) -> Result<Resources> {
                 .collect::<Vec<_>>()
         )));
     }
-    let bases = options.bases.clone().unwrap_or_else(|| {
-        std::env::var(constants::ENV_BASES_NAME)
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(|s| {
-                s.split(constants::BASE_SEPARATOR)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_else(|| {
-                constants::DEFAULT_BASES
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect()
-            })
-    });
+    let bases = configured_bases(options);
     let token = options
         .token
         .clone()
@@ -171,7 +179,7 @@ fn resources(options: &mut Options) -> Result<Resources> {
     let auth = AuthConfig {
         static_token: token,
     };
-    let trust = dsse::trusted_keys(options.trust_test_keys)?;
+    let trust = dsse::trusted_keys(options.trusted_keys.as_deref())?;
     Ok(Resources {
         root,
         platform,
@@ -201,6 +209,9 @@ fn default_host_platform() -> String {
 /// §1.3). On success, the library file exists on disk and every guarantee
 /// in §1.3 holds.
 pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
+    if std::env::var(constants::ENV_ALLOW_UNSIGNED_NAME).is_ok_and(|v| v == "1") {
+        options.allow_unsigned = true;
+    }
     let version_request = VersionRequest::parse(request)?;
     let res = resources(&mut options)?;
 
@@ -308,7 +319,7 @@ fn ensure_online(
                 check_artifact_statement(&stmt, &layer.digest)?;
                 (
                     stmt.predicate,
-                    stmt.signed_by.to_string(),
+                    stmt.signed_by.clone(),
                     Some(stmt.bundle_layer_digest),
                     Some(stmt.bundle_manifest_digest),
                     Vec::new(),
@@ -572,7 +583,7 @@ fn ensure_frozen(
                 platform,
                 Some(&VersionRequest::parse(request)?),
             )?;
-            (stmt.predicate, stmt.signed_by.to_string(), None)
+            (stmt.predicate, stmt.signed_by.clone(), None)
         }
         Err(Error::ArtifactUntrusted(detail)) if options.allow_unsigned => {
             warnings.push(format!(
@@ -813,7 +824,7 @@ pub fn fetch_signed(
     let auth = AuthConfig {
         static_token: token,
     };
-    let trust = dsse::trusted_keys(options.trust_test_keys)?;
+    let trust = dsse::trusted_keys(options.trusted_keys.as_deref())?;
     let source = Source {
         bases: repository_bases,
         client: &client,
@@ -1302,7 +1313,7 @@ fn install_from_local_blobs_for(
             layer_digest: layer.digest.clone(),
             bundle_digest: Some(stmt.bundle_layer_digest.clone()),
             bundle_manifest_digest: Some(stmt.bundle_manifest_digest.clone()),
-            signed_by: stmt.signed_by.to_string(),
+            signed_by: stmt.signed_by.clone(),
             library: library_name.clone(),
             library_sha256: library_sha256.clone(),
             library_bytes,

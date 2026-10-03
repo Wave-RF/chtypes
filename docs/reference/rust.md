@@ -32,6 +32,26 @@ Unix only: the loader is `dlopen`. Minimum supported Rust version 1.87. `cargo d
 | use a schema                    | `schema.describe()`, `row`, `rows`, `compile_filter`, `parse_block`                                                                                     |
 | use a filter                    | `filter.rows(format, body, &EvalOptions)`, `filter.eval(&block)`                                                                                        |
 
+## The fetch options
+
+`RegistryOptions::fetch` is a `FetchOptions` carrying everything [`fetch-v1.md`](../guides/fetch-v1.md) configures, each field defaulting to the fetch layer's own default (the environment, then the built-in value): `platform`, `bases`, `cache_dir`, `system_dirs`, `offline`, `frozen`, `lock_path`, `lock_write`, `update`, `allow_unsigned`, `trusted_keys` and `token`.
+
+`trusted_keys: Option<Vec<String>>` is the trust list: raw 32-byte ed25519 public keys, each as 64 hex digits. A non-empty list REPLACES the default trust (the release key); `None` reads `CHTYPES_TRUSTED_KEYS` (comma-separated), and the release key is used when neither names a key. A list never appends to the default, so trusting the SDK's fixture key means naming it (and the release key too, if both should verify). A key that is not 64 hex digits is `Error::Usage`.
+
+## The `chtypes` command
+
+The crate ships a `chtypes` binary over the fetch layer (`cargo install chtypes`). Progress and warnings go to stderr and results to stdout. Exit statuses come from the fetch layer's error table ([`fetch-v1.md`](../guides/fetch-v1.md) section 8); a usage error exits 2.
+
+| command                                                                                   | what it does                                                                                            |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `chtypes fetch <spelling>... [--platform K] [--lock F] [--frozen] [--offline] [--update]` | resolve, verify and install each version spelling; prints each installed directory                      |
+| `chtypes fetch --all [...]`                                                               | the same for every line (two-part tag) the registry publishes                                           |
+| `chtypes verify`                                                                          | re-hash every installed library against its verified record                                             |
+| `chtypes list`                                                                            | the version spellings the registry publishes (`tags/list`, filtered to two-, three- and four-part tags) |
+| `chtypes where`                                                                           | the v1 cache root                                                                                       |
+
+`--lock F` writes the lock after a fetch, `--frozen` fetches exactly what the lock pins (default file `chtypes.lock`) with no discovery, `--offline` reads the cache only, and `--update` re-resolves and rewrites the lock. The environment variables are `CHTYPES_ARTIFACTS_URL`, `CHTYPES_CACHE`, `CHTYPES_DOWNLOAD_TOKEN`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED`.
+
 ## Objects and threads
 
 `Schema`, `Filter` and `Block` are `Clone + Send + Sync + 'static`: a clone shares one handle, and the handle is freed when the last clone drops. `&self` methods run concurrently with no lock. A filter and a block hold a counted reference to their schema inside the library, so dropping the schema first is fine and the filter keeps working. `Registry` and `Library` (shared as `Arc<Library>`) are `Send + Sync`. A library is never unloaded.

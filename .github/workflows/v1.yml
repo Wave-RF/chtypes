@@ -645,6 +645,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The enrolled-shrink check reads origin/v1, and a pull request's
+      # checkout carries only its own merge commit, so the base is fetched
+      # here. Measured on the first integration pull request: without this the
+      # check printed "could not read origin/v1 (skipped)" and never ran.
+      # parity.py now FAILS when the base cannot be read, so a fetch that
+      # fails (or a branch that is gone) turns this job red rather than quiet.
+      - name: fetch the base ref the enrolled-shrink check compares against
+        run: git fetch --no-tags --depth=1 origin v1:refs/remotes/origin/v1
       # `if: always()` is deliberate and permanent, not a placeholder
       # artifact: the parity gate (lane 0B) must run even when v1-conformance
       # or v1-network failed, because reporting that failure — "0 enrolled",

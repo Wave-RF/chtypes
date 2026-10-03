@@ -31,6 +31,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from chtypes._ocifetch import _constants as C
 
 __all__ = [
+    "USER_AGENT",
     "Clock",
     "ForbiddenHttpError",
     "FetchPolicy",
@@ -44,6 +45,26 @@ __all__ = [
     "fetch_from_bases",
     "get_json",
 ]
+
+_USER_AGENT_DEV_VERSION = "0.0.0-dev"
+
+
+def _user_agent() -> str:
+    """`chtypes-python/<version>`, the User-Agent on every request this module
+    makes (docs/guides/fetch-v1.md section 2): delivery hosts may refuse a
+    generic library agent such as `Python-urllib/3.x`. The version is the
+    installed package's own; a source tree that was never installed reports
+    `0.0.0-dev`, and the header is never omitted."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        v = version("chtypes")
+    except PackageNotFoundError:
+        v = _USER_AGENT_DEV_VERSION
+    return f"chtypes-python/{v or _USER_AGENT_DEV_VERSION}"
+
+
+USER_AGENT = _user_agent()
 
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
 
@@ -186,7 +207,12 @@ def _opener(url: str) -> urllib.request.OpenerDirector:
 def _single_request(
     url: str, *, headers: Mapping[str, str], policy: FetchPolicy, max_bytes: int | None
 ) -> HttpResponse:
-    req = urllib.request.Request(url, method="GET", headers=dict(headers))
+    # The one place a request is built: manifests, blobs, referrers, tag
+    # lists, token exchanges and every redirect hop all arrive here, so the
+    # agent is set here and nowhere else. It overrides any caller-supplied one.
+    sent = {k: v for k, v in headers.items() if k.lower() != "user-agent"}
+    sent["User-Agent"] = USER_AGENT
+    req = urllib.request.Request(url, method="GET", headers=sent)
     timeout = policy.connect_timeout_s + policy.idle_timeout_s
     try:
         with _opener(url).open(req, timeout=timeout) as resp:

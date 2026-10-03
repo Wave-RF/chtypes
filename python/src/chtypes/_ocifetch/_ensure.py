@@ -25,6 +25,7 @@ from pathlib import Path
 from chtypes._ocifetch import _constants as C
 from chtypes._ocifetch._dsse import (
     TrustedKey,
+    env_trusted_keys,
     release_trusted_keys,
     verify_bundle,
 )
@@ -119,6 +120,9 @@ class Options:
     platform: str | None = None
     bases: tuple[str, ...] = ()
     cache_dir: str | os.PathLike[str] | None = None
+    # Read-only directories searched after the cache. None keeps the default
+    # list (constants: cache.system_dirs); an empty tuple searches none.
+    system_dirs: tuple[str | os.PathLike[str], ...] | None = None
     token: str | None = None
     trusted_keys: tuple[TrustedKey, ...] | None = None
     allow_unsigned: bool = False
@@ -147,7 +151,7 @@ class Options:
     def resolved_trusted_keys(self) -> tuple[TrustedKey, ...]:
         if self.trusted_keys is not None:
             return self.trusted_keys
-        return release_trusted_keys()
+        return env_trusted_keys() or release_trusted_keys()
 
     def resolved_platform(self) -> str:
         return self.platform or detect_host_platform()
@@ -613,7 +617,7 @@ def _ensure_floating(
     bases = options.resolved_bases()
     policy = FetchPolicy(token=options.token, clock=options.clock)
     retry = options.retry
-    roots = search_roots(options.cache_dir)
+    roots = search_roots(options.cache_dir, options.system_dirs)
     cache_root_path = roots[0]
     scratch_root = _scratch_root(cache_root_path)
 
@@ -786,7 +790,7 @@ def _ensure_frozen(
     bases = options.resolved_bases()
     policy = FetchPolicy(token=options.token, clock=options.clock)
     retry = options.retry
-    roots = search_roots(options.cache_dir)
+    roots = search_roots(options.cache_dir, options.system_dirs)
     cache_root_path = roots[0]
     scratch_root = _scratch_root(cache_root_path)
 
@@ -1071,7 +1075,7 @@ def resolve_installed(request: Request, platform: str, options: Options) -> Reso
     blobs before matching, so `--offline` still answers for a cache that
     was only ever pre-seeded (`oras copy --to-oci-layout`), never fetched.
     """
-    roots = search_roots(options.cache_dir)
+    roots = search_roots(options.cache_dir, options.system_dirs)
     _verify_preseeded_entries(roots, options.resolved_trusted_keys())
     candidates = [
         (dir_path, record)
@@ -1095,7 +1099,7 @@ def resolve_installed(request: Request, platform: str, options: Options) -> Reso
 def list_installed(options: Options) -> list[Resolved]:
     """Every verified install across the cache and the read-only system
     directories, cache-only (docs/guides/fetch-v1.md "The seam")."""
-    roots = search_roots(options.cache_dir)
+    roots = search_roots(options.cache_dir, options.system_dirs)
     return [
         _record_to_resolved(
             dir_path,
@@ -1111,7 +1115,7 @@ def list_installed(options: Options) -> list[Resolved]:
 def verify_installed(options: Options) -> list[VerifyResult]:
     """Re-hash every installed library's on-disk bytes against its own
     `verified.json` record, cache-only."""
-    roots = search_roots(options.cache_dir)
+    roots = search_roots(options.cache_dir, options.system_dirs)
     out = []
     for dir_path, record in list_verified_records(roots):
         lib_path = dir_path / record.library

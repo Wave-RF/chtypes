@@ -4,7 +4,9 @@ tag-vs-digest semantics, and dropping `Authorization` on redirect."""
 
 from __future__ import annotations
 
+import re
 import threading
+import tomllib
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -12,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from chtypes._ocifetch._http import (
+    USER_AGENT,
     Clock,
     FetchPolicy,
     ForbiddenHttpError,
@@ -501,3 +504,67 @@ def test_manifest_requests_send_both_media_types_in_accept(server: _Server) -> N
         retry=retry,
     )
     assert server.requests[-1][1].get("Accept") == want_accept
+
+
+# ---------------------------------------------------------------------------
+# User-Agent: `chtypes-python/<version>` on every request (fetch-v1.md §2).
+# ---------------------------------------------------------------------------
+
+_UA_PATTERN = re.compile(r"^chtypes-(go|python|ts|rust)/[0-9A-Za-z.+-]+$")
+
+
+def test_user_agent_matches_pattern_and_package_version() -> None:
+    assert _UA_PATTERN.fullmatch(USER_AGENT)
+    manifest = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    version = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]["version"]
+    assert USER_AGENT == f"chtypes-python/{version}"
+
+
+def test_user_agent_on_every_request_including_token_exchange_and_redirect(server: _Server) -> None:
+    other = _Server()
+    try:
+        challenge = f'Bearer realm="{server.base_url}/token",service="registry"'
+        state = {"n": 0}
+
+        def manifests():
+            state["n"] += 1
+            if state["n"] == 1:
+                return 401, {"WWW-Authenticate": challenge}, b""
+            return 302, {"Location": f"{other.base_url}/elsewhere"}, b""
+
+        server.routes["/manifests/26.8"] = [manifests, manifests]
+        server.routes["/token"] = [lambda: (200, {}, b'{"token": "t"}')]
+        other.routes["/elsewhere"] = [_ok(b"done")]
+        resp = fetch_from_bases(
+            (server.base_url,),
+            "/manifests/26.8",
+            mode="tag",
+            policy=FetchPolicy(clock=FakeClock()),
+            retry=RetryPolicy(),
+        )
+        assert resp.body == b"done"
+        seen = server.requests + other.requests
+        assert len(seen) >= 4  # manifest, token, manifest again, redirect target
+        for path, headers in seen:
+            assert headers.get("User-Agent") == USER_AGENT, path
+    finally:
+        other.stop()
+
+
+def test_referrers_query_is_percent_encoded(server: _Server) -> None:
+    """The real host form-decodes the query, so a raw `+` in the signature
+    media type becomes a space and filters every referrer out."""
+    from chtypes._ocifetch import _constants as C
+    from chtypes._ocifetch._referrers import discover_referrers
+
+    digest = "sha256:" + "a" * 64
+    server.routes[f"/referrers/{digest}"] = [lambda: (200, {}, b'{"manifests": []}')]
+    discover_referrers(
+        (server.base_url,),
+        digest,
+        C.MEDIA_TYPE_BUNDLE,
+        policy=FetchPolicy(clock=FakeClock()),
+        retry=RetryPolicy(),
+    )
+    path = server.requests[0][0]
+    assert path.endswith("?artifactType=application%2Fvnd.dev.sigstore.bundle.v0.3%2Bjson"), path

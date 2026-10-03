@@ -477,7 +477,7 @@ def _run_case(
     saved_search_roots = _ensure_module.search_roots
     if system_dirs:
 
-        def _fake_search_roots(cache_dir=None, _system_dirs=system_dirs):
+        def _fake_search_roots(cache_dir=None, _sd=None, _system_dirs=system_dirs):
             return (resolve_cache_root(cache_dir), *_system_dirs)
 
         _ensure_module.search_roots = _fake_search_roots

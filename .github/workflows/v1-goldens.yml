@@ -78,7 +78,7 @@ jobs:
         run: |
           # shellcheck disable=SC2016 # the commands are expanded later, by the step that runs them
           case "${{ matrix.binding }}" in
-            go)     path=go/internal/goldensv1/runner_test.go;        cmd='cd go && go test -count=1 -run TestGoldensV1Runner ./internal/goldensv1/' ;;
+            go)     path=go/chtypes/goldens_v1_runner_test.go;        cmd='cd go && go test -count=1 -run ^TestGoldensV1Runner$ ./chtypes/' ;;
             python) path=python/tests/goldens_v1/test_runner.py;      cmd='cd python && uv run pytest -q "${RUNNER_PATH#python/}"' ;;
             ts)     path=ts/test/goldens-v1/runner.test.ts;           cmd='cd ts && pnpm exec vitest run test/goldens-v1/runner.test.ts' ;;
             rust)   path=rust/tests/goldens_v1_runner.rs;             cmd='cd rust && cargo test --locked --features fetch-v1 --test goldens_v1_runner' ;;

@@ -63,7 +63,7 @@ The parse-once block twin does not change that — it is a performance shape, no
 
 **Today no `(line, platform)` pair is lifted.** Every supported line, on every published platform, is still under the gate above.
 
-This criterion is scored against the artifact producer's own differential comparison against real servers, and the per-`(line, platform)` state it produces is not served yet — the served `index.json` carries no such field today. Once the artifact producer serves one, this page reads it directly, the same principle [`support.md`](support.md)'s generated block already follows for line support (`supported_lines`) rather than listing lines by hand. Until then, do not infer a lift from anything but a CHANGELOG entry naming the pair.
+This criterion is scored against the artifact producer's own differential comparison against real servers, and the per-`(line, platform)` state it produces is not served yet — the served `index.json` carries no such field today. Once the artifact producer serves one, this page reads it directly, the same principle [`support-v1.md`](support-v1.md) follows for line support: it states what the registry says rather than listing lines by hand. Until then, do not infer a lift from anything but a CHANGELOG entry naming the pair.
 
 ## Some formats depend on the artifact, not the binding
 
@@ -116,7 +116,7 @@ The ClickHouse setting `allow_introspection_functions` defaults to disabled. At 
 | this library  | compiles the schema and stores the function's answer, at either setting value |
 | a real server | refuses the `CREATE TABLE` itself, error 446, at the default setting          |
 
-The artifact producer's relink at build `1790845279` made this library refuse the same `CREATE TABLE` with 446 on every **supported** line — 26.3, 26.7, 26.8 and 26.9 — so the over-accept no longer reproduces there. It is unchanged on `24.8` and `25.10`: both are **served, unsupported** lines (see [Served, unsupported ClickHouse lines](support.md#served-unsupported-clickhouse-lines)), upstream's own support for them has ended, and the artifact producer builds no new artifact for a retired line, ever — so their library half is still the pre-relink build and `demangle`'s DEFAULT still compiles and stores the demangled name there. On those two lines the divergence is permanent: a retired line gets no new builds and no new ABI revisions, so no fix will ever be served for it, and this entry stays registered for them for as long as they are served. On ABI revision 6, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` are declined (`unsupported`) at insert time on every served line, so they do not diverge and carry no entry here.
+The artifact producer's relink at build `1790845279` made this library refuse the same `CREATE TABLE` with 446 on every **supported** line — 26.3, 26.7, 26.8 and 26.9 — so the over-accept no longer reproduces there. It is unchanged on `24.8` and `25.10`: both are **served, unsupported** lines (see [ClickHouse lines](support-v1.md#clickhouse-lines)), upstream's own support for them has ended, and the artifact producer builds no new artifact for a retired line, ever — so their library half is still the pre-relink build and `demangle`'s DEFAULT still compiles and stores the demangled name there. On those two lines the divergence is permanent: a retired line gets no new builds and no new ABI revisions, so no fix will ever be served for it, and this entry stays registered for them for as long as they are served. On ABI revision 6, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` are declined (`unsupported`) at insert time on every served line, so they do not diverge and carry no entry here.
 
 **Measured**: this library's own answer, in this repository, against the published ABI revision 6 artifacts. `demangle`'s DEFAULT still compiles and stores the demangled name on `25.10` (darwin-arm64, build `1790767905`) and, by CI's linux-amd64 job, on `24.8` (no darwin artifact is published for that line). On `26.3`, `26.8` and `26.9` (darwin-arm64, build `1790845279`) this library now refuses the `CREATE TABLE` itself with code 446, matching a real server; `26.7` was not part of this check's line list before and is not added by this measurement. The server half — a 446 refusal of the `CREATE TABLE` at the default setting — was measured by the artifact producer against stock ClickHouse servers pinned to each line's exact patch, not measured here.
 
@@ -159,8 +159,60 @@ For example, `x UInt8, CONSTRAINT c CHECK x` admits a row with `x = 2` here; a r
 
 The fix belongs to the library. This entry is removed, per line, on the relink that makes it reject the way that line's own server does.
 
+## Known gaps in 1.0
+
+Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
+
+### Nested String values carry no raw bytes
+
+A `String` value nested inside `Array(String)`, `Map` or `Tuple` carries no raw `value` bytes, only ClickHouse's rendering of it. A scalar `String` or `FixedString` value always carries its raw bytes, including inside `Nullable` and `LowCardinality`.
+
+**Workaround:** read the rendering for a nested value, or select the nested element as its own scalar column when you need the bytes. **Planned.**
+
+### Binary input parameters must be UTF-8
+
+The values of `settings` and `query_params` must be UTF-8. A value that is not valid UTF-8 is refused.
+
+**Workaround:** inline the value as `unhex('<hex>')`, built from hex digits only. **Planned:** a byte-safe object form.
+
+### Zone names follow the host
+
+Whether a time zone name is valid is ClickHouse's own `DateLUT` rule, and `DateLUT` loads zone files from the host the library runs on. A host that is missing some zone files refuses names a server accepts. Measured on a CI runner with no `posix/` zoneinfo: every `posix/*` name was refused (`measured`). On darwin, case-folding of zone names differs.
+
+**Workaround:** give the host the server's zoneinfo, so its zone files match the server's. **Planned.**
+
+### `SHOW CREATE` of a Memory table is declined
+
+`SHOW CREATE TABLE` text from live 26.3, 26.7, 26.8 and 26.9 servers compiles with the schema call for every MergeTree-family shape measured, which is 28 of the 32 shapes. The 4 `ENGINE = Memory` tables are declined, not mis-compiled.
+
+**Workaround:** use the discovery calls for those tables. **Planned.**
+
+### A batch preview with a filter in a different zone than the batch is declined
+
+When the filter evaluates in a different time zone than the batch it runs over, the preview is declined. It never answers wrongly.
+
+**Workaround:** use one zone for both, or a per-row preview. **Planned.**
+
+### Per-call settings values are not validated the way a server's `SET` validates them
+
+Some invalid values for a per-call setting are accepted, where a server's `SET` would refuse them.
+
+**Workaround:** validate settings values in the caller, or against a server, before relying on a refusal here. **Planned.**
+
+### `lossy` on a String holding a raw NUL in TSV
+
+For a TSV `String` that contains a raw NUL byte, the third detector can report `value_changed` with `lossy: true` although the bytes are preserved.
+
+**Workaround:** compare `value`, the raw bytes, with your input; the bindings never second-guess `lossy`. **Planned:** fixed in 1.0.x.
+
+### No call for a server's version or settings
+
+1.0 has no call that queries a server's version or its changed settings, and no settings reader. The caller supplies both.
+
+**Workaround:** read the version and settings from your own connection and pass them in. **Planned.**
+
 ## Pre-1.0
 
-What is already frozen before 1.0, and how an artifact and the SDK opening it are matched, is in [`support.md`](support.md#pre-10).
+How a library and the SDK opening it are matched before 1.0 is in [`support-v1.md`](support-v1.md#pre-10).
 
 Anything else may still move before 1.0. Each binding's own CHANGELOG carries its list.
