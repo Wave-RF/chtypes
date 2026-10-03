@@ -60,11 +60,16 @@ def cache_root(cache_dir: str | os.PathLike[str] | None = None) -> Path:
     return resolve_cache_root(cache_dir)
 
 
-def search_roots(cache_dir: str | os.PathLike[str] | None = None) -> tuple[Path, ...]:
+def search_roots(
+    cache_dir: str | os.PathLike[str] | None = None,
+    system_dirs: Sequence[str | os.PathLike[str]] | None = None,
+) -> tuple[Path, ...]:
     """The cache, then the read-only system directories, in that order
     (layout-v2 spec §0 "cache": "Read-only system directories are searched
-    after it")."""
-    return (resolve_cache_root(cache_dir), *(Path(d) for d in C.SYSTEM_CACHE_DIRS))
+    after it"). `system_dirs` replaces the default list when given (an empty
+    sequence means none); `None` keeps the generated default."""
+    dirs = C.SYSTEM_CACHE_DIRS if system_dirs is None else system_dirs
+    return (resolve_cache_root(cache_dir), *(Path(d) for d in dirs))
 
 
 def unpacked_dir_for(root: Path, manifest_digest_hex: str) -> Path:

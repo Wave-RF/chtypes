@@ -53,7 +53,9 @@ _FETCH_CLASSES: dict[str, type[errors.ArtifactError]] = {
 @dataclass(frozen=True)
 class FetchOptions:
     """Everything the fetch layer configures that a caller may set: the bases to
-    read, the cache directory, trust, offline and frozen modes, and the lock.
+    read, the cache directory, the read-only system directories searched after
+    it (`None` keeps the default list, an empty sequence searches none), trust,
+    offline and frozen modes, and the lock.
 
     The test hooks of the fetch layer (its clock, retry policy and
     pre-rename callback) are deliberately not here. A field left at its default
@@ -64,6 +66,7 @@ class FetchOptions:
 
     bases: Sequence[str] = ()
     cache_dir: str | os.PathLike[str] | None = None
+    system_dirs: Sequence[str | os.PathLike[str]] | None = None
     token: str | None = None
     trusted_keys: Sequence[TrustedKey] | None = None
     allow_unsigned: bool | None = None
@@ -73,7 +76,7 @@ class FetchOptions:
     lock_write: bool = False
     update: bool = False
 
-    def to_options(self, platform: str | None = None) -> Options:
+    def _to_options(self, platform: str | None = None) -> Options:
         token = self.token
         if token is None:
             token = os.environ.get(_fetch_constants.ENV_TOKEN_NAME) or None
@@ -84,6 +87,7 @@ class FetchOptions:
             platform=platform,
             bases=tuple(self.bases),
             cache_dir=self.cache_dir,
+            system_dirs=None if self.system_dirs is None else tuple(self.system_dirs),
             token=token,
             trusted_keys=None if self.trusted_keys is None else tuple(self.trusted_keys),
             allow_unsigned=allow_unsigned,
@@ -148,7 +152,7 @@ class Registry:
     def installed(self) -> tuple[Resolved, ...]:
         """What is installed, from the fetch layer's own listing."""
         try:
-            return tuple(list_installed(self._fetch.to_options()))
+            return tuple(list_installed(self._fetch._to_options()))
         except FetchError as exc:
             raise _wrap(exc) from exc
 
@@ -179,7 +183,7 @@ class Registry:
             platform = detect_host_platform()
         except ValueError as exc:
             raise errors.ArtifactIncompatibleError(str(exc), reason="host_platform") from None
-        options = self._fetch.to_options(platform)
+        options = self._fetch._to_options(platform)
         try:
             resolved = resolve_installed(fetch_request, platform, options)
             if resolved is None:
