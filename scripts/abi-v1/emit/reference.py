@@ -15,7 +15,9 @@ ASCII, so a character is a column.
 
 from __future__ import annotations
 
-from model import CONTENTS
+import json
+
+from model import CONTENTS, THREADS
 
 from . import Output, banner, marker_key
 
@@ -105,10 +107,16 @@ def render(model) -> str:
     for f in model.functions:
         note(f.provisional, _code(f.name))
     out += ["", "### Provisional markers", ""]
-    out += table(
-        ["marker", "waits on", "entries"],
-        [[m, model.markers[m], ", ".join(used[m])] for m in sorted(used, key=marker_key)],
-    )
+    if used:
+        out += table(
+            ["marker", "waits on", "entries"],
+            [[m, model.markers[m], ", ".join(used[m])] for m in sorted(used, key=marker_key)],
+        )
+    else:
+        out.append("None: every entry in the description is FIRM.")
+
+    out += ["", "### Thread classes", ""]
+    out += table(["class", "what a caller may run at the same time"], [[_code(k), v] for k, v in THREADS.items()])
 
     out += ["", "### Parameter kinds", ""]
     out += table(["kind", "C spelling", "rule"], [[_code(k), c, r] for k, c, r in PARAM_KINDS])
@@ -126,6 +134,18 @@ def render(model) -> str:
             for k, v in [*CONTENTS.items(), ("document:<name>", "a JSON document, listed under Documents below")]
         ],
     )
+
+    cn = model.column_names
+    out += [
+        "",
+        "### Column names in JSON",
+        "",
+        f"A column name is a byte string. Wherever a JSON document, input or output, carries one, it is the member "
+        f"`{cn['text']}`, a JSON string, when the name's bytes are valid UTF-8 (a NUL written as the JSON escape `\\u0000`), "
+        f"and otherwise the member `{cn['bytes']}`, the raw bytes in standard {cn['bytes_encoding']} with padding. "
+        f"Exactly one of the two is present. In an array of names, each element is an object carrying one of them. "
+        f"A byte-returning accessor, such as `chs_error_column`, returns the raw bytes instead.",
+    ]
 
     out += ["", "### Handles", ""]
     out += table(
@@ -157,7 +177,13 @@ def render(model) -> str:
         out += [f"#### `{e.name}`", "", e.doc, "", f"{_marks(e.provisional)}{fb}.", ""]
         out += table(
             ["value", *extra],
-            [[_code(str(v.value)), *(str(v.fields[k]).lower() for k in extra)] for v in e.values],
+            [
+                [
+                    _code(str(v.value)) if v.value != "" else '`""` (none)',
+                    *(str(v.fields[k]).lower() if isinstance(v.fields[k], bool) else str(v.fields[k]) for k in extra),
+                ]
+                for v in e.values
+            ],
         )
         out.append("")
     out.pop()
@@ -170,9 +196,26 @@ def render(model) -> str:
 
     out += ["", "### Documents", ""]
     out += table(
-        ["document", "carries names", "status"],
-        [[_code(d.name), "yes" if d.carries_names else "no", _marks(d.provisional)] for d in model.documents.values()],
+        ["document", "carries names", "fixed fields", "status"],
+        [
+            [_code(d.name), "yes" if d.carries_names else "no", "yes" if d.schema is not None else "-", _marks(d.provisional)]
+            for d in model.documents.values()
+        ],
     )
+    for d in model.documents.values():
+        out += ["", f"#### document `{d.name}`", ""]
+        if d.doc:
+            out += [d.doc, ""]
+        if d.schema is not None:
+            out += [
+                "The fields the description fixes, as JSON Schema; the document may carry more:",
+                "",
+                "```json",
+                json.dumps(d.schema, indent=2),
+                "```",
+            ]
+        else:
+            out.append("The description fixes no field of this document; its prose above is the contract.")
 
     out += ["", "### build_info", ""]
     props = model.build_info_schema.get("properties", {})
