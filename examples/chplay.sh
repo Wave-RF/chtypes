@@ -107,11 +107,11 @@ have_ts() {
 }
 run_ts() {
   if [ "$LOCKED" -eq 1 ]; then
-    (cd "$HERE/ts" && pnpm install --frozen-lockfile --silent && node demo.mjs)
+    (cd "$HERE/ts" && pnpm install --frozen-lockfile --silent && pnpm --silent demo)
   else
     (cd "$HERE/ts" &&
       { [ -d node_modules ] || pnpm install --silent; } &&
-      node demo.mjs)
+      pnpm --silent demo)
   fi
 }
 
