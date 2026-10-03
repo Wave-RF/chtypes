@@ -165,6 +165,9 @@ func goToolchainID() string {
 	// v1.yml's matrix names the Go leg by minor line ("go1.27.x") and
 	// parity.py requires that exact string, while runtime.Version() is
 	// the patch release ("go1.27.1"); report the matrix's spelling.
+	if v := os.Getenv("CHTYPES_V1_TOOLCHAIN"); v != "" {
+		return v
+	}
 	v := runtime.Version()
 	if m := goMinorRE.FindStringSubmatch(v); m != nil {
 		return m[1] + ".x"
