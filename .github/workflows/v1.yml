@@ -11,9 +11,10 @@
 # (plan §2.2's table) — renaming one here is a protected-surface change, not
 # cosmetic. `v1-constants`, `v1-fixtures` and `v1-parity` are required;
 # `v1-conformance` and `v1-network` feed `v1-parity` (read, never required
-# themselves); `v1-refcheck` is report-only; `v1-oras-preseed`,
-# `v1-staging` and `v1-staging-verdict` are dispatch-only (the last two
-# never required, never read by `v1-parity`).
+# themselves); `v1-sandbox` proves the no-network sandbox those legs run in;
+# `v1-refcheck` is report-only; `v1-oras-preseed`, `v1-staging` and
+# `v1-staging-verdict` are dispatch-only (the last two never required, never
+# read by `v1-parity`).
 #
 # STATUS (lane 0A, first on `v1`): only `v1-constants` is live. Every other
 # job is a one-line placeholder that fails loudly with "not yet provided" —
@@ -99,6 +100,20 @@ jobs:
         run: python3 scripts/fetch-v1/schema_check.py --selftest && python3 scripts/fetch-v1/schema_check.py
       - name: "server.py --selftest — a real loopback server, driven by urllib.request"
         run: python3 scripts/fetch-v1/server.py --selftest
+
+  v1-sandbox:
+    name: "v1-sandbox — the no-network sandbox, proven on every pull request"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Every v1-conformance leg skips its sandbox step until that
+      # binding's runner file exists, so without this job the sandbox the
+      # suite depends on would be proven by nothing. Same script, same
+      # proofs; it also does one real loopback round trip through
+      # scripts/fetch-v1/server.py started inside the sandbox.
+      - name: "selftest — uid, curl exit 6 or 7 for github, loopback round trip through server.py"
+        run: scripts/fetch-v1/sandbox.sh --selftest
 
   v1-conformance:
     name: "v1-conformance (${{ matrix.binding }} ${{ matrix.toolchain }})"
@@ -187,48 +202,29 @@ jobs:
             rust) (cd rust && cargo fetch --locked) ;;
           esac
 
-      - name: cut egress for the test process only — never the runner's own connectivity
+      - name: prove the no-network sandbox before the suite relies on it
         # measured, PR #400: both `ts` legs (the first legs ever to reach
-        # this step; every earlier leg skipped for lack of a runner file)
-        # timed out at 20 minutes, twice, with `BlobNotFound` in both logs.
-        # ci.yml's own `ts` job installs the identical lockfile in seconds,
-        # so the lockfile was never the problem.
+        # the egress step; every earlier leg skipped for lack of a runner
+        # file) timed out at 20 minutes, twice, with `BlobNotFound` in both
+        # logs, after a blanket `iptables ... ! -o lo -j REJECT`.
+        # inferred: that rule cut the Actions runner's own link to GitHub,
+        # not just the suite's.
         #
-        # inferred: the mechanism. A blanket `iptables -A OUTPUT ! -o lo -j
-        # REJECT` cuts the Actions runner's own connection to GitHub too,
-        # not just the conformance suite — `BlobNotFound` is consistent
-        # with the runner losing its own link before it could report the
-        # "install dependencies" step's completion, which is why it reads
-        # as stuck rather than failed.
+        # measured, run 36980815013 (Go leg): the replacement, `sudo -g
+        # noegress ...`, failed in about a second with "cannot reach
+        # 127.0.0.1". inferred: the hosted runner's sudoers refuses run-as
+        # GROUP, so neither curl ever ran, and the "github is unreachable"
+        # proof passed falsely because it treated any nonzero result as
+        # "unreachable".
         #
-        # Fix: cut egress for a dedicated group only, and run the
-        # conformance process (next step) as that group — never the runner
-        # process itself, which keeps its normal route. Proved in both
-        # directions below, not assumed: the group must NOT reach GitHub,
-        # and must STILL reach loopback (server.py binds 127.0.0.1).
+        # Now: a network namespace holding only loopback, entered for the
+        # suite's process tree alone (scripts/fetch-v1/sandbox.sh). The
+        # runner's own connectivity is never touched. The proofs run
+        # curl INSIDE the sandbox and accept only curl's own "could not
+        # resolve / could not connect" codes, so a failing wrapper cannot
+        # read as success, and each prints its exit code.
         if: steps.runner_file.outputs.exists == 'true'
-        run: |
-          sudo groupadd -f noegress
-          sudo iptables -A OUTPUT -m owner --gid-owner noegress ! -o lo -j REJECT
-
-          if sudo -g noegress curl -fsS --max-time 5 https://github.com >/dev/null 2>&1; then
-            echo "::error::the noegress group can still reach https://github.com — the iptables rule did not take effect" >&2
-            exit 1
-          fi
-          echo "confirmed: https://github.com is unreachable for the noegress group"
-
-          python3 -m http.server 18080 --bind 127.0.0.1 >/dev/null 2>&1 &
-          LOOPBACK_PID=$!
-          trap 'kill "$LOOPBACK_PID" 2>/dev/null || true' EXIT
-          for _ in $(seq 1 10); do
-            if curl -fsS --max-time 2 http://127.0.0.1:18080/ >/dev/null 2>&1; then break; fi
-            sleep 0.5
-          done
-          if ! sudo -g noegress curl -fsS --max-time 5 http://127.0.0.1:18080/ >/dev/null 2>&1; then
-            echo "::error::the noegress group cannot reach 127.0.0.1 — loopback must stay open for the http transport" >&2
-            exit 1
-          fi
-          echo "confirmed: loopback (127.0.0.1) is reachable for the noegress group"
+        run: scripts/fetch-v1/sandbox.sh --selftest
 
       - name: run the conformance suite and write CHTYPES_V1_REPORT
         if: steps.runner_file.outputs.exists == 'true'
@@ -236,8 +232,8 @@ jobs:
           CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
           CHTYPES_V1_REPORT: ${{ runner.temp }}/report-${{ matrix.binding }}-${{ matrix.toolchain }}.json
         run: |
-          # Written to a file, then run under the noegress group, rather
-          # than inlined into a `sudo ... bash -c '...'` one-liner: the Go
+          # Written to a file, then run inside the no-network sandbox,
+          # rather than inlined into a `bash -c '...'` one-liner: the Go
           # leg's own command already needs single quotes
           # (`-run '^TestConformanceV1$'`), which cannot nest inside
           # another single-quoted -c string.
@@ -261,7 +257,7 @@ jobs:
           esac
           SCRIPT
           chmod +x "$RUNNER_TEMP/run-conformance.sh"
-          sudo -E -g noegress env PATH="$PATH" bash "$RUNNER_TEMP/run-conformance.sh"
+          scripts/fetch-v1/sandbox.sh -- bash "$RUNNER_TEMP/run-conformance.sh"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -616,6 +612,8 @@ jobs:
           - binding: rust
             toolchain: stable
     env:
+      # Deliberately NOT inside scripts/fetch-v1/sandbox.sh: that namespace has
+      # loopback only, and this job exists to reach a live host over HTTPS.
       # Through the environment, never interpolated into a script body.
       REGISTRY_BASE: ${{ inputs.registry_base }}
     steps:
