@@ -598,7 +598,7 @@ fn stub_selftest() -> Result<(), String> {
         &std::fs::read(stubs_dir.join("stubs.json")).map_err(|e| format!("stubs.json: {e}"))?,
     )
     .map_err(|e| format!("stubs.json is not JSON: {e}"))?;
-    let ok = manifest["ok"]["path"]
+    let ok = manifest["variants"]["ok"]["path"]
         .as_str()
         .ok_or("stubs.json names no `ok` variant")?;
     let document_path =
