@@ -22,7 +22,7 @@
   <a href="docs/">Docs</a> ·
   <a href="#install">Install</a> ·
   <a href="#quickstart">Quickstart</a> ·
-  <a href="docs/support.md">Supported versions</a> ·
+  <a href="docs/support-v1.md">Supported versions</a> ·
   <a href="#how-it-compares">How it compares</a> ·
   <a href="examples/">Examples</a>
 </p>
@@ -41,7 +41,7 @@ That last line is the point. ClickHouse will accept `256` into a `UInt8`, store 
 
 ## Install
 
-Two things, always: the **binding** for your language, and at least one **artifact** — the per-version native library it loads. The binding is small; the artifact is real ClickHouse, compiled.
+Two things, always: the **binding** for your language, and at least one **library** — the per-version native library it loads. The binding is small; the library is real ClickHouse, compiled.
 
 ```sh
 go get github.com/wave-rf/chtypes/go     # Go
@@ -50,7 +50,7 @@ pnpm add @wavehouse/chtypes              # TypeScript
 cargo add chtypes                        # Rust
 ```
 
-Then fetch an artifact — verified, into the per-user cache every binding reads by default. Each binding ships the same command, so you need nothing from this repository:
+Then fetch a library: resolved over OCI, verified, and unpacked into the per-user cache every binding reads by default. Each binding ships the same command, so you need nothing from this repository:
 
 ```sh
 go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
@@ -59,26 +59,24 @@ npx @wavehouse/chtypes fetch 26.8
 cargo install chtypes && chtypes fetch 26.8
 ```
 
-An ed25519 signature over the release and the sha256 of every byte are checked before anything lands.
-
-> ⚠️ **From 0.3.0 the rolling channel serves ABI revision 5.** A 0.2.x binding will download these artifacts and refuse them at load. Pinning an exact ClickHouse version does not help — a relink republishes the same version and the newest row wins. Point `--url` / `--tag` at a source still serving revision 4, or upgrade to 0.3.0. `fetch --all` takes every published line. Full details: [docs/install.md](docs/install.md).
+A signature over the library's statement and the sha256 of every byte are checked before anything is unpacked, and the library's own build record is checked again when it loads. `chtypes list` shows the lines the registry publishes. Which lines are supported is not stated by the registry yet, so [docs/support-v1.md](docs/support-v1.md) says "support unknown" rather than guessing.
 
 ## Quickstart
 
-One artifact, one schema, one row — the same program in each language. The row is **accepted**, and `256` is silently stored as `0`.
+One library, one schema, one row — the same program in each language. The row is **accepted**, and `256` is silently stored as `0`.
 
 <details open><summary><b>Go</b></summary>
 
 ```go
-reg, _ := chtypes.NewRegistry(chtypes.DefaultRegistryDir())
+reg, _ := chtypes.NewRegistry()
 lib, _ := reg.For("26.8")                      // a line or an exact patch; never a nearest match
-cs, _ := lib.CompileDDL("x UInt8, ts DateTime DEFAULT now()")
+cs, _ := lib.CompileTable("CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY x")
 defer cs.Close()
 
 r, _ := cs.Row(chtypes.JSONEachRow, []byte(`{"x":256}`))
 fmt.Println(r.Outcome)                // accepted
 fmt.Println(r.Transformed[0].Reason)  // overflow_wrap — 256 stored as 0, silently
-fmt.Println(r.Substituted)            // ts: send it explicitly, or preview != stored
+fmt.Println(r.Columns[1].Source)      // ts: default_substituted — send it explicitly, or preview != stored
 ```
 
 </details>
@@ -90,14 +88,15 @@ from chtypes import Format, Registry
 
 registry = Registry()
 library = registry.for_version("26.8")
+ddl = b"CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY x"
 
-with library.compile_ddl("x UInt8, ts DateTime DEFAULT now()") as schema:
-    r = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n')
+with library.compile_table(ddl) as schema:
+    r = schema.row(Format.JSON_EACH_ROW, b'{"x":256}\n')
 
 r.outcome                     # Outcome.ACCEPTED
-r.rows[0].value("x").text     # '0'             — what would actually be stored
+r.values[0].text              # b'0'            — what would actually be stored
 r.transformed[0].reason       # 'overflow_wrap' — which is the product
-r.rows[0].substituted         # ts: send it explicitly, or preview != stored
+r.columns[1].source           # ts: 'default_substituted' — send it explicitly, or preview != stored
 ```
 
 </details>
@@ -107,14 +106,14 @@ r.rows[0].substituted         # ts: send it explicitly, or preview != stored
 ```ts
 import { Format, Registry } from '@wavehouse/chtypes';
 
-const registry = new Registry();
-const lib = registry.for('26.8');
-const schema = lib.compileDdl('x UInt8, ts DateTime DEFAULT now()');
+const registry = await Registry.open();
+const lib = await registry.for('26.8');
+const schema = lib.compileTable('CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY x');
 
 const r = schema.row(Format.JSONEachRow, Buffer.from('{"x":256}'));
 console.log(r.outcome);                 // accepted
 console.log(r.transformed[0]?.reason);  // overflow_wrap — 256 stored as 0, silently
-console.log(r.substituted[0]?.column);  // ts — send it explicitly in the real INSERT
+console.log(r.columns[1]?.source);      // default_substituted — send ts explicitly in the real INSERT
 schema.close();                         // or `using schema = …` on Node >= 24
 ```
 
@@ -123,21 +122,22 @@ schema.close();                         // or `using schema = …` on Node >= 24
 <details><summary><b>Rust</b></summary>
 
 ```rust
-use chtypes::{Format, Registry, NO_SETTINGS};
+use chtypes::{CompileOptions, Format, Registry, RegistryOptions, RowOptions};
 
-let registry = Registry::from_search_path();
+let registry = Registry::new(RegistryOptions::default())?;
 let lib = registry.for_version("26.8")?;
-let schema = lib.compile("x UInt8, ts DateTime DEFAULT now()").compile()?;
+let ddl = "CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY x";
+let schema = lib.compile_table(ddl, &CompileOptions::default())?;
 
-let r = schema.rows(Format::JsonEachRow, br#"{"x":256}"#, NO_SETTINGS)?;
+let r = schema.row(Format::JsonEachRow, br#"{"x":256}"#, &RowOptions::default())?;
 assert_eq!(r.outcome, chtypes::Outcome::Accepted);
-assert_eq!(r.rows[0].values[0].text, "0");                      // what would be stored
+assert_eq!(r.values[0].text, b"0");                            // what would be stored
 assert_eq!(r.transformed[0].reason, chtypes::reason::OVERFLOW_WRAP);
 ```
 
 </details>
 
-A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying ClickHouse's own error code and message. Exceptions (or the `Err` arm) are for the machinery — a missing artifact, an unreadable document. [Full quickstart](docs/quickstart.md) · [the same tour, runnable, in all four languages](examples/)
+A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying ClickHouse's own error code and message. Exceptions (or the `Err` arm) are for the machinery — a missing library, an unreadable document. [Full quickstart](docs/quickstart.md) · [the same tour, runnable, in all four languages](examples/)
 
 ## How it compares
 
@@ -159,25 +159,27 @@ A bad row is a **verdict, not an error**: `outcome` becomes `rejected`, carrying
 
 ## What is supported
 
-Three axes — the language you call from, the platform you run on, and the ClickHouse line you want answers for. **[docs/support.md](docs/support.md)** carries the full matrix, generated from this tree's manifests and the release's own index so it cannot drift from what actually ships.
+Three axes — the language you call from, the platform you run on, and the ClickHouse line you want answers for. **[docs/support-v1.md](docs/support-v1.md)** states them by hand: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64` and `darwin-arm64` (Unix only — the loaders are `dlopen`); and the ClickHouse lines the registry publishes, which `chtypes list` prints. The v1 channel carries no statement of which lines are supported, so a line's support reads **unknown**, never unsupported.
 
-The short version: Go, Python, TypeScript and Rust; `linux-amd64`, `linux-arm64` and `darwin-arm64` (Unix only — both loaders are `dlopen`); and every ClickHouse line that has passed the artifact producer's comparison against a real server, today spanning 24.8 through 26.8 and growing as new releases pass it.
+## Known gaps in 1.0
+
+A short list of places where 1.0 does less than you might expect, each with what happens, a workaround and a note that a fix is planned: nested `String` values carry no raw bytes, binary `settings` and `query_params` values must be UTF-8, zone names follow the host's zone files, `SHOW CREATE` of a Memory table is declined, a batch preview with a filter in another zone is declined, per-call settings values are not validated like `SET`, `lossy` on a raw NUL in TSV, and no call for a server's version or settings. The full text is in **[docs/limitations.md](docs/limitations.md#known-gaps-in-10)**.
 
 ## Documentation
 
-|                                                               |                                                                                            |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [Install](docs/install.md) · [Quickstart](docs/quickstart.md) | getting a binding and an artifact, and the first program                                   |
-| [Guides](docs/guides/)                                        | artifacts, fetching, settings, batches, filters, discovery, multi-version, transformations |
-| [Reference](docs/reference/)                                  | per-language API, the C ABI contract, the binding contract                                 |
-| [Supported versions](docs/support.md)                         | languages, platforms, ClickHouse lines                                                     |
-| [Examples](examples/)                                         | four side-by-side runnable tours, same sections in every language                          |
+|                                                               |                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [Install](docs/install.md) · [Quickstart](docs/quickstart.md) | getting a binding and a library, and the first program                          |
+| [Guides](docs/guides/)                                        | fetching, settings, batches, filters, discovery, multi-version, transformations |
+| [Reference](docs/reference/)                                  | per-language API, the C ABI contract, the binding contract                      |
+| [Supported versions](docs/support-v1.md)                      | languages, platforms, ClickHouse lines                                          |
+| [Examples](examples/)                                         | four side-by-side runnable tours, same sections in every language               |
 
 ## Project status
 
-Pre-1.0, and published to all four registries — the badges above read the live version from each. What is already frozen before 1.0 is in [`docs/support.md`](docs/support.md#pre-10).
+The `v1` line is the 1.0 release in progress, and the ABI stays provisional until it is confirmed. The badges above read the live version from each registry. What that means for you is in [`docs/support-v1.md`](docs/support-v1.md#pre-10).
 
-This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the artifacts themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — belongs to the artifact producer, under its own license. The bindings here contain no ClickHouse code: they load an artifact and speak the ABI. Artifacts carry their own license; see the `LICENSE` inside each release.
+This repository is the **SDK half** of chtypes, Apache 2.0. The other half — the C++ wrapper, the per-version vendoring and build pipeline, the libraries themselves, and the differential proof (tens of thousands of cases scored against real ClickHouse servers on every supported version) — belongs to the artifact producer, under its own license. The bindings here contain no ClickHouse code: they load a library and speak the ABI. Libraries carry their own license; see the `LICENSE` inside each one.
 
 ## Contributing
 

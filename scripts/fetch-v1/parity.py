@@ -46,7 +46,7 @@ WHAT "PASS" MEANS, for every enrolled binding:
      "pass", in some report for that binding whose toolchain is exactly
      "registry" (the v1-network job's own report).
 
-The enrolled set may only grow between any two runs this script is told
+The base ref must be readable (a missing base FAILS, it is never skipped). The enrolled set may only grow between any two runs this script is told
 to compare (`--base-ref`, default "origin/v1"): a binding disappearing
 from spec/fetch-v1/enrolled/ is refused outright, never silently treated
 as "that binding opted out". With zero bindings enrolled, this script
@@ -96,11 +96,20 @@ def enrolled_bindings(enrolled_dir: Path) -> set[str]:
 
 
 def enrolled_at_ref(ref: str) -> set[str] | None:
-    """Returns the enrolled set spec/fetch-v1/enrolled/ held at ref, or
-    None if that ref cannot be read (no git, no such ref, shallow clone
-    missing it, ...) — a soft failure: this check is a refinement, never
-    the reason the whole gate cannot run."""
+    """Returns the enrolled set spec/fetch-v1/enrolled/ held at ref, or None
+    if the REF ITSELF cannot be read (no git, no such ref, a shallow checkout
+    that never fetched it). `run` treats None as a FAILURE: a gate that skips
+    its own shrink check when the base is missing never ran (measured on the
+    first integration pull request, where the check printed "skipped" because
+    the job's checkout carried no origin/v1). A ref that exists but holds no
+    enrolled directory (git does not track an empty one) is the empty set."""
     try:
+        ok = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if ok.returncode != 0:
+            return None
         out = subprocess.run(
             ["git", "-C", str(ROOT), "ls-tree", "--name-only", f"{ref}:spec/fetch-v1/enrolled"],
             capture_output=True, text=True, timeout=30,
@@ -108,7 +117,7 @@ def enrolled_at_ref(ref: str) -> set[str] | None:
     except (OSError, subprocess.SubprocessError):
         return None
     if out.returncode != 0:
-        return None
+        return set()
     return {line.strip() for line in out.stdout.splitlines() if line.strip() in BINDINGS}
 
 
@@ -208,7 +217,8 @@ def run(cases_path: Path, enrolled_dir: Path, reports_dir: Path, base_ref: str |
     if base_ref:
         base_enrolled = enrolled_at_ref(base_ref)
         if base_enrolled is None:
-            lines.append(f"enrolled-shrink check: could not read {base_ref}:spec/fetch-v1/enrolled (skipped)")
+            return 1, "\n".join(lines) + f"\nFAIL: the enrolled-shrink check could not read {base_ref}; a base it cannot " \
+                                           "read is a failure, never a skip (the job's checkout must fetch the base ref)"
         else:
             shrunk = base_enrolled - enrolled
             if shrunk:
@@ -347,11 +357,27 @@ def selftest() -> None:
         code, out = run(cases_path, enrolled_dir, reports_dir5, None)
         assert code != 0 and "stale report" in out, f"a stale cases_sha256 should fail:\n{out}"
 
+        # a base ref that cannot be read FAILS, never skips.
+        def unreadable_enrolled_at_ref(ref: str) -> set[str] | None:
+            return None
+
+        global enrolled_at_ref
+        original = enrolled_at_ref
+        enrolled_at_ref = unreadable_enrolled_at_ref  # type: ignore[assignment]
+        try:
+            code, out = run(cases_path, enrolled_dir, reports_dir, "no-such-ref")
+            assert code != 0 and "could not read" in out and "never a skip" in out, \
+                f"an unreadable base ref should fail:\n{out}"
+        finally:
+            enrolled_at_ref = original  # type: ignore[assignment]
+        # the real function on a ref git does not have, and on one it does.
+        assert enrolled_at_ref("refs/heads/no-such-branch-for-selftest") is None, "a missing ref must read as None"
+        assert isinstance(enrolled_at_ref("HEAD"), set), "HEAD must read as a set, empty or not"
+
         # enrolled-shrink: base had "go" and "python"; now only "go".
         def fake_enrolled_at_ref(ref: str) -> set[str] | None:
             return {"go", "python"}
 
-        global enrolled_at_ref
         original = enrolled_at_ref
         enrolled_at_ref = fake_enrolled_at_ref  # type: ignore[assignment]
         try:

@@ -1,5 +1,7 @@
 # What chtypes supports
 
+> The v1 line's support statement, written by hand, is [`support-v1.md`](support-v1.md).
+
 Three independent axes, and a combination works only if all three do: the **language** you call from, the **platform** you run on, and the **ClickHouse line** you want answers for.
 
 The table below is **generated** from this tree's four manifests and from the release's own `index.json` — never typed by hand, because every number in it changes on a schedule this repository does not control. Regenerate it with `scripts/support-matrix.sh`.
