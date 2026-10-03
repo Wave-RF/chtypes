@@ -96,6 +96,11 @@ fetch-v1 = [
   "dep:ruzstd",
 ]
 
+# ABI v1's generated FFI layer and loader (`src/abi1/**`), gated off by
+# default while it coexists with the v0 ABI: no new dependency, since
+# libloading and serde_json are already unconditional above.
+abi-v1 = []
+
 [[bin]]
 name = "chtypes"
 path = "src/main.rs"
@@ -113,6 +118,13 @@ required-features = ["fetch"]
 name = "ocifetch_conformance"
 path = "tests/ocifetch_conformance.rs"
 required-features = ["fetch-v1"]
+
+# The ABI v1 conformance suite re-declares src/abi1's module tree with
+# #[path] (rust/src/abi1/mod.rs explains why) and needs the abi-v1 feature's
+# generated layer and loader to exist at all.
+[[test]]
+name = "abi1_conformance"
+required-features = ["abi-v1"]
 
 [dev-dependencies]
 # The integration tests read manifest.json themselves, to prove the loader took
