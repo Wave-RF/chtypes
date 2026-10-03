@@ -22,6 +22,7 @@ __all__ = [
     "Column",
     "Computed",
     "DiscoveredColumn",
+    "EngineCell",
     "Discovery",
     "ErrorCodeEntry",
     "ErrorCodeTable",
@@ -83,9 +84,25 @@ class Transform:
 
 @dataclass(frozen=True, slots=True)
 class Computed:
+    """A computed column's value: `value` is the raw bytes of a scalar String or
+    FixedString (from `value_b64`), None otherwise."""
+
     column: bytes
     kind: str
     text: bytes
+    value: bytes | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EngineCell:
+    """One cell of a stored row after the engine's insert-time merge: the column
+    name, ClickHouse's rendering, null, and the raw bytes (`value`) of a scalar
+    String or FixedString."""
+
+    column: bytes
+    text: bytes
+    null: bool
+    value: bytes | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,12 +117,12 @@ class RowResult:
     values: tuple[Value, ...]
     transformed: tuple[Transform, ...]
     unknown_fields: tuple[bytes, ...]
-    unsupported_settings: tuple[str, ...]
+    unsupported_settings: tuple[bytes, ...]
     computed: tuple[Computed, ...]
     verdict: Verdict | None
     verdict_code: int
     verdict_err: bytes
-    partition_id: str | None
+    partition_id: bytes | None
     input_span: Span | None
 
 
@@ -145,10 +162,10 @@ class BatchResult:
     rows_read: int
     rows_skipped: int
     transformed: tuple[Transform, ...]
-    engine_rows: tuple[bytes, ...] | None
+    engine_rows: tuple[tuple[EngineCell, ...], ...] | None
     payload: bytes | None
     spans: tuple[Span, ...] | None
-    export_declined: str
+    export_declined: bytes
     rows_passed: int
     rows_cut: int
     partition_count: int | None
@@ -172,7 +189,7 @@ class FilterResult:
     err_code: int
     err_msg: bytes
     rows_read: int
-    unsupported_settings: tuple[str, ...]
+    unsupported_settings: tuple[bytes, ...]
     verdicts: tuple[Verdict, ...]
     errors: tuple[FilterRowError, ...]
 
@@ -203,6 +220,7 @@ class DiscoveredColumn:
 @dataclass(frozen=True, slots=True)
 class Discovery:
     columns: tuple[DiscoveredColumn, ...]
+    columns_sql: bytes
 
 
 @dataclass(frozen=True, slots=True)

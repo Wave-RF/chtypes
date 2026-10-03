@@ -34,6 +34,7 @@ from .results import (
     Computed,
     DiscoveredColumn,
     Discovery,
+    EngineCell,
     ErrorCodeEntry,
     ErrorCodeTable,
     FilterResult,
@@ -212,6 +213,20 @@ def _name(obj: Mapping[str, Any], key: str, where: str) -> bytes:
     return value
 
 
+def _opt_b64(obj: Mapping[str, Any], key: str, where: str) -> bytes | None:
+    """Raw bytes carried only as `<key>` (a `value_b64`): None when absent."""
+    value = obj.get(key)
+    return None if value is None else _decode_b64(value, where, key)
+
+
+def _name_list(obj: Mapping[str, Any], key: str, where: str) -> tuple[bytes, ...]:
+    """A list of names: `{"name"}` or `{"name_b64"}` objects, in every entry."""
+    return tuple(
+        _name(_obj(item, where, key), "name", f"{where}.{key}[{i}]")
+        for i, item in enumerate(_list(obj, key, where))
+    )
+
+
 def _strings_as_bytes(obj: Mapping[str, Any], key: str, where: str) -> tuple[bytes, ...]:
     out = []
     for item in _list(obj, key, where):
@@ -272,7 +287,7 @@ def _value(obj: dict[str, Any], where: str) -> Value:
         null=_bool(obj, "null", where),
         source=source,
         is_stored=stored,
-        value=_bytes_or_none(obj, "value", where),
+        value=_opt_b64(obj, "value_b64", where),
     )
 
 
@@ -293,7 +308,31 @@ def _computed(obj: dict[str, Any], where: str) -> Computed:
         column=_name(obj, "name", where),
         kind=_text(obj, "kind", where),
         text=_bytes(obj, "stored", where),
+        value=_opt_b64(obj, "value_b64", where),
     )
+
+
+def _engine_cell(obj: dict[str, Any], where: str) -> EngineCell:
+    return EngineCell(
+        column=_name(obj, "name", where),
+        text=_bytes(obj, "stored", where),
+        null=_bool(obj, "null", where),
+        value=_opt_b64(obj, "value_b64", where),
+    )
+
+
+def _engine_rows(obj: Mapping[str, Any], where: str) -> tuple[tuple[EngineCell, ...], ...]:
+    rows = []
+    for i, row in enumerate(_list(obj, "engine_rows", where)):
+        if not isinstance(row, list):
+            raise _wrong(where, "engine_rows", "an array of cell arrays", row)
+        rows.append(
+            tuple(
+                _engine_cell(_obj(cell, where, "engine_rows"), f"{where}.engine_rows[{i}][{j}]")
+                for j, cell in enumerate(row)
+            )
+        )
+    return tuple(rows)
 
 
 # ----------------------------------------------------------------- documents
@@ -302,6 +341,7 @@ def _computed(obj: dict[str, Any], where: str) -> Computed:
 def decode_row(obj: Mapping[str, Any], where: str = "row") -> RowResult:
     columns = _objects(obj, "cols", where, _value)
     verdict = _opt_text(obj, "verdict", where)
+    partition = _bytes_or_none(obj, "partition_id", where)
     return RowResult(
         outcome=Outcome.of(_text(obj, "outcome", where)),
         err_code=_int(obj, "code", where),
@@ -309,13 +349,13 @@ def decode_row(obj: Mapping[str, Any], where: str = "row") -> RowResult:
         columns=columns,
         values=tuple(v for v in columns if v.is_stored),
         transformed=_objects(obj, "transformed", where, _transform),
-        unknown_fields=_strings_as_bytes(obj, "unknown_fields", where),
-        unsupported_settings=_ascii_list(obj, "unsupported_settings", where),
+        unknown_fields=_name_list(obj, "unknown_fields", where),
+        unsupported_settings=_name_list(obj, "unsupported_settings", where),
         computed=_objects(obj, "computed", where, _computed),
         verdict=None if verdict is None else Verdict.of(verdict),
         verdict_code=_int(obj, "verdict_code", where),
         verdict_err=_bytes(obj, "verdict_err", where),
-        partition_id=_opt_text(obj, "partition_id", where),
+        partition_id=partition,
         input_span=_opt_span(obj, "input_span", where),
     )
 
@@ -346,9 +386,7 @@ def decode_batch(raw: bytes, export: bytes | None) -> BatchResult:
     where = "batch"
     obj = _obj(strict_loads(raw, where), where)
     framing = obj.get("framing")
-    engine_rows = (
-        None if obj.get("engine_rows") is None else _strings_as_bytes(obj, "engine_rows", where)
-    )
+    engine_rows = None if obj.get("engine_rows") is None else _engine_rows(obj, where)
     spans = None if obj.get("row_spans") is None else _spans(obj, "row_spans", where)
     return BatchResult(
         outcome=Outcome.of(_text(obj, "outcome", where)),
@@ -361,7 +399,7 @@ def decode_batch(raw: bytes, export: bytes | None) -> BatchResult:
         engine_rows=engine_rows,
         payload=export,
         spans=spans,
-        export_declined=_text(obj, "export_declined", where),
+        export_declined=_bytes(obj, "export_declined", where),
         rows_passed=_u64(obj, "rows_passed", where),
         rows_cut=_u64(obj, "rows_cut", where),
         partition_count=_opt_u64(obj, "partition_count", where),
@@ -393,7 +431,7 @@ def decode_filter_result(raw: bytes) -> FilterResult:
         err_code=_int(obj, "code", where),
         err_msg=_bytes(obj, "err", where),
         rows_read=_u64(obj, "rows_read", where),
-        unsupported_settings=_ascii_list(obj, "unsupported_settings", where),
+        unsupported_settings=_name_list(obj, "unsupported_settings", where),
         verdicts=tuple(Verdict.of(c) for c in verdicts),
         errors=_objects(obj, "errors", where, _filter_row_error),
     )
@@ -409,7 +447,7 @@ def _column(obj: dict[str, Any], where: str) -> Column:
         name=_name(obj, "name", where),
         type=_bytes(obj, "type", where),
         default_kind=default_kind,
-        default_expr=_bytes(obj, "default_expr", where),
+        default_expr=_bytes(obj, "default_expression", where),
     )
 
 
@@ -429,7 +467,10 @@ def _discovered(obj: dict[str, Any], where: str) -> DiscoveredColumn:
 def decode_discovery(raw: bytes) -> Discovery:
     where = "discovery"
     obj = _obj(strict_loads(raw, where), where)
-    return Discovery(columns=_objects(obj, "columns", where, _discovered))
+    return Discovery(
+        columns=_objects(obj, "columns", where, _discovered),
+        columns_sql=_bytes(obj, "columns_sql", where),
+    )
 
 
 def decode_error_codes(raw: bytes) -> ErrorCodeTable:

@@ -41,9 +41,9 @@ ROW = {
         {"column": "a", "input": "256", "stored": "0", "reason": "overflow_wrap", "row": 3},
         {"column_b64": b64(b"\xff"), "input_b64": b64(b"\x80"), "stored": "x", "reason": "zzz"},
     ],
-    "unknown_fields": ["extra"],
-    "unsupported_settings": ["foo"],
-    "computed": [{"name": "c", "kind": "materialized", "stored": "9"}],
+    "unknown_fields": [{"name": "extra"}, {"name_b64": b64(b"\xff\x00")}],
+    "unsupported_settings": [{"name": "foo"}],
+    "computed": [{"name": "c", "kind": "materialized", "stored": "9", "value_b64": b64(b"9")}],
     "verdict": "t",
     "verdict_code": 0,
     "partition_id": "p1",
@@ -67,9 +67,10 @@ def test_a_row_decodes_one_to_one_with_names_and_values_as_bytes() -> None:
     assert row.transformed[1].column == b"\xff" and row.transformed[1].input == b"\x80"
     assert row.transformed[1].reason == "zzz" and row.transformed[1].lossy is True
     assert row.transformed[1].row == 0
-    assert row.unknown_fields == (b"extra",) and row.unsupported_settings == ("foo",)
-    assert row.computed[0].text == b"9" and row.verdict is Verdict.TRUE
-    assert row.partition_id == "p1" and row.input_span.off == 0 and row.input_span.len == 5
+    assert row.unknown_fields == (b"extra", b"\xff\x00") and row.unsupported_settings == (b"foo",)
+    assert row.computed[0].text == b"9" and row.computed[0].value == b"9"
+    assert row.verdict is Verdict.TRUE
+    assert row.partition_id == b"p1" and row.input_span.off == 0 and row.input_span.len == 5
 
 
 def test_absent_is_the_default() -> None:
@@ -133,7 +134,13 @@ BATCH = {
     "rows_read": 2,
     "rows_skipped": 1,
     "transformed": [{"column": "a", "input": "1", "stored": "2", "reason": "reformat", "row": 1}],
-    "engine_rows": ["x", "y"],
+    "engine_rows": [
+        [
+            {"name": "a", "stored": "1", "null": False, "value_b64": b64(b"1")},
+            {"name_b64": b64(b"\xff"), "stored_b64": b64(b"\xfe"), "null": True},
+        ],
+        [],
+    ],
     "row_spans": [{"off": 0, "len": 4}],
     "export_declined": "",
     "rows_passed": 1,
@@ -154,7 +161,20 @@ def test_a_batch_decodes_rows_payload_framing_and_spans() -> None:
     assert len(batch.rows) == 2 and batch.rows[1].outcome is Outcome.SKIPPED
     assert batch.rows[1].err_msg == b"boom" and batch.rows[1].err_code == 27
     assert batch.transformed[0].row == 1
-    assert batch.engine_rows == (b"x", b"y")
+    first, second = batch.engine_rows
+    assert second == ()
+    assert (first[0].column, first[0].text, first[0].null, first[0].value) == (
+        b"a",
+        b"1",
+        False,
+        b"1",
+    )
+    assert (first[1].column, first[1].text, first[1].null, first[1].value) == (
+        b"\xff",
+        b"\xfe",
+        True,
+        None,
+    )
     assert batch.payload == b"export bytes"
     assert batch.spans is not None and batch.spans[0].len == 4
     assert batch.partition_count == 2 and batch.rows_passed == 1
@@ -185,7 +205,8 @@ def test_a_filter_result_maps_verdicts_through_the_generated_vocabulary() -> Non
                 "outcome": "ok",
                 "rows_read": 4,
                 "verdicts": "tfed?",
-                "errors": [{"row": 2, "code": 386, "err": "no common type"}],
+                "unsupported_settings": [{"name": "s"}],
+                "errors": [{"row": 2, "code": 386, "err_b64": b64(b"\xffno")}],
             }
         )
     )
@@ -198,7 +219,8 @@ def test_a_filter_result_maps_verdicts_through_the_generated_vocabulary() -> Non
         Verdict.DECLINE,
     )
     assert [v.answered for v in res.verdicts] == [True, True, False, False, False]
-    assert res.errors[0].msg == b"no common type" and res.errors[0].row == 2
+    assert res.errors[0].msg == b"\xffno" and res.errors[0].row == 2
+    assert res.unsupported_settings == (b"s",)
     assert decode_filter_result(dumps({"outcome": "weird"})).outcome is FilterOutcome.UNSUPPORTED
 
 
@@ -207,12 +229,12 @@ def test_schema_description_and_discovery_carry_names_as_bytes() -> None:
         dumps(
             {
                 "columns": [
-                    {"name": "a", "type": "UInt8", "default_kind": "", "default_expr": ""},
+                    {"name": "a", "type": "UInt8", "default_kind": "", "default_expression": ""},
                     {
                         "name_b64": b64(b"\xff"),
                         "type_b64": b64(b"Nullable(\xfe)"),
                         "default_kind": "MATERIALIZED",
-                        "default_expr": "a + 1",
+                        "default_expression": "a + 1",
                     },
                 ]
             }
@@ -229,11 +251,13 @@ def test_schema_description_and_discovery_carry_names_as_bytes() -> None:
                 "columns": [
                     {"name": "a", "declaration": "`a` UInt8"},
                     {"name_b64": "/w==", "declaration": "x"},
-                ]
+                ],
+                "columns_sql_b64": b64(b"\xffa"),
             }
         )
     )
     assert disc.columns[0].declaration == b"`a` UInt8" and disc.columns[1].name == b"\xff"
+    assert disc.columns_sql == b"\xffa"
 
 
 def test_error_code_table_and_live_handles() -> None:
@@ -249,3 +273,27 @@ def test_error_code_table_and_live_handles() -> None:
         "chs_schema": 2,
         "chs_buf": 0,
     }
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {"unknown_fields": ["bare string"]},
+        {"unknown_fields": [{}]},
+        {"unknown_fields": [{"name": "a", "name_b64": "YQ=="}]},
+        {"unsupported_settings": ["x"]},
+        {"partition_id": "p", "partition_id_b64": "cA=="},
+        {"cols": [{"name": "a", "null": False, "src": "input", "value_b64": "YQ"}]},  # unpadded
+        {"computed": [{"name": "c", "value_b64": "!!"}]},
+    ],
+)
+def test_both_forms_a_missing_name_and_bad_base64_are_internal_errors(doc) -> None:
+    with pytest.raises(InternalError):
+        decode_row_document(dumps(doc))
+
+
+def test_an_engine_row_must_be_a_list_of_cells_never_an_object() -> None:
+    with pytest.raises(InternalError):
+        decode_batch(dumps({"engine_rows": [{"a": "1"}]}), None)
+    with pytest.raises(InternalError):
+        decode_batch(dumps({"engine_rows": [[{"stored": "1", "null": False}]]}), None)  # no name
