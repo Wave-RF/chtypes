@@ -1,0 +1,6 @@
+{
+  "required_legs": [
+    {"toolchain": "go.mod", "os": "linux-amd64"},
+    {"toolchain": "go.mod", "os": "darwin-arm64"}
+  ]
+}
