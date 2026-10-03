@@ -86,7 +86,7 @@ with open(dst, "w") as f:
     f.write("\n")
 PY
 
-    local INCLUDE_DIR="$ROOT/include/v1"
+    local INCLUDE_DIR="$ROOT/include"
     local MARKER_PATH="$OUT/ctor-marker.marker"
     rm -f "$MARKER_PATH"
 

@@ -9,7 +9,7 @@ import (
 
 // selftest.go — proves --check actually catches drift, the same discipline
 // every gate in this repository follows (scripts/lint-public.sh,
-// scripts/check-abi-decls.py, ...): a checker nobody has seen fail is not a
+// scripts/lint-spelling.sh, ...): a checker nobody has seen fail is not a
 // checker. Runs entirely in a throwaway temp directory; never touches the
 // real tests/fixtures/fetch-v1/ tree.
 func runSelftest(root string) {

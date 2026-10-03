@@ -8,7 +8,7 @@
 WHY. In ABI v1 every binding's FFI declarations are generated from
 spec/abi-v1/abi.json by scripts/abi-v1/gen.py, and `gen.py --check` proves the
 generated files match the description byte for byte. That makes v0's
-scripts/check-abi-decls.py (which could compare only type classes) redundant
+v0's hand-written declaration check (which could compare only type classes) redundant
 by construction, except for one hole: hand-written code that declares or looks
 up an entry point itself, bypassing the generated layer. This check closes
 that hole. Each binding's rules are the shapes such a bypass must take:

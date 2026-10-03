@@ -1,6 +1,6 @@
 name: v1-abi
 
-# ABI v1's generated FFI layer, on the v1 branch only (docs/reference/abi-v1.md).
+# ABI v1's generated FFI layer, on pull requests into v1 and main and in the merge queue (docs/reference/abi-v1.md).
 #
 # spec/abi-v1/abi.json describes the whole ABI and scripts/abi-v1/gen.py
 # generates every file that states it: the C header, the export list, the
@@ -34,9 +34,14 @@ name: v1-abi
 
 on:
   pull_request:
-    branches: [v1]
+    branches: [main, v1]
+  # The merge queue's candidate combination must run every required context
+  # here too, or the queue waits forever: v1 and v1-abi's contexts are required
+  # on main once v1 merges (nothing below reads the event's base or head).
+  merge_group:
+    types: [checks_requested]
   push:
-    branches: [v1]
+    branches: [main, v1]
   workflow_dispatch:
 
 permissions:
@@ -128,12 +133,12 @@ jobs:
       - name: the header compiles as C11 and as C++20 (gcc and clang)
         run: |
           for c in gcc clang; do
-            "$c" -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c include/v1/chtypes.h
+            "$c" -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c include/chtypes.h
           done
           for cxx in g++ clang++; do
-            "$cxx" -std=c++20 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c++ include/v1/chtypes.h
+            "$cxx" -std=c++20 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c++ include/chtypes.h
           done
-          echo "include/v1/chtypes.h: C11 and C++20, gcc and clang, -Wall -Wextra -Werror -pedantic"
+          echo "include/chtypes.h: C11 and C++20, gcc and clang, -Wall -Wextra -Werror -pedantic"
 
   v1-abi-stubs:
     name: "v1-abi-stubs (${{ matrix.platform }})"
@@ -350,7 +355,7 @@ jobs:
       # this script's own --selftest actually invoked, not just declared.
       # The lane that adds go/internal/abi1 (F-Go) also adds this script
       # (never edits this workflow): a cgo type-check of linked_gen.go
-      # against include/v1/chtypes.h, no artifact (plan §2.4's v1 successor
+      # against include/chtypes.h, no artifact (plan §2.4's v1 successor
       # of check-linked-build.sh), under scripts/abi-v1 and named for this
       # job (below: check-${check}.sh).
       - name: "selftest — the linked-mode check's own fixtures, once it exists"
@@ -362,7 +367,7 @@ jobs:
             exit 1
           fi
           bash "$script" --selftest
-      - name: type-check the generated linked table against include/v1/chtypes.h
+      - name: type-check the generated linked table against include/chtypes.h
         run: |
           check="linked"
           bash "scripts/abi-v1/check-${check}.sh"
