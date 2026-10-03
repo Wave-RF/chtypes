@@ -18,9 +18,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ensure, fetchSigned } from '../../src/ocifetch/ensure.js';
+import { ensure, fetchSigned, resolveInstalled } from '../../src/ocifetch/ensure.js';
 import { FIXTURES_REPO_SUFFIX, PREDICATE_TYPE_FIXTURES, PREDICATE_TYPE_GOLDENS, RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
-import type { FetchV1ErrorCode } from '../../src/ocifetch/errors.js';
+import { ArtifactMissingError, type FetchV1ErrorCode } from '../../src/ocifetch/errors.js';
 import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
 import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
 import type { Clock, PlatformKey } from '../../src/ocifetch/types.js';
@@ -346,12 +346,21 @@ type EnsureOptions = Parameters<typeof ensure>[1];
 
 async function runEnsure(c: ConformanceCase, baseOptions: EnsureOptions, lockPath: string, conformanceDir: string): Promise<string> {
   try {
-    const resolved = await ensure(c.request.spelling, {
-      ...baseOptions,
-      lockWrite: c.request.lock_write,
-      lockAllPlatforms: c.request.lock_write,
-      update: c.request.update,
-    });
+    let resolved: Awaited<ReturnType<typeof ensure>>;
+    if (c.id.startsWith('resolve-installed-')) {
+      // The cache-only seam entry (guide §10): a miss is reported as
+      // CHTYPES_ARTIFACT_MISSING, the code --offline gives.
+      const found = await resolveInstalled(c.request.spelling, c.request.platform as PlatformKey, baseOptions);
+      if (found === undefined) throw new ArtifactMissingError(`chtypes: no installed artifact satisfies ${c.request.spelling}`);
+      resolved = found;
+    } else {
+      resolved = await ensure(c.request.spelling, {
+        ...baseOptions,
+        lockWrite: c.request.lock_write,
+        lockAllPlatforms: c.request.lock_write,
+        update: c.request.update,
+      });
+    }
     if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got ok with version ${resolved.version}`;
     if (c.expect.version !== null && resolved.version !== c.expect.version) {
       return `version ${resolved.version} != expected ${c.expect.version}`;

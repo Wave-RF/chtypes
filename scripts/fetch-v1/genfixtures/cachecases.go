@@ -15,6 +15,7 @@ import (
 
 func buildCacheCases(fs *FileSet) []Case {
 	var cases []Case
+	var extraLayouts []*Layout
 	tree := NewTree("cache")
 
 	newArtifact := func(version, build, seed string) PlatformArtifact {
@@ -249,7 +250,56 @@ func buildCacheCases(fs *FileSet) []Case {
 		}
 	}
 
+	// --- label-mismatch-*: no local LABEL may stand in for the signed
+	// version. The layout's index.json entry for the build is annotated with
+	// the ref name "26.9" (what a real `oras copy` of that tag writes), while
+	// the build's SIGNED predicate says 26.8.15.10. A request for 26.9 (the
+	// label) must not resolve to it; 26.8 (the signed version) is the
+	// control. Two layouts: one with the build already installed
+	// (installed.json), one only pre-seeded. A path component cannot carry a
+	// version at all (the unpacked directory is named by the manifest digest,
+	// and verified.json is written by the binding from the signed statement,
+	// never fabricated by this generator), so the index.json annotation is the
+	// one local label a fixture can plant. ------------------------------------
+	for _, kind := range []string{"installed", "preseeded"} {
+		layoutLbl := NewLayout("label-mismatch-" + kind)
+		copyArtifactIntoLayout(layoutLbl, tree, artInst, "26.9")
+		if kind == "installed" {
+			layoutLbl.SetInstalled(artInst.ManifestDesc.Digest)
+		}
+		extraLayouts = append(extraLayouts, layoutLbl)
+		for _, r := range []struct {
+			slug, spelling string
+			match          bool
+		}{{"label", "26.9", false}, {"signed", "26.8", true}} {
+			for _, mode := range []string{"offline", "resolve"} {
+				id := "label-mismatch-" + kind + "-" + r.slug + "-" + mode
+				if mode == "resolve" {
+					id = "resolve-installed-label-mismatch-" + kind + "-" + r.slug
+				}
+				c := newCase(id, "cache", "file", "http")
+				c.Request.Spelling = r.spelling
+				c.Request.Offline = true
+				c.Setup.Cache = "label-mismatch-" + kind
+				c.Expect.Requests.Max = intp(0)
+				if r.match {
+					c.Expect.OK = true
+					c.Expect.Version = strp(artInst.Predicate.ClickHouseVersion)
+					c.Expect.Build = strp(artInst.Predicate.Build)
+					c.Expect.LibrarySHA256 = strp(artInst.Predicate.LibrarySHA256)
+				} else {
+					c.Expect.OK = false
+					c.Expect.Code = strp("CHTYPES_ARTIFACT_MISSING")
+				}
+				cases = append(cases, c)
+			}
+		}
+	}
+
 	flushTrees(fs, tree, monoTree)
+	for _, l := range extraLayouts {
+		l.Flush(fs)
+	}
 	for _, l := range []*Layout{layoutInst, layoutHit, layoutMiss, layoutTwoVersions, layoutTwoBuilds, layoutNoop, layoutMono, layoutSys} {
 		l.Flush(fs)
 	}
