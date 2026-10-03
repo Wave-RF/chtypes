@@ -5,7 +5,7 @@
   "description": "The shape of spec/abi-v1/abi.json. Structure only: cross-references (a handle's free function exists, a status is a chs_status value, a FIRM function names nothing provisional, docs.md covers every symbol) are checked by scripts/abi-v1/model.py. Uses only the keywords that validator implements; it refuses any other.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["description_schema", "abi", "library", "scalars", "handles", "enums", "constants", "column_names", "documents", "build_info", "functions"],
+  "required": ["description_schema", "abi", "library", "scalars", "handles", "enums", "constants", "byte_strings", "documents", "build_info", "functions"],
   "properties": {
     "description_schema": {"const": 1, "description": "The version of this format."},
     "abi": {"type": "integer", "minimum": 1, "description": "The ABI generation: CHS_ABI_VERSION, and what chs_abi_version() returns."},
@@ -38,15 +38,15 @@
       "propertyNames": {"pattern": "^CHS_[A-Z0-9_]+$"},
       "additionalProperties": {"$ref": "#/$defs/constant"}
     },
-    "column_names": {
+    "byte_strings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["text", "bytes", "bytes_encoding"],
-      "description": "How a JSON document (an input or an output) carries a column name, which is a byte string: the member `text` holds it as a JSON string when its bytes are valid UTF-8 (NUL written as an escape), and otherwise the member `bytes` holds the raw bytes in `bytes_encoding` (standard base64, with padding). Exactly one of the two is present wherever a name is carried; a byte-returning accessor such as chs_error_column returns the raw bytes instead.",
+      "required": ["suffix", "encoding", "value"],
+      "description": "The one rule for every data-derived string a JSON document carries (a column name included), in every output document and in the input column list: the member F is a JSON string when the bytes are valid UTF-8 (a NUL written as an escape), and otherwise the member F + suffix holds the raw bytes in `encoding` (standard base64, padded). Never both. Where a document would hold a bare data-derived string in an array or as an object key, it holds an object instead, so the rule applies to that object's members. `value` names the member that holds a scalar String or FixedString value's raw bytes, beside its rendering. Each document lists its data-derived fields in byte_fields and the entries that carry `value` in value_entries; scripts/abi-v1/model.py checks both against the document's schema.",
       "properties": {
-        "text": {"$ref": "#/$defs/c_ident"},
-        "bytes": {"$ref": "#/$defs/c_ident"},
-        "bytes_encoding": {"enum": ["base64"]}
+        "suffix": {"const": "_b64"},
+        "encoding": {"enum": ["base64"]},
+        "value": {"$ref": "#/$defs/c_ident"}
       }
     },
     "documents": {
@@ -76,6 +76,7 @@
   "$defs": {
     "c_type_name": {"type": "string", "pattern": "^chs_[a-z0-9_]+$"},
     "c_ident": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "doc_path": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\[\\])*([.][a-z][a-z0-9_]*(\\[\\])*)*$"},
     "markers": {
       "description": "Present = PROVISIONAL, waiting on each named marker (sdk.json provisional_markers has the legend). Absent = FIRM.",
       "type": "array",
@@ -171,7 +172,19 @@
       "additionalProperties": false,
       "required": ["carries_names"],
       "properties": {
-        "carries_names": {"type": "boolean", "description": "The document carries column names, which are byte strings, each carried as column_names says."},
+        "carries_names": {"type": "boolean", "description": "The document carries column names, which are byte strings, each carried as byte_strings says."},
+        "byte_fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/doc_path"},
+          "description": "Every data-derived string field of the document, as a path into it: members joined by `.`, and `[]` after a member for each array level. Each is carried by the byte_strings rule."
+        },
+        "value_entries": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/doc_path"},
+          "description": "The entries (paths ending in `[]`) that report a stored value: each carries the byte_strings `value` member for a scalar String or FixedString value."
+        },
         "schema": {"type": "object", "description": "A JSON Schema (the subset model.py implements) of the fields of the document that the description fixes; a document may carry more, as docs.md describes."},
         "provisional": {"$ref": "#/$defs/markers"}
       }

@@ -51,7 +51,7 @@ interface StepEntry {
 
 interface CaseEntry {
   readonly id: string;
-  readonly kind: 'handshake' | 'echo' | 'status' | 'loader' | 'lifecycle' | 'concurrent';
+  readonly kind: 'handshake' | 'echo' | 'status' | 'loader' | 'lifecycle' | 'concurrent' | 'document';
   readonly fn?: string;
   readonly variant?: string;
   readonly os?: 'linux' | 'darwin';
@@ -291,6 +291,29 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
         const args = (c.args ?? []).map((a) => resolveArg(okRaw, a, newContext()));
         const call: RawCallResult = rawCall(okRaw, c.fn as string, args);
         checkEchoExpect(call, c.expect);
+      });
+    });
+  });
+
+  // A "document" case: each named output decodes as STRICT UTF-8 (a fatal
+  // TextDecoder, so a replacement character can never pass) and equals the
+  // expected document exactly, every member and no more.
+  describe('document', () => {
+    it.each(casesOfKind('document'))('$id', (c: CaseEntry) => {
+      record(c.id, () => {
+        const args = (c.args ?? []).map((a) => resolveArg(okRaw, a, newContext()));
+        const call: RawCallResult = rawCall(okRaw, c.fn as string, args);
+        expect(call.outcome).toBe('status');
+        if (call.outcome !== 'status') return;
+        expect(call.statusName).toBe(c.expect?.status);
+        const documents = (c.expect?.documents ?? {}) as Record<string, unknown>;
+        expect(Object.keys(documents).length).toBeGreaterThan(0);
+        for (const [name, want] of Object.entries(documents)) {
+          const actual = call.outs[name];
+          expect(Buffer.isBuffer(actual)).toBe(true);
+          const text = new TextDecoder('utf-8', { fatal: true }).decode(actual as Buffer);
+          expect(JSON.parse(text)).toStrictEqual(want);
+        }
       });
     });
   });

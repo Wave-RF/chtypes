@@ -498,6 +498,109 @@ static void chs_sb_handle_field(chs_sb *sb, const chs_handle_common *c) {{
 static chs_buf *chs_stub_finish_buf(chs_sb *sb) {{
     return chs_stub_make_buf((uint8_t *) sb->buf, sb->len);
 }}
+
+/* ------------------------------------------------- the byte_strings rule, in
+   C, for document mode (scripts/abi-v1/emit/_stubshared.py DOC_TEMPLATES).
+   Deliberately its own code: a conformance case compares what this produces
+   with what Python's own codec and base64 produce for the same bytes. */
+
+static void chs_sb_append(chs_sb *sb, const void *p, size_t n) {{
+    chs_sb_reserve(sb, n);
+    memcpy(sb->buf + sb->len, p, n);
+    sb->len += n;
+    sb->buf[sb->len] = 0;
+}}
+
+/* Strict UTF-8, as RFC 3629 defines it: no overlong form, no surrogate, nothing
+   above U+10FFFF. */
+static int chs_stub_utf8_valid(const uint8_t *p, size_t n) {{
+    size_t i = 0;
+    while (i < n) {{
+        uint8_t c = p[i];
+        size_t need;
+        uint8_t lo = 0x80, hi = 0xBF;
+        if (c < 0x80) {{ i++; continue; }}
+        else if (c >= 0xC2 && c <= 0xDF) need = 1;
+        else if (c == 0xE0) {{ need = 2; lo = 0xA0; }}
+        else if (c >= 0xE1 && c <= 0xEC) need = 2;
+        else if (c == 0xED) {{ need = 2; hi = 0x9F; }}
+        else if (c >= 0xEE && c <= 0xEF) need = 2;
+        else if (c == 0xF0) {{ need = 3; lo = 0x90; }}
+        else if (c >= 0xF1 && c <= 0xF3) need = 3;
+        else if (c == 0xF4) {{ need = 3; hi = 0x8F; }}
+        else return 0;
+        if (i + need >= n) return 0; /* truncated sequence */
+        if (p[i + 1] < lo || p[i + 1] > hi) return 0;
+        for (size_t k = 2; k <= need; k++)
+            if (p[i + k] < 0x80 || p[i + k] > 0xBF) return 0;
+        i += need + 1;
+    }}
+    return 1;
+}}
+
+/* A JSON string of valid UTF-8 bytes: quote, backslash and control bytes
+   escaped (a NUL as JSON's six-character escape for U+0000), every other byte kept. */
+static void chs_sb_json_utf8(chs_sb *sb, const uint8_t *p, size_t n) {{
+    static const char hexd[] = "0123456789abcdef";
+    chs_sb_append(sb, "\\"", 1);
+    for (size_t i = 0; i < n; i++) {{
+        uint8_t c = p[i];
+        if (c == '"' || c == '\\\\') {{
+            char e[2] = {{'\\\\', (char) c}};
+            chs_sb_append(sb, e, 2);
+        }} else if (c < 0x20) {{
+            char e[6] = {{'\\\\', 'u', '0', '0', hexd[c >> 4], hexd[c & 15]}};
+            chs_sb_append(sb, e, 6);
+        }} else {{
+            chs_sb_append(sb, &p[i], 1);
+        }}
+    }}
+    chs_sb_append(sb, "\\"", 1);
+}}
+
+/* A JSON string holding the standard base64 (RFC 4648 section 4, padded). */
+static void chs_sb_base64(chs_sb *sb, const uint8_t *p, size_t n) {{
+    static const char a[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    chs_sb_append(sb, "\\"", 1);
+    size_t i = 0;
+    for (; i + 3 <= n; i += 3) {{
+        uint32_t v = ((uint32_t) p[i] << 16) | ((uint32_t) p[i + 1] << 8) | p[i + 2];
+        char q[4] = {{a[(v >> 18) & 63], a[(v >> 12) & 63], a[(v >> 6) & 63], a[v & 63]}};
+        chs_sb_append(sb, q, 4);
+    }}
+    if (n - i == 1) {{
+        uint32_t v = (uint32_t) p[i] << 16;
+        char q[4] = {{a[(v >> 18) & 63], a[(v >> 12) & 63], '=', '='}};
+        chs_sb_append(sb, q, 4);
+    }} else if (n - i == 2) {{
+        uint32_t v = ((uint32_t) p[i] << 16) | ((uint32_t) p[i + 1] << 8);
+        char q[4] = {{a[(v >> 18) & 63], a[(v >> 12) & 63], a[(v >> 6) & 63], '='}};
+        chs_sb_append(sb, q, 4);
+    }}
+    chs_sb_append(sb, "\\"", 1);
+}}
+
+/* The byte_strings rule: "key":"<text>" for valid UTF-8, else "key_b64":"<base64>". */
+static void chs_sb_bytes_member(chs_sb *sb, const char *key, const uint8_t *p, size_t n) {{
+    chs_sb_append(sb, "\\"", 1);
+    chs_sb_cat(sb, key);
+    if (chs_stub_utf8_valid(p, n)) {{
+        chs_sb_append(sb, "\\":", 2);
+        chs_sb_json_utf8(sb, p, n);
+    }} else {{
+        chs_sb_append(sb, "_b64\\":", 6);
+        chs_sb_base64(sb, p, n);
+    }}
+}}
+
+/* payload ++ suffix, in a buffer the caller frees. */
+static uint8_t *chs_stub_concat(const uint8_t *p, size_t n, const char *suffix, size_t sn, size_t *out_n) {{
+    uint8_t *b = (uint8_t *) malloc(n + sn + 1);
+    if (n) memcpy(b, p, n);
+    if (sn) memcpy(b + n, suffix, sn);
+    *out_n = n + sn;
+    return b;
+}}
 '''
 
 
@@ -708,6 +811,83 @@ def _one_create(fn) -> list[str]:
     ]
 
 
+def _c_bytes_lit(data: bytes) -> str:
+    """A C string literal for arbitrary bytes, every byte octal-escaped."""
+    return '"' + "".join(f"\\{b:03o}" for b in data) + '"'
+
+
+def _document_mode(model, fn) -> list[str]:
+    """Document mode (_stubshared.DOC_FUNCTIONS / DOC_TEMPLATES): when the
+    named parameter begins the prefix, the call returns the template's
+    document in its `out` instead of the echo."""
+    entry = _stubshared.DOC_FUNCTIONS.get(fn.name)
+    if entry is None:
+        return []
+    param, template = entry
+    if not any(q.name == param and q.kind == "bytes_in" for q in fn.params):
+        raise ValueError(f"{fn.name}: DOC_FUNCTIONS names {param!r}, which is not one of its bytes_in parameters")
+    outs = [q for q in fn.params if q.kind == "out_handle" and q.type == BUF_HANDLE and not q.nullable]
+    if len(outs) != 1:
+        raise ValueError(f"{fn.name}: document mode needs exactly one required chs_buf output")
+    out = outs[0].name
+    pre = _stubshared.DOC_PREFIX
+    lines = [
+        "    {",
+        "        /* document mode: see scripts/abi-v1/emit/_stubshared.py DOC_TEMPLATES */",
+        f"        static const char pfx[] = {_c_bytes_lit(pre)};",
+        f"        if ({param} != NULL && {param}_len >= sizeof(pfx) - 1 && memcmp({param}, pfx, sizeof(pfx) - 1) == 0) {{",
+        f"            if ({out} == NULL) {{",
+        *_c_fixed_error("CHS_INVALID_ARGUMENT", f"{out}: required", indent="                "),
+        "            }",
+        f"            const uint8_t *pl = {param} + (sizeof(pfx) - 1);",
+        f"            size_t pln = {param}_len - (sizeof(pfx) - 1);",
+        "            (void) pl; (void) pln;",
+        "            chs_sb sb; chs_sb_init(&sb);",
+    ]
+
+    def src_code(src) -> tuple[list[str], str, str, bool]:
+        """(setup statements, pointer expr, length expr, needs free)."""
+        if src[0] == "lit":
+            return [], f"(const uint8_t *) {_c_bytes_lit(src[1])}", str(len(src[1])), False
+        if not src[1]:
+            return [], "pl", "pln", False
+        return (
+            [f"            size_t tn; uint8_t *tb = chs_stub_concat(pl, pln, {_c_bytes_lit(src[1])}, {len(src[1])}, &tn);"],
+            "tb",
+            "tn",
+            True,
+        )
+
+    for step in _stubshared.DOC_TEMPLATES[template]:
+        op = step[0]
+        if op == "raw":
+            lines.append(f"            chs_sb_cat(&sb, {_c_str(step[1])});")
+        elif op == "len":
+            lines.append(f'            chs_sb_fmt(&sb, "%zu", {param}_len);')
+        elif op in ("member", "b64"):
+            src = step[2] if op == "member" else step[1]
+            setup, ptr, n, needs_free = src_code(src)
+            lines.append("            {")
+            lines += setup
+            if op == "member":
+                lines.append(f"            chs_sb_bytes_member(&sb, {_c_str(step[1])}, {ptr}, {n});")
+            else:
+                lines.append(f"            chs_sb_base64(&sb, {ptr}, {n});")
+            if needs_free:
+                lines.append("            free(tb);")
+            lines.append("            }")
+        else:
+            raise ValueError(f"DOC_TEMPLATES: unknown step {op!r}")
+    lines += [
+        f"            *{out} = chs_stub_finish_buf(&sb);",
+        "            chs_stub_set_err(err, NULL);",
+        "            return CHS_OK;",
+        "        }",
+        "    }",
+    ]
+    return lines
+
+
 def _fill_outputs(model, fn) -> list[str]:
     """Fill every out_handle. `p.nullable` here means "the pointer-TO-pointer
     itself may be NULL" (the caller does not want this output); a required
@@ -789,6 +969,7 @@ def _gen_generic(model, fn) -> str:
     body += _input_checks(model, fn)
     body += _status_injection(fn)
     body += _one_create(fn)
+    body += _document_mode(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
     if err_param is not None:

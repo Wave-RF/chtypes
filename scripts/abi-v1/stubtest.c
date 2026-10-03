@@ -438,6 +438,63 @@ static void test_concurrent_shared(lib_t *l) {
     CHECK(live_count(l, "chs_buf") == buf_before, "live chs_buf did not return to its baseline");
 }
 
+/* The byte_strings rule, at the byte level: document mode
+   (scripts/abi-v1/emit/_stubshared.py DOC_TEMPLATES) on chs_preview_row.
+   Each member is in exactly ONE of its two forms, the plain one only for
+   strict UTF-8 (RFC 3629: no overlong form, no surrogate, nothing above
+   U+10FFFF), and value_b64 is always there. */
+static int doc_has(const char *doc, size_t n, const char *needle) {
+    size_t k = strlen(needle);
+    for (size_t i = 0; i + k <= n; i++)
+        if (memcmp(doc + i, needle, k) == 0) return 1;
+    return 0;
+}
+
+static void test_document_mode(lib_t *l) {
+    static const struct {
+        const char *what;
+        const char *value;
+        size_t len;
+        int utf8;
+        const char *stored; /* the exact member expected */
+        const char *b64;    /* value_b64's exact member */
+    } cases[] = {
+        {"binary FF 00 80", "\xff\x00\x80", 3, 0, "\"stored_b64\":\"/wCA\"", "\"value_b64\":\"/wCA\""},
+        {"UTF-8 with a NUL", "a\000b", 3, 1, "\"stored\":\"a\\u0000b\"", "\"value_b64\":\"YQBi\""},
+        {"a two-byte character", "\xc3\xa9", 2, 1, "\"stored\":\"\xc3\xa9\"", "\"value_b64\":\"w6k=\""},
+        {"U+10FFFF", "\xf4\x8f\xbf\xbf", 4, 1, "\"stored\":\"\xf4\x8f\xbf\xbf\"", "\"value_b64\":\"9I+/vw==\""},
+        {"an overlong NUL", "\xc0\x80", 2, 0, "\"stored_b64\":\"wIA=\"", "\"value_b64\":\"wIA=\""},
+        {"a surrogate", "\xed\xa0\x80", 3, 0, "\"stored_b64\":\"7aCA\"", "\"value_b64\":\"7aCA\""},
+        {"above U+10FFFF", "\xf4\x90\x80\x80", 4, 0, "\"stored_b64\":\"9JCAgA==\"", "\"value_b64\":\"9JCAgA==\""},
+        {"a truncated sequence", "a\xe2\x82", 3, 0, "\"stored_b64\":\"YeKC\"", "\"value_b64\":\"YeKC\""},
+    };
+    chs_schema *schema = NULL;
+    chs_error *err = NULL;
+    CHECK(l->schema_create((const uint8_t *) "x", 1, NULL, 0, &schema, &err) == CHS_OK, "chs_schema_create");
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        uint8_t body[64];
+        memcpy(body, "!D:", 3);
+        memcpy(body + 3, cases[i].value, cases[i].len);
+        chs_buf *out = NULL;
+        chs_status st = l->preview_row(schema, CHS_JSON_EACH_ROW, body, 3 + cases[i].len, NULL, 0, NULL, 0, &out, &err);
+        CHECK(st == CHS_OK && out != NULL, "document mode, %s: status %d", cases[i].what, (int) st);
+        if (out == NULL) continue;
+        const char *doc = (const char *) l->buf_data(out);
+        size_t n = l->buf_len(out);
+        CHECK(doc_has(doc, n, cases[i].stored), "document mode, %s: no %s in %.*s", cases[i].what, cases[i].stored,
+              (int) n, doc);
+        CHECK(doc_has(doc, n, cases[i].b64), "document mode, %s: no %s", cases[i].what, cases[i].b64);
+        CHECK(doc_has(doc, n, "\"stored\":") == cases[i].utf8, "document mode, %s: plain stored present = %d",
+              cases[i].what, !cases[i].utf8);
+        CHECK(doc_has(doc, n, "\"stored_b64\":") == !cases[i].utf8, "document mode, %s: stored_b64 present = %d",
+              cases[i].what, cases[i].utf8);
+        CHECK(doc_has(doc, n, "\"input\":") == cases[i].utf8 && doc_has(doc, n, "\"input_b64\":") == !cases[i].utf8,
+              "document mode, %s: input is not in exactly its one form", cases[i].what);
+        l->buf_free(out);
+    }
+    l->schema_free(schema);
+}
+
 /* Two SEPARATELY dlopen'd, byte-identical builds (RTLD_LOCAL: each gets its
    own static image-identity marker) must refuse each other's handles. */
 static void test_cross_image(lib_t *a, lib_t *b) {
@@ -488,6 +545,7 @@ int main(int argc, char **argv) {
     test_wrong_kind(&a);
     test_holds_and_live(&a);
     test_one_create(&a);
+    test_document_mode(&a);
     test_concurrent_shared(&a);
     test_cross_image(&a, &b);
     test_unbound_refuses_rtld_now(argv[1]);
