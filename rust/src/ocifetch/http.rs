@@ -325,7 +325,18 @@ enum TransportOutcome {
 fn classify_transport_error(url: &Url, e: ureq::Error) -> TransportOutcome {
     use ureq::Error as E;
     match e {
-        E::Timeout(_) | E::Io(_) | E::ConnectionFailed | E::HostNotFound => {
+        // A connection refused (nothing is listening) will never be fixed by
+        // retrying the SAME base: it fails this base at once, consuming none
+        // of the retry schedule, so the caller moves to the next base
+        // without a sleep — the same rule Go's `permanentTransportError`
+        // applies (`connection-refused-then-next-base`).
+        E::ConnectionFailed => {
+            TransportOutcome::Fatal(Error::SourceUnreachable(format!("{url}: {e}")))
+        }
+        E::Io(ref io) if io.kind() == std::io::ErrorKind::ConnectionRefused => {
+            TransportOutcome::Fatal(Error::SourceUnreachable(format!("{url}: {e}")))
+        }
+        E::Timeout(_) | E::Io(_) | E::HostNotFound => {
             TransportOutcome::Retryable(Error::SourceUnreachable(format!("{url}: {e}")))
         }
         other => TransportOutcome::Fatal(Error::SourceUnreachable(format!("{url}: {other}"))),

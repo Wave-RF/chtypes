@@ -87,6 +87,10 @@ pub struct Options {
     pub token: Option<String>,
     /// An injected clock, for the conformance suite's exact-sleep assertions.
     pub clock: Option<Box<dyn Clock>>,
+    /// Test seam: runs between the read and the rename of this call's
+    /// `index.json` update, to play a competing writer
+    /// (`before_index_rename_hook`, docs/guides/fetch-v1.md §10).
+    pub before_index_rename: Option<Box<dyn Fn()>>,
 }
 
 impl Default for Options {
@@ -108,6 +112,7 @@ impl Default for Options {
             trust_test_keys: false,
             token: None,
             clock: None,
+            before_index_rename: None,
         }
     }
 }
@@ -287,30 +292,20 @@ fn ensure_online(
         auth: &res.auth,
     };
     let fetched_index = oci::fetch_by_tag(&source, &version_request.tag())?;
-    let index: oci::Index = serde_json::from_slice(&fetched_index.bytes)?;
+    let index = oci::parse_index(&fetched_index.bytes, &format!("index for {request:?}"))?;
     let descriptor = oci::select_platform(&index, &res.platform)?;
 
     let fetched_manifest =
         oci::fetch_by_digest(&source, &descriptor.digest, constants::MANIFEST_MAX_BYTES)?;
     let manifest: oci::Manifest = serde_json::from_slice(&fetched_manifest.bytes)?;
-    let [layer] = manifest.layers.as_slice() else {
-        return Err(Error::ArtifactCorrupt(format!(
-            "platform manifest {} has {} layers, want exactly 1",
-            descriptor.digest,
-            manifest.layers.len()
-        )));
-    };
+    oci::check_platform_manifest(&manifest, &format!("manifest {}", descriptor.digest))?;
+    let layer = &manifest.layers[0];
 
     let trust_result = referrers::find_trusted_statement(&source, &descriptor.digest, &res.trust);
     let (predicate, signed_by, bundle_layer_digest, bundle_manifest_digest, mut warnings) =
         match trust_result {
             Ok(stmt) => {
-                if stmt.subject_sha256 != strip_sha256(&layer.digest)? {
-                    return Err(Error::ArtifactCorrupt(format!(
-                        "signed subject {} does not match the manifest's layer {}",
-                        stmt.subject_sha256, layer.digest
-                    )));
-                }
+                check_artifact_statement(&stmt, &layer.digest)?;
                 (
                     stmt.predicate,
                     stmt.signed_by.to_string(),
@@ -331,11 +326,34 @@ fn ensure_online(
             Err(e) => return Err(e),
         };
 
-    if !options.allow_unsigned {
-        validate_predicate(&predicate, &res.platform, version_request)?;
+    if !predicate.is_null() {
+        validate_predicate(&predicate, &res.platform, Some(version_request))?;
     }
 
     let already = is_fully_installed(&layout::unpacked_dir(&res.root, &descriptor.digest)?)?;
+
+    // Monotonicity (docs/guides/fetch-v1.md §6, `monotonic-warning`): a
+    // HIGHER build already installed than what the source now offers is
+    // kept, with a warning. Decided as soon as the candidate's own signed
+    // version/build are known and before its layer is fetched — there is no
+    // point downloading bytes this call is about to discard.
+    if !already && !predicate.is_null() {
+        if let Some((dir, record)) =
+            newer_installed(res, version_request, &descriptor.digest, &predicate)?
+        {
+            warnings.push(format!(
+                "chtypes: a newer build is already installed locally ({} build {}, monotonic check) than the source just resolved ({} build {}) — keeping the existing install",
+                record.version,
+                record.build,
+                predicate["clickhouse_version"].as_str().unwrap_or("?"),
+                predicate["build"].as_str().unwrap_or("?")
+            ));
+            let mut resolved =
+                record_to_resolved(request, &res.platform, &dir, record, "cache", true);
+            resolved.warnings = warnings;
+            return Ok(resolved);
+        }
+    }
 
     let (library_sha256, library_bytes, library_name) = if predicate.is_null() {
         // Only reachable via the explicit, warned `allow_unsigned` path:
@@ -382,7 +400,19 @@ fn ensure_online(
     };
 
     if let Some(record) = layout::read_verified(&dir)? {
-        warnings.extend(monotonic_warning(res, &version_request.tag(), &record)?);
+        // Keep the OCI layout's own view in step (oras interop): the platform
+        // manifest as a blob and an `index.json` entry, merged by a
+        // read-check-rename loop so a concurrent writer is never clobbered.
+        layout::put_blob(&res.root, &descriptor.digest, &fetched_manifest.bytes)?;
+        let platform = constants::PLATFORMS.iter().find(|p| p.key == res.platform);
+        layout::record_in_index(
+            &res.root,
+            &descriptor.digest,
+            fetched_manifest.bytes.len() as u64,
+            constants::MEDIA_TYPE_MANIFEST,
+            platform.map(|p| (p.os, p.architecture)),
+            options.before_index_rename.as_deref(),
+        )?;
         return Ok(Resolved {
             abi_generation: constants::ABI_GENERATION,
             platform: res.platform.clone(),
@@ -428,7 +458,7 @@ fn lock_entries_for_all_platforms(
         auth: &res.auth,
     };
     let fetched_index = oci::fetch_by_tag(&source, &version_request.tag())?;
-    let index: oci::Index = serde_json::from_slice(&fetched_index.bytes)?;
+    let index = oci::parse_index(&fetched_index.bytes, "index")?;
 
     let mut out = Vec::new();
     for d in &index.manifests {
@@ -456,20 +486,10 @@ fn lock_entries_for_all_platforms(
         let manifest_fetched =
             oci::fetch_by_digest(&source, &d.digest, constants::MANIFEST_MAX_BYTES)?;
         let manifest: oci::Manifest = serde_json::from_slice(&manifest_fetched.bytes)?;
-        let [layer] = manifest.layers.as_slice() else {
-            return Err(Error::ArtifactCorrupt(format!(
-                "platform manifest {} has {} layers, want exactly 1",
-                d.digest,
-                manifest.layers.len()
-            )));
-        };
+        oci::check_platform_manifest(&manifest, &format!("manifest {}", d.digest))?;
+        let layer = &manifest.layers[0];
         let stmt = referrers::find_trusted_statement(&source, &d.digest, &res.trust)?;
-        if stmt.subject_sha256 != strip_sha256(&layer.digest)? {
-            return Err(Error::ArtifactCorrupt(format!(
-                "signed subject {} does not match the manifest's layer {}",
-                stmt.subject_sha256, layer.digest
-            )));
-        }
+        check_artifact_statement(&stmt, &layer.digest)?;
         out.push((
             platform.key.to_string(),
             LockEntry {
@@ -533,11 +553,8 @@ fn ensure_frozen(
     let fetched_manifest =
         oci::fetch_by_digest(&source, &entry.manifest, constants::MANIFEST_MAX_BYTES)?;
     let manifest: oci::Manifest = serde_json::from_slice(&fetched_manifest.bytes)?;
-    let [layer] = manifest.layers.as_slice() else {
-        return Err(Error::ArtifactCorrupt(
-            "frozen manifest layer count".to_string(),
-        ));
-    };
+    oci::check_platform_manifest(&manifest, &format!("manifest {}", entry.manifest))?;
+    let layer = &manifest.layers[0];
     if layer.digest != entry.layer {
         return Err(Error::ArtifactCorrupt(format!(
             "frozen manifest's layer {} does not match the lock's {}",
@@ -545,16 +562,24 @@ fn ensure_frozen(
         )));
     }
 
-    let stmt = referrers::find_trusted_statement(&source, &entry.manifest, &res.trust);
-    let (predicate, signed_by, bundle_manifest_digest) = match stmt {
-        Ok(s) => (
-            s.predicate,
-            s.signed_by.to_string(),
-            Some(s.bundle_manifest_digest),
-        ),
-        Err(e) if options.allow_unsigned => (
+    // `--frozen` performs NO discovery (docs/guides/fetch-v1.md §6): the
+    // signature bundle is fetched by the digest the lock pins, never found
+    // through the referrers API or the fallback tag.
+    let bundle = oci::fetch_blob_by_digest(&source, &entry.bundle, constants::BUNDLE_MAX_BYTES)?;
+    let verified = dsse::verify_bundle(&bundle.bytes, &res.trust, constants::STATEMENT_TYPE);
+    let (predicate, signed_by, bundle_manifest_digest) = match verified {
+        Ok(stmt) => {
+            check_artifact_statement(&stmt, &layer.digest)?;
+            validate_predicate(
+                &stmt.predicate,
+                platform,
+                Some(&VersionRequest::parse(request)?),
+            )?;
+            (stmt.predicate, stmt.signed_by.to_string(), None)
+        }
+        Err(Error::ArtifactUntrusted(detail)) if options.allow_unsigned => (
             serde_json::Value::Null,
-            format!("UNSIGNED (allowed): {e}"),
+            format!("UNSIGNED (allowed): {detail}"),
             None,
         ),
         Err(e) => return Err(e),
@@ -610,11 +635,15 @@ fn ensure_frozen(
             bundle: Some(entry.bundle.clone()),
             bundle_manifest: bundle_manifest_digest,
         },
-        predicate,
+        predicate: predicate.clone(),
         signed_by,
         source: fetched_manifest.base,
         already_installed: false,
-        warnings: Vec::new(),
+        warnings: if predicate.is_null() {
+            vec!["chtypes: the locked bundle is unsigned or untrusted; CHTYPES_ALLOW_UNSIGNED is set, continuing unsigned".to_string()]
+        } else {
+            Vec::new()
+        },
     })
 }
 
@@ -809,6 +838,12 @@ pub fn fetch_signed(
         oci::fetch_by_tag(&source, reference)?
     };
     let manifest: oci::Manifest = serde_json::from_slice(&fetched.bytes)?;
+    if manifest.media_type.as_deref() != Some(constants::MEDIA_TYPE_MANIFEST) {
+        return Err(Error::SourceIncompatible(format!(
+            "{reference} has unrecognized mediaType {:?}",
+            manifest.media_type
+        )));
+    }
     let manifest_digest = if reference.starts_with("sha256:") {
         reference.to_string()
     } else {
@@ -924,7 +959,7 @@ fn verify_unpacked_library(
 fn validate_predicate(
     predicate: &serde_json::Value,
     platform: &str,
-    version_request: &VersionRequest,
+    version_request: Option<&VersionRequest>,
 ) -> Result<()> {
     let plat = constants::PLATFORMS
         .iter()
@@ -959,34 +994,83 @@ fn validate_predicate(
         .get("clickhouse_version")
         .and_then(|v| v.as_str())
         .ok_or_else(|| Error::ArtifactCorrupt("predicate has no clickhouse_version".to_string()))?;
-    if !version_request.matches(version) {
+    // A literal (non-numeric) spelling names a tag, not a version range:
+    // nothing to compare the resolved version against.
+    if let Some(req) = version_request {
+        if !req.is_literal() && !req.matches(version) {
+            return Err(Error::ArtifactCorrupt(format!(
+                "predicate.clickhouse_version {version:?} does not lie within the request"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// What a signed artifact statement must satisfy before anything in it is
+/// believed: its `predicateType` is the artifact one, and its subject is the
+/// manifest's own layer (the signature covers THESE bytes, not some other
+/// artifact's).
+fn check_artifact_statement(stmt: &dsse::VerifiedStatement, layer_digest: &str) -> Result<()> {
+    if stmt.predicate_type != constants::PREDICATE_TYPE_ARTIFACT {
         return Err(Error::ArtifactCorrupt(format!(
-            "predicate.clickhouse_version {version:?} does not lie within the request"
+            "signed statement predicateType is {:?}, want {:?}",
+            stmt.predicate_type,
+            constants::PREDICATE_TYPE_ARTIFACT
+        )));
+    }
+    if stmt.subject_sha256 != strip_sha256(layer_digest)? {
+        return Err(Error::ArtifactCorrupt(format!(
+            "signed subject {} does not match the manifest's layer {layer_digest}",
+            stmt.subject_sha256
         )));
     }
     Ok(())
 }
 
-/// A higher installed build offered by the source than what is already
-/// installed is fine, but worth a loud warning rather than a silent
-/// downgrade-looking swap (`monotonic-warning`).
-fn monotonic_warning(res: &Resources, tag: &str, record: &VerifiedRecord) -> Result<Vec<String>> {
-    let mut warnings = Vec::new();
-    for (_, other) in layout::list_verified(&res.root)? {
-        if other.platform != record.platform || other.manifest_digest == record.manifest_digest {
+/// The newest already-installed build (same platform, a different
+/// manifest) that is strictly newer than the candidate — the same version
+/// with a higher `build`, or a higher version still inside the request —
+/// or `None`. The monotonic check: such an install is kept rather than
+/// swapped for what the source now offers.
+fn newer_installed(
+    res: &Resources,
+    version_request: &VersionRequest,
+    candidate_manifest: &str,
+    predicate: &serde_json::Value,
+) -> Result<Option<(PathBuf, VerifiedRecord)>> {
+    if version_request.is_literal() {
+        return Ok(None);
+    }
+    let cand_version = predicate["clickhouse_version"].as_str().unwrap_or("");
+    let cand_build = predicate["build"].as_str().unwrap_or("");
+    let mut best: Option<(PathBuf, VerifiedRecord)> = None;
+    for (dir, rec) in layout::list_verified(&res.root)? {
+        if rec.platform != res.platform
+            || rec.manifest_digest == candidate_manifest
+            || !version_request.matches(&rec.version)
+        {
             continue;
         }
-        if !other.version.starts_with(tag) {
+        let newer = if rec.version == cand_version {
+            build_key(&rec.build) > build_key(cand_build)
+        } else {
+            version_key(&rec.version) > version_key(cand_version)
+        };
+        if !newer {
             continue;
         }
-        if version_key(&other.version) > version_key(&record.version) {
-            warnings.push(format!(
-                "a newer build ({} at {}) is already installed for {tag}/{}; resolving to the source's offer ({} at {}) anyway",
-                other.version, other.build, record.platform, record.version, record.build
-            ));
+        let better = match &best {
+            None => true,
+            Some((_, b)) => {
+                (version_key(&rec.version), build_key(&rec.build))
+                    > (version_key(&b.version), build_key(&b.build))
+            }
+        };
+        if better {
+            best = Some((dir, rec));
         }
     }
-    Ok(warnings)
+    Ok(best)
 }
 
 /// Builds compare as fixed-width strings (`"20261001.183455"`), per plan
@@ -1060,40 +1144,36 @@ fn find_installed(
     // Nothing already unpacked: look for a pre-seeded index.json entry, in
     // the cache first, then each system directory, and install it from
     // local blobs only (no network, regardless of caller).
-    if let Some(digest) = find_index_candidate(root, version_request, platform)? {
-        let resolved = install_from_local_blobs(root, root, &digest, platform, trust)?;
-        if let Some(record) = layout::read_verified(&resolved.dir)? {
-            return Ok(Some((resolved.dir, record, "cache".to_string())));
-        }
+    if let Some((dir, record)) = install_preseeded(root, root, version_request, platform, trust)? {
+        return Ok(Some((dir, record, "cache".to_string())));
     }
     for sysdir in system_dirs {
-        let Some(digest) = find_index_candidate(sysdir, version_request, platform)? else {
-            continue;
-        };
         // Read blobs from the (read-only) system directory; write the
         // unpacked result into the writable cache root.
-        let resolved = install_from_local_blobs(sysdir, root, &digest, platform, trust)?;
-        if let Some(record) = layout::read_verified(&resolved.dir)? {
-            return Ok(Some((
-                resolved.dir,
-                record,
-                format!("system:{}", sysdir.display()),
-            )));
+        if let Some((dir, record)) =
+            install_preseeded(sysdir, root, version_request, platform, trust)?
+        {
+            return Ok(Some((dir, record, format!("system:{}", sysdir.display()))));
         }
     }
     Ok(None)
 }
 
-/// The newest `index.json` entry (by the manifest's own
-/// `org.opencontainers.image.ref.name` annotation, per OCI convention —
-/// `genfixtures` and a real `oras copy` both set it) matching `platform`
-/// and lying within `version_request`, or `None` if `index.json` does not
-/// exist or nothing matches.
-fn find_index_candidate(
+/// Every `index.json` entry of `layout_root` that is for `platform`, verified
+/// and unpacked from local blobs into `cache_root`, keeping those whose
+/// SIGNED version lies within `version_request`; the newest wins. An
+/// entry's own annotations are never believed: the version a request is
+/// matched against is the one inside its verified predicate (a pre-seeded
+/// layout written by `oras copy` annotates with the tag it was copied
+/// from, e.g. `26.1`, not the build's version). An entry that fails to
+/// verify, or whose blobs are absent, is skipped, not fatal.
+fn install_preseeded(
     layout_root: &Path,
+    cache_root: &Path,
     version_request: &VersionRequest,
     platform: &str,
-) -> Result<Option<String>> {
+    trust: &[TrustedKey],
+) -> Result<Option<(PathBuf, VerifiedRecord)>> {
     let index_path = layout_root.join("index.json");
     let bytes = match std::fs::read(&index_path) {
         Ok(b) => b,
@@ -1105,31 +1185,37 @@ fn find_index_candidate(
         .iter()
         .find(|p| p.key == platform)
         .ok_or_else(|| Error::InvalidInput(format!("unknown platform {platform:?}")))?;
-    let mut best: Option<(String, String)> = None; // (version, digest)
+    let mut best: Option<(PathBuf, VerifiedRecord)> = None;
     for d in &index.manifests {
         let Some(p) = &d.platform else { continue };
         if p.os != plat.os || p.architecture != plat.architecture {
             continue;
         }
-        let Some(version) = d
-            .annotations
-            .as_ref()
-            .and_then(|a| a.get("org.opencontainers.image.ref.name"))
-        else {
+        let Ok(resolved) = install_from_local_blobs_for(
+            layout_root,
+            cache_root,
+            &d.digest,
+            platform,
+            trust,
+            Some(version_request),
+        ) else {
             continue;
         };
-        if !version_request.matches(version) {
+        let Some(record) = layout::read_verified(&resolved.dir)? else {
             continue;
-        }
+        };
         let better = match &best {
             None => true,
-            Some((v, _)) => version_key(version) > version_key(v),
+            Some((_, b)) => {
+                (version_key(&record.version), build_key(&record.build))
+                    > (version_key(&b.version), build_key(&b.build))
+            }
         };
         if better {
-            best = Some((version.clone(), d.digest.clone()));
+            best = Some((resolved.dir, record));
         }
     }
-    Ok(best.map(|(_, digest)| digest))
+    Ok(best)
 }
 
 /// Verify and unpack one manifest **entirely from local blobs** — no
@@ -1148,6 +1234,26 @@ pub fn install_from_local_blobs(
     platform: &str,
     trust: &[TrustedKey],
 ) -> Result<Resolved> {
+    install_from_local_blobs_for(
+        layout_root,
+        cache_root,
+        manifest_digest,
+        platform,
+        trust,
+        None,
+    )
+}
+
+/// [`install_from_local_blobs`], additionally refusing (before anything is
+/// unpacked) a signed predicate whose version does not lie within `request`.
+fn install_from_local_blobs_for(
+    layout_root: &Path,
+    cache_root: &Path,
+    manifest_digest: &str,
+    platform: &str,
+    trust: &[TrustedKey],
+    request: Option<&VersionRequest>,
+) -> Result<Resolved> {
     let already = is_fully_installed(&layout::unpacked_dir(cache_root, manifest_digest)?)?;
     let dir = if already {
         layout::unpacked_dir(cache_root, manifest_digest)?
@@ -1157,19 +1263,11 @@ pub fn install_from_local_blobs(
         })?;
         oci::verify_digest(&manifest_bytes, manifest_digest)?;
         let manifest: oci::Manifest = serde_json::from_slice(&manifest_bytes)?;
-        let [layer] = manifest.layers.as_slice() else {
-            return Err(Error::ArtifactCorrupt(format!(
-                "manifest {manifest_digest} has {} layers, want exactly 1",
-                manifest.layers.len()
-            )));
-        };
+        oci::check_platform_manifest(&manifest, &format!("manifest {manifest_digest}"))?;
+        let layer = &manifest.layers[0];
         let stmt = referrers::find_local_referrer(layout_root, manifest_digest, trust)?;
-        if stmt.subject_sha256 != strip_sha256(&layer.digest)? {
-            return Err(Error::ArtifactCorrupt(format!(
-                "signed subject {} does not match the manifest's layer {}",
-                stmt.subject_sha256, layer.digest
-            )));
-        }
+        check_artifact_statement(&stmt, &layer.digest)?;
+        validate_predicate(&stmt.predicate, platform, request)?;
         let (library_sha256, library_bytes, library_name) = library_fields(&stmt.predicate)?;
         let layer_bytes = layout::read_blob(layout_root, &layer.digest)?.ok_or_else(|| {
             Error::ArtifactMissing(format!("no local blob for layer {}", layer.digest))

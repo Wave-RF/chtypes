@@ -190,34 +190,49 @@ pub fn list_verified(root: &Path) -> Result<Vec<(PathBuf, VerifiedRecord)>> {
     Ok(out)
 }
 
-/// Add `descriptor_digest`/`size`/`media_type` to `index.json`'s manifest
-/// list if absent, by atomic rename, then re-read the live file once and
-/// fold in any entry a concurrent writer added between our read and our
-/// rename — so two independent writers both land in the final file rather
-/// than one clobbering the other (`index-race-reapply`).
-pub fn record_in_index(root: &Path, digest: &str, size: u64, media_type: &str) -> Result<()> {
+/// Add a manifest descriptor to `index.json` by a read-check-rename loop:
+/// read the live file, merge the entry, and — immediately before the atomic
+/// rename — re-read it once more; if a concurrent writer changed it in the
+/// window, throw the merge away and redo it on top of their file, so two
+/// independent writers both land in the final file rather than one
+/// clobbering the other (`index-race-reapply`). `before_rename` runs in
+/// exactly that window (once per attempt); the conformance runner uses it to
+/// play the competing writer.
+pub fn record_in_index(
+    root: &Path,
+    digest: &str,
+    size: u64,
+    media_type: &str,
+    platform: Option<(&str, &str)>,
+    before_rename: Option<&dyn Fn()>,
+) -> Result<()> {
     let path = root.join("index.json");
-    let mut value = read_index(&path)?;
-    if !has_digest(&value, digest) {
-        add_entry(&mut value, digest, size, media_type);
-        write_atomic(&path, serde_json::to_vec(&value)?.as_slice())?;
+    for _ in 0..16 {
+        let raw_before = std::fs::read(&path).ok();
+        let mut value = match &raw_before {
+            Some(bytes) => serde_json::from_slice(bytes)
+                .unwrap_or_else(|_| serde_json::json!({"schemaVersion": 2, "manifests": []})),
+            None => serde_json::json!({"schemaVersion": 2, "manifests": []}),
+        };
+        if has_digest(&value, digest) {
+            return Ok(());
+        }
+        add_entry(&mut value, digest, size, media_type, platform);
+        if let Some(hook) = before_rename {
+            hook();
+        }
+        let raw_now = std::fs::read(&path).ok();
+        if raw_now != raw_before {
+            // A competing writer renamed a new index.json into place after
+            // our read: re-merge onto theirs.
+            continue;
+        }
+        return write_atomic(&path, serde_json::to_vec(&value)?.as_slice());
     }
-    // Re-read and re-apply: fold in anything a racing writer added since.
-    let after = read_index(&path)?;
-    if !has_digest(&after, digest) {
-        let mut merged = after;
-        add_entry(&mut merged, digest, size, media_type);
-        write_atomic(&path, serde_json::to_vec(&merged)?.as_slice())?;
-    }
-    Ok(())
-}
-
-fn read_index(path: &Path) -> Result<serde_json::Value> {
-    match std::fs::read(path) {
-        Ok(bytes) => Ok(serde_json::from_slice(&bytes)
-            .unwrap_or_else(|_| serde_json::json!({"schemaVersion": 2, "manifests": []}))),
-        Err(_) => Ok(serde_json::json!({"schemaVersion": 2, "manifests": []})),
-    }
+    Err(Error::SourceUnreachable(format!(
+        "{} kept changing under this writer; gave up after 16 attempts",
+        path.display()
+    )))
 }
 
 fn has_digest(index: &serde_json::Value, digest: &str) -> bool {
@@ -226,14 +241,21 @@ fn has_digest(index: &serde_json::Value, digest: &str) -> bool {
         .is_some_and(|m| m.iter().any(|d| d["digest"] == digest))
 }
 
-fn add_entry(index: &mut serde_json::Value, digest: &str, size: u64, media_type: &str) {
+fn add_entry(
+    index: &mut serde_json::Value,
+    digest: &str,
+    size: u64,
+    media_type: &str,
+    platform: Option<(&str, &str)>,
+) {
     if !index["manifests"].is_array() {
         index["manifests"] = serde_json::json!([]);
     }
-    index["manifests"]
-        .as_array_mut()
-        .unwrap()
-        .push(serde_json::json!({"mediaType": media_type, "digest": digest, "size": size}));
+    let mut entry = serde_json::json!({"mediaType": media_type, "digest": digest, "size": size});
+    if let Some((os, architecture)) = platform {
+        entry["platform"] = serde_json::json!({"os": os, "architecture": architecture});
+    }
+    index["manifests"].as_array_mut().unwrap().push(entry);
 }
 
 /// Write `bytes` to `path` by writing a sibling temp file and renaming it

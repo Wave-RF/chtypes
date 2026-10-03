@@ -18,6 +18,7 @@ pub struct Descriptor {
     #[serde(rename = "mediaType")]
     pub media_type: String,
     pub digest: String,
+    #[serde(default)]
     pub size: u64,
     #[serde(rename = "artifactType")]
     pub artifact_type: Option<String>,
@@ -35,24 +36,34 @@ pub struct PlatformDescriptor {
 /// result of a manifest-by-tag lookup, one entry per platform.
 #[derive(Deserialize, Clone, Debug)]
 pub struct Index {
-    #[serde(rename = "schemaVersion")]
+    #[serde(rename = "schemaVersion", default)]
     pub schema_version: u32,
     #[serde(rename = "mediaType")]
     pub media_type: Option<String>,
+    /// `null` (an `oras`-written empty layout) reads as an empty list.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub manifests: Vec<Descriptor>,
+}
+
+fn null_as_empty<'de, D>(d: D) -> std::result::Result<Vec<Descriptor>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<Vec<Descriptor>>::deserialize(d)?.unwrap_or_default())
 }
 
 /// An OCI image manifest (`application/vnd.oci.image.manifest.v1+json`):
 /// one platform's config, layer and (when present) its `subject`.
 #[derive(Deserialize, Clone, Debug)]
 pub struct Manifest {
-    #[serde(rename = "schemaVersion")]
+    #[serde(rename = "schemaVersion", default)]
     pub schema_version: u32,
     #[serde(rename = "mediaType")]
     pub media_type: Option<String>,
     #[serde(rename = "artifactType")]
     pub artifact_type: Option<String>,
-    pub config: Descriptor,
+    pub config: Option<Descriptor>,
+    #[serde(default)]
     pub layers: Vec<Descriptor>,
     pub subject: Option<Descriptor>,
     pub annotations: Option<HashMap<String, String>>,
@@ -158,11 +169,16 @@ pub fn fetch_by_tag(source: &Source<'_>, tag: &str) -> Result<Fetched> {
                     base: base.clone(),
                 });
             }
-            Ok((404, _)) => continue,
-            Ok((status, _)) => {
-                last_err = Some(Error::SourceUnreachable(format!(
-                    "{base}: unexpected status {status} resolving tag {tag:?}"
+            Ok((404, _)) => {
+                last_err = Some(Error::ArtifactUnpublished(format!(
+                    "no base publishes tag {tag:?} ({base} answered 404)"
                 )));
+            }
+            Ok((status, _)) => {
+                last_err = Some(status_error(
+                    status,
+                    &format!("{base}: unexpected status {status} resolving tag {tag:?}"),
+                ));
             }
             Err(e) => last_err = Some(e),
         }
@@ -172,6 +188,17 @@ pub fn fetch_by_tag(source: &Source<'_>, tag: &str) -> Result<Fetched> {
         None => Err(Error::ArtifactUnpublished(format!(
             "no base publishes tag {tag:?}"
         ))),
+    }
+}
+
+/// A non-200, non-404 status as the shared error code it names
+/// (docs/guides/fetch-v1.md §8): 401 `SourceUnauthorized`, 403
+/// `SourceForbidden`, anything else `SourceUnreachable`.
+pub fn status_error(status: u16, detail: &str) -> Error {
+    match status {
+        401 => Error::SourceUnauthorized(detail.to_string()),
+        403 => Error::SourceForbidden(detail.to_string()),
+        _ => Error::SourceUnreachable(detail.to_string()),
     }
 }
 
@@ -195,6 +222,7 @@ fn fetch_bytes_by_digest(
     max_bytes: u64,
 ) -> Result<Fetched> {
     let accept = manifest_accept_header();
+    let mut last_err: Option<Error> = None;
     for (i, base) in source.bases.iter().enumerate() {
         let is_last = i + 1 == source.bases.len();
         let mut attempt = 0u32;
@@ -209,6 +237,9 @@ fn fetch_bytes_by_digest(
                     });
                 }
                 Ok((404, _)) => {
+                    last_err = Some(Error::SourceUnreachable(format!(
+                        "{base}: {digest} answered 404 — a listed digest that 404s is a host fault"
+                    )));
                     if !is_last || attempt >= constants::RETRY_ATTEMPTS {
                         break;
                     }
@@ -219,25 +250,24 @@ fn fetch_bytes_by_digest(
                     continue;
                 }
                 Ok((status, _)) => {
-                    if is_last {
-                        return Err(Error::SourceUnreachable(format!(
-                            "{base}: unexpected status {status} fetching {digest}"
-                        )));
-                    }
+                    last_err = Some(status_error(
+                        status,
+                        &format!("{base}: unexpected status {status} fetching {digest}"),
+                    ));
                     break;
                 }
                 Err(e) => {
-                    if is_last {
-                        return Err(e);
-                    }
+                    last_err = Some(e);
                     break;
                 }
             }
         }
     }
-    Err(Error::SourceUnreachable(format!(
-        "{digest} 404s on every base — a listed digest that 404s is a host fault"
-    )))
+    Err(last_err.unwrap_or_else(|| {
+        Error::SourceUnreachable(format!(
+            "{digest} 404s on every base — a listed digest that 404s is a host fault"
+        ))
+    }))
 }
 
 /// Every `GET …/manifests/<ref>` — by tag or by digest, the fallback tag
@@ -318,40 +348,66 @@ pub fn select_platform<'a>(index: &'a Index, platform_key: &str) -> Result<&'a D
     })
 }
 
-/// A parsed version request: 2, 3 or 4 numeric components, refusing anything
-/// the spelling regex excludes (a `v` prefix, an `-lts`/`-stable` suffix).
+/// A parsed version request. A spelling matching `constants::SPELLING_REGEX`
+/// (2, 3 or 4 numeric components) is a numeric request; anything else that
+/// does not carry one of the two documented mistakes (a `v` prefix, an
+/// `-lts`/`-stable` suffix) is looked up verbatim as an arbitrary OCI tag —
+/// the same path Go takes (`validateSpelling`). A literal request carries no
+/// version constraint: nothing checks the resolved predicate's version
+/// against it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VersionRequest {
     pub components: Vec<u64>,
+    /// `Some(tag)` for a non-numeric spelling.
+    pub literal: Option<String>,
 }
 
 impl VersionRequest {
     pub fn parse(spelling: &str) -> Result<VersionRequest> {
-        let re_hint = ["v", "-lts", "-stable"];
-        for hint in re_hint {
-            if spelling.starts_with('v') && hint == "v" {
-                return Err(Error::InvalidInput(format!(
-                    "version {spelling:?} is refused: this SDK spells versions without a leading 'v' (try {:?})",
-                    spelling.trim_start_matches('v')
-                )));
-            }
-            if (hint == "-lts" || hint == "-stable") && spelling.ends_with(hint) {
-                return Err(Error::InvalidInput(format!(
-                    "version {spelling:?} is refused: the channel is not part of the version spelling (try {:?})",
-                    spelling.trim_end_matches(hint)
-                )));
-            }
-        }
-        let components: std::result::Result<Vec<u64>, _> =
-            spelling.split('.').map(str::parse::<u64>).collect();
-        let components = components
-            .map_err(|_| Error::InvalidInput(format!("version {spelling:?} is not numeric")))?;
-        if !(2..=4).contains(&components.len()) {
+        if spelling.starts_with('v') {
             return Err(Error::InvalidInput(format!(
-                "version {spelling:?} must have 2-4 numeric components"
+                "version {spelling:?} is refused: this SDK spells versions without a leading 'v' (try {:?})",
+                spelling.trim_start_matches('v')
             )));
         }
-        Ok(VersionRequest { components })
+        for suffix in ["-lts", "-stable"] {
+            if spelling.ends_with(suffix) {
+                return Err(Error::InvalidInput(format!(
+                    "version {spelling:?} is refused: the channel is not part of the version spelling (try {:?})",
+                    spelling.trim_end_matches(suffix)
+                )));
+            }
+        }
+        let parts: Vec<&str> = spelling.split('.').collect();
+        let numeric = (2..=4).contains(&parts.len())
+            && parts.iter().all(|p| {
+                !p.is_empty()
+                    && p.bytes().all(|b| b.is_ascii_digit())
+                    && (*p == "0" || !p.starts_with('0'))
+            });
+        if !numeric {
+            return Ok(VersionRequest {
+                components: Vec::new(),
+                literal: Some(spelling.to_string()),
+            });
+        }
+        let components = parts
+            .iter()
+            .map(|p| {
+                p.parse::<u64>().map_err(|_| {
+                    Error::InvalidInput(format!("version {spelling:?} has an oversized component"))
+                })
+            })
+            .collect::<Result<Vec<u64>>>()?;
+        Ok(VersionRequest {
+            components,
+            literal: None,
+        })
+    }
+
+    /// A non-numeric spelling, looked up as an arbitrary tag.
+    pub fn is_literal(&self) -> bool {
+        self.literal.is_some()
     }
 
     /// Exactly four components: the request names one build, not a line.
@@ -361,8 +417,12 @@ impl VersionRequest {
 
     /// Whether `version` (e.g. `"26.8.15.10"`) lies within this request: a
     /// component-wise prefix for a floating request, equality for an exact
-    /// one (layout-v2 §7.2).
+    /// one (layout-v2 §7.2). A literal request matches nothing here: it
+    /// names a tag, not a version range.
     pub fn matches(&self, version: &str) -> bool {
+        if self.is_literal() {
+            return false;
+        }
         let parts: Vec<&str> = version.split('.').collect();
         if parts.len() != 4 {
             return false;
@@ -379,12 +439,53 @@ impl VersionRequest {
     }
 
     pub fn tag(&self) -> String {
+        if let Some(lit) = &self.literal {
+            return lit.clone();
+        }
         self.components
             .iter()
             .map(u64::to_string)
             .collect::<Vec<_>>()
             .join(".")
     }
+}
+
+/// Check a parsed platform manifest against what v1 accepts
+/// (docs/guides/fetch-v1.md §3): the manifest's own `mediaType`, exactly one
+/// layer, and that layer's `mediaType`. An unrecognized `mediaType` is
+/// `SourceIncompatible` (a newer or foreign producer), not corruption.
+pub fn check_platform_manifest(manifest: &Manifest, what: &str) -> Result<()> {
+    if manifest.media_type.as_deref() != Some(constants::MEDIA_TYPE_MANIFEST) {
+        return Err(Error::SourceIncompatible(format!(
+            "{what} has unrecognized mediaType {:?}",
+            manifest.media_type
+        )));
+    }
+    if manifest.layers.len() != 1 {
+        return Err(Error::ArtifactCorrupt(format!(
+            "{what} carries {} layers, want exactly 1",
+            manifest.layers.len()
+        )));
+    }
+    if manifest.layers[0].media_type != constants::MEDIA_TYPE_LAYER {
+        return Err(Error::SourceIncompatible(format!(
+            "{what} has an unrecognized layer mediaType {:?}",
+            manifest.layers[0].media_type
+        )));
+    }
+    Ok(())
+}
+
+/// Parse an index fetched by tag and check its own `mediaType`.
+pub fn parse_index(bytes: &[u8], what: &str) -> Result<Index> {
+    let index: Index = serde_json::from_slice(bytes)?;
+    if index.media_type.as_deref() != Some(constants::MEDIA_TYPE_INDEX) {
+        return Err(Error::SourceIncompatible(format!(
+            "{what} has unrecognized mediaType {:?}",
+            index.media_type
+        )));
+    }
+    Ok(index)
 }
 
 #[cfg(test)]
@@ -424,6 +525,15 @@ mod tests {
         assert!(r.matches("26.8.15.10"));
         assert!(!r.matches("26.8.15.11"));
         assert!(r.is_exact());
+    }
+
+    #[test]
+    fn non_numeric_spelling_is_a_literal_tag() {
+        let r = VersionRequest::parse("t-untrusted-key").unwrap();
+        assert!(r.is_literal());
+        assert_eq!(r.tag(), "t-untrusted-key");
+        assert!(!r.matches("26.8.15.10"));
+        assert!(!VersionRequest::parse("26.8").unwrap().is_literal());
     }
 
     #[test]

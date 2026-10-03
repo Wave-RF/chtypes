@@ -337,7 +337,7 @@ mod tests {
         let got = pae("http://example.com/HelloWorld", b"hello world");
         assert_eq!(
             got,
-            b"DSSEv1 30 http://example.com/HelloWorld 11 hello world".to_vec()
+            b"DSSEv1 29 http://example.com/HelloWorld 11 hello world".to_vec()
         );
     }
 

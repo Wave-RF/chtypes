@@ -28,6 +28,9 @@ use serde::Deserialize;
 
 const ENV_FIXTURES: &str = "CHTYPES_V1_CONFORMANCE";
 const ENV_REPORT: &str = "CHTYPES_V1_REPORT";
+/// Set only by the `v1-network` job: the registry base `{base}` expands to on
+/// the `registry` transport. Unset, every `registry` pair is skipped loudly.
+const ENV_REGISTRY_BASE: &str = "CHTYPES_V1_REGISTRY_BASE";
 
 /// An injected `Clock` (`ocifetch::http::Clock`) that never really sleeps —
 /// it only records the duration asked for — so a retry/backoff case runs in
@@ -139,9 +142,10 @@ struct ReportResult {
     detail: String,
 }
 
-/// `transport`s this runner actually drives. `registry` is the `v1-network`
-/// job's own suite, against a live `registry:2`; it never runs here.
-const RUNNER_TRANSPORTS: &[&str] = &["file", "http"];
+/// `transport`s this runner drives. `registry` runs only when
+/// `CHTYPES_V1_REGISTRY_BASE` names a live registry (the `v1-network` job);
+/// otherwise each `registry` pair is skipped loudly by name.
+const RUNNER_TRANSPORTS: &[&str] = &["file", "http", "registry"];
 
 #[test]
 fn conformance() {
@@ -168,12 +172,29 @@ fn conformance() {
     let server = ServerHandle::start(&fixtures_root);
     let mut results = Vec::new();
 
+    let registry_base = std::env::var(ENV_REGISTRY_BASE)
+        .ok()
+        .filter(|v| !v.is_empty());
+
     for case in &cases_file.cases {
         for transport in RUNNER_TRANSPORTS {
             if !case.transports.iter().any(|t| t == transport) {
                 continue;
             }
-            let (verdict, detail) = run_case(case, transport, &fixtures_root, server.as_ref());
+            if *transport == "registry" && registry_base.is_none() {
+                eprintln!(
+                    "SKIP: {} [registry]: {ENV_REGISTRY_BASE} is not set (the v1-network job produces registry-transport results)",
+                    case.id
+                );
+                continue;
+            }
+            let (verdict, detail) = run_case(
+                case,
+                transport,
+                &fixtures_root,
+                server.as_ref(),
+                registry_base.as_deref(),
+            );
             results.push(ReportResult {
                 id: case.id.clone(),
                 transport: transport.to_string(),
@@ -230,9 +251,10 @@ fn run_case(
     transport: &str,
     fixtures_root: &Path,
     server: Option<&ServerHandle>,
+    registry_base: Option<&str>,
 ) -> (&'static str, String) {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        execute_case(case, transport, fixtures_root, server)
+        execute_case(case, transport, fixtures_root, server, registry_base)
     }));
     match outcome {
         Ok(Ok(())) => ("pass", String::new()),
@@ -253,6 +275,7 @@ fn execute_case(
     transport: &str,
     fixtures_root: &Path,
     server: Option<&ServerHandle>,
+    registry_base: Option<&str>,
 ) -> Result<(), String> {
     // `{base}`/`{base2}`'s per-transport expansion (docs/guides/fetch-v1.md
     // §10, "{base2}" decided 2026-10-02 by lane 0B). `{base}` is the primary
@@ -288,6 +311,12 @@ fn execute_case(
                 ),
             )
         }
+        "registry" => {
+            let b = registry_base
+                .ok_or_else(|| format!("registry transport with no {ENV_REGISTRY_BASE} set"))?
+                .to_string();
+            (b.clone(), b)
+        }
         other => return Err(format!("unsupported transport {other:?}")),
     };
     let bases: Vec<String> = case
@@ -318,9 +347,36 @@ fn execute_case(
         std::fs::copy(&src, &lock_path)
             .map_err(|e| format!("staging lock {:?}: {e} (from {})", lock_name, src.display()))?;
     }
-    if case.setup.before_index_rename_hook.is_some() {
-        return Err("before_index_rename_hook is not implemented by this runner yet".to_string());
-    }
+    // `before_index_rename_hook` (docs/guides/fetch-v1.md §10): the name of a
+    // race hook the RUNNER installs. `index-race-reapply` is the only one in
+    // use: it simulates a second process completing its own `index.json`
+    // write between this fetch's read and its own rename, so the
+    // read-check-rename loop must observe the change and re-merge onto it
+    // rather than clobber it.
+    let competing_digest = format!("sha256:{}", "c0ffee00".repeat(8));
+    let before_index_rename: Option<Box<dyn Fn()>> = match case.setup.before_index_rename_hook {
+        None => None,
+        Some(ref name) if name == "index-race-reapply" => {
+            let root = cache_dir.path().to_path_buf();
+            let digest = competing_digest.clone();
+            let fired = std::cell::Cell::new(false);
+            Some(Box::new(move || {
+                if fired.replace(true) {
+                    return;
+                }
+                let _ = ocifetch::layout::record_in_index(
+                    &root,
+                    &digest,
+                    1,
+                    ocifetch::constants::MEDIA_TYPE_MANIFEST,
+                    None,
+                    None,
+                );
+            }))
+        }
+        Some(ref other) => return Err(format!("unknown before_index_rename_hook {other:?}")),
+    };
+    let mut before_index_rename = before_index_rename;
 
     // The `installed.json` test-setup convention (docs/guides/fetch-v1.md
     // §10, "Cache fixtures and `installed.json`"): some cache fixtures need
@@ -388,9 +444,9 @@ fn execute_case(
             trust_test_keys: case.request.trust == "test",
             token: None,
             clock: Some(fake_clock()),
+            before_index_rename: None,
         };
-        let result =
-            ensure::fetch_signed(&bases, &case.request.spelling, predicate_type, &mut options);
+        let result = run_generic_fetch(case, &bases, predicate_type, &mut options);
         check_generic_expectation(&case.expect, result)
     } else {
         let result = ensure::ensure(
@@ -409,12 +465,21 @@ fn execute_case(
                 trust_test_keys: case.request.trust == "test",
                 token: None,
                 clock: Some(fake_clock()),
+                before_index_rename: before_index_rename.take(),
             },
         );
-        check_expectation(&case.expect, result).and_then(|()| match &case.expect.lock_after {
-            Some(name) => check_lock_after(fixtures_root, name, &lock_path),
-            None => Ok(()),
-        })
+        check_expectation(&case.expect, result)
+            .and_then(|()| match &case.expect.lock_after {
+                Some(name) => check_lock_after(fixtures_root, name, &lock_path),
+                None => Ok(()),
+            })
+            .and_then(|()| {
+                if case.setup.before_index_rename_hook.is_some() {
+                    check_index_has_both(cache_dir.path(), &competing_digest)
+                } else {
+                    Ok(())
+                }
+            })
     };
 
     for k in case.env.keys() {
@@ -447,6 +512,79 @@ fn execute_case(
     }
 
     outcome
+}
+
+/// After an `index-race-reapply` case: the cache's `index.json` must list
+/// BOTH the competing writer's entry and this fetch's own — the loser of the
+/// race re-merged onto the winner's file instead of clobbering it.
+fn check_index_has_both(cache_root: &Path, competing_digest: &str) -> Result<(), String> {
+    let path = cache_root.join("index.json");
+    let bytes = std::fs::read(&path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    let index: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("parsing {}: {e}", path.display()))?;
+    let digests: Vec<&str> = index["manifests"]
+        .as_array()
+        .map(|m| m.iter().filter_map(|d| d["digest"].as_str()).collect())
+        .unwrap_or_default();
+    if !digests.contains(&competing_digest) {
+        return Err(format!(
+            "index.json lost the competing writer's entry {competing_digest}: {digests:?}"
+        ));
+    }
+    if digests.len() < 2 {
+        return Err(format!(
+            "index.json lacks this fetch's own entry beside the competing one: {digests:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// A `goldens-`/`fixtures-` case's fetch (docs/guides/fetch-v1.md §10, "the
+/// generic-fetch convention"). For goldens, `request.spelling` is the SUBJECT
+/// (a platform manifest) the goldens object is a referrer of: find its
+/// goldens-`artifactType` referrer first, then `fetch_signed` on that
+/// referrer's digest. For fixtures, the repository is the sibling
+/// `FIXTURES_REPO_SUFFIX` path under each base, reached by digest directly.
+fn run_generic_fetch(
+    case: &Case,
+    bases: &[String],
+    predicate_type: &str,
+    options: &mut Options,
+) -> Result<(Vec<u8>, serde_json::Value, ensure::Digests), ocifetch::error::Error> {
+    if case.id.starts_with("goldens-") {
+        let client = ocifetch::http::Client::new();
+        let auth = ocifetch::http::AuthConfig {
+            static_token: std::env::var(ocifetch::constants::ENV_TOKEN_NAME).ok(),
+        };
+        let source = ocifetch::oci::Source {
+            bases,
+            client: &client,
+            auth: &auth,
+        };
+        let referrer = ocifetch::referrers::find_content_referrer(
+            &source,
+            &case.request.spelling,
+            ocifetch::constants::GOLDENS_ARTIFACT_TYPE,
+        )?;
+        ensure::fetch_signed(bases, &referrer.digest, predicate_type, options)
+    } else {
+        let fixture_bases: Vec<String> = bases
+            .iter()
+            .map(|b| {
+                format!(
+                    "{}{}",
+                    b.trim_end_matches('/'),
+                    ocifetch::constants::FIXTURES_REPO_SUFFIX
+                )
+            })
+            .collect();
+        ensure::fetch_signed(
+            &fixture_bases,
+            &case.request.spelling,
+            predicate_type,
+            options,
+        )
+    }
 }
 
 #[derive(Deserialize)]
@@ -483,14 +621,17 @@ fn check_expectation(
                     return Err(format!("library_sha256 = {predicate_sha:?}, want {want:?}"));
                 }
             }
-            if !expect.warnings.is_empty() && resolved.warnings.len() != expect.warnings.len() {
-                return Err(format!(
-                    "{} warning(s), want {}: got {:?}, want {:?}",
-                    resolved.warnings.len(),
-                    expect.warnings.len(),
-                    resolved.warnings,
-                    expect.warnings
-                ));
+            for want in &expect.warnings {
+                if !resolved
+                    .warnings
+                    .iter()
+                    .any(|got| got.contains(want.as_str()))
+                {
+                    return Err(format!(
+                        "warnings {:?} do not contain a warning matching {want:?}",
+                        resolved.warnings
+                    ));
+                }
             }
             // expect.lock_after is checked by the caller (execute_case),
             // which has the fixtures root and the staged lock path; this
@@ -498,11 +639,11 @@ fn check_expectation(
             Ok(())
         }
         (false, Err(e)) => {
+            // `code: null` is a refusal that is deliberately not one of the
+            // shared CHTYPES_* codes (a refused spelling): any error is the
+            // expected outcome, exactly as the Go runner reads it.
             let Some(want_code) = &expect.code else {
-                return Err(format!(
-                    "case expects failure with no code, got {e} ({})",
-                    e.code()
-                ));
+                return Ok(());
             };
             if e.code() != want_code {
                 return Err(format!("error code = {}, want {want_code}: {e}", e.code()));
@@ -571,11 +712,11 @@ fn check_generic_expectation(
             Ok(())
         }
         (false, Err(e)) => {
+            // `code: null` is a refusal that is deliberately not one of the
+            // shared CHTYPES_* codes (a refused spelling): any error is the
+            // expected outcome, exactly as the Go runner reads it.
             let Some(want_code) = &expect.code else {
-                return Err(format!(
-                    "case expects failure with no code, got {e} ({})",
-                    e.code()
-                ));
+                return Ok(());
             };
             if e.code() != want_code {
                 return Err(format!("error code = {}, want {want_code}: {e}", e.code()));
