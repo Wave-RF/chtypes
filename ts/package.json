@@ -22,7 +22,7 @@
     "CHANGELOG.md"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.21"
   },
   "packageManager": "pnpm@12.4.1",
   "scripts": {

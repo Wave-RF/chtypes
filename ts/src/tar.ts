@@ -39,21 +39,65 @@ export interface ExtractedEntry {
  * Inflate and unpack `archive` (a `.tar.gz`) into `dest`, which must already
  * exist. Returns the regular files written, in archive order.
  *
+ * v0 only: permissive on a duplicate entry name (the last one written wins,
+ * as it always has) and uncapped on total size, exactly as before this
+ * export gained `TarExtractOptions`. v1's `ocifetch/unpack.ts` calls
+ * `extractTarStream` directly with both tightened.
+ *
  * @throws {ArtifactCorruptError} when the bytes are not a gzip stream, a
  *   header fails its checksum, the archive is truncated, an entry name would
  *   land outside `dest`, or an entry is not a regular file or directory (a
  *   symlink, hardlink, device or FIFO).
  */
 export async function extractTarGz(archive: string, dest: string): Promise<ExtractedEntry[]> {
-  const extractor = new TarExtractor(path.resolve(dest));
   try {
-    await pipeline(createReadStream(archive), createGunzip(), extractor);
+    return await extractTarStream([createReadStream(archive), createGunzip()], dest);
   } catch (err) {
     if (err instanceof FetchError) throw err;
     throw new ArtifactCorruptError(`chtypes: ${archive} is not a readable tar.gz: ${errorText(err)}`, {
       cause: err,
     });
   }
+}
+
+/** Tightened rules `extractTarGz` does not apply, for a caller (`ocifetch/unpack.ts`) that needs them. */
+export interface TarExtractOptions {
+  /** Refuse a second entry (file or directory) with the same confined name — `CORRUPT`. Off by default (v0 compat). */
+  readonly refuseDuplicateNames?: boolean;
+  /** A hard cap on total bytes written across every entry, enforced as the stream is written — `CORRUPT` over it. Unset: no cap (v0 compat). */
+  readonly maxTotalBytes?: number;
+}
+
+/**
+ * Unpacks an **already-decompressed** (or still-to-decompress, via extra
+ * pipeline stages) tar byte stream into `dest`, which must already exist.
+ * `sources` is one readable, or a readable followed by transform stages (a
+ * decompressor) — passed to `pipeline` **as one array**, never chained with
+ * `.pipe()` first: `pipeline` is what makes an upstream failure (a truncated
+ * read, a zstd window-log refusal) actually reject this call, where `.pipe()`
+ * alone would leave the error unheard.
+ *
+ * The v1 fetch layer's own entry point (`ocifetch/unpack.ts` pipes its
+ * verified temp file through a zstd decompressor into this), so no
+ * compression format is assumed here.
+ *
+ * @throws {ArtifactCorruptError} per the same rules as `extractTarGz`, plus
+ *   `options`'s own.
+ */
+export async function extractTarStream(
+  sources: NodeJS.ReadableStream | readonly NodeJS.ReadableStream[],
+  dest: string,
+  options: TarExtractOptions = {},
+): Promise<ExtractedEntry[]> {
+  const extractor = new TarExtractor(path.resolve(dest), options);
+  const stages = Array.isArray(sources) ? sources : [sources as NodeJS.ReadableStream];
+  // The array-form overload is typed as a fixed tuple
+  // `[Source, ...Transform[], Destination]`; `stages` is a plain array of
+  // dynamic length, which TS cannot shape-check against it, so this is a
+  // deliberate escape to the one overload that accepts a runtime array —
+  // the runtime behavior (verified: an upstream stage's error rejects this
+  // call) is what matters, not which overload TS resolves to.
+  await pipeline([...stages, extractor] as unknown as readonly [NodeJS.ReadableStream, NodeJS.WritableStream]);
   return extractor.entries;
 }
 
@@ -64,6 +108,10 @@ type Pending =
 
 class TarExtractor extends Writable {
   readonly entries: ExtractedEntry[] = [];
+  private readonly refuseDuplicateNames: boolean;
+  private readonly maxTotalBytes: number | undefined;
+  private readonly seenNames = new Set<string>();
+  private totalBytes = 0;
 
   private readonly head = Buffer.alloc(BLOCK);
   private headFill = 0;
@@ -77,8 +125,13 @@ class TarExtractor extends Writable {
   private zeroBlocks = 0;
   private ended = false;
 
-  constructor(private readonly dest: string) {
+  constructor(
+    private readonly dest: string,
+    options: TarExtractOptions = {},
+  ) {
     super();
+    this.refuseDuplicateNames = options.refuseDuplicateNames ?? false;
+    this.maxTotalBytes = options.maxTotalBytes;
   }
 
   override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
@@ -172,10 +225,15 @@ class TarExtractor extends Writable {
 
       if (flag === 0x30 /* 0 */ || flag === 0x00 || flag === 0x37 /* 7 */) {
         const target = this.confine(name, false);
+        const relName = path.relative(this.dest, target).split(path.sep).join('/');
+        if (this.refuseDuplicateNames && this.seenNames.has(relName)) {
+          throw new ArtifactCorruptError(`chtypes: tarball has a duplicate entry ${JSON.stringify(relName)}`);
+        }
+        this.seenNames.add(relName);
         await mkdir(path.dirname(target), { recursive: true });
         const handle = await openFile(target, 'w');
         this.pending = { kind: 'file', handle };
-        this.entries.push({ name: path.relative(this.dest, target).split(path.sep).join('/'), size });
+        this.entries.push({ name: relName, size });
       } else if (flag === 0x35 /* 5 */) {
         const target = this.confine(name, true);
         if (target !== this.dest) await mkdir(target, { recursive: true });
@@ -202,6 +260,12 @@ class TarExtractor extends Writable {
     const p = this.pending;
     if (p === null) return;
     if (p.kind === 'file') {
+      if (this.maxTotalBytes !== undefined) {
+        this.totalBytes += slice.length;
+        if (this.totalBytes > this.maxTotalBytes) {
+          throw new ArtifactCorruptError(`chtypes: tarball's unpacked size exceeds the ${this.maxTotalBytes}-byte limit`);
+        }
+      }
       let written = 0;
       while (written < slice.length) {
         const r = await p.handle.write(slice, written, slice.length - written);
