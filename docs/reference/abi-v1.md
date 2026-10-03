@@ -2,7 +2,7 @@
 
 ABI v1 is the next generation of the C ABI every binding speaks. It is built on the `v1` branch and is not released. Its declarations are not written by hand anywhere: one JSON description, `spec/abi-v1/abi.json`, states the whole ABI, and `scripts/abi-v1/gen.py` generates the C header, `include/v1/chtypes.h`, the export list, the reference block at the end of this page and, as each lands, every binding's declaration layer, the test stub and the conformance cases. The SDK owns the description and the header; the artifact producer builds libraries from the header.
 
-Until the ABI is confirmed, entries in the description are FIRM or PROVISIONAL. A FIRM entry follows from a decision below and changes only if that decision does. A PROVISIONAL entry is the proposed form of something still being decided; it carries one or more markers naming what it waits on, and the generated reference below lists every marker and what it covers. Either way a change is an edit to the description plus `gen.py --write`.
+The ABI was confirmed on 2026-10-03: every entry in the description is FIRM, following from a decision below, and the generated reference below says so. The description can still mark an entry PROVISIONAL, with one or more markers naming what it waits on, but none is marked today. A change is an edit to the description plus `gen.py --write`, and, because it changes the fingerprint, it waits for the artifact producer's agreement.
 
 ## The decisions
 
@@ -16,6 +16,19 @@ The artifact producer and the SDK decided these for ABI v1. The description cite
 | D4       | Provenance. A static `chs_build_info()`, and a mandatory cross-check of it against the verified signed statement after the library is opened.                                                                                                                                                                                                                                                                                           |
 | D5       | What v1 drops from v0: the presence probes and degradation, the sentinel codes, NUL-terminated inputs, `chs_free`, the borrowed column accessors, the init-time unsafe-families list, and the per-binding format probes. The three tooling calls stay exported, unwrapped.                                                                                                                                                              |
 | D6       | Derived results move into the library: the `Transformed` classifier and outcome promotion are computed in C, and a binding decodes the documents one to one.                                                                                                                                                                                                                                                                            |
+
+The owner's confirmation of 2026-10-03 then settled the rest, and the artifact producer fixed the details:
+
+- **Threads.** Concurrent calls on one handle are allowed wherever that is safe. Every call that reads a handle has the thread class `shared`; only a free is `handle_serial`.
+- **Filters and blocks.** A filter holds a counted reference to its schema, and so does a block.
+- **Defaults.** Default settings are immutable once traffic starts: `chs_set_defaults` is setup only and is refused once the image has created a schema. There is no context handle.
+- **Schemas.** `chs_schema_create` compiles exactly one `CREATE TABLE` statement, and the schema is immutable afterwards. There are no per-part setters.
+- **Time zones.** The image has one server zone, set once by `chs_initialize(timezone)`, which compiled types bind. Each call carries its own zone as the `session_timezone` setting, applied through ClickHouse's query context, so a filter's compile takes settings too. Every zone name is validated by ClickHouse's own `DateLUT`. On darwin, where the file system is case-insensitive, that validation accepts spellings a Linux server refuses; this is documented, not patched.
+- **Generated defaults.** A DEFAULT that calls an admitted random or ID generator is filled by the library with ClickHouse's own function, reported as `default_generated`, and stored when the caller inserts the library's output. `capabilities.features` lists `default_generators`.
+- **An empty input block** (every insertable column EPHEMERAL) stays a decline.
+- **The documents.** The batch reports `unconsumed` and `framing`, and every row reports `input_span`, all from the vendored reader's own state; `framing` fields the vendored reader cannot show are `null`, meaning not observable. A column name in JSON is `name` or `name_b64`. Every column entry carries `null`, every ClickHouse rendering is a JSON string, a bare number stays within plus or minus 2^53, and there is never a bare `inf` or `nan`. The describe document's `default_kind` is a vocabulary. The error-code table is an array of `{code, name}`. The discovery query takes `{database:String}` and `{table:String}`.
+- **A recorded gap.** No call reads a server's version or changed settings; a caller passes settings explicitly.
+- **Teardown.** `chs_shutdown` is idempotent, and a loader never unloads a library.
 
 ## The description
 
@@ -50,7 +63,7 @@ Every binding loads a library in the same steps, and refuses at the first that f
 4. Parse `chs_build_info()` and compare its `abi_fingerprint` with the compiled-in `CHS_ABI_FINGERPRINT`, byte for byte.
 5. Compare the `build_info` fields `spec/abi-v1/sdk.json` lists under `cross_check` with the verified signed statement.
 6. Resolve every described symbol; all are mandatory.
-7. Then, and only then, anything the provisional initialization contract adds.
+7. Call `chs_initialize` with the image's zone (length 0 for UTC), then `chs_set_defaults` if there are defaults, before any other call.
 
 Until step 6 passes, only the handshake set may be called. The loader never unloads a library. An absent handshake symbol other than `chs_abi_version` is refused as `missing_symbol:<name>` at whichever step first resolves it (step 4 for `chs_build_info`), not folded into step 3's `not_v1`, which is reserved for a missing `chs_abi_version` alone. Each refusal reason, and the error class it maps to in each binding, is in `spec/abi-v1/sdk.json`.
 
@@ -80,36 +93,33 @@ The `v1-abi` workflow runs all of it: `v1-abi-gen` checks the description, the f
 ## Reference
 
 <!-- BEGIN GENERATED: abi-v1 -->
-<!-- GENERATED by scripts/abi-v1/gen.py from spec/abi-v1/abi.json (CHS_ABI_FINGERPRINT sha256:b691663f42fb9ca2a872909e73a06fb61836abf92ce552a95b21baf4e006c4ed) — DO NOT EDIT -->
+<!-- GENERATED by scripts/abi-v1/gen.py from spec/abi-v1/abi.json (CHS_ABI_FINGERPRINT sha256:d6b9a42bc2fbb97273122a098ce09ee980d4ef31c0ceb6cb1b5c99e1465e0431) — DO NOT EDIT -->
 
 ### Identity
 
 | item                  | value                                                                     |
 | --------------------- | ------------------------------------------------------------------------- |
 | `CHS_ABI_VERSION`     | 1                                                                         |
-| `CHS_ABI_FINGERPRINT` | `sha256:b691663f42fb9ca2a872909e73a06fb61836abf92ce552a95b21baf4e006c4ed` |
+| `CHS_ABI_FINGERPRINT` | `sha256:d6b9a42bc2fbb97273122a098ce09ee980d4ef31c0ceb6cb1b5c99e1465e0431` |
 | library               | `libchtypes`, exporting only `chs_*`                                      |
 | functions             | 38: 31 api, 3 handshake, 1 tombstone, 3 tooling                           |
-| FIRM functions        | 15                                                                        |
-| provisional functions | 23                                                                        |
+| FIRM functions        | 38                                                                        |
+| provisional functions | 0                                                                         |
 | `reuse_v0_names`      | true                                                                      |
 
 ### Provisional markers
 
-| marker  | waits on                                                                                                         | entries                                                                                                                                                                                                                                                                                                                                                                    |
-| ------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A4      | the content of build_info capabilities: which formats and document flags a build reports                         | build_info `capabilities`                                                                                                                                                                                                                                                                                                                                                  |
-| A5      | process initialization and the time-zone contract: whether an init call survives, and where a zone is set        | `chs_initialize`                                                                                                                                                                                                                                                                                                                                                           |
-| A6      | settings channels and process defaults: whether a context handle exists and which calls take it                  | `chs_set_defaults`, `chs_type_validate`, `chs_schema_create`, `chs_discover_query`, `chs_discover_columns`                                                                                                                                                                                                                                                                 |
-| A8      | schema construction: one call over a whole CREATE TABLE statement, and its settings input                        | `chs_schema`, `chs_schema_create`, `chs_schema_free`, `chs_schema_describe`, `chs_preview_row`, `chs_preview_batch`, `chs_filter_create`, `chs_block_create`                                                                                                                                                                                                               |
-| A9      | how filters and blocks bind to a schema                                                                          | `chs_filter`, `chs_block`, `filter_outcome`, `filter_verdict`, document `filter_result`, `chs_preview_batch`, `chs_filter_create`, `chs_filter_free`, `chs_filter_eval_body`, `chs_block_create`, `chs_block_free`, `chs_filter_eval_block`                                                                                                                                |
-| A10     | the row, batch and filter result documents: fields, outcomes, vocabularies, and which refusals are call statuses | `transform_reason`, `value_src`, `row_outcome`, `batch_outcome`, `filter_outcome`, `filter_verdict`, `CHS_EXPORT_NONE`, `CHS_DOC_VALUES`, `CHS_DOC_TRANSFORMS`, `CHS_DOC_DEFAULTS`, `CHS_DOC_ALL`, document `row`, document `batch`, document `filter_result`, `chs_preview_row`, `chs_preview_batch`, `chs_filter_eval_body`, `chs_block_create`, `chs_filter_eval_block` |
-| A11     | derived results computed in the library: the Transformed classifier and the discovery kit                        | `transform_reason`, `value_src`, document `row`, document `batch`, document `discovery`, `chs_preview_row`, `chs_preview_batch`, `chs_discover_query`, `chs_discover_columns`                                                                                                                                                                                              |
-| A12     | column introspection, and how a column name that is not valid UTF-8 is carried inside a JSON document            | document `schema_description`, document `row`, document `batch`, document `discovery`, `chs_schema_describe`, `chs_preview_row`, `chs_preview_batch`, `chs_block_create`, `chs_discover_columns`                                                                                                                                                                           |
-| A13     | teardown: shutdown, background threads, and unloading the library                                                | `chs_shutdown`                                                                                                                                                                                                                                                                                                                                                             |
-| Q-c     | the form of the error accessors' text results, and the error-code table's buffer format                          | document `error_code_table`, `chs_error_ch_name`, `chs_error_message`, `chs_error_column`                                                                                                                                                                                                                                                                                  |
-| Q-f     | whether the discovery call also returns the query text a caller runs against a server                            | `chs_discover_query`                                                                                                                                                                                                                                                                                                                                                       |
-| confirm | outside the decided set: the SDK's proposed form, waiting on the confirmation of the whole ABI                   | document `live_handles`, `chs_back_quote`, `chs_back_quote_if_needed`, `chs_quote_string`                                                                                                                                                                                                                                                                                  |
+None: every entry in the description is FIRM.
+
+### Thread classes
+
+| class            | what a caller may run at the same time                                                                                                                   |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `any`            | reads no caller handle: safe from any thread, concurrently with any call                                                                                 |
+| `shared`         | reads one or more caller handles and never changes them: safe concurrently with any call, on the same handles too, except a free of one of those handles |
+| `handle_serial`  | a free: releases the caller's reference, so it must not overlap any other call that uses the same handle                                                 |
+| `process_once`   | process setup, once per image: the first call sets process state, and a repeat with the same arguments is a no-op that is safe at any time               |
+| `process_serial` | process-level: must not overlap any other call into the same library image                                                                               |
 
 ### Parameter kinds
 
@@ -135,8 +145,13 @@ Every counted input and every `chs_buf` is a byte string; the content says what 
 | `message`                   | a ClickHouse message: may quote input bytes, so may carry any byte                          |
 | `ascii`                     | guaranteed ASCII                                                                            |
 | `json_object_string_values` | a JSON object whose values are JSON strings (settings, query parameters)                    |
-| `json_array_names`          | a JSON array of column names (the encoding of a non-UTF-8 name is provisional: A12)         |
+| `json_array_names`          | a JSON array of column names, each an object carrying the name as column_names says         |
+| `timezone`                  | a time zone name, validated by ClickHouse's own DateLUT; length 0 means UTC                 |
 | `document:<name>`           | a JSON document, listed under Documents below                                               |
+
+### Column names in JSON
+
+A column name is a byte string. Wherever a JSON document, input or output, carries one, it is the member `name`, a JSON string, when the name's bytes are valid UTF-8 (a NUL written as the JSON escape `\u0000`), and otherwise the member `name_b64`, the raw bytes in standard base64 with padding. Exactly one of the two is present. In an array of names, each element is an object carrying one of them. A byte-returning accessor, such as `chs_error_column`, returns the raw bytes instead.
 
 ### Handles
 
@@ -144,9 +159,9 @@ Every counted input and every `chs_buf` is a byte string; the content says what 
 | ------------ | ----------------- | ------------ | ------ |
 | `chs_buf`    | `chs_buf_free`    | -            | FIRM   |
 | `chs_error`  | `chs_error_free`  | -            | FIRM   |
-| `chs_schema` | `chs_schema_free` | -            | A8     |
-| `chs_filter` | `chs_filter_free` | `chs_schema` | A9     |
-| `chs_block`  | `chs_block_free`  | `chs_schema` | A9     |
+| `chs_schema` | `chs_schema_free` | -            | FIRM   |
+| `chs_filter` | `chs_filter_free` | `chs_schema` | FIRM   |
+| `chs_block`  | `chs_block_free`  | `chs_schema` | FIRM   |
 
 #### `chs_buf`
 
@@ -158,15 +173,15 @@ The error a fallible call reports when its status is not `CHS_OK`: the status, C
 
 #### `chs_schema`
 
-A compiled table: the columns, engine, keys and settings of one `CREATE TABLE` statement, immutable once created.
+A compiled table: the columns, engine, keys, TTL, settings and constraints of exactly one `CREATE TABLE` statement, immutable once created, so any number of threads may use it at once.
 
 #### `chs_filter`
 
-A compiled boolean SQL expression over a schema's columns, with its query parameters bound.
+A compiled boolean SQL expression over a schema's columns, with its query parameters bound. It holds a counted reference to its schema, so the schema stays alive for as long as the filter does, whatever order the caller frees them in.
 
 #### `chs_block`
 
-A body parsed once under a schema, for evaluating many filters without parsing again.
+A body parsed once under a schema, for evaluating many filters without parsing again. Like a filter, it holds a counted reference to its schema.
 
 ### Enums
 
@@ -219,7 +234,7 @@ The input and export formats, numbered as they have been since the first release
 
 The reason a stored value differs from the supplied one, as the library reports it per column. `lossy` says whether information was lost; exactly four reasons are lossless (a representation change, a value filled from a DEFAULT or the type's zero, and a DEFAULT the library resolved from its own clock), and they are still reported because a preview must show what the table will hold. A binding reads `lossy` from here and never keeps a list of its own.
 
-A10, A11; an unrecognized value is read as `value_changed`.
+FIRM; an unrecognized value is read as `value_changed`.
 
 | value                   | lossy |
 | ----------------------- | ----- |
@@ -252,13 +267,16 @@ A10, A11; an unrecognized value is read as `value_changed`.
 
 Where a column's value came from. `is_stored` says whether the row as stored carries a value for the column: a column the input named but the table never stores (an EPHEMERAL column, a skipped MATERIALIZED or ALIAS column) and a DEFAULT the library could not resolve carry none.
 
-A10, A11.
+`default_generated` marks a DEFAULT column whose expression calls a random or ID generator the build admits; a build that does this lists `default_generators` in `chs_build_info`'s `capabilities.features`. The label means: generated by chtypes, and it becomes the stored value when you insert this output. The library drew the value itself, with ClickHouse's own vendored function. So insert the library's output (the export of `chs_preview_batch`, or the stored values its documents report), not your original input: a server evaluates a DEFAULT only for a column the INSERT does not supply, and the original input, which omits the column, would make the server draw a different value. Generators are admitted only in DEFAULT expressions: a MATERIALIZED column is always computed by the server, and an EPHEMERAL column is not stored. No binding logic is involved; a binding reports the source as it reads it.
+
+FIRM.
 
 | value                         | is_stored |
 | ----------------------------- | --------- |
 | `input`                       | true      |
 | `default`                     | true      |
 | `default_substituted`         | true      |
+| `default_generated`           | true      |
 | `absent`                      | true      |
 | `materialized_input`          | true      |
 | `skipped`                     | false     |
@@ -271,7 +289,7 @@ A10, A11.
 
 The verdict on one row: accepted, accepted but unreadable afterwards (the insert succeeds and every later read fails), rejected, skipped under the server's error allowance with the batch continuing, or declined by this build.
 
-A10; an unrecognized value is read as `unsupported`.
+FIRM; an unrecognized value is read as `unsupported`.
 
 | value               |
 | ------------------- |
@@ -285,7 +303,7 @@ A10; an unrecognized value is read as `unsupported`.
 
 The verdict on a whole body. A batch is never skipped; its rows carry their own outcomes.
 
-A10; an unrecognized value is read as `unsupported`.
+FIRM; an unrecognized value is read as `unsupported`.
 
 | value               |
 | ------------------- |
@@ -298,7 +316,7 @@ A10; an unrecognized value is read as `unsupported`.
 
 Whether a filter evaluation completed at all. Per-row failures are verdicts, not outcomes.
 
-A9, A10; an unrecognized value is read as `unsupported`.
+FIRM; an unrecognized value is read as `unsupported`.
 
 | value         |
 | ------------- |
@@ -310,7 +328,7 @@ A9, A10; an unrecognized value is read as `unsupported`.
 
 One character per row of a filter evaluation. `t` and `f` are answers (true; false or NULL); `e` (the predicate raised an error on this row) and `d` (this build declines the row) are not, and a caller enforcing visibility must fail closed on both.
 
-A9, A10; an unrecognized value is read as `d`.
+FIRM; an unrecognized value is read as `d`.
 
 | value | answered |
 | ----- | -------- |
@@ -319,28 +337,382 @@ A9, A10; an unrecognized value is read as `d`.
 | `e`   | false    |
 | `d`   | false    |
 
+#### `discover_query_param`
+
+The query parameters in the SQL `chs_discover_query` returns, each with its ClickHouse type. The caller binds them when it runs the query (over HTTP, as `param_database` and `param_table`), so no binding builds SQL.
+
+FIRM.
+
+| value      | ch_type |
+| ---------- | ------- |
+| `database` | String  |
+| `table`    | String  |
+
+#### `default_kind`
+
+A column's default kind, as ClickHouse names it: `DEFAULT`, `MATERIALIZED`, `ALIAS` or `EPHEMERAL`, or the empty string for a column with none. The schema description carries one per column.
+
+FIRM.
+
+| value          |
+| -------------- |
+| `""` (none)    |
+| `DEFAULT`      |
+| `MATERIALIZED` |
+| `ALIAS`        |
+| `EPHEMERAL`    |
+
 ### Constants
 
 | constant                     | type   | value | status |
 | ---------------------------- | ------ | ----- | ------ |
 | `CHS_ABI_REVISION_TOMBSTONE` | int32  | 1001  | FIRM   |
-| `CHS_EXPORT_NONE`            | int32  | -1    | A10    |
-| `CHS_DOC_VALUES`             | uint32 | 1     | A10    |
-| `CHS_DOC_TRANSFORMS`         | uint32 | 2     | A10    |
-| `CHS_DOC_DEFAULTS`           | uint32 | 4     | A10    |
-| `CHS_DOC_ALL`                | uint32 | 7     | A10    |
+| `CHS_EXPORT_NONE`            | int32  | -1    | FIRM   |
+| `CHS_DOC_VALUES`             | uint32 | 1     | FIRM   |
+| `CHS_DOC_TRANSFORMS`         | uint32 | 2     | FIRM   |
+| `CHS_DOC_DEFAULTS`           | uint32 | 4     | FIRM   |
+| `CHS_DOC_ALL`                | uint32 | 7     | FIRM   |
 
 ### Documents
 
-| document             | carries names | status        |
-| -------------------- | ------------- | ------------- |
-| `live_handles`       | no            | confirm       |
-| `error_code_table`   | no            | Q-c           |
-| `schema_description` | yes           | A12           |
-| `row`                | yes           | A10, A11, A12 |
-| `batch`              | yes           | A10, A11, A12 |
-| `filter_result`      | no            | A9, A10       |
-| `discovery`          | yes           | A11, A12      |
+| document             | carries names | fixed fields | status |
+| -------------------- | ------------- | ------------ | ------ |
+| `live_handles`       | no            | yes          | FIRM   |
+| `error_code_table`   | no            | yes          | FIRM   |
+| `schema_description` | yes           | -            | FIRM   |
+| `row`                | yes           | yes          | FIRM   |
+| `batch`              | yes           | yes          | FIRM   |
+| `filter_result`      | no            | -            | FIRM   |
+| `discovery`          | yes           | -            | FIRM   |
+
+#### document `live_handles`
+
+A JSON object with one key per handle kind (its type name, such as `chs_schema`) and the number of live handles of that kind in this image, counted before the document's own buffer exists.
+
+The fields the description fixes, as JSON Schema; the document may carry more:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": {
+    "type": "integer",
+    "minimum": 0
+  }
+}
+```
+
+#### document `error_code_table`
+
+ClickHouse's own error-code table for this build: a JSON array of `{"code": int, "name": string}`, one entry per code the vendored table names, in ascending code order. A passthrough over the vendored table, never a copy.
+
+The fields the description fixes, as JSON Schema; the document may carry more:
+
+```json
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "code",
+      "name"
+    ],
+    "properties": {
+      "code": {
+        "type": "integer"
+      },
+      "name": {
+        "type": "string"
+      }
+    }
+  }
+}
+```
+
+#### document `schema_description`
+
+A schema's columns, in declared order, with each column's canonical type, its `default_kind` (a value of the `default_kind` vocabulary) and default expression, and the facts a caller needs to build a row. Each column's name is carried as `name` or `name_b64`, by the rule for column names in JSON.
+
+The description fixes no field of this document; its prose above is the contract.
+
+#### document `row`
+
+One row's verdict and, as the flags ask, its columns' stored values, provenance and transformations. Every entry of `cols` carries its name by the rule for column names in JSON, `null` (whether the stored value is NULL, poisoned cells included), and its renderings (`input`, `stored`) as JSON strings. The transformations come from the library, never from a binding: each is the `transformed` entry the SDK's parity fixtures pin, with its `reason` from `transform_reason`. `input_span` is `{off, len}`, the bytes of the input body the reader consumed for this record, read from the vendored reader's own position.
+
+The fields the description fixes, as JSON Schema; the document may carry more:
+
+```json
+{
+  "$defs": {
+    "span": {
+      "type": "object",
+      "required": [
+        "off",
+        "len"
+      ],
+      "properties": {
+        "off": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "len": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "col": {
+      "type": "object",
+      "required": [
+        "null"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "name_b64": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+        },
+        "null": {
+          "type": "boolean"
+        },
+        "input": {
+          "type": "string"
+        },
+        "stored": {
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "name"
+          ]
+        },
+        {
+          "required": [
+            "name_b64"
+          ]
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "required": [
+    "input_span"
+  ],
+  "properties": {
+    "input_span": {
+      "$ref": "#/$defs/span"
+    },
+    "cols": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/col"
+      }
+    }
+  }
+}
+```
+
+#### document `batch`
+
+A body's verdict, counts and per-row documents (each a row document, with its own `input_span`), and, when an export was asked for, where each accepted row sits in the export bytes. Two further fields come from the vendored reader's own state, never from a tokenizer of the library's:
+
+- `unconsumed`: the byte ranges `{off, len}` of the input that the reader's error recovery skipped. A record swallowed there shows up as bytes here, so a caller that needs every record accounted for declines a body whose `unconsumed` is not empty, and never counts records itself.
+- `framing`: `bom_skipped` (whether the reader skipped a leading byte-order mark), `container` (`array` or `stream` for JSONEachRow, `null` for every other format), and `header` (`{consumed, lines, names}`, `names` as objects by the rule for column names in JSON). `bom_skipped` and `header` are `null` where the vendored reader does not expose the decision, and there `null` means not observable, never "no header": the TSV, TSVWithNames and Values readers keep both private (measured by the artifact producer in the source at every supported line). CSV, JSONEachRow and JSONCompactEachRow fill both from the reader's own hooks.
+
+The fields the description fixes, as JSON Schema; the document may carry more:
+
+```json
+{
+  "$defs": {
+    "span": {
+      "type": "object",
+      "required": [
+        "off",
+        "len"
+      ],
+      "properties": {
+        "off": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "len": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "named": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "name_b64": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "name"
+          ]
+        },
+        {
+          "required": [
+            "name_b64"
+          ]
+        }
+      ]
+    },
+    "row": {
+      "type": "object",
+      "required": [
+        "input_span"
+      ],
+      "properties": {
+        "input_span": {
+          "$ref": "#/$defs/span"
+        },
+        "cols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/col"
+          }
+        }
+      }
+    },
+    "col": {
+      "type": "object",
+      "required": [
+        "null"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "name_b64": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+        },
+        "null": {
+          "type": "boolean"
+        },
+        "input": {
+          "type": "string"
+        },
+        "stored": {
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "name"
+          ]
+        },
+        {
+          "required": [
+            "name_b64"
+          ]
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "required": [
+    "rows",
+    "unconsumed",
+    "framing"
+  ],
+  "properties": {
+    "rows": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    },
+    "unconsumed": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/span"
+      }
+    },
+    "framing": {
+      "type": "object",
+      "required": [
+        "bom_skipped",
+        "container",
+        "header"
+      ],
+      "properties": {
+        "bom_skipped": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "container": {
+          "enum": [
+            "array",
+            "stream",
+            null
+          ]
+        },
+        "header": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "consumed",
+                "lines",
+                "names"
+              ],
+              "properties": {
+                "consumed": {
+                  "type": "boolean"
+                },
+                "lines": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/named"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+#### document `filter_result`
+
+A filter evaluation: the call's outcome, one verdict character per row (`filter_verdict`), and each error or declined row itemized.
+
+The description fixes no field of this document; its prose above is the contract.
+
+#### document `discovery`
+
+The column declarations reconstructed from a server's `system.columns` rows, formatted by ClickHouse's own formatter.
+
+The description fixes no field of this document; its prose above is the contract.
 
 ### build_info
 
@@ -359,50 +731,50 @@ A9, A10; an unrecognized value is read as `d`.
 | `os`                 | string `^[a-z0-9]+$`                         | yes      | bytes         | FIRM    |
 | `arch`               | string `^[a-z0-9]+$`                         | yes      | bytes         | FIRM    |
 | `toolchain`          | object                                       | yes      | -             | FIRM    |
-| `capabilities`       | object                                       | yes      | -             | A4      |
+| `capabilities`       | object                                       | yes      | -             | FIRM    |
 
 ### Functions
 
-| function                   | class     | thread         | returns           | status                |
-| -------------------------- | --------- | -------------- | ----------------- | --------------------- |
-| `chs_abi_version`          | handshake | any            | `int32_t`         | FIRM                  |
-| `chs_build_info`           | handshake | any            | `const char *`    | FIRM                  |
-| `chs_clickhouse_version`   | handshake | any            | `const char *`    | FIRM                  |
-| `chs_abi_revision`         | tombstone | any            | `int`             | FIRM                  |
-| `chs_buf_data`             | api       | any            | `const uint8_t *` | FIRM                  |
-| `chs_buf_len`              | api       | any            | `size_t`          | FIRM                  |
-| `chs_buf_free`             | api       | handle_serial  | `void`            | FIRM                  |
-| `chs_error_status`         | api       | any            | `chs_status`      | FIRM                  |
-| `chs_error_ch_code`        | api       | any            | `int32_t`         | FIRM                  |
-| `chs_error_ch_name`        | api       | any            | `chs_buf *`       | Q-c                   |
-| `chs_error_message`        | api       | any            | `chs_buf *`       | Q-c                   |
-| `chs_error_column`         | api       | any            | `chs_buf *`       | Q-c                   |
-| `chs_error_free`           | api       | handle_serial  | `void`            | FIRM                  |
-| `chs_live_handles`         | api       | any            | status            | FIRM                  |
-| `chs_error_codes`          | api       | any            | status            | FIRM                  |
-| `chs_registered_families`  | tooling   | process_serial | status            | FIRM                  |
-| `chs_function_flags`       | tooling   | process_serial | status            | FIRM                  |
-| `chs_reference_type`       | tooling   | process_serial | status            | FIRM                  |
-| `chs_initialize`           | api       | process_once   | status            | A5                    |
-| `chs_set_defaults`         | api       | process_serial | status            | A6                    |
-| `chs_shutdown`             | api       | process_serial | `void`            | A13                   |
-| `chs_type_validate`        | api       | any            | status            | A6                    |
-| `chs_back_quote`           | api       | any            | status            | confirm               |
-| `chs_back_quote_if_needed` | api       | any            | status            | confirm               |
-| `chs_quote_string`         | api       | any            | status            | confirm               |
-| `chs_schema_create`        | api       | any            | status            | A6, A8                |
-| `chs_schema_free`          | api       | handle_serial  | `void`            | A8                    |
-| `chs_schema_describe`      | api       | handle_serial  | status            | A8, A12               |
-| `chs_preview_row`          | api       | handle_serial  | status            | A8, A10, A11, A12     |
-| `chs_preview_batch`        | api       | handle_serial  | status            | A8, A9, A10, A11, A12 |
-| `chs_filter_create`        | api       | handle_serial  | status            | A8, A9                |
-| `chs_filter_free`          | api       | handle_serial  | `void`            | A9                    |
-| `chs_filter_eval_body`     | api       | handle_serial  | status            | A9, A10               |
-| `chs_block_create`         | api       | handle_serial  | status            | A8, A9, A10, A12      |
-| `chs_block_free`           | api       | handle_serial  | `void`            | A9                    |
-| `chs_filter_eval_block`    | api       | handle_serial  | status            | A9, A10               |
-| `chs_discover_query`       | api       | any            | status            | A6, A11, Q-f          |
-| `chs_discover_columns`     | api       | any            | status            | A6, A11, A12          |
+| function                   | class     | thread         | returns           | status |
+| -------------------------- | --------- | -------------- | ----------------- | ------ |
+| `chs_abi_version`          | handshake | any            | `int32_t`         | FIRM   |
+| `chs_build_info`           | handshake | any            | `const char *`    | FIRM   |
+| `chs_clickhouse_version`   | handshake | any            | `const char *`    | FIRM   |
+| `chs_abi_revision`         | tombstone | any            | `int`             | FIRM   |
+| `chs_buf_data`             | api       | shared         | `const uint8_t *` | FIRM   |
+| `chs_buf_len`              | api       | shared         | `size_t`          | FIRM   |
+| `chs_buf_free`             | api       | handle_serial  | `void`            | FIRM   |
+| `chs_error_status`         | api       | shared         | `chs_status`      | FIRM   |
+| `chs_error_ch_code`        | api       | shared         | `int32_t`         | FIRM   |
+| `chs_error_ch_name`        | api       | shared         | `chs_buf *`       | FIRM   |
+| `chs_error_message`        | api       | shared         | `chs_buf *`       | FIRM   |
+| `chs_error_column`         | api       | shared         | `chs_buf *`       | FIRM   |
+| `chs_error_free`           | api       | handle_serial  | `void`            | FIRM   |
+| `chs_live_handles`         | api       | any            | status            | FIRM   |
+| `chs_error_codes`          | api       | any            | status            | FIRM   |
+| `chs_registered_families`  | tooling   | process_serial | status            | FIRM   |
+| `chs_function_flags`       | tooling   | process_serial | status            | FIRM   |
+| `chs_reference_type`       | tooling   | process_serial | status            | FIRM   |
+| `chs_initialize`           | api       | process_once   | status            | FIRM   |
+| `chs_set_defaults`         | api       | process_serial | status            | FIRM   |
+| `chs_shutdown`             | api       | process_serial | `void`            | FIRM   |
+| `chs_type_validate`        | api       | any            | status            | FIRM   |
+| `chs_back_quote`           | api       | any            | status            | FIRM   |
+| `chs_back_quote_if_needed` | api       | any            | status            | FIRM   |
+| `chs_quote_string`         | api       | any            | status            | FIRM   |
+| `chs_schema_create`        | api       | any            | status            | FIRM   |
+| `chs_schema_free`          | api       | handle_serial  | `void`            | FIRM   |
+| `chs_schema_describe`      | api       | shared         | status            | FIRM   |
+| `chs_preview_row`          | api       | shared         | status            | FIRM   |
+| `chs_preview_batch`        | api       | shared         | status            | FIRM   |
+| `chs_filter_create`        | api       | shared         | status            | FIRM   |
+| `chs_filter_free`          | api       | handle_serial  | `void`            | FIRM   |
+| `chs_filter_eval_body`     | api       | shared         | status            | FIRM   |
+| `chs_block_create`         | api       | shared         | status            | FIRM   |
+| `chs_block_free`           | api       | handle_serial  | `void`            | FIRM   |
+| `chs_filter_eval_block`    | api       | shared         | status            | FIRM   |
+| `chs_discover_query`       | api       | any            | status            | FIRM   |
+| `chs_discover_columns`     | api       | any            | status            | FIRM   |
 
 #### `chs_abi_version`
 
@@ -423,6 +795,8 @@ CHS_API const char *chs_build_info(void);
 - Class `handshake`, thread `any`, FIRM.
 
 What this library is, as static, NUL-terminated, ASCII-only JSON in the image's read-only data: never NULL, never freed, the same bytes on every call, and callable straight after opening the library. Its fields are listed under `build_info` in the reference, and `abi_fingerprint` is `CHS_ABI_FINGERPRINT` as the library was built, copied, never recomputed.
+
+`capabilities` is read from the build itself, never from a version number: `input_formats` and `export_formats` by ClickHouse's own format names from the build's FormatFactory, `doc_flags` as the document groups it honors, and `features`, an open list of build-level features, where a new feature is a new value and never a new field. `default_generators` in `features` means the library fills admitted generator DEFAULTs and the caller inserts the library's output (`default_generated` under `value_src`).
 
 A loader parses it (ASCII only, duplicate keys refused, `schema` equal to 1, every required field of its type), refuses when `abi_fingerprint` differs from its own compiled-in `CHS_ABI_FINGERPRINT` byte for byte, and then compares the fields listed in `spec/abi-v1/sdk.json` (`cross_check`) with the verified signed statement it fetched the library under, refusing on the first mismatch and naming the field. That comparison is mandatory. The file's own size, digest and glibc floor are not in it, because the file cannot carry facts measured on itself; they are in the signed statement.
 
@@ -455,7 +829,7 @@ A sweep of every released binding (every minor from 0.1 to 0.5, in all four lang
 CHS_API const uint8_t *chs_buf_data(const chs_buf *buf);
 ```
 
-- Class `api`, thread `any`, FIRM.
+- Class `api`, thread `shared`, FIRM.
 - The pointer is borrowed from `buf`.
 - `buf`: handle, `chs_buf`.
 
@@ -467,7 +841,7 @@ The buffer's bytes. The pointer may be NULL when `chs_buf_len` is 0, and a bindi
 CHS_API size_t chs_buf_len(const chs_buf *buf);
 ```
 
-- Class `api`, thread `any`, FIRM.
+- Class `api`, thread `shared`, FIRM.
 - `buf`: handle, `chs_buf`.
 
 The buffer's length in bytes. A NULL, freed, wrong-kind or cross-library buffer gives 0.
@@ -489,7 +863,7 @@ Releases the caller's reference to a buffer. Freeing NULL does nothing.
 CHS_API chs_status chs_error_status(const chs_error *error);
 ```
 
-- Class `api`, thread `any`, FIRM.
+- Class `api`, thread `shared`, FIRM.
 - `error`: handle, `chs_error`.
 
 The error's status, never `CHS_OK` for an error a call set. A NULL, freed, wrong-kind or cross-library error gives `CHS_INVALID_ARGUMENT`.
@@ -500,7 +874,7 @@ The error's status, never `CHS_OK` for an error a call set. A NULL, freed, wrong
 CHS_API int32_t chs_error_ch_code(const chs_error *error);
 ```
 
-- Class `api`, thread `any`, FIRM.
+- Class `api`, thread `shared`, FIRM.
 - `error`: handle, `chs_error`.
 
 ClickHouse's own error code, nonzero only when the status is `CHS_REJECTED`, and 0 otherwise or for an invalid error.
@@ -511,11 +885,11 @@ ClickHouse's own error code, nonzero only when the status is `CHS_REJECTED`, and
 CHS_API chs_buf *chs_error_ch_name(const chs_error *error);
 ```
 
-- Class `api`, thread `any`, Q-c.
+- Class `api`, thread `shared`, FIRM.
 - Returns a new `chs_buf` the caller owns (ascii), freed with `chs_buf_free`.
 - `error`: handle, `chs_error`.
 
-A new buffer holding the name this build's vendored error table gives the code, the name a server prints after the code; empty when the build has none or the status is not `CHS_REJECTED`. The form of the three text accessors (a returned buffer, as here, or an out-parameter) is open.
+A new buffer holding the name this build's vendored error table gives the code, the name a server prints after the code; empty when the build has none or the status is not `CHS_REJECTED`. Like the other two text accessors, it returns NULL only for a NULL or invalid error.
 
 #### `chs_error_message`
 
@@ -523,7 +897,7 @@ A new buffer holding the name this build's vendored error table gives the code, 
 CHS_API chs_buf *chs_error_message(const chs_error *error);
 ```
 
-- Class `api`, thread `any`, Q-c.
+- Class `api`, thread `shared`, FIRM.
 - Returns a new `chs_buf` the caller owns (message), freed with `chs_buf_free`.
 - `error`: handle, `chs_error`.
 
@@ -535,11 +909,11 @@ A new buffer holding the message: ClickHouse's own text, verbatim, for `CHS_REJE
 CHS_API chs_buf *chs_error_column(const chs_error *error);
 ```
 
-- Class `api`, thread `any`, Q-c.
+- Class `api`, thread `shared`, FIRM.
 - Returns a new `chs_buf` the caller owns (name), freed with `chs_buf_free`.
 - `error`: handle, `chs_error`.
 
-A new buffer holding the name of the column the error concerns, empty when there is none. A column name is a byte string: NUL and invalid UTF-8 are legal in a name.
+A new buffer holding the name of the column the error concerns, as raw bytes, empty when there is none. A column name is a byte string: NUL and invalid UTF-8 are legal in a name.
 
 #### `chs_error_free`
 
@@ -576,7 +950,7 @@ CHS_API chs_status chs_error_codes(chs_buf **out, chs_error **err);
 - `out`: out_handle, `chs_buf`, `document:error_code_table`.
 - `err`: out_error.
 
-ClickHouse's own error-code table for this build, as a JSON document: a passthrough over the vendored table, never a copy. The table belongs to the build, and one number can name different errors on two ClickHouse lines, so a caller that needs several lines asks each library. The name is v0's, with the v1 call shape; the tombstone keeps every v0 binding from reaching it.
+ClickHouse's own error-code table for this build, as a JSON array of `{"code", "name"}` in ascending code order: a passthrough over the vendored table, never a copy. The table belongs to the build, and one number can name different errors on two ClickHouse lines, so a caller that needs several lines asks each library. The name is v0's, with the v1 call shape; the tombstone keeps every v0 binding from reaching it.
 
 #### `chs_registered_families`
 
@@ -621,14 +995,17 @@ The widened reference type this build pairs with a type expression. A tooling ex
 #### `chs_initialize`
 
 ```c
-CHS_API chs_status chs_initialize(chs_error **err);
+CHS_API chs_status chs_initialize(const uint8_t *timezone, size_t timezone_len, chs_error **err);
 ```
 
-- Class `api`, thread `process_once`, A5.
-- May return `CHS_OK`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
+- Class `api`, thread `process_once`, FIRM.
+- May return `CHS_OK`, `CHS_REJECTED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
+- `timezone`: bytes_in, `timezone`.
 - `err`: out_error.
 
-Process setup for this image. The proposed form takes nothing: the time zone becomes per call rather than per process, and the list of type families the build must refuse is embedded when the library is built. Whether an initialization call survives at all is open; nothing before it in the load sequence needs it.
+Sets this image's server zone, once per process: the zone every compiled type binds, and the zone a call without its own `session_timezone` runs in. `timezone` is counted bytes, and length 0 means `UTC`. The name is validated by ClickHouse's own `DateLUT`, so a name it cannot load is `CHS_REJECTED` with `DateLUT`'s own code and message. A second call with the same spelling is a no-op that answers `CHS_OK`; a different spelling is `CHS_INVALID_ARGUMENT`, naming both. The spelling is compared byte for byte and never canonicalized, because it is observable: `timezoneOf` over a column reports the image zone exactly as spelled.
+
+The zone is process state, not a per-call parameter, because ClickHouse's own MergeTree code reads the server zone directly (`DateLUT::serverTimezoneInstance`). A per-call zone is the `session_timezone` setting instead. A loader calls this once, after the handshake checks and before any other call; the list of type families the build must refuse is embedded when the library is built, so nothing else is passed in.
 
 #### `chs_set_defaults`
 
@@ -636,12 +1013,14 @@ Process setup for this image. The proposed form takes nothing: the time zone bec
 CHS_API chs_status chs_set_defaults(const uint8_t *settings, size_t settings_len, chs_error **err);
 ```
 
-- Class `api`, thread `process_serial`, A6.
+- Class `api`, thread `process_serial`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `settings`: bytes_in, `json_object_string_values`.
 - `err`: out_error.
 
-Seeds the settings every later call starts from, as a JSON object whose values are JSON strings (a binding never rewrites a value, a boolean included). A setting name the server would refuse is refused here, with ClickHouse's own code and message, and nothing is committed.
+Seeds the settings every later call starts from, as a JSON object whose values are JSON strings (a binding never rewrites a value, a boolean included). Each successful call replaces the previous defaults whole. A setting name the server would refuse is refused here, with ClickHouse's own code and message, and nothing is committed. `session_timezone` here is the default zone for later calls; it does not change the image zone that compiled types bind.
+
+Setup only. The defaults are immutable once this image has created its first `chs_schema` (a filter or a block needs one): from then on the call changes nothing and answers `CHS_INVALID_ARGUMENT`. No call ever reads defaults that change under it, so no binding needs a lock around them.
 
 #### `chs_shutdown`
 
@@ -649,9 +1028,9 @@ Seeds the settings every later call starts from, as a JSON object whose values a
 CHS_API void chs_shutdown(void);
 ```
 
-- Class `api`, thread `process_serial`, A13.
+- Class `api`, thread `process_serial`, FIRM.
 
-Stops the background work the library started and joins its threads. Safe to call when nothing was started. Whether teardown and unloading are supported at all is open; a loader never unloads a library.
+Stops what `chs_initialize` started (its background threads) and joins them. It is idempotent and safe before `chs_initialize`. After it, no call is valid except `chs_shutdown` again. Unloading the library, or initializing it again in the same process, is unsupported: a loader never unloads a library.
 
 #### `chs_type_validate`
 
@@ -659,7 +1038,7 @@ Stops the background work the library started and joins its threads. Safe to cal
 CHS_API chs_status chs_type_validate(const uint8_t *type_expr, size_t type_expr_len, chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `any`, A6.
+- Class `api`, thread `any`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `type_expr`: bytes_in, `sql`.
 - `out`: out_handle, `chs_buf`, `sql`.
@@ -673,7 +1052,7 @@ Parses one type expression with ClickHouse's own parser and returns its canonica
 CHS_API chs_status chs_back_quote(const uint8_t *name, size_t name_len, chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `any`, confirm.
+- Class `api`, thread `any`, FIRM.
 - May return `CHS_OK`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `name`: bytes_in, `name`.
 - `out`: out_handle, `chs_buf`, `sql`.
@@ -687,7 +1066,7 @@ A name quoted the way ClickHouse's own `backQuote` quotes it: always quoted, eve
 CHS_API chs_status chs_back_quote_if_needed(const uint8_t *name, size_t name_len, chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `any`, confirm.
+- Class `api`, thread `any`, FIRM.
 - May return `CHS_OK`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `name`: bytes_in, `name`.
 - `out`: out_handle, `chs_buf`, `sql`.
@@ -701,7 +1080,7 @@ A name quoted only where this build's own `backQuoteIfNeed` says it must be. Whi
 CHS_API chs_status chs_quote_string(const uint8_t *text, size_t text_len, chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `any`, confirm.
+- Class `api`, thread `any`, FIRM.
 - May return `CHS_OK`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `text`: bytes_in, `bytes`.
 - `out`: out_handle, `chs_buf`, `sql`.
@@ -715,14 +1094,16 @@ A byte string spelled as a ClickHouse string literal by the vendored `quoteStrin
 CHS_API chs_status chs_schema_create(const uint8_t *create_table, size_t create_table_len, const uint8_t *settings, size_t settings_len, chs_schema **out, chs_error **err);
 ```
 
-- Class `api`, thread `any`, A6, A8.
+- Class `api`, thread `any`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `create_table`: bytes_in, `sql`.
 - `settings`: bytes_in, `json_object_string_values`.
 - `out`: out_handle, `chs_schema`.
 - `err`: out_error.
 
-Compiles one whole `CREATE TABLE` statement (columns, engine, keys, TTL, settings and constraints) with ClickHouse's own parser and the checks a server's CREATE runs, under a profile of settings given as a JSON object of string values. The result is immutable. The proposed form replaces v0's column-list compile and its engine, TTL and partition-key setters.
+Compiles exactly one `CREATE TABLE` statement (columns, engine, keys, TTL, settings and constraints) with ClickHouse's own parser and the checks a server's CREATE runs, under a profile of settings given as a JSON object of string values. A trailing semicolon is allowed. A second statement is refused the way ClickHouse's own parser refuses one in a single query (`CHS_REJECTED`, with its code and message), and a statement of any other kind is `CHS_INVALID_ARGUMENT`.
+
+The result is immutable: nothing changes a schema after this call, so it replaces v0's column-list compile and its engine, TTL and partition-key setters, and any number of threads may use it at once. Its types bind the image zone set by `chs_initialize`, never the profile's `session_timezone`, which governs only this call's own evaluation.
 
 #### `chs_schema_free`
 
@@ -730,7 +1111,7 @@ Compiles one whole `CREATE TABLE` statement (columns, engine, keys, TTL, setting
 CHS_API void chs_schema_free(chs_schema *schema);
 ```
 
-- Class `api`, thread `handle_serial`, A8.
+- Class `api`, thread `handle_serial`, FIRM.
 - `schema`: handle, `chs_schema`, nullable.
 
 Releases the caller's reference to a schema. Filters and blocks made from it keep it alive. Freeing NULL does nothing.
@@ -741,7 +1122,7 @@ Releases the caller's reference to a schema. Filters and blocks made from it kee
 CHS_API chs_status chs_schema_describe(const chs_schema *schema, chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `handle_serial`, A8, A12.
+- Class `api`, thread `shared`, FIRM.
 - May return `CHS_OK`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `schema`: handle, `chs_schema`.
 - `out`: out_handle, `chs_buf`, `document:schema_description`.
@@ -755,7 +1136,7 @@ A JSON document describing the schema's columns, owned by the caller; it replace
 CHS_API chs_status chs_preview_row(const chs_schema *schema, chs_format format, const uint8_t *body, size_t body_len, const uint8_t *settings, size_t settings_len, const uint8_t *columns, size_t columns_len, chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `handle_serial`, A8, A10, A11, A12.
+- Class `api`, thread `shared`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `schema`: handle, `chs_schema`.
 - `format`: enum, `chs_format`.
@@ -765,7 +1146,9 @@ CHS_API chs_status chs_preview_row(const chs_schema *schema, chs_format format, 
 - `out`: out_handle, `chs_buf`, `document:row`.
 - `err`: out_error.
 
-Validates and coerces one row of `body` under the schema, as a server's INSERT would, and returns the row's document. `columns` is the INSERT column list, empty for none.
+Validates and coerces one row of `body` under the schema, as a server's INSERT would, and returns the row's document. `columns` is the INSERT column list, a JSON array of name objects by the rule for column names in JSON, and empty for none. `session_timezone` in `settings` is this call's zone.
+
+An INSERT whose input block has no column at all (every insertable column EPHEMERAL, and no column list) is declined: a server answers it (code 90, EMPTY_LIST_OF_COLUMNS_PASSED) from a statement inside its INSERT interpreter that the library cannot call, and a decline is never a wrong answer.
 
 #### `chs_preview_batch`
 
@@ -773,7 +1156,7 @@ Validates and coerces one row of `body` under the schema, as a server's INSERT w
 CHS_API chs_status chs_preview_batch(const chs_schema *schema, chs_format format, const uint8_t *body, size_t body_len, const uint8_t *settings, size_t settings_len, const uint8_t *columns, size_t columns_len, const chs_filter *filter, int32_t export_format, uint32_t doc_flags, chs_buf **out, chs_buf **out_export, chs_error **err);
 ```
 
-- Class `api`, thread `handle_serial`, A8, A9, A10, A11, A12.
+- Class `api`, thread `shared`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `schema`: handle, `chs_schema`.
 - `format`: enum, `chs_format`.
@@ -787,23 +1170,26 @@ CHS_API chs_status chs_preview_batch(const chs_schema *schema, chs_format format
 - `out_export`: out_handle, `chs_buf`, `bytes`, nullable.
 - `err`: out_error.
 
-Validates and coerces a whole body, which may hold many rows, and returns the batch document. Row separation and the server's error allowance are ClickHouse's own. `filter`, when given, is evaluated over each stored row in the same parse. `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write; with an export, `out_export` receives the accepted rows serialized once, and it may be NULL when no export is asked for. `doc_flags` chooses which groups the per-row documents carry.
+Validates and coerces a whole body, which may hold many rows, and returns the batch document, with the same declines as `chs_preview_row`. Row separation and the server's error allowance are ClickHouse's own, and the document's `unconsumed` and `framing` say what the reader skipped and how it framed the body. `filter`, when given, is evaluated over each stored row in the same parse. `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write; with an export, `out_export` receives the accepted rows serialized once, and it may be NULL when no export is asked for. `doc_flags` chooses which groups the per-row documents carry.
 
 #### `chs_filter_create`
 
 ```c
-CHS_API chs_status chs_filter_create(const chs_schema *schema, const uint8_t *expr, size_t expr_len, const uint8_t *query_params, size_t query_params_len, chs_filter **out, chs_error **err);
+CHS_API chs_status chs_filter_create(const chs_schema *schema, const uint8_t *expr, size_t expr_len, const uint8_t *query_params, size_t query_params_len, const uint8_t *settings, size_t settings_len, chs_filter **out, chs_error **err);
 ```
 
-- Class `api`, thread `handle_serial`, A8, A9.
+- Class `api`, thread `shared`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `schema`: handle, `chs_schema`.
 - `expr`: bytes_in, `sql`.
 - `query_params`: bytes_in, `json_object_string_values`.
+- `settings`: bytes_in, `json_object_string_values`.
 - `out`: out_handle, `chs_filter`.
 - `err`: out_error.
 
-Compiles a boolean SQL expression over the schema's columns, binding its query parameters (a JSON object of string values) by ClickHouse's own substitution, so a value is never SQL text. Non-deterministic expressions are declined.
+Compiles a boolean SQL expression over the schema's columns, binding its query parameters (a JSON object of string values) by ClickHouse's own substitution, so a value is never SQL text. `settings` is the profile the expression is compiled under, so `session_timezone` there is the zone of its literals. Non-deterministic expressions are declined.
+
+A filter under a per-call `session_timezone` answers as the artifact producer has measured against live servers, including how the zone in an evaluation's settings combines with the zone the filter was compiled under. Until a path is measured to match a server it declines, which is never a wrong answer. The filter holds a counted reference to the schema.
 
 #### `chs_filter_free`
 
@@ -811,7 +1197,7 @@ Compiles a boolean SQL expression over the schema's columns, binding its query p
 CHS_API void chs_filter_free(chs_filter *filter);
 ```
 
-- Class `api`, thread `handle_serial`, A9.
+- Class `api`, thread `handle_serial`, FIRM.
 - `filter`: handle, `chs_filter`, nullable.
 
 Releases the caller's reference to a filter. Freeing NULL does nothing.
@@ -822,7 +1208,7 @@ Releases the caller's reference to a filter. Freeing NULL does nothing.
 CHS_API chs_status chs_filter_eval_body(const chs_filter *filter, chs_format format, const uint8_t *body, size_t body_len, const uint8_t *settings, size_t settings_len, chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `handle_serial`, A9, A10.
+- Class `api`, thread `shared`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `filter`: handle, `chs_filter`.
 - `format`: enum, `chs_format`.
@@ -831,7 +1217,7 @@ CHS_API chs_status chs_filter_eval_body(const chs_filter *filter, chs_format for
 - `out`: out_handle, `chs_buf`, `document:filter_result`.
 - `err`: out_error.
 
-Evaluates the filter over every row of a body, returning one verdict per row.
+Evaluates the filter over every row of a body, returning one verdict per row. `settings` governs parsing the body, and `session_timezone` there is this call's zone.
 
 #### `chs_block_create`
 
@@ -839,7 +1225,7 @@ Evaluates the filter over every row of a body, returning one verdict per row.
 CHS_API chs_status chs_block_create(const chs_schema *schema, chs_format format, const uint8_t *body, size_t body_len, const uint8_t *settings, size_t settings_len, const uint8_t *columns, size_t columns_len, chs_block **out, chs_error **err);
 ```
 
-- Class `api`, thread `handle_serial`, A8, A9, A10, A12.
+- Class `api`, thread `shared`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `schema`: handle, `chs_schema`.
 - `format`: enum, `chs_format`.
@@ -849,7 +1235,7 @@ CHS_API chs_status chs_block_create(const chs_schema *schema, chs_format format,
 - `out`: out_handle, `chs_block`.
 - `err`: out_error.
 
-Parses a body once under the schema, for evaluating many filters over it.
+Parses a body once under the schema, for evaluating many filters over it. `settings` governs the parse, `session_timezone` there included, and `columns` is read as `chs_preview_row` reads it. The block holds a counted reference to the schema.
 
 #### `chs_block_free`
 
@@ -857,7 +1243,7 @@ Parses a body once under the schema, for evaluating many filters over it.
 CHS_API void chs_block_free(chs_block *block);
 ```
 
-- Class `api`, thread `handle_serial`, A9.
+- Class `api`, thread `handle_serial`, FIRM.
 - `block`: handle, `chs_block`, nullable.
 
 Releases the caller's reference to a block. Freeing NULL does nothing.
@@ -868,14 +1254,14 @@ Releases the caller's reference to a block. Freeing NULL does nothing.
 CHS_API chs_status chs_filter_eval_block(const chs_filter *filter, const chs_block *block, chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `handle_serial`, A9, A10.
+- Class `api`, thread `shared`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `filter`: handle, `chs_filter`.
 - `block`: handle, `chs_block`.
 - `out`: out_handle, `chs_buf`, `document:filter_result`.
 - `err`: out_error.
 
-Evaluates the filter over a parsed block, with the same answers `chs_filter_eval_body` gives for the same body. The filter and the block must come from the same schema.
+Evaluates the filter over a parsed block, with the same answers `chs_filter_eval_body` gives for the same body. It takes no settings: the filter brings the settings it was compiled under and the block those it was parsed under. The filter and the block must come from the same schema; a pair from two schemas is `CHS_INVALID_ARGUMENT`.
 
 #### `chs_discover_query`
 
@@ -883,12 +1269,12 @@ Evaluates the filter over a parsed block, with the same answers `chs_filter_eval
 CHS_API chs_status chs_discover_query(chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `any`, A6, A11, Q-f.
+- Class `api`, thread `any`, FIRM.
 - May return `CHS_OK`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `out`: out_handle, `chs_buf`, `sql`.
 - `err`: out_error.
 
-The query a caller runs against a server to read a table's `system.columns` rows, so that no binding holds SQL of its own.
+The query a caller runs against a server to read a table's `system.columns` rows, so that no binding holds SQL of its own. It is the connect-time way to rebuild a table's columns from a server; whether a server's `SHOW CREATE TABLE` output compiles under `chs_schema_create` instead is not yet measured. It takes no input. The SQL names the table through the query parameters in `discover_query_param` (`{database:String}` and `{table:String}`), which the caller binds when it runs the query; it selects exactly the `system.columns` fields `chs_discover_columns` reads, `FORMAT JSONEachRow`.
 
 #### `chs_discover_columns`
 
@@ -896,7 +1282,7 @@ The query a caller runs against a server to read a table's `system.columns` rows
 CHS_API chs_status chs_discover_columns(const uint8_t *rows, size_t rows_len, chs_buf **out, chs_error **err);
 ```
 
-- Class `api`, thread `any`, A6, A11, A12.
+- Class `api`, thread `any`, FIRM.
 - May return `CHS_OK`, `CHS_REJECTED`, `CHS_DECLINED`, `CHS_INVALID_ARGUMENT`, `CHS_INTERNAL`.
 - `rows`: bytes_in, `bytes`.
 - `out`: out_handle, `chs_buf`, `document:discovery`.

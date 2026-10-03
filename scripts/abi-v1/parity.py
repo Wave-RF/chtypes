@@ -24,13 +24,18 @@ spec/abi-v1/schema/report.schema.json (one per v1-abi-conformance matrix
 leg, downloaded as CI artifacts in the real workflow). Without it, this
 treats zero reports as present, which only passes when nothing is enrolled.
 
+PER-OS CASES. A case may carry `os` ("linux" or "darwin"). Each leg is expected
+to report exactly the cases whose `os` is absent or whose report `os`
+(linux-amd64, linux-arm64, darwin-arm64) starts with that value plus "-".
+
 THE FOUR WAYS A CHECK REFUSES (the exact words --selftest proves each fires
 for), matching the acceptance criterion verbatim:
   * MISSING  — an enrolled binding's required leg has no matching report.
   * FAILED   — a report exists for a required leg, but at least one of its
                results has "pass": false.
   * EXTRA    — a report's results name a case id the current cases.json does
-               not contain (the report was built against a superset, or a
+               not contain, or one whose `os` does not match this leg (runners
+               OMIT those; see CASE_OS_TO_REPORT_PREFIX) (the report was built against a superset, or a
                since-renamed case).
   * STALE    — a report's cases_sha256 does not match the current
                tests/fixtures/abi-v1/cases.json (compute_cases_hash): it was
@@ -60,6 +65,11 @@ CASES_PATH = "tests/fixtures/abi-v1/cases.json"
 CASES_SCHEMA = "spec/abi-v1/schema/cases.schema.json"
 REPORT_SCHEMA = "spec/abi-v1/schema/report.schema.json"
 ENROLLED_DIR = "spec/abi-v1/enrolled"
+# cases.json's per-case `os` vocabulary ("linux", "darwin") onto a report's
+# `os` ("<os>-<arch>": linux-amd64, linux-arm64, darwin-arm64): a case with
+# os X applies to every report whose os starts with "X-". A case with no `os`
+# applies on every leg. Runners OMIT a case whose os does not match their leg.
+CASE_OS_TO_REPORT_PREFIX = {"linux": "linux-", "darwin": "darwin-"}
 BINDINGS = ("go", "python", "ts", "rust")
 
 
@@ -101,6 +111,22 @@ def load_cases(root: Path) -> tuple[dict, set[str], str]:
     return doc, ids, compute_cases_hash(doc)
 
 
+def case_os_map(doc: dict) -> dict[str, str]:
+    """case id -> its `os` ("linux" or "darwin"), for the cases that carry one."""
+    return {c["id"]: c["os"] for c in doc["cases"] if "os" in c}
+
+
+def expected_for_leg(cases_ids: set[str], case_os: dict[str, str], report_os: str) -> set[str]:
+    """The case ids a leg on `report_os` must report: those with no `os`, or
+    whose `os` maps (CASE_OS_TO_REPORT_PREFIX) onto this report's os."""
+    out = set()
+    for cid in cases_ids:
+        o = case_os.get(cid)
+        if o is None or report_os.startswith(CASE_OS_TO_REPORT_PREFIX[o]):
+            out.add(cid)
+    return out
+
+
 def load_enrolled(root: Path) -> dict[str, dict]:
     out: dict[str, dict] = {}
     d = root / ENROLLED_DIR
@@ -131,12 +157,17 @@ def _leg_key(binding: str, toolchain: str, os_: str) -> tuple[str, str, str]:
 
 
 def check(
-    enrolled: dict[str, dict], cases_ids: set[str], cases_hash: str, reports: list[dict]
+    enrolled: dict[str, dict],
+    cases_ids: set[str],
+    cases_hash: str,
+    reports: list[dict],
+    case_os: dict[str, str] | None = None,
 ) -> tuple[list[str], int]:
     """Return (problems, enrolled_count). An empty `problems` list is green —
     vacuously if enrolled_count is 0."""
     if not enrolled:
         return [], 0
+    case_os = case_os or {}
 
     by_binding: dict[str, list[dict]] = {b: [] for b in enrolled}
     for r in reports:
@@ -178,10 +209,14 @@ def check(
                 )
                 continue
             result_ids = {res["id"] for res in r["results"]}
-            extra = result_ids - cases_ids
+            expected = expected_for_leg(cases_ids, case_os, r["os"])
+            extra = result_ids - expected
             if extra:
-                problems.append(f"EXTRA: {leg}: report names case(s) not in {CASES_PATH}: {sorted(extra)}")
-            missing_cases = cases_ids - result_ids
+                problems.append(
+                    f"EXTRA: {leg}: report names case(s) not expected on this leg (absent from {CASES_PATH} "
+                    f"or for another os): {sorted(extra)}"
+                )
+            missing_cases = expected - result_ids
             if missing_cases:
                 problems.append(f"MISSING: {leg}: report has no result for case(s): {sorted(missing_cases)}")
             failed = sorted(res["id"] for res in r["results"] if not res["pass"])
@@ -192,10 +227,10 @@ def check(
 
 def run(root: Path, reports_dir: Path | None) -> int:
     report_schema = _validate_schema_file(root, REPORT_SCHEMA)
-    _, cases_ids, cases_hash = load_cases(root)
+    cases_doc, cases_ids, cases_hash = load_cases(root)
     enrolled = load_enrolled(root)
     reports = load_reports(reports_dir, report_schema)
-    problems, n = check(enrolled, cases_ids, cases_hash, reports)
+    problems, n = check(enrolled, cases_ids, cases_hash, reports, case_os_map(cases_doc))
     if n == 0:
         print(
             "v1-abi-parity: 0 ENROLLED bindings — vacuously green. No binding lane has landed yet "
@@ -341,6 +376,32 @@ def selftest() -> int:
         if not any(p.startswith("STALE") for p in problems):
             fails.append(f"a stale cases_sha256 was not caught: {problems}")
 
+        # 7. Per-OS cases: a leg reports only the cases whose os is absent or
+        #    matches. Fake set: a.echo (all), l.only (linux), d.only (darwin).
+        osids = {"a.echo", "l.only", "d.only"}
+        osmap = {"l.only": "linux", "d.only": "darwin"}
+
+        def os_report(os_, ids):
+            r = _good_report(cases_hash, os_=os_)
+            r["results"] = [{"id": i, "pass": True} for i in ids]
+            return r
+
+        for os_, want in (("linux-amd64", ["a.echo", "l.only"]), ("linux-arm64", ["a.echo", "l.only"]),
+                          ("darwin-arm64", ["a.echo", "d.only"])):
+            enroll([{"toolchain": "go.mod", "os": os_}])
+            en = load_enrolled(root)
+            problems, _ = check(en, osids, cases_hash, [os_report(os_, want)], osmap)
+            if problems:
+                fails.append(f"{os_}: a report with exactly its matching cases was refused: {problems}")
+        enroll([{"toolchain": "go.mod", "os": "darwin-arm64"}])
+        en = load_enrolled(root)
+        problems, _ = check(en, osids, cases_hash, [os_report("darwin-arm64", ["a.echo", "d.only", "l.only"])], osmap)
+        if not any(p.startswith("EXTRA") and "l.only" in p for p in problems):
+            fails.append(f"a mismatched-os case present in a report was not EXTRA: {problems}")
+        problems, _ = check(en, osids, cases_hash, [os_report("darwin-arm64", ["a.echo"])], osmap)
+        if not any(p.startswith("MISSING") and "d.only" in p for p in problems):
+            fails.append(f"a matching-os case absent from a report was not MISSING: {problems}")
+
         # run() end-to-end, through the real schemas, for the vacuous and the
         # MISSING cases (proves the CLI path, not just check()).
         if (root / ENROLLED_DIR / "go").exists():
@@ -357,7 +418,7 @@ def selftest() -> int:
         return 1
     print(
         "parity.py --selftest: ok: vacuous-0-enrolled is green, a clean report passes, and MISSING/FAILED/EXTRA/"
-        "STALE each refuse"
+        "STALE each refuse, and per-os cases are expected only on their own leg (omitted = ok, absent match = MISSING, present mismatch = EXTRA)"
     )
     return 0
 
