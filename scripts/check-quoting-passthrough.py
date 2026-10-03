@@ -427,8 +427,9 @@ def selftest(root: str) -> int:
         # that was already failing proves nothing. This is ALSO the
         # generated-file exemption's "banner present -> silent" control.
         # What the emitters produce, standing in for the real set (the real
-        # outputs are not source files yet): only the fabricated file above.
-        produced = frozenset({GENERATED_GO_DECLS})
+        # outputs, so a real generated file copied into the tree stays exempt) plus
+        # the fabricated file above.
+        produced = produced_outputs() | {GENERATED_GO_DECLS}
         n, lines = check(tmp, produced)
         if n:
             print("SELFTEST FAILED: the copied tree does not pass\n" + "\n".join(lines), file=sys.stderr)
