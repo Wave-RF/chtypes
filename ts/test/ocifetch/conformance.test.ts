@@ -105,7 +105,7 @@ function recordingClock(sleeps: number[]): Clock {
 
 type ServerProcess = ChildProcessByStdio<null, Readable, Readable>;
 
-async function startServer(conformanceDir: string): Promise<{ proc: ServerProcess; port: number } | undefined> {
+async function startServer(conformanceDir: string): Promise<{ proc: ServerProcess; port: number; port2: number } | undefined> {
   const scriptPath = path.resolve(conformanceDir, '..', '..', '..', 'scripts', 'fetch-v1', 'server.py');
   return new Promise((resolve) => {
     let proc: ServerProcess;
@@ -119,9 +119,9 @@ async function startServer(conformanceDir: string): Promise<{ proc: ServerProces
     const onData = (chunk: Buffer) => {
       buf += chunk.toString('utf8');
       const m = /LISTENING (\d+) (\d+)/.exec(buf);
-      if (m?.[1] !== undefined) {
+      if (m?.[1] !== undefined && m[2] !== undefined) {
         proc.stdout.off('data', onData);
-        resolve({ proc, port: Number.parseInt(m[1], 10) });
+        resolve({ proc, port: Number.parseInt(m[1], 10), port2: Number.parseInt(m[2], 10) });
       }
     };
     proc.stdout.on('data', onData);
@@ -136,8 +136,29 @@ async function fetchRequestLog(port: number, caseId: string): Promise<readonly R
   return (await res.json()) as readonly RequestLogEntry[];
 }
 
-/** `{base}` expansion for one case/transport (plan §3.2, guide §10's "{base} per transport"). */
-function expandBase(template: string, transport: Transport, serverPort: number | undefined, caseId: string, tree: string, conformanceDir: string): string {
+/**
+ * `{base}`/`{base2}` expansion for one case/transport (plan §3.2, guide
+ * §10's "{base} per transport"; `{base2}`, http transport only, decided
+ * lane 0B 2026-10-02: the same `s-<case-id>/chtypes/v1` suffix as `{base}`,
+ * rooted at `server.py`'s SECOND origin — the second port on its own
+ * `LISTENING <port> <port2>` line — for a case needing two genuinely
+ * independent bases over the same case id, such as a mirror-failover case).
+ */
+function expandBase(
+  template: string,
+  transport: Transport,
+  serverPort: number | undefined,
+  serverPort2: number | undefined,
+  caseId: string,
+  tree: string,
+  conformanceDir: string,
+): string {
+  if (template.includes('{base2}')) {
+    if (transport !== 'http') {
+      throw new Error(`chtypes: {base2} is an http-transport-only template, got transport ${transport}`);
+    }
+    return template.replace('{base2}', `http://127.0.0.1:${serverPort2}/s-${caseId}/chtypes/v1`);
+  }
   if (!template.includes('{base}')) return template;
   const base =
     transport === 'file'
@@ -171,7 +192,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
 describe.skipIf(CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '')('v1 conformance', () => {
   let caseFile: CaseFile;
   let casesSha256: string;
-  let server: { proc: ServerProcess; port: number } | undefined;
+  let server: { proc: ServerProcess; port: number; port2: number } | undefined;
   const results: ReportResult[] = [];
 
   beforeAll(async () => {
@@ -198,7 +219,7 @@ describe.skipIf(CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '')('v1 con
     for (const c of caseFile.cases) {
       for (const transport of c.transports) {
         if (transport === 'registry') continue; // the v1-network job's own leg.
-        const detail = await runOne(c, transport, CONFORMANCE_DIR, server?.port).catch(
+        const detail = await runOne(c, transport, CONFORMANCE_DIR, server?.port, server?.port2).catch(
           (err: unknown) => `runner threw: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
         );
         results.push({ id: c.id, transport, verdict: detail === '' ? 'pass' : 'fail', detail });
@@ -211,7 +232,13 @@ describe.skipIf(CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '')('v1 con
 
 // ------------------------------------------------------------------ one case
 
-async function runOne(c: ConformanceCase, transport: Transport, conformanceDir: string, serverPort: number | undefined): Promise<string> {
+async function runOne(
+  c: ConformanceCase,
+  transport: Transport,
+  conformanceDir: string,
+  serverPort: number | undefined,
+  serverPort2: number | undefined,
+): Promise<string> {
   const work = await mkdtemp(path.join(tmpdir(), 'ocifetch-v1-case-'));
   try {
     const cacheDir = path.join(work, 'cache');
@@ -254,7 +281,7 @@ async function runOne(c: ConformanceCase, transport: Transport, conformanceDir: 
     const beforeIndexRename = c.setup.before_index_rename_hook === null ? undefined : indexRenameHook(c.setup.before_index_rename_hook, cacheDir);
 
     const sleeps: number[] = [];
-    const bases = c.request.bases.map((b) => expandBase(b, transport, serverPort, c.id, c.tree, conformanceDir));
+    const bases = c.request.bases.map((b) => expandBase(b, transport, serverPort, serverPort2, c.id, c.tree, conformanceDir));
     const token = c.env['CHTYPES_DOWNLOAD_TOKEN'];
 
     const baseOptions = {
