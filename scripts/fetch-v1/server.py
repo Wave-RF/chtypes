@@ -53,6 +53,10 @@ reason). The server:
      from `tests/fixtures/fetch-v1/trees/<tree>/v2/<repository-relative
      path>` as a static file, 404 if absent.
 
+REFERRERS FILTER. `GET .../referrers/<digest>?artifactType=<t>` is answered
+as the real host does (form-decoded query, so an unencoded `+` in a media
+type matches nothing; `OCI-Filters-Applied: artifactType` when filtered).
+
 USER-AGENT. A request under `/v2/s-<case-id>/` whose `User-Agent` does not
 match `^chtypes-(go|python|ts|rust)/[0-9A-Za-z.+-]+$` is logged and then
 answered 400, before any routing, scripting or tree lookup.
@@ -99,7 +103,7 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 FIXTURES: Path = Path(".")  # set by main() / run_server()
 
@@ -331,15 +335,40 @@ class Handler(BaseHTTPRequestHandler):
         status = resp["status"]
         headers = substitute_headers(resp.get("headers", {}), self.origin_url, self.second_origin_url)
         body = b""
+        filtered = False
         if resp.get("body_from_tree"):
-            body = self._tree_bytes_for_request()
+            body, filtered = self._referrers_filter(self._tree_bytes_for_request())
         self.send_response(status)
         for k, v in headers.items():
             self.send_header(k, v)
+        if filtered:
+            self.send_header("OCI-Filters-Applied", "artifactType")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if self.command != "HEAD" and body:
             self.wfile.write(body)
+
+    def _referrers_filter(self, body: bytes) -> tuple[bytes, bool]:
+        """Answer the referrers API's `artifactType` filter the way the real
+        host does: the query is decoded as an HTML form (so a raw `+` is a
+        space and matches nothing; `%2B` is a plus), `manifests[]` is filtered
+        by exact `artifactType`, and `OCI-Filters-Applied: artifactType` is
+        sent when it filtered. A request with no filter is served unchanged,
+        so a binding that filters client-side still works."""
+        parsed = urlsplit(self.path)
+        if "/referrers/" not in parsed.path:
+            return body, False
+        wanted = parse_qs(parsed.query).get("artifactType")
+        if not wanted:
+            return body, False
+        try:
+            doc = json.loads(body)
+        except ValueError:
+            return body, False
+        if not isinstance(doc, dict) or not isinstance(doc.get("manifests"), list):
+            return body, False
+        doc["manifests"] = [m for m in doc["manifests"] if m.get("artifactType") == wanted[0]]
+        return json.dumps(doc, indent=2).encode("utf-8"), True
 
     def _tree_bytes_for_request(self) -> bytes:
         path = urlsplit(self.path).path
@@ -361,10 +390,12 @@ class Handler(BaseHTTPRequestHandler):
         if not f.is_file():
             self._send_status(404)
             return
-        body = f.read_bytes()
+        body, filtered = self._referrers_filter(f.read_bytes())
         content_type = "application/json" if _looks_like_json_route(repo_relative) else "application/octet-stream"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
+        if filtered:
+            self.send_header("OCI-Filters-Applied", "artifactType")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if self.command != "HEAD":
@@ -454,6 +485,19 @@ def _run_selftest(tmp: Path) -> None:
     # A minimal two-case fixture tree, built the same way genfixtures
     # shapes one, without depending on genfixtures itself (server.py has
     # no dependency on the Go generator; it only reads what is on disk).
+    ref_dir = tmp / "trees" / "basic" / "v2" / "chtypes" / "v1" / "referrers"
+    ref_dir.mkdir(parents=True)
+    (ref_dir / "sha256:abc").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "manifests": [
+                    {"digest": "sha256:1", "artifactType": "application/vnd.dev.sigstore.bundle.v0.3+json"},
+                    {"digest": "sha256:2", "artifactType": "application/vnd.other"},
+                ],
+            }
+        )
+    )
     tree_dir = tmp / "trees" / "basic" / "v2" / "chtypes" / "v1" / "manifests"
     tree_dir.mkdir(parents=True)
     (tree_dir / "26.8").write_text('{"ok":true}')
@@ -614,6 +658,20 @@ def _run_selftest(tmp: Path) -> None:
         for good in ("chtypes-go/1.0.0", "chtypes-python/1.0.0", "chtypes-ts/1.0.0-rc.1", "chtypes-rust/0.0.0-dev"):
             with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": good}), timeout=5) as r:
                 assert r.status == 200, f"expected 200 for User-Agent {good!r}, got {r.status}"
+        # 7. Referrers filter: raw `+` is a space (0 manifests), `%2B` is a
+        # plus (the bundle), no filter serves everything.
+        rbase = f"http://127.0.0.1:{port1}/v2/s-no-script/chtypes/v1/referrers/sha256:abc"
+        for query, want, applied in (
+            ("artifactType=application/vnd.dev.sigstore.bundle.v0.3+json", 0, True),
+            ("artifactType=application%2Fvnd.dev.sigstore.bundle.v0.3%2Bjson", 1, True),
+            ("", 2, False),
+        ):
+            with get(rbase + ("?" + query if query else "")) as r:
+                got = json.loads(r.read())["manifests"]
+                assert len(got) == want, f"referrers {query!r}: expected {want}, got {len(got)}"
+                has = r.headers.get("OCI-Filters-Applied") == "artifactType"
+                assert has == applied, f"referrers {query!r}: OCI-Filters-Applied={has}, want {applied}"
+
         log_ua = json.loads(get(f"http://127.0.0.1:{port1}/_log/s-no-script").read())
         agents = [e["user_agent"] for e in log_ua]
         assert "Python-urllib/3.13" in agents and "chtypes-go/1.0.0" in agents, f"agents not recorded: {agents}"
