@@ -6,6 +6,19 @@ name: release-python
 on:
   push:
     tags: ["python/v*"]
+  # A dry run: every step up to the publish (tag and version agreement against the
+  # tag NAME given here, the build, `twine check`), and nothing after it.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the tag name to check the version against, e.g. python/v1.0.0"
+        required: true
+        type: string
+      dry_run:
+        description: "stop before the publish and the post-publish check"
+        required: true
+        type: boolean
+        default: true
 permissions:
   contents: read
 # Every run: step uses bash with -eo pipefail. GitHub's default for a step
@@ -22,16 +35,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: the tag and the package agree on the version
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
-          tag="${GITHUB_REF_NAME#python/v}"
+          tag="${TAG_NAME#python/v}"
           ver="$(cd python && uv run --no-project python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
           [ "$tag" = "$ver" ] || { echo "::error::tag python/v$tag but pyproject says $ver"; exit 1; }
       - name: build sdist + wheel
         run: cd python && uv build
+      - name: the distributions pass twine check
+        run: uvx twine check python/dist/*
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with: { name: python-dist, path: python/dist/ }
   publish:
     needs: build
+    if: github.event_name == 'push' || inputs.dry_run == false
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -58,13 +76,16 @@ jobs:
   # yet is retried for up to 15 minutes, and every other failure fails at once.
   verify:
     needs: publish
+    if: github.event_name == 'push' || inputs.dry_run == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: it installs from PyPI, speaks the header's ABI fingerprint, and fetches and opens a line
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
-          version="${GITHUB_REF_NAME#python/v}"
+          version="${TAG_NAME#python/v}"
           want="$(sed -n 's/^#define CHS_ABI_FINGERPRINT "\(sha256:[0-9a-f]\{64\}\)"$/\1/p' include/chtypes.h)"
           [ -n "$want" ] || { echo "::error::no CHS_ABI_FINGERPRINT in include/chtypes.h"; exit 1; }
           clean="$(mktemp -d)"
@@ -90,7 +111,7 @@ jobs:
           echo "fingerprint $got matches include/chtypes.h"
           listing="$("$bin" list)"
           printf '%s\n' "$listing"
-          line="$(printf '%s\n' "$listing" | awk '/^published:/ { p = 1; next } p && $1 ~ /^[0-9]+[.][0-9]+$/ { print $1 }' | sort -V | tail -1)"
+          line="$(printf '%s\n' "$listing" | awk '/^published/ { p = 1; next } p && $1 ~ /^[0-9]+[.][0-9]+$/ { print $1 }' | sort -V | tail -1)"
           [ -n "$line" ] || { echo "::error::the production registry lists no release line"; exit 1; }
           "$bin" fetch "$line"
           LINE="$line" WANT="$want" "$py" - <<'PY'

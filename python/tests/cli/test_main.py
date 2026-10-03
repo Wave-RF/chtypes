@@ -47,7 +47,7 @@ def test_fetch_prints_the_library_path_and_where_names_the_cache(env, tmp_path, 
     code, out, err = run(capsys, "fetch", "26.8")
     assert code == 0, err
     path = Path(out.strip())
-    assert path.read_bytes() == env.library_bytes
+    assert (path / "libchtypes.so").read_bytes() == env.library_bytes
     assert str(path).startswith(str(tmp_path / "cache"))
     code, out, _ = run(capsys, "where")
     assert (code, out.strip()) == (0, str(tmp_path / "cache"))
@@ -57,7 +57,7 @@ def test_verify_passes_then_fails_when_the_library_changes(env, capsys) -> None:
     run(capsys, "fetch", "26.8")
     code, out, err = run(capsys, "verify")
     assert code == 0 and "ok" in out, err
-    library = Path(run(capsys, "fetch", "--offline", "26.8")[1].strip())
+    library = Path(run(capsys, "fetch", "--offline", "26.8")[1].strip()) / "libchtypes.so"
     library.write_bytes(b"tampered")
     code, out, _ = run(capsys, "verify")
     assert code == C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_CORRUPT"] and "FAILED" in out
@@ -89,6 +89,27 @@ def test_lock_then_frozen_then_offline(env, tmp_path, capsys) -> None:
     assert code == 0 and len(out.strip().splitlines()) == 1, err
     code, _, err = run(capsys, "fetch", "--offline", "26.8")
     assert code == 0, err
+
+
+def test_update_needs_a_lock_and_refuses_frozen(env, tmp_path, capsys) -> None:
+    assert run(capsys, "fetch", "26.8", "--update")[0] == 2
+    assert run(capsys, "fetch", "26.8", "--update", "--lock", "l", "--frozen")[0] == 2
+    run(capsys, "fetch", "26.8", "--lock", "chtypes.lock")
+    code, out, err = run(capsys, "fetch", "--update", "--lock", "chtypes.lock")
+    assert code == 0 and len(out.strip().splitlines()) == 1, err
+
+
+def test_cache_platform_and_version_flags(env, tmp_path, capsys) -> None:
+    other = tmp_path / "other"
+    code, out, _ = run(capsys, "where", "--cache", str(other))
+    assert (code, out.strip()) == (0, str(other))
+    code, out, err = run(
+        capsys, "fetch", "26.8", "--cache", str(other), "--platform", "linux-arm64"
+    )
+    assert code == 0 and out.startswith(str(other)), err
+    assert run(capsys, "fetch", "26.8", "--platform", "plan9-x")[0] == 2
+    assert run(capsys, "verify", "--cache", str(other))[0] == 0
+    assert run(capsys, "--version")[0] == 0
 
 
 def test_frozen_without_a_pin_is_artifact_pinned(env, capsys) -> None:
