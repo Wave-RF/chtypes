@@ -71,7 +71,7 @@ inner_loopback() {
   # A real fixture path: the offline-frozen case, tree lock-offline-frozen.
   local want="$ROOT/tests/fixtures/fetch-v1/trees/lock-offline-frozen/v2/chtypes/v1/tags/list"
   local rc=0
-  curl -fsS --max-time 5 -o "$tmp/got" "http://127.0.0.1:$port/v2/s-offline-frozen/chtypes/v1/tags/list" || rc=$?
+  curl -fsS --max-time 5 -A "chtypes-ts/0.0.0-dev" -o "$tmp/got" "http://127.0.0.1:$port/v2/s-offline-frozen/chtypes/v1/tags/list" || rc=$?
   echo "proof 3 (loopback round trip through server.py, inside the sandbox): curl exit code $rc"
   [ "$rc" -eq 0 ] || die "loopback round trip failed inside the sandbox (curl exit $rc)"
   cmp -s "$tmp/got" "$want" || die "the served bytes differ from the fixture file"
