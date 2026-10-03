@@ -20,9 +20,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { JsExternal } from 'ffi-rs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { HANDLE_INFO, SYMBOL } from '../../src/abi1/decls.gen.js';
 import { ArtifactCorruptError, ArtifactIncompatibleError } from '../../src/abi1/errors.js';
 import { Library, type LoadInput, openAbi1, type Predicate } from '../../src/abi1/loader.js';
-import { NULL_EXTERNAL, type RawApi, type RawCallResult, rawCall } from '../../src/abi1/raw.js';
+import { freeHandle, type HandleRef, NULL_EXTERNAL, type RawApi, type RawCallResult, rawCall } from '../../src/abi1/raw.js';
 
 const STUBS_DIR = process.env.CHTYPES_ABI1_STUBS;
 const REPORT_PATH = process.env.CHTYPES_ABI1_REPORT;
@@ -37,16 +38,28 @@ type ArgExpr =
   | { readonly int: number }
   | { readonly bytes_hex: string }
   | { readonly handle: { readonly fn: string; readonly args: readonly ArgExpr[] } }
-  | { readonly null_handle: true };
+  | { readonly null_handle: true }
+  | { readonly ref: string };
+
+interface StepEntry {
+  readonly let?: string;
+  readonly call?: { readonly fn: string; readonly args: readonly ArgExpr[] };
+  readonly expect?: any;
+  readonly free?: string;
+  readonly live_delta?: Readonly<Record<string, number>>;
+}
 
 interface CaseEntry {
   readonly id: string;
-  readonly kind: 'handshake' | 'echo' | 'status' | 'loader';
+  readonly kind: 'handshake' | 'echo' | 'status' | 'loader' | 'lifecycle' | 'concurrent';
   readonly fn?: string;
   readonly variant?: string;
   readonly os?: 'linux' | 'darwin';
   readonly args?: readonly ArgExpr[];
-  readonly expect: any;
+  readonly expect?: any;
+  readonly steps?: readonly StepEntry[];
+  readonly threads?: number;
+  readonly calls?: number;
 }
 
 interface CasesDoc {
@@ -105,19 +118,70 @@ function currentOs(): 'linux' | 'darwin' {
 
 // ------------------------------------------------------------- arg resolution
 
-/** Resolve one `ArgExpr` (cases.json's input-argument shape) into a value `rawCall` accepts, minting a handle recursively through `rawCall` itself when the expression names one. */
-function resolveArg(raw: RawApi, expr: ArgExpr): unknown {
-  if ('int' in expr) return expr.int;
-  if ('bytes_hex' in expr) return Buffer.from(expr.bytes_hex, 'hex');
-  if ('null_handle' in expr) return NULL_EXTERNAL;
-  const { fn, args } = expr.handle;
-  const resolved = args.map((a) => resolveArg(raw, a));
-  const call = rawCall(raw, fn, resolved);
+/** What an argument expression resolves against: the named handles a lifecycle case has bound (`ref`), and every handle minted along the way (so a concurrent case can free what it minted). */
+interface ArgContext {
+  readonly refs: Map<string, HandleRef>;
+  readonly minted: HandleRef[];
+}
+
+function newContext(): ArgContext {
+  return { refs: new Map(), minted: [] };
+}
+
+/** The first handle a successful status call produced. */
+function firstHandleOut(fn: string, call: RawCallResult): HandleRef {
   if (call.outcome !== 'status') throw new Error(`conformance: minting a handle via ${fn} did not return a status`);
   if (call.statusName !== 'CHS_OK') throw new Error(`conformance: minting a handle via ${fn} failed: ${call.statusName}`);
   const handleOut = Object.values(call.outs).find((v) => !Buffer.isBuffer(v));
   if (handleOut === undefined) throw new Error(`conformance: ${fn} produced no handle output`);
-  return (handleOut as { readonly ptr: JsExternal }).ptr;
+  return handleOut as HandleRef;
+}
+
+/** Resolve one `ArgExpr` (cases.json's input-argument shape) into a value `rawCall` accepts, minting a handle recursively through `rawCall` itself when the expression names one. */
+function resolveArg(raw: RawApi, expr: ArgExpr, ctx: ArgContext): unknown {
+  if ('int' in expr) return expr.int;
+  if ('bytes_hex' in expr) return Buffer.from(expr.bytes_hex, 'hex');
+  if ('null_handle' in expr) return NULL_EXTERNAL;
+  if ('ref' in expr) {
+    const bound = ctx.refs.get(expr.ref);
+    if (bound === undefined) throw new Error(`conformance: ref ${expr.ref} is not bound`);
+    return bound.ptr;
+  }
+  const { fn, args } = expr.handle;
+  const resolved = args.map((a) => resolveArg(raw, a, ctx));
+  const minted = firstHandleOut(fn, rawCall(raw, fn, resolved));
+  ctx.minted.push(minted);
+  return minted.ptr;
+}
+
+function freeRef(raw: RawApi, h: HandleRef): void {
+  const info = HANDLE_INFO[h.kind];
+  if (info === undefined) throw new Error(`conformance: no HANDLE_INFO for ${h.kind}`);
+  freeHandle(raw, info.free, h.ptr);
+}
+
+/** chs_live_handles' JSON document, as kind -> count. */
+function liveHandles(raw: RawApi): Record<string, number> {
+  const call = rawCall(raw, SYMBOL.LIVE_HANDLES, []);
+  if (call.outcome !== 'status' || call.statusName !== 'CHS_OK') throw new Error('conformance: chs_live_handles did not answer CHS_OK');
+  const out = call.outs.out;
+  if (!Buffer.isBuffer(out)) throw new Error('conformance: chs_live_handles produced no document');
+  return JSON.parse(out.toString('utf8')) as Record<string, number>;
+}
+
+/** An echo-style `expect` (status and optional outputs) against a call's result. */
+function checkEchoExpect(call: RawCallResult, expectation: any): void {
+  expect(call.outcome).toBe('status');
+  if (call.outcome !== 'status') return;
+  expect(call.statusName).toBe(expectation.status);
+  const expectedOutputs = expectation.outputs as Record<string, { fn: string; out: string; args: unknown[] }> | undefined;
+  if (expectedOutputs === undefined) return;
+  for (const [name, expected] of Object.entries(expectedOutputs)) {
+    const actual = call.outs[name];
+    expect(Buffer.isBuffer(actual)).toBe(true);
+    const parsed: unknown = JSON.parse((actual as Buffer).toString('utf8'));
+    expect(echoOutputMatches(expected, parsed)).toBe(true);
+  }
 }
 
 // -------------------------------------------------------------- echo matching
@@ -159,10 +223,10 @@ interface ReportResult {
 
 const results: ReportResult[] = [];
 
-function record(id: string, run: () => void): void {
+function record(id: string, run: () => string | undefined): void {
   try {
-    run();
-    results.push({ id, pass: true });
+    const detail = run();
+    results.push(typeof detail === 'string' ? { id, pass: true, detail } : { id, pass: true });
   } catch (err) {
     results.push({ id, pass: false, detail: err instanceof Error ? err.message : String(err) });
     throw err;
@@ -203,12 +267,12 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
         const call = rawCall(okRaw, c.fn as string, []);
         if ('int' in c.expect) {
           expect(call.outcome).toBe('value');
-          expect(call.outcome === 'value' ? call.value : undefined).toBe(c.expect.int);
+          expect(call.outcome === 'value' ? call.value : undefined).toBe(c.expect?.int);
         } else if ('contains' in c.expect) {
           expect(call.outcome).toBe('value');
           const v = call.outcome === 'value' ? call.value : null;
           expect(typeof v).toBe('string');
-          expect((v as string).includes(c.expect.contains as string)).toBe(true);
+          expect((v as string).includes(c.expect?.contains as string)).toBe(true);
         } else if ('non_empty' in c.expect) {
           expect(call.outcome).toBe('value');
           const v = call.outcome === 'value' ? call.value : null;
@@ -224,19 +288,9 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
   describe('echo', () => {
     it.each(casesOfKind('echo'))('$id', (c: CaseEntry) => {
       record(c.id, () => {
-        const args = (c.args ?? []).map((a) => resolveArg(okRaw, a));
+        const args = (c.args ?? []).map((a) => resolveArg(okRaw, a, newContext()));
         const call: RawCallResult = rawCall(okRaw, c.fn as string, args);
-        expect(call.outcome).toBe('status');
-        if (call.outcome !== 'status') return;
-        expect(call.statusName).toBe(c.expect.status);
-        const expectedOutputs = c.expect.outputs as Record<string, { fn: string; out: string; args: unknown[] }> | undefined;
-        if (expectedOutputs === undefined) return;
-        for (const [name, expected] of Object.entries(expectedOutputs)) {
-          const actual = call.outs[name];
-          expect(Buffer.isBuffer(actual)).toBe(true);
-          const parsed: unknown = JSON.parse((actual as Buffer).toString('utf8'));
-          expect(echoOutputMatches(expected, parsed)).toBe(true);
-        }
+        checkEchoExpect(call, c.expect);
       });
     });
   });
@@ -244,18 +298,79 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
   describe('status', () => {
     it.each(casesOfKind('status'))('$id', (c: CaseEntry) => {
       record(c.id, () => {
-        const args = (c.args ?? []).map((a) => resolveArg(okRaw, a));
+        const args = (c.args ?? []).map((a) => resolveArg(okRaw, a, newContext()));
         const call = rawCall(okRaw, c.fn as string, args);
         expect(call.outcome).toBe('status');
         if (call.outcome !== 'status') return;
-        expect(call.statusName).toBe(c.expect.status);
-        const expectedError = c.expect.error as { ch_code: number; ch_name: string; message: string; column: string };
+        expect(call.statusName).toBe(c.expect?.status);
+        const expectedError = c.expect?.error as { ch_code: number; ch_name: string; message: string; column: string };
         expect(call.error).not.toBeNull();
         if (call.error === null) return;
         expect(call.error.chCode).toBe(expectedError.ch_code);
         expect(call.error.chName).toBe(expectedError.ch_name);
         expect(call.error.messageBytes.toString('utf8')).toBe(expectedError.message);
         expect(call.error.column.toString('utf8')).toBe(expectedError.column);
+      });
+    });
+  });
+
+  describe('lifecycle', () => {
+    it.each(casesOfKind('lifecycle'))('$id', (c: CaseEntry) => {
+      record(c.id, () => {
+        const baseline = liveHandles(okRaw);
+        const ctx = newContext();
+        try {
+          for (const step of c.steps ?? []) {
+            if (step.free !== undefined) {
+              const h = ctx.refs.get(step.free);
+              if (h === undefined) throw new Error(`conformance: free of unbound ${step.free}`);
+              freeRef(okRaw, h);
+              ctx.refs.delete(step.free);
+            } else if (step.live_delta !== undefined) {
+              const now = liveHandles(okRaw);
+              for (const [kind, delta] of Object.entries(step.live_delta)) {
+                expect((now[kind] ?? 0) - (baseline[kind] ?? 0), `live delta of ${kind}`).toBe(delta);
+              }
+            } else if (step.call !== undefined) {
+              const args = step.call.args.map((a) => resolveArg(okRaw, a, ctx));
+              const call = rawCall(okRaw, step.call.fn, args);
+              if (step.let !== undefined) {
+                ctx.refs.set(step.let, firstHandleOut(step.call.fn, call));
+              } else {
+                checkEchoExpect(call, step.expect);
+              }
+            } else {
+              throw new Error(`conformance: ${c.id}: unrecognized step shape`);
+            }
+          }
+        } finally {
+          // A failing case must not leak handles into the next one.
+          for (const h of ctx.refs.values()) freeRef(okRaw, h);
+        }
+      });
+    });
+  });
+
+  describe('concurrent', () => {
+    it.each(casesOfKind('concurrent'))('$id', (c: CaseEntry) => {
+      record(c.id, () => {
+        // Node runs one isolate: the threads x calls are made in sequence.
+        const baseline = liveHandles(okRaw);
+        const ctx = newContext();
+        const total = (c.threads ?? 1) * (c.calls ?? 1);
+        try {
+          const args = (c.args ?? []).map((a) => resolveArg(okRaw, a, ctx));
+          for (let i = 0; i < total; i++) {
+            checkEchoExpect(rawCall(okRaw, c.fn as string, args), c.expect);
+          }
+        } finally {
+          for (const h of ctx.minted) freeRef(okRaw, h);
+        }
+        const after = liveHandles(okRaw);
+        for (const kind of new Set([...Object.keys(baseline), ...Object.keys(after)])) {
+          expect(after[kind] ?? 0, `live count of ${kind}`).toBe(baseline[kind] ?? 0);
+        }
+        return 'sequential';
       });
     });
   });
@@ -279,7 +394,7 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
         if (variant === undefined) throw new Error(`conformance: ${c.id}: no stub variant ${c.variant}`);
         const soPath = path.join(STUBS_DIR as string, `${c.variant}.so`);
         const input: LoadInput = { libraryPath: soPath, predicate: variant.predicate, platform: platformOf(variant.predicate) };
-        const expectedReason = c.expect.reason as string;
+        const expectedReason = c.expect?.reason as string;
         if (expectedReason === 'accepted') {
           const lib = openAbi1(input);
           expect(lib).toBeInstanceOf(Library);

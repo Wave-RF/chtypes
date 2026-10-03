@@ -62,6 +62,8 @@ export interface LoadInput {
   readonly libraryPath: string;
   readonly predicate: Predicate;
   readonly platform: string;
+  /** The image zone `chs_initialize` is given at step 7 (an IANA name); absent or empty means UTC. The public setup API arrives in wave C; until then only a test supplies one. */
+  readonly timezone?: string;
 }
 
 /** One opened, verified ABI v1 image. */
@@ -286,18 +288,22 @@ export function openAbi1(input: LoadInput): Library {
     }
   }
 
-  // step 7: a no-op hook. A5 (init vs. per-call timezone) is unsettled.
-  onLoaded();
+  // step 7: chs_initialize(timezone), once per image (a process-once call).
+  onLoaded(path, raw, input.timezone ?? '');
 
   const library = new Library(path, raw, buildInfo, String(buildInfo.clickhouse_version ?? ''));
   loadedByKey.set(key, library);
   return library;
 }
 
-function onLoaded(): void {
-  // Deliberately empty (plan §3.2 step 7 / §1.4): A5 decides what, if
-  // anything, runs here (process init, a context handle, a timezone). Wave
-  // C adds it without touching steps 1-6.
+function onLoaded(path: string, raw: RawApi, timezone: string): void {
+  // `chs_initialize` is process_once: a repeat with the same spelling is OK, a
+  // different spelling is CHS_INVALID_ARGUMENT. A zero-length zone means UTC.
+  const call = rawCall(raw, SYMBOL.INITIALIZE, [Buffer.from(timezone, 'utf8')]);
+  if (call.outcome !== 'status' || call.statusName !== 'CHS_OK') {
+    const got = call.outcome === 'status' ? call.statusName : call.outcome;
+    refuseIncompatible(path, 'initialize', 'CHS_OK', got);
+  }
 }
 
 // ----------------------------------------------------------------- unverified
@@ -350,7 +356,7 @@ export function openUnverified(path: string, options: { readonly explicit: boole
     }
   }
 
-  onLoaded();
+  onLoaded(path, raw, '');
   const library = new Library(path, raw, buildInfo, String(buildInfo.clickhouse_version ?? ''));
   loadedByKey.set(key, library);
   return library;
