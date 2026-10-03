@@ -38,6 +38,7 @@
 import { realpathSync, statSync } from 'node:fs';
 import type { JsExternal } from 'ffi-rs';
 import { ABI_FINGERPRINT, CROSS_CHECK, DESCRIBED_SYMBOLS, SYMBOL } from './decls.gen.js';
+import { errorForStatus } from './errmap.gen.js';
 import { ArtifactCorruptError, ArtifactIncompatibleError } from './errors.js';
 import { compareDottedVersions, ffiOpen, glibcVersionString, lastDlError, rawDlopen, rawDlsym } from './libc.js';
 import { defineRawFunctions, type RawApi, rawCall } from './raw.js';
@@ -301,8 +302,20 @@ function onLoaded(path: string, raw: RawApi, timezone: string): void {
   // different spelling is CHS_INVALID_ARGUMENT. A zero-length zone means UTC.
   const call = rawCall(raw, SYMBOL.INITIALIZE, [Buffer.from(timezone, 'utf8')]);
   if (call.outcome !== 'status' || call.statusName !== 'CHS_OK') {
-    const got = call.outcome === 'status' ? call.statusName : call.outcome;
-    refuseIncompatible(path, 'initialize', 'CHS_OK', got);
+    // Not a loader refusal (sdk.json has no step-7 reason): chs_initialize's own
+    // call error, mapped by the status table. The zone asked for, and whatever
+    // the library said about the zone it already holds, go in the message.
+    const status = call.outcome === 'status' ? call.statusName : 'CHS_INTERNAL';
+    const base = call.outcome === 'status' && call.error !== null ? call.error : null;
+    const note = `chs_initialize(timezone ${JSON.stringify(timezone === '' ? 'UTC' : timezone)}) failed for ${path}: ${status}`;
+    const library = base === null ? '' : `: ${base.messageBytes.toString('utf8')}`;
+    throw errorForStatus(status, {
+      status,
+      chCode: base?.chCode ?? 0,
+      chName: base?.chName ?? '',
+      messageBytes: Buffer.from(note + library, 'utf8'),
+      column: base?.column ?? Buffer.alloc(0),
+    });
   }
 }
 
