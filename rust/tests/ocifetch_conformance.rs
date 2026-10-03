@@ -449,25 +449,37 @@ fn execute_case(
         let result = run_generic_fetch(case, &bases, predicate_type, &mut options);
         check_generic_expectation(&case.expect, result)
     } else {
-        let result = ensure::ensure(
-            &case.request.spelling,
-            Options {
-                platform: Some(case.request.platform.clone()),
-                bases: Some(bases),
-                cache_dir: Some(cache_dir.path().to_string_lossy().to_string()),
-                system_dirs,
-                offline: case.request.offline,
-                frozen: case.request.frozen,
-                lock_path: Some(lock_path.clone()),
-                lock_write: case.request.lock_write,
-                update: case.request.update,
-                allow_unsigned: case.request.allow_unsigned,
-                trust_test_keys: case.request.trust == "test",
-                token: None,
-                clock: Some(fake_clock()),
-                before_index_rename: before_index_rename.take(),
-            },
-        );
+        let options = Options {
+            platform: Some(case.request.platform.clone()),
+            bases: Some(bases),
+            cache_dir: Some(cache_dir.path().to_string_lossy().to_string()),
+            system_dirs,
+            offline: case.request.offline,
+            frozen: case.request.frozen,
+            lock_path: Some(lock_path.clone()),
+            lock_write: case.request.lock_write,
+            update: case.request.update,
+            allow_unsigned: case.request.allow_unsigned,
+            trust_test_keys: case.request.trust == "test",
+            token: None,
+            clock: Some(fake_clock()),
+            before_index_rename: before_index_rename.take(),
+        };
+        let result = if case.id.starts_with("resolve-installed-") {
+            // The cache-only seam entry (docs/guides/fetch-v1.md §10): a miss
+            // is reported as CHTYPES_ARTIFACT_MISSING, the code --offline gives.
+            ensure::resolve_installed(&case.request.spelling, &case.request.platform, options)
+                .and_then(|found| {
+                    found.ok_or_else(|| {
+                        ocifetch::error::Error::ArtifactMissing(format!(
+                            "no installed artifact satisfies {}",
+                            case.request.spelling
+                        ))
+                    })
+                })
+        } else {
+            ensure::ensure(&case.request.spelling, options)
+        };
         check_expectation(&case.expect, result)
             .and_then(|()| match &case.expect.lock_after {
                 Some(name) => check_lock_after(fixtures_root, name, &lock_path),
@@ -552,21 +564,10 @@ fn run_generic_fetch(
     options: &mut Options,
 ) -> Result<(Vec<u8>, serde_json::Value, ensure::Digests), ocifetch::error::Error> {
     if case.id.starts_with("goldens-") {
-        let client = ocifetch::http::Client::new();
-        let auth = ocifetch::http::AuthConfig {
-            static_token: std::env::var(ocifetch::constants::ENV_TOKEN_NAME).ok(),
-        };
-        let source = ocifetch::oci::Source {
-            bases,
-            client: &client,
-            auth: &auth,
-        };
-        let referrer = ocifetch::referrers::find_content_referrer(
-            &source,
-            &case.request.spelling,
-            ocifetch::constants::GOLDENS_ARTIFACT_TYPE,
-        )?;
-        ensure::fetch_signed(bases, &referrer.digest, predicate_type, options)
+        // `request.spelling` is the SUBJECT (a platform manifest):
+        // `fetch_signed` itself discovers its goldens referrers, verifies each
+        // and returns the highest revision (docs/guides/fetch-v1.md §9).
+        ensure::fetch_signed(bases, &case.request.spelling, predicate_type, options)
     } else {
         let fixture_bases: Vec<String> = bases
             .iter()
