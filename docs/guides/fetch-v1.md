@@ -191,6 +191,10 @@ Each binding ships one runner, gated on `CHTYPES_V1_CONFORMANCE=<abs path to tes
 
 **Writing `CHTYPES_V1_REPORT`** (`report.schema.json`): one JSON file per toolchain leg, `{"schema":1,"binding":"go","toolchain":"go1.27.x","cases_sha256":"<sha256 of the head's cases.json>","results":[{"id":...,"transport":...,"verdict":"pass"|"fail","detail":"..."}]}`. The `v1-network` job's own report (registry-transport results only, for the five cases below) uses the toolchain value **`"registry"`** — a sentinel `parity.py` recognizes; it is never one of the matrix's real per-binding toolchain strings. Every report is uploaded `if: always()`, named `report-<binding>-<toolchain>.json`, whether its job passed or failed — `v1-parity` needs to see a _missing_ report as distinct from one that ran and failed.
 
+**`CHTYPES_V1_TOOLCHAIN`** names the report's `toolchain` field exactly as the matrix and `parity.py` spell it (`go1.27.x`, `3.13`, `node24`, `1.87`, ...). `v1.yml` exports it from the matrix leg (`registry` in the `v1-network` job); a runner uses it verbatim when set and falls back to its own mapping of its runtime version otherwise. A runtime's own patch version (`go1.27.1`) is rejected by `parity.py`.
+
+**The registry report.** The runners take no registry-only switch: with `CHTYPES_V1_REGISTRY_BASE` set they run every transport. The `v1-network` job therefore keeps only the `registry` rows of each runner's raw report and writes them as `report-<binding>-registry.json` with `toolchain` `registry`; the file and http rows are judged by the `v1-conformance` legs. The job's `registry:2` is loaded by `scripts/fetch-v1/push_tree.py` with every tree a registry-transport case names. TLS is never configured per binding: the throwaway CA is installed in the OS store and each binding must trust it from there (Node via its documented `--use-system-ca` option).
+
 **Enrollment:** add `spec/fetch-v1/enrolled/<binding>` (an empty file) in your own binding's PR, never another's. `parity.py` refuses a run where the enrolled set has shrunk since `v1`'s own tip.
 
 ### How to add a case

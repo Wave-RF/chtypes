@@ -230,6 +230,10 @@ jobs:
         env:
           CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
           CHTYPES_V1_REPORT: ${{ runner.temp }}/report-${{ matrix.binding }}-${{ matrix.toolchain }}.json
+          # The report's `toolchain`, exactly as the matrix names it (parity.py
+          # compares strings). sandbox.sh runs `sudo -E`, so it survives into
+          # the sandbox.
+          CHTYPES_V1_TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
           # Written to a file, then run inside the no-network sandbox,
           # rather than inlined into a `bash -c '...'` one-liner: the Go
@@ -470,6 +474,20 @@ jobs:
             echo "- \`GET /v2/chtypes/v1/referrers/<digest>\`: HTTP $REF_STATUS"
             echo "- fallback tag \`sha256-<hex>\`: $FALLBACK_RESULT"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: push every tree a registry-transport case names (cases.json `tree`), so each case has its own content to fetch
+        # layouts/basic above serves only the `basic` tree. The registry cases
+        # also name the trust, lock-no-discovery and lock-write-all-platforms
+        # trees, all against one base URL, so push every tree those cases name
+        # (derived from cases.json, not listed here). Tags and digests do not
+        # collide across these trees (a collision fails the push by digest).
+        run: |
+          trees=$(python3 -c '
+          import json
+          d = json.load(open("tests/fixtures/fetch-v1/cases.json"))
+          print(" ".join(sorted({"tests/fixtures/fetch-v1/trees/" + c["tree"] for c in d["cases"] if "registry" in c["transports"]})))')
+          echo "trees: $trees"
+          # shellcheck disable=SC2086 # word-splitting the list is the point
+          python3 scripts/fetch-v1/push_tree.py --registry registry.test:5443 --repo chtypes/v1 $trees
       - name: start tinyproxy with logging
         run: |
           sudo install -d -m 755 /var/log/tinyproxy
@@ -522,6 +540,7 @@ jobs:
         env:
           CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
           CHTYPES_V1_REGISTRY_BASE: https://registry.test:5443/chtypes/v1
+          CHTYPES_V1_TOOLCHAIN: registry
           HTTPS_PROXY: http://127.0.0.1:8888
           NO_PROXY: 127.0.0.1,localhost
         run: |
