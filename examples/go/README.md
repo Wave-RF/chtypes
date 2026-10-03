@@ -20,10 +20,10 @@ go run .                                  # 17 of 17 sections, dlopen-only: what
 
 ## Knobs
 
-| variable           | effect                                                                                    |
-| ------------------ | ----------------------------------------------------------------------------------------- |
-| `CHTYPES_VERSION`  | which line the tour uses (`26.8`, `26.8.15.10`, ...). Default: the newest line installed  |
-| `CHTYPES_CACHE`    | the cache root. Default: `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`                         |
+| variable          | effect                                                                                   |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| `CHTYPES_VERSION` | which line the tour uses (`26.8`, `26.8.15.10`, ...). Default: the newest line installed |
+| `CHTYPES_CACHE`   | the cache root. Default: `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`                        |
 
 ## What is Go-specific here
 

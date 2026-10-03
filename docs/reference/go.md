@@ -23,12 +23,12 @@ go build -tags chtypes_linked ./...   # + chtypes.OpenLinked (needs the artifact
 
 Row and batch verdicts are **never** Go errors: they are `Outcome` in the result. Go errors are for the call as a whole, and each is a peer type, so a decline can never satisfy `errors.As` against the refusal type ([`bindings-v1.md` §4](bindings-v1.md#4-errors)).
 
-| type                | class                                                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `*SchemaError`      | `CHS_REJECTED`: ClickHouse refused. `ChCode` is a real ClickHouse code, `ChName` its name in this build            |
-| `*UnsupportedError` | `CHS_DECLINED`: this build declines. Fall back to the server; never report it as a rejection                       |
-| `*UsageError`       | `CHS_INVALID_ARGUMENT`: misuse, such as a closed object, a refused spelling or a conflicting `Setup`               |
-| `*InternalError`    | `CHS_INTERNAL`, or a document that does not decode                                                                 |
+| type                | class                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `*SchemaError`      | `CHS_REJECTED`: ClickHouse refused. `ChCode` is a real ClickHouse code, `ChName` its name in this build                   |
+| `*UnsupportedError` | `CHS_DECLINED`: this build declines. Fall back to the server; never report it as a rejection                              |
+| `*UsageError`       | `CHS_INVALID_ARGUMENT`: misuse, such as a closed object, a refused spelling or a conflicting `Setup`                      |
+| `*InternalError`    | `CHS_INTERNAL`, or a document that does not decode                                                                        |
 | `*ArtifactError`    | a fetch or load failure, with a `Code` (one of ten) and a sentinel per code for `errors.Is`, such as `ErrArtifactMissing` |
 
 All four call types embed `CallError`, whose five fields (`Status`, `ChCode`, `ChName`, `Message`, `Column`) read directly; `AsCallError` reads them from any of the four. `Message` and `Column` are byte strings, and `Error()` is the one lossy display form.
@@ -37,19 +37,19 @@ All four call types embed `CallError`, whose five fields (`Status`, `ChCode`, `C
 
 Go's names for the operations in [`bindings-v1.md` §2](bindings-v1.md#2-the-operations), with the optional inputs as functional options.
 
-| Symbol                                                                                   | What it is                                                                                                                                           |
-| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Setup(SetupOptions{Timezone, Defaults})`                                                | records the process setup, once and first; a different setup later is a `*UsageError`                                                                |
-| `NewRegistry(opts...)`, `WithFetchOptions`, `WithAutoFetch`, `WithPreload`               | construct a registry; it opens nothing. Autofetch defaults to `CHTYPES_AUTOFETCH=1`, and is otherwise off                                            |
-| `Registry.For(request)`, `ForContext(ctx, request)`, `Installed()`, `Libraries()`        | open a version (two, three or four parts), what the fetch layer holds, what this registry has open. No `Close`: nothing is ever unloaded             |
-| `OpenUnverified(path, allow)`                                                            | open a local build without the signature steps; needs `allow` AND `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1`                                               |
-| `Library.{Version, Minor, Path}`, `BuildInfo()`, `Resolved()`                            | identity from `build_info`, never derived; `Resolved()` is nil for an unverified or linked open                                                      |
-| `Library.{ValidateType, QuoteIdentifier, QuoteIdentifierIfNeeded, QuoteLiteral}`         | the library's own canonicalization and quoting; bytes in a Go `string`                                                                               |
-| `Library.{ErrorCodes, DiscoverQuery, DiscoverColumns, LiveHandles}`                      | this build's error-code table, the discovery query and its column reader, and the diagnostic handle counts                                           |
-| `Library.CompileTable(createTable, opts...)`                                             | compile exactly one `CREATE TABLE` statement; options `WithSettings`, `WithSessionTimezone`                                                          |
-| `Schema.{Describe, Row, Rows, CompileFilter, ParseBlock, Close}`                         | describe, one row, a whole body, a filter, a parsed block, release. Options `WithSettings`, `WithSessionTimezone`, `WithColumns`, `WithRowFilter`, `WithExport`, `WithDocFlags`, `WithFilterParams` |
-| `Filter.{Rows, Eval, Close}`, `Block.Close`                                              | evaluate over a body or a block; release                                                                                                             |
-| `Verdict.Answered()`                                                                     | true for `VerdictTrue` and `VerdictFalse` only: **fail closed on the other two**                                                                     |
+| Symbol                                                                            | What it is                                                                                                                                                                                          |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Setup(SetupOptions{Timezone, Defaults})`                                         | records the process setup, once and first; a different setup later is a `*UsageError`                                                                                                               |
+| `NewRegistry(opts...)`, `WithFetchOptions`, `WithAutoFetch`, `WithPreload`        | construct a registry; it opens nothing. Autofetch defaults to `CHTYPES_AUTOFETCH=1`, and is otherwise off                                                                                           |
+| `Registry.For(request)`, `ForContext(ctx, request)`, `Installed()`, `Libraries()` | open a version (two, three or four parts), what the fetch layer holds, what this registry has open. No `Close`: nothing is ever unloaded                                                            |
+| `OpenUnverified(path, allow)`                                                     | open a local build without the signature steps; needs `allow` AND `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1`                                                                                              |
+| `Library.{Version, Minor, Path}`, `BuildInfo()`, `Resolved()`                     | identity from `build_info`, never derived; `Resolved()` is nil for an unverified or linked open                                                                                                     |
+| `Library.{ValidateType, QuoteIdentifier, QuoteIdentifierIfNeeded, QuoteLiteral}`  | the library's own canonicalization and quoting; bytes in a Go `string`                                                                                                                              |
+| `Library.{ErrorCodes, DiscoverQuery, DiscoverColumns, LiveHandles}`               | this build's error-code table, the discovery query and its column reader, and the diagnostic handle counts                                                                                          |
+| `Library.CompileTable(createTable, opts...)`                                      | compile exactly one `CREATE TABLE` statement; options `WithSettings`, `WithSessionTimezone`                                                                                                         |
+| `Schema.{Describe, Row, Rows, CompileFilter, ParseBlock, Close}`                  | describe, one row, a whole body, a filter, a parsed block, release. Options `WithSettings`, `WithSessionTimezone`, `WithColumns`, `WithRowFilter`, `WithExport`, `WithDocFlags`, `WithFilterParams` |
+| `Filter.{Rows, Eval, Close}`, `Block.Close`                                       | evaluate over a body or a block; release                                                                                                                                                            |
+| `Verdict.Answered()`                                                              | true for `VerdictTrue` and `VerdictFalse` only: **fail closed on the other two**                                                                                                                    |
 
 A string or byte-string input is a Go `string`, and a body is `[]byte`. A `Value`'s optional raw bytes (`Value.Value`, and the same field on `Computed` and `EngineCell`) are a `*string`, nil where the document carries none, so an absent value differs from an empty one; an export payload is `[]byte`. Settings and query parameters are `map[string]string`, serialized verbatim.
 
@@ -67,16 +67,16 @@ The library carries no exit status. `ErrorCode.ExitCode()` is a method of the sh
 go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
 ```
 
-| command                                  | meaning                                                                                                                                                      |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `fetch <spelling>... \| --all`           | resolve, verify and install each request (two, three or four parts), printing the installed directory of each alone on stdout. `--all` is every published line |
-| `fetch ... --platform <os-arch>`         | another platform than this host's, or `$CHTYPES_TARGET`                                                                                                      |
-| `fetch ... --lock <file>`                | resolve normally, then write the lock (schema 3). With `--frozen`, the lock to enforce; default `chtypes.lock`                                               |
-| `fetch ... --frozen`                     | fetch exactly what the lock pins, by digest, with no resolution; a request the lock does not pin is `CHTYPES_ARTIFACT_PINNED`                                |
-| `fetch ... --offline`                    | read the cache only; a miss is `CHTYPES_ARTIFACT_MISSING`                                                                                                    |
-| `verify`                                 | re-hash every installed library against its own recorded digests                                                                                             |
-| `list`                                   | what is installed for this platform, and the published lines from the registry's `tags/list`; `--offline` skips the registry. Support is unknown, never "unsupported" |
-| `where`                                  | the cache root (`$CHTYPES_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`); `--cache <dir>` overrides it on every command                              |
+| command                          | meaning                                                                                                                                                               |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fetch <spelling>... \| --all`   | resolve, verify and install each request (two, three or four parts), printing the installed directory of each alone on stdout. `--all` is every published line        |
+| `fetch ... --platform <os-arch>` | another platform than this host's, or `$CHTYPES_TARGET`                                                                                                               |
+| `fetch ... --lock <file>`        | resolve normally, then write the lock (schema 3). With `--frozen`, the lock to enforce; default `chtypes.lock`                                                        |
+| `fetch ... --frozen`             | fetch exactly what the lock pins, by digest, with no resolution; a request the lock does not pin is `CHTYPES_ARTIFACT_PINNED`                                         |
+| `fetch ... --offline`            | read the cache only; a miss is `CHTYPES_ARTIFACT_MISSING`                                                                                                             |
+| `verify`                         | re-hash every installed library against its own recorded digests                                                                                                      |
+| `list`                           | what is installed for this platform, and the published lines from the registry's `tags/list`; `--offline` skips the registry. Support is unknown, never "unsupported" |
+| `where`                          | the cache root (`$CHTYPES_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`); `--cache <dir>` overrides it on every command                                       |
 
 Exit statuses: 0 for success, 2 for a usage error (an unknown command or flag, a refused spelling, `--all` with an argument), and for a failure the status of its error code in the table above (1 for the four verification failures, 3 unreachable, 4 unpublished, 5 unauthorized, 6 forbidden, 7 incompatible source, 8 incompatible artifact).
 

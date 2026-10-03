@@ -26,15 +26,15 @@ The demo creates `chguide_demo.events` itself, so it is self-contained. It needs
 
 ## What each step shows
 
-| Step                      | What it demonstrates                                                                                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Discovery              | The server's version and changed settings, asked with **your own** HTTP client. chtypes never opens a socket, and holds no SQL for these two reads.                                   |
-| 2. Registry               | One library per ClickHouse version; `For()` resolves the server's exact version, fetching and verifying it on first use. No nearest-version fallback.                                 |
-| 3. `DiscoverQuery`        | The library's own `system.columns` query, run with your client, and `DiscoverColumns` turning the rows into declarations with ClickHouse's own reader and formatter.                  |
-| 4. `CompileTable`         | One `CREATE TABLE` compiled under the **discovered** settings, not a guessed profile.                                                                                                 |
-| 5a. Per-row admission     | `Row()`: one verdict per record, the shape a per-record ingest path already has.                                                                                                      |
-| 5b. The same rows batched | `Rows()`: under stock settings **one unparseable row ends the batch** and the rows after it never get a verdict.                                                                      |
-| 6. Unknown setting        | A refusal carrying ClickHouse's own code `115`, as distinct from a chtypes _decline_.                                                                                                 |
+| Step                      | What it demonstrates                                                                                                                                                 |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Discovery              | The server's version and changed settings, asked with **your own** HTTP client. chtypes never opens a socket, and holds no SQL for these two reads.                  |
+| 2. Registry               | One library per ClickHouse version; `For()` resolves the server's exact version, fetching and verifying it on first use. No nearest-version fallback.                |
+| 3. `DiscoverQuery`        | The library's own `system.columns` query, run with your client, and `DiscoverColumns` turning the rows into declarations with ClickHouse's own reader and formatter. |
+| 4. `CompileTable`         | One `CREATE TABLE` compiled under the **discovered** settings, not a guessed profile.                                                                                |
+| 5a. Per-row admission     | `Row()`: one verdict per record, the shape a per-record ingest path already has.                                                                                     |
+| 5b. The same rows batched | `Rows()`: under stock settings **one unparseable row ends the batch** and the rows after it never get a verdict.                                                     |
+| 6. Unknown setting        | A refusal carrying ClickHouse's own code `115`, as distinct from a chtypes _decline_.                                                                                |
 
 ## The five rows, and the decision each one forces
 
