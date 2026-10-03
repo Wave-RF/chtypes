@@ -27,9 +27,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with: { version: 11 }
+        with:
+          # No version here on purpose: pnpm/action-setup reads packageManager from
+          # ts/package.json, so the pin lives in exactly one place (it was pinned to
+          # 11 here while packageManager said 12, and the two had drifted).
+          package_json_file: ts/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: 22, registry-url: "https://registry.npmjs.org" }
+        with:
+          # The engines floor in ts/package.json (>=22.21), not an older 22.
+          node-version: "22.21"
+          registry-url: "https://registry.npmjs.org"
+      - name: the Node in use satisfies the package's engines floor
+        run: node -e "const [a,b]=process.versions.node.split('.').map(Number); if (a<22||(a===22&&b<21)) { console.error('node '+process.versions.node+' is below the 22.21 floor'); process.exit(1) }"
+
       - name: the tag and the package agree on the version
         run: |
           tag="${GITHUB_REF_NAME#ts/v}"; ver="$(node -p "require('./ts/package.json').version")"
@@ -41,25 +51,79 @@ jobs:
   # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
   # npm served the tarball, and for ~2 of those minutes `latest` resolved to
   # a version that 404'd. This installs the real thing from the public
-  # registry, with no credentials, and makes it report its ABI revision.
+  # registry, with no credentials, in a clean directory, and then makes it
+  # speak v1: its ABI fingerprint constant must equal the one in
+  # include/chtypes.h, its CLI must fetch one line from the production
+  # registry, and the public API must load what it fetched. It never reads
+  # CHS_ABI_REVISION: the v1 header has none.
   #
-  # Its own job, the way release-python.yml's `verify` already is, so
-  # "Re-run failed jobs" on a timeout re-runs ONLY this — `pnpm publish`
-  # cannot be retried, npm refuses to publish over a version that already
-  # landed. Measured on ts/v0.4.0 (2026-09-30): the publish step went green
-  # at 13:47:36Z, but npm did not serve the version for ~26 minutes with no
-  # human action anywhere in that window — see scripts/verify-published.sh's
-  # own header. No `environment` and no `id-token: write` here: this job
-  # only reads a public registry anonymously, it does not publish.
+  # Its own job, so "Re-run failed jobs" on a timeout re-runs ONLY this:
+  # `pnpm publish` cannot be retried, npm refuses to publish over a version
+  # that already landed. Measured on ts/v0.4.0 (2026-09-30): the publish step
+  # went green at 13:47:36Z, but npm did not serve the version for ~26
+  # minutes with no human action anywhere in that window, so the registry-lag
+  # loop below keeps its one-hour bound. No `environment` and no `id-token:
+  # write` here: this job only reads public registries anonymously.
   verify:
     needs: publish
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with: { node-version: 22 }
-      - name: it installs from the public registry and speaks ABI revision
-        run: scripts/verify-published.sh ts "${GITHUB_REF_NAME#ts/v}"
+        with: { node-version: "22.21" }
+      - name: it installs from the public registry, anonymously, and its ABI fingerprint is the header's
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#ts/v}"
+          want="$(sed -n 's/^#define CHS_ABI_FINGERPRINT "\(.*\)"$/\1/p' include/chtypes.h)"
+          [ -n "$want" ] || { echo "::error::could not read CHS_ABI_FINGERPRINT from include/chtypes.h"; exit 1; }
+          clean="$RUNNER_TEMP/clean"
+          mkdir -p "$clean"
+          cd "$clean"
+          : > .npmrc   # no token: exactly what a stranger gets
+          echo '{"name":"verify","private":true}' > package.json
+          deadline=$((SECONDS + 3600))
+          until npm install --no-audit --no-fund --userconfig ./.npmrc "@wavehouse/chtypes@$version" >install.log 2>&1; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              cat install.log
+              echo "::error::@wavehouse/chtypes@$version did not become installable from the public registry within an hour"
+              exit 1
+            fi
+            echo "not installable yet ($((deadline - SECONDS))s left); retrying in 30s"
+            sleep 30
+          done
+          # The constant lives in the package's generated layer, which the public entry point does not re-export:
+          # import it by file URL, which the package's `exports` map does not govern.
+          got="$(node --input-type=module -e "
+            import { pathToFileURL } from 'node:url';
+            import path from 'node:path';
+            const m = await import(pathToFileURL(path.resolve('node_modules/@wavehouse/chtypes/dist/abi1/decls.gen.js')).href);
+            process.stdout.write(m.ABI_FINGERPRINT);
+          ")"
+          echo "published binding fingerprint: $got"
+          echo "include/chtypes.h fingerprint: $want"
+          [ "$got" = "$want" ] || { echo "::error::the published binding speaks $got, the header says $want"; exit 1; }
+      - name: its CLI fetches one line from the production registry, and the public API loads it
+        run: |
+          set -euo pipefail
+          clean="$RUNNER_TEMP/clean"
+          cd "$clean"
+          export CHTYPES_CACHE="$RUNNER_TEMP/artifact-cache"
+          # The registry's own tag list names what is published; the newest two-part tag is a line.
+          line="$(node_modules/.bin/chtypes list | awk '/^published/ {p=1; next} p && $1 ~ /^[0-9]+\.[0-9]+$/ {l=$1} END {print l}')"
+          [ -n "$line" ] || { echo "::error::the production registry lists no line"; exit 1; }
+          echo "fetching $line with the published CLI"
+          dir="$(node_modules/.bin/chtypes fetch "$line")"
+          [ -d "$dir" ] || { echo "::error::chtypes fetch printed $dir, which is not a directory"; exit 1; }
+          node_modules/.bin/chtypes verify
+          LINE="$line" node --input-type=module -e "
+            import { Registry } from '@wavehouse/chtypes';
+            const registry = await Registry.open();
+            const lib = await registry.for(process.env.LINE);
+            const type = lib.validateType('UInt8').toString();
+            if (type !== 'UInt8') throw new Error('validateType(UInt8) answered ' + JSON.stringify(type));
+            console.log('loaded ' + lib.version + ' (' + lib.buildInfo.abiFingerprint + ') from ' + lib.path);
+          "

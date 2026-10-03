@@ -358,7 +358,3 @@ function paxRecords(payload: Buffer): Array<[string, string]> {
   }
   return out;
 }
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}

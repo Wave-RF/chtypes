@@ -11,7 +11,6 @@
  *   CHTYPES_REGISTRY         retired: one warning, otherwise ignored
  */
 
-import { createHash } from 'node:crypto';
 import { usageError } from './abi1/index.js';
 import {
   ENV_ALLOW_UNSIGNED_NAME,
@@ -23,7 +22,7 @@ import {
   ENV_TRUSTED_KEYS_NAME,
   PLATFORMS,
 } from './ocifetch/constants.gen.js';
-import { isPlatformKey, type FetchV1Options, type TrustedKey } from './ocifetch/index.js';
+import { type FetchV1Options, isPlatformKey, keyIdOfRawKey, type TrustedKey } from './ocifetch/index.js';
 
 const RAW_KEY = /^[0-9a-fA-F]{64}$/;
 let warnedRetired = false;
@@ -31,11 +30,6 @@ let warnedRetired = false;
 function flag(name: string): boolean {
   const v = process.env[name];
   return v !== undefined && ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
-}
-
-/** `sha256-first16hex` over the raw 32-byte key: the key id every signature names. */
-function keyIdOf(hex: string): string {
-  return createHash('sha256').update(Buffer.from(hex, 'hex')).digest('hex').slice(0, 16);
 }
 
 /** Fills each option the caller left unset from its environment variable. Pure over `process.env`, except the one retired-variable warning. */
@@ -58,7 +52,7 @@ export function withEnvironment<T extends FetchV1Options>(options: T): T {
       if (!RAW_KEY.test(k)) {
         throw usageError(`${ENV_TRUSTED_KEYS_NAME}: ${JSON.stringify(k)} is not a raw ed25519 public key (64 hex characters)`);
       }
-      list.push({ keyid: keyIdOf(k), ed25519Hex: k.toLowerCase() });
+      list.push({ keyid: keyIdOfRawKey(k), ed25519Hex: k.toLowerCase() });
     }
     out.trustedKeys = list;
   }
