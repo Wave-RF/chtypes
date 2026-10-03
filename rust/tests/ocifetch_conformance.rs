@@ -26,6 +26,25 @@ use std::time::SystemTime;
 use ocifetch::ensure::{self, Options};
 use serde::Deserialize;
 
+/// The trust list a case asks for: `request.trust: "test"` trusts the SDK
+/// fixture key IN ADDITION to the release key (an explicit list replaces the
+/// default, so both are named); anything else is the default.
+fn case_trusted_keys(case: &Case) -> Option<Vec<String>> {
+    if case.request.trust != "test" {
+        return None;
+    }
+    let mut keys: Vec<String> = ocifetch::constants::RELEASE_KEYS
+        .iter()
+        .map(|k| k.ed25519_hex.to_string())
+        .collect();
+    keys.extend(
+        ocifetch::constants::TEST_KEYS
+            .iter()
+            .map(|k| k.ed25519_hex.to_string()),
+    );
+    Some(keys)
+}
+
 const ENV_FIXTURES: &str = "CHTYPES_V1_CONFORMANCE";
 const ENV_REPORT: &str = "CHTYPES_V1_REPORT";
 /// Set only by the `v1-network` job: the registry base `{base}` expands to on
@@ -388,7 +407,7 @@ fn execute_case(
     if let Ok(bytes) = std::fs::read(&installed_marker) {
         let marker: InstalledMarker = serde_json::from_slice(&bytes)
             .map_err(|e| format!("parsing {}: {e}", installed_marker.display()))?;
-        let trust = ocifetch::dsse::trusted_keys(case.request.trust == "test")
+        let trust = ocifetch::dsse::trusted_keys(case_trusted_keys(case).as_deref())
             .map_err(|e| format!("building the pre-seed trust list: {e}"))?;
         for digest in &marker.installed {
             ocifetch::ensure::install_from_local_blobs(
@@ -441,7 +460,7 @@ fn execute_case(
             lock_write: case.request.lock_write,
             update: case.request.update,
             allow_unsigned: case.request.allow_unsigned,
-            trust_test_keys: case.request.trust == "test",
+            trusted_keys: case_trusted_keys(case),
             token: None,
             clock: Some(fake_clock()),
             before_index_rename: None,
@@ -460,7 +479,7 @@ fn execute_case(
             lock_write: case.request.lock_write,
             update: case.request.update,
             allow_unsigned: case.request.allow_unsigned,
-            trust_test_keys: case.request.trust == "test",
+            trusted_keys: case_trusted_keys(case),
             token: None,
             clock: Some(fake_clock()),
             before_index_rename: before_index_rename.take(),

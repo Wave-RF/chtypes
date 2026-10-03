@@ -60,9 +60,12 @@ pub struct FetchOptions {
     pub update: bool,
     /// Proceed, with a warning, when no signed statement verifies.
     pub allow_unsigned: bool,
-    /// Also trust the SDK's test key: fixtures only, never the default (the
-    /// default trust is the release key alone).
-    pub trust_test_keys: bool,
+    /// The trust list: raw 32-byte ed25519 public keys, each as 64 hex digits.
+    /// A non-empty list REPLACES the default trust (the release key); `None`
+    /// reads `$CHTYPES_TRUSTED_KEYS` (comma-separated), else the release key.
+    /// It never appends to the default. The SDK's own fixture key is trusted
+    /// only by naming it here.
+    pub trusted_keys: Option<Vec<String>>,
     /// An access token; `None` is `$CHTYPES_DOWNLOAD_TOKEN`.
     pub token: Option<String>,
 }
@@ -81,7 +84,7 @@ impl FetchOptions {
             lock_write: self.lock_write,
             update: self.update,
             allow_unsigned: self.allow_unsigned,
-            trust_test_keys: self.trust_test_keys,
+            trusted_keys: self.trusted_keys.clone(),
             token: self.token.clone(),
             clock: None,
             before_index_rename: None,

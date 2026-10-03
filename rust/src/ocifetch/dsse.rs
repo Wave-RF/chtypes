@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use super::constants;
 use super::error::{Error, Result};
@@ -17,28 +18,53 @@ use super::error::{Error, Result};
 /// A pinned ed25519 public key this module may trust a signature against.
 #[derive(Clone)]
 pub struct TrustedKey {
-    pub keyid: &'static str,
+    pub keyid: String,
     pub key: [u8; 32],
 }
 
-/// The default trust list (`constants::RELEASE_KEYS`) plus, when the caller
-/// opts in, the fixture-only test keys (never on by default, plan "Eric's
-/// decisions" D8).
-pub fn trusted_keys(include_test_keys: bool) -> Result<Vec<TrustedKey>> {
+impl TrustedKey {
+    /// A key from its raw 32-byte public key as 64 hex digits; the key id is
+    /// derived (`keyid_algorithm` `sha256-first16hex`: the first 16 hex
+    /// characters of sha256 over the raw key).
+    pub fn from_hex(hex: &str) -> Result<TrustedKey> {
+        let key = hex32(hex.trim())?;
+        let digest = Sha256::digest(key);
+        let keyid = digest[..8].iter().map(|b| format!("{b:02x}")).collect();
+        Ok(TrustedKey { keyid, key })
+    }
+}
+
+/// The trust list for one call (docs/guides/fetch-v1.md §4): `explicit` (the
+/// caller's own list, raw 32-byte keys as hex) if it is non-empty, else
+/// `$CHTYPES_TRUSTED_KEYS` (comma-separated hex) if it is set, else the
+/// release key. An explicit list or the environment REPLACES the default; it
+/// never appends to it, and the fixture-only test key is trusted only when a
+/// list names it.
+pub fn trusted_keys(explicit: Option<&[String]>) -> Result<Vec<TrustedKey>> {
+    let from_env: Vec<String>;
+    let hexes: &[String] = match explicit {
+        Some(list) if !list.is_empty() => list,
+        _ => {
+            from_env = std::env::var(constants::ENV_TRUSTED_KEYS_NAME)
+                .map(|v| {
+                    v.split(constants::BASE_SEPARATOR)
+                        .map(|k| k.trim().to_string())
+                        .filter(|k| !k.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            &from_env
+        }
+    };
+    if !hexes.is_empty() {
+        return hexes.iter().map(|h| TrustedKey::from_hex(h)).collect();
+    }
     let mut out = Vec::new();
     for rk in constants::RELEASE_KEYS {
         out.push(TrustedKey {
-            keyid: rk.keyid,
+            keyid: rk.keyid.to_string(),
             key: hex32(rk.ed25519_hex)?,
         });
-    }
-    if include_test_keys {
-        for tk in constants::TEST_KEYS {
-            out.push(TrustedKey {
-                keyid: tk.keyid,
-                key: hex32(tk.ed25519_hex)?,
-            });
-        }
     }
     Ok(out)
 }
@@ -88,7 +114,7 @@ pub struct VerifiedStatement {
     pub predicate_type: String,
     pub predicate: serde_json::Value,
     /// The keyid of the trusted key that verified this bundle.
-    pub signed_by: &'static str,
+    pub signed_by: String,
     /// The digest of the referrer manifest that carried this bundle, and of
     /// its one layer (the bundle bytes this function verified). Filled in
     /// by the caller (`referrers.rs`), which is the one that fetched them;
@@ -155,7 +181,7 @@ pub fn verify_bundle(
         .map_err(|e| Error::ArtifactCorrupt(format!("DSSE payload is not base64: {e}")))?;
     let pae_bytes = pae(&env.payload_type, &payload);
 
-    let mut signed_by: Option<&'static str> = None;
+    let mut signed_by: Option<String> = None;
     'keys: for tk in trust {
         let Ok(vk) = VerifyingKey::from_bytes(&tk.key) else {
             continue;
@@ -169,7 +195,7 @@ pub fn verify_bundle(
             };
             let signature = Signature::from_bytes(&raw_sig);
             if vk.verify(&pae_bytes, &signature).is_ok() {
-                signed_by = Some(tk.keyid);
+                signed_by = Some(tk.keyid.clone());
                 break 'keys;
             }
         }
