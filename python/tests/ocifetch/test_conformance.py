@@ -127,15 +127,27 @@ def _expand_base(
     tree: str,
     case_id: str,
     http_port: int | None,
+    http_port2: int | None = None,
 ) -> str:
-    if "{base}" not in template:
+    if "{base}" not in template and "{base2}" not in template:
         return template  # a second, non-templated mirror base, used verbatim.
     if transport == "file":
         base = f"file://{fixtures_root}/trees/{tree}/v2/chtypes/v1"
+        base2 = base  # file transport has no second origin; unused by any file case.
     elif transport == "http":
         if http_port is None:
             pytest.skip("the fixtures/server/parity lane's HTTP server is not available")
         base = f"http://127.0.0.1:{http_port}/s-{case_id}/chtypes/v1"
+        # docs/guides/fetch-v1.md "{base2}": server.py's SECOND origin, same
+        # s-<case-id>/chtypes/v1 suffix, its own response-sequence cursor
+        # (keyed on (case id, origin, method, path)) — for a case needing two
+        # genuinely independent bases over one case id (mirror-failover-*).
+        if "{base2}" in template:
+            if http_port2 is None:
+                pytest.skip("the fixtures/server/parity lane's second origin is not available")
+            base2 = f"http://127.0.0.1:{http_port2}/s-{case_id}/chtypes/v1"
+        else:
+            base2 = base
     elif transport == "registry":
         pytest.skip("the registry transport runs only in the v1-network CI job")
         raise AssertionError("unreachable")  # pytest.skip always raises
@@ -144,7 +156,7 @@ def _expand_base(
     # A suffix like "{base}/does-not-exist" (frozen-mirror) is a SUBSTRING
     # substitution, not an exact-match template — a deliberately unreachable
     # mirror ahead of the real one.
-    return template.replace("{base}", base)
+    return template.replace("{base2}", base2).replace("{base}", base)
 
 
 def _trusted_keys_for(trust: str) -> tuple[TrustedKey, ...]:
@@ -357,6 +369,7 @@ def _run_case(
     fixtures_root: Path,
     tmp_path: Path,
     http_port: int | None,
+    http_port2: int | None,
     request_log: _RequestLog,
 ) -> tuple[str, str]:
     """Drives one (case, transport) pair through `ensure()`. Returns
@@ -374,6 +387,7 @@ def _run_case(
             tree=case["tree"],
             case_id=case["id"],
             http_port=http_port,
+            http_port2=http_port2,
         )
         for b in req["bases"]
     )
@@ -551,6 +565,7 @@ def test_conformance_v1(
         for transport in case["transports"]:
             case_tmp = tmp_path_factory.mktemp(f"{case['id']}-{transport}")
             http_port = http_server[0] if http_server else None
+            http_port2 = http_server[1] if http_server else None
             try:
                 verdict, detail = _run_case(
                     case,
@@ -558,6 +573,7 @@ def test_conformance_v1(
                     fixtures_root=fixtures_root,
                     tmp_path=case_tmp,
                     http_port=http_port,
+                    http_port2=http_port2,
                     request_log=request_log,
                 )
             except pytest.skip.Exception:
