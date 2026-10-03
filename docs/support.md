@@ -12,8 +12,8 @@ The table below is **generated** from this tree's four manifests and from the re
 |---|---|---|---|
 | Go | `github.com/wave-rf/chtypes/go` | Go 1.27+ | cgo + `dlopen` |
 | Python | `chtypes` | Python 3.11+ | stdlib `ctypes` (no build step, no dependencies) |
-| TypeScript | `@wavehouse/chtypes` | Node 22+, ESM only | `ffi-rs` (prebuilt) |
-| Rust | `chtypes` | Rust 1.85+ (edition 2024) | `libloading` |
+| TypeScript | `@wavehouse/chtypes` | Node 22.21+, ESM only | `ffi-rs` (prebuilt) |
+| Rust | `chtypes` | Rust 1.87+ (edition 2024) | `libloading` |
 
 ## Platforms
 
