@@ -268,11 +268,68 @@ jobs:
   v1-network:
     name: "v1-network — registry:2 over TLS via the system CA store, through HTTPS_PROXY"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    # This job needs the local registry:2, a throwaway CA, tinyproxy and (for
+    # the binding steps) the package registries, so it does NOT run inside the
+    # no-network sandbox that v1-conformance uses (scripts/fetch-v1/sandbox.sh).
+    # Its egress is this job's own concern: the runners below talk only to
+    # registry.test (127.0.0.1) and the loopback fixture server.
     env:
       ORAS_VERSION: "1.3.4" # layout-v2 spec §0: ORAS 1.3.4 is the measured --platform-compatible version
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Which bindings' conformance runners exist on this branch yet? The same
+      # detection v1-conformance uses (keep the four paths in sync with it). A
+      # binding with no runner file skips loudly by name and uploads nothing,
+      # which v1-parity reads as "not enrolled", never as a failure.
+      - name: which bindings' conformance runners exist on this branch yet?
+        id: runners
+        run: |
+          for pair in go:go/internal/ocifetch/conformance_test.go \
+                      python:python/tests/ocifetch/test_conformance.py \
+                      ts:ts/test/ocifetch/conformance.test.ts \
+                      rust:rust/tests/ocifetch_conformance.rs; do
+            b="${pair%%:*}"; f="${pair#*:}"
+            if [ -f "$f" ]; then
+              echo "$b=true" >> "$GITHUB_OUTPUT"
+              echo "${b}_runner=$f" >> "$GITHUB_OUTPUT"
+            else
+              echo "$b=false" >> "$GITHUB_OUTPUT"
+              echo "v1-network ($b): SKIPPED — $f does not exist on this branch yet (that binding's own lane has not merged); no registry report is produced." >&2
+            fi
+          done
+      # Toolchains mirror v1-conformance's setup steps. The registry report
+      # does not depend on which toolchain leg runs it (its `toolchain` is the
+      # sentinel "registry"), so one version per binding is enough here.
+      - if: steps.runners.outputs.go == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - if: steps.runners.outputs.python == 'true'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+      - if: steps.runners.outputs.ts == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - if: steps.runners.outputs.ts == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - if: steps.runners.outputs.rust == 'true'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
+      - name: install dependencies for the bindings that have a runner
+        run: |
+          [ "${{ steps.runners.outputs.go }}" = true ] && (cd go && go mod download)
+          [ "${{ steps.runners.outputs.python }}" = true ] && (cd python && uv sync --locked --group dev)
+          [ "${{ steps.runners.outputs.ts }}" = true ] && (cd ts && pnpm install --frozen-lockfile)
+          [ "${{ steps.runners.outputs.rust }}" = true ] && (cd rust && cargo fetch --locked)
+          exit 0
       - name: install oras (pinned) and tinyproxy
         run: |
           curl -fsSL -o /tmp/oras.tar.gz \
@@ -442,9 +499,93 @@ jobs:
             exit 1
           }
           echo "proxy logging confirmed"
-      - name: registry up, fixtures pushed, proxy logging — the three things this job proves
+      - name: run each enrolled-candidate binding's conformance runner on the registry transport
+        # The runners take no "registry only" switch (and are not edited by
+        # this lane): with CHTYPES_V1_REGISTRY_BASE set they run every
+        # transport and write one report. So the raw report goes to
+        # report-<binding>-raw.json, and the report v1-parity reads is DERIVED
+        # from it: only the transport=="registry" rows, with `toolchain` set to
+        # the sentinel "registry" (parity.py NETWORK_TOOLCHAIN). The file and
+        # http rows are v1-conformance's to judge, so they are dropped here and
+        # a file/http failure cannot fail this job.
+        #
+        # TLS: no binding is told about the throwaway CA. registry.test's
+        # certificate verifies only if the binding's own TLS stack trusts the
+        # OS store that `update-ca-certificates` wrote above: Go (system roots),
+        # Python (ssl default context), Rust (rustls platform verifier). Node
+        # does not read the OS store by default; it is opted in with the
+        # documented `--use-system-ca` option (NODE_OPTIONS), never by
+        # disabling verification. A binding that cannot trust the system store
+        # fails here, and that is a finding to report, not something to patch
+        # over in this job.
+        if: steps.runners.outputs.go == 'true' || steps.runners.outputs.python == 'true' || steps.runners.outputs.ts == 'true' || steps.runners.outputs.rust == 'true'
+        env:
+          CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
+          CHTYPES_V1_REGISTRY_BASE: https://registry.test:5443/chtypes/v1
+          HTTPS_PROXY: http://127.0.0.1:8888
+          NO_PROXY: 127.0.0.1,localhost
         run: |
-          echo "v1-network: all three measured above. No binding is enrolled yet, so no conformance run happens here."
+          failed=0
+          run_one() {
+            local b="$1"; shift
+            local raw="$RUNNER_TEMP/report-$b-raw.json" out="$RUNNER_TEMP/report-$b-registry.json"
+            local before; before=$(sudo grep -c CONNECT /var/log/tinyproxy/tinyproxy.log || true)
+            echo "::group::v1-network ($b): conformance runner, registry transport"
+            set +e
+            CHTYPES_V1_REPORT="$raw" "$@"
+            local rc=$?
+            set -e
+            echo "::endgroup::"
+            local after; after=$(sudo grep -c CONNECT /var/log/tinyproxy/tinyproxy.log || true)
+            if [ ! -s "$raw" ]; then
+              echo "::error::v1-network ($b): the runner wrote no report (exit $rc)" >&2
+              failed=1; return
+            fi
+            jq '.toolchain = "registry" | .results |= map(select(.transport == "registry"))' "$raw" > "$out"
+            local n pass nfail
+            n=$(jq '.results | length' "$out")
+            pass=$(jq '[.results[] | select(.verdict == "pass")] | length' "$out")
+            nfail=$((n - pass))
+            echo "v1-network ($b): $n registry-transport results, $pass pass, $nfail fail; proxy CONNECTs during the run: $((after - before)) (report only)"
+            echo "- \`$b\`: $n registry results, $pass pass, $nfail fail, proxy CONNECTs $((after - before))" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$n" -eq 0 ]; then
+              echo "::error::v1-network ($b): the runner ran zero registry-transport cases (a run that tested nothing is a failure)" >&2
+              failed=1
+            elif [ "$nfail" -ne 0 ]; then
+              jq -r '.results[] | select(.verdict != "pass") | "  \(.id) [\(.transport)]: \(.detail)"' "$out" >&2
+              failed=1
+            fi
+          }
+          echo "### v1-network: registry-transport results per binding" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.runners.outputs.go }}" = true ]; then
+            run_one go bash -c "cd go && go test -count=1 -run '^TestConformanceV1\$' ./internal/ocifetch/"
+          fi
+          if [ "${{ steps.runners.outputs.python }}" = true ]; then
+            # the detected repo-root-relative path, "python/" stripped
+            rel="${{ steps.runners.outputs.python_runner }}"
+            run_one python bash -c "cd python && uv run --python 3.13 pytest -q ${rel#python/}"
+          fi
+          if [ "${{ steps.runners.outputs.ts }}" = true ]; then
+            # --use-system-ca: Node's documented option to trust the OS store
+            # (Node 22.15+/23.8+; this job runs Node 24).
+            run_one ts env NODE_OPTIONS=--use-system-ca bash -c "cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts"
+          fi
+          if [ "${{ steps.runners.outputs.rust }}" = true ]; then
+            run_one rust bash -c "cd rust && cargo test --locked --features fetch-v1 --test ocifetch_conformance"
+          fi
+          exit "$failed"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          # One artifact holding every binding's report-<binding>-registry.json;
+          # v1-parity downloads `report-*` with merge-multiple, so the file
+          # names (not the artifact name) are what keep the bindings apart.
+          name: report-network-registry
+          path: ${{ runner.temp }}/report-*-registry.json
+          if-no-files-found: ignore
+      - name: registry up, fixtures pushed, proxy logging
+        run: |
+          echo "v1-network: registry up, fixtures pushed and proxy logging were measured above; per-binding registry results are in the step summary."
 
   v1-parity:
     name: "v1-parity — every enrolled binding passes every conformance case"
