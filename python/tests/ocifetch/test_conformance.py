@@ -149,8 +149,13 @@ def _expand_base(
         else:
             base2 = base
     elif transport == "registry":
-        pytest.skip("the registry transport runs only in the v1-network CI job")
-        raise AssertionError("unreachable")  # pytest.skip always raises
+        # The registry transport expands {base} to CHTYPES_V1_REGISTRY_BASE
+        # (the staging run); unset, the pairs SKIP loudly by name.
+        registry_base = os.environ.get("CHTYPES_V1_REGISTRY_BASE")
+        if not registry_base:
+            pytest.skip("CHTYPES_V1_REGISTRY_BASE is not set: no staging registry for this pair")
+        base = registry_base
+        base2 = base
     else:
         raise ValueError(f"unknown transport {transport!r}")
     # A suffix like "{base}/does-not-exist" (frozen-mirror) is a SUBSTRING
