@@ -18,9 +18,9 @@
 
 import { createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { items, type Json, parseJsonValue } from '../json.js';
-import { ABI_GENERATION, DSSE_MAX_SIGNATURES, DSSE_PAYLOAD_TYPE } from './constants.gen.js';
+import { ABI_GENERATION, DSSE_MAX_SIGNATURES, DSSE_PAYLOAD_TYPE, SPELLING_REGEX } from './constants.gen.js';
 import { ArtifactCorruptError } from './errors.js';
-import { fetchBlobBytesByDigest, fetchManifestByDigest } from './oci.js';
+import { fetchBlobBytesByDigest, fetchManifestByDigest, type ManifestInfo } from './oci.js';
 import type { RequestOptions } from './http.js';
 import { discoverSignatureCandidates } from './referrers.js';
 import type { ArtifactPredicate, Statement, TrustedKey } from './types.js';
@@ -291,7 +291,7 @@ export function checkArtifactStatement(
   if (typeof version !== 'string') {
     throw new ArtifactCorruptError(`chtypes: statement predicate.clickhouse_version ${JSON.stringify(version)} is not a string`);
   }
-  if (check.requestedSpelling !== undefined && !versionWithinRequest(version, check.requestedSpelling)) {
+  if (check.requestedSpelling !== undefined && new RegExp(SPELLING_REGEX).test(check.requestedSpelling) && !versionWithinRequest(version, check.requestedSpelling)) {
     throw new ArtifactCorruptError(
       `chtypes: statement predicate.clickhouse_version ${JSON.stringify(version)} does not lie within requested ${JSON.stringify(check.requestedSpelling)}`,
     );
@@ -323,6 +323,8 @@ export interface TrustResult {
   readonly statement: Statement;
   /** The trusted key id that verified it, or the fixture test key's id under `trust: "test"`. */
   readonly signedBy: string;
+  /** The digest of the verified bundle blob itself (the referrer manifest's layer), as a lock pin's `bundle` records it. */
+  readonly bundleDigest: string;
 }
 
 /**
@@ -358,8 +360,9 @@ export async function verifyAnyReferrerBundle(
   const candidates = await discoverSignatureCandidates(repositoryRoot, subjectDigest, bundleArtifactType, options);
   for (const candidate of candidates) {
     let bundleBytes: Buffer;
+    let referrerManifest: ManifestInfo;
     try {
-      const referrerManifest = await fetchManifestByDigest([repositoryRoot], candidate.digest, options);
+      referrerManifest = await fetchManifestByDigest([repositoryRoot], candidate.digest, options);
       bundleBytes = await fetchBlobBytesByDigest([repositoryRoot], referrerManifest.layer, options);
     } catch {
       continue;
@@ -368,7 +371,7 @@ export async function verifyAnyReferrerBundle(
     if (verified === undefined) continue;
     const statement = parseStatement(verified.payload);
     checkContent(statement);
-    return { statement, signedBy: verified.signedBy };
+    return { statement, signedBy: verified.signedBy, bundleDigest: referrerManifest.layer.digest };
   }
   return undefined;
 }

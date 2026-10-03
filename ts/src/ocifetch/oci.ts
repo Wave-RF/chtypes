@@ -14,21 +14,27 @@
 
 import { createHash } from 'node:crypto';
 import { asString, field, items, type Json, parseJsonValue } from '../json.js';
-import { MANIFEST_MAX_BYTES, MAX_UNPACKED_BYTES, MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST, SPELLING_REFUSE_HINT_REGEX, SPELLING_REGEX } from './constants.gen.js';
+import { MANIFEST_MAX_BYTES, MAX_UNPACKED_BYTES, MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST, SPELLING_REFUSE_HINT_REGEX } from './constants.gen.js';
 import { ArtifactCorruptError, ArtifactUnpublishedError, SourceIncompatibleError, SourceUnreachableError } from './errors.js';
 import { type RequestOptions, readFileUrl, requestBuffered, requestToSink } from './http.js';
 import { digestOfHex, endpointUrl, hexOfDigest, MANIFEST_ACCEPT_HEADER, type PlatformKey, platformInfo } from './types.js';
 
-/** Refuses a spelling that is not `N.N`, `N.N.N` or `N.N.N.N`, or carries a `v`/channel suffix, before any network call. */
+/**
+ * Refuses the two documented spelling mistakes (a `v` prefix, a
+ * `-lts`/`-stable` channel suffix) before any network call (guide §3). A
+ * spelling that is simply not numeric is NOT refused here: the tag lookup
+ * answers for it (`CHTYPES_ARTIFACT_UNPUBLISHED` when nothing matches), the
+ * same path any arbitrary OCI tag takes — and the conformance trees publish
+ * symbolic tags such as `t-untrusted-key`. `SPELLING_REGEX` is a positive
+ * pattern used elsewhere (`versionWithinRequest`) to decide whether a
+ * resolved predicate's version is compared against the request at all.
+ */
 export function checkSpelling(spelling: string): void {
   if (new RegExp(SPELLING_REFUSE_HINT_REGEX).test(spelling)) {
     throw new Error(
       `chtypes: ${JSON.stringify(spelling)} is not a v1 version spelling (no "v" prefix, no "-lts"/"-stable" suffix); ` +
         'use the bare version, e.g. "26.8" or "26.8.15.10"',
     );
-  }
-  if (!new RegExp(SPELLING_REGEX).test(spelling)) {
-    throw new Error(`chtypes: ${JSON.stringify(spelling)} is not a valid version spelling (expected "N.N", "N.N.N" or "N.N.N.N")`);
   }
 }
 
@@ -195,6 +201,11 @@ export async function fetchManifestBytesByDigest(
   descriptor: Descriptor,
   options: RequestOptions,
 ): Promise<Buffer> {
+  if (descriptor.size !== undefined && descriptor.size > MANIFEST_MAX_BYTES) {
+    throw new ArtifactCorruptError(
+      `chtypes: manifest ${descriptor.digest}'s descriptor names ${descriptor.size} bytes, over the ${MANIFEST_MAX_BYTES}-byte manifest cap`,
+    );
+  }
   return fetchByDigestAcrossBases(bases, (d) => `/manifests/${d}`, descriptor, `manifest ${descriptor.digest}`, MANIFEST_MAX_BYTES, options, {
     accept: MANIFEST_ACCEPT_HEADER,
   });
@@ -351,6 +362,11 @@ export async function resolveTag(
       digest: manifestDigest,
       size: numberField(d, 'size'),
     };
+    if (manifestDescriptor.mediaType !== MEDIA_TYPE_MANIFEST) {
+      throw new SourceIncompatibleError(
+        `chtypes: ${spelling}'s ${platform} descriptor has mediaType ${JSON.stringify(manifestDescriptor.mediaType)}, not ${MEDIA_TYPE_MANIFEST}`,
+      );
+    }
     const manifestBytes = await fetchManifestBytesByDigest(bases, manifestDescriptor, options);
     const manifest = parseManifest(manifestDigest, manifestBytes);
     return { repositoryRoot: base, indexDigest: digestOfHex(sha256Hex(body)), indexBytes: body, manifest };

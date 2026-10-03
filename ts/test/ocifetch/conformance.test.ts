@@ -18,8 +18,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ensure, fetchSigned } from '../../src/ocifetch/ensure.js';
-import { FIXTURES_REPO_SUFFIX, PREDICATE_TYPE_FIXTURES, PREDICATE_TYPE_GOLDENS, RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
+import { ensure, fetchSigned, findReferrerDigests } from '../../src/ocifetch/ensure.js';
+import { FIXTURES_REPO_SUFFIX, GOLDENS_ARTIFACT_TYPE, PREDICATE_TYPE_FIXTURES, PREDICATE_TYPE_GOLDENS, RELEASE_KEYS, TEST_KEYS } from '../../src/ocifetch/constants.gen.js';
 import type { FetchV1ErrorCode } from '../../src/ocifetch/errors.js';
 import { verifyAndInstallFromLocalBlobs } from '../../src/ocifetch/localverify.js';
 import { readLock, type LockFile } from '../../src/ocifetch/lock.js';
@@ -27,6 +27,7 @@ import type { Clock, PlatformKey } from '../../src/ocifetch/types.js';
 
 const CONFORMANCE_DIR = process.env['CHTYPES_V1_CONFORMANCE'];
 const REPORT_PATH = process.env['CHTYPES_V1_REPORT'];
+const REGISTRY_BASE = process.env['CHTYPES_V1_REGISTRY_BASE'] === '' ? undefined : process.env['CHTYPES_V1_REGISTRY_BASE'];
 
 // ---------------------------------------------------------------- the shapes
 
@@ -165,7 +166,7 @@ function expandBase(
       ? `file://${path.resolve(conformanceDir, 'trees', tree, 'v2', 'chtypes', 'v1')}`
       : transport === 'http'
         ? `http://127.0.0.1:${serverPort}/s-${caseId}/chtypes/v1`
-        : 'https://registry.test:5443/chtypes/v1';
+        : (REGISTRY_BASE ?? (() => { throw new Error('chtypes: registry transport requested with no CHTYPES_V1_REGISTRY_BASE set'); })());
   return template.replace('{base}', base);
 }
 
@@ -214,11 +215,17 @@ describe.skipIf(CONFORMANCE_DIR === undefined || CONFORMANCE_DIR === '')('v1 con
     }
   });
 
-  it('every case in cases.json passes on every transport it lists (file, http)', async () => {
+  it('every case in cases.json passes on every transport it lists (file, http, and registry when CHTYPES_V1_REGISTRY_BASE is set)', async () => {
     if (CONFORMANCE_DIR === undefined) return;
     for (const c of caseFile.cases) {
       for (const transport of c.transports) {
-        if (transport === 'registry') continue; // the v1-network job's own leg.
+        // The `registry` transport runs only where CHTYPES_V1_REGISTRY_BASE
+        // names a live repository root (the v1-network and staging jobs set
+        // it); everywhere else its pairs are skipped LOUDLY, by name.
+        if (transport === 'registry' && REGISTRY_BASE === undefined) {
+          console.warn(`SKIP ${c.id}/registry: CHTYPES_V1_REGISTRY_BASE is unset`);
+          continue;
+        }
         const detail = await runOne(c, transport, CONFORMANCE_DIR, server?.port, server?.port2).catch(
           (err: unknown) => `runner threw: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
         );
@@ -377,7 +384,18 @@ async function runGenericFetch(c: ConformanceCase, bases: readonly string[], bas
   const repository = isGoldens ? bases[0]! : `${bases[0]}${FIXTURES_REPO_SUFFIX}`;
   const predicateType = isGoldens ? PREDICATE_TYPE_GOLDENS : PREDICATE_TYPE_FIXTURES;
   try {
-    const result = await fetchSigned(repository, c.request.spelling, predicateType, baseOptions);
+    // genericcases.go's own convention: a goldens case's `request.spelling`
+    // is the SUBJECT (a platform manifest) the goldens object is a referrer
+    // of, so it is a two-step resolution — find the goldens-artifactType
+    // referrer, then `fetchSigned` that referrer's own digest. A fixtures
+    // case names the object's digest directly.
+    let ref = c.request.spelling;
+    if (isGoldens) {
+      const found = await findReferrerDigests(repository, c.request.spelling, GOLDENS_ARTIFACT_TYPE, baseOptions);
+      if (found.length === 0) throw Object.assign(new Error(`chtypes: no goldens referrer of ${c.request.spelling}`), { code: 'CHTYPES_ARTIFACT_MISSING' });
+      ref = found[0]!;
+    }
+    const result = await fetchSigned(repository, ref, predicateType, baseOptions);
     if (!c.expect.ok) return `expected failure (code ${c.expect.code}), got ok`;
     if (c.expect.manifest !== null && result.digests.manifest !== c.expect.manifest) {
       return `manifest ${result.digests.manifest} != expected ${c.expect.manifest}`;

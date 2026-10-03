@@ -22,8 +22,8 @@ import {
   PREDICATE_TYPE_ARTIFACT,
   RELEASE_KEYS,
 } from './constants.gen.js';
-import { checkArtifactStatement, checkGenericStatement, verifyAnyReferrerBundle } from './dsse.js';
-import { ArtifactMissingError, ArtifactUnpublishedError, ArtifactUntrustedError } from './errors.js';
+import { checkArtifactStatement, checkGenericStatement, parseStatement, verifyAnyReferrerBundle, verifyBundleSignature } from './dsse.js';
+import { ArtifactCorruptError, ArtifactMissingError, ArtifactPinnedError, ArtifactUnpublishedError, ArtifactUntrustedError } from './errors.js';
 import type { RequestOptions } from './http.js';
 import {
   cacheRoot,
@@ -42,6 +42,7 @@ import {
   type VerifiedRecord,
   writeVerifiedRecord,
 } from './layout.js';
+import { discoverSignatureCandidates } from './referrers.js';
 import { verifyAndInstallFromLocalBlobs } from './localverify.js';
 import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, resolveTag } from './oci.js';
 import { emptyLock, getPin, type LockFile, readLock, withPin, writeLock } from './lock.js';
@@ -364,7 +365,7 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
           schema: 1,
           manifestDigest: resolveResult.manifest.digest,
           layerDigest: resolveResult.manifest.layer.digest,
-          bundleDigest: trust === undefined ? '' : digestOfHex(hexOfDigest(resolveResult.manifest.layer.digest)),
+          bundleDigest: trust === undefined ? '' : trust.bundleDigest,
           signedBy,
           predicate,
           library: predicate.library,
@@ -391,6 +392,12 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
 
   if (options.lockWrite === true) {
     await writeLockEntry(request, platform, record, options, resolveResult.repositoryRoot, resolveResult.indexBytes, baseReqOptions);
+  }
+  if (options.update === true) {
+    // `update` re-resolves every locked request and rewrites the lock from
+    // scratch (guide §6: it never merges a stale entry with a fresh one), in
+    // addition to resolving the request above.
+    await updateLock(options, bases, baseReqOptions, trustedKeys);
   }
 
   return resolvedFromRecord(record, platform, request, recordDir, resolveResult.repositoryRoot, alreadyInstalled, warnings);
@@ -453,18 +460,24 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
   const lockPath = options.lockPath ?? path.join(process.cwd(), 'chtypes.lock');
   const lock = await readLock(lockPath);
   if (lock === undefined) {
-    throw new ArtifactUnpublishedError(`chtypes: --frozen with no lock file at ${lockPath}; run \`fetch --lock\` first`);
+    throw new ArtifactPinnedError(`chtypes: --frozen with no lock file at ${lockPath}; run \`fetch --lock\` first`);
   }
   const pin = getPin(lock, request, platform);
   if (pin === undefined) {
-    throw new ArtifactUnpublishedError(`chtypes: ${lockPath} has no pin for ${request}/${platform}; re-lock with \`fetch --lock\``);
+    throw new ArtifactPinnedError(`chtypes: ${lockPath} names no entry for ${request}/${platform}; re-lock with \`fetch --lock\``);
   }
   const bases = resolveBases(options);
   const baseReqOptions = requestOptionsFor(options, bases);
   const trustedKeys = defaultTrustedKeys(options);
   const info = platformInfo(platform);
 
+  // `--frozen` skips resolution and discovery entirely (guide §6): every
+  // request is by digest — the manifest, the layer and the bundle blob all
+  // come from the lock's own pin, from any configured base.
   const manifest = await fetchManifestByDigest(bases, pin.manifest, { ...baseReqOptions, maxBytes: 0 });
+  if (manifest.layer.digest !== pin.layer) {
+    throw new ArtifactCorruptError(`chtypes: manifest ${manifest.digest}'s layer does not match the locked digest ${pin.layer}`);
+  }
   const manifestHex = hexOfDigest(manifest.digest);
   const finalDir = unpackedDir(root, manifestHex);
   const existing = await readVerifiedRecord(finalDir);
@@ -472,32 +485,26 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
     return resolvedFromRecord(existing, platform, request, finalDir, 'cache', true, []);
   }
 
-  // `--frozen` fetches by digest from any configured base; trust is checked
-  // the same way as a normal `ensure`, using the pinned bundle digest
-  // directly rather than rediscovering it through referrers.
-  //
-  // Simplification (decided-here): `--frozen` does not honor `allowUnsigned`.
-  // A frozen fetch's whole point is reproducing exactly what was locked, and
-  // the lock itself only ever records a digest that was signed at lock-write
-  // time, so "frozen and unsigned" is not a combination this lane builds a
-  // predicate-free path for.
-  const trust = await verifyAnyReferrerBundle(
-    bases[0]!,
-    manifest.digest,
-    MEDIA_TYPE_BUNDLE,
-    trustedKeys,
-    (statement) =>
-      checkArtifactStatement(statement, PREDICATE_TYPE_ARTIFACT, manifest.layer.digest, {
-        os: info.os,
-        arch: info.architecture,
-        requestedSpelling: request,
-      }),
-    { ...baseReqOptions, maxBytes: 0 },
-  );
-  if (trust === undefined) {
-    throw new ArtifactUntrustedError(`chtypes: no referrer of ${manifest.digest} verified under a trusted key`);
+  const bundleBytes = await fetchBlobBytesByDigest(bases, { mediaType: MEDIA_TYPE_BUNDLE, digest: pin.bundle }, { ...baseReqOptions, maxBytes: 0 });
+  const verified = verifyBundleSignature(bundleBytes, trustedKeys);
+  let predicate: ArtifactPredicate;
+  let signedBy: string;
+  let warnings: string[] = [];
+  if (verified === undefined) {
+    if (options.allowUnsigned !== true) {
+      throw new ArtifactUntrustedError(`chtypes: the locked bundle ${pin.bundle} does not verify under a trusted key`);
+    }
+    predicate = await unsignedPredicateFallback(bases[0]!, manifest, request, info, baseReqOptions);
+    signedBy = '';
+    warnings = ['chtypes: proceeding with an unsigned artifact (CHTYPES_ALLOW_UNSIGNED)'];
+  } else {
+    predicate = checkArtifactStatement(parseStatement(verified.payload), PREDICATE_TYPE_ARTIFACT, manifest.layer.digest, {
+      os: info.os,
+      arch: info.architecture,
+      requestedSpelling: request,
+    });
+    signedBy = verified.signedBy;
   }
-  const predicate = trust.statement.predicate as unknown as ArtifactPredicate;
 
   const staging = await freshStagingDir(root);
   const tempLayerPath = path.join(root, `.tmp-layer-${process.pid}-${randomBytes(6).toString('hex')}`);
@@ -511,20 +518,68 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
       schema: 1,
       manifestDigest: manifest.digest,
       layerDigest: manifest.layer.digest,
-      bundleDigest: pin.bundle,
-      signedBy: trust.signedBy,
+      bundleDigest: verified === undefined ? '' : pin.bundle,
+      signedBy,
       predicate,
       library: predicate.library,
     };
     await writeVerifiedRecord(staging, record);
     await commitStaging(staging, finalDir);
-    return resolvedFromRecord(record, platform, request, finalDir, bases[0]!, false, []);
+    return resolvedFromRecord(record, platform, request, finalDir, bases[0]!, false, warnings);
   } catch (err) {
     await removeStaging(staging);
     throw err;
   } finally {
     await unlink(tempLayerPath).catch(() => {});
   }
+}
+
+/**
+ * `update`: re-resolve every (request, platform) pair the existing lock
+ * names against the current index and rewrite the lock from that fresh set
+ * alone — never a merge with a stale entry (guide §6). A request with no
+ * platform that verifies is dropped rather than carried over stale.
+ */
+async function updateLock(
+  options: FetchV1Options,
+  bases: readonly string[],
+  baseReqOptions: Omit<RequestOptions, 'maxBytes'>,
+  trustedKeys: readonly TrustedKey[],
+): Promise<void> {
+  const lockPath = options.lockPath ?? path.join(process.cwd(), 'chtypes.lock');
+  const existing = await readLock(lockPath);
+  if (existing === undefined) throw new ArtifactPinnedError(`chtypes: update with no lock file at ${lockPath}`);
+  let fresh: LockFile = emptyLock();
+  for (const [spelling, byPlatform] of Object.entries(existing.requests)) {
+    for (const key of Object.keys(byPlatform)) {
+      const platformKey = key as PlatformKey;
+      const info = platformInfo(platformKey);
+      const resolved = await resolveTag(bases, spelling, platformKey, { ...baseReqOptions, maxBytes: 0 });
+      const trust = await verifyAnyReferrerBundle(
+        resolved.repositoryRoot,
+        resolved.manifest.digest,
+        MEDIA_TYPE_BUNDLE,
+        trustedKeys,
+        (statement) =>
+          checkArtifactStatement(statement, PREDICATE_TYPE_ARTIFACT, resolved.manifest.layer.digest, {
+            os: info.os,
+            arch: info.architecture,
+            requestedSpelling: spelling,
+          }),
+        { ...baseReqOptions, maxBytes: 0 },
+      );
+      if (trust === undefined) continue;
+      const predicate = trust.statement.predicate as unknown as ArtifactPredicate;
+      fresh = withPin(fresh, spelling, platformKey, {
+        version: predicate.clickhouse_version,
+        build: predicate.build,
+        manifest: resolved.manifest.digest,
+        layer: resolved.manifest.layer.digest,
+        bundle: trust.bundleDigest,
+      });
+    }
+  }
+  await writeLock(lockPath, fresh);
 }
 
 async function writeLockEntry(
@@ -580,7 +635,7 @@ async function writeLockEntry(
           build: otherPredicate.build,
           manifest: otherManifest.digest,
           layer: otherManifest.layer.digest,
-          bundle: otherManifest.layer.digest,
+          bundle: trust.bundleDigest,
         });
       } catch {
         // Best-effort: a platform whose bundle cannot be fetched/verified is
@@ -597,6 +652,26 @@ function isLikelyPlatformKey(key: string): boolean {
 }
 
 // ------------------------------------------------------------------ fetchSigned
+
+/**
+ * The digests of every referrer of `subjectDigest` whose artifactType is
+ * `artifactType` (referrers API first, the fallback tag only when the API
+ * named none). Internal: the conformance runner's goldens cases need a
+ * two-step lookup (subject -> its goldens referrer -> `fetchSigned`) that
+ * the seam itself deliberately does not offer. Not exported from `index.ts`.
+ */
+export async function findReferrerDigests(
+  repository: string,
+  subjectDigest: string,
+  artifactType: string,
+  options: FetchV1Options = {},
+): Promise<readonly string[]> {
+  const candidates = await discoverSignatureCandidates(repository, subjectDigest, artifactType, {
+    ...requestOptionsFor(options, [repository]),
+    maxBytes: 0,
+  });
+  return candidates.map((c) => c.digest);
+}
 
 export interface FetchSignedResult {
   readonly path: string;

@@ -9,7 +9,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { LOCK_DEFAULT_FILE, LOCK_SCHEMA } from './constants.gen.js';
+import { LOCK_DEFAULT_FILE, LOCK_SCHEMA, PLATFORMS } from './constants.gen.js';
 import { ArtifactPinnedError } from './errors.js';
 import { isPlatformKey, type PlatformKey } from './types.js';
 
@@ -155,7 +155,10 @@ export function getPin(lock: LockFile, spelling: string, platform: PlatformKey):
 
 /** Returns a new lock with `pin` set for `spelling`/`platform`, adding `platform` to the declared list if new. */
 export function withPin(lock: LockFile, spelling: string, platform: PlatformKey, pin: LockPin): LockFile {
-  const platforms = lock.platforms.includes(platform) ? lock.platforms : [...lock.platforms, platform];
+  // Platforms are kept in the contract's own order (`PLATFORMS`), never
+  // insertion order, so two writers that pinned the same set agree byte for byte.
+  const unsorted = lock.platforms.includes(platform) ? lock.platforms : [...lock.platforms, platform];
+  const platforms = PLATFORMS.map((p) => p.key as PlatformKey).filter((k) => unsorted.includes(k));
   const row = { ...(lock.requests[spelling] ?? {}), [platform]: pin };
   return { ...lock, platforms, requests: { ...lock.requests, [spelling]: row } };
 }

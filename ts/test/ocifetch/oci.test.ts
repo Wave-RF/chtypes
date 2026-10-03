@@ -22,12 +22,9 @@ describe('checkSpelling', () => {
     expect(() => checkSpelling(spelling)).toThrow(/v1 version spelling/);
   });
 
-  it('refuses a spelling with a non-numeric component', () => {
-    expect(() => checkSpelling('26.x')).toThrow();
-  });
-
-  it('refuses a leading-zero component (not a canonical spelling)', () => {
-    expect(() => checkSpelling('26.08')).toThrow();
+  it('leaves a non-numeric spelling to the tag lookup (UNPUBLISHED), like any arbitrary OCI tag', () => {
+    expect(() => checkSpelling('26.x')).not.toThrow();
+    expect(() => checkSpelling('t-untrusted-key')).not.toThrow();
   });
 });
 
