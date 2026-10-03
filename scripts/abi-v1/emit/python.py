@@ -1,7 +1,7 @@
 """python.py: the Python binding's generated ABI v1 layer (plan PLAN-sdk-v1-ffi
 section 2.2, row "Python").
 
-Two files, from the SAME spec/abi-v1/abi.json every other emitter reads:
+Three files, from the SAME spec/abi-v1/abi.json every other emitter reads:
 
   python/src/chtypes/_abi1/_decls.py
       A data table (`FUNCTIONS`) describing every parameter and return shape,
@@ -28,6 +28,21 @@ Two files, from the SAME spec/abi-v1/abi.json every other emitter reads:
       python/src/chtypes/_abi1/_errors.py (stable across regenerations; only
       the MAPPING is sdk.json-derived, so a status renumbering or a new
       refusal reason is a regeneration, never a hand edit).
+
+  python/src/chtypes/_abi1/_vocab.py
+      Every vocabulary the description defines, as the public API's types:
+      `Format` and `Status` (IntEnum), `Outcome`, `FilterOutcome`, `Verdict`
+      and `DefaultKind` (StrEnum, each with `of()` reading the description's
+      fallback), `Reason` and `Source` (plain strings plus the `lossy` and
+      `is_stored` facts), `DocFlags` and `EXPORT_NONE`. Nothing else keeps a
+      copy of any of it.
+
+  The typed, copy-then-free call wrappers (docs/reference/bindings-v1.md
+  section 8, question 1) are methods of `Api` in `_decls.py`, one per
+  status-returning function, named without `chs_`: bytes in, bytes or a handle
+  out, every `chs_buf` and `chs_error` read and freed inside the call, a
+  non-OK status raised as the class `_errmap` gives it. A `process_serial` or
+  `process_once` function takes the image's process lock; nothing else locks.
 
 ctypes conventions (plan section 3.3 "Python", and the F-Py dispatch):
   * `ctypes.CDLL(path, mode=os.RTLD_NOW | os.RTLD_LOCAL)` -- the hand-written
