@@ -73,7 +73,7 @@ const USAGE = `usage: chtypes <command> [options]
   --frozen    fetch exactly what the lock file pins, by digest; refuse anything it does not (default lock: chtypes.lock)
   --offline   never touch the network: an installed, verified build is fine, anything else fails
   --lock      record what was installed into this lock file
-  --update    re-resolve every request the lock holds and rewrite it (requires --lock; not with --frozen)
+  --update    re-resolve every request the lock holds and rewrite it (requires --lock; not with --frozen or --offline)
   --platform  <os>-<arch>: linux-amd64, linux-arm64 or darwin-arm64 (default: this host, or CHTYPES_TARGET)
   --cache     the cache root (default: CHTYPES_CACHE, else \${XDG_CACHE_HOME:-~/.cache}/chtypes/v1)
   -h, --help  this text;  --version  the package version
@@ -163,6 +163,7 @@ function fetchOptions(values: Values, forFetch: boolean): FetchV1Options {
     throw new CliUsageError(`--platform ${JSON.stringify(values.platform)} is not a platform: use linux-amd64, linux-arm64 or darwin-arm64`);
   }
   if (values.frozen && values.update) throw new CliUsageError('--frozen and --update contradict: one reads the lock, the other rewrites it');
+  if (values.update && values.offline) throw new CliUsageError('--update and --offline contradict: an update must reach the registry');
   if (values.update && values.lock === undefined) throw new CliUsageError('--update requires --lock <file>');
   const lockPath = values.lock;
   return withEnvironment({
@@ -237,10 +238,7 @@ async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Pr
   const options = fetchOptions(values, false);
   const root = cacheRoot(options.cacheDir);
   const results = await verifyInstalled(options);
-  if (results.length === 0) {
-    say(io, values, `nothing installed in ${root}`);
-    return EXIT_OK;
-  }
+  if (results.length === 0) return EXIT_OK;
   let bad = 0;
   for (const r of results) {
     if (!r.ok) {
@@ -248,7 +246,7 @@ async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Pr
       io.stderr(`BAD  ${r.platform}  ${r.dir}  ${r.detail}\n`);
     }
   }
-  say(io, values, bad === 0 ? `${results.length} build(s) verified in ${root}` : `${bad} of ${results.length} build(s) FAILED verification in ${root}`);
+  if (bad > 0) io.stderr(`${bad} of ${results.length} build(s) FAILED verification in ${root}\n`);
   return bad === 0 ? EXIT_OK : (ERROR_EXIT_CODES['CHTYPES_ARTIFACT_CORRUPT'] ?? EXIT_OTHER);
 }
 

@@ -68,6 +68,7 @@ describe('usage', () => {
     expect((await run('fetch', '26.8', '--platform', 'windows-amd64', '--cache', cache)).code).toBe(EXIT_USAGE);
     expect((await run('where', 'extra')).code).toBe(EXIT_USAGE);
     expect((await run('fetch', '26.8', '--update', '--cache', cache)).code).toBe(EXIT_USAGE);
+    expect((await run('fetch', '26.8', '--update', '--offline', '--lock', 'x.lock', '--cache', cache)).code).toBe(EXIT_USAGE);
     expect((await run('fetch', '26.8', '-q')).code).toBe(EXIT_USAGE);
     expect((await run('fetch', '26.8', '--base', 'x')).code).toBe(EXIT_USAGE);
     expect((await run('-V')).code).toBe(EXIT_USAGE);
@@ -84,6 +85,7 @@ describe('commands that touch no network', () => {
   it('verify and list --offline on an empty cache succeed and say nothing is installed', async () => {
     const verify = await run('verify', '--cache', cache);
     expect(verify.code).toBe(EXIT_OK);
+    expect(verify.out + verify.err).toBe('');
     const list = await run('list', '--offline', '--cache', cache);
     expect(list.code).toBe(EXIT_OK);
     expect(list.out).toContain('(nothing)');
