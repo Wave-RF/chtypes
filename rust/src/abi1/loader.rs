@@ -119,11 +119,81 @@ pub(crate) struct Loaded {
     pub(crate) api: Api,
 }
 
+/// What a failed load reports: a step 1-6 refusal (`sdk.json` reasons), or —
+/// step 7 having no refusal reason by design — `chs_initialize`'s own call
+/// error, mapped by the D3 status table.
+pub(crate) enum LoadError {
+    Refused(Refusal),
+    Initialize(InitializeError),
+}
+
+/// `chs_initialize`'s own call error: the status, the error class the D3
+/// table maps it to, and the library's own message (naming both zones for a
+/// zone conflict).
+pub(crate) struct InitializeError {
+    pub(crate) status: &'static str,
+    /// `usage` for `CHS_INVALID_ARGUMENT`, `internal` for `CHS_INTERNAL`,
+    /// `rejected` / `declined` for the other two.
+    pub(crate) class: &'static str,
+    pub(crate) message: String,
+}
+
 /// Run loader steps 1-7 against `input`. Step 7 calls `chs_initialize` once
 /// with the image zone (`process_once`: the same spelling again is OK, a
-/// different one is `CHS_INVALID_ARGUMENT`); any status but `CHS_OK` refuses
-/// the library with reason `initialize`.
-pub(crate) fn load(input: LoadInput<'_>) -> Result<Loaded, Refusal> {
+/// different one is `CHS_INVALID_ARGUMENT`); a non-OK status is that call's
+/// own error, never a refusal reason.
+pub(crate) fn load(input: LoadInput<'_>) -> Result<Loaded, LoadError> {
+    let timezone = input.timezone;
+    let loaded = load_checked(input).map_err(LoadError::Refused)?;
+    let api = &loaded.api;
+    let mut err: *mut decls::ChsError = std::ptr::null_mut();
+    // SAFETY: steps 1-6 passed, so `api` is fully resolved; `timezone` is a
+    // live slice for the whole call and `err` is this call's own local.
+    let status = unsafe { (api.chs_initialize)(timezone.as_ptr(), timezone.len(), &mut err) };
+    let message = if err.is_null() {
+        String::new()
+    } else {
+        // SAFETY: a non-null `err` is a `chs_error *` this call just handed
+        // over; the message buffer is read then freed through this image,
+        // and the error is freed exactly once.
+        unsafe {
+            let buf = (api.chs_error_message)(err as *const decls::ChsError);
+            let text = if buf.is_null() {
+                String::new()
+            } else {
+                let data = (api.chs_buf_data)(buf as *const decls::ChsBuf);
+                let len = (api.chs_buf_len)(buf as *const decls::ChsBuf);
+                let t = if data.is_null() || len == 0 {
+                    String::new()
+                } else {
+                    String::from_utf8_lossy(std::slice::from_raw_parts(data, len)).into_owned()
+                };
+                (api.chs_buf_free)(buf);
+                t
+            };
+            (api.chs_error_free)(err);
+            text
+        }
+    };
+    if status != 0 {
+        let name = decls::status_name(status).unwrap_or("CHS_INTERNAL");
+        let class = match name {
+            "CHS_INVALID_ARGUMENT" => "usage",
+            "CHS_REJECTED" => "rejected",
+            "CHS_DECLINED" => "declined",
+            _ => "internal",
+        };
+        return Err(LoadError::Initialize(InitializeError {
+            status: name,
+            class,
+            message,
+        }));
+    }
+    Ok(loaded)
+}
+
+/// Steps 1-6.
+fn load_checked(input: LoadInput<'_>) -> Result<Loaded, Refusal> {
     let path = input.library_path;
 
     // Step 1: glibc, Linux only, BEFORE dlopen.
@@ -247,26 +317,6 @@ pub(crate) fn load(input: LoadInput<'_>) -> Result<Loaded, Refusal> {
     // separate want/got pair.
     let api = unsafe { Api::resolve_all(lib) }
         .map_err(|name| Refusal::new(format!("missing_symbol:{name}"), path))?;
-
-    // Step 7: `chs_initialize(timezone, len, err)`, once per process.
-    let mut err: *mut decls::ChsError = std::ptr::null_mut();
-    // SAFETY: steps 1-6 passed, so `api` is fully resolved; `timezone` is a
-    // live slice for the whole call and `err` is this call's own local.
-    let status =
-        unsafe { (api.chs_initialize)(input.timezone.as_ptr(), input.timezone.len(), &mut err) };
-    if !err.is_null() {
-        // SAFETY: a non-null `err` is a `chs_error *` this same call just
-        // handed over, freed here exactly once through this image's own free.
-        unsafe { (api.chs_error_free)(err) };
-    }
-    if status != 0 {
-        let name = decls::status_name(status).unwrap_or("an unknown status");
-        return Err(Refusal::with_detail(
-            "initialize",
-            path,
-            format!("chs_initialize returned {name} ({status})"),
-        ));
-    }
 
     Ok(Loaded { api })
 }

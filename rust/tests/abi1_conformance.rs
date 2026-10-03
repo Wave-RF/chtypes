@@ -56,7 +56,7 @@ mod loader;
 
 use decls::Api;
 use invoke_gen::{MintedHandle, Outcome, ResolvedArg, invoke};
-use loader::{LoadInput, Loaded, Refusal};
+use loader::{LoadError, LoadInput, Loaded};
 
 /// A loud announcement on the REAL stderr, uncaptured by `cargo test` even
 /// without `--nocapture` — the same mechanism `rust/tests/fetch.rs` and
@@ -396,7 +396,7 @@ fn predicate_map(v: &Value) -> Result<serde_json::Map<String, Value>, String> {
 /// file name still names a real file here. Taking the file name alone is
 /// also forward-compatible with a future `stubs.json` that records a
 /// relative file name directly (F-B tracking this under a separate fix).
-fn load_variant(stubs_dir: &Path, variant: &Value) -> Result<Loaded, Refusal> {
+fn load_variant(stubs_dir: &Path, variant: &Value) -> Result<Loaded, LoadError> {
     let path_str = variant
         .get("path")
         .and_then(Value::as_str)
@@ -441,7 +441,11 @@ fn run_loader_case(
                 Err(format!("want refusal {want_reason:?}, the library loaded"))
             }
         }
-        Err(refusal) => {
+        Err(LoadError::Initialize(e)) => Err(format!(
+            "want {want_reason:?}, chs_initialize failed ({} / {}): {}",
+            e.status, e.class, e.message
+        )),
+        Err(LoadError::Refused(refusal)) => {
             if refusal.reason == want_reason {
                 Ok(())
             } else {
@@ -837,7 +841,13 @@ fn abi1_conformance() {
         Some(ok_variant) => match load_variant(&stubs_dir, ok_variant) {
             Ok(loaded) => Some(loaded.api),
             Err(e) => {
-                results.push(("ok-load".to_string(), false, Some(e.to_string())));
+                let detail = match e {
+                    LoadError::Refused(r) => r.to_string(),
+                    LoadError::Initialize(i) => {
+                        format!("chs_initialize: {} ({})", i.status, i.message)
+                    }
+                };
+                results.push(("ok-load".to_string(), false, Some(detail)));
                 None
             }
         },
