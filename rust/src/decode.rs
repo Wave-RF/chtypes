@@ -23,14 +23,14 @@ use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value as Json};
 
 use crate::abi1::vocab_gen::{
-    BYTES_SUFFIX, DefaultKind, FilterOutcome, Outcome, Verdict, reason, source,
+    BYTES_SUFFIX, DefaultKind, FilterOutcome, Outcome, VALUE_BYTES, Verdict, reason, source,
 };
 use crate::error::{Error, Result};
 use crate::raw::RawText;
 use crate::result::{
     BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn, Discovery,
-    ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing, Header, RowResult,
-    SchemaDescription, Span, Transform, Value,
+    EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing, Header,
+    RowResult, SchemaDescription, Span, Transform, Value,
 };
 
 // -------------------------------------------------------------- strict parse
@@ -304,6 +304,24 @@ impl<'a> Obj<'a> {
         })
     }
 
+    /// The raw bytes of a scalar `String` or `FixedString` value, from
+    /// `value_b64` alone: absent when the entry carries none.
+    fn value(&self) -> Result<Option<RawText>> {
+        match self.get(VALUE_BYTES) {
+            None => Ok(None),
+            Some(Json::String(s)) => base64::engine::general_purpose::STANDARD
+                .decode(s)
+                .map(|b| Some(RawText::from(b)))
+                .map_err(|_| self.fail(VALUE_BYTES, "standard base64")),
+            Some(_) => Err(self.fail(VALUE_BYTES, "a string")),
+        }
+    }
+
+    /// An array of name objects (`{"name"}` or `{"name_b64"}`), as bytes.
+    fn name_objects(&self, array_key: &str) -> Result<Vec<RawText>> {
+        self.names(array_key, "name")
+    }
+
     /// Each element of an array is an object carrying a name under `key`.
     fn names(&self, array_key: &str, key: &str) -> Result<Vec<RawText>> {
         self.array(array_key)?
@@ -358,7 +376,7 @@ fn value_of(o: &Obj<'_>) -> Result<Value> {
         null: o.boolean("null")?,
         source,
         is_stored,
-        value: o.bytes_opt("value")?.map(RawText::from),
+        value: o.value()?,
     })
 }
 
@@ -399,6 +417,7 @@ fn row_of(o: &Obj<'_>) -> Result<RowResult> {
             column: c.name("name")?,
             kind: c.string("kind")?,
             text: c.bytes("stored")?,
+            value: c.value()?,
         });
     }
     let mut unknown_fields = Vec::new();
@@ -421,12 +440,12 @@ fn row_of(o: &Obj<'_>) -> Result<RowResult> {
         values,
         transformed: transforms(o, "transformed")?,
         unknown_fields,
-        unsupported_settings: o.strings("unsupported_settings")?,
+        unsupported_settings: o.name_objects("unsupported_settings")?,
         computed,
         verdict: o.opt_string("verdict")?.map(|v| Verdict::from_wire(&v)),
         verdict_code: o.int32("verdict_code")?,
         verdict_err: o.bytes("verdict_err")?,
-        partition_id: o.opt_string("partition_id")?,
+        partition_id: o.bytes_opt("partition_id")?.map(RawText::from),
         input_span: span(o, "input_span")?,
     })
 }
@@ -449,17 +468,23 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
     }
     let engine_rows = match o.opt_array("engine_rows")? {
         None => None,
-        Some(items) => {
+        Some(rows) => {
             let mut out = Vec::new();
-            for (i, v) in items.iter().enumerate() {
-                match v {
-                    Json::String(s) => out.push(RawText::from(s.as_str())),
-                    Json::Object(_) => {
-                        let e = Obj::of("batch", format!("engine_rows[{i}]"), v)?;
-                        out.push(e.bytes("row")?);
-                    }
-                    _ => return Err(o.fail("engine_rows", "an array of strings")),
+            for (i, row) in rows.iter().enumerate() {
+                let Json::Array(cells) = row else {
+                    return Err(o.fail("engine_rows", "a list of rows, each a list of cells"));
+                };
+                let mut cells_out = Vec::new();
+                for (j, cell) in cells.iter().enumerate() {
+                    let c = Obj::of("batch", format!("engine_rows[{i}][{j}]"), cell)?;
+                    cells_out.push(EngineCell {
+                        column: c.name("name")?,
+                        text: c.bytes("stored")?,
+                        null: c.boolean("null")?,
+                        value: c.value()?,
+                    });
                 }
+                out.push(cells_out);
             }
             Some(out)
         }
@@ -483,7 +508,7 @@ pub(crate) fn batch(bytes: &[u8], payload: Option<Vec<u8>>) -> Result<BatchResul
         engine_rows,
         payload,
         spans: row_spans,
-        export_declined: o.string("export_declined")?,
+        export_declined: o.bytes("export_declined")?,
         rows_passed: o.uint64("rows_passed")?,
         rows_cut: o.uint64("rows_cut")?,
         partition_count: o.opt_uint64("partition_count")?,
@@ -538,7 +563,7 @@ pub(crate) fn filter_result(bytes: &[u8]) -> Result<FilterResult> {
         err_code: o.int32("code")?,
         err_msg: o.bytes("err")?,
         rows_read: o.uint64("rows_read")?,
-        unsupported_settings: o.strings("unsupported_settings")?,
+        unsupported_settings: o.name_objects("unsupported_settings")?,
         verdicts,
         errors,
     })
@@ -563,7 +588,7 @@ pub(crate) fn schema_description(bytes: &[u8]) -> Result<SchemaDescription> {
             name: c.name("name")?,
             r#type: c.bytes("type")?,
             default_kind,
-            default_expr: c.bytes("default_expr")?,
+            default_expr: c.bytes("default_expression")?,
         });
     }
     Ok(SchemaDescription { columns })
@@ -581,7 +606,10 @@ pub(crate) fn discovery(bytes: &[u8]) -> Result<Discovery> {
             declaration: c.bytes("declaration")?,
         });
     }
-    Ok(Discovery { columns })
+    Ok(Discovery {
+        columns,
+        columns_sql: o.bytes("columns_sql")?,
+    })
 }
 
 /// Decode one `error_code_table` document: a JSON array of `{code, name}`.
@@ -828,7 +856,7 @@ mod tests {
         let b = batch(
             br#"{"outcome":"accepted","rows_read":"9007199254740993","rows_skipped":1,
                 "rows_passed":2,"rows_cut":1,"partition_count":null,
-                "engine_rows":["{\"a\":1}"],"row_spans":[{"off":0,"len":5}],
+                "engine_rows":[[{"name":"a","stored":"1","null":false,"value_b64":"MQ=="}]],"row_spans":[{"off":0,"len":5}],
                 "rows":[{"outcome":"accepted","partition_id":"202601","input_span":{"off":0,"len":3}}],
                 "unconsumed":[],"framing":{"bom_skipped":null,"container":null,"header":null}}"#,
             Some(b"{\"a\":1}\n".to_vec()),
@@ -839,9 +867,16 @@ mod tests {
         assert_eq!(b.partition_count, None);
         assert_eq!(b.payload.as_deref(), Some(&b"{\"a\":1}\n"[..]));
         assert_eq!(b.spans, Some(vec![Span { off: 0, len: 5 }]));
-        assert_eq!(b.rows[0].partition_id.as_deref(), Some("202601"));
+        assert_eq!(
+            b.rows[0].partition_id.as_ref().map(RawText::as_bytes),
+            Some(&b"202601"[..])
+        );
         assert_eq!(b.rows[0].input_span, Some(Span { off: 0, len: 3 }));
-        assert_eq!(b.engine_rows.as_ref().map(Vec::len), Some(1));
+        let cell = &b.engine_rows.as_ref().expect("engine rows")[0][0];
+        assert_eq!(cell.column.as_bytes(), b"a");
+        assert_eq!(cell.text.as_bytes(), b"1");
+        assert!(!cell.null);
+        assert_eq!(cell.value.as_ref().map(RawText::as_bytes), Some(&b"1"[..]));
     }
 
     #[test]
@@ -883,6 +918,62 @@ mod tests {
         let m = live_handles(br#"{"chs_schema":2,"chs_filter":0}"#).unwrap();
         assert_eq!(m.get("chs_schema"), Some(&2));
         assert_eq!(m.get("chs_filter"), Some(&0));
+    }
+
+    #[test]
+    fn unsupported_settings_are_name_objects_and_surface_as_bytes() {
+        let r = row(
+            br#"{"outcome":"accepted","unsupported_settings":[{"name":"a_setting"},{"name_b64":"AP8="}]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.unsupported_settings[0].as_bytes(), b"a_setting");
+        assert_eq!(r.unsupported_settings[1].as_bytes(), &[0x00, 0xff]);
+        let f = filter_result(
+            br#"{"outcome":"ok","verdicts":"t","unsupported_settings":[{"name":"x"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(f.unsupported_settings[0].as_bytes(), b"x");
+        // A bare string is not a name object.
+        assert!(row(br#"{"outcome":"accepted","unsupported_settings":["x"]}"#).is_err());
+    }
+
+    #[test]
+    fn the_raw_value_comes_from_value_b64_alone() {
+        let r = row(br#"{"outcome":"accepted","cols":[
+                {"name":"s","null":false,"src":"input","stored":"\"a\"","value_b64":"YQ=="},
+                {"name":"t","null":false,"src":"input","stored":"1"}],
+              "computed":[{"name":"m","kind":"materialized","stored":"2","value_b64":"Mg=="}]}"#)
+        .unwrap();
+        assert_eq!(
+            r.columns[0].value.as_ref().map(RawText::as_bytes),
+            Some(&b"a"[..])
+        );
+        assert_eq!(r.columns[1].value, None);
+        assert_eq!(
+            r.computed[0].value.as_ref().map(RawText::as_bytes),
+            Some(&b"2"[..])
+        );
+        // Base64 outside the standard alphabet is a document that breaks its own schema.
+        let msg = internal(
+            row(br#"{"outcome":"accepted","cols":[{"name":"s","null":false,"src":"input","value_b64":"!!"}]}"#)
+                .unwrap_err(),
+        );
+        assert!(msg.contains("value_b64"), "{msg}");
+    }
+
+    #[test]
+    fn a_discovery_document_carries_its_columns_and_the_joined_sql() {
+        let d = discovery(
+            br#"{"columns":[{"name":"a","declaration":"`a` UInt8","type":"UInt8"},
+                           {"name_b64":"AP8=","declaration_b64":"/g=="}],
+                 "columns_sql":"`a` UInt8"}"#,
+        )
+        .unwrap();
+        assert_eq!(d.columns[0].name.as_bytes(), b"a");
+        assert_eq!(d.columns[0].declaration.as_bytes(), b"`a` UInt8");
+        assert_eq!(d.columns[1].name.as_bytes(), &[0x00, 0xff]);
+        assert_eq!(d.columns[1].declaration.as_bytes(), &[0xfe]);
+        assert_eq!(d.columns_sql.as_bytes(), b"`a` UInt8");
     }
 
     #[test]

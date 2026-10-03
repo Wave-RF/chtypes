@@ -48,8 +48,9 @@ pub struct Value {
     pub source: String,
     /// The description's `is_stored` fact for [`Value::source`].
     pub is_stored: bool,
-    /// The raw bytes of a scalar `String` or `FixedString` leaf (from
-    /// `value_b64`), when the library carries them; `None` otherwise.
+    /// The raw bytes of a scalar `String` or `FixedString` value (from
+    /// `value_b64`), whether or not they are valid UTF-8; `None` otherwise. A
+    /// value nested in another type has none in 1.0.
     pub value: Option<RawText>,
 }
 
@@ -79,8 +80,26 @@ pub struct Computed {
     pub column: RawText,
     /// What kind of computed value this is. ASCII.
     pub kind: String,
-    /// The rendering (from `stored`).
+    /// The rendering (from `stored` or `stored_b64`).
     pub text: RawText,
+    /// The raw bytes of a scalar `String` or `FixedString` value (from
+    /// `value_b64`); `None` otherwise.
+    pub value: Option<RawText>,
+}
+
+/// One cell of a stored row after the engine's insert-time merge.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct EngineCell {
+    /// The column's name (from `name` or `name_b64`).
+    pub column: RawText,
+    /// ClickHouse's own rendering of the value (from `stored` or `stored_b64`).
+    pub text: RawText,
+    /// Whether the value is NULL.
+    pub null: bool,
+    /// The raw bytes of a scalar `String` or `FixedString` value (from
+    /// `value_b64`); `None` otherwise.
+    pub value: Option<RawText>,
 }
 
 /// A row document, from `chs_preview_row`, and each entry of a batch's `rows`.
@@ -101,8 +120,9 @@ pub struct RowResult {
     pub transformed: Vec<Transform>,
     /// Input fields that name no column (`unknown_fields`), as bytes.
     pub unknown_fields: Vec<RawText>,
-    /// Settings this build does not support (`unsupported_settings`). ASCII.
-    pub unsupported_settings: Vec<String>,
+    /// Settings this build does not support (`unsupported_settings`, name
+    /// objects), as bytes.
+    pub unsupported_settings: Vec<RawText>,
     /// MATERIALIZED values (`computed`).
     pub computed: Vec<Computed>,
     /// The attached filter's verdict, present only with an attached filter.
@@ -112,7 +132,7 @@ pub struct RowResult {
     /// The filter's message for this row.
     pub verdict_err: RawText,
     /// The row's partition id, when the schema has a partition key.
-    pub partition_id: Option<String>,
+    pub partition_id: Option<RawText>,
     /// The bytes of the input the reader consumed for this record.
     pub input_span: Option<Span>,
 }
@@ -162,15 +182,14 @@ pub struct BatchResult {
     /// Every transformation in the batch with its `row`, storage transforms
     /// (TTL) included, as the library lists them.
     pub transformed: Vec<Transform>,
-    /// Each stored row after the engine's insert-time merge, as ClickHouse
-    /// rendered it.
-    pub engine_rows: Option<Vec<RawText>>,
+    /// Each stored row after the engine's insert-time merge: a list of cells.
+    pub engine_rows: Option<Vec<Vec<EngineCell>>>,
     /// The export bytes, present only when an export was asked for.
     pub payload: Option<Vec<u8>>,
     /// Each exported row's place in [`BatchResult::payload`].
     pub spans: Option<Vec<Span>>,
-    /// Why an export was declined; ASCII, empty when it was not.
-    pub export_declined: String,
+    /// Why an export was declined; empty when it was not.
+    pub export_declined: RawText,
     /// Rows an attached filter passed.
     pub rows_passed: u64,
     /// Rows an attached filter cut.
@@ -209,8 +228,8 @@ pub struct FilterResult {
     pub err_msg: RawText,
     /// Rows the evaluation read.
     pub rows_read: u64,
-    /// Settings this build does not support. ASCII.
-    pub unsupported_settings: Vec<String>,
+    /// Settings this build does not support (name objects), as bytes.
+    pub unsupported_settings: Vec<RawText>,
     /// One verdict per row. `Error` and `Decline` are never answers; a caller
     /// enforcing visibility fails closed on both ([`Verdict::answered`]).
     pub verdicts: Vec<Verdict>,
@@ -258,6 +277,8 @@ pub struct DiscoveredColumn {
 pub struct Discovery {
     /// The columns, in `system.columns` position order.
     pub columns: Vec<DiscoveredColumn>,
+    /// The declarations joined for a `CREATE TABLE` (`columns_sql`).
+    pub columns_sql: RawText,
 }
 
 /// What a build supports, from `build_info`'s `capabilities`. Every list is
