@@ -29,8 +29,12 @@ from pathlib import Path
 
 def put(url: str, data: bytes, ctype: str, method: str) -> None:
     req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": ctype})
-    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 — operator-supplied registry
-        resp.read()
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 — operator-supplied registry
+            resp.read()
+    except urllib.error.HTTPError as e:
+        # The registry's own error body names the cause (missing blob, bad media type, ...).
+        raise urllib.error.URLError(f"HTTP {e.code} {e.read()[:300]!r}") from e
 
 
 def push_tree(registry: str, repo: str, tree: Path) -> list[str]:
