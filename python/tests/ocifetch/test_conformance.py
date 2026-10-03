@@ -34,8 +34,15 @@ from chtypes._ocifetch._dsse import (
     release_trusted_keys,
     verify_bundle,
 )
-from chtypes._ocifetch._ensure import Clock, Options, Request, ensure, fetch_signed
-from chtypes._ocifetch._errors import FetchError
+from chtypes._ocifetch._ensure import (
+    Clock,
+    Options,
+    Request,
+    ensure,
+    fetch_signed,
+    resolve_installed,
+)
+from chtypes._ocifetch._errors import ArtifactMissingError, FetchError
 from chtypes._ocifetch._http import TransportError
 from chtypes._ocifetch._layout import VerifiedRecord, resolve_cache_root, write_verified_install
 from chtypes._ocifetch._oci import manifest_layer_descriptor, manifest_single_layer, parse_digest
@@ -484,6 +491,12 @@ def _run_case(
             # ("/sdk-fetch-fixtures") for fixtures.
             repository = "" if is_goldens else C.FIXTURES_REPO_SUFFIX
             generic_result = fetch_signed(repository, req["spelling"], predicate_type, options)
+        elif case["id"].startswith("resolve-installed-"):
+            # The cache-only seam entry (docs/guides/fetch-v1.md §10): a miss is
+            # reported as CHTYPES_ARTIFACT_MISSING, the code --offline gives.
+            resolved = resolve_installed(Request(req["spelling"]), req["platform"], options)
+            if resolved is None:
+                raise ArtifactMissingError(f"no installed artifact satisfies {req['spelling']}")
         else:
             resolved = ensure(Request(req["spelling"]), options)
     except (FetchError, TransportError) as e:

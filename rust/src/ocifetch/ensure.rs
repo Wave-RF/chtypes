@@ -792,9 +792,9 @@ fn verify_one_install(dir: &Path, record: &VerifiedRecord) -> VerifyResult {
 /// The generic signed-artifact fetch (plan §1.3): for a tag or digest fetched
 /// directly within `repository_bases` (the fixtures shape), find and verify
 /// its own signature referrer, then return the verified content bytes.
-/// For a goldens-shaped referrer-of-a-platform-manifest, first resolve the
-/// content descriptor with [`referrers::find_content_referrer`] and pass its
-/// digest as `reference`.
+/// For `expected_predicate_type` = `PREDICATE_TYPE_GOLDENS`, `reference` is a
+/// PLATFORM manifest digest and the result is its highest-`revision` verified
+/// goldens referrer ([`super::goldens::fetch_goldens`]).
 pub fn fetch_signed(
     repository_bases: &[String],
     reference: &str,
@@ -819,6 +819,14 @@ pub fn fetch_signed(
         client: &client,
         auth: &auth,
     };
+
+    if expected_predicate_type == constants::PREDICATE_TYPE_GOLDENS {
+        // Goldens are a referrer of a platform manifest (D7) and the registry
+        // is append-only, so `reference` names the PLATFORM manifest and the
+        // highest-revision verified goldens referrer is returned
+        // (docs/guides/fetch-v1.md §9; goldens.rs).
+        return super::goldens::fetch_goldens(&source, reference, &trust);
+    }
 
     let fetched = if reference.starts_with("sha256:") {
         oci::fetch_by_digest(&source, reference, constants::MANIFEST_MAX_BYTES)?
@@ -1315,6 +1323,17 @@ fn install_from_local_blobs_for(
             dir.display()
         ))
     })?;
+    // The request is checked against the SIGNED version on EVERY path, the
+    // already-unpacked one included: a build that is merely present in the
+    // cache must never answer a request it does not satisfy.
+    if let Some(request) = request {
+        if record.platform != platform || !request.matches(&record.version) {
+            return Err(Error::ArtifactMissing(format!(
+                "installed {} ({}) does not satisfy the request",
+                record.version, record.platform
+            )));
+        }
+    }
     Ok(record_to_resolved(
         "", platform, &dir, record, "cache", already,
     ))

@@ -954,7 +954,9 @@ func findLocalBundle(l *layout, trustedKeys []ed25519.PublicKey, manifestDigest,
 // configured base, find that manifest's own single layer and its own
 // referrer signature, verify, and return the layer bytes
 // (docs/guides/fetch-v1.md §9; used for goldens, repositorySuffix="", and
-// fixtures, repositorySuffix=FixturesRepoSuffix).
+// fixtures, repositorySuffix=FixturesRepoSuffix). For predicateType
+// PredicateTypeGoldens, ref is instead a PLATFORM manifest digest and the
+// result is its highest-revision verified goldens referrer (goldens.go).
 func FetchSigned(ctx context.Context, repositorySuffix, ref, predicateType string, opts *Options) (*SignedArtifact, error) {
 	ro, err := resolveOptions(opts)
 	if err != nil {
@@ -968,6 +970,13 @@ func FetchSigned(ctx context.Context, repositorySuffix, ref, predicateType strin
 		}
 	}
 	s := newSession(ro)
+
+	if predicateType == PredicateTypeGoldens {
+		// Goldens are an OCI referrer of a platform manifest (D7) and the
+		// registry is append-only, so ref names the PLATFORM manifest and the
+		// highest-revision verified goldens referrer is returned (goldens.go).
+		return s.fetchGoldens(ctx, ro, bases, ref)
+	}
 
 	policy := notFoundRetryOnLast
 	if !Digest(ref).Valid() {

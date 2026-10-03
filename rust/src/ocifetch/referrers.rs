@@ -113,7 +113,7 @@ fn try_fallback_tag(source: &Source<'_>, subject_digest: &str) -> Result<Option<
 /// GET that layer, and verify the DSSE envelope. Returns `Err(ArtifactUntrusted)`
 /// when the bundle is well-formed but no signature verifies (the caller may
 /// then try another candidate); any other `Err` is structural and final.
-fn verify_one(
+pub fn verify_one(
     source: &Source<'_>,
     descriptor: &Descriptor,
     trust: &[TrustedKey],

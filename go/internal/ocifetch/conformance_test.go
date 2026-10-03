@@ -406,24 +406,10 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 
 	switch {
 	case strings.HasPrefix(c.ID, "goldens-"):
-		// genericcases.go's own convention: request.spelling is the SUBJECT
-		// (a platform manifest) a goldens object is a referrer of, not the
-		// goldens object's own digest — fetch_signed's "ref" is that
-		// referrer's digest, so this is a two-step resolution: find the
-		// goldens-artifactType referrer of the subject, then fetch_signed
-		// on what that discovery returns.
-		ro, rerr := resolveOptions(opts)
-		if rerr != nil {
-			runErr = rerr
-			break
-		}
-		s := newSession(ro)
-		candidates := s.findReferrers(ctx, bases, Digest(c.Request.Spelling), GoldensArtifactType)
-		if len(candidates) == 0 {
-			runErr = newError(CodeArtifactMissing, c.Request.Spelling, "", "", nil, "no goldens referrer of %s", c.Request.Spelling)
-			break
-		}
-		signed, ferr := FetchSigned(ctx, "", string(candidates[0].Digest), PredicateTypeGoldens, opts)
+		// request.spelling is the SUBJECT (a platform manifest); FetchSigned
+		// itself discovers its goldens referrers, verifies each and returns
+		// the highest revision (docs/guides/fetch-v1.md §9).
+		signed, ferr := FetchSigned(ctx, "", c.Request.Spelling, PredicateTypeGoldens, opts)
 		runErr = ferr
 		if ferr == nil {
 			sum := sha256.Sum256(signed.Bytes)
@@ -440,6 +426,20 @@ func runOneCase(t *testing.T, fixturesDir string, port, port2 int, registryBase 
 			sum := sha256.Sum256(signed.Bytes)
 			resolvedManifest, resolvedLibrarySHA256 = string(signed.Digests.Manifest), hex.EncodeToString(sum[:])
 			warnings = signed.Warnings
+		}
+	case strings.HasPrefix(c.ID, "resolve-installed-"):
+		// The cache-only seam entry (docs/guides/fetch-v1.md §10): a miss is
+		// reported as CHTYPES_ARTIFACT_MISSING, the code --offline gives.
+		resolved, ferr := ResolveInstalled(Request{Spelling: c.Request.Spelling, Platform: c.Request.Platform}, c.Request.Platform, opts)
+		if ferr == nil && resolved == nil {
+			ferr = newError(CodeArtifactMissing, c.Request.Spelling, c.Request.Platform, "", nil, "no installed artifact satisfies %s", c.Request.Spelling)
+		}
+		runErr = ferr
+		if ferr == nil {
+			resolvedManifest = string(resolved.Digests.Manifest)
+			resolvedLibrarySHA256 = sha256FileHex(resolved.LibraryPath)
+			resolvedVersion, resolvedBuild = &resolved.Version, &resolved.Build
+			warnings = resolved.Warnings
 		}
 	default:
 		resolved, ferr := Ensure(ctx, Request{Spelling: c.Request.Spelling, Platform: c.Request.Platform}, opts)

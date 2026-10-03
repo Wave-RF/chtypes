@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.index.v1+json",
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:61f4f3cb30d316414c86e042422474debea1ce76e80f18145091d202b711737e",
+      "size": 552,
+      "artifactType": "application/vnd.wavehouse.chtypes.artifact.v1",
+      "platform": {
+        "os": "linux",
+        "architecture": "arm64"
+      },
+      "annotations": {
+        "org.opencontainers.image.ref.name": "26.9"
+      }
+    }
+  ]
+}

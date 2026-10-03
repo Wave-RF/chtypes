@@ -85,6 +85,10 @@ type bundleVerifyResult struct {
 	verified  bool
 	keyID     string
 	statement *Statement
+	// payload is the authenticated DSSE payload (the exact statement bytes
+	// the signature covers), kept for the few readers that need a token the
+	// decoded Statement has already normalized (a number's spelling).
+	payload []byte
 }
 
 // verifyBundle parses body as a Sigstore bundle and tries every trusted key
@@ -139,7 +143,7 @@ func verifyBundle(body []byte, trustedKeys []ed25519.PublicKey) (bundleVerifyRes
 	if err := strictUnmarshal(payload, &stmt); err != nil {
 		return bundleVerifyResult{}, fmt.Errorf("signed statement payload is not valid JSON: %w", err)
 	}
-	return bundleVerifyResult{verified: true, keyID: keyIDFor(matched), statement: &stmt}, nil
+	return bundleVerifyResult{verified: true, keyID: keyIDFor(matched), statement: &stmt, payload: payload}, nil
 }
 
 // validateStatement checks a verified statement against the request

@@ -17,13 +17,22 @@ import {
   CACHE_ANNOTATION_PREFIX,
   DEFAULT_BASES,
   ENV_BASES_NAME,
+  GOLDENS_ARTIFACT_TYPE,
   MEDIA_TYPE_BUNDLE,
   MEDIA_TYPE_MANIFEST,
   PREDICATE_TYPE_ARTIFACT,
+  PREDICATE_TYPE_GOLDENS,
   RELEASE_KEYS,
 } from './constants.gen.js';
 import { checkArtifactStatement, checkGenericStatement, parseStatement, verifyAnyReferrerBundle, verifyBundleSignature } from './dsse.js';
-import { ArtifactCorruptError, ArtifactMissingError, ArtifactPinnedError, ArtifactUnpublishedError, ArtifactUntrustedError } from './errors.js';
+import {
+  ArtifactCorruptError,
+  ArtifactMissingError,
+  ArtifactPinnedError,
+  ArtifactUnpublishedError,
+  ArtifactUntrustedError,
+  FetchV1Error,
+} from './errors.js';
 import type { RequestOptions } from './http.js';
 import {
   cacheRoot,
@@ -42,6 +51,7 @@ import {
   type VerifiedRecord,
   writeVerifiedRecord,
 } from './layout.js';
+import { type GoldensCandidate, selectGoldens, statementRevision } from './goldens.js';
 import { discoverSignatureCandidates } from './referrers.js';
 import { verifyAndInstallFromLocalBlobs } from './localverify.js';
 import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, resolveTag } from './oci.js';
@@ -659,26 +669,6 @@ function isLikelyPlatformKey(key: string): boolean {
 
 // ------------------------------------------------------------------ fetchSigned
 
-/**
- * The digests of every referrer of `subjectDigest` whose artifactType is
- * `artifactType` (referrers API first, the fallback tag only when the API
- * named none). Internal: the conformance runner's goldens cases need a
- * two-step lookup (subject -> its goldens referrer -> `fetchSigned`) that
- * the seam itself deliberately does not offer. Not exported from `index.ts`.
- */
-export async function findReferrerDigests(
-  repository: string,
-  subjectDigest: string,
-  artifactType: string,
-  options: FetchV1Options = {},
-): Promise<readonly string[]> {
-  const candidates = await discoverSignatureCandidates(repository, subjectDigest, artifactType, {
-    ...requestOptionsFor(options, [repository]),
-    maxBytes: 0,
-  });
-  return candidates.map((c) => c.digest);
-}
-
 export interface FetchSignedResult {
   readonly path: string;
   readonly statement: unknown;
@@ -696,6 +686,11 @@ export interface FetchSignedResult {
  * verified blob's path on disk (written into this layout's `blobs/`, not
  * unpacked — unpacking is this fetch's caller's job, since goldens and
  * fixtures are not necessarily tarballs).
+ *
+ * For `predicateType` = `PREDICATE_TYPE_GOLDENS`, `ref` is instead a
+ * PLATFORM manifest digest: the registry is append-only, so a corrected
+ * goldens set is a second goldens referrer of it, and the result is the
+ * highest-`revision` verified one (`goldens.ts`, guide §9).
  */
 export async function fetchSigned(
   repository: string,
@@ -707,6 +702,10 @@ export async function fetchSigned(
   await ensureLayout(root);
   const baseReqOptions = requestOptionsFor(options, [repository]);
   const trustedKeys = defaultTrustedKeys(options);
+
+  if (predicateType === PREDICATE_TYPE_GOLDENS) {
+    return fetchGoldens(repository, ref, root, trustedKeys, options.allowUnsigned === true, { ...baseReqOptions, maxBytes: 0 });
+  }
 
   const manifest = await fetchManifestByDigest([repository], ref, { ...baseReqOptions, maxBytes: 0 });
   const layerBytes = await fetchBlobBytesByDigest([repository], manifest.layer, { ...baseReqOptions, maxBytes: 0 });
@@ -729,4 +728,113 @@ export async function fetchSigned(
     statement: trust?.statement,
     digests: { manifest: manifest.digest, layer: manifest.layer.digest },
   };
+}
+
+/**
+ * `fetchSigned` for the goldens predicate type: the highest-revision verified
+ * goldens referrer of the platform manifest `subject`.
+ *
+ * Every candidate is verified on its own (its blob against its descriptor,
+ * its own signature referrer, the statement's subject against the blob
+ * digest, the predicateType). A candidate that fails is skipped: never
+ * chosen, never a tie. If none verifies, the first failure is thrown. A
+ * VERIFIED candidate whose `revision` is unusable is not skipped: it could be
+ * the newest document, and quietly choosing an older set is the stale pick
+ * this rule exists to prevent.
+ */
+async function fetchGoldens(
+  repository: string,
+  subject: string,
+  root: string,
+  trustedKeys: readonly TrustedKey[],
+  allowUnsigned: boolean,
+  reqOptions: RequestOptions,
+): Promise<FetchSignedResult> {
+  if (!/^sha256:[0-9a-f]{64}$/.test(subject)) {
+    throw new ArtifactCorruptError(`chtypes: a goldens fetch names a platform manifest by digest, not ${JSON.stringify(subject)}`);
+  }
+  const listed = await discoverSignatureCandidates(repository, subject, GOLDENS_ARTIFACT_TYPE, reqOptions);
+  if (listed.length === 0) throw new ArtifactUnpublishedError(`chtypes: no goldens referrer for ${subject}`);
+
+  const verified: GoldensCandidate[] = [];
+  const unsigned: { manifest: string; blob: string; bytes: Buffer }[] = [];
+  let firstFailure: unknown;
+  const note = (err: unknown): void => {
+    firstFailure ??= err;
+  };
+  const seen = new Set<string>();
+
+  for (const referrer of listed) {
+    if (seen.has(referrer.digest)) continue;
+    seen.add(referrer.digest);
+    let blob: Buffer;
+    let blobDigest: string;
+    try {
+      const manifest = await fetchManifestByDigest([repository], referrer.digest, reqOptions);
+      blobDigest = manifest.layer.digest;
+      blob = await fetchBlobBytesByDigest([repository], manifest.layer, reqOptions);
+    } catch (err) {
+      if (!(err instanceof FetchV1Error)) throw err;
+      note(err);
+      continue;
+    }
+    unsigned.push({ manifest: referrer.digest, blob: blobDigest, bytes: blob });
+
+    let found: GoldensCandidate | undefined;
+    const bundles = await discoverSignatureCandidates(repository, referrer.digest, MEDIA_TYPE_BUNDLE, reqOptions);
+    for (const bundleRef of bundles) {
+      let bundleBytes: Buffer;
+      let bundleDigest: string;
+      try {
+        const bundleManifest = await fetchManifestByDigest([repository], bundleRef.digest, reqOptions);
+        bundleDigest = bundleManifest.layer.digest;
+        bundleBytes = await fetchBlobBytesByDigest([repository], bundleManifest.layer, reqOptions);
+      } catch {
+        continue;
+      }
+      const signed = verifyBundleSignature(bundleBytes, trustedKeys);
+      if (signed === undefined) {
+        note(new ArtifactUntrustedError(`chtypes: no goldens signature of ${referrer.digest} verifies under a trusted key`));
+        continue;
+      }
+      let statement: ReturnType<typeof parseStatement>;
+      try {
+        statement = parseStatement(signed.payload);
+        checkGenericStatement(statement, PREDICATE_TYPE_GOLDENS, blobDigest);
+      } catch (err) {
+        if (!(err instanceof ArtifactCorruptError)) throw err;
+        note(err);
+        continue;
+      }
+      found = {
+        manifest: referrer.digest,
+        blob: blobDigest,
+        revision: statementRevision(signed.payload),
+        bytes: blob,
+        predicate: statement.predicate,
+        signedBy: signed.signedBy,
+        bundle: bundleDigest,
+      };
+      break;
+    }
+    if (found !== undefined) verified.push(found);
+  }
+
+  let chosen: { manifest: string; blob: string; bytes: Buffer; predicate: unknown };
+  if (verified.length > 0) {
+    chosen = selectGoldens(verified);
+  } else if (allowUnsigned && unsigned.length === 1) {
+    chosen = { ...unsigned[0]!, predicate: undefined };
+  } else if (allowUnsigned && unsigned.length > 1) {
+    throw new ArtifactCorruptError(
+      `chtypes: ${unsigned.length} unsigned goldens documents of ${subject}: no signature to read a revision from, so none can be chosen`,
+    );
+  } else if (firstFailure !== undefined) {
+    throw firstFailure;
+  } else {
+    throw new ArtifactUntrustedError(`chtypes: no goldens referrer of ${subject} verifies under a trusted key`);
+  }
+
+  const dest = await installBlob(root, hexOfDigest(chosen.blob), chosen.bytes);
+  return { path: dest, statement: chosen.predicate, digests: { manifest: chosen.manifest, layer: chosen.blob } };
 }

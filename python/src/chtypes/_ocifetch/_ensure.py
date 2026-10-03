@@ -39,6 +39,7 @@ from chtypes._ocifetch._errors import (
     SourceUnauthorizedError,
     SourceUnreachableError,
 )
+from chtypes._ocifetch._goldens import GoldensCandidate, select_goldens, statement_revision
 from chtypes._ocifetch._http import (
     Clock,
     FetchPolicy,
@@ -1153,7 +1154,9 @@ def fetch_signed(repository: str, ref: str, predicate_type: str, options: Option
     REFERRER of a platform manifest (D7), never fetched by their own
     digest/tag directly, so when `predicate_type` is
     `constants.PREDICATE_TYPE_GOLDENS`, `ref` is the SUBJECT (the platform
-    manifest)'s digest, and this discovers the one goldens referrer of it.
+    manifest)'s digest. The registry is append-only, so a corrected set is a
+    SECOND goldens referrer of it: this verifies every candidate and returns
+    the one with the highest predicate `revision` (§9; `_goldens.py`).
     For every other predicate type (fixtures today), `ref` is the artifact's
     OWN digest or tag to fetch directly — fixtures are pinned by digest with
     no tag fallback ever tried (§7.7).
@@ -1178,14 +1181,17 @@ def _fetch_signed_impl(repository: str, ref: str, predicate_type: str, options: 
     trusted_keys = options.resolved_trusted_keys()
 
     if predicate_type == C.PREDICATE_TYPE_GOLDENS:
-        referrers = discover_referrers(
-            bases, ref, C.GOLDENS_ARTIFACT_TYPE, policy=policy, retry=retry
+        return _fetch_goldens(
+            bases,
+            ref,
+            policy=policy,
+            retry=retry,
+            trusted_keys=trusted_keys,
+            allow_unsigned=options.allow_unsigned,
+            cache_root_path=cache_root_path,
+            scratch_root=scratch_root,
         )
-        if not referrers:
-            raise ArtifactUnpublishedError(f"chtypes: no goldens referrer for {ref}")
-        manifest_digest = referrers[0].digest
-        doc, _raw = fetch_manifest_by_digest(bases, manifest_digest, policy=policy, retry=retry)
-    elif ref.startswith("sha256:"):
+    if ref.startswith("sha256:"):
         doc, _raw = fetch_manifest_by_digest(bases, ref, policy=policy, retry=retry)
         manifest_digest = ref
     else:
@@ -1232,3 +1238,191 @@ def _fetch_signed_impl(repository: str, ref: str, predicate_type: str, options: 
             "bundle": bundle_digest,
         },
     }
+
+
+def _fetch_goldens(
+    bases: Sequence[str],
+    subject: str,
+    *,
+    policy: FetchPolicy,
+    retry: RetryPolicy,
+    trusted_keys: tuple[TrustedKey, ...],
+    allow_unsigned: bool,
+    cache_root_path: Path,
+    scratch_root: Path,
+) -> dict:
+    """`fetch_signed` for the goldens predicate type: the highest-revision
+    verified goldens referrer of the platform manifest `subject`.
+
+    Every candidate is verified on its own (its blob against its descriptor,
+    its own signature referrer, the statement's subject against the blob
+    digest, the predicateType). A candidate that fails is skipped: never
+    chosen, never a tie. If none verifies, the first failure's error is
+    raised. A VERIFIED candidate whose `revision` is unusable is not skipped:
+    it could be the newest document, and quietly choosing an older set is the
+    stale pick this rule exists to prevent."""
+    if not subject.startswith("sha256:"):
+        raise ArtifactCorruptError(
+            f"a goldens fetch names a platform manifest by digest, not {subject!r}"
+        )
+    listed = discover_referrers(bases, subject, C.GOLDENS_ARTIFACT_TYPE, policy=policy, retry=retry)
+    if not listed:
+        raise ArtifactUnpublishedError(f"chtypes: no goldens referrer for {subject}")
+
+    verified: list[GoldensCandidate] = []
+    unsigned: list[tuple[str, str, str]] = []  # (manifest digest, blob digest, scratch path)
+    first_failure: Exception | None = None
+    seen: set[str] = set()
+    tmp_dir = tempfile.mkdtemp(dir=str(scratch_root))
+    try:
+        for referrer in listed:
+            if referrer.digest in seen:
+                continue
+            seen.add(referrer.digest)
+            try:
+                doc, _raw = fetch_manifest_by_digest(
+                    bases, referrer.digest, policy=policy, retry=retry
+                )
+                blob_desc = manifest_single_layer(doc)
+                blob_path = os.path.join(tmp_dir, parse_digest(blob_desc.digest))
+                fetch_blob_to_path(
+                    bases,
+                    blob_desc,
+                    blob_path,
+                    policy=policy,
+                    retry=retry,
+                    max_bytes=C.MAX_UNPACKED_BYTES,
+                )
+            except (TransportError, FetchError) as e:
+                first_failure = first_failure or e
+                continue
+            unsigned.append((referrer.digest, blob_desc.digest, blob_path))
+            found = _verify_goldens_signature(
+                bases,
+                referrer.digest,
+                blob_desc.digest,
+                policy=policy,
+                retry=retry,
+                trusted_keys=trusted_keys,
+                scratch_root=scratch_root,
+            )
+            if isinstance(found, Exception):
+                first_failure = first_failure or found
+                continue
+            if found is None:
+                first_failure = first_failure or ArtifactUntrustedError(
+                    f"chtypes: no goldens signature of {referrer.digest} verifies "
+                    "under a trusted key"
+                )
+                continue
+            verified_bundle, bundle_digest = found
+            revision = statement_revision(verified_bundle.payload)
+            verified.append(
+                GoldensCandidate(
+                    manifest=referrer.digest,
+                    blob=blob_desc.digest,
+                    revision=revision,
+                    path=blob_path,
+                    predicate=verified_bundle.statement.predicate,
+                    signed_by=verified_bundle.signed_by,
+                    bundle=bundle_digest,
+                )
+            )
+
+        statement: dict | None
+        bundle_out: str | None
+        if verified:
+            best = select_goldens(verified)
+            manifest_digest, blob_digest, blob_path = best.manifest, best.blob, best.path
+            statement, bundle_out = best.predicate, best.bundle
+        elif allow_unsigned and len(unsigned) == 1:
+            manifest_digest, blob_digest, blob_path = unsigned[0]
+            statement, bundle_out = None, None
+        elif allow_unsigned and len(unsigned) > 1:
+            raise ArtifactCorruptError(
+                f"{len(unsigned)} unsigned goldens documents of {subject}: no signature to "
+                "read a revision from, so none can be chosen"
+            )
+        elif first_failure is not None:
+            raise first_failure
+        else:
+            raise ArtifactUntrustedError(
+                f"chtypes: no goldens referrer of {subject} verifies under a trusted key"
+            )
+
+        dest_dir = cache_root_path / "fetched-signed"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = str(dest_dir / parse_digest(blob_digest))
+        os.replace(blob_path, dest_path)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    return {
+        "path": dest_path,
+        "statement": statement,
+        "digests": {"manifest": manifest_digest, "layer": blob_digest, "bundle": bundle_out},
+    }
+
+
+def _verify_goldens_signature(
+    bases: Sequence[str],
+    goldens_manifest_digest: str,
+    blob_digest: str,
+    *,
+    policy: FetchPolicy,
+    retry: RetryPolicy,
+    trusted_keys: tuple[TrustedKey, ...],
+    scratch_root: Path,
+):
+    """The first signature referrer of one goldens manifest that verifies
+    under a trusted key AND whose statement is a goldens statement about
+    `blob_digest`. Returns `(VerifiedBundle, bundle blob digest)`; `None`
+    when no bundle verifies at all; or the first `ArtifactCorruptError` a
+    bundle that did verify (or could not be parsed) produced, for the caller
+    to skip this candidate with."""
+    failure: Exception | None = None
+    referrers = discover_referrers(
+        bases, goldens_manifest_digest, C.MEDIA_TYPE_BUNDLE, policy=policy, retry=retry
+    )
+    for ref in referrers:
+        tmp_dir = tempfile.mkdtemp(dir=str(scratch_root))
+        try:
+            referrer_doc, _raw = fetch_manifest_by_digest(
+                bases, ref.digest, policy=policy, retry=retry
+            )
+            bundle_desc = manifest_single_layer(
+                referrer_doc, expected_media_type=C.MEDIA_TYPE_BUNDLE
+            )
+            bundle_path = os.path.join(tmp_dir, "bundle.json")
+            fetch_blob_to_path(
+                bases,
+                bundle_desc,
+                bundle_path,
+                policy=policy,
+                retry=retry,
+                max_bytes=C.BUNDLE_MAX_BYTES,
+            )
+            with open(bundle_path, "rb") as f:
+                bundle_json = json.loads(f.read())
+            verified = verify_bundle(bundle_json, trusted_keys)
+        except ArtifactCorruptError as e:
+            failure = failure or e
+            continue
+        except (TransportError, FetchError, json.JSONDecodeError):
+            continue
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        if verified is None:
+            continue
+        if verified.statement.predicate_type != C.PREDICATE_TYPE_GOLDENS:
+            failure = failure or ArtifactCorruptError(
+                f"signed predicateType was {verified.statement.predicate_type!r}, want "
+                f"{C.PREDICATE_TYPE_GOLDENS!r}"
+            )
+            continue
+        if parse_digest(blob_digest) not in verified.statement.subject_sha256:
+            failure = failure or ArtifactCorruptError(
+                "signed subject digest did not match the goldens blob"
+            )
+            continue
+        return verified, bundle_desc.digest
+    return failure
