@@ -185,7 +185,7 @@ describe.skipIf(!stubsAvailable)('the registry over the real fetch derivation, o
   let mismatched: Built;
 
   beforeAll(async () => {
-    work = mkdtempSync(path.join(tmpdir(), 'chtypes-registry-adapter-'));
+    work = mkdtempSync(path.join(tmpdir(), 'ts-registry-adapter-'));
     // A predicate with an extra, unknown field proves the adapter and the fetch layer carry it through verbatim.
     good = await buildLayout(path.join(work, 'good'), { x_extra_field: { kept: ['verbatim'] } });
     // A statement that is genuinely signed but disagrees with the library's own build info.
@@ -264,7 +264,7 @@ describe.skipIf(!stubsAvailable)('the registry over the real fetch derivation, o
       () => undefined,
       (e: unknown) => e,
     );
-    // The image was already open (the good layout loaded the same bytes under another path, so this is a second image), and step 5 refuses.
+    // A second image (another path), signed correctly but disagreeing with its own build info: loader step 5 refuses.
     expect(err).toBeInstanceOf(ArtifactCorruptError);
     expect(err).toBeInstanceOf(LoaderCorruptError);
     expect((err as LoaderCorruptError).reason).toBe('build_info_mismatch:build');
