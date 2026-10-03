@@ -96,6 +96,9 @@ interface RequestLogEntry {
  * would call the report missing.
  */
 function toolchainId(): string {
+  // The job's own matrix value, when it exports one (lane NW), is authoritative.
+  const fromEnv = process.env['CHTYPES_V1_TOOLCHAIN'];
+  if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
   const full = process.version.replace(/^v/, '');
   const major = full.split('.')[0];
   return major === '22' ? `node${full}` : `node${major}`;
