@@ -42,15 +42,17 @@ Unix only: the loader is `dlopen`. Minimum supported Rust version 1.87. `cargo d
 
 The crate ships a `chtypes` binary over the fetch layer (`cargo install chtypes`). Progress and warnings go to stderr and results to stdout. Exit statuses come from the fetch layer's error table ([`fetch-v1.md`](../guides/fetch-v1.md) section 8); a usage error exits 2.
 
-| command                                                                                   | what it does                                                                                            |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `chtypes fetch <spelling>... [--platform K] [--lock F] [--frozen] [--offline] [--update]` | resolve, verify and install each version spelling; prints each installed directory                      |
-| `chtypes fetch --all [...]`                                                               | the same for every line (two-part tag) the registry publishes                                           |
-| `chtypes verify`                                                                          | re-hash every installed library against its verified record                                             |
-| `chtypes list`                                                                            | the version spellings the registry publishes (`tags/list`, filtered to two-, three- and four-part tags) |
-| `chtypes where`                                                                           | the v1 cache root                                                                                       |
+| command                                                                                   | what it does                                                                                                                                            |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chtypes fetch <spelling>... [--platform K] [--lock F] [--frozen] [--offline] [--update]` | resolve, verify and install each version spelling; prints each installed directory                                                                      |
+| `chtypes fetch --all [...]`                                                               | the same for every line (two-part tag) the registry publishes                                                                                           |
+| `chtypes verify`                                                                          | re-hash every installed library against its verified record                                                                                             |
+| `chtypes list [--offline]`                                                                | the installed builds, then, unless `--offline`, the version spellings the registry publishes (`tags/list`, filtered to two-, three- and four-part tags) |
+| `chtypes where`                                                                           | the v1 cache root                                                                                                                                       |
 
 `--lock F` writes the lock after a fetch, `--frozen` fetches exactly what the lock pins (default file `chtypes.lock`) with no discovery, `--offline` reads the cache only, and `--update` re-resolves and rewrites the lock. The environment variables are `CHTYPES_ARTIFACTS_URL`, `CHTYPES_CACHE`, `CHTYPES_DOWNLOAD_TOKEN`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED`.
+
+`chtypes --help` and `-h` print the usage to stdout and exit 0 wherever they appear; a usage error prints to stderr and exits 2. `chtypes --version` prints `chtypes <version>` and a newline (`0.0.0-dev` for an untagged build). `list` prints one flat line per entry, with no header: first `installed <version> <platform> <dir>` for each installed build, then, unless `--offline`, `published <spelling> support unknown` for each tag in the registry's `tags/list`. `--platform` belongs to `fetch` alone; on `verify`, `list` or `where` it is a usage error. `scripts/check-cli-parity.sh` holds all four bindings' commands to these rules.
 
 ## Objects and threads
 

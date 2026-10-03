@@ -32,7 +32,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"runtime"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -68,6 +67,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usageText)
 		return 2
 	}
+	// -h and --help print the usage to stdout and exit 0 wherever they appear.
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if a == "-h" || a == "--help" {
+			fmt.Fprint(stdout, usageText)
+			return 0
+		}
+	}
 	var err error
 	switch args[0] {
 	case "fetch":
@@ -79,10 +88,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "where":
 		err = cmdWhere(args[1:], stdout, stderr)
 	case "--version":
-		fmt.Fprintln(stdout, version())
-		return 0
-	case "help", "-h", "--help", "-help":
-		fmt.Fprint(stdout, usageText)
+		fmt.Fprintf(stdout, "chtypes %s\n", version())
 		return 0
 	default:
 		err = &usageError{fmt.Sprintf("unknown command %q", args[0])}
@@ -114,12 +120,13 @@ func exitStatus(err error) int {
 	return 2
 }
 
-// version is the binding's own version as the build reports it.
+// version is the binding's own version as the build reports it, without the
+// module path's "v"; an untagged or dev build is 0.0.0-dev.
 func version() string {
 	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		return bi.Main.Version
+		return strings.TrimPrefix(bi.Main.Version, "v")
 	}
-	return "devel"
+	return "0.0.0-dev"
 }
 
 func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
@@ -339,36 +346,15 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	} else if len(rest) > 0 {
 		return &usageError{fmt.Sprintf("list takes no positional arguments (%s)", strings.Join(rest, " "))}
 	}
-	platform, err := cf.platformKey()
-	if err != nil {
-		return err
-	}
-	if platform == "" {
-		platform = runtime.GOOS + "-" + runtime.GOARCH
-	}
 	opts := &ocifetch.Options{CacheDir: cf.cache, Offline: cf.offline}
-	root, err := ocifetch.CacheRoot(opts)
-	if err != nil {
-		return err
-	}
 	installed, err := ocifetch.ListInstalled(opts)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "installed (%s):\n", root)
-	n := 0
 	for _, r := range installed {
-		if r.Platform != platform {
-			continue
-		}
-		n++
-		fmt.Fprintf(stdout, "  %-16s %-14s %s\n", r.Version, r.Platform, r.Source)
-	}
-	if n == 0 {
-		fmt.Fprintf(stdout, "  (nothing for %s)\n", platform)
+		fmt.Fprintf(stdout, "installed %s %s %s\n", r.Version, r.Platform, r.Dir)
 	}
 	if cf.offline {
-		fmt.Fprintln(stdout, "published: not read (--offline)")
 		return nil
 	}
 	lines, err := ocifetch.ListTags(ctx, opts)
@@ -377,12 +363,8 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 	// The registry lists lines, not platforms or support: whether a line is
 	// supported is unknown here (the channel statement is out of v1).
-	fmt.Fprintln(stdout, "published lines (support unknown):")
-	if len(lines) == 0 {
-		fmt.Fprintln(stdout, "  (none)")
-	}
 	for _, l := range lines {
-		fmt.Fprintf(stdout, "  %s\n", l)
+		fmt.Fprintf(stdout, "published %s support unknown\n", l)
 	}
 	return nil
 }

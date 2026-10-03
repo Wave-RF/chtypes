@@ -1,0 +1,19 @@
+help | exit=0 | stderr=empty | stdout=usage
+help-short | exit=0 | stderr=empty | stdout=usage
+help-subcommand | exit=0 | stderr=empty | stdout=usage
+help-after-arguments | exit=0 | stderr=empty | stdout=usage
+version | exit=0 | stderr=empty | stdout=chtypes <VERSION>|
+list-offline-empty | exit=0 | stderr=empty | stdout=
+verify-empty | exit=0 | stderr=empty | stdout=
+where | exit=0 | stderr=empty | stdout=<DIR>|
+usage-no-arguments | exit=2 | stderr=nonempty | stdout=
+usage-unknown-command | exit=2 | stderr=nonempty | stdout=
+usage-short-version | exit=2 | stderr=nonempty | stdout=
+usage-base-flag | exit=2 | stderr=nonempty | stdout=
+usage-list-platform | exit=2 | stderr=nonempty | stdout=
+usage-verify-platform | exit=2 | stderr=nonempty | stdout=
+usage-where-platform | exit=2 | stderr=nonempty | stdout=
+usage-fetch-needs-a-version | exit=2 | stderr=nonempty | stdout=
+usage-update-needs-lock | exit=2 | stderr=nonempty | stdout=
+usage-update-frozen | exit=2 | stderr=nonempty | stdout=
+usage-update-offline | exit=2 | stderr=nonempty | stdout=

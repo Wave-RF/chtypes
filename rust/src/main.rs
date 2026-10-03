@@ -37,7 +37,8 @@ chtypes: fetch, verify and list ClickHouse artifacts for the chtypes SDKs
   chtypes verify [--cache <dir>]            re-verify the installed cache
   chtypes list [--cache <dir>] [--offline]  installed builds; without --offline, published lines too
   chtypes where [--cache <dir>]             the v1 cache root
-  chtypes --version
+  chtypes --version                         chtypes <version>
+  chtypes -h | --help                       this text
 
 A <spelling> is a two-, three- or four-part version (26.8, 26.8.15, 26.8.15.10):
 no 'v' prefix and no channel suffix. --all fetches every line (two-part tag)
@@ -91,7 +92,6 @@ fn parse(argv: &[String]) -> Result<Args, Usage> {
                     _ => args.lock = Some(PathBuf::from(value)),
                 }
             }
-            "-h" | "--help" => return Err(Usage(String::new())),
             other if other.starts_with('-') => {
                 return Err(Usage(format!("unknown flag: {other}")));
             }
@@ -150,6 +150,15 @@ fn print_resolved(resolved: &Resolved) {
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    // -h and --help print the usage to stdout and exit 0 wherever they appear.
+    if argv
+        .iter()
+        .take_while(|a| a.as_str() != "--")
+        .any(|a| a == "-h" || a == "--help")
+    {
+        print!("{USAGE}");
+        return ExitCode::SUCCESS;
+    }
     if argv.first().map(String::as_str) == Some("--version") {
         println!("chtypes {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
@@ -163,10 +172,6 @@ fn main() -> ExitCode {
         "verify" => cmd_verify(&args),
         "list" => cmd_list(&args),
         "where" => cmd_where(&args),
-        "help" => {
-            eprint!("{USAGE}");
-            return ExitCode::SUCCESS;
-        }
         other => Err(Usage(format!("unknown command: {other}"))),
     };
     match result {
@@ -181,6 +186,16 @@ fn usage(message: &str) -> ExitCode {
     }
     eprint!("{USAGE}");
     ExitCode::from(EXIT_USAGE)
+}
+
+/// `--platform` is a `fetch` flag only.
+fn no_platform(command: &str, args: &Args) -> Result<(), Usage> {
+    match args.platform {
+        Some(_) => Err(Usage(format!(
+            "--platform applies to fetch only, not {command}"
+        ))),
+        None => Ok(()),
+    }
 }
 
 fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
@@ -240,6 +255,7 @@ fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
 }
 
 fn cmd_verify(args: &Args) -> Result<u8, Usage> {
+    no_platform("verify", args)?;
     if !args.spellings.is_empty() || args.all {
         return Err(Usage("verify takes no arguments".into()));
     }
@@ -265,20 +281,14 @@ fn cmd_verify(args: &Args) -> Result<u8, Usage> {
 }
 
 fn cmd_list(args: &Args) -> Result<u8, Usage> {
+    no_platform("list", args)?;
     if !args.spellings.is_empty() || args.all {
         return Err(Usage("list takes no arguments".into()));
     }
-    let mut installed: Vec<String> = Vec::new();
     match ensure::list_installed(options(args)) {
         Ok(list) => {
             for r in list {
-                println!(
-                    "installed  {}  {}  {}",
-                    r.version,
-                    r.platform,
-                    r.dir.display()
-                );
-                installed.push(r.version);
+                println!("installed {} {} {}", r.version, r.platform, r.dir.display());
             }
         }
         Err(e) => return Ok(report(&e)),
@@ -289,7 +299,7 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
     match ocifetch::tags::published_versions(&options(args)) {
         Ok(versions) => {
             for v in versions {
-                println!("published  {v}  support unknown");
+                println!("published {v} support unknown");
             }
             Ok(0)
         }
@@ -298,6 +308,7 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
 }
 
 fn cmd_where(args: &Args) -> Result<u8, Usage> {
+    no_platform("where", args)?;
     if !args.spellings.is_empty() || args.all {
         return Err(Usage("where takes no arguments".into()));
     }
