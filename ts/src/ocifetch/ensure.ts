@@ -363,9 +363,7 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
         // Nothing signed names the library's hash or size on the unsigned
         // path (`CHTYPES_ALLOW_UNSIGNED`), so there is nothing to compare to.
         if (trust !== undefined) {
-          if (verified !== undefined) {
-      await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
-    }
+          await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
         }
         const newRecord: VerifiedRecord = {
           schema: 1,
