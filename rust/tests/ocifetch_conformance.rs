@@ -254,18 +254,20 @@ fn execute_case(
     fixtures_root: &Path,
     server: Option<&ServerHandle>,
 ) -> Result<(), String> {
-    // `{base}`'s per-transport expansion (docs/guides/fetch-v1.md §10). For
-    // http, successive occurrences of the token across `request.bases`
-    // resolve to DIFFERENT origins — the primary server for the first, the
-    // second server for the next — which is how a fixture with two
-    // textually identical `"{base}"` entries (`mirror-failover-5xx`,
-    // `mirror-failover-digest-404`) can express "this base fails, the next
-    // one serves the real content": the second origin's own `http-script`
-    // routes are empty for those case ids, so it falls straight through to
-    // the tree. For file, there is only one tree per case, so every
-    // occurrence resolves to it; a literal suffix after the token (e.g.
-    // `{base}/does-not-exist`) is what makes a SECOND file-transport base
-    // meaningfully different, not a second origin.
+    // `{base}`/`{base2}`'s per-transport expansion (docs/guides/fetch-v1.md
+    // §10, "{base2}" decided 2026-10-02 by lane 0B). `{base}` is the primary
+    // origin; `{base2}` (http transport only) is server.py's SECOND origin,
+    // with its own response-sequence cursor keyed on `(case id, origin,
+    // method, path)` — used by a case needing two genuinely independent
+    // bases over the same id (`mirror-failover-5xx`,
+    // `mirror-failover-digest-404`: base[0]'s scripted failures exhaust,
+    // base[1]/`{base2}` serves the real content from a cursor that never
+    // shared state with base[0]'s). `mirror-no-failover-on-verify-fail` uses
+    // `{base}` twice with a literal suffix on the second
+    // (`{base}-never-contacted`) — same origin, deliberately never reached —
+    // which is why the two tokens are substituted independently rather than
+    // by counting `{base}` occurrences. For file, both tokens resolve to the
+    // one tree per case.
     let (primary_base, second_base) = match transport {
         "file" => {
             let b = format!(
@@ -288,23 +290,14 @@ fn execute_case(
         }
         other => return Err(format!("unsupported transport {other:?}")),
     };
-    let mut base_occurrence = 0u32;
     let bases: Vec<String> = case
         .request
         .bases
         .iter()
         .map(|template| {
-            if template.contains("{base}") {
-                base_occurrence += 1;
-                let origin = if base_occurrence == 1 {
-                    &primary_base
-                } else {
-                    &second_base
-                };
-                template.replace("{base}", origin)
-            } else {
-                template.clone()
-            }
+            template
+                .replace("{base2}", &second_base)
+                .replace("{base}", &primary_base)
         })
         .collect();
 
@@ -710,7 +703,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// `http`-transport case (plan §3.3: "It starts … once"). Prints `LISTENING
 /// <port> <port2>` on stdout once ready. `<port2>` (`second_port`) is a
 /// true second origin: used for cross-origin-redirect cases, and also as
-/// the second base a mirror-failover case's `{base}` resolves to — see
+/// what a mirror-failover case's `{base2}` resolves to — see
 /// `execute_case`'s doc.
 struct ServerHandle {
     child: Child,
