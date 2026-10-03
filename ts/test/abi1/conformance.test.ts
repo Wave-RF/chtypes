@@ -361,7 +361,15 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
         try {
           const args = (c.args ?? []).map((a) => resolveArg(okRaw, a, ctx));
           for (let i = 0; i < total; i++) {
-            checkEchoExpect(rawCall(okRaw, c.fn as string, args), c.expect);
+            const call = rawCall(okRaw, c.fn as string, args);
+            try {
+              checkEchoExpect(call, c.expect);
+            } finally {
+              // Every handle the call produced is freed straight after.
+              if (call.outcome === 'status') {
+                for (const out of Object.values(call.outs)) if (!Buffer.isBuffer(out)) freeRef(okRaw, out);
+              }
+            }
           }
         } finally {
           for (const h of ctx.minted) freeRef(okRaw, h);
