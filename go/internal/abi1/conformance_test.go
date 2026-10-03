@@ -207,7 +207,7 @@ func TestConformance(t *testing.T) {
 			switch c.Kind {
 			case "handshake":
 				pass, detail = runHandshakeCase(tbl, c)
-			case "echo", "status":
+			case "echo", "status", "document":
 				pass, detail = runEchoOrStatusCase(tbl, c)
 			case "loader":
 				pass, detail = runLoaderCase(stubsDir, manifest, c)
@@ -340,6 +340,33 @@ func matchResult(expect map[string]interface{}, res *InvokeResult) []string {
 				}
 				if err := matchExpected(wantDoc, gotDoc); err != nil {
 					problems = append(problems, fmt.Sprintf("outputs[%s]: %v", name, err))
+				}
+			}
+		}
+	}
+
+	// A "document" case: each named output must equal the expected document
+	// EXACTLY (canonical re-encodings compared), so a member present in both
+	// its plain and its _b64 form fails. bufJSON already refused any output
+	// that is not valid UTF-8.
+	if rawDocs, ok := c.Expect["documents"]; ok {
+		wantDocs, ok := rawDocs.(map[string]interface{})
+		if !ok {
+			problems = append(problems, "expect.documents is not an object")
+		} else {
+			for name, wantDoc := range wantDocs {
+				gotDoc, present := res.Outputs[name]
+				if !present {
+					problems = append(problems, fmt.Sprintf("documents[%s]: missing", name))
+					continue
+				}
+				want, werr := canonicalJSON(wantDoc)
+				got, gerr := canonicalJSON(gotDoc)
+				switch {
+				case werr != nil || gerr != nil:
+					problems = append(problems, fmt.Sprintf("documents[%s]: re-encoding failed: %v %v", name, werr, gerr))
+				case want != got:
+					problems = append(problems, fmt.Sprintf("documents[%s]: got %s, want %s", name, got, want))
 				}
 			}
 		}
