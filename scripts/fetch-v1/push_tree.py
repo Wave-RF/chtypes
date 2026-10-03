@@ -29,14 +29,29 @@ import urllib.request
 from pathlib import Path
 
 
-def put(url: str, data: bytes, ctype: str, method: str) -> None:
+def put(url: str, data: bytes, ctype: str, method: str) -> urllib.request.addinfourl:
     req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": ctype})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 — operator-supplied registry
             resp.read()
+            return resp
     except urllib.error.HTTPError as e:
         # The registry's own error body names the cause (missing blob, bad media type, ...).
         raise urllib.error.URLError(f"HTTP {e.code} {e.read()[:300]!r}") from e
+
+
+def upload_blob(base: str, digest: str, data: bytes) -> None:
+    """Two-step upload (POST a session, PUT the bytes to its Location): registry:2
+    answers a one-shot POST with 202 and ignores the digest, which a status check
+    here would otherwise let pass as success."""
+    start = put(f"{base}/blobs/uploads/", b"", "application/octet-stream", "POST")
+    loc = start.headers["Location"]
+    if loc.startswith("/"):
+        loc = base.split("/v2/")[0] + loc
+    sep = "&" if "?" in loc else "?"
+    done = put(f"{loc}{sep}digest={digest}", data, "application/octet-stream", "PUT")
+    if done.status != 201:
+        raise urllib.error.URLError(f"blob upload answered HTTP {done.status}, not 201")
 
 
 def push_tree(registry: str, repo: str, tree: Path) -> list[str]:
@@ -51,7 +66,7 @@ def push_tree(registry: str, repo: str, tree: Path) -> list[str]:
             problems.append(f"{blob}: file name is not its own digest ({digest})")
             continue
         try:
-            put(f"{base}/blobs/uploads/?digest={digest}", data, "application/octet-stream", "POST")
+            upload_blob(base, digest, data)
         except urllib.error.URLError as e:
             problems.append(f"blob {digest}: {e}")
     pending = [p for p in sorted((root / "manifests").iterdir()) if p.is_file()]
