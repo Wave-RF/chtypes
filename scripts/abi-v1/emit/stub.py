@@ -536,7 +536,8 @@ def _build_info_section(model) -> str:
     "\\"channel\\":\\"lts\\",\\"clickhouse_minor\\":\\"26.8\\",\\"clickhouse_commit\\":\\"{"a" * 40}\\"," \\
     "\\"core_commit\\":\\"{"b" * 40}\\",\\"build\\":\\"20261001.000000\\",\\"inputs_sha256\\":\\"{"c" * 64}\\"," \\
     "\\"os\\":\\"%s\\",\\"arch\\":\\"%s\\",\\"toolchain\\":{{\\"cc\\":\\"stub\\"}}," \\
-    "\\"capabilities\\":{{\\"input_formats\\":[\\"JSONEachRow\\"],\\"export_formats\\":[\\"JSONEachRow\\"],\\"doc_flags\\":[\\"values\\"]}}}}"
+    "\\"capabilities\\":{{\\"input_formats\\":[\\"JSONEachRow\\"],\\"export_formats\\":[\\"JSONEachRow\\"],\\"doc_flags\\":[\\"values\\"]," \\
+    "\\"features\\":[\\"default_generators\\"]}}}}"
 
 {model.function("chs_build_info").prototype().rstrip(";")} {{
     static char buf[768];
@@ -678,6 +679,35 @@ def _status_injection(fn) -> list[str]:
     ]
 
 
+def _one_create(fn) -> list[str]:
+    """The stub's stand-in for the one-CREATE rule (_stubshared.ONE_CREATE):
+    after the input checks and any status injection, a `;` followed by
+    anything but ASCII whitespace or another `;` is refused with the rule's
+    status and error. Only the function the rule names gets it."""
+    rule = _stubshared.ONE_CREATE
+    if fn.name != rule["fn"]:
+        return []
+    p = rule["param"]
+    if not any(q.name == p and q.kind == "bytes_in" for q in fn.params):
+        raise ValueError(f"{fn.name}: _stubshared.ONE_CREATE names {p!r}, which is not one of its bytes_in parameters")
+    name_lit = _c_str(rule["ch_name"])
+    msg_lit = _c_str(rule["message"])
+    return [
+        "    {",
+        "        /* the one-CREATE rule's stand-in: see scripts/abi-v1/emit/_stubshared.py ONE_CREATE */",
+        "        size_t i = 0;",
+        f"        while (i < {p}_len && {p}[i] != ';') i++;",
+        f"        while (i < {p}_len && ({p}[i] == ';' || {p}[i] == ' ' || {p}[i] == '\\t' || {p}[i] == '\\n' || {p}[i] == '\\r')) i++;",
+        f"        if (i < {p}_len) {{",
+        f"            static const char name[] = {name_lit};",
+        f"            static const char msg[] = {msg_lit};",
+        f"            chs_stub_set_err(err, chs_stub_make_error({rule['status']}, {rule['ch_code']}, name, sizeof(name) - 1, msg, sizeof(msg) - 1));",
+        f"            return {rule['status']};",
+        "        }",
+        "    }",
+    ]
+
+
 def _fill_outputs(model, fn) -> list[str]:
     """Fill every out_handle. `p.nullable` here means "the pointer-TO-pointer
     itself may be NULL" (the caller does not want this output); a required
@@ -758,6 +788,7 @@ def _gen_generic(model, fn) -> str:
     body += [f"    (void) {cp.name};" for cp in fn.c_params]
     body += _input_checks(model, fn)
     body += _status_injection(fn)
+    body += _one_create(fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
     if err_param is not None:
