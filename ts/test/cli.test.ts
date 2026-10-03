@@ -19,7 +19,7 @@ let cache: string;
 let tree: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(tmpdir(), 'chtypes-cli-'));
+  tmp = mkdtempSync(path.join(tmpdir(), 'cli-test-'));
   cache = path.join(tmp, 'cache');
   tree = path.join(tmp, 'tree');
   mkdirSync(path.join(tree, 'tags'), { recursive: true });
