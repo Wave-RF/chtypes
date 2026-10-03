@@ -11,13 +11,13 @@
   "layers": [
     {
       "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
-      "digest": "sha256:c7ed1fabb4d8bf507b17f3d5de3a43a40c45a8a2890954a579193730ddfac306",
-      "size": 789
+      "digest": "sha256:56c78cc9c88b2295e9d5e6d8c623d71c71b6d8b4d0129b06ffe7e548de0e87ec",
+      "size": 805
     }
   ],
   "subject": {
     "mediaType": "application/vnd.oci.image.manifest.v1+json",
-    "digest": "sha256:f1bb56023e32b2b52f2ceb13f5acd1508272a965c5d87b56d9c414325ed28193",
+    "digest": "sha256:e524d0a9aca93d96b5c8d352f11f1ab7976d269354893a99a325c9709c5b2025",
     "size": 714
   }
 }
