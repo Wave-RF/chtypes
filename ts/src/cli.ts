@@ -8,9 +8,10 @@
  *   chtypes list                        what is installed, and the versions the registry publishes
  *   chtypes where                       the v1 cache root
  *
- * Shared options: `--platform <os-arch>`, `--cache <dir>` (the layout root,
- * as `CHTYPES_CACHE`), `--base <url>` (repeatable; replaces the default bases,
- * as `CHTYPES_ARTIFACTS_URL`), `-q/--quiet`, `-h/--help`, `-V/--version`.
+ * Options per cli-common: `fetch` takes `--platform`, `--cache`, `--lock`, `--frozen`,
+ * `--offline`, `--update`; `verify`, `list` and `where` take `--cache` (`list` also
+ * `--offline`); `-h/--help` anywhere, `--version` at top level. The registry base
+ * comes only from `CHTYPES_ARTIFACTS_URL`.
  *
  * Exit statuses: 0 ok, 2 usage, and for every fetch error the status the
  * `errors` table of `spec/fetch-v1/constants.json` gives its code (generated
@@ -72,12 +73,12 @@ const USAGE = `usage: chtypes <command> [options]
   --frozen    fetch exactly what the lock file pins, by digest; refuse anything it does not (default lock: chtypes.lock)
   --offline   never touch the network: an installed, verified build is fine, anything else fails
   --lock      record what was installed into this lock file
-  --update    re-resolve every request the lock holds and rewrite it
+  --update    re-resolve every request the lock holds and rewrite it (requires --lock; not with --frozen)
   --platform  <os>-<arch>: linux-amd64, linux-arm64 or darwin-arm64 (default: this host, or CHTYPES_TARGET)
   --cache     the cache root (default: CHTYPES_CACHE, else \${XDG_CACHE_HOME:-~/.cache}/chtypes/v1)
-  --base      a registry base URL; repeat for several (default: CHTYPES_ARTIFACTS_URL, else the public registry)
-  -q, --quiet no progress on stderr
-  -h, --help  this text;  -V, --version  the package version
+  -h, --help  this text;  --version  the package version
+
+the registry base comes only from CHTYPES_ARTIFACTS_URL (default: the public registry)
 
 exit status: 0 ok, 2 usage; a fetch error exits with its code's status in spec/fetch-v1/constants.json
 environment: CHTYPES_ARTIFACTS_URL, CHTYPES_CACHE, CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TRUSTED_KEYS,
@@ -100,10 +101,8 @@ const CONFIG = {
     lock: { type: 'string' },
     platform: { type: 'string' },
     cache: { type: 'string' },
-    base: { type: 'string', multiple: true },
-    quiet: { type: 'boolean', short: 'q' },
     help: { type: 'boolean', short: 'h' },
-    version: { type: 'boolean', short: 'V' },
+    version: { type: 'boolean' },
   },
 } as const;
 
@@ -159,14 +158,14 @@ export async function runCli(argv: readonly string[], io: CliIo = defaultIo): Pr
 }
 
 function fetchOptions(values: Values, forFetch: boolean): FetchV1Options {
+  if (!forFetch && values.platform !== undefined) throw new CliUsageError('--platform applies to fetch only');
   if (values.platform !== undefined && !isPlatformKey(values.platform)) {
     throw new CliUsageError(`--platform ${JSON.stringify(values.platform)} is not a platform: use linux-amd64, linux-arm64 or darwin-arm64`);
   }
   if (values.frozen && values.update) throw new CliUsageError('--frozen and --update contradict: one reads the lock, the other rewrites it');
-  const bases = values.base ?? [];
+  if (values.update && values.lock === undefined) throw new CliUsageError('--update requires --lock <file>');
   const lockPath = values.lock;
   return withEnvironment({
-    ...(bases.length > 0 ? { bases } : {}),
     ...(values.cache !== undefined ? { cacheDir: values.cache } : {}),
     ...(values.platform !== undefined ? { platform: values.platform as PlatformKey } : {}),
     ...(lockPath !== undefined ? { lockPath } : {}),
@@ -181,8 +180,8 @@ function fetchOptions(values: Values, forFetch: boolean): FetchV1Options {
   });
 }
 
-function say(io: CliIo, values: Values, message: string): void {
-  if (!values.quiet) io.stderr(`==> ${message}\n`);
+function say(io: CliIo, _values: Values, message: string): void {
+  io.stderr(`==> ${message}\n`);
 }
 
 async function cmdFetch(requests: readonly string[], values: Values, io: CliIo): Promise<number> {
@@ -244,10 +243,9 @@ async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Pr
   }
   let bad = 0;
   for (const r of results) {
-    if (r.ok) io.stdout(`ok   ${r.platform}  ${r.dir}\n`);
-    else {
+    if (!r.ok) {
       bad += 1;
-      io.stdout(`BAD  ${r.platform}  ${r.dir}  ${r.detail}\n`);
+      io.stderr(`BAD  ${r.platform}  ${r.dir}  ${r.detail}\n`);
     }
   }
   say(io, values, bad === 0 ? `${results.length} build(s) verified in ${root}` : `${bad} of ${results.length} build(s) FAILED verification in ${root}`);

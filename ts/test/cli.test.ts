@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EXIT_OK, EXIT_USAGE, runCli } from '../src/cli.js';
 import { ERROR_EXIT_CODES } from '../src/ocifetch/constants.gen.js';
 import { listTags } from '../src/ocifetch/index.js';
@@ -26,12 +26,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(tmp, { recursive: true, force: true });
 });
 
 function writeTags(tags: readonly string[]): string {
   writeFileSync(path.join(tree, 'tags', 'list'), JSON.stringify({ name: 'chtypes/v1', tags }));
-  return pathToFileURL(tree).href;
+  const base = pathToFileURL(tree).href;
+  vi.stubEnv('CHTYPES_ARTIFACTS_URL', base);
+  return base;
 }
 
 async function run(...argv: string[]): Promise<{ code: number; out: string; err: string }> {
@@ -61,9 +64,13 @@ describe('usage', () => {
     expect((await run('fetch', '--cache', cache)).code).toBe(EXIT_USAGE);
     expect((await run('fetch', '--all', '26.8', '--cache', cache)).code).toBe(EXIT_USAGE);
     expect((await run('fetch', '--all', '--frozen', '--cache', cache)).code).toBe(EXIT_USAGE);
-    expect((await run('fetch', '26.8', '--frozen', '--update', '--cache', cache)).code).toBe(EXIT_USAGE);
+    expect((await run('fetch', '26.8', '--frozen', '--update', '--lock', 'x.lock', '--cache', cache)).code).toBe(EXIT_USAGE);
     expect((await run('fetch', '26.8', '--platform', 'windows-amd64', '--cache', cache)).code).toBe(EXIT_USAGE);
     expect((await run('where', 'extra')).code).toBe(EXIT_USAGE);
+    expect((await run('fetch', '26.8', '--update', '--cache', cache)).code).toBe(EXIT_USAGE);
+    expect((await run('fetch', '26.8', '-q')).code).toBe(EXIT_USAGE);
+    expect((await run('fetch', '26.8', '--base', 'x')).code).toBe(EXIT_USAGE);
+    expect((await run('-V')).code).toBe(EXIT_USAGE);
   });
 });
 
@@ -101,28 +108,28 @@ describe('against a static tree', () => {
   });
 
   it('prints the published tags from the list command', async () => {
-    const base = writeTags(['26.8', '25.10']);
-    const r = await run('list', '--base', base, '--cache', cache);
+    writeTags(['26.8', '25.10']);
+    const r = await run('list', '--cache', cache);
     expect(r.code).toBe(EXIT_OK);
     expect(r.out).toContain('  25.10\n  26.8\n');
   });
 
   it('a tag nobody published exits with CHTYPES_ARTIFACT_UNPUBLISHED\'s status', async () => {
-    const base = writeTags(['26.8']);
-    const r = await run('fetch', '26.9', '--base', base, '--cache', cache);
+    writeTags(['26.8']);
+    const r = await run('fetch', '26.9', '--cache', cache);
     expect(r.code).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_UNPUBLISHED']);
   });
 
   it('a version spelling the guide refuses before any network call is an error, never a fetch', async () => {
-    const base = writeTags(['26.8']);
-    const r = await run('fetch', 'v26.8', '--base', base, '--cache', cache);
+    writeTags(['26.8']);
+    const r = await run('fetch', 'v26.8', '--cache', cache);
     expect(r.code).not.toBe(EXIT_OK);
     expect(r.err).toContain('v1 version spelling');
   });
 
   it('fetch --all over lines this platform has no build for is an UNPUBLISHED failure, not a success', async () => {
-    const base = writeTags(['26.8', '26.8.15.10']);
-    const r = await run('fetch', '--all', '--base', base, '--cache', cache);
+    writeTags(['26.8', '26.8.15.10']);
+    const r = await run('fetch', '--all', '--cache', cache);
     expect(r.code).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_UNPUBLISHED']);
   });
 });
