@@ -1,0 +1,312 @@
+{
+ "schema": "https://artifacts.wavehouse.dev/spec/goldens/v1",
+ "by": "hand-written fixture for the Rust runner's stub self-test; not a release's goldens",
+ "abi": 1,
+ "abi_fingerprint": "sha256:856e5cb7543db291b4db716662bf6e487b2258973b959bbf5d58b4bd46d73285",
+ "clickhouse_version": "99.1.2.3",
+ "build": "20990101.000000",
+ "revision": 1,
+ "generated": {
+  "platform": "linux/amd64",
+  "checked_on": [
+   "darwin/arm64",
+   "linux/amd64",
+   "linux/arm64"
+  ]
+ },
+ "setups": [
+  {
+   "id": "utc",
+   "image_zone_b64": "",
+   "defaults_b64": "e30=",
+   "cases": [
+    {
+     "id": "stub-schema-refused",
+     "kind": "schema",
+     "call": "schema_create",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "IVM6Q0hTX1JFSkVDVEVEOjUwOlVOS05PV05fVFlQRTpVbmtub3duIGRhdGEgdHlwZSBmYW1pbHk6IEJvZ3Vz",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "schema_create",
+      "status": "CHS_REJECTED",
+      "error": {
+       "ch_code": 50,
+       "ch_name_b64": "VU5LTk9XTl9UWVBF",
+       "message_b64": "VW5rbm93biBkYXRhIHR5cGUgZmFtaWx5OiBCb2d1cw==",
+       "column_b64": ""
+      },
+      "run_varying": []
+     }
+    },
+    {
+     "id": "stub-row-doc",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IUQ6aGVsbG8=",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "input_span": {
+        "off": 0,
+        "len": 8
+       },
+       "unknown_fields": [],
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "src": "input",
+         "input": "hello",
+         "stored": "hello",
+         "null": false,
+         "value_b64": "aGVsbG8="
+        }
+       ],
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    },
+    {
+     "id": "stub-row-doc-nonutf8",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IUQ6/wB4",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "input_span": {
+        "off": 0,
+        "len": 6
+       },
+       "unknown_fields": [],
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "src": "input",
+         "input_b64": "/wB4",
+         "stored_b64": "/wB4",
+         "null": false,
+         "value_b64": "/wB4"
+        }
+       ],
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    },
+    {
+     "id": "stub-row-declined",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IVM6Q0hTX0RFQ0xJTkVEOjc3OlRFU1RfQ09ERTpkZWNsaW5lZCBieSB0aGUgc3R1Yg==",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_DECLINED",
+      "error": {
+       "ch_code": 77,
+       "ch_name_b64": "VEVTVF9DT0RF",
+       "message_b64": "ZGVjbGluZWQgYnkgdGhlIHN0dWI=",
+       "column_b64": ""
+      },
+      "run_varying": []
+     }
+    },
+    {
+     "id": "stub-wire-csv-doc",
+     "kind": "wire",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 1,
+      "body_b64": "IUQ6YSxi",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "input_span": {
+        "off": 0,
+        "len": 6
+       },
+       "unknown_fields": [],
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "src": "input",
+         "input": "a,b",
+         "stored": "a,b",
+         "null": false,
+         "value_b64": "YSxi"
+        }
+       ],
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    },
+    {
+     "id": "stub-row-doc-darwin-only",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64"
+     ],
+     "platforms_reason": "the fixture exists to prove the skip rule: this case runs on darwin only",
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IUQ6ZGFyd2lu",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "input_span": {
+        "off": 0,
+        "len": 9
+       },
+       "unknown_fields": [],
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "src": "input",
+         "input": "darwin",
+         "stored": "darwin",
+         "null": false,
+         "value_b64": "ZGFyd2lu"
+        }
+       ],
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "tokyo",
+   "image_zone_b64": "QXNpYS9Ub2t5bw==",
+   "defaults_b64": "",
+   "cases": [
+    {
+     "id": "stub-tokyo-row-doc",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "settings_b64": "e30="
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IUQ6dG9reW8=",
+      "settings_b64": "e30="
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "input_span": {
+        "off": 0,
+        "len": 8
+       },
+       "unknown_fields": [],
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "src": "input",
+         "input": "tokyo",
+         "stored": "tokyo",
+         "null": false,
+         "value_b64": "dG9reW8="
+        }
+       ],
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    }
+   ]
+  }
+ ]
+}

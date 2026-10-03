@@ -10,6 +10,8 @@ Two things: this crate, and at least one **artifact**, the per-version native li
 
 ```sh
 cargo add chtypes
+cargo install chtypes     # the `chtypes` command: fetch, verify, list, where
+chtypes fetch 26.8
 ```
 
 ## Quickstart
@@ -67,7 +69,7 @@ Where this crate and the normative spec disagree, **the spec wins**.
 
 ## Tests
 
-`cargo test`. The suite that needs the stub libraries (`CHTYPES_ABI1_STUBS`) and the fetch fixtures skips loudly without them; `scripts/abi-v1/build-stubs.sh --out DIR` builds the stubs.
+`cargo test`. The suite that needs the stub libraries (`CHTYPES_ABI1_STUBS`), the fetch fixtures (`CHTYPES_V1_CONFORMANCE`) and the goldens runner (`CHTYPES_GOLDENS_REGISTRY_BASE`) each skips loudly without its inputs; `scripts/abi-v1/build-stubs.sh --out DIR` builds the stubs.
 
 `cargo run --example demo` is the product in one screen.
 

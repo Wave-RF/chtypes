@@ -1,69 +1,69 @@
-//! `chtypes` — the fetch command every SDK spells identically (`docs/guides/fetch.md`
-//! §6), over [`chtypes::ensure`].
+//! `chtypes`: the command line over the v1 fetch layer
+//! (`docs/guides/fetch-v1.md`), spelled identically in every SDK.
 //!
 //! ```text
-//! chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
-//!                         [--tag <t> | --url <base>] [--lock <file>] [--frozen]
-//!                         [--force] [--offline]
-//! chtypes verify [--dest <dir>]        re-hash every installed line against its manifest
-//! chtypes list   [--dest <dir>]        what is installed, and what the release offers
-//! chtypes where                        the registry directory fetch would write to
+//! chtypes fetch <spelling>... | --all  [--platform <key>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update]
+//! chtypes verify [--cache <dir>]       re-verify the installed cache
+//! chtypes list [--cache <dir>] [--offline]   installed builds, and the published lines unless --offline
+//! chtypes where [--cache <dir>]        the v1 cache root
 //! ```
 //!
-//! Progress goes to stderr; `fetch` prints the installed directory alone on
-//! stdout. Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source
-//! unreachable · 4 not published for this platform/line.
+//! Progress and warnings go to stderr; results go to stdout. Exit statuses
+//! come from the fetch layer's error table (`docs/guides/fetch-v1.md` §8, the
+//! generated `ERROR_EXIT_CODES`); a usage error exits 2.
+
+// The fetch layer is not public API, so the binary compiles it in under its
+// own crate root, the same way the conformance suites do.
+#[path = "ocifetch/mod.rs"]
+mod ocifetch;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use chtypes::fetch::{self, EnsureOptions};
-use chtypes::legacy::error::{CODE_ARTIFACT_UNPUBLISHED, CODE_SOURCE_UNREACHABLE, Error};
-use chtypes::legacy::registry::{host_platform, installed_patches};
+use ocifetch::constants;
+use ocifetch::ensure::{self, Options, Resolved};
+use ocifetch::error::Error;
+use ocifetch::oci::VersionRequest;
+
+/// The one status this program owns: a usage error. Everything else is the
+/// fetch layer's table.
+const EXIT_USAGE: u8 = 2;
 
 const USAGE: &str = "\
-chtypes — fetch, verify and list ClickHouse artifacts for the chtypes SDKs
+chtypes: fetch, verify and list ClickHouse artifacts for the chtypes SDKs
 
-  chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
-                          [--tag <t> | --url <base>] [--lock <file>] [--frozen]
-                          [--force] [--offline]
-  chtypes verify [--dest <dir>]        re-hash every installed line against its manifest
-  chtypes list   [--dest <dir>]        what is installed, and what the release offers
-  chtypes where                        the registry directory fetch would write to
+  chtypes fetch <spelling>... [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update]
+  chtypes fetch --all         [--platform <os-arch>] [--cache <dir>] [--lock <file>] [--frozen] [--offline] [--update]
+  chtypes verify [--cache <dir>]            re-verify the installed cache
+  chtypes list [--cache <dir>] [--offline]  installed builds; without --offline, published lines too
+  chtypes where [--cache <dir>]             the v1 cache root
+  chtypes --version
 
-A <line> is a ClickHouse minor line (25.8) or an exact patch (25.8.28.1-lts, a
-hard requirement). Only artifacts built at this SDK's ABI revision are ever
-installed. --all installs every line the release publishes for the platform at
-that revision. Without --dest (or CHTYPES_REGISTRY), fetch installs into the
-per-user cache, ${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>,
-R that revision. Progress prints on stderr; `fetch` prints each installed
-directory alone on stdout.
+A <spelling> is a two-, three- or four-part version (26.8, 26.8.15, 26.8.15.10):
+no 'v' prefix and no channel suffix. --all fetches every line (two-part tag)
+the registry publishes. --lock writes the lock after a fetch; --frozen fetches
+exactly what the lock pins (default file chtypes.lock) and does no discovery;
+--offline reads the cache only; --update re-resolves every locked request and
+rewrites the lock (it requires --lock). `fetch` prints each installed directory.
 
-Environment: CHTYPES_REGISTRY (where to install and look), CHTYPES_ARTIFACTS_URL
-(the artifacts host), CHTYPES_TRUSTED_KEYS (hex keys replacing the release key),
-CHTYPES_ALLOW_UNSIGNED=1 (skip the signature, loudly), CHTYPES_AUTOFETCH=1.
-
-Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source unreachable ·
-4 not published for this platform/line.
+Environment: CHTYPES_ARTIFACTS_URL (the only base override), CHTYPES_CACHE,
+CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TRUSTED_KEYS, CHTYPES_ALLOW_UNSIGNED.
 ";
 
-/// Exit 2: a usage problem, reported on stderr.
+/// A usage problem, reported on stderr with exit status 2.
 struct Usage(String);
 
-/// The flags every subcommand accepts (each ignores what it does not use).
 #[derive(Default)]
 struct Args {
     command: String,
-    lines: Vec<String>,
+    spellings: Vec<String>,
     all: bool,
     platform: Option<String>,
-    dest: Option<PathBuf>,
-    tag: Option<String>,
-    url: Option<String>,
     lock: Option<PathBuf>,
+    cache: Option<String>,
     frozen: bool,
-    force: bool,
     offline: bool,
+    update: bool,
 }
 
 fn parse(argv: &[String]) -> Result<Args, Usage> {
@@ -73,64 +73,79 @@ fn parse(argv: &[String]) -> Result<Args, Usage> {
         return Err(Usage(String::new()));
     };
     args.command = command.clone();
-    let value = |flag: &str, it: &mut std::slice::Iter<'_, String>| -> Result<String, Usage> {
-        it.next()
-            .filter(|v| !v.starts_with("--"))
-            .cloned()
-            .ok_or_else(|| Usage(format!("{flag} needs a value")))
-    };
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--all" => args.all = true,
             "--frozen" => args.frozen = true,
-            "--force" => args.force = true,
             "--offline" => args.offline = true,
-            "--platform" => args.platform = Some(value(arg, &mut it)?),
-            // --out is the spelling the CI workflows use for scripts/fetch.sh.
-            "--dest" | "--out" => args.dest = Some(PathBuf::from(value(arg, &mut it)?)),
-            "--tag" => args.tag = Some(value(arg, &mut it)?),
-            "--url" => args.url = Some(value(arg, &mut it)?),
-            "--lock" => args.lock = Some(PathBuf::from(value(arg, &mut it)?)),
+            "--update" => args.update = true,
+            "--platform" | "--lock" | "--cache" => {
+                let value = it
+                    .next()
+                    .filter(|v| !v.starts_with("--"))
+                    .cloned()
+                    .ok_or_else(|| Usage(format!("{arg} needs a value")))?;
+                match arg.as_str() {
+                    "--platform" => args.platform = Some(value),
+                    "--cache" => args.cache = Some(value),
+                    _ => args.lock = Some(PathBuf::from(value)),
+                }
+            }
             "-h" | "--help" => return Err(Usage(String::new())),
             other if other.starts_with('-') => {
                 return Err(Usage(format!("unknown flag: {other}")));
             }
-            other => args.lines.push(other.to_string()),
-        }
-    }
-    if args.url.is_some() && args.tag.is_some() {
-        return Err(Usage(
-            "--url names a full base; --tag selects a release on the artifacts host — pass one"
-                .into(),
-        ));
-    }
-    if let Some(p) = &args.platform {
-        if !matches!(
-            p.as_str(),
-            "linux-arm64" | "linux-amd64" | "darwin-arm64" | "darwin-amd64"
-        ) {
-            return Err(Usage(format!(
-                "not a known platform key: {p} ((linux|darwin)-(arm64|amd64))"
-            )));
+            other => args.spellings.push(other.to_string()),
         }
     }
     Ok(args)
 }
 
-fn options(args: &Args) -> EnsureOptions {
-    EnsureOptions {
-        dest: args.dest.clone(),
+fn options(args: &Args) -> Options {
+    let lock_path = args.lock.clone().or_else(|| {
+        args.frozen
+            .then(|| PathBuf::from(constants::LOCK_DEFAULT_FILE))
+    });
+    Options {
         platform: args.platform.clone(),
-        url: args.url.clone(),
-        tag: args.tag.clone(),
-        lock: args.lock.clone(),
-        frozen: args.frozen,
-        force: args.force,
+        cache_dir: args.cache.clone(),
         offline: args.offline,
-        trusted_keys: None,
-        allow_unsigned: None,
-        progress: true,
+        frozen: args.frozen,
+        update: args.update,
+        lock_write: args.lock.is_some() && !args.frozen,
+        lock_path,
+        ..Options::default()
     }
+}
+
+/// An error's own exit status, from the generated table.
+fn exit_for(err: &Error) -> u8 {
+    // The table has an entry for every code this module can raise; a drift
+    // between the two reads as a plain failure, never as success.
+    err.exit_code().unwrap_or(1)
+}
+
+fn report(err: &Error) -> u8 {
+    eprintln!("chtypes: {err}");
+    exit_for(err)
+}
+
+fn print_resolved(resolved: &Resolved) {
+    for warning in &resolved.warnings {
+        eprintln!("chtypes: warning: {warning}");
+    }
+    eprintln!(
+        "chtypes: {} {} ({}){}",
+        resolved.version,
+        resolved.platform,
+        resolved.source,
+        if resolved.already_installed {
+            ", already installed"
+        } else {
+            ""
+        }
+    );
+    println!("{}", resolved.dir.display());
 }
 
 fn main() -> ExitCode {
@@ -141,13 +156,7 @@ fn main() -> ExitCode {
     }
     let args = match parse(&argv) {
         Ok(a) => a,
-        Err(Usage(message)) => {
-            if !message.is_empty() {
-                eprintln!("chtypes: {message}");
-            }
-            eprint!("{USAGE}");
-            return ExitCode::from(2);
-        }
+        Err(Usage(message)) => return usage(&message),
     };
     let result = match args.command.as_str() {
         "fetch" => cmd_fetch(&args),
@@ -158,201 +167,129 @@ fn main() -> ExitCode {
             eprint!("{USAGE}");
             return ExitCode::SUCCESS;
         }
-        other => {
-            eprintln!("chtypes: unknown command: {other}");
-            eprint!("{USAGE}");
-            return ExitCode::from(2);
-        }
+        other => Err(Usage(format!("unknown command: {other}"))),
     };
     match result {
         Ok(code) => ExitCode::from(code),
-        Err(Usage(message)) => {
-            eprintln!("chtypes: {message}");
-            ExitCode::from(2)
-        }
+        Err(Usage(message)) => usage(&message),
     }
 }
 
-/// `docs/guides/fetch.md` §6: 1 verification failed · 3 source unreachable · 4 not
-/// published. Everything else that failed is 1 too — it did not succeed.
-fn exit_code_for(err: &Error) -> u8 {
-    match err.artifact_code() {
-        Some(CODE_SOURCE_UNREACHABLE) => 3,
-        Some(CODE_ARTIFACT_UNPUBLISHED) => 4,
-        _ => 1,
+fn usage(message: &str) -> ExitCode {
+    if !message.is_empty() {
+        eprintln!("chtypes: {message}");
     }
-}
-
-fn report(err: &Error) -> u8 {
-    match err.artifact_code() {
-        Some(code) => eprintln!("{err} [{code}]"),
-        None => eprintln!("{err}"),
-    }
-    exit_code_for(err)
+    eprint!("{USAGE}");
+    ExitCode::from(EXIT_USAGE)
 }
 
 fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
-    if args.all && !args.lines.is_empty() {
+    if args.all && !args.spellings.is_empty() {
         return Err(Usage(format!(
-            "--all installs every published line; drop the version argument ({})",
-            args.lines.join(" ")
+            "--all fetches every published line; drop the spelling ({})",
+            args.spellings.join(" ")
         )));
     }
-    if !args.all && args.lines.is_empty() {
-        return Err(Usage("a ClickHouse line is required (or --all)".into()));
+    if !args.all && args.spellings.is_empty() {
+        return Err(Usage("a version spelling is required (or --all)".into()));
     }
-    let opts = options(args);
-    if args.all {
-        return Ok(match fetch::ensure_all(&opts) {
-            Ok(installed) => {
-                for i in installed {
-                    println!("{}", i.dir.display());
-                }
-                0
-            }
-            Err(e) => report(&e),
-        });
+    if args.update && args.lock.is_none() {
+        return Err(Usage("--update requires --lock".into()));
+    }
+    if args.offline && args.update {
+        return Err(Usage(
+            "--update must reach the registry; it cannot combine with --offline".into(),
+        ));
+    }
+    if args.frozen && args.update {
+        return Err(Usage(
+            "--frozen fetches what the lock pins; --update rewrites it: pass one".into(),
+        ));
     }
     // Every spelling is checked before the first fetch: a typo in the third
     // argument must not cost the first two downloads.
-    for line in &args.lines {
-        if let Err(e) = fetch::parse_line(line) {
-            return Err(Usage(
-                e.to_string()
-                    .trim_start_matches("chtypes: fetch: ")
-                    .to_string(),
-            ));
+    for spelling in &args.spellings {
+        match VersionRequest::parse(spelling) {
+            Ok(r) if !r.is_literal() => {}
+            Ok(_) => {
+                return Err(Usage(format!(
+                    "{spelling:?} is not a version spelling (two, three or four numeric parts)"
+                )));
+            }
+            Err(e) => return Err(Usage(e.to_string())),
         }
     }
-    for line in &args.lines {
-        match fetch::ensure(line, &opts) {
-            Ok(i) => println!("{}", i.dir.display()),
+    let spellings = if args.all {
+        match ocifetch::tags::published_versions(&options(args)) {
+            Ok(all) => all
+                .into_iter()
+                .filter(|v| v.matches('.').count() == 1)
+                .collect(),
+            Err(e) => return Ok(report(&e)),
+        }
+    } else {
+        args.spellings.clone()
+    };
+    for spelling in &spellings {
+        match ensure::ensure(spelling, options(args)) {
+            Ok(resolved) => print_resolved(&resolved),
             Err(e) => return Ok(report(&e)),
         }
     }
     Ok(0)
 }
 
-/// `--dest` names the one directory to look in; without it, the §1 search
-/// path — the same rule `fetch` applies to "already installed".
-fn dirs_of(args: &Args, opts: &EnsureOptions) -> Result<Vec<PathBuf>, Error> {
-    match &args.dest {
-        Some(d) => Ok(vec![d.clone()]),
-        None => fetch::search_path(opts),
-    }
-}
-
 fn cmd_verify(args: &Args) -> Result<u8, Usage> {
-    let opts = options(args);
-    let dirs = match dirs_of(args, &opts) {
-        Ok(d) => d,
+    if !args.spellings.is_empty() || args.all {
+        return Err(Usage("verify takes no arguments".into()));
+    }
+    let results = match ensure::verify_installed(options(args)) {
+        Ok(r) => r,
         Err(e) => return Ok(report(&e)),
     };
-    let mut checked = 0usize;
-    let mut bad = 0usize;
-    for dir in &dirs {
-        if !dir.is_dir() {
-            continue;
-        }
-        for v in fetch::verify_installed(dir) {
-            checked += 1;
-            match &v.result {
-                Ok(sha) => println!(
-                    "ok       {}  ClickHouse {}  {}  sha256 {sha}",
-                    v.dir.display(),
-                    v.version,
-                    v.library
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("?")
-                ),
-                Err(e) => {
-                    bad += 1;
-                    println!("CORRUPT  {}  {e}", v.dir.display());
-                }
-            }
-        }
-    }
-    if checked == 0 {
-        eprintln!(
-            "chtypes: nothing is installed under {}",
-            dirs.iter()
-                .map(|d| d.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+    if results.is_empty() {
         return Ok(0);
     }
-    if let Ok(dir) = fetch::install_dir(&options(args)) {
-        print_goldens_line(&dir);
+    let mut bad = 0usize;
+    for r in &results {
+        if !r.ok {
+            bad += 1;
+            eprintln!("chtypes: CORRUPT {}: {}", r.dir.display(), r.detail);
+        }
     }
-    eprintln!("chtypes: {checked} installed line(s) re-hashed, {bad} corrupt");
-    Ok(if bad == 0 { 0 } else { 1 })
+    Ok(if bad == 0 {
+        0
+    } else {
+        exit_for(&Error::ArtifactCorrupt(String::new()))
+    })
 }
 
 fn cmd_list(args: &Args) -> Result<u8, Usage> {
-    let opts = options(args);
-    let dirs = match dirs_of(args, &opts) {
-        Ok(d) => d,
-        Err(e) => return Ok(report(&e)),
-    };
-    let platform = args.platform.clone().unwrap_or_else(host_platform);
-    println!("installed ({platform}):");
-    let installed = installed_patches(&dirs);
-    if installed.is_empty() {
-        println!("  (nothing)");
+    if !args.spellings.is_empty() || args.all {
+        return Err(Usage("list takes no arguments".into()));
     }
-    for patch in &installed {
-        println!(
-            "  {:<8} {:<20} {}{}",
-            patch.line,
-            patch.version,
-            patch.dir.display(),
-            if patch.flat { "" } else { "  (patches/)" }
-        );
-    }
-    let quiet = EnsureOptions {
-        progress: false,
-        ..opts
-    };
-    match fetch::release_info(&quiet) {
-        Ok(info) => {
-            println!(
-                "release ({}, {}):",
-                info.origin,
-                match &info.signed_by {
-                    Some(key) => format!("signed by ed25519 key {key}"),
-                    None => "UNVERIFIED — CHTYPES_ALLOW_UNSIGNED=1".to_string(),
-                }
-            );
-            // Only the rows this SDK can fetch — its own ABI revision
-            // (docs/guides/fetch.md §2) — and one line naming what that hid.
-            let (revision, not_shown) = fetch::__list_revision(&info.artifacts, &platform);
-            let mut any = false;
-            for row in info
-                .artifacts
-                .iter()
-                .filter(|r| r.platform() == platform && r.abi_revision == Some(revision))
-            {
-                any = true;
-                let have = installed
-                    .iter()
-                    .any(|p| p.line == row.clickhouse_minor && p.version == row.clickhouse_version);
+    let mut installed: Vec<String> = Vec::new();
+    match ensure::list_installed(options(args)) {
+        Ok(list) => {
+            for r in list {
                 println!(
-                    "  {:<8} {:<20} b{:<3} {}  {} bytes{}",
-                    row.clickhouse_minor,
-                    row.clickhouse_version,
-                    row.build_number(),
-                    row.file,
-                    row.bytes,
-                    if have { "  (installed)" } else { "" }
+                    "installed  {}  {}  {}",
+                    r.version,
+                    r.platform,
+                    r.dir.display()
                 );
+                installed.push(r.version);
             }
-            if !any {
-                println!("  (nothing for {platform})");
-            }
-            if let Some(note) = not_shown {
-                println!("  {note}");
+        }
+        Err(e) => return Ok(report(&e)),
+    }
+    if args.offline {
+        return Ok(0);
+    }
+    match ocifetch::tags::published_versions(&options(args)) {
+        Ok(versions) => {
+            for v in versions {
+                println!("published  {v}  support unknown");
             }
             Ok(0)
         }
@@ -360,25 +297,13 @@ fn cmd_list(args: &Args) -> Result<u8, Usage> {
     }
 }
 
-/// The served golden set sits beside the artifacts, so "where is my registry"
-/// and "is my registry sound" are both moments someone wants to know whether it
-/// is there — a missing one is why the golden tests skip.
-fn print_goldens_line(dir: &std::path::Path) {
-    let path = dir.join("sdk-goldens.json");
-    match std::fs::metadata(&path) {
-        Ok(m) => println!("{}  (golden set, {} bytes)", path.display(), m.len()),
-        Err(_) => println!(
-            "{}  (golden set: not fetched — the golden tests will skip)",
-            path.display()
-        ),
-    }
-}
-
 fn cmd_where(args: &Args) -> Result<u8, Usage> {
-    match fetch::install_dir(&options(args)) {
-        Ok(dir) => {
-            println!("{}", dir.display());
-            print_goldens_line(&dir);
+    if !args.spellings.is_empty() || args.all {
+        return Err(Usage("where takes no arguments".into()));
+    }
+    match ocifetch::layout::cache_root(args.cache.as_deref()) {
+        Ok(root) => {
+            println!("{}", root.display());
             Ok(0)
         }
         Err(e) => Ok(report(&e)),

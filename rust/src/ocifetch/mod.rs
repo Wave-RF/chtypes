@@ -42,6 +42,7 @@ pub mod layout;
 pub mod lock;
 pub mod oci;
 pub mod referrers;
+pub mod tags;
 pub mod unpack;
 pub mod url;
 
