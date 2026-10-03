@@ -23,7 +23,7 @@
 # and no test may have skipped for want of a registry.
 #
 # $CHTYPES_ABI_FIXTURES, when set, names a wrong-revision fixture set
-# (scripts/abi-fixtures.sh builds one), and then each suite's two ABI-revision
+# (a v0 generator built one; nothing sets it any more), and then each suite's two ABI-revision
 # cases must have RUN and passed: the refusal naming both numbers, and the
 # matching-revision control. A skipped or absent case reads exactly like a
 # working handshake, which is the failure the fixture exists to close (#36).
@@ -283,14 +283,12 @@ if [ "${1:-}" = "--selftest" ]; then
   python_abi_case_failed test_matching_revision_loads "$tmp/pyabi-control-failed.log" \
     || { echo "SELFTEST FAILED: the matching_revision_loads control's own FAILED line was not recognized" >&2; exit 1; }
 
-  # scripts/lib/provenance.py (chtypes#190) — the registry provenance printer
-  # both this script and check-standalone.sh call before running a suite.
-  # Its own --selftest builds a fake registry (a matching-revision manifest,
-  # a mismatched one, and a manifest-less scratch directory) and, critically,
-  # rewrites a TEMP COPY of the header's CHS_ABI_REVISION and re-asserts that
-  # the WARNING moves with it — so a version of the printer that hard-codes
-  # the pinned revision instead of reading the header fails this, not just a
-  # missing feature.
+  # scripts/lib/provenance.py (chtypes#190) — the ABI-identity printer both
+  # this script and check-standalone.sh call before running a suite. Its own
+  # --selftest rewrites a TEMP COPY of the header's CHS_ABI_VERSION and
+  # CHS_ABI_FINGERPRINT and re-asserts that the printed line moves with them —
+  # so a version of the printer that hard-codes either value instead of
+  # reading the header fails this, not just a missing feature.
   python3 "$SCRIPTS/lib/provenance.py" --selftest \
     || { echo "SELFTEST FAILED: scripts/lib/provenance.py --selftest" >&2; exit 1; }
 
@@ -324,15 +322,10 @@ if [ "$NO_ARTIFACTS" -eq 1 ]; then
 fi
 [ "$REQUIRE" -eq 0 ] || say "--require-artifacts: CHTYPES_REGISTRY=${CHTYPES_REGISTRY:-<unset — the search path>}; the golden set must run"
 
-# A registry PATH is not a fingerprint: the same path holds different builds
-# on different days, and a machine that also builds artifacts can hold
-# several producer commits worth at once (chtypes#190). Before the suite
-# runs, say what is actually in the registry it will use — one line per
-# artifact line's manifest fields, the goldens file's identity, and a loud
-# (never fatal) WARNING when a line's ABI revision does not match this
-# binding's own header. Mirrors the first entry of the documented registry
-# search path (docs/guides/artifacts.md), same as check-standalone.sh: an
-# explicit $CHTYPES_REGISTRY if set, else the per-user cache.
+# Before the suite runs, say which ABI this binding was built against: the
+# header's version and fingerprint (scripts/lib/provenance.py). Under ABI v1 a
+# library is identified when it is loaded, by its own build_info, so there is
+# no registry directory to describe here.
 if ! command -v python3 >/dev/null 2>&1; then
   # chtypes#320: the one case in this script where provenance literally
   # cannot be printed — python3 itself is missing, so even the annotation
@@ -344,21 +337,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   [ "${GITHUB_ACTIONS:-}" != "true" ] || echo "::warning title=chtypes artifact provenance::unknown — $WHICH suite (python3 not on PATH; provenance cannot be printed)"
   die "python3 is not on PATH; provenance cannot be printed"
 fi
-if [ "$NO_ARTIFACTS" -eq 1 ]; then
-  python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
-else
-  REG="${CHTYPES_REGISTRY:-}"
-  if [ -z "$REG" ]; then
-    _os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-    case "$(uname -m)" in x86_64|amd64) _arch=amd64 ;; arm64|aarch64) _arch=arm64 ;; *) _arch="$(uname -m)" ;; esac
-    # The per-user cache is keyed by the ABI revision the SDK speaks — this
-    # tree's own header, the number every binding's default follows.
-    _abi="$(sed -n 's/^#define CHS_ABI_REVISION \([0-9][0-9]*\)$/\1/p' "$ROOT/include/chtypes.h")"
-    case "$_abi" in ''|*[!0-9]*) die "cannot read one CHS_ABI_REVISION from $ROOT/include/chtypes.h" ;; esac
-    REG="${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/abi$_abi/$_os-$_arch"
-  fi
-  python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h" --registry "$REG"
-fi
+python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
 
 # The binding parity contract (tests/parity/manifest.json, docs/reference/bindings.md) is
 # checked by each language's OWN suite. It needs no artifact and no registry, so

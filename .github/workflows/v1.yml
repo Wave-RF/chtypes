@@ -5,7 +5,7 @@
 # trigger carries no branch filter, so every pull request into `v1` already
 # runs ci.yml's full required set unchanged — proof that v1 work leaves v0's
 # code paths green on the branch until the switch (plan §2.4). This file adds
-# exactly the v1-specific checks on top of that, triggered only on `v1`.
+# exactly the v1-specific checks on top of that, triggered on pull requests into `v1` and `main`, and in the merge queue (its required contexts are required on `main` once v1 merges).
 #
 # Job names below are the check CONTEXTS branch protection on `v1` names
 # (plan §2.2's table) — renaming one here is a protected-surface change, not
@@ -28,9 +28,14 @@ name: v1
 
 on:
   pull_request:
-    branches: [v1]
+    branches: [main, v1]
+  # The merge queue's candidate combination must run every required context
+  # here too, or the queue waits forever: v1 and v1-abi's contexts are required
+  # on main once v1 merges (nothing below reads the event's base or head).
+  merge_group:
+    types: [checks_requested]
   push:
-    branches: [v1]
+    branches: [main, v1]
   workflow_dispatch:
     inputs:
       registry_base:
@@ -58,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Selftest first, the same discipline every gate in this repository
-      # follows (scripts/check-abi-decls.py, scripts/lint-public.sh, …): a
+      # follows (scripts/lint-public.sh, scripts/lint-spelling.sh, …): a
       # checker nobody has seen fail is not a checker. It proves --check
       # catches drift on a throwaway copy, never the real tree.
       - name: "selftest — --check catches a flipped source value, and a test key cannot reach the default trust list"

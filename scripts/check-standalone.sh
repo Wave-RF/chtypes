@@ -87,23 +87,6 @@ command -v go >/dev/null 2>&1 || die "go is not on PATH; the check cannot run an
 SRC="$ROOT/go"
 [ -d "$SRC/chtypes" ] || die "no Go SDK at $SRC"
 
-if [ -z "$REG" ]; then
-  _os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  case "$(uname -m)" in x86_64|amd64) _arch=amd64 ;; arm64|aarch64) _arch=arm64 ;; *) _arch="$(uname -m)" ;; esac
-  # The per-user cache is keyed by the ABI revision the SDK speaks — this
-  # tree's own header, the number every binding's default follows.
-  _abi="$(sed -n 's/^#define CHS_ABI_REVISION \([0-9][0-9]*\)$/\1/p' "$ROOT/include/chtypes.h")"
-  case "$_abi" in ''|*[!0-9]*) die "cannot read one CHS_ABI_REVISION from $ROOT/include/chtypes.h" ;; esac
-  REG="${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/artifacts/abi$_abi/$_os-$_arch"
-fi
-
-# A registry PATH is not a fingerprint: the same path holds different builds
-# on different days, and a machine that also builds artifacts can hold
-# several producer commits worth at once (chtypes#190). Before anything
-# runs, say what is actually in the registry this run will use — one line
-# per artifact line's manifest fields, the goldens file's identity, and a
-# loud (never fatal) WARNING when a line's ABI revision does not match this
-# binding's own header.
 if ! command -v python3 >/dev/null 2>&1; then
   # chtypes#320: the one case here where provenance literally cannot be
   # printed — python3 itself is missing, so even the annotation helper
@@ -114,11 +97,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   [ "${GITHUB_ACTIONS:-}" != "true" ] || echo "::warning title=chtypes artifact provenance::unknown — go suite (python3 not on PATH; provenance cannot be printed)"
   die "python3 is not on PATH; provenance cannot be printed"
 fi
-if [ "$NO_ARTIFACTS" -eq 1 ]; then
-  python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
-else
-  python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h" --registry "$REG"
-fi
+python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/chtypes-standalone.XXXXXX")"
 trap 'rm -rf "$TMP" "${SCRATCH_CACHE:-}"' EXIT
@@ -139,13 +118,13 @@ package chtypes
 
 import "testing"
 
-func TestProbeLinkedAbsent(t *testing.T) { _, _ = CompileDDL("", "x UInt8") }
+func TestProbeLinkedAbsent(t *testing.T) { _, _ = OpenLinked() }
 GO
 if ( cd "$DEST" && go vet ./... ) >/dev/null 2>&1; then
-  rm -f "$probe"; die "CompileDDL compiled WITHOUT chtypes_linked — the linked path leaked into the default build"
+  rm -f "$probe"; die "OpenLinked compiled WITHOUT chtypes_linked — the linked path leaked into the default build"
 fi
 rm -f "$probe"
-note "CompileDDL is undefined without the tag (as it must be)"
+note "OpenLinked is undefined without the tag (as it must be)"
 
 LOG_DIR="$ROOT/scratch"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/check-standalone.json"

@@ -205,7 +205,7 @@ def run_census(log_path, rc, have_reg, require, abi_fixtures_set):
                 % (len(starved), ", ".join(starved))
             )
     # The ABI-revision handshake (#36). When $CHTYPES_ABI_FIXTURES names a
-    # wrong-revision fixture set (scripts/abi-fixtures.sh), both halves must
+    # wrong-revision fixture set (a v0 generator built one), both halves must
     # have PASSED: a skipped or absent case reads exactly like a working
     # handshake.
     if abi_fixtures_set:

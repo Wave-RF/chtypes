@@ -95,8 +95,7 @@ the pull request is left for a human and the exit status is 0.
                  ci.yml's `divergences` job can be red by design.
   test-counts    ONLY when the pull request touches a test or fixture path
                  (chtypes#285 §1b, is_test_or_fixture_path has the exact
-                 rule): no suite's executed-test count, and no golden-case
-                 count, fell below main's last green `ci` push run — read
+                 rule): no suite's executed-test count fell below main's last green `ci` push run — read
                  from each job's own log (see gather_test_counts and its own
                  comment for why the log, not the check run's output, is
                  what a read-only token can actually read). A missing or
@@ -400,7 +399,7 @@ job LOGS per side — but the posture is identical: `gather_test_counts` reads
 each job's console output through the Actions API (`GET
 repos/{repo}/actions/jobs/{id}/logs`), a passive read of text GitHub's own
 runner already produced, and every line this file cares about is matched by
-regex (`parse_suite_counts`/`parse_golden_count`) against fixed integers,
+regex (`parse_suite_counts`) against fixed integers,
 never executed, sourced, imported or otherwise interpreted as code. The job
 whose log is read is itself one `.github/**`/`scripts/**` cannot touch
 without tripping `protected` first (evaluated before `checks`, and
@@ -781,7 +780,7 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     # release-level asset, so a re-import that is byte-identical to that
     # asset is excused (served_fixture_problems); anything else waits for a
     # human. `abi-revision/` is a generator the asset carries and this tree
-    # does not track (scripts/abi-fixtures.sh fetches it from the release
+    # does not track (the retired abi-fixtures job fetched it from the release
     # itself), so it is left out of the served side.
     ProtectedGlob("tests/fixtures/fetch/**",
                   "the fetch fixtures every binding's fetch suite asserts: the test key, the refusal cases, and "
@@ -1893,17 +1892,20 @@ def guide_problems(guide_text: str, expected_block: str) -> list[str]:
     return problems or ["the guide's block differs from PROTECTED_GLOBS (order or whitespace)"]
 
 
-# The check-run names branch protection requires on `main`, copied from it.
-# --check-ci-names fails when this and ci.yml's blocking jobs disagree; see
-# the header for why the list lives here rather than being read at run time.
+# The check-run names ci.yml's blocking jobs report, which branch protection
+# on `main` requires (copied from it). --check-ci-names fails when this and
+# ci.yml's blocking jobs disagree; see the header for why the list lives here
+# rather than being read at run time. Contexts reported by OTHER workflows
+# (v1.yml, v1-abi.yml) are required by branch protection too but are not
+# listed: this list only stops the policy merge from attempting an enqueue it
+# already knows would fail, branch protection and the merge queue have the
+# final word, and --check-ci-names can only derive names from ci.yml.
 REQUIRED_CHECKS = (
-    "abi — the header and every binding agree",
+    "checks — repository scripts and their selftests (no network, no artifact)",
     "go — build, vet, standalone check (no artifacts)",
     "python — ruff, import, suite (no artifacts)",
     "ts — build, typecheck, suite (no artifacts)",
     "rust — build, clippy, fmt, suite (no artifacts)",
-    "abi-fixtures — the ABI-revision refusal, all four bindings, no published artifact",
-    "artifacts — published lines, linux-amd64, every suite runs the golden set",
     "lint-go — golangci-lint (go/.golangci.yml)",
     "lint-ts — biome (ts/biome.json)",
     "lint-actions — actionlint + shellcheck",
@@ -1918,29 +1920,19 @@ REQUIRED_CHECK_APP = "github-actions"
 
 # ---------------------------------------------------- test-counts (chtypes#285 §1b)
 #
-# Which check-run name to read each `chtypes-count` line from. Four suites,
-# each printed from TWO jobs (its own no-artifact job, and the `artifacts`
-# job's own step for that suite — see scripts/check-suite.sh and
-# scripts/lib/standalone_census.py, which print the line), plus the
-# golden-case count, sourced from wherever the goldens are already counted
-# TODAY (the `artifacts` job's go step — see standalone_census.py's own
-# docstring). The four `-artifacts` labels and `GOLDEN_LABEL` share ONE check
-# name because all five lines are printed by steps inside that SAME job — one
-# job log read serves all five, not five separate ones.
-_ARTIFACTS_CHECK = "artifacts — published lines, linux-amd64, every suite runs the golden set"
+# Which check-run name to read each `chtypes-count` line from: the four
+# suites, each printed by its own no-artifact job (see scripts/check-suite.sh
+# and scripts/lib/standalone_census.py, which print the line). The `artifacts`
+# job that used to print a second line per suite, and the golden-case count,
+# are gone with ABI v0: goldens are an OCI referrer under v1 and the parity
+# gates (`v1-parity`, `v1-abi-parity`) read their reports instead.
 SUITE_CHECK_NAME: dict[str, str] = {
     "go-no-artifacts": "go — build, vet, standalone check (no artifacts)",
     "python-no-artifacts": "python — ruff, import, suite (no artifacts)",
     "ts-no-artifacts": "ts — build, typecheck, suite (no artifacts)",
     "rust-no-artifacts": "rust — build, clippy, fmt, suite (no artifacts)",
-    "go-artifacts": _ARTIFACTS_CHECK,
-    "python-artifacts": _ARTIFACTS_CHECK,
-    "ts-artifacts": _ARTIFACTS_CHECK,
-    "rust-artifacts": _ARTIFACTS_CHECK,
 }
 SUITE_LABELS: tuple[str, ...] = tuple(SUITE_CHECK_NAME)
-GOLDEN_LABEL = "golden-cases"
-GOLDEN_CHECK_NAME = _ARTIFACTS_CHECK
 
 CONDITIONS = {
     "fork": "condition 1, the head is a branch of this repository",
@@ -1953,8 +1945,7 @@ CONDITIONS = {
                  "tree (chtypes#344) only by being byte-identical to its release-signed served asset",
     "checks": "condition 2, every required check passed",
     "test-counts": "condition 7 (chtypes#285 §1b), only when the diff touches a test or fixture path: no "
-                   "suite's executed-test count, and no golden-case count, fell below main's last green ci "
-                   "push run",
+                   "suite's executed-test count fell below main's last green ci push run",
     "mergeable": "GitHub reports no merge conflict",
     "review": "condition 4, no requested changes and no review conversation",
     "bytes": "condition 6, docs/support.md — when touched — is main's own regeneration byte for byte",
@@ -2022,20 +2013,17 @@ def first_difference(a: bytes, b: bytes) -> tuple[int, int]:
 class TestCountFacts:
     """Everything `test_count_problems` needs, already fetched. `head`/`main`
     map a SUITE_LABELS entry to (ran, skipped); a label absent from a dict is
-    exactly a missing count (see gather_test_counts). Empty dicts and None
-    golden counts are the correct, zero-API-call value for a pull request
-    that does not touch a test or fixture path — `decide()` never even looks
-    at this unless `touches_test_or_fixture_path(files)` is true."""
+    exactly a missing count (see gather_test_counts). Empty dicts are the
+    correct, zero-API-call value for a pull request that does not touch a
+    test or fixture path — `decide()` never even looks at this unless
+    `touches_test_or_fixture_path(files)` is true."""
     head: dict[str, tuple[int, int]]
     main: dict[str, tuple[int, int]]
-    head_golden: int | None
-    main_golden: int | None
 
 
-def test_count_problems(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]],
-                        head_golden: int | None, main_golden: int | None) -> list[str]:
-    """Every way chtypes#285 §1b's rule fails: a suite's (or the golden set's)
-    executed-test count on the head is lower than main's last green `ci` push
+def test_count_problems(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]]) -> list[str]:
+    """Every way chtypes#285 §1b's rule fails: a suite's executed-test count
+    on the head is lower than main's last green `ci` push
     run, checked PER SUITE, never summed — one suite dropping is a refusal
     even while another rises. Only the `ran` half of each pair is compared:
     skips are printed for a human but never compared directly, because a test
@@ -2056,12 +2044,6 @@ def test_count_problems(head: dict[str, tuple[int, int]], main: dict[str, tuple[
             continue
         if h[0] < m[0]:
             problems.append(f"{label}: ran {h[0]}, main's last green ci push ran {m[0]}")
-    if head_golden is None or main_golden is None:
-        problems.append(f"{GOLDEN_LABEL}: {'no' if head_golden is None else 'a'} count on the head, "
-                        f"{'no' if main_golden is None else 'a'} count on main's last green ci push — a "
-                        "missing count is a drop")
-    elif head_golden < main_golden:
-        problems.append(f"{GOLDEN_LABEL}: checked {head_golden}, main's last green ci push checked {main_golden}")
     return problems
 
 
@@ -2168,8 +2150,8 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
     # touches no test or fixture path skips this at zero cost, both here and
     # in gather_test_counts, which never reads a job log in that case.
     if touches_test_or_fixture_path(files):
-        tc = test_counts or TestCountFacts(head={}, main={}, head_golden=None, main_golden=None)
-        problems = test_count_problems(tc.head, tc.main, tc.head_golden, tc.main_golden)
+        tc = test_counts or TestCountFacts(head={}, main={})
+        problems = test_count_problems(tc.head, tc.main)
         if problems:
             more = f"; and {len(problems) - 3} more" if len(problems) > 3 else ""
             return Refusal("test-counts", "; ".join(problems[:3]) + more)
@@ -2421,7 +2403,6 @@ def regenerate_guarded_file(path: str, head_bytes: bytes, scratch_path: str,
 # same pwn-request posture as the docs/support.md byte comparison — nothing
 # here executes, sources or parses-as-code anything of the head.
 _COUNT_RE = re.compile(r"chtypes-count suite=(\S+) ran=(\d+) skipped=(\d+)")
-_GOLDEN_COUNT_RE = re.compile(r"chtypes-count golden-cases=(\d+)")
 
 
 def parse_suite_counts(log_text: str) -> dict[str, tuple[int, int]]:
@@ -2429,20 +2410,8 @@ def parse_suite_counts(log_text: str) -> dict[str, tuple[int, int]]:
     job's log text, keyed by label — the last line for a given label wins,
     the same "several runs, take what actually happened" posture
     check_run_problems applies to a re-run's check runs. A job log commonly
-    carries several labels at once: the `artifacts` job prints four (one per
-    suite step)."""
+    carries several labels at once."""
     return {m.group(1): (int(m.group(2)), int(m.group(3))) for m in _COUNT_RE.finditer(log_text)}
-
-
-def parse_golden_count(log_text: str) -> int | None:
-    """The last `chtypes-count golden-cases=<n>` line in a job's log text, or
-    None if it never printed one (a fetch failure before the go suite step
-    ran, an older log predating this feature, or — genuinely — the
-    no-artifact job's log, which never prints this line at all)."""
-    last = None
-    for m in _GOLDEN_COUNT_RE.finditer(log_text):
-        last = int(m.group(1))
-    return last
 
 
 def readable_job_ids(runs: list[dict]) -> dict[str, int]:
@@ -2470,8 +2439,8 @@ def latest_green_push_jobs(repo: str) -> dict[str, int]:
     own tip judging itself, which is what "main's last green ci push run"
     means. Empty if none is found — a fresh repository, or immediately after
     ci.yml itself first gained the `push` trigger — which test_count_problems
-    reads as every suite (and the golden count) being a missing count on the
-    main side, refusing rather than guessing."""
+    reads as every suite being a missing count on the main side, refusing
+    rather than guessing."""
     runs = gh_items(f"repos/{repo}/actions/workflows/ci.yml/runs?branch={BASE_BRANCH}&event=push&status=success"
                     "&per_page=1", ".workflow_runs[]")
     if not runs:
@@ -2481,17 +2450,17 @@ def latest_green_push_jobs(repo: str) -> dict[str, int]:
 
 
 def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> TestCountFacts:
-    """The head's and main's chtypes-count facts, or four empty/None values
-    at ZERO API cost when the diff does not touch a test or fixture path —
+    """The head's and main's chtypes-count facts, or two empty dicts at ZERO
+    API cost when the diff does not touch a test or fixture path —
     `decide()` would ignore them either way, but there is no reason to read
-    five job logs twice over for a pull request this condition never looks
+    four job logs twice over for a pull request this condition never looks
     at."""
     if not touches_test_or_fixture_path(files):
-        return TestCountFacts(head={}, main={}, head_golden=None, main_golden=None)
+        return TestCountFacts(head={}, main={})
     head_job_id = readable_job_ids(check_runs)
     main_job_id = latest_green_push_jobs(repo)
 
-    def read(job_id_by_name: dict[str, int]) -> tuple[dict[str, tuple[int, int]], int | None]:
+    def read(job_id_by_name: dict[str, int]) -> dict[str, tuple[int, int]]:
         counts: dict[str, tuple[int, int]] = {}
         logs: dict[int, str] = {}
 
@@ -2507,13 +2476,9 @@ def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> 
             found = parse_suite_counts(log_of(job_id)).get(label)
             if found is not None:
                 counts[label] = found
-        golden_job_id = job_id_by_name.get(GOLDEN_CHECK_NAME)
-        golden = parse_golden_count(log_of(golden_job_id)) if golden_job_id is not None else None
-        return counts, golden
+        return counts
 
-    head_counts, head_golden = read(head_job_id)
-    main_counts, main_golden = read(main_job_id)
-    return TestCountFacts(head=head_counts, main=main_counts, head_golden=head_golden, main_golden=main_golden)
+    return TestCountFacts(head=read(head_job_id), main=read(main_job_id))
 
 
 def api_surface_job_id(check_runs: list[dict]) -> int | None:
@@ -3062,12 +3027,9 @@ def _support_good() -> dict:
 ALL_SUITE_GOOD: dict[str, tuple[int, int]] = {label: (10, 0) for label in SUITE_LABELS}
 
 
-def _tc(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]],
-        head_golden: int | None = 1, main_golden: int | None = 1) -> TestCountFacts:
-    """A TestCountFacts for the selftest, defaulting the golden count to a
-    matching, non-zero (1, 1) so a case about the SUITE side never
-    incidentally also fails on the golden side, and vice versa."""
-    return TestCountFacts(head=head, main=main, head_golden=head_golden, main_golden=main_golden)
+def _tc(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]]) -> TestCountFacts:
+    """A TestCountFacts for the selftest."""
+    return TestCountFacts(head=head, main=main)
 
 
 def _sample_protected_path(g: ProtectedGlob) -> str:
@@ -3879,7 +3841,7 @@ def selftest() -> int:
     # the same "a pure decision is what --selftest proves" principle as the
     # rest of this file.
     a_test_path = "python/tests/test_foo.py"
-    expect("test-counts: every suite (and the golden count) equal, a test path touched",
+    expect("test-counts: every suite equal, a test path touched",
            decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
                           test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)))), None)
     expect("test-counts: one suite rises, the rest equal, still passes",
@@ -3888,34 +3850,24 @@ def selftest() -> int:
                                           dict(ALL_SUITE_GOOD)))), None)
     expect("test-counts: a drop in one suite refuses even while another rises",
            decide(**_with(files=[{"filename": "rust/tests/foo.rs", "status": "modified"}],
-                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-artifacts": (5, 0),
+                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-no-artifacts": (5, 0),
                                            "go-no-artifacts": (99, 0)},
                                           dict(ALL_SUITE_GOOD)))), "test-counts")
     expect("test-counts: a count missing on the head refuses",
            decide(**_with(files=[{"filename": "ts/test/foo.test.ts", "status": "modified"}],
-                          test_counts=_tc({k: v for k, v in ALL_SUITE_GOOD.items() if k != "ts-artifacts"},
+                          test_counts=_tc({k: v for k, v in ALL_SUITE_GOOD.items() if k != "ts-no-artifacts"},
                                           dict(ALL_SUITE_GOOD)))), "test-counts")
     expect("test-counts: a count missing on main (main's push run predates this feature) refuses",
            decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
                           test_counts=_tc(dict(ALL_SUITE_GOOD), {}))), "test-counts")
     expect("test-counts: a case moved from ran to skipped is a drop in ran, and refuses",
            decide(**_with(files=[{"filename": "go/chtypes/foo_test.go", "status": "modified"}],
-                          test_counts=_tc({**ALL_SUITE_GOOD, "go-artifacts": (9, 1)},
-                                          {**ALL_SUITE_GOOD, "go-artifacts": (10, 0)}))), "test-counts")
-    expect("test-counts: the golden-case count drops (a fixture tree already proven identical to its served set "
-           "still answers to test-counts)",
-           decide(**_with(files=[{"filename": "tests/fixtures/fetch/x", "status": "modified"}],
-                          served_fixtures={"sdk-fetch-fixtures.tar.gz": []},
-                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD),
-                                          head_golden=3, main_golden=5))), "test-counts")
-    expect("test-counts: the golden-case count missing on the head refuses",
-           decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
-                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD),
-                                          head_golden=None))), "test-counts")
+                          test_counts=_tc({**ALL_SUITE_GOOD, "go-no-artifacts": (9, 1)},
+                                          {**ALL_SUITE_GOOD, "go-no-artifacts": (10, 0)}))), "test-counts")
     expect("test-counts: a pull request touching no test or fixture path skips the condition "
            "entirely, even with a real drop sitting in test_counts",
            decide(**_with(files=[{"filename": "README.md", "status": "modified"}],
-                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-artifacts": (0, 0)},
+                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-no-artifacts": (0, 0)},
                                           dict(ALL_SUITE_GOOD)))), None)
     expect("test-counts: no test_counts argument at all, on a PR that touches no test path, still passes "
            "(the default TestCountFacts is never consulted)",
@@ -3944,12 +3896,10 @@ def selftest() -> int:
 
     # test_count_problems — the pure comparison, independent of decide()'s
     # own plumbing above.
-    if test_count_problems(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD), 1, 1):
+    if test_count_problems(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)):
         failures.append("test_count_problems: an all-equal input was refused")
-    if not test_count_problems({**ALL_SUITE_GOOD, "python-no-artifacts": (1, 0)}, dict(ALL_SUITE_GOOD), 1, 1):
+    if not test_count_problems({**ALL_SUITE_GOOD, "python-no-artifacts": (1, 0)}, dict(ALL_SUITE_GOOD)):
         failures.append("test_count_problems: a single-suite drop was not caught")
-    if test_count_problems(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD), 5, 5):
-        failures.append("test_count_problems: equal golden counts were refused")
 
     # condition 1 — fork
     expect("the ci run's head is a fork", decide(**_with(run_head_repo="someone/chtypes")), "fork")
@@ -4500,7 +4450,7 @@ def selftest() -> int:
           "exactly contents and pull-requests write inside the merge-bot job; ci.yml's blocking jobs and the "
           "CONTRIBUTING.md guide block are both derived from their source, never hand-set; test-counts "
           "(chtypes#285 §1b) refuses a single-suite drop even while another suite rises, a missing count on "
-          "either side, a ran-to-skipped shift, and a golden-case-count drop, passes an equal or rising count, "
+          "either side, and a ran-to-skipped shift, passes an equal or rising count, "
           "and is skipped entirely — at zero API cost — for a pull request that touches no test or fixture path; "
           "binding source (chtypes#285 §1) passes on its own binding's changed=false, read from a job log, and "
           "refuses on changed=true, a missing, tool-error or unparseable verdict, a verdict for another head or "
