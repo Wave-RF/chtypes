@@ -7,7 +7,8 @@
  * lands.
  */
 
-export { ensure, fetchSigned, listInstalled, resolveInstalled, verifyInstalled } from './ensure.js';
+export { cacheRoot } from './layout.js';
+export { ensure, fetchSigned, listInstalled, listTags, resolveInstalled, verifyInstalled } from './ensure.js';
 export type { FetchSignedResult } from './ensure.js';
 export {
   ArtifactCorruptError,

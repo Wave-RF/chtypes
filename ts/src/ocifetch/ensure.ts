@@ -23,6 +23,8 @@ import {
   PREDICATE_TYPE_ARTIFACT,
   PREDICATE_TYPE_GOLDENS,
   RELEASE_KEYS,
+  SPELLING_REGEX,
+  TAGS_LIST_MAX_BYTES,
 } from './constants.gen.js';
 import { checkArtifactStatement, checkGenericStatement, parseStatement, verifyAnyReferrerBundle, verifyBundleSignature } from './dsse.js';
 import {
@@ -32,8 +34,9 @@ import {
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
   FetchV1Error,
+  SourceUnreachableError,
 } from './errors.js';
-import type { RequestOptions } from './http.js';
+import { readFileUrl, type RequestOptions, requestBuffered } from './http.js';
 import {
   cacheRoot,
   commitStaging,
@@ -56,7 +59,7 @@ import { discoverSignatureCandidates } from './referrers.js';
 import { verifyAndInstallFromLocalBlobs } from './localverify.js';
 import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, resolveTag } from './oci.js';
 import { emptyLock, getPin, type LockFile, readLock, withPin, writeLock } from './lock.js';
-import { digestOfHex, hexOfDigest, platformInfo, realClock, resolvePlatformOption } from './types.js';
+import { digestOfHex, endpointUrl, hexOfDigest, platformInfo, realClock, resolvePlatformOption } from './types.js';
 import type { ArtifactPredicate, FetchV1Options, PlatformKey, Resolved, TrustedKey, VerifyResult } from './types.js';
 import { fetchVerifyAndUnpackLayer, verifyInstalledLibrary } from './unpack.js';
 
@@ -837,4 +840,70 @@ async function fetchGoldens(
 
   const dest = await installBlob(root, hexOfDigest(chosen.blob), chosen.bytes);
   return { path: dest, statement: chosen.predicate, digests: { manifest: chosen.manifest, layer: chosen.blob } };
+}
+
+// ---------------------------------------------------------------------- listTags
+
+/** Compares two version spellings component by component, numerically. */
+function compareSpellings(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? -1) - (pb[i] ?? -1);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * The version spellings a repository publishes: `GET tags/list` from the first
+ * base that has the repository, every tag that is not a version spelling
+ * (`SPELLING_REGEX`: the `sha256-<hex>` referrers fallback tags, symbolic tags)
+ * dropped, the rest in ascending numeric order. A tag names a version, not a
+ * platform: whether a platform is offered is that tag's index, which only a
+ * resolve reads. A next page is followed through the `Link` header.
+ */
+export async function listTags(options: FetchV1Options = {}): Promise<readonly string[]> {
+  const bases = resolveBases(options);
+  const reqOptions = { ...requestOptionsFor(options, bases), maxBytes: TAGS_LIST_MAX_BYTES };
+  const spelling = new RegExp(SPELLING_REGEX);
+  let lastUnreachable: SourceUnreachableError | undefined;
+  for (let i = 0; i < bases.length; i++) {
+    const base = bases[i]!;
+    const isLast = i === bases.length - 1;
+    const tags = new Set<string>();
+    let url: string | undefined = endpointUrl(base, '/tags/list');
+    let found = false;
+    for (let page = 0; url !== undefined && page < 64; page++) {
+      let res: Awaited<ReturnType<typeof requestBuffered>>;
+      try {
+        res = url.startsWith('file:') ? await readFileUrl(url, TAGS_LIST_MAX_BYTES) : await requestBuffered(url, reqOptions);
+      } catch (err) {
+        if (err instanceof SourceUnreachableError && !isLast) {
+          lastUnreachable = err;
+          url = undefined;
+          break;
+        }
+        throw err;
+      }
+      if (res.status === 404) {
+        url = undefined;
+        break;
+      }
+      if (res.status !== 200) throw new SourceUnreachableError(`chtypes: ${url} returned status ${res.status}`);
+      const json = parseJsonValue(res.body);
+      if (json === null) throw new ArtifactCorruptError(`chtypes: ${url} did not return valid JSON`);
+      found = true;
+      for (const t of items(field(json, 'tags'))) {
+        const tag = asString(t);
+        if (spelling.test(tag)) tags.add(tag);
+      }
+      const link = res.headers['link'];
+      const next = link === undefined ? undefined : /<([^>]+)>\s*;\s*rel="?next"?/.exec(link)?.[1];
+      url = next === undefined ? undefined : new URL(next, url).toString();
+    }
+    if (found) return [...tags].sort(compareSpellings);
+  }
+  if (lastUnreachable !== undefined) throw lastUnreachable;
+  throw new ArtifactUnpublishedError(`chtypes: no base serves a tag list (${bases.join(', ')})`);
 }

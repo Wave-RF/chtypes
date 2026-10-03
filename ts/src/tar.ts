@@ -16,13 +16,11 @@
  * as it inflates and never sits in memory whole.
  */
 
-import { createReadStream } from 'node:fs';
 import { mkdir, open as openFile, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { createGunzip } from 'node:zlib';
-import { ArtifactCorruptError, FetchError } from './errors.js';
+import { ArtifactCorruptError } from './ocifetch/errors.js';
 
 const BLOCK = 512;
 /** pax records and long names are tiny; a megabyte of them is not a tarball. */
@@ -35,36 +33,11 @@ export interface ExtractedEntry {
   readonly size: number;
 }
 
-/**
- * Inflate and unpack `archive` (a `.tar.gz`) into `dest`, which must already
- * exist. Returns the regular files written, in archive order.
- *
- * v0 only: permissive on a duplicate entry name (the last one written wins,
- * as it always has) and uncapped on total size, exactly as before this
- * export gained `TarExtractOptions`. v1's `ocifetch/unpack.ts` calls
- * `extractTarStream` directly with both tightened.
- *
- * @throws {ArtifactCorruptError} when the bytes are not a gzip stream, a
- *   header fails its checksum, the archive is truncated, an entry name would
- *   land outside `dest`, or an entry is not a regular file or directory (a
- *   symlink, hardlink, device or FIFO).
- */
-export async function extractTarGz(archive: string, dest: string): Promise<ExtractedEntry[]> {
-  try {
-    return await extractTarStream([createReadStream(archive), createGunzip()], dest);
-  } catch (err) {
-    if (err instanceof FetchError) throw err;
-    throw new ArtifactCorruptError(`chtypes: ${archive} is not a readable tar.gz: ${errorText(err)}`, {
-      cause: err,
-    });
-  }
-}
-
-/** Tightened rules `extractTarGz` does not apply, for a caller (`ocifetch/unpack.ts`) that needs them. */
+/** The v1 rules that are off by default: a duplicate entry name and a cap on total unpacked bytes. `ocifetch/unpack.ts` turns both on. */
 export interface TarExtractOptions {
-  /** Refuse a second entry (file or directory) with the same confined name — `CORRUPT`. Off by default (v0 compat). */
+  /** Refuse a second entry (file or directory) with the same confined name — `CORRUPT`. Off by default. */
   readonly refuseDuplicateNames?: boolean;
-  /** A hard cap on total bytes written across every entry, enforced as the stream is written — `CORRUPT` over it. Unset: no cap (v0 compat). */
+  /** A hard cap on total bytes written across every entry, enforced as the stream is written — `CORRUPT` over it. Unset: no cap. */
   readonly maxTotalBytes?: number;
 }
 
@@ -81,7 +54,7 @@ export interface TarExtractOptions {
  * verified temp file through a zstd decompressor into this), so no
  * compression format is assumed here.
  *
- * @throws {ArtifactCorruptError} per the same rules as `extractTarGz`, plus
+ * @throws {ArtifactCorruptError} for a header that fails its checksum, a truncated archive, an entry name that would land outside `dest`, an entry that is not a regular file or directory, plus
  *   `options`'s own.
  */
 export async function extractTarStream(

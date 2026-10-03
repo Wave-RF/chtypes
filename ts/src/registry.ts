@@ -36,6 +36,7 @@ import {
   resolveInstalled,
 } from './ocifetch/index.js';
 import { ENV_AUTOFETCH_NAME, SPELLING_REGEX } from './ocifetch/constants.gen.js';
+import { withEnvironment } from './env.js';
 import { commitSetup } from './setup.js';
 
 /** The fetch layer's options (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, lock path, ...) without its test-only hooks. */
@@ -71,7 +72,7 @@ export class Registry {
   readonly #opened: Library[] = [];
 
   private constructor(options: RegistryOptions) {
-    this.#fetch = options.fetch ?? {};
+    this.#fetch = withEnvironment(options.fetch ?? {});
     this.#autofetch = options.autofetch ?? envFlag(ENV_AUTOFETCH_NAME);
   }
 
