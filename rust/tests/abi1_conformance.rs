@@ -40,6 +40,7 @@
 //! and `cases.schema.json` are being updated, in a follow-up F-B PR, to
 //! expect that an os-mismatched case is absent from a leg's report.
 
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -74,6 +75,8 @@ enum CaseArgSpec {
     Bytes(Vec<u8>),
     NullHandle,
     Handle(Box<CaseCallSpec>),
+    /// A lifecycle step's named handle, bound earlier by a `let` step.
+    Ref(String),
 }
 
 #[derive(Debug)]
@@ -108,6 +111,11 @@ fn parse_arg(v: &Value) -> Result<CaseArgSpec, String> {
     if obj.contains_key("null_handle") {
         return Ok(CaseArgSpec::NullHandle);
     }
+    if let Some(r) = obj.get("ref") {
+        return Ok(CaseArgSpec::Ref(
+            r.as_str().ok_or("\"ref\" must be a string")?.to_string(),
+        ));
+    }
     if let Some(h) = obj.get("handle") {
         return Ok(CaseArgSpec::Handle(Box::new(parse_call(h)?)));
     }
@@ -141,13 +149,18 @@ fn resolve_arg(
     api: &Api,
     spec: &CaseArgSpec,
     minted: &mut Vec<MintedHandle>,
+    refs: &HashMap<String, MintedHandle>,
 ) -> Result<ResolvedArg, String> {
     match spec {
+        CaseArgSpec::Ref(name) => refs
+            .get(name)
+            .map(MintedHandle::as_resolved_arg)
+            .ok_or_else(|| format!("ref {name:?} names no bound handle")),
         CaseArgSpec::Int(i) => Ok(ResolvedArg::Int(*i)),
         CaseArgSpec::Bytes(b) => Ok(ResolvedArg::Bytes(b.clone())),
         CaseArgSpec::NullHandle => Ok(ResolvedArg::Null),
         CaseArgSpec::Handle(call) => {
-            let outcome = resolve_and_call(api, call, minted)?;
+            let outcome = resolve_and_call(api, call, minted, refs)?;
             let Outcome::Call {
                 status, outputs, ..
             } = outcome
@@ -178,10 +191,11 @@ fn resolve_and_call(
     api: &Api,
     call: &CaseCallSpec,
     minted: &mut Vec<MintedHandle>,
+    refs: &HashMap<String, MintedHandle>,
 ) -> Result<Outcome, String> {
     let mut args = Vec::with_capacity(call.args.len());
     for a in &call.args {
-        args.push(resolve_arg(api, a, minted)?);
+        args.push(resolve_arg(api, a, minted, refs)?);
     }
     // SAFETY: every `ResolvedArg::Handle` above was minted by this same
     // `api` (`resolve_arg` only ever builds one from an `outputs` entry this
@@ -394,6 +408,7 @@ fn load_variant(stubs_dir: &Path, variant: &Value) -> Result<Loaded, Refusal> {
     loader::load(LoadInput {
         library_path: &path,
         predicate,
+        timezone: &[],
     })
 }
 
@@ -464,7 +479,7 @@ fn run_generic_case(api: &Api, case: &Value, kind: &str, expect: &Value) -> Resu
         args: specs,
     };
     let mut minted = Vec::new();
-    let outcome = resolve_and_call(api, &call, &mut minted);
+    let outcome = resolve_and_call(api, &call, &mut minted, &HashMap::new());
     let verdict = match &outcome {
         Ok(o) => check_call(api, o, expect),
         Err(e) => Err(e.clone()),
@@ -473,6 +488,258 @@ fn run_generic_case(api: &Api, case: &Value, kind: &str, expect: &Value) -> Resu
         free_handle(api, h);
     }
     verdict
+}
+
+// ------------------------------------------------- lifecycle and concurrent
+
+/// `chs_live_handles`'s per-kind counts. The document's own buffer is read
+/// and freed here, after the counts were taken (the document is "taken before
+/// the document's own buffer exists").
+fn live_counts(api: &Api) -> Result<BTreeMap<String, i64>, String> {
+    let mut out: *mut decls::ChsBuf = std::ptr::null_mut();
+    let mut err: *mut decls::ChsError = std::ptr::null_mut();
+    // SAFETY: `api` completed loader step 7; both outputs are this call's own
+    // locals, and the buffer is freed through this same image below.
+    let status = unsafe { (api.chs_live_handles)(&mut out, &mut err) };
+    if !err.is_null() {
+        // SAFETY: a non-null `err` was just handed over by this call.
+        unsafe { (api.chs_error_free)(err) };
+    }
+    if status != 0 {
+        return Err(format!("chs_live_handles returned status {status}"));
+    }
+    let bytes = read_buf_bytes(api, &MintedHandle::Buf(out));
+    free_handle(api, MintedHandle::Buf(out));
+    let doc: Value = serde_json::from_slice(&bytes?).map_err(|e| e.to_string())?;
+    let obj = doc
+        .as_object()
+        .ok_or("chs_live_handles: not a JSON object")?;
+    obj.iter()
+        .map(|(k, v)| {
+            v.as_i64()
+                .map(|n| (k.clone(), n))
+                .ok_or_else(|| format!("chs_live_handles: {k} is not an integer"))
+        })
+        .collect()
+}
+
+fn free_outputs(api: &Api, outcome: &Outcome) {
+    if let Outcome::Call { outputs, .. } = outcome {
+        for h in outputs.values() {
+            free_handle(api, *h);
+        }
+    }
+}
+
+/// `lifecycle`: ordered steps with no other case in flight. `let` binds the
+/// handle a call produces; `call` + `expect` is checked as an echo case is;
+/// `free` releases a bound handle; `live_delta` compares `chs_live_handles`
+/// with the counts read when the case began.
+fn run_lifecycle_case(api: &Api, case: &Value) -> Result<(), String> {
+    let steps = case
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or("lifecycle case has no \"steps\"")?;
+    let base = live_counts(api)?;
+    let mut refs: HashMap<String, MintedHandle> = HashMap::new();
+    let mut verdict: Result<(), String> = Ok(());
+    for (i, step) in steps.iter().enumerate() {
+        let r = run_lifecycle_step(api, step, &base, &mut refs);
+        if let Err(e) = r {
+            verdict = Err(format!("step {i}: {e}"));
+            break;
+        }
+    }
+    // Every handle a step binds is freed by a step; on a failed case, free
+    // the leftovers so a later case's counts are not skewed.
+    for (_, h) in refs.drain() {
+        free_handle(api, h);
+    }
+    verdict
+}
+
+fn run_lifecycle_step(
+    api: &Api,
+    step: &Value,
+    base: &BTreeMap<String, i64>,
+    refs: &mut HashMap<String, MintedHandle>,
+) -> Result<(), String> {
+    if let Some(name) = step.get("free").and_then(Value::as_str) {
+        let h = refs
+            .remove(name)
+            .ok_or_else(|| format!("free: {name:?} names no bound handle"))?;
+        free_handle(api, h);
+        return Ok(());
+    }
+    if let Some(want) = step.get("live_delta") {
+        let now = live_counts(api)?;
+        let want_obj = want.as_object().ok_or("live_delta is not an object")?;
+        for (kind, delta) in want_obj {
+            let d = delta.as_i64().ok_or("live_delta value is not an integer")?;
+            let before = base.get(kind).copied().unwrap_or(0);
+            let after = now.get(kind).copied().unwrap_or(0);
+            if after - before != d {
+                return Err(format!(
+                    "live_delta {kind}: want {d}, got {} (began at {before}, now {after})",
+                    after - before
+                ));
+            }
+        }
+        return Ok(());
+    }
+    let call_v = step.get("call").ok_or("step has no recognized key")?;
+    let call = parse_call(call_v)?;
+    let mut minted = Vec::new();
+    let outcome = resolve_and_call(api, &call, &mut minted, refs)?;
+    if let Some(name) = step.get("let").and_then(Value::as_str) {
+        let Outcome::Call {
+            status, outputs, ..
+        } = &outcome
+        else {
+            return Err(format!(
+                "{}: a let call must be a status call",
+                call.fn_name
+            ));
+        };
+        if *status != "CHS_OK" {
+            return Err(format!("{}: let call returned {status}", call.fn_name));
+        }
+        let bound = outputs
+            .get("out")
+            .copied()
+            .ok_or_else(|| format!("{}: no \"out\" output to bind", call.fn_name))?;
+        for h in minted {
+            if !matches!(h, MintedHandle::Buf(_))
+                && h.raw_ptr() == bound.raw_ptr()
+                && h.kind_name() == bound.kind_name()
+            {
+                continue;
+            }
+            // Anything else the call produced (and any nested recipe) is freed
+            // now; the bound handle lives on until its own `free` step.
+            free_handle(api, h);
+        }
+        refs.insert(name.to_string(), bound);
+        return Ok(());
+    }
+    let expect = step
+        .get("expect")
+        .ok_or("a call step needs \"let\" or \"expect\"")?;
+    let verdict = check_call(api, &outcome, expect);
+    for h in minted {
+        free_handle(api, h);
+    }
+    verdict
+}
+
+/// Shares one `Api`, one resolved argument list and one expectation between
+/// the threads of a `concurrent` case. The ABI declares every function the
+/// case calls `shared` (any number of threads, same handles), which is what
+/// makes this sound; the raw pointers inside the arguments are never freed
+/// until every thread has joined.
+struct SharedCase<'a> {
+    api: &'a Api,
+    name: &'a str,
+    args: &'a [ResolvedArg],
+    expect: &'a Value,
+}
+
+// SAFETY: see the type's comment; the borrowed data is read-only for the
+// scope's lifetime and the called function is thread class `shared`.
+unsafe impl Sync for SharedCase<'_> {}
+
+impl SharedCase<'_> {
+    fn call_once(&self) -> Result<(), String> {
+        // SAFETY: the arguments were minted by this same `api` and outlive the
+        // threads; the function is `shared`, so concurrent use is allowed.
+        let outcome = unsafe { invoke(self.api, self.name, self.args) }?;
+        let verdict = check_call(self.api, &outcome, self.expect);
+        free_outputs(self.api, &outcome);
+        verdict
+    }
+}
+
+/// `concurrent`: the arguments are evaluated once, then `threads` threads each
+/// make `calls` calls at once; every call is checked as an echo case is and
+/// every produced handle freed; afterwards the live counts must equal those
+/// read before the case.
+fn run_concurrent_case(api: &Api, case: &Value) -> Result<(), String> {
+    let fn_name = case
+        .get("fn")
+        .and_then(Value::as_str)
+        .ok_or("case has no \"fn\"")?;
+    let threads = case
+        .get("threads")
+        .and_then(Value::as_u64)
+        .ok_or("no threads")? as usize;
+    let calls = case
+        .get("calls")
+        .and_then(Value::as_u64)
+        .ok_or("no calls")? as usize;
+    let expect = case.get("expect").ok_or("case has no \"expect\"")?;
+    let specs = case
+        .get("args")
+        .and_then(Value::as_array)
+        .ok_or("case has no \"args\"")?
+        .iter()
+        .map(parse_arg)
+        .collect::<Result<Vec<_>, _>>()?;
+    let base = live_counts(api)?;
+    let mut minted = Vec::new();
+    let refs = HashMap::new();
+    let mut resolved = Vec::new();
+    let mut setup: Result<(), String> = Ok(());
+    for spec in &specs {
+        match resolve_arg(api, spec, &mut minted, &refs) {
+            Ok(a) => resolved.push(a),
+            Err(e) => {
+                setup = Err(e);
+                break;
+            }
+        }
+    }
+    let verdict = setup.and_then(|()| {
+        let shared = SharedCase {
+            api,
+            name: fn_name,
+            args: &resolved,
+            expect,
+        };
+        let shared = &shared;
+        let first_err: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..threads)
+                .map(|_| {
+                    scope.spawn(move || {
+                        for _ in 0..calls {
+                            shared.call_once()?;
+                        }
+                        Ok::<(), String>(())
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|h| match h.join() {
+                    Ok(Ok(())) => None,
+                    Ok(Err(e)) => Some(e),
+                    Err(_) => Some("a thread panicked".to_string()),
+                })
+                .collect()
+        });
+        match first_err.first() {
+            Some(e) => Err(e.clone()),
+            None => Ok(()),
+        }
+    });
+    for h in minted {
+        free_handle(api, h);
+    }
+    verdict?;
+    let after = live_counts(api)?;
+    if after != base {
+        return Err(format!("live counts began {base:?}, ended {after:?}"));
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------------------ report
@@ -584,7 +851,7 @@ fn abi1_conformance() {
             .to_string();
         let kind = case.get("kind").and_then(Value::as_str).unwrap_or("");
         let expect = case.get("expect").cloned().unwrap_or(Value::Null);
-        if kind == "loader" && !case_applies_on_this_os(case) {
+        if !case_applies_on_this_os(case) {
             // OMITTED, not a pass (the PM's ruling): a case whose "os" names a
             // different platform never ran here, and reporting it pass:true
             // would be "a pass that never ran" — exactly the pattern this
@@ -598,7 +865,11 @@ fn abi1_conformance() {
         } else {
             match &ok_api {
                 None => Err("the \"ok\" stub did not load; see the ok-load result".to_string()),
-                Some(api) => run_generic_case(api, case, kind, &expect),
+                Some(api) => match kind {
+                    "lifecycle" => run_lifecycle_case(api, case),
+                    "concurrent" => run_concurrent_case(api, case),
+                    _ => run_generic_case(api, case, kind, &expect),
+                },
             }
         };
         match verdict {

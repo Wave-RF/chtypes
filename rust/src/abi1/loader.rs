@@ -108,6 +108,10 @@ pub(crate) struct LoadInput<'a> {
     /// The verified predicate, as a parsed JSON object — passed verbatim,
     /// never re-derived.
     pub(crate) predicate: serde_json::Map<String, serde_json::Value>,
+    /// The image zone `chs_initialize` sets at step 7, as bytes: empty means
+    /// UTC. The public setup API is wave C's; until then a caller (today only
+    /// a test) supplies it, and every other caller passes an empty slice.
+    pub(crate) timezone: &'a [u8],
 }
 
 /// A library that passed every check (steps 1-6): its resolved symbol table.
@@ -115,9 +119,10 @@ pub(crate) struct Loaded {
     pub(crate) api: Api,
 }
 
-/// Run loader steps 1-6 against `input`. Step 7 (`on_loaded`) is a no-op
-/// hook: A5 (init vs. per-call timezone) is unsettled, so nothing is built
-/// for it (plan §3.2).
+/// Run loader steps 1-7 against `input`. Step 7 calls `chs_initialize` once
+/// with the image zone (`process_once`: the same spelling again is OK, a
+/// different one is `CHS_INVALID_ARGUMENT`); any status but `CHS_OK` refuses
+/// the library with reason `initialize`.
 pub(crate) fn load(input: LoadInput<'_>) -> Result<Loaded, Refusal> {
     let path = input.library_path;
 
@@ -242,6 +247,26 @@ pub(crate) fn load(input: LoadInput<'_>) -> Result<Loaded, Refusal> {
     // separate want/got pair.
     let api = unsafe { Api::resolve_all(lib) }
         .map_err(|name| Refusal::new(format!("missing_symbol:{name}"), path))?;
+
+    // Step 7: `chs_initialize(timezone, len, err)`, once per process.
+    let mut err: *mut decls::ChsError = std::ptr::null_mut();
+    // SAFETY: steps 1-6 passed, so `api` is fully resolved; `timezone` is a
+    // live slice for the whole call and `err` is this call's own local.
+    let status =
+        unsafe { (api.chs_initialize)(input.timezone.as_ptr(), input.timezone.len(), &mut err) };
+    if !err.is_null() {
+        // SAFETY: a non-null `err` is a `chs_error *` this same call just
+        // handed over, freed here exactly once through this image's own free.
+        unsafe { (api.chs_error_free)(err) };
+    }
+    if status != 0 {
+        let name = decls::status_name(status).unwrap_or("an unknown status");
+        return Err(Refusal::with_detail(
+            "initialize",
+            path,
+            format!("chs_initialize returned {name} ({status})"),
+        ));
+    }
 
     Ok(Loaded { api })
 }
