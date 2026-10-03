@@ -1,4 +1,4 @@
-"""Marshalling a call's inputs: bytes in, the settings object, the column list.
+"""Marshaling a call's inputs: bytes in, the settings object, the column list.
 
 Plumbing only. Nothing here knows a ClickHouse rule: a settings value is a
 string and is written verbatim (no boolean or integer spelling, no float), the

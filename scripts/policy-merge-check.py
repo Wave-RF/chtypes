@@ -671,14 +671,9 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
                   "exact-patch resolution's load path, which runs the same load-time verification",
                   verification=True),
     ProtectedGlob("python/src/chtypes/_ed25519.py", "the ed25519 signature check itself", verification=True),
-    ProtectedGlob("python/src/chtypes/fetch.py",
-                  "the embedded release public key, the trust policy, and the fetch chain's signature and sha256 "
-                  "checks", verification=True),
-    ProtectedGlob("python/src/chtypes/_manifest.py",
-                  "load-time verification: check_library_bytes and verify_library's sha256 re-hash",
-                  verification=True),
     ProtectedGlob("python/src/chtypes/registry.py",
-                  "calls the load-time verification on every load (verify_hashes)", verification=True),
+                  "the v1 registry: the adapter from the fetch layer's verified record to the loader, which must "
+                  "pass the signed predicate through verbatim", verification=True),
     ProtectedGlob("ts/src/fetch.ts",
                   "the embedded release public keys, the trust policy, and the fetch chain's signature and sha256 "
                   "checks", verification=True),
@@ -3622,9 +3617,7 @@ def selftest() -> int:
             "go/chtypes/resolve.go": "if err := verifyArtifactLibrary(path); err != nil {",
             "go/chtypes/transform.go": "package chtypes",
             "python/src/chtypes/_ed25519.py": "import hashlib",
-            "python/src/chtypes/fetch.py": "from ._ed25519 import verify",
-            "python/src/chtypes/_manifest.py": "def verify_library(d):",
-            "python/src/chtypes/registry.py": "check_library_bytes(entry, manifest)",
+            "python/src/chtypes/registry.py": "resolved = resolve_installed(request, platform, options)",
             "ts/src/fetch.ts": "import { createHash } from 'node:crypto';",
             "ts/src/registry.ts": "verifyChecksum(libPath, manifest);",
             "rust/src/fetch/trust.rs": "use ed25519_dalek::VerifyingKey;",
@@ -3933,7 +3926,7 @@ def selftest() -> int:
              "tests/fixtures/fetch/signed/index.json"):
         if not is_test_or_fixture_path(p):
             failures.append(f"is_test_or_fixture_path: {p!r} was not recognized")
-    for p in ("python/src/chtypes/fetch.py", "tests/parity/manifest.json", "README.md"):
+    for p in ("python/src/chtypes/registry.py", "tests/parity/manifest.json", "README.md"):
         if is_test_or_fixture_path(p):
             failures.append(f"is_test_or_fixture_path: {p!r} was wrongly recognized as a test/fixture path")
     if not touches_test_or_fixture_path([{"filename": "README.md", "status": "renamed",
