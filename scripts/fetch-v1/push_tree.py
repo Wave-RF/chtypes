@@ -13,6 +13,8 @@ every blob, then every manifest, byte for byte, so digests are unchanged.
 - A manifest file named `sha256:<hex>` is pushed by digest; any other name
   (a tag such as `26.8`, or a referrers fallback tag such as `sha256-<hex>`)
   is pushed under that name. Content-Type is the manifest's own `mediaType`.
+- A manifest whose referenced blobs or children the tree does not carry is skipped
+  with a note (the registry refuses it by design); other errors fail the run.
 - Manifests are pushed in dependency order by retrying until no progress, since
   an index is refused until its child manifests exist.
 - TLS uses the default context, i.e. the OS trust store; nothing is disabled.
@@ -65,7 +67,15 @@ def push_tree(registry: str, repo: str, tree: Path) -> list[str]:
                 last_err[m.name] = str(e)
                 remaining.append(m)
         if len(remaining) == len(pending):
-            problems += [f"manifest {m.name}: {last_err[m.name]}" for m in remaining]
+            for m in remaining:
+                if "MANIFEST_BLOB_UNKNOWN" in last_err[m.name] or "MANIFEST_UNKNOWN" in last_err[m.name]:
+                    # Some fixture manifests name layers or children the tree
+                    # does not carry (only the file/http transports read
+                    # them). A registry refuses those by design; a case that
+                    # needs one fails on its own, which is the real signal.
+                    print(f"push_tree: skipped {m.name} (references content the tree does not carry)")
+                else:
+                    problems.append(f"manifest {m.name}: {last_err[m.name]}")
             break
         pending = remaining
     return problems
