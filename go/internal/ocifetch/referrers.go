@@ -96,6 +96,13 @@ func appendMatchingArtifactType(into []Descriptor, idx *ReferrersIndex, artifact
 // digest ("bundle" in Resolved.Digests) and the referrer manifest's digest
 // ("bundle_manifest").
 func (s *session) fetchReferrerContent(ctx context.Context, bases []string, desc Descriptor) (body []byte, layerDigest, manifestDigest Digest, err error) {
+	return s.fetchReferrerContentMax(ctx, bases, desc, BundleMaxBytes)
+}
+
+// fetchReferrerContentMax is fetchReferrerContent with the layer's size cap
+// named by the caller: a signature bundle is small, a goldens document is
+// not (maxBytes 0 means the transport's default ceiling).
+func (s *session) fetchReferrerContentMax(ctx context.Context, bases []string, desc Descriptor, maxBytes int64) (body []byte, layerDigest, manifestDigest Digest, err error) {
 	result, _, err := s.fetchAcrossBases(ctx, bases, "manifests/"+string(desc.Digest), notFoundRetryOnLast,
 		requestOptions{maxBytes: ManifestMaxBytes, accept: manifestAccept})
 	if err != nil {
@@ -114,7 +121,7 @@ func (s *session) fetchReferrerContent(ctx context.Context, bases []string, desc
 	}
 	layerDesc := m.Layers[0]
 	blobResult, _, err := s.fetchAcrossBases(ctx, bases, "blobs/"+string(layerDesc.Digest), notFoundRetryOnLast,
-		requestOptions{maxBytes: BundleMaxBytes})
+		requestOptions{maxBytes: maxBytes})
 	if err != nil {
 		return nil, "", "", err
 	}
