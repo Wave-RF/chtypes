@@ -167,13 +167,13 @@ A short list of places where 1.0 does less than you might expect, each with what
 
 ## Documentation
 
-|                                                               |                                                                                            |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [Install](docs/install.md) · [Quickstart](docs/quickstart.md) | getting a binding and a library, and the first program                                   |
+|                                                               |                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [Install](docs/install.md) · [Quickstart](docs/quickstart.md) | getting a binding and a library, and the first program                          |
 | [Guides](docs/guides/)                                        | fetching, settings, batches, filters, discovery, multi-version, transformations |
-| [Reference](docs/reference/)                                  | per-language API, the C ABI contract, the binding contract                                 |
-| [Supported versions](docs/support.md)                         | languages, platforms, ClickHouse lines                                                     |
-| [Examples](examples/)                                         | four side-by-side runnable tours, same sections in every language                          |
+| [Reference](docs/reference/)                                  | per-language API, the C ABI contract, the binding contract                      |
+| [Supported versions](docs/support.md)                         | languages, platforms, ClickHouse lines                                          |
+| [Examples](examples/)                                         | four side-by-side runnable tours, same sections in every language               |
 
 ## Project status
 

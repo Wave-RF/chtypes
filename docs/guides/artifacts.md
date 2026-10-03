@@ -17,12 +17,12 @@ cargo install chtypes && chtypes fetch 26.8                          # Rust
 
 `fetch --all` takes every line the registry publishes for this platform. A spelling is two, three or four parts (`26.8`, `26.8.15`, `26.8.15.10`) with no `v` prefix and no channel suffix; a floating one resolves to the newest build inside it. The commands are spelled identically in all four bindings:
 
-| command           | answers                                                                       |
-| ----------------- | ----------------------------------------------------------------------------- |
-| `fetch <line>...` | resolve, verify and install one or more lines (`--all` for every published)  |
-| `verify`          | re-verify every installed library against its own `verified.json` record      |
-| `list`            | the lines the registry publishes                                              |
-| `where`           | the cache directory a fetch would write to                                    |
+| command           | answers                                                                     |
+| ----------------- | --------------------------------------------------------------------------- |
+| `fetch <line>...` | resolve, verify and install one or more lines (`--all` for every published) |
+| `verify`          | re-verify every installed library against its own `verified.json` record    |
+| `list`            | the lines the registry publishes                                            |
+| `where`           | the cache directory a fetch would write to                                  |
 
 `fetch` takes `--frozen`, `--offline` and `--lock <file>` ([Pinning](#pinning-for-ci-and-production)). Usage errors exit 2, and every other exit status comes from the error table in [`fetch-v1.md` §8](fetch-v1.md#8-errors), so a script can tell an unreachable registry from a refused signature.
 
@@ -42,7 +42,7 @@ Before anything is unpacked, a fetch checks, in order: the platform manifest's d
 
 ## Pinning, for CI and production
 
-`fetch --lock chtypes.lock` records, per platform, the request, the exact version and build that resolved, and the platform manifest, layer and bundle digests ([`fetch-v1.md` §6](fetch-v1.md#6-lock-schema-3-and---frozen---offline-update)). `fetch --frozen` then fetches by digest only and refuses anything the lock does not pin with `CHTYPES_ARTIFACT_PINNED`. It is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, CI fails on drift.
+`fetch --lock chtypes.lock` records, per platform, the request, the exact version and build that resolved, and the platform manifest, layer and bundle digests ([`fetch-v1.md` §6](fetch-v1.md#6-lock-schema-3-and---frozen--offlineupdate)). `fetch --frozen` then fetches by digest only and refuses anything the lock does not pin with `CHTYPES_ARTIFACT_PINNED`. It is the lockfile model every package manager uses: trust on first fetch, byte-identical thereafter, CI fails on drift.
 
 ```sh
 npx @wavehouse/chtypes fetch 26.8 --lock chtypes.lock   # record

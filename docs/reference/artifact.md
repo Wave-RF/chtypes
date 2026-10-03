@@ -16,15 +16,15 @@ The registry is **append-only**. A build once published stays fetchable by its d
 
 The statement is an in-toto Statement v1 whose subject is the layer's sha256 and whose predicate carries what a loader needs to trust the bytes it unpacks. The fields this repository reads are:
 
-| field                | what it is                                                                                                                                                                 |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `abi`                | the ABI generation, always `1` for v1                                                                                                                                      |
-| `os`, `arch`         | the platform the library was built for                                                                                                                                     |
-| `clickhouse_version` | the exact ClickHouse release, four parts, equal to or within the request                                                                                                   |
-| `library_sha256`     | sha256 of the unpacked library file: the only integrity check that means anything                                                                                          |
-| `library_bytes`      | size of that file, a cheap first-pass check                                                                                                                                |
-| `abi_fingerprint`    | the fingerprint of the ABI description the library was built against, carried through the fetch layer opaque and compared by the loader                                    |
-| `glibc_floor`        | the minimum glibc the build needs, on Linux only. The loader checks it; the fetch layer never does                                                                         |
+| field                | what it is                                                                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `abi`                | the ABI generation, always `1` for v1                                                                                                   |
+| `os`, `arch`         | the platform the library was built for                                                                                                  |
+| `clickhouse_version` | the exact ClickHouse release, four parts, equal to or within the request                                                                |
+| `library_sha256`     | sha256 of the unpacked library file: the only integrity check that means anything                                                       |
+| `library_bytes`      | size of that file, a cheap first-pass check                                                                                             |
+| `abi_fingerprint`    | the fingerprint of the ABI description the library was built against, carried through the fetch layer opaque and compared by the loader |
+| `glibc_floor`        | the minimum glibc the build needs, on Linux only. The loader checks it; the fetch layer never does                                      |
 
 Additive fields are allowed, and a reader MUST ignore a field it does not know. The release key (`fdb5f06a8d4c9918d049a5f1748fa2e3b3238c3f2000986d5bb9e31beff778fc`, key id `deb275922dbff76e`) is the default trust root; the whole chain is [`guides/fetch-v1.md` §4](../guides/fetch-v1.md#4-trust).
 
