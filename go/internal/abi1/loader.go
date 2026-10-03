@@ -31,6 +31,11 @@ type LoadInput struct {
 	Predicate   []byte // nil only through OpenUnverified; steps 1 and 5 then skip
 	Platform    string // informational ("linux-amd64", ...); the predicate's
 	// own os/arch fields are what step 5 actually compares
+
+	// Timezone is the image zone chs_initialize sets at step 7: counted
+	// bytes, never canonicalized; empty means UTC. The public setup API
+	// supplies it in wave C; until then only a test sets it.
+	Timezone []byte
 }
 
 // LoadError is a step 1-6 refusal. Each one carries sdk.json's own reason
@@ -246,8 +251,14 @@ func load(in LoadInput) (*Table, *LoadError) {
 		return nil, &LoadError{Reason: "missing_symbol:" + missing, Path: in.LibraryPath}
 	}
 
-	// Step 7: on_loaded is a no-op hook until A5 settles init/context (plan
-	// §3.2 row 7). Nothing to call yet.
+	// Step 7: chs_initialize, once, with the image zone (length 0 = UTC). A
+	// repeat with the same spelling answers CHS_OK, a different spelling is
+	// CHS_INVALID_ARGUMENT (process_once), so a second Load of the same image
+	// is safe. The refusal reason is local: sdk.json's refusals list names
+	// none for step 7.
+	if cerr := t.Initialize(in.Timezone); cerr != nil {
+		return nil, &LoadError{Reason: "initialize:" + cerr.Status, Path: in.LibraryPath, Got: cerr.Message}
+	}
 
 	return t, nil
 }

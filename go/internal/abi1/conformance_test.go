@@ -26,8 +26,11 @@ type caseJSON struct {
 	Fn      string                 `json:"fn"`
 	Variant string                 `json:"variant"`
 	OS      string                 `json:"os,omitempty"`
-	Args    []Arg                  `json:"args"`
+	Args    []rArg                 `json:"args"`
 	Expect  map[string]interface{} `json:"expect"`
+	Steps   []stepJSON             `json:"steps,omitempty"`
+	Threads int                    `json:"threads,omitempty"`
+	Calls   int                    `json:"calls,omitempty"`
 }
 
 type casesDoc struct {
@@ -208,6 +211,10 @@ func TestConformance(t *testing.T) {
 				pass, detail = runEchoOrStatusCase(tbl, c)
 			case "loader":
 				pass, detail = runLoaderCase(stubsDir, manifest, c)
+			case "lifecycle":
+				pass, detail = runLifecycleCase(tbl, c)
+			case "concurrent":
+				pass, detail = runConcurrentCase(tbl, c)
 			default:
 				pass, detail = false, fmt.Sprintf("unknown case kind %q", c.Kind)
 			}
@@ -243,7 +250,7 @@ func TestConformance(t *testing.T) {
 }
 
 func runHandshakeCase(tbl *Table, c caseJSON) (bool, string) {
-	res, err := invoke(tbl, c.Fn, c.Args)
+	res, err := invoke(tbl, c.Fn, plainArgs(c.Args))
 	if err != nil {
 		return false, err.Error()
 	}
@@ -285,11 +292,21 @@ func runHandshakeCase(tbl *Table, c caseJSON) (bool, string) {
 }
 
 func runEchoOrStatusCase(tbl *Table, c caseJSON) (bool, string) {
-	res, err := invoke(tbl, c.Fn, c.Args)
+	res, err := invoke(tbl, c.Fn, plainArgs(c.Args))
 	if err != nil {
 		return false, err.Error()
 	}
+	if problems := matchResult(c.Expect, res); len(problems) > 0 {
+		return false, strings.Join(problems, "; ")
+	}
+	return true, ""
+}
+
+// matchResult checks one call's InvokeResult against an echo/status
+// expectation: the status name, the error fields, and the chs_buf outputs.
+func matchResult(expect map[string]interface{}, res *InvokeResult) []string {
 	var problems []string
+	c := caseJSON{Expect: expect}
 
 	wantStatus, _ := c.Expect["status"].(string)
 	if res.Status != wantStatus {
@@ -328,10 +345,7 @@ func runEchoOrStatusCase(tbl *Table, c caseJSON) (bool, string) {
 		}
 	}
 
-	if len(problems) > 0 {
-		return false, strings.Join(problems, "; ")
-	}
-	return true, ""
+	return problems
 }
 
 func matchCallError(want map[string]interface{}, got *CallError) []string {
