@@ -62,6 +62,7 @@ from . import Output, banner
 
 DECLS_PATH = "python/src/chtypes/_abi1/_decls.py"
 ERRMAP_PATH = "python/src/chtypes/_abi1/_errmap.py"
+VOCAB_PATH = "python/src/chtypes/_abi1/_vocab.py"
 
 # model.py's SCALARS gives the C spelling; this gives the matching ctypes
 # constructor's SOURCE TEXT (this is code generation: these are strings that
@@ -165,6 +166,127 @@ def _cross_check_literal(model: Model) -> str:
     return _tuple_block(items)
 
 
+# The thread classes (abi.json `thread`) whose calls must not overlap another
+# call of their class in one image. Only these take the Api's process lock; a
+# `shared` call takes none (the public layer holds no lock around a call
+# either), and `handle_serial` is a free, which the public objects' close
+# guards order.
+_PROCESS_LOCKED = ("process_serial", "process_once")
+
+
+
+def _handle_cls(model: Model, handle_type: str) -> str:
+    return _handle_class_name(handle_type)
+
+
+def _param_annotation(model: Model, p: Param) -> str:
+    if p.kind in ("scalar", "enum"):
+        return "int"
+    if p.kind == "bytes_in":
+        return "bytes | None"
+    if p.kind == "handle":
+        ann = _handle_cls(model, p.type)
+        return f"{ann} | None" if p.nullable else ann
+    raise ValueError(f"python.py: unexpected input param kind {p.kind!r}")
+
+
+def _out_annotation(model: Model, p: Param) -> str:
+    if p.type == "chs_buf":
+        return "bytes | None" if p.nullable else "bytes"
+    return _handle_cls(model, p.type)
+
+
+def _wrapper_name(fn: Function) -> str:
+    assert fn.name.startswith("chs_"), fn.name
+    return fn.name[len("chs_") :]
+
+
+def _typed_wrappers(model: Model) -> str:
+    """One method on `Api` per described status-returning function: bytes in,
+    bytes or a handle out, a raised error on a non-OK status (copy-then-free of
+    every `chs_buf` and `chs_error` inside the call, as Go's wrappers do). The
+    frees, the handle accessors and the three static handshake reads are not
+    wrapped here: the handle classes close themselves, and the accessors are
+    the read-out's own plumbing."""
+    out: list[str] = []
+    for fn in model.functions:
+        if fn.returns.kind != "status":
+            continue
+        ins = [p for p in fn.params if not p.is_out]
+        outs = [p for p in fn.params if p.kind == "out_handle"]
+        name = _wrapper_name(fn)
+        ret_types = [_out_annotation(model, p) for p in outs]
+        if not ret_types:
+            ret = "None"
+        elif len(ret_types) == 1:
+            ret = ret_types[0]
+        else:
+            ret = f"tuple[{', '.join(ret_types)}]"
+        lines: list[str] = []
+        if ins:
+            lines.append(f"    def {name}(")
+            lines.append("        self,")
+            for p in ins:
+                lines.append(f"        {p.name}: {_param_annotation(model, p)},")
+            lines.append(f"    ) -> {ret}:")
+        else:
+            lines.append(f"    def {name}(self) -> {ret}:")
+        lines.append(f'        """The generated call wrapper for {fn.name} (thread class {fn.thread}).')
+        lines.append("")
+        lines.append('        Raises the class the status maps to on a non-OK status."""')
+        for p in outs:
+            lines.append(f"        {p.name} = ctypes.c_void_p()")
+        has_err = any(p.kind == "out_error" for p in fn.params)
+        if has_err:
+            lines.append("        err = ctypes.c_void_p()")
+        call_args: list[str] = []
+        for p in fn.params:
+            if p.kind in ("scalar", "enum"):
+                call_args.append(f"int({p.name})")
+            elif p.kind == "bytes_in":
+                call_args.append(f"*_bytes_in({p.name})")
+            elif p.kind == "handle":
+                if p.nullable:
+                    call_args.append(f"None if {p.name} is None else {p.name}.value")
+                else:
+                    call_args.append(f"{p.name}.value")
+            elif p.kind == "out_handle":
+                call_args.append(f"ctypes.byref({p.name})")
+            elif p.kind == "out_error":
+                call_args.append("ctypes.byref(err)")
+            else:
+                raise ValueError(f"python.py: {fn.name}: unsupported param kind {p.kind!r}")
+        indent = "        "
+        if fn.thread in _PROCESS_LOCKED:
+            lines.append("        with self._process_lock:")
+            indent = "            "
+        lines.append(f'{indent}status = self._raw["{fn.name}"](')
+        for a in call_args:
+            lines.append(f"{indent}    {a},")
+        lines.append(f"{indent})")
+        lines.append(f"        self._check(status, {'err' if has_err else 'None'})")
+        rets: list[str] = []
+        for p in outs:
+            if p.type == "chs_buf":
+                if p.nullable:
+                    rets.append(f"None if not {p.name}.value else _read_buf(self, {p.name}.value)")
+                else:
+                    rets.append(f"_read_buf(self, {p.name}.value)")
+            else:
+                cls = _handle_cls(model, p.type)
+                free = model.handles[p.type].free
+                rets.append(f'{cls}({p.name}.value, self._raw["{free}"])')
+        if len(rets) == 1:
+            lines.append(f"        return {rets[0]}")
+        elif rets:
+            lines.append("        return (")
+            for r in rets:
+                lines.append(f"            {r},")
+            lines.append("        )")
+        out.append("\n".join(lines))
+    return "\n\n".join(out)
+
+
 def render_decls(model: Model) -> str:
     handshake = [fn.name for fn in model.functions if fn.cls == "handshake"]
     handle_names = list(model.handles)  # abi.json's own order: buf, error, schema, filter, block
@@ -176,6 +298,8 @@ def render_decls(model: Model) -> str:
     all_symbols = _tuple_block([_lit(n) for n in model.symbols()])
     handshake_names = _tuple_block([_lit(n) for n in handshake])
     handle_free = _dict_block([(_lit(h), _lit(model.handles[h].free)) for h in handle_names])
+    ok_value = next(v.value for v in model.enums["chs_status"].values if v.name == "CHS_OK")
+    typed_wrappers = _typed_wrappers(model)
     handle_class_dict = _dict_block([(_lit(h), cls) for h, cls in handle_classes.items()])
     cross_check = _cross_check_literal(model)
 
@@ -198,8 +322,11 @@ names this module exposes instead.
 from __future__ import annotations
 
 import ctypes
+import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+
+from . import _errmap
 
 CHS_ABI_VERSION = {model.abi}
 CHS_ABI_FINGERPRINT = {_dq(model.fingerprint)}
@@ -214,6 +341,7 @@ CROSS_CHECK_FIELDS: tuple[tuple[str, str, str], ...] = {cross_check}
 # regeneration, never a drift.
 STATUS_BY_VALUE: dict[int, str] = {status_table}
 STATUS_BY_NAME: dict[str, int] = {{v: k for k, v in STATUS_BY_VALUE.items()}}
+_STATUS_OK = {ok_value}
 
 # handle type name -> its free function's name (never called directly outside
 # this file: Handle.close() holds the bound method, resolved once in
@@ -385,6 +513,7 @@ class Api:
             raise TypeError("Api is constructed only by resolve_all()")
         self._lib = lib
         self._raw = raw
+        self._process_lock = threading.RLock()
 
     def build_info(self) -> bytes | None:
         return self._raw["chs_build_info"]()
@@ -395,12 +524,31 @@ class Api:
     def abi_revision(self) -> int:
         return self._raw["chs_abi_revision"]()
 
-    def initialize(self, timezone: bytes = b"") -> InvokeResult:
-        """Loader step 7: the once-per-process image zone (length 0 = UTC).
-        process_once: the same spelling again is CHS_OK, a different one is
-        CHS_INVALID_ARGUMENT. Returns the generic result so _loader.py never
-        spells a chs_ name."""
-        return invoke_by_name(self, "chs_initialize", [timezone])
+    def _check(self, status: int, err: ctypes.c_void_p | None) -> None:
+        """Turn a non-OK `status` into the class the description maps it to,
+        carrying the `chs_error` fields read verbatim (and freed) -- or, for a
+        status outside the closed set, an InternalError naming its value."""
+        if status == _STATUS_OK:
+            return
+        info = None
+        if err is not None and err.value:
+            info = _decode_error(self, err.value)
+        name = STATUS_BY_VALUE.get(status, f"UNKNOWN:{{status}}")
+        cls = _errmap.call_error_class(name)
+        message = info.message if info else b""
+        if name not in STATUS_BY_NAME:
+            message = f"status {{status}} is outside the closed chs_status set".encode() + (
+                b": " + message if message else b""
+            )
+        raise cls(
+            status,
+            info.ch_code if info else 0,
+            info.ch_name.decode("ascii", "replace") if info else "",
+            message,
+            info.column if info else b"",
+        )
+
+{typed_wrappers}
 
 
 _API_KEY = object()
@@ -447,6 +595,18 @@ class InvokeResult:
     outputs: dict[str, bytes] = field(default_factory=dict)
     out_handles: dict[str, Handle] = field(default_factory=dict)
     out_scalars: dict[str, int] = field(default_factory=dict)
+
+
+def _bytes_in(data: bytes | None) -> tuple[bytes | None, int]:
+    """A `bytes_in` parameter's two C arguments: (NULL, 0) for empty or
+    absent, else the bytes and their own length. ctypes hands a `bytes`
+    object's buffer over without scanning for a NUL, so NUL and invalid UTF-8
+    cross intact; any other bytes-like object is copied to `bytes` first."""
+    if not data:
+        return None, 0
+    if not isinstance(data, bytes):
+        data = bytes(data)
+    return data, len(data)
 
 
 def _read_buf(api: Api, ptr: int | None) -> bytes:
@@ -574,6 +734,247 @@ def invoke_by_name(api: Api, name: str, args: Iterable[object] = ()) -> InvokeRe
 '''
 
 
+# The member names the description cannot spell for itself: a verdict is one
+# character, and the empty default kind has no spelling. Every other
+# vocabulary value is its own name upper-cased. A value added to the
+# description without a name here fails generation (never silently skipped).
+_MEMBER_NAMES: dict[tuple[str, str], str] = {
+    ("filter_verdict", "t"): "TRUE",
+    ("filter_verdict", "f"): "FALSE",
+    ("filter_verdict", "e"): "ERROR",
+    ("filter_verdict", "d"): "DECLINE",
+    ("default_kind", ""): "NONE",
+}
+
+
+def _member(vocab: str, value: str) -> str:
+    name = _MEMBER_NAMES.get((vocab, value), value.upper())
+    if not name.isidentifier():
+        raise ValueError(f"python.py: {vocab} value {value!r} has no identifier spelling")
+    return name
+
+
+def _int_members(enum) -> list[tuple[str, int]]:
+    """`CHS_JSON_EACH_ROW` -> `JSON_EACH_ROW`: the C constant without its prefix."""
+    out = []
+    for v in enum.values:
+        assert v.name.startswith("CHS_"), v.name
+        out.append((v.name[len("CHS_") :], v.value))
+    return out
+
+
+def _str_members(model: Model, vocab: str) -> list[tuple[str, str, dict]]:
+    enum = model.enums[vocab]
+    members = [(_member(vocab, v.value), v.value, v.fields) for v in enum.values]
+    names = [m[0] for m in members]
+    if len(set(names)) != len(names):
+        raise ValueError(f"python.py: {vocab}: two values share a member name")
+    return members
+
+
+def _fallback_member(model: Model, vocab: str) -> str | None:
+    fb = model.enums[vocab].fallback
+    return None if fb is None else _member(vocab, fb)
+
+
+def _str_enum(model: Model, cls: str, vocab: str, doc: str, extra: str = "") -> str:
+    members = _str_members(model, vocab)
+    fb = _fallback_member(model, vocab)
+    lines = [f"class {cls}(StrEnum):", f'    """{doc}"""', ""]
+    for name, value, _ in members:
+        lines.append(f"    {name} = {_dq(value)}")
+    lines.append("")
+    lines.append("    @classmethod")
+    lines.append(f"    def of(cls, text: str) -> {cls}:")
+    if fb is None:
+        lines.append(f'        """Map a document\'s spelling. The description gives this vocabulary no')
+        lines.append('        fallback, so a spelling it does not list raises ValueError."""')
+        lines.append("        return cls(text)")
+    else:
+        lines.append(f'        """Map a document\'s spelling; one the description does not list reads as')
+        lines.append(f'        its fallback, `{cls}.{fb}`."""')
+        lines.append("        try:")
+        lines.append("            return cls(text)")
+        lines.append("        except ValueError:")
+        lines.append(f"            return cls.{fb}")
+    if extra:
+        lines.append("")
+        lines.append(extra)
+    return "\n".join(lines)
+
+
+def render_vocab(model: Model) -> str:
+    # Outcome is the row vocabulary, which holds every batch value too: one
+    # Python type for both, as the spec's vocabulary table has it.
+    row = {v.value for v in model.enums["row_outcome"].values}
+    batch = {v.value for v in model.enums["batch_outcome"].values}
+    if not batch <= row:
+        raise ValueError("python.py: batch_outcome has a value row_outcome lacks")
+    if model.enums["row_outcome"].fallback != model.enums["batch_outcome"].fallback:
+        raise ValueError("python.py: row_outcome and batch_outcome disagree on their fallback")
+
+    fmt_members = _int_members(model.enums["chs_format"])
+    status_members = _int_members(model.enums["chs_status"])
+    fmt_names = {
+        _dq(name): _dq(v.fields["ch_name"])
+        for (name, _), v in zip(fmt_members, model.enums["chs_format"].values, strict=True)
+    }
+
+    verdict_answered = {
+        _member("filter_verdict", v.value): v.fields["answered"]
+        for v in model.enums["filter_verdict"].values
+    }
+    if sum(verdict_answered.values()) < 2:
+        raise ValueError("python.py: expected at least two answered verdicts")
+    answered_names = ", ".join(f"Verdict.{n}" for n, a in verdict_answered.items() if a)
+
+    reasons = _str_members(model, "transform_reason")
+    sources = _str_members(model, "value_src")
+    reason_fb = model.enums["transform_reason"].fallback
+    reason_lossy = {v.value: v.fields["lossy"] for v in model.enums["transform_reason"].values}
+    fb_lossy = reason_lossy[reason_fb]
+
+    c = model.constants
+    for need in ("CHS_DOC_VALUES", "CHS_DOC_TRANSFORMS", "CHS_DOC_DEFAULTS", "CHS_DOC_ALL"):
+        if need not in c:
+            raise ValueError(f"python.py: the description has no constant {need}")
+
+    parts: list[str] = []
+    parts.append(f"# {banner(model)}  # noqa: E501")
+    parts.append(
+        '"""The Python binding\'s generated vocabularies, from spec/abi-v1/abi.json: the C\n'
+        "enums (`Format`, `Status`), the document vocabularies (`Outcome`, `FilterOutcome`,\n"
+        "`Verdict`, `DefaultKind`, `Reason`, `Source`) with the facts the description\n"
+        "attaches to each value (`Format.ch_name`, `Reason` lossy, `Source` is_stored,\n"
+        "`Verdict.answered`) and each vocabulary's fallback, and the `DocFlags` groups.\n"
+        'No other file in this package keeps a copy of any of it."""\n'
+    )
+    parts.append("from __future__ import annotations\n")
+    parts.append("from enum import IntEnum, IntFlag, StrEnum")
+    parts.append("from typing import Final\n")
+
+    parts.append("\nclass Format(IntEnum):")
+    parts.append('    """The `chs_format` codes. The numbers are part of the ABI."""\n')
+    for n, v in fmt_members:
+        parts.append(f"    {n} = {v}")
+    parts.append("")
+    parts.append("    @property")
+    parts.append("    def ch_name(self) -> str:")
+    parts.append("        \"\"\"ClickHouse's own name for this format, as `capabilities` lists it.\"\"\"")
+    parts.append("        return _FORMAT_CH_NAME[self.name]")
+    parts.append("")
+    parts.append("")
+    parts.append(f"_FORMAT_CH_NAME: Final[dict[str, str]] = {_dict_block(list(fmt_names.items()))}")
+    parts.append("")
+    parts.append("")
+    parts.append("class Status(IntEnum):")
+    parts.append('    """The `chs_status` values (D3: five, closed, frozen)."""\n')
+    for n, v in status_members:
+        parts.append(f"    {n} = {v}")
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum(
+            model,
+            "Outcome",
+            "row_outcome",
+            "The verdict on a row or a batch, in the document's own vocabulary.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum(
+            model,
+            "FilterOutcome",
+            "filter_outcome",
+            "The call-level verdict of a filter evaluation.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum(
+            model,
+            "Verdict",
+            "filter_verdict",
+            "One row's answer from a filter, in the document's own characters.",
+            extra=(
+                "    @property\n"
+                "    def answered(self) -> bool:\n"
+                '        """The description\'s own fact: whether this verdict is an ANSWER (true or\n'
+                "        false) rather than an error or a decline. A caller enforcing visibility\n"
+                '        fails closed on every verdict for which this is False."""\n'
+                f"        return self in ({answered_names})"
+            ),
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum(
+            model,
+            "DefaultKind",
+            "default_kind",
+            "A column's default kind, `\"\"` meaning none.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append("class Reason:")
+    parts.append('    """The `transform_reason` values, kept as plain strings: a reason from a newer')
+    parts.append("    library passes through with its spelling, and takes the fallback's lossy fact.")
+    parts.append('    """\n')
+    for n, v, _ in reasons:
+        parts.append(f"    {n}: Final = {_dq(v)}")
+    parts.append("")
+    parts.append("    @staticmethod")
+    parts.append("    def lossy(reason: str) -> bool:")
+    parts.append('        """The description\'s `lossy` fact for `reason`; an unlisted reason reads as')
+    parts.append(f'        the fallback `{reason_fb}`."""')
+    parts.append(f"        return _REASON_LOSSY.get(reason, {fb_lossy})")
+    parts.append("")
+    parts.append("")
+    parts.append(
+        "_REASON_LOSSY: Final[dict[str, bool]] = "
+        + _dict_block([(_dq(v), _lit(f["lossy"])) for _, v, f in reasons])
+    )
+    parts.append("")
+    parts.append("")
+    parts.append("class Source:")
+    parts.append('    """The `value_src` values, kept as plain strings. The vocabulary has no fallback,')
+    parts.append("    so a source the description does not list is an error to the decoder, never a")
+    parts.append('    guess."""\n')
+    for n, v, _ in sources:
+        parts.append(f"    {n}: Final = {_dq(v)}")
+    parts.append("")
+    parts.append("    @staticmethod")
+    parts.append("    def is_stored(source: str) -> bool:")
+    parts.append('        """The description\'s `is_stored` fact for `source`. Raises KeyError for a')
+    parts.append('        source the description does not list."""')
+    parts.append("        return _SOURCE_IS_STORED[source]")
+    parts.append("")
+    parts.append("")
+    parts.append(
+        "_SOURCE_IS_STORED: Final[dict[str, bool]] = "
+        + _dict_block([(_dq(v), _lit(f["is_stored"])) for _, v, f in sources])
+    )
+    parts.append("")
+    parts.append("")
+    parts.append("class DocFlags(IntFlag):")
+    parts.append('    """The document groups a `rows` call asks for (`CHS_DOC_*`)."""\n')
+    parts.append(f"    VALUES = {c['CHS_DOC_VALUES'].value}")
+    parts.append(f"    TRANSFORMS = {c['CHS_DOC_TRANSFORMS'].value}")
+    parts.append(f"    DEFAULTS = {c['CHS_DOC_DEFAULTS'].value}")
+    parts.append(f"    ALL = {c['CHS_DOC_ALL'].value}")
+    parts.append("")
+    parts.append("")
+    parts.append(
+        f"# `chs_preview_batch`'s `export_format` for no export (`CHS_EXPORT_NONE`).\nEXPORT_NONE: Final = {c['CHS_EXPORT_NONE'].value}"
+    )
+    return "\n".join(parts) + "\n"
+
+
 def render_errmap(model: Model) -> str:
     sdk = model.sdk
     status_pairs = [
@@ -596,10 +997,11 @@ def render_errmap(model: Model) -> str:
 
     return f'''# {banner(model)}  # noqa: E501
 """spec/abi-v1/sdk.json's error-mapping tables, as references to the
-hand-written classes in python/src/chtypes/_abi1/_errors.py. Only the
-MAPPING is generated: the classes themselves are stable across a
-regeneration (plan section 3.4), so a status renumbering or a new loader
-refusal reason changes this file, never _errors.py.
+public classes (python/src/chtypes/errors.py, re-exported by
+python/src/chtypes/_abi1/_errors.py). Only the MAPPING is generated: the
+classes themselves are stable across a regeneration (plan section 3.4), so a
+status renumbering or a new loader refusal reason changes this file, never
+the classes.
 """
 
 from __future__ import annotations
@@ -618,20 +1020,20 @@ UNKNOWN_STATUS_CLASS_KEY: str = {_lit(unknown_class)}
 LOADER_REFUSAL_CLASS_KEY: dict[str, str] = {_dict_block(refusal_pairs)}
 
 # sdk.json error-class key -> the actual exception class.
-CLASS_BY_KEY: dict[str, type[_errors.Abi1Error]] = {_dict_block(class_pairs)}
+CLASS_BY_KEY: dict[str, type[_errors.ChtypesError]] = {_dict_block(class_pairs)}
 
 # sdk.json's error codes (reserved exit-status names; plan section 3.4, Q-m).
 ERROR_CODES: dict[str, str] = {_dict_block(code_pairs)}
 
 
-def call_error_class(status: str) -> type[_errors.Abi1Error] | None:
+def call_error_class(status: str) -> type[_errors.ChtypesError] | None:
     """The exception class a `status` other than CHS_OK maps to, or None for
     CHS_OK itself."""
     key = STATUS_CLASS_KEY.get(status, UNKNOWN_STATUS_CLASS_KEY)
     return None if key is None else CLASS_BY_KEY[key]
 
 
-def loader_error_class(reason: str) -> type[_errors.Abi1Error]:
+def loader_error_class(reason: str) -> type[_errors.ChtypesError]:
     """The exception class a loader refusal `reason` (its base, before any
     ":<suffix>") maps to."""
     base = reason.split(":", 1)[0]
@@ -643,4 +1045,5 @@ def outputs(model: Model) -> list[Output]:
     return [
         Output(DECLS_PATH, content=render_decls(model)),
         Output(ERRMAP_PATH, content=render_errmap(model)),
+        Output(VOCAB_PATH, content=render_vocab(model)),
     ]

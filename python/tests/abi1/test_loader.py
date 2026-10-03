@@ -70,13 +70,13 @@ def test_open_unverified_needs_both_the_flag_and_the_env_var(
     path = stub_path(stubs_dir, entry)
     monkeypatch.delenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", raising=False)
 
-    with pytest.raises(_errors.ArtifactIncompatibleError):
+    with pytest.raises(_errors.UsageError):
         _loader.open_unverified(path, allow=False)
-    with pytest.raises(_errors.ArtifactIncompatibleError):
+    with pytest.raises(_errors.UsageError):
         _loader.open_unverified(path, allow=True)  # env var still unset
 
     monkeypatch.setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
-    with pytest.raises(_errors.ArtifactIncompatibleError):
+    with pytest.raises(_errors.UsageError):
         _loader.open_unverified(path, allow=False)  # flag still false
 
     result = _loader.open_unverified(path, allow=True)

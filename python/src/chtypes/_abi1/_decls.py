@@ -12,8 +12,11 @@ names this module exposes instead.
 from __future__ import annotations
 
 import ctypes
+import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+
+from . import _errmap
 
 CHS_ABI_VERSION = 1
 CHS_ABI_FINGERPRINT = "sha256:d6b9a42bc2fbb97273122a098ce09ee980d4ef31c0ceb6cb1b5c99e1465e0431"
@@ -44,6 +47,7 @@ STATUS_BY_VALUE: dict[int, str] = {
     4: "CHS_INTERNAL",
 }
 STATUS_BY_NAME: dict[str, int] = {v: k for k, v in STATUS_BY_VALUE.items()}
+_STATUS_OK = 0
 
 # handle type name -> its free function's name (never called directly outside
 # this file: Handle.close() holds the bound method, resolved once in
@@ -488,6 +492,7 @@ class Api:
             raise TypeError("Api is constructed only by resolve_all()")
         self._lib = lib
         self._raw = raw
+        self._process_lock = threading.RLock()
 
     def build_info(self) -> bytes | None:
         return self._raw["chs_build_info"]()
@@ -498,12 +503,416 @@ class Api:
     def abi_revision(self) -> int:
         return self._raw["chs_abi_revision"]()
 
-    def initialize(self, timezone: bytes = b"") -> InvokeResult:
-        """Loader step 7: the once-per-process image zone (length 0 = UTC).
-        process_once: the same spelling again is CHS_OK, a different one is
-        CHS_INVALID_ARGUMENT. Returns the generic result so _loader.py never
-        spells a chs_ name."""
-        return invoke_by_name(self, "chs_initialize", [timezone])
+    def _check(self, status: int, err: ctypes.c_void_p | None) -> None:
+        """Turn a non-OK `status` into the class the description maps it to,
+        carrying the `chs_error` fields read verbatim (and freed) -- or, for a
+        status outside the closed set, an InternalError naming its value."""
+        if status == _STATUS_OK:
+            return
+        info = None
+        if err is not None and err.value:
+            info = _decode_error(self, err.value)
+        name = STATUS_BY_VALUE.get(status, f"UNKNOWN:{status}")
+        cls = _errmap.call_error_class(name)
+        message = info.message if info else b""
+        if name not in STATUS_BY_NAME:
+            message = f"status {status} is outside the closed chs_status set".encode() + (
+                b": " + message if message else b""
+            )
+        raise cls(
+            status,
+            info.ch_code if info else 0,
+            info.ch_name.decode("ascii", "replace") if info else "",
+            message,
+            info.column if info else b"",
+        )
+
+    def live_handles(self) -> bytes:
+        """The generated call wrapper for chs_live_handles (thread class any).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_live_handles"](
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def error_codes(self) -> bytes:
+        """The generated call wrapper for chs_error_codes (thread class any).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_error_codes"](
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def registered_families(self) -> bytes:
+        """The generated call wrapper for chs_registered_families (thread class process_serial).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        with self._process_lock:
+            status = self._raw["chs_registered_families"](
+                ctypes.byref(out),
+                ctypes.byref(err),
+            )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def function_flags(self) -> bytes:
+        """The generated call wrapper for chs_function_flags (thread class process_serial).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        with self._process_lock:
+            status = self._raw["chs_function_flags"](
+                ctypes.byref(out),
+                ctypes.byref(err),
+            )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def reference_type(
+        self,
+        type_expr: bytes | None,
+    ) -> bytes:
+        """The generated call wrapper for chs_reference_type (thread class process_serial).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        with self._process_lock:
+            status = self._raw["chs_reference_type"](
+                *_bytes_in(type_expr),
+                ctypes.byref(out),
+                ctypes.byref(err),
+            )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def initialize(
+        self,
+        timezone: bytes | None,
+    ) -> None:
+        """The generated call wrapper for chs_initialize (thread class process_once).
+
+        Raises the class the status maps to on a non-OK status."""
+        err = ctypes.c_void_p()
+        with self._process_lock:
+            status = self._raw["chs_initialize"](
+                *_bytes_in(timezone),
+                ctypes.byref(err),
+            )
+        self._check(status, err)
+
+    def set_defaults(
+        self,
+        settings: bytes | None,
+    ) -> None:
+        """The generated call wrapper for chs_set_defaults (thread class process_serial).
+
+        Raises the class the status maps to on a non-OK status."""
+        err = ctypes.c_void_p()
+        with self._process_lock:
+            status = self._raw["chs_set_defaults"](
+                *_bytes_in(settings),
+                ctypes.byref(err),
+            )
+        self._check(status, err)
+
+    def type_validate(
+        self,
+        type_expr: bytes | None,
+    ) -> bytes:
+        """The generated call wrapper for chs_type_validate (thread class any).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_type_validate"](
+            *_bytes_in(type_expr),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def back_quote(
+        self,
+        name: bytes | None,
+    ) -> bytes:
+        """The generated call wrapper for chs_back_quote (thread class any).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_back_quote"](
+            *_bytes_in(name),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def back_quote_if_needed(
+        self,
+        name: bytes | None,
+    ) -> bytes:
+        """The generated call wrapper for chs_back_quote_if_needed (thread class any).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_back_quote_if_needed"](
+            *_bytes_in(name),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def quote_string(
+        self,
+        text: bytes | None,
+    ) -> bytes:
+        """The generated call wrapper for chs_quote_string (thread class any).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_quote_string"](
+            *_bytes_in(text),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def schema_create(
+        self,
+        create_table: bytes | None,
+        settings: bytes | None,
+    ) -> SchemaHandle:
+        """The generated call wrapper for chs_schema_create (thread class any).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_schema_create"](
+            *_bytes_in(create_table),
+            *_bytes_in(settings),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return SchemaHandle(out.value, self._raw["chs_schema_free"])
+
+    def schema_describe(
+        self,
+        schema: SchemaHandle,
+    ) -> bytes:
+        """The generated call wrapper for chs_schema_describe (thread class shared).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_schema_describe"](
+            schema.value,
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def preview_row(
+        self,
+        schema: SchemaHandle,
+        format: int,
+        body: bytes | None,
+        settings: bytes | None,
+        columns: bytes | None,
+    ) -> bytes:
+        """The generated call wrapper for chs_preview_row (thread class shared).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_preview_row"](
+            schema.value,
+            int(format),
+            *_bytes_in(body),
+            *_bytes_in(settings),
+            *_bytes_in(columns),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def preview_batch(
+        self,
+        schema: SchemaHandle,
+        format: int,
+        body: bytes | None,
+        settings: bytes | None,
+        columns: bytes | None,
+        filter: FilterHandle | None,
+        export_format: int,
+        doc_flags: int,
+    ) -> tuple[bytes, bytes | None]:
+        """The generated call wrapper for chs_preview_batch (thread class shared).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        out_export = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_preview_batch"](
+            schema.value,
+            int(format),
+            *_bytes_in(body),
+            *_bytes_in(settings),
+            *_bytes_in(columns),
+            None if filter is None else filter.value,
+            int(export_format),
+            int(doc_flags),
+            ctypes.byref(out),
+            ctypes.byref(out_export),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return (
+            _read_buf(self, out.value),
+            None if not out_export.value else _read_buf(self, out_export.value),
+        )
+
+    def filter_create(
+        self,
+        schema: SchemaHandle,
+        expr: bytes | None,
+        query_params: bytes | None,
+        settings: bytes | None,
+    ) -> FilterHandle:
+        """The generated call wrapper for chs_filter_create (thread class shared).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_filter_create"](
+            schema.value,
+            *_bytes_in(expr),
+            *_bytes_in(query_params),
+            *_bytes_in(settings),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return FilterHandle(out.value, self._raw["chs_filter_free"])
+
+    def filter_eval_body(
+        self,
+        filter: FilterHandle,
+        format: int,
+        body: bytes | None,
+        settings: bytes | None,
+    ) -> bytes:
+        """The generated call wrapper for chs_filter_eval_body (thread class shared).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_filter_eval_body"](
+            filter.value,
+            int(format),
+            *_bytes_in(body),
+            *_bytes_in(settings),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def block_create(
+        self,
+        schema: SchemaHandle,
+        format: int,
+        body: bytes | None,
+        settings: bytes | None,
+        columns: bytes | None,
+    ) -> BlockHandle:
+        """The generated call wrapper for chs_block_create (thread class shared).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_block_create"](
+            schema.value,
+            int(format),
+            *_bytes_in(body),
+            *_bytes_in(settings),
+            *_bytes_in(columns),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return BlockHandle(out.value, self._raw["chs_block_free"])
+
+    def filter_eval_block(
+        self,
+        filter: FilterHandle,
+        block: BlockHandle,
+    ) -> bytes:
+        """The generated call wrapper for chs_filter_eval_block (thread class shared).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_filter_eval_block"](
+            filter.value,
+            block.value,
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def discover_query(self) -> bytes:
+        """The generated call wrapper for chs_discover_query (thread class any).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_discover_query"](
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
+
+    def discover_columns(
+        self,
+        rows: bytes | None,
+    ) -> bytes:
+        """The generated call wrapper for chs_discover_columns (thread class any).
+
+        Raises the class the status maps to on a non-OK status."""
+        out = ctypes.c_void_p()
+        err = ctypes.c_void_p()
+        status = self._raw["chs_discover_columns"](
+            *_bytes_in(rows),
+            ctypes.byref(out),
+            ctypes.byref(err),
+        )
+        self._check(status, err)
+        return _read_buf(self, out.value)
 
 
 _API_KEY = object()
@@ -550,6 +959,18 @@ class InvokeResult:
     outputs: dict[str, bytes] = field(default_factory=dict)
     out_handles: dict[str, Handle] = field(default_factory=dict)
     out_scalars: dict[str, int] = field(default_factory=dict)
+
+
+def _bytes_in(data: bytes | None) -> tuple[bytes | None, int]:
+    """A `bytes_in` parameter's two C arguments: (NULL, 0) for empty or
+    absent, else the bytes and their own length. ctypes hands a `bytes`
+    object's buffer over without scanning for a NUL, so NUL and invalid UTF-8
+    cross intact; any other bytes-like object is copied to `bytes` first."""
+    if not data:
+        return None, 0
+    if not isinstance(data, bytes):
+        data = bytes(data)
+    return data, len(data)
 
 
 def _read_buf(api: Api, ptr: int | None) -> bytes:

@@ -18,8 +18,8 @@ resolve-all sweep run right after step 3, BEFORE step 4's
 `missing-chs_clickhouse_version` stub variants both expect the step 6
 `missing_symbol:<name>` reason, not a step 4 one, which is only possible if
 the full symbol sweep happens before chs_build_info is ever called). Step 7
-calls the image's once-per-process zone setup (empty zone = UTC unless the
-caller supplies one).
+calls the image's once-per-image zone setup (empty zone = UTC unless the
+caller supplies one) and then its default settings.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ class LoadResult:
     api: _decls.Api
     build_info: dict
     path: str
+    raw: bytes = b""
 
 
 def _refuse(reason: str, path: str, want: object = None, got: object = None) -> None:
@@ -145,6 +146,17 @@ def _parse_build_info(raw: bytes, path: str) -> dict:
     return info
 
 
+def _cross_check(info: Mapping[str, object], predicate: Mapping[str, object], path: str) -> None:
+    """Loader step 5: `chs_build_info()` against the signed predicate, field
+    by field, in the description's own order. The predicate is whatever the
+    fetch layer returned, never re-encoded."""
+    for build_info_field, predicate_field, _compare in _decls.CROSS_CHECK_FIELDS:
+        bi_val = info.get(build_info_field)
+        pred_val = predicate.get(predicate_field)
+        if bi_val != pred_val:
+            _refuse(f"build_info_mismatch:{build_info_field}", path, want=pred_val, got=bi_val)
+
+
 def _open(
     path: str,
     predicate: Mapping[str, object],
@@ -152,6 +164,7 @@ def _open(
     skip_step1: bool,
     skip_step5: bool,
     timezone: bytes = b"",
+    defaults: bytes = b"",
 ) -> LoadResult:
     if not skip_step1:
         _check_glibc(path, predicate)
@@ -185,39 +198,63 @@ def _open(
         )
 
     if not skip_step5:
-        for build_info_field, predicate_field, _compare in _decls.CROSS_CHECK_FIELDS:
-            bi_val = info.get(build_info_field)
-            pred_val = predicate.get(predicate_field)
-            if bi_val != pred_val:
-                _refuse(f"build_info_mismatch:{build_info_field}", path, want=pred_val, got=bi_val)
+        _cross_check(info, predicate, path)
 
-    # Step 7: the once-per-process image zone (empty = UTC), after every
-    # handshake check and before any other call. A failure is the library's
-    # own refusal, surfaced as the call error its status maps to.
-    init = api.initialize(timezone)
-    if init.status != "CHS_OK":
-        cls = _errmap.call_error_class(init.status or "")
-        err = init.error
-        raise cls(
-            init.status,
-            err.ch_code if err else 0,
-            err.ch_name if err else b"",
-            err.message if err else b"",
-            err.column if err else b"",
-        )
+    # Step 7: the once-per-image setup (docs/reference/bindings-v1.md section
+    # 6): the image zone (empty = UTC), then the default settings when there
+    # are any. After every handshake check and before any other call. A
+    # failure is the library's own refusal, the call error its status maps to
+    # (never a loader refusal reason).
+    api.initialize(timezone)
+    if defaults:
+        api.set_defaults(defaults)
 
-    return LoadResult(api=api, build_info=info, path=path)
+    return LoadResult(api=api, build_info=info, path=path, raw=raw)
 
 
-def open(path: str, predicate: Mapping[str, object], *, timezone: bytes = b"") -> LoadResult:
+def recheck(result: LoadResult, path: str, predicate: Mapping[str, object]) -> None:
+    """An image that is already open, met again through a new signed
+    statement: loader steps 1, 4 and 5 are checked against that statement
+    anyway (a mismatch refuses THIS request; the image stays open for the
+    requests it did match). No dlopen and no step 7: both happened once, when
+    the image first opened."""
+    _check_glibc(path, predicate)
+    _cross_check(result.build_info, predicate, path)
+
+
+def open(
+    path: str,
+    predicate: Mapping[str, object],
+    *,
+    timezone: bytes = b"",
+    defaults: bytes = b"",
+) -> LoadResult:
     """Load and verify a v1 artifact at `path` against its (already verified
     elsewhere) signed `predicate`, then set the image zone (`timezone`, empty
-    = UTC; step 7). Raises an `_errors.LoaderError` subclass
-    naming the exact refusal on any failure."""
-    return _open(path, predicate, skip_step1=False, skip_step5=False, timezone=timezone)
+    = UTC) and the default settings (`defaults`, a JSON object of string
+    values, empty for none): step 7. Raises an artifact error naming the exact
+    refusal on any loader failure, or the call error step 7's own status maps
+    to."""
+    return _open(
+        path,
+        predicate,
+        skip_step1=False,
+        skip_step5=False,
+        timezone=timezone,
+        defaults=defaults,
+    )
 
 
 _WARNED_PATHS: set[str] = set()
+
+
+def check_unverified_allowed(path: str, allow: bool) -> None:
+    """An unverified open needs BOTH the caller's `allow` and the environment
+    opt-in; either missing is a `UsageError`, raised before anything loads."""
+    if not allow or os.environ.get(ALLOW_UNVERIFIED_ENV) != "1":
+        raise _errors.misuse(
+            f"open_unverified({path!r}) needs both allow=True and ${ALLOW_UNVERIFIED_ENV}=1"
+        )
 
 
 def open_unverified(
@@ -226,17 +263,13 @@ def open_unverified(
     predicate: Mapping[str, object] | None = None,
     allow: bool = False,
     timezone: bytes = b"",
+    defaults: bytes = b"",
 ) -> LoadResult:
     """For core's local builds and the linked mode ONLY (plan section 3.1,
     Q-b): skips step 1 when no predicate is given, and always skips step 5.
     Needs BOTH `allow=True` and `$CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1`; never
     a default, and warns loudly once per path."""
-    if not allow or os.environ.get(ALLOW_UNVERIFIED_ENV) != "1":
-        raise _errors.ArtifactIncompatibleError(
-            reason="unverified_not_allowed",
-            path=path,
-            got=f"open_unverified() needs both allow=True and ${ALLOW_UNVERIFIED_ENV}=1",
-        )
+    check_unverified_allowed(path, allow)
     if path not in _WARNED_PATHS:
         _WARNED_PATHS.add(path)
         warnings.warn(
@@ -250,4 +283,5 @@ def open_unverified(
         skip_step1=predicate is None,
         skip_step5=True,
         timezone=timezone,
+        defaults=defaults,
     )
