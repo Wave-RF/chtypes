@@ -280,7 +280,8 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
                         manifest: resolved.digests.manifest.clone(),
                         layer: resolved.digests.layer.clone(),
                         bundle: resolved.digests.bundle.clone().unwrap_or_default(),
-                        index: resolved.digests.index.clone(),
+                        // The lock never records the index (§6: informational only).
+                        index: None,
                     },
                 );
             }
@@ -486,7 +487,7 @@ fn lock_entries_for_all_platforms(
                     manifest: host_resolved.digests.manifest.clone(),
                     layer: host_resolved.digests.layer.clone(),
                     bundle: host_resolved.digests.bundle.clone().unwrap_or_default(),
-                    index: host_resolved.digests.index.clone(),
+                    index: None,
                 },
             ));
             continue;
