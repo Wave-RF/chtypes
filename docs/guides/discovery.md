@@ -1,33 +1,44 @@
 # Discovery — ask the server, never the customer
 
-chtypes **never connects to ClickHouse**. It has no client, no connection string, no network code on the answer path. What it ships instead is three SQL constants, which your application runs at connect time with whatever client it already has, plus typed parsers for the results.
+chtypes **never connects to ClickHouse**. It has no client, no connection string, no network code on the answer path. What it gives you instead is one query, which your application runs at connect time with whatever client it already has, plus a typed reader for the answer.
 
-That split is deliberate. A library that opened its own connection would need credentials, a pool, a TLS story and a retry policy, all of which your application already has and has already tuned.
+That split is deliberate. A library that opened its own connection would need credentials, a pool, a TLS story and a retry policy, all of which your application already has and has already tuned. And no binding holds or builds SQL: the query comes from the loaded library, and the caller binds its two parameters the client's own way.
 
-## The three queries
+> **1.0 narrowed discovery to a table's columns.** 0.x also shipped queries for a server's version and its changed settings, plus a `ServerProfile` and a DDL reconstructor. Those are deleted ([`reference/bindings-v1.md` §7](../reference/bindings-v1.md#7-what-v0-api-is-deleted-and-why)), because a binding that holds SQL or rebuilds DDL is binding-side logic. Reading the version and the changed settings is yours to do on your own connection, and is a known gap: [`limitations.md`](../limitations.md#no-call-for-a-servers-version-or-settings).
 
-| constant                 | answers                                    | feeds                                             |
-| ------------------------ | ------------------------------------------ | ------------------------------------------------- |
-| `QUERY_SERVER_VERSION`   | the exact release                          | which artifact to resolve                         |
-| `QUERY_CHANGED_SETTINGS` | every setting changed from default         | the compile profile **and** the per-call settings |
-| `QUERY_TABLE_COLUMNS`    | one table's columns, kinds and expressions | reconstructing DDL to compile                     |
+## The calls
 
-In Go the constants are `QueryServerVersion`, `QueryChangedSettings` and `QueryTableColumns`; the other three bindings spell them in screaming snake case.
+Two calls on a loaded `Library`:
+
+| call                 | answers                                                                                                                                     | feeds                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `discover_query()`   | the query that reads one table's `system.columns` rows, `FORMAT JSONEachRow`                                                                | your client, which runs it |
+| `discover_columns()` | the column declarations, written as ClickHouse's own formatter writes them, and `columns_sql`, the declarations joined for a `CREATE TABLE` | the statement you compile  |
+
+In Go they are `DiscoverQuery` and `DiscoverColumns`, in TypeScript `discoverQuery` and `discoverColumns`, and in Python and Rust `discover_query` and `discover_columns`. The query takes two ClickHouse query parameters, `{database:String}` and `{table:String}`; over HTTP they are `param_database` and `param_table`. No binding splices a database or table name into the text.
+
+## What to run at connect time
+
+Three things, once per connection, cached per deployment (or per tenant, on bring-your-own-ClickHouse):
+
+1. **The version.** `SELECT version()` on your connection, then ask the registry for it. A request is a bare two, three or four-part spelling; a `v` prefix or a `-lts` suffix is a `UsageError`, so pass the numeric parts only. The registry fetches a version it does not have if `autofetch` is on ([`guides/artifacts.md`](artifacts.md#lazy-fetch-is-opt-in)).
+2. **The changed settings.** Your own query over `system.settings`. They become the profile you declare at every compile and every call.
+3. **The table.** Either of two ways:
+   - **Compile the server's own `SHOW CREATE TABLE` text.** Compile takes exactly one `CREATE TABLE` statement, and the text a server prints is one. This is measured on live 26.3, 26.7, 26.8 and 26.9 servers for every MergeTree-family shape tried (28 of 32); `ENGINE = Memory` tables are declined ([`limitations.md`](../limitations.md#show-create-of-a-memory-table-is-declined)).
+   - **Use the discovery calls** below, which also cover those Memory tables.
 
 ## The shape of it
 
-Run the first two once per connection, cache the profile per deployment (or per tenant, on bring-your-own-ClickHouse), then declare what you learned at every compile and every call.
-
 <details open><summary><b>Go</b></summary>
 
 ```go
-version, _ := chtypes.ParseVersionResult(run(chtypes.QueryServerVersion))
-settings, _ := chtypes.ParseChangedSettingsResult(run(chtypes.QueryChangedSettings))
-profile := chtypes.ServerProfile{Version: version, Settings: settings}
+query, _ := lib.DiscoverQuery()
+rows := run(query, map[string]string{"database": "default", "table": "events"}) // your client; JSONEachRow bytes
+found, _ := lib.DiscoverColumns(rows)
 
-lib, _ := reg.For(chtypes.Version(profile.Version))
-schema, _ := lib.CompileDDL(ddl, chtypes.WithCompileSettings(profile.Settings))
-res, _ := schema.Rows(chtypes.JSONEachRow, body, profile.Settings)
+ddl := "CREATE TABLE events (" + found.ColumnsSQL + ") ENGINE = Memory"
+schema, _ := lib.CompileTable(ddl, chtypes.WithSettings(profile))
+res, _ := schema.Rows(chtypes.JSONEachRow, body, chtypes.WithSettings(profile))
 ```
 
 </details>
@@ -35,16 +46,12 @@ res, _ := schema.Rows(chtypes.JSONEachRow, body, profile.Settings)
 <details><summary><b>Python</b></summary>
 
 ```python
-import chtypes
+rows = run(library.discover_query(), {"database": "default", "table": "events"})  # your client; JSONEachRow bytes
+found = library.discover_columns(rows)
 
-profile = chtypes.ServerProfile(
-    version=chtypes.parse_version_result(run(chtypes.QUERY_SERVER_VERSION)),
-    settings=chtypes.parse_changed_settings_result(run(chtypes.QUERY_CHANGED_SETTINGS)),
-)
-
-library = registry.for_version(profile.version)
-schema = library.compile_ddl(ddl, settings=profile.settings)
-res = schema.rows(chtypes.Format.JSON_EACH_ROW, body, settings=profile.settings)
+ddl = b"CREATE TABLE events (" + found.columns_sql + b") ENGINE = Memory"
+schema = library.compile_table(ddl, settings=profile)
+res = schema.rows(Format.JSON_EACH_ROW, body, settings=profile)
 ```
 
 </details>
@@ -52,14 +59,12 @@ res = schema.rows(chtypes.Format.JSON_EACH_ROW, body, settings=profile.settings)
 <details><summary><b>TypeScript</b></summary>
 
 ```ts
-const profile: ServerProfile = {
-  version: parseVersionResult(await run(QUERY_SERVER_VERSION)),
-  settings: parseChangedSettingsResult(await run(QUERY_CHANGED_SETTINGS)),
-};
+const rows = await run(lib.discoverQuery(), { database: 'default', table: 'events' }); // your client; JSONEachRow bytes
+const found = lib.discoverColumns(rows);
 
-const lib = registry.for(profile.version);
-const schema = lib.compileDdl(ddl, { settings: profile.settings });
-const res = schema.rows(Format.JSONEachRow, body, profile.settings);
+const ddl = Buffer.concat([Buffer.from('CREATE TABLE events ('), found.columnsSql, Buffer.from(') ENGINE = Memory')]);
+const schema = lib.compileTable(ddl, { settings: profile });
+const res = schema.rows(Format.JSONEachRow, body, { settings: profile });
 ```
 
 </details>
@@ -67,70 +72,31 @@ const res = schema.rows(Format.JSONEachRow, body, profile.settings);
 <details><summary><b>Rust</b></summary>
 
 ```rust
-let version = chtypes::parse_version_result(&query(chtypes::QUERY_SERVER_VERSION)?)?;
-let settings = chtypes::parse_changed_settings_result(&query(chtypes::QUERY_CHANGED_SETTINGS)?)?;
+let rows = run(lib.discover_query()?.as_bytes(), &[("database", "default"), ("table", "events")])?; // your client; JSONEachRow bytes
+let found = lib.discover_columns(&rows)?;
 
-let lib = registry.for_version(&version)?;
-let schema = lib.compile(ddl).settings(settings.clone()).compile()?;
-let batch = schema.rows(Format::JsonEachRow, body, &settings)?;
+let ddl = [b"CREATE TABLE events (".as_slice(), found.columns_sql.as_bytes(), b") ENGINE = Memory"].concat();
+let compile = CompileOptions { settings: profile.clone(), ..Default::default() };
+let schema = lib.compile_table(ddl, &compile)?;
+let call = RowsOptions { settings: profile.clone(), ..Default::default() };
+let batch = schema.rows(Format::JsonEachRow, body, &call)?;
 ```
 
-Rust's `parse_changed_settings_result` hands back a `Vec<(String, String)>` rather than a map, which is the shape the settings channels take anyway.
-
 </details>
+
+Here `run` is your own function and `profile` is the changed-settings map you read: a `map[string]string`, a `Settings` mapping, a `Record<string, string>`, or a `Vec<(String, String)>`, with string values only ([`settings.md`](settings.md#values-cross-as-strings-always)). The ENGINE clause is yours to supply when you build the statement from `columns_sql`: the discovery answer is the column list, and it does not carry the table's engine (`inferred` from the `system.columns` fields it reads).
 
 The settings go to **both** places on purpose: the compile profile is where a type gate binds, and the per-call map is where the row path reads everything else. [`settings.md`](settings.md) is why.
 
-## Rebuilding DDL from an existing table
+## Why the declarations carry their DEFAULTs
 
-For a table that already exists, `QUERY_TABLE_COLUMNS` plus two parsers gives you the column-declaration list that `compile` takes. Bind `param_db` and `param_table` through your client's own query-parameter channel.
+`discover_columns` writes each column as ClickHouse's own formatter writes it, and `columns_sql` joins them, so a `DEFAULT`, `MATERIALIZED` or `ALIAS` expression travels with its column. **Dropping them silently loses DEFAULT and MATERIALIZED semantics** — the columns are still there, they just stop behaving like themselves, and every preview after that is wrong in a way nothing reports. It is the reason the reader exists rather than a suggestion to build a column list from `system.columns` yourself.
 
-<details open><summary><b>Go</b></summary>
+One thing to know about `system.columns`: it reports the table **as stored**, with nested columns already flattened under `flatten_nested=1`. Compiling from it is therefore shape-faithful exactly when the discovered profile is also declared at the compile. Discover both or neither.
 
-```go
-cols, _ := chtypes.ParseColumnsResult(run(chtypes.QueryTableColumns))
-ddl, _ := lib.ReconstructDDL(cols)
-schema, _ := lib.CompileDDL(ddl, chtypes.WithCompileSettings(profile.Settings))
-```
+## Why the reader rather than your JSON library
 
-</details>
-
-<details><summary><b>Python</b></summary>
-
-```python
-cols = chtypes.parse_columns_result(run(chtypes.QUERY_TABLE_COLUMNS))
-schema = library.compile_ddl(library.reconstruct_ddl(cols), settings=profile.settings)
-```
-
-</details>
-
-<details><summary><b>TypeScript</b></summary>
-
-```ts
-const cols = parseColumnsResult(await run(QUERY_TABLE_COLUMNS));
-const schema = lib.compileDdl(lib.reconstructDdl(cols), { settings: profile.settings });
-```
-
-</details>
-
-<details><summary><b>Rust</b></summary>
-
-```rust
-let cols = chtypes::parse_columns_result(&query(chtypes::QUERY_TABLE_COLUMNS)?)?;
-let schema = lib.compile(&lib.reconstruct_ddl(&cols)?)
-.settings(settings.clone())
-.compile()?;
-```
-
-</details>
-
-Reconstruction hangs off the **loaded library** in all four bindings — resolve the artifact first — because the one thing it spells, the column name, is spelled by ClickHouse's own identifier quoting rather than by a rule in the binding (`docs/reference/bindings.md` §Quoting). It carries `default_kind` and `default_expression` through. **Dropping them silently loses DEFAULT and MATERIALIZED semantics** — the columns are still there, they just stop behaving like themselves, and every preview after that is wrong in a way nothing reports. It is the reason the parsers exist rather than a suggestion to read `system.columns` yourself.
-
-One thing to know about `system.columns`: it reports the table **as stored**, with nested columns already flattened under `flatten_nested=1`. Reconstruction is therefore shape-faithful exactly when the discovered profile is also declared at the compile. Discover both or neither.
-
-## Why the parsers rather than your JSON library
-
-All four read the `JSONEachRow` bytes through their own byte-exact reader, which is not a stylistic preference. `position` survives both quoted and bare spellings without a float round-trip, and numeric fields keep their exact text. A general-purpose JSON parser that turns every number into a double is the wrong tool for reading a report about exact values.
+The answer is `JSONEachRow` bytes with ClickHouse's own renderings (UInt64 positions arrive as quoted strings, and a column name can be any bytes), and the library reads them: you hand the bytes through untouched. Parsing the rows yourself and rebuilding a declaration is exactly the binding-side logic 1.0 deletes. Each name and declaration comes back as bytes ([`reference/bindings-v1.md` §5, `Discovery`](../reference/bindings-v1.md#discovery-from-the-discovery-document)).
 
 ## The payoff: a typo is caught at declare time
 

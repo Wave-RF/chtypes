@@ -276,13 +276,17 @@ if err != nil {
 }
 defer f.Close()
 
-batch, err := schema.RowsExportWith(chtypes.JSONEachRow, body, nil, chtypes.JSONCompactEachRow, chtypes.WithRowFilter(f))
+batch, err := schema.Rows(chtypes.JSONEachRow, body, chtypes.WithExport(chtypes.JSONCompactEachRow), chtypes.WithRowFilter(f))
 // batch.Payload holds the bytes of only the rows whose verdict was 't'
 ```
 
 </details>
 
-Go spells this `RowsExportWith(..., WithRowFilter(filter))` — a new entry point rather than an added option on `RowsExport`, so that call's existing signature never moves. The other three bindings surface the same call through their own idiom for the export channel (`docs/reference/bindings.md`'s shape table); the concept is identical across all four — one call, one parse, a verdict per row, bytes for the `t` rows — even where the exact spelling differs by language.
+In 1.0 this is one `rows` call with two options, `WithExport` and `WithRowFilter` in Go, `export=` and `row_filter=` in Python, `exportFormat` and `rowFilter` in TypeScript, `export` and `filter` in Rust ([`reference/bindings-v1.md` §2, The call options](../reference/bindings-v1.md#the-call-options)). 0.x's `RowsExportWith` and its spellings are deleted ([§7](../reference/bindings-v1.md#7-what-v0-api-is-deleted-and-why)). The concept is identical across all four: one call, one parse, a verdict per row, bytes for the `t` rows.
+
+## A filter answers in the zone it was created in
+
+A filter's zone is its own, fixed when it is compiled: its `WHERE` runs in the zone of the settings (`session_timezone`) the filter was compiled with, the way a server's `SELECT ... WHERE` runs in its own session. The zone in an evaluation's settings decides only how the body is parsed. A filter in one zone over a body parsed in another is an ordinary input, answered the way a server answers it, and never refused. One parsed block can serve many filters compiled under different zones. The rule and the per-binding spellings are [`reference/bindings-v1.md` §2, The call options](../reference/bindings-v1.md#the-call-options).
 
 Each row's document gains `verdict` — the same `t`/`f`/`e`/`d` as above — beside its own parse `outcome`; the two are independent facts, and neither one replaces the other. A row whose own `outcome` is not `accepted` — `skipped`, the row that aborted a strict batch, `accepted_poisoned`, an accepted row missing a stored wire column — is answered `d`, carrying that row's own error; a row the predicate itself declines at evaluation time is also `d`, and both cases add `verdict_code` and `verdict_err` beside `verdict`, exactly as an `e` does. Before the artifact producer's relink served at `chtypes_build` 1790845279, the library left `verdict_code`/`verdict_err` at `0`/`""` on a non-accepted row's `d` verdict — this contract and the library's document now agree, by design. One exception, `reported by the artifact producer` (24.8/25.x only — the only lines where an out-of-domain Enum `DEFAULT` reaches `accepted_poisoned` rather than refusing the `CREATE TABLE`, [`transformations.md`](transformations.md#an-out-of-domain-enum-default-follows-the-server)): an `accepted_poisoned` row's `verdict_err` stays `""`, because that row's own message is itself empty — `verdict_code` still carries the server's readback code (`691` on the 25.x lines). Never read an empty `verdict_err` on a `d` verdict as "nothing is wrong"; read `verdict_code` instead.
 

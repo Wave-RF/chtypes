@@ -6,7 +6,7 @@ The deep layer, under [the guides](../guides/). Most people never need to read i
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | [`go.md`](go.md) · [`python.md`](python.md) · [`ts.md`](ts.md) · [`rust.md`](rust.md) | the per-language API surface                                                                                       |
 | [`artifact.md`](artifact.md)                                                          | the artifact and registry contract: file names, `manifest.json`, platform keys, multi-version layout, verification |
-| [`bindings.md`](bindings.md)                                                          | the API shape every binding implements, and what one must do to claim conformance                                  |
+| [`bindings-v1.md`](bindings-v1.md)                                                    | the API shape every binding implements, and what one must do to claim conformance                                  |
 
 `MUST`, `MUST NOT`, `SHOULD`, `MAY` are RFC 2119. Where a statement is an observation from a specific artifact rather than a rule, it says so and names the artifact.
 
