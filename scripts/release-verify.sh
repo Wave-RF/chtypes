@@ -90,7 +90,7 @@ check_fingerprint() { # got
   [ "$1" = "$want" ] || fail "the binding speaks '$1', include/chtypes.h says '$want'"
 }
 
-# list_and_fetch <chtypes-binary>: steps 2 and 3. Sets $line.
+# list_and_fetch <cli-binary>: steps 2 and 3. Sets $line.
 list_and_fetch() {
   local bin="$1" listing
   listing="$("$bin" list)"
