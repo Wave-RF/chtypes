@@ -12,7 +12,7 @@
 # this script fetches one line through THAT binding's own command line
 # (`chtypes fetch <line>`: resolve over OCI, verify the signed statement, unpack
 # into the cache), so a tour exercises the same fetch path a user gets. The line
-# is $CHPLAY_LINE (default 26.8); $CHPLAY_FETCH_ARGS adds flags to the fetch,
+# is $CHPLAY_LINE (default: the newest line the registry publishes); $CHPLAY_FETCH_ARGS adds flags to the fetch,
 # for example `--offline` on a machine whose cache is already seeded. The cache
 # is the binding's default (${XDG_CACHE_HOME:-~/.cache}/chtypes/v1), or the
 # directory $CHTYPES_CACHE names. The tours need the network only for that
@@ -37,7 +37,36 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Neither is read from include/chtypes.h: ABI v1 has no revision number, and
 # each binding checks its own ABI fingerprint when it loads a library.
 CACHE_ROOT="${CHTYPES_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/chtypes/v1}"
-LINE="${CHPLAY_LINE:-26.8}"
+# Without $CHPLAY_LINE, the line is the newest two-part line the registry
+# publishes, read from its tags/list, so the tours follow what is actually served
+# instead of a number written here (a hard-coded line that a registry does not
+# carry yet would turn the required `examples` job red). The registry is the first
+# base in $CHTYPES_ARTIFACTS_URL, else the default every binding uses. If the
+# listing cannot be read (no network, or an --offline cache), 26.8 is the fallback,
+# and a fetch of a line the registry lacks still fails loudly.
+newest_published_line() {
+  local base="${CHTYPES_ARTIFACTS_URL:-https://registry.wavehouse.dev/chtypes/v1}"
+  base="${base%%,*}"
+  # A client splices /v2/ right after the scheme and authority (fetch-v1.md §2).
+  local scheme="${base%%://*}" rest="${base#*://}"
+  local authority="${rest%%/*}" path="${rest#*/}"
+  [ "$scheme" = "http" ] || [ "$scheme" = "https" ] || return 1
+  curl -fsS --max-time 20 -A "chplay/1" \
+    "$scheme://$authority/v2/$path/tags/list" 2>/dev/null |
+    python3 -c '
+import json, sys
+tags = json.load(sys.stdin).get("tags") or []
+lines = sorted({t for t in tags if t.count(".") == 1 and all(p.isdigit() for p in t.split("."))},
+               key=lambda t: tuple(int(p) for p in t.split(".")))
+print(lines[-1] if lines else "")
+' 2>/dev/null
+}
+if [ -n "${CHPLAY_LINE:-}" ]; then
+  LINE="$CHPLAY_LINE"
+else
+  LINE="$(newest_published_line || true)"
+  [ -n "$LINE" ] || LINE=26.8
+fi
 # Every tour prints this many numbered section banners when it ran in full.
 EXPECTED_SECTIONS=17
 ALL_LANGS=(go python ts rust)

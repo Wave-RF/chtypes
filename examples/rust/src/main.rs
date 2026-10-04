@@ -21,7 +21,7 @@
 //! ```text
 //! chtypes fetch 26.8                  # once, with the CLI (cargo run --bin chtypes -- fetch 26.8)
 //! CHTYPES_AUTOFETCH=1 cargo run       # or let the registry fetch what it lacks
-//! CHTYPES_VERSION=26.8 cargo run      # pick a line (default 26.8)
+//! CHTYPES_VERSION=26.8 cargo run      # pick a line (default: the newest installed)
 //! ../chplay.sh rust                   # the same, with prerequisite checks
 //! ```
 //!
@@ -191,11 +191,42 @@ fn section1() -> (Registry, Arc<Library>) {
         Err(err) => kv("installed", &err.to_string()),
     }
 
-    let want = std::env::var("CHTYPES_VERSION")
+    // $CHTYPES_VERSION picks a line or an exact version; without it, the newest
+    // installed build (numeric order), as the Go, Python and TS tours do.
+    let want = match std::env::var("CHTYPES_VERSION")
         .ok()
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "26.8".to_string());
-    kv("version requested", &want);
+    {
+        Some(v) => {
+            kv(
+                "version requested",
+                &format!("{v}  (from $CHTYPES_VERSION)"),
+            );
+            v
+        }
+        None => {
+            let newest = registry.installed().ok().and_then(|list| {
+                list.iter().map(|r| r.version.clone()).max_by_key(|v| {
+                    v.split('.')
+                        .map(|p| p.parse::<u64>().unwrap_or(0))
+                        .collect::<Vec<u64>>()
+                })
+            });
+            match newest {
+                Some(v) => {
+                    kv(
+                        "version requested",
+                        &format!("{v}  (default: the newest installed; set $CHTYPES_VERSION)"),
+                    );
+                    v
+                }
+                None => fatal(
+                    "nothing is installed. Run `chtypes fetch 26.8` \
+                     (cargo run --bin chtypes -- fetch 26.8), or set CHTYPES_AUTOFETCH=1.",
+                ),
+            }
+        }
+    };
     let lib = match registry.for_version(&want) {
         Ok(l) => l,
         Err(err) => fatal(&format!(
