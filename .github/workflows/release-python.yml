@@ -45,6 +45,20 @@ jobs:
         run: cd python && uv build
       - name: the distributions pass twine check
         run: uvx twine check python/dist/*
+      # The User-Agent assertion: install the BUILT wheel (not the source tree)
+      # into a clean venv and read the constant the fetch layer sends. It runs
+      # on the tag path too, before anything is published.
+      - name: the User-Agent version is the version being tagged
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          tag="${TAG_NAME#python/v}"
+          venv="$RUNNER_TEMP/ua-venv"
+          uv venv --quiet --python 3.13 "$venv"
+          uv pip install --quiet --python "$venv/bin/python" python/dist/*.whl
+          got="$(cd "$RUNNER_TEMP" && "$venv/bin/python" -c 'from chtypes._ocifetch._http import USER_AGENT; print(USER_AGENT)')"
+          echo "User-Agent: $got"
+          [ "$got" = "chtypes-python/$tag" ] || { echo "::error::the wheel's User-Agent is '$got', the tag says chtypes-python/$tag"; exit 1; }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with: { name: python-dist, path: python/dist/ }
   publish:

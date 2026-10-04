@@ -36,6 +36,9 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 		{"verify", "extra"},
 		{"list", "extra"},
 		{"list", "--platform", "linux-arm64"},
+		{"verify", "--platform", "linux-arm64"},
+		{"where", "--platform", "linux-arm64"},
+		{"fetch", "--update", "--lock", "f", "--offline"},
 		{"fetch", "26.8", "--update", "--frozen", "--lock", "x"},
 		{"fetch", "26.8", "--update"},
 		{"where", "extra"},
@@ -90,7 +93,7 @@ func TestVerifyAndListOnAnEmptyCache(t *testing.T) {
 	if code, out, _ := runCLI(t, env, "verify"); code != 0 || out != "" {
 		t.Errorf("verify = %d %q", code, out)
 	}
-	if code, out, _ := runCLI(t, env, "list", "--offline"); code != 0 || !strings.Contains(out, "not read (--offline)") {
+	if code, out, _ := runCLI(t, env, "list", "--offline"); code != 0 || out != "" {
 		t.Errorf("list --offline = %d %q", code, out)
 	}
 }
@@ -125,7 +128,7 @@ func TestFetchVerifyListAgainstTheFixtureTree(t *testing.T) {
 	if code, out, errText = runCLI(t, env, "verify"); code != 0 || out != "" {
 		t.Errorf("verify = %d %q %q", code, out, errText)
 	}
-	if code, out, errText = runCLI(t, env, "list"); code != 0 || !strings.Contains(out, "26.8.15.10") || !strings.Contains(out, "published lines (support unknown)") {
+	if code, out, errText = runCLI(t, env, "list"); code != 0 || !strings.Contains(out, "26.8.15.10") || !strings.Contains(out, "installed 26.8.15.10 ") || !strings.Contains(out, "published 26.8 support unknown\n") {
 		t.Errorf("list = %d %q %q", code, out, errText)
 	}
 
@@ -156,8 +159,17 @@ func TestFetchVerifyListAgainstTheFixtureTree(t *testing.T) {
 
 func TestVersionFlag(t *testing.T) {
 	code, out, _ := runCLI(t, nil, "--version")
-	if code != 0 || strings.TrimSpace(out) == "" {
+	if code != 0 || !strings.HasPrefix(out, "chtypes ") || strings.Count(out, "\n") != 1 || strings.Contains(out, "devel") {
 		t.Errorf("--version = %d %q", code, out)
+	}
+}
+
+func TestHelpIsStdoutAnywhere(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"-h"}, {"fetch", "--help"}, {"list", "26.8", "-h"}} {
+		code, out, errText := runCLI(t, nil, args...)
+		if code != 0 || !strings.HasPrefix(out, "usage:") || errText != "" {
+			t.Errorf("%v = %d stdout %q stderr %q", args, code, out, errText)
+		}
 	}
 }
 
@@ -168,7 +180,7 @@ func TestListOfflineIsInstalledOnly(t *testing.T) {
 		t.Fatal(e)
 	}
 	code, out, _ := runCLI(t, env, "list", "--offline")
-	if code != 0 || !strings.Contains(out, "26.8.15.10") || strings.Contains(out, "published lines") {
+	if code != 0 || !strings.Contains(out, "installed 26.8.15.10 ") || strings.Contains(out, "published") {
 		t.Errorf("list --offline = %d %q", code, out)
 	}
 }

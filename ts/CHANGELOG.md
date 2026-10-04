@@ -6,6 +6,17 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-10-04
+
+The TypeScript binding's first v1 release, and a deliberate break from 0.x. The default branch switches to v1 shortly after release. The sections below are the entries written as each part landed; this is what they add up to.
+
+- **A new ABI.** The binding speaks the generated ABI v1 layer, identified by an ABI fingerprint in `include/chtypes.h` rather than a revision number, so every FFI declaration is generated from `spec/abi-v1/abi.json`, not written by hand. The ABI stays provisional until the maintainer confirms it.
+- **Fetch over OCI, with signed statements.** Libraries are fetched from an OCI registry and verified against a signed statement before they are loaded; the default trust is the release key only (`docs/guides/fetch-v1.md`).
+- **The public API is `docs/reference/bindings-v1.md`**, the same four-binding contract with each language's own spelling.
+- **The CLI** is the `chtypes` bin (`dist/cli.js`): `fetch`, `verify`, `list` and `where`.
+- **The v0 surface is removed**; the list, and the reason for each removal, is `docs/reference/bindings-v1.md` section 7.
+- **Known gaps** are listed in [`docs/limitations.md`](../docs/limitations.md#known-gaps-in-10), and support for a line this release does not mention is "support unknown", never "unsupported".
+
 ### Changed (v1: breaking)
 
 - **The public API is rebuilt over the ABI v1 generated layer** (`docs/reference/bindings-v1.md`). `setup()` replaces the registry timezone option; `Registry.open()`, `for()` and `installed()` are async and resolve through the fetch layer; `compileTable` takes exactly one `CREATE TABLE` statement; every name, SQL text, message and rendered value is a `Buffer`; the four call errors (`SchemaError`, `UnsupportedError`, `UsageError`, `InternalError`) carry the library's five error fields, under the abstract `CallError`; the loader's refusals are `ArtifactIncompatibleError` and `ArtifactCorruptError`, one family with the fetch layer's errors.

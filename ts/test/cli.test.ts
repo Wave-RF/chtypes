@@ -57,7 +57,12 @@ describe('usage', () => {
     expect(help.out).toContain('chtypes fetch');
     const version = await run('--version');
     expect(version.code).toBe(EXIT_OK);
-    expect(version.out).toMatch(/^\d+\.\d+\.\d+/);
+    expect(version.out).toMatch(/^chtypes \d+\.\d+\.\d+\S*\n$/);
+    const anywhere = await run('fetch', '--help');
+    expect(anywhere.code).toBe(EXIT_OK);
+    expect(anywhere.out).toContain('chtypes fetch');
+    expect(anywhere.err).toBe('');
+    expect((await run('fetch', '26.8', '--version')).code).toBe(EXIT_USAGE);
   });
 
   it('refuses contradictory or incomplete fetch arguments as usage errors', async () => {
@@ -72,6 +77,9 @@ describe('usage', () => {
     expect((await run('fetch', '26.8', '-q')).code).toBe(EXIT_USAGE);
     expect((await run('fetch', '26.8', '--base', 'x')).code).toBe(EXIT_USAGE);
     expect((await run('-V')).code).toBe(EXIT_USAGE);
+    for (const command of ['verify', 'list', 'where']) {
+      expect((await run(command, '--platform', 'linux-arm64', '--cache', cache)).code).toBe(EXIT_USAGE);
+    }
   });
 });
 
@@ -88,7 +96,7 @@ describe('commands that touch no network', () => {
     expect(verify.out + verify.err).toBe('');
     const list = await run('list', '--offline', '--cache', cache);
     expect(list.code).toBe(EXIT_OK);
-    expect(list.out).toContain('(nothing)');
+    expect(list.out).toBe('');
   });
 
   it('fetch --offline of something not installed exits with CHTYPES_ARTIFACT_MISSING\'s status', async () => {
@@ -113,7 +121,7 @@ describe('against a static tree', () => {
     writeTags(['26.8', '25.10']);
     const r = await run('list', '--cache', cache);
     expect(r.code).toBe(EXIT_OK);
-    expect(r.out).toContain('  25.10\n  26.8\n');
+    expect(r.out).toBe('published 25.10 support unknown\npublished 26.8 support unknown\n');
   });
 
   it('a tag nobody published exits with CHTYPES_ARTIFACT_UNPUBLISHED\'s status', async () => {

@@ -190,6 +190,14 @@ jobs:
       # own escaping and gating logic against fabricated input only.
       - name: "selftest — scripts/lib/gha_annotate.py's escaping, titles and the unknown-annotation shape"
         run: python3 scripts/lib/gha_annotate.py --selftest
+      # scripts/check-cli-parity.sh holds the four chtypes command lines to one
+      # expectation file (scripts/cli-parity/expected.txt); each binding's own
+      # job runs it against its real CLI. This is its selftest, which needs no
+      # toolchain: a fake CLI that follows the contract must match, and each
+      # planted mismatch (help on stderr, a bare version, a list header, a
+      # --platform that list accepts) must be caught.
+      - name: selftest — the CLI parity check passes a conforming CLI and catches each planted mismatch
+        run: scripts/check-cli-parity.sh --selftest
       # scripts/check-selftests-wired.py is the static check that catches the
       # NEXT unwired selftest before it repeats the three above: every script
       # under scripts/ that declares a --selftest mode must be invoked with it
@@ -262,6 +270,8 @@ jobs:
         run: scripts/check-standalone.sh --selftest
       - name: standalone check — a bare copy builds, the linked API is absent, the suite's census
         run: scripts/check-standalone.sh --no-artifacts
+      - name: CLI parity — this binding's chtypes command line matches the shared expectation
+        run: scripts/check-cli-parity.sh go
       # The census JSON is diagnostic: it is how a failure is READ, never how a
       # verdict is reached — scripts/check-standalone.sh already decided, and
       # this job's result does not depend on the upload landing. So the upload
@@ -304,6 +314,8 @@ jobs:
           uv run python -c 'import chtypes; print("chtypes", chtypes.__version__)'
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts python
+      - name: CLI parity — this binding's chtypes command line matches the shared expectation
+        run: scripts/check-cli-parity.sh python
 
   ts:
     name: "ts — build, typecheck, suite (no artifacts)"
@@ -326,6 +338,8 @@ jobs:
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts ts
+      - name: CLI parity — this binding's chtypes command line matches the shared expectation
+        run: scripts/check-cli-parity.sh ts
 
   rust:
     name: "rust — build, clippy, fmt, suite (no artifacts)"
@@ -342,6 +356,8 @@ jobs:
         run: cd rust && cargo test --locked --no-default-features && cargo clippy --locked --all-targets --no-default-features -- -D warnings
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts rust
+      - name: CLI parity — this binding's chtypes command line matches the shared expectation
+        run: scripts/check-cli-parity.sh rust
 
   examples:
     name: "examples — every binding's tour runs every section (skips by name until enrolled)"
