@@ -31,7 +31,15 @@ for x in rust ts python go; do
 done
 ```
 
-A dry run does everything the tag path does up to the publish, and skips the publish and the post-publish `verify` job (which installs the PUBLISHED package and so cannot run before it exists). Read every run's STEP conclusions, not just the run's: a run is green only when each step before the skip ran and passed.
+A dry run does everything the tag path does up to the publish, skips the publish, and then RUNS the post-publish verify steps against the package the dry run built (the wheel, the packed tarball, `cargo install --path`, the local Go module through a `replace`) instead of the registry. Only the registry-lag retry loop is skipped. The verify steps are one script, `scripts/release-verify.sh`, shared by the tag path and the dry run so they cannot drift: they assert the binding's ABI fingerprint, run that CLI's `chtypes list` against the production registry, parse the newest published two-part line from the `published <spelling> support unknown` rows (the only column read is the second), fetch it, load it through the public API and assert the loaded `abi_fingerprint`. The `--selftest` of that script pins the parser against the CLI's flat output format. Read every run's STEP conclusions, not just the run's: a run is green only when each step ran and passed, the verify steps included. The parser was once proved only after an irreversible publish (the first `rust/v1.0.0` verify failed on a stale parser), which is why a dry run now runs it.
+
+**Verify only.** To re-run the post-publish check against a version that is already published, without publishing anything:
+
+```sh
+gh workflow run release-rust.yml --ref v1 -f tag=rust/v1.0.0 -f verify_only=true
+```
+
+`verify_only=true` skips the publish job entirely (it wins over `dry_run`), installs the version the `tag` input names from the public registry with the retry loop, and runs the same steps. A tag push is unchanged: publish, then verify against the registry.
 
 **The User-Agent assertion.** The fetch layer sends `chtypes-<language>/<version>`, and the version is read at a different place in each binding, so each release workflow asserts that the version in the User-Agent equals the version being tagged, in the dry run AND on the tag path, before anything is published:
 
