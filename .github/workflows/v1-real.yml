@@ -1,0 +1,430 @@
+name: v1-real
+
+# The four bindings against a REAL delivery host, never only the local
+# registry:2 fixture. Two real-host defects (an agent check in front of the
+# host, and an unencoded "+" in a query the host decodes as a space) were found
+# only this way. Each leg runs on a clean cache:
+#
+#   (a) build the binding's CLI, then fetch <version>, verify, list, where;
+#   (b) the binding's tour through examples/chplay.sh --require-all, which must
+#       print all 17 sections;
+#   (c) the loaded library's build_info, which must carry CHS_ABI_FINGERPRINT
+#       from include/chtypes.h.
+#
+# The verdict job writes one table: binding x platform. With `goldens` set
+# (the default) the goldens jobs below also run, per binding x platform, and
+# the goldens verdict gates on the wire kind. Dispatch-only; hosted runners,
+# no secrets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_base:
+        description: "The https base of the registry to fetch from, repository path included."
+        required: false
+        type: string
+        default: "https://registry-staging.wavehouse.dev/chtypes/v1"
+      line:
+        description: "The release line the tours fetch and open, for example 26.9."
+        required: false
+        type: string
+        default: "26.9"
+      version:
+        description: "The exact four-part ClickHouse version the release carries."
+        required: false
+        type: string
+        default: "26.9.8.3"
+      goldens:
+        description: "Also run every binding's goldens runner on every platform the goldens document was checked on, and judge them with the one comparator."
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v1-real-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REGISTRY_BASE: ${{ inputs.registry_base || 'https://registry-staging.wavehouse.dev/chtypes/v1' }}
+  LINE: ${{ inputs.line || '26.9' }}
+  VERSION: ${{ inputs.version || '26.9.8.3' }}
+
+jobs:
+  v1-real-leg:
+    name: "v1-real (${{ matrix.binding }}, ${{ matrix.platform }})"
+    runs-on: ${{ fromJSON('{"linux-amd64":"ubuntu-latest","linux-arm64":"ubuntu-24.04-arm","darwin-arm64":"macos-14"}')[matrix.platform] }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        binding: [go, python, ts, rust]
+        platform: [linux-amd64, linux-arm64, darwin-arm64]
+    env:
+      CHTYPES_ARTIFACTS_URL: ${{ inputs.registry_base || 'https://registry-staging.wavehouse.dev/chtypes/v1' }}
+      CHPLAY_LINE: ${{ inputs.line || '26.9' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: an empty cache, and where the CLI wrapper and the logs go
+        run: |
+          mkdir -p "$RUNNER_TEMP/cache" "$RUNNER_TEMP/bin" "$RUNNER_TEMP/logs"
+          {
+            echo "CHTYPES_CACHE=$RUNNER_TEMP/cache"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "CLI=$RUNNER_TEMP/bin/chtypes"
+          } >> "$GITHUB_ENV"
+      - if: matrix.binding == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - if: matrix.binding == 'python'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+      - if: matrix.binding == 'ts'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - if: matrix.binding == 'ts'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - if: matrix.binding == 'rust'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
+      - name: what this leg runs against
+        run: |
+          echo "registry: $CHTYPES_ARTIFACTS_URL  line: $CHPLAY_LINE  version: $VERSION  binding: ${{ matrix.binding }}  platform: ${{ matrix.platform }}"
+          uname -sm
+      - name: build the binding's CLI
+        id: build
+        run: |
+          case "${{ matrix.binding }}" in
+            go)
+              (cd go && go build -o "$CLI" ./cmd/chtypes) ;;
+            python)
+              (cd python && uv sync --locked)
+              printf '#!/usr/bin/env bash\nexec uv run --locked --project "%s/python" python -m chtypes "$@"\n' "$PWD" > "$CLI"
+              chmod +x "$CLI" ;;
+            ts)
+              (cd ts && pnpm install --frozen-lockfile && pnpm build)
+              printf '#!/usr/bin/env bash\nexec node "%s/ts/dist/cli.js" "$@"\n' "$PWD" > "$CLI"
+              chmod +x "$CLI" ;;
+            rust)
+              (cd rust && cargo build --locked --bin chtypes)
+              printf '#!/usr/bin/env bash\nexec "%s/rust/target/debug/chtypes" "$@"\n' "$PWD" > "$CLI"
+              chmod +x "$CLI" ;;
+          esac
+          "$CLI" --version
+      - name: "(a1) chtypes fetch <version>"
+        id: fetch
+        continue-on-error: true
+        run: |
+          "$CLI" fetch "$VERSION" 2>&1 | tee "$LOGS/fetch.log"
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: "(a2) chtypes verify"
+        id: verify
+        continue-on-error: true
+        run: |
+          "$CLI" verify 2>&1 | tee "$LOGS/verify.log"
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: "(a3) chtypes list shows the version among the published lines"
+        id: list
+        continue-on-error: true
+        run: |
+          "$CLI" list 2>&1 | tee "$LOGS/list.log"
+          test "${PIPESTATUS[0]}" -eq 0
+          command grep -F -- "$VERSION" "$LOGS/list.log" || { echo "::error::$VERSION is not in the chtypes list output"; exit 1; }
+      - name: "(a4) chtypes where"
+        id: where
+        continue-on-error: true
+        run: |
+          "$CLI" where 2>&1 | tee "$LOGS/where.log"
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: "(b) the tour through chplay --require-all, all 17 sections"
+        id: tour
+        continue-on-error: true
+        env:
+          CHTYPES_VERSION: ${{ inputs.version || '26.9.8.3' }}
+        run: |
+          set +e
+          examples/chplay.sh --require-all ${{ matrix.binding }} > "$LOGS/tour.log" 2>&1
+          rc=$?
+          set -e
+          cat "$LOGS/tour.log"
+          echo "chplay exit status: $rc"
+          test "$rc" -eq 0 || exit 1
+          # A tour can finish all 17 banners while a section quietly gave up
+          # (the discovery section did, against the real library). Name those.
+          python3 - <<'PY'
+          import os, re, sys
+          lines = open(os.environ["LOGS"] + "/tour.log", errors="replace").read().splitlines()
+          gave_up = [l for l in lines if re.search(r"did not match what this build reads|discover_columns +refused|^playground: ", l)]
+          n = sum(1 for l in lines if l.startswith("=== "))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"sections={n}\n")
+          print(f"sections printed: {n} of 17")
+          for l in gave_up:
+              print("gave up: " + l)
+          if gave_up:
+              print("::error::a section gave up against the real library (lines above)")
+              sys.exit(1)
+          if n < 17:
+              print(f"::error::only {n} of 17 sections printed")
+              sys.exit(1)
+          PY
+      - name: "(c) the loaded library's build_info carries the header's ABI fingerprint"
+        id: fingerprint
+        continue-on-error: true
+        run: |
+          want=$(sed -n 's/^#define CHS_ABI_FINGERPRINT "\(.*\)"$/\1/p' include/chtypes.h)
+          [ -n "$want" ] || { echo "::error::no CHS_ABI_FINGERPRINT in include/chtypes.h"; exit 1; }
+          echo "header: $want"
+          echo "--- what the tour printed about the library (section 1)"
+          command grep -iE 'library reports|^ *build|built for|fingerprint|signed by|opened from|loaded from|^ *path' "$LOGS/tour.log" | head -12 || true
+          # Go and Rust print the whole fingerprint; Python and TypeScript print a
+          # prefix (at least 16 hex digits). The loader already compared the full
+          # value against the binding's pinned constant before it opened the library.
+          got=$(command grep -iE 'fingerprint' "$LOGS/tour.log" | command grep -oE 'sha256:[0-9a-f]+' | head -1 || true)
+          [ -n "$got" ] || { echo "::error::the tour printed no fingerprint"; exit 1; }
+          echo "tour:   $got"
+          [ "${#got}" -ge 23 ] || { echo "::error::fingerprint too short to compare: $got"; exit 1; }
+          case "$want" in
+            "$got"*) echo "fingerprint matches ($(( ${#got} - 7 )) of 64 hex digits shown by this binding's tour)" ;;
+            *) echo "::error::fingerprint differs: tour $got, header $want"; exit 1 ;;
+          esac
+          command grep -F -- "$VERSION" "$LOGS/tour.log" > /dev/null || { echo "::error::the tour never named $VERSION"; exit 1; }
+      - name: record this leg
+        if: always()
+        run: |
+          printf '{"binding":"%s","platform":"%s","fetch":"%s","verify":"%s","list":"%s","where":"%s","tour":"%s","sections":"%s","fingerprint":"%s"}\n' \
+            "${{ matrix.binding }}" "${{ matrix.platform }}" \
+            "${{ steps.fetch.outcome }}" "${{ steps.verify.outcome }}" "${{ steps.list.outcome }}" "${{ steps.where.outcome }}" \
+            "${{ steps.tour.outcome }}" "${{ steps.tour.outputs.sections }}" "${{ steps.fingerprint.outcome }}" \
+            > "$LOGS/leg.json"
+          cat "$LOGS/leg.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: leg-${{ matrix.binding }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+      - name: this leg fails unless every measured step succeeded
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          d = json.load(open(os.environ["LOGS"] + "/leg.json"))
+          bad = [k for k in ("fetch", "verify", "list", "where", "tour", "fingerprint") if d[k] != "success"]
+          if bad:
+              print("::error::steps not green: " + ", ".join(bad))
+              sys.exit(1)
+          PY
+
+  v1-real-verdict:
+    name: "v1-real-verdict — binding x platform"
+    needs: [v1-real-leg]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          pattern: "leg-*"
+          path: ${{ runner.temp }}/legs
+      - name: one table, and a failure unless all twelve legs are green
+        run: |
+          python3 - <<'PY'
+          import glob, json, os, sys
+          rows = {}
+          for f in glob.glob(os.environ["RUNNER_TEMP"] + "/legs/*/leg.json"):
+              d = json.load(open(f))
+              rows[(d["binding"], d["platform"])] = d
+          out = [
+              f"### v1 real-host run: {os.environ['REGISTRY_BASE']}, version {os.environ['VERSION']}, line {os.environ['LINE']}",
+              "",
+              "| binding | platform | fetch | verify | list | tour sections | fingerprint |",
+              "|---|---|---|---|---|---|---|",
+          ]
+          ok = True
+          for b in ("go", "python", "ts", "rust"):
+              for p in ("linux-amd64", "linux-arm64", "darwin-arm64"):
+                  d = rows.get((b, p))
+                  if d is None:
+                      out.append(f"| {b} | {p} | MISSING | | | | |")
+                      ok = False
+                      continue
+                  sec = (d["sections"] or "0") + "/17"
+                  cells = [d["fetch"], d["verify"], d["list"], f"{d['tour']} ({sec})", d["fingerprint"]]
+                  ok = ok and all(d[k] == "success" for k in ("fetch", "verify", "list", "where", "tour", "fingerprint"))
+                  out.append(f"| {b} | {p} | " + " | ".join(cells) + " |")
+          out += ["", "VERDICT: " + ("all twelve legs green" if ok else "NOT GREEN")]
+          text = "\n".join(out)
+          print(text)
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(text + "\n")
+          sys.exit(0 if ok else 1)
+          PY
+
+  # ---------------------------------------------------------------------------
+  # The goldens (docs/guides/goldens-v1.md), on the same registry. Each leg runs
+  # that binding's runner, which fetches the release and the goldens referrer with
+  # the binding's own fetch layer and records what the library returned.
+  # ---------------------------------------------------------------------------
+  v1-real-goldens:
+    name: "v1-real-goldens (${{ matrix.binding }}, ${{ matrix.platform }})"
+    if: ${{ inputs.goldens }}
+    runs-on: ${{ fromJSON('{"linux-amd64":"ubuntu-latest","linux-arm64":"ubuntu-24.04-arm","darwin-arm64":"macos-14"}')[matrix.platform] }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        binding: [go, python, ts, rust]
+        platform: [linux-amd64, linux-arm64, darwin-arm64]
+    env:
+      CHTYPES_GOLDENS_REGISTRY_BASE: ${{ inputs.registry_base }}
+      CHTYPES_GOLDENS_VERSION: ${{ inputs.version }}
+      CHTYPES_GOLDENS_PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: where the runner writes its report and the document it fetched
+        run: |
+          mkdir -p "$RUNNER_TEMP/gout"
+          {
+            echo "CHTYPES_GOLDENS_REPORT=$RUNNER_TEMP/gout/goldens-report-${{ matrix.binding }}.json"
+            echo "CHTYPES_GOLDENS_DOCUMENT=$RUNNER_TEMP/gout/goldens-document-${{ matrix.binding }}.json"
+          } >> "$GITHUB_ENV"
+      - if: matrix.binding == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - if: matrix.binding == 'python'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+      - if: matrix.binding == 'ts'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - if: matrix.binding == 'ts'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - if: matrix.binding == 'rust'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
+      - name: install the binding's dependencies
+        run: |
+          case "${{ matrix.binding }}" in
+            go) (cd go && go mod download) ;;
+            python) (cd python && uv sync --locked --group dev) ;;
+            ts) (cd ts && pnpm install --frozen-lockfile) ;;
+            rust) (cd rust && cargo fetch --locked) ;;
+          esac
+      - name: run the binding's goldens runner
+        run: |
+          # shellcheck disable=SC2016 # the commands are expanded by the bash -c below
+          case "${{ matrix.binding }}" in
+            go)     cmd='cd go && go test -count=1 -run ^TestGoldensV1Runner$ ./chtypes/' ;;
+            python) cmd='cd python && uv run pytest -q tests/goldens_v1/test_runner.py' ;;
+            ts)     cmd='cd ts && pnpm exec vitest run test/goldens-v1/runner.test.ts' ;;
+            rust)   cmd='cd rust && cargo test --locked --features fetch-v1 --test goldens_v1_runner' ;;
+          esac
+          set +e
+          bash -c "$cmd" > "$RUNNER_TEMP/runner.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/runner.log"
+          python3 - "$rc" <<'PY'
+          import os, sys
+          rc = int(sys.argv[1])
+          log = open(os.environ["RUNNER_TEMP"] + "/runner.log", errors="replace").read()
+          if rc != 0 and "UNPUBLISHED" in log:
+              print("::error title=no goldens attached::the registry answered UNPUBLISHED for the goldens referrer of this release; no goldens are attached to it, so there is nothing to judge")
+          sys.exit(1 if rc != 0 else 0)
+          PY
+      - name: the runner wrote both files it owes
+        run: |
+          for f in "$CHTYPES_GOLDENS_REPORT" "$CHTYPES_GOLDENS_DOCUMENT"; do
+            [ -s "$f" ] || { echo "::error::the runner did not write $f"; exit 1; }
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: goldens-${{ matrix.binding }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/gout
+          if-no-files-found: ignore
+
+  v1-real-goldens-verdict:
+    name: "v1-real-goldens-verdict — one comparator per platform; the gate is the wire kind"
+    needs: [v1-real-goldens]
+    if: ${{ always() && inputs.goldens }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - name: download every runner's report and document
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          pattern: "goldens-*"
+          path: ${{ runner.temp }}/goldens
+      - name: judge each platform (full result printed; the exit status is the wire kind)
+        run: |
+          d="$RUNNER_TEMP/goldens"
+          gate=0
+          {
+            echo "### v1 goldens against $REGISTRY_BASE, version $VERSION"
+            echo
+            echo "The gate is the wire kind. The full result, every kind, is printed below it and is never hidden."
+          } >> "$GITHUB_STEP_SUMMARY"
+          for p in linux-amd64 linux-arm64 darwin-arm64; do
+            doc=$(ls "$d"/goldens-go-"$p"/goldens-document-go.json 2>/dev/null || true)
+            reports=()
+            for b in go python ts rust; do
+              [ -f "$d/goldens-$b-$p/goldens-report-$b.json" ] && reports+=(--report "$d/goldens-$b-$p/goldens-report-$b.json")
+            done
+            {
+              echo
+              echo "#### $p"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            if [ -z "$doc" ]; then
+              echo "no goldens document for $p: the go leg did not fetch one (no goldens attached, or the leg failed before fetching)" | tee -a "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::$p: no goldens document"
+              gate=1
+              continue
+            fi
+            set +e
+            echo "--- all kinds (informational)" | tee -a "$GITHUB_STEP_SUMMARY"
+            uv run --no-project --python 3.11 --with 'jsonschema==4.23.0' scripts/goldens-v1/compare.py \
+              --goldens "$doc" "${reports[@]}" --require-bindings go,python,ts,rust --schema-validate 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "--- the gate: wire" | tee -a "$GITHUB_STEP_SUMMARY"
+            uv run --no-project --python 3.11 --with 'jsonschema==4.23.0' scripts/goldens-v1/compare.py \
+              --goldens "$doc" "${reports[@]}" --require-bindings go,python,ts,rust --schema-validate --kinds wire 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+            rc="${PIPESTATUS[0]}"
+            set -e
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::$p: the wire kind is not green"
+              gate=1
+            fi
+          done
+          exit "$gate"

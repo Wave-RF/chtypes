@@ -102,10 +102,10 @@ const (
 // server), so they are plain values here.
 const (
 	cannedServerVersion = "25.8.28.1"
-	cannedColumnsResult = `{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT","default_expression":"now64(3)","position":"1"}` + "\n" +
-		`{"name":"device_id","type":"UInt32","default_kind":"","default_expression":"","position":"2"}` + "\n" +
-		`{"name":"reading c","type":"Float64","default_kind":"","default_expression":"","position":"3"}` + "\n" +
-		`{"name":"note","type":"String","default_kind":"DEFAULT","default_expression":"'unset'","position":"4"}` + "\n"
+	cannedColumnsResult = `{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT","default_expression":"now64(3)"}` + "\n" +
+		`{"name":"device_id","type":"UInt32","default_kind":"","default_expression":""}` + "\n" +
+		`{"name":"reading c","type":"Float64","default_kind":"","default_expression":""}` + "\n" +
+		`{"name":"note","type":"String","default_kind":"DEFAULT","default_expression":"'unset'"}` + "\n"
 )
 
 // setupDefaults is the process-wide default settings layer (section 9). It is
