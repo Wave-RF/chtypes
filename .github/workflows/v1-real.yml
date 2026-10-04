@@ -155,8 +155,13 @@ jobs:
         env:
           CHTYPES_VERSION: ${{ inputs.version || '26.9.8.3' }}
         run: |
-          examples/chplay.sh --require-all ${{ matrix.binding }} 2>&1 | tee "$LOGS/tour.log"
-          test "${PIPESTATUS[0]}" -eq 0
+          set +e
+          examples/chplay.sh --require-all ${{ matrix.binding }} > "$LOGS/tour.log" 2>&1
+          rc=$?
+          set -e
+          cat "$LOGS/tour.log"
+          echo "chplay exit status: $rc"
+          test "$rc" -eq 0
           # A tour can finish all 17 banners while a section quietly gave up
           # (the discovery section did, against the real library). Name those.
           if command grep -nE 'did not match what this build reads|discover_columns +refused|^playground: ' "$LOGS/tour.log"; then

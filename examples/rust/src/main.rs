@@ -80,7 +80,7 @@ const NATIVE_CAST: &str = "0301096465766963655f69640655496e743332020000000373657
 
 // Section 11's CANNED answer to the discovery query: shaped like a real
 // server's JSONEachRow answer over `system.columns` (quoted UInt64s and all).
-const CANNED_COLUMNS_RESULT: &[u8] = b"{\"name\":\"ts\",\"type\":\"DateTime64(3)\",\"default_kind\":\"DEFAULT\",\"default_expression\":\"now64(3)\"}\n{\"name\":\"device_id\",\"type\":\"UInt32\",\"default_kind\":\"\",\"default_expression\":\"\",\"position\":\"2\"}\n{\"name\":\"reading c\",\"type\":\"Float64\",\"default_kind\":\"\",\"default_expression\":\"\",\"position\":\"3\"}\n{\"name\":\"note\",\"type\":\"String\",\"default_kind\":\"DEFAULT\",\"default_expression\":\"'unset'\",\"position\":\"4\"}\n";
+const CANNED_COLUMNS_RESULT: &[u8] = b"{\"name\":\"ts\",\"type\":\"DateTime64(3)\",\"default_kind\":\"DEFAULT\",\"default_expression\":\"now64(3)\"}\n{\"name\":\"device_id\",\"type\":\"UInt32\",\"default_kind\":\"\",\"default_expression\":\"\"}\n{\"name\":\"reading c\",\"type\":\"Float64\",\"default_kind\":\"\",\"default_expression\":\"\"}\n{\"name\":\"note\",\"type\":\"String\",\"default_kind\":\"DEFAULT\",\"default_expression\":\"'unset'\"}\n";
 
 /// One CREATE TABLE statement over `columns`: compile takes exactly one.
 fn ddl(columns: &str) -> String {
