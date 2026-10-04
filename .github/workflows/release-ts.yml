@@ -60,6 +60,27 @@ jobs:
           name="${TAG_NAME#ts/v}"; tag="$name"; ver="$(node -p "require('./ts/package.json').version")"
           [ "$tag" = "$ver" ] || { echo "::error::tag ts/v$tag but package.json says $ver"; exit 1; }
       - run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
+      # The User-Agent assertion: pack the package, unpack the TARBALL (what
+      # npm would serve) and read the constant from its dist, so it proves the
+      # packed `package.json` and `dist` agree. It runs on the tag path too,
+      # before anything is published.
+      - name: the User-Agent version is the version being tagged
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          tag="${TAG_NAME#ts/v}"
+          pack="$RUNNER_TEMP/ua-pack"
+          rm -rf "$pack"; mkdir -p "$pack"
+          (cd ts && pnpm pack --pack-destination "$pack")
+          tar -xzf "$pack"/*.tgz -C "$pack"
+          got="$(node --input-type=module -e "
+            import { pathToFileURL } from 'node:url';
+            import path from 'node:path';
+            const m = await import(pathToFileURL(path.resolve(process.argv[1], 'package/dist/ocifetch/http.js')).href);
+            console.log(m.USER_AGENT);
+          " "$pack")"
+          echo "User-Agent: $got"
+          [ "$got" = "chtypes-ts/$tag" ] || { echo "::error::the tarball's User-Agent is '$got', the tag says chtypes-ts/$tag"; exit 1; }
       - name: publish (dry run)
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
         run: cd ts && pnpm publish --dry-run --access public --no-git-checks

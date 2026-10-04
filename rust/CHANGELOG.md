@@ -6,6 +6,17 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-10-04
+
+The Rust binding's first v1 release, and a deliberate break from 0.x. The default branch switches to v1 shortly after release. The sections below are the entries written as each part landed; this is what they add up to.
+
+- **A new ABI.** The binding speaks the generated ABI v1 layer, identified by an ABI fingerprint in `include/chtypes.h` rather than a revision number, so every FFI declaration is generated from `spec/abi-v1/abi.json`, not written by hand. The ABI stays provisional until the maintainer confirms it.
+- **Fetch over OCI, with signed statements.** Libraries are fetched from an OCI registry and verified against a signed statement before they are loaded; the default trust is the release key only (`docs/guides/fetch-v1.md`).
+- **The public API is `docs/reference/bindings-v1.md`**, the same four-binding contract with each language's own spelling.
+- **The CLI** is the `chtypes` binary of the crate: `fetch`, `verify`, `list` and `where`.
+- **The v0 surface is removed**; the list, and the reason for each removal, is `docs/reference/bindings-v1.md` section 7.
+- **Known gaps** are listed in [`docs/limitations.md`](../docs/limitations.md#known-gaps-in-10), and support for a line this release does not mention is "support unknown", never "unsupported".
+
 ### Changed (v1, breaking)
 
 - **The public API is `docs/reference/bindings-v1.md`.** `chtypes::setup(SetupOptions)` fixes the image zone and the default settings once per process; `Registry::new(RegistryOptions)` opens a version through the v1 fetch layer (`resolve_installed`, then `ensure` when autofetch is on, then loader steps 1 to 7) and memoizes per request; `Registry::for_version`, `installed` and `libraries`; `Library::open_unverified(path, allow)`; `Library::compile_table` takes exactly one `CREATE TABLE` statement; `Schema`, `Filter` and `Block` are `Clone + Send + Sync + 'static`, and a filter or a block holds a counted reference to its schema in the library, so there is no borrow and no free order. Every call takes an options struct with public fields and `Default`. Every byte output is `RawText`.

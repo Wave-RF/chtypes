@@ -17,6 +17,33 @@ This is here because a publish step exiting 0 does not mean anyone can install t
 
 It fetches anonymously on purpose. A registry can show a maintainer a version the public cannot see — `~/.npmrc` carrying a token is what made #10 take three wrong turns to diagnose — so the check is made with no credentials in scope.
 
+## The 1.0.0 release
+
+1.0.0 is tagged **from `v1`**, not from `main`. The release workflows live on `main` and `v1` alike, so a tag pushed at a `v1` commit runs `v1`'s copy of the workflow against `v1`'s tree. The `v1` to `main` merge comes after the maintainer's decision on the held items (public issue #431), and the default branch switches to v1 shortly after release; the release notes say so.
+
+The order is the one below: **`rust/v1.0.0` → `ts/v1.0.0` → `python/v1.0.0` → `go/v1.0.0`**, one at a time, each green before the next. Nobody tags before every dry run is green.
+
+**Dry runs, from `v1`, before any tag.** Each release workflow takes a `workflow_dispatch` with `tag` (the tag NAME to check, nothing is tagged) and `dry_run`:
+
+```sh
+for x in rust ts python go; do
+  gh workflow run "release-$x.yml" --ref v1 -f "tag=$x/v1.0.0" -f dry_run=true
+done
+```
+
+A dry run does everything the tag path does up to the publish, and skips the publish and the post-publish `verify` job (which installs the PUBLISHED package and so cannot run before it exists). Read every run's STEP conclusions, not just the run's: a run is green only when each step before the skip ran and passed.
+
+**The User-Agent assertion.** The fetch layer sends `chtypes-<language>/<version>`, and the version is read at a different place in each binding, so each release workflow asserts that the version in the User-Agent equals the version being tagged, in the dry run AND on the tag path, before anything is published:
+
+| workflow             | what it reads                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `release-go.yml`     | `userAgent()` (from the `bindingVersion` constant), through a throwaway test run inside the package                       |
+| `release-python.yml` | `chtypes._ocifetch._http.USER_AGENT` from the BUILT wheel, installed into a clean venv                                    |
+| `release-ts.yml`     | `USER_AGENT` from `dist/ocifetch/http.js` in the unpacked `pnpm pack` tarball                                             |
+| `release-rust.yml`   | the unit test pinning `user_agent()` to `CARGO_PKG_VERSION` (it must report one pass), and the built binary's `--version` |
+
+A stale Go `bindingVersion` therefore fails the dry run, not a user. There is no ancestry check in any of the four workflows: they check that the tag name and the manifest agree, and nothing about which branch the tag sits on.
+
 ## Before the first tag of each package
 
 1. Bump the manifest version (`python/pyproject.toml`, `ts/package.json`, `rust/Cargo.toml`; Go has none — the tag is the version — so bump `bindingVersion` in `go/internal/ocifetch/useragent.go` instead; it is the version in the fetch layer's `User-Agent`).
