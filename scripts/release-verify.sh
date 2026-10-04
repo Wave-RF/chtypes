@@ -241,7 +241,8 @@ func main() {
 	fmt.Println(lib.BuildInfo().ABIFingerprint)
 }
 GO
-    go mod tidy >/dev/null
+    # -e: tidy considers every build tag, including the retired v0 files (tagged out of the real build) whose imports no longer exist.
+    go mod tidy -e >/dev/null 2>&1 || true
     loaded_ok "$(go run . "$line")"
     ;;
 esac
