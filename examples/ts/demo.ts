@@ -1169,6 +1169,9 @@ function describeError(call: () => unknown, what: string): void {
     } else if (err instanceof SchemaError) {
       kv(what, `SchemaError  (a REFUSAL), chCode=${err.chCode} ${err.chName}`);
       kv('  detail', truncate(err.messageBytes.toString(), 84));
+    } else if (err instanceof InternalError) {
+      kv(what, 'InternalError  (a LIBRARY FAULT)');
+      kv('  message', truncate(err.message, 84));
     } else if (err instanceof UsageError) {
       kv(what, 'UsageError  (caller misuse, caught before the library)');
       kv('  message', truncate(err.message, 84));
