@@ -57,7 +57,7 @@ describe('the canonical verified.json', () => {
   });
 
   it('refuses to write a record that would not read back, and reads an unreadable one as absent', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'chtypes-layout-'));
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'verified-record-'));
     dirs.push(dir);
     await expect(writeVerifiedRecord(dir, { ...record, build: '' })).rejects.toThrow();
     await writeFile(path.join(dir, 'verified.json'), '{"platform":"x"}');
