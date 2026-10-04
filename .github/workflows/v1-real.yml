@@ -157,6 +157,11 @@ jobs:
         run: |
           examples/chplay.sh --require-all ${{ matrix.binding }} 2>&1 | tee "$LOGS/tour.log"
           test "${PIPESTATUS[0]}" -eq 0
+          # A tour can finish all 17 banners while a section quietly gave up
+          # (the discovery section did, against the real library). Name those.
+          if command grep -nE 'did not match what this build reads|discover_columns +refused|^playground: ' "$LOGS/tour.log"; then
+            echo "::error::a section gave up against the real library (lines above)"; exit 1
+          fi
           n=$(command grep -c '^=== ' "$LOGS/tour.log" || true)
           echo "sections=$n" >> "$GITHUB_OUTPUT"
           test "$n" -ge 17 || { echo "::error::only $n of 17 sections printed"; exit 1; }

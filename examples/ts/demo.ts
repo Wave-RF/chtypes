@@ -106,10 +106,10 @@ const BUFFERS_WIDE = '010000000000000001000000000000000800000000000000ffffffff';
 // Section 11's CANNED server answer to the discovery query: shaped like a real
 // ClickHouse's JSONEachRow rows of system.columns, quoted UInt64s and all.
 const CANNED_COLUMNS_RESULT =
-  '{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT","default_expression":"now64(3)","position":"1"}\n' +
-  '{"name":"device_id","type":"UInt32","default_kind":"","default_expression":"","position":"2"}\n' +
-  '{"name":"reading c","type":"Float64","default_kind":"","default_expression":"","position":"3"}\n' +
-  `{"name":"note","type":"String","default_kind":"DEFAULT","default_expression":"'unset'","position":"4"}\n`;
+  '{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT","default_expression":"now64(3)"}\n' +
+  '{"name":"device_id","type":"UInt32","default_kind":"","default_expression":""}\n' +
+  '{"name":"reading c","type":"Float64","default_kind":"","default_expression":""}\n' +
+  `{"name":"note","type":"String","default_kind":"DEFAULT","default_expression":"'unset'"}\n`;
 
 async function main(): Promise<void> {
   // The process setup is chosen once, before the first open (section 1).

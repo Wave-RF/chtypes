@@ -64,7 +64,7 @@ fetch_go() { (cd "$HERE/../go" && go run ./cmd/chtypes fetch $CHPLAY_FETCH_ARGS 
 # shellcheck disable=SC2086
 fetch_python() { (cd "$HERE/../python" && uv run python -m chtypes fetch $CHPLAY_FETCH_ARGS "$LINE"); }
 # shellcheck disable=SC2086
-fetch_ts() { (cd "$HERE/../ts" && pnpm install --frozen-lockfile --silent && pnpm build >/dev/null && pnpm exec chtypes fetch $CHPLAY_FETCH_ARGS "$LINE"); }
+fetch_ts() { (cd "$HERE/../ts" && pnpm install --frozen-lockfile --silent && pnpm build >/dev/null && node dist/cli.js fetch $CHPLAY_FETCH_ARGS "$LINE"); }
 # shellcheck disable=SC2086
 fetch_rust() { (cd "$HERE/../rust" && cargo run --quiet --locked --bin chtypes -- fetch $CHPLAY_FETCH_ARGS "$LINE"); }
 
