@@ -55,12 +55,19 @@ class _Parser(argparse.ArgumentParser):
         raise SystemExit(EXIT_USAGE)
 
 
+def _display_version() -> str:
+    """The package version; an uninstalled or dev build is 0.0.0-dev."""
+    if chtypes_version.startswith("0.0.0+"):
+        return "0.0.0-dev"
+    return chtypes_version
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog="chtypes",
         description="Fetch, verify and locate chtypes artifacts (docs/guides/fetch-v1.md).",
     )
-    parser.add_argument("--version", action="version", version=f"chtypes {chtypes_version}")
+    parser.add_argument("--version", action="version", version=f"chtypes {_display_version()}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
     sub.required = True
 
@@ -234,18 +241,11 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 def _cmd_list(args: argparse.Namespace) -> int:
     options = FetchOptions(cache_dir=args.cache, offline=args.offline)._to_options()
     installed = fetch_layer.list_installed(options)
-    sys.stdout.write(f"installed ({resolve_cache_root(args.cache)}):\n")
-    if not installed:
-        sys.stdout.write("  (nothing)\n")
     for r in sorted(installed, key=lambda r: (r.version, r.platform)):
-        sys.stdout.write(f"  {r.version:<14} {r.platform:<13} {r.library_path}\n")
+        sys.stdout.write(f"installed {r.version} {r.platform} {r.dir}\n")
     if not args.offline:
-        tags = _published_tags(options)
-        sys.stdout.write("published (support unknown):\n")
-        if not tags:
-            sys.stdout.write("  (nothing)\n")
-        for tag in tags:
-            sys.stdout.write(f"  {tag}\n")
+        for tag in _published_tags(options):
+            sys.stdout.write(f"published {tag} support unknown\n")
     sys.stdout.flush()
     return EXIT_OK
 

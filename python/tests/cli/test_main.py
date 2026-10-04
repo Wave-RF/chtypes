@@ -8,6 +8,7 @@ with the fetch layer's own environment (`CHTYPES_ARTIFACTS_URL`,
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -65,12 +66,14 @@ def test_verify_passes_then_fails_when_the_library_changes(env, capsys) -> None:
 
 def test_list_shows_installed_and_only_version_tags(env, capsys) -> None:
     code, out, _ = run(capsys, "list")
-    assert code == 0 and "(nothing)" in out
-    assert "26.8\n" in out and "26.8.15.10\n" in out
+    assert code == 0 and "installed" not in out
+    assert "published 26.8 support unknown\n" in out
+    assert "published 26.8.15.10 support unknown\n" in out
     assert "v26.8" not in out and "sha256-" not in out
     run(capsys, "fetch", "26.8")
     _, out, _ = run(capsys, "list", "--offline")
-    assert "26.8.15.10" in out and "published" not in out
+    assert out.startswith("installed 26.8.15.10 linux-arm64 ") and "published" not in out
+    assert out.count("\n") == 1
 
 
 def test_fetch_all_takes_every_published_line(env, capsys) -> None:
@@ -110,7 +113,16 @@ def test_cache_platform_and_version_flags(env, tmp_path, capsys) -> None:
     assert code == 0 and out.startswith(str(other)), err
     assert run(capsys, "fetch", "26.8", "--platform", "plan9-x")[0] == 2
     assert run(capsys, "verify", "--cache", str(other))[0] == 0
-    assert run(capsys, "--version")[0] == 0
+    code, out, _ = run(capsys, "--version")
+    assert code == 0 and re.fullmatch(r"chtypes \S+\n", out) and "+unknown" not in out
+    for command in ("verify", "list", "where"):
+        assert run(capsys, command, "--platform", "linux-arm64")[0] == 2
+
+
+def test_help_is_stdout_exit_zero(env, capsys) -> None:
+    for argv in (("--help",), ("-h",), ("fetch", "--help"), ("list", "-h")):
+        code, out, err = run(capsys, *argv)
+        assert code == 0 and "usage:" in out and err == "", argv
 
 
 def test_frozen_without_a_pin_is_artifact_pinned(env, capsys) -> None:

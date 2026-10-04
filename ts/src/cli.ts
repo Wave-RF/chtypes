@@ -76,7 +76,7 @@ const USAGE = `usage: chtypes <command> [options]
   --update    re-resolve every request the lock holds and rewrite it (requires --lock; not with --frozen or --offline)
   --platform  <os>-<arch>: linux-amd64, linux-arm64 or darwin-arm64 (default: this host, or CHTYPES_TARGET)
   --cache     the cache root (default: CHTYPES_CACHE, else \${XDG_CACHE_HOME:-~/.cache}/chtypes/v1)
-  -h, --help  this text;  --version  the package version
+  -h, --help  this text;  --version  "chtypes <version>"
 
 the registry base comes only from CHTYPES_ARTIFACTS_URL (default: the public registry)
 
@@ -118,6 +118,12 @@ class CliUsageError extends Error {}
  * is printed to stderr and mapped to its status.
  */
 export async function runCli(argv: readonly string[], io: CliIo = defaultIo): Promise<number> {
+  // -h and --help print the usage to stdout and exit 0 wherever they appear.
+  const dashDash = argv.indexOf('--');
+  if ((dashDash < 0 ? argv : argv.slice(0, dashDash)).some((a) => a === '-h' || a === '--help')) {
+    io.stdout(USAGE);
+    return EXIT_OK;
+  }
   let parsed: Parsed;
   try {
     parsed = parseArgs({ ...CONFIG, args: [...argv] });
@@ -131,7 +137,11 @@ export async function runCli(argv: readonly string[], io: CliIo = defaultIo): Pr
     return EXIT_OK;
   }
   if (values.version) {
-    io.stdout(`${packageVersion()}\n`);
+    if (argv[0] !== '--version') {
+      io.stderr(`chtypes: --version is a top-level flag\n${USAGE}`);
+      return EXIT_USAGE;
+    }
+    io.stdout(`chtypes ${packageVersion()}\n`);
     return EXIT_OK;
   }
   const [command, ...rest] = positionals;
@@ -253,16 +263,10 @@ async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Pr
 async function cmdList(rest: readonly string[], values: Values, io: CliIo): Promise<number> {
   noArguments('list', rest);
   const options = fetchOptions(values, false);
-  const root = cacheRoot(options.cacheDir);
   const installed = await listInstalled(options);
-  io.stdout(`installed in ${root}:\n`);
-  if (installed.length === 0) io.stdout('  (nothing)\n');
-  for (const r of installed) io.stdout(`  ${r.version.padEnd(14)} ${r.platform.padEnd(13)} build ${r.build}\n`);
+  for (const r of installed) io.stdout(`installed ${r.version} ${r.platform} ${r.dir}\n`);
   if (values.offline) return EXIT_OK;
-  const tags = await listTags(options);
-  io.stdout('published (a tag names a version; whether it has a build for your platform is support unknown until you fetch it):\n');
-  if (tags.length === 0) io.stdout('  (nothing)\n');
-  for (const t of tags) io.stdout(`  ${t}\n`);
+  for (const t of await listTags(options)) io.stdout(`published ${t} support unknown\n`);
   return EXIT_OK;
 }
 
@@ -301,9 +305,9 @@ function report(err: unknown, io: CliIo): number {
 function packageVersion(): string {
   try {
     const pkg = createRequire(import.meta.url)('../package.json') as { version?: string };
-    return pkg.version ?? '0.0.0';
+    return pkg.version ?? '0.0.0-dev';
   } catch {
-    return '0.0.0';
+    return '0.0.0-dev';
   }
 }
 
