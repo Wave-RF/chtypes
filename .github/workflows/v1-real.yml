@@ -162,17 +162,25 @@ jobs:
           cat "$LOGS/tour.log"
           echo "chplay exit status: $rc"
           test "$rc" -eq 0 || exit 1
-          echo "checkpoint: chplay ok"
           # A tour can finish all 17 banners while a section quietly gave up
           # (the discovery section did, against the real library). Name those.
-          if command grep -nE 'did not match what this build reads|discover_columns +refused|^playground: ' "$LOGS/tour.log"; then
-            echo "::error::a section gave up against the real library (lines above)"; exit 1
-          fi
-          echo "checkpoint: no gave-up lines"
-          n=$(command grep -c '^=== ' "$LOGS/tour.log" || true)
-          echo "checkpoint: sections=$n"
-          echo "sections=$n" >> "$GITHUB_OUTPUT"
-          test "$n" -ge 17 || { echo "::error::only $n of 17 sections printed"; exit 1; }
+          python3 - <<'PY'
+          import os, re, sys
+          lines = open(os.environ["LOGS"] + "/tour.log", errors="replace").read().splitlines()
+          gave_up = [l for l in lines if re.search(r"did not match what this build reads|discover_columns +refused|^playground: ", l)]
+          n = sum(1 for l in lines if l.startswith("=== "))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"sections={n}\n")
+          print(f"sections printed: {n} of 17")
+          for l in gave_up:
+              print("gave up: " + l)
+          if gave_up:
+              print("::error::a section gave up against the real library (lines above)")
+              sys.exit(1)
+          if n < 17:
+              print(f"::error::only {n} of 17 sections printed")
+              sys.exit(1)
+          PY
       - name: "(c) the loaded library's build_info carries the header's ABI fingerprint"
         id: fingerprint
         continue-on-error: true
