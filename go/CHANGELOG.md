@@ -6,6 +6,13 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-10-04
+
+### Fixed
+
+- `go mod tidy` failed in every module that depends on this one (#454). Five retained 0.x files were excluded from the build by a custom build tag, but `go mod tidy` considers every build tag except `ignore`, so it resolved their imports, including a package 1.0.0 no longer ships, and left the consumer's `go.sum` incomplete. They now carry `//go:build ignore`, so a consumer's `go mod tidy` (and `go mod tidy -diff`) succeeds with no `-e`. Nothing in the built package changes.
+- The release verification now runs a consumer's `go mod tidy` with no `-e`, in every dry run and after every publish, so this cannot ship again.
+
 ## [1.0.0] — 2026-10-04
 
 The Go binding's first v1 release, and a deliberate break from 0.x. The default branch switches to v1 shortly after release. The sections below are the entries written as each part landed; this is what they add up to.
