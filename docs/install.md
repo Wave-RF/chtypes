@@ -10,7 +10,7 @@ Two steps, in this order: the **binding** for your language, then at least one *
 go get github.com/wave-rf/chtypes/go
 ```
 
-The module path is lowercase — the Go norm — and froze at the first tag; what freezes for the function signatures is in [`support.md`](support.md#pre-10). Import it as:
+The module path is lowercase — the Go norm — and froze at the first tag. Import it as:
 
 ```go
 import "github.com/wave-rf/chtypes/go/chtypes"
@@ -18,7 +18,7 @@ import "github.com/wave-rf/chtypes/go/chtypes"
 
 The default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing, includes no header, and needs no build tree. That is what `go get` gives a consumer, and it is all you need.
 
-**cgo is required to build, and glibc to run.** The package's untagged `import "C"` is a thin layer of C shims over each artifact's `chs_*` function table, so a build needs `CGO_ENABLED=1` and a C compiler on `PATH`. Go switches cgo off by itself when it finds no compiler or is cross-compiling, and the build then fails with `undefined: Registry`, which does not mention cgo. At run time the artifact is a shared object that needs only the C library (`libc`, `libm`, `libpthread`, `librt` and `libdl`) and carries its C++ runtime inside. glibc 2.29 or newer runs every published artifact; from ClickHouse 25.8 on, 2.17 is enough, while 24.8 and 25.3 need 2.29 on `linux-amd64` and 2.27 on `linux-arm64`. So a glibc image such as `gcr.io/distroless/base-debian12` or `debian:bookworm-slim` runs it, while `FROM scratch`, `gcr.io/distroless/static` and musl distributions such as Alpine cannot. Build in a glibc image that has a compiler, such as the Debian-based `golang` images.
+**cgo is required to build, and glibc to run.** The package's untagged `import "C"` is a thin layer of C shims over each artifact's `chs_*` function table, so a build needs `CGO_ENABLED=1` and a C compiler on `PATH`. Go switches cgo off by itself when it finds no compiler or is cross-compiling, and the build then fails with an undefined-name error that does not mention cgo. At run time the artifact is a shared object that needs only the C library and carries its C++ runtime inside. On Linux it needs a glibc at or above the floor the build records in its own signed statement; a host below it is refused at open with `CHTYPES_ARTIFACT_INCOMPATIBLE` ([`support-v1.md`](support-v1.md#platforms)). So a glibc image such as `debian:bookworm-slim` can run it, while `FROM scratch`, `gcr.io/distroless/static` and musl distributions such as Alpine cannot (`inferred` from the loader; musl is support unknown). Build in a glibc image that has a compiler, such as the Debian-based `golang` images.
 
 </details>
 
@@ -30,7 +30,7 @@ uv pip install chtypes    # in a bare venv
 pip install chtypes       # anywhere else
 ```
 
-Pure Python: stdlib `ctypes`, zero dependencies, no build step and no compiler.
+Python 3.11 or newer. The binding is stdlib `ctypes`, with no build step and no compiler. On Python before 3.14 it pulls in one dependency, `backports.zstd`, for the artifact's zstd layer.
 
 </details>
 
@@ -41,9 +41,9 @@ pnpm add @wavehouse/chtypes
 npm install @wavehouse/chtypes
 ```
 
-ESM only. Native calls go through `ffi-rs`, prebuilt for darwin arm64/x64 and linux arm64/x64 (gnu and musl), so there is no build step.
+ESM only, Node 22.21 or newer. Native calls go through `ffi-rs`, prebuilt for darwin arm64/x64 and linux arm64/x64 (gnu and musl), so there is no build step.
 
-⚠️ That is the FFI loader's matrix, not the artifact's. chtypes artifacts are published for **darwin-arm64, linux-amd64 and linux-arm64 only** ([support.md](support.md)). On an Intel Mac or a musl distribution the package installs and `ffi-rs` resolves, and then `chtypes fetch <line>` has nothing to give you.
+⚠️ That is the FFI loader's matrix, not the artifact's. chtypes artifacts are published for **darwin-arm64, linux-amd64 and linux-arm64 only** ([`support-v1.md`](support-v1.md#platforms)). On an Intel Mac or a musl distribution the package installs and `ffi-rs` resolves, and then `chtypes fetch <line>` answers `CHTYPES_ARTIFACT_UNPUBLISHED`.
 
 </details>
 
@@ -53,13 +53,11 @@ ESM only. Native calls go through `ffi-rs`, prebuilt for darwin arm64/x64 and li
 cargo add chtypes
 ```
 
-`cargo add` writes the current version into `Cargo.toml`. Before 1.0 a minor release may break the API, and Cargo's default version requirement never crosses a minor release on its own, so moving to a new one is another `cargo add chtypes`.
-
-The `fetch` feature is on by default and carries the `chtypes` binary, `ensure` and autofetch. `default-features = false` drops it and every dependency it brings, leaving the loader alone.
+Rust 1.87 or newer, edition 2024. The fetch layer and the `chtypes` binary are part of the crate; no feature flag turns them on.
 
 </details>
 
-Version requirements per language, the platforms artifacts are published for, and the ClickHouse lines available are all in [`support.md`](support.md), which is generated from this tree's own manifests and from the release index rather than typed by hand.
+Version requirements per language and the platforms artifacts are published for are in [`support-v1.md`](support-v1.md). The ClickHouse lines that are available are whatever the registry publishes (`chtypes list`); the v1 channel carries no statement of which are supported, so a line's support reads **unknown**, never unsupported.
 
 ## 2. An artifact
 
@@ -72,22 +70,30 @@ npx @wavehouse/chtypes fetch 26.8                                    # TypeScrip
 cargo install chtypes && chtypes fetch 26.8                          # Rust
 ```
 
-That installs into `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>/26.8/` — the per-user cache every binding reads by default, so **one machine set up once serves all four**. `<R>` is the ABI revision the SDK speaks: fetch installs only artifacts built at it, and each revision gets its own directory, so two SDK versions at different revisions never overwrite each other's artifacts (an install from before this layout is not migrated; the first fetch after upgrading downloads again). `$CHTYPES_REGISTRY` overrides where it goes and where it is looked for.
+A spelling is two, three or four parts (`26.8`, `26.8.15`, `26.8.15.10`), with no `v` prefix and no channel suffix. The command installs into the per-user OCI cache `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/`, which every binding reads by default, so **one machine set up once serves all four**. `CHTYPES_CACHE` overrides the cache directory, and `chtypes where` prints the one in use. `CHTYPES_REGISTRY`, which the previous generation used, is retired: set, it warns once and is otherwise ignored.
 
-Before anything lands, the command checks an ed25519 signature over the release and the sha256 of every byte. `fetch --all` takes every line the release publishes for this platform; `verify`, `list` and `where` are the other three subcommands. [`guides/artifacts.md`](guides/artifacts.md) has the whole story, including pinning for CI.
+Before anything lands, the command verifies a Sigstore bundle signed under the release key and the digest of every byte. `fetch --all` takes every line the registry publishes for this platform; `verify`, `list` and `where` are the other three subcommands. [`guides/artifacts.md`](guides/artifacts.md) has the whole story, including pinning for CI with `--lock` and `--frozen`.
 
 Pick a line you actually need. Each artifact is 160–300 MB on disk and about 120 MB resident once loaded, so fetch the versions your deployments run rather than all of them.
+
+**Or let the first open fetch it.** A registry fetches a missing version on demand when its `autofetch` option is on, or when `CHTYPES_AUTOFETCH=1` is set for the process. It is off by default, because a production process should not begin a 250 MB download inside a request.
 
 ## Check it worked
 
 <details open><summary><b>Go</b></summary>
 
 ```go
-reg, err := chtypes.NewRegistry("")   // "" = walk the search path
+reg, err := chtypes.NewRegistry() // opens nothing
 if err != nil {
 	log.Fatal(err)
 }
-fmt.Println(reg.Versions())           // [24.8 25.3 26.8 …]
+installed, err := reg.Installed()
+if err != nil {
+	log.Fatal(err)
+}
+for _, r := range installed {
+	fmt.Println(r.Version, r.Platform) // 26.8.15.10 linux-arm64
+}
 ```
 
 </details>
@@ -97,7 +103,8 @@ fmt.Println(reg.Versions())           // [24.8 25.3 26.8 …]
 ```python
 from chtypes import Registry
 
-print(Registry().versions())   # ('24.8', '25.3', '26.8', …)
+for r in Registry().installed():
+    print(r.version, r.platform)   # 26.8.15.10 linux-arm64
 ```
 
 </details>
@@ -107,7 +114,10 @@ print(Registry().versions())   # ('24.8', '25.3', '26.8', …)
 ```ts
 import { Registry } from '@wavehouse/chtypes';
 
-console.log(new Registry().versions());   // [ '24.8', '25.3', '26.8', … ]
+const registry = await Registry.open();   // opens nothing
+for (const r of await registry.installed()) {
+  console.log(r.version, r.platform);     // 26.8.15.10 linux-arm64
+}
 ```
 
 </details>
@@ -115,14 +125,17 @@ console.log(new Registry().versions());   // [ '24.8', '25.3', '26.8', … ]
 <details><summary><b>Rust</b></summary>
 
 ```rust
-use chtypes::Registry;
+use chtypes::{Registry, RegistryOptions};
 
-println!("{:?}", Registry::from_search_path().versions());   // ["24.8", "25.3", "26.8", …]
+let registry = Registry::new(RegistryOptions::default())?;   // opens nothing
+for r in registry.installed()? {
+    println!("{} {}", r.version, r.platform);                // 26.8.15.10 linux-arm64
+}
 ```
 
 </details>
 
-An empty list means no artifact is installed where the binding is looking. Asking for a version you do not have is a deliberately loud error naming every directory it searched and the command that would fix it — see [the one error](guides/artifacts.md#the-one-error).
+An empty list means no artifact is installed where the binding is looking. Asking for a version you do not have is a deliberately loud error naming the request and the platform, and the command that would fix it — see [the one error](guides/artifacts.md#the-one-error).
 
 ## Working against a checkout
 
@@ -174,8 +187,8 @@ chtypes = { path = "../chtypes/rust" }
 
 </details>
 
-An artifact built locally by the artifact producer's pipeline and placed in the same per-user cache directory (`abi<R>/<os>-<arch>`, or wherever `$CHTYPES_REGISTRY` points) is interchangeable with a fetched release to every binding at that revision.
+A library you built yourself, for example the artifact producer's own unpublished build, is not reachable through a registry. Open it by path with `open_unverified`, which refuses unless you both pass its `allow` argument and set `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1` ([`reference/bindings-v1.md` §6](reference/bindings-v1.md#unverified-and-linked-opens)).
 
 ## Next
 
-[`quickstart.md`](quickstart.md) — one artifact, one schema, one row, in whichever of the four you just installed.
+[`quickstart.md`](quickstart.md) — one artifact, one schema, one row, in whichever of the four you just installed. What 1.0 does not do yet is in [`limitations.md`](limitations.md#known-gaps-in-10).

@@ -9,35 +9,37 @@ So settings travel on four channels, and the rule is: **the settings chtypes see
 On the row path, the leftmost channel that names a setting wins:
 
 ```text
-per-call map  >  handle compile profile  >  library defaults  >  ClickHouse's own defaults
+per-call settings  >  handle compile profile  >  setup defaults  >  ClickHouse's own defaults
 ```
 
-| channel             | set by                               | scope                                  |
-| ------------------- | ------------------------------------ | -------------------------------------- |
-| per-call map        | the third argument to `rows` / `row` | that one call                          |
-| compile profile     | the settings passed at compile       | that schema handle, for its life       |
-| library defaults    | `set_default_settings`               | the whole process, per loaded artifact |
-| ClickHouse defaults | the vendored build                   | everything                             |
+| channel             | set by                                                | scope                                                     |
+| ------------------- | ----------------------------------------------------- | --------------------------------------------------------- |
+| per-call settings   | the `settings` option of `rows`, `row` and the others | that one call                                             |
+| compile profile     | the `settings` option of `compile_table`              | that schema handle, for its life                          |
+| setup defaults      | `setup(defaults=…)`                                   | the whole process, applied to every library when it opens |
+| ClickHouse defaults | the vendored build                                    | everything                                                |
 
-**Go reaches only three of them.** `SetDefaultSettings` replaces a process-global that the row path reads _by reference_, so the ABI requires it to exclude every other call on the same artifact. Go's dlopen'd `Library` therefore does not carry the symbol in its function-pointer table at all — the call is structurally unavailable rather than merely discouraged, and `chtypes.SetDefaultSettings` exists only on the statically linked build (`-tags chtypes_linked`), which is a development and testing instrument. Put the settings a Go consumer needs in the compile profile and the per-call map, which is where they belong anyway.
+**The setup defaults latch.** `setup` is called once, before the first library opens, and the defaults it records are applied to each library as it loads and never again. A second `setup` with the same zone and defaults is a no-op; a different one is a `UsageError` naming both, and the first stands. If `setup` was never called, the first open commits the empty setup: no defaults, and the library's default zone, `UTC`. So call `setup` first. **There is no runtime setter in any binding.** 0.x's `set_default_settings` (and Go's `SetDefaultSettings`, which existed only on the linked build) is deleted ([`reference/bindings-v1.md` §7](../reference/bindings-v1.md#7-what-v0-api-is-deleted-and-why)); per-call settings and the compile profile carry everything that changes after setup. All four bindings reach all four channels now, Go included.
 
 <details open><summary><b>Go</b></summary>
 
 ```go
-schema, _ := lib.CompileDDL(ddl, chtypes.WithCompileSettings(profile))   // handle
-batch, _ := schema.Rows(chtypes.JSONEachRow, body, map[string]string{"date_time_input_format": "best_effort"})
+_ = chtypes.Setup(chtypes.SetupOptions{ // once, first
+	Defaults: map[string]string{"chtypes_default_eval_wall_nanos": "2000000000"},
+})
+schema, _ := lib.CompileTable(ddl, chtypes.WithSettings(profile)) // handle
+batch, _ := schema.Rows(chtypes.JSONEachRow, body,
+	chtypes.WithSettings(map[string]string{"date_time_input_format": "best_effort"})) // call
 ```
-
-Go has no process-wide channel on the dlopen path: `chtypes.SetDefaultSettings` is a package-level function on the statically linked build only. See the note below.
 
 </details>
 
 <details><summary><b>Python</b></summary>
 
 ```python
-library.set_default_settings({"chtypes_default_eval_wall_nanos": "2000000000"})   # process
-schema = library.compile_ddl(ddl, settings=profile)                              # handle
-batch = schema.rows(Format.JSON_EACH_ROW, body, {"date_time_input_format": "best_effort"})
+chtypes.setup(defaults={"chtypes_default_eval_wall_nanos": "2000000000"})   # process, once, first
+schema = library.compile_table(ddl, settings=profile)                       # handle
+batch = schema.rows(Format.JSON_EACH_ROW, body, settings={"date_time_input_format": "best_effort"})
 ```
 
 </details>
@@ -45,9 +47,9 @@ batch = schema.rows(Format.JSON_EACH_ROW, body, {"date_time_input_format": "best
 <details><summary><b>TypeScript</b></summary>
 
 ```ts
-lib.setDefaultSettings({ chtypes_default_eval_wall_nanos: '2000000000' });   // process
-const schema = lib.compileDdl(ddl, { settings: profile });                   // handle
-const batch = schema.rows(Format.JSONEachRow, body, { date_time_input_format: 'best_effort' });
+setup({ defaults: { chtypes_default_eval_wall_nanos: '2000000000' } });   // process, once, first
+const schema = lib.compileTable(ddl, { settings: profile });              // handle
+const batch = schema.rows(Format.JSONEachRow, body, { settings: { date_time_input_format: 'best_effort' } });
 ```
 
 </details>
@@ -55,14 +57,23 @@ const batch = schema.rows(Format.JSONEachRow, body, { date_time_input_format: 'b
 <details><summary><b>Rust</b></summary>
 
 ```rust
-lib.set_default_settings(&[("chtypes_default_eval_wall_nanos", "2000000000")])?;  // process
-let schema = lib.compile(ddl).settings(profile.clone()).compile()?;               // handle
-let batch = schema.rows(Format::JsonEachRow, body, &[("date_time_input_format", "best_effort")])?;
+chtypes::setup(SetupOptions {                                             // process, once, first
+    defaults: vec![("chtypes_default_eval_wall_nanos".into(), "2000000000".into())],
+    ..Default::default()
+})?;
+let schema = lib.compile_table(ddl, &CompileOptions { settings: profile.clone(), ..Default::default() })?; // handle
+let call = RowsOptions {                                                  // call
+    settings: vec![("date_time_input_format".into(), "best_effort".into())],
+    ..Default::default()
+};
+let batch = schema.rows(Format::JsonEachRow, body, &call)?;
 ```
 
-Note the shapes: the compile builder's `.settings()` takes anything iterable, while `rows` takes a **slice reference**, `&[(k, v)]`. `NO_SETTINGS` is the spelled-out empty map for the common call.
+Each options struct has public fields and `Default`, so a call that sets nothing passes `&RowsOptions::default()`.
 
 </details>
+
+`defaults` exists in `setup` only while the library keeps its `chs_set_defaults` entry point: if a regenerated description drops it, the field is deleted with it, and the per-call settings and the compile profile carry everything ([`reference/bindings-v1.md` §6](../reference/bindings-v1.md#the-process-setup)).
 
 ## The one exception: type gates bind at compile
 
@@ -74,31 +85,35 @@ This is the one place the precedence table above does not hold, and it holds the
 
 ## Values cross as strings. Always
 
-This has cost real bugs, so each binding enforces it as hard as its type system allows.
+This has cost real bugs, so v1 makes it one rule in all four bindings: **a settings value is a string, and only a string.** The binding serializes the map into a JSON object of string values with the language's stock encoder and passes it verbatim, and it never rewrites a value: no boolean or integer spelling, no float. A non-string value is the language's own type error.
 
-|            | how                                                                                                                                 |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Go         | `map[string]string` — structural, nothing else compiles                                                                             |
-| Rust       | `&[(K, V)]` where both are `AsRef<str>` — structural                                                                                |
-| Python     | stringifies an `int` exactly (`str(int)`, never through a float) and **raises `TypeError` on a `float`**                            |
-| TypeScript | accepts `string` and `bigint`; **rejects a JS `number` at runtime**, because TypeScript is not present at a JS consumer's call site |
+|            | how                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------ |
+| Go         | `map[string]string` — structural, nothing else compiles                              |
+| Rust       | `&[(K, V)]` or `Vec<(String, String)>` where both are strings — structural           |
+| Python     | a non-string value raises `TypeError`, an `int` and a `bool` included                |
+| TypeScript | a non-string value raises `TypeError` at runtime, a `number` and a `bigint` included |
 
-The reason is one setting in particular. `chtypes_now_epoch_nanos` is a 19-digit nanosecond epoch, and 19 digits do not survive an IEEE double: `1700000000123456789` becomes `1.7e+18`. Sent as a JSON number, the setting is **silently ignored** — the batch keeps stamping the real wall clock, and nothing anywhere says so. A loud `TypeError` is the whole point.
+0.x's friendlier encoders are deleted: Python no longer stringifies an `int` or rewrites a boolean, and TypeScript no longer accepts a `bigint`. Write `"1"`, not `1` or `True`.
+
+The reason is one setting in particular. `chtypes_now_epoch_nanos` is a 19-digit nanosecond epoch, and 19 digits do not survive an IEEE double: `1700000000123456789` becomes `1.7e+18`. Sent as a JSON number, the setting would be **silently ignored** — the batch keeps stamping the real wall clock, and nothing anywhere says so. A loud `TypeError` is the whole point.
+
+A value whose bytes are not valid UTF-8 cannot be passed as a setting or a query parameter in 1.0. Inline it in the SQL as `unhex('<hex>')`, built from hex digits only ([`limitations.md`](../limitations.md#binary-input-parameters-must-be-utf-8)).
 
 ## An unknown name refuses the whole call
 
-Spell a setting wrong and you get ClickHouse's own **code 115**, did-you-mean hint included, on every channel:
+Spell a setting wrong and you get ClickHouse's own **code 115**, did-you-mean hint included:
 
 ```text
 [115] Setting nope_not_a_setting is neither a builtin setting nor started with
 the prefix 'SQL_' registered for user-defined settings
 ```
 
-`compile_ddl` fails the compile. `row` and `rows` reject the call. `set_default_settings` refuses its payload **wholesale** — nothing is committed, so a partial profile is never silently in force. That last one matters most: a half-applied process seed would be a server whose behavior you cannot describe.
+`compile_table` fails the compile. `row` and `rows` reject the call. A typo in the `setup` defaults is refused by the library when the first open applies them (`unverified`: the refusal path for `chs_set_defaults` is not measured here), which is the reason to call `setup` at startup, not lazily.
 
 Obsolete setting names are accepted silently, as real servers do. Custom-prefixed names are legal and inert — the default prefix is `SQL_`, and `chtypes_custom_settings_prefixes` mirrors whatever your server's `custom_settings_prefixes` is set to.
 
-Catching a typo at **declare** time is the point of passing the discovered profile to the compile rather than only per call. A typo in a profile that is only ever passed per call is a typo you find on the hot path.
+Catching a typo at **declare** time is the point of passing the discovered profile to the compile rather than only per call. A typo in a profile that is only ever passed per call is a typo you find on the hot path. Per-call values are not validated the way a server's `SET` validates them, so validate a value yourself before relying on a refusal ([`limitations.md`](../limitations.md#per-call-settings-values-are-not-validated-the-way-a-servers-set-validates-them)).
 
 ## The six `chtypes_*` keys
 
@@ -112,7 +127,7 @@ Three are **per-call**, and they control the clock:
 | `chtypes_clock_offset_nanos`   | a measured server-minus-client offset                                                                   |
 | `chtypes_max_clock_skew_nanos` | refuse volatile-DEFAULT substitution past this budget, answering `unsupported` rather than substituting |
 
-Three are **per-process**, settable only through `set_default_settings`:
+Three are **per-process**, settable only through the `defaults` of `setup`:
 
 | key                                 | does                                  | default |
 | ----------------------------------- | ------------------------------------- | ------- |
@@ -120,26 +135,26 @@ Three are **per-process**, settable only through `set_default_settings`:
 | `chtypes_default_eval_wall_nanos`   | DEFAULT-expression wall-clock ceiling | 1 s     |
 | `chtypes_custom_settings_prefixes`  | mirror the server's own               | `SQL_`  |
 
-**Sending a per-process key on a per-call map is a decline, never an admission.** It comes back in the result's `unsupported_settings`, and the row is promoted to the `unsupported` outcome. Do not score such a row as agreement: chtypes did not answer it.
+**Sending a per-process key on a per-call map is a decline, never an admission.** It comes back in the result's `unsupported_settings`, and the row is promoted to the `unsupported` outcome (the library applies that promotion itself in 1.0; no binding does). Do not score such a row as agreement: chtypes did not answer it.
 
-## A real ClickHouse setting this library does not model: `session_timezone`
+## Time zones are two things
 
-`session_timezone` is a genuine, known ClickHouse setting — never the server's own code 115 — but it is not one of the six `chtypes_*` keys above, and this library resolves bare-`DateTime`/`DateTime64` timezone exactly once, process-wide, at `chs_init` (the `timezone` argument), never per call. As of the artifact producer's relink served at `chtypes_build` 1790845279, a per-call `session_timezone` naming a **valid, different** zone is **declined**, the same way an unmodeled MergeTree setting at a non-default value is declined, below: it comes back in `unsupported_settings`, which promotes the row to `unsupported`. `measured`, before vs. after that relink, on the same ClickHouse patch (darwin-arm64 26.8.15.10-lts, build 1790783214 vs. 1790845279):
+A bare `DateTime` column carries a zone, and ClickHouse resolves it in two different places. 1.0 gives each its own spelling, and they are not interchangeable:
 
-| per-call `session_timezone`                | before the relink                                               | after the relink                                                       |
-| ------------------------------------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `""` (unset)                               | accepted, no effect                                             | **unchanged**: accepted, no effect                                     |
-| the process zone (`"UTC"` here)            | accepted, no effect                                             | **unchanged**: accepted, no effect                                     |
-| a different valid zone (`"Europe/Berlin"`) | accepted, SILENTLY IGNORED — the row's own timezone never moved | **declined**: in `unsupported_settings`, row promoted to `unsupported` |
-| an invalid zone name (`"Not/AZone"`)       | declined: in `unsupported_settings`                             | **unchanged**: declined, same as before                                |
+- **The image zone** is process-wide, set once at `setup(timezone=…)`, before the first open. It governs compiled types: a bare `DateTime` column's zone, `MATERIALIZED` columns, `PARTITION BY` and `TTL`. Unset, it is `UTC`. It is ClickHouse's own process zone, which vendored MergeTree code reads directly, so it cannot vary per call.
+- **The per-call zone** is the `session_timezone` key in a call's settings. It governs parsing, rendering, export and DEFAULT evaluation for that call. Each binding also offers it as an option, `WithSessionTimezone` in Go, `session_timezone=` in Python, `sessionTimezone` in TypeScript and `session_timezone` in Rust, so the zone is visible in every signature it affects. The option writes the one `session_timezone` key into the settings object and does nothing else with it. **Passing the option and a `session_timezone` key in `settings` together is a `UsageError`, even when the two agree**, so a call never has two spellings of its zone.
 
-So the only new outcome is the third row: before the relink, a caller sending a tenant's real timezone per call could not tell "ignored" from "honored," because both looked identical — `accepted`, nothing in `unsupported_settings`. This is a library change, not a binding one: every binding already promotes a row whenever `unsupported_settings` is non-empty, so no binding code moved.
+A zone name is valid exactly when ClickHouse's own `DateLUT` loads it, and a name it will not load is refused with ClickHouse's own error, whatever its bytes. `DateLUT` loads zone files from the host the library runs on, so a host missing some zone files refuses names a server accepts ([`limitations.md`](../limitations.md#zone-names-follow-the-host)).
 
-> **This applies only to builds at `chtypes_build` 1790845279 or later, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9` — [`support.md`](../support.md)).** A served, unsupported (retired) line never gets a new build or a new ABI revision ([`support.md` → Served, unsupported ClickHouse lines](../support.md#served-unsupported-clickhouse-lines)), so it keeps the pre-relink behavior permanently — `26.6`'s newest build, `1790767905`, predates this relink and was never republished.
+The zone follows the settings precedence above: a per-call `session_timezone` beats the one in the compile profile, which beats the one in the setup defaults, which beats the image zone. A zone in the compile profile is a default for later calls on that schema; a compiled type always takes the image zone, never the profile's.
 
-## MergeTree settings are a different namespace
+**A filter's zone is its own**, fixed when it is compiled: its `WHERE` runs in the zone of the settings the filter was compiled with, and an evaluation's settings decide only how the body is parsed. [`reference/bindings-v1.md` §2](../reference/bindings-v1.md#the-call-options) has the rule and the per-binding spellings.
 
-The `SETTINGS` clause after an engine declaration is its own namespace, and it is passed separately — `WithMergeTreeSettings` in Go, `merge_tree_settings=` in Python, `mergeTreeSettings` in TypeScript, the third argument of `set_engine` in Rust.
+0.x declined a per-call `session_timezone` that named a different zone than the process's, because zone was resolved once at `chs_init`. That decline is gone with the model it protected.
+
+## MergeTree settings are part of the statement
+
+The `SETTINGS` clause after an engine declaration is its own namespace, and in 1.0 it is part of the one `CREATE TABLE` statement you compile: `... ENGINE = MergeTree ORDER BY k SETTINGS index_granularity = 4096`. There is no separate argument for them any more (`WithMergeTreeSettings`, `merge_tree_settings=` and `set_engine` are deleted, [`reference/bindings-v1.md` §7](../reference/bindings-v1.md#7-what-v0-api-is-deleted-and-why)).
 
 The two failure modes there are deliberately different from each other:
 
