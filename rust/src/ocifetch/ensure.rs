@@ -386,6 +386,7 @@ fn ensure_online(
                 .to_string(),
             build: predicate["build"].as_str().unwrap_or("").to_string(),
             channel: predicate["channel"].as_str().map(str::to_string),
+            index_digest: Some(format!("sha256:{}", oci::sha256_hex(&fetched_index.bytes))),
             manifest_digest: descriptor.digest.clone(),
             layer_digest: layer.digest.clone(),
             bundle_digest: bundle_layer_digest.clone(),
@@ -401,7 +402,7 @@ fn ensure_online(
             verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
             layout::write_atomic(
                 &tmp.join(constants::CACHE_VERIFIED_RECORD),
-                &serde_json::to_vec(&record)?,
+                &record.to_json_bytes()?,
             )
         })?
     };
@@ -430,7 +431,7 @@ fn ensure_online(
             library_path: dir.join(&record.library),
             dir,
             digests: Digests {
-                index: None,
+                index: record.index_digest,
                 manifest: descriptor.digest.clone(),
                 layer: layer.digest.clone(),
                 bundle: record.bundle_digest,
@@ -603,6 +604,7 @@ fn ensure_frozen(
         version: entry.version.clone(),
         build: entry.build.clone(),
         channel: predicate["channel"].as_str().map(str::to_string),
+        index_digest: entry.index.clone(),
         manifest_digest: entry.manifest.clone(),
         layer_digest: entry.layer.clone(),
         bundle_digest: Some(entry.bundle.clone()),
@@ -618,7 +620,7 @@ fn ensure_frozen(
         verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
         layout::write_atomic(
             &tmp.join(constants::CACHE_VERIFIED_RECORD),
-            &serde_json::to_vec(&record)?,
+            &record.to_json_bytes()?,
         )
     })?;
 
@@ -1309,6 +1311,7 @@ fn install_from_local_blobs_for(
                 .to_string(),
             build: stmt.predicate["build"].as_str().unwrap_or("").to_string(),
             channel: stmt.predicate["channel"].as_str().map(str::to_string),
+            index_digest: None,
             manifest_digest: manifest_digest.to_string(),
             layer_digest: layer.digest.clone(),
             bundle_digest: Some(stmt.bundle_layer_digest.clone()),
@@ -1324,7 +1327,7 @@ fn install_from_local_blobs_for(
             verify_unpacked_library(tmp, &library_name, &library_sha256, library_bytes)?;
             layout::write_atomic(
                 &tmp.join(constants::CACHE_VERIFIED_RECORD),
-                &serde_json::to_vec(&record)?,
+                &record.to_json_bytes()?,
             )
         })?
     };
@@ -1368,7 +1371,7 @@ fn record_to_resolved(
         library_path: dir.join(&record.library),
         dir: dir.to_path_buf(),
         digests: Digests {
-            index: None,
+            index: record.index_digest,
             manifest: record.manifest_digest,
             layer: record.layer_digest,
             bundle: record.bundle_digest,

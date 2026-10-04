@@ -36,6 +36,7 @@ func buildAll() *FileSet {
 	cases = append(cases, buildTrustCases(fs)...)
 	cases = append(cases, buildBytesCases(fs)...)
 	cases = append(cases, buildCacheCases(fs)...)
+	cases = append(cases, buildRecordCases(fs)...)
 	cases = append(cases, buildLockCases(fs)...)
 	cases = append(cases, buildHTTPCases(fs)...)
 	cases = append(cases, buildGenericCases(fs)...)

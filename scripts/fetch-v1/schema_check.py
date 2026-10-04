@@ -15,6 +15,11 @@ WHAT IT VALIDATES, and the one deliberate exclusion:
   - tests/fixtures/fetch-v1/cases.json            against cases.schema.json
   - tests/fixtures/fetch-v1/http/*.json           against http-script.schema.json
   - tests/fixtures/fetch-v1/locks/expected/*.json against lock3.schema.json
+  - tests/fixtures/fetch-v1/layouts/<name>/unpacked/sha256/*/verified.json
+                                                  against verified.schema.json, for every
+                                                  layout whose name starts `cache-record-canonical`
+                                                  (the foreign, schema-2 and 0.x layouts exist to
+                                                  FAIL it and are deliberately not validated)
 
 `locks/inputs/invalid-*.json` is DELIBERATELY NOT validated here. Those
 fixtures exist to prove a wrong-schema or wrong-ABI lock is refused
@@ -211,6 +216,16 @@ def run_checks() -> list[str]:
                 continue  # deliberately not lock3-valid; see module docstring
             problems += validate_file(p, lock_schema)
 
+    verified_schema = load_schema("verified.schema.json")
+    layouts_dir = FIXTURES_DIR / "layouts"
+    if layouts_dir.is_dir():
+        for layout in sorted(layouts_dir.glob("cache-record-canonical*")):
+            records = sorted(layout.glob("unpacked/sha256/*/verified.json"))
+            if not records:
+                problems.append(f"{layout}: a canonical-record layout carries no verified.json")
+            for p in records:
+                problems += validate_file(p, verified_schema)
+
     return problems
 
 
@@ -282,6 +297,56 @@ def selftest() -> None:
         sys.exit(1)
     except SchemaError:
         pass
+
+    # The canonical record schema: a good record passes, and each rule the
+    # readers enforce is refused here too.
+    verified_schema = load_schema("verified.schema.json")
+    good_record = {
+        "schema": 1,
+        "platform": "linux-arm64",
+        "version": "26.8.15.10",
+        "channel": None,
+        "build": "20261001.183455",
+        "library": "libchtypes.so",
+        "library_sha256": "a" * 64,
+        "library_bytes": 3,
+        "digests": {
+            "index": None,
+            "manifest": "sha256:" + "b" * 64,
+            "layer": "sha256:" + "c" * 64,
+            "bundle": None,
+            "bundle_manifest": None,
+        },
+        "signed_by": None,
+        "predicate": {},
+    }
+    try:
+        validate(good_record, verified_schema, verified_schema)
+    except SchemaError as e:
+        print(f"schema_check --selftest: a canonical record was refused: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    def mutated(fn: Any) -> dict[str, Any]:
+        doc = json.loads(json.dumps(good_record))
+        fn(doc)
+        return doc
+
+    for why, doc in [
+        ("schema 2", mutated(lambda d: d.update(schema=2))),
+        ("missing signed_by", mutated(lambda d: d.pop("signed_by"))),
+        ("missing digests.bundle_manifest", mutated(lambda d: d["digests"].pop("bundle_manifest"))),
+        ("library with a separator", mutated(lambda d: d.update(library="a/b"))),
+        ("short library_sha256", mutated(lambda d: d.update(library_sha256="abc"))),
+        ("negative library_bytes", mutated(lambda d: d.update(library_bytes=-1))),
+        ("unknown platform", mutated(lambda d: d.update(platform="plan9-mips"))),
+        ("three-part version", mutated(lambda d: d.update(version="26.8.15"))),
+    ]:
+        try:
+            validate(doc, verified_schema, verified_schema)
+        except SchemaError:
+            continue
+        print(f"schema_check --selftest: a record broken by [{why}] was NOT refused", file=sys.stderr)
+        sys.exit(1)
 
     print("schema_check --selftest: OK")
 

@@ -10,19 +10,23 @@ package main
 // find, so "already have these exact bytes locally" is literally true, not
 // approximated).
 //
-// Decided here, lane 0B (docs/guides/fetch-v1.md §10 records this): a
-// layout never carries a pre-populated "already unpacked" record of any
-// kind — that bookkeeping (`verified.json` in the guide's own words) is
-// each binding's own internal, implementation-private format, never a
-// cross-binding fixture shape. Every layout here is scoped to be read
-// exactly like a real pre-seed: a binding verifies-then-unpacks from these
-// local blobs on first access, with zero network calls either way. The
-// one case that needs something to already be INSTALLED rather than
-// merely PRESENT (monotonic-warning, and the two offline-newest-* cases)
-// says so via `installed.json` at the layout root — a TEST-SETUP
-// instruction the conformance RUNNER reads before the case begins ("call
-// your own ensure() against these manifest digests, offline, from these
-// local blobs, before starting the clock"), never a file any binding's
+// Decided here, lane 0B (docs/guides/fetch-v1.md §10 records this), and
+// amended by the cache-record lane: a layout carries no pre-populated
+// "already unpacked" directory EXCEPT in the cache-record-* and upgrade-0x-*
+// layouts, which exist to test exactly that. `verified.json` is one
+// canonical record every binding reads and writes (§1,
+// spec/fetch-v1/schema/verified.schema.json), so a layout may now carry the
+// canonical record (every binding must read it), a foreign or schema-2
+// record (every binding must treat it as absent and re-verify from the
+// blobs), or a 0.x leftover (never read as verified). Every OTHER layout
+// here is scoped to be read exactly like a real pre-seed: a binding
+// verifies-then-unpacks from these local blobs on first access, with zero
+// network calls either way. The cases that need something to already be
+// INSTALLED rather than merely PRESENT (monotonic-warning, and the two
+// offline-newest-* cases) say so via `installed.json` at the layout root — a
+// TEST-SETUP instruction the conformance RUNNER reads before the case begins
+// ("call your own ensure() against these manifest digests, offline, from
+// these local blobs, before starting the clock"), never a file any binding's
 // shipped cache code parses. See docs/guides/fetch-v1.md §10.
 
 type Layout struct {
@@ -30,6 +34,8 @@ type Layout struct {
 	blobs           map[string][]byte // "sha256:<hex>" -> content
 	roots           []Descriptor
 	installedMarker []string
+	files           map[string][]byte // extra files, by path relative to the layout root
+	raw             bool              // no OCI layout at all: only files (a 0.x registry directory)
 }
 
 func NewLayout(name string) *Layout {
@@ -62,8 +68,31 @@ func (l *Layout) AddRoot(desc Descriptor, refName string) {
 	l.roots = append(l.roots, d)
 }
 
+// AddFile adds one extra file at rel (a path relative to the layout root):
+// an unpacked directory's library or verified.json, or a 0.x registry file.
+func (l *Layout) AddFile(rel string, content []byte) {
+	if l.files == nil {
+		l.files = map[string][]byte{}
+	}
+	if existing, ok := l.files[rel]; ok && string(existing) != string(content) {
+		panic("genfixtures: layout " + l.Name + ": file " + rel + " added twice with different content")
+	}
+	l.files[rel] = content
+}
+
+// Raw marks the layout as no OCI image layout at all: Flush writes only the
+// files AddFile added, with no oci-layout, no index.json and no blobs. That
+// is exactly what a 0.x registry directory is.
+func (l *Layout) Raw() { l.raw = true }
+
 func (l *Layout) Flush(fs *FileSet) {
 	base := "layouts/" + l.Name
+	for rel, content := range l.files {
+		fs.Put(base+"/"+rel, content)
+	}
+	if l.raw {
+		return
+	}
 	fs.Put(base+"/oci-layout", canonicalJSON(ociLayoutMarker))
 	for digest, content := range l.blobs {
 		fs.Put(base+"/blobs/sha256/"+digestHexPart(digest), content)
