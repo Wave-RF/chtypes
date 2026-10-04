@@ -38,6 +38,7 @@ import {
 } from './errors.js';
 import { readFileUrl, type RequestOptions, requestBuffered } from './http.js';
 import {
+  buildRecord,
   cacheRoot,
   commitStaging,
   ensureLayout,
@@ -61,7 +62,7 @@ import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, resolve
 import { emptyLock, getPin, type LockFile, readLock, withPin, writeLock } from './lock.js';
 import { digestOfHex, endpointUrl, hexOfDigest, platformInfo, realClock, resolvePlatformOption } from './types.js';
 import type { ArtifactPredicate, FetchV1Options, PlatformKey, Resolved, TrustedKey, VerifyResult } from './types.js';
-import { fetchVerifyAndUnpackLayer, verifyInstalledLibrary } from './unpack.js';
+import { fetchVerifyAndUnpackLayer, measureLibrary, verifyInstalledLibrary } from './unpack.js';
 
 function defaultTrustedKeys(options: FetchV1Options): readonly TrustedKey[] {
   if (options.trustedKeys !== undefined) return options.trustedKeys;
@@ -115,14 +116,20 @@ function resolvedFromRecord(
     abiGeneration: ABI_GENERATION,
     platform,
     request,
-    version: record.predicate.clickhouse_version,
-    channel: record.predicate.channel,
-    build: record.predicate.build,
+    version: record.version,
+    ...(record.channel !== null ? { channel: record.channel } : {}),
+    build: record.build,
     libraryPath: path.join(dir, record.library),
     dir,
-    digests: { manifest: record.manifestDigest, layer: record.layerDigest, bundle: record.bundleDigest },
+    digests: {
+      ...(record.indexDigest !== null ? { index: record.indexDigest } : {}),
+      manifest: record.manifestDigest,
+      layer: record.layerDigest,
+      bundle: record.bundleDigest ?? '',
+      ...(record.bundleManifestDigest !== null ? { bundleManifest: record.bundleManifestDigest } : {}),
+    },
     predicate: record.predicate,
-    signedBy: record.signedBy,
+    signedBy: record.signedBy ?? '',
     source,
     alreadyInstalled,
     warnings,
@@ -156,8 +163,8 @@ export async function resolveInstalled(
 
   const candidates: { record: VerifiedRecord; dir: string; source: string }[] = [];
   for (const { dir, record } of await listVerified(root)) {
-    if (record.predicate.os !== platformInfo(platform).os || record.predicate.arch !== platformInfo(platform).architecture) continue;
-    if (!withinRequest(record.predicate.clickhouse_version, request)) continue;
+    if (record.platform !== platform) continue;
+    if (!withinRequest(record.version, request)) continue;
     candidates.push({ record, dir, source: 'cache' });
   }
   if (candidates.length === 0) return undefined;
@@ -251,8 +258,8 @@ export async function listInstalled(options: FetchV1Options = {}): Promise<reado
   const root = cacheRoot(options.cacheDir);
   const out: Resolved[] = [];
   for (const { dir, record } of await listVerified(root)) {
-    const platform = `${record.predicate.os}-${record.predicate.arch}` as PlatformKey;
-    out.push(resolvedFromRecord(record, platform, record.predicate.clickhouse_version, dir, 'cache', true, []));
+    const platform = record.platform as PlatformKey;
+    out.push(resolvedFromRecord(record, platform, record.version, dir, 'cache', true, []));
   }
   return out;
 }
@@ -264,9 +271,9 @@ export async function verifyInstalled(options: FetchV1Options = {}): Promise<rea
   const root = cacheRoot(options.cacheDir);
   const out: VerifyResult[] = [];
   for (const { dir, record } of await listVerified(root)) {
-    const platform = `${record.predicate.os}-${record.predicate.arch}` as PlatformKey;
+    const platform = record.platform as PlatformKey;
     try {
-      await verifyInstalledLibrary(path.join(dir, record.library), record.predicate.library_sha256, record.predicate.library_bytes);
+      await verifyInstalledLibrary(path.join(dir, record.library), record.librarySha256, record.libraryBytes);
       out.push({ platform, dir, ok: true, detail: '' });
     } catch (err) {
       out.push({ platform, dir, ok: false, detail: err instanceof Error ? err.message : String(err) });
@@ -378,15 +385,17 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
         if (trust !== undefined) {
           await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
         }
-        const newRecord: VerifiedRecord = {
-          schema: 1,
+        const newRecord = buildRecord({
+          platform,
+          predicate,
+          library: await measureLibrary(path.join(staging, predicate.library)),
+          indexDigest: resolveResult.indexDigest,
           manifestDigest: resolveResult.manifest.digest,
           layerDigest: resolveResult.manifest.layer.digest,
-          bundleDigest: trust === undefined ? '' : trust.bundleDigest,
-          signedBy,
-          predicate,
-          library: predicate.library,
-        };
+          bundleDigest: trust === undefined ? null : trust.bundleDigest,
+          bundleManifestDigest: trust === undefined ? null : trust.bundleManifestDigest,
+          signedBy: trust === undefined ? null : signedBy,
+        });
         await writeVerifiedRecord(staging, newRecord);
         await commitStaging(staging, finalDir);
         record = newRecord;
@@ -533,15 +542,17 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
     if (verified !== undefined) {
       await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
     }
-    const record: VerifiedRecord = {
-      schema: 1,
+    const record = buildRecord({
+      platform,
+      predicate,
+      library: await measureLibrary(path.join(staging, predicate.library)),
+      indexDigest: null,
       manifestDigest: manifest.digest,
       layerDigest: manifest.layer.digest,
-      bundleDigest: verified === undefined ? '' : pin.bundle,
-      signedBy,
-      predicate,
-      library: predicate.library,
-    };
+      bundleDigest: verified === undefined ? null : pin.bundle,
+      bundleManifestDigest: null,
+      signedBy: verified === undefined ? null : signedBy,
+    });
     await writeVerifiedRecord(staging, record);
     await commitStaging(staging, finalDir);
     return resolvedFromRecord(record, platform, request, finalDir, bases[0]!, false, warnings);
@@ -613,11 +624,11 @@ async function writeLockEntry(
   const lockPath = options.lockPath ?? path.join(process.cwd(), 'chtypes.lock');
   let lock: LockFile = (await readLock(lockPath)) ?? emptyLock();
   lock = withPin(lock, request, platform, {
-    version: record.predicate.clickhouse_version,
-    build: record.predicate.build,
+    version: record.version,
+    build: record.build,
     manifest: record.manifestDigest,
     layer: record.layerDigest,
-    bundle: record.bundleDigest,
+    bundle: record.bundleDigest ?? '',
   });
 
   if (options.lockAllPlatforms === true) {

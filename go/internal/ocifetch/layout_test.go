@@ -1,8 +1,10 @@
 package ocifetch
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -110,7 +112,7 @@ func TestWriteVerifiedRecordAndReuse(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(unpackDir, "lib.so"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("seed unpack dir: %v", err)
 	}
-	rec := verifiedRecord{Schema: 1, Platform: "linux-arm64", Version: "26.8.15.10", LibraryPath: "lib.so"}
+	rec := testRecord(manifestDigest)
 
 	gotDir, already, err := l.writeVerifiedRecord(manifestDigest, unpackDir, rec)
 	if err != nil {
@@ -191,5 +193,100 @@ func TestVersionLess(t *testing.T) {
 		if versionLess(c.b, c.a) {
 			t.Errorf("versionLess(%q, %q) = true, want false", c.b, c.a)
 		}
+	}
+}
+
+func testRecord(manifestDigest Digest) verifiedRecord {
+	return verifiedRecord{
+		Schema: 1, Platform: "linux-arm64", Version: "26.8.15.10", Build: "20261001.183455",
+		LibraryPath: "lib.so", LibrarySHA256: hex64('b'), LibraryBytes: 1,
+		Digests:   Digests{Manifest: manifestDigest, Layer: Digest("sha256:" + hex64('c'))},
+		Predicate: map[string]any{"clickhouse_version": "26.8.15.10"},
+	}
+}
+
+func TestRecordRoundTripAndNulls(t *testing.T) {
+	rec := testRecord(Digest("sha256:" + hex64('a')))
+	b, err := encodeRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range recordRequiredMembers {
+		if _, ok := m[k]; !ok {
+			t.Errorf("canonical record lacks member %q", k)
+		}
+	}
+	if m["channel"] != nil || m["signed_by"] != nil {
+		t.Errorf("channel and signed_by must be null when empty: %v %v", m["channel"], m["signed_by"])
+	}
+	d := m["digests"].(map[string]any)
+	for _, k := range recordRequiredDigests {
+		if _, ok := d[k]; !ok {
+			t.Errorf("canonical digests lack member %q", k)
+		}
+	}
+	back, err := decodeRecord(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Build != rec.Build || back.LibrarySHA256 != rec.LibrarySHA256 {
+		t.Fatalf("round trip lost fields: %+v", back)
+	}
+}
+
+func TestDecodeRecordRefusesForeignShapes(t *testing.T) {
+	good, _ := encodeRecord(testRecord(Digest("sha256:" + hex64('a'))))
+	for name, doc := range map[string]string{
+		"unparsable":   "not json",
+		"empty":        "",
+		"old flat":     `{"platform":"linux-arm64","version":"26.8.15.10","build":"1","manifest_digest":"x"}`,
+		"schema 2":     strings.Replace(string(good), `"schema":1`, `"schema":2`, 1),
+		"abs library":  strings.Replace(string(good), `"library":"lib.so"`, `"library":"/etc/passwd"`, 1),
+		"dotdot":       strings.Replace(string(good), `"library":"lib.so"`, `"library":"../lib.so"`, 1),
+		"short sha":    strings.Replace(string(good), hex64('b'), "abc", 1),
+		"missing sign": strings.Replace(string(good), `"signed_by":null,`, ``, 1),
+	} {
+		if _, err := decodeRecord([]byte(doc)); err == nil {
+			t.Errorf("%s: decodeRecord accepted it", name)
+		}
+	}
+	if _, err := decodeRecord(good); err != nil {
+		t.Fatalf("good record refused: %v", err)
+	}
+}
+
+func TestWriteVerifiedRecordReplacesAnUnreadableRecord(t *testing.T) {
+	l := newLayout(t.TempDir(), false)
+	if err := l.ensureSkeleton(); err != nil {
+		t.Fatal(err)
+	}
+	manifestDigest := Digest("sha256:" + hex64('a'))
+	stale := l.unpackedDir(manifestDigest)
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "manifest.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "verified.json"), []byte(`{"platform":"x"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fresh := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fresh, "lib.so"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir, already, err := l.writeVerifiedRecord(manifestDigest, fresh, testRecord(manifestDigest))
+	if err != nil || already {
+		t.Fatalf("replace: dir=%s already=%v err=%v", dir, already, err)
+	}
+	if _, err := readVerifiedRecord(dir); err != nil {
+		t.Fatalf("replaced record unreadable: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "manifest.json")); !os.IsNotExist(err) {
+		t.Fatalf("the stale directory's files should be gone")
 	}
 }

@@ -12,6 +12,8 @@
 # cosmetic. `v1-constants`, `v1-fixtures` and `v1-parity` are required;
 # `v1-conformance` and `v1-network` feed `v1-parity` (read, never required
 # themselves); `v1-sandbox` proves the no-network sandbox those legs run in;
+# `v1-cache-interop` runs the four real CLIs over one shared cache (a cache one
+# binding writes, every binding reads) and is not read by `v1-parity`;
 # `v1-refcheck` is report-only; `v1-oras-preseed`, `v1-staging` and
 # `v1-staging-verdict` are dispatch-only (the last two never required, never
 # read by `v1-parity`).
@@ -671,6 +673,60 @@ jobs:
         run: |
           mkdir -p "${{ runner.temp }}/reports"
           python3 scripts/fetch-v1/parity.py --reports-dir "${{ runner.temp }}/reports" --base-ref "origin/v1"
+
+  v1-cache-interop:
+    name: "v1-cache-interop — a cache one binding writes, every binding reads"
+    # The record every binding writes into `unpacked/sha256/<hex>/verified.json`
+    # is one format (docs/guides/fetch-v1.md §1). The per-binding conformance
+    # suites each start from an empty cache or a generated one, so none of them
+    # could see two bindings disagree about a record on the SAME cache — which
+    # is how the examples job found Rust refusing a record Go had written, on a
+    # cache all four tours share. This job runs the four real CLIs against the
+    # loopback fixture server: each binding writes a cache, all four read it
+    # (4 x 4), and a 0.x cache directory must never crash any of them. It fails
+    # if any pair fails, and prints the table.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
+      - name: build the four CLIs
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          (cd go && go build -o "$RUNNER_TEMP/bin/cli-go" ./cmd/chtypes)
+          (cd python && uv sync --locked)
+          printf '#!/usr/bin/env bash\nexec uv run --locked --project "%s/python" python -m chtypes "$@"\n' "$PWD" > "$RUNNER_TEMP/bin/cli-python"
+          (cd ts && pnpm install --frozen-lockfile && pnpm build)
+          printf '#!/usr/bin/env bash\nexec node "%s/ts/dist/cli.js" "$@"\n' "$PWD" > "$RUNNER_TEMP/bin/cli-ts"
+          (cd rust && cargo build --locked --bin chtypes)
+          printf '#!/usr/bin/env bash\nexec "%s/rust/target/debug/chtypes" "$@"\n' "$PWD" > "$RUNNER_TEMP/bin/cli-rust"
+          chmod +x "$RUNNER_TEMP"/bin/cli-python "$RUNNER_TEMP"/bin/cli-ts "$RUNNER_TEMP"/bin/cli-rust
+          for b in go python ts rust; do "$RUNNER_TEMP/bin/cli-$b" --version; done
+      - name: "selftest — the interop driver's own comparison and table logic"
+        run: python3 scripts/fetch-v1/cache-interop.py --selftest
+      - name: "4 x 4: each binding writes a cache, every binding reads it; then the 0.x rows"
+        run: |
+          python3 scripts/fetch-v1/cache-interop.py \
+            --cli "go=$RUNNER_TEMP/bin/cli-go" \
+            --cli "python=$RUNNER_TEMP/bin/cli-python" \
+            --cli "ts=$RUNNER_TEMP/bin/cli-ts" \
+            --cli "rust=$RUNNER_TEMP/bin/cli-rust"
 
   v1-refcheck:
     name: "v1-refcheck — reference verifiers agree with the fixture verdicts (report only)"

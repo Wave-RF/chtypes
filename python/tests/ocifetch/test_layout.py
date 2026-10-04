@@ -52,7 +52,6 @@ def test_unpacked_dir_for_rejects_non_hex() -> None:
 
 def _record(**overrides) -> VerifiedRecord:
     base = dict(
-        schema=1,
         manifest="sha256:" + "a" * 64,
         layer="sha256:" + "b" * 64,
         bundle="sha256:" + "c" * 64,
@@ -63,6 +62,8 @@ def _record(**overrides) -> VerifiedRecord:
         predicate={"library": "libchtypes.so", "library_sha256": "d" * 64, "library_bytes": 10},
         signed_by="deb275922dbff76e",
         library="libchtypes.so",
+        library_sha256="d" * 64,
+        library_bytes=10,
     )
     base.update(overrides)
     return VerifiedRecord(**base)
@@ -145,3 +146,73 @@ def test_update_index_json_race_reapply(tmp_path: Path) -> None:
     doc = json.loads(index_path.read_text())
     digests = {m["digest"] for m in doc["manifests"]}
     assert "mine" in digests
+
+
+def test_record_is_the_canonical_object() -> None:
+    doc = _record(channel=None, signed_by=None, bundle=None).to_json()
+    assert set(doc) == {
+        "schema",
+        "platform",
+        "version",
+        "channel",
+        "build",
+        "library",
+        "library_sha256",
+        "library_bytes",
+        "digests",
+        "signed_by",
+        "predicate",
+    }
+    assert set(doc["digests"]) == {"index", "manifest", "layer", "bundle", "bundle_manifest"}
+    assert doc["channel"] is None and doc["signed_by"] is None and doc["digests"]["bundle"] is None
+    assert VerifiedRecord.from_json(doc) == _record(channel=None, signed_by=None, bundle=None)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda d: d.update(schema=2),
+        lambda d: d.pop("signed_by"),
+        lambda d: d["digests"].pop("bundle_manifest"),
+        lambda d: d.update(library="/etc/passwd"),
+        lambda d: d.update(library="../lib.so"),
+        lambda d: d.update(library_sha256="abc"),
+        lambda d: d.update(library_bytes=True),
+        lambda d: d.update(platform="plan9-mips"),
+        lambda d: d.update(predicate=[]),
+    ],
+)
+def test_from_json_refuses_what_the_schema_refuses(mutate) -> None:  # noqa: ANN001
+    doc = _record().to_json()
+    mutate(doc)
+    with pytest.raises(ValueError):
+        VerifiedRecord.from_json(doc)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json",
+        "",
+        '{"platform":"linux-arm64","version":"26.8.15.10","build":"1","manifest_digest":"x"}',
+        '{"schema":1,"schema":1}',
+    ],
+)
+def test_unreadable_record_reads_as_absent(tmp_path: Path, content: str) -> None:
+    (tmp_path / C.CACHE_VERIFIED_RECORD).write_text(content)
+    assert read_verified_record(tmp_path) is None
+
+
+def test_write_verified_install_replaces_an_unreadable_record(tmp_path: Path) -> None:
+    record = _record()
+    stale = unpacked_dir_for(tmp_path, "a" * 64)
+    stale.mkdir(parents=True)
+    (stale / "manifest.json").write_text("{}")
+    (stale / C.CACHE_VERIFIED_RECORD).write_text('{"platform":"x"}')
+    fresh = tmp_path / "scratch" / "unpacked"
+    fresh.mkdir(parents=True)
+    (fresh / "libchtypes.so").write_bytes(b"fresh")
+    dest = write_verified_install(tmp_path, record.manifest, record, unpacked_tmp_dir=str(fresh))
+    assert read_verified_record(dest) == record
+    assert (dest / "libchtypes.so").read_bytes() == b"fresh"
+    assert not (dest / "manifest.json").exists()

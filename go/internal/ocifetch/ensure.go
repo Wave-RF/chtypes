@@ -505,21 +505,23 @@ func (s *session) installManifest(l *layout, req Request, platform Platform, man
 	}
 
 	rec := verifiedRecord{
-		Schema:      1,
-		Platform:    platform.Key,
-		Version:     version,
-		Channel:     channel,
-		Build:       build,
-		LibraryPath: up.libraryPath,
-		SignedBy:    signedBy,
-		Predicate:   predicate,
+		Schema:        1,
+		Platform:      platform.Key,
+		Version:       version,
+		Channel:       channel,
+		Build:         build,
+		LibraryPath:   up.libraryPath,
+		LibrarySHA256: up.librarySHA256,
+		LibraryBytes:  up.librarySize,
+		SignedBy:      signedBy,
+		Predicate:     predicate,
 	}
 	var bundleDigest, bundleManifestDigest Digest
 	if stmt != nil {
 		bundleDigest = stmt.BundleDigest
 		bundleManifestDigest = stmt.BundleManifestDigest
 	}
-	rec.Digests = Digests{Manifest: desc.Digest, Layer: layerDesc.Digest, Bundle: bundleDigest, BundleManifest: bundleManifestDigest}
+	rec.Digests = Digests{Index: indexDigest, Manifest: desc.Digest, Layer: layerDesc.Digest, Bundle: bundleDigest, BundleManifest: bundleManifestDigest}
 
 	dir, already, err := l.writeVerifiedRecord(manifestDigest, up.dir, rec)
 	if err != nil {
@@ -531,7 +533,9 @@ func (s *session) installManifest(l *layout, req Request, platform Platform, man
 
 func recordToResolved(rec *verifiedRecord, dir, platform, request string, indexDigest Digest, already bool, source string, warnings []string) *Resolved {
 	digests := rec.Digests
-	digests.Index = indexDigest
+	if indexDigest != "" {
+		digests.Index = indexDigest
+	}
 	return &Resolved{
 		ABIGeneration:    ABIGeneration,
 		Platform:         platform,
@@ -822,14 +826,16 @@ func verifyPreseededEntry(srcLayout, dstLayout *layout, req Request, platformKey
 			continue
 		}
 		rec := verifiedRecord{
-			Schema:      1,
-			Platform:    platform.Key,
-			Version:     stringPredicate(stmt.Statement.Predicate, "clickhouse_version"),
-			Channel:     stringPredicate(stmt.Statement.Predicate, "channel"),
-			Build:       stringPredicate(stmt.Statement.Predicate, "build"),
-			LibraryPath: up.libraryPath,
-			SignedBy:    stmt.KeyID,
-			Predicate:   stmt.Statement.Predicate,
+			Schema:        1,
+			Platform:      platform.Key,
+			Version:       stringPredicate(stmt.Statement.Predicate, "clickhouse_version"),
+			Channel:       stringPredicate(stmt.Statement.Predicate, "channel"),
+			Build:         stringPredicate(stmt.Statement.Predicate, "build"),
+			LibraryPath:   up.libraryPath,
+			LibrarySHA256: up.librarySHA256,
+			LibraryBytes:  up.librarySize,
+			SignedBy:      stmt.KeyID,
+			Predicate:     stmt.Statement.Predicate,
 			Digests: Digests{
 				Manifest:       desc.Digest,
 				Layer:          layerDesc.Digest,
@@ -904,14 +910,16 @@ func installPreseededByDigest(l *layout, manifestDigest Digest, trustedKeys []ed
 		return err
 	}
 	rec := verifiedRecord{
-		Schema:      1,
-		Platform:    platformKey,
-		Version:     stringPredicate(stmt.Statement.Predicate, "clickhouse_version"),
-		Channel:     stringPredicate(stmt.Statement.Predicate, "channel"),
-		Build:       stringPredicate(stmt.Statement.Predicate, "build"),
-		LibraryPath: up.libraryPath,
-		SignedBy:    stmt.KeyID,
-		Predicate:   stmt.Statement.Predicate,
+		Schema:        1,
+		Platform:      platformKey,
+		Version:       stringPredicate(stmt.Statement.Predicate, "clickhouse_version"),
+		Channel:       stringPredicate(stmt.Statement.Predicate, "channel"),
+		Build:         stringPredicate(stmt.Statement.Predicate, "build"),
+		LibraryPath:   up.libraryPath,
+		LibrarySHA256: up.librarySHA256,
+		LibraryBytes:  up.librarySize,
+		SignedBy:      stmt.KeyID,
+		Predicate:     stmt.Statement.Predicate,
 		Digests: Digests{
 			Manifest:       target.Digest,
 			Layer:          layerDesc.Digest,

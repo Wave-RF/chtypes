@@ -8,30 +8,184 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-
 use super::constants;
 use super::error::{Error, Result};
 
 /// One verified, unpacked install — the durable record this module reads
 /// back for `resolve_installed`/`list_installed`/`--offline`, and what
 /// `ensure.rs` builds [`crate::ocifetch::Resolved`] from.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+///
+/// Its on-disk form is the one canonical record every binding reads and
+/// writes (`spec/fetch-v1/schema/verified.schema.json`,
+/// `docs/guides/fetch-v1.md` §1): see [`VerifiedRecord::to_json_bytes`] and
+/// [`VerifiedRecord::from_json_bytes`]. `channel`, the optional digests and
+/// an empty `signed_by` are `null` on disk.
+#[derive(Clone, Debug)]
 pub struct VerifiedRecord {
     pub platform: String,
     pub version: String,
     pub build: String,
     pub channel: Option<String>,
+    pub index_digest: Option<String>,
     pub manifest_digest: String,
     pub layer_digest: String,
     pub bundle_digest: Option<String>,
     pub bundle_manifest_digest: Option<String>,
+    /// Empty means nothing verified (allow-unsigned); written as `null`.
     pub signed_by: String,
     /// The library's file name, relative to the unpacked directory.
     pub library: String,
     pub library_sha256: String,
     pub library_bytes: u64,
     pub predicate: serde_json::Value,
+}
+
+fn is_hex64(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn is_digest(s: &str) -> bool {
+    s.strip_prefix("sha256:").is_some_and(is_hex64)
+}
+
+impl VerifiedRecord {
+    /// The canonical `verified.json`: every member present, `null` where the
+    /// schema allows it.
+    pub fn to_json_bytes(&self) -> Result<Vec<u8>> {
+        let doc = serde_json::json!({
+            "schema": 1,
+            "platform": self.platform,
+            "version": self.version,
+            "channel": self.channel,
+            "build": self.build,
+            "library": self.library,
+            "library_sha256": self.library_sha256,
+            "library_bytes": self.library_bytes,
+            "digests": {
+                "index": self.index_digest,
+                "manifest": self.manifest_digest,
+                "layer": self.layer_digest,
+                "bundle": self.bundle_digest,
+                "bundle_manifest": self.bundle_manifest_digest,
+            },
+            "signed_by": if self.signed_by.is_empty() { None } else { Some(&self.signed_by) },
+            "predicate": self.predicate,
+        });
+        Ok(serde_json::to_vec(&doc)?)
+    }
+
+    /// Accept exactly the canonical schema-1 record. Anything else (not
+    /// JSON, another schema, a missing member, a member of the wrong type,
+    /// a broken rule) is an `Err`, which every caller treats as an ABSENT
+    /// record, never as a failure by itself.
+    pub fn from_json_bytes(bytes: &[u8]) -> std::result::Result<Self, String> {
+        let doc: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+        let obj = doc.as_object().ok_or("not an object")?;
+        for key in [
+            "schema",
+            "platform",
+            "version",
+            "channel",
+            "build",
+            "library",
+            "library_sha256",
+            "library_bytes",
+            "digests",
+            "signed_by",
+            "predicate",
+        ] {
+            if !obj.contains_key(key) {
+                return Err(format!("missing member {key:?}"));
+            }
+        }
+        let digests = obj["digests"]
+            .as_object()
+            .ok_or("digests is not an object")?;
+        for key in ["index", "manifest", "layer", "bundle", "bundle_manifest"] {
+            if !digests.contains_key(key) {
+                return Err(format!("missing digests member {key:?}"));
+            }
+        }
+        if obj["schema"].as_u64() != Some(1) {
+            return Err("schema is not 1".to_string());
+        }
+        let text = |name: &str| -> std::result::Result<String, String> {
+            obj[name]
+                .as_str()
+                .map(str::to_string)
+                .ok_or(format!("{name} is not a string"))
+        };
+        let nullable =
+            |v: &serde_json::Value, name: &str| -> std::result::Result<Option<String>, String> {
+                match v {
+                    serde_json::Value::Null => Ok(None),
+                    serde_json::Value::String(s) => Ok(Some(s.clone())),
+                    _ => Err(format!("{name} is neither a string nor null")),
+                }
+            };
+        let digest = |name: &str, optional: bool| -> std::result::Result<Option<String>, String> {
+            let v = nullable(&digests[name], name)?;
+            match &v {
+                None if optional => Ok(None),
+                Some(d) if is_digest(d) => Ok(v),
+                _ => Err(format!("digests.{name} is not sha256:<hex>")),
+            }
+        };
+        let platform = text("platform")?;
+        if !constants::PLATFORMS.iter().any(|p| p.key == platform) {
+            return Err(format!("platform {platform:?} is not one of v1's"));
+        }
+        let version = text("version")?;
+        let parts: Vec<&str> = version.split('.').collect();
+        if parts.len() != 4
+            || parts
+                .iter()
+                .any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()))
+        {
+            return Err("version is not four-part".to_string());
+        }
+        let build = text("build")?;
+        if build.is_empty() {
+            return Err("empty build".to_string());
+        }
+        let library = text("library")?;
+        if library.is_empty()
+            || library == "."
+            || library == ".."
+            || library.contains('/')
+            || library.contains('\\')
+        {
+            return Err("library is not a plain relative file name".to_string());
+        }
+        let library_sha256 = text("library_sha256")?;
+        if !is_hex64(&library_sha256) {
+            return Err("library_sha256 is not 64 lowercase hex".to_string());
+        }
+        let library_bytes = obj["library_bytes"]
+            .as_u64()
+            .ok_or("library_bytes is not a non-negative integer")?;
+        if !obj["predicate"].is_object() {
+            return Err("predicate is not an object".to_string());
+        }
+        Ok(Self {
+            platform,
+            version,
+            build,
+            channel: nullable(&obj["channel"], "channel")?,
+            index_digest: digest("index", true)?,
+            manifest_digest: digest("manifest", false)?.unwrap_or_default(),
+            layer_digest: digest("layer", false)?.unwrap_or_default(),
+            bundle_digest: digest("bundle", true)?,
+            bundle_manifest_digest: digest("bundle_manifest", true)?,
+            signed_by: nullable(&obj["signed_by"], "signed_by")?.unwrap_or_default(),
+            library,
+            library_sha256,
+            library_bytes,
+            predicate: obj["predicate"].clone(),
+        })
+    }
 }
 
 /// Resolve the layout root: `CHTYPES_CACHE` names the layout directory
@@ -113,33 +267,34 @@ pub fn unpacked_dir(root: &Path, manifest_digest: &str) -> Result<PathBuf> {
     Ok(root.join(constants::CACHE_UNPACKED_DIR).join(hex))
 }
 
-/// Read back an existing `unpacked/sha256/<hex>/verified.json`, if present.
+/// Read back an existing `unpacked/sha256/<hex>/verified.json`. A record
+/// that is missing, unparsable, of another schema or breaks a rule is
+/// ABSENT (`Ok(None)`), never an error and never trusted.
 pub fn read_verified(dir: &Path) -> Result<Option<VerifiedRecord>> {
     let path = dir.join(constants::CACHE_VERIFIED_RECORD);
     match std::fs::read(&path) {
-        Ok(bytes) => {
-            let record: VerifiedRecord = serde_json::from_slice(&bytes)
-                .map_err(|e| Error::ArtifactCorrupt(format!("{}: {e}", path.display())))?;
-            Ok(Some(record))
-        }
+        Ok(bytes) => Ok(VerifiedRecord::from_json_bytes(&bytes).ok()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => Ok(None),
         Err(e) => Err(e.into()),
     }
 }
 
 /// Install one unpacked artifact atomically: `build` populates a fresh temp
 /// directory (unpack the tar, write `verified.json`), which is then renamed
-/// into place. If the final directory already exists (another process won
-/// the race, or this exact build was already installed), the temp directory
-/// is discarded and the existing one is left untouched — never overwritten,
-/// since unpacked content is immutable once verified.
+/// into place. If the final directory already carries an acceptable record
+/// (another process won the race, or this exact build was already
+/// installed), the temp directory is discarded and the existing one is left
+/// untouched. If it exists WITHOUT one (a foreign, torn or older-format
+/// record), the caller has just re-verified from the cache's own blobs, so
+/// the stale directory is moved aside and replaced.
 pub fn install_unpacked(
     root: &Path,
     manifest_digest: &str,
     build: impl FnOnce(&Path) -> Result<()>,
 ) -> Result<PathBuf> {
     let final_dir = unpacked_dir(root, manifest_digest)?;
-    if final_dir.join(constants::CACHE_VERIFIED_RECORD).exists() {
+    if read_verified(&final_dir)?.is_some() {
         return Ok(final_dir);
     }
     let parent = final_dir
@@ -153,18 +308,34 @@ pub fn install_unpacked(
         let _ = std::fs::remove_dir_all(&tmp);
         return Err(e);
     }
-    match std::fs::rename(&tmp, &final_dir) {
-        Ok(()) => Ok(final_dir),
-        Err(_) if final_dir.join(constants::CACHE_VERIFIED_RECORD).exists() => {
+    let mut stale: Option<PathBuf> = None;
+    if std::fs::symlink_metadata(&final_dir).is_ok() {
+        let aside = parent.join(format!(".stale-{}", unique_suffix()));
+        if let Err(e) = std::fs::rename(&final_dir, &aside) {
+            let _ = std::fs::remove_dir_all(&tmp);
+            if read_verified(&final_dir)?.is_some() {
+                return Ok(final_dir);
+            }
+            return Err(e.into());
+        }
+        stale = Some(aside);
+    }
+    let outcome = match std::fs::rename(&tmp, &final_dir) {
+        Ok(()) => Ok(final_dir.clone()),
+        Err(_) if read_verified(&final_dir)?.is_some() => {
             // Another process installed the same content first.
             let _ = std::fs::remove_dir_all(&tmp);
-            Ok(final_dir)
+            Ok(final_dir.clone())
         }
         Err(e) => {
             let _ = std::fs::remove_dir_all(&tmp);
             Err(e.into())
         }
+    };
+    if let Some(aside) = stale {
+        let _ = std::fs::remove_dir_all(aside);
     }
+    outcome
 }
 
 /// List every verified record under `root`'s `unpacked/` tree (used by
@@ -297,23 +468,99 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    fn sample_record() -> VerifiedRecord {
+        VerifiedRecord {
+            platform: "linux-arm64".to_string(),
+            version: "26.8.15.10".to_string(),
+            build: "20261001.183455".to_string(),
+            channel: None,
+            index_digest: None,
+            manifest_digest: format!("sha256:{}", "a".repeat(64)),
+            layer_digest: format!("sha256:{}", "b".repeat(64)),
+            bundle_digest: None,
+            bundle_manifest_digest: None,
+            signed_by: String::new(),
+            library: "libchtypes.so".to_string(),
+            library_sha256: "c".repeat(64),
+            library_bytes: 3,
+            predicate: serde_json::json!({"build": "20261001.183455"}),
+        }
+    }
+
     #[test]
     fn install_unpacked_is_idempotent() {
         let root = std::env::temp_dir().join(format!("ocifetch-install-test-{}", unique_suffix()));
         let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let record = sample_record().to_json_bytes().unwrap();
         let mut calls = 0;
         let dir1 = install_unpacked(&root, digest, |tmp| {
             calls += 1;
-            write_atomic(&tmp.join("verified.json"), b"{}")
+            write_atomic(&tmp.join("verified.json"), &record)
         })
         .unwrap();
         let dir2 = install_unpacked(&root, digest, |tmp| {
             calls += 1;
-            write_atomic(&tmp.join("verified.json"), b"{}")
+            write_atomic(&tmp.join("verified.json"), &record)
         })
         .unwrap();
         assert_eq!(dir1, dir2);
         assert_eq!(calls, 1, "the second install must not re-run build()");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn record_round_trips_and_writes_every_member() {
+        let bytes = sample_record().to_json_bytes().unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(doc["channel"].is_null() && doc["signed_by"].is_null());
+        assert!(doc["digests"]["index"].is_null() && doc["digests"]["bundle_manifest"].is_null());
+        let back = VerifiedRecord::from_json_bytes(&bytes).unwrap();
+        assert_eq!(back.build, "20261001.183455");
+        assert_eq!(back.library_sha256, "c".repeat(64));
+    }
+
+    #[test]
+    fn foreign_and_malformed_records_are_refused() {
+        let good = String::from_utf8(sample_record().to_json_bytes().unwrap()).unwrap();
+        let old_flat = r#"{"platform":"linux-arm64","version":"26.8.15.10","build":"1","manifest_digest":"x"}"#;
+        for doc in [
+            "not json".to_string(),
+            String::new(),
+            old_flat.to_string(),
+            good.replacen("\"schema\":1", "\"schema\":2", 1),
+            good.replacen(
+                "\"library\":\"libchtypes.so\"",
+                "\"library\":\"/etc/passwd\"",
+                1,
+            ),
+            good.replacen("\"library\":\"libchtypes.so\"", "\"library\":\"../x\"", 1),
+            good.replacen(&"c".repeat(64), "abc", 1),
+            good.replacen("\"signed_by\":null,", "", 1),
+        ] {
+            assert!(
+                VerifiedRecord::from_json_bytes(doc.as_bytes()).is_err(),
+                "accepted: {doc}"
+            );
+        }
+        assert!(VerifiedRecord::from_json_bytes(good.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn install_unpacked_replaces_an_unreadable_record() {
+        let root = std::env::temp_dir().join(format!("ocifetch-replace-test-{}", unique_suffix()));
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let stale = unpacked_dir(&root, digest).unwrap();
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::write(stale.join("manifest.json"), b"{}").unwrap();
+        std::fs::write(stale.join("verified.json"), br#"{"platform":"x"}"#).unwrap();
+        let record = sample_record().to_json_bytes().unwrap();
+        let dir = install_unpacked(&root, digest, |tmp| {
+            write_atomic(&tmp.join("libchtypes.so"), b"abc")?;
+            write_atomic(&tmp.join("verified.json"), &record)
+        })
+        .unwrap();
+        assert!(read_verified(&dir).unwrap().is_some());
+        assert!(!dir.join("manifest.json").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -28,22 +29,181 @@ type ociLayoutIndex struct {
 	Manifests     []Descriptor `json:"manifests"`
 }
 
-// verifiedRecord is the durable, immutable proof that one unpacked directory
-// was verified once: under which key, against which digests, and the
-// predicate that was checked. It is written exactly once, when the
-// directory is created, and never edited afterward — a later fetch that
-// lands on the same manifest digest finds the directory already there and
-// reuses it (already_installed=true) rather than rewriting this file.
+// verifiedRecord is the durable proof that one unpacked directory was
+// verified once: under which key, against which digests, and the predicate
+// that was checked. Its on-disk form is the one canonical record every
+// binding reads and writes (spec/fetch-v1/schema/verified.schema.json,
+// docs/guides/fetch-v1.md §1): see recordWire, encodeRecord and
+// decodeRecord. It is written when the directory is created; a record that
+// a reader cannot accept is replaced after a successful re-verify.
 type verifiedRecord struct {
-	Schema      int            `json:"schema"`
-	Platform    string         `json:"platform"`
-	Version     string         `json:"version"`
-	Channel     string         `json:"channel,omitempty"`
-	Build       string         `json:"build"`
-	LibraryPath string         `json:"library_path"`
-	Digests     Digests        `json:"digests"`
-	Predicate   map[string]any `json:"predicate"`
-	SignedBy    string         `json:"signed_by"`
+	Schema        int
+	Platform      string
+	Version       string
+	Channel       string // "" is written as null
+	Build         string
+	LibraryPath   string // the library's file name, relative to the unpacked directory
+	LibrarySHA256 string
+	LibraryBytes  int64
+	Digests       Digests // an empty digest is written as null
+	Predicate     map[string]any
+	SignedBy      string // "" is written as null (allow-unsigned only)
+}
+
+// recordWire is verified.json exactly: every member present, null where the
+// schema allows it.
+type recordWire struct {
+	Schema        int            `json:"schema"`
+	Platform      string         `json:"platform"`
+	Version       string         `json:"version"`
+	Channel       *string        `json:"channel"`
+	Build         string         `json:"build"`
+	Library       string         `json:"library"`
+	LibrarySHA256 string         `json:"library_sha256"`
+	LibraryBytes  int64          `json:"library_bytes"`
+	Digests       digestsWire    `json:"digests"`
+	SignedBy      *string        `json:"signed_by"`
+	Predicate     map[string]any `json:"predicate"`
+}
+
+type digestsWire struct {
+	Index          *string `json:"index"`
+	Manifest       string  `json:"manifest"`
+	Layer          string  `json:"layer"`
+	Bundle         *string `json:"bundle"`
+	BundleManifest *string `json:"bundle_manifest"`
+}
+
+var (
+	recordHexPattern      = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	recordVersionPattern  = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$`)
+	recordRequiredMembers = []string{"schema", "platform", "version", "channel", "build", "library", "library_sha256", "library_bytes", "digests", "signed_by", "predicate"}
+	recordRequiredDigests = []string{"index", "manifest", "layer", "bundle", "bundle_manifest"}
+)
+
+func nullable[T ~string](v T) *string {
+	if v == "" {
+		return nil
+	}
+	s := string(v)
+	return &s
+}
+
+func unnull(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// encodeRecord renders rec as the canonical verified.json.
+func encodeRecord(rec verifiedRecord) ([]byte, error) {
+	pred := rec.Predicate
+	if pred == nil {
+		pred = map[string]any{}
+	}
+	return json.Marshal(recordWire{
+		Schema:        1,
+		Platform:      rec.Platform,
+		Version:       rec.Version,
+		Channel:       nullable(rec.Channel),
+		Build:         rec.Build,
+		Library:       rec.LibraryPath,
+		LibrarySHA256: rec.LibrarySHA256,
+		LibraryBytes:  rec.LibraryBytes,
+		Digests: digestsWire{
+			Index:          nullable(rec.Digests.Index),
+			Manifest:       string(rec.Digests.Manifest),
+			Layer:          string(rec.Digests.Layer),
+			Bundle:         nullable(rec.Digests.Bundle),
+			BundleManifest: nullable(rec.Digests.BundleManifest),
+		},
+		SignedBy:  nullable(rec.SignedBy),
+		Predicate: pred,
+	})
+}
+
+// decodeRecord accepts exactly the canonical schema-1 record. Anything else
+// (unparsable, another schema, a missing member, a member of the wrong
+// type, a rule broken) is an error, which every caller treats as an ABSENT
+// record, never as a failure by itself.
+func decodeRecord(b []byte) (*verifiedRecord, error) {
+	if err := checkNoDuplicateKeys(b); err != nil {
+		return nil, err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, err
+	}
+	for _, k := range recordRequiredMembers {
+		if _, ok := raw[k]; !ok {
+			return nil, fmt.Errorf("verified.json: missing member %q", k)
+		}
+	}
+	var rawDigests map[string]json.RawMessage
+	if err := json.Unmarshal(raw["digests"], &rawDigests); err != nil {
+		return nil, fmt.Errorf("verified.json: digests: %w", err)
+	}
+	for _, k := range recordRequiredDigests {
+		if _, ok := rawDigests[k]; !ok {
+			return nil, fmt.Errorf("verified.json: missing digests member %q", k)
+		}
+	}
+	var w recordWire
+	if err := json.Unmarshal(b, &w); err != nil {
+		return nil, err
+	}
+	if w.Schema != 1 {
+		return nil, fmt.Errorf("verified.json: schema %d is not 1", w.Schema)
+	}
+	if _, ok := platformByKey(w.Platform); !ok {
+		return nil, fmt.Errorf("verified.json: platform %q is not one of v1's", w.Platform)
+	}
+	if !recordVersionPattern.MatchString(w.Version) {
+		return nil, fmt.Errorf("verified.json: version %q is not four-part", w.Version)
+	}
+	if w.Build == "" {
+		return nil, fmt.Errorf("verified.json: empty build")
+	}
+	if w.Library == "" || !filepath.IsLocal(w.Library) || strings.ContainsAny(w.Library, `/\`) {
+		return nil, fmt.Errorf("verified.json: library %q is not a plain relative file name", w.Library)
+	}
+	if !recordHexPattern.MatchString(w.LibrarySHA256) {
+		return nil, fmt.Errorf("verified.json: library_sha256 is not 64 lowercase hex")
+	}
+	if w.LibraryBytes < 0 {
+		return nil, fmt.Errorf("verified.json: negative library_bytes")
+	}
+	if w.Predicate == nil {
+		return nil, fmt.Errorf("verified.json: predicate is not an object")
+	}
+	for name, d := range map[string]*string{"index": w.Digests.Index, "bundle": w.Digests.Bundle, "bundle_manifest": w.Digests.BundleManifest} {
+		if d != nil && !Digest(*d).Valid() {
+			return nil, fmt.Errorf("verified.json: digests.%s %q is not sha256:<hex>", name, *d)
+		}
+	}
+	if !Digest(w.Digests.Manifest).Valid() || !Digest(w.Digests.Layer).Valid() {
+		return nil, fmt.Errorf("verified.json: digests.manifest and digests.layer must be sha256:<hex>")
+	}
+	return &verifiedRecord{
+		Schema:        1,
+		Platform:      w.Platform,
+		Version:       w.Version,
+		Channel:       unnull(w.Channel),
+		Build:         w.Build,
+		LibraryPath:   w.Library,
+		LibrarySHA256: w.LibrarySHA256,
+		LibraryBytes:  w.LibraryBytes,
+		Digests: Digests{
+			Index:          Digest(unnull(w.Digests.Index)),
+			Manifest:       Digest(w.Digests.Manifest),
+			Layer:          Digest(w.Digests.Layer),
+			Bundle:         Digest(unnull(w.Digests.Bundle)),
+			BundleManifest: Digest(unnull(w.Digests.BundleManifest)),
+		},
+		Predicate: w.Predicate,
+		SignedBy:  unnull(w.SignedBy),
+	}, nil
 }
 
 // Digests carries every content digest a Resolved value names (§1.3).
@@ -256,30 +416,47 @@ func (l *layout) listAllBlobDigests() []Digest {
 
 // writeVerifiedRecord creates a fresh unpacked directory for manifestDigest
 // by renaming unpackDir (already populated by unpackLibrary) into place,
-// then writes verified.json inside it. If the directory already exists
-// (another fetch landed on the same manifest digest first), unpackDir is
-// discarded and the existing directory is left untouched — content at a
-// given manifest digest never changes, so there is nothing to reconcile.
+// then writes verified.json inside it. If the directory already exists with
+// a record a reader accepts (another fetch landed on the same manifest
+// digest first), unpackDir is discarded and the existing directory is left
+// untouched. If it exists WITHOUT an acceptable record (a foreign, torn or
+// older-format one), the caller has just re-verified from the cache's own
+// blobs, so the stale directory is moved aside and replaced by the fresh one.
 func (l *layout) writeVerifiedRecord(manifestDigest Digest, unpackDir string, rec verifiedRecord) (dest string, alreadyInstalled bool, err error) {
 	dest = l.unpackedDir(manifestDigest)
-	if _, statErr := os.Stat(dest); statErr == nil {
+	if _, rerr := readVerifiedRecord(dest); rerr == nil {
 		_ = os.RemoveAll(unpackDir)
 		return dest, true, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return "", false, err
 	}
-	out, err := json.Marshal(rec)
+	out, err := encodeRecord(rec)
 	if err != nil {
 		return "", false, err
 	}
 	if err := writeFileAtomic(unpackDir, filepath.Join(unpackDir, CacheVerifiedRecord), out); err != nil {
 		return "", false, err
 	}
+	if _, statErr := os.Lstat(dest); statErr == nil {
+		stale, terr := os.MkdirTemp(filepath.Dir(dest), ".stale-*")
+		if terr != nil {
+			return "", false, terr
+		}
+		if rerr := os.Rename(dest, filepath.Join(stale, "old")); rerr != nil {
+			_ = os.RemoveAll(stale)
+			if _, rerr2 := readVerifiedRecord(dest); rerr2 == nil {
+				_ = os.RemoveAll(unpackDir)
+				return dest, true, nil
+			}
+			return "", false, rerr
+		}
+		defer func() { _ = os.RemoveAll(stale) }()
+	}
 	if err := os.Rename(unpackDir, dest); err != nil {
-		// Another fetch won the race between our Stat and our Rename: its
+		// Another fetch won the race between our move and our rename: its
 		// directory is now in place, and ours is redundant.
-		if _, statErr := os.Stat(dest); statErr == nil {
+		if _, rerr := readVerifiedRecord(dest); rerr == nil {
 			_ = os.RemoveAll(unpackDir)
 			return dest, true, nil
 		}
@@ -288,17 +465,14 @@ func (l *layout) writeVerifiedRecord(manifestDigest Digest, unpackDir string, re
 	return dest, false, nil
 }
 
-// readVerifiedRecord reads one unpacked directory's verified.json.
+// readVerifiedRecord reads one unpacked directory's verified.json. Any
+// error means "no acceptable record here".
 func readVerifiedRecord(dir string) (*verifiedRecord, error) {
 	b, err := os.ReadFile(filepath.Join(dir, CacheVerifiedRecord))
 	if err != nil {
 		return nil, err
 	}
-	var rec verifiedRecord
-	if err := strictUnmarshal(b, &rec); err != nil {
-		return nil, err
-	}
-	return &rec, nil
+	return decodeRecord(b)
 }
 
 // installedEntry pairs one unpacked directory with its verified.json record.

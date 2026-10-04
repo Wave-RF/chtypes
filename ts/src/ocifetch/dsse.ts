@@ -330,6 +330,8 @@ export interface TrustResult {
   readonly signedBy: string;
   /** The digest of the verified bundle blob itself (the referrer manifest's layer), as a lock pin's `bundle` records it. */
   readonly bundleDigest: string;
+  /** The digest of the referrer manifest that carried the bundle. */
+  readonly bundleManifestDigest: string;
 }
 
 /**
@@ -376,7 +378,7 @@ export async function verifyAnyReferrerBundle(
     if (verified === undefined) continue;
     const statement = parseStatement(verified.payload);
     checkContent(statement);
-    return { statement, signedBy: verified.signedBy, bundleDigest: referrerManifest.layer.digest };
+    return { statement, signedBy: verified.signedBy, bundleDigest: referrerManifest.layer.digest, bundleManifestDigest: referrerManifest.digest };
   }
   return undefined;
 }

@@ -238,6 +238,7 @@ def _record_to_resolved(
     request_spelling: str,
     already_installed: bool,
     source: str,
+    warnings: Sequence[str] = (),
 ) -> Resolved:
     return Resolved(
         abi_generation=C.ABI_GENERATION,
@@ -252,13 +253,14 @@ def _record_to_resolved(
             "index": record.index,
             "manifest": record.manifest,
             "layer": record.layer,
-            "bundle": record.bundle or None,
+            "bundle": record.bundle,
+            "bundle_manifest": record.bundle_manifest,
         },
         predicate=record.predicate,
-        signed_by=record.signed_by,
+        signed_by=record.signed_by or "",
         source=source,
         already_installed=already_installed,
-        warnings=tuple(record.warnings),
+        warnings=tuple(warnings),
     )
 
 
@@ -407,14 +409,14 @@ def _unpack_and_install(
     layer_desc: Descriptor,
     manifest_digest: str,
     layer_digest: str,
-    bundle_digest: str,
+    bundle_digest: str | None,
+    bundle_manifest_digest: str | None,
     index_digest: str | None,
     platform_key: str,
     predicate: dict,
-    signed_by: str,
+    signed_by: str | None,
     policy: FetchPolicy,
     retry: RetryPolicy,
-    warnings: list[str],
 ) -> Path:
     tmp_dir = tempfile.mkdtemp(dir=str(scratch_root))
     try:
@@ -436,10 +438,10 @@ def _unpack_and_install(
             library_bytes=predicate["library_bytes"],
         )
         record = VerifiedRecord(
-            schema=1,
             manifest=manifest_digest,
             layer=layer_digest,
             bundle=bundle_digest,
+            bundle_manifest=bundle_manifest_digest,
             index=index_digest,
             platform=platform_key,
             version=predicate["clickhouse_version"],
@@ -448,7 +450,8 @@ def _unpack_and_install(
             predicate=predicate,
             signed_by=signed_by,
             library=predicate["library"],
-            warnings=tuple(warnings),
+            library_sha256=predicate["library_sha256"],
+            library_bytes=predicate["library_bytes"],
         )
         return write_verified_install(
             cache_root_path, manifest_digest, record, unpacked_tmp_dir=unpack_dest
@@ -683,10 +686,11 @@ def _ensure_floating(
             bases, config_desc.digest, policy=policy, retry=retry, max_bytes=C.MANIFEST_MAX_BYTES
         )
         predicate = json.loads(config_bytes)
-        signed_by = ""
-        bundle_digest = ""
+        signed_by = None
+        bundle_digest = None
+        bundle_manifest_digest = None
     else:
-        verified, bundle_digest, _referrer_digest = found
+        verified, bundle_digest, bundle_manifest_digest = found
         statement = verified.statement
         if statement.predicate_type != C.PREDICATE_TYPE_ARTIFACT:
             raise ArtifactCorruptError(
@@ -734,13 +738,13 @@ def _ensure_floating(
         manifest_digest=platform_desc.digest,
         layer_digest=layer_desc.digest,
         bundle_digest=bundle_digest,
+        bundle_manifest_digest=bundle_manifest_digest,
         index_digest=index_digest,
         platform_key=platform_key,
         predicate=predicate,
         signed_by=signed_by,
         policy=policy,
         retry=retry,
-        warnings=warnings,
     )
     record = read_verified_record(dest_dir)
     assert record is not None
@@ -760,6 +764,7 @@ def _ensure_floating(
         request_spelling=request.spelling,
         already_installed=False,
         source=bases[0] if bases else "cache",
+        warnings=warnings,
     )
     _maybe_write_lock(
         options,
@@ -843,13 +848,13 @@ def _ensure_frozen(
         manifest_digest=pin.manifest,
         layer_digest=pin.layer,
         bundle_digest=pin.bundle,
+        bundle_manifest_digest=None,
         index_digest=pin.index,
         platform_key=platform_key,
         predicate=predicate,
         signed_by=verified.signed_by,
         policy=policy,
         retry=retry,
-        warnings=[],
     )
     record = read_verified_record(dest_dir)
     assert record is not None
@@ -960,6 +965,7 @@ def _verify_and_install_from_local_blobs(
 
     verified = None
     bundle_digest = None
+    bundle_manifest_digest = None
     for blob_path in blobs_dir.iterdir():
         try:
             doc = json.loads(blob_path.read_bytes())
@@ -979,6 +985,7 @@ def _verify_and_install_from_local_blobs(
         if candidate is not None:
             verified = candidate
             bundle_digest = referrer_layer.digest
+            bundle_manifest_digest = "sha256:" + blob_path.name
             break
     if verified is None:
         return None
@@ -1013,10 +1020,10 @@ def _verify_and_install_from_local_blobs(
             library_bytes=predicate["library_bytes"],
         )
         record = VerifiedRecord(
-            schema=1,
             manifest=manifest_digest,
             layer=layer_desc.digest,
-            bundle=bundle_digest or "",
+            bundle=bundle_digest,
+            bundle_manifest=bundle_manifest_digest,
             index=None,
             platform=platform_key,
             version=predicate["clickhouse_version"],
@@ -1025,6 +1032,8 @@ def _verify_and_install_from_local_blobs(
             predicate=predicate,
             signed_by=verified.signed_by,
             library=predicate["library"],
+            library_sha256=predicate["library_sha256"],
+            library_bytes=predicate["library_bytes"],
         )
         write_verified_install(
             cache_write_root, manifest_digest, record, unpacked_tmp_dir=unpacked_dir
