@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import string
 import tempfile
 from collections.abc import Callable, Sequence
@@ -78,57 +79,145 @@ def unpacked_dir_for(root: Path, manifest_digest_hex: str) -> Path:
     return root / C.CACHE_UNPACKED_DIR / manifest_digest_hex
 
 
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$")
+_REQUIRED = (
+    "schema",
+    "platform",
+    "version",
+    "channel",
+    "build",
+    "library",
+    "library_sha256",
+    "library_bytes",
+    "digests",
+    "signed_by",
+    "predicate",
+)
+_REQUIRED_DIGESTS = ("index", "manifest", "layer", "bundle", "bundle_manifest")
+
+
 @dataclass(frozen=True)
 class VerifiedRecord:
-    """The contents of one `unpacked/sha256/<hex>/verified.json`."""
+    """The contents of one `unpacked/sha256/<hex>/verified.json`: the one
+    canonical record every binding reads and writes
+    (spec/fetch-v1/schema/verified.schema.json, docs/guides/fetch-v1.md §1).
+    Optional members are `None` here and `null` on disk."""
 
-    schema: int
     manifest: str
     layer: str
-    bundle: str
     platform: str
     version: str
     build: str
     channel: str | None
     predicate: dict
-    signed_by: str
+    signed_by: str | None
     library: str
+    library_sha256: str
+    library_bytes: int
     index: str | None = None
-    warnings: tuple[str, ...] = ()
+    bundle: str | None = None
+    bundle_manifest: str | None = None
+    schema: int = 1
 
     def to_json(self) -> dict:
         return {
-            "schema": self.schema,
-            "manifest": self.manifest,
-            "layer": self.layer,
-            "bundle": self.bundle,
-            "index": self.index,
+            "schema": 1,
             "platform": self.platform,
             "version": self.version,
-            "build": self.build,
             "channel": self.channel,
-            "predicate": self.predicate,
-            "signed_by": self.signed_by,
+            "build": self.build,
             "library": self.library,
-            "warnings": list(self.warnings),
+            "library_sha256": self.library_sha256,
+            "library_bytes": self.library_bytes,
+            "digests": {
+                "index": self.index,
+                "manifest": self.manifest,
+                "layer": self.layer,
+                "bundle": self.bundle,
+                "bundle_manifest": self.bundle_manifest,
+            },
+            "signed_by": self.signed_by,
+            "predicate": self.predicate,
         }
 
     @classmethod
-    def from_json(cls, doc: dict) -> VerifiedRecord:
+    def from_json(cls, doc: object) -> VerifiedRecord:
+        """Accept exactly the canonical schema-1 record; anything else is a
+        `ValueError`, which every caller treats as an ABSENT record."""
+        if not isinstance(doc, dict):
+            raise ValueError("verified.json is not an object")
+        for key in _REQUIRED:
+            if key not in doc:
+                raise ValueError(f"verified.json: missing member {key!r}")
+        digests = doc["digests"]
+        if not isinstance(digests, dict):
+            raise ValueError("verified.json: digests is not an object")
+        for key in _REQUIRED_DIGESTS:
+            if key not in digests:
+                raise ValueError(f"verified.json: missing digests member {key!r}")
+        schema = doc["schema"]
+        if type(schema) is not int or schema != 1:
+            raise ValueError("verified.json: schema is not 1")
+
+        def text(name: str, nullable: bool = False) -> str | None:
+            v = doc[name]
+            if v is None and nullable:
+                return None
+            if not isinstance(v, str):
+                raise ValueError(f"verified.json: {name} is not a string")
+            return v
+
+        platform = text("platform")
+        if not any(p["key"] == platform for p in C.PLATFORMS):
+            raise ValueError(f"verified.json: platform {platform!r} is not one of v1's")
+        version = text("version")
+        if not _VERSION.match(version or ""):
+            raise ValueError("verified.json: version is not four-part")
+        build = text("build")
+        if not build:
+            raise ValueError("verified.json: empty build")
+        library = text("library")
+        if (
+            not library
+            or "/" in library
+            or "\\" in library
+            or library in (".", "..")
+            or os.path.isabs(library)
+        ):
+            raise ValueError("verified.json: library is not a plain relative file name")
+        sha = text("library_sha256")
+        if not _HEX64.match(sha or ""):
+            raise ValueError("verified.json: library_sha256 is not 64 lowercase hex")
+        size = doc["library_bytes"]
+        if type(size) is not int or size < 0:
+            raise ValueError("verified.json: library_bytes is not a non-negative integer")
+        if not isinstance(doc["predicate"], dict):
+            raise ValueError("verified.json: predicate is not an object")
+
+        def digest(name: str, nullable: bool) -> str | None:
+            v = digests[name]
+            if v is None and nullable:
+                return None
+            if not isinstance(v, str) or not _DIGEST.match(v):
+                raise ValueError(f"verified.json: digests.{name} is not sha256:<hex>")
+            return v
+
         return cls(
-            schema=doc["schema"],
-            manifest=doc["manifest"],
-            layer=doc["layer"],
-            bundle=doc["bundle"],
-            index=doc.get("index"),
-            platform=doc["platform"],
-            version=doc["version"],
-            build=doc["build"],
-            channel=doc.get("channel"),
+            platform=platform or "",
+            version=version or "",
+            build=build,
+            channel=text("channel", True),
+            library=library,
+            library_sha256=sha or "",
+            library_bytes=size,
+            index=digest("index", True),
+            manifest=digest("manifest", False) or "",
+            layer=digest("layer", False) or "",
+            bundle=digest("bundle", True),
+            bundle_manifest=digest("bundle_manifest", True),
+            signed_by=text("signed_by", True),
             predicate=doc["predicate"],
-            signed_by=doc["signed_by"],
-            library=doc["library"],
-            warnings=tuple(doc.get("warnings", ())),
         )
 
 
@@ -162,35 +251,68 @@ def write_verified_install(
 ) -> Path:
     """Install an already-unpacked library directory plus its
     `verified.json`, atomically: the caller unpacks into a sibling temp
-    directory first (`_unpack.unpack_tar_zst` does), then this renames that
-    whole directory into place and writes the record — temp-then-rename for
-    both, never a partial directory visible under the final name."""
+    directory first (`_unpack.unpack_tar_zst` does), the canonical record is
+    written into it, and the whole directory is renamed into place. A
+    destination that already carries an acceptable record is left alone. One
+    that does not (foreign, torn or older-format) was just re-verified by the
+    caller from the cache's own blobs, so it is moved aside and replaced."""
     hex_digest = manifest_digest.split(":", 1)[1]
     dest = unpacked_dir_for(root, hex_digest)
-    if unpacked_tmp_dir is not None:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists():
-            # Another process (or an earlier run) already installed the same
-            # content-addressed manifest; the bytes are identical by
-            # construction, so there is nothing to reconcile.
-            pass
+    if read_verified_record(dest) is not None:
+        if unpacked_tmp_dir is not None:
+            shutil.rmtree(str(unpacked_tmp_dir), ignore_errors=True)
+        return dest
+    if unpacked_tmp_dir is None:
+        raise ValueError("write_verified_install: nothing to install")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(unpacked_tmp_dir)
+    _atomic_write(
+        tmp / C.CACHE_VERIFIED_RECORD, json.dumps(record.to_json(), sort_keys=True).encode("utf-8")
+    )
+    stale: Path | None = None
+    if dest.exists() or dest.is_symlink():
+        stale = Path(tempfile.mkdtemp(dir=str(dest.parent), prefix=".stale-"))
+        try:
+            os.replace(dest, stale / "old")
+        except OSError:
+            shutil.rmtree(stale, ignore_errors=True)
+            if read_verified_record(dest) is not None:
+                shutil.rmtree(tmp, ignore_errors=True)
+                return dest
+            raise
+    try:
+        os.replace(tmp, dest)
+    except OSError:
+        # Another process won between our move and our rename.
+        if read_verified_record(dest) is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
         else:
-            tmp = str(unpacked_tmp_dir)
-            final_tmp = str(dest) + ".installing"
-            os.replace(tmp, final_tmp)
-            os.replace(final_tmp, dest)
-    record_path = dest / C.CACHE_VERIFIED_RECORD
-    _atomic_write(record_path, json.dumps(record.to_json(), sort_keys=True).encode("utf-8"))
+            raise
+    finally:
+        if stale is not None:
+            shutil.rmtree(stale, ignore_errors=True)
     return dest
 
 
 def read_verified_record(dest_dir: Path) -> VerifiedRecord | None:
+    """The directory's canonical record, or `None` when it is missing,
+    unparsable, of another schema, or breaks a rule: an unreadable record is
+    ABSENT, never fatal and never trusted."""
     record_path = dest_dir / C.CACHE_VERIFIED_RECORD
     try:
         with open(record_path, encoding="utf-8") as f:
-            return VerifiedRecord.from_json(json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            return VerifiedRecord.from_json(json.load(f, object_pairs_hook=_no_duplicates))
+    except (OSError, ValueError, RecursionError):
         return None
+
+
+def _no_duplicates(pairs: list[tuple[str, object]]) -> dict:
+    out: dict = {}
+    for k, v in pairs:
+        if k in out:
+            raise ValueError(f"duplicate key {k!r}")
+        out[k] = v
+    return out
 
 
 def list_verified_records(
