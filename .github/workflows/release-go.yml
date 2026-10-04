@@ -6,9 +6,9 @@ name: release-go
 on:
   push:
     tags: ["go/v*"]
-  # A dry run proves everything that does not need the tag to be published: the
-  # tag name's shape, the module, the build. The post-publish steps (which
-  # install the PUBLISHED module) are skipped while dry_run is true.
+  # A dry run proves the tag name's shape, the module and the build, and then
+  # runs the post-publish steps against the LOCAL module (a `replace`) instead of
+  # the proxy. verify_only runs just those steps against a published version.
   workflow_dispatch:
     inputs:
       tag:
@@ -16,10 +16,15 @@ on:
         required: true
         type: string
       dry_run:
-        description: "Run every step up to the publish and skip the post-publish steps."
+        description: "Run every step up to the publish; the post-publish steps then run against the local module instead of the proxy."
         required: false
         type: boolean
         default: true
+      verify_only:
+        description: "Skip the build and tag checks and run only the post-publish steps against the ALREADY-PUBLISHED version the tag names (proxy install first, with its retry loop). Wins over dry_run."
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 # Every run: step uses bash with -eo pipefail. GitHub's default for a step
@@ -34,6 +39,7 @@ env:
 
 jobs:
   verify:
+    if: github.event_name != 'workflow_dispatch' || !inputs.verify_only
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,91 +86,32 @@ jobs:
           printf '%s\n' "$out"
           grep -q -- '--- PASS: TestReleaseUserAgentMatchesTag' <<<"$out" || { echo "::error::the User-Agent assertion did not run and pass"; exit 1; }
           rm go/internal/ocifetch/zz_release_useragent_test.go
-      # A tag exiting green does not mean anyone can install the package: the
-      # Go proxy serves a new tag some minutes after it is pushed. These steps
-      # install the PUBLISHED module from the public proxy in a clean module,
-      # with no credentials, and prove three things about it: the binding's ABI
-      # fingerprint constant is the one in include/chtypes.h; the published
-      # command fetches one line from the production registry; and the public
-      # API loads what it fetched. None of them reads an ABI revision (v1 has
-      # none). Each retries for registry lag, the way the v0 check did.
-      - name: the published module installs, and its ABI fingerprint is the header's
-        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+  # A tag exiting green does not mean anyone can install the package: the Go
+  # proxy serves a new tag some minutes after it is pushed. scripts/release-verify.sh
+  # installs the PUBLISHED module from the public proxy in a clean module, with no
+  # credentials, retrying for proxy lag, and proves: the binding's ABI fingerprint
+  # constant is the header's; the command lists the production registry, parses
+  # the newest line, and fetches it; and the public API loads it and reports the
+  # same fingerprint. None of it reads an ABI revision (v1 has none). A dry run
+  # runs the same script against the local module, so the list parser is proven
+  # before the tag exists.
+  post-publish:
+    needs: verify
+    if: ${{ !failure() && (needs.verify.result == 'success' || (needs.verify.result == 'skipped' && inputs.verify_only)) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go/go.mod }
+      - name: the verify script's own selftest (the list parser)
+        run: scripts/release-verify.sh --selftest
+      - name: the module installs, speaks the header's ABI fingerprint, lists, fetches a line and loads it
         env:
-          GOPROXY: https://proxy.golang.org
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'local' || 'registry' }}
         run: |
-          version="${TAG#go/}"
-          want="$(sed -n 's/^#define CHS_ABI_FINGERPRINT "\(sha256:[0-9a-f]*\)".*/\1/p' include/chtypes.h)"
-          [ -n "$want" ] || { echo "no CHS_ABI_FINGERPRINT in include/chtypes.h" >&2; exit 1; }
-          clean="$RUNNER_TEMP/published"
-          mkdir -p "$clean" && cd "$clean"
-          go mod init published.example
-          ok=0
-          for attempt in $(seq 1 20); do
-            if go get "github.com/wave-rf/chtypes/go@$version"; then ok=1; break; fi
-            echo "attempt $attempt: $version is not served yet; waiting for the proxy" >&2
-            sleep 30
-          done
-          [ "$ok" = 1 ] || { echo "the proxy never served $version" >&2; exit 1; }
-          dir="$(go list -m -f '{{.Dir}}' github.com/wave-rf/chtypes/go)"
-          got="$(sed -n 's/^const ChsAbiFingerprint = "\(sha256:[0-9a-f]*\)".*/\1/p' "$dir/internal/abi1/abi_gen.go")"
-          echo "header:    $want"
-          echo "published: $got"
-          [ "$got" = "$want" ] || { echo "the published binding's ABI fingerprint differs from the header's" >&2; exit 1; }
-          echo "clean=$clean" >> "$GITHUB_ENV"
-      - name: the published command fetches a line from the production registry, and the public API loads it
-        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
-        env:
-          GOPROXY: https://proxy.golang.org
-          LINE: ${{ vars.CHTYPES_RELEASE_CHECK_LINE || '26.8' }}
-          CHTYPES_CACHE: ${{ runner.temp }}/release-cache
-        run: |
-          version="${TAG#go/}"
-          cd "$clean"
-          GOBIN="$clean/bin" go install "github.com/wave-rf/chtypes/go/cmd/chtypes@$version"
-          # The default registry and the default trust (the release key) apply:
-          # no CHTYPES_ARTIFACTS_URL, no CHTYPES_TRUSTED_KEYS, no CHTYPES_ALLOW_UNSIGNED.
-          ok=0
-          for attempt in $(seq 1 10); do
-            if "$clean/bin/chtypes" fetch "$LINE"; then ok=1; break; fi
-            echo "attempt $attempt: fetching $LINE failed; retrying" >&2
-            sleep 30
-          done
-          [ "$ok" = 1 ] || { echo "the published command could not fetch $LINE" >&2; exit 1; }
-          cat > main.go <<'EOF'
-          package main
-
-          import (
-          	"fmt"
-          	"os"
-
-          	"github.com/wave-rf/chtypes/go/chtypes"
-          )
-
-          func main() {
-          	reg, err := chtypes.NewRegistry()
-          	if err != nil {
-          		fmt.Fprintln(os.Stderr, err)
-          		os.Exit(1)
-          	}
-          	lib, err := reg.For(os.Args[1])
-          	if err != nil {
-          		fmt.Fprintln(os.Stderr, err)
-          		os.Exit(1)
-          	}
-          	schema, err := lib.CompileTable("CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY x")
-          	if err != nil {
-          		fmt.Fprintln(os.Stderr, err)
-          		os.Exit(1)
-          	}
-          	defer schema.Close()
-          	batch, err := schema.Rows(chtypes.JSONEachRow, []byte(`{"x":256}`))
-          	if err != nil || batch.Outcome != chtypes.Accepted || len(batch.Rows) != 1 || len(batch.Rows[0].Transformed) != 1 || batch.Rows[0].Transformed[0].Reason != chtypes.ReasonOverflowWrap {
-          		fmt.Fprintf(os.Stderr, "unexpected answer: %+v, %v\n", batch, err)
-          		os.Exit(1)
-          	}
-          	fmt.Println(lib.Version, lib.BuildInfo().ABIFingerprint, batch.Outcome, batch.Rows[0].Transformed[0].Reason)
-          }
-          EOF
-          go mod tidy
-          go run . "$LINE"
+          version="${TAG#go/v}"
+          if [ "$MODE" = local ]; then
+            scripts/release-verify.sh go local "$version" go
+          else
+            scripts/release-verify.sh go registry "$version"
+          fi

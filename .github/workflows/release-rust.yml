@@ -18,6 +18,11 @@ on:
         required: true
         type: boolean
         default: true
+      verify_only:
+        description: "Skip the publish job and run only the verify job against the ALREADY-PUBLISHED version the tag names (registry install first, with its retry loop). Wins over dry_run."
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 # Every run: step uses bash with -eo pipefail. GitHub's default for a step
@@ -29,6 +34,7 @@ defaults:
 
 jobs:
   publish:
+    if: github.event_name != 'workflow_dispatch' || !inputs.verify_only
     runs-on: ubuntu-latest
     environment: crates-io
     permissions:
@@ -83,8 +89,8 @@ jobs:
   # version that already exists. No `environment` and no `id-token: write`
   # here: this job only reads public registries anonymously.
   #
-  # What it proves, in order, each one a fact about the PUBLISHED crate and
-  # none read from this checkout's source tree:
+  # What it proves, in order (on the tag path each one a fact about the
+  # PUBLISHED crate, none read from this checkout's source tree):
   #   1. the crate installs (the registry-lag retry loop, 15 minutes);
   #   2. the ABI fingerprint constant in the published source equals
   #      CHS_ABI_FINGERPRINT in include/chtypes.h (v1 has no revision number);
@@ -92,9 +98,17 @@ jobs:
   #      and fetches one of them;
   #   4. the public API opens that line, and the loaded library's own
   #      build_info reports the same fingerprint.
+  # The steps are scripts/release-verify.sh, shared by every path:
+  #   - a tag push: publish, then verify the registry's copy;
+  #   - a dry run (dry_run=true): no publish; the same steps against the crate
+  #     in this checkout (`cargo install --path`), the retry loop skipped;
+  #   - verify_only=true: no publish; the same steps against the version the
+  #     `tag` input names, already on crates.io.
+  # The parser of `chtypes list` and the whole sequence are therefore exercised
+  # by a dry run, before an irreversible publish.
   verify:
     needs: publish
-    if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+    if: ${{ !failure() && (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && inputs.verify_only)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -102,53 +116,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
-      - name: the published crate installs, speaks the header's ABI fingerprint, fetches a line and loads it
+      - name: the verify script's own selftest (the list parser)
+        run: scripts/release-verify.sh --selftest
+      - name: the crate installs, speaks the header's ABI fingerprint, lists, fetches a line and loads it
         env:
-          WORK_PARENT: ${{ runner.temp }}
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'local' || 'registry' }}
         run: |
-          version="${GITHUB_REF_NAME#rust/v}"
-          want="$(sed -n 's/^#define CHS_ABI_FINGERPRINT "\(sha256:[0-9a-f]*\)"$/\1/p' include/chtypes.h)"
-          [ -n "$want" ] || { echo "::error::could not read CHS_ABI_FINGERPRINT from include/chtypes.h"; exit 1; }
-          work="$WORK_PARENT/verify-rust"
-          rm -rf "$work"; mkdir -p "$work/bin"
-          export CHTYPES_CACHE="$work/cache"
-          echo "verifying chtypes $version, expecting $want"
-
-          # 1. the registry-lag retry loop: install the published binary.
-          deadline=$(( $(date +%s) + 900 ))
-          until cargo install "chtypes@=$version" --locked --root "$work/bin" > "$work/install.log" 2>&1; do
-            if [ "$(date +%s)" -ge "$deadline" ]; then
-              tail -n 20 "$work/install.log"
-              echo "::error::chtypes $version did not become installable from crates.io within 900s"
-              exit 1
-            fi
-            echo "not installable yet; retrying in 30s"
-            sleep 30
-          done
-
-          # 2. the fingerprint constant in the PUBLISHED source, from the registry's own copy.
-          cd "$work"
-          cargo init --name chtypes-verify --vcs none >/dev/null 2>&1
-          cargo add "chtypes@=$version" >/dev/null 2>&1
-          src="$(cargo metadata --format-version 1 | python3 -c 'import json,sys; print(next(p["manifest_path"] for p in json.load(sys.stdin)["packages"] if p["name"] == "chtypes"))')"
-          got="$(sed -n 's/^ *"\(sha256:[0-9a-f]*\)";$/\1/p' "$(dirname "$src")/src/abi1/decls.rs" | head -n 1)"
-          [ "$got" = "$want" ] || { echo "::error::published CHS_ABI_FINGERPRINT is '$got', include/chtypes.h says '$want'"; exit 1; }
-
-          # 3. the published CLI, against the production registry.
-          line="$("$work/bin/bin/chtypes" list | sed -n '/^[0-9][0-9]*\.[0-9][0-9]*$/p' | sort -V | tail -n 1)"
-          [ -n "$line" ] || { echo "::error::the production registry lists no line"; exit 1; }
-          echo "fetching $line"
-          "$work/bin/bin/chtypes" fetch "$line"
-
-          # 4. the public API opens it; the library's own build_info must agree.
-          cat > src/main.rs <<RS
-          fn main() -> Result<(), Box<dyn std::error::Error>> {
-              let registry = chtypes::Registry::new(chtypes::RegistryOptions::default())?;
-              let lib = registry.for_version("$line")?;
-              println!("{}", lib.build_info().abi_fingerprint);
-              Ok(())
-          }
-          RS
-          loaded="$(cargo run --quiet)"
-          [ "$loaded" = "$want" ] || { echo "::error::the loaded library reports '$loaded', expected '$want'"; exit 1; }
-          echo "OK: chtypes $version installs, speaks $want, fetched $line and loaded it"
+          version="${TAG_NAME#rust/v}"
+          if [ "$MODE" = local ]; then
+            scripts/release-verify.sh rust local "$version" rust
+          else
+            scripts/release-verify.sh rust registry "$version"
+          fi
