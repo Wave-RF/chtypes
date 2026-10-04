@@ -36,6 +36,7 @@ import {
   type FilterResult,
   Format,
   formatChName,
+  InternalError,
   isChtypesError,
   type Library,
   Registry,
@@ -625,7 +626,8 @@ function section8(lib: Library): void {
 
   kv('(d) a clock TTL', 'TTL ts + INTERVAL 1 DAY relative to now()');
   kv('  compile', classify(() => lib.compileTable('CREATE TABLE t (ts DateTime) ENGINE = MergeTree ORDER BY ts TTL now() + INTERVAL 1 DAY')));
-  note('a clock-reading TTL is DECLINED, not guessed');
+  note('a clock-reading TTL is answered by the library per its own rules;');
+  note('this tour reports whatever kind of answer comes back');
 }
 
 // ---------------------------------------------------------------------------
@@ -1188,6 +1190,7 @@ function classify(call: () => unknown): string {
   } catch (err) {
     if (err instanceof UnsupportedError) return 'DECLINED  (UnsupportedError)';
     if (err instanceof SchemaError) return `REFUSED   (SchemaError, code ${err.chCode})`;
+    if (err instanceof InternalError) return 'LIBRARY FAULT  (InternalError)';
     throw err;
   }
 }

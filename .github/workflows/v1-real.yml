@@ -161,13 +161,16 @@ jobs:
           set -e
           cat "$LOGS/tour.log"
           echo "chplay exit status: $rc"
-          test "$rc" -eq 0
+          test "$rc" -eq 0 || exit 1
+          echo "checkpoint: chplay ok"
           # A tour can finish all 17 banners while a section quietly gave up
           # (the discovery section did, against the real library). Name those.
           if command grep -nE 'did not match what this build reads|discover_columns +refused|^playground: ' "$LOGS/tour.log"; then
             echo "::error::a section gave up against the real library (lines above)"; exit 1
           fi
+          echo "checkpoint: no gave-up lines"
           n=$(command grep -c '^=== ' "$LOGS/tour.log" || true)
+          echo "checkpoint: sections=$n"
           echo "sections=$n" >> "$GITHUB_OUTPUT"
           test "$n" -ge 17 || { echo "::error::only $n of 17 sections printed"; exit 1; }
       - name: "(c) the loaded library's build_info carries the header's ABI fingerprint"
