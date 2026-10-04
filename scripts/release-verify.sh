@@ -241,8 +241,10 @@ func main() {
 	fmt.Println(lib.BuildInfo().ABIFingerprint)
 }
 GO
-    # -e: tidy considers every build tag, including the retired v0 files (tagged out of the real build) whose imports no longer exist.
-    go mod tidy -e >/dev/null 2>&1 || true
+    # A consumer's own `go mod tidy`, with no -e and no masking: it fails loudly
+    # if the module ships any file, under any build tag except `ignore`, that
+    # imports a package the module does not contain (go/v1.0.0 did: #454).
+    go mod tidy
     loaded_ok "$(go run . "$line")"
     ;;
 esac

@@ -1,4 +1,4 @@
-//go:build chtypes_v0_retired
+//go:build ignore
 
 package chtypes
 
