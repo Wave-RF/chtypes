@@ -11,10 +11,54 @@ The source of truth for every value this page cites is [`spec/fetch-v1/constants
 A standard **OCI image layout** rooted at `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/` (`CHTYPES_CACHE` names the layout directory itself, overriding the whole path, not a parent of it). This is a v1-only root: it shares nothing with v0's `…/chtypes/artifacts/abi<R>/` caches or with a developer's local build caches under `…/chtypes/` — a fetch here never reads or writes either.
 
 - `oci-layout`, `index.json` and `blobs/sha256/<hex>` are the OCI image layout proper: every manifest, index and layer blob this fetcher has verified, content-addressed.
-- `unpacked/sha256/<manifest-hex>/` sits beside `blobs/`: the unpacked library for one verified platform manifest, named by that manifest's own digest. A `verified.json` record inside it is the fetch layer's own durable proof that this directory was verified once, under which key, and against which digests — **the source of truth for `--offline` and `resolve_installed`** (never `index.json`; see below).
+- `unpacked/sha256/<manifest-hex>/` sits beside `blobs/`: the unpacked library for one verified platform manifest, named by that manifest's own digest. A `verified.json` record inside it is the durable proof that this directory was verified once, under which key, and against which digests — **the source of truth for `--offline` and `resolve_installed`** (never `index.json`; see below). The record has one format, below, which every binding writes and reads: the cache is shared, so a cache one binding wrote is a cache every binding reads.
 - `index.json` is written by **temp-file-then-atomic-rename**, then re-read and re-applied, never edited in place — two concurrent fetches racing the same cache must both survive (the `index-race-reapply` case, §10).
 - Read-only **system directories** are searched after the user cache, never written to.
 - The cache **can be pre-seeded** with `oras copy -r --to-oci-layout` (ORAS 1.3.4 and `--platform` are `measured` compatible with this layout, per the delivery side's design). A pre-seeded layout has entries in `index.json` with no corresponding `unpacked/` directory yet; the first request for one verifies it against its signature exactly as a freshly downloaded layer would, then unpacks it. Losing a pre-seed's `index.json` entry to a losing race costs only `oras` interop, never correctness — verification never trusts `index.json` content, only digests it then independently checks.
+
+### The `verified.json` record (schema 1)
+
+The schema is `spec/fetch-v1/schema/verified.schema.json`. The record is a JSON object with exactly these members, every one present, with `null` where shown:
+
+```json
+{
+  "schema": 1,
+  "platform": "linux-arm64",
+  "version": "26.8.15.10",
+  "channel": "lts",
+  "build": "20261001.183455",
+  "library": "libchtypes.so",
+  "library_sha256": "<64 lowercase hex>",
+  "library_bytes": 123456,
+  "digests": {
+    "index": "sha256:<hex>",
+    "manifest": "sha256:<hex>",
+    "layer": "sha256:<hex>",
+    "bundle": "sha256:<hex>",
+    "bundle_manifest": "sha256:<hex>"
+  },
+  "signed_by": "<key id>",
+  "predicate": {}
+}
+```
+
+- `platform` is `linux-amd64`, `linux-arm64` or `darwin-arm64`. `version` is the exact four-part version and `build` the fixed-width build timestamp, both from the verified predicate. `predicate` is the verified statement's predicate, verbatim.
+- `library` is the library's file name **relative to the unpacked directory**: never an absolute path, never a path with a separator, never `.` or `..`, so a cache that moves still reads. `library_sha256` and `library_bytes` are what the installer measured on the unpacked file (equal to the signed predicate's).
+- `channel`, `digests.index`, `digests.bundle`, `digests.bundle_manifest` and `signed_by` may be `null`. `signed_by` and `digests.bundle` are `null` only under allow-unsigned. `digests.index` and `digests.bundle_manifest` are informational: `null` when the install path never saw them (a frozen install never saw the index).
+- A reader ignores any member not listed here and never refuses a record for one.
+
+**Writers** write exactly this object, atomically (a temporary file in the same directory, then a rename of the directory or file), once per directory. Key order and whitespace are free; what is equal across bindings is the parsed members.
+
+**Readers** accept exactly `schema` 1. A record that is missing, unparsable, of another `schema`, or that breaks a rule above is treated as **ABSENT**, never as a failure by itself and never trusted: the directory is re-verified from the cache's own content-addressed blobs, exactly as a pre-seeded `index.json` entry is (a failing re-verify is the usual `CHTYPES_ARTIFACT_CORRUPT`; no blobs at all is not installed). After a successful re-verify the unreadable directory is replaced by the freshly verified one (a temporary directory in the same parent, then a rename), so the record that could not be read is gone and the next reader finds a good one. The conformance cases `cache-record-*` (§10) prove this in every binding, and the `v1-cache-interop` job proves that a cache any binding writes is read by every binding.
+
+### Upgrading from 0.x
+
+`measured` (from the source on this branch): every v1 binding resolves its cache root to `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/`, or to `CHTYPES_CACHE` when set (`expandCacheRoot` in `go/internal/ocifetch/ensure.go`, `resolve_cache_root` in `python/src/chtypes/_ocifetch/_layout.py`, `cache_root` in `rust/src/ocifetch/layout.rs`, `cacheRoot` in `ts/src/ocifetch/layout.ts`). The 0.x line used a different root: a registry directory of `<minor>/manifest.json` entries, by default `${XDG_CACHE_HOME:-~/.cache}/chtypes/artifacts/abi<R>/<os>-<arch>/`, set by the retired `CHTYPES_REGISTRY` (`go/chtypes/registry_path.go` and `python/src/chtypes/_manifest.py`; the guide is `docs/guides/fetch.md` §1). `inferred`: the TypeScript and Rust 0.x registries use the same layout, as that guide states it for all four. So a machine that carries a 0.x cache into 1.0 has two disjoint directories, and nothing in 1.0 reads or writes the old one.
+
+Nothing about a 0.x cache may crash 1.0, including when something points the 1.0 root at it:
+
+- A `CHTYPES_CACHE` that names a 0.x registry directory (no `oci-layout`, no `index.json`) is an empty, foreign layout. A fetch proceeds normally and installs beside the old files without touching them. `--offline` and `resolve_installed` answer the ordinary not-installed code. Nothing is read as verified. (`upgrade-0x-registry-*`.)
+- An `unpacked/sha256/<hex>/` directory holding a 0.x-style `manifest.json` and no `verified.json` reads as absent. It is re-verified from blobs when they exist and reported not installed when they do not. (`upgrade-0x-unpacked-*`.)
 
 ## 2. Sources
 
@@ -84,7 +128,7 @@ Every one of the checks above runs **in this order**, and a failure at any step 
 - `fetch --lock` resolves normally (§3–§4) and then writes the lock.
 - `--frozen` **skips resolution entirely**: it fetches the platform manifest, bundle and layer by digest from any configured base, verifies them exactly as a normal fetch would (§4–§5), and refuses (`CHTYPES_ARTIFACT_PINNED`) if the lock names no entry for the requested platform, or the lock itself fails schema validation. A tree with **no tags, no referrers API and no `tags/list`** still succeeds under `--frozen` — every request it makes is by digest (the `frozen-no-discovery` case).
 - `update` re-resolves every locked request against the current index and rewrites the lock; it never merges a stale entry with a fresh one.
-- `--offline` reads the cache only (§1): the **source of truth is the immutable `unpacked/sha256/*/verified.json` records**, never `index.json`. A pre-seeded `index.json` entry with no corresponding `unpacked/` directory is the one case `--offline` still verifies and unpacks before answering, because it has not yet produced a `verified.json` record of its own.
+- `--offline` reads the cache only (§1): the **source of truth is the immutable `unpacked/sha256/*/verified.json` records**, never `index.json`. A pre-seeded `index.json` entry with no corresponding `unpacked/` directory is the one case `--offline` still verifies and unpacks before answering, because it has not yet produced a `verified.json` record of its own. A directory whose record a reader cannot accept (§1) counts as having none.
 - Writing a lock for **every platform the index offers**, not only the host's own, downloads and verifies every platform's bundle but fetches the **layer only for the host's own platform** — `lock-write-all-platforms` asserts zero layer `GET`s for non-host platforms.
 
 <!-- BEGIN GENERATED: fetch-v1 constants -->
@@ -226,7 +270,9 @@ A case id starting `resolve-installed-` exercises `resolve_installed(request, pl
 
 ### Cache fixtures and `installed.json`
 
-A `layouts/<name>/` fixture (`setup.cache` names one) is always a plain OCI image layout — `oci-layout`, `index.json`, `blobs/sha256/<hex>` — the same shape a real `oras copy --to-oci-layout` produces. **It never carries a pre-populated "already unpacked" record.** That bookkeeping (§1's `verified.json`) is each binding's own internal, implementation-private format; it is not part of the frozen seam (§9 only returns a `Resolved` value, never a file format) and this generator never fabricates one. Every binding's fetch layer must already treat a pre-seeded `index.json` entry with no corresponding `unpacked/` directory as unverified — verify-then-unpack from local blobs, zero network — so most cache cases (`offline-hit`, `offline-miss`, `preseed-oras`, `system-dir-readonly`) need nothing more than the layout itself.
+A `layouts/<name>/` fixture (`setup.cache` names one) is a plain OCI image layout — `oci-layout`, `index.json`, `blobs/sha256/<hex>` — the same shape a real `oras copy --to-oci-layout` produces, with two kinds of exception. **Most layouts carry no pre-populated "already unpacked" directory.** Every binding's fetch layer must treat a pre-seeded `index.json` entry with no corresponding `unpacked/` directory as unverified — verify-then-unpack from local blobs, zero network — so most cache cases (`offline-hit`, `offline-miss`, `preseed-oras`, `system-dir-readonly`) need nothing more than the layout itself.
+
+**The `cache-record-*` and `upgrade-0x-*` layouts DO carry an `unpacked/` directory, and the generator writes the `verified.json` in it.** This amends the earlier rule that a fixture never carried one, which held while each binding kept a private record format: `verified.json` is now the one canonical record (§1), so a fixture can carry it, and the only way to prove every binding READS the canonical record is to hand each a layout that already has one. The generator writes the record from the artifact's own digests, never by running a binding. `cache-record-canonical` has the record, the library and no blobs and no `index.json`, so it passes only if the record was read and trusted. `cache-record-foreign-unparsable`, `-flat` (the old flat shape) and `-schema2` (a `schema: 2` record naming a build no real artifact has) carry blobs and an `index.json` entry with an unreadable record: every binding must treat the record as absent, re-verify from the blobs, and answer with the real build. `upgrade-0x-registry` is a raw layout with no `oci-layout` and no `index.json` at all (`<minor>/manifest.json`, a library, `patches/…`): offline is not installed, and the online case `upgrade-0x-registry-online` installs a build into it. `upgrade-0x-unpacked-noblobs` and `-reverify` hold a 0.x-style `manifest.json` where `verified.json` belongs, without and with blobs. Each is run through `--offline` and through `resolve_installed` (the `resolve-installed-` id prefix). `scripts/fetch-v1/schema_check.py` validates the record in every `cache-record-canonical*` layout against `verified.schema.json`.
 
 **`preseed-oras` is CONDITIONAL on `layouts/oras-preseed/` actually being on disk, checked fresh on every `--write`/`--check`/`--selftest`.** That directory is written only by a real `oras copy -r --to-oci-layout` in the workflow_dispatch-only `v1-oras-preseed` job, never by this generator — and as of this writing that job has not yet landed its output in this tree. Rather than ship the case unbacked (a `setup.cache` naming a directory that cannot exist, which every binding's runner would either 404/ENOENT on or have to special-case around — a GENERATOR problem presented as a binding one, the exact defect three fetch lanes independently found, 2026-10-02), `cachecases.go` gates the case's very presence in `cases.json` on `layoutPresentOnDisk("oras-preseed")` and otherwise skips it LOUDLY (a stderr line, every run, never silent — the same discipline `CHTYPES_V1_CONFORMANCE` unset already follows, above). Dispatching the job and committing its output is enough to pick the case back up on the next regeneration; no binding needs a second wiring pass. `checkCacheLayoutsExist` (`cases.go`) is this same invariant's second, independent check.
 

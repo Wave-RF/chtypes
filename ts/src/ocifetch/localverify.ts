@@ -26,6 +26,7 @@ import { MEDIA_TYPE_BUNDLE, PREDICATE_TYPE_ARTIFACT } from './constants.gen.js';
 import { checkArtifactStatement, parseStatement, verifyBundleSignature } from './dsse.js';
 import { ArtifactCorruptError } from './errors.js';
 import {
+  buildRecord,
   commitStaging,
   freshStagingDir,
   listLocalBlobHexes,
@@ -38,7 +39,7 @@ import {
 import { type Descriptor, parseManifest, verifyDescriptor } from './oci.js';
 import type { ArtifactPredicate, PlatformKey, Statement, TrustedKey } from './types.js';
 import { digestOfHex, hexOfDigest, platformInfo } from './types.js';
-import { verifyAndUnpackLayerBytes, verifyInstalledLibrary } from './unpack.js';
+import { measureLibrary, verifyAndUnpackLayerBytes, verifyInstalledLibrary } from './unpack.js';
 
 /**
  * Verifies and installs the platform manifest named by `manifestDigest`,
@@ -97,15 +98,17 @@ export async function verifyAndInstallFromLocalBlobs(
         );
       }
       await verifyInstalledLibrary(path.join(staging, predicate.library), predicate.library_sha256, predicate.library_bytes);
-      const record: VerifiedRecord = {
-        schema: 1,
+      const record = buildRecord({
+        platform,
+        predicate,
+        library: await measureLibrary(path.join(staging, predicate.library)),
+        indexDigest: null,
         manifestDigest,
         layerDigest: manifest.layer.digest,
         bundleDigest: found.bundleDigest,
+        bundleManifestDigest: found.bundleManifestDigest,
         signedBy: found.signedBy,
-        predicate,
-        library: predicate.library,
-      };
+      });
       await writeVerifiedRecord(staging, record);
       await commitStaging(staging, unpackedDir(writeRoot, manifestHex));
       return record;
@@ -128,6 +131,7 @@ interface LocalSignature {
   readonly statement: Statement;
   readonly signedBy: string;
   readonly bundleDigest: string;
+  readonly bundleManifestDigest: string;
 }
 
 /**
@@ -166,7 +170,7 @@ async function findLocalSignature(
       continue;
     }
     if (statement.subject[0]?.digest.sha256 !== hexOfDigest(layer.digest)) continue;
-    return { statement, signedBy: verified.signedBy, bundleDigest: digestOfHex(hex) };
+    return { statement, signedBy: verified.signedBy, bundleDigest: candidateManifest.layer.digest, bundleManifestDigest: digestOfHex(hex) };
   }
   return undefined;
 }

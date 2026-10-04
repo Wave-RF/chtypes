@@ -315,10 +315,9 @@ def _preinstall_from_layout(
             library_bytes=predicate["library_bytes"],
         )
         record = VerifiedRecord(
-            schema=1,
             manifest=manifest_digest,
             layer=layer_desc.digest,
-            bundle=bundle_digest or "",
+            bundle=bundle_digest,
             index=None,
             platform=platform_key,
             version=predicate["clickhouse_version"],
@@ -327,6 +326,8 @@ def _preinstall_from_layout(
             predicate=predicate,
             signed_by=verified.signed_by,
             library=predicate["library"],
+            library_sha256=predicate["library_sha256"],
+            library_bytes=predicate["library_bytes"],
         )
         write_verified_install(cache_root, manifest_digest, record, unpacked_tmp_dir=unpacked_dir)
     finally:

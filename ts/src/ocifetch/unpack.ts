@@ -176,6 +176,22 @@ export async function fetchVerifyAndUnpackLayer(
   return verifyAndUnpackLayerBytes(downloaded.bytes, layer, destDir);
 }
 
+/** The sha256 (lowercase hex) and byte length of the unpacked library, as the canonical `verified.json` records them. */
+export async function measureLibrary(libraryPath: string): Promise<{ readonly sha256: string; readonly bytes: number }> {
+  const hash = createHash('sha256');
+  let size = 0;
+  await new Promise<void>((resolve, reject) => {
+    const s = createReadStream(libraryPath);
+    s.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      hash.update(chunk);
+    });
+    s.on('end', resolve);
+    s.on('error', reject);
+  });
+  return { sha256: hash.digest('hex'), bytes: size };
+}
+
 /** Re-hashes the installed library against the signed predicate's `library_sha256`/`library_bytes` (guide §5 step 5). */
 export async function verifyInstalledLibrary(libraryPath: string, expectedSha256Hex: string, expectedBytes: number): Promise<void> {
   const hash = createHash('sha256');

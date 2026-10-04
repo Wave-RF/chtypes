@@ -19,7 +19,8 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { CACHE_UNPACKED_DIR, CACHE_VERIFIED_RECORD, ENV_CACHE_NAME, SYSTEM_CACHE_DIRS } from './constants.gen.js';
+import { CACHE_UNPACKED_DIR, CACHE_VERIFIED_RECORD, ENV_CACHE_NAME, PLATFORMS, SYSTEM_CACHE_DIRS } from './constants.gen.js';
+import { ArtifactCorruptError } from './errors.js';
 import type { ArtifactPredicate } from './types.js';
 
 /** `CHTYPES_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1` — the layout root itself, not a parent of it. */
@@ -194,38 +195,192 @@ export async function readIndexEntries(root: string): Promise<readonly IndexDesc
 
 // ------------------------------------------------------------- verified.json
 
+/**
+ * One `unpacked/sha256/<hex>/verified.json`, in memory. Its on-disk form is
+ * the one canonical record every binding reads and writes
+ * (`spec/fetch-v1/schema/verified.schema.json`, guide §1): see
+ * `encodeRecord` and `decodeRecord`. Optional members are `null` here and
+ * on disk.
+ */
 export interface VerifiedRecord {
-  readonly schema: 1;
+  readonly platform: string;
+  readonly version: string;
+  readonly channel: string | null;
+  readonly build: string;
+  /** The library's file name, relative to the unpacked directory. */
+  readonly library: string;
+  readonly librarySha256: string;
+  readonly libraryBytes: number;
+  readonly indexDigest: string | null;
   readonly manifestDigest: string;
   readonly layerDigest: string;
-  readonly bundleDigest: string;
-  readonly signedBy: string;
+  readonly bundleDigest: string | null;
+  readonly bundleManifestDigest: string | null;
+  /** `null` only under allow-unsigned. */
+  readonly signedBy: string | null;
   readonly predicate: ArtifactPredicate;
-  /** The library's path relative to the unpacked directory (matches `predicate.library`). */
-  readonly library: string;
+}
+
+export interface RecordSource {
+  readonly platform: string;
+  readonly predicate: ArtifactPredicate;
+  /** The unpacked library as measured on disk (`measureLibrary`), never copied from an unsigned config. */
+  readonly library: { readonly sha256: string; readonly bytes: number };
+  readonly indexDigest: string | null;
+  readonly manifestDigest: string;
+  readonly layerDigest: string;
+  readonly bundleDigest: string | null;
+  readonly bundleManifestDigest: string | null;
+  readonly signedBy: string | null;
+}
+
+/** Builds the canonical record for one verified install from what the install itself established. */
+export function buildRecord(src: RecordSource): VerifiedRecord {
+  const channel = src.predicate.channel;
+  return {
+    platform: src.platform,
+    version: src.predicate.clickhouse_version,
+    channel: typeof channel === 'string' && channel !== '' ? channel : null,
+    build: src.predicate.build,
+    library: src.predicate.library,
+    librarySha256: src.library.sha256,
+    libraryBytes: src.library.bytes,
+    indexDigest: src.indexDigest,
+    manifestDigest: src.manifestDigest,
+    layerDigest: src.layerDigest,
+    bundleDigest: src.bundleDigest,
+    bundleManifestDigest: src.bundleManifestDigest,
+    signedBy: src.signedBy,
+    predicate: src.predicate,
+  };
+}
+
+const HEX64 = /^[0-9a-f]{64}$/;
+const DIGEST = /^sha256:[0-9a-f]{64}$/;
+const VERSION4 = /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/;
+
+/** The canonical `verified.json` text: every member present, `null` where the schema allows it. */
+export function encodeRecord(record: VerifiedRecord): string {
+  return JSON.stringify({
+    schema: 1,
+    platform: record.platform,
+    version: record.version,
+    channel: record.channel,
+    build: record.build,
+    library: record.library,
+    library_sha256: record.librarySha256,
+    library_bytes: record.libraryBytes,
+    digests: {
+      index: record.indexDigest,
+      manifest: record.manifestDigest,
+      layer: record.layerDigest,
+      bundle: record.bundleDigest,
+      bundle_manifest: record.bundleManifestDigest,
+    },
+    signed_by: record.signedBy,
+    predicate: record.predicate,
+  });
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function nullableString(v: unknown): string | null | undefined {
+  if (v === null) return null;
+  return typeof v === 'string' ? v : undefined;
+}
+
+/**
+ * Accepts exactly the canonical schema-1 record. Anything else (not JSON,
+ * another schema, a missing member, a member of the wrong type, a broken
+ * rule) is `undefined`, which every caller treats as an ABSENT record —
+ * never fatal by itself and never trusted.
+ */
+export function decodeRecord(raw: string): VerifiedRecord | undefined {
+  let doc: unknown;
+  try {
+    doc = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!isObject(doc)) return undefined;
+  for (const key of ['schema', 'platform', 'version', 'channel', 'build', 'library', 'library_sha256', 'library_bytes', 'digests', 'signed_by', 'predicate']) {
+    if (!(key in doc)) return undefined;
+  }
+  const digests = doc['digests'];
+  if (!isObject(digests)) return undefined;
+  for (const key of ['index', 'manifest', 'layer', 'bundle', 'bundle_manifest']) {
+    if (!(key in digests)) return undefined;
+  }
+  if (doc['schema'] !== 1) return undefined;
+  const platform = doc['platform'];
+  const version = doc['version'];
+  const build = doc['build'];
+  const library = doc['library'];
+  const sha = doc['library_sha256'];
+  const bytes = doc['library_bytes'];
+  if (typeof platform !== 'string' || !PLATFORMS.some((p) => p.key === platform)) return undefined;
+  if (typeof version !== 'string' || !VERSION4.test(version)) return undefined;
+  if (typeof build !== 'string' || build === '') return undefined;
+  if (typeof library !== 'string' || library === '' || library === '.' || library === '..' || library.includes('/') || library.includes('\\')) return undefined;
+  if (typeof sha !== 'string' || !HEX64.test(sha)) return undefined;
+  if (typeof bytes !== 'number' || !Number.isInteger(bytes) || bytes < 0) return undefined;
+  if (!isObject(doc['predicate'])) return undefined;
+  const channel = nullableString(doc['channel']);
+  const signedBy = nullableString(doc['signed_by']);
+  const index = nullableString(digests['index']);
+  const manifest = digests['manifest'];
+  const layer = digests['layer'];
+  const bundle = nullableString(digests['bundle']);
+  const bundleManifest = nullableString(digests['bundle_manifest']);
+  if (channel === undefined || signedBy === undefined || index === undefined || bundle === undefined || bundleManifest === undefined) return undefined;
+  if (typeof manifest !== 'string' || !DIGEST.test(manifest) || typeof layer !== 'string' || !DIGEST.test(layer)) return undefined;
+  for (const d of [index, bundle, bundleManifest]) {
+    if (d !== null && !DIGEST.test(d)) return undefined;
+  }
+  return {
+    platform,
+    version,
+    channel,
+    build,
+    library,
+    librarySha256: sha,
+    libraryBytes: bytes,
+    indexDigest: index,
+    manifestDigest: manifest,
+    layerDigest: layer,
+    bundleDigest: bundle,
+    bundleManifestDigest: bundleManifest,
+    signedBy,
+    predicate: doc['predicate'] as unknown as ArtifactPredicate,
+  };
 }
 
 /**
  * Writes the directory's own durable proof of verification — **the source
  * of truth for `--offline` and `resolve_installed`** (guide §6), never
  * `index.json`. Written once, by temp-then-rename, immediately after a
- * successful unpack; a directory with no `verified.json` is treated as
- * unverified regardless of what `index.json` claims about it.
+ * successful unpack; a directory with no acceptable `verified.json` is
+ * treated as unverified regardless of what `index.json` claims about it.
+ * A record that would not read back (it breaks the schema) is refused here
+ * rather than left behind as a directory no reader will trust.
  */
 export async function writeVerifiedRecord(dir: string, record: VerifiedRecord): Promise<void> {
+  const text = encodeRecord(record);
+  if (decodeRecord(text) === undefined) {
+    throw new ArtifactCorruptError(`chtypes: refusing to write a verified.json that breaks its own schema (version ${JSON.stringify(record.version)}, build ${JSON.stringify(record.build)})`);
+  }
   const dest = path.join(dir, CACHE_VERIFIED_RECORD);
   const tmp = await tempPathNear(dest);
-  await writeFile(tmp, JSON.stringify(record));
+  await writeFile(tmp, text);
   await rename(tmp, dest);
 }
 
-/** `undefined` when the directory has no (or an unreadable) `verified.json` — never partially trusted. */
+/** `undefined` when the directory has no acceptable `verified.json` (missing, unparsable, another schema, or a broken rule) — never partially trusted. */
 export async function readVerifiedRecord(dir: string): Promise<VerifiedRecord | undefined> {
   try {
-    const raw = await readFile(path.join(dir, CACHE_VERIFIED_RECORD), 'utf8');
-    const parsed = JSON.parse(raw) as VerifiedRecord;
-    if (parsed.schema !== 1 || typeof parsed.manifestDigest !== 'string') return undefined;
-    return parsed;
+    return decodeRecord(await readFile(path.join(dir, CACHE_VERIFIED_RECORD), 'utf8'));
   } catch {
     return undefined;
   }

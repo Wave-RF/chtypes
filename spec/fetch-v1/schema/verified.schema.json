@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chtypes.wave-rf.dev/spec/fetch-v1/schema/verified.schema.json",
+  "title": "chtypes v1 verified.json (schema 1)",
+  "description": "The durable record inside one unpacked/sha256/<manifest-hex>/ directory (docs/guides/fetch-v1.md §1): the proof that the directory was verified once. Every binding writes exactly this object and reads exactly this object, so a cache one binding wrote is a cache every binding reads. Every member is present, with null where the schema allows it. READERS accept exactly schema 1 and IGNORE any member not listed here (this schema forbids extra members only because it describes what a WRITER emits). A record that is missing, unparsable, of another schema, or that breaks a rule here is treated as ABSENT: the directory is re-verified from the cache's own blobs, and a successful re-verify replaces the record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "platform",
+    "version",
+    "channel",
+    "build",
+    "library",
+    "library_sha256",
+    "library_bytes",
+    "digests",
+    "signed_by",
+    "predicate"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "platform": {
+      "type": "string",
+      "enum": [
+        "linux-amd64",
+        "linux-arm64",
+        "darwin-arm64"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "The exact four-part version, from the verified predicate."
+    },
+    "channel": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "From the predicate when it names one, else null."
+    },
+    "build": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The fixed-width UTC build timestamp from the verified predicate."
+    },
+    "library": {
+      "type": "string",
+      "pattern": "^[^/\\\\]+$",
+      "description": "The library's file name, relative to this unpacked directory: a plain file name, never an absolute path, never a path with a separator, never . or .. (a cache that moves must still read). The pattern states the separator rule; readers also refuse . and .. ."
+    },
+    "library_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "The sha256 of the unpacked library as the installer measured it."
+    },
+    "library_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The size of the unpacked library as the installer measured it."
+    },
+    "digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "manifest",
+        "layer",
+        "bundle",
+        "bundle_manifest"
+      ],
+      "properties": {
+        "index": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Informational: the index the install was resolved through, null when the install did not go through one (a frozen or pre-seeded install)."
+        },
+        "manifest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "layer": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "bundle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The signature bundle's own blob; null only under allow-unsigned."
+        },
+        "bundle_manifest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Informational: the referrer manifest that carried the bundle, null when the install path never saw it (a frozen install) or under allow-unsigned."
+        }
+      }
+    },
+    "signed_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The key id that verified the signature; null only under allow-unsigned."
+    },
+    "predicate": {
+      "type": "object",
+      "description": "The verified statement's predicate, verbatim (under allow-unsigned, the config blob's fields)."
+    }
+  }
+}
