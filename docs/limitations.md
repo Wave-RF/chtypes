@@ -195,9 +195,9 @@ When the filter evaluates in a different time zone than the batch it runs over, 
 
 ### Per-call settings values are not validated the way a server's `SET` validates them
 
-Some invalid values for a per-call setting are accepted, where a server's `SET` would refuse them.
+**Fixed in the artifacts, build `20261004.021416` and later** (no SDK change). The artifact producer reports that an invalid value for a per-call setting is now refused with the server's own error code, as a server's `SET` refuses it, and that a filter created with an invalid `session_timezone` is refused at create (code 36). Every tag and line resolves to that build by default.
 
-**Workaround:** validate settings values in the caller, or against a server, before relying on a refusal here. **Planned.**
+On the first 1.0 build, `20261003.231921`, which stays fetchable by digest and through a lock that pins it, some invalid values are still accepted. **Workaround on that build:** validate settings values in the caller, or against a server, before relying on a refusal here, or move to the current build: `chtypes fetch <line>` resolves it, and a locked project re-resolves with `chtypes fetch --lock <file> --update`.
 
 ### `lossy` on a String holding a raw NUL in TSV
 
