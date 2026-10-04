@@ -49,6 +49,37 @@ jobs:
           mod="$(cd go && go list -m)"
           [ "$mod" = "github.com/wave-rf/chtypes/go" ] || { echo "module is $mod" >&2; exit 1; }
           (cd go && go mod verify)
+      # The User-Agent assertion. The fetch layer's `User-Agent` is
+      # `chtypes-go/<bindingVersion>`, and Go has no manifest to cross-check
+      # that constant against, so a stale one would ship silently. This
+      # writes a throwaway test INSIDE the package (userAgent is unexported),
+      # drives it with the tag's version, and requires the test to have RUN
+      # and passed. It runs on the tag path too, before anything is public.
+      - name: the User-Agent version is the version being tagged
+        run: |
+          version="${TAG#go/v}"
+          cat > go/internal/ocifetch/zz_release_useragent_test.go <<'EOF'
+          package ocifetch
+
+          import (
+          	"os"
+          	"testing"
+          )
+
+          func TestReleaseUserAgentMatchesTag(t *testing.T) {
+          	v := os.Getenv("RELEASE_VERSION")
+          	if v == "" {
+          		t.Fatal("RELEASE_VERSION is empty")
+          	}
+          	if got, want := userAgent(), "chtypes-go/"+v; got != want {
+          		t.Fatalf("User-Agent is %q, the tag says %q (bump bindingVersion in useragent.go)", got, want)
+          	}
+          }
+          EOF
+          out="$(cd go && RELEASE_VERSION="$version" go test ./internal/ocifetch -count=1 -run '^TestReleaseUserAgentMatchesTag$' -v)"
+          printf '%s\n' "$out"
+          grep -q -- '--- PASS: TestReleaseUserAgentMatchesTag' <<<"$out" || { echo "::error::the User-Agent assertion did not run and pass"; exit 1; }
+          rm go/internal/ocifetch/zz_release_useragent_test.go
       # A tag exiting green does not mean anyone can install the package: the
       # Go proxy serves a new tag some minutes after it is pushed. These steps
       # install the PUBLISHED module from the public proxy in a clean module,

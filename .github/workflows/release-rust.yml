@@ -46,6 +46,22 @@ jobs:
           ver="$(cd rust && cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;print(json.load(sys.stdin)["packages"][0]["version"])')"
           [ "$tag" = "$ver" ] || { echo "::error::tag rust/v$tag but Cargo.toml says $ver"; exit 1; }
       - run: cd rust && cargo build --locked && cargo test --locked --lib
+      # The User-Agent assertion. `user_agent()` is `chtypes-rust/` plus
+      # CARGO_PKG_VERSION; the unit test pins that shape (and must have RUN: a
+      # filter that matches nothing reports "0 passed"), and the BUILT binary
+      # must report the tagged version. It runs on the tag path too, before
+      # anything is published.
+      - name: the User-Agent version is the version being tagged
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          tag="${TAG_NAME#rust/v}"
+          out="$(cd rust && cargo test --locked --lib user_agent_is_chtypes_rust_with_the_crate_version 2>&1)"
+          printf '%s\n' "$out"
+          grep -q 'test result: ok. 1 passed' <<<"$out" || { echo "::error::the User-Agent unit test did not run and pass"; exit 1; }
+          got="$(cd rust && cargo run --locked --quiet --bin chtypes -- --version)"
+          echo "binary: $got"
+          [ "$got" = "chtypes $tag" ] || { echo "::error::the built binary reports '$got', the tag says chtypes $tag"; exit 1; }
       - name: dry run, the publish rehearsal
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
         run: cd rust && cargo publish --dry-run --locked
