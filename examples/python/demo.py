@@ -86,17 +86,17 @@ BUFFERS_OK = "010000000000000001000000000000000400000000000000ffffffff"
 BUFFERS_WIDE = "010000000000000001000000000000000800000000000000ffffffff"
 
 # Section 11's CANNED server answer: shaped like a stock HTTP server's
-# JSONEachRow answer to the library's own discovery query (quoted UInt64s and
-# all). Swap in your own client's bytes and nothing else changes.
+# JSONEachRow answer to the library's own discovery query (the four columns
+# it selects). Swap in your own client's bytes and nothing else changes.
 CANNED_COLUMNS_RESULT = (
     b'{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT",'
-    b'"default_expression":"now64(3)","position":"1"}\n'
+    b'"default_expression":"now64(3)"}\n'
     b'{"name":"device_id","type":"UInt32","default_kind":"",'
-    b'"default_expression":"","position":"2"}\n'
+    b'"default_expression":""}\n'
     b'{"name":"reading c","type":"Float64","default_kind":"",'
-    b'"default_expression":"","position":"3"}\n'
+    b'"default_expression":""}\n'
     b'{"name":"note","type":"String","default_kind":"DEFAULT",'
-    b'"default_expression":"\'unset\'","position":"4"}\n'
+    b'"default_expression":"\'unset\'"}\n'
 )
 
 

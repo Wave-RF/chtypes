@@ -36,6 +36,7 @@ import {
   type FilterResult,
   Format,
   formatChName,
+  InternalError,
   isChtypesError,
   type Library,
   Registry,
@@ -65,13 +66,13 @@ seq UInt8 DEFAULT 0,
 payload String,
 grade Enum8('a' = 1, 'b' = 2),
 payload_len UInt32 MATERIALIZED length(payload)
-) ENGINE = Memory`;
+) ENGINE = MergeTree ORDER BY tuple()`;
 
 // A small three-column table for the outcome and format sections.
-const FORMAT_DDL = "CREATE TABLE t (device_id UInt32, seq UInt8 DEFAULT 7, label String DEFAULT 'unknown') ENGINE = Memory";
+const FORMAT_DDL = "CREATE TABLE t (device_id UInt32, seq UInt8 DEFAULT 7, label String DEFAULT 'unknown') ENGINE = MergeTree ORDER BY tuple()";
 
 // Section 17's table: an EPHEMERAL input column feeding a DEFAULT.
-const COLUMNS_DDL = 'CREATE TABLE t (id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1) ENGINE = Memory';
+const COLUMNS_DDL = 'CREATE TABLE t (id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1) ENGINE = MergeTree ORDER BY tuple()';
 
 // Pinning the clock is what makes a demo with now64(3) in it reproducible. The
 // value is a STRING at the boundary, always: settings values are strings only.
@@ -106,10 +107,10 @@ const BUFFERS_WIDE = '010000000000000001000000000000000800000000000000ffffffff';
 // Section 11's CANNED server answer to the discovery query: shaped like a real
 // ClickHouse's JSONEachRow rows of system.columns, quoted UInt64s and all.
 const CANNED_COLUMNS_RESULT =
-  '{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT","default_expression":"now64(3)","position":"1"}\n' +
-  '{"name":"device_id","type":"UInt32","default_kind":"","default_expression":"","position":"2"}\n' +
-  '{"name":"reading c","type":"Float64","default_kind":"","default_expression":"","position":"3"}\n' +
-  `{"name":"note","type":"String","default_kind":"DEFAULT","default_expression":"'unset'","position":"4"}\n`;
+  '{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT","default_expression":"now64(3)"}\n' +
+  '{"name":"device_id","type":"UInt32","default_kind":"","default_expression":""}\n' +
+  '{"name":"reading c","type":"Float64","default_kind":"","default_expression":""}\n' +
+  `{"name":"note","type":"String","default_kind":"DEFAULT","default_expression":"'unset'"}\n`;
 
 async function main(): Promise<void> {
   // The process setup is chosen once, before the first open (section 1).
@@ -169,7 +170,7 @@ async function section1(): Promise<{ registry: Registry; lib: Library; lines: st
   const info = lib.buildInfo;
   kv('library reports', `${lib.version}  (minor ${lib.minor}, channel ${info.channel || '(none)'})`);
   kv('loaded from', lib.path);
-  kv('abi / fingerprint', `${info.abi} / ${info.abiFingerprint.slice(0, 16)}...`);
+  kv('abi / fingerprint', `${info.abi} / ${info.abiFingerprint}`);
   kv('built for', `${info.os}-${info.arch}, build ${info.build}`);
   kv('signed by', lib.resolved?.signedBy ? `key ${lib.resolved.signedBy}` : '(not a fetched library)');
   note('the library NAMES ITSELF: nothing is inferred from a directory or file name,');
@@ -261,21 +262,21 @@ function section3(lib: Library): void {
   note('input; watch it come back separately in section 6');
   blank();
 
-  withSchema(lib, 'CREATE TABLE t (x Int64 DEFAULT NULL) ENGINE = Memory', (schema) => {
+  withSchema(lib, 'CREATE TABLE t (x Int64 DEFAULT NULL) ENGINE = MergeTree ORDER BY tuple()', (schema) => {
     const c = schema.describe().columns[0];
     kv('x Int64 DEFAULT NULL', `compiles as ${c?.type.toString()} DEFAULT ${c?.defaultExpr.toString()}`);
   });
   note('the DEFAULT rewrote the type to Nullable: the server does this at CREATE,');
   note('so chtypes must too, or every later verdict drifts');
 
-  withSchema(lib, 'CREATE TABLE t (a UInt8, al ALIAS a + 1) ENGINE = Memory', (schema) => {
+  withSchema(lib, 'CREATE TABLE t (a UInt8, al ALIAS a + 1) ENGINE = MergeTree ORDER BY tuple()', (schema) => {
     kv('a UInt8, al ALIAS a + 1', `al compiles as ${schema.describe().columns[1]?.type.toString()}`);
   });
   note("UInt8 + 1 widens to UInt16: ClickHouse's own inference");
   blank();
 
-  kv('x NotAType', classify(() => lib.compileTable('CREATE TABLE t (x NotAType) ENGINE = Memory')));
-  note(truncate(caught(() => lib.compileTable('CREATE TABLE t (x NotAType) ENGINE = Memory')), 90));
+  kv('x NotAType', classify(() => lib.compileTable('CREATE TABLE t (x NotAType) ENGINE = MergeTree ORDER BY tuple()')));
+  note(truncate(caught(() => lib.compileTable('CREATE TABLE t (x NotAType) ENGINE = MergeTree ORDER BY tuple()')), 90));
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +298,7 @@ function section4(lib: Library): void {
 
   kv('(a) flatten_nested', 'id UInt32, n Nested(a UInt8, b String)');
   for (const value of ['1', '0']) {
-    const schema = lib.compileTable('CREATE TABLE t (id UInt32, n Nested(a UInt8, b String)) ENGINE = Memory', {
+    const schema = lib.compileTable('CREATE TABLE t (id UInt32, n Nested(a UInt8, b String)) ENGINE = MergeTree ORDER BY tuple()', {
       settings: { flatten_nested: value },
     });
     kv(`  =${value}`, schema.describe().columns.map((c) => `${c.name.toString()} ${c.type.toString()}`).join(' | '));
@@ -311,7 +312,7 @@ function section4(lib: Library): void {
   kv('(b) a type gate', 'lc LowCardinality(UInt8), allow_suspicious_low_cardinality_types');
   for (const value of ['0', '1']) {
     try {
-      const schema = lib.compileTable('CREATE TABLE t (lc LowCardinality(UInt8)) ENGINE = Memory', {
+      const schema = lib.compileTable('CREATE TABLE t (lc LowCardinality(UInt8)) ENGINE = MergeTree ORDER BY tuple()', {
         settings: { allow_suspicious_low_cardinality_types: value },
       });
       kv(`  =${value}`, `compiled: ${schema.describe().columns[0]?.type.toString()}`);
@@ -325,7 +326,7 @@ function section4(lib: Library): void {
   blank();
 
   try {
-    lib.compileTable('CREATE TABLE t (a UInt8) ENGINE = Memory', { settings: { flatten_nestedd: '1' } });
+    lib.compileTable('CREATE TABLE t (a UInt8) ENGINE = MergeTree ORDER BY tuple()', { settings: { flatten_nestedd: '1' } });
   } catch (err) {
     if (!(err instanceof SchemaError)) throw err;
     kv('(c) unknown setting name', `flatten_nestedd -> code ${err.chCode} ${err.chName}`);
@@ -335,7 +336,7 @@ function section4(lib: Library): void {
   blank();
 
   kv('(d) settings are strings', 'a number is a TypeError, never silently rewritten');
-  kv('  flatten_nested: 0', caught(() => lib.compileTable('CREATE TABLE t (a UInt8) ENGINE = Memory', { settings: { flatten_nested: 0 as unknown as string } })));
+  kv('  flatten_nested: 0', caught(() => lib.compileTable('CREATE TABLE t (a UInt8) ENGINE = MergeTree ORDER BY tuple()', { settings: { flatten_nested: 0 as unknown as string } })));
 }
 
 // ---------------------------------------------------------------------------
@@ -378,7 +379,7 @@ function section5(lib: Library): void {
   });
 
   kv('(d) POISON', 'an accept that bites at read time');
-  withSchema(lib, "CREATE TABLE t (id UInt32, e Enum8('red' = 1, 'green' = 2)) ENGINE = Memory", (schema) => {
+  withSchema(lib, "CREATE TABLE t (id UInt32, e Enum8('red' = 1, 'green' = 2)) ENGINE = MergeTree ORDER BY tuple()", (schema) => {
     kv('  payload (RBWD)', `${RBWD_POISON}   (id=1 by value, e by marker byte)`);
     feed(schema, 'RBWD marker', Format.RowBinaryWithDefaults, unhex(RBWD_POISON));
     note('accepted_poisoned: the marker fills with the COLUMN-level raw zero, and raw 0');
@@ -463,7 +464,7 @@ function section6(lib: Library): void {
     note('unknown fields are reported, not judged: whether to 400 on them is gateway policy');
     blank();
 
-    withSchema(lib, 'CREATE TABLE t (a UInt8, d UInt8 DEFAULT a + 1) ENGINE = Memory', (dep) => {
+    withSchema(lib, 'CREATE TABLE t (a UInt8, d UInt8 DEFAULT a + 1) ENGINE = MergeTree ORDER BY tuple()', (dep) => {
       kv('row-dependent DEFAULT', 'a UInt8, d UInt8 DEFAULT a + 1   fed CSV `7,`');
       feed(dep, 'CSV', Format.CSV, utf8('7,'));
       note('the bare empty CSV field takes the DEFAULT, which reads a=7 from the same row');
@@ -557,7 +558,7 @@ async function section7(lib: Library, registry: Registry, lines: readonly string
 
   group('Buffers: NO self-description at all');
   const newest = await registry.for(newestLine(lines));
-  withSchema(newest, 'CREATE TABLE t (x Int32) ENGINE = Memory', (schema) => {
+  withSchema(newest, 'CREATE TABLE t (x Int32) ENGINE = MergeTree ORDER BY tuple()', (schema) => {
     kv('  library', `${newest.minor}  (Buffers arrives at 26.5; this block uses the newest installed)`);
     kv('  payload', '4 bytes ff ff ff ff, declared x Int32');
     feed(schema, 'Buffers reinterpret', Format.Buffers, unhex(BUFFERS_OK));
@@ -625,7 +626,8 @@ function section8(lib: Library): void {
 
   kv('(d) a clock TTL', 'TTL ts + INTERVAL 1 DAY relative to now()');
   kv('  compile', classify(() => lib.compileTable('CREATE TABLE t (ts DateTime) ENGINE = MergeTree ORDER BY ts TTL now() + INTERVAL 1 DAY')));
-  note('a clock-reading TTL is DECLINED, not guessed');
+  note('a clock-reading TTL is answered by the library per its own rules;');
+  note('this tour reports whatever kind of answer comes back');
 }
 
 // ---------------------------------------------------------------------------
@@ -655,7 +657,7 @@ function section9(lib: Library): void {
   const iso = utf8('{"ts":"2026-01-15T10:30:00Z"}');
   const basic = { date_time_input_format: 'basic' };
   const bestEffort = { date_time_input_format: 'best_effort' };
-  const ddl = 'CREATE TABLE t (ts DateTime) ENGINE = Memory';
+  const ddl = 'CREATE TABLE t (ts DateTime) ENGINE = MergeTree ORDER BY tuple()';
   kv('library', lib.version);
 
   const plain = lib.compileTable(ddl);
@@ -716,9 +718,9 @@ function section10(lib: Library): void {
   raw('      }');
   blank();
 
-  describeError(() => lib.compileTable('CREATE TABLE t (x NotAType) ENGINE = Memory'), 'compile x NotAType');
+  describeError(() => lib.compileTable('CREATE TABLE t (x NotAType) ENGINE = MergeTree ORDER BY tuple()'), 'compile x NotAType');
   describeError(() => lib.compileTable('CREATE TABLE t (ts DateTime) ENGINE = MergeTree ORDER BY ts TTL now() + INTERVAL 1 DAY'), 'compile a clock TTL');
-  const schema = lib.compileTable('CREATE TABLE t (a UInt8) ENGINE = Memory');
+  const schema = lib.compileTable('CREATE TABLE t (a UInt8) ENGINE = MergeTree ORDER BY tuple()');
   schema.close();
   describeError(() => schema.describe(), 'describe() after close()');
   describeError(() => setup({ timezone: 'America/New_York' }), 'setup with a second zone');
@@ -769,7 +771,7 @@ function section11(lib: Library): void {
   note('build prints: the quoting is the library\'s, not a rule in the binding');
   blank();
 
-  const ddl = `CREATE TABLE t (${found.columnsSql.toString()}) ENGINE = Memory`;
+  const ddl = `CREATE TABLE t (${found.columnsSql.toString()}) ENGINE = MergeTree ORDER BY tuple()`;
   kv('compile', ddl);
   withSchema(lib, ddl, (schema) => {
     const row = '{"ts":"2026-01-15T10:30:00Z","device_id":9,"reading c":21.5}';
@@ -807,7 +809,7 @@ async function section12(registry: Registry, lines: readonly string[]): Promise<
     const lib = await openOrNote(registry, v);
     if (lib === undefined) continue;
     try {
-      const schema = lib.compileTable("CREATE TABLE t (a UInt8, x Int64 DEFAULT if(1,2,'a')) ENGINE = Memory");
+      const schema = lib.compileTable("CREATE TABLE t (a UInt8, x Int64 DEFAULT if(1,2,'a')) ENGINE = MergeTree ORDER BY tuple()");
       const col = schema.describe().columns[1];
       kv(`  ${v}`, `compiled  (${col?.type.toString()} DEFAULT ${col?.defaultExpr.toString()})`);
       schema.close();
@@ -824,7 +826,7 @@ async function section12(registry: Registry, lines: readonly string[]): Promise<
     const lib = await openOrNote(registry, v);
     if (lib === undefined) continue;
     kv(`  ${v} lists Buffers`, String(lib.buildInfo.capabilities.inputFormats.includes(formatChName(Format.Buffers) ?? '')));
-    withSchema(lib, 'CREATE TABLE t (x Int32) ENGINE = Memory', (schema) => {
+    withSchema(lib, 'CREATE TABLE t (x Int32) ENGINE = MergeTree ORDER BY tuple()', (schema) => {
       const batch = schema.rows(Format.Buffers, unhex(BUFFERS_OK));
       const first = batch.rows[0]?.values[0];
       if (batch.outcome === 'accepted' && first !== undefined) kv(`  ${v}`, `accepted  x = ${first.text.toString()}`);
@@ -853,7 +855,7 @@ function section13(registry: Registry): void {
   if (lib === undefined) return;
   const live = (): string => JSON.stringify(lib.liveHandles());
   kv('liveHandles() before', live());
-  const a = lib.compileTable('CREATE TABLE t (a UInt8) ENGINE = Memory');
+  const a = lib.compileTable('CREATE TABLE t (a UInt8) ENGINE = MergeTree ORDER BY tuple()');
   const f = a.compileFilter('a = 1');
   kv('after a schema + a filter', live());
   a.close();
@@ -925,7 +927,7 @@ function section15(lib: Library): void {
   note('flags thin the DESCRIPTION, never the VERDICT; Values / Transforms / Defaults pick groups');
   blank();
 
-  withSchema(lib, "CREATE TABLE t (e Enum8('a' = 1, 'b' = 2)) ENGINE = Memory", (poisonSchema) => {
+  withSchema(lib, "CREATE TABLE t (e Enum8('a' = 1, 'b' = 2)) ENGINE = MergeTree ORDER BY tuple()", (poisonSchema) => {
     const poi = poisonSchema.rows(Format.JSONEachRow, utf8('{"e":null}\n'), {
       settings: { input_format_defaults_for_omitted_fields: '0' },
       exportFormat,
@@ -958,7 +960,7 @@ function section15(lib: Library): void {
 // ---------------------------------------------------------------------------
 function section16(lib: Library): void {
   section(16, 'Filters: WHERE semantics at the edge');
-  const schema = lib.compileTable('CREATE TABLE t (x UInt8) ENGINE = Memory');
+  const schema = lib.compileTable('CREATE TABLE t (x UInt8) ENGINE = MergeTree ORDER BY tuple()');
   {
     const filt = schema.compileFilter('x = 256');
     const fr = filt.rows(Format.JSONEachRow, utf8('{"x":0}\n{"x":255}\n'));
@@ -971,7 +973,7 @@ function section16(lib: Library): void {
   blank();
 
   {
-    const nullableSchema = lib.compileTable('CREATE TABLE t (lvl Nullable(UInt8)) ENGINE = Memory');
+    const nullableSchema = lib.compileTable('CREATE TABLE t (lvl Nullable(UInt8)) ENGINE = MergeTree ORDER BY tuple()');
     const nf = nullableSchema.compileFilter('lvl = 1');
     const fr = nf.rows(Format.JSONEachRow, utf8('{"lvl":null}\n{"lvl":1}\n'));
     nullableSchema.close();
@@ -980,7 +982,7 @@ function section16(lib: Library): void {
   blank();
 
   {
-    const strSchema = lib.compileTable('CREATE TABLE t (s String) ENGINE = Memory');
+    const strSchema = lib.compileTable('CREATE TABLE t (s String) ENGINE = MergeTree ORDER BY tuple()');
     const sf = strSchema.compileFilter('s = 257');
     const fr = sf.rows(Format.JSONEachRow, utf8('{"s":"hi"}\n'));
     strSchema.close();
@@ -1014,7 +1016,7 @@ function section16(lib: Library): void {
       '{"tenant":"evil","role":"viewer","x":2}\n' +
       '{"tenant":"\' OR 1=1 --","role":"admin","x":3}\n',
   );
-  const ps = lib.compileTable('CREATE TABLE t (tenant String, role String, x UInt8) ENGINE = Memory');
+  const ps = lib.compileTable('CREATE TABLE t (tenant String, role String, x UInt8) ENGINE = MergeTree ORDER BY tuple()');
   {
     const tf = ps.compileFilter('tenant = {t:String}', { params: { t: 'acme' } });
     kv('`tenant = {t:String}`, t=acme', `verdicts ${verdictString(tf.rows(Format.JSONEachRow, eventBody))}`);
@@ -1050,7 +1052,7 @@ function section16(lib: Library): void {
 
   group("a filter's zone is its own, fixed at compile");
   {
-    const zs = lib.compileTable('CREATE TABLE t (ts DateTime) ENGINE = Memory');
+    const zs = lib.compileTable('CREATE TABLE t (ts DateTime) ENGINE = MergeTree ORDER BY tuple()');
     const zf = zs.compileFilter("ts > '2026-01-15 10:00:00'", { sessionTimezone: 'Asia/Tokyo' });
     const fr = zf.rows(Format.JSONEachRow, utf8('{"ts":"2026-01-15 09:30:00"}\n{"ts":"2026-01-15 10:30:00"}\n'), { sessionTimezone: 'UTC' });
     zf.close();
@@ -1167,6 +1169,9 @@ function describeError(call: () => unknown, what: string): void {
     } else if (err instanceof SchemaError) {
       kv(what, `SchemaError  (a REFUSAL), chCode=${err.chCode} ${err.chName}`);
       kv('  detail', truncate(err.messageBytes.toString(), 84));
+    } else if (err instanceof InternalError) {
+      kv(what, 'InternalError  (a LIBRARY FAULT)');
+      kv('  message', truncate(err.message, 84));
     } else if (err instanceof UsageError) {
       kv(what, 'UsageError  (caller misuse, caught before the library)');
       kv('  message', truncate(err.message, 84));
@@ -1188,6 +1193,7 @@ function classify(call: () => unknown): string {
   } catch (err) {
     if (err instanceof UnsupportedError) return 'DECLINED  (UnsupportedError)';
     if (err instanceof SchemaError) return `REFUSED   (SchemaError, code ${err.chCode})`;
+    if (err instanceof InternalError) return 'LIBRARY FAULT  (InternalError)';
     throw err;
   }
 }
