@@ -211,6 +211,12 @@ For a TSV `String` that contains a raw NUL byte, the third detector can report `
 
 **Workaround:** read the version and settings from your own connection and pass them in. **Planned.**
 
+### A time-dependent TTL in a CREATE comes back as an internal error
+
+`TTL now() + INTERVAL 1 DAY` in a `CREATE TABLE` returns an `InternalError` (`CHS_INTERNAL`) where a server refuses the statement with its own error. Measured against the 26.9.8.3 library (`measured`).
+
+**Workaround:** treat an internal error from a CREATE whose TTL does not reference a column as that refusal. **Planned:** fixed in 1.0.x.
+
 ## Pre-1.0
 
 How a library and the SDK opening it are matched before 1.0 is in [`support-v1.md`](support-v1.md#pre-10).
