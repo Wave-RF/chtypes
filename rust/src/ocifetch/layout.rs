@@ -293,6 +293,10 @@ pub fn read_verified(dir: &Path) -> Result<Option<VerifiedRecord>> {
 /// older-format record), the caller has just re-verified from the cache's
 /// own blobs, so the stale directory is moved aside and replaced. The temp
 /// directory is consumed either way.
+///
+/// The temp directory is a new one, `.tmp-<pid>-<random>`, made with
+/// `create_dir`, never `create_dir_all`: two installers never share one, even
+/// if their names repeat (public issue #482).
 pub fn install_unpacked(
     root: &Path,
     manifest_digest: &str,
@@ -306,8 +310,7 @@ pub fn install_unpacked(
         .parent()
         .ok_or_else(|| Error::InvalidInput("unpacked dir has no parent".to_string()))?;
     std::fs::create_dir_all(parent).map_err(unwritable(parent))?;
-    let tmp = parent.join(format!(".tmp-{}", unique_suffix()));
-    std::fs::create_dir_all(&tmp).map_err(unwritable(&tmp))?;
+    let tmp = create_unique_dir(parent, ".tmp-")?;
     let result = build(&tmp).and_then(|()| install_dir(&tmp, &final_dir));
     // Gone already after a successful rename; removed here otherwise.
     let _ = std::fs::remove_dir_all(&tmp);
@@ -330,7 +333,8 @@ const INSTALL_ATTEMPTS: usize = 8;
 /// - A `dest` that holds an acceptable record is kept: the same content is
 ///   already installed.
 /// - Only a `dest` WITHOUT an acceptable record (foreign, torn or older
-///   format) is moved aside, to a fresh `.stale-*` name beside it, and
+///   format) is moved aside, into a fresh `.stale-*` directory beside it
+///   (created with `create_dir`, so never one another process holds), and
 ///   replaced. If what was moved turns out to carry an acceptable record
 ///   (another installer's rename landed in between), it is put back.
 ///
@@ -351,14 +355,17 @@ fn install_dir(src: &Path, dest: &Path) -> Result<bool> {
         if std::fs::symlink_metadata(dest).is_err() {
             continue; // what stood there went away: try the rename again
         }
-        let aside = parent.join(format!(".stale-{}", unique_suffix()));
+        let stale = create_unique_dir(parent, ".stale-")?;
+        let aside = stale.join("old");
         if std::fs::rename(dest, &aside).is_err() {
+            let _ = std::fs::remove_dir_all(&stale);
             continue; // another process moved or replaced it: look again
         }
         if read_verified(&aside)?.is_some() && std::fs::rename(&aside, dest).is_ok() {
+            let _ = std::fs::remove_dir_all(&stale);
             return Ok(true);
         }
-        let _ = std::fs::remove_dir_all(&aside);
+        let _ = std::fs::remove_dir_all(&stale);
     }
     Err(match last {
         Some(e) => unwritable(dest)(e),
@@ -528,9 +535,11 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         Error::InvalidInput(format!("{} has no parent directory", path.display()))
     })?;
     std::fs::create_dir_all(parent).map_err(unwritable(parent))?;
-    let tmp = temp_sibling(path);
-    std::fs::write(&tmp, bytes).map_err(unwritable(&tmp))?;
-    std::fs::rename(&tmp, path).map_err(unwritable(path))
+    let tmp = write_temp_sibling(path, bytes).map_err(|(tmp, e)| unwritable(&tmp)(e))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        unwritable(path)(e)
+    })
 }
 
 /// [`write_atomic`] for a file outside the cache (the lock), whose I/O
@@ -539,26 +548,110 @@ pub fn write_atomic_io(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = temp_sibling(path);
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    let tmp = write_temp_sibling(path, bytes).map_err(|(_, e)| e)?;
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
-fn temp_sibling(path: &Path) -> PathBuf {
-    path.with_file_name(format!(
-        ".tmp-{}-{}",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("x"),
-        unique_suffix()
-    ))
+/// How many fresh names [`create_unique_dir`] and [`write_temp_sibling`] try
+/// before giving up. A repeat needs another process with the same process id
+/// to draw the same 64 random bits, so a second try is already a remote
+/// chance; this only bounds a loop that should never run twice.
+const TEMP_ATTEMPTS: usize = 16;
+
+/// A new, empty directory `<prefix><pid>-<random>` in `parent`, created with
+/// `create_dir`: a name that already exists is never reused, another is drawn
+/// (public issue #482). A failure is the cache's, naming the path.
+fn create_unique_dir(parent: &Path, prefix: &str) -> Result<PathBuf> {
+    let mut last = None;
+    for _ in 0..TEMP_ATTEMPTS {
+        let dir = parent.join(format!("{prefix}{}", unique_suffix()));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some((dir, e)),
+            Err(e) => return Err(unwritable(&dir)(e)),
+        }
+    }
+    let (dir, e) = last.expect("TEMP_ATTEMPTS is not zero");
+    Err(unwritable(&dir)(e))
 }
 
+/// Write `bytes` to a new sibling of `path`, `.tmp-<name>-<pid>-<random>`,
+/// opened with `create_new`: a temporary file another writer holds is never
+/// opened, truncated or renamed away by this one (public issue #482). The
+/// mode is `fs::write`'s, 0666 less the umask. Returns the temporary path, or
+/// the path that failed with its error.
+fn write_temp_sibling(
+    path: &Path,
+    bytes: &[u8],
+) -> std::result::Result<PathBuf, (PathBuf, std::io::Error)> {
+    use std::io::Write as _;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("x");
+    let mut last = None;
+    for _ in 0..TEMP_ATTEMPTS {
+        let tmp = path.with_file_name(format!(".tmp-{name}-{}", unique_suffix()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+        {
+            Ok(mut file) => {
+                let written = file.write_all(bytes);
+                drop(file);
+                return match written {
+                    Ok(()) => Ok(tmp),
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&tmp);
+                        Err((tmp, e))
+                    }
+                };
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some((tmp, e)),
+            Err(e) => return Err((tmp, e)),
+        }
+    }
+    Err(last.expect("TEMP_ATTEMPTS is not zero"))
+}
+
+/// The variable part of every temporary and aside name: this process's id
+/// and 64 random bits (public issue #482). It used to be a clock reading and
+/// the thread id, and the main thread is `ThreadId(1)` in every process, so
+/// two processes that read the clock in the same step chose the same names,
+/// shared a temporary directory, and one renamed the other's half-written
+/// files into place. Every name made from it is also created exclusively, so
+/// even a repeat is refused, never shared.
 fn unique_suffix() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{nanos:x}-{:?}", std::thread::current().id())
+    use std::hash::{BuildHasher, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    if let Some(forced) = forced_suffix() {
+        return forced;
+    }
+    static DRAWN: AtomicU64 = AtomicU64::new(0);
+    // RandomState's SipHash keys come from the operating system's random
+    // source, drawn afresh in every process, and differ for every
+    // RandomState made; the counter only keeps two draws' inputs apart.
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u64(DRAWN.fetch_add(1, Ordering::Relaxed));
+    format!("{}-{:016x}", std::process::id(), hasher.finish())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam: suffixes [`unique_suffix`] hands out first, in order, so a
+    /// test can make a name repeat exactly as two processes' names once did.
+    static FORCED_SUFFIXES: std::cell::RefCell<std::collections::VecDeque<String>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+}
+
+#[cfg(test)]
+fn forced_suffix() -> Option<String> {
+    FORCED_SUFFIXES.with(|q| q.borrow_mut().pop_front())
+}
+
+#[cfg(not(test))]
+fn forced_suffix() -> Option<String> {
+    None
 }
 
 #[cfg(test)]
@@ -719,6 +812,109 @@ mod tests {
         let listed = list_verified(&root).unwrap();
         assert_eq!(listed.len(), 1);
         assert!(listed[0].0.ends_with("b".repeat(64)));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The next names [`unique_suffix`] hands out on this thread.
+    fn force_suffixes(names: &[&str]) {
+        FORCED_SUFFIXES.with(|q| q.borrow_mut().extend(names.iter().map(|n| n.to_string())));
+    }
+
+    /// Temporary and aside names carry the process id and fresh random bits
+    /// (public issue #482): the main thread is `ThreadId(1)` in every
+    /// process, so a clock reading and a thread id repeated across processes.
+    #[test]
+    fn temporary_names_carry_the_process_id_and_differ() {
+        let (a, b) = (unique_suffix(), unique_suffix());
+        assert!(a.starts_with(&format!("{}-", std::process::id())), "{a}");
+        assert_ne!(a, b);
+    }
+
+    /// A temporary directory whose name another installer holds is never
+    /// shared: the install draws a fresh name, and the other installer's
+    /// directory and its files are left as they were. When two processes
+    /// shared one, whichever renamed it into place first took the other's
+    /// half-written files with it, and the other then failed on a path that
+    /// had vanished, `No such file or directory` (public issue #482).
+    #[test]
+    fn a_temporary_directory_another_installer_holds_is_never_shared() {
+        let root = std::env::temp_dir().join(format!("ocifetch-tmp-held-{}", unique_suffix()));
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let parent = unpacked_dir(&root, digest)
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let theirs = parent.join(".tmp-held");
+        std::fs::create_dir_all(&theirs).unwrap();
+        std::fs::write(theirs.join("half-written"), b"theirs").unwrap();
+        force_suffixes(&["held"]);
+        let record = sample_record().to_json_bytes().unwrap();
+        let dir = install_unpacked(&root, digest, |tmp| {
+            std::fs::write(tmp.join("libchtypes.so"), b"abc")?;
+            std::fs::write(tmp.join("verified.json"), &record)?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(read_verified(&dir).unwrap().is_some());
+        assert!(
+            !dir.join("half-written").exists(),
+            "the other installer's file was installed as this one's"
+        );
+        assert_eq!(
+            std::fs::read(theirs.join("half-written")).ok().as_deref(),
+            Some(&b"theirs"[..]),
+            "the other installer's temporary directory was taken"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A temporary file another writer holds is never opened, truncated or
+    /// renamed away: the write draws a fresh name (public issue #482).
+    #[test]
+    fn a_temporary_file_another_writer_holds_is_never_shared() {
+        let dir = std::env::temp_dir().join(format!("ocifetch-tmpfile-held-{}", unique_suffix()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let theirs = dir.join(".tmp-index.json-held");
+        std::fs::write(&theirs, b"theirs").unwrap();
+        force_suffixes(&["held"]);
+        write_atomic(&dir.join("index.json"), b"ours").unwrap();
+        assert_eq!(std::fs::read(dir.join("index.json")).unwrap(), b"ours");
+        assert_eq!(
+            std::fs::read(&theirs).ok().as_deref(),
+            Some(&b"theirs"[..]),
+            "the other writer's temporary file was taken"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The aside directory is a fresh one too: an existing `.stale-*` name
+    /// (here an empty directory, which a rename onto it would silently
+    /// replace) is never reused, and the entry it replaces is moved INTO a
+    /// new directory.
+    #[test]
+    fn an_aside_name_another_installer_holds_is_never_reused() {
+        let root = std::env::temp_dir().join(format!("ocifetch-stale-held-{}", unique_suffix()));
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let entry = unpacked_dir(&root, digest).unwrap();
+        std::fs::create_dir_all(&entry).unwrap();
+        std::fs::write(entry.join("verified.json"), br#"{"platform":"x"}"#).unwrap();
+        let theirs = entry.parent().unwrap().join(".stale-held");
+        std::fs::create_dir(&theirs).unwrap();
+        // The temporary directory draws the first name, the aside the second.
+        force_suffixes(&["mine", "held"]);
+        let record = sample_record().to_json_bytes().unwrap();
+        let dir = install_unpacked(&root, digest, |tmp| {
+            std::fs::write(tmp.join("libchtypes.so"), b"abc")?;
+            std::fs::write(tmp.join("verified.json"), &record)?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(read_verified(&dir).unwrap().is_some());
+        assert!(
+            theirs.is_dir(),
+            "the other installer's aside directory was taken"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
