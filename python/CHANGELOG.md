@@ -6,6 +6,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-10-06
+
 ### Fixed
 
 - A request is answered only by a build within it, and a newer install is kept only within the request (#481). In Go and TypeScript, when a line had no install of its own and the request went online, a request for a lower ClickHouse line, or for an exact lower build, was answered by a higher line already in the cache: a request for `26.3` loaded 26.8.15.10, with only a warning. Python installed an older build of a line over a newer one already installed and answered with it. Rust was correct. Now all four keep an installed build instead of the one the registry offers only when the installed build lies within the request and is newer: a newer build of that line for a line request, a newer build of that exact version for an exact request. That holds even when the offered build is installed too, which all four had answered with the offered, older build. An install of another line never answers. Every open through a registry also checks the loaded library's own `build_info` version against the request, and fails as `CHTYPES_ARTIFACT_CORRUPT` (reason `build_info_mismatch:clickhouse_version`) when it lies outside it, whatever the cache did. No name or signature changes. All four bindings run the same fetch conformance cases, `request-scope-*`, and the rule is `docs/guides/fetch-v1.md` section 9.
