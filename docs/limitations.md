@@ -168,16 +168,18 @@ Until then, do not treat a successful schema creation on these engines as proof 
 
 ### A DEFAULT that throws on a row which supplies the column can fail the server's INSERT while this library accepts it
 
-**Over-accept, measured on line 26.3 only, linux-amd64 only.** The other lines are not yet measured. A server evaluates a column's `DEFAULT` expression over the whole INSERT block, including the rows that supply the column, whenever some other row of the block omits it. This library accepts every row. For example, with `b Int32 DEFAULT intDiv(10, a)`, a batch in which some rows omit `b` and one row is `{"a":0,"b":5}`:
+**Over-accept, on every supported line, with `input_format_defaults_for_omitted_fields=1` (the server's default).** A server evaluates a column's `DEFAULT` expression over the whole INSERT block, including the rows that supply the column, whenever some other row of the block omits it. This library accepts every row. For example, with `b Int32 DEFAULT intDiv(10, a)`, a batch in which some rows omit `b` and one row is `{"a":0,"b":5}`:
 
 |               |                                                                             |
 | ------------- | --------------------------------------------------------------------------- |
 | this library  | accepts every row                                                           |
 | a real server | refuses the INSERT, with error **153**, **395** or **70** by the expression |
 
-Which of the three depends on the expression. Seen in `JSONEachRow`, and in CSV with `input_format_defaults_for_omitted_fields=1`. A batch in which every row supplies the column, and a single row, agree with the server.
+A batch in which every row supplies the column, and a single row, agree with the server. With `input_format_defaults_for_omitted_fields=0` the server also accepts a mixed batch, so there is no divergence.
 
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on line `26.3` only, on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+The reverse is an over-reject, and needs a non-default setting, so it is a line here and not an entry of its own. With `b Int32 DEFAULT intDiv(10, a)` and a column `m … MATERIALIZED b + 1`, in `JSONEachRow` with `input_format_defaults_for_omitted_fields=0`, a row that omits `b` with `a = 0` is accepted by a server (`b` takes its type's default) and refused by this library with error 153.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not trust an accepted batch that mixes rows omitting and rows supplying a DEFAULT column whose expression can throw.
 
@@ -190,6 +192,16 @@ Until then, do not trust an accepted batch that mixes rows omitting and rows sup
 **Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not treat a successful schema creation with a Nullable sorting key as proof that the server will accept the CREATE.
+
+### A clock-reading MATERIALIZED expression reports 1970 in a batch preview when no row omits a Volatile DEFAULT column
+
+**Value divergence, on every supported line, through the batch preview only.** In a batch preview with no pinned clock, where no row omits a Volatile DEFAULT column, a clock-reading `MATERIALIZED` expression (`now()`, `now64()`, `today()`) reports `1970-01-01` in the batch document's `computed` values. A real server stores the current time. In a mixed batch, the rows that supply the defaulted column get 1970, and the rows that omit it get the current time.
+
+With a pinned clock (`chtypes_now_epoch_nanos`) plus `chtypes_clock_offset_nanos`, an omitted DEFAULT applies the offset, but a `MATERIALIZED` expression ignores it. The row preview is not yet measured.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not trust `computed` clock values from a batch preview unless at least one row omits a Volatile DEFAULT column, or the clock is pinned with no offset.
 
 ## Known gaps in 1.0
 
