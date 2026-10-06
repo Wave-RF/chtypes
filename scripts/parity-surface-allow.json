@@ -520,6 +520,26 @@
       ],
       "reason": "True for any error the package throws on purpose. TypeScript's ArtifactError (the fetch layer's error class, re-exported) does not extend ChtypesError, so one guard covers the call errors and the artifact errors together; Python's ArtifactError is a ChtypesError, Go has no base and Rust has one Error enum, so none of them needs it. TypeScript-only, carried as found.",
       "issue": 487
+    },
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": [
+        "Status.Known",
+        "Format.Known",
+        "Reason.Known",
+        "Source.Known",
+        "Outcome.Known",
+        "FilterOutcome.Known",
+        "Verdict.Known",
+        "DefaultKind.Known",
+        "DiscoverQueryParam",
+        "DiscoverQueryParam.Known",
+        "QueryParamDatabase",
+        "QueryParamTable"
+      ],
+      "issue": 511,
+      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member, an unlisted value kept per field, which Go spells as the raw value plus Known() false; discover_query_param is an enum like every other, so it gains its type. docs/reference/bindings-v1.md is the 1.x surface and names neither; the v2 surface document lands with the other three dev bindings (public issue #511), and this entry goes with it."
     }
   ]
 }
