@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -313,8 +314,8 @@ func TestWriteVerifiedRecordConcurrentInstallsKeepTheFirst(t *testing.T) {
 		inodes := make(map[uint64]bool, racers)
 		dirs := make([]string, racers)
 		for i := range dirs {
-			d, err := os.MkdirTemp(parent, "unpack-*")
-			if err != nil {
+			d := filepath.Join(parent, "unpack-"+strconv.Itoa(i))
+			if err := os.Mkdir(d, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(d, "lib.so"), []byte("x"), 0o644); err != nil {
