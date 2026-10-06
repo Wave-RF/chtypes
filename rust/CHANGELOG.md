@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Added
+
+- `EngineCell` is re-exported from the crate root (#498). It is the type `BatchResult::engine_rows` holds, and was public in its module but unreachable by name, so a caller can now write `chtypes::EngineCell` in a signature or a match. Additive.
+
 ## [1.0.4] — 2026-10-06
 
 ### Changed

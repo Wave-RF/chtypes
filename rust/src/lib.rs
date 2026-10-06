@@ -100,8 +100,8 @@ pub use raw::RawText;
 pub use registry::{FetchOptions, Registry, RegistryOptions};
 pub use result::{
     BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn, Discovery,
-    ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing, Header, RowResult,
-    SchemaDescription, Span, Transform, Value,
+    EngineCell, ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing, Header,
+    RowResult, SchemaDescription, Span, Transform, Value,
 };
 pub use schema::{
     Block, CompileOptions, EvalOptions, Filter, FilterOptions, RowOptions, RowsOptions, Schema,
