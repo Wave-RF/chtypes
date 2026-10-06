@@ -6,6 +6,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-06
+
 ### Added
 
 - `EngineCell` is re-exported from the crate root (#498). It is the type `BatchResult::engine_rows` holds, and was public in its module but unreachable by name, so a caller can now write `chtypes::EngineCell` in a signature or a match. Additive.
@@ -14,6 +16,7 @@ The four bindings in this repository are released together and give one answer, 
 ### Changed
 
 - A write the fetch layer needed under the cache that failed is now `CHTYPES_CACHE_UNUSABLE` with reason `unwritable`, in every mode (#486). Go raised a `*UsageError` (CLI exit 2), Python a raw `OSError` (CLI exit 1), TypeScript a `UsageError` (CLI exit 2) and Rust `CHTYPES_SOURCE_UNREACHABLE` (exit 3), which a retry loop would retry. A cache root that cannot be read is now "not installed" with a warning in every binding and on every Python: Python before 3.14 raised a raw `PermissionError` there, and Rust `CHTYPES_SOURCE_UNREACHABLE`; strict mode makes it the new error.
+- Rust's default mode now treats an unreadable record, entry or `index.json` under the cache as absent, with a warning, where it used to report `CHTYPES_SOURCE_UNREACHABLE` (#486). Strict mode makes it `CHTYPES_CACHE_UNUSABLE` in all four.
 
 ### Fixed
 
