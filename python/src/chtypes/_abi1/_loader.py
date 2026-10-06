@@ -30,7 +30,7 @@ import os
 import platform
 import re
 import warnings
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from . import _decls, _errmap, _errors
@@ -165,6 +165,7 @@ def _open(
     skip_step5: bool,
     timezone: bytes = b"",
     defaults: bytes = b"",
+    settle: Callable[[bool], None] | None = None,
 ) -> LoadResult:
     if not skip_step1:
         _check_glibc(path, predicate)
@@ -204,10 +205,20 @@ def _open(
     # 6): the image zone (empty = UTC), then the default settings when there
     # are any. After every handshake check and before any other call. A
     # failure is the library's own refusal, the call error its status maps to
-    # (never a loader refusal reason).
-    api.initialize(timezone)
-    if defaults:
-        api.set_defaults(defaults)
+    # (never a loader refusal reason). `settle`, when given, is told how step 7
+    # ended: the public layer's setup guard latches on success and clears its
+    # record on a failure before any image has completed step 7. Nothing here
+    # remembers a failure, so the next open runs step 7 again.
+    try:
+        api.initialize(timezone)
+        if defaults:
+            api.set_defaults(defaults)
+    except Exception:
+        if settle is not None:
+            settle(False)
+        raise
+    if settle is not None:
+        settle(True)
 
     return LoadResult(api=api, build_info=info, path=path, raw=raw)
 
@@ -228,13 +239,14 @@ def open(
     *,
     timezone: bytes = b"",
     defaults: bytes = b"",
+    settle: Callable[[bool], None] | None = None,
 ) -> LoadResult:
     """Load and verify a v1 artifact at `path` against its (already verified
     elsewhere) signed `predicate`, then set the image zone (`timezone`, empty
     = UTC) and the default settings (`defaults`, a JSON object of string
     values, empty for none): step 7. Raises an artifact error naming the exact
     refusal on any loader failure, or the call error step 7's own status maps
-    to."""
+    to. `settle`, when given, is told whether step 7 completed."""
     return _open(
         path,
         predicate,
@@ -242,6 +254,7 @@ def open(
         skip_step5=False,
         timezone=timezone,
         defaults=defaults,
+        settle=settle,
     )
 
 
@@ -264,6 +277,7 @@ def open_unverified(
     allow: bool = False,
     timezone: bytes = b"",
     defaults: bytes = b"",
+    settle: Callable[[bool], None] | None = None,
 ) -> LoadResult:
     """For core's local builds and the linked mode ONLY (plan section 3.1,
     Q-b): skips step 1 when no predicate is given, and always skips step 5.
@@ -284,4 +298,5 @@ def open_unverified(
         skip_step5=True,
         timezone=timezone,
         defaults=defaults,
+        settle=settle,
     )

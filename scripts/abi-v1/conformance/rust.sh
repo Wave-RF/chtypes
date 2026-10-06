@@ -15,10 +15,11 @@
 # cases fail.
 #
 # The same cargo invocation also runs the public-API suites (api_v1,
-# api_v1_setup, api_v1_registry), which read the same CHTYPES_ABI1_STUBS and
-# prove the public layer's plumbing over the stubs: error mapping per status,
-# handle lifetimes and zero live handles, the process setup, and the registry
-# adapter over a real signed OCI layout. They write no report; this script's
+# api_v1_setup, api_v1_setup_cases, api_v1_registry), which read the same
+# CHTYPES_ABI1_STUBS and prove the public layer's plumbing over the stubs:
+# error mapping per status, handle lifetimes and zero live handles, the process
+# setup and the shared setup cases (tests/fixtures/abi-v1/setup-cases.json),
+# and the registry adapter over a real signed OCI layout. They write no report; this script's
 # own exit code is the worst of the test binaries.
 #
 # goldens_v1_runner (docs/guides/goldens-v1.md) joins them: with only
@@ -35,4 +36,4 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 
 cd "$ROOT/rust"
-exec cargo test --locked --features abi-v1 --test abi1_conformance --test api_v1 --test api_v1_setup --test api_v1_registry --test goldens_v1_runner -- --nocapture
+exec cargo test --locked --features abi-v1 --test abi1_conformance --test api_v1 --test api_v1_setup --test api_v1_setup_cases --test api_v1_registry --test goldens_v1_runner -- --nocapture

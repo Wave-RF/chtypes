@@ -157,6 +157,39 @@ ONE_CREATE = {
     "message": "Multi-statements are not allowed",
 }
 
+# The image zone's process-once rule (chs_initialize), as the stub models it
+# and as the cases that probe it expect it: emit/stub.py generates the C from
+# this dict, and emit/cases.py (the call-level cases) and emit/setup_cases.py
+# (the public-API setup case) read the same values, so the three can never
+# disagree. The library's rule, which the stub restates:
+#
+#   * a zone ClickHouse's DateLUT cannot load is refused with CHS_REJECTED and
+#     ClickHouse's own code, and commits NOTHING: a later, different, good
+#     zone on the same image is accepted (`measured` on darwin-arm64
+#     26.8.15.10, calling chs_initialize directly: "Not/AZone" answered
+#     CHS_REJECTED with code 36, then "Europe/Berlin" answered CHS_OK on the
+#     same image);
+#   * once a zone is accepted, the same spelling again is CHS_OK and a
+#     different spelling is CHS_INVALID_ARGUMENT (the same measurement's
+#     control: "Europe/Berlin" then "UTC").
+#
+# The stub is a test double, not ClickHouse: it refuses exactly one sentinel
+# spelling, `bad_zone`, and accepts every other one. The code is the one the
+# measurement above returned, and the name is ClickHouse's own name for that
+# code; the two messages are the stub's stand-ins, not ClickHouse's text. A
+# status injection (`!S:`) is answered before this rule and commits nothing.
+IMAGE_ZONE = {
+    "fn": "chs_initialize",
+    "param": "timezone",
+    "bad_zone": "Not/AZone",
+    "status": "CHS_REJECTED",
+    "ch_code": 36,
+    "ch_name": "BAD_ARGUMENTS",
+    "message": "Cannot load time zone Not/AZone",
+    "conflict_status": "CHS_INVALID_ARGUMENT",
+    "conflict_message": "the image zone is already set, to a different spelling",
+}
+
 # The symbol a loader checks before any other (step 3): it gets its own named
 # variant ("no-abi-version", reason "not_v1") rather than folding into the
 # generic missing-<sym> sweep, because a real loader distinguishes "this is

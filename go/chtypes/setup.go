@@ -3,6 +3,8 @@ package chtypes
 // setup.go — the process setup (bindings-v1.md section 6). The image zone and
 // the default settings are process-wide in ClickHouse, so both are chosen once,
 // before traffic: Setup records them, and every image gets them at load step 7.
+// The record latches once an image completes step 7; a step 7 failure before
+// that clears it, so a corrected setup can be recorded.
 
 import (
 	"reflect"
@@ -19,9 +21,13 @@ type SetupOptions struct {
 	Defaults map[string]string
 }
 
+// setup is the setup guard: the record, and whether any image has completed
+// load step 7 under it. Every open holds images.mu around its commit, its load
+// and its settle, so the record a load ran under is the one it settles.
 var setup struct {
 	mu       sync.Mutex
 	recorded bool
+	latched  bool // an image completed load step 7 under the record
 	opts     SetupOptions
 }
 
@@ -55,9 +61,12 @@ func quoteForMessage(s string) string {
 // any library is open it stores the zone and defaults, and called again with
 // the same zone, byte for byte, and the same defaults it is a no-op. A
 // different zone or different defaults is a *UsageError naming both, and the
-// first setup stands. The first open commits an empty setup if Setup was never
-// called, after which Setup succeeds only with exactly the setup in effect.
-// Call it first.
+// first setup stands. The first open records the empty setup if Setup was
+// never called. The setup latches once an image completes load step 7
+// (chs_initialize, then chs_set_defaults when there are defaults); from then
+// on Setup succeeds only with exactly the setup in effect. If step 7 fails
+// before any image has completed it, the record is cleared, so a corrected
+// Setup is accepted and the next open runs step 7 with it. Call it first.
 func Setup(opts SetupOptions) error {
 	setup.mu.Lock()
 	defer setup.mu.Unlock()
@@ -72,7 +81,7 @@ func Setup(opts SetupOptions) error {
 	return usageError("setup is already %s; refusing a different setup, %s", describeSetup(setup.opts), describeSetup(opts))
 }
 
-// commitSetup returns the setup every image is loaded under, committing the
+// commitSetup returns the setup every image is loaded under, recording the
 // empty setup when Setup was never called.
 func commitSetup() (zone []byte, defaults []byte, err error) {
 	setup.mu.Lock()
@@ -83,6 +92,23 @@ func commitSetup() (zone []byte, defaults []byte, err error) {
 		return nil, nil, err
 	}
 	return []byte(setup.opts.Timezone), defaults, nil
+}
+
+// settleSetup records how load step 7 ended, under the setup guard. A success
+// latches the setup in effect. A failure before any image has completed step 7
+// clears the record, so Setup accepts a corrected setup; once the setup has
+// latched, a failure changes nothing (the library's own process-once rule
+// answers a different zone on an image that already has one).
+func settleSetup(completed bool) {
+	setup.mu.Lock()
+	defer setup.mu.Unlock()
+	if completed {
+		setup.latched = true
+		return
+	}
+	if !setup.latched {
+		setup.recorded, setup.opts = false, SetupOptions{}
+	}
 }
 
 func copyMap(m map[string]string) map[string]string {

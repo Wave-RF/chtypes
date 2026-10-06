@@ -6,6 +6,12 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [1.0.2] — unreleased
+
+### Fixed
+
+- `setup` now latches only once an image completes load step 7 (#458). A zone the library refuses, such as `setup(timezone="Not/AZone")`, used to fix the process setup at the first open: every later open failed with ClickHouse's code 36, and a corrected `setup` was a `UsageError` until the process restarted. Now, if step 7 (`chs_initialize`, then `chs_set_defaults` when there are defaults) fails before any image has completed it, the setup record is cleared. That open still raises the library's own error, a corrected `setup` is accepted, and the next open runs step 7 again with it, on the same image too: a failed step 7 is never remembered (`open_unverified` and `Registry.for_version` alike). Once an image has completed step 7, a different setup is still a `UsageError`. No name or signature changes. All four bindings run the same case, `tests/fixtures/abi-v1/setup-cases.json`, and the rule is `docs/reference/bindings-v1.md` section 6.
+
 ## [1.0.0] — 2026-10-04
 
 The Python binding's first v1 release, and a deliberate break from 0.x. The default branch switches to v1 shortly after release. The sections below are the entries written as each part landed; this is what they add up to.

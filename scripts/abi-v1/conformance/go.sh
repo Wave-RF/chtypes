@@ -38,3 +38,9 @@ go test ./internal/abi1/... -run TestConformance -v
 # and refuse the same report with one planted wrong byte. -v prints the PASS line.
 echo "go.sh: go test ./chtypes -run TestGoldensV1StubSelfCheck"
 go test ./chtypes -run TestGoldensV1StubSelfCheck -count=1 -v
+
+# The process setup's shared public-API cases (tests/fixtures/abi-v1/setup-cases.json,
+# which all four bindings run): each case through the public API over a fresh
+# copy of a stub. -v prints each case's PASS line.
+echo "go.sh: go test ./chtypes -run TestSetupCases"
+go test ./chtypes -run TestSetupCases -count=1 -v

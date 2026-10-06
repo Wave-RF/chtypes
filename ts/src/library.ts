@@ -16,7 +16,7 @@ import {
 } from './documents.js';
 import type { Resolved } from './ocifetch/index.js';
 import { Schema, type CompileOptions } from './schema.js';
-import { commitSetup } from './setup.js';
+import { commitSetup, settleSetup } from './setup.js';
 import { type BytesIn, bytesIn, encodeSettings } from './settings.js';
 
 export class Library {
@@ -126,5 +126,5 @@ export function libraryOf(image: LoadedImage, resolved: Resolved | undefined): L
  */
 export function openUnverified(path: string, options: { readonly allow: boolean }): Library {
   const setup = commitSetup();
-  return libraryOf(loadUnverified(path, { allow: options.allow, timezone: setup.timezone, defaults: setup.defaults }), undefined);
+  return libraryOf(loadUnverified(path, { allow: options.allow, timezone: setup.timezone, defaults: setup.defaults, settle: settleSetup }), undefined);
 }
