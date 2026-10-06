@@ -23,13 +23,23 @@ type setupCaseExpect struct {
 	ChCode *int32  `json:"ch_code"`
 	ChName *string `json:"ch_name"`
 	Reason string  `json:"reason"`
+	// ImageZone, on a successful open, is the zone the image was set up
+	// with, read back with the document's image_zone_probe.
+	ImageZone *string `json:"image_zone"`
 }
 
 type setupCaseStep struct {
 	Op       string          `json:"op"`
 	Timezone string          `json:"timezone"`
 	Variant  string          `json:"variant"`
+	Request  string          `json:"request"`
+	Allow    *bool           `json:"allow"`
 	Expect   setupCaseExpect `json:"expect"`
+}
+
+type setupCasesDoc struct {
+	ImageZoneProbe string      `json:"image_zone_probe"`
+	Cases          []setupCase `json:"cases"`
 }
 
 type setupCase struct {
@@ -38,7 +48,7 @@ type setupCase struct {
 	Steps   []setupCaseStep `json:"steps"`
 }
 
-func loadSetupCases(t *testing.T) []setupCase {
+func loadSetupCases(t *testing.T) setupCasesDoc {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -49,16 +59,17 @@ func loadSetupCases(t *testing.T) []setupCase {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc struct {
-		Cases []setupCase `json:"cases"`
-	}
+	var doc setupCasesDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("%s: %v", path, err)
 	}
 	if len(doc.Cases) == 0 {
 		t.Fatalf("%s: zero cases; a suite that ran nothing must not pass", path)
 	}
-	return doc.Cases
+	if doc.ImageZoneProbe == "" {
+		t.Fatalf("%s: no image_zone_probe", path)
+	}
+	return doc
 }
 
 // setupStepOutcome compares one step's outcome with its expectation, and
@@ -129,7 +140,8 @@ func setupStepOutcome(want setupCaseExpect, err error) string {
 // API.
 func TestSetupCases(t *testing.T) {
 	stubDir(t) // skips loudly without the stubs
-	for _, c := range loadSetupCases(t) {
+	doc := loadSetupCases(t)
+	for _, c := range doc.Cases {
 		t.Run(c.ID, func(t *testing.T) {
 			resetSetup(t)
 			t.Setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
@@ -148,16 +160,37 @@ func TestSetupCases(t *testing.T) {
 			}
 			for i, s := range c.Steps {
 				var err error
-				switch s.Op {
-				case "setup":
+				var lib *Library
+				switch {
+				case s.Op == "setup":
 					err = Setup(SetupOptions{Timezone: s.Timezone})
-				case "open":
-					_, err = OpenUnverified(image(s.Variant), true)
+				case s.Op == "open" && s.Request != "":
+					// A registry over an empty cache, offline, autofetch off.
+					var reg *Registry
+					reg, err = NewRegistry(WithFetchOptions(FetchOptions{
+						CacheDir: t.TempDir(), SystemDirs: []string{t.TempDir()}, Offline: true,
+					}), WithAutoFetch(false))
+					if err != nil {
+						t.Fatalf("step %d: constructing a registry: %v", i, err)
+					}
+					lib, err = reg.For(s.Request)
+				case s.Op == "open":
+					lib, err = OpenUnverified(image(s.Variant), s.Allow == nil || *s.Allow)
 				default:
 					t.Fatalf("step %d: an op this runner does not know: %q", i, s.Op)
 				}
-				if diff := setupStepOutcome(s.Expect, err); diff != "" {
-					t.Fatalf("step %d (%s %q %s): %s", i, s.Op, s.Timezone, s.Variant, diff)
+				diff := setupStepOutcome(s.Expect, err)
+				if diff == "" && s.Expect.ImageZone != nil {
+					zone, perr := lib.ValidateType(doc.ImageZoneProbe)
+					switch {
+					case perr != nil:
+						diff = fmt.Sprintf("reading the image zone back: %v", perr)
+					case zone != *s.Expect.ImageZone:
+						diff = fmt.Sprintf("the image was set up with zone %q, want %q", zone, *s.Expect.ImageZone)
+					}
+				}
+				if diff != "" {
+					t.Fatalf("step %d (%s %q %s%s): %s", i, s.Op, s.Timezone, s.Variant, s.Request, diff)
 				}
 			}
 		})

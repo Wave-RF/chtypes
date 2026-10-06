@@ -17,7 +17,9 @@ import {
   ArtifactCorruptError,
   ArtifactIncompatibleError,
   InternalError,
+  type Library,
   openUnverified,
+  Registry,
   SchemaError,
   Status,
   setup,
@@ -38,12 +40,16 @@ interface Expect {
   readonly ch_code?: number;
   readonly ch_name?: string;
   readonly reason?: string;
+  /** On a successful open: the zone the image was set up with, read back with the document's `image_zone_probe`. */
+  readonly image_zone?: string;
 }
 
 interface Step {
   readonly op: string;
   readonly timezone?: string;
   readonly variant?: string;
+  readonly request?: string;
+  readonly allow?: boolean;
   readonly expect: Expect;
 }
 
@@ -53,7 +59,8 @@ interface SetupCase {
   readonly steps: readonly Step[];
 }
 
-const setupCases: readonly SetupCase[] = (JSON.parse(readFileSync(SETUP_CASES_PATH, 'utf8')) as { cases: SetupCase[] }).cases;
+const setupDoc = JSON.parse(readFileSync(SETUP_CASES_PATH, 'utf8')) as { image_zone_probe: string; cases: SetupCase[] };
+const setupCases: readonly SetupCase[] = setupDoc.cases;
 
 const CLASSES: Readonly<Record<string, abstract new (...args: never[]) => Error>> = {
   schema: SchemaError,
@@ -99,7 +106,7 @@ describe('the setup cases file', () => {
 });
 
 describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API', () => {
-  it.each(setupCases.map((c) => [c.id, c] as const))('%s', (_id, c) => {
+  it.each(setupCases.map((c) => [c.id, c] as const))('%s', async (_id, c) => {
     expect(c.steps.length).toBeGreaterThan(0);
     const dir = mkdtempSync(path.join(os.tmpdir(), 'setup-case-'));
     const images = new Map<string, string>();
@@ -120,20 +127,30 @@ describe.skipIf(!stubsAvailable)('the shared setup cases, through the public API
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     process.env.CHTYPES_ALLOW_UNVERIFIED_LIBRARY = '1';
     try {
-      c.steps.forEach((step, i) => {
+      for (const [i, step] of c.steps.entries()) {
         let error: unknown;
+        let opened: Library | undefined;
         try {
           if (step.op === 'setup') setup({ timezone: step.timezone ?? '' });
-          else if (step.op === 'open') openUnverified(image(step.variant), { allow: true });
+          else if (step.op === 'open' && step.request !== undefined) {
+            // A registry over an empty cache, offline, autofetch off.
+            const cacheDir = mkdtempSync(path.join(dir, 'cache-'));
+            const registry = await Registry.open({ fetch: { cacheDir, systemDirs: [], offline: true }, autofetch: false });
+            opened = await registry.for(step.request);
+          } else if (step.op === 'open') opened = openUnverified(image(step.variant), { allow: step.allow ?? true });
           else throw new Error(`step ${i}: an op this runner does not know: ${step.op}`);
         } catch (err) {
           const known = Object.values(CLASSES).some((cls) => err instanceof cls);
           if (!known) throw err;
           error = err;
         }
-        const diff = outcome(step.expect, error);
-        expect(diff, `step ${i} (${step.op} ${JSON.stringify(step.timezone ?? '')} ${step.variant ?? ''})`).toBe('');
-      });
+        let diff = outcome(step.expect, error);
+        if (diff === '' && step.expect.image_zone !== undefined) {
+          const zone = (opened as Library).validateType(setupDoc.image_zone_probe).toString('utf8');
+          if (zone !== step.expect.image_zone) diff = `the image was set up with zone ${JSON.stringify(zone)}, want ${JSON.stringify(step.expect.image_zone)}`;
+        }
+        expect(diff, `step ${i} (${step.op} ${JSON.stringify(step.timezone ?? '')} ${step.variant ?? ''}${step.request ?? ''})`).toBe('');
+      }
     } finally {
       warn.mockRestore();
       resetSetupForTests();

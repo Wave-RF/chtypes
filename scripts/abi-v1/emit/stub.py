@@ -63,6 +63,8 @@ exercised against real memory).
     CHS_REJECTED and commits nothing, the first other spelling is committed,
     and after that the same spelling is CHS_OK and a different one is
     CHS_INVALID_ARGUMENT, per image (each dlopen'd copy has its own state).
+    A probe (_stubshared.ZONE_PROBE) reads the committed zone back through
+    `chs_type_validate`, so a public-API test can see which zone step 7 used.
   * `chs_live_handles` reports this image's own live count per handle kind
     from five atomic counters (incremented on mint, decremented the instant
     a handle's refcount reaches zero), never by walking a registry.
@@ -816,6 +818,29 @@ def _one_create(fn) -> list[str]:
     ]
 
 
+def _image_zone_state() -> str:
+    """The image zone's state, file scope: chs_initialize's process-once rule
+    (_image_zone) writes it, and the zone probe (_zone_probe) reads it. Static
+    storage, so each dlopen'd copy of the stub (each image) has its own."""
+    return """
+/* ------------------------------------------------------------- the image zone
+   (scripts/abi-v1/emit/_stubshared.py IMAGE_ZONE and ZONE_PROBE) */
+
+static atomic_flag chs_stub_zone_lock = ATOMIC_FLAG_INIT;
+static uint8_t *chs_stub_zone = NULL;
+static size_t chs_stub_zone_len = 0;
+static int chs_stub_zone_set = 0;
+
+static void chs_stub_zone_acquire(void) {
+    while (atomic_flag_test_and_set(&chs_stub_zone_lock)) { /* spin: the critical sections are a few instructions */ }
+}
+
+static void chs_stub_zone_release(void) {
+    atomic_flag_clear(&chs_stub_zone_lock);
+}
+"""
+
+
 def _image_zone(fn) -> list[str]:
     """The stub's stand-in for the image zone's process-once rule
     (_stubshared.IMAGE_ZONE): after the input checks and any status
@@ -832,10 +857,6 @@ def _image_zone(fn) -> list[str]:
     return [
         "    {",
         "        /* the image zone's process-once rule: see scripts/abi-v1/emit/_stubshared.py IMAGE_ZONE */",
-        "        static atomic_flag held_lock = ATOMIC_FLAG_INIT;",
-        "        static uint8_t *held = NULL;",
-        "        static size_t held_len = 0;",
-        "        static int held_set = 0;",
         f"        static const char bad[] = {_c_str(rule['bad_zone'])};",
         f"        if ({p}_len == sizeof(bad) - 1 && memcmp({p}, bad, sizeof(bad) - 1) == 0) {{",
         f"            static const char name[] = {_c_str(rule['ch_name'])};",
@@ -844,20 +865,54 @@ def _image_zone(fn) -> list[str]:
         f"            return {rule['status']};",
         "        }",
         "        int conflict = 0;",
-        "        while (atomic_flag_test_and_set(&held_lock)) { /* spin: the critical section is a few instructions */ }",
-        "        if (!held_set) {",
-        f"            held = {p}_len ? (uint8_t *) malloc({p}_len) : NULL;",
-        f"            if (held) memcpy(held, {p}, {p}_len);",
-        f"            held_len = {p}_len;",
-        "            held_set = 1;",
-        f"        }} else if (held_len != {p}_len || ({p}_len > 0 && memcmp(held, {p}, {p}_len) != 0)) {{",
+        "        chs_stub_zone_acquire();",
+        "        if (!chs_stub_zone_set) {",
+        f"            chs_stub_zone = {p}_len ? (uint8_t *) malloc({p}_len) : NULL;",
+        f"            if (chs_stub_zone) memcpy(chs_stub_zone, {p}, {p}_len);",
+        f"            chs_stub_zone_len = {p}_len;",
+        "            chs_stub_zone_set = 1;",
+        f"        }} else if (chs_stub_zone_len != {p}_len || ({p}_len > 0 && memcmp(chs_stub_zone, {p}, {p}_len) != 0)) {{",
         "            conflict = 1;",
         "        }",
-        "        atomic_flag_clear(&held_lock);",
+        "        chs_stub_zone_release();",
         "        if (conflict) {",
         f"            static const char msg[] = {_c_str(rule['conflict_message'])};",
         f"            chs_stub_set_err(err, chs_stub_make_error({rule['conflict_status']}, 0, \"\", 0, msg, sizeof(msg) - 1));",
         f"            return {rule['conflict_status']};",
+        "        }",
+        "    }",
+    ]
+
+
+def _zone_probe(fn) -> list[str]:
+    """The image zone probe (_stubshared.ZONE_PROBE): when the named parameter
+    is exactly the probe, the call returns the zone this image holds (empty
+    when none was committed) in its output, instead of the echo. Only the
+    function the probe names gets it."""
+    rule = _stubshared.ZONE_PROBE
+    if fn.name != rule["fn"]:
+        return []
+    p, out = rule["param"], rule["out"]
+    if not any(q.name == p and q.kind == "bytes_in" for q in fn.params):
+        raise ValueError(f"{fn.name}: _stubshared.ZONE_PROBE names {p!r}, which is not one of its bytes_in parameters")
+    if not any(q.name == out and q.kind == "out_handle" and q.type == BUF_HANDLE and not q.nullable for q in fn.params):
+        raise ValueError(f"{fn.name}: _stubshared.ZONE_PROBE names {out!r}, which is not its required chs_buf output")
+    return [
+        "    {",
+        "        /* the image zone probe: see scripts/abi-v1/emit/_stubshared.py ZONE_PROBE */",
+        f"        static const char probe[] = {_c_str(rule['probe'])};",
+        f"        if ({p}_len == sizeof(probe) - 1 && memcmp({p}, probe, sizeof(probe) - 1) == 0) {{",
+        f"            if ({out} == NULL) {{",
+        *_c_fixed_error("CHS_INVALID_ARGUMENT", f"{out}: required", indent="                "),
+        "            }",
+        "            chs_stub_zone_acquire();",
+        "            size_t n = chs_stub_zone_len;",
+        "            uint8_t *copy = (uint8_t *) malloc(n + 1);",
+        "            if (n) memcpy(copy, chs_stub_zone, n);",
+        "            chs_stub_zone_release();",
+        f"            *{out} = chs_stub_make_buf(copy, n);",
+        "            chs_stub_set_err(err, NULL);",
+        "            return CHS_OK;",
         "        }",
         "    }",
     ]
@@ -1022,6 +1077,7 @@ def _gen_generic(model, fn) -> str:
     body += _status_injection(fn)
     body += _one_create(fn)
     body += _image_zone(fn)
+    body += _zone_probe(fn)
     body += _document_mode(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
@@ -1169,6 +1225,7 @@ def render_stub_c(model) -> str:
         f"{bi_begin}\n{_build_info_section(model)}\n{bi_end}",
         _ctor_section(),
         _unbound_section(),
+        _image_zone_state(),
     ]
     # chs_build_info and chs_abi_version need their own omit/override handling,
     # woven around the hand-written and special bodies below.

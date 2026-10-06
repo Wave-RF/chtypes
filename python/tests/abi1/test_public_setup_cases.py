@@ -18,7 +18,9 @@ import pytest
 from chtypes import (
     ArtifactCorruptError,
     ArtifactIncompatibleError,
+    FetchOptions,
     InternalError,
+    Registry,
     SchemaError,
     Status,
     UnsupportedError,
@@ -30,7 +32,9 @@ from chtypes import (
 from .conftest import REPO_ROOT, stub_path
 
 SETUP_CASES_PATH = REPO_ROOT / "tests" / "fixtures" / "abi-v1" / "setup-cases.json"
-_SETUP_CASES: list[dict] = json.loads(SETUP_CASES_PATH.read_text(encoding="utf-8"))["cases"]
+_SETUP_DOC: dict = json.loads(SETUP_CASES_PATH.read_text(encoding="utf-8"))
+_SETUP_CASES: list[dict] = _SETUP_DOC["cases"]
+IMAGE_ZONE_PROBE: bytes = _SETUP_DOC["image_zone_probe"].encode()
 
 CLASSES = {
     "schema": SchemaError,
@@ -88,20 +92,30 @@ def test_setup_case(
     warned: set[str] = set()
     for i, step in enumerate(steps):
         error: BaseException | None = None
+        opened = None
         try:
             if step["op"] == "setup":
                 setup(timezone=step["timezone"])
+            elif step["op"] == "open" and "request" in step:
+                # A registry over an empty cache, offline, autofetch off.
+                cache = tmp_path / f"cache-{i}"
+                empty = FetchOptions(cache_dir=cache, system_dirs=[], offline=True)
+                registry = Registry(fetch=empty, autofetch=False)
+                opened = registry.for_version(step["request"])
             elif step["op"] == "open":
                 path = image(step.get("variant"))
-                # An unverified open warns once per path: on each copy's first open.
-                expect_warning = path not in warned
-                warned.add(path)
+                allow = step.get("allow", True)
+                # An unverified open with both opt-ins warns once per path: on
+                # each copy's first such open. Without them it warns nothing.
+                expect_warning = allow and path not in warned
+                if allow:
+                    warned.add(path)
                 with (
                     pytest.warns(UserWarning, match="UNVERIFIED")
                     if expect_warning
                     else contextlib.nullcontext()
                 ):
-                    open_unverified(path, allow=True)
+                    opened = open_unverified(path, allow=allow)
             else:
                 pytest.fail(f"step {i}: an op this runner does not know: {step['op']!r}")
         except (
@@ -114,5 +128,13 @@ def test_setup_case(
         ) as exc:
             error = exc
         diff = _outcome(step["expect"], error)
-        where = f"{step['op']} {step.get('timezone', '')!r} {step.get('variant', '')}"
+        if not diff and "image_zone" in step["expect"]:
+            zone = opened.validate_type(IMAGE_ZONE_PROBE)
+            want_zone = step["expect"]["image_zone"]
+            if zone != want_zone.encode():
+                diff = f"the image was set up with zone {zone!r}, want {want_zone!r}"
+        where = (
+            f"{step['op']} {step.get('timezone', '')!r} "
+            f"{step.get('variant', '')}{step.get('request', '')}"
+        )
         assert not diff, f"step {i} ({where}): {diff}"

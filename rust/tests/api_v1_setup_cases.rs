@@ -13,8 +13,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
-use chtypes::{Error, Library, SetupOptions, status};
+use chtypes::{Error, FetchOptions, Library, Registry, RegistryOptions, SetupOptions, status};
 use serde_json::Value;
 
 const ENV_STUBS: &str = "CHTYPES_ABI1_STUBS";
@@ -29,10 +30,15 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn load_cases() -> Vec<Value> {
+/// The document's image zone probe, and its cases.
+fn load_cases() -> (String, Vec<Value>) {
     let path = repo_root().join("tests/fixtures/abi-v1/setup-cases.json");
     let doc: Value = serde_json::from_slice(&std::fs::read(&path).expect("read setup-cases.json"))
         .expect("parse setup-cases.json");
+    let probe = doc["image_zone_probe"]
+        .as_str()
+        .expect("setup-cases.json has an image_zone_probe")
+        .to_string();
     let cases = doc["cases"]
         .as_array()
         .expect("setup-cases.json has a cases array")
@@ -42,7 +48,7 @@ fn load_cases() -> Vec<Value> {
         "{}: zero cases; a suite that ran nothing must not pass",
         path.display()
     );
-    cases
+    (probe, cases)
 }
 
 /// A status name (`CHS_REJECTED`) as the generated constant's value.
@@ -124,7 +130,7 @@ fn outcome(want: &Value, got: &Result<(), Error>) -> Result<(), String> {
 
 /// The child: one case, on a fresh copy of each stub it opens, from a process
 /// with no setup recorded.
-fn run_case(stubs: &Path, case: &Value) {
+fn run_case(stubs: &Path, probe: &str, case: &Value) {
     let id = case["id"].as_str().expect("case id");
     let case_variant = case["variant"].as_str().expect("case variant");
     let manifest: Value =
@@ -166,16 +172,58 @@ fn run_case(stubs: &Path, case: &Value) {
             .get("variant")
             .and_then(Value::as_str)
             .unwrap_or(case_variant);
-        let got: Result<(), Error> = match op {
-            "setup" => chtypes::setup(SetupOptions {
+        let request = step.get("request").and_then(Value::as_str);
+        let allow = step.get("allow").and_then(Value::as_bool).unwrap_or(true);
+        let mut opened: Option<Arc<Library>> = None;
+        let got: Result<(), Error> = match (op, request) {
+            ("setup", _) => chtypes::setup(SetupOptions {
                 timezone: Some(zone.to_string()),
                 defaults: Vec::new(),
             }),
-            "open" => Library::open_unverified(image(variant), true).map(|_| ()),
-            other => panic!("case {id} step {i}: an op this runner does not know: {other:?}"),
+            ("open", Some(request)) => {
+                // A registry over an empty cache, offline, autofetch off.
+                let cache = dir.join(format!("cache-{i}"));
+                std::fs::create_dir_all(&cache).expect("create an empty cache");
+                let registry = Registry::new(RegistryOptions {
+                    fetch: FetchOptions {
+                        cache_dir: Some(cache.to_string_lossy().into_owned()),
+                        system_dirs: Some(Vec::new()),
+                        offline: true,
+                        ..Default::default()
+                    },
+                    autofetch: Some(false),
+                    ..Default::default()
+                })
+                .expect("constructing a registry opens nothing");
+                registry.for_version(request).map(|l| opened = Some(l))
+            }
+            ("open", None) => {
+                Library::open_unverified(image(variant), allow).map(|l| opened = Some(l))
+            }
+            (other, _) => {
+                panic!("case {id} step {i}: an op this runner does not know: {other:?}")
+            }
         };
-        if let Err(diff) = outcome(&step["expect"], &got) {
-            panic!("case {id} step {i} ({op} {zone:?} {variant}): {diff}");
+        let mut checked = outcome(&step["expect"], &got);
+        if let (Ok(()), Some(want)) = (&checked, step["expect"].get("image_zone")) {
+            let want = want.as_str().expect("image_zone is a string");
+            let library = opened
+                .as_ref()
+                .expect("a successful open returns its library");
+            checked = match library.validate_type(probe) {
+                Err(e) => Err(format!("reading the image zone back: {e:?}")),
+                Ok(zone) if zone.as_bytes() != want.as_bytes() => Err(format!(
+                    "the image was set up with zone {:?}, want {want:?}",
+                    String::from_utf8_lossy(zone.as_bytes())
+                )),
+                Ok(_) => Ok(()),
+            };
+        }
+        if let Err(diff) = checked {
+            panic!(
+                "case {id} step {i} ({op} {zone:?} {variant} {}): {diff}",
+                request.unwrap_or("")
+            );
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -190,7 +238,7 @@ fn setup_cases() {
         );
         return;
     };
-    let cases = load_cases();
+    let (probe, cases) = load_cases();
 
     if let Some(id) = std::env::var_os(ENV_CASE) {
         let id = id.to_string_lossy().into_owned();
@@ -198,7 +246,7 @@ fn setup_cases() {
             .iter()
             .find(|c| c["id"].as_str() == Some(id.as_str()))
             .unwrap_or_else(|| panic!("no setup case {id:?}"));
-        run_case(&stubs, case);
+        run_case(&stubs, &probe, case);
         return;
     }
 

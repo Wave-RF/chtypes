@@ -190,6 +190,20 @@ IMAGE_ZONE = {
     "conflict_message": "the image zone is already set, to a different spelling",
 }
 
+# The image zone probe: the one way a test reads back the zone an image was set
+# up with, through a binding's PUBLIC API. A call to `fn` whose `param` is
+# exactly `probe` returns, as its output, the zone the image holds
+# (IMAGE_ZONE's committed spelling, empty when none was committed yet),
+# instead of its echo. The setup cases (emit/setup_cases.py) use it to prove an
+# open ran step 7 under the zone the caller recorded, not under the empty
+# setup. A real library has no such call: this is the stub's alone.
+ZONE_PROBE = {
+    "fn": "chs_type_validate",
+    "param": "type_expr",
+    "out": "out",
+    "probe": "!Z:",
+}
+
 # The symbol a loader checks before any other (step 3): it gets its own named
 # variant ("no-abi-version", reason "not_v1") rather than folding into the
 # generic missing-<sym> sweep, because a real loader distinguishes "this is
