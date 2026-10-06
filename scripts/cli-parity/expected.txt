@@ -4,7 +4,7 @@ help-subcommand | exit=0 | stderr=empty | stdout=usage
 help-after-arguments | exit=0 | stderr=empty | stdout=usage
 version | exit=0 | stderr=empty | stdout=chtypes <VERSION>|
 list-offline-empty | exit=0 | stderr=empty | stdout=
-verify-empty | exit=0 | stderr=empty | stdout=
+verify-empty | exit=0 | stderr=nonempty | stdout=
 where | exit=0 | stderr=empty | stdout=<DIR>|
 usage-no-arguments | exit=2 | stderr=nonempty | stdout=
 usage-unknown-command | exit=2 | stderr=nonempty | stdout=

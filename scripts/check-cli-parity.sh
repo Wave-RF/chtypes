@@ -177,6 +177,8 @@ case "$1" in
       shift
     done
     if [ "$cmd" = where ]; then echo "$cache"; fi
+    # A verify that verified nothing says so on stderr (public issue #486).
+    if [ "$cmd" = verify ]; then echo "chtypes: verified 0 builds under $cache" >&2; fi
     if [ "$cmd" = list ] && [ "$brk" = list-header ]; then echo "installed ($cache):"; fi
     exit 0 ;;
 esac
