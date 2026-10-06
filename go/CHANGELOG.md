@@ -6,6 +6,8 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-10-06
+
 ### Changed
 
 - The 0.x line is retracted (#431): `go.mod` declares `retract [v0.1.0, v0.5.2]`. Once this release is out, `go get` and `@latest` no longer select a 0.x version, and `go list -m -u` warns a module that still requires one. The versions stay downloadable, so an existing build that pins one keeps working. Use v1.

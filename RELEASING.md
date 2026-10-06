@@ -11,23 +11,23 @@ Four packages, one repository, one tag convention: **the directory prefix is the
 
 Each workflow refuses a tag whose version does not equal the manifest's, builds, and publishes with provenance where the registry supports it. No long-lived token is stored for PyPI or crates.io.
 
-**And each one then installs what it just published.** The `verify` job of every release workflow runs `scripts/release-verify.sh <binding> registry <version>`: a clean-room install of the PUBLISHED package from its public registry, anonymous, retrying for registry lag. Then, in a clean directory with a clean cache, it checks four things. The binding's ABI fingerprint must equal `CHS_ABI_FINGERPRINT` in `include/chtypes.h`. Its CLI must list the production registry and fetch the newest line. And its public API must load that line, whose own `build_info` reports the same fingerprint. A dry run runs the same script in `local` mode against the package it just built (see the 1.0.0 section below).
+**And each one then installs what it just published.** The `verify` job of every release workflow runs `scripts/release-verify.sh <binding> registry <version>`: a clean-room install of the PUBLISHED package from its public registry, anonymous, retrying for registry lag. Then, in a clean directory with a clean cache, it checks four things. The binding's ABI fingerprint must equal `CHS_ABI_FINGERPRINT` in `include/chtypes.h`. Its CLI must list the production registry and fetch the newest line. And its public API must load that line, whose own `build_info` reports the same fingerprint. A dry run runs the same script in `local` mode against the package it just built (see the 1.x releases section below).
 
 This is here because a publish step exiting 0 does not mean anyone can install the package. On `ts/v0.1.1` the job went green about seven minutes before npm served the tarball, and for two of those minutes `dist-tags.latest` resolved to a version that 404'd — a clean `npm install` failed while CI showed a green release (issue #10). A publish that never completes looks identical. Presence is not the test: the check installs and runs, so it also catches an artifact that resolves but does not work, and one whose ABI disagrees with the header.
 
 It fetches anonymously on purpose. A registry can show a maintainer a version the public cannot see — `~/.npmrc` carrying a token is what made #10 take three wrong turns to diagnose — so the check is made with no credentials in scope.
 
-## The 1.0.0 release
+## The 1.x releases
 
-1.0.0 is tagged **from `v1`**, not from `main`. The release workflows live on `main` and `v1` alike, so a tag pushed at a `v1` commit runs `v1`'s copy of the workflow against `v1`'s tree. The `v1` to `main` merge comes after the maintainer's decision on the held items (public issue #431), and the default branch switches to v1 shortly after release; the release notes say so.
+Releases are tagged **from `main`**. `v1` was merged into `main` on 2026-10-06 (#475), so `main` is the 1.0 tree and the default branch. 1.0.0 and 1.0.2 were tagged from `v1` before that merge; 1.0.3 and later come from `main`. The release workflows live on `main`, so a tag pushed at a `main` commit runs `main`'s copy of the workflow against `main`'s tree.
 
-The order is the one below: **`rust/v1.0.0` → `ts/v1.0.0` → `python/v1.0.0` → `go/v1.0.0`**, one at a time, each green before the next. Nobody tags before every dry run is green.
+The order is the one below: **`rust/v1.0.3` → `ts/v1.0.3` → `python/v1.0.3` → `go/v1.0.3`** (for 1.0.3), one at a time, each green before the next. Nobody tags before every dry run is green.
 
-**Dry runs, from `v1`, before any tag.** Each release workflow takes a `workflow_dispatch` with `tag` (the tag NAME to check, nothing is tagged) and `dry_run`:
+**Dry runs, from the release branch (or `main`), before any tag.** Each release workflow takes a `workflow_dispatch` with `tag` (the tag NAME to check, nothing is tagged) and `dry_run`:
 
 ```sh
 for x in rust ts python go; do
-  gh workflow run "release-$x.yml" --ref v1 -f "tag=$x/v1.0.0" -f dry_run=true
+  gh workflow run "release-$x.yml" --ref <branch> -f "tag=$x/v1.0.3" -f dry_run=true
 done
 ```
 
@@ -36,7 +36,7 @@ A dry run does everything the tag path does up to the publish, skips the publish
 **Verify only.** To re-run the post-publish check against a version that is already published, without publishing anything:
 
 ```sh
-gh workflow run release-rust.yml --ref v1 -f tag=rust/v1.0.0 -f verify_only=true
+gh workflow run release-rust.yml --ref main -f tag=rust/v1.0.3 -f verify_only=true
 ```
 
 `verify_only=true` skips the publish job entirely (it wins over `dry_run`), installs the version the `tag` input names from the public registry with the retry loop, and runs the same steps. A tag push is unchanged: publish, then verify against the registry.
