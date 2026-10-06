@@ -44,7 +44,7 @@ const bundleMediaType = "application/vnd.dev.sigstore.bundle.v0.3+json" // media
 // today). Keying by our own keyid also means a fixture's bad-hint cases
 // read as plainly as a hex key id should.
 
-// KeyID is go/chtypes/fetch_sign.go's KeyID: the first 16 hex characters of
+// KeyID is go/internal/ocifetch/dsse.go's keyIDFor: the first 16 hex characters of
 // sha256 over the raw 32-byte ed25519 public key. Kept in sync by hand
 // (never generated) because this one algorithm is a single line, pinned in
 // spec/fetch-v1/constants.json's trust.keyid_algorithm, and copied here only

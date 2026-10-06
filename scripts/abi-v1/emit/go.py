@@ -10,8 +10,8 @@ GENERATED (plan §2.2's Go/Go-linked/Go-invoke/error-map rows):
                                    handle parameter or return is spelled
                                    `void *` here (never the opaque `chs_K *`),
                                    which is the SAME void*/typed-pointer
-                                   interchangeability go/chtypes/multiversion.go
-                                   already relies on to call through a function
+                                   interchangeability the v0 Go loader relied
+                                   on to call through a function
                                    pointer without linking the real header —
                                    measured safe on every ABI this repository
                                    targets (identical pointer representation
@@ -305,7 +305,7 @@ def render_table_header(model) -> str:
         "   argument/return types only need to match in REPRESENTATION to call through it",
         "   correctly (every target here: identical pointer representation and calling",
         "   convention for `void *` and a struct pointer), which is the same rule",
-        "   go/chtypes/multiversion.go already relies on for its own dlopen path. */",
+        "   the v0 Go loader relied on for its own dlopen path. */",
         "",
     ]
     for fn in model.functions:

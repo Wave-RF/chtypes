@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "521d77bf23502113940a2a54907ee811d1b126d7",
+    "generator_commit": "f9c907c9857f2fe06985e662079237db78339023",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
