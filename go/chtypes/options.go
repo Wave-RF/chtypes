@@ -58,24 +58,66 @@ type ColumnsOption interface {
 	BlockOption
 }
 
-// option is one functional option; its methods make it every option
-// interface, and the exported constructors return only the interface the
-// option belongs to.
-type option func(*callConfig)
+// The options are small named types, one per option, rather than closures: a
+// closure is a heap allocation each time an option is built, and a map, a
+// pointer or a small integer converts to an interface without one. Each type
+// implements exactly the option interfaces of the operations it applies to,
+// and the exported constructors return only those interfaces.
 
-func (o option) applyCompile(c *callConfig) { o(c) }
-func (o option) applyRow(c *callConfig)     { o(c) }
-func (o option) applyRows(c *callConfig)    { o(c) }
-func (o option) applyBlock(c *callConfig)   { o(c) }
-func (o option) applyFilter(c *callConfig)  { o(c) }
-func (o option) applyEval(c *callConfig)    { o(c) }
+type settingsOpt map[string]string
+
+func (o settingsOpt) apply(c *callConfig)        { c.settings = o }
+func (o settingsOpt) applyCompile(c *callConfig) { o.apply(c) }
+func (o settingsOpt) applyRow(c *callConfig)     { o.apply(c) }
+func (o settingsOpt) applyRows(c *callConfig)    { o.apply(c) }
+func (o settingsOpt) applyBlock(c *callConfig)   { o.apply(c) }
+func (o settingsOpt) applyFilter(c *callConfig)  { o.apply(c) }
+func (o settingsOpt) applyEval(c *callConfig)    { o.apply(c) }
+
+type timezoneOpt string
+
+func (o timezoneOpt) apply(c *callConfig) {
+	name := string(o)
+	c.timezone = &name
+}
+func (o timezoneOpt) applyCompile(c *callConfig) { o.apply(c) }
+func (o timezoneOpt) applyRow(c *callConfig)     { o.apply(c) }
+func (o timezoneOpt) applyRows(c *callConfig)    { o.apply(c) }
+func (o timezoneOpt) applyBlock(c *callConfig)   { o.apply(c) }
+func (o timezoneOpt) applyFilter(c *callConfig)  { o.apply(c) }
+func (o timezoneOpt) applyEval(c *callConfig)    { o.apply(c) }
+
+type columnsOpt []string
+
+func (o columnsOpt) apply(c *callConfig)     { c.columns, c.haveColumns = o, true }
+func (o columnsOpt) applyRow(c *callConfig)  { o.apply(c) }
+func (o columnsOpt) applyRows(c *callConfig) { o.apply(c) }
+func (o columnsOpt) applyBlock(c *callConfig) {
+	o.apply(c)
+}
+
+type rowFilterOpt struct{ f *Filter }
+
+func (o rowFilterOpt) applyRows(c *callConfig) { c.filter = o.f }
+
+type exportOpt Format
+
+func (o exportOpt) applyRows(c *callConfig) { c.export = Format(o) }
+
+type docFlagsOpt DocFlags
+
+func (o docFlagsOpt) applyRows(c *callConfig) { c.docFlags = DocFlags(o) }
+
+type paramsOpt map[string]string
+
+func (o paramsOpt) applyFilter(c *callConfig) { c.params = o }
 
 // WithSettings sets the call's settings: a map of strings to strings,
 // serialized as a JSON object and passed verbatim. No value is ever rewritten.
 // On a compile it is the profile; on a filter compile the filter's own profile;
 // on the calls that parse a body, the body's parse settings.
 func WithSettings(settings map[string]string) SettingsOption {
-	return option(func(c *callConfig) { c.settings = settings })
+	return settingsOpt(settings)
 }
 
 // WithSessionTimezone sets the per-call zone: the session_timezone key of the
@@ -83,33 +125,33 @@ func WithSettings(settings map[string]string) SettingsOption {
 // validates it). Passing it together with a session_timezone settings key is a
 // *UsageError, whether or not the two agree.
 func WithSessionTimezone(name string) SettingsOption {
-	return option(func(c *callConfig) { c.timezone = &name })
+	return timezoneOpt(name)
 }
 
 // WithColumns sets the INSERT column list.
 func WithColumns(names []string) ColumnsOption {
-	return option(func(c *callConfig) { c.columns, c.haveColumns = names, true })
+	return columnsOpt(names)
 }
 
 // WithRowFilter attaches a compiled filter to a Rows call.
 func WithRowFilter(f *Filter) RowsOption {
-	return option(func(c *callConfig) { c.filter = f })
+	return rowFilterOpt{f}
 }
 
 // WithExport asks Rows to also serialize the accepted rows in the given
 // format; absent means ExportNone.
 func WithExport(format Format) RowsOption {
-	return option(func(c *callConfig) { c.export = format })
+	return exportOpt(format)
 }
 
 // WithDocFlags chooses the document groups Rows returns; absent means DocAll.
 func WithDocFlags(flags DocFlags) RowsOption {
-	return option(func(c *callConfig) { c.docFlags = flags })
+	return docFlagsOpt(flags)
 }
 
 // WithFilterParams sets the query parameters of a filter compile.
 func WithFilterParams(params map[string]string) FilterOption {
-	return option(func(c *callConfig) { c.params = params })
+	return paramsOpt(params)
 }
 
 func compileConfig(opts []CompileOption) *callConfig {

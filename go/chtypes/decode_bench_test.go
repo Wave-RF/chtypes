@@ -11,6 +11,7 @@ import (
 var benchDocs = []struct{ name, file string }{
 	{"flags0", "batch-100-flags0.json"},
 	{"flags7", "batch-100-flags7.json"},
+	{"filter", "batch-100-filter.json"},
 }
 
 // BenchmarkDecodeBatch decodes one document per iteration. Run it with

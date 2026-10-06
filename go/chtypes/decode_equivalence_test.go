@@ -132,6 +132,7 @@ func wellFormed(t *testing.T) map[string]string {
 	docs := map[string]string{
 		"real, doc_flags 0": readTestdata(t, "batch-100-flags0.json"),
 		"real, doc_flags 7": readTestdata(t, "batch-100-flags7.json"),
+		"real, filter":      readTestdata(t, "batch-100-filter.json"),
 	}
 	for name, doc := range batchFixtures {
 		docs["batch: "+name] = doc
@@ -178,7 +179,7 @@ func TestDecodeBatchEquivalenceReal(t *testing.T) {
 	for _, tc := range []struct {
 		file    string
 		columns bool
-	}{{"batch-100-flags0.json", false}, {"batch-100-flags7.json", true}} {
+	}{{"batch-100-flags0.json", false}, {"batch-100-flags7.json", true}, {"batch-100-filter.json", false}} {
 		res, err := decodeBatch([]byte(readTestdata(t, tc.file)), nil)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.file, err)
@@ -188,6 +189,12 @@ func TestDecodeBatchEquivalenceReal(t *testing.T) {
 		}
 		if got := len(res.Rows[0].Columns) > 0; got != tc.columns {
 			t.Errorf("%s: row 0 has columns = %v, want %v", tc.file, got, tc.columns)
+		}
+		if tc.file == "batch-100-filter.json" {
+			// A filtering caller's document: one span per row, counts, verdicts.
+			if len(res.Spans) != 100 || res.RowsPassed+res.RowsCut != 100 || res.RowsPassed == 0 || res.Rows[0].Verdict == nil || res.Rows[0].InputSpan == nil {
+				t.Errorf("%s: %d spans, passed %d, cut %d, row 0 verdict %v", tc.file, len(res.Spans), res.RowsPassed, res.RowsCut, res.Rows[0].Verdict)
+			}
 		}
 		if tc.columns {
 			if len(res.Transformed) == 0 || len(res.Rows[0].Computed) == 0 || res.Rows[1].Columns[1].Value == nil {
@@ -284,6 +291,20 @@ func mutations(doc string) map[string]string {
 	replace("unconsumed element null", `"unconsumed":[]`, `"unconsumed":[null]`)
 	replace("unconsumed element empty", `"unconsumed":[]`, `"unconsumed":[{}]`)
 	replace("unconsumed span", `"unconsumed":[]`, `"unconsumed":[{"off":1,"len":2},{"off":"3","len":4}]`)
+	replace("row_spans", `"unconsumed":[]`, `"unconsumed":[],"row_spans":[{"off":0,"len":5},{"off":"6","len":7}]`)
+	replace("row_spans empty", `"unconsumed":[]`, `"unconsumed":[],"row_spans":[]`)
+	replace("row_spans null", `"unconsumed":[]`, `"unconsumed":[],"row_spans":null`)
+	replace("row_spans element null", `"unconsumed":[]`, `"unconsumed":[],"row_spans":[{"off":0,"len":5},null]`)
+	replace("row_spans element a number", `"unconsumed":[]`, `"unconsumed":[],"row_spans":[5]`)
+	replace("row_spans element empty", `"unconsumed":[]`, `"unconsumed":[],"row_spans":[{}]`)
+	replace("row_spans element unknown key", `"unconsumed":[]`, `"unconsumed":[],"row_spans":[{"off":0,"len":5,"x":1}]`)
+	replace("row_spans element key twice", `"unconsumed":[]`, `"unconsumed":[],"row_spans":[{"off":0,"off":1,"len":5}]`)
+	replace("row_spans not an array", `"unconsumed":[]`, `"unconsumed":[],"row_spans":{}`)
+	replace("row_spans twice", `"unconsumed":[]`, `"unconsumed":[],"row_spans":[],"row_spans":[]`)
+	replace("row_spans unterminated", `"unconsumed":[]`, `"unconsumed":[],"row_spans":[{"off":0,"len":5}`)
+	replace("row_spans beyond rows_read", `"rows_read":`, `"rows_read":1,"row_spans":[{"off":0,"len":1},{"off":1,"len":1},{"off":2,"len":1}],"x_rows_read":`)
+	replace("row_spans with a huge rows_read", `"rows_read":`, `"rows_read":4294967296,"row_spans":[{"off":0,"len":1}],"x_rows_read":`)
+	replace("unconsumed null", `"unconsumed":[]`, `"unconsumed":null`)
 	replace("engine_rows cell", `"unconsumed":[]`, `"unconsumed":[],"engine_rows":[[{"name":"a","stored":"1","null":false,"value_b64":"MQ=="}],null,[]]`)
 	replace("engine_rows cell, no name", `"unconsumed":[]`, `"unconsumed":[],"engine_rows":[[{"stored":"1"}]]`)
 	replace("engine_rows not arrays", `"unconsumed":[]`, `"unconsumed":[],"engine_rows":[{}]`)
@@ -308,7 +329,7 @@ func mutations(doc string) map[string]string {
 
 func TestDecodeBatchEquivalenceMutations(t *testing.T) {
 	n := 0
-	for _, file := range []string{"batch-100-flags0.json", "batch-100-flags7.json"} {
+	for _, file := range []string{"batch-100-flags0.json", "batch-100-flags7.json", "batch-100-filter.json"} {
 		doc := readTestdata(t, file)
 		for name, m := range mutations(doc) {
 			compareDecoders(t, file+": "+name, m)
@@ -334,7 +355,7 @@ func TestDecodeBatchEquivalenceMutations(t *testing.T) {
 func TestDecodeBatchEquivalenceRandomEdits(t *testing.T) {
 	rng := rand.New(rand.NewSource(456))
 	structural := []byte(`{}[],:"\ 0189-.nul`)
-	docs := []string{readTestdata(t, "batch-100-flags0.json"), readTestdata(t, "batch-100-flags7.json")}
+	docs := []string{readTestdata(t, "batch-100-flags0.json"), readTestdata(t, "batch-100-flags7.json"), readTestdata(t, "batch-100-filter.json")}
 	for _, name := range []string{"every top-level field", "framing known"} {
 		docs = append(docs, batchFixtures[name])
 	}

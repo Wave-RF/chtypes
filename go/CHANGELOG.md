@@ -11,6 +11,7 @@ The four bindings in this repository are released together and give one answer, 
 ### Changed
 
 - `Schema.Rows` decodes its result with far fewer allocations, so it scales across goroutines (#456). It reads the batch document in one streaming pass into typed values, with no generic tree and no per-row path string, and falls back to the strict generic reader for any document it will not judge itself (an unknown key, a duplicate key, a value of the wrong type), so every refusal and its message are unchanged. On a real 100-row document the decode went from 4,476 to 173 allocations at `doc_flags` 0 and from 56,822 to 2,641 at `doc_flags` 7. The decoded values are identical, and no exported name changes.
+- `Schema.Rows` makes far fewer allocations around the decode too (#456). Measured on a full call over a 100-row body with a filter, a four-key settings map and an export (the shape of the report), it went from 412 allocations and 75 KB per call to 76 and 45 KB, about 40% fewer bytes for the collector to clear. The batch document is copied out of the library into a pooled buffer instead of a fresh slice, the row decoders and the settings encoder are kept between calls, the per-row verdict, partition id and span pointers come from shared chunks, a list of spans is decoded one element at a time with no allocation each, and the call options are small named types instead of closures. Every returned value is still Go-owned and independent of those pools, and results are byte-for-byte what they were; no exported name changes.
 
 ### Fixed
 
