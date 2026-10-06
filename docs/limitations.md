@@ -71,11 +71,11 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 **No budget is a rule about process, not a claim about state.** A non-zero count, in either direction, on any binding against any ClickHouse line, is refused unless a person has named that case and recorded why, with a tracking reference attached. Nothing non-zero passes quietly, and no threshold waves anything through.
 
-**So it does not mean there are none.** What is true today is narrower, and worth stating exactly: **one case is currently known in 1.0 in which this library and a real server disagree about whether a row gets through: a row on which a skip index's or a projection's expression throws, listed under [Known divergences](#known-divergences) below.** The three that were registered for 0.x (a DEFAULT over `demangle`, a CHECK constraint, and a filter whose result is not a boolean-context type) are fixed in every 1.0 build: this repository measured the `demangle` refusal (446) through the published Go binding on all four supported lines, and the artifact producer measured the filter and CHECK cases on production. Both directions are at zero across every line the artifacts are proved against — `measured` by the differential proof those artifacts are built from, and a state rather than a promise: it is what the rule has produced so far, not something the rule guarantees will hold tomorrow.
+**So it does not mean there are none.** The cases known today, in either direction, are listed under [Known divergences](#known-divergences) below, each with the build it was measured on and the workaround until it is fixed. The three that were registered for 0.x (a DEFAULT over `demangle`, a CHECK constraint, and a filter whose result is not a boolean-context type) are fixed in every 1.0 build: this repository measured the `demangle` refusal (446) through the published Go binding on all four supported lines, and the artifact producer measured the filter and CHECK cases on production. Nothing in that list is a promise about tomorrow: the differential proof keeps finding cases, and each one is listed as soon as its server half is measured.
 
 ⚠️ **Zero in both directions is a statement about the verdict, not about the value or the error.** There are two other ways to disagree: both sides accept a row and **store different values**, or both refuse it and **report different codes**. Neither is an accept-or-reject disagreement, so the no-budget rule above does not cover them.
 
-They are measured all the same, and as of the current published artifacts **both are also at zero on every line, for every binding**. That's `measured` by the same differential proof, not by this repository, and it's the same kind of statement as the one above: a state of what the proof covers, not a promise about every input. A case outside that coverage can still disagree, and any that's known is listed under [Known divergences](#known-divergences). Getting there meant investigating the cases one at a time. Some were fixed in the library. Others turned out not to be something a caller can reach, because the disagreement was a property of how the comparison itself was run. Any that a caller **can** reach are listed under [Known divergences](#known-divergences) below.
+They are measured all the same, by the same differential proof, not by this repository. Any that a caller can reach is listed under [Known divergences](#known-divergences), the same as a verdict divergence. Getting there meant investigating the cases one at a time. Some were fixed in the library. Others turned out not to be something a caller can reach, because the disagreement was a property of how the comparison itself was run. Any that a caller **can** reach are listed under [Known divergences](#known-divergences) below.
 
 In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather than a subclass, so `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both. The subtype was retired precisely because catching one and getting the other is a silent misclassification.
 
@@ -96,39 +96,6 @@ An entry disappears when an artifact stops diverging, or when the disagreement t
 Every entry here has a machine-checkable twin in [`docs/divergences.json`](divergences.json). The v0 job that drove each one against loaded artifacts is retired with the v0 registry layout, so nothing checks these entries until a v1 replacement lands; treat each as a claim about the build named, and re-measure before relying on it.
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
-
-### A row on which a skip index's or a projection's expression throws is accepted, where a real server refuses it
-
-**Over-accept, on every supported line.** This library does not evaluate a table's skip-index (`INDEX … TYPE …`) or `PROJECTION` expressions when it previews a row. A real server evaluates them during the INSERT, and one that throws on a row refuses the whole INSERT. For example, with `x UInt8` and a row where `x = 0`, for each of `INDEX i intDiv(100, x) TYPE minmax`, `PROJECTION p (SELECT x, intDiv(100, x) AS d ORDER BY d)` and `PROJECTION p (SELECT x, sum(intDiv(100, x)) AS s GROUP BY x)`:
-
-|               |                                                            |
-| ------------- | ---------------------------------------------------------- |
-| this library  | accepts the row                                            |
-| a real server | refuses the INSERT with error **153** (`ILLEGAL_DIVISION`) |
-
-A `CHECK` or a `PARTITION BY` over the same expression is refused with 153 here too, as a server refuses it, and a row with `x = 5` is accepted on both sides. An `ORDER BY` over such an expression is declined (`unsupported`) rather than accepted: an over-decline, not an entry here.
-
-**Measured**: by the artifact producer, against the production 1.0 builds (`20261004.052404`) on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), through both the row and the batch preview; the server half against stock servers pinned to each line. A library fix is in progress; this entry is removed on the 1.0.x release that ships it.
-
-Until then, do not rely on this library to refuse a row whose only failure is a skip index's or a projection's expression: the server can still refuse that INSERT.
-
-### A Date-valued TTL follows the call's session_timezone; a real server uses its own zone
-
-**Value divergence, on every supported line, only with a per-call `session_timezone`.** When a batch preview is called with a per-call `session_timezone` that differs from this library's zone (in 1.0 the process image zone stands in for the server's), a Date-valued TTL's expiry is computed at the CALL zone's midnight. That expiry is what the batch's storage transforms report as `ttl_expired` (a rows TTL) and `ttl_column_expired` (a column TTL). A real server computes it at its own zone's midnight, whatever the session.
-
-Both directions occur, and which one depends on the zones: this library follows the SESSION zone's midnights, and a server follows its own zone's. Only the rows whose expiry falls between the two midnights are affected. With `TTL toDate(ts) + 1`, for both a rows TTL and a column TTL:
-
-| server and library zone | per-call session     | this library                           | a real server |
-| ----------------------- | -------------------- | -------------------------------------- | ------------- |
-| UTC                     | `Pacific/Kiritimati` | reports 12 rows dropped (values reset) | keeps them    |
-| `Pacific/Kiritimati`    | UTC                  | reports 12 rows kept                   | drops them    |
-| `Pacific/Kiritimati`    | `Etc/GMT+12`         | reports 12 rows kept                   | drops them    |
-
-With no per-call `session_timezone`, or one equal to this library's zone, both sides agree.
-
-**Measured**: by the artifact producer, against the production 1.0 build `20261004.052404` and live servers on `26.3.38.2`, `26.7.19.5`, `26.8.15.10` and `26.9.8.3` (linux-amd64), in both directions. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run of this differential against the production build that ships the fix, showing both sides agree. It does not retire on a CI result.
-
-Until then, for a table with a Date-valued TTL, either do not pass a per-call `session_timezone` that differs from this library's zone, or do not rely on `ttl_expired` and `ttl_column_expired` from such a call.
 
 ### The row preview skips the engine's insert-time merge step on Collapsing and Replacing-with-`is_deleted` tables
 
@@ -202,6 +169,14 @@ With a pinned clock (`chtypes_now_epoch_nanos`) plus `chtypes_clock_offset_nanos
 **Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not trust `computed` clock values from a batch preview unless at least one row omits a Volatile DEFAULT column, or the clock is pinned with no offset.
+
+### A projection with no ORDER BY is accepted at schema creation; a real server refuses the CREATE
+
+**Over-accept, on every supported line, at schema creation, linux-amd64 only.** A table whose `PROJECTION` has no `ORDER BY` is accepted by `chs_schema_create`, and a preview then accepts rows for it. A real server refuses the CREATE with error **36** (`ORDER BY cannot be empty`).
+
+**Measured**: by the artifact producer, against the production library build `20261006.170903` and its predecessor `20261004.052404`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not treat a successful schema creation as proof that the server will accept a CREATE whose projections have no `ORDER BY`.
 
 ## Known gaps in 1.0
 
