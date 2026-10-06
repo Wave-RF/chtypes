@@ -20,11 +20,26 @@
 # repository follows — and this script still exits 0 (nothing to report).
 #
 #     scripts/abi-v1/conformance/ts.sh
+#
+# With CHTYPES_ABI1_STUBS set the run is read back through the stub census
+# (scripts/abi-v1/stub_census.py, public issue #463): vitest's own JSON result,
+# not its exit code, must show tests passed, and no test file in which nothing
+# passed (every file under ts/test/abi1 gates on the stubs; measured: no other
+# ts test file reads the variable).
+#
+#     scripts/abi-v1/conformance/ts.sh --selftest   prove the census on synthetic results
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 TS_DIR="$ROOT/ts"
+CENSUS="$HERE/../stub_census.py"
+
+if [ "${1:-}" = "--selftest" ]; then
+    command -v python3 >/dev/null 2>&1 || { echo "ts.sh: python3 is not on PATH; the selftest cannot run" >&2; exit 1; }
+    python3 "$CENSUS" --selftest
+    exit 0
+fi
 
 if [ -z "${CHTYPES_ABI1_STUBS:-}" ]; then
     echo "ts.sh: CHTYPES_ABI1_STUBS is unset — the conformance test will skip every case loudly by name"
@@ -43,4 +58,19 @@ echo "ts.sh: pnpm install --frozen-lockfile"
 pnpm install --frozen-lockfile
 
 echo "ts.sh: vitest run test/abi1 (toolchain ${CHTYPES_ABI1_TOOLCHAIN:-unknown})"
-pnpm exec vitest run test/abi1 --reporter=verbose
+if [ -z "${CHTYPES_ABI1_STUBS:-}" ]; then
+    pnpm exec vitest run test/abi1 --reporter=verbose
+    exit 0
+fi
+JSON="$(mktemp "${TMPDIR:-/tmp}/ts-stub-census.XXXXXX")"
+trap 'rm -f "$JSON"' EXIT
+rc=0
+pnpm exec vitest run test/abi1 --reporter=verbose --reporter=json --outputFile.json="$JSON" || rc=$?
+echo "ts.sh: stub census"
+census_rc=0
+python3 "$CENSUS" vitest "$JSON" "$rc" || census_rc=$?
+if [ "$census_rc" -ne 0 ]; then
+    echo "ts.sh: the stub census refused this run (vitest rc=$rc)" >&2
+    exit 1
+fi
+exit "$rc"
