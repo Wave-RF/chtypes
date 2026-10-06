@@ -1,6 +1,6 @@
 {
   "name": "@wavehouse/chtypes",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "ClickHouse's own type system, per version, over the frozen chs_* C ABI",
   "license": "Apache-2.0",
   "type": "module",
