@@ -8,6 +8,7 @@ package chtypes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -131,12 +132,15 @@ func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (_ *
 	if l := r.memo[request]; l != nil {
 		return l, nil
 	}
-	// A failed open clears the setup record while no image has completed load
-	// step 7, whatever failed: the spelling, the fetch, the signature or any
-	// load step (bindings-v1.md section 6, rule 4).
+	// An open that attempted a load and failed unlocks the setup record while
+	// no image has completed load step 7, whatever failed: the resolve, the
+	// fetch, the signature or any load step. A refused version spelling is the
+	// caller's own misuse, refused before anything is attempted, and unlocks
+	// nothing (bindings-v1.md section 6, rule 4).
 	gen := setupGeneration()
+	misuse := false
 	defer func() {
-		if err != nil {
+		if err != nil && !misuse {
 			failedOpen(gen)
 		}
 	}()
@@ -144,6 +148,8 @@ func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (_ *
 	req := ocifetch.Request{Spelling: request}
 	res, err := ocifetch.ResolveInstalled(req, "", opts)
 	if err != nil {
+		var spelling *ocifetch.SpellingError
+		misuse = errors.As(err, &spelling)
 		return nil, fetchError(err)
 	}
 	if res == nil {

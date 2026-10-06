@@ -6,7 +6,7 @@
  * is trivially safe to call in any order.
  */
 
-import { type BuildInfo, type Calls, type LoadedImage, openUnverified as loadUnverified } from './abi1/index.js';
+import { type BuildInfo, type Calls, checkUnverifiedAllowed, type LoadedImage, openUnverified as loadUnverified } from './abi1/index.js';
 import {
   type Discovery,
   decodeDiscovery,
@@ -125,6 +125,8 @@ export function libraryOf(image: LoadedImage, resolved: Resolved | undefined): L
  * no `resolved`, unless a registry had already opened the same image.
  */
 export function openUnverified(path: string, options: { readonly allow: boolean }): Library {
+  // The caller's two opt-ins are checked before anything is attempted: misuse, which unlocks nothing.
+  checkUnverifiedAllowed(path, options.allow);
   const began = setupGeneration();
   try {
     const setup = commitSetup();
@@ -132,7 +134,7 @@ export function openUnverified(path: string, options: { readonly allow: boolean 
     latchSetup();
     return libraryOf(image, undefined);
   } catch (err) {
-    // Like any open: a failure clears the setup record while no image has completed step 7.
+    // Like any open: a failed attempt unlocks the setup record while no image has completed step 7.
     settleFailedOpen(began);
     throw err;
   }

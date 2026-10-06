@@ -99,25 +99,28 @@ describe('setup: the process-once rule', () => {
   });
 });
 
-describe('setup: a failed open before the first step 7 clears the record', () => {
+describe('setup: a failed open before the first step 7 unlocks the record', () => {
   beforeEach(() => resetSetupForTests());
 
-  it('clears it after a registry open that fails before any load (nothing installed, autofetch off)', async () => {
+  it('a refused spelling unlocks nothing; a failed resolve (nothing installed, autofetch off) keeps the record and lets a different setup replace it', async () => {
     setup({ timezone: 'Asia/Tokyo' });
     const cacheDir = mkdtempSync(path.join(os.tmpdir(), 'setup-latch-empty-cache-'));
     const registry = await Registry.open({ fetch: { cacheDir, systemDirs: [], offline: true }, autofetch: false });
-    await expect(registry.for('26.8')).rejects.toBeInstanceOf(ArtifactMissingError);
-    expect(() => setup({ timezone: 'UTC' })).not.toThrow();
-  });
-
-  it('clears it after a refused version spelling too: any failed open', async () => {
-    setup({ timezone: 'Asia/Tokyo' });
-    const registry = await Registry.open({ autofetch: false });
     await expect(registry.for('v26.8')).rejects.toBeInstanceOf(UsageError);
-    expect(() => setup({ timezone: 'UTC' })).not.toThrow();
+    expect(() => setup({ timezone: 'UTC' })).toThrow(UsageError); // misuse unlocked nothing
+    await expect(registry.for('26.8')).rejects.toBeInstanceOf(ArtifactMissingError);
+    expect(commitSetup().timezone).toBe('Asia/Tokyo'); // kept: a retry runs under it, never the empty setup
   });
 
-  it('never clears a setup recorded after the open began, nor a latched one', () => {
+  it('after a failed attempt, a different setup replaces the record, and the replacement is locked again', () => {
+    setup({ timezone: 'Asia/Tokyo' });
+    settleFailedOpen(setupGeneration());
+    expect(() => setup({ timezone: 'UTC' })).not.toThrow();
+    expect(commitSetup().timezone).toBe('UTC');
+    expect(() => setup({ timezone: 'Europe/Berlin' })).toThrow(UsageError);
+  });
+
+  it('never unlocks a setup recorded after the open began, nor a latched one', () => {
     const began = setupGeneration();
     setup({ timezone: 'Asia/Tokyo' });
     settleFailedOpen(began); // it began before Asia/Tokyo was recorded

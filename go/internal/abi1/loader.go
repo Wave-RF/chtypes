@@ -138,6 +138,17 @@ func (e *UnverifiedRefusedError) Error() string {
 	return fmt.Sprintf("abi1: OpenUnverified(%s) refused: pass explicit=true AND set %s=1", e.Path, unverifiedEnv)
 }
 
+// CheckUnverifiedAllowed is OpenUnverified's own gate, alone: nil only when
+// explicit is true AND CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1 is set, otherwise an
+// *UnverifiedRefusedError. The public layer asks it before an open is
+// attempted, so the caller's misuse is told apart from a failed load.
+func CheckUnverifiedAllowed(path string, explicit bool) error {
+	if !explicit || os.Getenv(unverifiedEnv) != "1" {
+		return &UnverifiedRefusedError{Path: path}
+	}
+	return nil
+}
+
 // OpenUnverified loads a library with NO predicate verification: steps 1 and
 // 5 are skipped (plan §3.1). It is for core's own local builds and the
 // linked-mode smoke path, and refuses unless BOTH explicit=true AND
@@ -146,8 +157,8 @@ func (e *UnverifiedRefusedError) Error() string {
 // this but a caller that asked for it by name. It runs step 7 like any open,
 // under the timezone and defaults given.
 func OpenUnverified(path string, explicit bool, timezone, defaults []byte) (*Table, error) {
-	if !explicit || os.Getenv(unverifiedEnv) != "1" {
-		return nil, &UnverifiedRefusedError{Path: path}
+	if err := CheckUnverifiedAllowed(path, explicit); err != nil {
+		return nil, err
 	}
 	warnUnverifiedOnce(path)
 	return load(LoadInput{LibraryPath: path, Predicate: nil, Timezone: timezone, Defaults: defaults})

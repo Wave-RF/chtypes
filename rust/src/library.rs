@@ -69,13 +69,13 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Settle an open that failed, whatever failed (`crate::setup`'s rule): under
-/// the image list's lock, so the clear never lands between another open's
-/// commit and its latch. `began` is `setup::generation()` read when the open
-/// began.
+/// Settle an open that attempted a load and failed, whatever failed
+/// (`crate::setup`'s rule): under the image list's lock, so the unlock never
+/// lands between another open's commit and its latch. `began` is
+/// `setup::generation()` read when the attempt began.
 pub(crate) fn settle_failed_open(began: u64) {
     let _images = lock(&IMAGES);
-    setup::clear_after_failed_open(began);
+    setup::unlock_after_failed_open(began);
 }
 
 /// Open the image at `path`, or return the one this process already opened.
@@ -154,17 +154,9 @@ impl Library {
     /// It is not reachable through a [`crate::Registry`], and the library it
     /// returns has no [`Library::resolved`].
     pub fn open_unverified(path: impl AsRef<Path>, allow: bool) -> Result<Arc<Library>> {
-        // Like any open: a failure clears the setup record while no image has
-        // completed load step 7, whatever failed.
-        let began = setup::generation();
-        let opened = Self::open_unverified_once(path.as_ref(), allow);
-        if opened.is_err() {
-            settle_failed_open(began);
-        }
-        opened
-    }
-
-    fn open_unverified_once(path: &Path, allow: bool) -> Result<Arc<Library>> {
+        let path = path.as_ref();
+        // The caller's two opt-ins are checked before anything is attempted:
+        // misuse, which unlocks nothing.
         let env_on = std::env::var(UNVERIFIED_ENV).is_ok_and(|v| v == "1");
         if !(allow && env_on) {
             return Err(Error::usage(format!(
@@ -172,6 +164,17 @@ impl Library {
                 if env_on { "set" } else { "not set" }
             )));
         }
+        // Like any open: a failed attempt unlocks the setup record while no
+        // image has completed load step 7, whatever failed.
+        let began = setup::generation();
+        let opened = Self::open_unverified_once(path);
+        if opened.is_err() {
+            settle_failed_open(began);
+        }
+        opened
+    }
+
+    fn open_unverified_once(path: &Path) -> Result<Arc<Library>> {
         {
             let mut warned = lock(&WARNED);
             if warned

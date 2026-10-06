@@ -148,10 +148,12 @@ func TestFirstOpenCommitsTheEmptySetup(t *testing.T) {
 	}
 }
 
-// TestAFailedFetchBeforeStep7ClearsTheSetup: a registry open that fails before
-// any load (nothing installed, autofetch off) clears the setup record while no
-// image has completed step 7, so a different setup is accepted afterwards.
-func TestAFailedFetchBeforeStep7ClearsTheSetup(t *testing.T) {
+// TestAFailedFetchBeforeStep7UnlocksTheSetup: a registry open that attempted
+// to resolve and failed (nothing installed, autofetch off) unlocks the setup
+// record while no image has completed step 7, so a different setup replaces it.
+// A refused version spelling is misuse, refused before anything is attempted,
+// and unlocks nothing.
+func TestAFailedFetchBeforeStep7UnlocksTheSetup(t *testing.T) {
 	resetSetup(t)
 	if err := Setup(SetupOptions{Timezone: "Asia/Tokyo"}); err != nil {
 		t.Fatal(err)
@@ -160,30 +162,38 @@ func TestAFailedFetchBeforeStep7ClearsTheSetup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reg.For("26.8"); !errors.Is(err, ErrArtifactMissing) {
-		t.Fatalf("For on an empty cache = %v, want ErrArtifactMissing", err)
-	}
-	if err := Setup(SetupOptions{Timezone: "UTC"}); err != nil {
-		t.Errorf("a different setup after a failed open = %v, want it accepted", err)
-	}
-	// A refused version spelling is a failed open too.
 	var ue *UsageError
+	// A refused spelling first: it unlocks nothing.
 	if _, err := reg.For("v26.8"); !errors.As(err, &ue) {
 		t.Fatalf("For(v26.8) = %v, want a *UsageError", err)
 	}
-	if err := Setup(SetupOptions{Timezone: "Europe/Berlin"}); err != nil {
-		t.Errorf("a different setup after a refused spelling = %v, want it accepted", err)
+	if err := Setup(SetupOptions{Timezone: "UTC"}); !errors.As(err, &ue) {
+		t.Errorf("a different setup after a refused spelling = %v, want a *UsageError", err)
 	}
-	// Before any open is attempted, a second, different setup is still misuse.
-	if err := Setup(SetupOptions{Timezone: "Asia/Tokyo"}); !errors.As(err, &ue) {
-		t.Errorf("a second, different setup before any open = %v, want a *UsageError", err)
+	if _, err := reg.For("26.8"); !errors.Is(err, ErrArtifactMissing) {
+		t.Fatalf("For on an empty cache = %v, want ErrArtifactMissing", err)
+	}
+	// The failed open kept the record (a retry runs under it, never the empty
+	// setup) and made it replaceable.
+	setup.mu.Lock()
+	kept, replaceable := setup.recorded && setup.opts.Timezone == "Asia/Tokyo", setup.replaceable
+	setup.mu.Unlock()
+	if !kept || !replaceable {
+		t.Errorf("after a failed open: record kept = %v, replaceable = %v; want both", kept, replaceable)
+	}
+	if err := Setup(SetupOptions{Timezone: "UTC"}); err != nil {
+		t.Errorf("a different setup after a failed open = %v, want it to replace the record", err)
+	}
+	// The replaced record is locked again.
+	if err := Setup(SetupOptions{Timezone: "Europe/Berlin"}); !errors.As(err, &ue) {
+		t.Errorf("a second, different setup after the replacement = %v, want a *UsageError", err)
 	}
 }
 
-// TestAFailedOpenClearsOnlyItsOwnRecordAndNeverALatchedOne: a failed open never
-// clears a setup recorded after it began, and once an image has completed step
-// 7 a failure clears nothing.
-func TestAFailedOpenClearsOnlyItsOwnRecordAndNeverALatchedOne(t *testing.T) {
+// TestAFailedOpenUnlocksOnlyItsOwnRecordAndNeverALatchedOne: a failed open
+// never unlocks a setup recorded after it began, and once an image has
+// completed step 7 a failure unlocks nothing.
+func TestAFailedOpenUnlocksOnlyItsOwnRecordAndNeverALatchedOne(t *testing.T) {
 	resetSetup(t)
 	began := setupGeneration()
 	if err := Setup(SetupOptions{Timezone: "Asia/Tokyo"}); err != nil {
@@ -191,12 +201,12 @@ func TestAFailedOpenClearsOnlyItsOwnRecordAndNeverALatchedOne(t *testing.T) {
 	}
 	failedOpen(began) // began before Asia/Tokyo was recorded
 	if err := Setup(SetupOptions{Timezone: "UTC"}); err == nil {
-		t.Error("a failed open cleared a setup recorded after it began")
+		t.Error("a failed open unlocked a setup recorded after it began")
 	}
 	latchSetup()
 	failedOpen(setupGeneration())
 	if err := Setup(SetupOptions{Timezone: "UTC"}); err == nil {
-		t.Error("a failed open cleared a latched setup")
+		t.Error("a failed open unlocked a latched setup")
 	}
 	if err := Setup(SetupOptions{Timezone: "Asia/Tokyo"}); err != nil {
 		t.Errorf("the latched setup again = %v, want a no-op", err)

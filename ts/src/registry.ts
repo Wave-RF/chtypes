@@ -80,6 +80,7 @@ export class Registry {
   static async open(options: RegistryOptions = {}): Promise<Registry> {
     const registry = new Registry(options);
     for (const request of options.preload ?? []) {
+      checkSpelling(request);
       await registry.#memoized(request, false);
     }
     return registry;
@@ -87,6 +88,7 @@ export class Registry {
 
   /** Open a version: the installed build the request names, fetched first when autofetch is on and none is installed. */
   async for(request: string): Promise<Library> {
+    checkSpelling(request); // misuse, refused before anything is attempted: it unlocks nothing
     return this.#memoized(request, this.#autofetch);
   }
 
@@ -103,7 +105,7 @@ export class Registry {
   #memoized(request: string, mayFetch: boolean): Promise<Library> {
     const memo = this.#memo.get(request);
     if (memo !== undefined) return memo;
-    // A failed open clears the setup record while no image has completed load step 7, whatever failed: the spelling, the fetch, the signature or any load step (bindings-v1.md §6, rule 4).
+    // An open that attempted a load and failed unlocks the setup record while no image has completed load step 7, whatever failed: the resolve, the fetch, the signature or any load step (bindings-v1.md §6, rule 4). The spelling was checked before this, as misuse.
     const began = setupGeneration();
     const opening = this.#openRequest(request, mayFetch).then(
       (library) => {
@@ -121,7 +123,6 @@ export class Registry {
   }
 
   async #openRequest(request: string, mayFetch: boolean): Promise<Library> {
-    checkSpelling(request); // a refused spelling is a failed open too, settled by #memoized
     const platform: PlatformKey | undefined = this.#fetch.platform ?? hostPlatformKey(os.platform(), os.arch());
     if (platform === undefined) {
       throw new ArtifactMissingError(`chtypes: no v1 artifact is published for this host (${os.platform()}-${os.arch()})`);

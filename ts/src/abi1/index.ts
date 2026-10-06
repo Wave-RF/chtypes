@@ -27,7 +27,7 @@ export {
   usageError,
 } from './errors.js';
 export { Abi1Handle, HANDLE_CLASSES, wrapHandle } from './handles.js';
-export { type ImageSetup, LoadedImage, type LoadInput, openAbi1, openUnverified, type Predicate } from './loader.js';
+export { checkUnverifiedAllowed, type ImageSetup, LoadedImage, type LoadInput, openAbi1, openUnverified, type Predicate } from './loader.js';
 export {
   asBuffer,
   checkStatus,

@@ -50,7 +50,7 @@ func imageKey(kind, path string) string {
 // the record it loaded under, and Setup cannot change that record in between
 // (it refuses a different setup while one is recorded). A failed load is never
 // cached, so the next open runs every step again; the open that called this
-// settles a failure with failedOpen, whatever failed.
+// settles a failure with failedOpen, whatever failed in the attempt.
 func openImage(key string, load func(zone, defaults []byte) (*abi1.Table, error), path string, resolved *Resolved) (*Library, error) {
 	images.mu.Lock()
 	defer images.mu.Unlock()
@@ -90,6 +90,11 @@ func openImage(key string, load func(zone, defaults []byte) (*abi1.Table, error)
 // step 7 under the process setup like any open, is not reachable through a
 // Registry, and its Library has no Resolved record.
 func OpenUnverified(path string, allow bool) (l *Library, err error) {
+	// The caller's two opt-ins are checked before anything is attempted, so a
+	// refusal here is misuse and unlocks nothing (bindings-v1.md section 6).
+	if err := abi1.CheckUnverifiedAllowed(path, allow); err != nil {
+		return nil, loadError(err)
+	}
 	gen := setupGeneration()
 	defer func() {
 		if err != nil {

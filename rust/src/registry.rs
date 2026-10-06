@@ -29,6 +29,7 @@ use crate::error::{Error, Result};
 use crate::library::{Library, open_image, settle_failed_open};
 use crate::ocifetch::constants::ENV_AUTOFETCH_NAME;
 use crate::ocifetch::ensure::{self, Options, Resolved};
+use crate::ocifetch::oci::VersionRequest;
 use crate::setup;
 
 /// What the fetch layer is configured with, under its own names
@@ -193,9 +194,12 @@ impl Registry {
         if let Some(o) = opened.iter().find(|o| o.request == request) {
             return Ok(Arc::clone(&o.library));
         }
-        // A failed open clears the setup record while no image has completed
-        // load step 7, whatever failed: the spelling, the fetch, the signature
-        // or any load step (bindings-v1.md section 6, rule 4).
+        // A refused version spelling is the caller's own misuse, refused before
+        // anything is attempted, and unlocks nothing. An open that attempted a
+        // load and failed unlocks the setup record while no image has
+        // completed load step 7, whatever failed: the resolve, the fetch, the
+        // signature or any load step (bindings-v1.md section 6, rule 4).
+        VersionRequest::parse(request)?;
         let began = setup::generation();
         let library = match self.resolve_and_open(request, may_fetch) {
             Ok(library) => library,

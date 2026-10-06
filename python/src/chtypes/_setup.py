@@ -5,10 +5,11 @@ the default settings, chosen once, before traffic.
 `setup` was never called. The record latches once an image completes loader
 step 7 (`chs_initialize`, then `chs_set_defaults` when there are defaults), and
 from then on `setup` succeeds only with exactly the setup in effect. Until then,
-any open that fails, whatever failed, clears the record (`open_failed`), so a
-corrected setup can be recorded. Every image is set up once, at loader step 7,
-by `library.open_image` and `open_unverified`, under this module's lock: the
-setup guard, which every load, latch and clear holds.
+an open that attempted a load and failed unlocks the record (`open_failed`): it
+stays, so a retry runs under it, and a different setup may replace it. Every
+image is set up once, at loader step 7, by `library.open_image` and
+`open_unverified`, under this module's lock: the setup guard, which every load,
+latch and unlock holds.
 """
 
 from __future__ import annotations
@@ -42,36 +43,36 @@ class SetupState:
 _state: SetupState | None = None
 # Whether any image has completed loader step 7 under the record.
 _latched = False
-# Counts the records `setup` made and the records failed opens cleared. An open
-# reads it when it begins, and clears the record on failure only if it is
-# unchanged: a failed open never clears a setup recorded after it began.
+# Whether an open that attempted a load failed since the record was last set or
+# committed, with nothing latched: a different `setup` then replaces the record
+# instead of being refused.
+_replaceable = False
+# Counts the records `setup` made or replaced. An open reads it when its attempt
+# begins, and unlocks the record on failure only if it is unchanged: a failed
+# open never unlocks a setup recorded after it began.
 _generation = 0
 
 
-def _record(state: SetupState, *, by_setup: bool = False) -> SetupState:
-    """Record `state`, or confirm it equals the one in effect. Holds LOCK."""
-    global _state, _generation
-    if _state is None:
-        _state = state
-        if by_setup:
-            _generation += 1
-        return state
-    if _state != state:
-        raise misuse(
-            f"setup is already in effect ({_state.describe()}) and cannot be changed to "
-            f"({state.describe()}); call setup() once, before the first open"
-        )
-    return _state
+def _misuse(current: SetupState, wanted: SetupState) -> Exception:
+    return misuse(
+        f"setup is already in effect ({current.describe()}) and cannot be changed to "
+        f"({wanted.describe()}); call setup() once, before the first open"
+    )
 
 
 def effective() -> SetupState:
     """The setup in effect, recording the empty setup if none was recorded.
-    Called by an open, with LOCK held."""
-    return _record(_state if _state is not None else SetupState("", {}))
+    Called by an open, with LOCK held. The load that follows claims the record,
+    so it is locked again: no `setup` replaces it under a load."""
+    global _state, _replaceable
+    if _state is None:
+        _state = SetupState("", {})
+    _replaceable = False
+    return _state
 
 
 def generation() -> int:
-    """Read when an open begins, for `open_failed`."""
+    """Read when an open's attempt begins, for `open_failed`."""
     with LOCK:
         return _generation
 
@@ -79,25 +80,25 @@ def generation() -> int:
 def latch() -> None:
     """An image completed loader step 7: from then on the setup in effect
     stands. Called by an open with LOCK held, right after the load."""
-    global _latched
+    global _latched, _replaceable
     with LOCK:
-        _latched = True
+        _latched, _replaceable = True, False
 
 
 def open_failed(began: int) -> None:
-    """Settle an open that failed, whatever failed. While no image has completed
-    step 7 it clears the record, so `setup` accepts a corrected setup, unless a
-    setup was recorded after the open began (`began` is `generation()` then).
-    Once the setup has latched it changes nothing: the library's own
-    process-once rule answers a different zone on an image that already has one.
-    LOCK serializes it with every load, so it never lands between another
-    open's commit and its latch."""
-    global _state, _generation
+    """Settle an open that attempted a load and failed, whatever failed. While
+    no image has completed step 7 it unlocks the record: the record stays, so a
+    retry runs under it, and a different `setup` may replace it. It leaves alone
+    a setup recorded or replaced after the open began (`began` is
+    `generation()` then), and once the setup has latched it changes nothing:
+    the library's own process-once rule answers a different zone on an image
+    that already has one. LOCK serializes it with every load, so it never lands
+    between another open's commit and its latch."""
+    global _replaceable
     with LOCK:
-        if _latched or _generation != began:
+        if _latched or _state is None or _generation != began:
             return
-        _state = None
-        _generation += 1
+        _replaceable = True
 
 
 def setup(*, timezone: str | None = None, defaults: Settings | None = None) -> None:
@@ -113,11 +114,13 @@ def setup(*, timezone: str | None = None, defaults: Settings | None = None) -> N
     defaults, this is a no-op. Called with a different zone or different
     defaults it is a `UsageError` naming both, and the first setup stands. If it
     is never called, the first open records the empty setup. The setup latches
-    once an image completes loader step 7. Until then, any open that fails,
-    whatever failed (the fetch, the signature, an incompatible artifact, a
-    missing symbol or step 7), clears the record: the next `setup` is accepted,
-    and an open with no `setup` after the failure records the empty setup. Call
-    it first.
+    once an image completes loader step 7. Until then, an open that attempted a
+    load and failed, whatever failed (the fetch, the signature, an incompatible
+    artifact, a missing symbol or step 7), keeps the record but makes it
+    replaceable: a retry with no new `setup` runs under the recorded setup, and
+    a different `setup` replaces it. A refused version spelling or an unverified
+    open without the caller's opt-in fails before any load is attempted, and
+    unlocks nothing. Call it first.
     """
     if timezone is not None and not isinstance(timezone, str):
         raise TypeError(f"timezone must be str, not {type(timezone).__name__}")
@@ -125,14 +128,24 @@ def setup(*, timezone: str | None = None, defaults: Settings | None = None) -> N
     if defaults:
         string_map_json(defaults, "defaults")  # the type check, once
         mapping = dict(defaults)
+    wanted = SetupState(timezone or "", mapping)
+    global _state, _replaceable, _generation
     with LOCK:
-        _record(SetupState(timezone or "", mapping), by_setup=True)
+        if _state == wanted:
+            return
+        if _state is not None and (_latched or not _replaceable):
+            raise _misuse(_state, wanted)
+        # A first record, or a replacement after a failed open: either way the
+        # new record is locked until the next failed open.
+        _state, _replaceable = wanted, False
+        _generation += 1
 
 
 def _reset_for_tests() -> None:
     """Forget the recorded setup and the latch. Test-only: images already loaded
     keep theirs."""
-    global _state, _latched
+    global _state, _latched, _replaceable
     with LOCK:
         _state = None
         _latched = False
+        _replaceable = False

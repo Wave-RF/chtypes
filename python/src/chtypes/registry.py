@@ -170,23 +170,26 @@ class Registry:
             hit = self._memo.get(request)
             if hit is not None:
                 return hit
-            # A failed open clears the setup record while no image has completed
-            # load step 7, whatever failed: the spelling, the fetch, the
-            # signature or any load step (bindings-v1.md section 6, rule 4).
+            # A refused version spelling is the caller's own misuse, refused
+            # before anything is attempted, and unlocks nothing. An open that
+            # attempted a load and failed unlocks the setup record while no
+            # image has completed load step 7, whatever failed: the resolve,
+            # the fetch, the signature or any load step (bindings-v1.md
+            # section 6, rule 4).
+            try:
+                fetch_request = Request(request)
+            except ValueError as exc:
+                raise errors.misuse(str(exc)) from None
             began = _setup.generation()
             try:
-                library = self._resolve_and_open(request, allow_fetch)
+                library = self._resolve_and_open(request, fetch_request, allow_fetch)
             except Exception:
                 _setup.open_failed(began)
                 raise
             self._memo[request] = library
             return library
 
-    def _resolve_and_open(self, request: str, allow_fetch: bool) -> Library:
-        try:
-            fetch_request = Request(request)
-        except ValueError as exc:
-            raise errors.misuse(str(exc)) from None
+    def _resolve_and_open(self, request: str, fetch_request: Request, allow_fetch: bool) -> Library:
         try:
             platform = detect_host_platform()
         except ValueError as exc:

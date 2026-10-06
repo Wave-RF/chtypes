@@ -59,7 +59,7 @@ def open_image(path: str, predicate: object, resolved: object | None) -> Library
     A new image runs loader steps 1 to 7 once, under the setup in effect, and
     latches the setup when step 7 completes (`_setup.latch`). A failed load is
     never cached, so the next open of the same image runs every step again; the
-    caller settles a failure with `_setup.open_failed`, whatever failed. An
+    caller settles a failed attempt with `_setup.open_failed`. An
     image already open is still checked against this signed statement (steps 1,
     4 and 5): a mismatch refuses this request and leaves the image open for the
     requests it did match.
@@ -89,12 +89,14 @@ def open_unverified(path: str | os.PathLike[str], *, allow: bool = False) -> Lib
     `allow` is passed AND `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1` is set, warns once
     per path, and skips loader steps 1 and 5. It runs step 7 under the process
     setup like any open. It is not reachable through a registry, and its
-    `Library` has no `resolved`. Like any open, a failure clears the setup
-    record while no image has completed step 7 (`_setup.open_failed`)."""
+    `Library` has no `resolved`. Without both opt-ins it is misuse, refused
+    before anything is attempted, and unlocks nothing; like any open, a failed
+    attempt unlocks the setup record while no image has completed step 7
+    (`_setup.open_failed`)."""
     spelled = os.fspath(path)
+    _loader.check_unverified_allowed(spelled, allow)
     began = _setup.generation()
     try:
-        _loader.check_unverified_allowed(spelled, allow)
         with _setup.LOCK:
             state = _setup.effective()
             existing = _IMAGES.get(_image_key(spelled))

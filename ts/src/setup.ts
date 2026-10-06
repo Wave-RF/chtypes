@@ -12,11 +12,13 @@
  *      library reads as UTC, and no defaults. Once an image completes loader
  *      step 7 (`chs_initialize`, then `chs_set_defaults` when there are
  *      defaults), `setup` succeeds only with exactly the setup in effect
- *      (`latchSetup`). Until then, any open that fails, whatever failed (the
- *      fetch, the signature, an incompatible artifact, a missing symbol or
- *      step 7), clears the record (`settleFailedOpen`): the next `setup` is
- *      accepted, and an open with no `setup` after the failure records the
- *      empty setup.
+ *      (`latchSetup`). Until then, an open that attempted a load and failed,
+ *      whatever failed (the fetch, the signature, an incompatible artifact, a
+ *      missing symbol or step 7), keeps the record but makes it replaceable
+ *      (`settleFailedOpen`): a retry with no new `setup` runs under the
+ *      recorded setup, and a different `setup` replaces it. A refused version
+ *      spelling or an unverified open without the caller's opt-in fails before
+ *      any load is attempted, and unlocks nothing.
  *   3. Every image is set up at loader step 7, once, from this record
  *      (`./abi1/loader.ts`); nothing sets either again for that image.
  *
@@ -42,7 +44,9 @@ export interface ProcessSetup {
 let recorded: ProcessSetup | undefined;
 /** Whether any image has completed loader step 7 under the record. */
 let latched = false;
-/** Counts the records `setup` made and the records failed opens cleared. An open reads it when it begins, and clears the record on failure only if it is unchanged: a failed open never clears a setup recorded after it began. */
+/** Whether an open that attempted a load failed since the record was last set or committed, with nothing latched: a different `setup` then replaces the record instead of being refused. */
+let replaceable = false;
+/** Counts the records `setup` made or replaced. An open reads it when its attempt begins, and unlocks the record on failure only if it is unchanged: a failed open never unlocks a setup recorded after it began. */
 let generation = 0;
 
 function describe(s: ProcessSetup): string {
@@ -65,23 +69,24 @@ export function setup(options: SetupOptions = {}): void {
   const defaults = options.defaults ?? {};
   validateDefaults(defaults);
   const next: ProcessSetup = { timezone, defaults: { ...defaults } };
-  if (recorded === undefined) {
-    recorded = next;
-    generation += 1;
-    return;
-  }
-  if (!same(recorded, next)) {
+  if (recorded !== undefined && same(recorded, next)) return;
+  if (recorded !== undefined && (latched || !replaceable)) {
     throw usageError(`setup was already fixed at ${describe(recorded)}; it was asked for ${describe(next)}. The first setup stands: call setup before the first open, once.`);
   }
+  // A first record, or a replacement after a failed open: either way the new record is locked until the next failed open.
+  recorded = next;
+  replaceable = false;
+  generation += 1;
 }
 
-/** The setup in effect, recording the empty setup if none was recorded: what an open does before step 7. */
+/** The setup in effect, recording the empty setup if none was recorded: what an open does before step 7. The load that follows claims the record, so it is locked again. */
 export function commitSetup(): ProcessSetup {
   recorded ??= { timezone: '', defaults: {} };
+  replaceable = false;
   return recorded;
 }
 
-/** Read when an open begins, for `settleFailedOpen`. */
+/** Read when an open's attempt begins, for `settleFailedOpen`. */
 export function setupGeneration(): number {
   return generation;
 }
@@ -89,19 +94,20 @@ export function setupGeneration(): number {
 /** An image completed loader step 7: from then on the setup in effect stands. An open calls it synchronously after the load that committed the record, so it latches the record that load ran under. */
 export function latchSetup(): void {
   latched = true;
+  replaceable = false;
 }
 
 /**
- * Settle an open that failed, whatever failed. While no image has completed step 7 it clears the record, so `setup` accepts a corrected setup, unless a setup was recorded after the open began (`began` is `setupGeneration()` then). Once the setup has latched it changes nothing: the library's own process-once rule answers a different zone on an image that already has one.
+ * Settle an open that attempted a load and failed, whatever failed. While no image has completed step 7 it unlocks the record: the record stays, so a retry runs under it, and a different `setup` may replace it. It leaves alone a setup recorded or replaced after the open began (`began` is `setupGeneration()` then), and once the setup has latched it changes nothing: the library's own process-once rule answers a different zone on an image that already has one.
  */
 export function settleFailedOpen(began: number): void {
-  if (latched || generation !== began) return;
-  recorded = undefined;
-  generation += 1;
+  if (latched || recorded === undefined || generation !== began) return;
+  replaceable = true;
 }
 
-/** Test only: forget the recorded setup and the latch. Not part of the public API. */
+/** Test only: forget the recorded setup, the latch and the unlock. Not part of the public API. */
 export function resetSetupForTests(): void {
   recorded = undefined;
   latched = false;
+  replaceable = false;
 }

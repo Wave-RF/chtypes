@@ -283,6 +283,13 @@ function initializeImage(image: LoadedImage, setup: ImageSetup): void {
 
 const UNVERIFIED_ENV = 'CHTYPES_ALLOW_UNVERIFIED_LIBRARY';
 
+/** `openUnverified`'s own gate, alone: a `UsageError` unless BOTH `allow` is true AND `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1` is set. The public layer asks it before an open is attempted, so the caller's misuse is told apart from a failed load. */
+export function checkUnverifiedAllowed(path: string, allow: boolean): void {
+  if (!allow || process.env[UNVERIFIED_ENV] !== '1') {
+    throw usageError(`opening ${path} unverified requires BOTH allow: true and ${UNVERIFIED_ENV}=1`);
+  }
+}
+
 /**
  * Load `path` with NO predicate: skips step 1 (nothing to check a floor
  * against) and step 5 (nothing to cross-check), still runs 2, 3, 4, 6 and 7.
@@ -292,9 +299,7 @@ const UNVERIFIED_ENV = 'CHTYPES_ALLOW_UNVERIFIED_LIBRARY';
  * only caller.
  */
 export function openUnverified(path: string, options: { readonly allow: boolean } & ImageSetup): LoadedImage {
-  if (!options.allow || process.env[UNVERIFIED_ENV] !== '1') {
-    throw usageError(`opening ${path} unverified requires BOTH allow: true and ${UNVERIFIED_ENV}=1`);
-  }
+  checkUnverifiedAllowed(path, options.allow);
   warnUnverifiedOnce(path);
 
   const key = resolveImageKey(path);
