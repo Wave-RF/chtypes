@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -225,6 +226,35 @@ func TestReadOnlyLookupsCreateNothing(t *testing.T) {
 		}
 		if _, err := os.Lstat(filepath.Join(tmp, "no-such-system-dir")); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("the system dir was created: %v", err)
+		}
+	}
+}
+
+// TestMissingCarriesTheZeroXHint: a MISSING answer from a cache that holds a
+// 0.x registry says so and names the v1 root (public issue #486). A 1.x cache
+// without an oci-layout (as Python writes it) and an empty directory carry no
+// hint.
+func TestMissingCarriesTheZeroXHint(t *testing.T) {
+	tmp := t.TempDir()
+	zeroX := filepath.Join(tmp, "zero-x")
+	writeZeroXRegistry(t, zeroX)
+	opts := &Options{CacheDir: zeroX, SystemDirs: []string{}, Offline: true}
+	_, err := Ensure(context.Background(), Request{Spelling: "26.1", Platform: "linux-arm64"}, opts)
+	want := zeroX + " holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at ${XDG_CACHE_HOME:-~/.cache}/chtypes/v1"
+	var fe *FetchError
+	if !errors.As(err, &fe) || fe.Code != CodeArtifactMissing || !strings.Contains(fe.Msg, want) {
+		t.Fatalf("Ensure(offline) on a 0.x registry = %v, want MISSING carrying %q", err, want)
+	}
+	if notes := MissingNotes(opts); len(notes) != 1 || !strings.HasPrefix(notes[0], want) {
+		t.Errorf("MissingNotes = %q", notes)
+	}
+
+	pyCache := filepath.Join(tmp, "python-written")
+	writeRecordRoot(t, pyCache, "26.8.1.1", "20260801.000001")
+	empty := t.TempDir()
+	for _, dir := range []string{pyCache, empty, filepath.Join(tmp, "absent")} {
+		if notes := MissingNotes(&Options{CacheDir: dir}); len(notes) != 0 {
+			t.Errorf("%s: MissingNotes = %q, want none", dir, notes)
 		}
 	}
 }

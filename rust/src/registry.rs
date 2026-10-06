@@ -226,14 +226,18 @@ impl Registry {
                 ensure::ensure(request, self.fetch.to_options())?
             }
             None => {
-                return Err(Error::ArtifactMissing(format!(
+                let message = format!(
                     "nothing installed answers {request} for {platform}{}",
                     if self.autofetch {
                         ""
                     } else {
                         " (autofetch is off: set CHTYPES_AUTOFETCH=1 or RegistryOptions::autofetch)"
                     }
-                )));
+                );
+                // The fetch layer's own sentences about the cache (the 0.x
+                // hint), the same ones its offline fetch adds.
+                let notes = ensure::missing_notes(&self.fetch.to_options());
+                return Err(Error::ArtifactMissing(ensure::with_notes(&message, &notes)));
             }
         };
         // The adapter: the fetch layer's record to the loader's input. The

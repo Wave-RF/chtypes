@@ -150,9 +150,11 @@ pub fn configured_bases(options: &Options) -> Vec<String> {
     })
 }
 
+/// One call's shared state. It creates nothing: a lookup is read-only, and
+/// only a fetch makes the layout (`ensure`, past its offline branch;
+/// docs/guides/fetch-v1.md §6, public issue #486).
 fn resources(options: &mut Options) -> Result<Resources> {
     let root = layout::cache_root(options.cache_dir.as_deref())?;
-    layout::ensure_layout(&root)?;
     let platform = options
         .platform
         .clone()
@@ -223,6 +225,8 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
     if options.offline {
         return resolve_offline(&res, &version_request, request, &options, lock.as_ref());
     }
+    // A fetch, from here on: the layout is made now, never by a lookup.
+    layout::ensure_layout(&res.root)?;
 
     if options.frozen {
         let lock = lock.ok_or_else(|| {
@@ -702,10 +706,38 @@ fn resolve_offline(
             &source,
             true,
         )),
-        None => Err(Error::ArtifactMissing(format!(
-            "--offline: nothing installed satisfies {request} for {}",
-            res.platform
+        None => Err(Error::ArtifactMissing(with_notes(
+            &format!(
+                "--offline: nothing installed satisfies {request} for {}",
+                res.platform
+            ),
+            &notes_for(&res.root),
         ))),
+    }
+}
+
+/// What a `CHTYPES_ARTIFACT_MISSING` answer from the cache `options` names
+/// adds to its message, each a complete sentence: the 0.x hint when the cache
+/// is a 0.x registry directory (docs/guides/fetch-v1.md, "Upgrading from 0.x";
+/// public issue #486). The registry's own MISSING adds the same notes as the
+/// offline fetch's.
+pub fn missing_notes(options: &Options) -> Vec<String> {
+    match layout::cache_root(options.cache_dir.as_deref()) {
+        Ok(root) => notes_for(&root),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn notes_for(root: &Path) -> Vec<String> {
+    layout::zero_x_hint(root).into_iter().collect()
+}
+
+/// `message` with `notes`, each a complete sentence, appended.
+pub fn with_notes(message: &str, notes: &[String]) -> String {
+    if notes.is_empty() {
+        message.to_string()
+    } else {
+        format!("{message}. {}", notes.join(" "))
     }
 }
 
@@ -770,12 +802,18 @@ pub fn list_installed(mut options: Options) -> Result<Vec<Resolved>> {
 }
 
 /// `verify_installed(options)`: re-hash every installed library against its
-/// own recorded `library_sha256`, with no network.
+/// own recorded `library_sha256`, with no network: the cache, then the system
+/// directories, the same roots [`list_installed`] reads (public issue #486).
 pub fn verify_installed(mut options: Options) -> Result<Vec<VerifyResult>> {
     let res = resources(&mut options)?;
     let mut out = Vec::new();
     for (dir, record) in layout::list_verified(&res.root)? {
         out.push(verify_one_install(&dir, &record));
+    }
+    for sysdir in &res.system_dirs {
+        for (dir, record) in layout::list_verified(sysdir).unwrap_or_default() {
+            out.push(verify_one_install(&dir, &record));
+        }
     }
     Ok(out)
 }
@@ -1568,6 +1606,36 @@ mod cache_roots_tests {
             ));
             assert_eq!(tree_of(&cache), before, "{} changed", cache.display());
             assert!(tree_of(&no_system).is_none());
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A MISSING answer from a 0.x registry names it and the v1 root; a 1.x
+    /// cache without an `oci-layout` and an empty one carry no hint.
+    #[test]
+    fn missing_carries_the_zero_x_hint() {
+        let base = scratch("hint");
+        let zero_x = base.join("zero-x");
+        zero_x_registry(&zero_x);
+        let hint = format!(
+            "{} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at \
+             ${{XDG_CACHE_HOME:-~/.cache}}/chtypes/v1",
+            zero_x.display()
+        );
+        let mut offline = options(&zero_x, Vec::new());
+        offline.offline = true;
+        match ensure("26.1", offline) {
+            Err(Error::ArtifactMissing(m)) => assert!(m.contains(&hint), "{m}"),
+            other => panic!("want ArtifactMissing, got {other:?}"),
+        }
+        let notes = missing_notes(&options(&zero_x, Vec::new()));
+        assert!(notes.len() == 1 && notes[0].starts_with(&hint), "{notes:?}");
+        let one_x = base.join("one-x");
+        write_record(&one_x, "26.8.1.1", "20260801.000001");
+        let empty = base.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        for cache in [one_x, empty, base.join("absent")] {
+            assert!(missing_notes(&options(&cache, Vec::new())).is_empty());
         }
         let _ = std::fs::remove_dir_all(&base);
     }

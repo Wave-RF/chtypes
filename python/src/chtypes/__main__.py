@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from . import __version__ as chtypes_version
 from . import _ocifetch as fetch_layer
 from ._ocifetch import _constants as C
-from ._ocifetch._ensure import _translate_transport_error, detect_host_platform
+from ._ocifetch._ensure import _translate_transport_error, detect_host_platform, missing_notes
 from ._ocifetch._errors import ArtifactCorruptError, FetchError
 from ._ocifetch._http import FetchPolicy, RetryPolicy, TransportError, fetch_from_bases
 from ._ocifetch._layout import resolve_cache_root
@@ -226,7 +226,15 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
-    results = fetch_layer.verify_installed(FetchOptions(cache_dir=args.cache)._to_options())
+    options = FetchOptions(cache_dir=args.cache)._to_options()
+    results = fetch_layer.verify_installed(options)
+    if not results:
+        # An empty pass must never look like a good one (public issue #486):
+        # say that nothing was verified, and why when the cache says why.
+        _say(f"chtypes: verified 0 builds under {resolve_cache_root(args.cache)}")
+        for note in missing_notes(options):
+            _say(f"chtypes: {note}")
+        return EXIT_OK
     failed = 0
     for r in results:
         if not r.ok:

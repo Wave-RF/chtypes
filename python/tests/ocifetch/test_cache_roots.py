@@ -24,6 +24,7 @@ from chtypes._ocifetch._ensure import (
     Request,
     ensure,
     list_installed,
+    missing_notes,
     resolve_installed,
     verify_installed,
 )
@@ -171,6 +172,15 @@ def test_missing_carries_the_zero_x_hint(tmp_path: Path) -> None:
     with pytest.raises(ArtifactMissingError) as raised:
         ensure(Request("26.1"), options)
     assert f"{zero_x} {HINT_TAIL}" in str(raised.value)
+    notes = missing_notes(options)
+    assert len(notes) == 1 and notes[0].startswith(f"{zero_x} {HINT_TAIL}")
+
+    one_x = tmp_path / "one-x"
+    _write_record(one_x, "26.8.1.1", "20260801.000001")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    for cache in (one_x, empty, tmp_path / "absent"):
+        assert missing_notes(Options(cache_dir=cache)) == []
 
     registry = Registry(fetch=FetchOptions(cache_dir=zero_x, system_dirs=()), autofetch=False)
     with pytest.raises(public_errors.ArtifactMissingError) as raised:

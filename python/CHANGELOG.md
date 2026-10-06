@@ -6,6 +6,10 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Fixed
+
+- A cache one uid writes is readable by another, the cache and the system directories are one search, and a lookup writes nothing (#486). Go created every cache directory 0700 and every file 0600, and Python wrote `verified.json` and `index.json` 0600, so a cache fetched by one uid (a CI user) read as empty to another (a container's nonroot user). Now all four create every directory and file with mode 0777 or 0666 less the process umask, so at umask 022 another uid can read the cache, and readable is never writable. Lookups read the system directories differently: Go answered from the first root with a match, and TypeScript never read a system directory's installs at all. Now all four answer with the newest build across the cache and every system directory, a tie going to the cache, and `list` and `verify` read the same roots. Go, TypeScript and Rust created the layout (`oci-layout`, `blobs/`, `unpacked/`) on a lookup, `fetch --offline` included; now a lookup creates nothing, so a read-only mount reads cleanly. A `chtypes verify` that verified no build now says so on stderr, `verified 0 builds under <root>`, where it printed nothing and exited 0. A miss from a cache that is a 0.x registry directory names it and the v1 root, in the CLI and the registry alike. No name or signature changes. The rules are `docs/guides/fetch-v1.md` sections 1 and 6; every binding runs the `root-order-*` conformance cases, and the `v1-cache-interop` job reads every binding's cache as another uid.
+
 ## [1.0.4] — 2026-10-06
 
 ### Fixed

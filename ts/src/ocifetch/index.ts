@@ -9,7 +9,17 @@
 
 export { keyIdOfRawKey } from './dsse.js';
 export { cacheRoot, isFilesystemError } from './layout.js';
-export { ensure, fetchSigned, listInstalled, listTags, resolveInstalled, satisfiesRequest, verifyInstalled } from './ensure.js';
+export {
+  ensure,
+  fetchSigned,
+  listInstalled,
+  listTags,
+  missingNotes,
+  resolveInstalled,
+  satisfiesRequest,
+  verifyInstalled,
+  withNotes,
+} from './ensure.js';
 export type { FetchSignedResult } from './ensure.js';
 export {
   ArtifactCorruptError,

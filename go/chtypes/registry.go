@@ -154,7 +154,7 @@ func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (_ *
 	}
 	if res == nil {
 		if !mayFetch {
-			return nil, missingError(request)
+			return nil, missingError(request, ocifetch.MissingNotes(opts))
 		}
 		if res, err = ocifetch.Ensure(ctx, req, opts); err != nil {
 			return nil, fetchError(err)
@@ -209,18 +209,21 @@ func checkWithinRequest(l *Library, request, platform string) error {
 	}
 }
 
-func missingError(request string) error {
+// missingError is the miss of an open with autofetch off. notes are the fetch
+// layer's own sentences about the cache (the 0.x hint), the same ones its
+// offline fetch adds.
+func missingError(request string, notes []string) error {
 	platform := ""
 	for _, p := range ocifetch.Platforms {
 		if p.OS == runtime.GOOS && p.Architecture == runtime.GOARCH {
 			platform = p.Key
 		}
 	}
+	msg := ocifetch.WithNotes(fmt.Sprintf("no installed artifact for ClickHouse %s (%s), and autofetch is off. "+
+		"Fetch it first, or enable autofetch with WithAutoFetch or %s=1", request, platform, ocifetch.EnvAutofetchName), notes)
 	return &ArtifactError{
 		Code: CodeArtifactMissing, Request: request, Platform: platform,
-		Msg: fmt.Sprintf("chtypes: no installed artifact for ClickHouse %s (%s), and autofetch is off. "+
-			"Fetch it first, or enable autofetch with WithAutoFetch or %s=1 [%s]",
-			request, platform, ocifetch.EnvAutofetchName, CodeArtifactMissing),
+		Msg: fmt.Sprintf("chtypes: %s [%s]", msg, CodeArtifactMissing),
 	}
 }
 

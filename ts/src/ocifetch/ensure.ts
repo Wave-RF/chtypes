@@ -54,6 +54,7 @@ import {
   upsertIndexEntry,
   type VerifiedRecord,
   writeVerifiedRecord,
+  zeroXHint,
 } from './layout.js';
 import { type GoldensCandidate, selectGoldens, statementRevision } from './goldens.js';
 import { discoverSignatureCandidates } from './referrers.js';
@@ -161,16 +162,54 @@ export async function resolveInstalled(
     await verifyPreseededEntries(sysDir, root, platform, trustedKeys);
   }
 
-  const candidates: { record: VerifiedRecord; dir: string; source: string }[] = [];
-  for (const { dir, record } of await listVerified(root)) {
-    if (record.platform !== platform) continue;
-    if (!withinRequest(record.version, request)) continue;
-    candidates.push({ record, dir, source: 'cache' });
+  // One root order (guide §1; public issue #486): the cache, then every
+  // system directory in order, read the same way. The newest (version,
+  // build) among every record that answers the request wins, and a tie goes
+  // to the earlier root.
+  const candidates: { record: VerifiedRecord; dir: string; source: string; rank: number }[] = [];
+  for (const [rank, r] of searchRoots(options).entries()) {
+    for (const { dir, record } of await listVerified(r.root)) {
+      if (record.platform !== platform) continue;
+      if (!withinRequest(record.version, request)) continue;
+      candidates.push({ record, dir, source: r.source, rank });
+    }
   }
   if (candidates.length === 0) return undefined;
-  candidates.sort((a, b) => compareVersionThenBuild(b.record.predicate, a.record.predicate));
+  candidates.sort((a, b) => compareRecords(b.record, a.record) || a.rank - b.rank);
   const best = candidates[0]!;
   return resolvedFromRecord(best.record, platform, request, best.dir, best.source, true, []);
+}
+
+/** The cache, then every system directory in order: the one search order every lookup uses. */
+function searchRoots(options: FetchV1Options): readonly { readonly root: string; readonly source: string }[] {
+  return [{ root: cacheRoot(options.cacheDir), source: 'cache' }, ...systemDirs(options.systemDirs).map((d) => ({ root: d, source: `system:${d}` }))];
+}
+
+/** Two records by (version, build): the version numerically, part by part, then the fixed-width build. */
+function compareRecords(a: VerifiedRecord, b: VerifiedRecord): number {
+  const av = a.version.split('.').map(Number);
+  const bv = b.version.split('.').map(Number);
+  for (let i = 0; i < Math.max(av.length, bv.length); i++) {
+    const diff = (av[i] ?? 0) - (bv[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return a.build < b.build ? -1 : a.build > b.build ? 1 : 0;
+}
+
+/**
+ * What a `CHTYPES_ARTIFACT_MISSING` answer from the cache `options` names adds
+ * to its message, each a complete sentence: the 0.x hint when the cache is a
+ * 0.x registry directory (guide, "Upgrading from 0.x"; public issue #486). The
+ * registry's own MISSING adds the same notes as the offline fetch's.
+ */
+export async function missingNotes(options: FetchV1Options = {}): Promise<readonly string[]> {
+  const hint = await zeroXHint(cacheRoot(options.cacheDir));
+  return hint === undefined ? [] : [hint];
+}
+
+/** `message` with `notes`, each a complete sentence, appended. */
+export function withNotes(message: string, notes: readonly string[]): string {
+  return notes.length === 0 ? message : `${message}. ${notes.join(' ')}`;
 }
 
 /**
@@ -277,11 +316,12 @@ async function checkMonotonic(
 // ------------------------------------------------------------------ listInstalled
 
 export async function listInstalled(options: FetchV1Options = {}): Promise<readonly Resolved[]> {
-  const root = cacheRoot(options.cacheDir);
   const out: Resolved[] = [];
-  for (const { dir, record } of await listVerified(root)) {
-    const platform = record.platform as PlatformKey;
-    out.push(resolvedFromRecord(record, platform, record.version, dir, 'cache', true, []));
+  for (const r of searchRoots(options)) {
+    for (const { dir, record } of await listVerified(r.root)) {
+      const platform = record.platform as PlatformKey;
+      out.push(resolvedFromRecord(record, platform, record.version, dir, r.source, true, []));
+    }
   }
   return out;
 }
@@ -290,15 +330,16 @@ export async function listInstalled(options: FetchV1Options = {}): Promise<reado
 
 /** Re-checks every installed library's bytes against its own `verified.json` record (guide §9). */
 export async function verifyInstalled(options: FetchV1Options = {}): Promise<readonly VerifyResult[]> {
-  const root = cacheRoot(options.cacheDir);
   const out: VerifyResult[] = [];
-  for (const { dir, record } of await listVerified(root)) {
-    const platform = record.platform as PlatformKey;
-    try {
-      await verifyInstalledLibrary(path.join(dir, record.library), record.librarySha256, record.libraryBytes);
-      out.push({ platform, dir, ok: true, detail: '' });
-    } catch (err) {
-      out.push({ platform, dir, ok: false, detail: err instanceof Error ? err.message : String(err) });
+  for (const r of searchRoots(options)) {
+    for (const { dir, record } of await listVerified(r.root)) {
+      const platform = record.platform as PlatformKey;
+      try {
+        await verifyInstalledLibrary(path.join(dir, record.library), record.librarySha256, record.libraryBytes);
+        out.push({ platform, dir, ok: true, detail: '' });
+      } catch (err) {
+        out.push({ platform, dir, ok: false, detail: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
   return out;
@@ -314,15 +355,19 @@ export async function verifyInstalled(options: FetchV1Options = {}): Promise<rea
 export async function ensure(request: string, options: FetchV1Options = {}): Promise<Resolved> {
   const platform = resolvePlatformOption(options.platform, os.platform(), os.arch());
   const root = cacheRoot(options.cacheDir);
-  await ensureLayout(root);
 
+  // An offline lookup is read-only: it creates nothing, so a read-only mount
+  // reads cleanly (guide §6; public issue #486). Only a fetch makes the layout.
   if (options.offline === true) {
     const hit = await resolveInstalled(request, platform, options);
     if (hit === undefined) {
-      throw new ArtifactMissingError(`chtypes: ${request} (${platform}) is not installed, and --offline forbids fetching it`);
+      throw new ArtifactMissingError(
+        withNotes(`chtypes: ${request} (${platform}) is not installed, and --offline forbids fetching it`, await missingNotes(options)),
+      );
     }
     return hit;
   }
+  await ensureLayout(root);
 
   if (options.frozen === true) {
     return ensureFrozen(request, platform, options);

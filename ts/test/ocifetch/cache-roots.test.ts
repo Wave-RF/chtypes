@@ -11,7 +11,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Registry } from '../../src/registry.js';
 import { ArtifactMissingError } from '../../src/ocifetch/errors.js';
-import { ensure, listInstalled, resolveInstalled, verifyInstalled } from '../../src/ocifetch/ensure.js';
+import { ensure, listInstalled, missingNotes, resolveInstalled, verifyInstalled } from '../../src/ocifetch/ensure.js';
 import {
   commitStaging,
   encodeRecord,
@@ -200,12 +200,23 @@ describe('read-only lookups create nothing (public issue #486)', () => {
 });
 
 describe('the 0.x hint (public issue #486)', () => {
-  it('a MISSING answer from a 0.x registry names it and the v1 root, from the offline fetch and the registry alike', async () => {
+  it('a MISSING answer from a 0.x registry names it and the v1 root; a 1.x cache and an empty one carry none', async () => {
     const base = await tmp();
     const zeroX = path.join(base, 'zero-x');
     await zeroXRegistry(zeroX);
     const options = { cacheDir: zeroX, systemDirs: [], platform: 'linux-arm64' as const };
     await expect(ensure('26.1', { ...options, offline: true })).rejects.toThrow(`${zeroX} ${HINT_TAIL}`);
+    const notes = await missingNotes(options);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.startsWith(`${zeroX} ${HINT_TAIL}`)).toBe(true);
+
+    const oneX = path.join(base, 'one-x');
+    await writeRecord(oneX, '26.8.1.1', '20260801.000001');
+    const empty = path.join(base, 'empty');
+    await mkdir(empty);
+    for (const cache of [oneX, empty, path.join(base, 'absent')]) {
+      expect(await missingNotes({ cacheDir: cache })).toEqual([]);
+    }
 
     const registry = await Registry.open({ fetch: { cacheDir: zeroX, systemDirs: [] }, autofetch: false });
     await expect(registry.for('26.1')).rejects.toThrow(`${zeroX} ${HINT_TAIL}`);
