@@ -355,6 +355,9 @@ class Handler(BaseHTTPRequestHandler):
         by exact `artifactType`, and `OCI-Filters-Applied: artifactType` is
         sent when it filtered. A request with no filter is served unchanged,
         so a binding that filters client-side still works."""
+        # PROBE (throwaway, never merged): model a host that strips the query
+        # string, so the referrers list is always served UNFILTERED.
+        return body, False
         parsed = urlsplit(self.path)
         if "/referrers/" not in parsed.path:
             return body, False
