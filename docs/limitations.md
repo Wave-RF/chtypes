@@ -38,11 +38,6 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 - **MergeTree settings declared at a non-default value.** An unknown _name_ is the server's own 115, a rejection; a known name at a value this build does not model is a decline, never a silent ignore.
 - **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
 - **Blocking DEFAULTs**, such as anything calling `sleep`.
-- **A multi-row body into a deprecated `Object('json')` column whose stored values depend on how a server splits it** (24.8–25.10; `Values`, `JSONEachRow`, `JSONCompactEachRow`, `CSV`, `TSV`). There are two ways this happens:
-  - **Committed in parts.** The call's `max_insert_block_size` splits the body, and `min_insert_block_size_rows` / `_bytes` keep the INSERT's squashing step from joining the pieces back, so a server writes several parts, each typed separately.
-  - **A parallel-parsing segment cut mid-chunk** (text formats only). With `input_format_parallel_parsing` on, a segment of `min_chunk_bytes_for_parallel_parsing` ends inside a `max_insert_block_size` chunk. At the default chunk size, a four-row `CSV` body at `max_insert_block_size` 2 is enough.
-
-  In both cases what the table reads back depends on where the body was cut, not only on the body, so this build declines rather than guess. The first needs non-default settings. The second can happen at the defaults for a text body larger than `min_chunk_bytes_for_parallel_parsing`, because parallel parsing is on by default.
 - **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md).
 
 ## Constants are not payloads
@@ -63,13 +58,11 @@ The parse-once block twin does not change that — it is a performance shape, no
 
 **Today no `(line, platform)` pair is lifted.** Every supported line, on every published platform, is still under the gate above.
 
-This criterion is scored against the artifact producer's own differential comparison against real servers, and the per-`(line, platform)` state it produces is not served yet — the served `index.json` carries no such field today. Once the artifact producer serves one, this page reads it directly, the same principle [`support-v1.md`](support-v1.md) follows for line support: it states what the registry says rather than listing lines by hand. Until then, do not infer a lift from anything but a CHANGELOG entry naming the pair.
+This criterion is scored against the artifact producer's own differential comparison against real servers, and the per-`(line, platform)` state it produces is not served yet — the registry carries no such field today. Once the artifact producer serves one, this page reads it directly, the same principle [`support-v1.md`](support-v1.md) follows for line support: it states what the registry says rather than listing lines by hand. Until then, do not infer a lift from anything but a CHANGELOG entry naming the pair.
 
 ## Some formats depend on the artifact, not the binding
 
-`RowBinary` and its family, `Native` and `Buffers` parse only on artifacts new enough to carry the reader. This is a property of the **loaded artifact's age**, not of your binding's version, so probe the artifact rather than assuming from the package version. Earlier artifacts answer 73 or 117 exactly as their own servers do.
-
-`CSVWithNames` and `TSVWithNames` are text formats with the same property. They joined the format set inside ABI revision 5 without changing the revision number, so an artifact built before them can report revision 5 and still not know them. Probe for them the same way.
+Which input formats a library reads is a property of the **loaded artifact**, not of your binding's version: every 1.0 build lists them in its `build_info`. Probe that rather than assuming from the package version. A format the loaded library does not read is refused with 73 or 117, exactly as its own server would refuse it.
 
 ## The error model is normative
 
@@ -79,7 +72,7 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 **No budget is a rule about process, not a claim about state.** A non-zero count, in either direction, on any binding against any ClickHouse line, is refused unless a person has named that case and recorded why, with a tracking reference attached. Nothing non-zero passes quietly, and no threshold waves anything through.
 
-**So it does not mean there are none.** What is true today is narrower, and worth stating exactly: **three cases are currently known in which this library and a real server disagree about whether a row gets through, all listed under [Known divergences](#known-divergences) below: two over-accepts (a DEFAULT over `demangle`, and a CHECK constraint) and one over-admit by a filter, which on 25.10 and later also over-hides some float results.** Apart from them, both directions are at zero across every line the artifacts are proved against — `measured` by the differential proof those artifacts are built from, not by this repository, and a state rather than a promise: it is what the rule has produced so far, not something the rule guarantees will hold tomorrow.
+**So it does not mean there are none.** What is true today is narrower, and worth stating exactly: **no case is currently known in 1.0 in which this library and a real server disagree about whether a row gets through.** The three that were registered for 0.x (a DEFAULT over `demangle`, a CHECK constraint, and a filter whose result is not a boolean-context type) are fixed in every 1.0 build: this repository measured the `demangle` refusal (446) through the published Go binding on all four supported lines, and the artifact producer measured the filter and CHECK cases on production. Both directions are at zero across every line the artifacts are proved against — `measured` by the differential proof those artifacts are built from, and a state rather than a promise: it is what the rule has produced so far, not something the rule guarantees will hold tomorrow.
 
 ⚠️ **Zero in both directions is a statement about the verdict, not about the value or the error.** There are two other ways to disagree: both sides accept a row and **store different values**, or both refuse it and **report different codes**. Neither is an accept-or-reject disagreement, so the no-budget rule above does not cover them.
 
@@ -89,9 +82,9 @@ In Python specifically, `UnsupportedError` is a **peer** of `SchemaError` rather
 
 The ABI header is the full contract.
 
-## An out-of-domain Enum DEFAULT answers differently by line
+## An out-of-domain Enum DEFAULT is refused at compile
 
-This is by design, because the server does too. On 24.8–25.10 such a schema compiles, and a row relying on the default is `accepted_poisoned`. On 26.x, compiling refuses it (`691`, or `70`). The poisoned row's code is the server's readback code, which also differs by line. The conformance suite compares that code on every line and binding, and finds no mismatch. The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
+This is by design, because the server does too: on every supported line, compiling such a schema refuses it (`691`, or `70`). The rule and the codes are in [`transformations.md`](guides/transformations.md#an-out-of-domain-enum-default-follows-the-server).
 
 ## Known divergences
 
@@ -101,26 +94,11 @@ An entry disappears when an artifact stops diverging, or when the disagreement t
 
 ⚠️ **"A real server" means a real table engine** — a MergeTree table, the kind a tenant writes to. A `CREATE TEMPORARY TABLE` is `ENGINE=Memory`, has no parts, and accepts values that every ordinary table refuses at part-write time. If you reproduce an entry against a temporary table you will not get the answer recorded here, and the temporary table is the one that is wrong about your production write.
 
-Every entry below has a machine-checkable twin in [`docs/divergences.json`](divergences.json). The v0 job that drove each one against loaded artifacts is retired with the v0 registry layout, so nothing checks these entries until a v1 replacement lands; treat each as a claim about the build named, and re-measure before relying on it.
+Every entry here has a machine-checkable twin in [`docs/divergences.json`](divergences.json). The v0 job that drove each one against loaded artifacts is retired with the v0 registry layout, so nothing checks these entries until a v1 replacement lands; treat each as a claim about the build named, and re-measure before relying on it.
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
 
-### A DEFAULT over demangle admits what a real server refuses to create
-
-**Over-accept, on `24.8` and `25.10`. Served, unsupported: not fixed on retired lines.** This library compiles a schema, and admits a row against it, that a real server refuses to create in the first place.
-
-The ClickHouse setting `allow_introspection_functions` defaults to disabled. At that default, a real server refuses a `CREATE TABLE` containing a `DEFAULT` over `demangle` with error 446 (`FUNCTION_NOT_ALLOWED`). This library never consults the setting, so it compiles the same schema and evaluates the same DEFAULT identically at either value. For example, `s String, v String DEFAULT demangle(s)`, with a body that never supplies `v`:
-
-|               |                                                                               |
-| ------------- | ----------------------------------------------------------------------------- |
-| this library  | compiles the schema and stores the function's answer, at either setting value |
-| a real server | refuses the `CREATE TABLE` itself, error 446, at the default setting          |
-
-The artifact producer's relink at build `1790845279` made this library refuse the same `CREATE TABLE` with 446 on every **supported** line — 26.3, 26.7, 26.8 and 26.9 — so the over-accept no longer reproduces there. It is unchanged on `24.8` and `25.10`: both are **served, unsupported** lines (see [ClickHouse lines](support-v1.md#clickhouse-lines)), upstream's own support for them has ended, and the artifact producer builds no new artifact for a retired line, ever — so their library half is still the pre-relink build and `demangle`'s DEFAULT still compiles and stores the demangled name there. On those two lines the divergence is permanent: a retired line gets no new builds and no new ABI revisions, so no fix will ever be served for it, and this entry stays registered for them for as long as they are served. On ABI revision 6, `addressToLine`, `addressToLineWithInlines` and `addressToSymbol` are declined (`unsupported`) at insert time on every served line, so they do not diverge and carry no entry here.
-
-**Measured**: this library's own answer, in this repository, against the published ABI revision 6 artifacts. `demangle`'s DEFAULT still compiles and stores the demangled name on `25.10` (darwin-arm64, build `1790767905`) and, by CI's linux-amd64 job, on `24.8` (no darwin artifact is published for that line). On `26.3`, `26.8` and `26.9` (darwin-arm64, build `1790845279`) this library now refuses the `CREATE TABLE` itself with code 446, matching a real server; `26.7` was not part of this check's line list before and is not added by this measurement. The server half — a 446 refusal of the `CREATE TABLE` at the default setting — was measured by the artifact producer against stock ClickHouse servers pinned to each line's exact patch, not measured here.
-
-Do not put `demangle` in a DEFAULT for a server that runs at the default setting on `24.8` or `25.10`: this library still compiles the schema there, and the server refuses the `CREATE TABLE` with 446. On every supported line this library now refuses the same `CREATE TABLE` the same way.
+No divergence is currently registered for 1.0.
 
 ## Known gaps in 1.0
 
