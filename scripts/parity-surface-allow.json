@@ -239,16 +239,6 @@
     },
     {
       "binding": "rust",
-      "kind": "missing",
-      "names": [
-        "EngineCell",
-        "EngineCell.*"
-      ],
-      "reason": "Found by this gate: rust/src/result.rs declares `pub struct EngineCell`, and BatchResult.engine_rows holds it, but lib.rs does not re-export it, so a caller cannot name chtypes::EngineCell (cargo-public-api lists no path to it). Re-exporting it is a public-API addition for its own pull request; carried here until then.",
-      "issue": 498
-    },
-    {
-      "binding": "rust",
       "kind": "spelling",
       "doc": "reason.lossy",
       "as": "reason.is_lossy",
