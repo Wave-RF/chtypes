@@ -27,10 +27,9 @@
 # goldens runner, then scripts/goldens-v1/compare.py, which must pass the
 # runner's report and must refuse the same report with one planted wrong byte.
 #
-# Every stub-backed test binary is named below (public issue #463 added
-# api_v1_setup_cases, which was in no CI job); measured: these are all the rust test files
-# that read CHTYPES_ABI1_STUBS. The run is read back through the stub census
-# (scripts/abi-v1/stub_census.py): libtest's own result lines must show tests
+# Every stub-backed test binary is named below (measured, public issue #463: these
+# are all the rust test files that read CHTYPES_ABI1_STUBS). The run is read back through
+# the stub census (scripts/abi-v1/stub_census.py): libtest's own result lines must show tests
 # passed and no loud SKIP line may name CHTYPES_ABI1_STUBS (these suites skip by
 # early return, so the line is the evidence).
 #
@@ -51,4 +50,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 
 cd "$ROOT/rust"
-exec cargo test --locked --features abi-v1 --test abi1_conformance --test api_v1 --test api_v1_setup --test api_v1_setup_cases --test api_v1_registry --test goldens_v1_runner -- --nocapture
+OUT="$(mktemp "${TMPDIR:-/tmp}/rust-stub-census.XXXXXX")"
+trap 'rm -f "$OUT"' EXIT
+rc=0
+cargo test --locked --features abi-v1 --test abi1_conformance --test api_v1 --test api_v1_setup --test api_v1_setup_cases --test api_v1_registry --test goldens_v1_runner -- --nocapture >"$OUT" 2>&1 || rc=$?
+cat "$OUT"
+echo "rust.sh: stub census"
+census_rc=0
+python3 "$HERE/../stub_census.py" text "$OUT" "$rc" || census_rc=$?
+if [ "$census_rc" -ne 0 ]; then
+    echo "rust.sh: the stub census refused this run (cargo rc=$rc)" >&2
+    exit 1
+fi
+exit "$rc"
