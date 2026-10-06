@@ -24,6 +24,9 @@ package chtypes
 // struct field's key case-insensitively, so below the top level a key that
 // differs from a known key only in letter case reads as that key here, where
 // the generic reader would ignore it as unknown. The library never emits one.
+// docs/reference/bindings-v1.md section 5 rule 3 records this tolerance, and the
+// TestDecodeBatchEquivalence tests keep it from diverging silently: they compare
+// this decoder with the generic reader on every document fixture.
 
 import (
 	"bytes"
