@@ -135,6 +135,8 @@ Three are **per-process**, settable only through the `defaults` of `setup`:
 | `chtypes_default_eval_wall_nanos`   | DEFAULT-expression wall-clock ceiling | 1 s     |
 | `chtypes_custom_settings_prefixes`  | mirror the server's own               | `SQL_`  |
 
+The functions a DEFAULT expression cannot use at all are listed, with the reason for each, in [`declined-functions.md`](../reference/declined-functions.md).
+
 **Sending a per-process key on a per-call map is a decline, never an admission.** It comes back in the result's `unsupported_settings`, and the row is promoted to the `unsupported` outcome (the library applies that promotion itself in 1.0; no binding does). Do not score such a row as agreement: chtypes did not answer it.
 
 ## Time zones are two things
@@ -144,7 +146,7 @@ A bare `DateTime` column carries a zone, and ClickHouse resolves it in two diffe
 - **The image zone** is process-wide, set once at `setup(timezone=…)`, before the first open. It governs compiled types: a bare `DateTime` column's zone, `MATERIALIZED` columns, `PARTITION BY` and `TTL`. Unset, it is `UTC`. It is ClickHouse's own process zone, which vendored MergeTree code reads directly, so it cannot vary per call.
 - **The per-call zone** is the `session_timezone` key in a call's settings. It governs parsing, rendering, export and DEFAULT evaluation for that call. Each binding also offers it as an option, `WithSessionTimezone` in Go, `session_timezone=` in Python, `sessionTimezone` in TypeScript and `session_timezone` in Rust, so the zone is visible in every signature it affects. The option writes the one `session_timezone` key into the settings object and does nothing else with it. **Passing the option and a `session_timezone` key in `settings` together is a `UsageError`, even when the two agree**, so a call never has two spellings of its zone.
 
-A zone name is valid exactly when ClickHouse's own `DateLUT` loads it, and a name it will not load is refused with ClickHouse's own error, whatever its bytes. `DateLUT` loads zone files from the host the library runs on, so a host missing some zone files refuses names a server accepts ([`limitations.md`](../limitations.md#zone-names-follow-the-host)).
+A zone name is valid exactly when ClickHouse's own `DateLUT` loads it, and a name it will not load is refused with ClickHouse's own error, whatever its bytes. `DateLUT` loads zone files from the host the library runs on, so a host missing some zone files refuses names a server accepts ([`limitations.md`](../limitations.md#zone-names-outside-clickhouses-embedded-table-follow-the-host)).
 
 The zone follows the settings precedence above: a per-call `session_timezone` beats the one in the compile profile, which beats the one in the setup defaults, which beats the image zone. A zone in the compile profile is a default for later calls on that schema; a compiled type always takes the image zone, never the profile's.
 

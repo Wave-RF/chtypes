@@ -130,6 +130,79 @@ With no per-call `session_timezone`, or one equal to this library's zone, both s
 
 Until then, for a table with a Date-valued TTL, either do not pass a per-call `session_timezone` that differs from this library's zone, or do not rely on `ttl_expired` and `ttl_column_expired` from such a call.
 
+### The row preview skips the engine's insert-time merge step on Collapsing and Replacing-with-`is_deleted` tables
+
+**Over-accept, on every supported line, through the row preview only.** `chs_preview_row` (the row preview) does not run the table engine's insert-time merge step. A real server's single-row INSERT runs it, and it refuses a row whose `sign` or `is_deleted` is out of range. For example, a one-row preview is accepted for each of:
+
+- `CollapsingMergeTree(sign)` with `sign = 7`;
+- `ReplacingMergeTree(ver, is_deleted)` with `is_deleted = 2`.
+
+|                           |                                                          |
+| ------------------------- | -------------------------------------------------------- |
+| this library, row preview | accepts the row                                          |
+| a real server             | refuses the INSERT with error **117** (`INCORRECT_DATA`) |
+
+The batch preview (`chs_preview_batch`) of the same row answers correctly, with 117, so it agrees with the server.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64; the server half against the server's single-row INSERT. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, use the batch preview, even for one row, on `CollapsingMergeTree`, `VersionedCollapsingMergeTree` and `ReplacingMergeTree` with an `is_deleted` column.
+
+### Creating a schema accepts MergeTree-family CREATE statements that a real server refuses
+
+**Over-accept, on every supported line, at schema creation.** `chs_schema_create` (the schema-create call) accepts some MergeTree-family `CREATE TABLE` statements that a real server refuses at the CREATE. The cases measured:
+
+- wrong engine arguments: `SummingMergeTree(a, b)`, `AggregatingMergeTree(x)`, `MergeTree(k)`;
+- a `String` version column, or a `UInt8` sign column;
+- a missing sign, version or columns-to-sum column;
+- `ReplacingMergeTree(ver)` with no `ORDER BY`;
+- the deprecated engine syntax;
+- `ReplacingMergeTree` with a projection (the server refuses with error **344**);
+- from 26.7, an `AggregatingMergeTree` dimension outside the keys (the server refuses with error **36**).
+
+For every other case in the list, the server refuses the CREATE.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not treat a successful schema creation on these engines as proof that the server will accept the CREATE.
+
+### A DEFAULT that throws on a row which supplies the column can fail the server's INSERT while this library accepts it
+
+**Over-accept, on every supported line, with `input_format_defaults_for_omitted_fields=1` (the server's default).** A server evaluates a column's `DEFAULT` expression over the whole INSERT block, including the rows that supply the column, whenever some other row of the block omits it. This library accepts every row. For example, with `b Int32 DEFAULT intDiv(10, a)`, a batch in which some rows omit `b` and one row is `{"a":0,"b":5}`:
+
+|               |                                                                             |
+| ------------- | --------------------------------------------------------------------------- |
+| this library  | accepts every row                                                           |
+| a real server | refuses the INSERT, with error **153**, **395** or **70** by the expression |
+
+A batch in which every row supplies the column, and a single row, agree with the server. With `input_format_defaults_for_omitted_fields=0` the server also accepts a mixed batch, so there is no divergence.
+
+The reverse is an over-reject, and needs a non-default setting, so it is a line here and not an entry of its own. With `b Int32 DEFAULT intDiv(10, a)` and a column `m … MATERIALIZED b + 1`, in `JSONEachRow` with `input_format_defaults_for_omitted_fields=0`, a row that omits `b` with `a = 0` is accepted by a server (`b` takes its type's default) and refused by this library with error 153.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not trust an accepted batch that mixes rows omitting and rows supplying a DEFAULT column whose expression can throw.
+
+### A Nullable sorting key is accepted
+
+**Over-accept, on every supported line, at schema creation, linux-amd64 only.** `ORDER BY k` (also `ORDER BY (k, v)`, or `PRIMARY KEY k`) over a `Nullable` column, without `allow_nullable_key`, is accepted by `chs_schema_create`. A real server refuses the CREATE with error **44**.
+
+`allow_nullable_key = 1`, and `ifNull` or `assumeNotNull` keys, are declined (`unsupported`) rather than accepted: an over-decline, not an entry here.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not treat a successful schema creation with a Nullable sorting key as proof that the server will accept the CREATE.
+
+### A clock-reading MATERIALIZED expression reports 1970 in a batch preview when no row omits a Volatile DEFAULT column
+
+**Value divergence, on every supported line, through the batch preview only.** In a batch preview with no pinned clock, where no row omits a Volatile DEFAULT column, a clock-reading `MATERIALIZED` expression (`now()`, `now64()`, `today()`) reports `1970-01-01` in the batch document's `computed` values. A real server stores the current time. In a mixed batch, the rows that supply the defaulted column get 1970, and the rows that omit it get the current time.
+
+With a pinned clock (`chtypes_now_epoch_nanos`) plus `chtypes_clock_offset_nanos`, an omitted DEFAULT applies the offset, but a `MATERIALIZED` expression ignores it. The row preview is not yet measured.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not trust `computed` clock values from a batch preview unless at least one row omits a Volatile DEFAULT column, or the clock is pinned with no offset.
+
 ## Known gaps in 1.0
 
 Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.
@@ -146,11 +219,17 @@ The values of `settings` and `query_params` must be UTF-8. A value that is not v
 
 **Workaround:** inline the value as `unhex('<hex>')`, built from hex digits only. **Planned:** a byte-safe object form.
 
-### Zone names follow the host
+### Zone names outside ClickHouse's embedded table follow the host
 
-Whether a time zone name is valid is ClickHouse's own `DateLUT` rule, and `DateLUT` loads zone files from the host the library runs on. A host that is missing some zone files refuses names a server accepts. Measured on a CI runner with no `posix/` zoneinfo: every `posix/*` name was refused (`measured`). On darwin, case-folding of zone names differs.
+Every zone in ClickHouse's own embedded table, the 598 names of `system.time_zones` on 26.3, 26.7, 26.8 and 26.9 (tzdata 2026d), is compiled into the library. It answers the same on every host, with no zoneinfo installed. A name outside that table is looked up the way a ClickHouse server looks it up: in the host's zoneinfo directory, `$TZDIR` if set, else `/usr/share/zoneinfo`. Three kinds of name depend on it:
 
-**Workaround:** give the host the server's zoneinfo, so its zone files match the server's. **Planned.**
+- `posix/<zone>` loads only where the host has a `posix/` tree. The `clickhouse/clickhouse-server` images (Ubuntu 22.04) and Debian 12 have one. Ubuntu 24.04 has none, even with `tzdata-legacy`.
+- `posixrules` loads only where the host has that file. Ubuntu's and Debian's `tzdata` install it.
+- `localtime` loads only where `<zoneinfo>/localtime` resolves. On Debian and Ubuntu it is a symlink to `/etc/localtime`, so that file must exist too.
+
+Where the host lacks the file, the library refuses the name with ClickHouse's error 36, as a server whose image lacks it does. `right/*` names are refused on every host, even where the files exist, because ClickHouse's loader rejects leap-second data. When both accept a name, the library and the server render values identically. The library needs glibc. On darwin, the host lookup folds case.
+
+**Workaround:** to answer as the official server image does, give the library host that image's zoneinfo. Copy its `/usr/share/zoneinfo`, or point `TZDIR` at a copy, and copy its `/etc/localtime` for `localtime`. With both in place, the library agreed with the server image on every name tested, on all four lines.
 
 ### `SHOW CREATE` of a Memory table is declined
 
