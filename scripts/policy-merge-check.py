@@ -1935,12 +1935,22 @@ def latest_green_push_jobs(repo: str) -> dict[str, int]:
     ci.yml itself first gained the `push` trigger — which test_count_problems
     reads as every suite being a missing count on the main side, refusing
     rather than guessing."""
-    runs = gh_items(f"repos/{repo}/actions/workflows/ci.yml/runs?branch={BASE_BRANCH}&event=push&status=success"
-                    "&per_page=1", ".workflow_runs[]")
-    if not runs:
+    # One page of push runs, newest first, filtered HERE rather than by the
+    # API's `status=success`: on 2026-10-06 at 15:34:55Z that filtered listing
+    # returned a nine-day-old run while five newer green runs existed (index
+    # lag, inferred), and that run's job logs answered 410.
+    page = gh_object(f"repos/{repo}/actions/workflows/ci.yml/runs?branch={BASE_BRANCH}&event=push&per_page=30")
+    run = latest_green_run(page.get("workflow_runs") or [])
+    if run is None:
         return {}
-    jobs = gh_items(f"repos/{repo}/actions/runs/{runs[0]['id']}/jobs?per_page=100", ".jobs[]")
+    jobs = gh_items(f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100", ".jobs[]")
     return readable_job_ids(jobs)
+
+
+def latest_green_run(runs: list[dict]) -> dict | None:
+    """The newest completed, successful run in `runs` (by created_at), or None."""
+    green = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") == "success"]
+    return max(green, key=lambda r: r.get("created_at") or "", default=None)
 
 
 def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> TestCountFacts:
@@ -1955,24 +1965,38 @@ def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> 
     main_job_id = latest_green_push_jobs(repo)
 
     def read(job_id_by_name: dict[str, int]) -> dict[str, tuple[int, int]]:
-        counts: dict[str, tuple[int, int]] = {}
-        logs: dict[int, str] = {}
-
-        def log_of(job_id: int) -> str:
-            if job_id not in logs:
-                logs[job_id] = job_log(repo, job_id)
-            return logs[job_id]
-
-        for label, check_name in SUITE_CHECK_NAME.items():
-            job_id = job_id_by_name.get(check_name)
-            if job_id is None:
-                continue
-            found = parse_suite_counts(log_of(job_id)).get(label)
-            if found is not None:
-                counts[label] = found
-        return counts
+        return counts_from_logs(job_id_by_name, lambda job_id: job_log(repo, job_id))
 
     return TestCountFacts(head=read(head_job_id), main=read(main_job_id))
+
+
+def counts_from_logs(job_id_by_name: dict[str, int], log_reader) -> dict[str, tuple[int, int]]:
+    """Each suite's chtypes-count line, read from its job's log. A log GitHub
+    no longer serves (404, or 410 once it has expired) is a MISSING count, so
+    test_count_problems refuses quietly and a later trigger retries. It is
+    never an exit-2 error, and never a pass (2026-10-06: a 410 on main's
+    baseline log turned the whole policy-merge run red)."""
+    counts: dict[str, tuple[int, int]] = {}
+    logs: dict[int, str | None] = {}
+    for label, check_name in SUITE_CHECK_NAME.items():
+        job_id = job_id_by_name.get(check_name)
+        if job_id is None:
+            continue
+        if job_id not in logs:
+            try:
+                logs[job_id] = log_reader(job_id)
+            except ApiError as e:
+                if e.status in (404, 410):
+                    logs[job_id] = None
+                else:
+                    raise
+        text = logs[job_id]
+        if text is None:
+            continue
+        found = parse_suite_counts(text).get(label)
+        if found is not None:
+            counts[label] = found
+    return counts
 
 
 def api_surface_job_id(check_runs: list[dict]) -> int | None:
@@ -3474,6 +3498,33 @@ def selftest() -> int:
     ):
         if not v1_name_problems(texts, req):
             failures.append(f"v1_name_problems: {label} was not caught")
+    # latest_green_run: the newest completed success, whatever the list order.
+    lg = latest_green_run([
+        {"id": 1, "status": "completed", "conclusion": "success", "created_at": "2026-09-28T22:54:00Z"},
+        {"id": 2, "status": "in_progress", "conclusion": None, "created_at": "2026-10-06T15:34:06Z"},
+        {"id": 3, "status": "completed", "conclusion": "failure", "created_at": "2026-10-06T15:12:12Z"},
+        {"id": 4, "status": "completed", "conclusion": "success", "created_at": "2026-10-06T15:13:02Z"},
+    ])
+    if lg is None or lg["id"] != 4:
+        failures.append(f"latest_green_run: picked {lg and lg['id']}, not the newest completed success (4)")
+    if latest_green_run([]) is not None:
+        failures.append("latest_green_run: an empty list did not give None")
+    # counts_from_logs: a 410 or 404 log is a missing count, never an exception; any other API error raises.
+    any_check = next(iter(SUITE_CHECK_NAME.values()))
+    def gone(_job_id: int) -> str:
+        raise ApiError("GET actions/jobs/1/logs", 410, "Server Error (HTTP 410)")
+    try:
+        if counts_from_logs({any_check: 1}, gone):
+            failures.append("counts_from_logs: a 410 log produced a count")
+    except ApiError:
+        failures.append("counts_from_logs: a 410 log raised instead of reading as missing")
+    def boom(_job_id: int) -> str:
+        raise ApiError("GET actions/jobs/1/logs", 500, "Server Error")
+    try:
+        counts_from_logs({any_check: 1}, boom)
+        failures.append("counts_from_logs: a 500 was swallowed instead of raised")
+    except ApiError:
+        pass
     # decide() waits for every required context, V1_REQUIRED_CHECKS included:
     # a green ci with one v1 context missing is a `checks` refusal, never an enqueue.
     for missing in (V1_REQUIRED_CHECKS[0], V1_REQUIRED_CHECKS[3]):
