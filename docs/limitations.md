@@ -160,15 +160,17 @@ Until then, do not trust an accepted batch that mixes rows omitting and rows sup
 
 Until then, do not treat a successful schema creation with a Nullable sorting key as proof that the server will accept the CREATE.
 
-### A clock-reading MATERIALIZED expression reports 1970 in a batch preview when no row omits a Volatile DEFAULT column
+### A clock-reading MATERIALIZED expression reports 1970, or ignores the clock offset, in both previews
 
-**Value divergence, on every supported line, through the batch preview only.** In a batch preview with no pinned clock, where no row omits a Volatile DEFAULT column, a clock-reading `MATERIALIZED` expression (`now()`, `now64()`, `today()`) reports `1970-01-01` in the batch document's `computed` values. A real server stores the current time. In a mixed batch, the rows that supply the defaulted column get 1970, and the rows that omit it get the current time.
+**Value divergence, on every supported line, through both the batch and the row preview.** In a batch preview with no pinned clock, where no row omits a Volatile DEFAULT column, a clock-reading `MATERIALIZED` expression (`now()`, `now64()`, `today()`) reports `1970-01-01` in the batch document's `computed` values. A real server stores the current time. In a mixed batch, the rows that supply the defaulted column get 1970, and the rows that omit it get the current time.
 
-With a pinned clock (`chtypes_now_epoch_nanos`) plus `chtypes_clock_offset_nanos`, an omitted DEFAULT applies the offset, but a `MATERIALIZED` expression ignores it. The row preview is not yet measured.
+With a pinned clock (`chtypes_now_epoch_nanos`) plus `chtypes_clock_offset_nanos`, an omitted DEFAULT applies the offset, but a `MATERIALIZED` expression ignores it.
 
-**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only, with identical results. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+The row preview (`chs_preview_row`) is affected the same way. With no pinned clock, its clock-reading `MATERIALIZED` values are `1970-01-01 00:00:00`; with a pinned clock plus an offset, its clock-derived values carry the pin alone, ignoring the offset. Neither returns an error: the row document's outcome is OK, with the wrong value in it.
 
-Until then, do not trust `computed` clock values from a batch preview unless at least one row omits a Volatile DEFAULT column, or the clock is pinned with no offset.
+**Measured**: by the artifact producer, the batch preview against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64, with identical results; the row preview against `20261006.170903` on all four lines, on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not trust clock values from either preview (a batch document's `computed` values, or the row document's) unless at least one row omits a Volatile DEFAULT column, or the clock is pinned with no offset.
 
 ### A projection with no ORDER BY is accepted at schema creation; a real server refuses the CREATE
 
@@ -205,6 +207,19 @@ Until then, use the batch preview, even for one row, on a table with a `TTL`.
 **Measured**: by the artifact producer, against the production library builds `20261004.052404` and `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, on such a table, do not read a batch preview's refusal with code 10 as the server's answer. The row preview accepts these rows, but it does not run the engine's merge step (see [the entry above](#the-row-preview-skips-the-engines-insert-time-merge-step-on-collapsing-and-replacing-with-is_deleted-tables)), so it cannot catch an out-of-range sign or `is_deleted` either.
+
+### The batch preview refuses a row with code 10 when a TTL expression reads a MATERIALIZED column
+
+**Over-reject, on every supported line, through the batch preview.** On a table whose `TTL` expression reads a `MATERIALIZED` column, `chs_preview_batch` (the batch preview) refuses the row with code **10** (`Not found column or subcolumn … in block`). A real server accepts it.
+
+|                             |                                  |
+| --------------------------- | -------------------------------- |
+| this library, batch preview | refuses the row with code **10** |
+| a real server               | accepts the row                  |
+
+**Measured**: by the artifact producer, against the production library build `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, on such a table, do not read a batch preview's refusal with code 10 as the server's answer.
 
 ## Known gaps in 1.0
 

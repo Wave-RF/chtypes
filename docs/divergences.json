@@ -28,7 +28,7 @@
     },
     {
       "id": "clock-materialized-reports-1970-in-batch-preview",
-      "heading": "A clock-reading MATERIALIZED expression reports 1970 in a batch preview when no row omits a Volatile DEFAULT column",
+      "heading": "A clock-reading MATERIALIZED expression reports 1970, or ignores the clock offset, in both previews",
       "note": "no machine check is expressible in this register's schema: the divergence is in the batch document's 'computed' values and depends on the clock instant, which a check can neither read ('stored' asserts a stored column's text, not a computed value) nor pin together with chtypes_clock_offset_nanos. The v1 replacement of the checker must add an assertion on computed values under a pinned clock before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
       "checks": []
     },
@@ -47,6 +47,12 @@
     {
       "id": "batch-preview-code-10-materialized-engine-column",
       "heading": "The batch preview refuses a row with code 10 when an engine column is MATERIALIZED",
+      "note": "no machine check is in this entry yet: the over-reject is the batch preview's own verdict (code 10) on a payload a real server accepts, which this register's schema could express, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
+    },
+    {
+      "id": "batch-preview-code-10-ttl-reads-materialized",
+      "heading": "The batch preview refuses a row with code 10 when a TTL expression reads a MATERIALIZED column",
       "note": "no machine check is in this entry yet: the over-reject is the batch preview's own verdict (code 10) on a payload a real server accepts, which this register's schema could express, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
       "checks": []
     }
