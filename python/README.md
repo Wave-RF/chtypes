@@ -2,48 +2,49 @@
 
 **If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native library behind the frozen `chs_*` C ABI and reached here through stdlib `ctypes`. Nothing semantic is reimplemented, so _"what does ClickHouse do with `256` into a `UInt8`?"_ is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
 
-Pure Python: **zero dependencies, no build step, no compiler.**
+Pure ctypes: no compiler, no build step. The only dependency is a zstd decompressor for the artifact layer, which is the standard library's own from Python 3.14 and the `backports.zstd` package before that.
 
 ## Install
 
-Two things: this package, and at least one **artifact** — the per-version native library it `dlopen`s at runtime.
+Two things: this package, and at least one **artifact** — the per-version native library it `dlopen`s at runtime. The registry fetches the artifact on first use when autofetch is on (`Registry(autofetch=True)` or `CHTYPES_AUTOFETCH=1`), after verifying its signature and every byte against the signed statement; with autofetch off it answers only from what is already installed.
 
 ```sh
 uv add chtypes            # or: pip install chtypes
-python -m chtypes fetch 26.8
 ```
-
-The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/26.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it. The ed25519 verifier is pure stdlib too.
 
 ## Quickstart
 
 ```python
+import chtypes
 from chtypes import Format, Registry
 
-registry = Registry()                   # walks the search path
-library = registry.for_version("26.8")  # a line or an exact patch; never a nearest match
+chtypes.setup(timezone="UTC")             # once, before the first open (optional)
+registry = Registry(autofetch=True)
+library = registry.for_version("26.8")    # a release line or an exact version
 
-with library.compile_ddl("x UInt8, ts DateTime DEFAULT now()") as schema:
+ddl = b"CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = Memory"
+with library.compile_table(ddl) as schema:
     batch = schema.rows(Format.JSON_EACH_ROW, b'{"x":256}\n')
 
 row = batch.rows[0]
-print(batch.outcome)              # accepted
-print(row.value("x").text)        # 0             — what would actually be stored
-print(row.transformed[0].reason)  # overflow_wrap — which is the product
-print(row.substituted)            # ts: send it explicitly, or preview != stored
+print(batch.outcome)                  # accepted
+print(row.values[0].text)             # b'0'          what would actually be stored
+print(row.transformed[0].reason)      # overflow_wrap which is the product
 ```
 
-The row is **accepted** and `256` is silently stored as `0`. That report — `transformed` — is the one derived answer in the system and the reason it exists.
+The row is **accepted** and `256` is silently stored as `0`. That report — `transformed` — is why chtypes exists. Names, SQL, messages and renderings come back as `bytes`, never decoded for you: a column name that is not valid UTF-8 round-trips exactly.
 
-`ts` was substituted rather than stored: send every substituted column as an explicit value in the real INSERT, or the server re-evaluates `now()` at its own instant and your preview is not what landed. Pin the instant in tests with `settings={"chtypes_now_epoch_nanos": "1700000000000000000"}`.
+A column whose DEFAULT calls a random or UUID generator is drawn by the library (`Source.DEFAULT_GENERATED`). Ask `rows` for an `export` and insert its `payload`, never the original body, or the server draws a different value than the one previewed.
 
-## Three outcomes, and conflating any two is a bug
+## Errors
 
-A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTED` with ClickHouse's own code. Exceptions are for schema-level answers and for the machinery.
+A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTED` with ClickHouse's own code. Exceptions are for the call and for the machinery. Every call error carries `status`, `ch_code`, `ch_name`, `message` (bytes) and `column` (bytes).
 
-- `SchemaError` — the server itself would refuse this, and `.code` is a real ClickHouse code.
+- `SchemaError` — the server itself would refuse this, and `.ch_code` is a real ClickHouse code.
 - `UnsupportedError` — this build declines to answer, and a real server might well have accepted. **Fall back to the server**; never tell a user they are wrong on the strength of a decline.
-- **`UnsupportedError` is a peer of `SchemaError`, not a subclass.** `except SchemaError` never catches a decline. Handle the two arms explicitly, or catch `ChtypesError` for both.
+- `UsageError` — a misuse: a closed object, a conflicting `setup`, a zone given twice. `InternalError` — a library bug.
+- **`UnsupportedError` is a peer of `SchemaError`, not a subclass**, so `except SchemaError` never catches a decline. Catch `CallError` for all four, deliberately.
+- `ArtifactError` and its subclasses cover fetching and loading: `ArtifactCorruptError`, `ArtifactIncompatibleError`, `ArtifactMissingError` and the rest, one class per code.
 
 ## Documentation
 
@@ -56,21 +57,25 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 | [Transformations](https://github.com/wave-rf/chtypes/blob/main/docs/guides/transformations.md)                                                                              | the silent-change report, and the DEFAULTs you must echo back                |
 | [Settings](https://github.com/wave-rf/chtypes/blob/main/docs/guides/settings.md) · [Discovery](https://github.com/wave-rf/chtypes/blob/main/docs/guides/discovery.md)       | the four channels; asking a real server what profile to validate under       |
 | [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process    |
-| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                            |
+| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support-v1.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)         | what works where; what chtypes declines to answer                            |
 
-## Four things specific to this binding
+## Fetching from the command line
 
-**A settings value must never be a `float`.** `encode_settings` stringifies an `int` exactly and raises `TypeError` on a `float`: a 19-digit `chtypes_now_epoch_nanos` does not survive an IEEE double, and as a JSON number the setting would be silently ignored.
+`chtypes fetch 26.8` (or `python -m chtypes fetch 26.8`) resolves, verifies and installs a build into the per-user cache; `chtypes verify`, `chtypes list` and `chtypes where` complete the four commands. `--lock FILE` records what was installed and `--frozen` fetches only what the lock pins. See the [Python API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/python.md#the-command).
 
-**`substituted` is on `RowResult`, not on `BatchResult`.** Reach it through `batch.rows[i].substituted`. `BatchResult` does carry a batch-level `transformed`, which folds in the storage layer's own verdicts.
+## Things specific to this binding
 
-**`ctypes` releases the GIL for the whole duration of a foreign call**, so the GIL is not the exclusion. The package uses a writer-preferring readers-writer lock per loaded image plus one plain lock per `Schema`; `set_default_settings` and `close` take it exclusively, as the ABI requires. Measured under contention: 27,770 batch reads across 8 threads against 566 concurrent settings swaps, every answer byte-identical to the uncontended one.
+**A settings value is a string, and only a string.** `settings={"flatten_nested": "0"}`, never `0`: a non-string value is a `TypeError`, and nothing rewrites one for you.
 
-**The INSERT column list (ABI revision 5) is a keyword-only `columns` on the same calls** — `schema.row(fmt, raw, columns=["id", "e"])`, and the same argument on `Schema.rows` and `Schema.parse_block`. `None` or an empty sequence is the no-list behavior of every earlier revision; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored. The column list needs an artifact of revision 5 or later, and this binding loads only artifacts at its own `chtypes.ABI_REVISION` — any other is refused at load, naming both revisions.
+**`ctypes` releases the GIL for the whole of a foreign call**, so calls on compiled handles run in parallel across threads. The package takes no lock around a call; it keeps a close guard per handle and one setup guard.
+
+**The INSERT column list is a keyword-only `columns`** on `schema.row`, `schema.rows` and `schema.parse_block`: `schema.row(Format.JSON_EACH_ROW, body, columns=["id", "e"])`. `None` or an empty sequence is the no-list shape; a list makes the data supply exactly those columns, with a listed `EPHEMERAL` value read and in scope for the DEFAULTs that reference it but never stored.
+
+**Known gaps in 1.0** are listed, with workarounds, in [`docs/limitations.md`](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md#known-gaps-in-10).
 
 ## Tests
 
-`uv run pytest -q`. Tests that need an artifact **skip loudly by name** without a registry on the search path, and a suite that ran nothing fails. The fetch suite runs offline against the miniature releases in `tests/fixtures/fetch/` through `file://` sources and the test key.
+`uv run pytest -q`. Tests that need an artifact **skip loudly by name** without a registry on the search path, and a suite that ran nothing fails. The fetch conformance suite runs offline against the repository's `tests/fixtures/fetch-v1/` cases, served by a loopback registry the suite starts itself, under the fixture test key (`docs/guides/fetch-v1.md` §10).
 
 ## License
 

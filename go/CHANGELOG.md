@@ -6,11 +6,55 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+### Changed
+
+- The 0.x line is retracted (#431): `go.mod` declares `retract [v0.1.0, v0.5.2]`. Once this release is out, `go get` and `@latest` no longer select a 0.x version, and `go list -m -u` warns a module that still requires one. The versions stay downloadable, so an existing build that pins one keeps working. Use v1.
+
 ### Fixed
 
-- **The crash-guard refuse-list is now sourced identically to the other three bindings, and an artifact with neither source refuses rather than loading unguarded.** This binding read only `unsafe_families.txt` next to the library, so a directory missing that file silently called `chs_init` with an empty guard; `unsafe_families.txt` is still tried first, even when it is empty, but `manifest.json`'s own `unsafe_families` field is now the fallback when the file is absent, and present-but-empty wins in both places. A directory with neither source is refused, naming both, instead of loading with no refuse-list at all (`docs/reference/artifact.md` step 9).
-- **`fetch`/`ensure` now retry a transient HTTP 5xx, 408 or 429 from the artifacts host, and a connection-level failure (refused, reset, timed out, DNS), within the existing retry budget and schedule** (`docs/guides/fetch.md` §3a: 5 attempts, delays doubling from 4s) — previously only the publish-window symptoms (a signature or index/sums disagreement) were retried, so even a few-second host blip failed `CHTYPES_SOURCE_UNREACHABLE` at once. A `Retry-After` on a 503 or 429 is honored, in both the delta-seconds and HTTP-date forms, capped so it never makes the total wait exceed the existing budget — one that does not fit fails at once, naming the requested delay. A 404 or 410, and a tarball hash or size mismatch, are still decided on the first attempt, never retried (closes #365).
-- **A schema abandoned with an open filter or block is now reclaimed.** A `LoadedSchema` dropped without `Close()` while a `LoadedFilter` or `LoadedBlock` over it was still open leaked all of their C handles for the life of the process: each child points back at its schema, the schema tracked its children so it could free them first, and all three carried a `runtime.SetFinalizer`; Go does not collect a cycle that contains a finalizer. Measured against a 25.8 artifact: 0 of 100 such schemas, filters or blocks were freed after repeated GC; all 100 of each are now, each exactly once, children before their schema. The GC backstop is now `runtime.AddCleanup` over a separate native half that holds the handles, so the cycle stays collectable, and the schema's cleanup frees any child still open before the schema whichever cleanup runs first. A held filter or block still keeps its schema alive, and `Close()` is unchanged: idempotent, children first, and still the only deterministic release. The linked build's `CompiledSchema`, `Filter` and `Block` had the same cycle and take the same fix (closes #375).
+- An open that attempted a load and failed now unlocks the setup, whatever failed, while no library has completed load step 7 (#468). After `Setup(SetupOptions{Timezone: "Asia/Tokyo"})`, an open could fail before step 7: at the fetch, the signature check, an incompatible artifact (`CHTYPES_ARTIFACT_INCOMPATIBLE`) or a missing symbol. That left the setup locked, and a different `Setup` was a `*UsageError` until the process restarted. 1.0.2 handled only a failure in step 7 itself (#458). Now any failed attempt keeps the recorded setup but makes it replaceable. A plain retry with no new `Setup` runs under the recorded zone and defaults, never the empty setup. A different `Setup` is accepted and replaces the record, which is then locked again. This holds for `Registry.For`, `OpenUnverified` and `OpenLinked`. The caller's own misuse fails before any load is attempted and unlocks nothing: a refused version spelling, or `OpenUnverified(path, false)`. Two different `Setup` calls before any open is attempted are still a `*UsageError`, never a silent last-wins. Once a library has completed step 7, a different setup is still a `*UsageError`. No name or signature changes. All four bindings run the same cases, `tests/fixtures/abi-v1/setup-cases.json`, and the rule is `docs/reference/bindings-v1.md` section 6.
+
+## [1.0.2] — 2026-10-06
+
+### Changed
+
+- `Schema.Rows` decodes its result with far fewer allocations, so it scales across goroutines (#456). It reads the batch document in one streaming pass into typed values, with no generic tree and no per-row path string, and falls back to the strict generic reader for any document it will not judge itself (an unknown key, a duplicate key, a value of the wrong type), so every refusal and its message are unchanged. On a real 100-row document the decode went from 4,476 to 173 allocations at `doc_flags` 0 and from 56,822 to 2,641 at `doc_flags` 7. The decoded values are identical, and no exported name changes.
+- `Schema.Rows` makes far fewer allocations around the decode too (#456). Measured on a full call over a 100-row body with a filter, a four-key settings map and an export (the shape of the report), it went from 412 allocations and 75 KB per call to 76 and 45 KB, about 40% fewer bytes for the collector to clear. The batch document is copied out of the library into a pooled buffer instead of a fresh slice, the row decoders and the settings encoder are kept between calls, the per-row verdict, partition id and span pointers come from shared chunks, a list of spans is decoded one element at a time with no allocation each, and the call options are small named types instead of closures. Every returned value is still Go-owned and independent of those pools, and results are byte-for-byte what they were; no exported name changes.
+
+### Fixed
+
+- `Setup` now latches only once an image completes load step 7 (#458). A zone the library refuses, such as `Setup(SetupOptions{Timezone: "Not/AZone"})`, used to fix the process setup at the first open: every later open failed with ClickHouse's code 36, and a corrected `Setup` was a `*UsageError` until the process restarted. Now, if step 7 (`chs_initialize`, then `chs_set_defaults` when there are defaults) fails before any image has completed it, the setup record is cleared. That open still returns the library's own error, a corrected `Setup` is accepted, and the next open runs step 7 again with it, on the same image too: a failed step 7 is never remembered (`OpenUnverified` and `Registry.For` alike). Once an image has completed step 7, a different setup is still a `*UsageError`. No name or signature changes. All four bindings run the same case, `tests/fixtures/abi-v1/setup-cases.json`, and the rule is `docs/reference/bindings-v1.md` section 6.
+
+## [1.0.1] — 2026-10-04
+
+### Fixed
+
+- `go mod tidy` failed in every module that depends on this one (#454). Five retained 0.x files were excluded from the build by a custom build tag, but `go mod tidy` considers every build tag except `ignore`, so it resolved their imports, including a package 1.0.0 no longer ships, and left the consumer's `go.sum` incomplete. They now carry `//go:build ignore`, so a consumer's `go mod tidy` (and `go mod tidy -diff`) succeeds with no `-e`. Nothing in the built package changes.
+- The release verification now runs a consumer's `go mod tidy` with no `-e`, in every dry run and after every publish, so this cannot ship again.
+
+## [1.0.0] — 2026-10-04
+
+The Go binding's first v1 release, and a deliberate break from 0.x. The default branch switches to v1 shortly after release. The sections below are the entries written as each part landed; this is what they add up to.
+
+- **A new ABI.** The binding speaks the generated ABI v1 layer, identified by an ABI fingerprint in `include/chtypes.h` rather than a revision number, so every FFI declaration is generated from `spec/abi-v1/abi.json`, not written by hand. The ABI stays provisional until the maintainer confirms it.
+- **Fetch over OCI, with signed statements.** Libraries are fetched from an OCI registry and verified against a signed statement before they are loaded; the default trust is the release key only (`docs/guides/fetch-v1.md`).
+- **The public API is `docs/reference/bindings-v1.md`**, the same four-binding contract with each language's own spelling.
+- **The CLI** is `go/cmd/chtypes`, installed with `go install github.com/wave-rf/chtypes/go/cmd/chtypes@v1.0.0`: `fetch`, `verify`, `list` and `where`.
+- **The v0 surface is removed**; the list, and the reason for each removal, is `docs/reference/bindings-v1.md` section 7.
+- **Known gaps** are listed in [`docs/limitations.md`](../docs/limitations.md#known-gaps-in-10), and support for a line this release does not mention is "support unknown", never "unsupported".
+
+### Changed
+
+- **A `Value`'s optional raw bytes are a `*string`**, not `[]byte` (`Value.Value`, `Computed.Value`, `EngineCell.Value`): the byte type of `bindings-v1.md` section 3, nil where the document carries none.
+- **The v1 public API replaces v0.** `Setup`, `NewRegistry` (with `WithFetchOptions`, `WithAutoFetch`, `WithPreload`), `Registry.For`, `Library.CompileTable` and the `Schema`, `Filter` and `Block` objects, over the generated ABI layer and the v1 fetch layer. Results are 1:1 decodes of the library's documents, names and renderings are bytes, and the per-call zone is the `WithSessionTimezone` option. `chtypes.OpenLinked()` replaces the package-level linked API.
+
+### Removed
+
+- Everything v0 that existed only because of binding-side logic or the v0 loader: the transform classifier, the discovery reconstruction, the hand FFI tables and presence probes, the error-table parser, the denormal repair, the v0 registry and fetch modules, `SetDefaultTimezone`, `ErrInitConflict`, `ABIRevision`, and `ExitCode` (the exit status is the command's, from the generated table).
+
+### Added
+
+- **`go/cmd/chtypes`, the v1 artifact tool** over the fetch layer: `fetch <spelling>... | --all` (with `--platform`, `--lock`, `--frozen`, `--offline`), `verify`, `list` and `where`. Usage errors exit 2 and a failure exits with the status of its error code in `spec/fetch-v1/constants.json`.
 
 ## [0.5.2] — 2026-10-01
 

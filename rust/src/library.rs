@@ -1,722 +1,297 @@
-//! One loaded ClickHouse build.
+//! A loaded library: one image, opened once per process.
+//!
+//! [`Library`] is shared as `Arc<Library>` and is `Send + Sync`: the library
+//! makes every call on a compiled handle safe to run concurrently with any
+//! other call, so the public layer takes no lock around a call. A library is
+//! never unloaded (there is no `dlclose`, and nothing here calls
+//! `chs_shutdown`), so dropping the last `Arc` releases only Rust memory.
+//!
+//! The loader keys an image on its resolved path plus `dev:ino`, so two
+//! registries, two spellings or a hardlink of one artifact share one image and
+//! one `Library`. An already-open image is still checked against every new
+//! signed statement a request brings (loader steps 1, 4 and 5): a mismatch
+//! refuses that request, and the image stays open for the requests it did
+//! match.
 
+use std::collections::{BTreeMap, HashSet};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::compile::{CompileMode, CompileRequest};
-use crate::discover::{DiscoveredColumn, reconstruct_ddl_with};
+use serde_json::{Map, Value as Json};
+
+use crate::abi1::calls_gen::SchemaHandle;
+use crate::abi1::decls::Api;
+use crate::abi1::errmap_gen::UNVERIFIED_ENV;
+use crate::abi1::loader::{self, LoadError, LoadInput, Refusal};
+use crate::decode;
 use crate::error::{Error, Result};
-use crate::error_codes::{ErrorCodeTable, cached};
-use crate::ffi::{Api, cstring};
-use crate::schema::settings_json;
+use crate::ocifetch::ensure::Resolved;
+use crate::raw::RawText;
+use crate::result::{BuildInfo, Discovery, ErrorCodeTable};
+use crate::schema::{CompileOptions, Schema, settings_object};
+use crate::setup;
 
-/// The server timezone assumed for bare `DateTime` / `DateTime64` columns.
-///
-/// A binding must default this to `UTC` — what a stock ClickHouse container uses
-/// — and must **not** read the host's `TZ`, or the host's environment leaks into
-/// results. [`Library::load`] takes it explicitly so the default is visible.
-pub const DEFAULT_TIMEZONE: &str = "UTC";
-
-/// What a column's DEFAULT clause is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DefaultKind {
-    /// No DEFAULT clause.
-    None,
-    /// A `DEFAULT` expression: applied when the row omits the column, and
-    /// overridable by the row.
-    Default,
-    /// Durable, and not part of `SELECT *`.
-    Materialized,
-    /// Computed at read time; never presented as a stored value.
-    Alias,
-    /// No value at all; visible only through the DEFAULT columns referencing it.
-    Ephemeral,
-    /// A kind added after this crate was written. The ABI grows additively, so an
-    /// unknown spelling is passed through rather than rejected.
-    Other(String),
-}
-
-impl DefaultKind {
-    fn parse(s: &str) -> DefaultKind {
-        match s {
-            "" => DefaultKind::None,
-            "DEFAULT" => DefaultKind::Default,
-            "MATERIALIZED" => DefaultKind::Materialized,
-            "ALIAS" => DefaultKind::Alias,
-            "EPHEMERAL" => DefaultKind::Ephemeral,
-            other => DefaultKind::Other(other.to_string()),
-        }
-    }
-}
-
-/// One column of a compiled schema, as this build canonicalized it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Column {
-    /// The column name.
-    pub name: String,
-    /// The canonical type in **ClickHouse's own spelling** — `Decimal(18, 4)`,
-    /// `Enum8('a' = 1, 'b' = 2)`, `Map(String, Array(UInt8))`, with a space after
-    /// each comma. Pass it through verbatim; a binding must not normalize
-    /// whitespace of its own.
-    pub ty: String,
-    /// Which clause the column carries, if any.
-    pub default_kind: DefaultKind,
-    /// The DEFAULT/MATERIALIZED/ALIAS expression as ClickHouse canonicalized it,
-    /// empty when there is none.
-    pub default_expr: String,
-    /// True when the DEFAULT is a plain literal applicable without the
-    /// expression interpreter.
-    pub default_is_literal: bool,
-}
-
-/// One `dlopen`'d vendored ClickHouse build.
-///
-/// The library names itself: [`Library::version`] comes from
-/// `chs_clickhouse_version()`, never from the directory or file name.
-///
-/// Thread-safety follows the reference implementation's `dlopen` path and is
-/// deliberately more conservative than the ABI requires: one mutex per loaded
-/// IMAGE guards every call, including `chs_schema_compile` and `chs_free`. The
-/// header allows concurrent calls on *distinct* handles; per-handle parallelism
-/// inside one version is a change a binding must prove with the rigs rather than
-/// by reasoning, so this crate does not take it.
-///
-/// Per loaded IMAGE, not per `Library` value, and the difference is
-/// load-bearing (2026-08-26). `dlopen` refcounts one mapping per file, so two
-/// `Registry` instances over one directory produce two `Library` values that
-/// share ONE set of the wrapper's process-globals — the same reason `chs_init`
-/// is deduplicated by path just below. `set_default_settings` REPLACES the
-/// seeded settings list while the row path reads it by reference
-/// (the C ABI contract §Thread-safety: it "MUST be serialized against all other
-/// calls"), and two `Mutex<()>` values, one per `Library`, would have excluded
-/// nothing at all. The mutex is therefore interned on the image's identity
-/// (`image_identity`), exactly as `INITED` is, from the same single stat;
-/// `docs/reference/bindings.md` §Concurrency states the rule.
+/// One loaded library image.
 pub struct Library {
-    version: String,
-    minor: String,
+    pub(crate) api: Arc<Api>,
+    build_info: BuildInfo,
+    build_info_map: Map<String, Json>,
     path: PathBuf,
-    api: Api,
-    /// Serializes every call into this library. See the type docs.
-    lock: Arc<Mutex<()>>,
-    /// This library's own error-code table, once built (see
-    /// [`Library::error_codes`]). Per `Library` and never shared: the table is
-    /// a property of the build.
+    resolved: Option<Resolved>,
     error_codes: OnceLock<ErrorCodeTable>,
 }
-
-/// An artifact image's identity: the `(st_dev, st_ino)` of its FILE.
-///
-/// Every per-image table in this crate — `INITED` and the mutex below — is
-/// keyed on it, because it is what `dlopen` itself deduplicates on: a
-/// symlink, a second spelling and a HARDLINK of one file all stat to one key,
-/// and `dlopen` hands each the one image already mapped. A canonicalized path
-/// cannot see a hardlink (a different path to the same inode), and keying on
-/// one let a hardlink re-run `chs_init` on a live image and move its zone
-/// (issue #355).
-type ImageKey = (u64, u64);
-
-/// Every spelling an image has been opened under — as given and
-/// canonicalized — to its key. The loader matches an already-loaded image by
-/// the path it was opened under before it looks at the file at all, so once
-/// a path is open, a NEW file renamed over it (a fresh inode) is still
-/// answered with the OLD image; keying on the inode alone would call that
-/// file new and re-run `chs_init` on the live image. A spelling already open
-/// is therefore the image it was opened as, whatever is at that path now.
-static IMAGE_PATHS: Mutex<std::collections::BTreeMap<PathBuf, ImageKey>> =
-    Mutex::new(std::collections::BTreeMap::new());
-
-fn lock_ignoring_poison<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    match m.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    }
-}
-
-/// The key of the image `dlopen` will hand back for `path`, and the spellings
-/// to record once it is open: the image already opened under this spelling,
-/// as given or canonicalized, if there is one; else the file a stat of
-/// `path` names, following symlinks.
-///
-/// A path that cannot be stat'ed or canonicalized is [`Error::LibraryRead`],
-/// naming it — never keyed on its spelling instead, because a spelling cannot
-/// tell a hardlink of a loaded image from a new file, and guessing "new" is
-/// exactly the silent re-initialization the key exists to stop.
-fn image_identity(path: &Path) -> Result<(ImageKey, [PathBuf; 2])> {
-    use std::os::unix::fs::MetadataExt;
-    let unreadable = |source| Error::LibraryRead {
-        path: path.to_path_buf(),
-        source,
-    };
-    let meta = std::fs::metadata(path).map_err(unreadable)?;
-    let resolved = std::fs::canonicalize(path).map_err(unreadable)?;
-    let spellings = [path.to_path_buf(), resolved];
-    let known = lock_ignoring_poison(&IMAGE_PATHS);
-    if let Some(key) = spellings.iter().find_map(|s| known.get(s)) {
-        return Ok((*key, spellings));
-    }
-    Ok(((meta.dev(), meta.ino()), spellings))
-}
-
-/// Record that `key`'s image is open under each of `spellings`.
-fn remember_image_paths(key: ImageKey, spellings: [PathBuf; 2]) {
-    let mut known = lock_ignoring_poison(&IMAGE_PATHS);
-    for s in spellings {
-        known.insert(s, key);
-    }
-}
-
-/// The one mutex per loaded image, keyed the way `chs_init` is keyed. See
-/// `Library`'s docs for why this cannot live in the `Library` value.
-fn image_lock(key: ImageKey) -> Arc<Mutex<()>> {
-    static LOCKS: Mutex<std::collections::BTreeMap<ImageKey, Arc<Mutex<()>>>> =
-        Mutex::new(std::collections::BTreeMap::new());
-    Arc::clone(
-        lock_ignoring_poison(&LOCKS)
-            .entry(key)
-            .or_insert_with(|| Arc::new(Mutex::new(()))),
-    )
-}
-
-/// The refuse-list to pass to `chs_init` for the artifact at `path`
-/// (docs/reference/artifact.md step 9): `unsafe_families.txt` beside it when
-/// that file is present, even empty; otherwise `manifest.json`'s own
-/// `unsafe_families` field when IT is present, even empty. Neither source
-/// present is [`Error::MissingUnsafeFamilies`] rather than a silent empty
-/// guard — `chs_init` must never run with an empty refuse-list by default.
-fn resolve_unsafe_families(path: &Path) -> Result<String> {
-    let dir = path.parent().unwrap_or(Path::new("."));
-    if let Ok(s) = std::fs::read_to_string(dir.join("unsafe_families.txt")) {
-        return Ok(s.trim().to_string());
-    }
-    if let Ok(text) = std::fs::read_to_string(dir.join("manifest.json")) {
-        if let Ok(m) = serde_json::from_str::<crate::registry::Manifest>(&text) {
-            if let Some(families) = m.unsafe_families {
-                return Ok(families.trim().to_string());
-            }
-        }
-    }
-    Err(Error::MissingUnsafeFamilies {
-        path: dir.to_path_buf(),
-    })
-}
-
-impl Library {
-    /// `dlopen` one artifact, ask it its own version, and `chs_init` it exactly
-    /// once with `timezone` and the contents of the artifact's own
-    /// `unsafe_families.txt`, falling back to `manifest.json`'s own
-    /// `unsafe_families` field when that file is absent.
-    ///
-    /// The refuse-list is generated at build time by probing the build's own
-    /// registry and must never be hard-coded. A PRESENT but empty file or
-    /// field means an empty list — every artifact in the current matrix ships
-    /// one, so treating "empty" as "missing, bail out" would be wrong. Neither
-    /// source present IS "missing, bail out": see [`Error::MissingUnsafeFamilies`].
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Load`] — `dlopen` failed, or the artifact reports a `chs_*`
-    ///   ABI revision different from this crate's [`crate::ABI_REVISION`]
-    ///   (both nonzero ⇒ refuse; `0` means the artifact predates the probe
-    ///   and loads with per-symbol degradation).
-    /// * [`Error::NotAnArtifact`] — the library loaded but lacks one of the
-    ///   four mandatory `chs_*` symbols.
-    /// * [`Error::MissingUnsafeFamilies`] — neither `unsafe_families.txt` nor
-    ///   `manifest.json`'s `unsafe_families` field is present next to the
-    ///   library; refused rather than loaded with an empty guard.
-    /// * [`Error::Init`] — `chs_init` returned nonzero; the one reachable
-    ///   cause is an unknown `timezone`, and the message names it.
-    /// * [`Error::InitConflict`] — this artifact image is already initialized
-    ///   with a different timezone (one image per FILE — a hardlink or
-    ///   symlink to a loaded artifact is the same image; `chs_init` runs at
-    ///   most once).
-    /// * [`Error::LibraryRead`] — `path` cannot be stat'ed, so which image it
-    ///   names cannot be known; refused before anything is `dlopen`ed.
-    /// * [`Error::Nul`] — `timezone` or the refuse-list contained an interior
-    ///   NUL byte.
-    pub fn load(path: impl AsRef<Path>, timezone: &str) -> Result<Library> {
-        let path = path.as_ref();
-        // Which image this is, from ONE stat, before anything is dlopen'd:
-        // the same key interns the mutex and guards `chs_init` below, so a
-        // hardlink can never get two mutexes over one image.
-        let (key, spellings) = image_identity(path)?;
-        let api = Api::open(path)?;
-
-        // The library names itself; nothing is inferred from the path.
-        let version = api.clickhouse_version();
-        let minor = minor_of(&version);
-
-        let families = resolve_unsafe_families(path)?;
-
-        // chs_init AT MOST ONCE per artifact image. dlopen refcounts one image
-        // per file, so a second Library over the same artifact — or over a
-        // hardlink or symlink to it — shares its C globals: re-running
-        // chs_init would rebuild the refuse-list and re-set DateLUT under the
-        // first instance's live readers (the same hazard the Go binding's
-        // loadedLibs map and the TS binding's `loaded` map guard). Keyed on
-        // the image's identity so no spelling or link of one file can slip
-        // past; a second init with a DIFFERENT timezone is refused rather
-        // than silently re-timezoning the survivor's live libraries.
-        static INITED: Mutex<std::collections::BTreeMap<ImageKey, String>> =
-            Mutex::new(std::collections::BTreeMap::new());
-        {
-            let mut inited = INITED.lock().expect("init registry poisoned");
-            match inited.get(&key) {
-                Some(prev_tz) if prev_tz == timezone => {} // already initialized, same config
-                Some(prev_tz) => {
-                    return Err(Error::InitConflict {
-                        path: path.to_path_buf(),
-                        have: prev_tz.clone(),
-                        want: timezone.to_string(),
-                    });
-                }
-                None => {
-                    let tz = cstring(timezone, "timezone")?;
-                    let fams = cstring(&families, "unsafe_families")?;
-                    let (rc, message) = api.init(&tz, &fams);
-                    if rc != 0 {
-                        return Err(Error::Init {
-                            path: path.to_path_buf(),
-                            rc,
-                            message,
-                        });
-                    }
-                    inited.insert(key, timezone.to_string());
-                }
-            }
-            remember_image_paths(key, spellings);
-        }
-
-        Ok(Library {
-            version,
-            minor,
-            path: path.to_path_buf(),
-            api,
-            lock: image_lock(key),
-            error_codes: OnceLock::new(),
-        })
-    }
-
-    /// The exact ClickHouse release, e.g. `25.8.28.1-lts`, as the library
-    /// reports it.
-    pub fn version(&self) -> &str {
-        &self.version
-    }
-
-    /// The `chs_*` ABI revision this ARTIFACT was built from, or `0` when it
-    /// predates `chs_abi_revision`.
-    ///
-    /// A `Library` that exists reports either [`crate::ABI_REVISION`] or `0`:
-    /// a different nonzero revision is refused at load time, because it is a
-    /// positive statement that this crate's declarations do not describe the
-    /// artifact.
-    pub fn abi_revision(&self) -> i32 {
-        self.api.abi_revision()
-    }
-
-    /// The minor line, e.g. `25.8` — the first two dot-separated components of
-    /// [`Library::version`]. Note `25.10` is a *later* line than `25.8`: string
-    /// comparison of minor lines is meaningless and must not be used for
-    /// ordering.
-    pub fn minor(&self) -> &str {
-        &self.minor
-    }
-
-    /// The shared library's path.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Parse and canonicalize one type expression.
-    ///
-    /// Canonicalization is not a spelling normalizer: `DECIMAL(18,4)` and
-    /// `Decimal64(4)` both become `Decimal(18, 4)`, `BIGINT` becomes `Int64`,
-    /// `Variant(UInt8, String)` becomes `Variant(String, UInt8)` with members
-    /// sorted, and `Int8(3)` drops the surplus parameter rather than failing.
-    ///
-    /// It is also not sufficient on its own: `x Int64 DEFAULT NULL` compiles to
-    /// `Nullable(Int64)`, which only [`Library::compile`] can see.
-    ///
-    /// Returns the canonical spelling in **ClickHouse's own text**, verbatim —
-    /// `Decimal(18, 4)` with the space after the comma. String-compare against
-    /// it exactly; never re-normalize whitespace.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Schema`] — ClickHouse rejected the expression, with its own
-    ///   code and message (`50` `Unknown data type family: NotAType`).
-    /// * [`Error::Unsupported`] — this build declines to answer for the
-    ///   expression ([`crate::CODE_UNSUPPORTED`]); not a rejection.
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_validate_type`.
-    /// * [`Error::Nul`] — the expression contained an interior NUL byte.
-    pub fn validate_type(&self, type_expr: &str) -> Result<String> {
-        let expr = cstring(type_expr, "type expression")?;
-        let _guard = self.lock();
-        self.api.validate_type(&expr)
-    }
-
-    /// Compile a ClickHouse **column-declaration list** — not a `CREATE TABLE`:
-    /// `"a UInt8, b Nullable(String) DEFAULT 'x', c DateTime MATERIALIZED now()"`.
-    /// It is parsed by ClickHouse's own `ParserColumnDeclarationList`, so DEFAULT
-    /// expressions are validated as real SQL.
-    ///
-    /// Returns a [`CompileRequest`] builder. The common case needs only the
-    /// terminal call:
-    ///
-    /// ```no_run
-    /// # use chtypes::Registry;
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let lib = Registry::from_env_or_default()?.for_version("25.8")?;
-    /// let schema = lib.compile("a UInt8, b String").compile()?;
-    /// # Ok(()) }
-    /// ```
-    ///
-    /// and a DECLARED settings profile — the settings the deployment's server
-    /// runs, fixed into the handle exactly as a real `CREATE TABLE` fixes them
-    /// into the table (the C ABI contract §Compile-time vs per-call settings) —
-    /// reads as a sentence:
-    ///
-    /// ```no_run
-    /// # use chtypes::{CompileMode, Registry};
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let lib = Registry::from_env_or_default()?.for_version("25.8")?;
-    /// let schema = lib.compile("n Nested(a Int64, b String)")
-    ///     .settings([("flatten_nested", "0")])
-    ///     .mode(CompileMode::Declared)
-    ///     .compile()?;
-    /// # Ok(()) }
-    /// ```
-    ///
-    /// [`CompileMode::Declared`] (the default) is the only defined mode:
-    /// declared names take the caller's values, undeclared settings keep the
-    /// library's permissive compile base. An unknown setting name — the
-    /// `chtypes_*` per-call keys included — fails with the server's own code
-    /// `115` ([`crate::Error::Schema`], code visible). Values cross as
-    /// strings, as everywhere on this boundary.
-    ///
-    /// What a settings profile changes at compile, this revision:
-    /// `flatten_nested` — at `1` (the default) a `Nested(a, b)` column
-    /// compiles to its flattened `n.a`/`n.b` Array columns; at `0` it stays
-    /// one column `n` of type `Nested(...)`, and every downstream shape
-    /// (column introspection, JSONEachRow name lookup, positional arity, the
-    /// RowBinary wire) follows the compiled shape. Per-call settings still
-    /// govern row parsing, and only row parsing; a handle's compile profile
-    /// is immutable for the handle's life.
-    ///
-    /// Column-level `TTL` clauses belong in the DDL string; [`crate::Schema::set_ttl`]
-    /// is only for the table-level rows TTL.
-    pub fn compile(self: &Arc<Self>, columns_sql: &str) -> CompileRequest<'_> {
-        CompileRequest {
-            lib: self,
-            columns_sql: columns_sql.to_string(),
-            settings: Vec::new(),
-            mode: CompileMode::default(),
-        }
-    }
-
-    /// Whether this artifact exports the settings-aware compile
-    /// (`chs_schema_compile`, consolidated 2026-08-24). Always `true`: the
-    /// entry point is one of the four mandatory symbols, so any artifact
-    /// this crate loaded at all exports it. Kept as a probe because the
-    /// conformance driver's `caps.compile_settings` handshake keys on it, and
-    /// because a future `Registry` loading a third-party-built artifact
-    /// should still ask rather than assume.
-    pub fn has_compile_settings(&self) -> bool {
-        self.api.has_compile_settings()
-    }
-
-    /// Seed the settings every later call starts from, for the server-level type
-    /// gates a gateway knows once — `allow_suspicious_low_cardinality_types`,
-    /// `allow_experimental_json_type` and friends. Per-call settings still win.
-    ///
-    /// Prefer [`Library::compile`]'s `.settings(...)` for a gate that belongs
-    /// to a particular tenant's table: a gate declared in the compile profile
-    /// binds where a real server binds it — once, at CREATE — and then
-    /// outranks the per-call map for that handle (measured on live 25.10.7.6
-    /// and 26.7.3.19; the C ABI contract, "Server-level type gates"). This
-    /// process-wide seed stays the right channel only for gateway-uniform
-    /// policy.
-    ///
-    /// The admission budgets (`chtypes_default_eval_memory_bytes`,
-    /// `chtypes_default_eval_wall_nanos`) are process-wide and can **only** be
-    /// set here; admission deliberately takes no per-call settings.
-    ///
-    /// Values cross as strings, as everywhere on this boundary — see
-    /// [`crate::SETTING_NOW_EPOCH_NANOS`].
-    ///
-    /// Thread-safety: the ABI requires this call be serialized against every
-    /// other call on the same loaded image (`docs/reference/bindings.md` §Concurrency,
-    /// rule 3 — the row path reads the seeded settings by reference). This
-    /// crate satisfies that with the per-image mutex every call takes, so no
-    /// caller-side exclusion is needed.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Schema`] — the payload was refused **wholesale** and nothing
-    ///   was committed. An unknown setting name is the server's own code `115`
-    ///   with its did-you-mean hint; unrecognized `chtypes_*` names take the
-    ///   same `115`.
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_set_default_settings`.
-    /// * [`Error::Nul`] — a name or value contained an interior NUL byte.
-    pub fn set_default_settings<K: AsRef<str>, V: AsRef<str>>(
-        &self,
-        settings: &[(K, V)],
-    ) -> Result<()> {
-        let json = settings_json(settings)?;
-        let _guard = self.lock();
-        match self.api.set_default_settings(&json) {
-            None => Err(Error::PredatesFeature {
-                feature: "chs_set_default_settings",
-            }),
-            Some((0, _)) => Ok(()),
-            Some((rc, message)) => Err(Error::Schema {
-                code: rc,
-                message,
-                column: None,
-            }),
-        }
-    }
-
-    /// Diagnostic: the widened reference type this build would use for a type
-    /// expression (`UInt8` -> `Int256`, `UUID` -> `String`). `None` for a type
-    /// with no wider type to compare against (`String`, `Float64`).
-    ///
-    /// Not needed to function — the reference parse already happens inside
-    /// `chs_row` and is reported per column — but it makes a transformation
-    /// finding explainable.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_reference_type`.
-    /// * [`Error::Nul`] — the expression contained an interior NUL byte.
-    pub fn reference_type(&self, type_expr: &str) -> Result<Option<String>> {
-        let expr = cstring(type_expr, "type expression")?;
-        let _guard = self.lock();
-        self.api.reference_type(&expr)
-    }
-
-    /// Spell `name` as a back-quoted identifier — ALWAYS quoted, which is the
-    /// safe default and the one to reach for without thinking
-    /// (`chs_quote_identifier`, the vendored `backQuote`).
-    ///
-    /// The bytes are this library's own: an embedded back-quote comes back in
-    /// the spelling the server's formatter prints, not in a spelling of ours.
-    /// Reach for [`Library::quote_identifier_if_needed`] only when the bare
-    /// spelling matters to something downstream.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_quote_identifier`.
-    pub fn quote_identifier(&self, name: &str) -> Result<String> {
-        let _guard = self.lock();
-        self.api.quote_identifier(name.as_bytes())
-    }
-
-    /// Spell `name` bare where THIS library's ClickHouse says a bare spelling
-    /// is legal, and back-quote it otherwise
-    /// (`chs_quote_identifier_if_needed`, the vendored `backQuoteIfNeed`).
-    ///
-    /// Which names it leaves bare is a property of the vendored build, not of
-    /// this crate, and it CHANGES between builds — ask the library you will
-    /// compile against rather than caching an answer across versions.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_quote_identifier_if_needed`.
-    pub fn quote_identifier_if_needed(&self, name: &str) -> Result<String> {
-        let _guard = self.lock();
-        self.api.quote_identifier_if_needed(name.as_bytes())
-    }
-
-    /// Spell `text` as a ClickHouse string literal, quotes and escapes
-    /// included (`chs_quote_literal`, the vendored `quoteString`) — the call
-    /// to reach for when a value is spliced into DDL, e.g. a DEFAULT
-    /// expression.
-    ///
-    /// The input is counted, so a value carrying a NUL byte is quoted
-    /// correctly; the answer is escaped and therefore NUL-free.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_quote_literal`.
-    pub fn quote_literal(&self, text: &str) -> Result<String> {
-        let _guard = self.lock();
-        self.api.quote_literal(text.as_bytes())
-    }
-
-    /// Turn [`crate::QUERY_TABLE_COLUMNS`]' rows back into the
-    /// column-declaration list [`Library::compile`] takes.
-    ///
-    /// It hangs off a `Library` because the one thing it spells — the column
-    /// NAME — is spelled by this library's own
-    /// [`Library::quote_identifier`]. Reconstruction is a spelling exercise,
-    /// not a semantic one: types and expressions are the server's own text,
-    /// passed through verbatim, and this library's own compile is the judge
-    /// of the result.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Discovery`] — an inconsistent column list, or no columns.
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_quote_identifier`.
-    pub fn reconstruct_ddl(&self, cols: &[DiscoveredColumn]) -> Result<String> {
-        reconstruct_ddl_with(cols, |name| self.quote_identifier(name))
-    }
-
-    /// Every type family in this build's runtime registry, newline-separated.
-    /// This is the answer to "does this build track upstream type families
-    /// without a table to maintain?" — it does.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_registered_families`.
-    pub fn registered_families(&self) -> Result<Vec<String>> {
-        let _guard = self.lock();
-        Ok(self
-            .api
-            .registered_families()?
-            .lines()
-            .filter(|l| !l.is_empty())
-            .map(str::to_string)
-            .collect())
-    }
-
-    /// THIS library's own error-code table (`chs_error_codes`, revision 6):
-    /// every code the vendored ClickHouse names, with the name it gives it —
-    /// the table the server's `system.errors` enumerates and the name it prints
-    /// after "Code: N." in an exception message.
-    ///
-    /// The table belongs to the build, not to this crate: codes join and leave
-    /// between lines, and one number can name different errors on two lines
-    /// (903 differs between 25.8 and 26.2). Ask the library whose line you are
-    /// answering for; there is no crate-level table.
-    ///
-    /// Built on the first call and kept for this library's life — the answer
-    /// never changes for a loaded library. Only a table that was actually built
-    /// is kept.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_error_codes`.
-    /// * [`Error::NoDocument`] — the library could not build the document (a
-    ///   guarded exception); nothing was cached, and the next call asks again.
-    /// * [`Error::BadDocument`] — the document did not parse.
-    pub fn error_codes(&self) -> Result<&ErrorCodeTable> {
-        cached(&self.error_codes, || {
-            let _guard = self.lock();
-            self.api.error_codes()
-        })
-    }
-
-    /// TSV audit of every registered function's volatility flags, one per line:
-    /// `name \t deterministic \t deterministic_in_query \t server_constant \t
-    /// stateful \t resolver_error_code`. ClickHouse's own answers off this
-    /// build's own registry.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::PredatesFeature`] — the artifact does not export
-    ///   `chs_function_flags`.
-    pub fn function_flags(&self) -> Result<String> {
-        let _guard = self.lock();
-        self.api.function_flags()
-    }
-
-    /// Join the DEFAULT evaluator's background threads.
-    ///
-    /// `chs_init` registers this with `atexit`, so an ordinary process needs no
-    /// call. Call it when the host controls its own teardown order, or from a
-    /// test that must not depend on `atexit`. Idempotent.
-    pub fn shutdown(&self) {
-        let _guard = self.lock();
-        self.api.shutdown();
-    }
-
-    pub(crate) fn api(&self) -> &Api {
-        &self.api
-    }
-
-    /// The per-library lock every call takes. A poisoned mutex cannot leave the
-    /// native library in a bad state — every C entry point is a pure function of
-    /// (build, schema text, row bytes, settings, clock instant) with no
-    /// cross-call state — so the guard is recovered rather than propagated.
-    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
-        match self.lock.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        }
-    }
-}
-
-// Library deliberately has NO Drop that calls `chs_shutdown`.
-//
-// It used to (2026-08-17, briefly): at the time, exiting via the atexit path
-// alone aborted once more than one artifact had enumerated its function
-// registry. That was re-diagnosed the same day as a 26.7-only wrapper defect
-// and fixed IN THE ARTIFACT (chs_init now primes the thread-teardown statics
-// before registering its atexit handler); with current artifacts, atexit-only
-// teardown across all six loaded versions exits 0 — measured.
-//
-// Keeping the Drop would have been worse than useless: `dlopen` refcounts one
-// image per path, so two `Library`/`Registry` instances over the same artifact
-// share process-global C state — dropping the first would have run
-// `Context::shutdown()` under the survivor, which then evaluates DEFAULTs
-// against a shut-down context. The Go and TS bindings never call
-// `chs_shutdown` implicitly for the same reason. A host that controls its own
-// teardown (or intends to `dlclose`) calls [`Library::shutdown`] /
-// [`Registry::shutdown`] explicitly, exactly as the C header prescribes.
-//
-// The shared library itself is never `dlclose`d — see `ffi`'s module docs.
 
 impl std::fmt::Debug for Library {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Library")
-            .field("version", &self.version)
-            .field("minor", &self.minor)
+            .field("version", &self.build_info.clickhouse_version)
             .field("path", &self.path)
             .finish()
     }
 }
 
-/// The introspection group's raw columns, mapped into the public [`Column`]
-/// shape. `None` (an artifact predating the group) is an empty list.
-pub(crate) fn columns_of(raw: Option<Vec<crate::ffi::RawColumn>>) -> Vec<Column> {
-    raw.unwrap_or_default()
-        .into_iter()
-        .map(|c| Column {
-            name: c.name,
-            ty: c.ty,
-            default_kind: DefaultKind::parse(&c.default_kind),
-            default_expr: c.default_expr,
-            default_is_literal: c.default_is_literal,
+struct Image {
+    key: (u64, u64),
+    library: Arc<Library>,
+}
+
+/// Every image this process has opened. Held across a load, so two threads
+/// asking for one file load it once.
+static IMAGES: Mutex<Vec<Image>> = Mutex::new(Vec::new());
+
+/// Paths already warned about by an unverified open.
+static WARNED: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    // A poisoned mutex here only means another thread panicked while holding
+    // it; the data (a list of opened images) is still a valid list.
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Settle an open that attempted a load and failed, whatever failed
+/// (`crate::setup`'s rule): under the image list's lock, so the unlock never
+/// lands between another open's commit and its latch. `began` is
+/// `setup::generation()` read when the attempt began.
+pub(crate) fn settle_failed_open(began: u64) {
+    let _images = lock(&IMAGES);
+    setup::unlock_after_failed_open(began);
+}
+
+/// Open the image at `path`, or return the one this process already opened.
+/// `predicate` is the fetch layer's verified statement, verbatim; `None` is an
+/// unverified open.
+pub(crate) fn open_image(
+    path: &Path,
+    predicate: Option<&Json>,
+    resolved: Option<Resolved>,
+) -> Result<Arc<Library>> {
+    let refusal = |reason: &str, detail: String| {
+        Error::from_refusal(Refusal {
+            reason: reason.to_string(),
+            path: path.to_path_buf(),
+            want: None,
+            got: None,
+            detail: Some(detail),
         })
-        .collect()
-}
+    };
+    let canonical = std::fs::canonicalize(path).map_err(|e| refusal("dlopen", e.to_string()))?;
+    let meta = std::fs::metadata(&canonical).map_err(|e| refusal("dlopen", e.to_string()))?;
+    let key = (meta.dev(), meta.ino());
 
-/// The minor line of a reported version: the first two dot-separated components.
-pub(crate) fn minor_of(version: &str) -> String {
-    let mut it = version.splitn(3, '.');
-    match (it.next(), it.next()) {
-        (Some(a), Some(b)) => format!("{a}.{b}"),
-        _ => version.to_string(),
+    let mut images = lock(&IMAGES);
+    if let Some(image) = images.iter().find(|i| i.key == key) {
+        if let Some(predicate) = predicate {
+            loader::recheck(&image.library.build_info_map, predicate, &canonical)
+                .map_err(Error::from_refusal)?;
+        }
+        return Ok(Arc::clone(&image.library));
     }
+
+    // The image list's lock is held from the commit to the latch, so an image
+    // latches the record it loaded under, and `setup` cannot change that record
+    // in between (it refuses a different setup while one is recorded). A failed
+    // load is never pushed, so the next open runs every step again; the open
+    // that called this settles a failure with `settle_failed_open`, whatever
+    // failed.
+    let setup = setup::commit();
+    let loaded = loader::load(LoadInput {
+        library_path: &canonical,
+        predicate,
+        timezone: &setup.timezone,
+        defaults: setup.defaults.as_deref(),
+    })
+    .map_err(|e| match e {
+        LoadError::Refused(r) => Error::from_refusal(r),
+        LoadError::Call(c) => Error::from_call(c),
+    })?;
+    setup::latch();
+    let build_info = decode::build_info(&loaded.build_info, &loaded.build_info_raw)
+        .map_err(|detail| refusal("build_info_malformed", detail))?;
+    let library = Arc::new(Library {
+        api: loaded.api,
+        build_info,
+        build_info_map: loaded.build_info,
+        path: canonical,
+        resolved,
+        error_codes: OnceLock::new(),
+    });
+    images.push(Image {
+        key,
+        library: Arc::clone(&library),
+    });
+    Ok(library)
 }
 
-/// `(major, minor)` for ordering minor lines numerically. String order would put
-/// `25.10` before `25.3`, which is why the spec forbids it.
-pub(crate) fn minor_order(minor: &str) -> (u64, u64) {
-    let mut it = minor.split('.');
-    let major = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-    let line = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-    (major, line)
+impl Library {
+    /// Open a local build without a signed statement: for the artifact
+    /// producer's own suites over an unpublished library.
+    ///
+    /// It refuses with [`Error::Usage`] unless `allow` is true **and**
+    /// `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1` is set, warns once per path on
+    /// standard error, and skips loader steps 1 and 5, because there is no
+    /// signed statement. It runs step 7 under the process setup like any open.
+    /// It is not reachable through a [`crate::Registry`], and the library it
+    /// returns has no [`Library::resolved`].
+    pub fn open_unverified(path: impl AsRef<Path>, allow: bool) -> Result<Arc<Library>> {
+        let path = path.as_ref();
+        // The caller's two opt-ins are checked before anything is attempted:
+        // misuse, which unlocks nothing.
+        let env_on = std::env::var(UNVERIFIED_ENV).is_ok_and(|v| v == "1");
+        if !(allow && env_on) {
+            return Err(Error::usage(format!(
+                "an unverified open needs both opt-ins: the caller's `allow` (was {allow}) and {UNVERIFIED_ENV}=1 (was {})",
+                if env_on { "set" } else { "not set" }
+            )));
+        }
+        // Like any open: a failed attempt unlocks the setup record while no
+        // image has completed load step 7, whatever failed.
+        let began = setup::generation();
+        let opened = Self::open_unverified_once(path);
+        if opened.is_err() {
+            settle_failed_open(began);
+        }
+        opened
+    }
+
+    fn open_unverified_once(path: &Path) -> Result<Arc<Library>> {
+        {
+            let mut warned = lock(&WARNED);
+            if warned
+                .get_or_insert_with(HashSet::new)
+                .insert(path.to_path_buf())
+            {
+                eprintln!(
+                    "chtypes: opening {} WITHOUT a signed statement (an unverified local build)",
+                    path.display()
+                );
+            }
+        }
+        open_image(path, None, None)
+    }
+
+    /// What this library is, from `chs_build_info`, read once at load.
+    pub fn build_info(&self) -> &BuildInfo {
+        &self.build_info
+    }
+
+    /// The ClickHouse version (`build_info`'s `clickhouse_version`, read rather
+    /// than derived): four parts, no channel.
+    pub fn version(&self) -> &str {
+        &self.build_info.clickhouse_version
+    }
+
+    /// The minor line (`build_info`'s `clickhouse_minor`).
+    pub fn minor(&self) -> &str {
+        &self.build_info.clickhouse_minor
+    }
+
+    /// The canonical path the image was loaded from.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The fetch record this image was first opened by; `None` when it was
+    /// opened unverified.
+    pub fn resolved(&self) -> Option<&Resolved> {
+        self.resolved.as_ref()
+    }
+
+    /// Canonicalize a type (`chs_type_validate`).
+    pub fn validate_type(&self, type_expr: impl AsRef<[u8]>) -> Result<RawText> {
+        self.call(|api| api.type_validate(type_expr.as_ref()))
+            .map(RawText::from)
+    }
+
+    /// Quote an identifier, always (`chs_back_quote`).
+    pub fn quote_identifier(&self, name: impl AsRef<[u8]>) -> Result<RawText> {
+        self.call(|api| api.back_quote(name.as_ref()))
+            .map(RawText::from)
+    }
+
+    /// Quote an identifier if it needs it (`chs_back_quote_if_needed`).
+    pub fn quote_identifier_if_needed(&self, name: impl AsRef<[u8]>) -> Result<RawText> {
+        self.call(|api| api.back_quote_if_needed(name.as_ref()))
+            .map(RawText::from)
+    }
+
+    /// Quote a string literal (`chs_quote_string`).
+    pub fn quote_literal(&self, text: impl AsRef<[u8]>) -> Result<RawText> {
+        self.call(|api| api.quote_string(text.as_ref()))
+            .map(RawText::from)
+    }
+
+    /// This build's error-code table (`chs_error_codes`). Built on the first
+    /// call and kept for the library's life, on success only.
+    pub fn error_codes(&self) -> Result<&ErrorCodeTable> {
+        if let Some(table) = self.error_codes.get() {
+            return Ok(table);
+        }
+        let bytes = self.call(|api| api.error_codes())?;
+        let table = decode::error_code_table(&bytes)?;
+        Ok(self.error_codes.get_or_init(|| table))
+    }
+
+    /// The discovery query (`chs_discover_query`): it selects exactly the
+    /// `system.columns` fields [`Library::discover_columns`] reads, `FORMAT
+    /// JSONEachRow`, with two ClickHouse query parameters, `{database:String}`
+    /// and `{table:String}`. The caller runs it with its own client, binding
+    /// the parameters the client's own way.
+    pub fn discover_query(&self) -> Result<RawText> {
+        self.call(|api| api.discover_query()).map(RawText::from)
+    }
+
+    /// Read a server's columns (`chs_discover_columns`) from the answer to
+    /// [`Library::discover_query`].
+    pub fn discover_columns(&self, rows: &[u8]) -> Result<Discovery> {
+        decode::discovery(&self.call(|api| api.discover_columns(rows))?)
+    }
+
+    /// Live handle counts by kind (`chs_live_handles`), a diagnostic: after
+    /// every handle is dropped, every count is zero.
+    pub fn live_handles(&self) -> Result<BTreeMap<String, u64>> {
+        decode::live_handles(&self.call(|api| api.live_handles())?)
+    }
+
+    /// Compile exactly one `CREATE TABLE` statement (`chs_schema_create`).
+    pub fn compile_table(
+        self: &Arc<Self>,
+        create_table: impl AsRef<[u8]>,
+        options: &CompileOptions,
+    ) -> Result<Schema> {
+        let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
+        let handle: SchemaHandle =
+            self.call(|api| api.schema_create(create_table.as_ref(), &settings))?;
+        Ok(Schema::new(Arc::clone(self), handle))
+    }
+
+    /// Run one generated call and map its error by `sdk.json`'s status table.
+    pub(crate) fn call<T>(
+        &self,
+        f: impl FnOnce(&Arc<Api>) -> std::result::Result<T, crate::abi1::calls_gen::RawCallError>,
+    ) -> Result<T> {
+        f(&self.api).map_err(Error::from_call)
+    }
 }
 
 #[cfg(test)]
@@ -724,99 +299,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn minor_lines_come_from_the_reported_version() {
-        assert_eq!(minor_of("25.8.28.1-lts"), "25.8");
-        assert_eq!(minor_of("25.10.7.6-stable"), "25.10");
-        assert_eq!(minor_of("26.7"), "26.7");
-        assert_eq!(minor_of("head"), "head");
+    fn an_unverified_open_needs_both_opt_ins_and_names_what_is_missing() {
+        // `allow` false refuses whatever the environment holds, before any file
+        // is touched.
+        let Err(Error::Usage(c)) = Library::open_unverified("/nonexistent/lib.so", false) else {
+            panic!("want a usage error")
+        };
+        assert!(c.message.to_lossy().contains("allow"), "{c}");
+        assert_eq!(c.status, crate::status::INVALID_ARGUMENT);
     }
 
     #[test]
-    fn minor_lines_order_numerically_not_lexically() {
-        let mut lines = vec!["25.8", "26.7", "25.10", "24.8", "25.3"];
-        lines.sort_by_key(|l| minor_order(l));
-        assert_eq!(lines, vec!["24.8", "25.3", "25.8", "25.10", "26.7"]);
-    }
-
-    #[test]
-    fn default_kinds_are_the_abi_spellings() {
-        assert_eq!(DefaultKind::parse(""), DefaultKind::None);
-        assert_eq!(DefaultKind::parse("DEFAULT"), DefaultKind::Default);
-        assert_eq!(
-            DefaultKind::parse("MATERIALIZED"),
-            DefaultKind::Materialized
-        );
-        assert_eq!(DefaultKind::parse("ALIAS"), DefaultKind::Alias);
-        assert_eq!(DefaultKind::parse("EPHEMERAL"), DefaultKind::Ephemeral);
-        assert_eq!(
-            DefaultKind::parse("FUTURE"),
-            DefaultKind::Other("FUTURE".into())
-        );
-    }
-
-    // `resolve_unsafe_families` is exercised directly (docs/reference/artifact.md
-    // step 9: "the contents of that version's own unsafe_families.txt") rather
-    // than through `Library::load`, which would need a loadable artifact: the
-    // three cases below are about WHICH source wins, never about chs_init itself.
-
-    /// A scratch directory for one test, removed when dropped — the same
-    /// shape `tests/integration.rs`'s `Scratch` uses, kept local here since
-    /// unit tests in this module cannot reach that integration-test type.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(tag: &str) -> Scratch {
-            let dir = std::env::temp_dir().join(format!("chtypes-rs-{tag}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).expect("scratch directory");
-            Scratch(dir)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    #[test]
-    fn resolve_unsafe_families_falls_back_to_manifest_field() {
-        let scratch = Scratch::new("fallback");
-        std::fs::write(
-            scratch.0.join("manifest.json"),
-            r#"{"library":"libchtypes.so","unsafe_families":"Array,Map"}"#,
-        )
-        .unwrap();
-        // No unsafe_families.txt written: the manifest's field must reach init.
-        let got = resolve_unsafe_families(&scratch.0.join("libchtypes.so")).unwrap();
-        assert_eq!(got, "Array,Map");
-    }
-
-    #[test]
-    fn resolve_unsafe_families_refuses_with_neither_source() {
-        let scratch = Scratch::new("neither");
-        std::fs::write(
-            scratch.0.join("manifest.json"),
-            r#"{"library":"libchtypes.so"}"#,
-        )
-        .unwrap();
-        let err = resolve_unsafe_families(&scratch.0.join("libchtypes.so")).unwrap_err();
-        assert!(matches!(err, Error::MissingUnsafeFamilies { .. }), "{err}");
-        let message = err.to_string();
-        assert!(message.contains("unsafe_families.txt"), "{message}");
-        assert!(message.contains("manifest.json"), "{message}");
-    }
-
-    #[test]
-    fn resolve_unsafe_families_empty_file_wins_over_manifest_field() {
-        let scratch = Scratch::new("empty-wins");
-        std::fs::write(
-            scratch.0.join("manifest.json"),
-            r#"{"library":"libchtypes.so","unsafe_families":"Array,Map"}"#,
-        )
-        .unwrap();
-        std::fs::write(scratch.0.join("unsafe_families.txt"), "").unwrap();
-        let got = resolve_unsafe_families(&scratch.0.join("libchtypes.so")).unwrap();
-        assert_eq!(got, "");
+    fn a_library_is_shareable_across_threads() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<Library>();
+        send_sync::<Arc<Library>>();
     }
 }

@@ -1,0 +1,987 @@
+# v1.yml — the v1 fetch layer's own checks, separate from ci.yml (the v1
+# fetch-layer plan's §2.2).
+#
+# ci.yml is NOT touched by this workflow's existence: its `pull_request:`
+# trigger carries no branch filter, so every pull request into `v1` already
+# runs ci.yml's full required set unchanged — proof that v1 work leaves v0's
+# code paths green on the branch until the switch (plan §2.4). This file adds
+# exactly the v1-specific checks on top of that, triggered on pull requests into `v1` and `main`, and in the merge queue (its required contexts are required on `main` once v1 merges).
+#
+# Job names below are the check CONTEXTS branch protection on `v1` names
+# (plan §2.2's table) — renaming one here is a protected-surface change, not
+# cosmetic. `v1-constants`, `v1-fixtures` and `v1-parity` are required;
+# `v1-conformance` and `v1-network` feed `v1-parity` (read, never required
+# themselves); `v1-sandbox` proves the no-network sandbox those legs run in;
+# `v1-cache-interop` runs the four real CLIs over one shared cache (a cache one
+# binding writes, every binding reads) and is not read by `v1-parity`;
+# `v1-refcheck` is report-only; `v1-oras-preseed`, `v1-staging` and
+# `v1-staging-verdict` are dispatch-only (the last two never required, never
+# read by `v1-parity`).
+#
+# STATUS (lane 0A, first on `v1`): only `v1-constants` is live. Every other
+# job is a one-line placeholder that fails loudly with "not yet provided" —
+# deliberately, not a bug — until the lane that owns its body lands
+# (`v1-fixtures`, `v1-network`, `v1-parity`, `v1-refcheck` and
+# `v1-oras-preseed`: lane 0B; `v1-conformance`'s matrix legs: each binding
+# lane, against the runner commands plan §3.3 fixes). The shape (job ids,
+# names, the matrix legs, and `v1-parity`'s `needs`/`if: always()`) is frozen
+# now so a later lane fills in steps, never restructures the DAG.
+name: v1
+
+on:
+  pull_request:
+    branches: [main, v1]
+  # The merge queue's candidate combination must run every required context
+  # here too, or the queue waits forever: v1 and v1-abi's contexts are required
+  # on main once v1 merges (nothing below reads the event's base or head).
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main, v1]
+  workflow_dispatch:
+    inputs:
+      registry_base:
+        description: "Staging-registry conformance run: the https base the v1-staging job points each enrolled binding at, repository path included (docs/guides/fetch-v1.md §10, The staging run). Empty: the job does not run."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v1-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  v1-constants:
+    name: "v1-constants — one constants source, generated into all four"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Selftest first, the same discipline every gate in this repository
+      # follows (scripts/lint-public.sh, scripts/lint-spelling.sh, …): a
+      # checker nobody has seen fail is not a checker. It proves --check
+      # catches drift on a throwaway copy, never the real tree.
+      - name: "selftest — --check catches a flipped source value, and a test key cannot reach the default trust list"
+        run: scripts/fetch-v1/gen-constants.py --selftest
+      - name: every generated output and the guide's block match spec/fetch-v1/constants.json
+        run: scripts/fetch-v1/gen-constants.py --check
+
+  v1-fixtures:
+    name: "v1-fixtures — fixtures regenerate byte-identical from the generator"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: scripts/fetch-v1/genfixtures/go.mod
+      - name: gofmt / go vet (genfixtures is its own module; no.go/lint-go job covers it)
+        run: |
+          cd scripts/fetch-v1/genfixtures
+          test -z "$(gofmt -l .)" || { echo "gofmt would reformat:" >&2; gofmt -l .; exit 1; }
+          go vet ./...
+      - name: "selftest — --check catches drift, on a throwaway copy, never the real tree"
+        run: cd scripts/fetch-v1/genfixtures && go run . --selftest # scripts/fetch-v1/genfixtures/main.go
+      - name: committed fixtures match the generator (first check)
+        run: cd scripts/fetch-v1/genfixtures && go run . --check
+      - name: regenerate in place and diff against the commit (second, independent proof)
+        run: |
+          cd scripts/fetch-v1/genfixtures
+          go run . --write
+          cd "$GITHUB_WORKSPACE"
+          git diff --exit-code -- tests/fixtures/fetch-v1 || {
+            echo "genfixtures --write produced different bytes than what is committed — the" >&2
+            echo "generator is not deterministic, or the fixtures were hand-edited." >&2
+            exit 1
+          }
+      - name: committed fixtures match the generator (third check, post-write)
+        run: cd scripts/fetch-v1/genfixtures && go run . --check
+      - name: validate cases.json, http scripts and locks/expected against their schemas
+        run: python3 scripts/fetch-v1/schema_check.py --selftest && python3 scripts/fetch-v1/schema_check.py
+      - name: "server.py --selftest — a real loopback server, driven by urllib.request"
+        run: python3 scripts/fetch-v1/server.py --selftest
+
+  v1-sandbox:
+    name: "v1-sandbox — the no-network sandbox, proven on every pull request"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Every v1-conformance leg skips its sandbox step until that
+      # binding's runner file exists, so without this job the sandbox the
+      # suite depends on would be proven by nothing. Same script, same
+      # proofs; it also does one real loopback round trip through
+      # scripts/fetch-v1/server.py started inside the sandbox.
+      - name: "selftest — uid, curl exit 6 or 7 for github, loopback round trip through server.py"
+        run: scripts/fetch-v1/sandbox.sh --selftest
+
+  v1-conformance:
+    name: "v1-conformance (${{ matrix.binding }} ${{ matrix.toolchain }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - binding: go
+            toolchain: go1.27.x
+          - binding: python
+            toolchain: "3.11"
+          - binding: python
+            toolchain: "3.13"
+          - binding: python
+            toolchain: "3.14"
+          - binding: ts
+            toolchain: node22.21.0
+            node_version: "22.21.0"
+          - binding: ts
+            toolchain: node24
+            node_version: "24"
+          - binding: rust
+            # 1.87, not 1.85 — the PM's MSRV ruling; the matrix line also
+            # moves in the Rust lane's own PR, expect a trivial merge there.
+            toolchain: "1.87"
+          - binding: rust
+            toolchain: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Each binding's own conformance runner file does not exist on this
+      # branch until that binding's lane lands (plan §3.3's seam is frozen;
+      # the runners themselves are each lane's own PR). Every step below is
+      # gated on this check so an unmerged binding's leg skips loudly and
+      # uploads nothing, rather than failing the matrix — v1-parity reads
+      # "no report" as "not enrolled", never as a failure.
+      - name: does this binding's conformance runner exist on this branch yet?
+        id: runner_file
+        run: |
+          case "${{ matrix.binding }}" in
+            go) f="go/internal/ocifetch/conformance_test.go" ;;
+            python) f="python/tests/ocifetch/test_conformance.py" ;;
+            ts) f="ts/test/ocifetch/conformance.test.ts" ;;
+            rust) f="rust/tests/ocifetch_conformance.rs" ;;
+          esac
+          echo "runner_file_path=$f" >> "$GITHUB_OUTPUT"
+          if [ -f "$f" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "v1-conformance (${{ matrix.binding }} ${{ matrix.toolchain }}): SKIPPED — $f does not exist on this branch yet (that binding's own lane has not merged)." >&2
+          fi
+
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'python'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.toolchain }}
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'ts'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'ts'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node_version }}
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'rust'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: install dependencies (the last step with network access)
+        if: steps.runner_file.outputs.exists == 'true'
+        run: |
+          case "${{ matrix.binding }}" in
+            go) (cd go && go mod download) ;;
+            python) (cd python && uv sync --locked --group dev) ;;
+            ts) (cd ts && pnpm install --frozen-lockfile) ;;
+            rust) (cd rust && cargo fetch --locked) ;;
+          esac
+
+      - name: prove the no-network sandbox before the suite relies on it
+        # measured, PR #400: both `ts` legs (the first legs ever to reach
+        # the egress step; every earlier leg skipped for lack of a runner
+        # file) timed out at 20 minutes, twice, with `BlobNotFound` in both
+        # logs, after a blanket `iptables ... ! -o lo -j REJECT`.
+        # inferred: that rule cut the Actions runner's own link to GitHub,
+        # not just the suite's.
+        #
+        # measured, run 36980815013 (Go leg): the replacement, `sudo -g
+        # noegress ...`, failed in about a second with "cannot reach
+        # 127.0.0.1". inferred: the hosted runner's sudoers refuses run-as
+        # GROUP, so neither curl ever ran, and the "github is unreachable"
+        # proof passed falsely because it treated any nonzero result as
+        # "unreachable".
+        #
+        # Now: a network namespace holding only loopback, entered for the
+        # suite's process tree alone (scripts/fetch-v1/sandbox.sh). The
+        # runner's own connectivity is never touched. The proofs run
+        # curl INSIDE the sandbox and accept only curl's own "could not
+        # resolve / could not connect" codes, so a failing wrapper cannot
+        # read as success, and each prints its exit code.
+        if: steps.runner_file.outputs.exists == 'true'
+        run: scripts/fetch-v1/sandbox.sh --selftest
+
+      - name: run the conformance suite and write CHTYPES_V1_REPORT
+        if: steps.runner_file.outputs.exists == 'true'
+        env:
+          CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
+          CHTYPES_V1_REPORT: ${{ runner.temp }}/report-${{ matrix.binding }}-${{ matrix.toolchain }}.json
+          # The report's `toolchain`, exactly as the matrix names it (parity.py
+          # compares strings). sandbox.sh runs `sudo -E`, so it survives into
+          # the sandbox.
+          CHTYPES_V1_TOOLCHAIN: ${{ matrix.toolchain }}
+        run: |
+          # Written to a file, then run inside the no-network sandbox,
+          # rather than inlined into a `bash -c '...'` one-liner: the Go
+          # leg's own command already needs single quotes
+          # (`-run '^TestConformanceV1$'`), which cannot nest inside
+          # another single-quoted -c string.
+          cat > "$RUNNER_TEMP/run-conformance.sh" <<'SCRIPT'
+          set -e
+          case "${{ matrix.binding }}" in
+            go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/) ;;
+            python)
+              # steps.runner_file's own path (repo-root-relative) with the
+              # "python/" prefix stripped at runtime — `cd python` first so
+              # pytest's own rootdir/config discovery matches every other
+              # python job in this repository, without a literal
+              # "tests/ocifetch/..." substring appearing unprefixed in this
+              # file (that file does not exist on `v1` yet; see the
+              # runner_file step above).
+              rel="${{ steps.runner_file.outputs.runner_file_path }}"
+              (cd python && uv run --offline --python "${{ matrix.toolchain }}" pytest -q "${rel#python/}")
+              ;;
+            ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
+            rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
+          esac
+          SCRIPT
+          chmod +x "$RUNNER_TEMP/run-conformance.sh"
+          scripts/fetch-v1/sandbox.sh -- bash "$RUNNER_TEMP/run-conformance.sh"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: report-${{ matrix.binding }}-${{ matrix.toolchain }}
+          path: ${{ runner.temp }}/report-${{ matrix.binding }}-${{ matrix.toolchain }}.json
+          if-no-files-found: ignore
+
+  v1-network:
+    name: "v1-network — registry:2 over TLS via the system CA store, through HTTPS_PROXY"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # This job needs the local registry:2, a throwaway CA, tinyproxy and (for
+    # the binding steps) the package registries, so it does NOT run inside the
+    # no-network sandbox that v1-conformance uses (scripts/fetch-v1/sandbox.sh).
+    # Its egress is this job's own concern: the runners below talk only to
+    # registry.test (127.0.0.1) and the loopback fixture server.
+    env:
+      ORAS_VERSION: "1.3.4" # layout-v2 spec §0: ORAS 1.3.4 is the measured --platform-compatible version
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Which bindings' conformance runners exist on this branch yet? The same
+      # detection v1-conformance uses (keep the four paths in sync with it). A
+      # binding with no runner file skips loudly by name and uploads nothing,
+      # which v1-parity reads as "not enrolled", never as a failure.
+      - name: which bindings' conformance runners exist on this branch yet?
+        id: runners
+        run: |
+          for pair in go:go/internal/ocifetch/conformance_test.go \
+                      python:python/tests/ocifetch/test_conformance.py \
+                      ts:ts/test/ocifetch/conformance.test.ts \
+                      rust:rust/tests/ocifetch_conformance.rs; do
+            b="${pair%%:*}"; f="${pair#*:}"
+            if [ -f "$f" ]; then
+              echo "$b=true" >> "$GITHUB_OUTPUT"
+              echo "${b}_runner=$f" >> "$GITHUB_OUTPUT"
+            else
+              echo "$b=false" >> "$GITHUB_OUTPUT"
+              echo "v1-network ($b): SKIPPED — $f does not exist on this branch yet (that binding's own lane has not merged); no registry report is produced." >&2
+            fi
+          done
+      # Toolchains mirror v1-conformance's setup steps. The registry report
+      # does not depend on which toolchain leg runs it (its `toolchain` is the
+      # sentinel "registry"), so one version per binding is enough here.
+      - if: steps.runners.outputs.go == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - if: steps.runners.outputs.python == 'true'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+      - if: steps.runners.outputs.ts == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - if: steps.runners.outputs.ts == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - if: steps.runners.outputs.rust == 'true'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
+      - name: install dependencies for the bindings that have a runner
+        run: |
+          [ "${{ steps.runners.outputs.go }}" = true ] && (cd go && go mod download)
+          [ "${{ steps.runners.outputs.python }}" = true ] && (cd python && uv sync --locked --group dev)
+          [ "${{ steps.runners.outputs.ts }}" = true ] && (cd ts && pnpm install --frozen-lockfile)
+          [ "${{ steps.runners.outputs.rust }}" = true ] && (cd rust && cargo fetch --locked)
+          exit 0
+      - name: install oras (pinned) and tinyproxy
+        run: |
+          curl -fsSL -o /tmp/oras.tar.gz \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          mkdir -p /tmp/oras-install
+          tar -xzf /tmp/oras.tar.gz -C /tmp/oras-install oras
+          sudo mv /tmp/oras-install/oras /usr/local/bin/oras
+          oras version
+          sudo apt-get update -y
+          sudo apt-get install -y tinyproxy
+      - name: generate a throwaway CA and TLS certificate for registry.test
+        # An RFC 5280-proper chain, because strict clients refuse less:
+        # measured on a Python 3.13 registry run, its default context sets
+        # VERIFY_X509_STRICT and rejected the earlier CA with "CA cert does not
+        # include key usage extension"; Go and Node were only more lenient.
+        run: |
+          mkdir -p "$RUNNER_TEMP/certs"
+          cd "$RUNNER_TEMP/certs"
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 1 \
+            -subj "/CN=v1-fixture-ca" -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign" -addext "subjectKeyIdentifier=hash"
+          openssl req -newkey rsa:2048 -nodes -keyout registry.test.key -out registry.test.csr \
+            -subj "/CN=registry.test"
+          printf '%s\n' 'basicConstraints = critical,CA:FALSE' \
+            'keyUsage = critical,digitalSignature,keyEncipherment' \
+            'extendedKeyUsage = serverAuth' \
+            'subjectAltName = DNS:registry.test' \
+            'subjectKeyIdentifier = hash' \
+            'authorityKeyIdentifier = keyid:always' > ext.cnf
+          openssl x509 -req -in registry.test.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+            -out registry.test.crt -days 1 -extfile ext.cnf
+          sudo cp ca.crt /usr/local/share/ca-certificates/v1-fixture-ca.crt
+          sudo update-ca-certificates
+          echo "127.0.0.1 registry.test" | sudo tee -a /etc/hosts
+      - name: the chain passes a STRICT verification (openssl -x509_strict), before anything uses it
+        run: |
+          cd "$RUNNER_TEMP/certs"
+          openssl verify -x509_strict -purpose sslserver -CAfile ca.crt registry.test.crt
+          openssl x509 -in ca.crt -noout -ext keyUsage,basicConstraints
+          openssl x509 -in registry.test.crt -noout -ext keyUsage,extendedKeyUsage,subjectAltName
+      - name: start registry:2 with TLS
+        run: |
+          docker run -d --name v1-fixture-registry \
+            -p 5443:5443 \
+            -v "$RUNNER_TEMP/certs:/certs:ro" \
+            -e REGISTRY_HTTP_ADDR=0.0.0.0:5443 \
+            -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/registry.test.crt \
+            -e REGISTRY_HTTP_TLS_KEY=/certs/registry.test.key \
+            registry:2
+          ok=
+          for _ in $(seq 1 30); do
+            if curl -fsS https://registry.test:5443/v2/ >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then
+            echo "registry:2 never came up" >&2
+            docker logs v1-fixture-registry || true
+            exit 1
+          fi
+          echo "registry up: HTTP $(curl -s -o /dev/null -w '%{http_code}' https://registry.test:5443/v2/)"
+      - name: a Python TLS handshake under the DEFAULT context (strict, OS store) succeeds, before any binding runs
+        run: |
+          python3 - <<'PY'
+          import ssl, urllib.request
+          ctx = ssl.create_default_context()
+          print("python", ssl.OPENSSL_VERSION, "verify_flags", ctx.verify_flags)
+          with urllib.request.urlopen("https://registry.test:5443/v2/", context=ctx, timeout=10) as r:
+              print("HTTP", r.status)
+          PY
+      - name: push layouts/basic (the full multi-platform index) into registry:2
+        run: |
+          oras cp -r --from-oci-layout \
+            "tests/fixtures/fetch-v1/layouts/basic:26.8.15.10" \
+            "registry.test:5443/chtypes/v1:26.8.15.10"
+          echo "--- what the registry now serves ---"
+          curl -fsS https://registry.test:5443/v2/chtypes/v1/tags/list
+          echo "fixtures pushed"
+      - name: attach the linux-arm64 signature bundle as a referrer, so the next step has something real to measure
+        # `oras cp -r --from-oci-layout` does NOT copy referrer artifacts
+        # from a local OCI layout source (measured locally with oras 1.3.4,
+        # lane 0B: the Referrers API / fallback-tag convention `-r` relies
+        # on has no equivalent for a directory source, so the prior step's
+        # `-r` moves only the index and its platform manifests). This step
+        # closes that gap for this job's own purposes only, by attaching
+        # the bundle bytes straight from the tree fixture via `oras attach`
+        # — never a substitute for a real producer push, which is blocked
+        # on the delivery side (plan §1.2) and does its own thing.
+        run: |
+          MANIFEST_DIGEST=$(jq -r '
+            .manifests[] | select(.platform.os=="linux" and .platform.architecture=="arm64") | .digest
+          ' "tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1/manifests/26.8.15.10")
+          BUNDLE_MANIFEST_DIGEST=$(jq -r '
+            .manifests[] | select(.artifactType=="application/vnd.dev.sigstore.bundle.v0.3+json") | .digest
+          ' "tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1/referrers/$MANIFEST_DIGEST" | head -1)
+          BUNDLE_LAYER_DIGEST=$(jq -r '.layers[0].digest' \
+            "tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1/manifests/$BUNDLE_MANIFEST_DIGEST")
+          cp "tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1/blobs/$BUNDLE_LAYER_DIGEST" "$RUNNER_TEMP/bundle.json"
+          # oras 1.3.4 refuses an absolute file-path argument by default
+          # (measured, lane 0B, run 36957: "Error: absolute file path
+          # detected"), unrelated to registry:2 or the referrers API —
+          # purely its own client-side path-traversal guard against a path
+          # it did not compute itself. $RUNNER_TEMP is always absolute, so
+          # name the escape hatch explicitly rather than relocate the file.
+          oras attach --disable-path-validation \
+            --artifact-type application/vnd.dev.sigstore.bundle.v0.3+json \
+            --platform linux/arm64 \
+            "registry.test:5443/chtypes/v1:26.8.15.10" \
+            "$RUNNER_TEMP/bundle.json:application/vnd.dev.sigstore.bundle.v0.3+json"
+      - name: record registry:2's referrers behavior — measured, not assumed
+        # Distribution 2.x answers a GET for an OCI index with 404
+        # MANIFEST_UNKNOWN when Accept does not list the OCI index media
+        # type — the exact reason every binding's own manifest GET carries
+        # Accept (manifest-accept-header, above). The first version of this
+        # step sent no Accept header at all, so an earlier run's "fallback
+        # tag also 404s" reading was the probe's own flaw, not necessarily
+        # the host's: oras's default (unknown) --distribution-spec writes
+        # the sha256-<hex> fallback tag itself whenever it detects the
+        # referrers API is absent, so the tag most likely already existed
+        # and this step simply could not see it.
+        run: |
+          MANIFEST_DIGEST=$(jq -r '
+            .manifests[] | select(.platform.os=="linux" and .platform.architecture=="arm64") | .digest
+          ' "tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1/manifests/26.8.15.10")
+          ACCEPT="application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json"
+
+          REF_STATUS=$(curl -s -H "Accept: $ACCEPT" -o "$RUNNER_TEMP/referrers.json" -w "%{http_code}" \
+            "https://registry.test:5443/v2/chtypes/v1/referrers/$MANIFEST_DIGEST")
+          echo "GET /v2/chtypes/v1/referrers/$MANIFEST_DIGEST -> HTTP $REF_STATUS"
+          cat "$RUNNER_TEMP/referrers.json" || true
+          echo
+
+          FALLBACK_TAG="sha256-${MANIFEST_DIGEST#sha256:}"
+          FB_STATUS=$(curl -s -H "Accept: $ACCEPT" -o "$RUNNER_TEMP/fallback.json" -w "%{http_code}" \
+            "https://registry.test:5443/v2/chtypes/v1/manifests/$FALLBACK_TAG")
+          echo "GET /v2/chtypes/v1/manifests/$FALLBACK_TAG -> HTTP $FB_STATUS"
+          echo "--- fallback tag body ---"
+          cat "$RUNNER_TEMP/fallback.json" || true
+          echo
+
+          # Assert what this measures, rather than only record it: if the
+          # fallback tag answers 200, it must actually name the signature
+          # bundle referrer this job attached — anything else here is a
+          # real defect to fail on, not a fact to shrug past. If the
+          # fallback genuinely is still 404 even with the header, that is
+          # itself the measurement — report it plainly and let the job
+          # stay green (this check is report-only; v1-parity never reads
+          # it, per plan §2.2).
+          if [ "$FB_STATUS" = "200" ]; then
+            BUNDLE_HIT=$(jq -r '
+              .manifests[]? | select(.artifactType=="application/vnd.dev.sigstore.bundle.v0.3+json") | .artifactType
+            ' "$RUNNER_TEMP/fallback.json" | head -1)
+            if [ "$BUNDLE_HIT" != "application/vnd.dev.sigstore.bundle.v0.3+json" ]; then
+              echo "::error::fallback tag answered 200 but names no application/vnd.dev.sigstore.bundle.v0.3+json referrer" >&2
+              exit 1
+            fi
+            FALLBACK_RESULT="HTTP 200, naming the signature bundle referrer"
+          else
+            FALLBACK_RESULT="HTTP $FB_STATUS — absent even with the Accept header"
+          fi
+
+          {
+            echo "### registry:2 referrers behavior (measured, oras ${ORAS_VERSION}, Accept: $ACCEPT)"
+            echo "- \`GET /v2/chtypes/v1/referrers/<digest>\`: HTTP $REF_STATUS"
+            echo "- fallback tag \`sha256-<hex>\`: $FALLBACK_RESULT"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: push every tree a registry-transport case names (cases.json `tree`), so each case has its own content to fetch
+        # layouts/basic above serves only the `basic` tree. The registry cases
+        # also name the trust, lock-no-discovery and lock-write-all-platforms
+        # trees, all against one base URL, so push every tree those cases name
+        # (derived from cases.json, not listed here). Tags and digests do not
+        # collide across these trees (a collision fails the push by digest).
+        run: |
+          trees=$(python3 -c '
+          import json
+          d = json.load(open("tests/fixtures/fetch-v1/cases.json"))
+          print(" ".join(sorted({"tests/fixtures/fetch-v1/trees/" + c["tree"] for c in d["cases"] if "registry" in c["transports"]})))')
+          echo "trees: $trees"
+          # shellcheck disable=SC2086 # word-splitting the list is the point
+          python3 scripts/fetch-v1/push_tree.py --registry registry.test:5443 --repo chtypes/v1 $trees
+      - name: start tinyproxy with logging
+        run: |
+          sudo install -d -m 755 /var/log/tinyproxy
+          sudo tee /etc/tinyproxy/tinyproxy.conf > /dev/null <<'EOF'
+          User tinyproxy
+          Group tinyproxy
+          Port 8888
+          Listen 127.0.0.1
+          Timeout 600
+          LogFile "/var/log/tinyproxy/tinyproxy.log"
+          LogLevel Info
+          PidFile "/run/tinyproxy/tinyproxy.pid"
+          MaxClients 100
+          Allow 127.0.0.1
+          EOF
+          sudo systemctl restart tinyproxy
+          sleep 1
+          systemctl is-active tinyproxy
+      - name: fetch through the proxy; the CONNECT must appear in its log
+        run: |
+          HTTPS_PROXY=http://127.0.0.1:8888 curl -fsS https://registry.test:5443/v2/ >/dev/null
+          sleep 1
+          echo "--- tinyproxy log ---"
+          sudo cat /var/log/tinyproxy/tinyproxy.log
+          sudo grep -q "CONNECT" /var/log/tinyproxy/tinyproxy.log || {
+            echo "tinyproxy never logged a CONNECT — the proxy path was not exercised" >&2
+            exit 1
+          }
+          echo "proxy logging confirmed"
+      - name: run each enrolled-candidate binding's conformance runner on the registry transport
+        # The runners take no "registry only" switch (and are not edited by
+        # this lane): with CHTYPES_V1_REGISTRY_BASE set they run every
+        # transport and write one report. So the raw report goes to
+        # report-<binding>-raw.json, and the report v1-parity reads is DERIVED
+        # from it: only the transport=="registry" rows, with `toolchain` set to
+        # the sentinel "registry" (parity.py NETWORK_TOOLCHAIN). The file and
+        # http rows are v1-conformance's to judge, so they are dropped here and
+        # a file/http failure cannot fail this job.
+        #
+        # TLS: no binding is told about the throwaway CA. registry.test's
+        # certificate verifies only if the binding's own TLS stack trusts the
+        # OS store that `update-ca-certificates` wrote above: Go (system roots),
+        # Python (ssl default context), Rust (rustls platform verifier). Node
+        # does not read the OS store by default; it is opted in with the
+        # documented `--use-system-ca` option (NODE_OPTIONS), never by
+        # disabling verification. A binding that cannot trust the system store
+        # fails here, and that is a finding to report, not something to patch
+        # over in this job.
+        if: steps.runners.outputs.go == 'true' || steps.runners.outputs.python == 'true' || steps.runners.outputs.ts == 'true' || steps.runners.outputs.rust == 'true'
+        env:
+          CHTYPES_V1_CONFORMANCE: ${{ github.workspace }}/tests/fixtures/fetch-v1
+          CHTYPES_V1_REGISTRY_BASE: https://registry.test:5443/chtypes/v1
+          CHTYPES_V1_TOOLCHAIN: registry
+          HTTPS_PROXY: http://127.0.0.1:8888
+          NO_PROXY: 127.0.0.1,localhost
+        run: |
+          failed=0
+          run_one() {
+            local b="$1"; shift
+            local raw="$RUNNER_TEMP/report-$b-raw.json" out="$RUNNER_TEMP/report-$b-registry.json"
+            local before; before=$(sudo grep -c CONNECT /var/log/tinyproxy/tinyproxy.log || true)
+            echo "::group::v1-network ($b): conformance runner, registry transport"
+            set +e
+            CHTYPES_V1_REPORT="$raw" "$@"
+            local rc=$?
+            set -e
+            echo "::endgroup::"
+            local after; after=$(sudo grep -c CONNECT /var/log/tinyproxy/tinyproxy.log || true)
+            if [ ! -s "$raw" ]; then
+              echo "::error::v1-network ($b): the runner wrote no report (exit $rc)" >&2
+              failed=1; return
+            fi
+            jq '.toolchain = "registry" | .results |= map(select(.transport == "registry"))' "$raw" > "$out"
+            local n pass nfail
+            n=$(jq '.results | length' "$out")
+            pass=$(jq '[.results[] | select(.verdict == "pass")] | length' "$out")
+            nfail=$((n - pass))
+            echo "v1-network ($b): $n registry-transport results, $pass pass, $nfail fail; proxy CONNECTs during the run: $((after - before)) (report only)"
+            echo "- \`$b\`: $n registry results, $pass pass, $nfail fail, proxy CONNECTs $((after - before))" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$n" -eq 0 ]; then
+              echo "::error::v1-network ($b): the runner ran zero registry-transport cases (a run that tested nothing is a failure)" >&2
+              failed=1
+            elif [ "$nfail" -ne 0 ]; then
+              jq -r '.results[] | select(.verdict != "pass") | "  \(.id) [\(.transport)]: \(.detail)"' "$out" >&2
+              failed=1
+            fi
+          }
+          echo "### v1-network: registry-transport results per binding" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.runners.outputs.go }}" = true ]; then
+            run_one go bash -c "cd go && go test -count=1 -run '^TestConformanceV1\$' ./internal/ocifetch/"
+          fi
+          if [ "${{ steps.runners.outputs.python }}" = true ]; then
+            # the detected repo-root-relative path, "python/" stripped
+            rel="${{ steps.runners.outputs.python_runner }}"
+            run_one python bash -c "cd python && uv run --python 3.13 pytest -q ${rel#python/}"
+          fi
+          if [ "${{ steps.runners.outputs.ts }}" = true ]; then
+            # --use-system-ca: Node's documented option to trust the OS store
+            # (Node 22.15+/23.8+; this job runs Node 24).
+            run_one ts env NODE_OPTIONS=--use-system-ca bash -c "cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts"
+          fi
+          if [ "${{ steps.runners.outputs.rust }}" = true ]; then
+            run_one rust bash -c "cd rust && cargo test --locked --features fetch-v1 --test ocifetch_conformance"
+          fi
+          exit "$failed"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          # One artifact holding every binding's report-<binding>-registry.json;
+          # v1-parity downloads `report-*` with merge-multiple, so the file
+          # names (not the artifact name) are what keep the bindings apart.
+          name: report-network-registry
+          path: ${{ runner.temp }}/report-*-registry.json
+          if-no-files-found: ignore
+      - name: registry up, fixtures pushed, proxy logging
+        run: |
+          echo "v1-network: registry up, fixtures pushed and proxy logging were measured above; per-binding registry results are in the step summary."
+
+  v1-parity:
+    name: "v1-parity — every enrolled binding passes every conformance case"
+    needs: [v1-conformance, v1-network]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The enrolled-shrink check reads origin/v1, and a pull request's
+      # checkout carries only its own merge commit, so the base is fetched
+      # here. Measured on the first integration pull request: without this the
+      # check printed "could not read origin/v1 (skipped)" and never ran.
+      # parity.py now FAILS when the base cannot be read, so a fetch that
+      # fails (or a branch that is gone) turns this job red rather than quiet.
+      - name: fetch the base ref the enrolled-shrink check compares against
+        run: git fetch --no-tags --depth=1 origin v1:refs/remotes/origin/v1
+      # `if: always()` is deliberate and permanent, not a placeholder
+      # artifact: the parity gate (lane 0B) must run even when v1-conformance
+      # or v1-network failed, because reporting that failure — "0 enrolled",
+      # a missing report, a stale cases_sha256 — is its job, never something
+      # it skips past.
+      - name: "selftest — the parity gate's own fixtures (missing, failed, extra, stale cases_sha256)"
+        run: python3 scripts/fetch-v1/parity.py --selftest
+      - name: download every conformance/network report (whether its job passed or failed)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true # no artifacts exist at all while 0 bindings are enrolled
+        with:
+          pattern: "report-*"
+          path: ${{ runner.temp }}/reports
+          merge-multiple: true
+      - name: "v1-parity: every enrolled binding passes every case (expected: 0 enrolled today)"
+        run: |
+          mkdir -p "${{ runner.temp }}/reports"
+          python3 scripts/fetch-v1/parity.py --reports-dir "${{ runner.temp }}/reports" --base-ref "origin/v1"
+
+  v1-cache-interop:
+    name: "v1-cache-interop — a cache one binding writes, every binding reads"
+    # The record every binding writes into `unpacked/sha256/<hex>/verified.json`
+    # is one format (docs/guides/fetch-v1.md §1). The per-binding conformance
+    # suites each start from an empty cache or a generated one, so none of them
+    # could see two bindings disagree about a record on the SAME cache — which
+    # is how the examples job found Rust refusing a record Go had written, on a
+    # cache all four tours share. This job runs the four real CLIs against the
+    # loopback fixture server: each binding writes a cache, all four read it
+    # (4 x 4), and a 0.x cache directory must never crash any of them. It fails
+    # if any pair fails, and prints the table.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
+      - name: build the four CLIs
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          (cd go && go build -o "$RUNNER_TEMP/bin/cli-go" ./cmd/chtypes)
+          (cd python && uv sync --locked)
+          printf '#!/usr/bin/env bash\nexec uv run --locked --project "%s/python" python -m chtypes "$@"\n' "$PWD" > "$RUNNER_TEMP/bin/cli-python"
+          (cd ts && pnpm install --frozen-lockfile && pnpm build)
+          printf '#!/usr/bin/env bash\nexec node "%s/ts/dist/cli.js" "$@"\n' "$PWD" > "$RUNNER_TEMP/bin/cli-ts"
+          (cd rust && cargo build --locked --bin chtypes)
+          printf '#!/usr/bin/env bash\nexec "%s/rust/target/debug/chtypes" "$@"\n' "$PWD" > "$RUNNER_TEMP/bin/cli-rust"
+          chmod +x "$RUNNER_TEMP"/bin/cli-python "$RUNNER_TEMP"/bin/cli-ts "$RUNNER_TEMP"/bin/cli-rust
+          for b in go python ts rust; do "$RUNNER_TEMP/bin/cli-$b" --version; done
+      - name: "selftest — the interop driver's own comparison and table logic"
+        run: python3 scripts/fetch-v1/cache-interop.py --selftest
+      - name: "4 x 4: each binding writes a cache, every binding reads it; then the 0.x rows"
+        run: |
+          python3 scripts/fetch-v1/cache-interop.py \
+            --cli "go=$RUNNER_TEMP/bin/cli-go" \
+            --cli "python=$RUNNER_TEMP/bin/cli-python" \
+            --cli "ts=$RUNNER_TEMP/bin/cli-ts" \
+            --cli "rust=$RUNNER_TEMP/bin/cli-rust"
+
+  v1-refcheck:
+    name: "v1-refcheck — reference verifiers agree with the fixture verdicts (report only)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: scripts/fetch-v1/genfixtures/go.mod
+      - name: regenerate fixtures (refcheck reads tests/fixtures/fetch-v1/ directly)
+        run: cd scripts/fetch-v1/genfixtures && go run . --write
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: "sigstore-go: does it accept our ed25519 key-only bundle? (report only)"
+        id: sigstore-go
+        continue-on-error: true
+        run: |
+          cd scripts/fetch-v1/refcheck/go
+          test -z "$(gofmt -l .)" || { echo "gofmt would reformat:" >&2; gofmt -l .; exit 1; }
+          go vet ./...
+          go run .
+      - name: "@sigstore/verify: does it accept our ed25519 key-only bundle? (report only)"
+        id: sigstore-js
+        continue-on-error: true
+        run: |
+          cd scripts/fetch-v1/refcheck/js
+          npm install
+          node index.js
+      - name: install cosign (pinned)
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: "v3.1.3" # the exact version measured locally before this file was committed
+      - name: "cosign verify-blob-attestation: does it accept our ed25519 key-only bundle? (report only)"
+        id: cosign
+        continue-on-error: true
+        run: bash scripts/fetch-v1/refcheck/cosign-check.sh
+      - name: summary — per-tool acceptance of the ed25519 key-only bundle (never gates v1-parity)
+        run: |
+          {
+            echo "### v1-refcheck: reference-verifier acceptance of the ed25519 key-only bundle (report only)"
+            echo "| tool | accepts |"
+            echo "| --- | --- |"
+            echo "| sigstore-go | ${{ steps.sigstore-go.outcome }} |"
+            echo "| @sigstore/verify | ${{ steps.sigstore-js.outcome }} |"
+            echo "| cosign verify-blob-attestation | ${{ steps.cosign.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "v1-refcheck is report-only: this job always exits 0 regardless of the table above" >&2
+          echo "(docs/guides/fetch-v1.md §10). It becomes required once the delivery side's §9" >&2
+          echo "step 1 measurement names which reference verifiers accept an ed25519-keyed bundle." >&2
+
+  v1-oras-preseed:
+    name: "v1-oras-preseed — regenerate layouts/oras-preseed/ (workflow_dispatch only)"
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ORAS_VERSION: "1.3.4" # layout-v2 spec §0: ORAS 1.3.4 is the measured --platform-compatible version
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: install oras (pinned)
+        run: |
+          curl -fsSL -o /tmp/oras.tar.gz \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          mkdir -p /tmp/oras-install
+          tar -xzf /tmp/oras.tar.gz -C /tmp/oras-install oras
+          sudo mv /tmp/oras-install/oras /usr/local/bin/oras
+          oras version
+      - name: start a plain-HTTP registry:2 (no TLS/proxy needed for this job)
+        run: |
+          docker run -d --name v1-preseed-registry -p 5000:5000 registry:2
+          ok=
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5000/v2/ >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then
+            echo "registry:2 never came up" >&2
+            docker logs v1-preseed-registry || true
+            exit 1
+          fi
+      - name: push layouts/basic (the full multi-platform index) into the registry
+        run: |
+          oras cp -r --from-oci-layout --to-plain-http \
+            "tests/fixtures/fetch-v1/layouts/basic:26.8.15.10" \
+            "127.0.0.1:5000/chtypes/v1:26.8.15.10"
+      - name: "oras copy -r --platform linux/arm64 --to-oci-layout — the real command this fixture records"
+        run: |
+          rm -rf /tmp/oras-preseed
+          oras cp -r --platform linux/arm64 --to-oci-layout --from-plain-http \
+            "127.0.0.1:5000/chtypes/v1:26.8.15.10" \
+            "/tmp/oras-preseed:26.8.15.10"
+          cat > /tmp/oras-preseed/README.md <<EOF
+          # layouts/oras-preseed/
+
+          Written by a REAL \`oras copy\`, never by \`scripts/fetch-v1/genfixtures\` (which
+          explicitly never touches this directory — see its own header comment).
+
+          - oras version: $(oras version | head -1)
+          - command: \`oras cp -r --platform linux/arm64 --to-oci-layout <source>:26.8.15.10 layouts/oras-preseed:26.8.15.10\`
+          - source: the \`chtypes/v1\` repository at tag \`26.8.15.10\`, pushed from
+            \`tests/fixtures/fetch-v1/layouts/basic\` by the \`v1-oras-preseed\` workflow job
+            (\`.github/workflows/v1.yml\`), run by \`workflow_dispatch\` only.
+          - regenerate: dispatch the \`v1\` workflow's \`v1-oras-preseed\` job, download its
+            \`oras-preseed\` artifact, and replace this directory with its contents.
+          EOF
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oras-preseed
+          path: /tmp/oras-preseed
+          if-no-files-found: error
+
+  # Dispatch-only, and only when `registry_base` is non-empty. Never a
+  # required context and never an input to v1-parity: the verdict is
+  # information in the job summary (docs/guides/fetch-v1.md §10, "The staging
+  # run"). Each leg runs ONE binding's own conformance runner, unchanged, over
+  # the derived case table scripts/fetch-v1/staging.py emits, with the
+  # registry transport pointed at `registry_base`. A binding with no
+  # enrollment marker, or no runner file yet, skips loudly and uploads nothing.
+  v1-staging:
+    name: "v1-staging (${{ matrix.binding }})"
+    if: github.event_name == 'workflow_dispatch' && inputs.registry_base != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - binding: go
+            toolchain: go1.27.x
+          - binding: python
+            toolchain: "3.13"
+          - binding: ts
+            toolchain: node24
+            node_version: "24"
+          - binding: rust
+            toolchain: stable
+    env:
+      # Deliberately NOT inside scripts/fetch-v1/sandbox.sh: that namespace has
+      # loopback only, and this job exists to reach a live host over HTTPS.
+      # Through the environment, never interpolated into a script body.
+      REGISTRY_BASE: ${{ inputs.registry_base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: registry_base must be an https URL with no trailing slash
+        run: |
+          case "$REGISTRY_BASE" in
+            https://*/*) ;;
+            *) echo "::error::registry_base must be https://<host>/<repository path>, got: $REGISTRY_BASE" >&2; exit 1 ;;
+          esac
+          case "$REGISTRY_BASE" in
+            */) echo "::error::registry_base must not end in a slash" >&2; exit 1 ;;
+          esac
+      - name: is this binding enrolled, and does its runner exist yet?
+        id: gate
+        run: |
+          case "${{ matrix.binding }}" in
+            go) f="go/internal/ocifetch/conformance_test.go" ;;
+            python) f="python/tests/ocifetch/test_conformance.py" ;;
+            ts) f="ts/test/ocifetch/conformance.test.ts" ;;
+            rust) f="rust/tests/ocifetch_conformance.rs" ;;
+          esac
+          echo "runner_file_path=$f" >> "$GITHUB_OUTPUT"
+          if [ -f "spec/fetch-v1/enrolled/${{ matrix.binding }}" ] && [ -f "$f" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "v1-staging (${{ matrix.binding }}): SKIPPED — not enrolled (spec/fetch-v1/enrolled/${{ matrix.binding }}) or $f does not exist on this ref." >&2
+          fi
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'python'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.toolchain }}
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'ts'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'ts'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node_version }}
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - if: steps.gate.outputs.run == 'true' && matrix.binding == 'rust'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - name: install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          case "${{ matrix.binding }}" in
+            go) (cd go && go mod download) ;;
+            python) (cd python && uv sync --locked --group dev) ;;
+            ts) (cd ts && pnpm install --frozen-lockfile) ;;
+            rust) (cd rust && cargo fetch --locked) ;;
+          esac
+      - name: "derive the staging case table — the SDK test key is trusted here by explicit opt-in, and nowhere else"
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          scripts/fetch-v1/staging.py emit \
+            --out "$RUNNER_TEMP/staging-fixtures" \
+            --trust-test-key "$(cat tests/fixtures/fetch-v1/test-key/public.hex)"
+      - name: run the binding's own conformance runner against registry_base
+        if: steps.gate.outputs.run == 'true'
+        env:
+          CHTYPES_V1_CONFORMANCE: ${{ runner.temp }}/staging-fixtures
+          CHTYPES_V1_REGISTRY_BASE: ${{ inputs.registry_base }}
+          CHTYPES_V1_REPORT: ${{ runner.temp }}/staging-report-${{ matrix.binding }}.json
+        run: |
+          case "${{ matrix.binding }}" in
+            go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/) ;;
+            python)
+              rel="${{ steps.gate.outputs.runner_file_path }}"
+              (cd python && uv run --offline --python "${{ matrix.toolchain }}" pytest -q "${rel#python/}")
+              ;;
+            ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
+            rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
+          esac
+      # `staging-report-*`, never `report-*`: v1-parity downloads `report-*`
+      # and must never see a staging report.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.gate.outputs.run == 'true'
+        with:
+          name: staging-report-${{ matrix.binding }}
+          path: ${{ runner.temp }}/staging-report-${{ matrix.binding }}.json
+          if-no-files-found: ignore
+
+  v1-staging-verdict:
+    name: "v1-staging-verdict — what the staging run measured (job summary only)"
+    needs: [v1-staging]
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.registry_base != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: "selftest — the case table's rules, the trust opt-in and the verdict's own failure modes"
+        run: scripts/fetch-v1/staging.py --selftest
+      - name: download every staging report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true # none exist while no binding is enrolled
+        with:
+          pattern: "staging-report-*"
+          path: ${{ runner.temp }}/staging-reports
+          merge-multiple: true
+      - name: verdict, to the job summary only (exit status is 0 whatever it says)
+        env:
+          REGISTRY_BASE: ${{ inputs.registry_base }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/staging-reports"
+          scripts/fetch-v1/staging.py emit --out "$RUNNER_TEMP/staging-fixtures" \
+            --trust-test-key "$(cat tests/fixtures/fetch-v1/test-key/public.hex)" >/dev/null
+          scripts/fetch-v1/staging.py verdict --derived "$RUNNER_TEMP/staging-fixtures" \
+            --reports-dir "$RUNNER_TEMP/staging-reports" --registry-base "$REGISTRY_BASE"

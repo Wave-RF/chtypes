@@ -1,33 +1,34 @@
-// Command playground is the Go tour of chtypes.
+// Command playground is the Go tour of chtypes, on the v1 public API
+// (docs/reference/bindings-v1.md).
 //
 // # WHAT THIS IS
 //
 // chtypes answers one question: "if this row were inserted into this table on
-// this ClickHouse version, what would happen?" — without a server. The answers
-// come from ClickHouse's own C++ (vendored per release into shared libraries
-// behind a 22-function C ABI), which is why they are exact rather than
-// approximately right.
+// this ClickHouse version, what would happen?" without a server. The answers
+// come from ClickHouse's own C++, vendored per release into a shared library
+// the binding loads and speaks to over a C ABI, which is why they are exact
+// rather than approximately right.
 //
 // This file is a tutorial you RUN. Seventeen numbered sections walk the whole
-// public API of the Go SDK, from loading an artifact to tearing down, each
-// with a comment saying what it demonstrates, why an ingest pipeline cares,
-// and what to look at in the output. The same seventeen sections — same
-// numbering, same schemas, same rows — exist in python/demo.py, ts/demo.mjs
-// and rust/src/main.rs, so you can diff two tours and see only the language
-// idioms differ.
+// public API of the Go SDK, from opening a library to tearing down, each with
+// a comment saying what it demonstrates, why an ingest pipeline cares, and
+// what to look at in the output. The same seventeen sections exist in the
+// Python, TypeScript and Rust tours, so you can diff two tours and see only
+// the language idioms differ.
 //
-// EVERYTHING HERE IS OFFLINE. You need the Go toolchain and the artifacts in
-// the registry (scripts/fetch.sh, or a core-repository build) — no Docker, no ClickHouse
-// server, no network. Even the discovery-kit section (11) runs offline,
-// against CANNED bytes shaped exactly like a real server's responses.
+// Everything runs offline against an INSTALLED artifact: fetch one first,
 //
-//	go run .                       # newest vendored version
+//	go run ../../go/cmd/chtypes fetch 26.8
+//
+// then run the tour (no Docker, no ClickHouse server; even the discovery-kit
+// section runs against canned bytes):
+//
+//	go run .                       # newest installed line
 //	CHTYPES_VERSION=26.8 go run .  # pick a line
 //	../chplay.sh go                # same, with prerequisite checks
 //
-// Nothing here is a test — the real suites live in go/chtypes and
-// tests/. Every number printed below is produced by the run, never written
-// down by hand.
+// Nothing here is a test: the real suites live under go/ and tests/. Every
+// number printed below is produced by the run, never written down by hand.
 package main
 
 import (
@@ -35,6 +36,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -43,33 +46,34 @@ import (
 
 // ---------------------------------------------------------------- the fixture
 //
-// These constants are IDENTICAL in all four playgrounds. Change one here and
-// you must change it in python/demo.py, ts/demo.mjs and rust/src/main.rs too —
-// the point of this directory is that the four outputs can be diffed.
+// These constants are IDENTICAL in all four tours: the point of this
+// directory is that the four outputs can be diffed.
 
-// The tenant's table for the DEFAULT/result sections: one of everything the
-// tour needs — a volatile DEFAULT (now64), a literal DEFAULT, an Enum (how a
-// table gets poisoned), and a MATERIALIZED column (never in SELECT *).
-const demoDDL = `ts DateTime64(3) DEFAULT now64(3),
+// The tenant's table for the DEFAULT and result sections: one of everything
+// the tour needs, a volatile DEFAULT (now64), a literal DEFAULT, an Enum (how
+// a table gets poisoned), and a MATERIALIZED column (never in SELECT *).
+const demoDDL = `CREATE TABLE t (
+ts DateTime64(3) DEFAULT now64(3),
 device_id UInt32,
 seq UInt8 DEFAULT 0,
 payload String,
 grade Enum8('a' = 1, 'b' = 2),
-payload_len UInt32 MATERIALIZED length(payload)`
+payload_len UInt32 MATERIALIZED length(payload)
+) ENGINE = MergeTree ORDER BY device_id`
 
 // A small three-column table for the outcome and format sections. Positional
 // formats (CSV, TSV, Values, RowBinary...) are far easier to read against a
 // small schema, and both DEFAULTs give the empty-field rules something to do.
-const formatDDL = `device_id UInt32, seq UInt8 DEFAULT 7, label String DEFAULT 'unknown'`
+const formatDDL = `CREATE TABLE t (device_id UInt32, seq UInt8 DEFAULT 7, label String DEFAULT 'unknown') ENGINE = MergeTree ORDER BY device_id`
 
-// Pinning the clock is what makes a demo with now64(3) in it reproducible.
-// The value is a STRING at the boundary, always: 19 digits do not survive an
-// IEEE double, and a JSON number here would be silently ignored.
-const pinnedClock = "1700000000000000000" // 2023-11-14 22:13:20 UTC
+// tableOf wraps a column list in the one CREATE TABLE statement every compile
+// takes (there is no column-list compile in v1).
+func tableOf(columns string) string {
+	return "CREATE TABLE t (" + columns + ") ENGINE = MergeTree ORDER BY tuple()"
+}
 
 // Hand-built binary payloads (hex), shared by all four tours. Each is
-// explained where it is fed. The RBWD payloads are the committed fixtures
-// from tests/fixtures/rbwd/, whose value bytes a real ClickHouse wrote.
+// explained where it is fed.
 const (
 	rowBinaryOK = "0100000007026f6b"     // UInt32 LE 1, UInt8 7, varint-len "ok"
 	rbwdMarker  = "00020000000100026869" // device_id=2 by value, seq by marker, label="hi"
@@ -85,27 +89,37 @@ const (
 	nativeOK   = "0301096465766963655f69640655496e74333201000000037365710555496e743807056c6162656c06537472696e67026f6b"
 	nativeCast = "0301096465766963655f69640655496e743332020000000373657106537472696e6703323030056c6162656c06537472696e670463617374"
 	// Buffers: uint64le n_columns, n_rows, then per column a byte size and the
-	// raw column. 4 bytes ff ff ff ff — declared 4 wide, then (wrongly) 8 wide.
+	// raw column. 4 bytes ff ff ff ff, declared 4 wide, then (wrongly) 8 wide.
 	buffersOK   = "010000000000000001000000000000000400000000000000ffffffff"
 	buffersWide = "010000000000000001000000000000000800000000000000ffffffff"
 )
 
-// Section 11's CANNED server responses. These are not live bytes — they are
-// shaped EXACTLY like a real ClickHouse's JSONEachRow answers to the three
-// discovery queries (quoted UInt64s and all, matching a stock HTTP server's
-// output_format_json_quote_64bit_integers=1). Swap in your own HTTP client's
-// bytes and nothing else changes.
+// Section 11's CANNED server answer: the JSONEachRow rows of the library's own
+// discovery query (system.columns), shaped like a stock HTTP server's output
+// (quoted UInt64s and all). Swap in your own HTTP client's bytes and nothing
+// else changes. The server's version, and the settings it changed from stock,
+// are the CALLER's to supply in v1 (the library has no call that asks a
+// server), so they are plain values here.
 const (
-	cannedVersionResult  = `{"version":"25.8.28.1"}` + "\n"
-	cannedSettingsResult = `{"name":"flatten_nested","value":"0"}` + "\n" +
-		`{"name":"date_time_input_format","value":"best_effort"}` + "\n"
-	cannedColumnsResult = `{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT","default_expression":"now64(3)","position":"1"}` + "\n" +
-		`{"name":"device_id","type":"UInt32","default_kind":"","default_expression":"","position":"2"}` + "\n" +
-		`{"name":"reading c","type":"Float64","default_kind":"","default_expression":"","position":"3"}` + "\n" +
-		`{"name":"note","type":"String","default_kind":"DEFAULT","default_expression":"'unset'","position":"4"}` + "\n"
+	cannedServerVersion = "25.8.28.1"
+	cannedColumnsResult = `{"name":"ts","type":"DateTime64(3)","default_kind":"DEFAULT","default_expression":"now64(3)"}` + "\n" +
+		`{"name":"device_id","type":"UInt32","default_kind":"","default_expression":""}` + "\n" +
+		`{"name":"reading c","type":"Float64","default_kind":"","default_expression":""}` + "\n" +
+		`{"name":"note","type":"String","default_kind":"DEFAULT","default_expression":"'unset'"}` + "\n"
 )
 
+// setupDefaults is the process-wide default settings layer (section 9). It is
+// fixed once, before any library opens, and lives under every call's own
+// settings: a stock "basic" datetime parse, so section 9 can show each layer
+// overriding the one below it.
+var setupDefaults = map[string]string{"date_time_input_format": "basic"}
+
 func main() {
+	// The process setup comes first and only once (bindings-v1.md section 6):
+	// the image zone and the default settings are fixed before any library
+	// loads, and a different setup later is a *UsageError.
+	must(chtypes.Setup(chtypes.SetupOptions{Defaults: setupDefaults}))
+
 	reg, lib := section1()
 	section2(lib)
 	section3(lib)
@@ -114,9 +128,9 @@ func main() {
 	section6(lib)
 	section7(lib, reg)
 	section8(lib)
-	section9()
+	section9(lib)
 	section10(lib)
-	section11(reg)
+	section11(reg, lib)
 	section12(reg)
 	section13()
 	section14()
@@ -126,70 +140,84 @@ func main() {
 
 	blank()
 	line("Done. Every value above was measured by this run.")
-	line("The optional ONLINE demo (a real server, end to end) is go/ingest-demo/.")
+	line("The optional ONLINE demo (a real server, end to end) is ingest-demo/.")
 }
 
 // ---------------------------------------------------------------------------
-// SECTION 1 — Load the library and check the ABI
+// SECTION 1 — Open a library and read its build info
 //
-// WHAT: open the artifact registry, see every ClickHouse version
-// resident in this one process, pick one, and check the ABI revision.
+// WHAT: construct a registry, see what the fetch layer holds, open one
+// version, and read the library's own account of itself.
 // WHY: an ingest gateway serves tenants on different ClickHouse versions at
 // once; the registry is how one process answers for all of them, exactly.
-// LOOK FOR: the artifact NAMING ITSELF, and the refusal for a version that is
-// not built — never a silent nearest-version fallback.
-// C API: chs_clickhouse_version, chs_abi_revision, chs_init (implicit on
-// load), chs_free (implicit on every returned string).
+// LOOK FOR: the library NAMING ITSELF (version, line, fingerprint), and the
+// refusal for a version that is not installed, never a nearest-version
+// fallback.
+// C API: chs_build_info (read once by the loader), after the load steps of
+// docs/reference/abi-v1.md.
 // ---------------------------------------------------------------------------
 func section1() (*chtypes.Registry, *chtypes.Library) {
-	section(1, "Load the library and check the ABI")
+	section(1, "Open a library and read its build info")
 
-	dir := registryDir()
-	reg, err := chtypes.NewRegistry(dir)
+	reg, err := chtypes.NewRegistry()
 	if err != nil {
-		fatal("open registry %q: %v\n\nFetch an artifact first: `scripts/fetch.sh 26.8`.", dir, err)
+		fatal("construct a registry: %v", err)
 	}
-	versions := reg.Versions()
-	kv("registry dir", dir)
-	kv("versions resident", strings.Join(versions, "  "))
-	note("one dlopen (RTLD_LOCAL) per version — all live in THIS process at once")
-	if len(versions) == 1 {
-		note("only one artifact is built; the tour still runs, and section 12's")
-		note("cross-version sweeps will degrade gracefully. More: `scripts/fetch.sh 26.7`")
+	installed, err := reg.Installed()
+	if err != nil {
+		fatal("list the installed builds: %v", err)
+	}
+	lines := installedLines(installed)
+	kv("lines installed", strings.Join(lines, "  "))
+	note("one dlopen per library, never unloaded: every line lives in THIS")
+	note("process at once. Fetch more with `chtypes fetch <spelling>`.")
+	if len(lines) == 0 {
+		fatal("nothing is installed for %s.\n\nFetch an artifact first: `go run ../../go/cmd/chtypes fetch 26.8`.", hostPlatform())
+	}
+	if len(lines) == 1 {
+		note("only one line is installed; the tour still runs, and section 12's")
+		note("cross-version sweeps will degrade gracefully.")
 	}
 
-	// Version selection: a minor line ("26.8") and an exact patch
-	// ("26.8.15.10-lts") both resolve. Docker tags drift, so an
-	// exact-match-only lookup would silently lose a whole version line.
+	// A request is a spelling: a two-part line ("26.8"), three parts, or an
+	// exact four-part version. The fetch layer decides which installed build
+	// a floating request means; the binding never orders versions.
 	want := os.Getenv("CHTYPES_VERSION")
 	if want == "" {
-		want = newestLine(versions)
-		kv("version selected", want+"  (default: newest held; set $CHTYPES_VERSION to change)")
+		want = lines[len(lines)-1]
+		kv("version requested", want+"  (default: newest installed; set $CHTYPES_VERSION to change)")
 	} else {
-		kv("version selected", want+"  (from $CHTYPES_VERSION)")
+		kv("version requested", want+"  (from $CHTYPES_VERSION)")
 	}
-	lib, err := reg.For(chtypes.Version(want))
+	lib, err := reg.For(want)
 	if err != nil {
 		fatal("%v", err)
 	}
-	kv("artifact reports", string(lib.Version)+"  (minor line "+lib.Minor+")")
-	note("the artifact names ITSELF via chs_clickhouse_version() — nothing is")
-	note("ever inferred from a directory or file name")
+	kv("library reports", lib.Version+"  (minor line "+lib.Minor+")")
+	note("the library names ITSELF from chs_build_info; nothing is ever")
+	note("inferred from a directory or file name")
 
-	// The ABI revision closes the gap symbol presence cannot: a symbol proves
-	// a function exists, never that its signature matches. The binding's
-	// revision is a compile-time constant; the artifact's is a live call. A
-	// nonzero disagreement is refused AT LOAD, not discovered mid-call.
-	kv("ABI revision (binding)", strconv.Itoa(chtypes.ABIRevision))
-	kv("ABI revision (artifact)", strconv.Itoa(lib.ABIRevision)+"   (0 would mean 'predates the probe')")
-	kv("compile-settings symbol", fmt.Sprintf("%v  (Library.HasCompileSettings)", lib.HasCompileSettings()))
+	// Identity is the ABI generation plus the fingerprint, checked by the
+	// loader before any call is made; a mismatch is *ArtifactError, never a
+	// crash mid-call.
+	info := lib.BuildInfo()
+	kv("ABI generation", strconv.Itoa(info.ABI))
+	kv("ABI fingerprint", info.ABIFingerprint)
+	kv("build", info.Build+"  (core "+shortHash(info.CoreCommit)+", ClickHouse "+shortHash(info.ClickHouseCommit)+")")
+	if res := lib.Resolved(); res != nil {
+		kv("opened from", res.Source+"  (signed by key "+res.SignedBy+")")
+	}
 
-	// Graceful refusal: answering 26.7 semantics out of a 25.8 artifact would
-	// be a lie, so an unknown version errors, NAMING what is loaded.
+	// Graceful refusal: answering 26.7 semantics out of a 25.8 library would
+	// be a lie, so an uninstalled version errors, NAMING how to get it.
 	blank()
 	_, err = reg.For("99.9")
 	kv("asking for 99.9", errStr(err))
-	note("no nearest-neighbor fallback, ever — a wrong-version answer is a")
+	var ae *chtypes.ArtifactError
+	if errors.As(err, &ae) {
+		kv("  error code", string(ae.Code))
+	}
+	note("no nearest-neighbor fallback, ever: a wrong-version answer is a")
 	note("wrong answer with a green checkmark on it")
 
 	return reg, lib
@@ -198,16 +226,16 @@ func section1() (*chtypes.Registry, *chtypes.Library) {
 // ---------------------------------------------------------------------------
 // SECTION 2 — Ask a build about itself
 //
-// WHAT: type validation and canonicalization, straight from this build's own
-// DataTypeFactory.
+// WHAT: type validation and canonicalization, quoting, and the build's own
+// error-code table and capabilities.
 // WHY: canonicalization is how you compare a tenant's declared type against
-// what the server will actually store — and it is NOT a spelling normalizer,
+// what the server will actually store, and it is NOT a spelling normalizer,
 // it is the server's own parse.
-// LOOK FOR: Variant members being SORTED, BIGINT becoming Int64, and the
-// error for an unknown family carrying ClickHouse's own code 50.
-// C API: chs_validate_type, plus the introspection trio — chs_reference_type,
-// chs_registered_families, chs_function_flags — exposed per Library in every
-// SDK since the 2026-08-26 parity cycle (docs/reference/bindings.md §Introspection).
+// LOOK FOR: Variant members being SORTED, BIGINT becoming Int64, the error
+// for an unknown family carrying ClickHouse's own code 50, and quoting that
+// is the library's own backQuote.
+// C API: chs_type_validate, chs_back_quote(_if_needed), chs_quote_string,
+// chs_error_codes.
 // ---------------------------------------------------------------------------
 func section2(lib *chtypes.Library) {
 	section(2, "Ask a build about itself")
@@ -221,110 +249,113 @@ func section2(lib *chtypes.Library) {
 		}
 		kv("  "+t, "-> "+canon)
 	}
-	note("Variant members are SORTED; surplus parameters are dropped; the")
-	note("space after each comma is the library's own spelling — compare")
-	note("canonical strings verbatim, never re-normalize whitespace")
+	note("Variant members are SORTED; the space after each comma is the")
+	note("library's own spelling: compare canonical strings verbatim, never")
+	note("re-normalize whitespace")
 	blank()
 
 	// An unknown family is a typed error carrying ClickHouse's OWN code and
-	// message — not a string you have to pattern-match.
+	// message, not a string you have to pattern-match.
 	_, err := lib.ValidateType("NotAType")
 	var se *chtypes.SchemaError
 	if errors.As(err, &se) {
-		kv("ValidateType(NotAType)", fmt.Sprintf("*SchemaError code=%d  %s", se.Code, se.Msg))
-		note("code 50 = UNKNOWN_TYPE — the server's own code, from the server's")
+		kv("ValidateType(NotAType)", fmt.Sprintf("*SchemaError code=%d %s  %s", se.ChCode, se.ChName, truncate(se.Message, 48)))
+		note("code 50 = UNKNOWN_TYPE: the server's own code, from the server's")
 		note("own registry. Section 10 is the full error taxonomy.")
 	}
 	blank()
 
-	// The introspection trio, per Library (docs/reference/bindings.md §Introspection).
-	if ref, err := lib.ReferenceType("UInt8"); err == nil {
-		kv("ReferenceType(UInt8)", "-> "+ref+"  (the widened second-parse type)")
-	} else {
-		kv("ReferenceType(UInt8)", errStr(err))
-	}
-	if families, err := lib.RegisteredFamilies(); err == nil {
-		kv("RegisteredFamilies", fmt.Sprintf("%d type families (e.g. %s)", len(families), strings.Join(families[:3], ", ")))
-	} else {
-		kv("RegisteredFamilies", errStr(err))
-	}
-	if flags, err := lib.FunctionFlags(); err == nil {
-		lines := 0
-		for _, l := range strings.Split(flags, "\n") {
-			if l != "" {
-				lines++
-			}
+	// Quoting is ClickHouse's own: bytes in, bytes out, never a copy of the
+	// rule in the binding.
+	for _, name := range []string{"plain", "reading c", "a`b"} {
+		always, err1 := lib.QuoteIdentifier(name)
+		needed, err2 := lib.QuoteIdentifierIfNeeded(name)
+		if err1 != nil || err2 != nil {
+			kv("  quote "+name, errStr(errors.Join(err1, err2)))
+			continue
 		}
-		kv("FunctionFlags", fmt.Sprintf("%d registered functions audited (TSV)", lines))
-		note("the volatility audit behind the statelessness gate — the build")
-		note("fails unless the admitted volatile set is exactly the 4 clock reads")
-	} else {
-		kv("FunctionFlags", errStr(err))
+		kv("  quote "+name, fmt.Sprintf("always %s   if needed %s", always, needed))
 	}
+	if lit, err := lib.QuoteLiteral("it's"); err == nil {
+		kv("  QuoteLiteral(it's)", lit)
+	}
+	blank()
+
+	// The build's own error-code table: this ClickHouse line's names for its
+	// codes. An unknown code is absent, never synthesized.
+	table, err := lib.ErrorCodes()
+	if err != nil {
+		kv("ErrorCodes", errStr(err))
+	} else {
+		name, _ := table.Name(50)
+		kv("ErrorCodes", fmt.Sprintf("%d codes; 50 is %s", len(table.All()), name))
+	}
+	caps := lib.BuildInfo().Capabilities
+	kv("capabilities", fmt.Sprintf("%d input formats, %d export formats, features %v", len(caps.InputFormats), len(caps.ExportFormats), caps.Features))
+	note("what a build supports is READ from build_info, never probed by calling")
+	note("(v1 deletes the v0 introspection trio; see bindings-v1.md section 7)")
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 3 — Compile a schema and read it back
 //
-// WHAT: compile a column-declaration list (NOT a CREATE TABLE) and walk the
-// compiled columns: canonical types, DEFAULT kinds and expressions.
+// WHAT: compile ONE CREATE TABLE statement and walk the compiled columns:
+// canonical types, DEFAULT kinds and expressions.
 // WHY: the compiled handle IS the table, as this ClickHouse version would
 // create it. Two rewrites below are things no type-string comparison could
-// ever catch — the compile is schema-aware.
+// ever catch: the compile is schema-aware.
 // LOOK FOR: DEFAULT NULL turning Int64 into Nullable(Int64), and an ALIAS
 // column whose type is INFERRED from its expression.
-// C API: chs_schema_compile, chs_schema_column_count/_name/_type/
-// _default_kind/_default_expr, chs_schema_free (via Close). The Go SDK does
-// not surface chs_schema_column_default_is_literal (Python/TS/Rust do).
+// C API: chs_schema_create, chs_schema_describe, chs_schema_free (via Close).
 // ---------------------------------------------------------------------------
 func section3(lib *chtypes.Library) {
 	section(3, "Compile a schema and read it back")
 
-	kv("the DDL", "")
-	for _, l := range strings.Split(demoDDL, ",\n") {
+	kv("the statement", "")
+	for _, l := range strings.Split(demoDDL, "\n") {
 		raw("      " + l)
 	}
-	s, err := lib.CompileDDL(demoDDL)
+	s, err := lib.CompileTable(demoDDL)
 	if err != nil {
 		fatal("%v", err)
 	}
+	desc, err := s.Describe()
+	must(err)
 	blank()
 	kv("compiled columns", "name  type  (default kind + expression)")
-	for _, c := range s.Columns {
+	for _, c := range desc.Columns {
 		extra := ""
 		if c.DefaultKind != chtypes.KindNone {
-			extra = "  " + c.DefaultKind.String() + " " + c.Default
+			extra = "  " + string(c.DefaultKind) + " " + c.DefaultExpr
 		}
 		kv("  "+c.Name, c.Type+extra)
 	}
 	note("payload_len is MATERIALIZED: compiled, introspectable, but never")
-	note("read from input — watch it come back separately in section 6")
-	s.Close() // chs_schema_free; freed handles refuse further calls
+	note("read from input; watch it come back separately in section 6")
+	must(s.Close()) // chs_schema_free; a closed handle is a *UsageError
 	blank()
 
 	// Rewrite 1: a DEFAULT can change the declared TYPE. This is why
 	// ValidateType alone is not enough and a schema-aware compile exists.
-	s2, err := lib.CompileDDL("x Int64 DEFAULT NULL")
-	if err != nil {
-		fatal("%v", err)
-	}
-	kv("x Int64 DEFAULT NULL", "compiles as "+s2.Columns[0].Type+" DEFAULT "+s2.Columns[0].Default)
-	note("the DEFAULT rewrote the type to Nullable — the server does this at")
+	s2, err := lib.CompileTable(tableOf("x Int64 DEFAULT NULL"))
+	must(err)
+	d2, _ := s2.Describe()
+	kv("x Int64 DEFAULT NULL", "compiles as "+d2.Columns[0].Type+" DEFAULT "+d2.Columns[0].DefaultExpr)
+	note("the DEFAULT rewrote the type to Nullable: the server does this at")
 	note("CREATE, so chtypes must too or every later verdict drifts")
 	s2.Close()
 
 	// Rewrite 2: an ALIAS column's type is inferred from its expression.
-	s3, err := lib.CompileDDL("a UInt8, al ALIAS a + 1")
-	if err != nil {
-		fatal("%v", err)
-	}
-	kv("a UInt8, al ALIAS a + 1", "al compiles as "+s3.Columns[1].Type)
+	s3, err := lib.CompileTable(tableOf("a UInt8, al ALIAS a + 1"))
+	must(err)
+	d3, _ := s3.Describe()
+	kv("a UInt8, al ALIAS a + 1", "al compiles as "+d3.Columns[1].Type)
 	note("UInt8 + 1 widens to UInt16, ClickHouse's own inference")
 	s3.Close()
 	blank()
 
 	// A failed compile is the same typed error as section 2's.
-	_, err = lib.CompileDDL("x NotAType")
+	_, err = lib.CompileTable(tableOf("x NotAType"))
 	kv("x NotAType", classify(err))
 	note(truncate(errStr(err), 90))
 }
@@ -332,31 +363,31 @@ func section3(lib *chtypes.Library) {
 // ---------------------------------------------------------------------------
 // SECTION 4 — Compile under a settings profile
 //
-// WHAT: the same compile with a DECLARED settings profile fixed into the
-// handle — the settings a real server would have had at CREATE TABLE.
+// WHAT: the same compile with a profile of settings: the settings a real
+// server would have had at CREATE TABLE.
 // WHY: some settings change the SHAPE of a table (flatten_nested), some gate
 // which TYPES may exist (allow_suspicious_low_cardinality_types). A gateway
-// discovers a deployment's settings once (section 11) and declares them here;
-// the handle then behaves like a table created on THAT server.
-// LOOK FOR: one DDL compiling to two different column lists; a type gate
-// failing with the server's own 455; a typo'd setting name failing with the
-// server's own 115 INCLUDING its did-you-mean hint.
-// C API: chs_schema_compile (settings_json + mode arguments).
+// discovers a deployment's settings once (section 11) and declares them here.
+// LOOK FOR: one statement compiling to two different column lists; a type
+// gate failing with the server's own code; a typo'd setting name failing with
+// the server's own 115 INCLUDING its did-you-mean hint.
+// C API: chs_schema_create (the settings argument).
 // ---------------------------------------------------------------------------
 func section4(lib *chtypes.Library) {
 	section(4, "Compile under a settings profile")
 
-	// (a) A compile-SHAPE setting: the same DDL, two storage shapes.
+	// (a) A compile-SHAPE setting: the same statement, two storage shapes.
 	kv("(a) flatten_nested", "id UInt32, n Nested(a UInt8, b String)")
 	for _, v := range []string{"1", "0"} {
-		s, err := lib.CompileDDL("id UInt32, n Nested(a UInt8, b String)",
-			chtypes.WithCompileSettings(map[string]string{"flatten_nested": v}))
+		s, err := lib.CompileTable(tableOf("id UInt32, n Nested(a UInt8, b String)"),
+			chtypes.WithSettings(map[string]string{"flatten_nested": v}))
 		if err != nil {
 			kv("  ="+v, errStr(err))
 			continue
 		}
+		d, _ := s.Describe()
 		var names []string
-		for _, c := range s.Columns {
+		for _, c := range d.Columns {
 			names = append(names, c.Name+" "+c.Type)
 		}
 		kv("  ="+v, strings.Join(names, " | "))
@@ -364,181 +395,165 @@ func section4(lib *chtypes.Library) {
 	}
 	note("under 1 (the stock default) the Nested column is stored FLATTENED as")
 	note("two Arrays; under 0 it is one Array(Tuple) column. Every downstream")
-	note("answer — names, arity, the RowBinary wire — follows the compiled shape.")
+	note("answer (names, arity, the RowBinary wire) follows the compiled shape.")
 	blank()
 
 	// (b) A TYPE GATE, declared: checked ONCE at compile with the server's own
 	// code, exactly where a real server checks it (at CREATE).
 	kv("(b) a type gate", "lc LowCardinality(UInt8), allow_suspicious_low_cardinality_types")
 	for _, v := range []string{"0", "1"} {
-		s, err := lib.CompileDDL("lc LowCardinality(UInt8)",
-			chtypes.WithCompileSettings(map[string]string{"allow_suspicious_low_cardinality_types": v}))
+		s, err := lib.CompileTable(tableOf("lc LowCardinality(UInt8)"),
+			chtypes.WithSettings(map[string]string{"allow_suspicious_low_cardinality_types": v}))
 		if err != nil {
-			var se *chtypes.SchemaError
-			code := "?"
-			if errors.As(err, &se) {
-				code = strconv.Itoa(se.Code)
-			}
-			kv("  ="+v, "REFUSED, the server's own code "+code)
+			kv("  ="+v, "REFUSED, "+classify(err))
 			note(truncate(errStr(err), 92))
 		} else {
-			kv("  ="+v, "compiled: "+s.Columns[0].Type)
+			d, _ := s.Describe()
+			kv("  ="+v, "compiled: "+d.Columns[0].Type)
 			s.Close()
 		}
 	}
 	blank()
 
 	// (c) A typo in the profile is caught at DECLARE time. The did-you-mean
-	// hint is the SERVER'S — chtypes passes it through and invents nothing.
-	_, err := lib.CompileDDL("a UInt8",
-		chtypes.WithCompileSettings(map[string]string{"flatten_nestedd": "1"}))
+	// hint is the SERVER'S: chtypes passes it through and invents nothing.
+	_, err := lib.CompileTable(tableOf("a UInt8"), chtypes.WithSettings(map[string]string{"flatten_nestedd": "1"}))
 	var se *chtypes.SchemaError
 	if errors.As(err, &se) {
-		kv("(c) unknown setting name", fmt.Sprintf("flatten_nestedd -> code %d (UNKNOWN_SETTING)", se.Code))
-		note(truncate(se.Msg, 96))
+		kv("(c) unknown setting name", fmt.Sprintf("flatten_nestedd -> code %d %s", se.ChCode, se.ChName))
+		note(truncate(se.Message, 96))
 	}
 	blank()
 
-	// (d) The compile MODE. One mode exists (DECLARED = 0). A binding passes
-	// an unrecognized mode THROUGH; the refusal (-2, a decline) is the
-	// library's to make — unconditionally, even with no profile.
-	kv("(d) compile mode", "chtypes.CompileDeclared = "+strconv.Itoa(int(chtypes.CompileDeclared)))
-	s, err := lib.CompileDDL("a UInt8", chtypes.WithCompileMode(chtypes.CompileDeclared))
-	kv("  mode=0", okOr(err, "compiled"))
-	if s != nil {
-		s.Close()
-	}
-	_, err = lib.CompileDDL("a UInt8", chtypes.WithCompileMode(chtypes.CompileMode(7)))
-	kv("  mode=7", classify(err))
-	note("a DECLINE (-2), not a rejection: reserved for a future mode")
+	// (d) The statement's own engine and settings are part of the one
+	// statement; a schema is immutable once compiled (v0's SetEngine,
+	// SetTTL and compile modes are gone, bindings-v1.md section 7).
+	kv("(d) one statement", "engine, TTL and partition key are in the CREATE TABLE text")
+	note("section 8 shows the engine layer; there is no setter after the compile")
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 5 — Accept, reject, decline (and poison)
 //
-// WHAT: the three verdicts every row lands on — plus the fourth, poisoned,
-// which looks like an accept and bites at read time.
+// WHAT: the verdicts every row lands on, plus the fourth, poisoned, which
+// looks like an accept and bites at read time, and the fifth, skipped.
 // WHY: this is the contract of the whole product. An ingest gateway routes on
 // exactly this: accepted -> insert and publish the STORED values; rejected ->
 // 400 the producer with the server's own message; unsupported -> chtypes
-// refuses to guess, so fall back to the real server (validate cautiously) and
-// NEVER convert the decline into an accept or a reject yourself.
+// refuses to guess, so fall back to the real server and NEVER convert the
+// decline into an accept or a reject yourself.
 // LOOK FOR: the accept carrying a visible coercion (input 256, stored 0);
 // the reject carrying ClickHouse's own error text; the decline carrying no
 // ClickHouse code at all.
-// C API: chs_rows.
+// C API: chs_preview_row, chs_preview_batch.
 // ---------------------------------------------------------------------------
 func section5(lib *chtypes.Library) {
 	section(5, "Accept, reject, decline (and poison)")
 	kv("schema", formatDDL)
 	blank()
 
-	s, err := lib.CompileDDL(formatDDL)
+	s, err := lib.CompileTable(formatDDL)
 	if err != nil {
 		fatal("%v", err)
 	}
 	defer s.Close()
 
-	// ACCEPT — with the coercion made visible. ClickHouse's readIntText wraps
-	// integers mod 2^N and reports SUCCESS; chtypes derives the Transform so a
-	// gateway can warn the tenant BEFORE the row ships to subscribers.
+	// ACCEPT, with the coercion made visible. ClickHouse's readIntText wraps
+	// integers mod 2^N and reports SUCCESS; the library reports the Transform
+	// so a gateway can warn the tenant BEFORE the row ships to subscribers.
 	kv("(a) ACCEPT", `{"device_id":1,"seq":256,"label":"ok"}`)
 	feed(s, "JSONEachRow", chtypes.JSONEachRow, []byte(`{"device_id":1,"seq":256,"label":"ok"}`))
-	note("accepted — but look at seq: input 256, stored 0. The ~ line is the")
-	note("Transform (reason overflow_wrap, LOSSY). Publish the STORED value;")
-	note("publishing the payload value is how previews and tables diverge.")
+	note("accepted, but look at seq: input 256, stored 0. The ~ line is the")
+	note("Transform (reason overflow_wrap, LOSSY, read from the document).")
+	note("Publish the STORED value; publishing the payload value is how")
+	note("previews and tables diverge.")
 	blank()
 
-	// REJECT — the server's own refusal, code and message verbatim from the
+	// REJECT: the server's own refusal, code and message verbatim from the
 	// vendored ClickHouse code. Nothing to retry; tell the producer.
 	kv("(b) REJECT", `{"device_id":"abc"}`)
 	feed(s, "JSONEachRow", chtypes.JSONEachRow, []byte(`{"device_id":"abc"}`))
-	note("code 27 and the message are ClickHouse's OWN — chtypes never")
+	note("the code and the message are ClickHouse's OWN: chtypes never")
 	note("hand-writes an error, so your 400 body matches what a real INSERT")
 	note("would have said")
 	blank()
 
-	// DECLINE — chtypes refuses to guess. Values falls back to the SQL
+	// DECLINE: chtypes refuses to guess. Values falls back to the SQL
 	// expression parser for non-literals; evaluating tenant SQL locally is a
-	// guess this library will not make, so the row is UNSUPPORTED (-2).
+	// guess this library will not make.
 	kv("(c) DECLINE", "(2,7,concat('a','b'))  as Values")
 	feed(s, "Values", chtypes.Values, []byte(`(2,7,concat('a','b'))`))
 	note("unsupported means 'a real server MIGHT WELL accept this; I will not")
 	note("guess'. Do not 400 the producer (that manufactures an over-reject),")
 	note("do not publish (that manufactures an over-accept): send it to the")
-	note("real server unpreviewed and let it decide. Both mistake classes")
-	note("have no budget in this repo: nothing non-zero passes quietly.")
+	note("real server unpreviewed and let it decide.")
 	blank()
 
-	// POISON — the fourth verdict. The INSERT genuinely succeeds and every
-	// later SELECT throws: RowBinaryWithDefaults' marker byte fills an Enum
-	// with the raw zero, and Enum8('red'=1,'green'=2) has NO name for 0.
+	// POISON: the INSERT genuinely succeeds and every later SELECT throws:
+	// RowBinaryWithDefaults' marker byte fills an Enum with the raw zero, and
+	// Enum8('red'=1,'green'=2) has NO name for 0.
 	kv("(d) POISON", "an accept that bites at read time")
-	sp, err := lib.CompileDDL("id UInt32, e Enum8('red' = 1, 'green' = 2)")
+	sp, err := lib.CompileTable(tableOf("id UInt32, e Enum8('red' = 1, 'green' = 2)"))
 	if err == nil {
 		kv("  schema", "id UInt32, e Enum8('red' = 1, 'green' = 2)")
 		kv("  payload (RBWD)", rbwdPoison+"   (id=1 by value, e by marker byte)")
 		feed(sp, "RBWD marker", chtypes.RowBinaryWithDefaults, unhex(rbwdPoison))
-		note("accepted_poisoned + code 691: the marker fills with the COLUMN-level")
-		note("raw zero, and raw 0 has no Enum name. The insert returns success;")
-		note("every later SELECT fails. Reported as an ACCEPT variant — never a")
-		note("rejection — because the insert really does succeed.")
+		note("accepted_poisoned: the marker fills with the COLUMN-level raw zero,")
+		note("and raw 0 has no Enum name. The insert returns success; every later")
+		note("SELECT fails. Reported as an ACCEPT variant, never a rejection,")
+		note("because the insert really does succeed.")
 		kv("  control payload", rbwdValue+"   (e supplied by value = 2)")
 		feed(sp, "RBWD value", chtypes.RowBinaryWithDefaults, unhex(rbwdValue))
 		sp.Close()
 	}
 	blank()
 
-	// SKIP — the fifth verdict (2026-08-27), and the only per-row-only one: a
-	// batch under input_format_allow_errors_* drops a bad row and continues,
-	// with the server's own machinery — and since the itemization cycle, every
-	// skip keeps its place in Rows with the error IRowInputFormat caught
-	// before resyncing. The server logs only a count; chtypes reports what it
-	// computed.
+	// SKIP: the only per-row-only verdict. A batch under
+	// input_format_allow_errors_* drops a bad row and continues, with the
+	// server's own machinery, and every skip keeps its place in Rows with the
+	// error the reader caught before resyncing.
 	kv("(e) SKIP", "a bad middle row under input_format_allow_errors_num=10")
 	batch := []byte(`{"device_id":1,"seq":1,"label":"a"}` + "\n" +
 		`{"device_id":"oops"}` + "\n" +
 		`{"device_id":3,"seq":3,"label":"c"}` + "\n")
 	b, err := s.Rows(chtypes.JSONEachRow, batch,
-		map[string]string{"input_format_allow_errors_num": "10"})
+		chtypes.WithSettings(map[string]string{"input_format_allow_errors_num": "10"}))
 	if err != nil {
 		fatal("%v", err)
 	}
-	kv("  batch", fmt.Sprintf("%s  rows_read=%d rows_skipped=%d",
-		b.Outcome, b.RowsRead, b.RowsSkipped))
+	kv("  batch", fmt.Sprintf("%s  rows_read=%d rows_skipped=%d", b.Outcome, b.RowsRead, b.RowsSkipped))
 	for i, r := range b.Rows {
-		line := r.Outcome.String()
+		l := string(r.Outcome)
 		if r.Outcome == chtypes.Skipped {
-			line += fmt.Sprintf("  code=%d %s", r.ErrCode, truncate(r.ErrMsg, 48))
+			l += fmt.Sprintf("  code=%d %s", r.ErrCode, truncate(r.ErrMsg, 48))
 		}
-		kv(fmt.Sprintf("  row %d", i), line)
+		kv(fmt.Sprintf("  row %d", i), l)
 	}
 	note("one Rows call answers per input record, IN ORDER: accepted (with")
-	note("the coerced Values) or skipped (with the error that caused it).")
-	note("A Skipped row is never stored — route on the row Outcome; forward")
+	note("the coerced values) or skipped (with the error that caused it).")
+	note("A skipped row is never stored: route on the row Outcome; forward")
 	note("only survivors, and never send allow_errors to the real INSERT.")
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 6 — DEFAULT evaluation: where every value comes from
 //
-// WHAT: one row through the demo table with the clock pinned, then reading
-// back WHERE each stored value came from (Value.Source), which values chtypes
-// substituted itself, and which it computed.
+// WHAT: one row through the demo table, then reading back WHERE each stored
+// value came from (Value.Source), which entries the library computed, and
+// which it generated.
 // WHY: an INSERT is mostly values the row did NOT supply. A gateway that
 // cannot answer "what will the table hold for this column?" cannot preview an
-// insert. The volatile-DEFAULT rule is the sharp edge: chtypes resolved
-// now64() from ITS clock, so the caller MUST send that column explicitly —
-// otherwise the server stamps its own clock and preview != stored, always.
-// LOOK FOR: four different Source values in one row; the Substituted warning;
-// payload_len under Computed (never in Values); "bogus" under UnknownFields;
-// and a skew-budget DECLINE at the end.
-// C API: chs_row (via RowWithSettings), the chtypes_* clock settings.
+// insert.
+// LOOK FOR: several different Source values in one row; payload_len under
+// Computed (never in Values); "bogus" under UnknownFields; and, when the build
+// lists the default_generators feature, a generated DEFAULT you must insert
+// from the library's output.
+// C API: chs_preview_row.
 // ---------------------------------------------------------------------------
 func section6(lib *chtypes.Library) {
 	section(6, "DEFAULT evaluation: where every value comes from")
 
-	s, err := lib.CompileDDL(demoDDL)
+	s, err := lib.CompileTable(demoDDL)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -546,10 +561,8 @@ func section6(lib *chtypes.Library) {
 
 	row := []byte(`{"device_id":42,"seq":256,"payload":"hello","grade":"a","bogus":1}`)
 	kv("row fed", string(row))
-	kv("clock pinned", "chtypes_now_epoch_nanos="+pinnedClock+"  (2023-11-14 22:13:20 UTC)")
-	note("ts and label are OMITTED on purpose; bogus matches no column")
-	r, err := s.RowWithSettings(chtypes.JSONEachRow, row,
-		map[string]string{"chtypes_now_epoch_nanos": pinnedClock})
+	note("ts is OMITTED on purpose; bogus matches no column")
+	r, err := s.Row(chtypes.JSONEachRow, row)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -561,23 +574,21 @@ func section6(lib *chtypes.Library) {
 		kv("  "+v.Column, fmt.Sprintf("%-28s (%s)", textOr(v), v.Source))
 	}
 	note("Source values: input (the row supplied it), default (a DEFAULT")
-	note("expression evaluated through ClickHouse's own CAST path),")
-	note("default_substituted (a VOLATILE default resolved from the pinned")
-	note("clock), absent (no DEFAULT: the type's own zero). Text is")
-	note("ClickHouse's OWN JSON rendering — never re-serialized here, because")
-	note("18446744073709551615 through a double comes back ...552000.")
+	note("evaluated through ClickHouse's own CAST path), default_substituted")
+	note("(a VOLATILE default the library resolved from its own clock), absent")
+	note("(no DEFAULT: the type's own zero). Text is ClickHouse's OWN rendering,")
+	note("never re-serialized here.")
 
 	blank()
-	kv("Substituted[]", "volatile DEFAULTs chtypes resolved from ITS clock")
-	for _, sub := range r.Substituted {
-		kv("  "+sub.Column, sub.Expr+"  ->  "+sub.Text)
+	kv("Columns[]", "every entry the library reports, stored or not")
+	for _, c := range r.Columns {
+		kv("  "+c.Column, fmt.Sprintf("%-10s is_stored=%v", c.Source, c.IsStored))
 	}
-	note("SEND THESE AS EXPLICIT COLUMNS IN THE REAL INSERT. If the server")
-	note("evaluates now64() itself, preview and stored differ every time —")
-	note("ClickHouse reads the clock once per BLOCK, not once per statement.")
+	note("is_stored is the description's own fact for the source: an EPHEMERAL")
+	note("input or an unresolved DEFAULT is reported but stores nothing")
 
 	blank()
-	kv("Computed[]", "MATERIALIZED values — durable, but never in SELECT *")
+	kv("Computed[]", "MATERIALIZED values: durable, but never in SELECT *")
 	for _, c := range r.Computed {
 		kv("  "+c.Column, c.Kind+"  =  "+c.Text)
 	}
@@ -587,72 +598,69 @@ func section6(lib *chtypes.Library) {
 	blank()
 	kv("Transformed[]", "every silent change, with a machine-readable reason")
 	for _, t := range r.Transformed {
-		kv("  "+t.Reason, fmt.Sprintf("%s: %s -> %s   lossy=%v", t.Column, or(t.Input, "(absent)"), t.Stored, t.Lossy()))
+		kv("  "+string(t.Reason), fmt.Sprintf("%s: %s -> %s   lossy=%v", t.Column, or(t.Input, "(absent)"), t.Stored, t.Lossy))
 	}
-	note("Lossy() is false for exactly four reasons (reformat, default_filled,")
-	note("zero_filled, default_materialized) and true for everything else")
+	note("lossy is READ from the document: the library decides, and the")
+	note("binding keeps no list of reasons of its own")
 
 	blank()
-	kv("UnknownFields[]", fmt.Sprintf("%v", r.UnknownFields))
-	kv("UnsupportedSettings[]", fmt.Sprintf("%v", r.UnsupportedSettings))
-	note("unknown fields are reported, not judged — whether to 400 on them is")
-	note("gateway policy. A non-empty UnsupportedSettings promotes the row to")
-	note("unsupported: a declined setting must never score as agreement.")
+	kv("UnknownFields[]", fmt.Sprintf("%q", r.UnknownFields))
+	kv("UnsupportedSettings[]", fmt.Sprintf("%q", r.UnsupportedSettings))
+	note("unknown fields are reported, not judged: whether to 400 on them is")
+	note("gateway policy")
 	blank()
 
 	// A DEFAULT can read OTHER columns of the same row.
-	s2, err := lib.CompileDDL("a UInt8, d UInt8 DEFAULT a + 1")
+	s2, err := lib.CompileTable(tableOf("a UInt8, d UInt8 DEFAULT a + 1"))
 	if err == nil {
 		kv("row-dependent DEFAULT", "a UInt8, d UInt8 DEFAULT a + 1   fed CSV `7,`")
 		feed(s2, "CSV", chtypes.CSV, []byte("7,"))
 		note("the bare empty CSV field takes the DEFAULT, and the DEFAULT reads")
-		note("a=7 from the same row — d stores 8, exactly as the server computes it")
+		note("a=7 from the same row: d stores 8, exactly as the server computes it")
 		s2.Close()
 	}
 	blank()
 
-	// The clock-skew budget: the one place a DEFAULT becomes a DECLINE. Past
-	// the budget the only safe answer is "unsupported" — a substituted
-	// timestamp too far in the past under a TTL is silently deleted at merge
-	// time, with no error at any point.
-	r2, err := s.RowWithSettings(chtypes.JSONEachRow, []byte(`{"device_id":1,"seq":1,"payload":"x","grade":"b"}`),
-		map[string]string{"chtypes_clock_offset_nanos": "5000000000", "chtypes_max_clock_skew_nanos": "1"})
-	if err == nil {
-		kv("skew budget decline", "offset=5s, budget=1ns")
-		kv("  Outcome / ErrCode", fmt.Sprintf("%v / %d", r2.Outcome, r2.ErrCode))
-		for _, v := range r2.Values {
-			if v.Column == "ts" {
-				kv("  ts.Source", v.Source)
-			}
+	// A DEFAULT that calls an admitted random or ID generator: the library
+	// draws the value itself, so the CALLER must insert the library's output.
+	if hasFeature(lib, "default_generators") {
+		s3, err := lib.CompileTable(tableOf("id UInt32, token UUID DEFAULT generateUUIDv4()"))
+		must(err)
+		defer s3.Close()
+		kv("generated DEFAULT", "token UUID DEFAULT generateUUIDv4()   fed {\"id\":1}")
+		gr, err := s3.Row(chtypes.JSONEachRow, []byte(`{"id":1}`))
+		must(err)
+		for _, v := range gr.Values {
+			kv("  "+v.Column, fmt.Sprintf("%-38s (%s)", textOr(v), v.Source))
 		}
-		note("default_volatile_unresolved: chtypes refuses to substitute a")
-		note("volatile DEFAULT when the measured clock offset exceeds the")
-		note("caller's budget (chtypes_max_clock_skew_nanos)")
+		note("default_generated: the library drew this UUID. A real server would")
+		note("draw a DIFFERENT one for the same row, so insert the library's")
+		note("EXPORT (section 15), never your original input.")
+	} else {
+		kv("generated DEFAULT", "this build does not list default_generators; skipped")
 	}
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 7 — One schema, every format
 //
-// WHAT: the same three-column schema fed in all twelve chs_format encodings
-// — accept and reject for each text format, the two header formats, then the
-// binary tier with hand-built bytes.
+// WHAT: the same three-column schema fed in all twelve input formats: accept
+// and reject for each text format, the two header formats, then the binary
+// tier with hand-built bytes.
 // WHY: format is not cosmetic. Each format has signature behaviors (CSV's
 // bare-vs-quoted empty field, RBWD's marker byte, Native's silent CAST,
 // Buffers' silent reinterpret) that change what the table ends up holding.
 // LOOK FOR: the same logical row giving format-specific verdicts, and the
-// byte-level payloads in the comments — every binary payload is explained.
-// C API: chs_rows with format codes 0..11 (frozen integers: JSONEachRow=0,
-// CSV=1, TSV=2, Values=3, JSONCompactEachRow=4, RowBinary=5,
-// RowBinaryWithDefaults=6, RowBinaryWithNamesAndTypesAndDefaults=7,
-// Native=8, Buffers=9, CSVWithNames=10, TSVWithNames=11).
+// byte-level payloads in the comments: every binary payload is explained.
+// C API: chs_preview_row / chs_preview_batch with the Format values (frozen
+// integers: JSONEachRow=0 ... TSVWithNames=11).
 // ---------------------------------------------------------------------------
 func section7(lib *chtypes.Library, reg *chtypes.Registry) {
 	section(7, "One schema, every format")
 	kv("schema", formatDDL)
 	blank()
 
-	s, err := lib.CompileDDL(formatDDL)
+	s, err := lib.CompileTable(formatDDL)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -671,7 +679,7 @@ func section7(lib *chtypes.Library, reg *chtypes.Registry) {
 	feed(s, "Values       DEFAULT", chtypes.Values, []byte(`(3,DEFAULT,'d')`))
 	feed(s, "Values       decline", chtypes.Values, []byte(`(2,7,concat('a','b'))`))
 	note("Values has an explicit DEFAULT keyword; an SQL expression is a")
-	note("DECLINE (section 5c) — evaluated by a real server, guessed by nobody")
+	note("DECLINE (section 5c): evaluated by a real server, guessed by nobody")
 	blank()
 
 	// CSV's signature rule deserves its own two lines.
@@ -689,17 +697,14 @@ func section7(lib *chtypes.Library, reg *chtypes.Registry) {
 	feed(s, "CSVWithNames CASE", chtypes.CSVWithNames, []byte("DEVICE_ID,seq,label\n1,7,ok"))
 	note("header-name matching is EXACT through 26.4 and case-insensitive from")
 	note("26.5, so DEVICE_ID binds on one line and is an unknown field on the")
-	note("other — the artifact's answer, not this SDK's")
-	note("10 and 11 joined enum chs_format INSIDE ABI revision 5 without")
-	note("bumping it, so an artifact linked before them reports revision 5 and")
-	note("answers 117 \"unknown format 10\": ask the artifact, never the enum")
+	note("other: the library's answer, not this SDK's")
 	blank()
 
-	group("binary formats (bytes, COUNTED — never NUL-terminated)")
+	group("binary formats (bytes, COUNTED, never NUL-terminated)")
 	kv("  RowBinary payload", rowBinaryOK)
 	feed(s, "RowBinary    accept", chtypes.RowBinary, unhex(rowBinaryOK))
 	note("4-byte LE UInt32 (1), 1-byte UInt8 (7), varint-length String (\"ok\")")
-	note("— no framing, no names, no self-description")
+	note("with no framing, no names, no self-description")
 	feed(s, "RowBinary    reject", chtypes.RowBinary, []byte{0x01, 0x00})
 	note("truncated mid-row: framing faults are all-or-nothing per batch")
 	kv("  RBWD payload", rbwdMarker)
@@ -709,9 +714,9 @@ func section7(lib *chtypes.Library, reg *chtypes.Registry) {
 	note("bytes'. Above, seq's marker is 01 -> stored 7 (its DEFAULT).")
 	kv("  RBWNTD payload", "(hand-built: LEB128 count, names, types, then a marker row)")
 	feed(s, "RBWNTD       accept", chtypes.RowBinaryWithNamesAndTypesAndDefaults, unhex(rbwntdRow))
-	note("format 7 arrives with ClickHouse 26.x — on an older artifact the line")
-	note("above is the server's own 73 UNKNOWN_FORMAT, not a chtypes error.")
-	note("Section 12 turns exactly this into the version-pinning lesson.")
+	note("on a line that lacks the format, the line above is the server's own")
+	note("UNKNOWN_FORMAT, not a chtypes error; section 12 turns exactly this")
+	note("into the version-pinning lesson")
 	blank()
 
 	group("Native: self-describing, and it CASTs")
@@ -721,26 +726,26 @@ func section7(lib *chtypes.Library, reg *chtypes.Registry) {
 	feed(s, "Native       CAST", chtypes.Native, unhex(nativeCast))
 	note("this block declares seq as String \"200\" while the table says UInt8:")
 	note("the disagreement is CAST silently (input_format_native_allow_types_")
-	note("conversion defaults to true on every vendored era) — visible here as")
-	note("a Transform, invisible on a real server")
+	note("conversion defaults to true), visible here as a Transform, invisible")
+	note("on a real server")
 	blank()
 
 	group("Buffers: NO self-description at all")
-	newest, err := reg.For(chtypes.Version(newestLine(reg.Versions())))
+	newest, err := reg.For(newestLine(reg))
 	if err != nil {
 		return
 	}
-	sn, err := newest.CompileDDL("x Int32")
+	sn, err := newest.CompileTable(tableOf("x Int32"))
 	if err != nil {
 		return
 	}
 	defer sn.Close()
-	kv("  artifact", newest.Minor+"  (Buffers arrives at 26.5; this block uses the newest held)")
+	kv("  library", newest.Minor+"  (Buffers arrives at 26.5; this block uses the newest installed)")
 	kv("  payload", "4 bytes ff ff ff ff, declared x Int32")
 	feed(sn, "Buffers reinterpret", chtypes.Buffers, unhex(buffersOK))
 	note("a UInt32 producer's 4294967295 reads back as -1: same width, no")
 	note("metadata, so no check CAN fire. The over-accept class in a format")
-	note("that cannot detect it — the schema is entirely out of band.")
+	note("that cannot detect it: the schema is entirely out of band.")
 	feed(sn, "Buffers width", chtypes.Buffers, unhex(buffersWide))
 	note("the same 4 bytes declared 8 wide IS caught: size accounting disagrees")
 }
@@ -748,684 +753,640 @@ func section7(lib *chtypes.Library, reg *chtypes.Registry) {
 // ---------------------------------------------------------------------------
 // SECTION 8 — Engines, MergeTree settings, and TTL
 //
-// WHAT: declare the table's engine and TTL, then watch the STORAGE layer
-// change what a batch stores — including storing nothing at all.
+// WHAT: declare the table's engine, settings and TTL IN the statement, then
+// watch the STORAGE layer change what a batch stores, including storing
+// nothing at all.
 // WHY: a row can be accepted per row and absent per batch. SummingMergeTree
 // folds rows at insert; a TTL already in the past deletes them at merge, with
 // no error at any point. A gateway reading only per-row verdicts previews
 // rows the table will never hold.
 // LOOK FOR: EngineRows (the stored truth) being SHORTER than the input; the
 // TTL batch whose row is accepted and whose EngineRows is empty; and the
-// refusal-vs-decline pair on MergeTree settings (the sign of the ABI return
-// decides which).
-// C API: chs_schema_engine, chs_schema_ttl, chs_rows.
+// refusal-vs-decline pair on MergeTree settings (the class decides which).
+// C API: chs_schema_create (the engine is part of the statement),
+// chs_preview_batch.
 // ---------------------------------------------------------------------------
 func section8(lib *chtypes.Library) {
 	section(8, "Engines, MergeTree settings, and TTL")
 
 	// (a) A specialized engine changes what the table STORES.
-	s, err := lib.CompileDDL("day Date, key UInt32, v UInt64")
+	kv("(a) engine", "SummingMergeTree ORDER BY (day, key)")
+	s, err := lib.CompileTable("CREATE TABLE t (day Date, key UInt32, v UInt64) ENGINE = SummingMergeTree ORDER BY (day, key)")
 	if err != nil {
-		fatal("%v", err)
-	}
-	kv("(a) SetEngine", "SummingMergeTree ORDER BY (day, key)")
-	if err := s.SetEngine("SummingMergeTree", "(day, key)"); err != nil {
 		kv("  failed", errStr(err))
-		s.Close()
 		return
 	}
 	body := []byte(`{"day":"2026-01-01","key":1,"v":5}` + "\n" + `{"day":"2026-01-01","key":1,"v":7}`)
-	b, err := s.Rows(chtypes.JSONEachRow, body, nil)
+	b, err := s.Rows(chtypes.JSONEachRow, body)
 	if err != nil {
 		fatal("%v", err)
 	}
 	kv("  rows in / rows_read", fmt.Sprintf("2 / %d   (v=5 and v=7, same key)", b.RowsRead))
-	kv("  EngineRows (stored)", fmt.Sprintf("%s", b.EngineRows))
-	note("two rows in, ONE row out, v summed — EngineRows is the post-merge")
+	kv("  EngineRows (stored)", engineRows(b.EngineRows))
+	note("two rows in, ONE row out, v summed: EngineRows is the post-merge")
 	note("preview and, when present, the truth to believe over Rows")
 	s.Close()
 	blank()
 
-	// (b) MergeTree-namespace settings: two failures, two KINDS. The sign of
-	// the ABI return decides — a positive code is the SERVER refusing, a
-	// negative one is this LIBRARY declining. Never flatten them.
+	// (b) MergeTree-namespace settings are part of the statement. Two
+	// failures, two KINDS: the class decides, a refusal is the SERVER's, a
+	// decline is this LIBRARY declining. Never flatten them.
 	kv("(b) MergeTree settings", "refusal vs decline vs inert")
-	s2, _ := lib.CompileDDL("a UInt8")
-	err = s2.SetEngine("MergeTree", "tuple()",
-		chtypes.WithMergeTreeSettings(map[string]string{"index_granularityy": "8192"}))
-	kv("  unknown NAME", "index_granularityy -> "+classify(err))
-	note(truncate(errStr(err), 90))
-	note("the server's own 115: this DDL can never exist — tell the tenant")
-	s2.Close()
-	s3, _ := lib.CompileDDL("a UInt8")
-	err = s3.SetEngine("MergeTree", "tuple()",
-		chtypes.WithMergeTreeSettings(map[string]string{"index_granularity": "4096"}))
-	kv("  known, non-default", "index_granularity=4096 -> "+classify(err))
-	note("a DECLINE: no MergeTree setting's behavior is modeled yet, and")
-	note("silently ignoring a declared value would fake the profile being in")
-	note("force. A real server might well accept it — validate cautiously.")
-	s3.Close()
-	s4, _ := lib.CompileDDL("a UInt8")
-	err = s4.SetEngine("MergeTree", "tuple()",
-		chtypes.WithMergeTreeSettings(map[string]string{"index_granularity": "8192"}))
-	kv("  known, AT default", "index_granularity=8192 -> "+okOr(err, "accepted (inert)"))
-	s4.Close()
+	for _, c := range []struct{ label, setting string }{
+		{"unknown NAME", "index_granularityy = 8192"},
+		{"known, non-default", "index_granularity = 4096"},
+		{"known, AT default", "index_granularity = 8192"},
+	} {
+		s2, err := lib.CompileTable("CREATE TABLE t (a UInt8) ENGINE = MergeTree ORDER BY tuple() SETTINGS " + c.setting)
+		kv("  "+c.label, c.setting+" -> "+okOr(err, "compiled"))
+		if err != nil {
+			note(truncate(classify(err), 90))
+		}
+		if s2 != nil {
+			s2.Close()
+		}
+	}
+	note("an unknown name is the server's own refusal: this DDL can never")
+	note("exist, tell the tenant. A decline means the library will not guess:")
+	note("a real server might well accept it, so validate cautiously.")
 	blank()
 
 	// (c) TTL: accepted per row, gone per batch.
-	s5, err := lib.CompileDDL("ts DateTime, v UInt8")
+	ttlDDL := "CREATE TABLE t (ts DateTime, v UInt8) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 1 DAY"
+	s5, err := lib.CompileTable(ttlDDL)
 	if err != nil {
 		fatal("%v", err)
 	}
 	defer s5.Close()
-	kv("(c) SetTTL", okOr(s5.SetEngine("MergeTree", "ts"), "MergeTree ORDER BY ts")+", TTL "+okOr(s5.SetTTL("ts + INTERVAL 1 DAY"), "ts + INTERVAL 1 DAY"))
-	bt, err := s5.Rows(chtypes.JSONEachRow, []byte(`{"ts":"2020-01-01 00:00:00","v":9}`),
-		map[string]string{"chtypes_now_epoch_nanos": pinnedClock})
+	kv("(c) TTL", "ts + INTERVAL 1 DAY")
+	bt, err := s5.Rows(chtypes.JSONEachRow, []byte(`{"ts":"2020-01-01 00:00:00","v":9}`))
 	if err != nil {
 		fatal("%v", err)
 	}
-	kv("  row fed", `{"ts":"2020-01-01 00:00:00","v":9}  with the clock pinned to 2023`)
-	kv("  row-level outcome", bt.Rows[0].Outcome.String()+"   <- the row PARSED fine")
-	kv("  EngineRows (stored)", fmt.Sprintf("%v  (length %d)", bt.EngineRows, len(bt.EngineRows)))
-	for _, t := range bt.Transformed {
-		kv("  batch transform", fmt.Sprintf("row=%d column=%q reason=%s lossy=%v", t.Row, t.Column, t.Reason, t.Lossy()))
+	kv("  row fed", `{"ts":"2020-01-01 00:00:00","v":9}`)
+	if len(bt.Rows) > 0 {
+		kv("  row-level outcome", string(bt.Rows[0].Outcome)+"   <- the row PARSED fine")
 	}
-	note("accepted per ROW, stored nowhere per BATCH: the 2020 timestamp is")
-	note("already past the TTL, so the part holds nothing. On a real server")
-	note("this is a silent merge-time delete — the ttl_expired transform is")
-	note("the only warning anyone gets.")
+	kv("  EngineRows (stored)", engineRows(bt.EngineRows))
+	for _, t := range bt.Transformed {
+		kv("  batch transform", fmt.Sprintf("row=%d column=%q reason=%s lossy=%v", t.Row, t.Column, t.Reason, t.Lossy))
+	}
+	note("accepted per ROW, stored nowhere per BATCH: a 2020 timestamp is")
+	note("already past a one-day TTL, so the part holds nothing. On a real")
+	note("server this is a silent merge-time delete; the ttl_expired transform")
+	note("is the only warning anyone gets.")
 	blank()
 
 	// (d) A TTL this library will not guess at.
-	err = s5.SetTTL("now() + INTERVAL 1 DAY")
-	kv("(d) SetTTL now()+1 DAY", classify(err))
+	_, err = lib.CompileTable("CREATE TABLE t (ts DateTime, v UInt8) ENGINE = MergeTree ORDER BY ts TTL now() + INTERVAL 1 DAY")
+	kv("(d) TTL now()+1 DAY", classify(err))
 	note(truncate(errStr(err), 90))
-	note("a clock-reading TTL is DECLINED, not guessed")
+	note("a clock-reading TTL is answered by the library per its own rules;")
+	note("a decline here means it was not guessed")
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 9 — Settings precedence: who wins
 //
-// WHAT: the same row and the same handle, answered differently as settings
-// are supplied at each layer:
+// WHAT: the same row and the same table, answered differently as settings are
+// supplied at each layer:
 //
-//	per-call  >  handle profile  >  library defaults  >  ClickHouse's own
+//	per-call  >  compile profile  >  process defaults (Setup)  >  ClickHouse's own
 //
 // WHY: this is how a gateway declares a deployment's settings ONCE (at
 // compile) yet still lets one INSERT override per call. If precedence were
 // fuzzy, the declared profile would not actually be in force.
-// LOOK FOR: layers 3 vs 4 — the SAME handle, the SAME bytes, passing under
-// the handle profile and failing the moment a per-call value overrides it.
-// Then the library-defaults layer measured via SetDefaultSettings, including
-// a WHOLESALE refusal that commits nothing.
-// C API: chs_rows (settings_json), chs_set_default_settings.
+// LOOK FOR: three verdicts on one row: the process default ("basic") rejects
+// an ISO-8601 timestamp, the profile ("best_effort") overrides that default
+// and accepts, and a per-call "basic" overrides the profile and rejects again.
+// C API: chs_set_defaults (fixed at setup), chs_schema_create (the profile),
+// chs_preview_row (the call's settings).
 // ---------------------------------------------------------------------------
-func section9() {
+func section9(lib *chtypes.Library) {
 	section(9, "Settings precedence: who wins")
 	kv("the probe", `ts DateTime  fed  {"ts":"2026-01-15T10:30:00Z"}`)
+	kv("process defaults", fmt.Sprintf("%v   (chtypes.Setup, fixed in main before any library opened)", setupDefaults))
 	note("stock ClickHouse parses 'basic' datetimes only; best_effort accepts")
-	note("ISO-8601 — so the verdict TELLS you which setting value won")
-	note("(this section runs on Go's static path — see the comment for why)")
+	note("ISO-8601, so the verdict TELLS you which setting value won")
 	blank()
 
-	// Go note: on the dlopen'd Registry path, SetDefaultSettings is
-	// STRUCTURALLY unreachable — the function-pointer table deliberately
-	// omits chs_set_default_settings, because it reallocates a process-global
-	// the row path reads by reference (see docs/reference/bindings.md §Teardown). The
-	// static cgo path (one artifact, linked at build time — here lib/build)
-	// exposes it as the package-level SetDefaultSettings, so this section
-	// demonstrates all four layers there. Python/TS/Rust expose the seed on
-	// their dlopen'd Library and their section 9 uses the selected version.
 	iso := []byte(`{"ts":"2026-01-15T10:30:00Z"}`)
-	basic := map[string]string{"date_time_input_format": "basic"}
-	bestEffort := map[string]string{"date_time_input_format": "best_effort"}
-	section9Static(iso, basic, bestEffort)
+	basic := chtypes.WithSettings(map[string]string{"date_time_input_format": "basic"})
+	bestEffort := chtypes.WithSettings(map[string]string{"date_time_input_format": "best_effort"})
+
+	plain, err := lib.CompileTable(tableOf("ts DateTime"))
+	must(err)
+	defer plain.Close()
+	profiled, err := lib.CompileTable(tableOf("ts DateTime"),
+		chtypes.WithSettings(map[string]string{"date_time_input_format": "best_effort"}))
+	must(err)
+	defer profiled.Close()
+
+	r1, _ := plain.Rows(chtypes.JSONEachRow, iso)
+	kv("1. process default (basic)", verdict(r1))
+	note("nothing declared on the table or the call: the Setup default decides")
+	r2, _ := profiled.Rows(chtypes.JSONEachRow, iso)
+	kv("2. compile profile best_effort", verdict(r2))
+	note("the profile declared at COMPILE reaches every later call and")
+	note("overrides the process default beneath it")
+	r3, _ := profiled.Rows(chtypes.JSONEachRow, iso, basic)
+	kv("3.  + per-call basic", verdict(r3))
+	note("2 vs 3 is the requirement, measured: the same row PASSES under the")
+	note("profile and FAILS when the per-call value overrides it")
+	r4, _ := plain.Rows(chtypes.JSONEachRow, iso, bestEffort)
+	kv("4. default + per-call best_effort", verdict(r4))
+	note("a per-call value outranks the process default too")
+	blank()
+
+	kv("defaults are fixed", "there is no setter during traffic")
+	err = chtypes.Setup(chtypes.SetupOptions{Defaults: map[string]string{"date_time_input_format": "best_effort"}})
+	kv("  Setup with other defaults", classify(err))
+	note("a different setup after the first is a *UsageError naming both; the")
+	note("first stands. A binding never rewrites a value: settings are strings.")
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 10 — The error taxonomy
 //
-// WHAT: every kind of answer this SDK gives, told apart BY TYPE — never by
+// WHAT: every kind of answer this SDK gives, told apart BY TYPE, never by
 // string matching.
-// WHY: the three kinds demand three different reactions (tell the tenant /
-// fall back cautiously / fix the deployment), and Go's two error types are
-// deliberately PEERS: a decline can never satisfy errors.As against the
+// WHY: the kinds demand different reactions (tell the tenant / fall back
+// cautiously / fix the caller / fix the deployment), and Go's error types
+// are deliberately PEERS: a decline can never satisfy errors.As against the
 // refusal type, so a caller handling only refusals cannot silently convert
 // declines into rejections.
-// LOOK FOR: the same errors.As switch you would write in production, and the
+// LOOK FOR: the errors.As switch you would write in production, and the
 // reminder that ROW verdicts are data (RowResult.Outcome), not errors.
 // ---------------------------------------------------------------------------
 func section10(lib *chtypes.Library) {
 	section(10, "The error taxonomy")
 
-	kv("the Go idiom", "errors.As against two PEER types")
-	raw("      var ue *chtypes.UnsupportedError   // a DECLINE — validate cautiously")
-	raw("      var se *chtypes.SchemaError        // a REFUSAL — se.Code is ClickHouse's")
-	raw("      switch {")
-	raw("      case errors.As(err, &ue): ...")
-	raw("      case errors.As(err, &se): ...")
-	raw("      }")
+	kv("the Go idiom", "errors.As against four peer call types, one artifact type")
+	raw("      var se *chtypes.SchemaError       // CHS_REJECTED: ClickHouse's own refusal")
+	raw("      var ue *chtypes.UnsupportedError  // CHS_DECLINED: a decline")
+	raw("      var us *chtypes.UsageError        // CHS_INVALID_ARGUMENT: a misuse")
+	raw("      var ie *chtypes.InternalError     // CHS_INTERNAL: a library fault")
+	raw("      var ae *chtypes.ArtifactError     // a fetch or load failure, with a shared code")
 	blank()
 
 	// A REFUSAL: ClickHouse's own code rides on *SchemaError.
-	_, err := lib.CompileDDL("x NotAType")
+	_, err := lib.CompileTable(tableOf("x NotAType"))
 	describeError(err, "compile x NotAType")
 
 	// A DECLINE: *UnsupportedError, no ClickHouse code to carry.
-	s, _ := lib.CompileDDL("ts DateTime, v UInt8")
-	_ = s.SetEngine("MergeTree", "ts")
-	err = s.SetTTL("now() + INTERVAL 1 DAY")
-	describeError(err, "SetTTL now()+1 DAY")
+	_, err = lib.CompileTable("CREATE TABLE t (ts DateTime, v UInt8) ENGINE = MergeTree ORDER BY ts TTL now() + INTERVAL 1 DAY")
+	describeError(err, "TTL now()+1 DAY")
+
+	// A MISUSE: a closed handle is refused before any C call.
+	s, _ := lib.CompileTable(tableOf("a UInt8"))
 	s.Close()
+	_, err = s.Describe()
+	describeError(err, "Describe on a closed schema")
 
-	// A registry miss is a plain error naming what IS loaded (Go has no
-	// dedicated registry error type; Python/TS have RegistryError, Rust has
-	// dedicated Error variants).
+	// An ARTIFACT error: a fetch or load failure, one shared code.
 	blank()
-	kv("registry miss", "a plain error that names what IS loaded")
-	note("(see section 1's For(\"99.9\") — same message)")
-	blank()
+	_, err = chtypes.OpenUnverified("/nonexistent/libchtypes.so", false)
+	describeError(err, "OpenUnverified without allow")
+	reg, _ := chtypes.NewRegistry()
+	_, err = reg.For("99.9")
+	describeError(err, "For(99.9)")
 
+	blank()
 	kv("row verdicts are DATA", "RowResult.Outcome, not an error return")
 	note("a row the server would reject comes back (RowResult, nil): the")
-	note("Result is about whether the question could be asked; the verdict —")
-	note("accepted / rejected / accepted_poisoned / unsupported — lives in the")
-	note("answer. The Go error return fires only for a closed schema or an")
-	note("unreadable result document.")
-	kv("CodeUnsupported", strconv.Itoa(chtypes.CodeUnsupported)+"  (the wire sentinel; never a real ClickHouse code)")
+	note("error return is about whether the question could be asked; the")
+	note("verdict (accepted / rejected / accepted_poisoned / skipped /")
+	note("unsupported) lives in the answer.")
+	kv("error codes", "ArtifactError.Code is one of ten shared codes; the CLI's exit status is theirs")
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 11 — The discovery kit, offline
 //
-// WHAT: the three canonical queries chtypes ships for learning who a
-// deployment is, their typed parsers, and Library.ReconstructDDL — run here against
-// CANNED bytes shaped exactly like a real server's JSONEachRow responses.
-// WHY: chtypes NEVER opens a socket. You run these queries with whatever
-// client you already have; the kit gives you the SQL and parses the results.
-// The payoff is the last step: the server's own version string resolves an
-// artifact, and the discovered settings become the compile profile — so the
-// handle behaves like a table created on THAT deployment.
-// LOOK FOR: the reconstructed DDL (the server's own identifier spelling,
-// DEFAULTs carried),
-// and the SAME ROW accepted under the discovered profile but rejected under a
-// stock compile — the measurable reason discovery matters.
-// C API: chs_quote_identifier for the reconstruction, then the compile — the
-// queries and parsers themselves are pure client-side.
-// (The ONLINE version of this flow, against a real server, is
-// go/ingest-demo/ — the optional demo chplay.sh never runs.)
+// WHAT: the library's own discovery query, its column reader, and the
+// settings a deployment changed, run here against CANNED bytes shaped exactly
+// like a real server's JSONEachRow answer.
+// WHY: chtypes NEVER opens a socket. You run the query with whatever client
+// you already have; the library gives you the SQL and reads the result. The
+// payoff is the last step: the server's own version resolves a library, and
+// the discovered settings become the compile profile, so the handle behaves
+// like a table created on THAT deployment.
+// LOOK FOR: the declarations in the server's own spelling (DEFAULTs carried,
+// the odd column name quoted), and the SAME ROW accepted under the discovered
+// profile but rejected under a stock compile.
+// C API: chs_discover_query, chs_discover_columns, then the compile. (The
+// ONLINE flow, against a real server, is ingest-demo/.)
 // ---------------------------------------------------------------------------
-func section11(reg *chtypes.Registry) {
+func section11(reg *chtypes.Registry, base *chtypes.Library) {
 	section(11, "The discovery kit, offline")
-	kv("NOTE", "responses below are CANNED — shaped exactly like a real")
-	kv("", "server's, so the parsers cannot tell. Swap in your HTTP client.")
+	kv("NOTE", "the response below is CANNED: shaped exactly like a real")
+	kv("", "server's, so the reader cannot tell. Swap in your HTTP client.")
 	blank()
 
-	// Query 1: who are you? (version)
-	kv("QueryServerVersion", chtypes.QueryServerVersion)
-	kv("  canned response", strings.TrimSpace(cannedVersionResult))
-	version, err := chtypes.ParseVersionResult([]byte(cannedVersionResult))
+	// Step 1: the library's own query. The caller binds {database:String} and
+	// {table:String} as query parameters when it runs it.
+	query, err := base.DiscoverQuery()
 	if err != nil {
 		fatal("%v", err)
 	}
-	kv("  parsed", version)
-	blank()
-
-	// Query 2: which settings did this deployment change from stock?
-	kv("QueryChangedSettings", chtypes.QueryChangedSettings)
-	for _, l := range strings.Split(strings.TrimSpace(cannedSettingsResult), "\n") {
+	kv("DiscoverQuery", truncate(query, 70))
+	kv("  you bind", "param_database, param_table as query parameters")
+	for _, l := range strings.Split(strings.TrimSpace(cannedColumnsResult), "\n") {
 		kv("  canned response", l)
 	}
-	settings, err := chtypes.ParseChangedSettingsResult([]byte(cannedSettingsResult))
-	if err != nil {
-		fatal("%v", err)
-	}
-	kv("  parsed", fmt.Sprintf("%d changed settings -> the compile profile", len(settings)))
 	blank()
 
-	// Query 3: what does the table look like AS STORED?
-	kv("QueryTableColumns", "(system.columns for one table; see the constant)")
-	cols, err := chtypes.ParseColumnsResult([]byte(cannedColumnsResult))
+	// Step 2: ClickHouse's own reader turns the rows into declarations.
+	// Which library reads them does not matter; the one for the server's
+	// version is used below.
+	kv("server version", cannedServerVersion+"  (the CALLER supplies it in v1: nothing here asks a server)")
+	lib, err := reg.For(lineOfVersion(cannedServerVersion))
+	if err != nil {
+		kv("registry.For("+lineOfVersion(cannedServerVersion)+")", errStr(err))
+		note("this line is not installed (`chtypes fetch " + lineOfVersion(cannedServerVersion) + "` would add it);")
+		note("the rest of this section uses the library already open")
+		lib = base
+	} else {
+		kv("registry.For("+lineOfVersion(cannedServerVersion)+")", "library "+lib.Version+"  (the "+lib.Minor+" line)")
+	}
+	disc, err := lib.DiscoverColumns([]byte(cannedColumnsResult))
 	if err != nil {
 		fatal("%v", err)
 	}
-	for _, c := range cols {
-		kind := ""
-		if c.DefaultKind != "" {
-			kind = "  " + c.DefaultKind + " " + c.DefaultExpression
-		}
-		kv(fmt.Sprintf("  [%d] %s", c.Position, c.Name), c.Type+kind)
+	for i, c := range disc.Columns {
+		kv(fmt.Sprintf("  [%d] %s", i, c.Name), c.Declaration)
 	}
-	note("default_kind/default_expression are CARRIED — dropping them would")
-	note("silently lose the DEFAULT semantics sections 6 and 8 run on")
-	note("reconstruction needs the library — the column NAME is spelled by")
-	note("ClickHouse's own quoting, not by a rule in the binding")
+	kv("  ColumnsSQL", truncate(disc.ColumnsSQL, 80))
+	note("default_kind and default_expression are CARRIED: dropping them would")
+	note("silently lose the DEFAULT semantics sections 6 and 8 run on. The")
+	note("column NAME is spelled by ClickHouse's own quoting, not by a rule here.")
 	blank()
 
-	// The payoff: version -> artifact, settings -> profile, and a measurable
-	// difference the discovered profile makes.
-	lib, err := reg.For(chtypes.Version(version))
-	if err != nil {
-		kv("registry.For("+version+")", errStr(err))
-		note("no artifact for this line — `scripts/fetch.sh 25.8` would add it; the")
-		note("rest of this section needs it and is skipped")
-		return
-	}
-	kv("registry.For("+version+")", "artifact "+string(lib.Version)+"  (exact patch -> the "+lib.Minor+" line)")
-	ddl, err := lib.ReconstructDDL(cols)
-	if err != nil {
-		fatal("%v", err)
-	}
-	kv("  lib.ReconstructDDL", ddl)
-	note("`reading c` came back QUOTED, in the spelling THIS build prints —")
-	note("QuoteIdentifier is the artifact's own backQuote, not a copy here")
-	blank()
-	sProf, err := lib.CompileDDL(ddl, chtypes.WithCompileSettings(settings))
+	// Step 3: the payoff. Declared settings become the compile profile. They
+	// are the CALLER's to supply: v1 has no call that asks a server for them.
+	profile := map[string]string{"date_time_input_format": "best_effort"}
+	ddl := "CREATE TABLE t (" + disc.ColumnsSQL + ") ENGINE = MergeTree ORDER BY tuple()"
+	sProf, err := lib.CompileTable(ddl, chtypes.WithSettings(profile))
 	if err != nil {
 		fatal("%v", err)
 	}
 	defer sProf.Close()
-	sPlain, err := lib.CompileDDL(ddl)
+	sPlain, err := lib.CompileTable(ddl)
 	if err != nil {
 		fatal("%v", err)
 	}
 	defer sPlain.Close()
 	row := []byte(`{"ts":"2026-01-15T10:30:00Z","device_id":9,"reading c":21.5}`)
 	kv("the same row, twice", string(row))
-	bProf, _ := sProf.Rows(chtypes.JSONEachRow, row, nil)
+	bProf, _ := sProf.Rows(chtypes.JSONEachRow, row)
 	kv("  under the discovered profile", verdict(bProf))
-	bPlain, _ := sPlain.Rows(chtypes.JSONEachRow, row, nil)
+	bPlain, _ := sPlain.Rows(chtypes.JSONEachRow, row)
 	kv("  under a stock compile", verdict(bPlain))
 	note("the deployment declared date_time_input_format=best_effort, so ITS")
-	note("server takes the ISO-8601 timestamp — a stock compile answers for a")
+	note("server takes the ISO-8601 timestamp; a stock compile answers for a")
 	note("server the tenant does not have. Discovery is what closes that gap.")
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 12 — Version pinning: same input, different answers
 //
-// WHAT: the same DDL and the same bytes, swept across every artifact resident
-// in this process.
+// WHAT: the same statement and the same bytes, swept across every installed
+// line in this process.
 // WHY: version differences are the reason the registry exists. They are not
-// monotonic — newer is NOT always more permissive — so no rule can predict
-// them; only the real per-version artifact can answer.
-// LOOK FOR: 25.10 rejecting a DEFAULT that both 25.8 and 26.5 accept; and the
-// Buffers format simply not existing before 26.5 (the server's own 73).
+// monotonic (newer is NOT always more permissive), so no rule can predict
+// them; only the real per-version library can answer.
+// LOOK FOR: one line rejecting a DEFAULT that others accept; and the Buffers
+// format simply not existing before 26.5 (the server's own refusal).
 // ---------------------------------------------------------------------------
 func section12(reg *chtypes.Registry) {
 	section(12, "Version pinning: same input, different answers")
-	versions := reg.Versions()
-	if len(versions) < 2 {
-		kv("versions resident", strings.Join(versions, "  "))
-		note("only one artifact is built, so there is nothing to sweep — the")
-		note("point of this section needs at least two. Build another line")
-		note("(e.g. `scripts/fetch.sh 26.7`) and re-run to see the answers diverge.")
+	installed, _ := reg.Installed()
+	lines := installedLines(installed)
+	if len(lines) < 2 {
+		kv("lines installed", strings.Join(lines, "  "))
+		note("only one line is installed, so there is nothing to sweep: the")
+		note("point of this section needs at least two. Fetch another")
+		note("(`chtypes fetch 26.7`) and re-run to see the answers diverge.")
 		return
 	}
 
 	kv("(a) a mixed-type DEFAULT", "a UInt8, x Int64 DEFAULT if(1,2,'a')")
-	for _, v := range versions {
-		lib, err := reg.For(chtypes.Version(v))
+	for _, v := range lines {
+		lib, err := reg.For(v)
 		if err != nil {
 			kv("  "+v, "SKIPPED  "+errStr(err))
 			continue
 		}
-		s, err := lib.CompileDDL("a UInt8, x Int64 DEFAULT if(1,2,'a')")
+		s, err := lib.CompileTable(tableOf("a UInt8, x Int64 DEFAULT if(1,2,'a')"))
 		if err != nil {
 			var se *chtypes.SchemaError
 			if errors.As(err, &se) {
-				kv("  "+v, fmt.Sprintf("REJECTED code %d  %s", se.Code, truncate(se.Msg, 52)))
+				kv("  "+v, fmt.Sprintf("REJECTED code %d  %s", se.ChCode, truncate(se.Message, 52)))
 			} else {
 				kv("  "+v, errStr(err))
 			}
 			continue
 		}
-		kv("  "+v, "compiled  ("+s.Columns[1].Type+" DEFAULT "+s.Columns[1].Default+")")
+		d, _ := s.Describe()
+		kv("  "+v, "compiled  ("+d.Columns[1].Type+" DEFAULT "+d.Columns[1].DefaultExpr+")")
 		s.Close()
 	}
-	note("NEWER IS NOT ALWAYS MORE PERMISSIVE — no monotonic rule predicts")
-	note("this, which is exactly why one real artifact per line exists")
+	note("NEWER IS NOT ALWAYS MORE PERMISSIVE: no monotonic rule predicts")
+	note("this, which is exactly why one real library per line exists")
 	blank()
 
-	kv("(b) a format's arrival", "Buffers (code 9), added in ClickHouse 26.5")
+	kv("(b) a format's arrival", "Buffers (added in ClickHouse 26.5)")
 	kv("  payload", "1 column, 1 row, 4 bytes ff ff ff ff, declared x Int32")
-	for _, v := range versions {
-		lib, err := reg.For(chtypes.Version(v))
+	for _, v := range lines {
+		lib, err := reg.For(v)
 		if err != nil {
 			kv("  "+v, "SKIPPED  "+errStr(err))
 			continue
 		}
-		s, err := lib.CompileDDL("x Int32")
+		s, err := lib.CompileTable(tableOf("x Int32"))
 		if err != nil {
 			continue
 		}
-		b, err := s.Rows(chtypes.Buffers, unhex(buffersOK), nil)
+		b, err := s.Rows(chtypes.Buffers, unhex(buffersOK))
 		switch {
 		case err != nil:
 			kv("  "+v, "call failed: "+err.Error())
-		case b.Outcome == chtypes.Accepted && len(b.Rows) > 0:
+		case b.Outcome == chtypes.Accepted && len(b.Rows) > 0 && len(b.Rows[0].Values) > 0:
 			kv("  "+v, "accepted  x = "+b.Rows[0].Values[0].Text)
 		default:
 			kv("  "+v, fmt.Sprintf("%v  code=%d  %s", b.Outcome, b.ErrCode, truncate(b.ErrMsg, 40)))
 		}
 		s.Close()
 	}
-	note("73 UNKNOWN_FORMAT is the SERVER'S own answer on the older lines —")
-	note("probe the artifact (one payload through Rows) instead of trusting")
-	note("your own version arithmetic")
+	note("the refusal on the older lines is the SERVER'S own answer: ask the")
+	note("library (one payload through Rows, or capabilities.input_formats)")
+	note("instead of trusting your own version arithmetic")
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 13 — Teardown
 //
 // WHAT: what to release, and when.
-// WHY: schema handles are C allocations (chs_schema_free via Close). Process
-// teardown is chs_shutdown — and Go's Registry deliberately exposes NO
-// close/shutdown, which is a considered design, not an omission.
-// C API: chs_schema_free, chs_shutdown.
+// WHY: schema, filter and block handles are C allocations (freed by Close, and
+// by a finalizer when abandoned). No library is ever unloaded, so a registry
+// and a library own nothing to close.
+// C API: chs_schema_free, chs_filter_free, chs_block_free.
 // ---------------------------------------------------------------------------
 func section13() {
 	section(13, "Teardown")
-	kv("schema handles", "Close() each compiled schema when done (chs_schema_free)")
-	kv("Registry teardown", "none — deliberately")
-	note("Go never dlcloses an artifact, and chs_init registers chs_shutdown")
-	note("with atexit(), so an ordinary process needs no call. Omitting the")
-	note("symbol from the function-pointer table is also what makes")
-	note("chs_set_default_settings structurally unreachable from a Library —")
-	note("a property worth more than the entry point (docs/reference/bindings.md")
-	note("§Teardown). Python (registry.close()), TS (close()/Symbol.dispose)")
-	note("and Rust (Registry::shutdown()) each show their SDK's shape.")
+	kv("schema, filter, block", "Close() each when done; Close is idempotent, any order is safe")
+	kv("Registry, Library", "no Close: nothing to release")
+	note("a library is never unloaded: there is no dlclose in any binding, and")
+	note("chs_shutdown is never called, so an ordinary process owes nothing.")
+	note("A filter or a block holds a counted reference to its schema inside")
+	note("the library, so closing a schema while its filters are in use is")
+	note("legal and they keep working. A finalizer frees what the caller")
+	note("abandons; using a closed object is a *UsageError raised before any C call.")
 }
 
 // ---------------------------------------------------------------------------
-// SECTION 14 — The static path (Go only)
-//
-// WHAT: the second, cgo-linked shape only Go has — ONE artifact (lib/build,
-// whatever version it was built from) linked at build time, no dlopen, used
-// through package-level functions.
-// WHY: it is the fast path for a binary that serves exactly one ClickHouse
-// version, and it is the only place Go exposes SetDefaultSettings (section 9)
-// and RegisteredFamilies. The Registry is the product path; docs/reference/bindings.md
-// makes this static shape explicitly optional, and the other three SDKs
-// (ctypes/ffi-rs/libloading — always dlopen) print a stub for this section.
-// C API: same 22 functions, resolved by the linker instead of dlsym.
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 // SECTION 15 — Export: bytes + spans
 //
-// WHAT: the SAME chs_rows call that judges a batch can also serialize its
-// accepted rows to wire bytes (JSONCompactEachRow this revision), addressed
-// per row by index-aligned spans — RowsExport, one C call, never a second.
+// WHAT: the SAME call that judges a batch can also serialize its accepted
+// rows to wire bytes (here JSONCompactEachRow), addressed per row by
+// index-aligned spans, one C call, never a second.
 // WHY: every consumer of an accepted row wants the stored bytes ready to
-// publish or INSERT without rebuilding them from the document — reassembly
-// is where caller bugs live (the invalid-JSON-on-poisoned-rows class).
+// publish or INSERT without rebuilding them from the document: reassembly is
+// where caller bugs live (the invalid-JSON-on-poisoned-rows class), and the
+// export carries every generated DEFAULT already filled in.
 // LOOK FOR: the skipped row's {0,0} span; a span slice BEING the row's line;
 // the poisoned batch DECLINING the export and saying why (fail-closed: an
 // unreadable value cannot be honestly serialized); emitted-EMPTY (an answer)
-// vs declined (not one); and the lean document (doc flags 0) keeping every
+// vs declined (not one); and the lean document (doc flags) keeping every
 // verdict while dropping the description.
-// C API: chs_rows with export_format/doc_flags/out_bytes (ABI revision 3).
+// C API: chs_preview_batch with export_format and doc_flags.
 // ---------------------------------------------------------------------------
 func section15(lib *chtypes.Library) {
 	section(15, "Export: bytes + spans")
 
-	cs, err := lib.CompileDDL(formatDDL)
+	cs, err := lib.CompileTable(formatDDL)
 	must(err)
 	defer cs.Close()
 
 	body := []byte(`{"device_id":1,"label":"ok"}` + "\n" +
 		`{"device_id":"zap"}` + "\n" +
 		`{"device_id":3,"label":"hi"}` + "\n")
-	res, err := cs.RowsExport(chtypes.JSONEachRow, body,
-		map[string]string{"input_format_allow_errors_num": "10"},
-		chtypes.JSONCompactEachRow, chtypes.DocAll)
-	var ue *chtypes.UnsupportedError
-	if errors.As(err, &ue) {
-		note("this artifact predates the export surface (relink it to ABI")
-		note("revision 3, `just refresh <version>`); the section degrades here")
-		note("rather than failing the tour — the surface is additive.")
-		return
-	}
+	allowErrors := chtypes.WithSettings(map[string]string{"input_format_allow_errors_num": "10"})
+	res, err := cs.Rows(chtypes.JSONEachRow, body, allowErrors,
+		chtypes.WithExport(chtypes.JSONCompactEachRow), chtypes.WithDocFlags(chtypes.DocAll))
 	must(err)
 	if res.Outcome == chtypes.Unsupported {
-		kv("RowsExport", "declined: "+truncate(res.ErrMsg, 64))
-		note("this artifact answers the export request unsupported; relink the")
-		note("fleet (wave 3 / `just refresh`) to see the live bytes. Degrading.")
+		kv("Rows with export", "declined: "+truncate(res.ErrMsg, 64))
+		note("this build declines the export request; the section degrades here")
 		return
 	}
 	kv("batch", fmt.Sprintf("%s  rows_read=%d rows_skipped=%d", res.Outcome, res.RowsRead, res.RowsSkipped))
 	kv("payload", fmt.Sprintf("%q  (%d bytes, one line per ACCEPTED row)", res.Payload, len(res.Payload)))
 	note("wire order = declared minus MATERIALIZED/ALIAS/EPHEMERAL, so these")
 	note("bytes are directly INSERT-able with no column list; DEFAULTs (seq=7,")
-	note("label='unknown') are already applied — preview == stored")
+	note("label='unknown') are already applied: preview == stored")
 	for i, sp := range res.Spans {
-		lineOf := "(no bytes — row not accepted)"
+		l := "(no bytes: row not accepted)"
 		if sp.Len > 0 {
-			lineOf = fmt.Sprintf("%q", res.Payload[sp.Off:sp.Off+sp.Len])
+			l = fmt.Sprintf("%q", res.Payload[sp.Off:sp.Off+sp.Len])
 		}
-		kv(fmt.Sprintf("  span[%d] {off:%d len:%d}", i, sp.Off, sp.Len),
-			fmt.Sprintf("%s -> %s", res.Rows[i].Outcome, lineOf))
+		kv(fmt.Sprintf("  span[%d] {off:%d len:%d}", i, sp.Off, sp.Len), fmt.Sprintf("%s -> %s", res.Rows[i].Outcome, l))
 	}
 	note("spans are INDEX-ALIGNED with rows; slicing spans out of the payload")
 	note("IS the per-row payload, and concatenating non-zero spans reproduces")
-	note("it exactly — batches merge by byte concatenation")
+	note("it exactly: batches merge by byte concatenation")
 	blank()
 
-	// The lean document: doc flags 0 (RowsExport's default) keeps the whole
-	// verdict channel and drops the description — same bytes, thinner JSON.
-	lean, err := cs.RowsExport(chtypes.JSONEachRow, body,
-		map[string]string{"input_format_allow_errors_num": "10"},
-		chtypes.JSONCompactEachRow)
+	// The lean document: fewer doc flags keep the whole verdict channel and
+	// drop the description: same bytes, thinner JSON.
+	lean, err := cs.Rows(chtypes.JSONEachRow, body, allowErrors,
+		chtypes.WithExport(chtypes.JSONCompactEachRow), chtypes.WithDocFlags(0))
 	must(err)
-	kv("lean (flags 0)", fmt.Sprintf("outcome %s, %d verdict rows, %d Values, %d Transformed — payload identical: %v",
-		lean.Outcome, len(lean.Rows), len(lean.Rows[0].Values), len(lean.Transformed),
-		string(lean.Payload) == string(res.Payload)))
+	vals := 0
+	if len(lean.Rows) > 0 {
+		vals = len(lean.Rows[0].Values)
+	}
+	kv("lean (flags 0)", fmt.Sprintf("outcome %s, %d verdict rows, %d Values, %d Transformed, payload identical: %v",
+		lean.Outcome, len(lean.Rows), vals, len(lean.Transformed), string(lean.Payload) == string(res.Payload)))
 	note("flags thin the DESCRIPTION, never the VERDICT; DocValues /")
-	note("DocTransforms / DocDefaults pick groups à la carte")
+	note("DocTransforms / DocDefaults pick groups a la carte")
 	blank()
 
 	// Fail-closed: a poisoned batch holds a value ClickHouse itself cannot
-	// read back — no writer can honestly serialize it, so no bytes.
-	ps, err := lib.CompileDDL(`e Enum8('a' = 1, 'b' = 2)`)
+	// read back; no writer can honestly serialize it, so no bytes.
+	ps, err := lib.CompileTable(tableOf("e Enum8('a' = 1, 'b' = 2)"))
 	must(err)
 	defer ps.Close()
-	poi, err := ps.RowsExport(chtypes.JSONEachRow, []byte(`{"e":null}`+"\n"),
-		map[string]string{"input_format_defaults_for_omitted_fields": "0"},
-		chtypes.JSONCompactEachRow, chtypes.DocAll)
+	poi, err := ps.Rows(chtypes.JSONEachRow, []byte(`{"e":null}`+"\n"),
+		chtypes.WithSettings(map[string]string{"input_format_defaults_for_omitted_fields": "0"}),
+		chtypes.WithExport(chtypes.JSONCompactEachRow), chtypes.WithDocFlags(chtypes.DocAll))
 	must(err)
 	pv := "nil (declined)"
 	if poi.Payload != nil {
 		pv = fmt.Sprintf("%d bytes", len(poi.Payload))
 	}
-	kv("poisoned batch", fmt.Sprintf("%s -> payload=%s export_declined=%q",
-		poi.Outcome, pv, truncate(poi.ExportDeclined, 48)))
+	kv("poisoned batch", fmt.Sprintf("%s -> payload=%s export_declined=%q", poi.Outcome, pv, truncate(poi.ExportDeclined, 48)))
 
 	// Emitted-empty is an ANSWER (zero accepted rows), not a decline.
-	emp, err := cs.RowsExport(chtypes.JSONEachRow, nil, nil, chtypes.JSONCompactEachRow)
-	must(err)
-	kv("empty batch", fmt.Sprintf("payload non-nil=%v len=%d  (emitted-empty != declined)",
-		emp.Payload != nil, len(emp.Payload)))
+	emp, err := cs.Rows(chtypes.JSONEachRow, nil, chtypes.WithExport(chtypes.JSONCompactEachRow))
+	if err != nil {
+		kv("empty batch", classify(err))
+	} else {
+		kv("empty batch", fmt.Sprintf("%s  payload non-nil=%v len=%d", emp.Outcome, emp.Payload != nil, len(emp.Payload)))
+	}
+	note("an empty input block stays a decline; an accepted batch of zero rows")
+	note("emits an empty, non-nil payload, which is an answer")
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 16 — Filters: WHERE semantics at the edge
 //
 // WHAT: compile one boolean expression against a schema (CompileFilter) and
-// evaluate it per row of a body — ClickHouse's own comparison functions, so
+// evaluate it per row of a body: ClickHouse's own comparison functions, so
 // the answers are WHERE-side by construction.
 // WHY: read-side row visibility (who may SEE this row) is a WHERE question,
 // and WHERE coercion is NOT insert coercion: `x = 256` over UInt8 PROMOTES
-// (false for every row) where an insert would wrap 256 to 0. Reusing the
-// insert answer would silently match every legitimate zero.
+// (false for every row) where an insert would wrap 256 to 0.
 // LOOK FOR: 'f','f' where the insert path stores 0; NULL being not-true; the
-// 'e' class (compiles, then THROWS per row — a server fails the WHOLE query
-// here); clock reads and {p:Type} parameters REFUSED at compile, never
-// guessed; and the enforcement gate at the end.
-// C API: chs_filter_compile / chs_filter_rows / chs_filter_free (revision 3).
+// 'e' class (compiles, then THROWS per row: a server fails the WHOLE query
+// here); clock reads and unbound {p:Type} parameters REFUSED at compile; the
+// query-parameter and block-twin sub-demos; and the enforcement gate at the
+// end.
+// C API: chs_filter_create, chs_filter_eval_body, chs_filter_eval_block,
+// chs_block_create, and the three frees.
 // ---------------------------------------------------------------------------
 func section16(lib *chtypes.Library) {
 	section(16, "Filters: WHERE semantics at the edge")
 
-	cs, err := lib.CompileDDL("x UInt8")
+	cs, err := lib.CompileTable(tableOf("x UInt8"))
 	must(err)
 	defer cs.Close()
 
 	f, err := cs.CompileFilter("x = 256")
-	var ue *chtypes.UnsupportedError
-	if errors.As(err, &ue) {
-		note("this artifact predates the filter surface (relink it to ABI")
-		note("revision 3, `just refresh <version>`); the section degrades here")
-		note("rather than failing the tour — the surface is additive.")
-		return
-	}
 	must(err)
-	fr, err := f.Rows(chtypes.JSONEachRow, []byte(`{"x":0}`+"\n"+`{"x":255}`+"\n"), nil)
+	fr, err := f.Rows(chtypes.JSONEachRow, []byte(`{"x":0}`+"\n"+`{"x":255}`+"\n"))
 	must(err)
 	kv("filter `x = 256` over UInt8", "verdicts "+verdictString(fr))
 	note("PROMOTES, never wraps: false for x=0 AND x=255. The insert side of")
-	note("this same library stores 256 as 0 (section 5's overflow_wrap) —")
-	note("which is why predicate constants must never be folded through")
-	note("insert coercion (docs/reference/bindings.md §Constants are not payloads)")
+	note("this same library stores 256 as 0 (section 5's overflow_wrap), which")
+	note("is why predicate constants must never be folded through insert coercion")
 	f.Close()
 	blank()
 
-	// NULL is not true — three-valued logic collapsed at the WHERE boundary.
-	ns, err := lib.CompileDDL("lvl Nullable(UInt8)")
+	// NULL is not true: three-valued logic collapsed at the WHERE boundary.
+	ns, err := lib.CompileTable(tableOf("lvl Nullable(UInt8)"))
 	must(err)
 	defer ns.Close()
 	nf, err := ns.CompileFilter("lvl = 1")
 	must(err)
-	fr, err = nf.Rows(chtypes.JSONEachRow, []byte(`{"lvl":null}`+"\n"+`{"lvl":1}`+"\n"), nil)
+	fr, err = nf.Rows(chtypes.JSONEachRow, []byte(`{"lvl":null}`+"\n"+`{"lvl":1}`+"\n"))
 	must(err)
 	kv("`lvl = 1` on [null, 1]", "verdicts "+verdictString(fr)+"   (NULL is not true, as WHERE hides it)")
 	nf.Close()
 	blank()
 
 	// The 'e' class: compiles clean, then THROWS on every row's values.
-	ss, err := lib.CompileDDL("s String")
+	ss, err := lib.CompileTable(tableOf("s String"))
 	must(err)
 	defer ss.Close()
 	sf, err := ss.CompileFilter("s = 257")
 	must(err)
-	fr, err = sf.Rows(chtypes.JSONEachRow, []byte(`{"s":"hi"}`+"\n"), nil)
+	fr, err = sf.Rows(chtypes.JSONEachRow, []byte(`{"s":"hi"}`+"\n"))
 	must(err)
 	kv("`s = 257` over String", "verdicts "+verdictString(fr))
 	for _, fe := range fr.Errors {
 		kv(fmt.Sprintf("  row %d", fe.Row), fmt.Sprintf("code %d  %s", fe.Code, truncate(fe.Msg, 56)))
 	}
-	note("on a real server this WHERE fails the WHOLE query — 'e' is NOT an")
+	note("on a real server this WHERE fails the WHOLE query: 'e' is NOT an")
 	note("answer, and neither is 'd' (a row this library declines): an")
-	note("enforcing caller fails CLOSED on both, or NOT(decline-as-false)")
-	note("inverts fail-closed into fail-open — the measured leak class")
+	note("enforcing caller fails CLOSED on both (Verdict.Answered is false),")
+	note("or NOT(decline-as-false) inverts fail-closed into fail-open")
 	sf.Close()
 	blank()
 
 	// A bad row declines ('d'), itemized, and the tail keeps its indexes.
 	df, err := cs.CompileFilter("x < 5")
 	must(err)
-	fr, err = df.Rows(chtypes.JSONEachRow,
-		[]byte(`{"x":1}`+"\n"+`{"x":"zap"}`+"\n"+`{"x":9}`+"\n"), nil)
+	fr, err = df.Rows(chtypes.JSONEachRow, []byte(`{"x":1}`+"\n"+`{"x":"zap"}`+"\n"+`{"x":9}`+"\n"))
 	must(err)
 	kv("`x < 5` on [1, bad, 9]", "verdicts "+verdictString(fr)+"   (the bad row cannot swallow the tail)")
 	df.Close()
 	blank()
 
-	// Refused at compile, never guessed — and the two REASONS are two TYPES.
+	// Refused at compile, never guessed.
 	_, err = cs.CompileFilter("now() > x")
 	kv("compile `now() > x`", classify(err))
 	_, err = cs.CompileFilter("x = {p:UInt8}")
 	kv("compile `x = {p:UInt8}`", classify(err))
 	note("clock reads would be answered with THIS process's clock, not the")
-	note("server's; an UNBOUND {p:Type} is the SERVER's own 456 since ABI")
-	note("revision 4 (\"Substitution `p` is not set\") — bind it instead")
+	note("server's; an UNBOUND {p:Type} is the SERVER's own error: bind it")
 	_, err = cs.CompileFilter("nosuch = 1")
 	kv("compile `nosuch = 1`", classify(err))
 	blank()
 
-	// -- revision 4 sub-demo: query parameters ---------------------------
-	// One 3-row "event" body, shared with the twin sub-demo below.
-	group("query parameters (ABI revision 4) — values are STRINGS, never escaped")
-	ps, err := lib.CompileDDL("tenant String, role String, x UInt8")
+	// Query parameters.
+	group("query parameters: values are STRINGS, never escaped")
+	ps, err := lib.CompileTable(tableOf("tenant String, role String, x UInt8"))
 	must(err)
 	defer ps.Close()
 	eventBody := []byte(`{"tenant":"acme","role":"admin","x":1}` + "\n" +
 		`{"tenant":"evil","role":"viewer","x":2}` + "\n" +
 		`{"tenant":"' OR 1=1 --","role":"admin","x":3}` + "\n")
 
-	tf, err := ps.CompileFilter("tenant = {t:String}",
-		chtypes.WithFilterParams(map[string]string{"t": "acme"}))
-	var pue *chtypes.UnsupportedError
-	if errors.As(err, &pue) {
-		note("this artifact predates the params surface (relink it to ABI")
-		note("revision 4, `just refresh <version>`); the sub-demo degrades")
-		note("here rather than failing the tour — the surface is additive.")
-	} else {
-		must(err)
-		fr, err := tf.Rows(chtypes.JSONEachRow, eventBody, nil)
-		must(err)
-		kv("`tenant = {t:String}`, t=acme", "verdicts "+verdictString(fr))
-		tf.Close()
-		note("compiled ONCE per (schema, expr, params) — the value is baked in;")
-		note("a per-tenant cache MUST be a bounded LRU + a compile throttle")
+	tf, err := ps.CompileFilter("tenant = {t:String}", chtypes.WithFilterParams(map[string]string{"t": "acme"}))
+	must(err)
+	fr, err = tf.Rows(chtypes.JSONEachRow, eventBody)
+	must(err)
+	kv("`tenant = {t:String}`, t=acme", "verdicts "+verdictString(fr))
+	tf.Close()
+	note("compiled ONCE per (schema, expr, params): the value is baked in;")
+	note("a per-tenant cache MUST be a bounded LRU + a compile throttle")
 
-		hostile := `' OR 1=1 --`
-		hf, err := ps.CompileFilter("tenant = {t:String}",
-			chtypes.WithFilterParams(map[string]string{"t": hostile}))
-		must(err)
-		fr, err = hf.Rows(chtypes.JSONEachRow, eventBody, nil)
-		must(err)
-		hostileOK := fr.Outcome == chtypes.FilterOK && len(fr.Verdicts) == 3 &&
-			fr.Verdicts[0] == chtypes.VerdictFalse && fr.Verdicts[1] == chtypes.VerdictFalse &&
-			fr.Verdicts[2] == chtypes.VerdictTrue
-		kv("t = `' OR 1=1 --` (hostile)", fmt.Sprintf("verdicts %s   hostile-value-inert: %v", verdictString(fr), hostileOK))
-		hf.Close()
-		note("the value became a typed LITERAL after SQL parsing — it matches")
-		note("only the row holding exactly that string; no OR 1=1 semantics,")
-		note("and NOTHING was escaped to get there (never hand-escape values)")
-		note("traps: size the {brace type} for the value's domain ({p:UInt8}")
-		note("given \"256\" BINDS 0 — the reader wraps); and never NAME a param")
-		note("`limit`/`offset` — a real server's TCP channel refuses those")
-	}
+	hostile := `' OR 1=1 --`
+	hf, err := ps.CompileFilter("tenant = {t:String}", chtypes.WithFilterParams(map[string]string{"t": hostile}))
+	must(err)
+	fr, err = hf.Rows(chtypes.JSONEachRow, eventBody)
+	must(err)
+	hostileOK := fr.Outcome == chtypes.FilterOK && len(fr.Verdicts) == 3 &&
+		fr.Verdicts[0] == chtypes.VerdictFalse && fr.Verdicts[1] == chtypes.VerdictFalse &&
+		fr.Verdicts[2] == chtypes.VerdictTrue
+	kv("t = `' OR 1=1 --` (hostile)", fmt.Sprintf("verdicts %s   hostile-value-inert: %v", verdictString(fr), hostileOK))
+	hf.Close()
+	note("the value became a typed LITERAL after SQL parsing: it matches only")
+	note("the row holding exactly that string, and NOTHING was escaped to get")
+	note("there (never hand-escape values). Size the {brace type} for the")
+	note("value's domain, and never NAME a param `limit` or `offset`.")
 	blank()
 
-	// -- revision 4 sub-demo: the block twin -----------------------------
-	group("the block twin (ABI revision 4) — parse ONCE, evaluate K filters")
-	blockHandle, err := ps.ParseBlock(chtypes.JSONEachRow, eventBody, nil)
-	if errors.As(err, &pue) {
-		note("this artifact predates the block twin (relink it to ABI")
-		note("revision 4, `just refresh <version>`); the sub-demo degrades")
-		note("here rather than failing the tour — the surface is additive.")
-	} else {
-		must(err)
-		adminF, err := ps.CompileFilter("role = 'admin'")
-		must(err)
-		viewerF, err := ps.CompileFilter("role = 'viewer'")
-		must(err)
-		fr, err := adminF.Eval(blockHandle)
-		must(err)
-		kv("eval `role = 'admin'`", "verdicts "+verdictString(fr))
-		fr, err = viewerF.Eval(blockHandle)
-		must(err)
-		kv("eval `role = 'viewer'`", "verdicts "+verdictString(fr))
-		adminF.Close()
-		viewerF.Close()
-		blockHandle.Close()
-		note("ONE parse of the 3-row event fed BOTH filters: eval neither")
-		note("consumes nor mutates the block, and Eval(ParseBlock(body)) ≡")
-		note("Rows(body) for every verdict class — the live-SSE hot path is")
-		note("K per-principal filters × 1 event, and the re-parse is shed")
-	}
+	// The block twin: parse once, evaluate K filters.
+	group("the block twin: parse ONCE, evaluate K filters")
+	blk, err := ps.ParseBlock(chtypes.JSONEachRow, eventBody)
+	must(err)
+	adminF, err := ps.CompileFilter("role = 'admin'")
+	must(err)
+	viewerF, err := ps.CompileFilter("role = 'viewer'")
+	must(err)
+	fr, err = adminF.Eval(blk)
+	must(err)
+	kv("eval `role = 'admin'`", "verdicts "+verdictString(fr))
+	fr, err = viewerF.Eval(blk)
+	must(err)
+	kv("eval `role = 'viewer'`", "verdicts "+verdictString(fr))
+	adminF.Close()
+	viewerF.Close()
+	blk.Close()
+	note("ONE parse of the 3-row event fed BOTH filters: eval neither consumes")
+	note("nor mutates the block, and Eval(ParseBlock(body)) is Rows(body) for")
+	note("every verdict class. A filter and a block each hold a counted")
+	note("reference to the schema, so Close order never matters.")
 	blank()
 
-	note("THREADS: a filter call is ALSO a use of its schema handle — two")
-	note("filters over one schema never run concurrently (the SDK enforces it)")
-	note("LIFETIME: filters AND blocks free before their schema; Close()")
-	note("ordering is structural in every SDK — schema Close frees them first")
+	note("THREADS: concurrent calls on one handle are safe in the library, so")
+	note("two filters over one schema may run at once")
 	note("ENFORCEMENT GATE: nothing may enforce read-side security on this")
 	note("API until the WHERE-truth rig gates green (zero over-admit, zero")
-	note("over-hide). Until that run of record exists this is a shadow/replay")
-	note("surface: log disagreements, enforce with what enforced yesterday —")
-	note("the twin is a call shape, not an enforcement opening.")
+	note("over-hide). Until then this is a shadow/replay surface: log")
+	note("disagreements, enforce with what enforced yesterday.")
 }
 
 // verdictString renders a FilterResult's verdicts as the document's compact
@@ -1436,7 +1397,7 @@ func verdictString(fr chtypes.FilterResult) string {
 	}
 	var b strings.Builder
 	for _, v := range fr.Verdicts {
-		b.WriteString(v.String())
+		b.WriteString(string(v))
 	}
 	return "\"" + b.String() + "\""
 }
@@ -1444,39 +1405,28 @@ func verdictString(fr chtypes.FilterResult) string {
 // ---------------------------------------------------------------------------
 // SECTION 17 — The INSERT column list
 //
-// WHAT: chtypes.WithColumns names the INSERT column list (ABI revision 5) —
-// the `INSERT INTO t (a, b, …)` shape. The data then supplies exactly the
+// WHAT: chtypes.WithColumns names the INSERT column list: the
+// `INSERT INTO t (a, b, ...)` shape. The data then supplies exactly the
 // listed columns, and the server computes the rest with them in scope.
-// WHY: an EPHEMERAL column has NO value at all outside a column list — it
-// exists only to feed another column's DEFAULT — so a gateway that never
-// declares one can never reach it. This is also the shape WaveHouse's own
-// INSERT path always uses: its list is every insertable column, EPHEMERAL
-// included.
+// WHY: an EPHEMERAL column has NO value at all outside a column list: it
+// exists only to feed another column's DEFAULT, so a gateway that never
+// declares one can never reach it.
 // LOOK FOR: a listed EPHEMERAL column's value reaching `d`'s DEFAULT (d = 6)
 // while never appearing among the stored Values itself; and the SAME server
-// code (16) an unknown column and an ALIAS column in the list both answer —
-// indistinguishable from the wire.
-// C API: chs_row's trailing columns_json (ABI revision 5).
+// code an unknown column and an ALIAS column in the list both answer.
+// C API: chs_preview_row's columns argument.
 // ---------------------------------------------------------------------------
 func section17(lib *chtypes.Library) {
 	section(17, "The INSERT column list")
 
-	if lib.ABIRevision < 5 {
-		note("SKIPPED: section 17 needs a revision-5 artifact")
-		note(fmt.Sprintf("(this artifact reports ABI revision %d; `just refresh <version>`", lib.ABIRevision))
-		note("relinks it once revision-5 artifacts exist — the surface is additive)")
-		return
-	}
-
 	// e is EPHEMERAL: no value at all outside a column list. d's DEFAULT
 	// reads e, so a caller that wants d computed from a supplied e must list
-	// e explicitly — there is no other way to reach it.
-	s, err := lib.CompileDDL("id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1")
+	// e explicitly.
+	s, err := lib.CompileTable(tableOf("id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1"))
 	must(err)
 	defer s.Close()
 
-	r, err := s.Row(chtypes.JSONEachRow, []byte(`{"id":3,"e":5}`),
-		chtypes.WithColumns([]string{"id", "e"}))
+	r, err := s.Row(chtypes.JSONEachRow, []byte(`{"id":3,"e":5}`), chtypes.WithColumns([]string{"id", "e"}))
 	must(err)
 	var vals []string
 	for _, v := range r.Values {
@@ -1489,25 +1439,25 @@ func section17(lib *chtypes.Library) {
 	blank()
 
 	// The refusal: an unknown name in the list. Names are never validated
-	// locally — this is the server's own code, surfaced exactly as it comes
-	// back (an ALIAS column in the list answers the SAME code and message).
-	r2, err := s.Row(chtypes.JSONEachRow, []byte(`{"id":1,"nosuch":2}`),
-		chtypes.WithColumns([]string{"id", "nosuch"}))
+	// locally: this is the server's own code, surfaced as it comes back (an
+	// ALIAS column in the list answers the SAME code and message).
+	r2, err := s.Row(chtypes.JSONEachRow, []byte(`{"id":1,"nosuch":2}`), chtypes.WithColumns([]string{"id", "nosuch"}))
 	must(err)
 	kv("list (id, nosuch)", fmt.Sprintf("%s  code=%d  %s", r2.Outcome, r2.ErrCode, truncate(r2.ErrMsg, 56)))
-	note("code 16 NO_SUCH_COLUMN_IN_TABLE — indistinguishable on the wire from")
-	note("naming an ALIAS column; a repeated name answers the server's own")
-	note("code 15 instead (not shown). This library reimplements none of them.")
+	note("NO_SUCH_COLUMN_IN_TABLE: indistinguishable on the wire from naming")
+	note("an ALIAS column; a repeated name answers the server's own different")
+	note("code (not shown). This library reimplements none of them.")
 	blank()
 
-	note("an absent or EMPTY list means exactly the same thing — today's")
-	note("no-list behavior — and NEVER renders as `INSERT INTO t () …`: that")
-	note("statement is a syntax error, code 62, on every server")
+	note("an absent or EMPTY list means exactly the same thing: today's no-list")
+	note("behavior, and NEVER renders as `INSERT INTO t () ...`: that statement")
+	note("is a syntax error on every server")
 }
 
 // ---------------------------------------------------------------- plumbing
 //
-// Everything below is printing helpers — no chtypes calls hide here.
+// Everything below is printing helpers; no chtypes calls hide here beyond the
+// small reads each one names.
 
 func section(n int, title string) { fmt.Printf("\n=== %d. %s ===\n", n, title) }
 func kv(k, v string)              { fmt.Printf("  %-30s %s\n", k, v) }
@@ -1530,15 +1480,15 @@ func must(err error) {
 
 // feed runs one payload through Rows and prints the verdict on one line, plus
 // a "~" line per Transform (a silent change ClickHouse made).
-func feed(s *chtypes.LoadedSchema, label string, f chtypes.Format, body []byte) {
-	b, err := s.Rows(f, body, nil)
+func feed(s *chtypes.Schema, label string, f chtypes.Format, body []byte) {
+	b, err := s.Rows(f, body)
 	if err != nil {
 		kv("  "+label, "call failed: "+err.Error())
 		return
 	}
-	parts := []string{b.Outcome.String()}
+	parts := []string{string(b.Outcome)}
 	if b.ErrCode != 0 {
-		parts = append(parts, "code="+strconv.Itoa(b.ErrCode))
+		parts = append(parts, "code="+strconv.Itoa(int(b.ErrCode)))
 	}
 	if len(b.Rows) > 0 {
 		var vals []string
@@ -1555,28 +1505,41 @@ func feed(s *chtypes.LoadedSchema, label string, f chtypes.Format, body []byte) 
 	kv("  "+label, strings.Join(parts, "  "))
 	for _, t := range b.Transformed {
 		lossy := ""
-		if t.Lossy() {
+		if t.Lossy {
 			lossy = ", LOSSY"
 		}
 		raw(fmt.Sprintf("      ~ %s: %s -> %s (%s%s)", t.Column, t.Input, t.Stored, t.Reason, lossy))
 	}
 }
 
-// describeError prints which of the two peer types an error is, with its code.
+// describeError prints which peer type an error is, with its fields.
 func describeError(err error, what string) {
 	var se *chtypes.SchemaError
 	var ue *chtypes.UnsupportedError
+	var us *chtypes.UsageError
+	var ie *chtypes.InternalError
+	var ae *chtypes.ArtifactError
 	switch {
-	case errors.As(err, &ue):
-		kv(what, "*UnsupportedError  (a DECLINE)")
-		kv("  message", truncate(ue.Msg, 84))
-		kv("  also a *SchemaError?", fmt.Sprintf("%v   <- peers, not a hierarchy", errors.As(err, &se)))
-	case errors.As(err, &se):
-		kv(what, fmt.Sprintf("*SchemaError  (a REFUSAL), .Code=%d", se.Code))
-		kv("  message", truncate(se.Msg, 84))
-		kv("  also an *UnsupportedError?", fmt.Sprintf("%v   <- peers, not a hierarchy", errors.As(err, &ue)))
 	case err == nil:
 		kv(what, "(no error)")
+	case errors.As(err, &ue):
+		kv(what, "*UnsupportedError  (a DECLINE)")
+		kv("  message", truncate(ue.Message, 84))
+		kv("  also a *SchemaError?", fmt.Sprintf("%v   <- peers, not a hierarchy", errors.As(err, &se)))
+	case errors.As(err, &se):
+		kv(what, fmt.Sprintf("*SchemaError  (a REFUSAL), .ChCode=%d %s", se.ChCode, se.ChName))
+		kv("  message", truncate(se.Message, 84))
+		kv("  also an *UnsupportedError?", fmt.Sprintf("%v   <- peers, not a hierarchy", errors.As(err, &ue)))
+	case errors.As(err, &us):
+		kv(what, "*UsageError  (a MISUSE)")
+		kv("  message", truncate(us.Message, 84))
+	case errors.As(err, &ie):
+		kv(what, "*InternalError  (a LIBRARY FAULT)")
+		kv("  message", truncate(ie.Message, 84))
+	case errors.As(err, &ae):
+		kv(what, "*ArtifactError  .Code="+string(ae.Code))
+		kv("  message", truncate(ae.Msg, 84))
+		kv("  errors.Is(ErrArtifactMissing)", fmt.Sprintf("%v   <- one sentinel per code", errors.Is(err, chtypes.ErrArtifactMissing)))
 	default:
 		kv(what, fmt.Sprintf("%T: %v", err, err))
 	}
@@ -1587,13 +1550,16 @@ func describeError(err error, what string) {
 func classify(err error) string {
 	var se *chtypes.SchemaError
 	var ue *chtypes.UnsupportedError
+	var us *chtypes.UsageError
 	switch {
 	case err == nil:
 		return "accepted"
 	case errors.As(err, &ue):
 		return "DECLINED  (*UnsupportedError)"
 	case errors.As(err, &se):
-		return "REFUSED   (*SchemaError, code " + strconv.Itoa(se.Code) + ")"
+		return "REFUSED   (*SchemaError, code " + strconv.Itoa(int(se.ChCode)) + ")"
+	case errors.As(err, &us):
+		return "MISUSE    (*UsageError)"
 	}
 	return err.Error()
 }
@@ -1605,15 +1571,7 @@ func verdict(b chtypes.BatchResult) string {
 	if len(b.Rows) > 0 && len(b.Rows[0].Values) > 0 {
 		return fmt.Sprintf("%-9s %s = %s", b.Outcome, b.Rows[0].Values[0].Column, b.Rows[0].Values[0].Text)
 	}
-	return b.Outcome.String()
-}
-
-func verdictRow(r chtypes.RowResult) string {
-	parts := []string{r.Outcome.String()}
-	for _, v := range r.Values {
-		parts = append(parts, fmt.Sprintf("%s=%s(%s)", v.Column, textOr(v), v.Source))
-	}
-	return strings.Join(parts, "  ")
+	return string(b.Outcome)
 }
 
 func textOr(v chtypes.Value) string {
@@ -1621,6 +1579,30 @@ func textOr(v chtypes.Value) string {
 		return "<unreadable>"
 	}
 	return v.Text
+}
+
+func engineRows(rows [][]chtypes.EngineCell) string {
+	if rows == nil {
+		return "(none reported)"
+	}
+	var out []string
+	for _, r := range rows {
+		var cells []string
+		for _, c := range r {
+			cells = append(cells, c.Column+"="+c.Text)
+		}
+		out = append(out, "["+strings.Join(cells, " ")+"]")
+	}
+	return fmt.Sprintf("%d rows %s", len(rows), strings.Join(out, " "))
+}
+
+func hasFeature(lib *chtypes.Library, name string) bool {
+	for _, f := range lib.BuildInfo().Capabilities.Features {
+		if f == name {
+			return true
+		}
+	}
+	return false
 }
 
 func or(s, fallback string) string {
@@ -1634,7 +1616,7 @@ func okOr(err error, ok string) string {
 	if err == nil {
 		return ok
 	}
-	return err.Error()
+	return truncate(err.Error(), 70)
 }
 
 func errStr(err error) string {
@@ -1652,6 +1634,13 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
+func shortHash(s string) string {
+	if len(s) > 10 {
+		return s[:10]
+	}
+	return s
+}
+
 func unhex(s string) []byte {
 	b, err := hex.DecodeString(s)
 	if err != nil {
@@ -1660,27 +1649,47 @@ func unhex(s string) []byte {
 	return b
 }
 
-// registryDir is $CHTYPES_REGISTRY, else the per-user artifact cache every
-// SDK defaults to (chtypes.DefaultRegistryDir).
-func registryDir() string {
-	if dir := os.Getenv("CHTYPES_REGISTRY"); dir != "" {
-		return dir
-	}
-	return chtypes.DefaultRegistryDir()
-}
+func hostPlatform() string { return runtime.GOOS + "-" + runtime.GOARCH }
 
-// newestLine picks the numerically highest minor line: "25.10" > "25.3",
-// which a string sort gets exactly backwards.
-func newestLine(lines []string) string {
-	best := ""
-	for _, l := range lines {
-		if best == "" || lineLess(best, l) {
-			best = l
+// installedLines is the two-part spelling ("26.8") of every installed build
+// for this host's platform, oldest line first. A line is the first two parts
+// of a version the fetch layer reported; ordering them is this example's
+// business, and only for printing.
+func installedLines(installed []chtypes.Resolved) []string {
+	seen := map[string]bool{}
+	var lines []string
+	for _, r := range installed {
+		if r.Platform != hostPlatform() {
+			continue
+		}
+		if l := lineOfVersion(r.Version); l != "" && !seen[l] {
+			seen[l] = true
+			lines = append(lines, l)
 		}
 	}
-	return best
+	sort.Slice(lines, func(i, j int) bool { return lineLess(lines[i], lines[j]) })
+	return lines
 }
 
+func newestLine(reg *chtypes.Registry) string {
+	installed, _ := reg.Installed()
+	lines := installedLines(installed)
+	if len(lines) == 0 {
+		return ""
+	}
+	return lines[len(lines)-1]
+}
+
+func lineOfVersion(v string) string {
+	parts := strings.Split(v, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0] + "." + parts[1]
+}
+
+// lineLess orders two-part lines numerically: "25.10" > "25.3", which a
+// string sort gets exactly backwards.
 func lineLess(a, b string) bool {
 	ap, bp := strings.Split(a, "."), strings.Split(b, ".")
 	for i := 0; i < len(ap) && i < len(bp); i++ {

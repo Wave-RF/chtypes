@@ -5,7 +5,7 @@ WHY THIS EXISTS. ClickHouse names its error codes in a table that is a property
 of the BUILD, and it moves between lines: codes join, codes leave, and one
 number can name two different errors on two lines (903 is LICENSE_EXPIRED on
 25.3 and 25.8, absent on 25.10, and DISTRIBUTED_CACHE_REGISTRY_SHUTDOWN on 26.2
-through 26.9). Revision 6 of the C ABI serves each build's own table through `chs_error_codes`, and every binding
+through 26.9). The C ABI serves each build's own table through `chs_error_codes`, and every binding
 reaches it per loaded library — `Library.ErrorCodes()` / `error_codes()` /
 `errorCodes()` / `error_codes()`. A code -> name table written into a binding
 would be right for at most one line and silently wrong for the rest, which is
@@ -33,6 +33,21 @@ literal and a comment is nothing. Go, TypeScript and Rust are lexed a line at a
 time: comment LINES are skipped, so prose may name a code, while a comment that
 TRAILS code on the same line is still scanned.
 
+Also excluded: a file that is one of the paths scripts/abi-v1/gen.py's emitters
+produce (gen.produced_outputs()) AND carries gen.py's generated banner in its
+first 512 bytes (emit/__init__.py's BANNER_RE — the same two-part test
+scripts/abi-v1/check-no-hand-decls.py exempts generated files by). Build and
+dist directories are walked, not skipped, so a copied banner under one of them
+is not exempt. The
+*/abi1/* declaration layers gen.py emits pair D3's five frozen chs_status
+values with their UPPER_SNAKE names (CHS_OK, CHS_REJECTED, ...) — an ABI
+status table from spec/abi-v1/abi.json, not a ClickHouse error-code table —
+and Rule B cannot tell those apart from a hand-written one by shape alone.
+The exemption cannot be forged: it needs the path to be a produced output, and
+gen.py --check refuses a produced path whose content differs from the
+emitter's, so it cannot be used to smuggle a real error-code table past Rule A
+or B.
+
 RULE A — no known ClickHouse error name as a string literal.
 
   A string literal whose ENTIRE content is one of the names in KNOWN_NAMES
@@ -55,16 +70,16 @@ RULE B — no code -> name table shape.
   is TABLE_MIN pairs, each starting within RUN_GAP tokens of the previous one.
   That catches a table of names nobody listed in KNOWN_NAMES, which Rule A
   cannot. `CHTYPES_*` literals are exempt: they are this repository's own
-  artifact-error vocabulary (docs/guides/fetch.md §6), never a ClickHouse name.
+  artifact-error vocabulary (docs/guides/fetch-v1.md §8), never a ClickHouse name.
 
 RULE C — every binding DECLARES chs_error_codes.
 
   Rules A and B prove no second answer is computed here; they cannot prove the
   first one is reachable. A binding that stops declaring the symbol cannot ask
   the library, and would have to carry the table these rules forbid — so the
-  declaration is required, in the same files and by the same wiring patterns
-  scripts/check-quoting-passthrough.py requires the quoting trio, and
-  scripts/check-abi-decls.py then checks its arity and types.
+  declaration is required, in the same generated files and by the same wiring
+  patterns scripts/check-quoting-passthrough.py requires the quoting trio;
+  scripts/abi-v1/gen.py --check proves the declaration matches the header.
 
 WHAT NONE OF THEM CAN DO. Nothing here proves the table a library RETURNS is
 right for its line: that is the artifact producer's build-time comparison with
@@ -84,6 +99,16 @@ import sys
 import tempfile
 import tokenize
 
+# A generated file (scripts/abi-v1/gen.py's output: the abi1 declaration
+# layers, chs_status name tables among them) is exempt from Rules A and B —
+# see GENERATED_EXEMPTION below. BANNER_RE is the SAME real-fingerprint
+# pattern scripts/abi-v1/check-no-hand-decls.py already exempts generated
+# files by, imported rather than re-derived so the two checks can never
+# disagree about what counts as "really generated".
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "abi-v1"))
+from emit import BANNER_RE  # noqa: E402
+from gen import produced_outputs  # noqa: E402
+
 # --------------------------------------------------------------- what is scanned
 
 SCAN_DIRS = ("go", "python", "ts", "rust")
@@ -92,24 +117,22 @@ SCAN_EXTS = (".go", ".py", ".ts", ".mts", ".mjs", ".js", ".rs")
 SKIP_DIRS = {
     "node_modules",
     "target",
-    "dist",
     ".venv",
-    "build",
     "__pycache__",
     "testdata",
     "tests",
     "test",
 }
 
-# The same declaration sources, and the same wiring patterns, that
+# The same generated declaration layers, and the same wiring patterns, that
 # scripts/check-quoting-passthrough.py requires for the quoting trio: a dlsym
-# cast, a direct cgo call, a signature-table key — never a bare mention.
+# cast, a direct linked address, a declaration-table row — never a bare mention.
 DECL_SOURCES = (
-    ("go", "go/chtypes/multiversion.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
-    ("go-linked", "go/chtypes/linked.go", r"\bC\.{sym}\s*\("),
-    ("python", "python/src/chtypes/_native.py", r'"{sym}"\s*:'),
-    ("ts", "ts/src/ffi.ts", r"\b{sym}\s*:\s*d\("),
-    ("rust", "rust/src/ffi.rs", r'b"{sym}\\0"'),
+    ("go", "go/internal/abi1/abi_gen.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
+    ("go-linked", "go/internal/abi1/linked_gen.go", r"&{sym}\s*;"),
+    ("python", "python/src/chtypes/_abi1/_decls.py", r'_add\(\s*"{sym}"'),
+    ("ts", "ts/src/abi1/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
+    ("rust", "rust/src/abi1/decls.rs", r'concat!\(\s*"{sym}"'),
 )
 DECL_SYMBOLS = ("chs_error_codes",)
 
@@ -440,18 +463,20 @@ def check_declarations(root: str) -> list[str]:
 # ------------------------------------------------------------------- the check
 
 
-def check(root: str) -> tuple[int, list[str]]:
+def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[str]]:
     files = scanned_files(root)
+    if produced is None:
+        produced = produced_outputs()
     findings: list[str] = []
 
     # A scanner that stopped seeing a binding must fail, not report success for
     # what it never read: one anchor per binding, the file its table would
     # most plausibly grow in.
     anchors = (
-        "go/chtypes/error_codes.go",
-        "python/src/chtypes/_error_codes.py",
-        "ts/src/error-codes.ts",
-        "rust/src/error_codes.rs",
+        "go/internal/abi1/loader.go",
+        "python/src/chtypes/_abi1/_loader.py",
+        "ts/src/abi1/loader.ts",
+        "rust/src/abi1/loader.rs",
     )
     for anchor in anchors:
         if anchor not in files:
@@ -465,8 +490,11 @@ def check(root: str) -> tuple[int, list[str]]:
         findings.append(f"the scan read {f}, a test file it promises to skip")
 
     for rel in files:
+        text = open(os.path.join(root, rel), encoding="utf-8").read()
+        if rel in produced and BANNER_RE.search(text[:512]):
+            continue  # scripts/abi-v1/gen.py's own output: see this module's docstring
         try:
-            findings += scan_text(rel, open(os.path.join(root, rel), encoding="utf-8").read())
+            findings += scan_text(rel, text)
         except ScanError as e:
             raise ScanError(f"{rel}: {e}") from e
     findings += check_declarations(root)
@@ -487,134 +515,168 @@ def check(root: str) -> tuple[int, list[str]]:
 
 TABLE_FINDING = "numeric literals paired with UPPER_SNAKE names"
 
+# A fabricated stand-in for what scripts/abi-v1/gen.py actually emits under
+# */abi1/* (D3's five chs_status values, paired with their UPPER_SNAKE
+# names): proves the generated-file exemption in BOTH directions with the
+# SAME table, varying only whether a real banner is present. Written
+# directly into the selftest's temp tree (it is not a real file in this
+# repository today), with the banner line: the baseline check(tmp) call
+# right after it is created is the "silent while the banner is present"
+# control; the PLANT below strips the banner and expects TABLE_FINDING.
+GENERATED_RUST_DECLS = "rust/src/abi1/status_names.rs"
+GENERATED_BANNER_LINE = (
+    "// GENERATED by scripts/abi-v1/gen.py from spec/abi-v1/abi.json "
+    "(CHS_ABI_FINGERPRINT sha256:" + "a" * 64 + ") — DO NOT EDIT"
+)
+GENERATED_STATUS_TABLE = (
+    "pub(crate) fn status_name(c: i32) -> &'static str {\n"
+    "    match c {\n"
+    '        0 => "CHS_OK",\n'
+    '        1 => "CHS_REJECTED",\n'
+    '        2 => "CHS_DECLINED",\n'
+    '        _ => "",\n'
+    "    }\n"
+    "}\n"
+)
+
+# A plant with find=None creates a NEW file in the copied tree holding `repl`,
+# so no plant depends on what a hand-written file happens to say; a plant with
+# a find edits a GENERATED declaration file, whose text is fixed by
+# spec/abi-v1/abi.json.
+GO_PLANT = "go/internal/abi1/zz_planted.go"
+PY_PLANT = "python/src/chtypes/_abi1/_planted.py"
+TS_PLANT = "ts/src/abi1/planted.ts"
+RS_PLANT = "rust/src/abi1/planted.rs"
+
 PLANTS = (
     (
         "go table",
-        "go/chtypes/error_codes.go",
-        "type ErrorCodeEntry struct {",
-        'var codeNames = map[int]string{\n\t0: "OK",\n\t1: "FIRST_ERROR",\n\t47: "SOME_ERROR",\n'
-        '\t62: "OTHER_ERROR",\n}\n\ntype ErrorCodeEntry struct {',
+        GO_PLANT,
+        None,
+        'package abi1\n\nvar codeNames = map[int]string{\n\t0: "OK",\n\t1: "FIRST_ERROR",\n\t47: "SOME_ERROR",\n'
+        '\t62: "OTHER_ERROR",\n}\n',
         TABLE_FINDING,
     ),
     (
         "go switch table",
-        "go/chtypes/error_codes.go",
-        "type ErrorCodeEntry struct {",
-        'func nameOf(c int) string {\n\tswitch c {\n\tcase 36:\n\t\treturn "BAD_ARG_X"\n\tcase 44:\n'
-        '\t\treturn "ILLEGAL_X"\n\tcase 62:\n\t\treturn "SYNTAX_X"\n\t}\n\treturn ""\n}\n\n'
-        "type ErrorCodeEntry struct {",
+        GO_PLANT,
+        None,
+        'package abi1\n\nfunc nameOf(c int) string {\n\tswitch c {\n\tcase 36:\n\t\treturn "BAD_ARG_X"\n\tcase 44:\n'
+        '\t\treturn "ILLEGAL_X"\n\tcase 62:\n\t\treturn "SYNTAX_X"\n\t}\n\treturn ""\n}\n',
         TABLE_FINDING,
     ),
     (
         "go name literal",
-        "go/chtypes/error_codes.go",
-        "type ErrorCodeEntry struct {",
-        'const tooMany = "TOO_MANY_PARTS"\n\ntype ErrorCodeEntry struct {',
+        GO_PLANT,
+        None,
+        'package abi1\n\nconst tooMany = "TOO_MANY_PARTS"\n',
         'the literal "TOO_MANY_PARTS" is a ClickHouse error name',
     ),
     (
         "python table",
-        "python/src/chtypes/_error_codes.py",
-        '__all__ = ["ErrorCodeEntry", "ErrorCodeTable"]',
-        '__all__ = ["ErrorCodeEntry", "ErrorCodeTable"]\n\n_NAMES = {\n    ("A_ERROR", 1),\n    ("B_ERROR", 2),\n'
-        '    ("C_ERROR", 3),\n}',
+        PY_PLANT,
+        None,
+        '_NAMES = {\n    ("A_ERROR", 1),\n    ("B_ERROR", 2),\n    ("C_ERROR", 3),\n}\n',
         TABLE_FINDING,
     ),
     (
         "python name literal",
-        "python/src/chtypes/_error_codes.py",
-        '__all__ = ["ErrorCodeEntry", "ErrorCodeTable"]',
-        '__all__ = ["ErrorCodeEntry", "ErrorCodeTable"]\n\nif True:\n    _X = "SYNTAX_ERROR"',
+        PY_PLANT,
+        None,
+        'if True:\n    _X = "SYNTAX_ERROR"\n',
         'the literal "SYNTAX_ERROR" is a ClickHouse error name',
     ),
     (
         "ts table",
-        "ts/src/error-codes.ts",
-        "export interface ErrorCodeEntry {",
-        "const NAMES = [\n  { code: 1, name: 'A_ERROR' },\n  { code: 2, name: 'B_ERROR' },\n"
-        "  { code: 3, name: 'C_ERROR' },\n];\n\nexport interface ErrorCodeEntry {",
+        TS_PLANT,
+        None,
+        "export const NAMES = [\n  { code: 1, name: 'A_ERROR' },\n  { code: 2, name: 'B_ERROR' },\n"
+        "  { code: 3, name: 'C_ERROR' },\n];\n",
         TABLE_FINDING,
     ),
     (
         "ts name literal",
-        "ts/src/error-codes.ts",
-        "export interface ErrorCodeEntry {",
-        "const X = 'UNKNOWN_IDENTIFIER';\n\nexport interface ErrorCodeEntry {",
+        TS_PLANT,
+        None,
+        "export const X = 'UNKNOWN_IDENTIFIER';\n",
         'the literal "UNKNOWN_IDENTIFIER" is a ClickHouse error name',
     ),
     (
         "rust table",
-        "rust/src/error_codes.rs",
-        "/// One row of a build's error-code table",
+        RS_PLANT,
+        None,
         'pub(crate) fn name_of(c: i32) -> &\'static str {\n    match c {\n        1 => "A_ERROR",\n'
-        '        2 => "B_ERROR",\n        3 => "C_ERROR",\n        _ => "",\n    }\n}\n\n'
-        "/// One row of a build's error-code table",
+        '        2 => "B_ERROR",\n        3 => "C_ERROR",\n        _ => "",\n    }\n}\n',
         TABLE_FINDING,
     ),
     (
         "rust name literal",
-        "rust/src/error_codes.rs",
-        "/// One row of a build's error-code table",
-        'pub(crate) const X: &str = "TOO_MANY_PARTS";\n\n/// One row of a build\'s error-code table',
+        RS_PLANT,
+        None,
+        'pub(crate) const X: &str = "TOO_MANY_PARTS";\n',
         'the literal "TOO_MANY_PARTS" is a ClickHouse error name',
     ),
     (
         "go declaration dropped",
-        "go/chtypes/multiversion.go",
+        "go/internal/abi1/abi_gen.go",
         'dlsym(h, "chs_error_codes")',
         'dlsym(h, "chs_absent_symbol")',
-        "go: go/chtypes/multiversion.go does not declare chs_error_codes",
+        "go: go/internal/abi1/abi_gen.go does not declare chs_error_codes",
     ),
     (
         "go-linked declaration dropped",
-        "go/chtypes/linked.go",
-        "C.chs_error_codes()",
-        "C.chs_absent_symbol()",
-        "go-linked: go/chtypes/linked.go does not declare chs_error_codes",
+        "go/internal/abi1/linked_gen.go",
+        "&chs_error_codes;",
+        "&chs_absent_symbol;",
+        "go-linked: go/internal/abi1/linked_gen.go does not declare chs_error_codes",
     ),
     (
         "python declaration dropped",
-        "python/src/chtypes/_native.py",
-        '"chs_error_codes": (',
-        '"chs_absent_symbol": (',
-        "python: python/src/chtypes/_native.py does not declare chs_error_codes",
+        "python/src/chtypes/_abi1/_decls.py",
+        '    "chs_error_codes",\n    "status",',
+        '    "chs_absent_symbol",\n    "status",',
+        "python: python/src/chtypes/_abi1/_decls.py does not declare chs_error_codes",
     ),
     (
         "ts declaration dropped",
-        "ts/src/ffi.ts",
-        "chs_error_codes: d(",
-        "chs_absent_symbol: d(",
-        "ts: ts/src/ffi.ts does not declare chs_error_codes",
+        "ts/src/abi1/decls.gen.ts",
+        '"chs_error_codes": {',
+        '"chs_absent_symbol": {',
+        "ts: ts/src/abi1/decls.gen.ts does not declare chs_error_codes",
     ),
     (
         "rust declaration dropped",
-        "rust/src/ffi.rs",
-        'b"chs_error_codes\\0"',
-        'b"chs_absent_symbol\\0"',
-        "rust: rust/src/ffi.rs does not declare chs_error_codes",
+        "rust/src/abi1/decls.rs",
+        'concat!("chs_error_codes", "\\0")',
+        'concat!("chs_absent_symbol", "\\0")',
+        "rust: rust/src/abi1/decls.rs does not declare chs_error_codes",
+    ),
+    (
+        "generated banner stripped from a would-be-generated file",
+        GENERATED_RUST_DECLS,
+        GENERATED_BANNER_LINE,
+        "// NOT a generated banner",
+        TABLE_FINDING,
     ),
 )
 
-# Controls: each must leave the check GREEN. (label, file, find, replace)
+# Controls: each must leave the check GREEN. (label, file, content) — each
+# writes a NEW file in the copied tree.
 CONTROLS = (
     (
         "a table inside a Rust #[cfg(test)] module",
-        "rust/src/error_codes.rs",
-        "#[cfg(test)]\nmod tests {",
-        '#[cfg(test)]\nmod tests {\n    const T: [(i32, &str); 3] = [(1, "A_ERROR"), (2, "B_ERROR"), (3, "TOO_MANY_PARTS")];',
+        RS_PLANT,
+        '#[cfg(test)]\nmod tests {\n    const T: [(i32, &str); 3] = [(1, "A_ERROR"), (2, "B_ERROR"), (3, "TOO_MANY_PARTS")];\n}\n',
     ),
     (
         "a name inside prose",
-        "go/chtypes/error_codes.go",
-        "type ErrorCodeEntry struct {",
-        'var proseOnly = "a 252 TOO_MANY_PARTS refusal is an ordinary rejection"\n\ntype ErrorCodeEntry struct {',
+        GO_PLANT,
+        'package abi1\n\nvar proseOnly = "a 252 TOO_MANY_PARTS refusal is an ordinary rejection"\n',
     ),
     (
         "this repository's own CHTYPES_ vocabulary beside numbers",
-        "go/chtypes/error_codes.go",
-        "type ErrorCodeEntry struct {",
-        'var exits = map[string]int{\n\t"CHTYPES_A_B": 1,\n\t"CHTYPES_C_D": 2,\n\t"CHTYPES_E_F": 3,\n}\n\n'
-        "type ErrorCodeEntry struct {",
+        GO_PLANT,
+        'package abi1\n\nvar exits = map[string]int{\n\t"CHTYPES_A_B": 1,\n\t"CHTYPES_C_D": 2,\n\t"CHTYPES_E_F": 3,\n}\n',
     ),
 )
 
@@ -653,21 +715,56 @@ def selftest(root: str) -> int:
         open(os.path.join(tmp, "python", "tests", "test_planted.py"), "w", encoding="utf-8").write(
             'T = {1: "A_ERROR", 2: "B_ERROR", 3: "TOO_MANY_PARTS"}\n'
         )
+        # A fabricated generated file carrying a real banner and a table: the
+        # baseline check(tmp) right below is ALSO the "banner present -> the
+        # generated-file exemption keeps this silent" control. The PLANT
+        # "generated banner stripped..." proves the other direction, on the
+        # exact same table.
+        os.makedirs(os.path.join(tmp, os.path.dirname(GENERATED_RUST_DECLS)), exist_ok=True)
+        open(os.path.join(tmp, GENERATED_RUST_DECLS), "w", encoding="utf-8").write(
+            GENERATED_BANNER_LINE + "\n" + GENERATED_STATUS_TABLE
+        )
 
-        n, lines = check(tmp)
+        # What the emitters produce, standing in for the real set (the real
+        # outputs, so a real generated file copied into the tree stays exempt) plus
+        # the fabricated file above.
+        produced = produced_outputs() | {GENERATED_RUST_DECLS}
+
+        n, lines = check(tmp, produced)
         if n:
             print("SELFTEST FAILED: the copied tree does not pass\n" + "\n".join(lines), file=sys.stderr)
             return 1
 
+        # The same real banner and table in a hand-written file under a
+        # build directory inside a binding, which is not a produced path:
+        # the walk must reach it and the exemption must refuse it.
+        built = os.path.join(tmp, "rust", "src", "build", "decls.rs")
+        os.makedirs(os.path.dirname(built), exist_ok=True)
+        open(built, "w", encoding="utf-8").write(GENERATED_BANNER_LINE + "\n" + GENERATED_STATUS_TABLE)
+        n, lines = check(tmp, produced)
+        if n == 0 or TABLE_FINDING not in "\n".join(lines) or "rust/src/build/decls.rs" not in "\n".join(lines):
+            print("SELFTEST FAILED: a bannered hand-written file under build/ was exempted or never walked", file=sys.stderr)
+            return 1
+        print(f"  plant   {'bannered hand-written file under build/':<52} caught")
+        os.remove(built)
+
         for label, rel, find, repl, want in PLANTS:
             path = os.path.join(tmp, rel)
-            original = _apply(path, find, repl, label)
-            if original is None:
-                return 1
+            if find is None:
+                original = None
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                open(path, "w", encoding="utf-8").write(repl)
+            else:
+                original = _apply(path, find, repl, label)
+                if original is None:
+                    return 1
             try:
-                n, lines = check(tmp)
+                n, lines = check(tmp, produced)
             finally:
-                open(path, "w", encoding="utf-8").write(original)
+                if original is None:
+                    os.remove(path)
+                else:
+                    open(path, "w", encoding="utf-8").write(original)
             report = "\n".join(lines)
             if n == 0:
                 print(f"SELFTEST FAILED: the {label} plant was not caught", file=sys.stderr)
@@ -681,15 +778,14 @@ def selftest(root: str) -> int:
                 return 1
             print(f"  plant   {label:<52} caught")
 
-        for label, rel, find, repl in CONTROLS:
+        for label, rel, content in CONTROLS:
             path = os.path.join(tmp, rel)
-            original = _apply(path, find, repl, label)
-            if original is None:
-                return 1
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "w", encoding="utf-8").write(content)
             try:
-                n, lines = check(tmp)
+                n, lines = check(tmp, produced)
             finally:
-                open(path, "w", encoding="utf-8").write(original)
+                os.remove(path)
             if n:
                 print(
                     f"SELFTEST FAILED: the control '{label}' fired, and must not:\n" + "\n".join(lines),
@@ -702,7 +798,8 @@ def selftest(root: str) -> int:
 
     print(
         "check-no-error-code-table: selftest ok — a planted table, a name literal and a dropped "
-        "declaration fire in every binding; a test file, prose and the CHTYPES_ vocabulary stay silent"
+        "declaration fire in every binding; a test file, prose, the CHTYPES_ vocabulary and a "
+        "real generated file stay silent, and the same table fires once that banner is stripped or when the banner sits on a file no emitter produces"
     )
     return 0
 

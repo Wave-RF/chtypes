@@ -6,75 +6,71 @@ Node ≥ 22, ESM only. `ffi-rs` ships prebuilt for darwin arm64/x64 and linux ar
 
 ## Install
 
-Two things: this package, and at least one **artifact** — the per-version native library it `dlopen`s at runtime.
+Two things: this package, and at least one **artifact**, the per-version native library it `dlopen`s at runtime. The fetch layer (`src/ocifetch`) resolves a version request to a signed artifact in its cache, verifies the signature and the library's digest, and hands the result to the loader; a `Registry` turns on fetching with `autofetch` (or `CHTYPES_AUTOFETCH=1`).
 
 ```sh
 pnpm add @wavehouse/chtypes
-npx @wavehouse/chtypes fetch 26.8
 ```
-
-The fetch lands in `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/26.8/` — the per-user cache every chtypes binding reads by default, `<R>` the ABI revision this SDK speaks (fetch installs only artifacts built at it) — after checking an ed25519 signature over the release and the sha256 of every byte. `$CHTYPES_REGISTRY` overrides it.
 
 ## Quickstart
 
 ```ts
-import { Format, Registry } from '@wavehouse/chtypes';
+import { Format, Registry, setup } from '@wavehouse/chtypes';
 
-const registry = new Registry();     // walks the search path
-const lib = registry.for('26.8');    // a line or an exact patch; never a nearest match
-const schema = lib.compileDdl('x UInt8, ts DateTime DEFAULT now()');
+setup({ timezone: 'UTC' });                  // optional; once, before the first open
+const registry = await Registry.open({ autofetch: true });
+const lib = await registry.for('26.8');      // two, three or four parts; never a nearest match
+const schema = lib.compileTable('CREATE TABLE t (x UInt8, ts DateTime DEFAULT now()) ENGINE = Memory');
 
-const batch = schema.rows(Format.JSONEachRow, Buffer.from('{"x":256}'));
+const batch = schema.rows(Format.JSONEachRow, Buffer.from('{"x":256}\n'));
 const row = batch.rows[0];
-console.log(batch.outcome);              // accepted
-console.log(row.values[0].text);         // 0             — what would actually be stored
-console.log(row.transformed[0]?.reason); // overflow_wrap — which is the product
-console.log(row.substituted[0]?.column); // ts — send it explicitly in the real INSERT
+console.log(batch.outcome);                    // accepted
+console.log(row?.values[0]?.text.toString());  // 0             what would actually be stored
+console.log(row?.transformed[0]?.reason);      // overflow_wrap which is the product
 
 schema.close();
 ```
 
-The row is **accepted** and `256` is silently stored as `0`. That report — `transformed` — is the one derived answer in the system and the reason it exists.
+The row is **accepted** and `256` is silently stored as `0`. That report, `transformed`, comes from the library, which is the only place a ClickHouse rule lives.
 
-`ts` was substituted rather than stored: send every substituted column as an explicit value in the real INSERT, or the server re-evaluates `now()` at its own instant and your preview is not what landed.
+## What a result is
 
-## Three outcomes, and conflating any two is a bug
+Every field of a result is a field of the document the library returned, decoded one to one with the stock `JSON.parse`; nothing is computed in this package. Every name, SQL text, message and rendered value is **bytes** (`Buffer`), never assumed to be UTF-8: ClickHouse round-trips column names containing NUL and invalid UTF-8. `Value.isStored`, `Transform.lossy` and `verdictAnswered` are the description's own facts for the value a document carries.
 
-A bad **row** is a verdict, not an exception: `outcome` becomes `'rejected'` with ClickHouse's own code and message. Exceptions are for schema-level answers — `compileDdl`, `setEngine`, `setTtl`, `validateType` — and there the class _is_ the verdict.
+## Errors
 
-- `SchemaError` — the server refused, and `code` is a real ClickHouse code.
-- `UnsupportedError` — chtypes declines to guess, and a real server might well have accepted. **Fall back to the server.**
-- The two are **peers**: a decline never satisfies `instanceof SchemaError`.
+A bad **row** is a verdict, not an exception: `outcome` becomes `'rejected'` with ClickHouse's own code and message. The calls that can fail throw one of four peers, under the abstract `CallError`:
+
+- `SchemaError`: the server would refuse; `chCode` and `chName` are ClickHouse's own.
+- `UnsupportedError`: this build declines to answer, and a real server might well have accepted. **Fall back to the server.**
+- `UsageError`: caller misuse, whichever side caught it (a closed object, a zone given twice, a refused version spelling).
+- `InternalError`: a library bug, or a document that does not decode.
+
+The four are **peers**: a decline never satisfies `instanceof SchemaError`. Loader and fetch errors are `ArtifactError`s: `ArtifactIncompatibleError`, `ArtifactCorruptError` (the fetch layer's and the loader's step 5 are one class), `ArtifactMissingError` and the rest of the fetch family.
 
 ## Documentation
 
-|                                                                                                                                                                             |                                                                              |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [Quickstart](https://github.com/wave-rf/chtypes/blob/main/docs/quickstart.md)                                                                                               | the same program in all four languages                                       |
-| [TypeScript API reference](https://github.com/wave-rf/chtypes/blob/main/docs/reference/ts.md)                                                                               | every symbol, the C entry point under it, what it returns and what it throws |
-| [Artifacts](https://github.com/wave-rf/chtypes/blob/main/docs/guides/artifacts.md)                                                                                          | getting one, where it lands, verifying and pinning it                        |
-| [Batches](https://github.com/wave-rf/chtypes/blob/main/docs/guides/batches.md)                                                                                              | always `rows`, and the two bad-row policies                                  |
-| [Transformations](https://github.com/wave-rf/chtypes/blob/main/docs/guides/transformations.md)                                                                              | the silent-change report, and the DEFAULTs you must echo back                |
-| [Settings](https://github.com/wave-rf/chtypes/blob/main/docs/guides/settings.md) · [Discovery](https://github.com/wave-rf/chtypes/blob/main/docs/guides/discovery.md)       | the four channels; asking a real server what profile to validate under       |
-| [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process    |
-| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                            |
+|                                                        |                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| [The v1 binding API](../docs/reference/bindings-v1.md) | every operation, type, error class and document decoder, in all four languages |
+| [Fetching artifacts](../docs/guides/fetch-v1.md)       | resolving, verifying and caching an artifact                                   |
 
-## Four things specific to this binding
+## Things specific to this binding
 
-**`using` is a syntax error on Node 22**, this package's own floor. Explicit resource management needs TypeScript to downlevel it for you, or plain JavaScript on Node ≥ 24. `close()` works everywhere and every disposable here has both, so portable examples use `close()`.
+**`using` is a syntax error on Node 22**, this package's own floor. Explicit resource management needs TypeScript to downlevel it for you, or plain JavaScript on Node >= 24. `close()` works everywhere and every disposable here has both, so portable examples use `close()`.
 
-**A settings value may be a `string` or a `bigint`, never a `number`.** The runtime rejects a `number`, because TypeScript is not present at a JS consumer's call site and a 19-digit `chtypes_now_epoch_nanos` does not survive an IEEE double — sent as a JSON number the setting would be silently ignored.
+**Settings values are strings, and only strings.** The map becomes a JSON object of string values and is passed verbatim; a `number` or a `boolean` is a `TypeError`. The per-call zone is the `session_timezone` key of the call's settings: pass `sessionTimezone`, or the key, never both.
 
-**`for()` never fetches; `open()` can.** `Registry#for(v)` is synchronous and resolves from the search path alone. `await registry.open(v)` is its async twin, and with `{ autofetch: true }` (or `CHTYPES_AUTOFETCH=1`) it fetches a missing line first. Off by default: a production process must not begin a 250 MB download inside a request.
+**`Registry.open`, `for` and `installed` are async**, because the fetch layer is. Construction opens nothing; `for` resolves from the cache first and fetches only when `autofetch` is on.
 
-**`worker_threads` is the boundary.** Two JS threads share one dlopen'd image and one set of C globals, which no per-isolate counter can see. Seed default settings before starting workers, and do not share a `Schema` across them.
+**`worker_threads` is the boundary.** Every call runs synchronously on one thread, so there is nothing to share inside an isolate. A handle cannot cross to another worker: each worker opens its own objects over the shared image, and every worker must call `setup` identically.
 
 ## Tests
 
-`pnpm test`. Tests that need an artifact **skip loudly by name** without a registry on the search path, and a suite that ran nothing fails. The fetch suite runs offline against the miniature releases in `tests/fixtures/fetch/`.
+`pnpm test`. The stub-backed suites under `test/abi1` need `$CHTYPES_ABI1_STUBS` and skip loudly by name without it; the decoder, settings and setup suites need nothing.
 
-Working against a checkout: build `dist/` first (`pnpm install && pnpm build`) — that is what `package.json#exports` serves. If a linked copy goes stale, note that `pnpm install --force` does **not** relink; remove `node_modules` and reinstall.
+Working against a checkout: build `dist/` first (`pnpm install && pnpm build`), which is what `package.json#exports` serves.
 
 ## License
 
-Apache 2.0. The artifacts this package loads are **Elastic License 2.0** — a separate license, shipped inside each artifact release, and `fetch` says so once.
+Apache 2.0. The artifacts this package loads are **Elastic License 2.0**, a separate license shipped inside each artifact release.

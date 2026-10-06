@@ -6,6 +6,25 @@ name: release-go
 on:
   push:
     tags: ["go/v*"]
+  # A dry run proves the tag name's shape, the module and the build, and then
+  # runs the post-publish steps against the LOCAL module (a `replace`) instead of
+  # the proxy. verify_only runs just those steps against a published version.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag name to check, for example go/v1.0.0 (a tag push uses the pushed tag)."
+        required: true
+        type: string
+      dry_run:
+        description: "Run every step up to the publish; the post-publish steps then run against the local module instead of the proxy."
+        required: false
+        type: boolean
+        default: true
+      verify_only:
+        description: "Skip the build and tag checks and run only the post-publish steps against the ALREADY-PUBLISHED version the tag names (proxy install first, with its retry loop). Wins over dry_run."
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 # Every run: step uses bash with -eo pipefail. GitHub's default for a step
@@ -15,18 +34,84 @@ defaults:
   run:
     shell: bash
 
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
 jobs:
   verify:
+    if: github.event_name != 'workflow_dispatch' || !inputs.verify_only
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version-file: go/go.mod }
       - run: cd go && go build ./... && go vet ./...
-      # A publish step exiting 0 does not mean anyone can install the package.
-      # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
-      # npm served the tarball, and for ~2 of those minutes `latest` resolved to
-      # a version that 404'd. This installs the real thing from the public
-      # registry, with no credentials, and makes it report its ABI revision.
-      - name: it installs from the public registry and speaks ABI revision
-        run: scripts/verify-published.sh go "${GITHUB_REF_NAME#go/v}"
+      - name: the tag name is the subdirectory form, and names this module
+        run: |
+          case "$TAG" in
+            go/v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "tag $TAG is not go/vMAJOR.MINOR.PATCH" >&2; exit 1 ;;
+          esac
+          mod="$(cd go && go list -m)"
+          [ "$mod" = "github.com/wave-rf/chtypes/go" ] || { echo "module is $mod" >&2; exit 1; }
+          (cd go && go mod verify)
+      # The User-Agent assertion. The fetch layer's `User-Agent` is
+      # `chtypes-go/<bindingVersion>`, and Go has no manifest to cross-check
+      # that constant against, so a stale one would ship silently. This
+      # writes a throwaway test INSIDE the package (userAgent is unexported),
+      # drives it with the tag's version, and requires the test to have RUN
+      # and passed. It runs on the tag path too, before anything is public.
+      - name: the User-Agent version is the version being tagged
+        run: |
+          version="${TAG#go/v}"
+          cat > go/internal/ocifetch/zz_release_useragent_test.go <<'EOF'
+          package ocifetch
+
+          import (
+          	"os"
+          	"testing"
+          )
+
+          func TestReleaseUserAgentMatchesTag(t *testing.T) {
+          	v := os.Getenv("RELEASE_VERSION")
+          	if v == "" {
+          		t.Fatal("RELEASE_VERSION is empty")
+          	}
+          	if got, want := userAgent(), "chtypes-go/"+v; got != want {
+          		t.Fatalf("User-Agent is %q, the tag says %q (bump bindingVersion in useragent.go)", got, want)
+          	}
+          }
+          EOF
+          out="$(cd go && RELEASE_VERSION="$version" go test ./internal/ocifetch -count=1 -run '^TestReleaseUserAgentMatchesTag$' -v)"
+          printf '%s\n' "$out"
+          grep -q -- '--- PASS: TestReleaseUserAgentMatchesTag' <<<"$out" || { echo "::error::the User-Agent assertion did not run and pass"; exit 1; }
+          rm go/internal/ocifetch/zz_release_useragent_test.go
+  # A tag exiting green does not mean anyone can install the package: the Go
+  # proxy serves a new tag some minutes after it is pushed. scripts/release-verify.sh
+  # installs the PUBLISHED module from the public proxy in a clean module, with no
+  # credentials, retrying for proxy lag, and proves: the binding's ABI fingerprint
+  # constant is the header's; the command lists the production registry, parses
+  # the newest line, and fetches it; and the public API loads it and reports the
+  # same fingerprint. None of it reads an ABI revision (v1 has none). A dry run
+  # runs the same script against the local module, so the list parser is proven
+  # before the tag exists.
+  post-publish:
+    needs: verify
+    if: ${{ !failure() && (needs.verify.result == 'success' || (needs.verify.result == 'skipped' && inputs.verify_only)) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go/go.mod }
+      - name: the verify script's own selftest (the list parser)
+        run: scripts/release-verify.sh --selftest
+      - name: the module installs, speaks the header's ABI fingerprint, lists, fetches a line and loads it
+        env:
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'local' || 'registry' }}
+        run: |
+          version="${TAG#go/v}"
+          if [ "$MODE" = local ]; then
+            scripts/release-verify.sh go local "$version" go
+          else
+            scripts/release-verify.sh go registry "$version"
+          fi

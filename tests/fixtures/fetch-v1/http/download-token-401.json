@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "download-token-401",
+  "tree": "http-basic",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "status": 401
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": []
+}

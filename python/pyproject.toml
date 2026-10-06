@@ -1,6 +1,6 @@
 [project]
 name = "chtypes"
-version = "0.5.2"
+version = "1.0.2"
 description = "Python binding for the chtypes artifacts: ClickHouse's own type system, per version, behind the frozen chs_* C ABI"
 readme = "README.md"
 license = "Apache-2.0"
@@ -13,21 +13,24 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Database",
 ]
-# Zero runtime dependencies, on purpose. The binding is stdlib `ctypes` over the
-# artifact's C ABI, so installing it needs no compiler, no cffi build step and
-# no wheel per Python version — the native code already exists as a prebuilt
-# artifact and is dlopen'd at runtime. See README "Why ctypes".
-dependencies = []
-
-# `chtypes fetch 25.8` — the same surface as `python -m chtypes` (docs/guides/fetch.md §6).
-[project.scripts]
-chtypes = "chtypes.__main__:main"
+# Zero runtime dependencies was the rule through v0: the binding is stdlib
+# `ctypes` over the artifact's C ABI, so installing it needs no compiler, no
+# cffi build step and no wheel per Python version. v1's artifacts are zstd
+# (docs/guides/fetch-v1.md "Bytes"), and CPython's own `compression.zstd`
+# only exists from 3.14 (PEP 784); this binding's floor is 3.11, so 3.11-3.13
+# need a backport of the same stdlib-shaped API. 3.14+ needs nothing extra —
+# the marker below excludes it, so a 3.14 install still carries zero
+# dependencies. See README "Why ctypes".
+dependencies = ["backports.zstd>=1.7; python_version < '3.14'"]
 
 [project.urls]
 Homepage = "https://github.com/wave-rf/chtypes"
 Repository = "https://github.com/wave-rf/chtypes"
 Documentation = "https://github.com/wave-rf/chtypes/blob/main/python/README.md"
 Changelog = "https://github.com/wave-rf/chtypes/releases"
+
+[project.scripts]
+chtypes = "chtypes.__main__:main"
 
 [dependency-groups]
 dev = [

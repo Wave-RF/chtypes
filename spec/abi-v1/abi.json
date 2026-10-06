@@ -1,0 +1,3699 @@
+{
+  "description_schema": 1,
+  "abi": 1,
+  "library": {
+    "stem": "libchtypes",
+    "prefix": "chs_"
+  },
+  "scalars": [
+    "void",
+    "int",
+    "int32",
+    "uint32",
+    "int64",
+    "uint64",
+    "size",
+    "u8ptr_const",
+    "cstr_static"
+  ],
+  "handles": {
+    "chs_buf": {
+      "free": "chs_buf_free",
+      "holds": []
+    },
+    "chs_error": {
+      "free": "chs_error_free",
+      "holds": []
+    },
+    "chs_schema": {
+      "free": "chs_schema_free",
+      "holds": []
+    },
+    "chs_filter": {
+      "free": "chs_filter_free",
+      "holds": [
+        "chs_schema"
+      ]
+    },
+    "chs_block": {
+      "free": "chs_block_free",
+      "holds": [
+        "chs_schema"
+      ]
+    }
+  },
+  "enums": {
+    "chs_status": {
+      "repr": "int32",
+      "closed": true,
+      "frozen": true,
+      "values": [
+        {
+          "name": "CHS_OK",
+          "value": 0
+        },
+        {
+          "name": "CHS_REJECTED",
+          "value": 1
+        },
+        {
+          "name": "CHS_DECLINED",
+          "value": 2
+        },
+        {
+          "name": "CHS_INVALID_ARGUMENT",
+          "value": 3
+        },
+        {
+          "name": "CHS_INTERNAL",
+          "value": 4
+        }
+      ]
+    },
+    "chs_format": {
+      "repr": "int32",
+      "frozen": true,
+      "fields": {
+        "ch_name": "string"
+      },
+      "values": [
+        {
+          "name": "CHS_JSON_EACH_ROW",
+          "value": 0,
+          "ch_name": "JSONEachRow"
+        },
+        {
+          "name": "CHS_CSV",
+          "value": 1,
+          "ch_name": "CSV"
+        },
+        {
+          "name": "CHS_TSV",
+          "value": 2,
+          "ch_name": "TSV"
+        },
+        {
+          "name": "CHS_VALUES",
+          "value": 3,
+          "ch_name": "Values"
+        },
+        {
+          "name": "CHS_JSON_COMPACT_EACH_ROW",
+          "value": 4,
+          "ch_name": "JSONCompactEachRow"
+        },
+        {
+          "name": "CHS_ROW_BINARY",
+          "value": 5,
+          "ch_name": "RowBinary"
+        },
+        {
+          "name": "CHS_ROW_BINARY_WITH_DEFAULTS",
+          "value": 6,
+          "ch_name": "RowBinaryWithDefaults"
+        },
+        {
+          "name": "CHS_ROW_BINARY_WITH_NAMES_AND_TYPES_AND_DEFAULTS",
+          "value": 7,
+          "ch_name": "RowBinaryWithNamesAndTypesAndDefaults"
+        },
+        {
+          "name": "CHS_NATIVE",
+          "value": 8,
+          "ch_name": "Native"
+        },
+        {
+          "name": "CHS_BUFFERS",
+          "value": 9,
+          "ch_name": "Buffers"
+        },
+        {
+          "name": "CHS_CSV_WITH_NAMES",
+          "value": 10,
+          "ch_name": "CSVWithNames"
+        },
+        {
+          "name": "CHS_TSV_WITH_NAMES",
+          "value": 11,
+          "ch_name": "TSVWithNames"
+        }
+      ]
+    },
+    "transform_reason": {
+      "repr": "string",
+      "fields": {
+        "lossy": "boolean"
+      },
+      "fallback": "value_changed",
+      "values": [
+        {
+          "value": "overflow_wrap",
+          "lossy": true
+        },
+        {
+          "value": "null_to_default",
+          "lossy": true
+        },
+        {
+          "value": "null_loss",
+          "lossy": true
+        },
+        {
+          "value": "decimal_truncate",
+          "lossy": true
+        },
+        {
+          "value": "date_clamp",
+          "lossy": true
+        },
+        {
+          "value": "datetime_wrap",
+          "lossy": true
+        },
+        {
+          "value": "date_shift",
+          "lossy": true
+        },
+        {
+          "value": "uuid_mangle",
+          "lossy": true
+        },
+        {
+          "value": "ip_mangle",
+          "lossy": true
+        },
+        {
+          "value": "float_precision",
+          "lossy": true
+        },
+        {
+          "value": "lossy_numeric",
+          "lossy": true
+        },
+        {
+          "value": "fixedstring_pad",
+          "lossy": true
+        },
+        {
+          "value": "emptied",
+          "lossy": true
+        },
+        {
+          "value": "element_changed",
+          "lossy": true
+        },
+        {
+          "value": "enum_coerce",
+          "lossy": true
+        },
+        {
+          "value": "value_changed",
+          "lossy": true
+        },
+        {
+          "value": "poisoned",
+          "lossy": true
+        },
+        {
+          "value": "duplicate_key_dropped",
+          "lossy": true
+        },
+        {
+          "value": "reformat",
+          "lossy": false
+        },
+        {
+          "value": "default_filled",
+          "lossy": false
+        },
+        {
+          "value": "zero_filled",
+          "lossy": false
+        },
+        {
+          "value": "default_materialized",
+          "lossy": false
+        },
+        {
+          "value": "ttl_expired",
+          "lossy": true
+        },
+        {
+          "value": "ttl_column_expired",
+          "lossy": true
+        }
+      ]
+    },
+    "value_src": {
+      "repr": "string",
+      "fields": {
+        "is_stored": "boolean"
+      },
+      "values": [
+        {
+          "value": "input",
+          "is_stored": true
+        },
+        {
+          "value": "default",
+          "is_stored": true
+        },
+        {
+          "value": "default_substituted",
+          "is_stored": true
+        },
+        {
+          "value": "default_generated",
+          "is_stored": true
+        },
+        {
+          "value": "absent",
+          "is_stored": true
+        },
+        {
+          "value": "materialized_input",
+          "is_stored": true
+        },
+        {
+          "value": "skipped",
+          "is_stored": false
+        },
+        {
+          "value": "ephemeral_input",
+          "is_stored": false
+        },
+        {
+          "value": "default_expr_unsupported",
+          "is_stored": false
+        },
+        {
+          "value": "default_volatile_unresolved",
+          "is_stored": false
+        },
+        {
+          "value": "default_pending",
+          "is_stored": false
+        }
+      ]
+    },
+    "row_outcome": {
+      "repr": "string",
+      "fallback": "unsupported",
+      "values": [
+        {
+          "value": "accepted"
+        },
+        {
+          "value": "accepted_poisoned"
+        },
+        {
+          "value": "rejected"
+        },
+        {
+          "value": "skipped"
+        },
+        {
+          "value": "unsupported"
+        }
+      ]
+    },
+    "batch_outcome": {
+      "repr": "string",
+      "fallback": "unsupported",
+      "values": [
+        {
+          "value": "accepted"
+        },
+        {
+          "value": "accepted_poisoned"
+        },
+        {
+          "value": "rejected"
+        },
+        {
+          "value": "unsupported"
+        }
+      ]
+    },
+    "filter_outcome": {
+      "repr": "string",
+      "fallback": "unsupported",
+      "values": [
+        {
+          "value": "ok"
+        },
+        {
+          "value": "rejected"
+        },
+        {
+          "value": "unsupported"
+        }
+      ]
+    },
+    "filter_verdict": {
+      "repr": "string",
+      "fields": {
+        "answered": "boolean"
+      },
+      "fallback": "d",
+      "values": [
+        {
+          "value": "t",
+          "answered": true
+        },
+        {
+          "value": "f",
+          "answered": true
+        },
+        {
+          "value": "e",
+          "answered": false
+        },
+        {
+          "value": "d",
+          "answered": false
+        }
+      ]
+    },
+    "discover_query_param": {
+      "repr": "string",
+      "fields": {
+        "ch_type": "string"
+      },
+      "values": [
+        {
+          "value": "database",
+          "ch_type": "String"
+        },
+        {
+          "value": "table",
+          "ch_type": "String"
+        }
+      ]
+    },
+    "default_kind": {
+      "repr": "string",
+      "values": [
+        {
+          "value": ""
+        },
+        {
+          "value": "DEFAULT"
+        },
+        {
+          "value": "MATERIALIZED"
+        },
+        {
+          "value": "ALIAS"
+        },
+        {
+          "value": "EPHEMERAL"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "CHS_ABI_REVISION_TOMBSTONE": {
+      "type": "int32",
+      "value": 1001
+    },
+    "CHS_EXPORT_NONE": {
+      "type": "int32",
+      "value": -1
+    },
+    "CHS_DOC_VALUES": {
+      "type": "uint32",
+      "value": 1
+    },
+    "CHS_DOC_TRANSFORMS": {
+      "type": "uint32",
+      "value": 2
+    },
+    "CHS_DOC_DEFAULTS": {
+      "type": "uint32",
+      "value": 4
+    },
+    "CHS_DOC_ALL": {
+      "type": "uint32",
+      "value": 7
+    }
+  },
+  "byte_strings": {
+    "suffix": "_b64",
+    "encoding": "base64",
+    "value": "value_b64"
+  },
+  "documents": {
+    "live_handles": {
+      "carries_names": false,
+      "schema": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "error_code_table": {
+      "carries_names": false,
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "code",
+            "name"
+          ],
+          "properties": {
+            "code": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_description": {
+      "carries_names": true,
+      "byte_fields": [
+        "columns[].name",
+        "columns[].type",
+        "columns[].default_expression"
+      ],
+      "schema": {
+        "$defs": {
+          "column": {
+            "type": "object",
+            "properties": {
+              "default_kind": {
+                "enum": [
+                  "",
+                  "DEFAULT",
+                  "MATERIALIZED",
+                  "ALIAS",
+                  "EPHEMERAL"
+                ]
+              },
+              "default_is_literal": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "type": {
+                "type": "string"
+              },
+              "type_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "default_expression": {
+                "type": "string"
+              },
+              "default_expression_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "type_b64"
+                    ],
+                    "properties": {
+                      "type": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "type": false,
+                      "type_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "default_expression"
+                    ],
+                    "properties": {
+                      "default_expression_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "default_expression_b64"
+                    ],
+                    "properties": {
+                      "default_expression": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "default_expression": false,
+                      "default_expression_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns"
+        ],
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/column"
+            }
+          }
+        }
+      }
+    },
+    "row": {
+      "carries_names": true,
+      "byte_fields": [
+        "err",
+        "verdict_err",
+        "partition_id",
+        "unknown_fields[].name",
+        "unsupported_settings[].name",
+        "cols[].name",
+        "cols[].type",
+        "cols[].base",
+        "cols[].input",
+        "cols[].stored",
+        "cols[].ref",
+        "cols[].ref_type",
+        "cols[].wire",
+        "computed[].name",
+        "computed[].stored",
+        "transformed[].column",
+        "transformed[].input",
+        "transformed[].stored"
+      ],
+      "value_entries": [
+        "cols[]",
+        "computed[]"
+      ],
+      "schema": {
+        "$defs": {
+          "span": {
+            "type": "object",
+            "required": [
+              "off",
+              "len"
+            ],
+            "properties": {
+              "off": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "len": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "named": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "col": {
+            "type": "object",
+            "required": [
+              "null"
+            ],
+            "properties": {
+              "null": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "type": {
+                "type": "string"
+              },
+              "type_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "base": {
+                "type": "string"
+              },
+              "base_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "input": {
+                "type": "string"
+              },
+              "input_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "stored": {
+                "type": "string"
+              },
+              "stored_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "ref": {
+                "type": "string"
+              },
+              "ref_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "ref_type": {
+                "type": "string"
+              },
+              "ref_type_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "wire": {
+                "type": "string"
+              },
+              "wire_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "value_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "type_b64"
+                    ],
+                    "properties": {
+                      "type": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "type": false,
+                      "type_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "base"
+                    ],
+                    "properties": {
+                      "base_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "base_b64"
+                    ],
+                    "properties": {
+                      "base": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "base": false,
+                      "base_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "input"
+                    ],
+                    "properties": {
+                      "input_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "input_b64"
+                    ],
+                    "properties": {
+                      "input": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "input": false,
+                      "input_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stored"
+                    ],
+                    "properties": {
+                      "stored_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "stored_b64"
+                    ],
+                    "properties": {
+                      "stored": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "stored": false,
+                      "stored_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "ref"
+                    ],
+                    "properties": {
+                      "ref_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "ref_b64"
+                    ],
+                    "properties": {
+                      "ref": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "ref": false,
+                      "ref_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "ref_type"
+                    ],
+                    "properties": {
+                      "ref_type_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "ref_type_b64"
+                    ],
+                    "properties": {
+                      "ref_type": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "ref_type": false,
+                      "ref_type_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "wire"
+                    ],
+                    "properties": {
+                      "wire_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "wire_b64"
+                    ],
+                    "properties": {
+                      "wire": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "wire": false,
+                      "wire_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "computed": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "stored": {
+                "type": "string"
+              },
+              "stored_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "value_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stored"
+                    ],
+                    "properties": {
+                      "stored_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "stored_b64"
+                    ],
+                    "properties": {
+                      "stored": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "stored": false,
+                      "stored_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "transform": {
+            "type": "object",
+            "properties": {
+              "row": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "column": {
+                "type": "string"
+              },
+              "column_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "input": {
+                "type": "string"
+              },
+              "input_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "stored": {
+                "type": "string"
+              },
+              "stored_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "column"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "column_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "input"
+                    ],
+                    "properties": {
+                      "input_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "input_b64"
+                    ],
+                    "properties": {
+                      "input": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "input": false,
+                      "input_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stored"
+                    ],
+                    "properties": {
+                      "stored_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "stored_b64"
+                    ],
+                    "properties": {
+                      "stored": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "stored": false,
+                      "stored_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "input_span"
+        ],
+        "properties": {
+          "input_span": {
+            "$ref": "#/$defs/span"
+          },
+          "unknown_fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/named"
+            }
+          },
+          "unsupported_settings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/named"
+            }
+          },
+          "cols": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/col"
+            }
+          },
+          "computed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/computed"
+            }
+          },
+          "transformed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/transform"
+            }
+          },
+          "err": {
+            "type": "string"
+          },
+          "err_b64": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          },
+          "verdict_err": {
+            "type": "string"
+          },
+          "verdict_err_b64": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          },
+          "partition_id": {
+            "type": "string"
+          },
+          "partition_id_b64": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          }
+        },
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "err"
+                ],
+                "properties": {
+                  "err_b64": false
+                }
+              },
+              {
+                "required": [
+                  "err_b64"
+                ],
+                "properties": {
+                  "err": false
+                }
+              },
+              {
+                "properties": {
+                  "err": false,
+                  "err_b64": false
+                }
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "verdict_err"
+                ],
+                "properties": {
+                  "verdict_err_b64": false
+                }
+              },
+              {
+                "required": [
+                  "verdict_err_b64"
+                ],
+                "properties": {
+                  "verdict_err": false
+                }
+              },
+              {
+                "properties": {
+                  "verdict_err": false,
+                  "verdict_err_b64": false
+                }
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "partition_id"
+                ],
+                "properties": {
+                  "partition_id_b64": false
+                }
+              },
+              {
+                "required": [
+                  "partition_id_b64"
+                ],
+                "properties": {
+                  "partition_id": false
+                }
+              },
+              {
+                "properties": {
+                  "partition_id": false,
+                  "partition_id_b64": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "batch": {
+      "carries_names": true,
+      "byte_fields": [
+        "err",
+        "export_declined",
+        "rows[].err",
+        "rows[].verdict_err",
+        "rows[].partition_id",
+        "rows[].unknown_fields[].name",
+        "rows[].unsupported_settings[].name",
+        "rows[].cols[].name",
+        "rows[].cols[].type",
+        "rows[].cols[].base",
+        "rows[].cols[].input",
+        "rows[].cols[].stored",
+        "rows[].cols[].ref",
+        "rows[].cols[].ref_type",
+        "rows[].cols[].wire",
+        "rows[].computed[].name",
+        "rows[].computed[].stored",
+        "rows[].transformed[].column",
+        "rows[].transformed[].input",
+        "rows[].transformed[].stored",
+        "engine_rows[][].name",
+        "engine_rows[][].stored",
+        "storage_transforms[].column",
+        "storage_transforms[].stored",
+        "transformed[].column",
+        "transformed[].input",
+        "transformed[].stored",
+        "framing.header.names[].name"
+      ],
+      "value_entries": [
+        "rows[].cols[]",
+        "rows[].computed[]",
+        "engine_rows[][]",
+        "storage_transforms[]"
+      ],
+      "schema": {
+        "$defs": {
+          "span": {
+            "type": "object",
+            "required": [
+              "off",
+              "len"
+            ],
+            "properties": {
+              "off": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "len": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "named": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "col": {
+            "type": "object",
+            "required": [
+              "null"
+            ],
+            "properties": {
+              "null": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "type": {
+                "type": "string"
+              },
+              "type_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "base": {
+                "type": "string"
+              },
+              "base_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "input": {
+                "type": "string"
+              },
+              "input_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "stored": {
+                "type": "string"
+              },
+              "stored_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "ref": {
+                "type": "string"
+              },
+              "ref_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "ref_type": {
+                "type": "string"
+              },
+              "ref_type_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "wire": {
+                "type": "string"
+              },
+              "wire_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "value_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "type_b64"
+                    ],
+                    "properties": {
+                      "type": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "type": false,
+                      "type_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "base"
+                    ],
+                    "properties": {
+                      "base_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "base_b64"
+                    ],
+                    "properties": {
+                      "base": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "base": false,
+                      "base_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "input"
+                    ],
+                    "properties": {
+                      "input_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "input_b64"
+                    ],
+                    "properties": {
+                      "input": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "input": false,
+                      "input_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stored"
+                    ],
+                    "properties": {
+                      "stored_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "stored_b64"
+                    ],
+                    "properties": {
+                      "stored": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "stored": false,
+                      "stored_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "ref"
+                    ],
+                    "properties": {
+                      "ref_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "ref_b64"
+                    ],
+                    "properties": {
+                      "ref": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "ref": false,
+                      "ref_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "ref_type"
+                    ],
+                    "properties": {
+                      "ref_type_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "ref_type_b64"
+                    ],
+                    "properties": {
+                      "ref_type": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "ref_type": false,
+                      "ref_type_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "wire"
+                    ],
+                    "properties": {
+                      "wire_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "wire_b64"
+                    ],
+                    "properties": {
+                      "wire": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "wire": false,
+                      "wire_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "computed": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "stored": {
+                "type": "string"
+              },
+              "stored_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "value_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stored"
+                    ],
+                    "properties": {
+                      "stored_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "stored_b64"
+                    ],
+                    "properties": {
+                      "stored": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "stored": false,
+                      "stored_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "transform": {
+            "type": "object",
+            "properties": {
+              "row": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "column": {
+                "type": "string"
+              },
+              "column_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "input": {
+                "type": "string"
+              },
+              "input_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "stored": {
+                "type": "string"
+              },
+              "stored_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "column"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "column_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "input"
+                    ],
+                    "properties": {
+                      "input_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "input_b64"
+                    ],
+                    "properties": {
+                      "input": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "input": false,
+                      "input_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stored"
+                    ],
+                    "properties": {
+                      "stored_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "stored_b64"
+                    ],
+                    "properties": {
+                      "stored": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "stored": false,
+                      "stored_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "row": {
+            "type": "object",
+            "required": [
+              "input_span"
+            ],
+            "properties": {
+              "input_span": {
+                "$ref": "#/$defs/span"
+              },
+              "unknown_fields": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/named"
+                }
+              },
+              "unsupported_settings": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/named"
+                }
+              },
+              "cols": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/col"
+                }
+              },
+              "computed": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/computed"
+                }
+              },
+              "transformed": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/transform"
+                }
+              },
+              "err": {
+                "type": "string"
+              },
+              "err_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "verdict_err": {
+                "type": "string"
+              },
+              "verdict_err_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "partition_id": {
+                "type": "string"
+              },
+              "partition_id_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "err"
+                    ],
+                    "properties": {
+                      "err_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "err_b64"
+                    ],
+                    "properties": {
+                      "err": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "err": false,
+                      "err_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "verdict_err"
+                    ],
+                    "properties": {
+                      "verdict_err_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "verdict_err_b64"
+                    ],
+                    "properties": {
+                      "verdict_err": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "verdict_err": false,
+                      "verdict_err_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "partition_id"
+                    ],
+                    "properties": {
+                      "partition_id_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "partition_id_b64"
+                    ],
+                    "properties": {
+                      "partition_id": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "partition_id": false,
+                      "partition_id_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "cell": {
+            "type": "object",
+            "required": [
+              "null"
+            ],
+            "properties": {
+              "null": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "stored": {
+                "type": "string"
+              },
+              "stored_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "value_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stored"
+                    ],
+                    "properties": {
+                      "stored_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "stored_b64"
+                    ],
+                    "properties": {
+                      "stored": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "stored": false,
+                      "stored_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "storage_transform": {
+            "type": "object",
+            "properties": {
+              "row": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "column": {
+                "type": "string"
+              },
+              "column_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "stored": {
+                "type": "string"
+              },
+              "stored_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "value_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "column"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "column_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stored"
+                    ],
+                    "properties": {
+                      "stored_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "stored_b64"
+                    ],
+                    "properties": {
+                      "stored": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "stored": false,
+                      "stored_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "unconsumed",
+          "framing"
+        ],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/row"
+            }
+          },
+          "engine_rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/cell"
+              }
+            }
+          },
+          "storage_transforms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/storage_transform"
+            }
+          },
+          "transformed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/transform"
+            }
+          },
+          "unconsumed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/span"
+            }
+          },
+          "framing": {
+            "type": "object",
+            "required": [
+              "bom_skipped",
+              "container",
+              "header"
+            ],
+            "properties": {
+              "bom_skipped": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "container": {
+                "enum": [
+                  "array",
+                  "stream",
+                  null
+                ]
+              },
+              "header": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "consumed",
+                      "lines",
+                      "names"
+                    ],
+                    "properties": {
+                      "consumed": {
+                        "type": "boolean"
+                      },
+                      "lines": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "names": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/$defs/named"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "err": {
+            "type": "string"
+          },
+          "err_b64": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          },
+          "export_declined": {
+            "type": "string"
+          },
+          "export_declined_b64": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          }
+        },
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "err"
+                ],
+                "properties": {
+                  "err_b64": false
+                }
+              },
+              {
+                "required": [
+                  "err_b64"
+                ],
+                "properties": {
+                  "err": false
+                }
+              },
+              {
+                "properties": {
+                  "err": false,
+                  "err_b64": false
+                }
+              }
+            ]
+          },
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "export_declined"
+                ],
+                "properties": {
+                  "export_declined_b64": false
+                }
+              },
+              {
+                "required": [
+                  "export_declined_b64"
+                ],
+                "properties": {
+                  "export_declined": false
+                }
+              },
+              {
+                "properties": {
+                  "export_declined": false,
+                  "export_declined_b64": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "filter_result": {
+      "carries_names": false,
+      "byte_fields": [
+        "err",
+        "unsupported_settings[].name",
+        "errors[].err"
+      ],
+      "schema": {
+        "$defs": {
+          "named": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "filter_error": {
+            "type": "object",
+            "properties": {
+              "row": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "err": {
+                "type": "string"
+              },
+              "err_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "err"
+                    ],
+                    "properties": {
+                      "err_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "err_b64"
+                    ],
+                    "properties": {
+                      "err": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "err": false,
+                      "err_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "properties": {
+          "unsupported_settings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/named"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/filter_error"
+            }
+          },
+          "err": {
+            "type": "string"
+          },
+          "err_b64": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          }
+        },
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "err"
+                ],
+                "properties": {
+                  "err_b64": false
+                }
+              },
+              {
+                "required": [
+                  "err_b64"
+                ],
+                "properties": {
+                  "err": false
+                }
+              },
+              {
+                "properties": {
+                  "err": false,
+                  "err_b64": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "discovery": {
+      "carries_names": true,
+      "byte_fields": [
+        "columns[].name",
+        "columns[].type",
+        "columns[].default_kind",
+        "columns[].default_expression",
+        "columns[].declaration",
+        "columns_sql"
+      ],
+      "schema": {
+        "$defs": {
+          "column": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "name_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "type": {
+                "type": "string"
+              },
+              "type_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "default_kind": {
+                "type": "string"
+              },
+              "default_kind_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "default_expression": {
+                "type": "string"
+              },
+              "default_expression_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "declaration": {
+                "type": "string"
+              },
+              "declaration_b64": {
+                "type": "string",
+                "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "name_b64"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "type_b64"
+                    ],
+                    "properties": {
+                      "type": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "type": false,
+                      "type_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "default_kind"
+                    ],
+                    "properties": {
+                      "default_kind_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "default_kind_b64"
+                    ],
+                    "properties": {
+                      "default_kind": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "default_kind": false,
+                      "default_kind_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "default_expression"
+                    ],
+                    "properties": {
+                      "default_expression_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "default_expression_b64"
+                    ],
+                    "properties": {
+                      "default_expression": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "default_expression": false,
+                      "default_expression_b64": false
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "declaration"
+                    ],
+                    "properties": {
+                      "declaration_b64": false
+                    }
+                  },
+                  {
+                    "required": [
+                      "declaration_b64"
+                    ],
+                    "properties": {
+                      "declaration": false
+                    }
+                  },
+                  {
+                    "properties": {
+                      "declaration": false,
+                      "declaration_b64": false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns"
+        ],
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/column"
+            }
+          },
+          "columns_sql": {
+            "type": "string"
+          },
+          "columns_sql_b64": {
+            "type": "string",
+            "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          }
+        },
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "columns_sql"
+                ],
+                "properties": {
+                  "columns_sql_b64": false
+                }
+              },
+              {
+                "required": [
+                  "columns_sql_b64"
+                ],
+                "properties": {
+                  "columns_sql": false
+                }
+              },
+              {
+                "properties": {
+                  "columns_sql": false,
+                  "columns_sql_b64": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "build_info": {
+    "schema": {
+      "type": "object",
+      "required": [
+        "schema",
+        "abi",
+        "abi_fingerprint",
+        "clickhouse_version",
+        "channel",
+        "clickhouse_minor",
+        "clickhouse_commit",
+        "core_commit",
+        "build",
+        "inputs_sha256",
+        "os",
+        "arch",
+        "toolchain",
+        "capabilities"
+      ],
+      "properties": {
+        "schema": {
+          "type": "integer",
+          "const": 1
+        },
+        "abi": {
+          "type": "integer"
+        },
+        "abi_fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "clickhouse_version": {
+          "type": "string",
+          "pattern": "^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$"
+        },
+        "channel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clickhouse_minor": {
+          "type": "string",
+          "pattern": "^[0-9]+[.][0-9]+$"
+        },
+        "clickhouse_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "core_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "build": {
+          "type": "string",
+          "pattern": "^[0-9]{8}[.][0-9]{6}$"
+        },
+        "inputs_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "os": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+$"
+        },
+        "arch": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+$"
+        },
+        "toolchain": {
+          "type": "object"
+        },
+        "capabilities": {
+          "type": "object",
+          "required": [
+            "input_formats",
+            "export_formats",
+            "doc_flags",
+            "features"
+          ],
+          "properties": {
+            "input_formats": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "export_formats": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "doc_flags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "name": "chs_abi_version",
+      "class": "handshake",
+      "thread": "any",
+      "returns": {
+        "kind": "scalar",
+        "type": "int32"
+      },
+      "params": []
+    },
+    {
+      "name": "chs_build_info",
+      "class": "handshake",
+      "thread": "any",
+      "returns": {
+        "kind": "scalar",
+        "type": "cstr_static"
+      },
+      "params": []
+    },
+    {
+      "name": "chs_clickhouse_version",
+      "class": "handshake",
+      "thread": "any",
+      "returns": {
+        "kind": "scalar",
+        "type": "cstr_static"
+      },
+      "params": []
+    },
+    {
+      "name": "chs_abi_revision",
+      "class": "tombstone",
+      "thread": "any",
+      "returns": {
+        "kind": "scalar",
+        "type": "int",
+        "constant": "CHS_ABI_REVISION_TOMBSTONE"
+      },
+      "params": []
+    },
+    {
+      "name": "chs_buf_data",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "scalar",
+        "type": "u8ptr_const",
+        "borrows": "buf"
+      },
+      "params": [
+        {
+          "name": "buf",
+          "kind": "handle",
+          "type": "chs_buf",
+          "const": true
+        }
+      ]
+    },
+    {
+      "name": "chs_buf_len",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "scalar",
+        "type": "size"
+      },
+      "params": [
+        {
+          "name": "buf",
+          "kind": "handle",
+          "type": "chs_buf",
+          "const": true
+        }
+      ]
+    },
+    {
+      "name": "chs_buf_free",
+      "class": "api",
+      "thread": "handle_serial",
+      "returns": {
+        "kind": "void"
+      },
+      "params": [
+        {
+          "name": "buf",
+          "kind": "handle",
+          "type": "chs_buf",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "chs_error_status",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "enum",
+        "type": "chs_status"
+      },
+      "params": [
+        {
+          "name": "error",
+          "kind": "handle",
+          "type": "chs_error",
+          "const": true
+        }
+      ]
+    },
+    {
+      "name": "chs_error_ch_code",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "scalar",
+        "type": "int32"
+      },
+      "params": [
+        {
+          "name": "error",
+          "kind": "handle",
+          "type": "chs_error",
+          "const": true
+        }
+      ]
+    },
+    {
+      "name": "chs_error_ch_name",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "handle",
+        "type": "chs_buf",
+        "owned": true,
+        "nullable": true,
+        "content": "ascii"
+      },
+      "params": [
+        {
+          "name": "error",
+          "kind": "handle",
+          "type": "chs_error",
+          "const": true
+        }
+      ]
+    },
+    {
+      "name": "chs_error_message",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "handle",
+        "type": "chs_buf",
+        "owned": true,
+        "nullable": true,
+        "content": "message"
+      },
+      "params": [
+        {
+          "name": "error",
+          "kind": "handle",
+          "type": "chs_error",
+          "const": true
+        }
+      ]
+    },
+    {
+      "name": "chs_error_column",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "handle",
+        "type": "chs_buf",
+        "owned": true,
+        "nullable": true,
+        "content": "name"
+      },
+      "params": [
+        {
+          "name": "error",
+          "kind": "handle",
+          "type": "chs_error",
+          "const": true
+        }
+      ]
+    },
+    {
+      "name": "chs_error_free",
+      "class": "api",
+      "thread": "handle_serial",
+      "returns": {
+        "kind": "void"
+      },
+      "params": [
+        {
+          "name": "error",
+          "kind": "handle",
+          "type": "chs_error",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "chs_live_handles",
+      "class": "api",
+      "thread": "any",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "document:live_handles"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_error_codes",
+      "class": "api",
+      "thread": "any",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "document:error_code_table"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_registered_families",
+      "class": "tooling",
+      "thread": "process_serial",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "ascii"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_function_flags",
+      "class": "tooling",
+      "thread": "process_serial",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "ascii"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_reference_type",
+      "class": "tooling",
+      "thread": "process_serial",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "type_expr",
+          "kind": "bytes_in",
+          "content": "sql"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "sql"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_initialize",
+      "class": "api",
+      "thread": "process_once",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "timezone",
+          "kind": "bytes_in",
+          "content": "timezone"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_set_defaults",
+      "class": "api",
+      "thread": "process_serial",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "settings",
+          "kind": "bytes_in",
+          "content": "json_object_string_values"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_shutdown",
+      "class": "api",
+      "thread": "process_serial",
+      "returns": {
+        "kind": "void"
+      },
+      "params": []
+    },
+    {
+      "name": "chs_type_validate",
+      "class": "api",
+      "thread": "any",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "type_expr",
+          "kind": "bytes_in",
+          "content": "sql"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "sql"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_back_quote",
+      "class": "api",
+      "thread": "any",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "name",
+          "kind": "bytes_in",
+          "content": "name"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "sql"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_back_quote_if_needed",
+      "class": "api",
+      "thread": "any",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "name",
+          "kind": "bytes_in",
+          "content": "name"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "sql"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_quote_string",
+      "class": "api",
+      "thread": "any",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "text",
+          "kind": "bytes_in",
+          "content": "bytes"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "sql"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_schema_create",
+      "class": "api",
+      "thread": "any",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "create_table",
+          "kind": "bytes_in",
+          "content": "sql"
+        },
+        {
+          "name": "settings",
+          "kind": "bytes_in",
+          "content": "json_object_string_values"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_schema"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_schema_free",
+      "class": "api",
+      "thread": "handle_serial",
+      "returns": {
+        "kind": "void"
+      },
+      "params": [
+        {
+          "name": "schema",
+          "kind": "handle",
+          "type": "chs_schema",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "chs_schema_describe",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "schema",
+          "kind": "handle",
+          "type": "chs_schema",
+          "const": true
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "document:schema_description"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_preview_row",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "schema",
+          "kind": "handle",
+          "type": "chs_schema",
+          "const": true
+        },
+        {
+          "name": "format",
+          "kind": "enum",
+          "type": "chs_format"
+        },
+        {
+          "name": "body",
+          "kind": "bytes_in",
+          "content": "bytes"
+        },
+        {
+          "name": "settings",
+          "kind": "bytes_in",
+          "content": "json_object_string_values"
+        },
+        {
+          "name": "columns",
+          "kind": "bytes_in",
+          "content": "json_array_names"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "document:row"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_preview_batch",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "schema",
+          "kind": "handle",
+          "type": "chs_schema",
+          "const": true
+        },
+        {
+          "name": "format",
+          "kind": "enum",
+          "type": "chs_format"
+        },
+        {
+          "name": "body",
+          "kind": "bytes_in",
+          "content": "bytes"
+        },
+        {
+          "name": "settings",
+          "kind": "bytes_in",
+          "content": "json_object_string_values"
+        },
+        {
+          "name": "columns",
+          "kind": "bytes_in",
+          "content": "json_array_names"
+        },
+        {
+          "name": "filter",
+          "kind": "handle",
+          "type": "chs_filter",
+          "const": true,
+          "nullable": true
+        },
+        {
+          "name": "export_format",
+          "kind": "scalar",
+          "type": "int32"
+        },
+        {
+          "name": "doc_flags",
+          "kind": "scalar",
+          "type": "uint32"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "document:batch"
+        },
+        {
+          "name": "out_export",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "bytes",
+          "nullable": true
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_filter_create",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "schema",
+          "kind": "handle",
+          "type": "chs_schema",
+          "const": true
+        },
+        {
+          "name": "expr",
+          "kind": "bytes_in",
+          "content": "sql"
+        },
+        {
+          "name": "query_params",
+          "kind": "bytes_in",
+          "content": "json_object_string_values"
+        },
+        {
+          "name": "settings",
+          "kind": "bytes_in",
+          "content": "json_object_string_values"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_filter"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_filter_free",
+      "class": "api",
+      "thread": "handle_serial",
+      "returns": {
+        "kind": "void"
+      },
+      "params": [
+        {
+          "name": "filter",
+          "kind": "handle",
+          "type": "chs_filter",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "chs_filter_eval_body",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "filter",
+          "kind": "handle",
+          "type": "chs_filter",
+          "const": true
+        },
+        {
+          "name": "format",
+          "kind": "enum",
+          "type": "chs_format"
+        },
+        {
+          "name": "body",
+          "kind": "bytes_in",
+          "content": "bytes"
+        },
+        {
+          "name": "settings",
+          "kind": "bytes_in",
+          "content": "json_object_string_values"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "document:filter_result"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_block_create",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "schema",
+          "kind": "handle",
+          "type": "chs_schema",
+          "const": true
+        },
+        {
+          "name": "format",
+          "kind": "enum",
+          "type": "chs_format"
+        },
+        {
+          "name": "body",
+          "kind": "bytes_in",
+          "content": "bytes"
+        },
+        {
+          "name": "settings",
+          "kind": "bytes_in",
+          "content": "json_object_string_values"
+        },
+        {
+          "name": "columns",
+          "kind": "bytes_in",
+          "content": "json_array_names"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_block"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_block_free",
+      "class": "api",
+      "thread": "handle_serial",
+      "returns": {
+        "kind": "void"
+      },
+      "params": [
+        {
+          "name": "block",
+          "kind": "handle",
+          "type": "chs_block",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "chs_filter_eval_block",
+      "class": "api",
+      "thread": "shared",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "filter",
+          "kind": "handle",
+          "type": "chs_filter",
+          "const": true
+        },
+        {
+          "name": "block",
+          "kind": "handle",
+          "type": "chs_block",
+          "const": true
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "document:filter_result"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_discover_query",
+      "class": "api",
+      "thread": "any",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "sql"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    },
+    {
+      "name": "chs_discover_columns",
+      "class": "api",
+      "thread": "any",
+      "returns": {
+        "kind": "status"
+      },
+      "params": [
+        {
+          "name": "rows",
+          "kind": "bytes_in",
+          "content": "bytes"
+        },
+        {
+          "name": "out",
+          "kind": "out_handle",
+          "type": "chs_buf",
+          "content": "document:discovery"
+        },
+        {
+          "name": "err",
+          "kind": "out_error"
+        }
+      ],
+      "may_return": [
+        "CHS_OK",
+        "CHS_REJECTED",
+        "CHS_DECLINED",
+        "CHS_INVALID_ARGUMENT",
+        "CHS_INTERNAL"
+      ]
+    }
+  ]
+}

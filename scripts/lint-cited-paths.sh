@@ -71,21 +71,22 @@ if [ "${1:-}" = "--selftest" ]; then
   # this script exists to prevent, so prove all three.
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   git init -q "$tmp"
-  mkdir -p "$tmp/docs/guides" "$tmp/rust/tests" "$tmp/go" "$tmp/tests/fixtures/fetch"
-  printf 'ok\n'                       > "$tmp/docs/guides/fetch.md"
+  mkdir -p "$tmp/docs/guides" "$tmp/rust/tests" "$tmp/go" "$tmp/tests/fixtures/fetch-v1"
+  printf 'ok\n'                       > "$tmp/docs/guides/fetch-v1.md"
   printf 'ok\n'                       > "$tmp/rust/tests/integration.rs"
   printf 'see docs/gone/missing.md\n' > "$tmp/planted.md"
-  printf 'see docs/guides/fetch.md\n' > "$tmp/live.md"
+  printf 'see docs/guides/fetch-v1.md\n' > "$tmp/live.md"
   printf '// see tests/integration.rs\n' > "$tmp/rust/lib.rs"
   printf 'run pytest tests/integration.rs from rust/\n' > "$tmp/sibling.md"
-  # The fetch fixtures were exempt until their generator stopped citing paths
-  # that do not exist here (#224, then the regeneration that removed the
-  # exemption). A dead path planted there must be caught like anywhere else.
-  printf 'the rule is docs/fetch.md, section 3a\n' > "$tmp/tests/fixtures/fetch/README.md"
+  # The v0 fetch fixtures were exempt until their generator stopped citing
+  # paths that do not exist here (#224, then the regeneration that removed the
+  # exemption; the v0 fixtures themselves were deleted with v0, #431). A dead
+  # path planted in generated fixture prose must be caught like anywhere else.
+  printf 'the rule is docs/fetch.md, section 3a\n' > "$tmp/tests/fixtures/fetch-v1/README.md"
   git -C "$tmp" add -A
   out="$(scan "$tmp" 2>&1)" && { echo "SELFTEST FAILED: the planted dead path was not caught" >&2; exit 1; }
   printf '%s\n' "$out" | grep -q 'planted.md' || { echo "SELFTEST FAILED: rule did not fire on planted.md" >&2; exit 1; }
-  printf '%s\n' "$out" | grep -q 'tests/fixtures/fetch/README.md' || { echo "SELFTEST FAILED: rule did not fire inside tests/fixtures/fetch/" >&2; exit 1; }
+  printf '%s\n' "$out" | grep -q 'tests/fixtures/fetch-v1/README.md' || { echo "SELFTEST FAILED: rule did not fire inside tests/fixtures/fetch-v1/" >&2; exit 1; }
   printf '%s\n' "$out" | grep -q 'live.md'    && { echo "SELFTEST FAILED: a path that exists was flagged" >&2; exit 1; }
   printf '%s\n' "$out" | grep -q 'rust/lib.rs' && { echo "SELFTEST FAILED: a crate-relative path was flagged" >&2; exit 1; }
   echo "lint-cited-paths: selftest ok — fires on a dead path (fixtures included), silent on live and crate-relative ones"

@@ -17,7 +17,7 @@ So never reuse insert-side coercion to fold a `WHERE` constant. The filter surfa
 
 ## Writing a filter's result type
 
-**A filter's top-level result must be `UInt8`/`Bool`, an integer up to 64 bits, `Float32`/`Float64`, or `Nullable`/`LowCardinality` of one of those.** A real server's own rule for what may answer a `WHERE` is narrower than "any type", and it differs by ClickHouse line — see [`limitations.md` → A filter whose result is not a boolean-context type admits rows a real server refuses](../limitations.md#a-filter-whose-result-is-not-a-boolean-context-type-admits-rows-a-real-server-refuses) for the exact boundary per line. Wrap anything else in an explicit comparison instead of filtering on the bare column:
+**A filter's top-level result must be `UInt8`/`Bool`, an integer up to 64 bits, `Float32`/`Float64`, or `Nullable`/`LowCardinality` of one of those.** That is a real server's own rule (`canBeUsedInBooleanContext()` on every supported line), and 1.0 applies it the same way: a filter whose result is any other type is refused at compile with error 59, before any row is read. Wrap anything else in an explicit comparison instead of filtering on the bare column:
 
 ```text
 d != toDate(0)            not: d
@@ -25,9 +25,9 @@ toInt128(x) != 0          not: x            (x Int128)
 e8 = 'a'                  not: e8           (e8 an Enum)
 ```
 
-Today's library does not enforce this: it answers a result of any type with a C-style truthiness — `t` when the value's low 64 bits are non-zero — where a real server refuses the query outright with error 59. That is a known over-admit. A library fix is in progress for the supported lines (`26.3`, `26.7`, `26.8`, `26.9`). **Retired lines will not be rebuilt with it, so their over-admit is permanent: do not use a retired line's build for row-level filtering.** See the limitations entry linked above.
+1.0 enforces this the way a real server does, on every supported line (`26.3`, `26.7`, `26.8`, `26.9`). 0.x answered such a result with a C-style truthiness instead; 0.x is retired, and 1.0 ships only the supported lines.
 
-**A known over-hide travels with the same surface, in the safe direction.** The library's truthiness truncates to an integer, so `0.5` and `-0.5` hide a row a real server's own cast keeps, and `NaN` hides a row on `arm64`. Compare explicitly there too — `x != 0` rather than a bare `x`.
+**Each row is decided with a real server's own truthiness.** `0.5`, `-0.5` and `NaN` keep a row, as a server's `static_cast<bool>` does, and `NULL` does not. Prefer an explicit comparison anyway — `x != 0` rather than a bare `x` — so the intent is visible.
 
 ## Four verdicts, two of which are not answers
 
@@ -276,13 +276,17 @@ if err != nil {
 }
 defer f.Close()
 
-batch, err := schema.RowsExportWith(chtypes.JSONEachRow, body, nil, chtypes.JSONCompactEachRow, chtypes.WithRowFilter(f))
+batch, err := schema.Rows(chtypes.JSONEachRow, body, chtypes.WithExport(chtypes.JSONCompactEachRow), chtypes.WithRowFilter(f))
 // batch.Payload holds the bytes of only the rows whose verdict was 't'
 ```
 
 </details>
 
-Go spells this `RowsExportWith(..., WithRowFilter(filter))` — a new entry point rather than an added option on `RowsExport`, so that call's existing signature never moves. The other three bindings surface the same call through their own idiom for the export channel (`docs/reference/bindings.md`'s shape table); the concept is identical across all four — one call, one parse, a verdict per row, bytes for the `t` rows — even where the exact spelling differs by language.
+In 1.0 this is one `rows` call with two options, `WithExport` and `WithRowFilter` in Go, `export=` and `row_filter=` in Python, `exportFormat` and `rowFilter` in TypeScript, `export` and `filter` in Rust ([`reference/bindings-v1.md` §2, The call options](../reference/bindings-v1.md#the-call-options)). 0.x's `RowsExportWith` and its spellings are deleted ([§7](../reference/bindings-v1.md#7-what-v0-api-is-deleted-and-why)). The concept is identical across all four: one call, one parse, a verdict per row, bytes for the `t` rows.
+
+## A filter answers in the zone it was created in
+
+A filter's zone is its own, fixed when it is compiled: its `WHERE` runs in the zone of the settings (`session_timezone`) the filter was compiled with, the way a server's `SELECT ... WHERE` runs in its own session. The zone in an evaluation's settings decides only how the body is parsed. A filter in one zone over a body parsed in another is an ordinary input, answered the way a server answers it, and never refused. One parsed block can serve many filters compiled under different zones. The rule and the per-binding spellings are [`reference/bindings-v1.md` §2, The call options](../reference/bindings-v1.md#the-call-options).
 
 Each row's document gains `verdict` — the same `t`/`f`/`e`/`d` as above — beside its own parse `outcome`; the two are independent facts, and neither one replaces the other. A row whose own `outcome` is not `accepted` — `skipped`, the row that aborted a strict batch, `accepted_poisoned`, an accepted row missing a stored wire column — is answered `d`, carrying that row's own error; a row the predicate itself declines at evaluation time is also `d`, and both cases add `verdict_code` and `verdict_err` beside `verdict`, exactly as an `e` does. Before the artifact producer's relink served at `chtypes_build` 1790845279, the library left `verdict_code`/`verdict_err` at `0`/`""` on a non-accepted row's `d` verdict — this contract and the library's document now agree, by design. One exception, `reported by the artifact producer` (24.8/25.x only — the only lines where an out-of-domain Enum `DEFAULT` reaches `accepted_poisoned` rather than refusing the `CREATE TABLE`, [`transformations.md`](transformations.md#an-out-of-domain-enum-default-follows-the-server)): an `accepted_poisoned` row's `verdict_err` stays `""`, because that row's own message is itself empty — `verdict_code` still carries the server's readback code (`691` on the 25.x lines). Never read an empty `verdict_err` on a `d` verdict as "nothing is wrong"; read `verdict_code` instead.
 
@@ -290,7 +294,7 @@ Three consequences follow, and a consumer meets each of them:
 
 - **A batch whose own `outcome` is not `accepted` exports nothing, filter or no filter — and, as of the artifact producer's relink served at `chtypes_build` 1790845279, reports `rows_passed` and `rows_cut` as both `0`.** Measured by the artifact producer: a `CONSTRAINT … CHECK` violator anywhere in the batch rejects the whole batch with code **469**, and the table stores nothing, so no passing row's bytes flow either, whatever its own verdict would have been. There is no path by which such a batch exports its admitted rows; attaching a filter does not create one. The same rejection used to still count an earlier row's own `accepted` outcome and `t` verdict toward `rows_passed` — a strict (no `input_format_allow_errors_*`) batch aborted by a later bad row measured `rows_passed: 1` despite an overall `outcome` of `rejected` — so a caller keying "exported" off `rows_passed > 0` could publish from a batch that stored and exported nothing. By design, since that relink: both counts are gated on the BATCH's own `outcome`, not only on each row's.
 
-This `verdict_code`/`verdict_err` and `rows_passed`/`rows_cut` fix applies only to builds at `chtypes_build` 1790845279 or later, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9` — [`support.md`](../support.md)). A served, unsupported (retired) line never gets a new build or a new ABI revision ([`support.md` → Served, unsupported ClickHouse lines](../support.md#served-unsupported-clickhouse-lines)), so it keeps the pre-relink behavior permanently — `26.6`'s newest build, `1790767905`, predates this relink and was never republished.
+This `verdict_code`/`verdict_err` and `rows_passed`/`rows_cut` fix applies only to builds at `chtypes_build` 1790845279 or later, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9`). A served, unsupported (retired) line never gets a new build or a new ABI revision, so it keeps the pre-relink behavior permanently — `26.6`'s newest build, `1790767905`, predates this relink and was never republished.
 
 > ⚠️ **Verdicts index THIS call's rows — never another call's.** Measured by the artifact producer: a filtered export call and a plain `chs_filter_rows` / block-parse call reading the identical body can come back with a **different number of verdicts**, because the filtered export call stops at whichever row aborts its own parse, while the other reads the whole body regardless. Zipping one call's verdicts against another call's rows is exactly the mistake that costs a caller its own withhold-on-mismatch check — index verdicts only against the rows of the SAME call that produced them.
 

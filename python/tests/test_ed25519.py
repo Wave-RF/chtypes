@@ -1,7 +1,8 @@
 """The pure-Python ed25519 verifier, against vectors nobody here chose.
 
 No fixtures, no artifacts: RFC 8032 §7.1's own test vectors, the release
-key's reference vector from docs/guides/fetch.md §4, and the negatives that matter
+key's reference vector (published with the 0.x fetch contract; the key is the
+default trust in docs/guides/fetch-v1.md §4), and the negatives that matter
 for a verifier (a flipped message byte, a flipped signature byte, a
 non-canonical scalar, a point off the curve, wrong lengths).
 """
@@ -12,8 +13,8 @@ import hashlib
 
 import pytest
 
-from chtypes import fetch as fetch_module
 from chtypes._ed25519 import verify
+from chtypes._ocifetch import _constants as fetch_constants
 
 # RFC 8032 §7.1 — TEST 1 (empty message), TEST 2 (one byte), TEST 3 (two bytes).
 RFC_VECTORS = [
@@ -34,8 +35,8 @@ RFC_VECTORS = [
     ),
 ]
 
-# docs/guides/fetch.md §4: the release key and its reference vector (openssl -rawin).
-RELEASE_KEY = bytes.fromhex(fetch_module.RELEASE_PUBLIC_KEY)
+# The release key (docs/guides/fetch-v1.md §4) and its reference vector (openssl -rawin).
+RELEASE_KEY = bytes.fromhex(fetch_constants.RELEASE_KEYS[0]["ed25519_hex"])
 RELEASE_MESSAGE = b"hello\n"
 RELEASE_SIGNATURE = bytes.fromhex(
     "0fee686f7ed7c64b86a7dce0ffd66b15d1504178153c3b0cc118e2c9456afa6d"
@@ -54,7 +55,7 @@ def test_rfc8032_vectors_reject_a_changed_message(pk: str, msg: str, sig: str) -
 
 
 def test_the_release_key_reference_vector() -> None:
-    """The exact vector docs/guides/fetch.md §4 publishes — the same check every SDK
+    """The release key's exact reference vector — the same check every SDK
     embeds — and that flipping one byte of the message fails it."""
     assert verify(RELEASE_KEY, RELEASE_MESSAGE, RELEASE_SIGNATURE) is True
     assert verify(RELEASE_KEY, b"hellp\n", RELEASE_SIGNATURE) is False
@@ -62,8 +63,8 @@ def test_the_release_key_reference_vector() -> None:
 
 
 def test_the_embedded_key_id_is_sha256_of_the_raw_key() -> None:
-    assert hashlib.sha256(RELEASE_KEY).hexdigest()[:16] == fetch_module.RELEASE_KEY_ID
-    assert fetch_module.key_id(RELEASE_KEY) == "deb275922dbff76e"
+    assert hashlib.sha256(RELEASE_KEY).hexdigest()[:16] == fetch_constants.RELEASE_KEYS[0]["keyid"]
+    assert hashlib.sha256(RELEASE_KEY).hexdigest()[:16] == "deb275922dbff76e"
 
 
 def test_every_bit_of_the_signature_matters() -> None:

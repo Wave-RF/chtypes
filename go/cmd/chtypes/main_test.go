@@ -1,306 +1,220 @@
 package main
 
-// main_test.go — the §6 surface: exit codes, stdout discipline (fetch prints
-// the installed directory alone), progress on stderr. The fetch/verify/list
-// flows run against the shared fixtures (tests/fixtures/fetch, reached by
-// $CHTYPES_FETCH_FIXTURES or by path) and SKIP LOUDLY without them; the
-// usage and `where` checks need nothing.
-
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/wave-rf/chtypes/go/chtypes"
-	"github.com/wave-rf/chtypes/go/internal/testhook"
+	"github.com/wave-rf/chtypes/go/internal/ocifetch"
 )
 
-func isolate(t *testing.T) string {
+func runCLI(t *testing.T, env map[string]string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	cache := t.TempDir()
-	for _, k := range []string{"CHTYPES_REGISTRY", "CHTYPES_AUTOFETCH", "CHTYPES_TRUSTED_KEYS", "CHTYPES_ALLOW_UNSIGNED", "CHTYPES_TARGET", "CHTYPES_ARTIFACTS_URL", "CHTYPES_DOWNLOAD_TOKEN"} {
+	for _, k := range []string{"CHTYPES_ARTIFACTS_URL", "CHTYPES_CACHE", "CHTYPES_TRUSTED_KEYS", "CHTYPES_ALLOW_UNSIGNED", "CHTYPES_TARGET"} {
 		t.Setenv(k, "")
 	}
-	t.Setenv("XDG_CACHE_HOME", cache)
-	return cache
-}
-
-func fixtures(t *testing.T) (dir, key string) {
-	t.Helper()
-	dir = os.Getenv("CHTYPES_FETCH_FIXTURES")
-	if dir == "" {
-		dir = filepath.Join("..", "..", "..", "tests", "fixtures", "fetch")
+	for k, v := range env {
+		t.Setenv(k, v)
 	}
-	abs, _ := filepath.Abs(dir)
-	b, err := os.ReadFile(filepath.Join(abs, "test-key", "public.hex"))
-	if err != nil {
-		t.Skipf("shared fetch fixtures not found: %v (set CHTYPES_FETCH_FIXTURES to tests/fixtures/fetch)", err)
-	}
-	// Fetch installs only rows at the binding's own ABI revision; the fixtures
-	// carry whatever revision they were generated at and declare it in
-	// expected.json (fixtures_abi_revision) — never typed here — and this test
-	// selects at it.
-	rev, err := testhook.FixturesABIRevision(abs)
-	if err != nil {
-		t.Fatalf("fetch fixtures: %v", err)
-	}
-	prev := testhook.FetchABIRevision
-	testhook.FetchABIRevision = rev
-	t.Cleanup(func() { testhook.FetchABIRevision = prev })
-	return abs, strings.TrimSpace(string(b))
-}
-
-func exec(t *testing.T, args ...string) (rc int, stdout, stderr string) {
-	t.Helper()
 	var out, errb bytes.Buffer
-	rc = run(context.Background(), args, &out, &errb)
-	return rc, out.String(), errb.String()
+	code = run(context.Background(), args, &out, &errb)
+	return code, out.String(), errb.String()
 }
 
-func TestCLIUsageErrorsAndWhereOutput(t *testing.T) {
-	cache := isolate(t)
-	for _, args := range [][]string{{}, {"bogus"}, {"fetch"}, {"fetch", "--all", "25.8"}, {"fetch", "25.8", "--tag", "v1", "--url", "x"},
-		{"fetch", "25.8", "--platform", "windows-amd64"}, {"fetch", "25.8", "--nope"}, {"where", "extra"}, {"verify", "extra"}, {"list", "extra"}} {
-		rc, out, errs := exec(t, args...)
-		if rc != 2 || out != "" || !strings.Contains(errs, "usage:") {
-			t.Errorf("%v: rc=%d stdout=%q stderr=%q", args, rc, out, errs)
+func TestUsageErrorsExitTwo(t *testing.T) {
+	for _, args := range [][]string{
+		nil,
+		{"frobnicate"},
+		{"fetch"},
+		{"fetch", "26.8", "--all"},
+		{"fetch", "26.8", "--platform", "plan9-mips"},
+		{"fetch", "26.8", "--frozen", "--offline"},
+		{"fetch", "v26.8", "--offline"},
+		{"verify", "extra"},
+		{"list", "extra"},
+		{"list", "--platform", "linux-arm64"},
+		{"verify", "--platform", "linux-arm64"},
+		{"where", "--platform", "linux-arm64"},
+		{"fetch", "--update", "--lock", "f", "--offline"},
+		{"fetch", "26.8", "--update", "--frozen", "--lock", "x"},
+		{"fetch", "26.8", "--update"},
+		{"where", "extra"},
+		{"fetch", "--nope"},
+	} {
+		if code, _, _ := runCLI(t, map[string]string{"CHTYPES_CACHE": t.TempDir()}, args...); code != 2 {
+			t.Errorf("%v: exit %d, want 2", args, code)
 		}
-	}
-	rc, out, _ := exec(t, "help")
-	if rc != 0 || !strings.Contains(out, "chtypes fetch") {
-		t.Fatalf("help: rc=%d %q", rc, out)
-	}
-	host := chtypes.HostPlatform()
-	// `where` prints the directory on its own FIRST line — that is the
-	// scriptable contract, `cd "$(chtypes where | head -1)"` — and then the
-	// served golden set, which is the other half of "what is in my registry".
-	firstLine := func(s string) string { return strings.SplitN(strings.TrimSpace(s), "\n", 2)[0] }
-	rc, out, _ = exec(t, "where")
-	if rc != 0 || firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(chtypes.ABIRevision), host) {
-		t.Fatalf("where: rc=%d %q", rc, out)
-	}
-	if !strings.Contains(out, "sdk-goldens.json") {
-		t.Fatalf("where does not name the golden set: %q", out)
-	}
-	t.Setenv("CHTYPES_REGISTRY", "/env/reg")
-	if _, out, _ = exec(t, "where"); firstLine(out) != "/env/reg" {
-		t.Fatalf("where with CHTYPES_REGISTRY: %q", out)
-	}
-	// Another platform's default is its own cache, never CHTYPES_REGISTRY.
-	other := "linux-amd64"
-	if host == other {
-		other = "linux-arm64"
-	}
-	if _, out, _ = exec(t, "where", "--platform", other); firstLine(out) != filepath.Join(cache, "chtypes", "artifacts", "abi"+strconv.Itoa(chtypes.ABIRevision), other) {
-		t.Fatalf("where --platform: %q", out)
-	}
-	// verify/list on an empty registry: honest, exit 0.
-	t.Setenv("CHTYPES_REGISTRY", "")
-	rc, out, _ = exec(t, "verify")
-	if rc != 0 || !strings.Contains(out, "nothing installed") {
-		t.Fatalf("verify empty: rc=%d %q", rc, out)
-	}
-	rc, out, _ = exec(t, "list", "--offline")
-	if rc != 0 || !strings.Contains(out, "(nothing)") || !strings.Contains(out, "--offline") {
-		t.Fatalf("list --offline: rc=%d %q", rc, out)
-	}
-	// offline fetch of nothing: 3, no network, nothing on stdout.
-	rc, out, errs := exec(t, "fetch", "25.8", "--offline", "--url", "http://127.0.0.1:9/never")
-	if rc != 3 || out != "" || !strings.Contains(errs, "CHTYPES_SOURCE_UNREACHABLE") {
-		t.Fatalf("offline: rc=%d stdout=%q stderr=%q", rc, out, errs)
 	}
 }
 
-func TestFetchVerifyListAgainstFixtures(t *testing.T) {
-	dir, key := fixtures(t)
-	isolate(t)
-	t.Setenv("CHTYPES_TRUSTED_KEYS", key)
-	dest := filepath.Join(t.TempDir(), "reg")
-	signed := "file://" + filepath.Join(dir, "signed")
-
-	// fetch: the installed directory alone on stdout, progress on stderr.
-	rc, out, errs := exec(t, "fetch", "25.8", "--url", signed, "--dest", dest)
-	if rc != 0 || strings.TrimSpace(out) != filepath.Join(dest, "25.8") || !strings.Contains(errs, "==> installed and verified") {
-		t.Fatalf("fetch: rc=%d stdout=%q stderr=%q", rc, out, errs)
+func TestWhereIsTheCacheRoot(t *testing.T) {
+	dir := t.TempDir()
+	code, out, _ := runCLI(t, map[string]string{"CHTYPES_CACHE": dir}, "where")
+	if code != 0 || strings.TrimSpace(out) != dir {
+		t.Errorf("where = %d %q, want %q", code, out, dir)
 	}
-	// Flags interleave with positionals, several lines at once, one dir per line.
-	rc, out, _ = exec(t, "fetch", "--dest", dest, "25.8", "26.7", "--url", signed)
-	if rc != 0 || out != filepath.Join(dest, "25.8")+"\n"+filepath.Join(dest, "26.7")+"\n" {
-		t.Fatalf("fetch two: rc=%d stdout=%q", rc, out)
-	}
-	rc, out, _ = exec(t, "verify", "--dest", dest)
-	if rc != 0 || strings.Count(out, "\nok ")+strings.Count(out, "ok ") < 2 || !strings.Contains(out, "2 installed, 2 verified, 0 bad") {
-		t.Fatalf("verify: rc=%d %q", rc, out)
-	}
-	rc, out, _ = exec(t, "list", "--dest", dest, "--url", signed)
-	if rc != 0 || !strings.Contains(out, "installed ("+dest+")") || !strings.Contains(out, "(installed)") || !strings.Contains(out, "signed by key") {
-		t.Fatalf("list: rc=%d %q", rc, out)
-	}
-	if strings.Contains(out, "not shown") {
-		t.Fatalf("list hid rows when every row is at the SDK's revision: %q", out)
-	}
-	// One revision past the fixtures' own, list shows none of their rows and
-	// says so in one line naming what it hid (docs/guides/fetch.md §6).
-	rev := testhook.FetchABIRevision
-	testhook.FetchABIRevision = rev + 1
-	rc, out, _ = exec(t, "list", "--dest", dest, "--url", signed)
-	testhook.FetchABIRevision = rev
-	want := fmt.Sprintf("  2 row(s) at ABI revision(s) %d not shown; this SDK speaks %d\n", rev, rev+1)
-	if rc != 0 || !strings.Contains(out, "(nothing for ") || !strings.Contains(out, want) {
-		t.Fatalf("list at another revision: rc=%d %q (want %q)", rc, out, want)
-	}
-	// A rotted install: verify says so and exits 1.
-	inst, _ := chtypes.ListInstalled(dest)
-	os.WriteFile(filepath.Join(inst[0].Dir, inst[0].Library), []byte("rot"), 0o755)
-	rc, out, errs = exec(t, "verify", "--dest", dest)
-	if rc != 1 || !strings.Contains(out, "MISMATCH") || !strings.Contains(errs, "CHTYPES_ARTIFACT_CORRUPT") {
-		t.Fatalf("verify rotted: rc=%d %q %q", rc, out, errs)
-	}
-	// --all with a lock, then --frozen against it.
-	lock := filepath.Join(t.TempDir(), "chtypes.lock")
-	dest2 := filepath.Join(t.TempDir(), "reg2")
-	rc, out, _ = exec(t, "fetch", "--all", "--url", signed, "--dest", dest2, "--lock", lock)
-	if rc != 0 || out != filepath.Join(dest2, "25.8")+"\n"+filepath.Join(dest2, "26.7")+"\n" {
-		t.Fatalf("fetch --all: rc=%d %q", rc, out)
-	}
-	if rc, _, _ = exec(t, "fetch", "25.8", "--url", signed, "--dest", dest2, "--lock", lock, "--frozen"); rc != 0 {
-		t.Fatalf("frozen: rc=%d", rc)
-	}
-	rc, out, errs = exec(t, "fetch", "25.8", "--url", "file://"+filepath.Join(dir, "signed"), "--dest", dest2, "--lock", filepath.Join(t.TempDir(), "none.lock"), "--frozen")
-	if rc != 1 || out != "" || !strings.Contains(errs, "CHTYPES_ARTIFACT_PINNED") {
-		t.Fatalf("frozen without lock: rc=%d %q %q", rc, out, errs)
-	}
-
-	// The §6 exit codes, one fixture each.
-	cases := []struct {
-		fixture, line, platform, code string
-		rc                            int
-		allowUnsigned                 bool
-	}{
-		{"bad-signature", "25.8", "", "CHTYPES_ARTIFACT_UNTRUSTED", 1, false},
-		{"unsigned", "25.8", "", "CHTYPES_ARTIFACT_UNTRUSTED", 1, false},
-		{"unsigned", "25.8", "", "", 0, true},
-		{"tampered-tarball", "25.8", "", "CHTYPES_ARTIFACT_CORRUPT", 1, false},
-		{"sums-index-mismatch", "25.8", "", "CHTYPES_ARTIFACT_CORRUPT", 1, false},
-		{"signed", "24.8", "", "CHTYPES_ARTIFACT_UNPUBLISHED", 4, false},
-		{"signed", "25.8.99.1-lts", "", "CHTYPES_ARTIFACT_UNPUBLISHED", 4, false},
-		{"signed", "25.8", "darwin-amd64", "CHTYPES_ARTIFACT_UNPUBLISHED", 4, false},
-	}
-	for _, c := range cases {
-		t.Setenv("CHTYPES_ALLOW_UNSIGNED", "")
-		if c.allowUnsigned {
-			t.Setenv("CHTYPES_ALLOW_UNSIGNED", "1")
-		}
-		d := filepath.Join(t.TempDir(), c.fixture)
-		args := []string{"fetch", c.line, "--url", "file://" + filepath.Join(dir, c.fixture), "--dest", d}
-		if c.platform != "" {
-			args = append(args, "--platform", c.platform)
-		}
-		rc, out, errs := exec(t, args...)
-		if rc != c.rc {
-			t.Errorf("%s %s: rc=%d want %d\n%s", c.fixture, c.line, rc, c.rc, errs)
-		}
-		if c.code != "" && (out != "" || !strings.Contains(errs, c.code)) {
-			t.Errorf("%s %s: stdout=%q stderr=%q", c.fixture, c.line, out, errs)
-		}
-		if c.code == "" && (strings.TrimSpace(out) != filepath.Join(d, "25.8") || !strings.Contains(errs, "WARNING")) {
-			t.Errorf("%s allow-unsigned: stdout=%q stderr=%q", c.fixture, out, errs)
-		}
-	}
-	// A release signed by the test key is untrusted under the embedded key alone.
-	t.Setenv("CHTYPES_TRUSTED_KEYS", "")
-	t.Setenv("CHTYPES_ALLOW_UNSIGNED", "")
-	rc, _, errs = exec(t, "fetch", "25.8", "--url", signed, "--dest", filepath.Join(t.TempDir(), "x"))
-	if rc != 1 || !strings.Contains(errs, "CHTYPES_ARTIFACT_UNTRUSTED") {
-		t.Fatalf("embedded key only: rc=%d %q", rc, errs)
+	code, out, _ = runCLI(t, nil, "where", "--cache", dir)
+	if code != 0 || strings.TrimSpace(out) != dir {
+		t.Errorf("where --cache = %d %q", code, out)
 	}
 }
 
-// TestFetchListVerifyAgainstTwoPatchesFixture drives the CLI over
-// tests/fixtures/fetch/two-patches/ (issue #284): an exact-patch fetch lands
-// under patches/<minor>/<exact>/, a line fetch lands flat, `list` shows both
-// installed patches and marks BOTH release rows "(installed)", and `verify`
-// reports both.
-func TestFetchListVerifyAgainstTwoPatchesFixture(t *testing.T) {
-	dir, key := fixtures(t)
-	isolate(t)
-	t.Setenv("CHTYPES_TRUSTED_KEYS", key)
-	src := "file://" + filepath.Join(dir, "two-patches")
-	blob, err := os.ReadFile(filepath.Join(dir, "expected.json"))
+// The exit status of every shared code is the generated table's, so this
+// asserts the table is what the CLI reads, one code at a time.
+func TestExitStatusIsTheGeneratedTable(t *testing.T) {
+	want := map[ocifetch.ErrorCode]int{
+		ocifetch.CodeArtifactMissing: 1, ocifetch.CodeArtifactUntrusted: 1, ocifetch.CodeArtifactCorrupt: 1,
+		ocifetch.CodeArtifactPinned: 1, ocifetch.CodeArtifactUnpublished: 4, ocifetch.CodeSourceUnreachable: 3,
+		ocifetch.CodeSourceUnauthorized: 5, ocifetch.CodeSourceForbidden: 6, ocifetch.CodeSourceIncompatible: 7,
+		ocifetch.CodeArtifactIncompatible: 8,
+	}
+	if len(want) != len(ocifetch.ErrorExitCodes) {
+		t.Fatalf("the generated table has %d codes, this test %d", len(ocifetch.ErrorExitCodes), len(want))
+	}
+	for c, n := range want {
+		if got := exitStatus(&ocifetch.FetchError{Code: c}); got != n {
+			t.Errorf("%s exits %d, want %d", c, got, n)
+		}
+	}
+}
+
+func TestOfflineMissIsArtifactMissing(t *testing.T) {
+	code, _, errText := runCLI(t, map[string]string{"CHTYPES_CACHE": t.TempDir()}, "fetch", "26.8", "--offline", "--platform", "linux-arm64")
+	if code != 1 || !strings.Contains(errText, "CHTYPES_ARTIFACT_MISSING") {
+		t.Errorf("exit %d, stderr %q", code, errText)
+	}
+}
+
+func TestVerifyAndListOnAnEmptyCache(t *testing.T) {
+	env := map[string]string{"CHTYPES_CACHE": t.TempDir()}
+	if code, out, _ := runCLI(t, env, "verify"); code != 0 || out != "" {
+		t.Errorf("verify = %d %q", code, out)
+	}
+	if code, out, _ := runCLI(t, env, "list", "--offline"); code != 0 || out != "" {
+		t.Errorf("list --offline = %d %q", code, out)
+	}
+}
+
+// fixtureBase is the conformance suite's file:// tree, or a loud skip.
+func fixtureBase(t *testing.T) (base, keyHex string) {
+	t.Helper()
+	root, err := filepath.Abs("../../../tests/fixtures/fetch-v1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var exp struct {
-		Patches struct {
-			Line   string   `json:"line"`
-			Served []string `json:"served"`
-			Newest string   `json:"newest"`
-		} `json:"patches"`
+	key, err := os.ReadFile(filepath.Join(root, "test-key", "public.hex"))
+	if err != nil {
+		t.Skipf("SKIPPED: the fetch-v1 fixtures are not beside this checkout (%v)", err)
 	}
-	if err := json.Unmarshal(blob, &exp); err != nil {
-		t.Fatal(err)
+	return "file://" + filepath.Join(root, "trees", "basic", "v2", "chtypes", "v1"), strings.TrimSpace(string(key))
+}
+
+func TestFetchVerifyListAgainstTheFixtureTree(t *testing.T) {
+	base, key := fixtureBase(t)
+	cache := t.TempDir()
+	env := map[string]string{"CHTYPES_ARTIFACTS_URL": base, "CHTYPES_TRUSTED_KEYS": key, "CHTYPES_CACHE": cache, "CHTYPES_TARGET": "linux-arm64"}
+
+	code, out, errText := runCLI(t, env, "fetch", "26.8")
+	dir := strings.TrimSpace(out)
+	if code != 0 || !strings.HasPrefix(dir, cache) || strings.Contains(dir, "\n") {
+		t.Fatalf("fetch = %d stdout %q stderr %q", code, out, errText)
 	}
-	if exp.Patches.Line == "" || len(exp.Patches.Served) != 2 {
-		t.Fatalf("expected.json carries no usable patches block: %+v", exp.Patches)
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("the printed directory does not exist: %v", err)
 	}
-	older, newer := exp.Patches.Served[0], exp.Patches.Served[1]
-	if newer != exp.Patches.Newest {
-		// served[] is documented as ascending; keep this test honest about it.
-		t.Fatalf("served = %v, newest = %s — served[1] is assumed to be the newest", exp.Patches.Served, exp.Patches.Newest)
+	if code, out, errText = runCLI(t, env, "verify"); code != 0 || out != "" {
+		t.Errorf("verify = %d %q %q", code, out, errText)
+	}
+	if code, out, errText = runCLI(t, env, "list"); code != 0 || !strings.Contains(out, "26.8.15.10") || !strings.Contains(out, "installed 26.8.15.10 ") || !strings.Contains(out, "published 26.8 support unknown\n") {
+		t.Errorf("list = %d %q %q", code, out, errText)
 	}
 
-	dest := filepath.Join(t.TempDir(), "reg")
-	rc, out, errs := exec(t, "fetch", older, "--url", src, "--dest", dest)
-	wantOlderDir := filepath.Join(dest, "patches", exp.Patches.Line, older)
-	if rc != 0 || strings.TrimSpace(out) != wantOlderDir {
-		t.Fatalf("fetch exact older: rc=%d stdout=%q stderr=%q, want dir %q", rc, out, errs, wantOlderDir)
+	// --lock writes the lock, and --frozen then fetches from it alone.
+	lock := filepath.Join(t.TempDir(), "chtypes.lock")
+	if code, _, errText = runCLI(t, env, "fetch", "26.8", "--lock", lock); code != 0 {
+		t.Fatalf("fetch --lock = %d %q", code, errText)
 	}
-	rc, out, errs = exec(t, "fetch", exp.Patches.Line, "--url", src, "--dest", dest)
-	wantFlatDir := filepath.Join(dest, exp.Patches.Line)
-	if rc != 0 || strings.TrimSpace(out) != wantFlatDir {
-		t.Fatalf("fetch line: rc=%d stdout=%q stderr=%q, want dir %q", rc, out, errs, wantFlatDir)
+	env["CHTYPES_CACHE"] = t.TempDir()
+	if code, out, errText = runCLI(t, env, "fetch", "26.8", "--frozen", "--lock", lock); code != 0 || strings.TrimSpace(out) == "" {
+		t.Errorf("fetch --frozen = %d %q %q", code, out, errText)
 	}
-
-	rc, out, _ = exec(t, "verify", "--dest", dest)
-	if rc != 0 || !strings.Contains(out, "2 installed, 2 verified, 0 bad") {
-		t.Fatalf("verify: rc=%d %q", rc, out)
+	// A request the lock does not pin is CHTYPES_ARTIFACT_PINNED (exit 1).
+	if code, _, errText = runCLI(t, env, "fetch", "26.7", "--frozen", "--lock", lock); code != 1 || !strings.Contains(errText, "CHTYPES_ARTIFACT_PINNED") {
+		t.Errorf("an unpinned frozen request = %d %q", code, errText)
 	}
-
-	rc, out, _ = exec(t, "list", "--dest", dest, "--url", src)
-	if rc != 0 {
-		t.Fatalf("list: rc=%d %q", rc, out)
+	// A tag nothing publishes is CHTYPES_ARTIFACT_UNPUBLISHED (exit 4).
+	if code, _, errText = runCLI(t, env, "fetch", "1.1"); code != 4 || !strings.Contains(errText, "CHTYPES_ARTIFACT_UNPUBLISHED") {
+		t.Errorf("an unpublished line = %d %q", code, errText)
 	}
-	if strings.Count(out, "(installed)") != 2 {
-		t.Fatalf("list did not mark BOTH served patches installed:\n%s", out)
-	}
-	if !strings.Contains(out, older) || !strings.Contains(out, newer) {
-		t.Fatalf("list does not name both installed patches:\n%s", out)
+	// Without the test key trusted, the same tree is CHTYPES_ARTIFACT_UNTRUSTED (exit 1).
+	env["CHTYPES_TRUSTED_KEYS"] = ""
+	env["CHTYPES_CACHE"] = t.TempDir()
+	if code, _, errText = runCLI(t, env, "fetch", "26.8"); code != 1 || !strings.Contains(errText, "CHTYPES_ARTIFACT_UNTRUSTED") {
+		t.Errorf("an untrusted tree = %d %q", code, errText)
 	}
 }
 
-// list's note names rows with no recorded revision for what they are — built
-// before revisions were recorded — never as a revision called "none".
-func TestListNoteNamesRowsThatRecordNoRevision(t *testing.T) {
-	rev := chtypes.ABIRevision
-	other := rev + 1
-	rows := []chtypes.ReleaseArtifact{{ABIRevision: &other}, {}, {}}
-	for _, tc := range []struct {
-		hidden []chtypes.ReleaseArtifact
-		want   string
-	}{
-		{nil, ""},
-		{rows[:1], fmt.Sprintf("1 row(s) at ABI revision(s) %d not shown; this SDK speaks %d", other, rev)},
-		{rows[1:], fmt.Sprintf("2 row(s) that record no ABI revision (built before revisions were recorded) not shown; this SDK speaks %d", rev)},
-		{rows, fmt.Sprintf("1 row(s) at ABI revision(s) %d and 2 row(s) that record no ABI revision (built before revisions were recorded) not shown; this SDK speaks %d", other, rev)},
-	} {
-		if got := notShown(tc.hidden, rev); got != tc.want {
-			t.Fatalf("notShown(%d rows) = %q, want %q", len(tc.hidden), got, tc.want)
+func TestVersionFlag(t *testing.T) {
+	code, out, _ := runCLI(t, nil, "--version")
+	if code != 0 || !strings.HasPrefix(out, "chtypes ") || strings.Count(out, "\n") != 1 || strings.Contains(out, "devel") {
+		t.Errorf("--version = %d %q", code, out)
+	}
+}
+
+func TestHelpIsStdoutAnywhere(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"-h"}, {"fetch", "--help"}, {"list", "26.8", "-h"}} {
+		code, out, errText := runCLI(t, nil, args...)
+		if code != 0 || !strings.HasPrefix(out, "usage:") || errText != "" {
+			t.Errorf("%v = %d stdout %q stderr %q", args, code, out, errText)
 		}
 	}
+}
+
+func TestListOfflineIsInstalledOnly(t *testing.T) {
+	base, key := fixtureBase(t)
+	env := map[string]string{"CHTYPES_ARTIFACTS_URL": base, "CHTYPES_TRUSTED_KEYS": key, "CHTYPES_CACHE": t.TempDir(), "CHTYPES_TARGET": "linux-arm64"}
+	if code, _, e := runCLI(t, env, "fetch", "26.8"); code != 0 {
+		t.Fatal(e)
+	}
+	code, out, _ := runCLI(t, env, "list", "--offline")
+	if code != 0 || !strings.Contains(out, "installed 26.8.15.10 ") || strings.Contains(out, "published") {
+		t.Errorf("list --offline = %d %q", code, out)
+	}
+}
+
+func TestFetchUpdateRewritesTheLock(t *testing.T) {
+	base, key := fixtureBase(t)
+	env := map[string]string{"CHTYPES_ARTIFACTS_URL": base, "CHTYPES_TRUSTED_KEYS": key, "CHTYPES_CACHE": t.TempDir(), "CHTYPES_TARGET": "linux-arm64"}
+	lock := filepath.Join(t.TempDir(), "chtypes.lock")
+	if code, _, e := runCLI(t, env, "fetch", "26.8", "--lock", lock); code != 0 {
+		t.Fatal(e)
+	}
+	if err := os.WriteFile(lock+".bak", mustRead(t, lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lock, mustRead(t, lock+".bak"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, e := runCLI(t, env, "fetch", "--update", "--lock", lock)
+	if code != 0 || strings.TrimSpace(out) == "" {
+		t.Fatalf("fetch --update = %d %q %q", code, out, e)
+	}
+	if string(mustRead(t, lock)) != string(mustRead(t, lock+".bak")) {
+		t.Error("an update against an unchanged registry must rewrite the same lock")
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

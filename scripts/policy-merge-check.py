@@ -15,11 +15,11 @@ Run by .github/workflows/policy-merge.yml, whose header says why the workflow
 exists and what it may touch; read that first.
 
 This file, and the workflow that runs it, used to be named regen-automerge —
-a pull request that only regenerated docs/support.md merged itself once `ci`
-passed. Issue #280 generalized it: ANY pull request merges itself once every
-condition below holds, not just a docs/support.md regeneration. The
-docs/support.md guard survives as condition 6, the one case this script still
-compares a file's actual bytes rather than just judging its path.
+a pull request that only regenerated the v0 support page merged itself once
+`ci` passed. Issue #280 generalized it: ANY pull request merges itself once
+every condition below holds, not just a regeneration. The support-page guard
+survived as condition 6 until that page was retired with v0 (#431); the
+number stays retired, so that 7 names the same condition everywhere.
 
 A pull request no longer merges directly. `enqueue` adds it to main's GitHub
 merge queue (the `enqueuePullRequest` GraphQL mutation) once every condition
@@ -34,16 +34,18 @@ something cannot be decided deterministically — a check fails, an issue needs
 filing, or a pull request touches a file whose correctness this tree cannot
 verify by rule alone (chtypes#280). Everything else is a mechanical decision a
 machine can make from data GitHub already has: the required checks' own
-verdicts, the diff's file list, and — for docs/support.md alone — a
-byte-for-byte regeneration.
+verdicts, the diff's file list, and — for the conditional classes below — a
+job log or a commit, read as data.
 
 ================================================================================
-THE SEVEN CONDITIONS
+THE CONDITIONS
 ================================================================================
 
 A pull request enqueues itself when ALL of these hold. Evaluated in this
 order; the first that fails is the one reported. A refusal is not an error:
-the pull request is left for a human and the exit status is 0.
+the pull request is left for a human and the exit status is 0. The numbers
+are the conditions' historical names; 6 (`bytes`, a byte-for-byte
+regeneration of the v0 support page) was retired with that page (#431).
 
   fork       (1) The head is a branch of THIS repository: the head repository
                  the ci run reports AND the pull request's own head repository.
@@ -73,14 +75,7 @@ the pull request is left for a human and the exit status is 0.
                  disagreeing signal anywhere in that chain (the author, the
                  commit shape, any dependency's own metadata, or the
                  manifest diff) counts as not proven, same fail-closed
-                 posture as a missing api-surface verdict; and for a
-                 fixture tree generated from a served, release-signed
-                 asset (the served-fixture entries, chtypes#344 —
-                 tests/fixtures/fetch/** today), the head's whole tree
-                 under it is byte-identical to a fresh extraction of that
-                 asset, fetched and verified by main's own scripts/fetch.sh
-                 under the release key (served_fixture_problems) — any
-                 error anywhere in that chain refuses. This is also
+                 posture as a missing api-surface verdict. This is also
                  what makes `checks` (next) mean anything: a pull_request run
                  of `ci` uses the pull request's own copy of `.github/` and
                  `scripts/`, which a pull request that edited either could
@@ -95,8 +90,7 @@ the pull request is left for a human and the exit status is 0.
                  ci.yml's `divergences` job can be red by design.
   test-counts    ONLY when the pull request touches a test or fixture path
                  (chtypes#285 §1b, is_test_or_fixture_path has the exact
-                 rule): no suite's executed-test count, and no golden-case
-                 count, fell below main's last green `ci` push run — read
+                 rule): no suite's executed-test count fell below main's last green `ci` push run — read
                  from each job's own log (see gather_test_counts and its own
                  comment for why the log, not the check run's output, is
                  what a read-only token can actually read). A missing or
@@ -112,35 +106,14 @@ the pull request is left for a human and the exit status is 0.
                  conversation resolved, and the REST API cannot tell a
                  resolved thread from an open one, so any review comment
                  leaves the pull request for a human.
-  bytes      (6) ONLY when the pull request touches docs/support.md: it was
-                 MODIFIED (not added, deleted or renamed), and main's own
-                 scripts/support-matrix.sh, run against the live index OVER A
-                 SCRATCH COPY SEEDED WITH THE HEAD'S OWN BYTES — never main's
-                 checked-out copy (chtypes#316: main's hand-written prose
-                 used to collide with every prose-only edit on the head,
-                 because the old code regenerated from main's tree and
-                 compared that against the head) — reproduces the head's
-                 copy byte for byte. A pull request that does not touch
-                 docs/support.md skips this condition. This is necessarily a
-                 PRE-ENQUEUE check only — see ENQUEUE, NOT MERGE for why the
-                 old post-merge re-verification (the merge commit's
-                 docs/support.md still equals the regeneration) cannot run
-                 anymore.
 
-`gate` checks everything except the byte HALF of `bytes`, which needs the
-regeneration; `enqueue` regenerates only after every other condition already
-holds (regenerate_guarded_file, from the head's own bytes), so an ordinary
-pull request costs a handful of API reads before the gate ever reaches this
-one, and the gate itself never regenerates at all. `test-counts` has no such
-split — gather_test_counts reads every job log it needs (never a head file)
-up front, so `gate` checks it fully, at the API cost of up to five job-log
-reads per side, and only for a pull request that touches a test or fixture
-path. The api-surface verdicts are the same: one job-log read, only for a
-pull request that touches binding source and nothing unconditionally
-protected. So is the served-fixture proof: one trees-API read and one
-fetch.sh download, only for a pull request that touches a served fixture
-tree and nothing unconditionally protected. `enqueue` reads every fact again, checks all of them including the
-byte comparison, and enqueues with `expectedHeadOid=<head>` so GitHub itself
+`gate` and `enqueue` check the same conditions. gather_test_counts reads
+every job log `test-counts` needs (never a head file) up front, at the API
+cost of up to five job-log reads per side, and only for a pull request that
+touches a test or fixture path. The api-surface verdicts are the same: one
+job-log read, only for a pull request that touches binding source and
+nothing unconditionally protected. `enqueue` reads every fact again, checks
+all of them, and enqueues with `expectedHeadOid=<head>` so GitHub itself
 refuses if the head moved in between (reported as `stale`).
 
 ================================================================================
@@ -182,18 +155,6 @@ not exist on this repository yet to observe its exact error shape against).
 The primary, verified defense against a moved head remains `decide()`'s
 `stale` condition, checked immediately before the mutation is ever reached.
 
-A PRE-ENQUEUE-ONLY byte check (condition 6, above) is the other consequence:
-the old code re-read the merge commit after a successful `PUT .../merge` and
-failed the run if it did not carry the regeneration, because a three-way
-merge's result is not guaranteed to equal the head's raw diff even when the
-head matched byte for byte. That re-read needed a `merge_sha` returned
-synchronously by the merge call; `enqueuePullRequest` returns a queue entry,
-not a merge result, and the actual merge happens later, asynchronously, on
-whatever commit the queue eventually lands. This file therefore trusts the
-pre-enqueue byte comparison against the head's own diff and does not attempt
-a post-hoc re-verification — a real gap versus the old guarantee, accepted
-because there is no synchronous moment left at which to make it.
-
 BUILT-IN TOKEN EVENTS START NO WORKFLOW. An entry enqueued with the
 workflow's built-in token gets no merge_group run of `ci`: GitHub starts no
 workflow for an event that token causes, so the entry waits at
@@ -224,9 +185,8 @@ guide_problems()). Decided by the chtypes lead (chtypes#280), conservative by
 design: over-protect rather than under-protect.
 
   .github/**            the workflows define and run the required checks
-  scripts/**             every gate a required check runs, this checker
-                          itself, and scripts/fetch.sh, which verifies
-                          release signatures
+  scripts/**             every gate a required check runs, and this checker
+                          itself
   include/**              the frozen C ABI header
   go/**/*.go (except *_test.go), python/src/**, ts/src/**, rust/src/**
                           each binding's source tree — CONDITIONAL since
@@ -241,15 +201,15 @@ design: over-protect rather than under-protect.
                           protected only while that binding's verdict is not
                           `changed=false`. An exported ADDITION is a change.
   the SECURITY CARVE-OUT  inside those trees but UNCONDITIONAL, whatever the
-                          verdict: go/chtypes/{fetch_sign,fetch,registry_path,
-                          multiversion,resolve}.go, python/src/chtypes/{_ed25519,
-                          fetch,_manifest,registry}.py, ts/src/{fetch,
-                          registry}.ts, rust/src/fetch/**, rust/src/digest.rs,
-                          rust/src/registry.rs — the fetch chain (the ed25519
-                          signature, each tarball's sha256, the lock pin, the
-                          trusted keys and the allow-unsigned switch) and the
-                          load-time checks (library_bytes on every load, the
-                          opt-in sha256 re-hash). Derived by VERIFICATION_NEEDLES
+                          verdict: python/src/chtypes/{_ed25519,registry}.py,
+                          ts/src/registry.ts, rust/src/registry.rs and each
+                          binding's v1 fetch layer (go/internal/ocifetch/**,
+                          python/src/chtypes/_ocifetch/**, ts/src/ocifetch/**,
+                          rust/src/ocifetch/**) — the embedded release key, the
+                          trust policy, the signed-statement check and the
+                          byte verification of every fetched library. (The v0
+                          fetch modules these entries once named were deleted
+                          with v0, public issue #431.) Derived by VERIFICATION_NEEDLES
                           (the primitives and trust anchors, never names a
                           re-export also carries), and `--check-carve-out`,
                           run by the required `abi` job, derives it again
@@ -289,29 +249,17 @@ design: over-protect rather than under-protect.
                           configure the required `ts` job's build and
                           typecheck steps (`tsc -p tsconfig.json` /
                           `tsc -p tsconfig.test.json` in ts/package.json)
-  tests/parity/manifest.json
-                          the cross-binding parity contract: each of the
-                          required `go`/`python`/`ts`/`rust` jobs' own parity
-                          test (parity_test.go, test_parity.py,
-                          parity.test.ts, parity.rs) reads and enforces it —
-                          declares what each binding must support, the same
-                          threat model as a config file that configures a
-                          check's rules
-  tests/fixtures/fetch/** the fetch fixtures, CONDITIONAL since chtypes#344:
-                          the refusal cases and expected.json, the outcome
-                          every binding's fetch suite asserts for each. A
-                          diff editing both could turn "fetch refuses a
-                          tampered tarball" into "fetch accepts it" in all
-                          four suites with the same test count and no
-                          verification code touched. Generated by the
-                          artifact producer and served as the release-level
-                          sdk-fetch-fixtures.tar.gz, so a touch is excused
-                          only when the head's tree under it is byte-
-                          identical to a fresh extraction of that asset,
-                          verified under the release key — see "served
-                          fixture trees" below. abi-revision/, which the
-                          asset carries and this tree does not track, is
-                          left out of the served side only.
+  tests/fixtures/fetch-v1/**
+                          the v1 conformance fixtures: the signing keys, the
+                          route trees and OCI layouts, the scripted HTTP
+                          responses, and cases.json's outcome for each. A
+                          diff editing a refusal case and its outcome
+                          together could turn "fetch refuses" into "fetch
+                          accepts" in all four suites with the same test
+                          count and no verification code touched.
+                          Unconditional. (The v0 fetch fixtures, which were
+                          excused when byte-identical to a release-signed
+                          served asset, were deleted with v0, #431.)
   tests/fixtures/api-surface/**
                           hand-written packages, no served source: the
                           api-surface job's fixture proof runs every pinned
@@ -345,36 +293,15 @@ manifest and lockfile; _dependabot_manifests_agree_with_globs (run by
 --selftest) proves it cannot drift from the entries above the way --check-
 guide proves CONTRIBUTING.md cannot drift from PROTECTED_GLOBS itself.
 
-scripts/fetch.sh, the shell fetch that also verifies release signatures, is
-inside scripts/**. scripts/lint-public.sh's one exemption (the literal `runner` segment in its
+scripts/lint-public.sh's one exemption (the literal `runner` segment in its
 LOCAL_PATH_PLACEHOLDERS allowlist) lives inside the script itself, so
 scripts/** already covers it; there is no exemption file outside that glob.
 
-Tests, examples, docs (docs/support.md alone excepted, as condition 6 above)
-and CHANGELOGs are deliberately NOT protected: the protected gates (`checks`)
-judge them, and `test-counts` catches a test removed or turned into a skip.
-Fixtures that decide an outcome by themselves are the exception
-(chtypes#344): tests/fixtures/fetch/** (conditional) and
-tests/fixtures/api-surface/** (unconditional), above. The whole of tests/**
-was inventoried for that: those two trees and tests/parity/manifest.json are
-everything under it, and only the fetch fixtures come from a served, signed
-asset.
-
-SERVED FIXTURE TREES (chtypes#344, FAIL CLOSED by the lead's ruling). A
-touch is excused only when ALL of: main's own scripts/fetch.sh --release-file
-<asset>, its environment stripped of every CHTYPES_* variable (so no
-CHTYPES_TRUSTED_KEYS, CHTYPES_ALLOW_UNSIGNED or CHTYPES_ARTIFACTS_URL reaches
-it), exits 0 having verified SHA256SUMS.sig under the release key embedded in
-main's fetch.sh and the asset's sha256 against that signed SHA256SUMS — and
-its own success line names the release key's id, deb275922dbff76e, never the
-fixture test key a pull request could edit; the head's recursive tree listing
-is complete (`truncated` false); and the two path -> (mode, git blob id) maps
-are equal, which is byte equality because a git blob id is a hash of the
-bytes. Anything else — a download failure, an HTTP error, a bad or foreign
-signature, a sha mismatch, a missing, extra or differing file, a mode, a
-symlink, a submodule, an unreadable tarball, any exception — is a refusal.
-The comparison is against the HEAD's tree; the queue's merge with main's tip
-is not re-compared, the same accepted gap as condition 6's bytes.
+Tests, examples, docs and CHANGELOGs are deliberately NOT protected: the
+protected gates (`checks`) judge them, and `test-counts` catches a test
+removed or turned into a skip. Fixtures that decide an outcome by themselves
+are the exception (chtypes#344): tests/fixtures/fetch-v1/** and
+tests/fixtures/api-surface/**, both unconditional, above.
 
 ================================================================================
 THE PWN-REQUEST RULE — THE ONE THING THIS FILE MUST NEVER BREAK
@@ -386,21 +313,16 @@ before `checks` is ever trusted. `workflow_run` runs this file from the
 DEFAULT BRANCH with a token that can write to this repository, after a `ci`
 run that anyone can start by opening a pull request from a fork. So nothing
 from a pull request's head may run here. This script never reads a head file
-from disk and never executes, sources, imports or parses anything of the
-head: a head file's bytes (docs/support.md alone, and only when it is part of
-the diff) arrive from the contents API, and regenerate_guarded_file writes
-them to a scratch file as plain input text for main's own regenerator — never
-main's checked-out copy (chtypes#316) — which rewrites only that file's
-generated block in place; the result is then only ever compared with other
-bytes, never executed, sourced or parsed as code at any point. The workflow
-checks out main, and main's code is all that runs.
+from disk and never executes, sources or imports anything of the head: what
+it reads of the head arrives through the API as data, each kind described
+below. The workflow checks out main, and main's code is all that runs.
 
 `test-counts` (chtypes#285 §1b) reads more than one file's bytes — up to five
 job LOGS per side — but the posture is identical: `gather_test_counts` reads
 each job's console output through the Actions API (`GET
 repos/{repo}/actions/jobs/{id}/logs`), a passive read of text GitHub's own
 runner already produced, and every line this file cares about is matched by
-regex (`parse_suite_counts`/`parse_golden_count`) against fixed integers,
+regex (`parse_suite_counts`) against fixed integers,
 never executed, sourced, imported or otherwise interpreted as code. The job
 whose log is read is itself one `.github/**`/`scripts/**` cannot touch
 without tripping `protected` first (evaluated before `checks`, and
@@ -427,9 +349,9 @@ other text this file parses; it is never evaluated as YAML or any other
 code. manifest_bump_problems parses a manifest's bytes with Python's own
 `tomllib`/`json` — a declarative DATA format, not a programming language: it
 has no function calls, no imports and no way to cause a side effect, so
-"parsing" one is exactly as safe as decode_contents() already treats
-docs/support.md's bytes, and strictly safer than running a regex against
-free text, which this file already does throughout.
+"parsing" one is exactly as safe as decode_contents() reading its bytes, and
+strictly safer than running a regex against free text, which this file
+already does throughout.
 
 One PRIVILEGED signal — trusting `pr["user"]["login"] == "dependabot[bot]"`
 at all — cannot be forged by opening a pull request: GitHub assigns that
@@ -447,16 +369,6 @@ own force-push history, both trusted only as data, same as everything
 else here. Nothing runs with elevated trust because of any of this; it
 narrows what a pull request must ALSO prove about its own commit, its
 branch's history and its manifest diff before anything is excused.
-
-The served-fixture half of `protected` (chtypes#344) reads less of the head
-than anything above: one `git/trees/{head}?recursive=1` listing — paths,
-modes and blob ids, never a file's bytes — compared as data. What it runs is
-main's own scripts/fetch.sh, with arguments that are constants of main's
-code (the asset name, a scratch --dest) and no `--url`, so it fetches from
-fetch.sh's own default source; the tarball it verifies is read in memory by
-Python's `tarfile`, hashed and compared, never extracted to disk, never
-executed. Nothing the pull request controls chooses the source, the key or
-the command.
 
 ================================================================================
 REQUIRED_CHECKS, AND WHY IT IS PINNED HERE
@@ -481,15 +393,11 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
-import io
 import json
 import os
 import re
 import subprocess
 import sys
-import tarfile
-import tempfile
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -504,32 +412,6 @@ MINT_PERMISSIONS = {"permission-contents": "write", "permission-pull-requests": 
 GUIDE_PATH = os.path.join(ROOT, "CONTRIBUTING.md")
 
 BASE_BRANCH = "main"
-
-# The generated files this script still checks byte for byte when a pull
-# request touches them (condition 6). docs/support.md is the only one today;
-# adding a second is a deliberate act with three parts: register its
-# generator in GUARDED_FILE_GENERATORS below, cmd_enqueue refuses (exit 2,
-# KeyError) until every GUARDED_FILES entry has one, and decide()'s `bytes`
-# condition needs a matching lookup — it is not derived from this tuple
-# automatically, on purpose, because each generated file's status rule could
-# one day differ.
-GUARDED_FILES = ("docs/support.md",)
-
-# Which of main's own scripts regenerates each GUARDED_FILES entry.
-# regenerate_guarded_file (below) seeds a scratch copy with the HEAD's OWN
-# bytes — fetched as DATA through the contents API (head_file), never main's
-# checked-out copy — and runs this script over that SAME path with --out, so
-# it rewrites only the generated block in place and leaves the head's own
-# prose untouched (scripts/support-matrix.sh's own read-modify-write contract
-# on --out: it refuses if the markers are missing, never if the surrounding
-# prose differs from main's). chtypes#316: the old workflow step seeded the
-# scratch file from main's own checked-out docs/support.md instead, so any
-# prose edit on the head was compared against MAIN's prose plus a freshly
-# computed block and always differed. ROOT-anchored so it resolves whatever
-# the invoking process's working directory is.
-GUARDED_FILE_GENERATORS: dict[str, str] = {
-    "docs/support.md": os.path.join(ROOT, "scripts", "support-matrix.sh"),
-}
 
 
 @dataclass(frozen=True)
@@ -556,18 +438,7 @@ class ProtectedGlob:
     the SECURITY CARVE-OUT — signature and checksum verification code and
     the embedded release key, inside a binding's source tree but protected
     whatever its API verdict says; `--check-carve-out` keeps those entries in
-    step with the tree.
-
-    `served_asset`, when set, makes the entry CONDITIONAL a third way
-    (chtypes#344): it is a fixture tree generated from that release-level
-    asset of the served release, and a touch of it is protected unless the
-    head's whole tree under the pattern is byte-identical to a fresh
-    extraction of that asset, fetched and verified by main's own
-    scripts/fetch.sh under the embedded release key (served_fixture_problems).
-    The pattern must be the 'DIR/**' shape. `served_untracked` names the
-    member prefixes the asset carries that this repository deliberately does
-    not track; they are left out of the SERVED side of the comparison only,
-    so a head that carries anything there is an extra file and refuses."""
+    step with the tree."""
 
     pattern: str
     reason: str
@@ -575,14 +446,12 @@ class ProtectedGlob:
     binding: str | None = None
     verification: bool = False
     dependabot_ecosystem: str | None = None
-    served_asset: str | None = None
-    served_untracked: tuple[str, ...] = ()
 
     @property
     def conditional(self) -> bool:
         """Whether a touch of this entry can ever be excused — by an API
-        verdict, a dependabot proof or a served-fixture proof."""
-        return self.binding is not None or self.dependabot_ecosystem is not None or self.served_asset is not None
+        verdict or a dependabot proof."""
+        return self.binding is not None or self.dependabot_ecosystem is not None
 
     def label(self) -> str:
         base = f"{self.pattern} (except *{self.except_suffix})" if self.except_suffix else self.pattern
@@ -591,8 +460,6 @@ class ProtectedGlob:
         if self.dependabot_ecosystem:
             return (f"{base} [unless this is a proven dependabot patch-level dev-dependency bump of "
                     f"{self.dependabot_ecosystem}]")
-        if self.served_asset:
-            return f"{base} [unless the head's tree under it is byte-identical to the release-signed {self.served_asset}]"
         return base
 
     def guide_bullet(self) -> str:
@@ -603,12 +470,6 @@ class ProtectedGlob:
         if self.dependabot_ecosystem:
             return (f"- `{self.pattern}`{exc} — {self.reason}; protected only while this is not a proven "
                     f"dependabot patch-level dev-dependency bump of {self.dependabot_ecosystem}")
-        if self.served_asset:
-            untracked = (f" (`{'`, `'.join(self.served_untracked)}` excepted, which this repository does not track)"
-                         if self.served_untracked else "")
-            return (f"- `{self.pattern}`{exc} — {self.reason}; protected unless the head's tree under it is "
-                    f"byte-identical to a fresh extraction of the served `{self.served_asset}`{untracked}, "
-                    "verified under the release key")
         if self.verification:
             return f"- `{self.pattern}`{exc} — {self.reason}; security carve-out, protected whatever the API verdict"
         return f"- `{self.pattern}`{exc} — {self.reason}"
@@ -622,10 +483,18 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob(".github/**",
                   "the workflows define and run the required checks; a pull_request run of ci uses the pull "
                   "request's own copy"),
-    ProtectedGlob("scripts/**",
-                  "every gate a required check runs, this checker itself, and scripts/fetch.sh, which verifies "
-                  "release signatures"),
+    ProtectedGlob("scripts/**", "every gate a required check runs, and this checker itself"),
     ProtectedGlob("include/**", "the frozen C ABI header"),
+    # The v1 fetch layer's own frozen interface: the generated-constants
+    # source, its JSON schemas, the case/report/lock schema shapes every v1
+    # binding and the conformance runner build against, and the per-binding
+    # enrollment markers. Unconditional: none of it is binding source an
+    # api-surface verdict says anything about, and it is the one place every
+    # v1 fetcher agrees on the wire contract — a silent drift here breaks
+    # all four at once rather than one.
+    ProtectedGlob("spec/**",
+                  "the v1 fetch layer's generated-constants source, JSON schemas and binding "
+                  "enrollment markers — the frozen interface every v1 fetcher builds against"),
     # Each binding's source tree, CONDITIONAL since chtypes#285 §1: a touch
     # is refused only while the `api-surface` job's verdict for that binding
     # on the judged head is not `changed=false` (an exported addition, a
@@ -646,42 +515,40 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     # and `--check-carve-out` fails when a file the needles hit is not covered
     # here, or an entry here no longer exists — so this list cannot silently
     # go stale when code moves.
-    ProtectedGlob("go/chtypes/fetch_sign.go",
-                  "the embedded release public key and the ed25519 signature check", verification=True),
-    ProtectedGlob("go/chtypes/fetch.go",
-                  "the fetch chain: the signature-check call, every tarball's sha256 against SHA256SUMS, the lock "
-                  "pin, the trusted-keys and allow-unsigned options", verification=True),
-    ProtectedGlob("go/chtypes/registry_path.go",
-                  "names the CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED variables the trust policy reads",
-                  verification=True),
-    ProtectedGlob("go/chtypes/multiversion.go",
-                  "load-time verification: the library_bytes size check on every load and the "
-                  "WithVerifyChecksums sha256 re-hash", verification=True),
-    ProtectedGlob("go/chtypes/resolve.go",
-                  "exact-patch resolution's load path, which runs the same load-time verification",
-                  verification=True),
     ProtectedGlob("python/src/chtypes/_ed25519.py", "the ed25519 signature check itself", verification=True),
-    ProtectedGlob("python/src/chtypes/fetch.py",
-                  "the embedded release public key, the trust policy, and the fetch chain's signature and sha256 "
-                  "checks", verification=True),
-    ProtectedGlob("python/src/chtypes/_manifest.py",
-                  "load-time verification: check_library_bytes and verify_library's sha256 re-hash",
-                  verification=True),
     ProtectedGlob("python/src/chtypes/registry.py",
-                  "calls the load-time verification on every load (verify_hashes)", verification=True),
-    ProtectedGlob("ts/src/fetch.ts",
-                  "the embedded release public keys, the trust policy, and the fetch chain's signature and sha256 "
-                  "checks", verification=True),
+                  "the v1 registry adapter: hands the fetch layer's verified record (the signed predicate) to the "
+                  "loader unchanged", verification=True),
     ProtectedGlob("ts/src/registry.ts",
-                  "load-time verification: checkLibraryBytes on every load and the verifyChecksums sha256 re-hash",
-                  verification=True),
-    ProtectedGlob("rust/src/fetch/**",
-                  "the embedded release public key, the trust policy, the signature check, the sha256 checks and "
-                  "the lock pin", verification=True),
-    ProtectedGlob("rust/src/digest.rs", "the sha256 helper every checksum check hashes with", verification=True),
+                  "the v1 registry adapter: hands the fetch layer's verified record (the signed predicate) to the "
+                  "loader unchanged", verification=True),
     ProtectedGlob("rust/src/registry.rs",
-                  "load-time verification: the library_bytes size check and the verify_checksums sha256 re-hash",
-                  verification=True),
+                  "the v1 registry adapter: hands the fetch layer's verified record (the signed predicate) to the "
+                  "loader unchanged", verification=True),
+    # The v1 fetch layer's own carve-out (same reasoning, same discipline):
+    # each binding's new ocifetch module sits inside the already-CONDITIONAL
+    # binding-source globs above (go/**/*.go, python/src/**, ts/src/**,
+    # rust/src/**), and each one's generated constants file carries the
+    # embedded release key as a 64-hex literal plus the CHTYPES_TRUSTED_KEYS
+    # / CHTYPES_ALLOW_UNSIGNED environment variable names — exactly what
+    # VERIFICATION_NEEDLES["*"] matches — so without an unconditional entry
+    # here, an unchanged api-surface verdict would excuse a change to the
+    # trust policy or the embedded key the moment the v1 fetch code (not yet
+    # written) lands. A whole directory per binding, not individual files,
+    # because the fetch, trust and byte-verification logic is not yet split
+    # into named files the way v0's is.
+    ProtectedGlob("go/internal/ocifetch/**",
+                  "the v1 fetch layer: generated constants (the embedded release key) plus the trust, "
+                  "resolve and byte-verification code built on them", verification=True),
+    ProtectedGlob("python/src/chtypes/_ocifetch/**",
+                  "the v1 fetch layer: generated constants (the embedded release key) plus the trust, "
+                  "resolve and byte-verification code built on them", verification=True),
+    ProtectedGlob("ts/src/ocifetch/**",
+                  "the v1 fetch layer: generated constants (the embedded release key) plus the trust, "
+                  "resolve and byte-verification code built on them", verification=True),
+    ProtectedGlob("rust/src/ocifetch/**",
+                  "the v1 fetch layer: generated constants (the embedded release key) plus the trust, "
+                  "resolve and byte-verification code built on them", verification=True),
     # Not binding source by path, but code: cargo finds and RUNS a build
     # script at the crate root on every build — on every consumer's machine,
     # and inside the api-surface job, whose log the binding-source class
@@ -736,23 +603,19 @@ PROTECTED_GLOBS: tuple[ProtectedGlob, ...] = (
     ProtectedGlob("ts/tsconfig.json", "configures the required ts job's build step (tsc -p tsconfig.json)"),
     ProtectedGlob("ts/tsconfig.test.json",
                   "configures the required ts job's typecheck step (tsc -p tsconfig.test.json)"),
-    ProtectedGlob("tests/parity/manifest.json",
-                  "the cross-binding parity contract each of the required go/python/ts/rust jobs' own parity "
-                  "test reads and enforces — declares what every binding must support"),
     # Fixtures that carry their own outcomes (chtypes#344): a diff that edits
     # a refusal case AND the outcome the suites assert for it turns "fetch
     # refuses" into "fetch accepts" in all four bindings at once, with the
-    # same test count and no verification code touched. The fetch fixtures
-    # are generated by the artifact producer and served, signed, as one
-    # release-level asset, so a re-import that is byte-identical to that
-    # asset is excused (served_fixture_problems); anything else waits for a
-    # human. `abi-revision/` is a generator the asset carries and this tree
-    # does not track (scripts/abi-fixtures.sh fetches it from the release
-    # itself), so it is left out of the served side.
-    ProtectedGlob("tests/fixtures/fetch/**",
-                  "the fetch fixtures every binding's fetch suite asserts: the test key, the refusal cases, and "
-                  "expected.json, the outcome each case must produce",
-                  served_asset="sdk-fetch-fixtures.tar.gz", served_untracked=("abi-revision/",)),
+    # same test count and no verification code touched. Unconditional: the
+    # artifact producer does not yet publish this shape (the v1 fetch-layer
+    # plan's §9/A17), so there is no signed release asset to excuse a
+    # re-import against. It carries outcome-bearing cases (cases.json's
+    # `expect` block) plus the test and "other" signing keys. (The v0 fetch
+    # fixtures this entry was modeled on, excused when byte-identical to a
+    # release-signed served asset, were deleted with v0, #431.)
+    ProtectedGlob("tests/fixtures/fetch-v1/**",
+                  "the v1 conformance fixtures: the test and other-key signing keys, the route trees and OCI "
+                  "layouts, the scripted HTTP responses, and cases.json's outcome for each"),
     # Hand-written test data with no served source: the packages the
     # api-surface job's fixture proof runs every pinned tool on before it
     # prints any verdict (scripts/api-surface.py's prove(), on the pull
@@ -842,9 +705,7 @@ def is_protected(path: str) -> ProtectedGlob | None:
     one is protected depends on that binding's api-surface verdict, which
     binding_of() and api_surface_problems() decide. Neither is a dependabot-
     ecosystem entry (chtypes#285 §2): dependabot_glob_of() and
-    dependabot_bump_problems()/manifest_bump_problems() decide those. Nor is
-    a served-fixture entry (chtypes#344): served_glob_of() and
-    served_fixture_problems() decide those."""
+    dependabot_bump_problems()/manifest_bump_problems() decide those."""
     for g in PROTECTED_GLOBS:
         if not g.conditional and _covers(g, path):
             return g
@@ -984,20 +845,14 @@ def is_test_or_fixture_path(path: str) -> bool:
         check, not anchored to go/chtypes/);
       - `python/tests/**`, `ts/test/**`, `rust/tests/**` — each binding's own
         suite;
-      - `tests/fixtures/**` — the fetch fixtures every binding's fetch suite
-        reads (docs/guides/fetch.md §9). The fixture-reading TEST files
-        themselves (go/chtypes/fetch_fixtures_test.go,
-        ts/test/fixture-revision.ts, and their python/rust counterparts)
-        already match one of the rules above; this entry is for the fixture
-        DATA under tests/fixtures/ itself. A fetch-fixture change that the
-        served-fixture proof (chtypes#344) excuses still answers to this
-        condition; tests/fixtures/api-surface/ is unconditionally protected,
-        so it never reaches it.
-    `tests/parity/manifest.json` is deliberately NOT one of these: it is
-    already a PROTECTED_GLOBS entry (the cross-binding parity contract, a
-    threat this condition does not need to duplicate) — a pull request may
-    not touch it and merge itself at all, so `test-counts` never gets a
-    chance to look at it either way."""
+      - `tests/fixtures/**` — the fixture data the suites read (among them
+        the v1 conformance cases every binding's fetch suite runs,
+        docs/guides/fetch-v1.md §10). The fixture-reading TEST files
+        themselves already match one of the rules above; this entry is for
+        the fixture DATA under tests/fixtures/ itself.
+        tests/fixtures/fetch-v1/ and tests/fixtures/api-surface/ are
+        unconditionally protected, so neither ever reaches it.
+"""
     if path.startswith("go/") and path.endswith("_test.go"):
         return True
     return path.startswith(_TEST_PATH_PREFIXES)
@@ -1163,9 +1018,8 @@ def carve_out_problems(sources: dict[str, str]) -> list[str]:
 # its pull request's force-push timeline, and two more revisions of one
 # already-protected manifest file — never executed, sourced or evaluated as
 # code. manifest_bump_problems parses each ecosystem's declarative config
-# format with Python's own stdlib (tomllib/json) exactly the way
-# decode_contents already treats docs/support.md's bytes as data — a parse,
-# never a run.
+# format with Python's own stdlib (tomllib/json) as data — a parse, never a
+# run.
 #
 # The pull request's own `author` field cannot be forged by opening a pull
 # request: GitHub assigns the `dependabot[bot]` identity only to one its own
@@ -1509,300 +1363,6 @@ def manifest_bump_problems(ecosystem: str, old_bytes: bytes, new_bytes: bytes, d
     return problems
 
 
-# ----------------------------------------------- served fixture trees (chtypes#344)
-#
-# A fixture tree generated from a served, release-signed asset merges itself
-# only when the head's tree under it is byte-identical to a fresh extraction
-# of that asset. FAIL CLOSED, by the lead's ruling on #344: a download that
-# fails, a signature that does not verify under the RELEASE key, a sha256
-# that does not match the signed SHA256SUMS, a tree read that fails or is
-# truncated, a missing file, an extra file, one differing byte or mode — and
-# any exception at all — leaves the touch protected. Nothing passes on an
-# error.
-#
-# The download and both verifications are main's own scripts/fetch.sh
-# --release-file, run with every CHTYPES_* variable removed from its
-# environment, so the trust anchor is the release key embedded in main's
-# fetch.sh (never tests/fixtures/fetch/test-key/, which a pull request could
-# edit) and the source is fetch.sh's own default host (never anything the
-# pull request names). As a second guard, fetch.sh's own success line must
-# name the release key's id: a run that verified under any other key —
-# CHTYPES_TRUSTED_KEYS, if it ever reached the subprocess — refuses even
-# though it exited 0.
-#
-# The head's side is one API read: the git trees API, recursively, at the
-# judged head sha — every path's mode and git blob id, never a file's bytes,
-# never a checkout. A git blob id is a content hash
-# (sha1("blob <len>\0" + bytes)), so comparing the two path -> (mode, blob
-# id) maps is a byte-for-byte comparison of every file at no further cost.
-# The served side is read from the verified tarball's members in memory,
-# never extracted to disk, never executed.
-
-RELEASE_KEY_ID = "deb275922dbff76e"
-FETCH_SH = os.path.join(ROOT, "scripts", "fetch.sh")
-# fetch.sh's own `say` line for a SHA256SUMS.sig it verified, and the
-# SIG_STATUS its verifier prints for the embedded release key — the only
-# key this gate accepts. Anchored to the start of a line, ANSI bold allowed.
-_RELEASE_KEY_VERIFIED_RE = re.compile(r"^(?:\x1b\[1m)?==> SHA256SUMS\.sig verified: ed25519 key "
-                                      + RELEASE_KEY_ID + r" \(the release key\)(?:\x1b\[0m)?\r?$", re.M)
-# fetch.sh's own publish-window retries take about 70 s at most; curl has no
-# overall timeout of its own, so this one bounds a hung connection. The gate
-# and the enqueue step each run one fetch, inside the job's 10 minutes.
-SERVED_FETCH_TIMEOUT_S = 180
-
-
-def git_blob_sha(data: bytes) -> str:
-    """The git blob id of `data`, exactly as `git hash-object` computes it."""
-    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
-
-
-def served_glob_of(path: str) -> ProtectedGlob | None:
-    """The served-fixture entry (a PROTECTED_GLOBS entry with `served_asset`
-    set, chtypes#344) that covers `path`, or None."""
-    for g in PROTECTED_GLOBS:
-        if g.served_asset is not None and _covers(g, path):
-            return g
-    return None
-
-
-def served_globs_touched(files: list[dict]) -> list[ProtectedGlob]:
-    """Every served-fixture entry the pull request touches (rename and
-    deletion handling: _touched_paths), each once, in PROTECTED_GLOBS
-    order."""
-    touched = {id(g) for g in map(served_glob_of, _touched_paths(files)) if g is not None}
-    return [g for g in PROTECTED_GLOBS if id(g) in touched]
-
-
-def first_served_fixture_touch(files: list[dict], proofs: dict[str, list[str]]
-                               ) -> tuple[str, ProtectedGlob, list[str]] | None:
-    """The first (path, glob, why) a pull request's file list touches that a
-    served-fixture entry covers and `proofs` does not excuse: `proofs` maps
-    an asset to served_fixture_problems' result for it, and only an EMPTY
-    list — the comparison ran and found nothing — excuses. An asset missing
-    from `proofs` was never compared, which is a refusal, never a pass."""
-    for path in _touched_paths(files):
-        g = served_glob_of(path)
-        if g is None:
-            continue
-        problems = proofs.get(g.served_asset)
-        if problems is None:
-            return path, g, [f"the head's tree was never compared with the served {g.served_asset}"]
-        if problems:
-            return path, g, problems
-    return None
-
-
-def served_tree_prefix(g: ProtectedGlob) -> str:
-    """'DIR/' for a served-fixture entry's 'DIR/**' pattern; anything else
-    raises, so a mis-shaped entry can only ever refuse."""
-    m = _TRAILING_DOUBLE_STAR.match(g.pattern)
-    if g.served_asset is None or not m:
-        raise ValueError(f"{g.pattern!r} is not a served-fixture entry of the 'DIR/**' shape")
-    return m["dir"] + "/"
-
-
-def head_tree_entries(payload: object, prefix: str) -> tuple[dict[str, tuple[str, str]], list[str]]:
-    """(path below `prefix` -> (mode, sha)) for every entry under `prefix` in
-    a `git/trees/{sha}?recursive=1` response that is not itself a directory
-    — a symlink (120000), an executable (100755) or a submodule (160000)
-    included, each with its own mode, so it can only ever differ from a
-    served regular file — and every reason the response cannot be trusted:
-    `truncated` not exactly false, no `tree` list, or `prefix` itself
-    missing or not a directory."""
-    if not isinstance(payload, dict):
-        return {}, [f"the trees API returned {type(payload).__name__}, not an object"]
-    if payload.get("truncated") is not False:
-        return {}, [f"the trees API response is truncated={payload.get('truncated')!r}, not false; an incomplete "
-                    "listing cannot prove a tree identical"]
-    tree = payload.get("tree")
-    if not isinstance(tree, list):
-        return {}, ["the trees API response carries no tree list"]
-    root = prefix.rstrip("/")
-    entries: dict[str, tuple[str, str]] = {}
-    problems: list[str] = []
-    root_seen = False
-    for e in tree:
-        path = e.get("path") if isinstance(e, dict) else None
-        if not isinstance(path, str):
-            problems.append(f"the trees API listed an entry with no path: {e!r}")
-        elif path == root:
-            root_seen = True
-            if e.get("type") != "tree":
-                problems.append(f"{root} is a {e.get('type')} (mode {e.get('mode')}) on the head, not a directory")
-        elif path.startswith(prefix) and e.get("type") != "tree":
-            entries[path[len(prefix):]] = (str(e.get("mode")), str(e.get("sha")))
-    if not root_seen:
-        problems.append(f"the head carries no {root} at all")
-    return entries, problems
-
-
-def served_tarball_entries(data: bytes, untracked: tuple[str, ...]) -> tuple[dict[str, tuple[str, str]], list[str]]:
-    """(member path -> (git mode, git blob id)) for every regular-file member
-    of a gzip tarball, read in memory and never extracted to disk, with the
-    `untracked` prefixes left out — and every reason the tarball cannot be
-    compared: unreadable, a member that is not a regular file or a directory
-    (a symlink, a hard link, a device), an absolute or `..` name, a
-    duplicate, or no tracked file at all. A leading './' is dropped and a
-    directory member skipped, which is what an extraction does with both.
-    The mode is git's: 100755 when the owner may execute, 100644 otherwise."""
-    entries: dict[str, tuple[str, str]] = {}
-    problems: list[str] = []
-    try:
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-            for m in tar.getmembers():
-                name = m.name
-                while name.startswith("./"):
-                    name = name[2:]
-                if m.isdir():
-                    continue
-                if not name or name.startswith("/") or ".." in name.split("/") or "\\" in name:
-                    problems.append(f"the served tarball has a member with an unsafe name: {m.name!r}")
-                    continue
-                if not m.isfile():
-                    problems.append(f"the served tarball's member {m.name!r} is not a regular file")
-                    continue
-                if name.startswith(untracked):
-                    continue
-                if name in entries:
-                    problems.append(f"the served tarball carries {name!r} twice")
-                    continue
-                f = tar.extractfile(m)
-                if f is None:
-                    problems.append(f"the served tarball's member {m.name!r} could not be read")
-                    continue
-                entries[name] = ("100755" if m.mode & 0o100 else "100644", git_blob_sha(f.read()))
-    except (tarfile.TarError, OSError, EOFError, ValueError) as e:
-        return {}, [f"the served tarball could not be read: {type(e).__name__}: {e}"]
-    if not entries and not problems:
-        problems.append("the served tarball carries no file this repository tracks")
-    return entries, problems
-
-
-def served_tree_problems(head: dict[str, tuple[str, str]], served: dict[str, tuple[str, str]]) -> list[str]:
-    """Every way the head's tree (head_tree_entries) differs from the served
-    extraction (served_tarball_entries): a file the served set has and the
-    head does not, one the head has and the served set does not, a file
-    whose bytes differ (blob id), and one whose bytes match but whose mode
-    does not. [] means byte-identical, file for file."""
-    def names(paths: list[str]) -> str:
-        return ", ".join(paths[:5]) + (f" and {len(paths) - 5} more" if len(paths) > 5 else "")
-
-    problems = []
-    missing = sorted(set(served) - set(head))
-    extra = sorted(set(head) - set(served))
-    both = sorted(set(head) & set(served))
-    content = [p for p in both if head[p][1] != served[p][1]]
-    mode = [p for p in both if head[p][1] == served[p][1] and head[p][0] != served[p][0]]
-    if missing:
-        problems.append(f"{len(missing)} served file(s) missing from the head: {names(missing)}")
-    if extra:
-        problems.append(f"{len(extra)} file(s) on the head that the served set does not have: {names(extra)}")
-    if content:
-        problems.append(f"{len(content)} file(s) whose bytes differ from the served set: {names(content)}")
-    if mode:
-        problems.append(f"{len(mode)} file(s) whose mode differs from the served set: "
-                        + names([f"{p} ({head[p][0]}, served {served[p][0]})" for p in mode]))
-    return problems
-
-
-def _fetch_tail(log: str) -> str:
-    """fetch.sh's last refusal line (`fetch.sh: …`), ANSI stripped, for a
-    refusal's detail — or its last non-empty line."""
-    lines = [re.sub(r"\x1b\[[0-9;]*m", "", line).strip() for line in (log or "").splitlines()]
-    lines = [line for line in lines if line]
-    named = [line for line in lines if line.startswith("fetch.sh:")]
-    return (named or lines or ["<no output>"])[-1]
-
-
-def served_fixture_problems(g: ProtectedGlob, read_tree: Callable[[], object],
-                            download: Callable[[str, str], tuple[int, str]]) -> list[str]:
-    """THE served-fixture classification (chtypes#344) — [] only when the
-    head's tree under `g`'s directory is byte-identical, file for file and
-    mode for mode, to a fresh extraction of the served `g.served_asset`
-    (its `served_untracked` members left out), and that asset was fetched
-    and verified under the release key. Every other outcome is a non-empty
-    list of reasons, and so a refusal: `read_tree()` (the head's recursive
-    tree listing) failing or truncated; `download(asset, dest)` — fetch.sh,
-    which verifies SHA256SUMS.sig under the release key and the asset's
-    sha256 against that signed SHA256SUMS — exiting non-zero for any reason
-    (no network, an HTTP error, a bad or foreign signature, a sha mismatch),
-    or exiting 0 without naming the release key, or installing nothing; an
-    unreadable tarball; and any exception at all, which is caught here and
-    reported, never raised past the gate as anything that could pass.
-
-    Both `read_tree` and `download` are injected, so --selftest drives this
-    very function, with fabricated trees and with main's real fetch.sh
-    pointed at fabricated local releases, and never the network. The gate
-    passes a trees-API read and fetch_served_asset."""
-    asset = g.served_asset
-    try:
-        prefix = served_tree_prefix(g)
-        head, problems = head_tree_entries(read_tree(), prefix)
-        if problems:
-            return problems
-        with tempfile.TemporaryDirectory(prefix="policy-merge-served-") as dest:
-            rc, log = download(asset, dest)
-            if rc != 0:
-                return [f"scripts/fetch.sh --release-file {asset} exited {rc}: {_fetch_tail(log)}"]
-            if not _RELEASE_KEY_VERIFIED_RE.search(log or ""):
-                return [f"scripts/fetch.sh --release-file {asset} exited 0 but did not report SHA256SUMS.sig verified "
-                        f"under the release key {RELEASE_KEY_ID}; a set signed by any other key never excuses"]
-            with open(os.path.join(dest, asset), "rb") as f:
-                data = f.read()
-        served, problems = served_tarball_entries(data, g.served_untracked)
-        if problems:
-            return problems
-        return served_tree_problems(head, served)
-    except Exception as e:  # noqa: BLE001 — fail closed: every error is a refusal, never a pass and never a crash
-        return [f"the comparison with the served {asset} did not complete ({type(e).__name__}: {e}); an error "
-                "never excuses"]
-
-
-def run_fetch_sh(asset: str, dest: str, extra_args: tuple[str, ...] = (), extra_env: dict[str, str] | None = None
-                 ) -> tuple[int, str]:
-    """(exit status, stdout+stderr) of main's own `scripts/fetch.sh
-    --release-file ASSET --dest DEST`, with every CHTYPES_* variable removed
-    from its environment first. `extra_args`/`extra_env` exist for --selftest
-    alone, which points it at a fabricated local release (`--url file://…`)
-    under the fixture test key; the gate never passes either — see
-    fetch_served_asset."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("CHTYPES_")}
-    env.update(extra_env or {})
-    proc = subprocess.run([FETCH_SH, "--release-file", asset, "--dest", dest, *extra_args], capture_output=True,
-                          text=True, errors="replace", env=env, timeout=SERVED_FETCH_TIMEOUT_S)
-    return proc.returncode, proc.stdout + proc.stderr
-
-
-def fetch_served_asset(asset: str, dest: str) -> tuple[int, str]:
-    """The gate's download: fetch.sh's own default source and its embedded
-    release key, nothing else — no `--url`, no `--tag`, no CHTYPES_TRUSTED_KEYS,
-    no CHTYPES_ALLOW_UNSIGNED, no CHTYPES_ARTIFACTS_URL, so nothing a pull
-    request controls can choose the source or the key."""
-    return run_fetch_sh(asset, dest)
-
-
-def gather_served_fixtures(repo: str, files: list[dict], head_sha: str, *,
-                           read_tree: Callable[[], object] | None = None,
-                           download: Callable[[str, str], tuple[int, str]] | None = None) -> dict[str, list[str]]:
-    """served asset -> served_fixture_problems' verdict, for every
-    served-fixture entry the diff touches — at ZERO cost (no API read, no
-    download) when it touches none, or when it touches an unconditionally
-    protected file, which decide() refuses first whatever this says. The
-    head's tree is one `git/trees/{head_sha}?recursive=1` read: the judged
-    commit's paths, modes and blob ids, never a file's bytes."""
-    if first_protected_touch(files) is not None:
-        return {}
-    globs = served_globs_touched(files)
-    if not globs:
-        return {}
-
-    def tree() -> object:
-        return gh_object(f"repos/{repo}/git/trees/{head_sha}?recursive=1")
-
-    return {g.served_asset: served_fixture_problems(g, read_tree or tree, download or fetch_served_asset)
-            for g in globs}
-
-
 # ------------------------------------------------------- the CONTRIBUTING.md guide
 
 
@@ -1848,17 +1408,21 @@ def guide_problems(guide_text: str, expected_block: str) -> list[str]:
     return problems or ["the guide's block differs from PROTECTED_GLOBS (order or whitespace)"]
 
 
-# The check-run names branch protection requires on `main`, copied from it.
-# --check-ci-names fails when this and ci.yml's blocking jobs disagree; see
-# the header for why the list lives here rather than being read at run time.
+# The check-run names ci.yml's blocking jobs report, which branch protection
+# on `main` requires (copied from it). --check-ci-names fails when this and
+# ci.yml's blocking jobs disagree; see the header for why the list lives here
+# rather than being read at run time. Contexts reported by OTHER workflows
+# (v1.yml, v1-abi.yml) are required by branch protection too but are not
+# listed: this list only stops the policy merge from attempting an enqueue it
+# already knows would fail, branch protection and the merge queue have the
+# final word, and --check-ci-names can only derive names from ci.yml.
 REQUIRED_CHECKS = (
-    "abi — the header and every binding agree",
+    "checks — repository scripts and their selftests (no network, no artifact)",
     "go — build, vet, standalone check (no artifacts)",
     "python — ruff, import, suite (no artifacts)",
     "ts — build, typecheck, suite (no artifacts)",
     "rust — build, clippy, fmt, suite (no artifacts)",
-    "abi-fixtures — the ABI-revision refusal, all four bindings, no published artifact",
-    "artifacts — published lines, linux-amd64, every suite runs the golden set",
+    "examples — every binding's tour runs every section (skips by name until enrolled)",
     "lint-go — golangci-lint (go/.golangci.yml)",
     "lint-ts — biome (ts/biome.json)",
     "lint-actions — actionlint + shellcheck",
@@ -1873,29 +1437,19 @@ REQUIRED_CHECK_APP = "github-actions"
 
 # ---------------------------------------------------- test-counts (chtypes#285 §1b)
 #
-# Which check-run name to read each `chtypes-count` line from. Four suites,
-# each printed from TWO jobs (its own no-artifact job, and the `artifacts`
-# job's own step for that suite — see scripts/check-suite.sh and
-# scripts/lib/standalone_census.py, which print the line), plus the
-# golden-case count, sourced from wherever the goldens are already counted
-# TODAY (the `artifacts` job's go step — see standalone_census.py's own
-# docstring). The four `-artifacts` labels and `GOLDEN_LABEL` share ONE check
-# name because all five lines are printed by steps inside that SAME job — one
-# job log read serves all five, not five separate ones.
-_ARTIFACTS_CHECK = "artifacts — published lines, linux-amd64, every suite runs the golden set"
+# Which check-run name to read each `chtypes-count` line from: the four
+# suites, each printed by its own no-artifact job (see scripts/check-suite.sh
+# and scripts/lib/standalone_census.py, which print the line). The `artifacts`
+# job that used to print a second line per suite, and the golden-case count,
+# are gone with ABI v0: goldens are an OCI referrer under v1 and the parity
+# gates (`v1-parity`, `v1-abi-parity`) read their reports instead.
 SUITE_CHECK_NAME: dict[str, str] = {
     "go-no-artifacts": "go — build, vet, standalone check (no artifacts)",
     "python-no-artifacts": "python — ruff, import, suite (no artifacts)",
     "ts-no-artifacts": "ts — build, typecheck, suite (no artifacts)",
     "rust-no-artifacts": "rust — build, clippy, fmt, suite (no artifacts)",
-    "go-artifacts": _ARTIFACTS_CHECK,
-    "python-artifacts": _ARTIFACTS_CHECK,
-    "ts-artifacts": _ARTIFACTS_CHECK,
-    "rust-artifacts": _ARTIFACTS_CHECK,
 }
 SUITE_LABELS: tuple[str, ...] = tuple(SUITE_CHECK_NAME)
-GOLDEN_LABEL = "golden-cases"
-GOLDEN_CHECK_NAME = _ARTIFACTS_CHECK
 
 CONDITIONS = {
     "fork": "condition 1, the head is a branch of this repository",
@@ -1904,15 +1458,12 @@ CONDITIONS = {
     "protected": "condition 5, no touched file (current or, for a rename, old path) matches a protected glob, "
                  "every touched binding's source has an api-surface verdict of changed=false on the head, a "
                  "touched ecosystem manifest/lockfile pair (chtypes#285 §2) is excused only by a proven "
-                 "dependabot patch-level dev-dependency bump of that ecosystem, and a touched served fixture "
-                 "tree (chtypes#344) only by being byte-identical to its release-signed served asset",
+                 "dependabot patch-level dev-dependency bump of that ecosystem",
     "checks": "condition 2, every required check passed",
     "test-counts": "condition 7 (chtypes#285 §1b), only when the diff touches a test or fixture path: no "
-                   "suite's executed-test count, and no golden-case count, fell below main's last green ci "
-                   "push run",
+                   "suite's executed-test count fell below main's last green ci push run",
     "mergeable": "GitHub reports no merge conflict",
     "review": "condition 4, no requested changes and no review conversation",
-    "bytes": "condition 6, docs/support.md — when touched — is main's own regeneration byte for byte",
 }
 
 
@@ -1966,31 +1517,21 @@ def check_run_problems(check_runs: list[dict], required: tuple[str, ...]) -> lis
     return problems
 
 
-def first_difference(a: bytes, b: bytes) -> tuple[int, int]:
-    """(byte offset, 1-based line) of the first difference between two byte strings."""
-    n = min(len(a), len(b))
-    i = next((k for k in range(n) if a[k] != b[k]), n)
-    return i, a[:i].count(b"\n") + 1
-
-
 @dataclass(frozen=True)
 class TestCountFacts:
     """Everything `test_count_problems` needs, already fetched. `head`/`main`
     map a SUITE_LABELS entry to (ran, skipped); a label absent from a dict is
-    exactly a missing count (see gather_test_counts). Empty dicts and None
-    golden counts are the correct, zero-API-call value for a pull request
-    that does not touch a test or fixture path — `decide()` never even looks
-    at this unless `touches_test_or_fixture_path(files)` is true."""
+    exactly a missing count (see gather_test_counts). Empty dicts are the
+    correct, zero-API-call value for a pull request that does not touch a
+    test or fixture path — `decide()` never even looks at this unless
+    `touches_test_or_fixture_path(files)` is true."""
     head: dict[str, tuple[int, int]]
     main: dict[str, tuple[int, int]]
-    head_golden: int | None
-    main_golden: int | None
 
 
-def test_count_problems(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]],
-                        head_golden: int | None, main_golden: int | None) -> list[str]:
-    """Every way chtypes#285 §1b's rule fails: a suite's (or the golden set's)
-    executed-test count on the head is lower than main's last green `ci` push
+def test_count_problems(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]]) -> list[str]:
+    """Every way chtypes#285 §1b's rule fails: a suite's executed-test count
+    on the head is lower than main's last green `ci` push
     run, checked PER SUITE, never summed — one suite dropping is a refusal
     even while another rises. Only the `ran` half of each pair is compared:
     skips are printed for a human but never compared directly, because a test
@@ -2011,40 +1552,25 @@ def test_count_problems(head: dict[str, tuple[int, int]], main: dict[str, tuple[
             continue
         if h[0] < m[0]:
             problems.append(f"{label}: ran {h[0]}, main's last green ci push ran {m[0]}")
-    if head_golden is None or main_golden is None:
-        problems.append(f"{GOLDEN_LABEL}: {'no' if head_golden is None else 'a'} count on the head, "
-                        f"{'no' if main_golden is None else 'a'} count on main's last green ci push — a "
-                        "missing count is a drop")
-    elif head_golden < main_golden:
-        problems.append(f"{GOLDEN_LABEL}: checked {head_golden}, main's last green ci push checked {main_golden}")
     return problems
 
 
 def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: dict,
            files: list[dict], check_runs: list[dict], reviews: list[dict],
-           review_comments: list[dict], head_bytes: dict[str, bytes] | None = None,
-           regenerated: dict[str, bytes] | None = None, test_counts: TestCountFacts | None = None,
+           review_comments: list[dict], test_counts: TestCountFacts | None = None,
            api_verdicts: dict[str, list[str]] | None = None, dependabot_ecosystem: str | None = None,
-           served_fixtures: dict[str, list[str]] | None = None,
            required: tuple[str, ...] = REQUIRED_CHECKS) -> Refusal | None:
     """The first condition that fails, or None when every condition holds.
-    With `regenerated` None (the gate), the byte HALF of condition 6 is not
-    checked — but a docs/support.md that was added, deleted or renamed rather
-    than modified is still refused at gate time; that much is pure API data.
-    `test_counts` has no such split: gather_test_counts reads everything
-    condition 7 needs (job logs, never a head file) up front, so both `gate`
-    and `enqueue` check it fully. `api_verdicts` (gather_api_verdicts, the
-    api-surface job's log for this head) is the same: None or {} is no
-    verdict at all, which keeps every touched binding's source protected.
-    `dependabot_ecosystem` (gather_dependabot_ecosystem, chtypes#285 §2) has
-    no such split either — it reads everything it needs (a commit and two
-    manifest revisions, never a head file) up front, zero cost unless the
-    file list alone already looks like a candidate: None excuses nothing, so
-    every ecosystem's manifest and lockfile stays exactly as protected as
-    before this parameter existed. `served_fixtures` (gather_served_fixtures,
-    chtypes#344) is the same again: served asset -> served_fixture_problems'
-    verdict, read up front by both `gate` and `enqueue`; an asset it does not
-    name, or names with any problem, leaves its fixture tree protected."""
+    gather_test_counts reads everything condition 7 needs (job logs, never a
+    head file) up front, so both `gate` and `enqueue` check it fully.
+    `api_verdicts` (gather_api_verdicts, the api-surface job's log for this
+    head) is the same: None or {} is no verdict at all, which keeps every
+    touched binding's source protected. `dependabot_ecosystem`
+    (gather_dependabot_ecosystem, chtypes#285 §2) is the same again — it
+    reads everything it needs (a commit and two manifest revisions, never a
+    head file) up front, zero cost unless the file list alone already looks
+    like a candidate: None excuses nothing, so every ecosystem's manifest and
+    lockfile stays exactly as protected as before this parameter existed."""
     # fork (condition 1)
     if run_head_repo is not None and run_head_repo != repo:
         return Refusal("fork", f"the ci run's head is in {run_head_repo or '<no repository>'}, not {repo}")
@@ -2089,18 +1615,6 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
         return Refusal("protected", f"{path} matches the protected glob `{glob.pattern}` ({glob.reason}); excused "
                                     f"only for a proven dependabot patch-level dev-dependency bump of "
                                     f"{glob.dependabot_ecosystem}")
-    # The served-fixture class (chtypes#344), still condition 5 and still
-    # before `checks`: excused only by served_fixture_problems' empty verdict
-    # — the head's tree under the glob byte-identical to the release-signed
-    # served asset, fetched by main's fetch.sh — never by anything the pull
-    # request's own ci run produced.
-    served_touch = first_served_fixture_touch(files, served_fixtures or {})
-    if served_touch is not None:
-        path, glob, why = served_touch
-        more = f"; and {len(why) - 3} more" if len(why) > 3 else ""
-        return Refusal("protected", f"{path} matches the protected glob `{glob.pattern}` ({glob.reason}); excused "
-                                    f"only when the head's tree under it is byte-identical to the release-signed "
-                                    f"{glob.served_asset}, and it is not proven: " + "; ".join(why[:3]) + more)
     # The binding-source class (chtypes#285 §1), still condition 5 and still
     # before `checks`: the api-surface verdicts it reads were written by the
     # pull request's own copy of ci.yml and scripts/, which the unconditional
@@ -2123,8 +1637,8 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
     # touches no test or fixture path skips this at zero cost, both here and
     # in gather_test_counts, which never reads a job log in that case.
     if touches_test_or_fixture_path(files):
-        tc = test_counts or TestCountFacts(head={}, main={}, head_golden=None, main_golden=None)
-        problems = test_count_problems(tc.head, tc.main, tc.head_golden, tc.main_golden)
+        tc = test_counts or TestCountFacts(head={}, main={})
+        problems = test_count_problems(tc.head, tc.main)
         if problems:
             more = f"; and {len(problems) - 3} more" if len(problems) > 3 else ""
             return Refusal("test-counts", "; ".join(problems[:3]) + more)
@@ -2144,22 +1658,6 @@ def decide(*, repo: str, expected_head_sha: str, run_head_repo: str | None, pr: 
     blockers = sorted(user for user, state in latest.items() if state == "CHANGES_REQUESTED")
     if blockers:
         return Refusal("review", "changes requested by " + ", ".join(blockers))
-
-    # bytes (condition 6) — only when the diff touches docs/support.md
-    support = next((f for f in files if f.get("filename") == "docs/support.md"), None)
-    if support is not None:
-        if support.get("status") != "modified":
-            return Refusal("bytes", f"docs/support.md is {support.get('status')}, not modified; a policy merge "
-                                    "only verifies a plain regeneration")
-        if regenerated is not None:
-            if head_bytes is None:
-                raise ValueError("a byte comparison needs the head's bytes")
-            want, got = regenerated["docs/support.md"], head_bytes["docs/support.md"]
-            if want != got:
-                offset, line = first_difference(want, got)
-                return Refusal("bytes", f"docs/support.md at the head differs from main's regeneration at byte "
-                                        f"{offset} (line {line}); the head has {len(got)} bytes, the regeneration "
-                                        f"{len(want)}")
     return None
 
 
@@ -2321,38 +1819,6 @@ def head_file(repo: str, path: str, sha: str) -> bytes:
     return decode_contents(gh_object(f"repos/{repo}/contents/{path}?ref={sha}"), path)
 
 
-def regenerate_guarded_file(path: str, head_bytes: bytes, scratch_path: str,
-                            run: Callable[..., object] = subprocess.run) -> bytes:
-    """What `enqueue` compares a GUARDED_FILES entry's head bytes against:
-    main's own regeneration, run over the HEAD's OWN copy — never main's
-    checked-out tree (chtypes#316). The old workflow step seeded the scratch
-    file with `cp docs/support.md $SCRATCH` from main's own checkout, so a
-    pull request's prose was compared against MAIN's prose plus a freshly
-    computed block, and any edit outside the generated block always differed.
-
-    Writing `head_bytes` — fetched as DATA through the contents API by
-    head_file(), never executed, sourced or parsed as code — into the scratch
-    file first means the generator (GUARDED_FILE_GENERATORS[path], main's own
-    script and nothing of the head) sees the head's own prose and markers,
-    and rewrites only the generated block in place
-    (scripts/support-matrix.sh's own read-modify-write contract on --out).
-    Regenerating a page whose own prose and block already match the live
-    index reproduces it byte for byte, whatever its prose says — which is
-    exactly what makes a prose-only edit pass and a stale or hand-edited
-    block refuse.
-
-    `run` is injectable so --selftest can prove this composition — the
-    scratch file is seeded from `head_bytes`, nothing else, before the
-    generator ever sees it — with a fake generator standing in for the real
-    script, which needs the network and a tagged git history this file's own
-    selftest must not depend on."""
-    with open(scratch_path, "wb") as f:
-        f.write(head_bytes)
-    run([GUARDED_FILE_GENERATORS[path], "--out", scratch_path], check=True)
-    with open(scratch_path, "rb") as f:
-        return f.read()
-
-
 # --------------------------------------------- test-counts (chtypes#285 §1b)
 #
 # A check run's own `output.summary` and `output.text` are NOT populated for
@@ -2372,11 +1838,9 @@ def regenerate_guarded_file(path: str, head_bytes: bytes, scratch_path: str,
 # id>` returned the same job, by name and run_id). Both endpoints need the
 # `actions: read` permission, which the `automerge` job does not otherwise
 # use; policy-merge.yml documents why it is safe to add: this reads the
-# ALREADY-COMPLETED run's own log text as data, through the API, exactly the
-# same pwn-request posture as the docs/support.md byte comparison — nothing
+# ALREADY-COMPLETED run's own log text as data, through the API — nothing
 # here executes, sources or parses-as-code anything of the head.
 _COUNT_RE = re.compile(r"chtypes-count suite=(\S+) ran=(\d+) skipped=(\d+)")
-_GOLDEN_COUNT_RE = re.compile(r"chtypes-count golden-cases=(\d+)")
 
 
 def parse_suite_counts(log_text: str) -> dict[str, tuple[int, int]]:
@@ -2384,20 +1848,8 @@ def parse_suite_counts(log_text: str) -> dict[str, tuple[int, int]]:
     job's log text, keyed by label — the last line for a given label wins,
     the same "several runs, take what actually happened" posture
     check_run_problems applies to a re-run's check runs. A job log commonly
-    carries several labels at once: the `artifacts` job prints four (one per
-    suite step)."""
+    carries several labels at once."""
     return {m.group(1): (int(m.group(2)), int(m.group(3))) for m in _COUNT_RE.finditer(log_text)}
-
-
-def parse_golden_count(log_text: str) -> int | None:
-    """The last `chtypes-count golden-cases=<n>` line in a job's log text, or
-    None if it never printed one (a fetch failure before the go suite step
-    ran, an older log predating this feature, or — genuinely — the
-    no-artifact job's log, which never prints this line at all)."""
-    last = None
-    for m in _GOLDEN_COUNT_RE.finditer(log_text):
-        last = int(m.group(1))
-    return last
 
 
 def readable_job_ids(runs: list[dict]) -> dict[str, int]:
@@ -2425,8 +1877,8 @@ def latest_green_push_jobs(repo: str) -> dict[str, int]:
     own tip judging itself, which is what "main's last green ci push run"
     means. Empty if none is found — a fresh repository, or immediately after
     ci.yml itself first gained the `push` trigger — which test_count_problems
-    reads as every suite (and the golden count) being a missing count on the
-    main side, refusing rather than guessing."""
+    reads as every suite being a missing count on the main side, refusing
+    rather than guessing."""
     runs = gh_items(f"repos/{repo}/actions/workflows/ci.yml/runs?branch={BASE_BRANCH}&event=push&status=success"
                     "&per_page=1", ".workflow_runs[]")
     if not runs:
@@ -2436,17 +1888,17 @@ def latest_green_push_jobs(repo: str) -> dict[str, int]:
 
 
 def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> TestCountFacts:
-    """The head's and main's chtypes-count facts, or four empty/None values
-    at ZERO API cost when the diff does not touch a test or fixture path —
+    """The head's and main's chtypes-count facts, or two empty dicts at ZERO
+    API cost when the diff does not touch a test or fixture path —
     `decide()` would ignore them either way, but there is no reason to read
-    five job logs twice over for a pull request this condition never looks
+    four job logs twice over for a pull request this condition never looks
     at."""
     if not touches_test_or_fixture_path(files):
-        return TestCountFacts(head={}, main={}, head_golden=None, main_golden=None)
+        return TestCountFacts(head={}, main={})
     head_job_id = readable_job_ids(check_runs)
     main_job_id = latest_green_push_jobs(repo)
 
-    def read(job_id_by_name: dict[str, int]) -> tuple[dict[str, tuple[int, int]], int | None]:
+    def read(job_id_by_name: dict[str, int]) -> dict[str, tuple[int, int]]:
         counts: dict[str, tuple[int, int]] = {}
         logs: dict[int, str] = {}
 
@@ -2462,13 +1914,9 @@ def gather_test_counts(repo: str, files: list[dict], check_runs: list[dict]) -> 
             found = parse_suite_counts(log_of(job_id)).get(label)
             if found is not None:
                 counts[label] = found
-        golden_job_id = job_id_by_name.get(GOLDEN_CHECK_NAME)
-        golden = parse_golden_count(log_of(golden_job_id)) if golden_job_id is not None else None
-        return counts, golden
+        return counts
 
-    head_counts, head_golden = read(head_job_id)
-    main_counts, main_golden = read(main_job_id)
-    return TestCountFacts(head=head_counts, main=main_counts, head_golden=head_golden, main_golden=main_golden)
+    return TestCountFacts(head=read(head_job_id), main=read(main_job_id))
 
 
 def api_surface_job_id(check_runs: list[dict]) -> int | None:
@@ -2576,8 +2024,8 @@ def gather_dependabot_ecosystem(repo: str, pr: dict, files: list[dict]) -> str |
     provenance_problems), the pull request's force-push timeline once
     (force_push_actors) and, only when there is exactly one parent to read
     the pre-bump manifest at, the manifest's bytes at that parent and at the
-    head — contents-API reads, same call as head_file() already makes for
-    docs/support.md, never main's tip and never anything executed. The
+    head — contents-API reads (head_file), never main's tip and never
+    anything executed. The
     actual decision is classify_dependabot_bump, which has its own test."""
     candidate = candidate_dependabot_ecosystem(files)
     if candidate is None:
@@ -2718,15 +2166,6 @@ def refuse(refusal: Refusal, where: str) -> int:
     return 0
 
 
-def report_served_fixtures(verdicts: dict[str, list[str]]) -> None:
-    """One log line per served asset compared (chtypes#344), whatever decide()
-    then makes of it — a refusal names only the first condition that fails."""
-    for asset, problems in verdicts.items():
-        print(f"policy-merge: served fixtures {asset}: "
-              + ("byte-identical to the release-signed served set" if not problems
-                 else "NOT proven identical — " + "; ".join(problems)))
-
-
 # ----------------------------------------------------------- the subcommands
 
 
@@ -2748,19 +2187,14 @@ def cmd_gate(args: argparse.Namespace) -> int:
     test_counts = gather_test_counts(args.repo, facts.files, facts.check_runs)
     api_verdicts = gather_api_verdicts(args.repo, facts.files, facts.check_runs, sha)
     dependabot_ecosystem = gather_dependabot_ecosystem(args.repo, facts.pr, facts.files)
-    served_fixtures = gather_served_fixtures(args.repo, facts.files, sha)
-    report_served_fixtures(served_fixtures)
     refusal = decide(repo=args.repo, expected_head_sha=sha, run_head_repo=run_head_repo, pr=facts.pr,
                      files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
                      review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts,
-                     dependabot_ecosystem=dependabot_ecosystem, served_fixtures=served_fixtures)
+                     dependabot_ecosystem=dependabot_ecosystem)
     if refusal:
         output(candidate=0)
         return refuse(refusal, f"PR #{number} at {sha[:12]}")
-    support_touched = any(f.get("filename") == "docs/support.md" for f in facts.files)
-    note = ("passes every condition but the docs/support.md byte comparison" if support_touched
-            else "passes every condition (does not touch docs/support.md)")
-    print(f"policy-merge: PR #{number} at {sha} {note}; proceeding to the enqueue check")
+    print(f"policy-merge: PR #{number} at {sha} passes every condition; proceeding to the enqueue check")
     output(candidate=1, pr=number, head_sha=sha)
     return 0
 
@@ -2771,58 +2205,31 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     test_counts = gather_test_counts(args.repo, facts.files, facts.check_runs)
     api_verdicts = gather_api_verdicts(args.repo, facts.files, facts.check_runs, sha)
     dependabot_ecosystem = gather_dependabot_ecosystem(args.repo, facts.pr, facts.files)
-    served_fixtures = gather_served_fixtures(args.repo, facts.files, sha)
-    report_served_fixtures(served_fixtures)
-    judged = dict(repo=args.repo, expected_head_sha=sha, run_head_repo=args.run_head_repo or None, pr=facts.pr,
-                  files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
-                  review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts,
-                  dependabot_ecosystem=dependabot_ecosystem, served_fixtures=served_fixtures)
-    # Every other condition first, fresh: a head that moved or vanished since
-    # the gate is `stale`, never a failed read of its bytes. This IS the
-    # primary defense against a moved head — see enqueue_pull_request()'s own
-    # docstring for why the mutation's expectedHeadOid is a backstop on this,
-    # not a replacement for it.
-    refusal = decide(**judged)
-    if refusal is None:
-        # Regenerated unconditionally, whether or not this pull request
-        # happens to touch a guarded file — it is cheap, and decide()'s own
-        # bytes condition only USES it when the diff actually touches
-        # docs/support.md. Each guarded file's generator runs over a scratch
-        # copy seeded with the HEAD's OWN bytes (chtypes#316) — never main's
-        # checked-out tree — so the comparison below is against what the
-        # head's own prose and markers regenerate to, not against main's.
-        head_bytes = {path: head_file(args.repo, path, sha) for path in GUARDED_FILES}
-        with tempfile.TemporaryDirectory(prefix="policy-merge-regen-") as scratch_dir:
-            regenerated = {path: regenerate_guarded_file(path, data, os.path.join(scratch_dir, os.path.basename(path)))
-                          for path, data in head_bytes.items()}
-        refusal = decide(**judged, head_bytes=head_bytes, regenerated=regenerated)
+    # Every condition, fresh: a head that moved or vanished since the gate is
+    # `stale`. This IS the primary defense against a moved head — see
+    # enqueue_pull_request()'s own docstring for why the mutation's
+    # expectedHeadOid is a backstop on this, not a replacement for it.
+    refusal = decide(repo=args.repo, expected_head_sha=sha, run_head_repo=args.run_head_repo or None, pr=facts.pr,
+                     files=facts.files, check_runs=facts.check_runs, reviews=facts.reviews,
+                     review_comments=facts.review_comments, test_counts=test_counts, api_verdicts=api_verdicts,
+                     dependabot_ecosystem=dependabot_ecosystem)
     where = f"PR #{number} at {sha[:12]}"
     if refusal:
         return refuse(refusal, where)
-    main_sha = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"], capture_output=True, text=True,
-                              check=True).stdout.strip()
-    touched_guarded = tuple(p for p in GUARDED_FILES if any(f.get("filename") == p for f in facts.files))
     # What to do next is a PURE decision (build_enqueue_plan) from facts
     # already in hand, so --selftest can prove the plan carries the judged
     # head sha and that a dry run's plan is never executed, without a
     # network call — see EnqueuePlan's own docstring.
     plan = build_enqueue_plan(facts.pr, sha, args.dry_run)
     if plan.dry_run:
-        extra = f" (regenerated from main at {main_sha[:12]})" if touched_guarded else ""
-        summary(f"policy-merge: DRY RUN. {where}: every condition holds{extra}; enqueuePullRequest was not called")
+        summary(f"policy-merge: DRY RUN. {where}: every condition holds; enqueuePullRequest was not called")
         return 0
     # The judging job never enqueues: an entry the built-in token enqueues
     # gets no merge_group run of `ci` and stalls (BUILT-IN TOKEN EVENTS START
     # NO WORKFLOW, above). It hands the judged node id and head sha to the
     # `enqueue` job, which mints the App token and calls the mutation.
     output(**handoff_outputs(plan, number))
-    if touched_guarded:
-        summary(f"policy-merge: every condition holds for PR #{number} (head {sha}); {', '.join(touched_guarded)} at "
-                f"the head matched main's regeneration (main at {main_sha[:12]}) byte for byte; handed to the "
-                "enqueue job")
-    else:
-        summary(f"policy-merge: every condition holds for PR #{number} (head {sha}); no guarded generated file was "
-                "touched; handed to the enqueue job")
+    summary(f"policy-merge: every condition holds for PR #{number} (head {sha}); handed to the enqueue job")
     return 0
 
 
@@ -2949,7 +2356,8 @@ def cmd_check_guide() -> int:
 REPO = "example/chtypes"
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
-GOOD = b"# Support\n\n| Line | Platforms |\n|---|---|\n| `25.8` | all |\n"
+# Arbitrary file bytes for decode_contents' round-trip selftest.
+GOOD = b"# Sample\n\n| Key | Value |\n|---|---|\n| `a` | b |\n"
 
 
 def _good_pr() -> dict:
@@ -2980,8 +2388,7 @@ def _run(name: str, status: str = "completed", conclusion: str | None = "success
 
 def _good() -> dict:
     """A plain, unprotected change (README.md) that merges on its own: every
-    required check green, nothing touches a protected glob, docs/support.md
-    is not part of the diff at all."""
+    required check green, nothing touches a protected glob."""
     return dict(
         repo=REPO, expected_head_sha=SHA, run_head_repo=REPO, pr=_good_pr(),
         files=[{"filename": "README.md", "status": "modified"}],
@@ -3004,25 +2411,12 @@ def _checks(drop: str | None = None, replace: dict | None = None, extra: list | 
     return runs + (extra or [])
 
 
-def _support_good() -> dict:
-    """docs/support.md, alone, modified, with matching head/regenerated
-    bytes — the classic regen-automerge case, preserved as condition 6."""
-    d = _good()
-    d["files"] = [{"filename": "docs/support.md", "status": "modified"}]
-    d["head_bytes"] = {"docs/support.md": GOOD}
-    d["regenerated"] = {"docs/support.md": GOOD}
-    return d
-
-
 ALL_SUITE_GOOD: dict[str, tuple[int, int]] = {label: (10, 0) for label in SUITE_LABELS}
 
 
-def _tc(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]],
-        head_golden: int | None = 1, main_golden: int | None = 1) -> TestCountFacts:
-    """A TestCountFacts for the selftest, defaulting the golden count to a
-    matching, non-zero (1, 1) so a case about the SUITE side never
-    incidentally also fails on the golden side, and vice versa."""
-    return TestCountFacts(head=head, main=main, head_golden=head_golden, main_golden=main_golden)
+def _tc(head: dict[str, tuple[int, int]], main: dict[str, tuple[int, int]]) -> TestCountFacts:
+    """A TestCountFacts for the selftest."""
+    return TestCountFacts(head=head, main=main)
 
 
 def _sample_protected_path(g: ProtectedGlob) -> str:
@@ -3083,309 +2477,6 @@ jobs:
 CI_GOOD_REQUIRED = ("alpha — the first", "beta — it's quoted", "gamma")
 
 
-def _selftest_served_fixtures(failures: list[str], expect: Callable[[str, Refusal | None, str | None], None],
-                              equal_counts: TestCountFacts) -> None:
-    """chtypes#344's cases, driven through served_fixture_problems — the very
-    function the gate calls — with fabricated trees, fabricated tarballs and,
-    for the download half, main's REAL scripts/fetch.sh pointed at the
-    fixture releases under tests/fixtures/fetch/ over file:// (a fabricated
-    source, never the network)."""
-    fetch_glob = next((g for g in PROTECTED_GLOBS if g.served_asset == "sdk-fetch-fixtures.tar.gz"), None)
-    if fetch_glob is None or fetch_glob.pattern != "tests/fixtures/fetch/**" \
-            or fetch_glob.served_untracked != ("abi-revision/",):
-        failures.append(f"served fixtures: tests/fixtures/fetch/** is not the served-fixture entry for "
-                        f"sdk-fetch-fixtures.tar.gz with abi-revision/ untracked: {fetch_glob!r}")
-        return
-    asset, prefix = fetch_glob.served_asset, served_tree_prefix(fetch_glob)
-    for g in PROTECTED_GLOBS:
-        if g.served_asset is not None:
-            try:
-                served_tree_prefix(g)
-            except ValueError as e:
-                failures.append(f"served fixtures: {e}")
-    if is_protected(prefix + "expected.json") is not None or served_glob_of(prefix + "expected.json") is not fetch_glob:
-        failures.append("served fixtures: tests/fixtures/fetch/expected.json is not (only) the conditional entry")
-    if is_protected("tests/fixtures/api-surface/go/base/apifix.go") is None:
-        failures.append("served fixtures: tests/fixtures/api-surface/** is not unconditionally protected")
-    # RELEASE_KEY_ID is the key fetch.sh embeds and self-tests, not a second opinion of it: a key rotation in
-    # fetch.sh without this constant would refuse every fixture refresh, so it fails here first.
-    try:
-        with open(FETCH_SH, encoding="utf-8") as f:
-            fetch_text = f.read()
-    except OSError as e:
-        fetch_text = ""
-        failures.append(f"served fixtures: scripts/fetch.sh is unreadable: {e}")
-    if f'keyid(RELEASE) == "{RELEASE_KEY_ID}"' not in fetch_text or f"# key id {RELEASE_KEY_ID}" not in fetch_text:
-        failures.append(f"served fixtures: scripts/fetch.sh's embedded release key is no longer {RELEASE_KEY_ID}")
-    # git's own ids for two known blobs: `git hash-object` of an empty file and of "hello\n".
-    if git_blob_sha(b"") != "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391" \
-            or git_blob_sha(b"hello\n") != "ce013625030ba8dba906f756967f9e9ca394464a":
-        failures.append("served fixtures: git_blob_sha does not compute git's own blob ids")
-
-    def expected_json(tampered_exit: int, tampered_code: str | None) -> bytes:
-        # The shape of the real expected.json's `verdicts` rows.
-        return (json.dumps({"verdicts": [
-            {"fixture": "signed", "trusted_keys": "test", "allow_unsigned": False, "code": None, "exit": 0},
-            {"fixture": "tampered-tarball", "trusted_keys": "test", "allow_unsigned": False,
-             "code": tampered_code, "exit": tampered_exit}]}, indent=2) + "\n").encode()
-
-    served = {"README.md": b"# fetch fixtures (selftest)\n",
-              "expected.json": expected_json(1, "CHTYPES_ARTIFACT_CORRUPT"),
-              "tampered-tarball/SHA256SUMS": b"0" * 64 + b"  chtypes-selftest\n",
-              "tampered-tarball/chtypes-selftest": b"one flipped byte\n",
-              "test-key/public.hex": b"ab" * 32 + b"\n"}
-    untracked = {"abi-revision/gen.py": b"print('a generator, not a release')\n"}
-
-    def tarball(files: dict[str, bytes], *, dot: bool = False, mode: int = 0o644,
-                extra: tuple[tarfile.TarInfo, ...] = ()) -> bytes:
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-            if dot:   # what `tar -C <dir> -czf x .` writes: ./-prefixed names and directory members
-                for d in (".", "./tampered-tarball", "./test-key", "./abi-revision"):
-                    info = tarfile.TarInfo(d)
-                    info.type, info.mode = tarfile.DIRTYPE, 0o755
-                    tar.addfile(info)
-            for name, data in files.items():
-                info = tarfile.TarInfo(("./" if dot else "") + name)
-                info.size, info.mode = len(data), mode
-                tar.addfile(info, io.BytesIO(data))
-            for info in extra:
-                tar.addfile(info, io.BytesIO(b"x" * info.size) if info.isfile() else None)
-        return buf.getvalue()
-
-    _MISSING = object()
-
-    def tree(files: dict[str, bytes], *, modes: dict[str, str] | None = None, truncated: object = False,
-             extra: tuple[dict, ...] = (), root: str | None = "tree") -> dict:
-        entries = [{"path": "README.md", "type": "blob", "mode": "100644", "sha": git_blob_sha(b"outside")},
-                   {"path": "tests/fixtures", "type": "tree", "mode": "040000", "sha": "1" * 40},
-                   # a sibling that shares the prefix's spelling, not its directory: ignored
-                   {"path": prefix.rstrip("/") + "x/README.md", "type": "blob", "mode": "100644",
-                    "sha": git_blob_sha(b"sibling")}]
-        if root is not None:
-            entries.append({"path": prefix.rstrip("/"), "type": root,
-                            "mode": "040000" if root == "tree" else "120000", "sha": "2" * 40})
-        dirs = sorted({prefix + "/".join(n.split("/")[:i]) for n in files for i in range(1, n.count("/") + 1)})
-        entries += [{"path": d, "type": "tree", "mode": "040000", "sha": "3" * 40} for d in dirs]
-        entries += [{"path": prefix + n, "type": "blob", "mode": (modes or {}).get(n, "100644"),
-                     "sha": git_blob_sha(data)} for n, data in files.items()]
-        payload: dict = {"sha": SHA, "tree": entries + list(extra)}
-        if truncated is not _MISSING:
-            payload["truncated"] = truncated
-        return payload
-
-    release_ok = f"\x1b[1m==> SHA256SUMS.sig verified: ed25519 key {RELEASE_KEY_ID} (the release key)\x1b[0m\n"
-
-    def download(data: bytes | None, rc: int = 0, log: str = release_ok) -> Callable[[str, str], tuple[int, str]]:
-        """A fabricated fetch: writes `data` where fetch.sh would install the asset, and reports `rc`/`log`."""
-        def dl(name: str, dest: str) -> tuple[int, str]:
-            if data is not None:
-                with open(os.path.join(dest, name), "wb") as f:
-                    f.write(data)
-            return rc, log
-        return dl
-
-    good_tar = tarball({**served, **untracked})
-
-    def classify(payload: object, dl: Callable[[str, str], tuple[int, str]], glob: ProtectedGlob = fetch_glob
-                 ) -> list[str]:
-        return served_fixture_problems(glob, lambda: payload, dl)
-
-    def check(label: str, problems: list[str], want_pass: bool, needle: str | None = None) -> None:
-        if want_pass:
-            if problems:
-                failures.append(f"served fixtures: {label}: expected byte-identical, got {problems}")
-        elif not problems:
-            failures.append(f"served fixtures: {label}: expected a refusal, got a pass")
-        elif needle is not None and not any(needle in p for p in problems):
-            failures.append(f"served fixtures: {label}: refused, but not for {needle!r}: {problems}")
-
-    def raises(exc: BaseException) -> Callable:
-        def f(*_args: object) -> object:
-            raise exc
-        return f
-
-    # (a) identical, and identical whatever the tarball's own spelling.
-    check("(a) an identical tree passes (the untracked abi-revision/ in the tarball left out)",
-          classify(tree(served), download(good_tar)), True)
-    check("(a) an identical tree passes against a ./-prefixed tarball with directory members",
-          classify(tree(served), download(tarball({**served, **untracked}, dot=True))), True)
-    # The lead's case: ONE flipped outcome in expected.json — the tampered-tarball case now "installs".
-    flipped = {**served, "expected.json": expected_json(0, None)}
-    flipped_problems = classify(tree(flipped), download(good_tar))
-    check("a fixture tree with ONE flipped expected.json outcome (tampered-tarball: exit 1 -> 0) refuses",
-          flipped_problems, False, "expected.json")
-    # (b) an extra file, (c) a missing one, and every other way a tree can differ.
-    check("(b) an extra file refuses", classify(tree({**served, "tampered-tarball/NOTES": b"x\n"}), download(good_tar)),
-          False, "tampered-tarball/NOTES")
-    check("(b) the head carrying the untracked abi-revision/ is an extra file, and refuses",
-          classify(tree({**served, **untracked}), download(good_tar)), False, "abi-revision/gen.py")
-    check("(c) a missing file refuses",
-          classify(tree({k: v for k, v in served.items() if k != "test-key/public.hex"}), download(good_tar)),
-          False, "test-key/public.hex")
-    check("an executable bit the served file does not have refuses",
-          classify(tree(served, modes={"README.md": "100755"}), download(good_tar)), False, "mode differs")
-    check("a symlink whose target text equals a served file's bytes refuses (its mode differs)",
-          classify(tree(served, modes={"README.md": "120000"}), download(good_tar)), False, "mode differs")
-    check("a submodule under the tree refuses",
-          classify(tree(served, extra=({"path": prefix + "vendored", "type": "commit", "mode": "160000",
-                                        "sha": "4" * 40},)), download(good_tar)), False, "vendored")
-    check("the tree's own directory replaced by a symlink refuses",
-          classify(tree({}, root="blob"), download(good_tar)), False, "not a directory")
-    check("no tree there at all refuses", classify(tree({}, root=None), download(good_tar)), False, "carries no")
-    check("a truncated trees API listing refuses", classify(tree(served, truncated=True), download(good_tar)),
-          False, "truncated")
-    check("a trees API listing that does not say whether it is truncated refuses",
-          classify(tree(served, truncated=_MISSING), download(good_tar)), False, "truncated")
-    check("a trees API read that fails refuses",
-          served_fixture_problems(fetch_glob, raises(ApiError("GET git/trees", 502, "bad gateway")), download(good_tar)),
-          False, "ApiError")
-    # The download half, fabricated: every failure refuses, and so does a success that is not the release key's.
-    check("(f) a download that times out refuses",
-          classify(tree(served), raises(subprocess.TimeoutExpired("fetch.sh", SERVED_FETCH_TIMEOUT_S))), False,
-          "TimeoutExpired")
-    check("(f) fetch.sh exiting 3 (CHTYPES_SOURCE_UNREACHABLE) refuses",
-          classify(tree(served), download(None, 3, "fetch.sh: CHTYPES_SOURCE_UNREACHABLE: could not fetch "
-                                                   "SHA256SUMS\n")), False, "exited 3")
-    check("fetch.sh exiting 0 without naming the release key refuses",
-          classify(tree(served), download(good_tar, 0, "")), False, "did not report")
-    check("fetch.sh exiting 0 under a key from CHTYPES_TRUSTED_KEYS refuses",
-          classify(tree(served), download(good_tar, 0, release_ok.replace(f"{RELEASE_KEY_ID} (the release key)",
-                                                                          "d1251e468f9156ef (from CHTYPES_TRUSTED_KEYS)"))),
-          False, "did not report")
-    check("fetch.sh exiting 0 but installing nothing refuses", classify(tree(served), download(None)), False,
-          "FileNotFoundError")
-    check("a download that is not a gzip tarball refuses", classify(tree(served), download(b"not a tarball")),
-          False, "could not be read")
-    link = tarfile.TarInfo("signed/SHA256SUMS")
-    link.type, link.linkname = tarfile.SYMTYPE, "../../../scripts"
-    check("a served tarball carrying a symlink refuses",
-          classify(tree(served), download(tarball(served, extra=(link,)))), False, "not a regular file")
-    escape = tarfile.TarInfo("../outside")
-    escape.size = 1
-    check("a served tarball carrying a ../ member refuses",
-          classify(tree(served), download(tarball(served, extra=(escape,)))), False, "unsafe name")
-    twice = tarfile.TarInfo("README.md")
-    twice.size = 1
-    check("a served tarball carrying one name twice refuses",
-          classify(tree(served), download(tarball(served, extra=(twice,)))), False, "twice")
-    check("a served tarball carrying only untracked members refuses",
-          classify(tree({}), download(tarball(untracked))), False, "carries no file")
-
-    # (d)/(e)/(f) through main's REAL scripts/fetch.sh, over file:// from the
-    # fixture releases themselves — fabricated sources, no network. Each
-    # requests a row the fixture release really lists, so the refusal is
-    # fetch.sh's own verdict on that release, read off its own exit and code.
-    fixtures = os.path.join(ROOT, *prefix.rstrip("/").split("/"))
-    try:
-        with open(os.path.join(fixtures, "test-key", "public.hex"), encoding="utf-8") as f:
-            test_key = f.read().strip()
-    except OSError as e:
-        failures.append(f"served fixtures: the fixture test key is unreadable, so fetch.sh's own refusals were not "
-                        f"exercised: {e}")
-        return
-    row = "chtypes-25.8.28.1-lts-linux-arm64.tar.gz"
-    row_glob = ProtectedGlob(fetch_glob.pattern, "selftest: one row of a fixture release", served_asset=row)
-
-    def real(fixture: str, key: str | None) -> Callable[[str, str], tuple[int, str]]:
-        def dl(name: str, dest: str) -> tuple[int, str]:
-            return run_fetch_sh(name, dest, ("--url", "file://" + os.path.join(fixtures, fixture)),
-                                {"CHTYPES_TRUSTED_KEYS": key} if key else None)
-        return dl
-
-    check("(d) real fetch.sh: a tarball whose sha256 does not match the signed SHA256SUMS refuses",
-          classify(tree(served), real("tampered-tarball", test_key), row_glob), False, "CHTYPES_ARTIFACT_CORRUPT")
-    check("(e) real fetch.sh: a SHA256SUMS.sig made by another key refuses",
-          classify(tree(served), real("bad-signature", test_key), row_glob), False, "CHTYPES_ARTIFACT_UNTRUSTED")
-    check("(e) real fetch.sh: a release signed by the fixture TEST key refuses under the release key alone (the "
-          "gate's own trust)",
-          classify(tree(served), real("signed", None), row_glob), False, "CHTYPES_ARTIFACT_UNTRUSTED")
-    check("(e) real fetch.sh: a release with no SHA256SUMS.sig refuses",
-          classify(tree(served), real("unsigned", None), row_glob), False, "CHTYPES_ARTIFACT_UNTRUSTED")
-    test_key_ok = classify(tree(served), real("signed", test_key), row_glob)
-    check("real fetch.sh: a release fetch.sh ACCEPTS under the fixture test key still refuses — only the release "
-          "key excuses", test_key_ok, False, "did not report")
-    check("(f) real fetch.sh: a source that cannot be reached refuses",
-          classify(tree(served), real("__selftest_no_such_release__", None), row_glob), False,
-          "CHTYPES_SOURCE_UNREACHABLE")
-    # fetch.sh's own success line, with the key swapped for the release key's, is what the gate requires — so
-    # the pattern matches the line fetch.sh really prints, not a hand-typed guess at it.
-    with tempfile.TemporaryDirectory(prefix="policy-merge-selftest-") as dest:
-        rc, log = real("signed", test_key)(row, dest)
-    seen = [line for line in log.splitlines() if "SHA256SUMS.sig verified:" in line]
-    if rc != 0 or len(seen) != 1 or not _RELEASE_KEY_VERIFIED_RE.search(
-            seen[0].replace("(from CHTYPES_TRUSTED_KEYS)", "(the release key)").replace(
-                ed25519_key_id(test_key), RELEASE_KEY_ID)):
-        failures.append(f"served fixtures: fetch.sh's own verified line ({seen!r}, exit {rc}) no longer has the "
-                        "shape the release-key check requires")
-    # Every CHTYPES_* variable is stripped before fetch.sh runs: a key or an unsigned switch in the
-    # environment never reaches the gate's fetch.
-    saved = {k: os.environ.get(k) for k in ("CHTYPES_TRUSTED_KEYS", "CHTYPES_ALLOW_UNSIGNED")}
-    try:
-        os.environ["CHTYPES_TRUSTED_KEYS"], os.environ["CHTYPES_ALLOW_UNSIGNED"] = test_key, "1"
-        for fixture in ("signed", "unsigned"):
-            with tempfile.TemporaryDirectory(prefix="policy-merge-selftest-") as dest:
-                rc, log = run_fetch_sh(row, dest, ("--url", "file://" + os.path.join(fixtures, fixture)))
-            if rc == 0 or "CHTYPES_ARTIFACT_UNTRUSTED" not in log:
-                failures.append(f"served fixtures: CHTYPES_TRUSTED_KEYS/CHTYPES_ALLOW_UNSIGNED in the environment "
-                                f"reached fetch.sh ({fixture}/ exited {rc})")
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-
-    # Through decide() itself: the lead's flipped outcome, a proven tree, and an unconditional path beside it.
-    fixture_only = [{"filename": prefix + "expected.json", "status": "modified"}]
-    expect("chtypes#344: a fixture-only diff with ONE flipped expected.json outcome refuses",
-           decide(**_with(files=fixture_only, served_fixtures={asset: flipped_problems}, test_counts=equal_counts)),
-           "protected")
-    expect("chtypes#344: a fixture-only diff byte-identical to the served set passes",
-           decide(**_with(files=fixture_only, served_fixtures={asset: classify(tree(served), download(good_tar))},
-                          test_counts=equal_counts)), None)
-    expect("chtypes#344: a fixture-only diff never compared (no proof at all) refuses",
-           decide(**_with(files=fixture_only, test_counts=equal_counts)), "protected")
-    for extra in ("scripts/__selftest_sample__", "tests/fixtures/api-surface/__selftest_sample__"):
-        got = decide(**_with(pr=_pr(changed_files=2), files=fixture_only + [{"filename": extra, "status": "modified"}],
-                             served_fixtures={asset: []}, test_counts=equal_counts))
-        if got is None or got.condition != "protected" or extra not in got.detail:
-            failures.append(f"served fixtures: (g) a proven fixture tree beside {extra} must refuse as protected, "
-                            f"naming {extra}; got {got.text() if got else 'a pass'}")
-    expect("chtypes#344: a rename OUT of the fixture tree counts by its old path",
-           decide(**_with(files=[{"filename": "docs/__selftest_sample__", "status": "renamed",
-                                  "previous_filename": prefix + "expected.json"}], test_counts=equal_counts)),
-           "protected")
-    # gather_served_fixtures: zero cost unless a served tree is touched and nothing unconditional is.
-    calls: list[str] = []
-
-    def counted_tree() -> object:
-        calls.append("tree")
-        return tree(served)
-
-    def counted_download(name: str, dest: str) -> tuple[int, str]:
-        calls.append("download")
-        return download(good_tar)(name, dest)
-
-    for label, files in (("touches no served tree", [{"filename": "README.md", "status": "modified"}]),
-                         ("also touches scripts/", fixture_only + [{"filename": "scripts/__selftest_sample__",
-                                                                    "status": "modified"}])):
-        got = gather_served_fixtures(REPO, files, SHA, read_tree=counted_tree, download=counted_download)
-        if got != {} or calls:
-            failures.append(f"served fixtures: gather_served_fixtures read or fetched for a diff that {label}: "
-                            f"{got!r}, {calls!r}")
-        calls.clear()
-    got = gather_served_fixtures(REPO, fixture_only, SHA, read_tree=counted_tree, download=counted_download)
-    if got != {asset: []} or calls != ["tree", "download"]:
-        failures.append(f"served fixtures: gather_served_fixtures on a fixture-only diff gave {got!r} after {calls!r}")
-
-
-def ed25519_key_id(public_hex: str) -> str:
-    """An ed25519 public key's id as fetch.sh prints it: the first 16 hex of
-    the sha256 of its 32 raw bytes."""
-    return hashlib.sha256(bytes.fromhex(public_hex)).hexdigest()[:16]
-
-
 def selftest() -> int:
     failures: list[str] = []
 
@@ -3398,11 +2489,8 @@ def selftest() -> int:
         elif got.condition != condition:
             failures.append(f"{label}: expected a {condition} refusal, got {got.text()}")
 
-    # An unprotected, docs/support.md-free change merges on its own, at the
-    # gate and at the merge.
-    expect("an unprotected change passes, gate", decide(**_good()), None)
-    expect("an unprotected change passes, merge (no guarded file touched)",
-           decide(**_good(), head_bytes={}, regenerated={}), None)
+    # An unprotected change merges on its own.
+    expect("an unprotected change passes", decide(**_good()), None)
     expect("mergeable unknown (null) is not a refusal", decide(**_with(pr=_pr(mergeable=None))), None)
     expect("mergeable true", decide(**_with(pr=_pr(mergeable=True))), None)
     expect("a manual re-check has no ci-run head repository", decide(**_with(run_head_repo=None)), None)
@@ -3414,7 +2502,7 @@ def selftest() -> int:
     expect("several unprotected files merge together",
            decide(**_with(pr=_pr(changed_files=2),
                           files=[{"filename": "README.md", "status": "modified"},
-                                 {"filename": "docs/reference/bindings.md", "status": "added"}])), None)
+                                 {"filename": "docs/reference/bindings-v1.md", "status": "added"}])), None)
 
     # condition 5 — protected, driven from PROTECTED_GLOBS itself, never a
     # hand-typed duplicate of it: every glob family refuses with no
@@ -3422,7 +2510,6 @@ def selftest() -> int:
     # binding's `changed=false`; every other entry — the security carve-out
     # among them — still refuses with EVERY binding's `changed=false`.
     all_unchanged = {b: ["false"] for b in BINDINGS}
-    all_served_proven = {g.served_asset: [] for g in PROTECTED_GLOBS if g.served_asset is not None}
     equal_counts = _tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD))
     for g in PROTECTED_GLOBS:
         sample = _sample_protected_path(g)
@@ -3438,20 +2525,10 @@ def selftest() -> int:
             expect(f"{g.pattern} still refuses for a DIFFERENT proven ecosystem",
                    decide(**_with(pr=_pr(changed_files=1), files=one, dependabot_ecosystem="some-other-ecosystem")),
                    "protected")
-        elif g.served_asset is not None:
-            expect(f"served fixture tree {g.pattern} passes once proven byte-identical to {g.served_asset}",
-                   decide(**_with(files=one, served_fixtures={g.served_asset: []}, test_counts=equal_counts)), None)
-            expect(f"served fixture tree {g.pattern} refuses on any problem in its proof",
-                   decide(**_with(files=one, served_fixtures={g.served_asset: ["a byte differs"]},
-                                  test_counts=equal_counts)), "protected")
-            expect(f"served fixture tree {g.pattern} refuses when only ANOTHER asset was proven",
-                   decide(**_with(files=one, served_fixtures={"some-other-asset.tar.gz": []},
-                                  test_counts=equal_counts)), "protected")
         else:
-            expect(f"{g.pattern} refuses whatever every binding's api-surface verdict and every served-fixture "
-                   "proof says",
-                   decide(**_with(files=one, api_verdicts=dict(all_unchanged), served_fixtures=dict(all_served_proven),
-                                  test_counts=equal_counts)), "protected")
+            expect(f"{g.pattern} refuses whatever every binding's api-surface verdict says",
+                   decide(**_with(files=one, api_verdicts=dict(all_unchanged), test_counts=equal_counts)),
+                   "protected")
     expect("a go test file is the *_test.go exception, not protected (test-counts holds too)",
            decide(**_with(files=[{"filename": "go/chtypes/client_test.go", "status": "modified"}],
                           test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)))), None)
@@ -3570,22 +2647,20 @@ def selftest() -> int:
     # present with a needle in it is clean; a needle in an uncovered file, a
     # carve-out entry that covers nothing, and a needle only in a comment are
     # each read the right way.
-    tree = {"go/chtypes/fetch_sign.go": 'import "crypto/ed25519"',
-            "go/chtypes/fetch.go": 'import "crypto/sha256"',
-            "go/chtypes/registry_path.go": 'envAllowUnsign = "CHTYPES_ALLOW_UNSIGNED"',
-            "go/chtypes/multiversion.go": "if err := checkLibraryBytes(path); err != nil {",
-            "go/chtypes/resolve.go": "if err := verifyArtifactLibrary(path); err != nil {",
-            "go/chtypes/transform.go": "package chtypes",
+    tree = {"go/chtypes/transform.go": "package chtypes",
             "python/src/chtypes/_ed25519.py": "import hashlib",
-            "python/src/chtypes/fetch.py": "from ._ed25519 import verify",
-            "python/src/chtypes/_manifest.py": "def verify_library(d):",
             "python/src/chtypes/registry.py": "check_library_bytes(entry, manifest)",
-            "ts/src/fetch.ts": "import { createHash } from 'node:crypto';",
             "ts/src/registry.ts": "verifyChecksum(libPath, manifest);",
-            "rust/src/fetch/trust.rs": "use ed25519_dalek::VerifyingKey;",
-            "rust/src/digest.rs": "use sha2::{Digest, Sha256};",
-            "rust/src/registry.rs": "let actual = crate::digest::sha256_file(&path);",
-            "rust/src/lib.rs": "pub mod fetch;"}
+            "rust/src/registry.rs": "let actual = sha256_file(&path);",
+            "rust/src/lib.rs": "pub mod registry;",
+            # The v1 fetch layer's carve-out (one representative file per
+            # binding's ocifetch directory): each generated constants file
+            # carries the embedded release key as a 64-hex literal, the
+            # needle every one of these entries exists to catch.
+            "go/internal/ocifetch/constants_gen.go": 'ReleaseKeyHex = "' + "ab" * 32 + '"',
+            "python/src/chtypes/_ocifetch/_constants.py": 'RELEASE_KEY_HEX = "' + "ab" * 32 + '"',
+            "ts/src/ocifetch/constants.gen.ts": 'export const RELEASE_KEY_HEX = "' + "ab" * 32 + '";',
+            "rust/src/ocifetch/constants.rs": 'pub const RELEASE_KEY_HEX: &str = "' + "ab" * 32 + '";'}
     if carve_out_problems(tree):
         failures.append(f"carve_out_problems: refused a tree that matches the carve-out: {carve_out_problems(tree)}")
     if not carve_out_problems({**tree, "go/chtypes/sneaky.go": 'import "crypto/sha256"'}):
@@ -3594,10 +2669,10 @@ def selftest() -> int:
         failures.append("carve_out_problems: a 64-hex key literal in an uncovered TS file was not caught")
     if carve_out_problems({**tree, "go/chtypes/doc.go": '// we import "crypto/sha256" elsewhere'}):
         failures.append("carve_out_problems: a needle inside a comment only was read as verification code")
-    if not carve_out_problems({k: v for k, v in tree.items() if k != "go/chtypes/fetch_sign.go"}):
+    if not carve_out_problems({k: v for k, v in tree.items() if k != "python/src/chtypes/_ed25519.py"}):
         failures.append("carve_out_problems: a carve-out entry covering no file was not caught")
-    if not carve_out_problems({k: v for k, v in tree.items() if not k.startswith("rust/src/fetch/")}):
-        failures.append("carve_out_problems: rust/src/fetch/** covering no file was not caught")
+    if not carve_out_problems({k: v for k, v in tree.items() if not k.startswith("rust/src/ocifetch/")}):
+        failures.append("carve_out_problems: rust/src/ocifetch/** covering no file was not caught")
 
     # build_enqueue_plan — a pure function of facts already in hand, so
     # "enqueue is called with the judged head sha" and "dry run never calls
@@ -3703,98 +2778,6 @@ def selftest() -> int:
     # line precedes `enqueue_pull_request(...)`, and both live entirely after
     # `if refusal: return refuse(refusal, where)`.
 
-    # condition 6 — bytes, only when docs/support.md is touched
-    expect("docs/support.md untouched: no byte guard at all",
-           decide(**_with(files=[{"filename": "README.md", "status": "modified"}],
-                          head_bytes={}, regenerated={})), None)
-    sg_gate = _support_good()
-    sg_gate.pop("head_bytes")
-    sg_gate.pop("regenerated")
-    expect("docs/support.md modified, matching, gate (no regenerated bytes yet)", decide(**sg_gate), None)
-    expect("docs/support.md modified, matching, merge", decide(**_support_good()), None)
-    sg = _support_good()
-    one_byte = bytearray(GOOD)
-    one_byte[-3] ^= 0x01
-    expect("docs/support.md modified, a one-byte difference",
-           decide(**{**sg, "head_bytes": {"docs/support.md": bytes(one_byte)}}), "bytes")
-    expect("docs/support.md modified, a missing trailing newline",
-           decide(**{**sg, "head_bytes": {"docs/support.md": GOOD[:-1]}}), "bytes")
-    expect("docs/support.md modified, one extra byte at the end",
-           decide(**{**sg, "head_bytes": {"docs/support.md": GOOD + b"\n"}}), "bytes")
-    expect("docs/support.md added, not modified",
-           decide(**{**sg, "files": [{"filename": "docs/support.md", "status": "added"}]}), "bytes")
-    sg_gate_added = {k: v for k, v in sg.items() if k not in ("head_bytes", "regenerated")}
-    sg_gate_added["files"] = [{"filename": "docs/support.md", "status": "added"}]
-    expect("docs/support.md added, not modified, caught at GATE time with no regenerated bytes at all",
-           decide(**sg_gate_added), "bytes")
-    expect("docs/support.md deleted, not modified",
-           decide(**{**sg, "files": [{"filename": "docs/support.md", "status": "removed"}]}), "bytes")
-    expect("docs/support.md renamed into place, not modified",
-           decide(**{**sg, "files": [{"filename": "docs/support.md", "status": "renamed",
-                                      "previous_filename": "README.md"}]}), "bytes")
-    if first_difference(GOOD, bytes(one_byte)) != (len(GOOD) - 3, GOOD.count(b"\n")):
-        failures.append(f"first_difference located the planted byte wrongly: {first_difference(GOOD, bytes(one_byte))}")
-
-    # chtypes#316: the regeneration must run over the HEAD's OWN copy, never
-    # main's checked-out tree, or a prose edit outside the generated block
-    # collides with main's prose forever. These four model the issue's own
-    # scenarios at the pure decide() level: `regenerated` is what cmd_enqueue
-    # now computes by feeding the HEAD's own bytes (never main's) into main's
-    # generator — regenerate_guarded_file, which has its own test, below, for
-    # the seeding itself.
-    PROSE_A = b"# Support\n\nSome human-written context.\n\n"
-    PROSE_B = b"# Support\n\nSome human-written context, lightly reworded.\n\n"
-    BLOCK_HANDEDITED = b"| `25.8` | all |\n| `26.1` | linux-amd64 only |\n"
-    BLOCK_STALE = b"| `25.8` | all |\n"
-    BLOCK_CURRENT = b"| `25.8` | all |\n| `26.1` | all |\n"
-
-    def _page(prose: bytes, block: bytes) -> bytes:
-        return prose + block
-
-    expect("chtypes#316: a prose-only edit passes — regenerating the head's own "
-           "(edited) prose with the already-current block reproduces it exactly",
-           decide(**{**sg, "head_bytes": {"docs/support.md": _page(PROSE_B, BLOCK_CURRENT)},
-                    "regenerated": {"docs/support.md": _page(PROSE_B, BLOCK_CURRENT)}}), None)
-    expect("chtypes#316: a hand-edited generated cell refuses — regenerating the head's "
-           "own prose recomputes the correct block, which differs from the hand-edited one",
-           decide(**{**sg, "head_bytes": {"docs/support.md": _page(PROSE_A, BLOCK_HANDEDITED)},
-                    "regenerated": {"docs/support.md": _page(PROSE_A, BLOCK_CURRENT)}}), "bytes")
-    expect("chtypes#316: a stale generated block refuses — the live index moved on since "
-           "the head last regenerated",
-           decide(**{**sg, "head_bytes": {"docs/support.md": _page(PROSE_A, BLOCK_STALE)},
-                    "regenerated": {"docs/support.md": _page(PROSE_A, BLOCK_CURRENT)}}), "bytes")
-    expect("chtypes#316: a pure regeneration PR still passes — the head committed exactly "
-           "what the generator produces, prose unchanged",
-           decide(**{**sg, "head_bytes": {"docs/support.md": _page(PROSE_A, BLOCK_CURRENT)},
-                    "regenerated": {"docs/support.md": _page(PROSE_A, BLOCK_CURRENT)}}), None)
-
-    # regenerate_guarded_file itself (chtypes#316's actual fix): the scratch
-    # file must be seeded with the HEAD's bytes before the generator ever
-    # sees it, and the returned bytes are whatever the generator leaves
-    # behind — proven with a fake `run`, so this needs neither the network
-    # nor the tagged git history the real scripts/support-matrix.sh needs.
-    with tempfile.TemporaryDirectory(prefix="policy-merge-selftest-") as scratch_dir:
-        scratch_path = os.path.join(scratch_dir, "support.md")
-        seen_before_run: list[bytes] = []
-        calls: list[list[str]] = []
-
-        def fake_generator_run(cmd: list[str], **kwargs: object) -> None:
-            calls.append(cmd)
-            with open(cmd[-1], "rb") as f:
-                seen_before_run.append(f.read())
-            with open(cmd[-1], "wb") as f:
-                f.write(b"REGENERATED:" + seen_before_run[-1])
-
-        result = regenerate_guarded_file("docs/support.md", b"THE HEAD'S OWN BYTES", scratch_path,
-                                         run=fake_generator_run)
-        if seen_before_run != [b"THE HEAD'S OWN BYTES"]:
-            failures.append(f"regenerate_guarded_file: the generator saw {seen_before_run!r}, not the head's own "
-                            "bytes — chtypes#316 regressed")
-        if calls != [[GUARDED_FILE_GENERATORS["docs/support.md"], "--out", scratch_path]]:
-            failures.append(f"regenerate_guarded_file: ran {calls!r}, not GUARDED_FILE_GENERATORS' own entry")
-        if result != b"REGENERATED:THE HEAD'S OWN BYTES":
-            failures.append(f"regenerate_guarded_file: returned {result!r}, not the generator's own output")
-
     # condition 2 — required checks
     required_one = REQUIRED_CHECKS[3]
     expect("a missing required check", decide(**_with(check_runs=_checks(drop=required_one))), "checks")
@@ -3820,13 +2803,12 @@ def selftest() -> int:
     expect("no check runs at all", decide(**_with(check_runs=[])), "checks")
 
     # test-counts (condition 7, chtypes#285 §1b) — driven directly through
-    # decide()'s own `test_counts` parameter, the same way condition 6 is
-    # driven through `head_bytes`/`regenerated` rather than a real job-log
+    # decide()'s own `test_counts` parameter rather than a real job-log
     # fetch: gather_test_counts (the network half) is not exercised here, on
     # the same "a pure decision is what --selftest proves" principle as the
     # rest of this file.
     a_test_path = "python/tests/test_foo.py"
-    expect("test-counts: every suite (and the golden count) equal, a test path touched",
+    expect("test-counts: every suite equal, a test path touched",
            decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
                           test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)))), None)
     expect("test-counts: one suite rises, the rest equal, still passes",
@@ -3835,34 +2817,24 @@ def selftest() -> int:
                                           dict(ALL_SUITE_GOOD)))), None)
     expect("test-counts: a drop in one suite refuses even while another rises",
            decide(**_with(files=[{"filename": "rust/tests/foo.rs", "status": "modified"}],
-                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-artifacts": (5, 0),
+                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-no-artifacts": (5, 0),
                                            "go-no-artifacts": (99, 0)},
                                           dict(ALL_SUITE_GOOD)))), "test-counts")
     expect("test-counts: a count missing on the head refuses",
            decide(**_with(files=[{"filename": "ts/test/foo.test.ts", "status": "modified"}],
-                          test_counts=_tc({k: v for k, v in ALL_SUITE_GOOD.items() if k != "ts-artifacts"},
+                          test_counts=_tc({k: v for k, v in ALL_SUITE_GOOD.items() if k != "ts-no-artifacts"},
                                           dict(ALL_SUITE_GOOD)))), "test-counts")
     expect("test-counts: a count missing on main (main's push run predates this feature) refuses",
            decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
                           test_counts=_tc(dict(ALL_SUITE_GOOD), {}))), "test-counts")
     expect("test-counts: a case moved from ran to skipped is a drop in ran, and refuses",
            decide(**_with(files=[{"filename": "go/chtypes/foo_test.go", "status": "modified"}],
-                          test_counts=_tc({**ALL_SUITE_GOOD, "go-artifacts": (9, 1)},
-                                          {**ALL_SUITE_GOOD, "go-artifacts": (10, 0)}))), "test-counts")
-    expect("test-counts: the golden-case count drops (a fixture tree already proven identical to its served set "
-           "still answers to test-counts)",
-           decide(**_with(files=[{"filename": "tests/fixtures/fetch/x", "status": "modified"}],
-                          served_fixtures={"sdk-fetch-fixtures.tar.gz": []},
-                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD),
-                                          head_golden=3, main_golden=5))), "test-counts")
-    expect("test-counts: the golden-case count missing on the head refuses",
-           decide(**_with(files=[{"filename": a_test_path, "status": "modified"}],
-                          test_counts=_tc(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD),
-                                          head_golden=None))), "test-counts")
+                          test_counts=_tc({**ALL_SUITE_GOOD, "go-no-artifacts": (9, 1)},
+                                          {**ALL_SUITE_GOOD, "go-no-artifacts": (10, 0)}))), "test-counts")
     expect("test-counts: a pull request touching no test or fixture path skips the condition "
            "entirely, even with a real drop sitting in test_counts",
            decide(**_with(files=[{"filename": "README.md", "status": "modified"}],
-                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-artifacts": (0, 0)},
+                          test_counts=_tc({**ALL_SUITE_GOOD, "rust-no-artifacts": (0, 0)},
                                           dict(ALL_SUITE_GOOD)))), None)
     expect("test-counts: no test_counts argument at all, on a PR that touches no test path, still passes "
            "(the default TestCountFacts is never consulted)",
@@ -3877,10 +2849,10 @@ def selftest() -> int:
     if is_test_or_fixture_path("go/chtypes/client.go"):
         failures.append("is_test_or_fixture_path: a non-test go file was recognized as one")
     for p in ("python/tests/test_golden.py", "ts/test/golden.test.ts", "rust/tests/golden.rs",
-             "tests/fixtures/fetch/signed/index.json"):
+             "tests/fixtures/fetch-v1/cases.json"):
         if not is_test_or_fixture_path(p):
             failures.append(f"is_test_or_fixture_path: {p!r} was not recognized")
-    for p in ("python/src/chtypes/fetch.py", "tests/parity/manifest.json", "README.md"):
+    for p in ("python/src/chtypes/registry.py", "include/chtypes.h", "README.md"):
         if is_test_or_fixture_path(p):
             failures.append(f"is_test_or_fixture_path: {p!r} was wrongly recognized as a test/fixture path")
     if not touches_test_or_fixture_path([{"filename": "README.md", "status": "renamed",
@@ -3891,12 +2863,10 @@ def selftest() -> int:
 
     # test_count_problems — the pure comparison, independent of decide()'s
     # own plumbing above.
-    if test_count_problems(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD), 1, 1):
+    if test_count_problems(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD)):
         failures.append("test_count_problems: an all-equal input was refused")
-    if not test_count_problems({**ALL_SUITE_GOOD, "python-no-artifacts": (1, 0)}, dict(ALL_SUITE_GOOD), 1, 1):
+    if not test_count_problems({**ALL_SUITE_GOOD, "python-no-artifacts": (1, 0)}, dict(ALL_SUITE_GOOD)):
         failures.append("test_count_problems: a single-suite drop was not caught")
-    if test_count_problems(dict(ALL_SUITE_GOOD), dict(ALL_SUITE_GOOD), 5, 5):
-        failures.append("test_count_problems: equal golden counts were refused")
 
     # condition 1 — fork
     expect("the ci run's head is a fork", decide(**_with(run_head_repo="someone/chtypes")), "fork")
@@ -3922,7 +2892,7 @@ def selftest() -> int:
     # The ORDER is part of the contract: a fork is reported as a fork even
     # when every other condition also fails.
     everything_wrong = _with(run_head_repo="someone/chtypes", pr=_pr(state="closed", head_sha=OTHER_SHA),
-                             check_runs=[], files=[{"filename": "scripts/fetch.sh", "status": "added"}])
+                             check_runs=[], files=[{"filename": "scripts/__selftest_sample__", "status": "added"}])
     expect("a fork outranks everything else", decide(**everything_wrong), "fork")
 
     # select_pr — which pull request a ci run belongs to
@@ -4350,8 +3320,6 @@ def selftest() -> int:
                "(the manifest's own range already covered it, so the manifest itself did not change) still "
                "passes", "python", dep_pr(), real_84401fd_entries, one_parent, py_old, py_old, "python")
 
-    _selftest_served_fixtures(failures, expect, equal_counts)
-
     # the CONTRIBUTING.md guide/constant divergence case (chtypes#280: pin one
     # selftest case that fails if the guide and the constant diverge).
     expected_block = protected_globs_guide_block()
@@ -4435,11 +3403,7 @@ def selftest() -> int:
             print(f"SELFTEST FAILED: {f}", file=sys.stderr)
         return 1
     print("policy-merge-check: selftest ok — every PROTECTED_GLOBS family refuses (incl. a rename's old path and "
-          "a deletion, and ts/biome.json by name), docs/support.md's byte guard refuses a mismatch and a "
-          "non-modification, and (chtypes#316) a prose-only edit passes, a hand-edited generated cell and a "
-          "stale generated block each refuse, and a pure regeneration still passes — all against a regeneration "
-          "of the HEAD's own bytes, never main's checked-out copy, which regenerate_guarded_file's own test "
-          "proves it seeds the scratch file with; a missing, failing or pending required check, a fork, a stale "
+          "a deletion, and ts/biome.json by name); a missing, failing or pending required check, a fork, a stale "
           "head, a draft, a conflict and a review each refuse; an all-good input passes; build_enqueue_plan carries the judged "
           "head sha and node_id and never reaches the mutation on a dry run; the hand-off to the enqueue job carries "
           "exactly that node id and head sha, and enqueue-as-bot refuses malformed ones; only a job that completed "
@@ -4447,7 +3411,7 @@ def selftest() -> int:
           "exactly contents and pull-requests write inside the merge-bot job; ci.yml's blocking jobs and the "
           "CONTRIBUTING.md guide block are both derived from their source, never hand-set; test-counts "
           "(chtypes#285 §1b) refuses a single-suite drop even while another suite rises, a missing count on "
-          "either side, a ran-to-skipped shift, and a golden-case-count drop, passes an equal or rising count, "
+          "either side, and a ran-to-skipped shift, passes an equal or rising count, "
           "and is skipped entirely — at zero API cost — for a pull request that touches no test or fixture path; "
           "binding source (chtypes#285 §1) passes on its own binding's changed=false, read from a job log, and "
           "refuses on changed=true, a missing, tool-error or unparseable verdict, a verdict for another head or "
@@ -4474,16 +3438,7 @@ def selftest() -> int:
           "(empty) force-push timeline, and classify_dependabot_bump refuses each of these end-to-end too; and "
           "decide() itself refuses a dependabot-eligible manifest+lockfile diff that also touches an "
           "unconditionally protected path even if dependabot_ecosystem were granted, and still protects the "
-          "manifest when an extra UNPROTECTED path is also touched; and (chtypes#344) served_fixture_problems — the "
-          "function the gate calls — passes only a head tree byte-identical to the served set, and refuses ONE "
-          "flipped expected.json outcome, an extra file (the untracked abi-revision/ included), a missing one, a "
-          "mode, a symlink, a submodule, a truncated or failed tree read, a download that times out or fails, a "
-          "success not under the release key, an unreadable tarball and a symlink, ../ or duplicate member; main's "
-          "REAL scripts/fetch.sh, over file:// from the fixture releases, refuses a sha256 mismatch, a foreign or "
-          "missing signature, a test-key-signed release under the release key alone and an unreachable source, "
-          "and never sees a CHTYPES_* variable from the environment; decide() refuses the flipped outcome and a "
-          "proven tree beside scripts/ or tests/fixtures/api-surface/, and gather_served_fixtures reads nothing "
-          "for a diff it cannot excuse")
+          "manifest when an extra UNPROTECTED path is also touched")
     return 0
 
 
@@ -4523,7 +3478,7 @@ def main(argv: list[str]) -> int:
         return cmd_check_carve_out()
     parser = argparse.ArgumentParser(prog="policy-merge-check.py")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    g = sub.add_parser("gate", help="every condition but the byte comparison")
+    g = sub.add_parser("gate", help="every condition, from API reads alone")
     g.add_argument("--repo", required=True)
     g.add_argument("--pr", type=int)
     g.add_argument("--run-head-sha")

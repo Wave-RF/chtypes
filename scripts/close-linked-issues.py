@@ -150,9 +150,9 @@ def issues_to_close(repo: str, merged: bool, closing_issues: list[dict]) -> list
 
 def comment_body(pr_number: int, merge_sha: str) -> str:
     """The comment posted on every issue this script closes. First line is
-    a machine-category marker (this repository's own convention — see e.g.
-    .github/workflows/artifacts-readback.yml's `artifacts-readback:
-    generated_at …` comments) naming the pull request, so a reader or a
+    a machine-category marker (this repository's own convention, the
+    `<!-- word: … -->` shape the since-retired v0 index read-back's comments
+    also used) naming the pull request, so a reader or a
     watcher can tell at a glance which close this comment belongs to without
     parsing the sentence. Closes with `<!-- agent:chtypes-sdk -->`, this
     repository's identity marker for SDK-side automation."""

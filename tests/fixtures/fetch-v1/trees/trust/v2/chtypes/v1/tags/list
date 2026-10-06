@@ -1,0 +1,22 @@
+{
+  "name": "chtypes/v1",
+  "tags": [
+    "t-untrusted-key",
+    "t-bad-signature",
+    "t-subject-not-layer",
+    "t-wrong-platform",
+    "26.8.1.5",
+    "t-abi-revision",
+    "t-predicate-type",
+    "t-dup-key",
+    "t-multi-referrer",
+    "t-hint-unknown",
+    "t-no-bundle",
+    "t-no-bundle-allow-unsigned",
+    "t-fallback-only",
+    "t-referrers-empty-ok",
+    "t-referrers-empty-no-fallback",
+    "t-rotation-two-bundles",
+    "t-goldens-alongside"
+  ]
+}

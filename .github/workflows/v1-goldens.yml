@@ -1,0 +1,188 @@
+name: v1-goldens
+
+# The v1 goldens: one signed goldens document per release, executed by all four
+# bindings against the production artifact, judged by ONE comparator
+# (docs/guides/goldens-v1.md). Dispatch-only for now: it needs a published
+# release and its goldens referrer, which only a registry can serve.
+#
+# Each matrix leg runs that binding's goldens runner. The runner does its own
+# fetching with the binding's fetch layer (ensure for the release, fetch_signed
+# for the goldens referrer), executes every case, and RECORDS what the library
+# returned; it never compares. The verdict job then runs
+# scripts/goldens-v1/compare.py over the four reports. A binding whose runner
+# does not exist yet FAILS its leg by name, never skips: the verdict job cannot
+# go green without all four reports.
+#
+# The runner contract (the environment it receives, the files it writes) is in
+# docs/guides/goldens-v1.md. The paths below are the table runner lanes land
+# their files at; changing one is a change to that contract.
+#
+# Hosted runners, no secrets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_base:
+        description: "The https base of the registry to fetch from, repository path included (the same shape docs/guides/fetch-v1.md uses for the staging run)."
+        required: true
+        type: string
+      version:
+        description: "The exact four-part ClickHouse version of the release, for example 26.8.15.10."
+        required: true
+        type: string
+      platform:
+        description: "The platform to fetch and run on."
+        required: false
+        type: choice
+        default: linux-amd64
+        options:
+          - linux-amd64
+          - linux-arm64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v1-goldens-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  v1-goldens-run:
+    name: "v1-goldens-run (${{ matrix.binding }}) — the binding's runner executes the goldens and records the answers"
+    runs-on: ${{ inputs.platform == 'linux-arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        binding: [go, python, ts, rust]
+    env:
+      CHTYPES_GOLDENS_REGISTRY_BASE: ${{ inputs.registry_base }}
+      CHTYPES_GOLDENS_VERSION: ${{ inputs.version }}
+      CHTYPES_GOLDENS_PLATFORM: ${{ inputs.platform }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: where the runner writes its report and the document it fetched
+        run: |
+          {
+            echo "CHTYPES_GOLDENS_REPORT=$RUNNER_TEMP/goldens-report-${{ matrix.binding }}.json"
+            echo "CHTYPES_GOLDENS_DOCUMENT=$RUNNER_TEMP/goldens-document-${{ matrix.binding }}.json"
+          } >> "$GITHUB_ENV"
+      # The runner table. The path is where the binding's lane lands its runner;
+      # the command runs it. A missing runner fails this leg by name.
+      - name: which runner does this binding use, and does it exist on this branch yet?
+        id: runner
+        run: |
+          # shellcheck disable=SC2016 # the commands are expanded later, by the step that runs them
+          case "${{ matrix.binding }}" in
+            go)     path=go/chtypes/goldens_v1_runner_test.go;        cmd='cd go && go test -count=1 -run ^TestGoldensV1Runner$ ./chtypes/' ;;
+            python) path=python/tests/goldens_v1/test_runner.py;      cmd='cd python && uv run pytest -q "${RUNNER_PATH#python/}"' ;;
+            ts)     path=ts/test/goldens-v1/runner.test.ts;           cmd='cd ts && pnpm exec vitest run test/goldens-v1/runner.test.ts' ;;
+            rust)   path=rust/tests/goldens_v1_runner.rs;             cmd='cd rust && cargo test --locked --features fetch-v1 --test goldens_v1_runner' ;;
+          esac
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "cmd=$cmd" >> "$GITHUB_OUTPUT"
+          if [ ! -f "$path" ]; then
+            echo "::error title=v1-goldens (${{ matrix.binding }})::the ${{ matrix.binding }} goldens runner does not exist on this branch: $path. This leg FAILS rather than skips; the verdict job needs all four reports."
+            exit 1
+          fi
+      - if: matrix.binding == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - if: matrix.binding == 'python'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+      - if: matrix.binding == 'ts'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - if: matrix.binding == 'ts'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - if: matrix.binding == 'rust'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
+      - name: install the binding's dependencies
+        run: |
+          case "${{ matrix.binding }}" in
+            go) (cd go && go mod download) ;;
+            python) (cd python && uv sync --locked --group dev) ;;
+            ts) (cd ts && pnpm install --frozen-lockfile) ;;
+            rust) (cd rust && cargo fetch --locked) ;;
+          esac
+      - name: run the runner (fetch the release and the goldens with the binding's own fetch layer, execute, record)
+        env:
+          RUNNER_CMD: ${{ steps.runner.outputs.cmd }}
+          RUNNER_PATH: ${{ steps.runner.outputs.path }}
+        run: bash -c "$RUNNER_CMD"
+      - name: the runner wrote both files it owes
+        run: |
+          for f in "$CHTYPES_GOLDENS_REPORT" "$CHTYPES_GOLDENS_DOCUMENT"; do
+            [ -s "$f" ] || { echo "::error::the runner did not write $f"; exit 1; }
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: goldens-${{ matrix.binding }}
+          path: |
+            ${{ runner.temp }}/goldens-report-${{ matrix.binding }}.json
+            ${{ runner.temp }}/goldens-document-${{ matrix.binding }}.json
+          if-no-files-found: ignore
+
+  v1-goldens-verdict:
+    name: "v1-goldens-verdict — one comparator over the four reports"
+    needs: [v1-goldens-run]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      # Selftest first: a comparator nobody has seen fail is not a comparator.
+      - name: "selftest — the producer's rules and every report-level failure mode, schemas included"
+        run: uv run --no-project --python 3.11 --with 'jsonschema==4.23.0' scripts/goldens-v1/compare.py --selftest --schema-validate
+      - name: download every runner's report and the document it fetched
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true # none exist while no runner has landed; the next step then fails by name
+        with:
+          pattern: "goldens-*"
+          path: ${{ runner.temp }}/goldens
+          merge-multiple: true
+      - name: verdict (the document is validated against spec/goldens/v1/schema.json first; all four bindings required)
+        run: |
+          d="$RUNNER_TEMP/goldens"
+          doc=
+          for f in "$d"/goldens-document-*.json; do
+            [ -f "$f" ] && { doc="$f"; break; }
+          done
+          if [ -z "$doc" ]; then
+            echo "::error::no runner uploaded a goldens document; no binding has a runner yet or every leg failed before fetching"
+            exit 1
+          fi
+          reports=()
+          for b in go python ts rust; do
+            [ -f "$d/goldens-report-$b.json" ] && reports+=(--report "$d/goldens-report-$b.json")
+          done
+          set +e
+          uv run --no-project --python 3.11 --with 'jsonschema==4.23.0' scripts/goldens-v1/compare.py \
+            --goldens "$doc" "${reports[@]}" --require-bindings go,python,ts,rust --schema-validate | tee "$RUNNER_TEMP/verdict.txt"
+          rc="${PIPESTATUS[0]}"
+          {
+            echo '### v1 goldens'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/verdict.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"

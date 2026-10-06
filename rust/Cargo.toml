@@ -1,8 +1,12 @@
 [package]
 name = "chtypes"
-version = "0.5.2"
+version = "1.0.2"
 edition = "2024"
-rust-version = "1.85"
+# 1.87, not 1.85: ruzstd (the v1 zstd decoder) declares rust-version = "1.87"
+# in every current release (0.8.3 and 0.9.0). v1 is a breaking 1.0 release, so
+# this floor moves with it; rustls-platform-verifier 0.7.1 (also new in this
+# release, for fetch-v1) declares 1.85, which is within the new floor.
+rust-version = "1.87"
 license = "Apache-2.0"
 repository = "https://github.com/wave-rf/chtypes"
 homepage = "https://github.com/wave-rf/chtypes"
@@ -14,74 +18,75 @@ description = "ClickHouse's own type system, schema validation, DEFAULT/TTL sema
 [dependencies]
 libloading = "0.8"
 serde = { version = "1", features = ["derive"] }
-# serde_json reads `manifest.json` and writes the settings object that crosses the
-# C boundary — both of which are this crate's own well-formed UTF-8.
-#
-# It deliberately does NOT read result documents. `raw_value` was the analog of
-# Go's json.RawMessage here, but serde_json cannot parse a document at all when a
-# String column's bytes are not valid UTF-8 — which is how this crate came to
-# retry through `String::from_utf8_lossy` and destroy the bytes the C ABI contract
-# calls authoritative. `crate::doc` reads those documents over `&[u8]`, and
-# `crate::json` compares leaf text exactly; `arbitrary_precision` is not enabled
-# for the same reason it never was (see those modules' docs).
+# serde_json is the stock JSON parser every result document, `build_info` and the
+# settings object goes through. `arbitrary_precision` is not enabled: documents
+# carry integers beyond 2^53 as strings, so no number is ever routed through a
+# float.
 serde_json = "1"
 thiserror = "2"
-# sha2 is NOT optional, and that is the point: load-time checksum verification
-# (RegistryOptions::verify_checksums) is a security posture, and the consumer
-# who builds `--no-default-features` — no downloader, artifacts arriving by
-# some path this crate never sees — is precisely the one who most needs to
-# re-hash them before dlopen. Gating the hash behind `fetch` would mean "you
-# may verify only if you also compile an HTTP client, a tar reader and
-# ed25519", which is backwards. It is pure Rust with no system dependency,
-# `default-features = false` (no std digest extras), and it is the same digest
-# the fetch chain hashes with — one copy, pinned to the series ed25519-dalek
-# itself uses.
+# sha2 hashes the fetch layer's digests.
 sha2 = { version = "0.11", default-features = false }
 
-# --- the `fetch` feature: chtypes::ensure and the `chtypes` binary (docs/guides/fetch.md).
-# Every crate below is optional and behind `fetch`, so `--no-default-features`
-# builds with exactly the dependency set above.
+# --- the v1 fetch layer (`src/ocifetch`, docs/guides/fetch-v1.md) is part of the
+# public API now (the registry opens every library through it), so its crates
+# are ordinary dependencies and the `fetch-v1` feature below is only the name
+# CI and the conformance suite already use.
 #
-# ed25519-dalek verifies SHA256SUMS.sig (spec §4); verification only, so the
-# precomputed tables and zeroize are off. The digest the whole chain hashes
-# with is the unconditional `sha2` above — the loader needs it with or without
-# this feature.
-ed25519-dalek = { version = "3", optional = true, default-features = false }
-# ureq fetches over HTTPS (rustls + webpki roots, no OpenSSL). Its gzip feature
-# is OFF on purpose: a transparently un-gzipped body would hash differently
-# from the bytes SHA256SUMS records. base64 (for the signature file) is pinned
-# to the series ureq uses so there is one copy.
-ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
-base64 = { version = "0.23", optional = true }
-# tar + flate2 unpack the artifact tarball; xattr support is not wanted.
-tar = { version = "0.4", optional = true, default-features = false }
-flate2 = { version = "1", optional = true }
+# ed25519-dalek verifies the signed statements; verification only, so the
+# precomputed tables and zeroize are off.
+ed25519-dalek = { version = "3", default-features = false }
+# ureq fetches over HTTPS (rustls + webpki roots, no OpenSSL), with the system
+# certificate store as a root-cert source on top. Its gzip feature is OFF on
+# purpose: a transparently un-gzipped body would hash differently from the
+# bytes a digest names.
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
+base64 = "0.23"
+# tar unpacks the artifact layer; xattr support is not wanted.
+tar = { version = "0.4", default-features = false }
+# ruzstd is the zstd *decoder* (pure Rust, no system dependency): v1 artifacts
+# are zstd-compressed.
+ruzstd = { version = "0.9.0", default-features = false, features = ["std"] }
 
 [features]
-default = ["fetch"]
-# `chtypes::ensure`, the registry's autofetch option and the `chtypes` binary.
-fetch = [
-  "dep:ed25519-dalek",
-  "dep:ureq",
-  "dep:base64",
-  "dep:tar",
-  "dep:flate2",
-]
+default = []
+# Retained names, no longer gating anything: the v1 fetch layer and the ABI v1
+# layer are unconditional. CI commands and `[[test]] required-features` below
+# still spell them.
+fetch-v1 = []
+abi-v1 = []
 
+# The v1 command line over the fetch layer (src/main.rs): fetch, verify, list
+# and where. The binary re-declares src/ocifetch with #[path], the same way
+# the conformance suites do, because the fetch layer is not public API.
 [[bin]]
 name = "chtypes"
 path = "src/main.rs"
-required-features = ["fetch"]
 
-# The fetch suite runs the binary and the fixtures; it does not exist without
-# the feature.
+# The v1 conformance suite (docs/guides/fetch-v1.md §10, plan §3.3). It reads
+# CHTYPES_V1_CONFORMANCE and skips loudly, rather than failing, when unset.
 [[test]]
-name = "fetch"
-required-features = ["fetch"]
+name = "ocifetch_conformance"
+path = "tests/ocifetch_conformance.rs"
+required-features = ["fetch-v1"]
+
+# The v1 goldens runner (docs/guides/goldens-v1.md section 2). It has its own
+# `main` (harness = false) because it re-executes itself once per setup, and it
+# skips loudly, rather than failing, when its inputs are unset.
+[[test]]
+name = "goldens_v1_runner"
+path = "tests/goldens_v1_runner.rs"
+harness = false
+
+# The ABI v1 conformance suite re-declares src/abi1's module tree with
+# #[path] (rust/src/abi1/mod.rs explains why) and needs the abi-v1 feature's
+# generated layer and loader to exist at all.
+[[test]]
+name = "abi1_conformance"
+required-features = ["abi-v1"]
 
 [dev-dependencies]
-# The integration tests read manifest.json themselves, to prove the loader took
-# the library file name from it rather than constructing one.
+# The integration tests read the stub conformance report and the fetch fixtures'
+# case files with the same parser the crate uses.
 serde_json = "1"
 
 [[example]]

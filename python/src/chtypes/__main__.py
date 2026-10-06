@@ -1,46 +1,46 @@
-"""``python -m chtypes`` and the ``chtypes`` console script — docs/guides/fetch.md §6.
+"""``python -m chtypes`` and the ``chtypes`` console script, over the v1 fetch layer
+(docs/guides/fetch-v1.md).
 
-    chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
-                            [--tag <t> | --url <base>] [--lock <file>] [--frozen]
-                            [--force] [--offline]
-    chtypes verify [--dest <dir>]        re-hash every installed line against its manifest
-    chtypes list   [--dest <dir>]        what is installed, and what the release offers
-    chtypes where                        the registry directory fetch would write to
+    chtypes fetch <spelling>... | --all  [--platform <os-arch>] [--cache <dir>] [--lock <file>]
+                                         [--frozen] [--offline] [--update]
+    chtypes verify [--cache <dir>]       re-verify every installed build
+    chtypes list   [--cache <dir>] [--offline]
+    chtypes where  [--cache <dir>]       the cache root
 
-Exit codes: 0 ok · 1 verification failed · 2 usage · 3 source unreachable ·
-4 not published for this platform/line. Progress goes to stderr; ``fetch``
-prints the installed directory alone on stdout, one per line.
+A spelling is `26.8`, `26.8.15` or `26.8.15.10`. Exit statuses come from the
+`errors` table of spec/fetch-v1/constants.json (generated into the fetch layer
+as `ERROR_EXIT_CODES`); a usage error exits 2 and success exits 0. Progress and
+diagnostics go to stderr; `fetch` prints one installed library path per line on
+stdout.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
-import warnings
 from collections.abc import Sequence
-from pathlib import Path
 
-from .errors import (
-    CODE_ARTIFACT_UNPUBLISHED,
-    CODE_SOURCE_UNREACHABLE,
-    ArtifactError,
-    ChtypesError,
-    UnsignedArtifactWarning,
-)
-from .fetch import DEFAULT_ARTIFACTS_URL, DEFAULT_TAG, PLATFORMS
+from . import __version__ as chtypes_version
+from . import _ocifetch as fetch_layer
+from ._ocifetch import _constants as C
+from ._ocifetch._ensure import _translate_transport_error, detect_host_platform
+from ._ocifetch._errors import ArtifactCorruptError, FetchError
+from ._ocifetch._http import FetchPolicy, RetryPolicy, TransportError, fetch_from_bases
+from ._ocifetch._layout import resolve_cache_root
+from ._ocifetch._lock import load_lock
+from .errors import ChtypesError
+from .registry import FetchOptions
 
 __all__ = ["main"]
 
 EXIT_OK = 0
-EXIT_VERIFY_FAILED = 1
 EXIT_USAGE = 2
-EXIT_UNREACHABLE = 3
-EXIT_UNPUBLISHED = 4
-
-_EXIT_FOR_CODE = {
-    CODE_SOURCE_UNREACHABLE: EXIT_UNREACHABLE,
-    CODE_ARTIFACT_UNPUBLISHED: EXIT_UNPUBLISHED,
-}
+# A failure that carries no code from the table (a lock file that cannot be
+# read, an interrupted run): the status the table gives its verification codes.
+_EXIT_FALLBACK = C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_CORRUPT"]
+_EXIT_INTERRUPTED = 130
 
 
 def _say(line: str) -> None:
@@ -49,251 +49,238 @@ def _say(line: str) -> None:
 
 
 class _Parser(argparse.ArgumentParser):
-    """argparse exits 2 on usage errors already; this keeps the message shape ours."""
-
     def error(self, message: str) -> None:  # type: ignore[override]
         self.print_usage(sys.stderr)
         _say(f"chtypes: {message}")
         raise SystemExit(EXIT_USAGE)
 
 
+def _display_version() -> str:
+    """The package version; an uninstalled or dev build is 0.0.0-dev."""
+    if chtypes_version.startswith("0.0.0+"):
+        return "0.0.0-dev"
+    return chtypes_version
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog="chtypes",
-        description="Fetch, verify and locate chtypes artifacts (docs/guides/fetch.md).",
+        description="Fetch, verify and locate chtypes artifacts (docs/guides/fetch-v1.md).",
     )
+    parser.add_argument("--version", action="version", version=f"chtypes {_display_version()}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
     sub.required = True
 
-    def dest_option(p: argparse.ArgumentParser) -> None:
+    def cache_option(p: argparse.ArgumentParser) -> None:
         p.add_argument(
-            "--dest",
-            metavar="<dir>",
-            help="the registry directory (default: $CHTYPES_REGISTRY, else the per-user cache)",
+            "--cache", metavar="<dir>", help="the cache directory (default: CHTYPES_CACHE)"
         )
 
     fetch = sub.add_parser(
         "fetch",
-        help="install one or more ClickHouse lines, verified",
-        description=(
-            "Install ClickHouse lines through the verification chain (docs/guides/fetch.md §3)."
-        ),
+        help="install one or more versions, verified",
+        description="Resolve, verify and install versions (docs/guides/fetch-v1.md sections 3-6).",
     )
     fetch.add_argument(
-        "lines",
+        "spellings",
         nargs="*",
-        metavar="<line>",
-        help="a minor line (25.8) or an exact patch (25.8.28.1-lts, a hard requirement)",
-    )
-    fetch.add_argument("--all", action="store_true", help="every line the release publishes")
-    fetch.add_argument(
-        "--platform",
-        metavar="<os-arch>",
-        choices=PLATFORMS,
-        help=f"one of {', '.join(PLATFORMS)} (default: this host)",
-    )
-    dest_option(fetch)
-    where_from = fetch.add_mutually_exclusive_group()
-    where_from.add_argument(
-        "--tag",
-        metavar="<t>",
-        help=f"a release tag on the artifacts host (default: the rolling '{DEFAULT_TAG}')",
-    )
-    where_from.add_argument(
-        "--url",
-        metavar="<base>",
-        help=f"any base: an http(s) URL, a file:// URL or a directory "
-        f"(default: $CHTYPES_ARTIFACTS_URL or {DEFAULT_ARTIFACTS_URL}, plus the tag)",
+        metavar="<spelling>",
+        help="26.8, 26.8.15 or 26.8.15.10 (no v prefix, no channel suffix)",
     )
     fetch.add_argument(
-        "--lock", metavar="<file>", help="record what was installed in this lock file (§5)"
+        "--all",
+        action="store_true",
+        help="every line the registry publishes (with --frozen: every request the lock pins)",
+    )
+    fetch.add_argument(
+        "--platform", metavar="<os-arch>", help="one of the platform keys (default: this host)"
+    )
+    cache_option(fetch)
+    fetch.add_argument(
+        "--update",
+        action="store_true",
+        help="re-resolve every locked request and rewrite the lock (requires --lock)",
+    )
+    fetch.add_argument(
+        "--lock",
+        metavar="<file>",
+        help=f"write the lock file (default name {C.LOCK_DEFAULT_FILE}); with --frozen, read it",
     )
     fetch.add_argument(
         "--frozen",
         action="store_true",
-        help="refuse anything the lock file does not pin (default lock: chtypes.lock)",
+        help="fetch only what the lock pins, by digest, with no tag or referrer lookups",
     )
-    fetch.add_argument("--force", action="store_true", help="re-download an installed line")
     fetch.add_argument(
         "--offline",
         action="store_true",
-        help="never touch the source: installed and verified, or CHTYPES_SOURCE_UNREACHABLE",
+        help="never touch a source: installed and verified, or CHTYPES_ARTIFACT_MISSING",
     )
 
     verify = sub.add_parser(
         "verify",
-        help="re-hash every installed line against its manifest",
-        description="Re-hash every installed line's library against its own manifest.json.",
+        help="re-verify the installed cache",
+        description="Re-hash every installed library against its own verified record.",
     )
-    dest_option(verify)
+    cache_option(verify)
 
     listing = sub.add_parser(
         "list",
-        help="what is installed, and what the release offers",
-        description="What is installed in the registry, and what the release offers for it.",
+        help="what is installed, and what the registry publishes",
+        description="What is installed, and the version tags the registry publishes.",
     )
-    dest_option(listing)
-    listing.add_argument("--platform", metavar="<os-arch>", choices=PLATFORMS)
-    lfrom = listing.add_mutually_exclusive_group()
-    lfrom.add_argument("--tag", metavar="<t>")
-    lfrom.add_argument("--url", metavar="<base>")
+    cache_option(listing)
+    listing.add_argument(
+        "--offline", action="store_true", help="list only what is installed; no network"
+    )
 
-    where = sub.add_parser(
-        "where",
-        help="the registry directory fetch would write to",
-        description="Print the registry directory fetch would write to (docs/guides/fetch.md §1).",
-    )
-    where.add_argument("--platform", metavar="<os-arch>", choices=PLATFORMS)
+    where = sub.add_parser("where", help="the cache root", description="Print the cache root.")
+    cache_option(where)
     return parser
 
 
-def _cmd_fetch(args: argparse.Namespace) -> int:
-    from .fetch import fetch_lines
-
-    installed = fetch_lines(
-        args.lines,
-        all_lines=args.all,
-        dest=args.dest,
-        platform=args.platform,
-        url=args.url,
-        tag=args.tag,
-        lock=args.lock,
-        frozen=args.frozen,
-        force=args.force,
-        offline=args.offline,
-        progress=_say,
+def _options(args: argparse.Namespace, *, platform: str | None = None):
+    lock_path = None
+    lock_write = False
+    if getattr(args, "frozen", False):
+        lock_path = args.lock or C.LOCK_DEFAULT_FILE
+    elif getattr(args, "update", False):
+        lock_path = args.lock
+    elif getattr(args, "lock", None):
+        lock_path = args.lock
+        lock_write = True
+    fetch = FetchOptions(
+        cache_dir=getattr(args, "cache", None),
+        offline=getattr(args, "offline", False),
+        frozen=getattr(args, "frozen", False),
+        lock_path=lock_path,
+        lock_write=lock_write,
+        update=getattr(args, "update", False),
     )
-    for directory in installed:
-        sys.stdout.write(f"{directory}\n")
+    return fetch._to_options(platform)
+
+
+_LINE_SPELLING = re.compile(r"^[0-9]+\.[0-9]+$")
+
+
+def _published_tags(options) -> list[str]:
+    """The registry's `tags/list`, kept to the tags that are v1 version spellings
+    (`spelling.regex`): the referrers fallback tags (`sha256-<hex>`) and anything
+    else a repository carries are not versions."""
+    try:
+        resp = fetch_from_bases(
+            options.resolved_bases(),
+            "/tags/list",
+            mode="tag",
+            accept=("application/json",),
+            max_bytes=C.TAGS_LIST_MAX_BYTES,
+            policy=FetchPolicy(token=options.token),
+            retry=RetryPolicy(),
+        )
+    except TransportError as exc:
+        raise _translate_transport_error(exc) from exc
+    try:
+        tags = json.loads(resp.body.decode("utf-8")).get("tags") or []
+    except (ValueError, AttributeError) as exc:
+        raise ArtifactCorruptError(f"chtypes: tags/list was not a tag list ({exc})") from exc
+    keep = [t for t in tags if isinstance(t, str) and re.fullmatch(C.SPELLING_REGEX, t)]
+    return sorted(set(keep), key=lambda t: tuple(int(p) for p in t.split(".")))
+
+
+def _cmd_fetch(args: argparse.Namespace) -> int:
+    if args.all and args.spellings:
+        raise ValueError("chtypes: give spellings or --all, not both")
+    if not args.all and not args.spellings and not args.update:
+        raise ValueError("chtypes: name at least one version, or pass --all")
+    if args.update and not args.lock:
+        raise ValueError("chtypes: --update requires --lock")
+    if args.update and (args.frozen or args.offline):
+        raise ValueError("chtypes: --update cannot be combined with --frozen or --offline")
+    platform = args.platform or detect_host_platform()
+    if platform not in {p["key"] for p in C.PLATFORMS}:
+        raise ValueError(f"chtypes: unknown platform {platform!r}")
+    options = _options(args, platform=platform)
+    if args.update and not args.spellings and not args.all:
+        spellings = list(load_lock(options.lock_path).requests)
+        args.spellings = spellings
+    if args.all:
+        if args.frozen or args.update:
+            lock = load_lock(options.lock_path)
+            spellings = list(lock.requests)
+        else:
+            spellings = [t for t in _published_tags(options) if _LINE_SPELLING.match(t)]
+            if not spellings:
+                _say("chtypes: the registry publishes no lines")
+    else:
+        spellings = list(args.spellings)
+    requests = [fetch_layer.Request(s) for s in spellings]  # spelling errors: usage, before any I/O
+    for request in requests:
+        resolved = fetch_layer.ensure(request, options)
+        for warning in resolved.warnings:
+            _say(f"chtypes: warning: {warning}")
+        state = "already installed" if resolved.already_installed else "installed"
+        _say(f"chtypes: {request.spelling} -> {resolved.version} ({resolved.platform}) {state}")
+        sys.stdout.write(f"{resolved.dir}\n")
     sys.stdout.flush()
     return EXIT_OK
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
-    from .fetch import fetch_destination, verify_registry
-
-    registry = fetch_destination(args.dest)
-    report = verify_registry(registry)
-    if not report:
-        _say(f"chtypes: nothing installed under {registry}")
-        return EXIT_OK
+    results = fetch_layer.verify_installed(FetchOptions(cache_dir=args.cache)._to_options())
     failed = 0
-    for minor, directory, error in report:
-        if error is None:
-            sys.stdout.write(f"{minor:<8} ok       {directory}\n")
-        else:
+    for r in results:
+        if not r.ok:
             failed += 1
-            sys.stdout.write(f"{minor:<8} FAILED   {directory}\n")
-            _say(f"  {error}")
-    _goldens_line(Path(registry))
-    sys.stdout.flush()
+            _say(f"chtypes: FAILED {r.version} {r.platform} {r.dir}: {r.detail}")
     if failed:
-        _say(f"chtypes: {failed} of {len(report)} installed line(s) FAILED verification")
-        return EXIT_VERIFY_FAILED
-    _say(f"chtypes: {len(report)} installed line(s) verified under {registry}")
+        _say(f"chtypes: {failed} of {len(results)} installed build(s) FAILED verification")
+        return C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_CORRUPT"]
     return EXIT_OK
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    from .fetch import (
-        Fetcher,
-        _fetch_abi_revision,
-        _not_shown,
-        fetch_destination,
-        host_platform,
-        installed_patches,
-    )
-
-    platform = args.platform or host_platform()
-    registry = fetch_destination(args.dest, platform=platform)
-    have = installed_patches(registry)
-    sys.stdout.write(f"installed ({registry}):\n")
-    if not have:
-        sys.stdout.write("  (nothing)\n")
-    for patch in have:
-        # SDK#284: the flat slot (the patch a LINE request selects) and every
-        # other patch under patches/<minor>/<version>/ both report.
-        tag = "" if patch.flat else "  (patches/)"
-        sys.stdout.write(f"  {patch.minor:<8} {patch.version:<18} {patch.directory}{tag}\n")
-    sys.stdout.flush()
-
-    fetcher = Fetcher(dest=registry, platform=platform, url=args.url, tag=args.tag, progress=_say)
-    release = fetcher.release()
-    offered = release.offered(platform)
-    signed = f"signed by key {release.signed_by}" if release.signed_by else "UNSIGNED"
-    sys.stdout.write(f"release ({release.source}, {signed}) offers for {platform}:\n")
-    if not offered:
-        sys.stdout.write("  (nothing)\n")
-    installed_versions = {patch.version for patch in have}
-    for entry in offered:
-        state = "installed" if entry.clickhouse_version in installed_versions else "not installed"
-        sys.stdout.write(
-            f"  {entry.minor:<8} {entry.clickhouse_version:<18} b{entry.build_number:<3} "
-            f"{entry.file}  [{state}]\n"
-        )
-    # Only this SDK's own ABI revision is offered (docs/guides/fetch.md §2), and
-    # one line names what that hid.
-    note = _not_shown([e for e in release.entries if e.platform == platform], _fetch_abi_revision())
-    if note is not None:
-        sys.stdout.write(f"  {note}\n")
+    options = FetchOptions(cache_dir=args.cache, offline=args.offline)._to_options()
+    installed = fetch_layer.list_installed(options)
+    for r in sorted(installed, key=lambda r: (r.version, r.platform)):
+        sys.stdout.write(f"installed {r.version} {r.platform} {r.dir}\n")
+    if not args.offline:
+        for tag in _published_tags(options):
+            sys.stdout.write(f"published {tag} support unknown\n")
     sys.stdout.flush()
     return EXIT_OK
-
-
-def _goldens_line(registry: Path) -> None:
-    """The served golden set sits beside the artifacts, so "where is my registry"
-    and "is my registry sound" are both moments someone wants to know whether it
-    is there — a missing one is why the golden tests skip."""
-    from .fetch import GOLDENS_ASSET
-
-    path = Path(registry) / GOLDENS_ASSET
-    try:
-        size = path.stat().st_size
-    except OSError:
-        sys.stdout.write(f"{path}  (golden set: not fetched — the golden tests will skip)\n")
-    else:
-        sys.stdout.write(f"{path}  (golden set, {size} bytes)\n")
 
 
 def _cmd_where(args: argparse.Namespace) -> int:
-    from .fetch import fetch_destination
-
-    dest = fetch_destination(platform=args.platform)
-    sys.stdout.write(f"{dest}\n")
-    _goldens_line(Path(dest))
+    sys.stdout.write(f"{resolve_cache_root(args.cache)}\n")
     return EXIT_OK
 
 
-_COMMANDS = {
-    "fetch": _cmd_fetch,
-    "verify": _cmd_verify,
-    "list": _cmd_list,
-    "where": _cmd_where,
-}
+_COMMANDS = {"fetch": _cmd_fetch, "verify": _cmd_verify, "list": _cmd_list, "where": _cmd_where}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI; returns the exit code (docs/guides/fetch.md §6)."""
-    parser = build_parser()
-    args = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
-    # The library's loud warning reaches stderr through the progress channel
-    # here; the `warnings` copy would print it a second time.
-    warnings.simplefilter("ignore", UnsignedArtifactWarning)
+    """Run the CLI; returns the exit status."""
+    try:
+        args = build_parser().parse_args(list(sys.argv[1:] if argv is None else argv))
+    except SystemExit as exc:  # argparse: a usage error (2) or --help (0)
+        return exc.code if isinstance(exc.code, int) else EXIT_USAGE
     try:
         return _COMMANDS[args.command](args)
-    except ValueError as exc:  # a bad option combination or spelling: usage
+    except ValueError as exc:  # a bad spelling or option combination
         _say(str(exc))
         return EXIT_USAGE
-    except ArtifactError as exc:
+    except (FetchError, ChtypesError) as exc:
+        code = getattr(exc, "code", "")
         _say(str(exc))
-        _say(f"chtypes: {exc.code}")
-        return _EXIT_FOR_CODE.get(exc.code, EXIT_VERIFY_FAILED)
-    except ChtypesError as exc:
-        _say(str(exc))
-        return EXIT_VERIFY_FAILED
+        if code:
+            _say(f"chtypes: {code}")
+        return C.ERROR_EXIT_CODES.get(code, _EXIT_FALLBACK)
+    except OSError as exc:
+        _say(f"chtypes: {exc}")
+        return _EXIT_FALLBACK
     except KeyboardInterrupt:
         _say("chtypes: interrupted")
-        return 130
+        return _EXIT_INTERRUPTED
 
 
 if __name__ == "__main__":

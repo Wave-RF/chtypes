@@ -3,18 +3,20 @@
 //
 // It walks the whole connect-time-to-publish path against a REAL ClickHouse:
 //
-//  1. discovery   — the three canonical queries, run over plain HTTP
-//  2. registry    — pick the artifact matching the server's own version
-//  3. reconstruct — system.columns rows -> a column-declaration list, with the
-//     column names spelled by the artifact's own quoting
-//  4. compile     — CompileDDL under the deployment's declared profile
+//  1. discovery   — the server's version and changed settings, over plain HTTP
+//  2. registry    — open the library matching the server's own version
+//  3. reconstruct — the library's own discovery query, and its reader turning
+//     the system.columns rows into declarations
+//  4. compile     — CompileTable under the deployment's declared profile
 //  5. rows        — a batch through Rows(), and the publish decision per row
 //
 // Nothing here talks to ClickHouse through chtypes. chtypes never opens a
-// socket; it ships the queries and parses their results. The HTTP client below
-// is standing in for whatever HTTP client your service already has.
+// socket; the library supplies the columns query and reads its result. The HTTP
+// client below is standing in for whatever HTTP client your service already
+// has.
 //
-// Run it:
+// Run it (the library for the server's version is fetched and verified on
+// first use):
 //
 //	docker run -d --name chguide-ch --label com.docker.compose.project=chguide \
 //	    -e CLICKHOUSE_PASSWORD=chguide clickhouse/clickhouse-server:26.8
@@ -24,6 +26,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -91,95 +95,92 @@ func run() error {
 
 	// ---------------------------------------------------------- 1. discovery
 	//
-	// Three queries, run with the caller's own client. chtypes supplies the
-	// SQL text and the parsers; it never connects.
+	// Three reads, run with the caller's own client. The server's version and
+	// the settings it changed from stock are the CALLER's to ask for (the
+	// library has no call that queries a server, and holds no SQL for it); the
+	// columns query is the library's own, and ClickHouse's own reader turns its
+	// answer into declarations. chtypes never connects.
 	section("1. Connect-time discovery")
 
-	verBody, err := ch.exec(chtypes.QueryServerVersion, nil)
+	verBody, err := ch.exec("SELECT version() AS version FORMAT JSONEachRow", nil)
 	if err != nil {
 		return fmt.Errorf("version query: %w", err)
 	}
-	version, err := chtypes.ParseVersionResult(verBody)
+	version, err := parseVersion(verBody)
 	if err != nil {
 		return err
 	}
 
-	setBody, err := ch.exec(chtypes.QueryChangedSettings, nil)
+	setBody, err := ch.exec("SELECT name, value FROM system.settings WHERE changed FORMAT JSONEachRow", nil)
 	if err != nil {
 		return fmt.Errorf("settings query: %w", err)
 	}
-	settings, err := chtypes.ParseChangedSettingsResult(setBody)
+	settings, err := parseSettings(setBody)
 	if err != nil {
 		return err
 	}
+	kv("server version", version)
+	kv("changed settings", fmt.Sprintf("%d %v", len(settings), settings))
 
-	colBody, err := ch.exec(chtypes.QueryTableColumns, map[string]string{
-		"param_db":    demoDB,
-		"param_table": demoTable,
+	// ---------------------------------------------------------- 2. registry
+	section("2. Registry: the library matching the server")
+
+	// Autofetch is on because the version is only known now: the fetch layer
+	// verifies the signature before anything is loaded.
+	reg, err := chtypes.NewRegistry(chtypes.WithAutoFetch(true))
+	if err != nil {
+		return fmt.Errorf("registry: %w", err)
+	}
+	lib, err := reg.For(version)
+	if err != nil {
+		return fmt.Errorf("no library for server %s: %w", version, err)
+	}
+	kv("resolved", fmt.Sprintf("%s (minor %s)", lib.Version, lib.Minor))
+	if res := lib.Resolved(); res != nil {
+		kv("opened from", res.Source)
+	}
+
+	// ------------------------------------------------------- 3. reconstruct
+	section("3. DiscoverQuery and DiscoverColumns")
+
+	query, err := lib.DiscoverQuery()
+	if err != nil {
+		return err
+	}
+	colBody, err := ch.exec(query, map[string]string{
+		"param_database": demoDB,
+		"param_table":    demoTable,
 	})
 	if err != nil {
 		return fmt.Errorf("columns query: %w", err)
 	}
-	cols, err := chtypes.ParseColumnsResult(colBody)
+	disc, err := lib.DiscoverColumns(colBody)
 	if err != nil {
 		return err
 	}
-
-	profile := chtypes.ServerProfile{Version: version, Settings: settings}
-	kv("server version", profile.Version)
-	kv("changed settings", fmt.Sprintf("%d %v", len(profile.Settings), profile.Settings))
-	kv("columns", fmt.Sprintf("%d", len(cols)))
-	for _, c := range cols {
-		detail := c.Type
-		if c.DefaultKind != "" {
-			detail += "  " + c.DefaultKind + " " + c.DefaultExpression
-		}
-		fmt.Printf("      %-12s %s\n", c.Name, detail)
+	for _, c := range disc.Columns {
+		fmt.Printf("      %-12s %s\n", c.Name, c.Declaration)
 	}
-
-	// A discovery query that does not SELECT default_expression — an easy
-	// column to leave out — loses the table's DEFAULT semantics silently.
-	// Note how much of this table is carried by that one column.
-
-	// ---------------------------------------------------------- 2. registry
-	section("2. Registry — artifact matching the server")
-
-	dir := registryDir()
-	reg, err := chtypes.NewRegistry(dir)
-	if err != nil {
-		return fmt.Errorf("registry at %s: %w", dir, err)
-	}
-	kv("registry dir", dir)
-	kv("artifacts", strings.Join(reg.Versions(), " "))
-
-	lib, err := reg.For(chtypes.Version(profile.Version))
-	if err != nil {
-		return fmt.Errorf("no artifact for server %s: %w", profile.Version, err)
-	}
-	kv("resolved", fmt.Sprintf("%s (minor %s)", lib.Version, lib.Minor))
-
-	// ------------------------------------------------------- 3. reconstruct
-	section("3. lib.ReconstructDDL")
-
-	ddl, err := lib.ReconstructDDL(cols)
-	if err != nil {
-		return err
-	}
-	for _, part := range strings.Split(ddl, ", ") {
-		fmt.Printf("      %s\n", part)
-	}
+	// A discovery query that does not select default_expression, an easy
+	// column to leave out, loses the table's DEFAULT semantics silently; the
+	// library's own query selects exactly what its reader needs.
 
 	// ----------------------------------------------------------- 4. compile
-	section("4. CompileDDL under the declared profile")
+	section("4. CompileTable under the declared profile")
 
-	schema, err := lib.CompileDDL(ddl, chtypes.WithCompileSettings(profile.Settings))
+	ddl := "CREATE TABLE t (" + disc.ColumnsSQL + ") ENGINE = MergeTree ORDER BY tuple()"
+	schema, err := lib.CompileTable(ddl, chtypes.WithSettings(settings))
 	if err != nil {
 		return fmt.Errorf("compile: %w", err)
 	}
 	defer schema.Close()
-	kv("compiled", fmt.Sprintf("%d columns", len(schema.Columns)))
-	for i, c := range schema.Columns {
-		fmt.Printf("      %-12s %-24s %s\n", c.Name, schema.Canonical[i], c.DefaultKind)
+	desc, err := schema.Describe()
+	if err != nil {
+		return err
+	}
+	kv("compiled", fmt.Sprintf("%d columns", len(desc.Columns)))
+	for _, c := range desc.Columns {
+		fmt.Printf("      %-12s %-24s %s\n", c.Name, c.Type, c.DefaultKind)
 	}
 
 	// ----------------------------------------------------- 5a. per-row admission
@@ -212,7 +213,7 @@ func run() error {
 		body.WriteByte('\n')
 	}
 
-	res, err := schema.Rows(chtypes.JSONEachRow, []byte(body.String()), nil)
+	res, err := schema.Rows(chtypes.JSONEachRow, []byte(body.String()))
 	if err != nil {
 		return fmt.Errorf("rows: %w", err)
 	}
@@ -235,7 +236,7 @@ func run() error {
 
 	bad, err := schema.Rows(chtypes.JSONEachRow,
 		[]byte(batch[0].json+"\n"),
-		map[string]string{"totally_not_a_setting": "1"})
+		chtypes.WithSettings(map[string]string{"totally_not_a_setting": "1"}))
 	if err != nil {
 		fmt.Printf("   Rows returned a Go error: %v\n", err)
 	} else {
@@ -280,8 +281,8 @@ func reportRow(i int, want string, row chtypes.RowResult, transforms []chtypes.T
 				text = "NULL"
 			}
 			marker := ""
-			if v.Source != "input" {
-				marker = "   <- " + v.Source
+			if v.Source != chtypes.SourceInput {
+				marker = "   <- " + string(v.Source)
 			}
 			fmt.Printf("      %-12s %s%s\n", v.Column, text, marker)
 		}
@@ -295,18 +296,22 @@ func reportRow(i int, want string, row chtypes.RowResult, transforms []chtypes.T
 	// the payload here, rather than the stored value, is the bug to avoid.
 	for _, t := range transforms {
 		lossy := "reversible"
-		if t.Lossy() {
+		if t.Lossy {
 			lossy = "LOSSY"
 		}
 		fmt.Printf("   SILENT CHANGE (%s, %s): %s  %s -> %s\n",
 			t.Reason, lossy, t.Column, t.Input, t.Stored)
 	}
 
-	// The caller's obligation: a volatile DEFAULT resolved here is only true if
-	// the server is never asked to evaluate it.
-	for _, s := range row.Substituted {
-		fmt.Printf("   SUBSTITUTED %s = %s (from %s)\n", s.Column, s.Text, s.Expr)
-		fmt.Printf("      -> MUST be sent as an explicit column, or stored != preview\n")
+	// The caller's obligation: a volatile DEFAULT the library resolved from its
+	// own clock, or a generated one, is only the stored value if the server is
+	// never asked to evaluate it, so insert the library's export, or send the
+	// column explicitly.
+	for _, v := range row.Values {
+		if v.Source == chtypes.SourceDefaultSubstituted || v.Source == chtypes.SourceDefaultGenerated {
+			fmt.Printf("   %s %s = %s\n", strings.ToUpper(string(v.Source)), v.Column, v.Text)
+			fmt.Printf("      -> MUST be sent as an explicit column (or insert the export), or stored != preview\n")
+		}
 	}
 
 	if len(row.UnknownFields) > 0 {
@@ -359,13 +364,33 @@ func (c *client) exec(query string, params map[string]string) ([]byte, error) {
 	return b, nil
 }
 
-// registryDir is $CHTYPES_REGISTRY, else the per-user artifact cache every
-// SDK defaults to, the same way the other playground programs do.
-func registryDir() string {
-	if d := os.Getenv("CHTYPES_REGISTRY"); d != "" {
-		return d
+// parseVersion reads the one row of the version query. This is the caller's
+// own query and the caller's own parse: chtypes holds neither.
+func parseVersion(body []byte) (string, error) {
+	var row struct {
+		Version string `json:"version"`
 	}
-	return chtypes.DefaultRegistryDir()
+	if err := json.Unmarshal(bytes.TrimSpace(body), &row); err != nil || row.Version == "" {
+		return "", fmt.Errorf("the version query answered %q", firstLine(string(body)))
+	}
+	return row.Version, nil
+}
+
+// parseSettings reads the changed settings as the strings the library takes:
+// a settings value is a string, and is never rewritten.
+func parseSettings(body []byte) (map[string]string, error) {
+	out := map[string]string{}
+	for _, l := range bytes.Split(bytes.TrimSpace(body), []byte("\n")) {
+		if len(l) == 0 {
+			continue
+		}
+		var row struct{ Name, Value string }
+		if err := json.Unmarshal(l, &row); err != nil {
+			return nil, fmt.Errorf("a settings row: %w", err)
+		}
+		out[row.Name] = row.Value
+	}
+	return out, nil
 }
 
 func env(k, def string) string {

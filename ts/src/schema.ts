@@ -1,804 +1,217 @@
 /**
- * A compiled schema — one tenant table's column list, compiled inside one
- * version's library, plus the engine and TTL declarations that make `rows()`
- * answer with the storage layer's verdict as well as the type layer's.
+ * `Schema`, `Filter` and `Block`: the compiled objects of `docs/reference/bindings-v1.md` §2.
+ *
+ * Every public call makes exactly one ABI call over the generated, typed
+ * layer, then decodes the document it returned (`./documents.ts`) and
+ * computes nothing. The per-call zone is the `session_timezone` key of the
+ * call's settings and nothing more (`./settings.ts`).
+ *
+ * Handles. Each object holds the generated layer's handle wrapper, whose
+ * `ptr` raises a `UsageError` naming the object once it is closed, before any
+ * C call. A filter or a block holds a counted reference to its schema inside
+ * the library, so a binding object neither holds its parent alive nor orders
+ * its frees: closing a schema while its filters are in use is legal, and
+ * `close` is idempotent. A `FinalizationRegistry` per handle class frees what
+ * the caller abandons. TypeScript runs every call synchronously on one
+ * thread, so the close guard of the other bindings reduces to this check: no
+ * call is ever in flight while `close` runs.
  */
 
-import { ChtypesError } from './errors.js';
-import type { BlockHandle, FilterHandle, NativeLibrary, SchemaHandle } from './ffi.js';
-import { DOC_ALL, EXPORT_NONE, type Format } from './format.js';
-import { parseDocument } from './json.js';
+import type { BlockHandle, Calls, FilterHandle, SchemaHandle } from './abi1/index.js';
+import { DocFlags, EXPORT_NONE, type Format } from './abi1/index.js';
 import {
-  batchResultOf,
-  filterResultOf,
-  rowResultOf,
   type BatchResult,
+  decodeBatch,
+  decodeFilterResult,
+  decodeRow,
+  decodeSchemaDescription,
   type FilterResult,
   type RowResult,
-} from './results.js';
-import { encodeSettings, type Settings } from './settings.js';
+  type SchemaDescription,
+} from './documents.js';
+import { type BytesIn, bytesIn, encodeColumns, encodeParams, encodeSettings, type Settings } from './settings.js';
 
-/**
- * Native state a `Schema`'s GC finalizer frees from, tracked separately from
- * the `Schema` object itself: a `FinalizationRegistry` callback must never
- * hold (or close over) a reference to the object it was registered for —
- * that would keep it reachable forever and the finalizer would never run.
- *
- * `Filter` and `Block` each remove their own handle from `openFilters` /
- * `openBlocks` when they free it — whether that is an explicit `close()` or
- * their OWN finalizer — so whichever gets there first wins and the other is
- * a safe no-op. That is what lets this schema's finalizer walk whatever is
- * STILL in these sets and free it before freeing the schema itself (the C
- * layer does not refcount: freeing the schema under a live filter or block
- * handle is a use-after-free) without racing a filter's or block's own
- * independent finalizer — the spec promises nothing about the order two
- * separate `FinalizationRegistry` callbacks run in, so correctness cannot
- * depend on which one happens to fire first.
- */
-interface SchemaNative {
-  readonly native: NativeLibrary;
-  handle: SchemaHandle | null;
-  readonly openFilters: Set<FilterHandle>;
-  readonly openBlocks: Set<BlockHandle>;
+/** Options of `Library.compileTable`: the profile settings a schema compiles under, and the zone that profile defaults to. */
+export interface CompileOptions {
+  readonly settings?: Settings | undefined;
+  /** In a compile profile it is a default for later calls on the schema; a compiled type always takes the image zone, never the profile's. */
+  readonly sessionTimezone?: string | undefined;
 }
 
-const schemaFinalizer = new FinalizationRegistry<SchemaNative>((n) => {
-  if (n.handle === null) return; // closed explicitly already
-  for (const h of n.openFilters) n.native.filterFree(h);
-  n.openFilters.clear();
-  for (const h of n.openBlocks) n.native.blockFree(h);
-  n.openBlocks.clear();
-  n.native.schemaFree(n.handle);
-  n.handle = null;
-});
-
-/** `Filter`'s half of the same coordination; see `SchemaNative`. */
-interface FilterNative {
-  readonly native: NativeLibrary;
-  readonly schema: SchemaNative;
-  handle: FilterHandle | null;
-}
-
-const filterFinalizer = new FinalizationRegistry<FilterNative>((n) => {
-  if (n.handle === null) return;
-  if (n.schema.openFilters.delete(n.handle)) n.native.filterFree(n.handle);
-  n.handle = null;
-});
-
-/** `Block`'s half of the same coordination; see `SchemaNative`. */
-interface BlockNative {
-  readonly native: NativeLibrary;
-  readonly schema: SchemaNative;
-  handle: BlockHandle | null;
-}
-
-const blockFinalizer = new FinalizationRegistry<BlockNative>((n) => {
-  if (n.handle === null) return;
-  if (n.schema.openBlocks.delete(n.handle)) n.native.blockFree(n.handle);
-  n.handle = null;
-});
-
-/** One declared column, as ClickHouse canonicalized it. */
-export interface ColumnInfo {
-  readonly name: string;
-  /** Canonical type — pass it through verbatim, never re-normalize whitespace. */
-  readonly type: string;
-  /** "" | "DEFAULT" | "MATERIALIZED" | "ALIAS" | "EPHEMERAL" */
-  readonly defaultKind: string;
-  readonly defaultExpr: string;
-  /** True when the DEFAULT is a literal applicable without the interpreter. */
-  readonly defaultIsLiteral: boolean;
-}
-
-/** Options for `Schema#setEngine` — the table's MergeTree-namespace settings. */
-export interface EngineOptions {
-  /**
-   * The `SETTINGS` clause after the engine — `allow_nullable_key` and friends,
-   * a namespace `DB::Settings` cannot carry (the C ABI contract §`chs_schema_engine`).
-   * Absent or empty is structurally identical to the plain engine declaration:
-   * `chs_schema_engine` takes "{}" either way. Names are validated by the
-   * server's own `MergeTreeSettings` object: an unknown name throws the
-   * server's own 115; a known name declared at a NON-default value is refused
-   * (`unsupported`, naming it) — no MergeTree setting's behavior is modeled
-   * yet, and silently ignoring a declared value would mean the declared
-   * profile is not in force; a name declared AT its default is inert and
-   * accepted.
-   */
-  readonly mergeTreeSettings?: Settings | undefined;
-}
-
-/**
- * Options for `Schema#row` and `Schema#parseBlock` — the revision-5 INSERT
- * column list (the C ABI contract §Rows, for which include/chtypes.h is the
- * public authority). `RowsOptions` (below) extends this with the
- * revision-3 export/document-flag channels, which are meaningless on
- * `row()` and `parseBlock()` — this type simply does not offer them, rather
- * than offering fields those two methods would silently ignore.
- */
+/** Options of `Schema.row` and `Schema.parseBlock`. */
 export interface RowOptions {
-  /**
-   * The revision-5 INSERT column list, for `row()`, `parseBlock()`, and
-   * `rows()` (and its export channel) via `RowsOptions` extending this:
-   * name the columns THIS DATA supplies, and the server computes the rest
-   * with them in scope for their DEFAULTs.
-   *
-   * Absent or an empty array is the no-list behavior of every revision
-   * before 5 — the data supplies every plain column — and is NEVER rendered
-   * as `INSERT INTO t () FORMAT X`: that is code 62 `SYNTAX_ERROR` on every
-   * line, so this binding always crosses the ABI's OTHER no-list spelling,
-   * `"[]"`, which `chs_row`'s own comment states is byte-for-byte the same
-   * input as a real NULL.
-   *
-   * With a list: positional formats address the k-th field to the k-th
-   * LISTED column (the list order, not declared order, is the wire order,
-   * and the list length is the arity); JSON-family formats match keys
-   * against the listed set, and a key naming an unlisted table column is an
-   * unknown field under `input_format_skip_unknown_fields`, exactly as a
-   * key naming no column at all. A listed `EPHEMERAL` column's value IS
-   * read and IS in scope for the DEFAULTs that reference it, and is still
-   * never stored and never exported — `chs_schema_column_default_kind`
-   * reports `'EPHEMERAL'` for it (see `ColumnInfo#defaultKind`).
-   *
-   * Not validated here: an unknown name, an `ALIAS` column, or a repeated
-   * name is the SERVER's own refusal (codes 16, 16 and 15 respectively),
-   * surfaced through the row/batch outcome exactly as it arrives.
-   */
-  readonly columns?: readonly string[] | undefined;
+  readonly settings?: Settings | undefined;
+  /** The per-call zone: written into the settings as `session_timezone`, verbatim. */
+  readonly sessionTimezone?: string | undefined;
+  /** The INSERT column list. */
+  readonly columns?: readonly BytesIn[] | undefined;
 }
 
-/**
- * Options for `Schema#rows` — `RowOptions` (the revision-5 column list,
- * shared with `row()` and `parseBlock()`) plus the revision-3
- * export/document-flag channels (the C ABI contract §Rows, for which
- * include/chtypes.h is the public authority). `tests/parity/manifest.json`
- * capability `schema.columns-option` spells the shared column-list
- * capability `RowsOptions` in TypeScript — this type still carries it, now
- * through inheriting `RowOptions` rather than declaring its own `columns`
- * field. Whatever the options, `rows()` is always ONE `chs_rows` call —
- * never a second call, never re-parsing.
- */
+/** Options of `Schema.rows`. */
 export interface RowsOptions extends RowOptions {
-  /**
-   * A `Format` the artifact can SERIALIZE — this revision exactly
-   * `Format.JSONCompactEachRow`. Any other value answers the whole call
-   * `outcome: 'unsupported'` and processes nothing — loud, never silent.
-   * Absent = no export: today's path, byte-identical to revision 2.
-   */
-  readonly exportFormat?: Format | undefined;
-  /**
-   * A bitmask of `DOC_VALUES | DOC_TRANSFORMS | DOC_DEFAULTS` selecting the
-   * document groups; the verdict channel is always present and not a flag.
-   * Defaults: `DOC_ALL` when no `exportFormat` is given (the full document —
-   * plain `rows()` behavior), `0` (LEAN — verdicts only: `values`,
-   * `transformed`, `substituted`, `computed` and `unknownFields` all come
-   * back empty) when one is. An explicit value always wins; a bit outside
-   * `DOC_ALL` is refused loudly by the library, never pre-validated here.
-   */
-  readonly docFlags?: number | undefined;
-  /**
-   * Attach a compiled `Filter` to this call's export channel (revision 5,
-   * second half — docs/guides/filters.md "Exporting only the rows a filter
-   * admits"): ONE `chs_rows` parse then answers both the per-row verdict
-   * (`RowResult#verdict`) and, for rows whose verdict is `'t'`, the export
-   * bytes. Absent is today's behavior byte for byte.
-   *
-   * `'e'` (the predicate threw) and `'d'` (declined — including a row whose
-   * own parse `outcome` was not `'accepted'`) are NEVER exported and NEVER
-   * collapsed into `'f'`: collapsing either turns fail-closed into
-   * fail-open, the leak class this surface exists to prevent. A
-   * security-enforcing caller must treat any `RowResult#verdict` that is
-   * `undefined` or not `isAnswer()` as a refusal — hide the row or fail the
-   * request, never export it.
-   *
-   * The filter must be compiled over THIS schema: one from a different
-   * `Schema` of the SAME loaded library rejects the whole call, loudly
-   * (`outcome: 'rejected'`, code 1002 — the same cross-schema rule
-   * `Filter#eval` lets the C layer enforce for a (filter, block) pair). One
-   * from a DIFFERENT loaded library throws `ChtypesError` before any C
-   * call — no handle crosses a dlopen'd image boundary.
-   */
+  /** A compiled filter evaluated over the body in the same call. */
   readonly rowFilter?: Filter | undefined;
+  /** Ask for an export in this format; absent means none. */
+  readonly exportFormat?: Format | undefined;
+  /** The document groups to carry; absent means all of them. */
+  readonly docFlags?: number | undefined;
 }
 
-/**
- * Options for `Schema#compileFilter` — the revision-4 query-parameter
- * bindings.
- */
-export interface CompileFilterOptions {
-  /**
-   * `{name:Type}` query-parameter bindings: name → value STRING, exactly as
-   * the server's own parameter channels carry them. Each value is
-   * deserialized by the DECLARED type's own reader and injected as a typed
-   * literal AFTER SQL parsing, so a value is never SQL text and NEVER needs
-   * hand-escaping — injection safety is by construction, not by escaping
-   * (the C ABI contract §Filters, Query parameters). Do not render values into
-   * the expression yourself.
-   *
-   * CHOOSE THE BRACE TYPE FOR THE VALUE'S DOMAIN: the declared type's own
-   * reader WRAPS an out-of-domain integer — `{p:UInt8}` given `"256"` binds
-   * `0` and matches every genuine zero (measured, uniform 24.8–26.7) —
-   * while the same constant as a literal PROMOTES (`x = 256` is never
-   * true). Sizing the brace type WIDER does not remove this: the same wrap
-   * reappears at 2^64 on every integer width once the bound value reaches
-   * it, and `[U]Int128`/`[U]Int256` wrap at their own width instead of at
-   * 2^64 — no brace type is safe against an untrusted value's magnitude by
-   * size alone. For a value you cannot already validate as in-domain and
-   * canonical, bind `{p:String}` and use the round-trip strict-cast form
-   * instead of picking a wider brace type (docs/guides/filters.md "The
-   * round-trip form — the recipe for an untrusted value"). Malformed
-   * spellings refuse loudly (457 for `"-1"`/`"+7"`/`"007"` as UInt8, 32 for
-   * `""`). A name bound twice at the C boundary takes the LAST binding —
-   * the server's own `insert_or_assign` rule (unreachable through this
-   * unique-keyed object, stated for completeness).
-   *
-   * The compiled handle bakes the values in: identity is per
-   * (schema, expr, params), so changing a value means compiling a new
-   * `Filter`. A caller compiling filters from tenant-influenced values MUST
-   * bound its cache (an LRU keyed on schema generation + expr + params-hash)
-   * and its compile rate per principal — the key is attacker-influencable,
-   * so an unbounded cache is a memory DoS and an unmetered compile path is a
-   * CPU DoS.
-   */
+/** Options of `Schema.compileFilter`. */
+export interface FilterOptions {
+  /** Query parameters the expression names (`{p:Type}`). */
   readonly params?: Settings | undefined;
+  /** The filter's own zone and profile: fixed when it is compiled, and every evaluation of it runs its WHERE under them. */
+  readonly settings?: Settings | undefined;
+  readonly sessionTimezone?: string | undefined;
 }
 
-/**
- * A compiled schema — one tenant table's column list, compiled inside one
- * version's library. Obtained from `Library#compileDdl`; never constructed
- * directly. Release with `close()` (idempotent) or `using` / `Symbol.dispose`
- * — `close()` stays the primary path; a GC finalizer that calls it for a
- * schema nobody closed is a backstop, not a replacement, since there is no
- * promise about WHEN (or, in principle, whether) it runs.
- *
- * Thread-safety: the C ABI forbids using one `chs_schema *` from two threads
- * at once; on a single JS thread every call here is synchronous, so ordinary
- * Node code satisfies that by construction. Do not share a `Schema` across
- * `worker_threads`.
- */
-export class Schema {
-  /**
-   * The declared columns as ClickHouse canonicalized them, in declaration
-   * order — flattened under `flatten_nested=1`, DEFAULT-rewritten types
-   * (`x Int64 DEFAULT NULL` compiles as `Nullable(Int64)`), ALIAS types
-   * inferred. A gateway detects EPHEMERAL columns here, at compile time
-   * (`defaultKind === 'EPHEMERAL'`), not per row.
-   */
-  readonly columns: readonly ColumnInfo[];
-  /** The handle plus the GC-finalizer coordination state; see `SchemaNative`. */
-  private readonly n: SchemaNative;
-  /**
-   * Every open `Filter` compiled from this handle, so `close()` can free them
-   * FIRST — the C layer does not refcount, and freeing the schema under a
-   * live filter is use-after-free (the C ABI contract §Filters, handle lifetime).
-   */
-  private readonly filters = new Set<Filter>();
-  /**
-   * Every open `Block` parsed from this handle — the same non-owning rule,
-   * the same free-before-schema order (the C ABI contract §Blocks).
-   */
-  private readonly blocks = new Set<Block>();
-
-  /** @internal — obtained from `Library#compileDdl`. */
-  constructor(
-    private readonly native: NativeLibrary,
-    handle: SchemaHandle,
-    /** The column-declaration list this schema was compiled from, verbatim. */
-    readonly ddl: string,
-  ) {
-    this.n = { native, handle, openFilters: new Set(), openBlocks: new Set() };
-    this.columns = native.columns(handle);
-    schemaFinalizer.register(this, this.n, this);
-  }
-
-  private live(): SchemaHandle {
-    if (this.n.handle === null) throw new ChtypesError('chtypes: schema is closed');
-    return this.n.handle;
-  }
-
-  /**
-   * Declare the table engine, so `rows()` applies the engine's own insert-time
-   * merge (`optimize_on_insert = 1`): a CollapsingMergeTree refusing an invalid
-   * Sign with code 117 before anything is stored, a SummingMergeTree summing
-   * equal keys and dropping all-zero rows, a ReplacingMergeTree deduplicating.
-   *
-   * `options.mergeTreeSettings` declares the table's MergeTree-namespace
-   * settings — see `EngineOptions` for the error contract (unknown name ⇒ the
-   * server's 115; non-default declared value ⇒ `unsupported`, never silently
-   * ignored). Absent/empty is structurally the plain engine declaration:
-   * `chs_schema_engine` takes "{}" either way.
-   *
-   * The two error classes here are the refusal/decline split and MUST be
-   * handled as peers — `UnsupportedError` is deliberately NOT
-   * `instanceof SchemaError` (docs/reference/bindings.md §The error split):
-   *
-   * @param engine - the engine expression, e.g. `"SummingMergeTree"`,
-   *   `"CollapsingMergeTree(sign)"`.
-   * @param orderBy - the sorting key, e.g. `"(day, key)"`.
-   * @param options - the MergeTree-namespace `SETTINGS` clause, if any.
-   * @throws {SchemaError} when the SERVER refused (positive code): this DDL
-   *   can never exist and the tenant has to be told. Today that is 115, an
-   *   unknown MergeTree setting name, with the server's own message verbatim.
-   * @throws {UnsupportedError} when this LIBRARY declined: an engine or
-   *   sorting key this build does not model, a known MergeTree setting
-   *   declared at a non-default value, or a guarded exception. A real server
-   *   might well have accepted it — validate cautiously, fall back to the
-   *   server, and never present the decline as a rejection.
-   */
-  setEngine(engine: string, orderBy: string, options?: EngineOptions): void {
-    this.native.schemaEngine(this.live(), engine, orderBy, encodeSettings(options?.mergeTreeSettings));
-  }
-
-  /**
-   * Declare the table's rows TTL (`ts + INTERVAL 30 DAY`). An expired row is
-   * reported NOT STORED through the batch's `transformed` list.
-   *
-   * Column-level TTLs need no call: they are part of the declaration list.
-   *
-   * @param ttl - the rows-TTL expression, e.g. `"ts + INTERVAL 30 DAY"`. It is
-   *   validated under the handle's declared compile profile when one exists.
-   * @throws {UnsupportedError} for a TTL form this build refuses rather than
-   *   guesses: WHERE / GROUP BY TTLs, TO DISK/VOLUME moves, RECOMPRESS, any
-   *   clock-reading TTL expression, and guarded exceptions. Fall back to the
-   *   server; do not report a tenant error.
-   */
-  setTtl(ttl: string): void {
-    this.native.schemaTtl(this.live(), ttl);
-  }
-
-  /**
-   * Declare the table's partition key — the `PARTITION BY` clause after the
-   * engine, e.g. `"toYYYYMM(ts)"` or `"(toDate(ts), tenant)"`
-   * (`chs_schema_partition_by`, revision 6). The key is built by the server's
-   * own CREATE-path call over this schema's columns, under the handle's
-   * compile profile. A second call REPLACES the first; `""` removes the
-   * declaration, and the schema then answers exactly as one that never
-   * declared a key.
-   *
-   * With a key declared, `row` and `rows` answer `RowResult#partitionId` for
-   * every row that would be stored and `BatchResult#partitionCount` for the
-   * batch, and a body that would split into more partitions than the call's
-   * `max_partitions_per_insert_block` allows is an ordinary `'rejected'` with
-   * `errCode` 252 (TOO_MANY_PARTS), the server's own — a verdict, never a
-   * throw.
-   *
-   * @param expr - the partition key expression, or `""` to remove it.
-   * @throws {SchemaError} when the server's own CREATE path refuses the key
-   *   (e.g. 36 BAD_ARGUMENTS for a non-deterministic key, 549
-   *   DATA_TYPE_CANNOT_BE_USED_IN_KEY) — `setEngine`'s SIGN rule, not
-   *   `setTtl`'s.
-   * @throws {UnsupportedError} when this build declines (-1, a guarded
-   *   exception), or the artifact predates `chs_schema_partition_by`. -2 is a
-   *   key the server accepts but this build will not evaluate; a
-   *   non-deterministic key is the server's own rejection, 36 BAD_ARGUMENTS.
-   */
-  setPartitionBy(expr: string): void {
-    this.native.schemaPartitionBy(this.live(), expr);
-  }
-
-  /**
-   * Validate and coerce ONE row body, answering exactly as this ClickHouse
-   * version's insert path would.
-   *
-   * There is no exception for a bad row: rejection, poisoning and declines all
-   * arrive as the `RowResult`'s `outcome` (see `Outcome` for the taxonomy and
-   * the caller's obligations per arm).
-   *
-   * @param format - the wire format code (`Format`). Binary-format support
-   *   depends on the loaded artifact — probe, don't assume.
-   * @param raw - the row's bytes, exactly as they would arrive in an INSERT
-   *   body. Always bytes, never a JS string: binary formats contain NUL bytes
-   *   and text rows can carry invalid UTF-8 on purpose.
-   * @param settings - per-call settings; they win over the compile profile and
-   *   the library defaults (except a type gate the profile declared, which the
-   *   handle has already settled, as a real server's CREATE does).
-   * @param options - `RowOptions#columns` (revision 5), the INSERT column
-   *   list. `row()` takes `RowOptions`, not `RowsOptions`: the revision-3
-   *   export/doc-flag channels are meaningless on a single row, so this
-   *   method's options type simply does not offer them.
-   * @returns the `RowResult` — verdict, stored values, and every silent change.
-   * @throws {ChtypesError} when the schema is closed, or a settings value is a
-   *   JS `number`.
-   * @throws {UnsupportedError} when the artifact predates `chs_row`.
-   */
-  row(format: Format, raw: Uint8Array, settings?: Settings, options?: RowOptions): RowResult {
-    const doc = this.native.row(this.live(), format, raw, encodeSettings(settings), options?.columns);
-    return rowResultOf(parseDocument(doc));
-  }
-
-  /**
-   * Validate and coerce a whole request body, which may hold many rows.
-   *
-   * This is not `row()` in a loop and must never be implemented as one: row
-   * separation is format-specific (a quoted CSV field can contain a newline),
-   * `input_format_allow_errors_num` / `_ratio` decide whether a bad row is
-   * skipped or aborts the batch, and one batch is one clock instant for the
-   * volatile-DEFAULT guarantee.
-   *
-   * @param format - the wire format code (`Format`).
-   * @param body - the whole request body as bytes (never a JS string).
-   * @param settings - per-call settings; same precedence as `row`.
-   * @returns the `BatchResult`. When `engineRows` is present it — not `rows` —
-   *   is the stored truth, and batch-level storage transforms (`ttl_expired`,
-   *   `ttl_column_expired`) are folded into `transformed`.
-   * With `options.exportFormat` the same ONE call also serializes the batch's
-   * accepted rows through the vendored writer: `payload` carries the bytes
-   * (zero-length = emitted-empty, an accepted batch with zero accepted rows;
-   * `undefined` + `exportDeclined` = withheld, with the reason), and `spans`
-   * is index-aligned with `rows` — `payload.subarray(s.off, s.off + s.len)`
-   * IS row i's line. With `options.docFlags` the per-row documents are
-   * thinned to the selected groups; the verdict channel is never thinned.
-   * See `RowsOptions` for the defaults and `BatchResult` for the three
-   * payload states.
-   *
-   * @param format - the wire format code (`Format`).
-   * @param body - the whole request body as bytes (never a JS string).
-   * @param settings - per-call settings; same precedence as `row`.
-   * @param options - the revision-3 export/doc-flag channels, plus
-   *   `columns` (revision 5), the INSERT column list, and `rowFilter`
-   *   (revision 5, second half) — see `RowsOptions`; absent = today's full
-   *   document, byte-identical to revision 2, no list, byte-identical to
-   *   every revision before 5, and no filter, byte-identical byte for byte.
-   * @returns the `BatchResult`. When `engineRows` is present it — not `rows` —
-   *   is the stored truth, and batch-level storage transforms (`ttl_expired`,
-   *   `ttl_column_expired`) are folded into `transformed`. With
-   *   `options.rowFilter`, `rowsPassed`/`rowsCut` join the result and every
-   *   row carries its filter `verdict` beside its own `outcome`.
-   * @throws {ChtypesError} when the schema is closed, a settings value is a JS
-   *   `number`, the artifact predates `chs_rows` (a mandatory symbol), the
-   *   filter is closed, or the filter comes from a different loaded library.
-   */
-  rows(format: Format, body: Uint8Array, settings?: Settings, options?: RowsOptions): BatchResult {
-    const exportFormat = options?.exportFormat ?? EXPORT_NONE;
-    const docFlags = options?.docFlags ?? (options?.exportFormat === undefined ? DOC_ALL : 0);
-    const rowFilter = options?.rowFilter;
-    let filterHandle: FilterHandle | undefined;
-    if (rowFilter !== undefined) {
-      if (rowFilter.nativeLib !== this.native) {
-        throw new ChtypesError('chtypes: filter and schema come from different libraries');
-      }
-      filterHandle = rowFilter.liveHandle();
-    }
-    const { doc, payload } = this.native.rows(
-      this.live(),
-      format,
-      body,
-      encodeSettings(settings),
-      exportFormat,
-      docFlags,
-      options?.columns,
-      filterHandle,
-    );
-    return batchResultOf(parseDocument(doc), payload);
-  }
-
-  /**
-   * Compile one boolean SQL expression over this schema's PHYSICAL columns
-   * (ordinary + MATERIALIZED; naming an ALIAS/EPHEMERAL column fails with
-   * ClickHouse's own UNKNOWN_IDENTIFIER, exactly where a real CREATE fails) —
-   * the same TreeRewriter + ExpressionAnalyzer pipeline the CONSTRAINT CHECK
-   * path runs, so comparison semantics are WHERE-side by construction:
-   * `x = 256` over UInt8 promotes (false for every row), it never wraps
-   * (the C ABI contract §Filters).
-   *
-   * The expression may contain `{name:Type}` query parameters, bound with
-   * `options.params` (revision 4) — substitution is the server's own
-   * `ReplaceQueryParameterVisitor`, run before analysis, exactly where a
-   * real server runs it; see `CompileFilterOptions` for the injection-safety
-   * and cache-discipline contract. Close the filter when done (`close()` /
-   * `Symbol.dispose`); `schema.close()` also closes every open filter FIRST,
-   * so no caller ordering can free the schema under a live filter.
-   *
-   * ENFORCEMENT GATE: nothing may enforce read-side security on this surface
-   * until the WHERE-truth rig gates green (zero over-admit, zero over-hide);
-   * until then it is a shadow/replay surface.
-   *
-   * @param expr - one boolean expression, e.g. `"x = 256"` or
-   *   `"tenant = {t:String}"`.
-   * @param options - the `{name:Type}` bindings, if any.
-   * @returns the compiled `Filter`.
-   * @throws {SchemaError} when ClickHouse itself refuses the expression —
-   *   unknown identifier (47), unknown function, an analyzer-raised
-   *   NO_COMMON_TYPE — and, since revision 4, the server's own parameter
-   *   refusals: an UNBOUND `{name:Type}` is **456** UNKNOWN_QUERY_PARAMETER
-   *   ("Substitution `name` is not set"), a value the declared type cannot
-   *   parse completely is **457** BAD_QUERY_PARAMETER — the server's own
-   *   code and message, verbatim. A bound name the expression never uses is
-   *   ignored, as a live server ignores an unused `param_*`.
-   * @throws {UnsupportedError} when this build declines: a non-deterministic
-   *   expression (clock reads — `now() > ts` —, `rand()`, server-constants;
-   *   the scan runs AFTER substitution, so a value can never smuggle one
-   *   in), or an artifact that predates the filter trio.
-   */
-  compileFilter(expr: string, options?: CompileFilterOptions): Filter {
-    const handle = this.native.filterCompile(this.live(), expr, encodeSettings(options?.params));
-    this.n.openFilters.add(handle);
-    const filter = new Filter(this.native, this, this.n, handle, expr);
-    this.filters.add(filter);
-    return filter;
-  }
-
-  /** @internal — `Filter#close` deregisters itself here. */
-  forgetFilter(filter: Filter): void {
-    this.filters.delete(filter);
-  }
-
-  /**
-   * Parse a body ONCE into a `Block` (`chs_block_parse`) — the parse half of
-   * `Filter#rows`, exported so K filters can evaluate one event with no
-   * re-parse (`Filter#eval`; the C ABI contract §Blocks). Same formats and
-   * settings contract as `rows` (`settings` is the PARSE-side map: format
-   * settings, clock keys; evaluation takes none). Volatile DEFAULTs resolve
-   * against THIS call's clock instant, so
-   * `filter.eval(schema.parseBlock(...))` ≡ `filter.rows(...)` exactly when
-   * the clock is pinned (`chtypes_now_epoch_nanos`) or the schema has no
-   * volatile DEFAULT.
-   *
-   * Per-row parse failures do NOT throw — they are recorded IN the block and
-   * answer `'d'` from every filter, with the recorded error. Release
-   * with `close()` / `Symbol.dispose`; `schema.close()` closes open blocks
-   * FIRST, the C-required order.
-   *
-   * @param format - the wire format code (`Format`).
-   * @param body - the rows as bytes (never a JS string).
-   * @param settings - parse-side settings; same precedence as `Schema#rows`.
-   * @param options - `RowOptions#columns` (revision 5), the INSERT column
-   *   list read exactly as `Schema#row` reads it. `parseBlock()` takes
-   *   `RowOptions`, not `RowsOptions`: the revision-3 export/doc-flag
-   *   channels are meaningless here, so this method's options type simply
-   *   does not offer them. Filters compiled against this schema still
-   *   evaluate the schema's PHYSICAL columns, so a listed `EPHEMERAL`
-   *   column stays unreferenceable in a filter.
-   * @returns the parsed `Block`.
-   * @throws {SchemaError} on a call-level failure — an unknown setting's
-   *   115, an unsplittable body, a binary decode fault, the deferred
-   *   JSONEachRow framing verdict: a malformed body yields no block and no
-   *   partial answers.
-   * @throws {UnsupportedError} when this build declines the call, or the
-   *   artifact predates the block twin.
-   */
-  parseBlock(format: Format, body: Uint8Array, settings?: Settings, options?: RowOptions): Block {
-    const handle = this.native.blockParse(this.live(), format, body, encodeSettings(settings), options?.columns);
-    this.n.openBlocks.add(handle);
-    const block = new Block(this.native, this, this.n, handle);
-    this.blocks.add(block);
-    return block;
-  }
-
-  /** @internal — `Block#close` deregisters itself here. */
-  forgetBlock(block: Block): void {
-    this.blocks.delete(block);
-  }
-
-  /**
-   * Release the native schema. Idempotent. After it, `row` / `rows` /
-   * `setEngine` / `setTtl` / `setPartitionBy` throw `ChtypesError` ("schema
-   * is closed").
-   * Any `Filter` or `Block` still open on this schema is closed FIRST, in
-   * the same call — the handles-before-schema free order the C layer
-   * requires, enforced here so no dispose ordering can get it backwards.
-   */
-  close(): void {
-    for (const filter of this.filters) filter.close();
-    this.filters.clear();
-    for (const block of this.blocks) block.close();
-    this.blocks.clear();
-    if (this.n.handle === null) return;
-    this.native.schemaFree(this.n.handle);
-    this.n.handle = null;
-    schemaFinalizer.unregister(this);
-  }
-
-  /** `using schema = lib.compileDdl(...)` releases it at scope exit. */
-  [Symbol.dispose](): void {
-    this.close();
-  }
+/** Options of `Filter.rows`. The settings are PARSE settings only: they decide how the body is parsed, never the filter's WHERE. */
+export interface EvalOptions {
+  readonly settings?: Settings | undefined;
+  readonly sessionTimezone?: string | undefined;
 }
 
-/**
- * One boolean SQL expression compiled against a `Schema`'s columns
- * (`chs_filter_compile`). Obtained from `Schema#compileFilter`; never
- * constructed directly.
- *
- * LIFETIME: a filter REFERENCES its schema handle — the C layer does not copy
- * and does not refcount (the C ABI contract §Filters). This binding enforces the
- * free order structurally, both ways: the `Filter` holds its `Schema` (so the
- * schema stays reachable), and `Schema#close` closes every open filter before
- * freeing the schema. `close()` is idempotent, and `using` / `Symbol.dispose`
- * work on both objects in any nesting — the schema's dispose runs the
- * filter's first when the caller forgot. A filter compiled from a schema
- * answers for THAT handle: recompile filters when the schema is recompiled.
- * A filter nobody closed is also backed by a GC finalizer, coordinated with
- * its schema's own (see `SchemaNative`) so the two can never free this
- * filter's handle out of order or twice, whichever one the GC happens to run
- * first.
- *
- * THREADS: the header's rule, verbatim — one `chs_filter` "must not be used
- * from two threads at once, and a chs_filter call is ALSO a use of its schema
- * handle" (two filters over ONE schema must not run concurrently either). On
- * a single JS thread every call here is synchronous, so ordinary Node code
- * satisfies both by construction (docs/reference/bindings.md §Concurrency); do not
- * share a `Filter` — or its `Schema` — across `worker_threads`.
- *
- * ENFORCEMENT GATE: `'e'` and `'d'` verdicts are NOT answers — a
- * caller enforcing visibility MUST fail closed on both — and NO caller may
- * enforce read-side security on this surface until the WHERE-truth rig gates
- * green; until then it is a shadow/replay surface (the C ABI contract §Filters).
- */
+function bodyIn(body: Uint8Array): Uint8Array {
+  if (typeof body === 'string') throw new TypeError('chtypes: a body is bytes (a Uint8Array); it never accepts the text type');
+  return body;
+}
+
+const filterHandles = new WeakMap<Filter, FilterHandle>();
+
+/** A compiled `WHERE`-style expression bound to a schema. It holds its own zone, fixed at compile. */
 export class Filter {
-  /** The handle plus the GC-finalizer coordination state; see `FilterNative`. */
-  private readonly n: FilterNative;
+  readonly #calls: Calls;
+  readonly #h: FilterHandle;
 
-  /** @internal — obtained from `Schema#compileFilter`. */
-  constructor(
-    private readonly native: NativeLibrary,
-    private readonly schema: Schema,
-    schemaNative: SchemaNative,
-    handle: FilterHandle,
-    /** The expression text as compiled, for logging and cache keys. */
-    readonly expr: string,
-  ) {
-    this.n = { native, schema: schemaNative, handle };
-    filterFinalizer.register(this, this.n, this);
+  /** Not for callers: use `Schema.compileFilter`. */
+  constructor(calls: Calls, handle: FilterHandle) {
+    this.#calls = calls;
+    this.#h = handle;
+    filterHandles.set(this, handle);
   }
 
-  /** @internal — the loaded library this filter's handle belongs to, for
-   * `Schema#rows(options.rowFilter)`'s cross-library check. */
-  get nativeLib(): NativeLibrary {
-    return this.native;
+  /** Evaluate over a body. */
+  rows(format: Format, body: Uint8Array, options: EvalOptions = {}): FilterResult {
+    return decodeFilterResult(
+      this.#calls.filterEvalBody(this.#h, format, bodyIn(body), encodeSettings(options.settings, options.sessionTimezone)),
+    );
   }
 
-  /** @internal — the live handle, for `Schema#rows(options.rowFilter)`. */
-  liveHandle(): FilterHandle {
-    if (this.n.handle === null) throw new ChtypesError('chtypes: filter is closed');
-    return this.n.handle;
-  }
-
-  /**
-   * Evaluate the filter over a body of rows (`chs_filter_rows`) — the same
-   * formats and settings contract as `Schema#rows`, ONE C call. Rows are
-   * evaluated INDEPENDENTLY (there is no INSERT to abort):
-   * `input_format_allow_errors_*` does not apply, a bad text row declines
-   * (`'d'`) and the tail resyncs so verdict indexes keep matching input
-   * rows, and volatile DEFAULTs resolve against one clock instant per call.
-   *
-   * @param format - the wire format code (`Format`).
-   * @param body - the rows as bytes (never a JS string).
-   * @param settings - per-call settings; same precedence as `Schema#rows`.
-   * @returns the `FilterResult` — the call-level outcome, and one verdict per
-   *   row when it is `'ok'`.
-   * @throws {ChtypesError} when the filter is closed, or a settings value is
-   *   a JS `number`.
-   */
-  rows(format: Format, body: Uint8Array, settings?: Settings): FilterResult {
-    if (this.n.handle === null) throw new ChtypesError('chtypes: filter is closed');
-    const doc = this.native.filterRows(this.n.handle, format, body, encodeSettings(settings));
-    return filterResultOf(parseDocument(doc));
-  }
-
-  /**
-   * Evaluate this filter over an already-parsed `Block` (`chs_filter_eval`)
-   * — the SAME result document `rows` returns: same `FilterResult` fields,
-   * same verdicts, same `errors` rule (a row the parse recorded as
-   * unparseable answers `'d'` with the recorded error). Evaluation is
-   * a pure function of (filter, block): no settings, and the block is
-   * neither consumed nor mutated, so one block can be evaluated by K filters
-   * sequentially with no re-parse — the live-SSE call shape.
-   *
-   * Filter and block MUST come from the SAME schema: a mismatched pair
-   * answers a REJECTED result (code 1002) — the C layer's loud refusal,
-   * never undefined behavior. A pair from two different libraries throws
-   * `ChtypesError`: no handle ever crosses a dlopen'd image boundary.
-   *
-   * @param block - a `Block` from `Schema#parseBlock`.
-   * @returns the `FilterResult`, exactly as `rows` would answer it.
-   * @throws {ChtypesError} when the filter or block is closed, or they come
-   *   from two different libraries.
-   */
+  /** Evaluate over a parsed block. The filter brings its zone and the block brought its parse zone, so there are no settings here. */
   eval(block: Block): FilterResult {
-    if (this.n.handle === null) throw new ChtypesError('chtypes: filter is closed');
-    if (block.nativeLib !== this.native) {
-      throw new ChtypesError('chtypes: filter and block come from different libraries');
-    }
-    const doc = this.native.filterEval(this.n.handle, block.liveHandle());
-    return filterResultOf(parseDocument(doc));
+    return decodeFilterResult(this.#calls.filterEvalBlock(this.#h, blockHandles.get(block) as BlockHandle));
   }
 
-  /**
-   * Release the native filter (`chs_filter_free`). Idempotent, and also
-   * performed by the schema's own `close()` — filters first, then the schema,
-   * the C-required order. Also the backstop a GC finalizer calls for a filter
-   * nobody closed — see `SchemaNative`; the `openFilters.delete` guard is
-   * what makes it safe to run whether `close()`, this filter's own finalizer,
-   * or the schema's finalizer gets here first.
-   */
+  /** Release this filter; idempotent. */
   close(): void {
-    if (this.n.handle === null) return;
-    if (this.n.schema.openFilters.delete(this.n.handle)) {
-      this.native.filterFree(this.n.handle);
-    }
-    this.n.handle = null;
-    this.schema.forgetFilter(this);
-    filterFinalizer.unregister(this);
+    this.#h.close();
   }
 
-  /** `using filter = schema.compileFilter(...)` releases it at scope exit. */
   [Symbol.dispose](): void {
     this.close();
   }
 }
 
-/**
- * One body, parsed ONCE under one schema handle and one clock instant
- * (`chs_block_parse`). Obtained from `Schema#parseBlock`; evaluated by
- * `Filter#eval`. The parse-once/eval-many twin of `Filter#rows`
- * (the C ABI contract §Blocks): the live-SSE hot path is K filters × 1 event, and
- * the block sheds the re-parse.
- *
- * LIFETIME: a block REFERENCES its schema handle exactly as a filter does —
- * the C layer does not copy and does not refcount. This binding enforces the
- * free order structurally, both ways: the `Block` holds its `Schema` (so the
- * schema stays reachable), and `Schema#close` closes every open block before
- * freeing the schema — `using` / `Symbol.dispose` work on all three objects
- * in any nesting, and the schema's dispose runs the block's first when the
- * caller forgot. A block may be evaluated by MANY filters, sequentially;
- * evaluation does not consume or mutate it. Recompile blocks when the schema
- * is recompiled.
- *
- * THREADS: one block must not be used from two threads at once, and an eval
- * is a use of BOTH handles. On a single JS thread every call here is
- * synchronous, so ordinary Node code satisfies both by construction; do not
- * share a `Block` — or its `Schema` — across `worker_threads`.
- *
- * A block nobody closed is also backed by a GC finalizer, coordinated with
- * its schema's own (see `SchemaNative`) so the two can never free this
- * block's handle out of order or twice, whichever one the GC happens to run
- * first.
- */
+const blockHandles = new WeakMap<Block, BlockHandle>();
+
+/** A body parsed once, evaluated by any number of filters. */
 export class Block {
-  /** The handle plus the GC-finalizer coordination state; see `BlockNative`. */
-  private readonly n: BlockNative;
+  readonly #h: BlockHandle;
 
-  /** @internal — obtained from `Schema#parseBlock`. */
-  constructor(
-    private readonly native: NativeLibrary,
-    private readonly schema: Schema,
-    schemaNative: SchemaNative,
-    handle: BlockHandle,
-  ) {
-    this.n = { native, schema: schemaNative, handle };
-    blockFinalizer.register(this, this.n, this);
+  /** Not for callers: use `Schema.parseBlock`. */
+  constructor(handle: BlockHandle) {
+    this.#h = handle;
+    blockHandles.set(this, handle);
   }
 
-  /** @internal — the loaded library this block's handle belongs to. */
-  get nativeLib(): NativeLibrary {
-    return this.native;
-  }
-
-  /** @internal — the live handle, for `Filter#eval`. */
-  liveHandle(): BlockHandle {
-    if (this.n.handle === null) throw new ChtypesError('chtypes: block is closed');
-    return this.n.handle;
-  }
-
-  /**
-   * Release the native block (`chs_block_free`). Idempotent, and also
-   * performed by the schema's own `close()` — blocks first, then the schema,
-   * the C-required order. Also the backstop a GC finalizer calls for a block
-   * nobody closed — see `SchemaNative`; the `openBlocks.delete` guard is what
-   * makes it safe to run whether `close()`, this block's own finalizer, or
-   * the schema's finalizer gets here first.
-   */
+  /** Release this block; idempotent. */
   close(): void {
-    if (this.n.handle === null) return;
-    if (this.n.schema.openBlocks.delete(this.n.handle)) {
-      this.native.blockFree(this.n.handle);
-    }
-    this.n.handle = null;
-    this.schema.forgetBlock(this);
-    blockFinalizer.unregister(this);
+    this.#h.close();
   }
 
-  /** `using block = schema.parseBlock(...)` releases it at scope exit. */
+  [Symbol.dispose](): void {
+    this.close();
+  }
+}
+
+/** A compiled `CREATE TABLE`: describe it, preview rows and bodies against it, compile filters and parse blocks over it. */
+export class Schema {
+  readonly #calls: Calls;
+  readonly #h: SchemaHandle;
+
+  /** Not for callers: use `Library.compileTable`. */
+  constructor(calls: Calls, handle: SchemaHandle) {
+    this.#calls = calls;
+    this.#h = handle;
+  }
+
+  /** The columns, in declared order. */
+  describe(): SchemaDescription {
+    return decodeSchemaDescription(this.#calls.schemaDescribe(this.#h));
+  }
+
+  /** One row. */
+  row(format: Format, body: Uint8Array, options: RowOptions = {}): RowResult {
+    return decodeRow(
+      this.#calls.previewRow(
+        this.#h,
+        format,
+        bodyIn(body),
+        encodeSettings(options.settings, options.sessionTimezone),
+        encodeColumns(options.columns),
+      ),
+    );
+  }
+
+  /** A whole body. */
+  rows(format: Format, body: Uint8Array, options: RowsOptions = {}): BatchResult {
+    const filter = options.rowFilter === undefined ? null : (filterHandles.get(options.rowFilter) as FilterHandle);
+    const exporting = options.exportFormat !== undefined;
+    const out = this.#calls.previewBatch(
+      this.#h,
+      format,
+      bodyIn(body),
+      encodeSettings(options.settings, options.sessionTimezone),
+      encodeColumns(options.columns),
+      filter,
+      exporting ? (options.exportFormat as number) : EXPORT_NONE,
+      options.docFlags ?? DocFlags.All,
+    );
+    return decodeBatch(out.out, exporting ? out.outExport : undefined);
+  }
+
+  /** Compile a filter. Its zone is fixed here. */
+  compileFilter(expr: BytesIn, options: FilterOptions = {}): Filter {
+    return new Filter(
+      this.#calls,
+      this.#calls.filterCreate(
+        this.#h,
+        bytesIn(expr),
+        encodeParams(options.params),
+        encodeSettings(options.settings, options.sessionTimezone),
+      ),
+    );
+  }
+
+  /** Parse a body once. */
+  parseBlock(format: Format, body: Uint8Array, options: RowOptions = {}): Block {
+    return new Block(
+      this.#calls.blockCreate(
+        this.#h,
+        format,
+        bodyIn(body),
+        encodeSettings(options.settings, options.sessionTimezone),
+        encodeColumns(options.columns),
+      ),
+    );
+  }
+
+  /** Release this schema; idempotent. Filters and blocks made from it keep working. */
+  close(): void {
+    this.#h.close();
+  }
+
   [Symbol.dispose](): void {
     this.close();
   }

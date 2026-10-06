@@ -10,8 +10,8 @@ copies round-tripped, so nothing caught it; a hand-written rule that parses is
 exactly as dangerous as one that does not, because it is silently a DIFFERENT
 answer from the server's.
 
-Those copies are deleted. `chs_quote_identifier`, `chs_quote_identifier_if_needed`
-and `chs_quote_literal` are the only source of a quoted spelling in this
+Those copies are deleted. `chs_back_quote`, `chs_back_quote_if_needed` and
+`chs_quote_string` (ABI v1) are the only source of a quoted spelling in this
 repository. This script is what keeps that true: it fails if a binding re-grows
 a local quoting rule, and it fails if a binding stops DECLARING the symbols it
 must call instead.
@@ -48,7 +48,7 @@ RULE A — no quoting atom in a string or character literal.
 
   What it deliberately does NOT flag: a back-quote inside prose. Error
   messages, notes and doc text in these trees mention `version`, `unlisted.go`
-  and `scripts/fetch.sh` constantly — 179 literals in the tree contain a
+  and script names constantly — 179 literals in the tree contain a
   back-quote — and banning those would make the rule unusable, which is the
   same as not having it. A1/A2/A3 hold at zero findings across the whole tree.
 
@@ -70,14 +70,13 @@ RULE A — no quoting atom in a string or character literal.
 
 RULE B — every binding DECLARES all three symbols.
 
-  scripts/check-abi-decls.py checks a declaration against the header, but a
-  binding that declares nothing at all is REPORTED there, not failed — "not
-  declaring a symbol means the binding cannot call it, which is a design
-  choice". For these three that is not a design choice: delete the declaration
-  and the binding cannot quote, which is precisely the state Rule A exists to
-  make unsurvivable. So Rule B requires the declaration, and check-abi-decls
-  then requires it to have the right arity and types. The pair is what makes
-  "the call goes through the library" checkable without an artifact.
+  Each binding's declaration layer is GENERATED from spec/abi-v1/abi.json, so
+  scripts/abi-v1/gen.py --check already proves every declaration matches the
+  header. It cannot prove the description still DESCRIBES these three: drop
+  one from the description and the binding cannot quote, which is precisely
+  the state Rule A exists to make unsurvivable. So Rule B requires the
+  generated declaration of each symbol in each binding, and the pair is what
+  makes "the call goes through the library" checkable without an artifact.
 
 WHAT NEITHER RULE CAN DO. Nothing here proves the three calls RETURN the
 server's answer, or that `if needed` matches a given line: that needs a loaded
@@ -93,6 +92,17 @@ import shutil
 import sys
 import tempfile
 
+# SCAN_DIRS below walks go/, python/, ts/src, ts/test, rust/src and
+# rust/tests wholesale, which now includes each binding's generated */abi1/*
+# declaration layer (scripts/abi-v1/gen.py's output). A generated file is
+# exempt from Rule A the same way scripts/check-no-error-code-table.py and
+# scripts/abi-v1/check-no-hand-decls.py exempt one: the path must be one of
+# gen.produced_outputs() AND carry BANNER_RE, both imported rather than
+# re-derived so all three checks agree on what "really generated" means.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "abi-v1"))
+from emit import BANNER_RE  # noqa: E402
+from gen import produced_outputs  # noqa: E402
+
 # --------------------------------------------------------------- what is scanned
 #
 # Library sources, tests and the examples tours: an example that hand-quotes
@@ -100,27 +110,28 @@ import tempfile
 
 SCAN_DIRS = ("go", "python", "ts/src", "ts/test", "rust/src", "rust/tests", "examples")
 SCAN_EXTS = (".go", ".py", ".ts", ".mjs", ".rs")
-SKIP_DIRS = {"node_modules", "target", "dist", ".venv", "build", "__pycache__"}
+# build and dist are walked on purpose: a banner copied into a hand-written file
+# under one is not exempt (the exemption needs a produced path).
+SKIP_DIRS = {"node_modules", "target", ".venv", "__pycache__"}
 
-# The FFI declaration source of each binding — the same files
-# scripts/check-abi-decls.py reads, plus Go's linked path, which calls the
-# symbols directly rather than through a function pointer.
-# Each entry carries the pattern that binding uses to WIRE the symbol at
-# runtime — a dlsym cast, a direct cgo call, a signature-table key. Not a bare
-# mention: every one of these files names the symbols in prose too, and a doc
-# comment describing a call is exactly what this must not accept as the call.
+# The generated FFI declaration layer of each binding (scripts/abi-v1/gen.py's
+# output, banner-exempt from Rule A) and the pattern that layer uses to WIRE a
+# symbol at runtime: a dlsym cast, a direct linked address, a declaration-table
+# row. Not a bare mention: every one of these files names the symbols in prose
+# too, and a doc comment describing a call is exactly what this must not
+# accept as the call.
 DECL_SOURCES = (
-    ("go", "go/chtypes/multiversion.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
-    ("go-linked", "go/chtypes/linked.go", r"\bC\.{sym}\s*\("),
-    ("python", "python/src/chtypes/_native.py", r'"{sym}"\s*:'),
-    ("ts", "ts/src/ffi.ts", r"\b{sym}\s*:\s*d\("),
-    ("rust", "rust/src/ffi.rs", r'b"{sym}\\0"'),
+    ("go", "go/internal/abi1/abi_gen.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
+    ("go-linked", "go/internal/abi1/linked_gen.go", r"&{sym}\s*;"),
+    ("python", "python/src/chtypes/_abi1/_decls.py", r'_add\(\s*"{sym}"'),
+    ("ts", "ts/src/abi1/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
+    ("rust", "rust/src/abi1/decls.rs", r'concat!\(\s*"{sym}"'),
 )
 
 QUOTE_SYMBOLS = (
-    "chs_quote_identifier",
-    "chs_quote_identifier_if_needed",
-    "chs_quote_literal",
+    "chs_back_quote",
+    "chs_back_quote_if_needed",
+    "chs_quote_string",
 )
 
 # --------------------------------------------------------------------- rule A
@@ -248,8 +259,10 @@ def check_declarations(root: str) -> list[str]:
 # ------------------------------------------------------------------- the check
 
 
-def check(root: str) -> tuple[int, list[str]]:
+def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[str]]:
     files = scanned_files(root)
+    if produced is None:
+        produced = produced_outputs()
     lines: list[str] = []
     findings: list[str] = []
 
@@ -257,10 +270,10 @@ def check(root: str) -> tuple[int, list[str]]:
     # what it never read. One anchor per binding, the file each one's quoting
     # would most plausibly re-grow in.
     anchors = (
-        "go/chtypes/discover.go",
-        "python/src/chtypes/discover.py",
-        "ts/src/discover.ts",
-        "rust/src/discover.rs",
+        "go/internal/abi1/loader.go",
+        "python/src/chtypes/_abi1/_loader.py",
+        "ts/src/abi1/loader.ts",
+        "rust/src/abi1/loader.rs",
     )
     for anchor in anchors:
         if anchor not in files:
@@ -270,12 +283,15 @@ def check(root: str) -> tuple[int, list[str]]:
             )
 
     for rel in files:
-        findings += scan_text(rel, open(os.path.join(root, rel), encoding="utf-8").read())
+        text = open(os.path.join(root, rel), encoding="utf-8").read()
+        if rel in produced and BANNER_RE.search(text[:512]):
+            continue  # scripts/abi-v1/gen.py's own output
+        findings += scan_text(rel, text)
     findings += check_declarations(root)
 
     lines.append(f"scanned {len(files)} source file(s) in {len(SCAN_DIRS)} tree(s)")
     for label, rel, _ in DECL_SOURCES:
-        lines.append(f"  {label:<10} declares all three chs_quote_* symbols ({rel})")
+        lines.append(f"  {label:<10} declares all three quoting symbols ({rel})")
     return len(findings), lines + ([""] + [f"  {f}" for f in findings] if findings else [])
 
 
@@ -285,76 +301,101 @@ def check(root: str) -> tuple[int, list[str]]:
 # contain). Every binding gets a re-grown quoting rule AND a dropped
 # declaration, because a rule that has only ever passed is not known to work.
 
+# A fabricated stand-in for a generated */abi1/* declaration file, proving
+# the generated-file exemption (BANNER_RE, imported above) in both
+# directions with the SAME literal, varying only whether a real banner is
+# present. Written directly into the selftest's temp tree (not a real file
+# in this repository today): the baseline check(tmp) call right after it is
+# created is the "banner present -> silent" control; the PLANT below strips
+# the banner and expects the atom to fire.
+GENERATED_GO_DECLS = "go/internal/abi1/decls.go"
+GENERATED_BANNER_LINE = (
+    "// GENERATED by scripts/abi-v1/gen.py from spec/abi-v1/abi.json "
+    "(CHS_ABI_FINGERPRINT sha256:" + "a" * 64 + ") — DO NOT EDIT"
+)
+GENERATED_QUOTE_ATOM = 'package abi1\n\nvar _ = "`"\n'
+
+# A plant with find=None creates a NEW file in the copied tree holding `repl`,
+# so a rule-A plant never depends on what any hand-written file happens to
+# say; a plant with a find edits a GENERATED declaration file, whose text is
+# fixed by spec/abi-v1/abi.json.
 PLANTS = (
     (
         "go re-grown rule",
-        "go/chtypes/discover.go",
-        "\tvar b strings.Builder",
-        '\tvar b strings.Builder\n\t_ = "`" + "x" + "`"',
-        "go/chtypes/discover.go:",
+        "go/internal/abi1/zz_planted.go",
+        None,
+        'package abi1\n\nvar _ = "`" + "x" + "`"\n',
+        "go/internal/abi1/zz_planted.go:",
     ),
     (
         "python re-grown rule",
-        "python/src/chtypes/discover.py",
-        "    parts: list[str] = []",
-        '    parts: list[str] = []\n    _unused = "`" + "x" + "`"',
-        "python/src/chtypes/discover.py:",
+        "python/src/chtypes/_abi1/_planted.py",
+        None,
+        '_unused = "`" + "x" + "`"\n',
+        "python/src/chtypes/_abi1/_planted.py:",
     ),
     (
         "ts re-grown rule",
-        "ts/src/discover.ts",
-        "  const parts: string[] = [];",
-        "  const parts: string[] = [];\n  const unused = '`' + 'x' + '`';",
-        "ts/src/discover.ts:",
+        "ts/src/abi1/planted.ts",
+        None,
+        "export const unused = '`' + 'x' + '`';\n",
+        "ts/src/abi1/planted.ts:",
     ),
     (
         "ts template quoter",
-        "ts/src/discover.ts",
-        "  const parts: string[] = [];",
-        "  const parts: string[] = [];\n  const unused = `\\`x\\``;",
+        "ts/src/abi1/planted.ts",
+        None,
+        "export const unused = `\\`x\\``;\n",
         "the template literal `\\`x\\`` wraps a value in back-quotes",
     ),
     (
         "rust re-grown rule",
-        "rust/src/discover.rs",
-        "    let mut out = String::new();",
-        '    let mut out = String::new();\n    let _unused = format!("`{}`", "x");',
-        "rust/src/discover.rs:",
+        "rust/src/abi1/planted.rs",
+        None,
+        'pub(crate) fn unused() -> String {\n    format!("`{}`", "x")\n}\n',
+        "rust/src/abi1/planted.rs:",
     ),
     (
         "go declaration dropped",
-        "go/chtypes/multiversion.go",
-        'dlsym(h, "chs_quote_literal")',
+        "go/internal/abi1/abi_gen.go",
+        'dlsym(h, "chs_quote_string")',
         'dlsym(h, "chs_absent_symbol")',
-        "go: go/chtypes/multiversion.go does not declare chs_quote_literal",
+        "go: go/internal/abi1/abi_gen.go does not declare chs_quote_string",
     ),
     (
         "go-linked declaration dropped",
-        "go/chtypes/linked.go",
-        "C.chs_quote_literal(p, n, out, err)",
-        "C.chs_absent_symbol(p, n, out, err)",
-        "go-linked: go/chtypes/linked.go does not declare chs_quote_literal",
+        "go/internal/abi1/linked_gen.go",
+        "&chs_quote_string;",
+        "&chs_absent_symbol;",
+        "go-linked: go/internal/abi1/linked_gen.go does not declare chs_quote_string",
     ),
     (
         "python declaration dropped",
-        "python/src/chtypes/_native.py",
-        '"chs_quote_literal": (',
-        '"chs_absent_symbol": (',
-        "python: python/src/chtypes/_native.py does not declare chs_quote_literal",
+        "python/src/chtypes/_abi1/_decls.py",
+        '    "chs_quote_string",\n    "status",',
+        '    "chs_absent_symbol",\n    "status",',
+        "python: python/src/chtypes/_abi1/_decls.py does not declare chs_quote_string",
     ),
     (
         "ts declaration dropped",
-        "ts/src/ffi.ts",
-        "chs_quote_literal: d(I32,",
-        "chs_absent_symbol: d(I32,",
-        "ts: ts/src/ffi.ts does not declare chs_quote_literal",
+        "ts/src/abi1/decls.gen.ts",
+        '"chs_quote_string": {',
+        '"chs_absent_symbol": {',
+        "ts: ts/src/abi1/decls.gen.ts does not declare chs_quote_string",
     ),
     (
         "rust declaration dropped",
-        "rust/src/ffi.rs",
-        'b"chs_quote_literal\\0"',
-        'b"chs_absent_symbol\\0"',
-        "rust: rust/src/ffi.rs does not declare chs_quote_literal",
+        "rust/src/abi1/decls.rs",
+        'concat!("chs_quote_string", "\\0")',
+        'concat!("chs_absent_symbol", "\\0")',
+        "rust: rust/src/abi1/decls.rs does not declare chs_quote_string",
+    ),
+    (
+        "generated banner stripped from a would-be-generated file",
+        GENERATED_GO_DECLS,
+        GENERATED_BANNER_LINE,
+        "// NOT a generated banner",
+        "is a SQL quoting atom",
     ),
 )
 
@@ -379,29 +420,59 @@ def selftest(root: str) -> int:
             dst = os.path.join(tmp, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copyfile(os.path.join(root, rel), dst)
+        os.makedirs(os.path.join(tmp, os.path.dirname(GENERATED_GO_DECLS)), exist_ok=True)
+        open(os.path.join(tmp, GENERATED_GO_DECLS), "w", encoding="utf-8").write(
+            GENERATED_BANNER_LINE + "\n" + GENERATED_QUOTE_ATOM
+        )
 
         # The copy itself must still pass: a plant that fires against a tree
-        # that was already failing proves nothing.
-        n, lines = check(tmp)
+        # that was already failing proves nothing. This is ALSO the
+        # generated-file exemption's "banner present -> silent" control.
+        # What the emitters produce, standing in for the real set (the real
+        # outputs, so a real generated file copied into the tree stays exempt) plus
+        # the fabricated file above.
+        produced = produced_outputs() | {GENERATED_GO_DECLS}
+        n, lines = check(tmp, produced)
         if n:
             print("SELFTEST FAILED: the copied tree does not pass\n" + "\n".join(lines), file=sys.stderr)
             return 1
 
+        # The same real banner and atom in a hand-written file under a build
+        # directory inside a binding, which is not a produced path: the walk
+        # must reach it and the exemption must refuse it.
+        built = os.path.join(tmp, "go", "internal", "abi1", "build", "decls.go")
+        os.makedirs(os.path.dirname(built), exist_ok=True)
+        open(built, "w", encoding="utf-8").write(GENERATED_BANNER_LINE + "\n" + GENERATED_QUOTE_ATOM)
+        n, lines = check(tmp, produced)
+        if n == 0 or "go/internal/abi1/build/decls.go" not in "\n".join(lines):
+            print("SELFTEST FAILED: a bannered hand-written file under build/ was exempted or never walked", file=sys.stderr)
+            return 1
+        print(f"  plant {'bannered hand-written file under build/':<28} caught")
+        os.remove(built)
+
         for label, rel, find, repl, want in PLANTS:
             path = os.path.join(tmp, rel)
-            original = open(path, encoding="utf-8").read()
-            if original.count(find) != 1:
-                print(
-                    f"SELFTEST FAILED: the {label} plant's anchor is not in {rel} exactly once "
-                    f"(found {original.count(find)}) — the source moved; update PLANTS",
-                    file=sys.stderr,
-                )
-                return 1
-            open(path, "w", encoding="utf-8").write(original.replace(find, repl))
+            if find is None:
+                original = None
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                open(path, "w", encoding="utf-8").write(repl)
+            else:
+                original = open(path, encoding="utf-8").read()
+                if original.count(find) != 1:
+                    print(
+                        f"SELFTEST FAILED: the {label} plant's anchor is not in {rel} exactly once "
+                        f"(found {original.count(find)}) — the source moved; update PLANTS",
+                        file=sys.stderr,
+                    )
+                    return 1
+                open(path, "w", encoding="utf-8").write(original.replace(find, repl))
             try:
-                n, lines = check(tmp)
+                n, lines = check(tmp, produced)
             finally:
-                open(path, "w", encoding="utf-8").write(original)
+                if original is None:
+                    os.remove(path)
+                else:
+                    open(path, "w", encoding="utf-8").write(original)
             report = "\n".join(lines)
             if n == 0:
                 print(f"SELFTEST FAILED: the {label} plant was not caught", file=sys.stderr)
@@ -431,7 +502,7 @@ def main(argv: list[str]) -> int:
         print(
             f"\ncheck-quoting-passthrough: {n} finding(s).\n"
             "  ClickHouse's own backQuote / backQuoteIfNeed / quoteString are reached through\n"
-            "  chs_quote_identifier, chs_quote_identifier_if_needed and chs_quote_literal.\n"
+            "  chs_back_quote, chs_back_quote_if_needed and chs_quote_string.\n"
             "  A second implementation here is how the `null` divergence happened (#52).",
             file=sys.stderr,
         )

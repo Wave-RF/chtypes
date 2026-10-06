@@ -2,86 +2,73 @@
 //!
 //! chtypes answers one question, exactly: **if this row were inserted into this
 //! ClickHouse table on this ClickHouse version, what would happen?** It answers
-//! it by running ClickHouse's own C++ machinery — `DataTypeFactory`,
-//! `ISerialization`, `ReadHelpers`, `evaluateMissingDefaults`, the TTL
-//! algorithms, `MergeTreeDataWriter::mergeBlock` — vendored per release and
-//! linked behind the frozen `chs_*` C ABI. Nothing here reimplements a coercion
-//! rule, which is why the answers are exact by construction.
+//! it by running ClickHouse's own C++ machinery, vendored per release and
+//! linked behind the `chs_*` C ABI. Nothing here reimplements a coercion rule,
+//! which is why the answers are exact by construction: this crate is a thin
+//! passthrough, and every public call makes exactly one ABI call.
 //!
-//! This crate is a peer SDK over that ABI, alongside Go, Python and TypeScript.
-//! The language-neutral contract is `docs/reference/` in this repository; where this crate
-//! and `docs/reference/` disagree, the spec wins and this is a bug.
+//! The language-neutral contract is `docs/reference/bindings-v1.md` in this
+//! repository; where this crate and that page disagree, the page wins and this
+//! is a bug.
 //!
 //! ```no_run
-//! use chtypes::{Format, Registry, NO_SETTINGS};
+//! use chtypes::{Format, Registry, RegistryOptions, RowsOptions, CompileOptions};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let registry = Registry::from_env_or_default()?;   // $CHTYPES_REGISTRY, else the per-user cache
-//! let lib = registry.for_version("25.8")?;             // minor line or exact patch
-//! let schema = lib.compile("ts DateTime, seq UInt8").compile()?;
+//! // Optional, and first: the image zone and the default settings are fixed
+//! // once per process. See `setup`.
+//! chtypes::setup(chtypes::SetupOptions::default())?;
+//!
+//! let registry = Registry::new(RegistryOptions::default())?;
+//! let lib = registry.for_version("26.8")?;
+//! let schema = lib.compile_table(
+//!     "CREATE TABLE t (ts DateTime, seq UInt8) ENGINE = MergeTree ORDER BY ts",
+//!     &CompileOptions::default(),
+//! )?;
 //!
 //! let batch = schema.rows(
 //!     Format::JsonEachRow,
 //!     br#"{"ts":"2026-01-15 10:30:00","seq":256}"#,
-//!     NO_SETTINGS,
+//!     &RowsOptions::default(),
 //! )?;
-//!
-//! println!("{} {:?}", batch.outcome, batch.rows[0].values);
+//! println!("{}", batch.outcome);
 //! for t in &batch.transformed {
-//!     // seq: 256 -> 0, overflow_wrap, lossy — and ClickHouse returned success.
-//!     println!("row {} {}: {} -> {} ({})", t.row, t.column, t.input, t.stored, t.reason);
+//!     // seq: 256 -> 0, overflow_wrap, lossy, and ClickHouse returned success.
+//!     println!("row {} {}: {} -> {}", t.row, t.column, t.input, t.stored);
 //! }
 //! # Ok(()) }
 //! ```
 //!
 //! # What this crate will not do
 //!
-//! * **Never map [`Error::Unsupported`] onto a rejection or an acceptance.**
-//!   `-2` ([`CODE_UNSUPPORTED`]) means "a real server might well have accepted
-//!   this; I decline to guess". Mapping it to a rejection manufactures an
-//!   over-reject; mapping it to an acceptance manufactures an over-accept, which
-//!   is the cardinal sin — rows stream to subscribers and then the insert fails.
-//! * **Never infer one version's answer from another's.** Behavior is not
-//!   monotonic: 25.10 rejects a mixed-type DEFAULT that 24.8 through 25.8 and
-//!   26.6 onward all accept; `JSON` is rejected on 24.8 and accepted from 25.3.
-//!   [`Registry::for_version`] fails, naming what is loaded, rather than
-//!   answering from the nearest artifact.
-//! * **Never treat a per-row `accepted` as "stored".** A TTL-expired row is
-//!   accepted per row and not stored per batch. [`BatchResult::transformed`]
-//!   folds in the batch-level `storage_transforms`, and
-//!   [`BatchResult::engine_rows`] — when present — is the stored truth, not
-//!   [`BatchResult::rows`].
-//! * **Never route a value through a float.** Settings values cross as strings
-//!   and stored values stay raw JSON text; `18446744073709551615` must not
-//!   become `18446744073709552000`.
-//! * **Never decode a stored value into a language type before comparing it.**
-//!   A ClickHouse `String` holds arbitrary bytes, so a stored rendering is
-//!   [`RawText`] — bytes, with a *fallible* UTF-8 view — and never a `String`
-//!   that silently carries U+FFFD where the value had bytes. See [`Value::text`].
+//! * **Never map [`Error::Unsupported`] onto a rejection or an acceptance.** A
+//!   decline means "a real server might well have accepted this; this build will
+//!   not answer". Mapping it to a rejection manufactures an over-reject;
+//!   mapping it to an acceptance manufactures an over-accept.
+//! * **Never treat bytes as text.** A column name, a message and a rendered
+//!   value are [`RawText`]: the bytes are authoritative and the UTF-8 view is
+//!   fallible.
+//! * **Never rewrite a setting.** Settings values are strings, and only
+//!   strings; they cross the boundary as the caller wrote them.
+//! * **Never insert the original body when a row carries a generated default.**
+//!   A value whose [`Value::source`] is [`source::DEFAULT_GENERATED`] is stored
+//!   only if the caller inserts the library's own output: ask `rows` for an
+//!   export in the format you will insert ([`RowsOptions::export`]) and insert
+//!   [`BatchResult::payload`].
 //!
-//! # Getting artifacts
+//! # Threads
 //!
-//! An artifact is one ClickHouse release compiled behind the C ABI — 166–302 MB
-//! each, hours of C++ compute. Fetch prebuilt, signed ones with the crate's own
-//! command (`cargo install chtypes` → `chtypes fetch 25.8`) or from Rust with
-//! [`ensure`] — the `docs/guides/fetch.md` contract, behind the default-on `fetch`
-//! feature; `scripts/fetch.sh` is the reference implementation of the same
-//! chain. Both install into the per-user cache,
-//! `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>` — R is this crate's
-//! [`ABI_REVISION`], and fetch selects only artifacts built at it, so two SDK
-//! versions at different revisions never share a directory.
-//! [`Registry::from_search_path`]
-//! looks there, in `$CHTYPES_REGISTRY` and in the system locations, and names
-//! every place it looked when a line is missing ([`Error::ArtifactMissing`]);
-//! [`Registry::new`] loads one explicit directory.
+//! Every object is safe to share. [`Registry`] and [`Library`] (shared as
+//! `Arc<Library>`) are `Send + Sync`; [`Schema`], [`Filter`] and [`Block`] are
+//! `Clone + Send + Sync + 'static`, and `&self` methods run concurrently with
+//! no lock. A library is never unloaded: dropping the last `Arc<Library>`
+//! releases only Rust memory.
 //!
 //! # Platform
 //!
-//! Unix only — the loader is `dlopen`. Linux is the shipping target; macOS is a
-//! development floor and **not** an oracle: its `long double` is 53-bit, so float
-//! parses diverge from a real server (the float corpus matches 395/395 on Linux
-//! and 0/395 on macOS). Any float expectation must come from a Linux artifact or
-//! a live server.
+//! Unix only: the loader is `dlopen`. Linux is the shipping target; macOS is a
+//! development floor and **not** an oracle (its `long double` is 53-bit, so
+//! float parses diverge from a real server).
 
 #![deny(missing_docs)]
 #![warn(clippy::undocumented_unsafe_blocks)]
@@ -89,86 +76,58 @@
 #[cfg(not(unix))]
 compile_error!("chtypes loads artifacts with dlopen and supports unix targets only");
 
-mod compile;
-mod digest;
-mod discover;
-mod doc;
+mod abi1;
+mod decode;
 mod error;
-mod error_codes;
-#[cfg(feature = "fetch")]
-pub mod fetch;
-mod ffi;
-mod json;
 mod library;
+// The fetch layer's own documentation is its module docs; its record types are
+// re-exported below, undocumented field by field.
+#[allow(missing_docs)]
+mod ocifetch;
 mod raw;
 mod registry;
 mod result;
 mod schema;
-mod transform;
+mod setup;
 
-pub use compile::{CompileMode, CompileRequest};
-pub use discover::{
-    DiscoveredColumn, QUERY_CHANGED_SETTINGS, QUERY_SERVER_VERSION, QUERY_TABLE_COLUMNS,
-    ServerProfile, parse_changed_settings_result, parse_columns_result, parse_version_result,
+pub use abi1::vocab_gen::{
+    DefaultKind, DocFlags, FilterOutcome, Format, Outcome, Verdict, reason, source, status,
 };
-pub use error::{
-    ABI_REVISION, CODE_ARTIFACT_CORRUPT, CODE_ARTIFACT_MISSING, CODE_ARTIFACT_PINNED,
-    CODE_ARTIFACT_UNPUBLISHED, CODE_ARTIFACT_UNTRUSTED, CODE_SOURCE_UNREACHABLE, CODE_UNSUPPORTED,
-    Error, FETCH_COMMAND, Result,
-};
-pub use error_codes::{ErrorCodeEntry, ErrorCodeTable};
-#[cfg(feature = "fetch")]
-pub use fetch::{Action, EnsureOptions, Installed, ensure};
-pub use library::{Column, DEFAULT_TIMEZONE, DefaultKind, Library};
+pub use error::{CallError, Error, Refusal, Result};
+pub use library::Library;
+pub use ocifetch::ensure::Resolved;
 pub use raw::RawText;
-pub use registry::{
-    AUTOFETCH_ENV, InstalledPatch, Manifest, REGISTRY_ENV, Registry, RegistryOptions, Resolution,
-    SYSTEM_ARTIFACT_ROOTS, cache_dir_for, default_registry_dir, host_platform, install_dir,
-    install_dir_for, installed_lines, installed_patches, locate, locate_in, registry_search_path,
-    search_path_for,
-};
-pub use result::source;
+pub use registry::{FetchOptions, Registry, RegistryOptions};
 pub use result::{
-    BatchResult, Computed, DocFlags, FilterOutcome, FilterResult, FilterRowError, Format, Outcome,
-    RowResult, Span, Substitution, Transform, Value, Verdict,
+    BatchResult, BuildInfo, Capabilities, Column, Computed, DiscoveredColumn, Discovery,
+    ErrorCodeEntry, ErrorCodeTable, FilterResult, FilterRowError, Framing, Header, RowResult,
+    SchemaDescription, Span, Transform, Value,
 };
 pub use schema::{
-    Block, Filter, NO_PARAMS, NO_SETTINGS, RowOptions, SETTING_CLOCK_OFFSET_NANOS,
-    SETTING_DEFAULT_EVAL_MEMORY_BYTES, SETTING_DEFAULT_EVAL_WALL_NANOS,
-    SETTING_MAX_CLOCK_SKEW_NANOS, SETTING_NOW_EPOCH_NANOS, Schema,
+    Block, CompileOptions, EvalOptions, Filter, FilterOptions, RowOptions, RowsOptions, Schema,
 };
-pub use transform::reason;
+pub use setup::{SetupOptions, setup};
 
 #[cfg(test)]
 mod thread_contract {
     use super::*;
 
-    /// `chtypes.h`: a single handle must not be used from two threads at once,
-    /// but the library is thread-safe for concurrent calls on distinct handles.
-    /// So [`Schema`] is `Send` and `!Sync`, and these assertions fail to compile
-    /// if that ever changes.
-    fn assert_send<T: Send>() {}
-    fn assert_send_sync<T: Send + Sync>() {}
-
-    trait AmbiguousIfSync<A> {
-        fn tag() {}
-    }
-    impl<T: ?Sized> AmbiguousIfSync<()> for T {}
-    impl<T: ?Sized + Sync> AmbiguousIfSync<u8> for T {}
+    fn clone_send_sync_static<T: Clone + Send + Sync + 'static>() {}
+    fn send_sync<T: Send + Sync>() {}
 
     #[test]
-    fn schema_is_send_and_not_sync() {
-        assert_send::<Schema>();
-        // Resolves only while Schema is NOT Sync: a second impl would make the
-        // call ambiguous and this would stop compiling.
-        let _ = <Schema as AmbiguousIfSync<_>>::tag;
-    }
-
-    #[test]
-    fn a_library_and_registry_are_shareable() {
-        // Every call takes the library's mutex, so sharing these is safe.
-        assert_send_sync::<Library>();
-        assert_send_sync::<Registry>();
-        assert_send_sync::<std::sync::Arc<Library>>();
+    fn every_object_is_safe_to_share() {
+        send_sync::<Registry>();
+        send_sync::<Library>();
+        send_sync::<std::sync::Arc<Library>>();
+        clone_send_sync_static::<Schema>();
+        clone_send_sync_static::<Filter>();
+        clone_send_sync_static::<Block>();
+        // Results, errors and BuildInfo are plain values.
+        send_sync::<RowResult>();
+        send_sync::<BatchResult>();
+        send_sync::<FilterResult>();
+        send_sync::<Error>();
+        send_sync::<BuildInfo>();
     }
 }

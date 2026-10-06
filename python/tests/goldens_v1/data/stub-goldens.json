@@ -1,0 +1,148 @@
+{
+ "schema": "https://artifacts.wavehouse.dev/spec/goldens/v1",
+ "by": "sdk stub fixture",
+ "abi": 1,
+ "abi_fingerprint": "sha256:856e5cb7543db291b4db716662bf6e487b2258973b959bbf5d58b4bd46d73285",
+ "clickhouse_version": "26.8.15.10",
+ "build": "20261001.000000",
+ "revision": 1,
+ "generated": {
+  "platform": "linux/amd64",
+  "checked_on": [
+   "darwin/arm64",
+   "linux/amd64",
+   "linux/arm64"
+  ]
+ },
+ "setups": [
+  {
+   "id": "setup-default",
+   "image_zone_b64": "",
+   "defaults_b64": "",
+   "cases": [
+    {
+     "id": "stub-row-text",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "settings_b64": ""
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IUQ6aGVsbG8=",
+      "settings_b64": ""
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "input_span": {
+        "off": 0,
+        "len": 8
+       },
+       "unknown_fields": [],
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "src": "input",
+         "input": "hello",
+         "stored": "hello",
+         "null": false,
+         "value_b64": "aGVsbG8="
+        }
+       ],
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    },
+    {
+     "id": "stub-refusal",
+     "kind": "schema",
+     "call": "schema_create",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKGEgVUludDgpIEVOR0lORSA9IE1lcmdlVHJlZSBPUkRFUiBCWSBhOyBTRUxFQ1QgMQ==",
+      "settings_b64": ""
+     },
+     "expect": {
+      "at": "schema_create",
+      "status": "CHS_REJECTED",
+      "run_varying": [],
+      "error": {
+       "ch_code": 62,
+       "ch_name_b64": "U1lOVEFYX0VSUk9S",
+       "message_b64": "TXVsdGktc3RhdGVtZW50cyBhcmUgbm90IGFsbG93ZWQ=",
+       "column_b64": ""
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "setup-utc-defaults",
+   "image_zone_b64": "VVRD",
+   "defaults_b64": "eyJkYXRlX3RpbWVfaW5wdXRfZm9ybWF0IjoiYmFzaWMifQ==",
+   "cases": [
+    {
+     "id": "stub-row-bytes",
+     "kind": "row",
+     "call": "preview_row",
+     "platforms": [
+      "darwin/arm64",
+      "linux/amd64",
+      "linux/arm64"
+     ],
+     "schema": {
+      "create_table_b64": "Q1JFQVRFIFRBQkxFIHQgKHMgU3RyaW5nKSBFTkdJTkUgPSBNZXJnZVRyZWUgT1JERVIgQlkgdHVwbGUoKQ==",
+      "settings_b64": ""
+     },
+     "body": {
+      "format": 0,
+      "body_b64": "IUQ6//4AcmF3",
+      "settings_b64": ""
+     },
+     "expect": {
+      "at": "call",
+      "status": "CHS_OK",
+      "document": {
+       "outcome": "accepted",
+       "input_span": {
+        "off": 0,
+        "len": 9
+       },
+       "unknown_fields": [],
+       "unsupported_settings": [],
+       "cols": [
+        {
+         "name": "s",
+         "type": "String",
+         "src": "input",
+         "input_b64": "//4AcmF3",
+         "stored_b64": "//4AcmF3",
+         "null": false,
+         "value_b64": "//4AcmF3"
+        }
+       ],
+       "transformed": []
+      },
+      "run_varying": []
+     }
+    }
+   ]
+  }
+ ]
+}

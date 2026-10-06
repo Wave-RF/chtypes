@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "mirror-failover-digest-404",
+  "tree": "http-basic",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "status": 404
+        }
+      ]
+    }
+  ],
+  "second_origin_routes": [
+    {
+      "method": "GET",
+      "path": "/v2/chtypes/v1/manifests/26.12",
+      "responses": [
+        {
+          "from_tree": true
+        }
+      ]
+    }
+  ]
+}

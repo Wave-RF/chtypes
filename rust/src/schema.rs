@@ -1,1181 +1,376 @@
-//! A compiled schema, and the two entry points that answer "what would this
-//! table do with this row?".
+//! [`Schema`], [`Filter`] and [`Block`], and the options each call takes.
+//!
+//! Every public call makes exactly one ABI call, plus the generated read-out of
+//! its buffers and error. Nothing here contains a ClickHouse rule: no scalar,
+//! comparison, coercion, timestamp, zone, quoting or classification logic.
+//!
+//! The three handle objects are `Clone + Send + Sync + 'static`: a clone shares
+//! one handle, and the handle is freed when the last clone drops. `&self`
+//! methods run concurrently with no lock; `Drop` cannot race a call, because a
+//! call borrows the handle. A filter and a block each hold a counted reference
+//! to their schema inside the library, so freeing order never matters.
+//!
+//! # The two zones
+//!
+//! The per-call zone is the `session_timezone` key of a call's `settings`; the
+//! `session_timezone` option exists so the zone is visible in every signature
+//! it affects, and writes its value into the settings object verbatim. Passing
+//! the option and a `session_timezone` key together is [`Error::Usage`] whether
+//! or not the two agree, so a call never has two spellings of its zone.
+//!
+//! A filter's zone is its own, fixed when it is compiled
+//! ([`FilterOptions`]): its WHERE runs in that zone for every evaluation. An
+//! evaluation's settings ([`EvalOptions`], [`RowOptions`] for a block) are the
+//! body's PARSE settings only. Differing zones are an ordinary input.
 
-use std::cell::Cell;
-use std::ffi::CString;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
+use serde_json::{Map, Value as Json};
+
+use crate::abi1::calls_gen::{BlockHandle, FilterHandle, SchemaHandle};
+use crate::abi1::vocab_gen::{DocFlags, EXPORT_NONE, Format};
+use crate::decode;
 use crate::error::{Error, Result};
-use crate::ffi::{ChsBlock, ChsFilter, ChsSchema, EXPORT_NONE, cstring};
-use crate::json::quote_bare_denormals;
-use crate::library::{Column, Library};
-use crate::result::{
-    BatchDoc, BatchResult, DocFlags, FilterDoc, FilterResult, Format, RowDoc, RowResult,
-    batch_result_of, filter_result_of, row_result_of,
-};
+use crate::library::Library;
+use crate::result::{BatchResult, FilterResult, RowResult, SchemaDescription};
 
-/// An empty settings map, for the common call with no per-request settings.
-pub const NO_SETTINGS: &[(&str, &str)] = &[];
+/// The settings key a call's zone travels under.
+const SESSION_TIMEZONE: &str = "session_timezone";
 
-/// An empty query-parameter map, for the common [`Schema::compile_filter`]
-/// call with no `{name:Type}` parameters. Positionally, like the settings
-/// slice [`Schema::rows`] and [`Schema::set_engine`] already take — the
-/// crate's one-optional-parameter convention (`docs/reference/bindings.md` §One compile
-/// function).
-pub const NO_PARAMS: &[(&str, &str)] = &[];
+/// Serialize settings (and the per-call zone) into the JSON object of string
+/// values that crosses the C boundary. Values are strings, only strings, and
+/// are never rewritten. A zone given both as the option and as a settings key,
+/// or a key given twice, is misuse, raised before any call.
+pub(crate) fn settings_object(
+    settings: &[(String, String)],
+    session_timezone: Option<&str>,
+) -> Result<Vec<u8>> {
+    string_object(settings, session_timezone, "settings")
+}
 
-/// Pin the batch instant outright — tests, replay, anything that must be
-/// reproducible. The value is a 19-digit nanosecond epoch and **must** cross as a
-/// string: as a JSON number through a float it becomes `1.7e+18` and the setting
-/// is silently ignored.
-pub const SETTING_NOW_EPOCH_NANOS: &str = "chtypes_now_epoch_nanos";
-/// The caller's measured `(server - client)` offset, added to every clock read.
-pub const SETTING_CLOCK_OFFSET_NANOS: &str = "chtypes_clock_offset_nanos";
-/// Refuse to substitute a volatile DEFAULT when `|offset|` exceeds this; `0`
-/// means no budget, and with none of these set the tolerated skew is unbounded.
-pub const SETTING_MAX_CLOCK_SKEW_NANOS: &str = "chtypes_max_clock_skew_nanos";
-/// Admission ceiling on DEFAULT/TTL evaluation memory. Process-wide: settable
-/// only through [`Library::set_default_settings`].
-pub const SETTING_DEFAULT_EVAL_MEMORY_BYTES: &str = "chtypes_default_eval_memory_bytes";
-/// Admission ceiling on DEFAULT/TTL evaluation wall time. Process-wide, as above.
-pub const SETTING_DEFAULT_EVAL_WALL_NANOS: &str = "chtypes_default_eval_wall_nanos";
+fn string_object(
+    pairs: &[(String, String)],
+    session_timezone: Option<&str>,
+    what: &str,
+) -> Result<Vec<u8>> {
+    let mut map = Map::new();
+    for (k, v) in pairs {
+        if map.insert(k.clone(), Json::String(v.clone())).is_some() {
+            return Err(Error::usage(format!(
+                "{what}: the key {k:?} is given twice"
+            )));
+        }
+    }
+    if let Some(zone) = session_timezone {
+        if map.contains_key(SESSION_TIMEZONE) {
+            return Err(Error::usage(format!(
+                "{SESSION_TIMEZONE} is given both as the option and as a key of {what}; a call carries exactly one spelling of its zone"
+            )));
+        }
+        map.insert(SESSION_TIMEZONE.to_string(), Json::String(zone.to_string()));
+    }
+    serde_json::to_vec(&Json::Object(map))
+        .map_err(|e| Error::internal(format!("{what} do not encode: {e}")))
+}
 
-/// The revision-5 per-call options for [`Schema::row_with_options`],
-/// [`Schema::rows_with_options`], [`Schema::rows_export_with_options`] and
-/// [`Schema::parse_block_with_options`] — the settings map every one of
-/// those already took, plus the new INSERT column list. Follows
-/// [`crate::RegistryOptions`]'s own precedent: `#[derive(Default)]`, public
-/// documented fields, `..RowOptions::default()` for "everything but this
-/// one field."
+/// The INSERT column list as the JSON array of name objects the ABI takes:
+/// each name is `{"name": "<utf-8>"}`, or `{"name_b64": "<base64>"}` when its
+/// bytes are not valid UTF-8. Empty means none.
+fn columns_array(columns: &[Vec<u8>]) -> Result<Vec<u8>> {
+    use base64::Engine as _;
+    if columns.is_empty() {
+        return Ok(Vec::new());
+    }
+    let items: Vec<Json> = columns
+        .iter()
+        .map(|name| {
+            let mut o = Map::new();
+            match std::str::from_utf8(name) {
+                Ok(s) => o.insert("name".to_string(), Json::String(s.to_string())),
+                Err(_) => o.insert(
+                    "name_b64".to_string(),
+                    Json::String(base64::engine::general_purpose::STANDARD.encode(name)),
+                ),
+            };
+            Json::Object(o)
+        })
+        .collect();
+    serde_json::to_vec(&Json::Array(items))
+        .map_err(|e| Error::internal(format!("the column list does not encode: {e}")))
+}
+
+/// What a compile takes: the profile settings, and the per-call zone.
 ///
-/// ```no_run
-/// use chtypes::{Format, Registry, RowOptions, NO_SETTINGS};
-///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let lib = Registry::from_env_or_default()?.for_version("25.8")?;
-/// // id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1
-/// let schema = lib.compile("id UInt32, e UInt8 EPHEMERAL, d UInt8 DEFAULT e + 1").compile()?;
-///
-/// // e is read, feeds d's DEFAULT (d = 6), and is itself never stored.
-/// let opts = RowOptions {
-///     columns: Some(vec!["id".to_string(), "e".to_string()]),
-///     ..RowOptions::default()
-/// };
-/// let row = schema.row_with_options(Format::JsonEachRow, br#"{"id":3,"e":5}"#, &opts)?;
-/// assert_eq!(row.values.iter().find(|v| v.column == "d").unwrap().text, "6");
-/// # let _ = NO_SETTINGS;
-/// # Ok(()) }
-/// ```
-#[derive(Debug, Clone, Default)]
-pub struct RowOptions {
-    /// Per-call ClickHouse format settings — the same key/value shape
-    /// [`Schema::row_with_settings`] and [`Schema::rows`] already take
-    /// positionally (see [`NO_SETTINGS`]). Owned, rather than the generic
-    /// `&[(K, V)]` those take: a struct field cannot be generic over a
-    /// trait bound the way a function parameter can.
+/// In a compile profile the zone is a default for later calls on that schema;
+/// a compiled type always takes the image zone, never the profile's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompileOptions {
+    /// The profile settings. Values are strings.
     pub settings: Vec<(String, String)>,
-    /// The INSERT column list (revision 5): the data supplies exactly these
-    /// columns — k-th field to k-th listed column in the positional formats,
-    /// keys matched against the listed set in the JSON family — and the
-    /// server computes the rest, with the listed values in scope for their
-    /// DEFAULT expressions.
-    ///
-    /// `None` — or `Some(vec![])` — is the no-list behavior of every
-    /// revision before 5, where the data supplies every plain column;
-    /// **never** rendered as an empty `()`, which is a syntax error (code
-    /// 62) on every ClickHouse line, so this crate sends a NULL pointer for
-    /// both cases rather than a JSON `"[]"` string.
-    ///
-    /// **EPHEMERAL rule**: a listed `EPHEMERAL` column's value IS read and
-    /// is in scope for the DEFAULTs referencing it, and is still never
-    /// stored and never exported ([`Schema::rows_export_with_options`]'s
-    /// payload never carries it). A name that is unknown, an `ALIAS`, or
-    /// repeated is refused with the server's own code (16, 16, 15
-    /// respectively) — this crate does no local validation of the list.
-    pub columns: Option<Vec<String>>,
+    /// The `session_timezone` key, written into the settings verbatim.
+    pub session_timezone: Option<String>,
 }
 
-/// A schema compiled inside one specific version's library.
-///
-/// # Thread-safety
-///
-/// `chtypes.h`: *"The library is thread-safe for concurrent `chs_row()` calls on
-/// distinct handles; a single handle must not be used from two threads at once."*
-/// That is encoded here in the type system: `Schema` is [`Send`] — a handle may
-/// be moved to another thread, which is what an executor needs — and deliberately
-/// **not** [`Sync`], so the compiler rejects sharing one handle between threads
-/// rather than leaving it to a comment. Concurrency across versions, or across
-/// schemas of one version, is expressed by making more schemas.
+/// What `row` and `parse_block` take.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RowOptions {
+    /// The call's settings. Values are strings.
+    pub settings: Vec<(String, String)>,
+    /// The `session_timezone` key, written into the settings verbatim: the
+    /// zone the body is parsed in.
+    pub session_timezone: Option<String>,
+    /// The INSERT column list, each name as bytes; empty for none.
+    pub columns: Vec<Vec<u8>>,
+}
+
+/// What `rows` takes.
+#[derive(Debug, Clone, Default)]
+pub struct RowsOptions {
+    /// The call's settings. Values are strings.
+    pub settings: Vec<(String, String)>,
+    /// The `session_timezone` key, written into the settings verbatim.
+    pub session_timezone: Option<String>,
+    /// The INSERT column list, each name as bytes; empty for none.
+    pub columns: Vec<Vec<u8>>,
+    /// An attached filter. Its WHERE runs in the zone it was compiled under.
+    pub filter: Option<Filter>,
+    /// An export format; `None` asks for no export.
+    pub export: Option<Format>,
+    /// Which document groups to emit; `None` means all.
+    pub doc_flags: Option<DocFlags>,
+}
+
+/// What `compile_filter` takes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FilterOptions {
+    /// The expression's query parameters, bound by ClickHouse's own
+    /// substitution. Values are strings.
+    pub params: Vec<(String, String)>,
+    /// The profile the expression is compiled under.
+    pub settings: Vec<(String, String)>,
+    /// The `session_timezone` key: the filter's own zone, fixed at compile.
+    pub session_timezone: Option<String>,
+}
+
+/// What `Filter::rows` takes: the body's PARSE settings, never the WHERE's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EvalOptions {
+    /// The body's parse settings. Values are strings.
+    pub settings: Vec<(String, String)>,
+    /// The `session_timezone` key: the zone the body is parsed in.
+    pub session_timezone: Option<String>,
+}
+
+/// A compiled table. Immutable; `Clone` shares one handle.
+#[derive(Clone)]
 pub struct Schema {
-    lib: Arc<Library>,
-    handle: *mut ChsSchema,
-    columns: Vec<Column>,
-    /// `Cell` is `Send` and `!Sync`: it states the intent the raw pointer already
-    /// implies, so removing the pointer later cannot silently make `Schema` sync.
-    _not_sync: PhantomData<Cell<()>>,
-}
-
-// SAFETY: the handle is owned exclusively by this Schema (compile returns a fresh
-// one and Drop is the only release), and every call into the library takes the
-// library's mutex, so moving the handle to another thread cannot produce a
-// concurrent use of it. `Sync` is deliberately NOT implemented: two threads
-// holding &Schema could call chs_row on one handle at once, which the header
-// forbids.
-unsafe impl Send for Schema {}
-
-impl Schema {
-    pub(crate) fn new(lib: Arc<Library>, handle: *mut ChsSchema, columns: Vec<Column>) -> Schema {
-        Schema {
-            lib,
-            handle,
-            columns,
-            _not_sync: PhantomData,
-        }
-    }
-
-    /// The declared columns, canonicalized by this build. Empty when the artifact
-    /// predates the column-introspection group (which shipped all-or-nothing).
-    pub fn columns(&self) -> &[Column] {
-        &self.columns
-    }
-
-    /// The library this schema was compiled in.
-    pub fn library(&self) -> &Arc<Library> {
-        &self.lib
-    }
-
-    /// Declare the table's engine so [`Schema::rows`] applies the engine's own
-    /// insert-time semantics — the single-block merge every INSERT runs under
-    /// `optimize_on_insert = 1`: `CollapsingMergeTree` refusing an invalid `Sign`
-    /// with code 117 before anything is stored, `SummingMergeTree` summing equal
-    /// keys and dropping all-zero rows, `ReplacingMergeTree` deduplicating within
-    /// the block.
-    ///
-    /// `engine` is the `SHOW CREATE` spelling (`"CollapsingMergeTree(sign)"`);
-    /// `order_by` the sorting key (`"tuple()"`, `"id"`, `"(day, key)"`);
-    /// `merge_tree_settings` is the table's **MergeTree-namespace** settings —
-    /// the `SETTINGS` clause after the engine (`allow_nullable_key` and
-    /// friends), a namespace `DB::Settings` cannot carry. Pass
-    /// [`NO_SETTINGS`] for none.
-    ///
-    /// Any engine or sorting key this build does not model — and any artifact
-    /// that predates the entry point — is [`crate::Error::Unsupported`], never
-    /// a guess and never a load failure.
-    ///
-    /// `merge_tree_settings` names are validated by the server's own
-    /// `MergeTreeSettings` object: an unknown name answers the server's code
-    /// `115` ([`crate::Error::Schema`], code visible, so a caller can tell
-    /// "bad name" from "not modeled"). A known name declared at a
-    /// **non-default** value is refused ([`crate::Error::Unsupported`],
-    /// naming it) — no MergeTree setting's behavior is modeled yet, and
-    /// silently ignoring a declared value would mean the declared profile is
-    /// not in force. A name declared **at** its default is inert and
-    /// accepted. Values cross as strings, as everywhere on this boundary.
-    ///
-    /// # Errors
-    ///
-    /// Two KINDS of failure travel through one return, told apart by the C
-    /// return's **sign** (`docs/reference/bindings.md` §The error split) — never flatten them:
-    ///
-    /// * [`crate::Error::Schema`] — positive code: **the server refused**.
-    ///   This DDL can never exist and the tenant must be told. Today `115`
-    ///   (unknown MergeTree setting name) is the only positive code here.
-    /// * [`crate::Error::Unsupported`] — negative code: **this library
-    ///   declined** (`-2` unmodeled engine or sorting key, or a non-default
-    ///   declared MergeTree setting value; `-1` a guarded exception). Validate
-    ///   cautiously — a real server might have accepted it.
-    /// * [`crate::Error::PredatesFeature`] — the artifact predates
-    ///   `chs_schema_engine`; also a decline, never a load failure.
-    /// * [`crate::Error::Nul`] — an argument contained an interior NUL byte.
-    pub fn set_engine<K: AsRef<str>, V: AsRef<str>>(
-        &mut self,
-        engine: &str,
-        order_by: &str,
-        merge_tree_settings: &[(K, V)],
-    ) -> Result<()> {
-        let e = cstring(engine, "engine")?;
-        let o = cstring(order_by, "order by")?;
-        let mt = settings_json(merge_tree_settings)?;
-        let _guard = self.lib.lock();
-        // SAFETY: our own handle, under the library lock.
-        unsafe { self.lib.api().engine(self.handle, &e, &o, &mt) }
-    }
-
-    /// Declare the table's rows TTL — the `TTL ...` clause after the engine, e.g.
-    /// `"ts + INTERVAL 30 DAY"`. Evaluated per batch against the batch's one
-    /// clock instant with `force=true`, which is `OPTIMIZE FINAL`'s posture and
-    /// how the acceptance rig captures its ground truth.
-    ///
-    /// An expired row is reported **not stored**, as a batch-level
-    /// `ttl_expired` transform. `WHERE`/`GROUP BY` TTLs, `TO DISK`/`VOLUME`
-    /// moves, `RECOMPRESS` and any clock-reading TTL expression are
-    /// [`crate::Error::Unsupported`]. Column-level TTLs need no call: they are part of
-    /// the declaration list and are captured at compile time.
-    ///
-    /// The TTL is validated under the handle's declared compile profile when
-    /// it has one, the process defaults otherwise — the handle IS the CREATE,
-    /// and a `TTL` clause is validated by the CREATE, which is why this call
-    /// takes no settings parameter.
-    ///
-    /// # Errors
-    ///
-    /// * [`crate::Error::Unsupported`] — any nonzero C return is a decline:
-    ///   `-2` for a refused TTL form, `-1` for a guarded exception. Never a
-    ///   rejection; a real server might have accepted the clause.
-    /// * [`crate::Error::PredatesFeature`] — the artifact predates
-    ///   `chs_schema_ttl`.
-    /// * [`crate::Error::Nul`] — the clause contained an interior NUL byte.
-    pub fn set_ttl(&mut self, ttl_sql: &str) -> Result<()> {
-        let t = cstring(ttl_sql, "ttl")?;
-        let _guard = self.lib.lock();
-        // SAFETY: our own handle, under the library lock.
-        unsafe { self.lib.api().ttl(self.handle, &t) }
-    }
-
-    /// Declare the table's partition key — the `PARTITION BY` clause after the
-    /// engine, e.g. `"toYYYYMM(ts)"` or `"(toDate(ts), tenant)"`
-    /// (`chs_schema_partition_by`, revision 6). The key is built by the
-    /// server's own CREATE-path call over this schema's columns, under the
-    /// handle's compile profile. A second call REPLACES the first; `""`
-    /// removes the declaration, and the schema then answers exactly as one that
-    /// never declared a key.
-    ///
-    /// With a key declared, [`Schema::row`] and [`Schema::rows`] answer
-    /// [`crate::RowResult::partition_id`] for every row that would be stored
-    /// and [`crate::BatchResult::partition_count`] for the batch, and a body
-    /// that would split into more partitions than the call's
-    /// `max_partitions_per_insert_block` allows is an ordinary
-    /// [`crate::Outcome::Rejected`] with `err_code` 252 (`TOO_MANY_PARTS`), the
-    /// server's own — a verdict, never an `Err`.
-    ///
-    /// # Errors
-    ///
-    /// The return follows [`Schema::set_engine`]'s SIGN rule, NOT
-    /// [`Schema::set_ttl`]'s:
-    ///
-    /// * [`crate::Error::Schema`] — positive code: **the server refused** the
-    ///   key on its own CREATE path (e.g. `36` `BAD_ARGUMENTS` for a
-    ///   non-deterministic key, `549` `DATA_TYPE_CANNOT_BE_USED_IN_KEY`), with
-    ///   its own message.
-    /// * [`crate::Error::Unsupported`] — negative code: **this library
-    ///   declined** (`-1` a guarded exception). `-2` is a key the server
-    ///   accepts but this build will not evaluate; a non-deterministic key is
-    ///   the server's own rejection, `36` `BAD_ARGUMENTS`.
-    /// * [`crate::Error::PredatesFeature`] — the artifact predates
-    ///   `chs_schema_partition_by`.
-    /// * [`crate::Error::Nul`] — the expression contained an interior NUL
-    ///   byte.
-    pub fn set_partition_by(&mut self, expr: &str) -> Result<()> {
-        let p = cstring(expr, "partition by")?;
-        let _guard = self.lib.lock();
-        // SAFETY: our own handle, under the library lock.
-        unsafe { self.lib.api().partition_by(self.handle, &p) }
-    }
-
-    /// Validate and coerce one row, with no per-request settings —
-    /// [`Schema::row_with_settings`] with an empty map. Same errors.
-    pub fn row(&self, format: Format, raw: &[u8]) -> Result<RowResult> {
-        self.row_with_settings(format, raw, NO_SETTINGS)
-    }
-
-    /// [`Schema::row`] under a per-request settings map —
-    /// [`Schema::row_with_options`] with [`RowOptions::columns`] absent.
-    /// Same errors.
-    pub fn row_with_settings<K: AsRef<str>, V: AsRef<str>>(
-        &self,
-        format: Format,
-        raw: &[u8],
-        settings: &[(K, V)],
-    ) -> Result<RowResult> {
-        self.row_with_options(
-            format,
-            raw,
-            &RowOptions {
-                settings: owned_pairs(settings),
-                columns: None,
-            },
-        )
-    }
-
-    /// Validate and coerce one row — [`Schema::row`] and
-    /// [`Schema::row_with_settings`] are both single invocations of this,
-    /// the ONE `chs_row` call site.
-    ///
-    /// `raw` is passed counted, never as text: binary formats contain NUL bytes
-    /// and text rows can carry invalid UTF-8 on purpose. Settings values cross as
-    /// strings — see [`SETTING_NOW_EPOCH_NANOS`].
-    ///
-    /// # The INSERT column list (revision 5)
-    ///
-    /// [`RowOptions::columns`] is the `chs_row` `columns_json` argument — see
-    /// its docs for the EPHEMERAL rule and the empty-list-is-no-list
-    /// distinction. A listed column's per-column document entry reports the
-    /// value the server read (a listed `EPHEMERAL` column included) under
-    /// whatever `src` the artifact names; this crate does not special-case
-    /// it, so a listed `EPHEMERAL` column simply appears in
-    /// [`RowResult::values`] alongside the plain ones.
-    ///
-    /// **The verdict is in the `Ok` value, not the `Err`.** A row the server
-    /// would reject comes back `Ok` with [`crate::Outcome::Rejected`] and
-    /// ClickHouse's code in [`RowResult::err_code`]; a decline is
-    /// [`crate::Outcome::Unsupported`]; an unknown setting name rejects the
-    /// call with the server's own `115` — also in the result, not the `Err`.
-    /// An unknown/`ALIAS`/duplicate listed column name is likewise a
-    /// SERVER refusal, in the result: codes 16, 16 and 15 respectively,
-    /// never validated locally. The `Err` arm is reserved for the machinery
-    /// failing to ask at all.
-    ///
-    /// # Errors
-    ///
-    /// * [`crate::Error::PredatesFeature`] — the artifact predates `chs_row`.
-    /// * [`crate::Error::BadDocument`] — the result document could not be
-    ///   read exactly, even after the bare-denormal repair.
-    /// * [`crate::Error::Nul`] — a setting or column name contained an
-    ///   interior NUL byte.
-    pub fn row_with_options(
-        &self,
-        format: Format,
-        raw: &[u8],
-        options: &RowOptions,
-    ) -> Result<RowResult> {
-        let json = settings_json(&options.settings)?;
-        let cols = columns_json(&options.columns)?;
-        let doc: RowDoc = {
-            let _guard = self.lib.lock();
-            // SAFETY: our own handle, under the library lock; the byte slice
-            // outlives the call.
-            let out = unsafe {
-                self.lib
-                    .api()
-                    .row(self.handle, format.code(), raw, &json, cols.as_deref())?
-            };
-            parse_row_doc(&out)?
-        };
-        Ok(row_result_of(doc))
-    }
-
-    /// Validate and coerce a whole request body, which may hold many rows.
-    ///
-    /// This is **not** [`Schema::row`] in a loop and must not be implemented as
-    /// one: row separation is format-specific (a quoted CSV field can contain a
-    /// newline) and `input_format_allow_errors_num` / `_ratio` decide whether a
-    /// bad row is skipped or aborts the batch. It is also the unit of the
-    /// volatile-DEFAULT clock guarantee — one batch is one clock instant.
-    ///
-    /// When [`BatchResult::engine_rows`] is present it, not
-    /// [`BatchResult::rows`], is what the table will hold.
-    ///
-    /// **The verdict is in the `Ok` value, not the `Err`** — see
-    /// [`Schema::row_with_settings`]. The batch verdict is
-    /// [`BatchResult::outcome`] / [`BatchResult::err_code`].
-    ///
-    /// # Errors
-    ///
-    /// * [`crate::Error::PredatesFeature`] — the artifact predates `chs_rows`
-    ///   (unreachable for an artifact this crate loaded: the symbol is
-    ///   mandatory).
-    /// * [`crate::Error::BadDocument`] — the result document could not be
-    ///   read exactly, even after the bare-denormal repair.
-    /// * [`crate::Error::Nul`] — a setting contained an interior NUL byte.
-    pub fn rows<K: AsRef<str>, V: AsRef<str>>(
-        &self,
-        format: Format,
-        body: &[u8],
-        settings: &[(K, V)],
-    ) -> Result<BatchResult> {
-        // export off, all document groups on: the revision-3 pass-through
-        // that keeps rows() byte-identical to revision 2; no column list:
-        // the revision-5 pass-through that keeps it byte-identical still.
-        self.rows_through(
-            format,
-            body,
-            &RowOptions {
-                settings: owned_pairs(settings),
-                columns: None,
-            },
-            EXPORT_NONE,
-            DocFlags::ALL,
-        )
-    }
-
-    /// [`Schema::rows`] with the revision-5 INSERT column list exposed —
-    /// [`Schema::rows_export_with_options`] with export off and every
-    /// document group on. See [`RowOptions::columns`] for the EPHEMERAL
-    /// rule and the empty-list-is-no-list distinction. Same errors as
-    /// [`Schema::rows`].
-    pub fn rows_with_options(
-        &self,
-        format: Format,
-        body: &[u8],
-        options: &RowOptions,
-    ) -> Result<BatchResult> {
-        self.rows_through(format, body, options, EXPORT_NONE, DocFlags::ALL)
-    }
-
-    /// [`Schema::rows`] with the revision-3 export and document-flag channels
-    /// exposed: ONE `chs_rows` call, never a second, never re-parsing
-    /// (the C ABI contract §Rows is normative; `include/chtypes.h` is its
-    /// public authority).
-    ///
-    /// `export` is `None` (no bytes; `doc_flags` still thins the document) or
-    /// `Some(format)` for a [`Format`] this artifact can SERIALIZE — this
-    /// revision exactly [`Format::JsonCompactEachRow`]. Any other value
-    /// answers the whole call [`crate::Outcome::Unsupported`] and processes
-    /// nothing — loud, never silent.
-    ///
-    /// `doc_flags` selects the document groups; [`DocFlags::NONE`] (the
-    /// `Default`) is the LEAN document — verdicts intact, but `values`,
-    /// `transformed`, `substituted`, `computed` and `unknown_fields` all come
-    /// back empty. [`Schema::rows`] is the [`DocFlags::ALL`] spelling.
-    ///
-    /// The exported bytes come back in [`BatchResult::payload`] with
-    /// [`BatchResult::spans`] index-aligned to [`BatchResult::rows`] —
-    /// `payload[s.off..s.off + s.len]` IS row i's line — and the
-    /// emitted-empty versus declined distinction is `Some(empty)` versus
-    /// `None` + [`BatchResult::export_declined`]. The C buffer is copied and
-    /// freed (same library's `chs_free`) before this returns; no ownership
-    /// crosses the boundary.
-    ///
-    /// Same errors as [`Schema::rows`] — the verdict is in the `Ok` value.
-    pub fn rows_export<K: AsRef<str>, V: AsRef<str>>(
-        &self,
-        format: Format,
-        body: &[u8],
-        settings: &[(K, V)],
-        export: Option<Format>,
-        doc_flags: DocFlags,
-    ) -> Result<BatchResult> {
-        let export_code = export.map_or(EXPORT_NONE, Format::code);
-        self.rows_through(
-            format,
-            body,
-            &RowOptions {
-                settings: owned_pairs(settings),
-                columns: None,
-            },
-            export_code,
-            doc_flags,
-        )
-    }
-
-    /// [`Schema::rows_export`] with the revision-5 INSERT column list
-    /// exposed. The export channel is unchanged by a column list: the
-    /// exported tuple stays the stored columns in declared order — a listed
-    /// `EPHEMERAL` column is read and may feed a DEFAULT but never rides in
-    /// [`BatchResult::payload`]. Same errors as [`Schema::rows_export`].
-    pub fn rows_export_with_options(
-        &self,
-        format: Format,
-        body: &[u8],
-        options: &RowOptions,
-        export: Option<Format>,
-        doc_flags: DocFlags,
-    ) -> Result<BatchResult> {
-        let export_code = export.map_or(EXPORT_NONE, Format::code);
-        self.rows_through(format, body, options, export_code, doc_flags)
-    }
-
-    /// The ONE `chs_rows` call site — [`Schema::rows`], [`Schema::rows_export`],
-    /// [`Schema::rows_with_options`], [`Schema::rows_export_with_options`],
-    /// [`Schema::rows_export_with`] and
-    /// [`Schema::rows_export_with_options_and_filter`] are all single
-    /// invocations of it.
-    fn rows_through(
-        &self,
-        format: Format,
-        body: &[u8],
-        options: &RowOptions,
-        export_code: i32,
-        doc_flags: DocFlags,
-    ) -> Result<BatchResult> {
-        self.rows_through_filtered(
-            format,
-            body,
-            options,
-            export_code,
-            doc_flags,
-            std::ptr::null(),
-        )
-    }
-
-    /// [`Schema::rows_through`]'s twin with the attached-filter parameter
-    /// exposed — see [`Schema::rows_export_with`] and
-    /// [`Schema::rows_export_with_options_and_filter`] for the contract.
-    /// `filter` is NULL for every call except those two.
-    fn rows_through_filtered(
-        &self,
-        format: Format,
-        body: &[u8],
-        options: &RowOptions,
-        export_code: i32,
-        doc_flags: DocFlags,
-        filter: *const ChsFilter,
-    ) -> Result<BatchResult> {
-        let json = settings_json(&options.settings)?;
-        let cols = columns_json(&options.columns)?;
-        let (doc, payload): (BatchDoc, Option<Vec<u8>>) = {
-            let _guard = self.lib.lock();
-            // SAFETY: our own handle, under the library lock; the byte slice
-            // outlives the call. `filter`, when non-null, is the caller's own
-            // (`rows_export_with`'s `# Safety` clause: it comes from this
-            // schema's library, and the borrow of `Filter<'_>` keeps it alive
-            // for at least this call).
-            let (out, payload) = unsafe {
-                self.lib.api().rows(
-                    self.handle,
-                    format.code(),
-                    body,
-                    &json,
-                    export_code,
-                    doc_flags.bits(),
-                    cols.as_deref(),
-                    filter,
-                )?
-            };
-            (parse_batch_doc(&out)?, payload)
-        };
-        let mut res = batch_result_of(doc);
-        res.payload = payload;
-        Ok(res)
-    }
-
-    /// [`Schema::rows_export`] with a compiled [`Filter`] attached to the
-    /// export channel (revision 5, second half —
-    /// `docs/guides/filters.md` "Exporting only the rows a filter admits"):
-    /// ONE `chs_rows` parse then answers both the per-row verdict
-    /// ([`RowResult::verdict`]) and, for rows whose verdict is
-    /// [`crate::Verdict::True`], the export bytes.
-    ///
-    /// **Superseded by [`Schema::rows_export_with_options_and_filter`]**,
-    /// which takes a [`RowOptions`] in `settings`'s place so the revision-5
-    /// INSERT column list ([`RowOptions::columns`]) composes with the
-    /// attached filter on the same call — matching Python's
-    /// `rows(..., columns=, row_filter=)` and TypeScript's
-    /// `rows(..., {columns, rowFilter})`, which already let a caller combine
-    /// the two (issue #304). This method's own signature is unchanged and
-    /// keeps working exactly as released; it is a candidate for removal in
-    /// the next breaking release once callers have moved to the options
-    /// form.
-    ///
-    /// [`crate::Verdict::Error`] (the predicate threw) and
-    /// [`crate::Verdict::Decline`] (declined — including a row whose own
-    /// parse outcome was not [`crate::Outcome::Accepted`]) are NEVER
-    /// exported and NEVER collapsed into [`crate::Verdict::False`]:
-    /// collapsing either turns fail-closed into fail-open, the leak class
-    /// this surface exists to prevent. A security-enforcing caller must
-    /// treat any row whose [`RowResult::verdict`] is not
-    /// `Some(v) if v.answered()` as a refusal — hide the row or fail the
-    /// request, never export it. [`BatchResult::rows_passed`] and
-    /// [`BatchResult::rows_cut`] join the result;
-    /// `rows_passed + rows_cut` equals the accepted-row count.
-    ///
-    /// `filter` must be compiled over THIS schema: one from a different
-    /// `Schema` of the SAME loaded library rejects the whole call, loudly
-    /// ([`crate::Outcome::Rejected`], code 1002 — the C layer's own answer,
-    /// exactly as [`Filter::eval`] lets it answer for a mismatched
-    /// (filter, block) pair). One from a DIFFERENT loaded library is
-    /// [`crate::Error::CrossLibrarySchema`], refused before any C call — no
-    /// handle ever crosses a `dlopen`'d image boundary. The borrow checker
-    /// enforces the rest structurally: `filter` keeps ITS schema alive for
-    /// at least this call, exactly as every other `Filter` call does — this
-    /// is the SAME lifetime mechanism [`Schema::compile_filter`] already
-    /// gives you, not a second one.
-    ///
-    /// # Errors
-    ///
-    /// [`crate::Error::CrossLibrarySchema`], plus every error
-    /// [`Schema::rows_export`] can return.
-    pub fn rows_export_with<K: AsRef<str>, V: AsRef<str>>(
-        &self,
-        format: Format,
-        body: &[u8],
-        settings: &[(K, V)],
-        export: Option<Format>,
-        doc_flags: DocFlags,
-        filter: &Filter<'_>,
-    ) -> Result<BatchResult> {
-        if !Arc::ptr_eq(&self.lib, &filter.schema.lib) {
-            return Err(Error::CrossLibrarySchema {
-                filter_version: filter.schema.lib.version().to_string(),
-                schema_version: self.lib.version().to_string(),
-            });
-        }
-        let export_code = export.map_or(EXPORT_NONE, Format::code);
-        self.rows_through_filtered(
-            format,
-            body,
-            &RowOptions {
-                settings: owned_pairs(settings),
-                columns: None,
-            },
-            export_code,
-            doc_flags,
-            filter.handle,
-        )
-    }
-
-    /// [`Schema::rows_export_with`] with a [`RowOptions`] in place of a bare
-    /// settings slice — the same shape [`Schema::rows_export_with_options`]
-    /// already gives the no-filter path — so [`RowOptions::columns`], the
-    /// revision-5 INSERT column list, composes with the attached filter on
-    /// the SAME call (issue #304). The C ABI's `chs_rows` already carries
-    /// `columns_json` and the attached filter as two independent trailing
-    /// parameters on one call; this is the entry point that passes both
-    /// through, where [`Schema::rows_export_with`] alone hardcodes
-    /// `columns: None`. Added rather than changing
-    /// [`Schema::rows_export_with`]'s own signature, which is released and
-    /// stays exactly as published.
-    ///
-    /// Every other rule is [`Schema::rows_export_with`]'s own: the ONE
-    /// `chs_rows` parse answers both per-row verdict and export bytes,
-    /// `'e'`/`'d'` verdicts are NEVER exported and NEVER collapsed into
-    /// `'f'`, and `filter` must be compiled over THIS schema (a different
-    /// `Schema` of the SAME library rejects the call loudly with code 1002;
-    /// a DIFFERENT loaded library is [`crate::Error::CrossLibrarySchema`],
-    /// refused before any C call).
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Schema::rows_export_with`].
-    pub fn rows_export_with_options_and_filter(
-        &self,
-        format: Format,
-        body: &[u8],
-        options: &RowOptions,
-        export: Option<Format>,
-        doc_flags: DocFlags,
-        filter: &Filter<'_>,
-    ) -> Result<BatchResult> {
-        if !Arc::ptr_eq(&self.lib, &filter.schema.lib) {
-            return Err(Error::CrossLibrarySchema {
-                filter_version: filter.schema.lib.version().to_string(),
-                schema_version: self.lib.version().to_string(),
-            });
-        }
-        let export_code = export.map_or(EXPORT_NONE, Format::code);
-        self.rows_through_filtered(format, body, options, export_code, doc_flags, filter.handle)
-    }
-
-    /// Compile one boolean SQL expression over this schema's PHYSICAL columns
-    /// (`chs_filter_compile`; the C ABI contract §Filters is the full contract) —
-    /// the same `TreeRewriter` + `ExpressionAnalyzer` pipeline the
-    /// CONSTRAINT CHECK path runs, so comparison semantics are WHERE-side by
-    /// construction: `x = 256` over `UInt8` promotes (false for every row),
-    /// it never wraps. Naming an `ALIAS`/`EPHEMERAL` column fails with
-    /// ClickHouse's own `UNKNOWN_IDENTIFIER`, exactly where a real CREATE
-    /// fails.
-    ///
-    /// # Query parameters (revision 4)
-    ///
-    /// The expression may contain `{name:Type}` query parameters, bound by
-    /// `params` — name → value **string** pairs, positionally like every
-    /// settings slice in this crate ([`NO_PARAMS`] for none). Substitution
-    /// is the server's own `ReplaceQueryParameterVisitor`, run before
-    /// analysis exactly where a real server runs it: each value is
-    /// deserialized by the DECLARED type's own reader and injected as a
-    /// typed literal AFTER SQL parsing, so a value is never SQL text and
-    /// NEVER needs hand-escaping — injection safety is by construction, not
-    /// by escaping. Do not render values into the expression yourself.
-    ///
-    /// CHOOSE THE BRACE TYPE FOR THE VALUE'S DOMAIN: the declared type's
-    /// own reader WRAPS an out-of-domain integer — `{p:UInt8}` given `"256"`
-    /// binds `0` and matches every genuine zero (measured, uniform
-    /// 24.8-26.7) — while the same constant as a literal PROMOTES
-    /// (`x = 256` is never true). Sizing the brace type WIDER does not
-    /// remove this: the same wrap reappears at 2^64 on every integer width
-    /// once the bound value reaches it, and `[U]Int128`/`[U]Int256` wrap at
-    /// their own width instead of at 2^64 — no brace type is safe against
-    /// an untrusted value's magnitude by size alone. For a value you cannot
-    /// already validate as in-domain and canonical, bind `{p:String}` and
-    /// use the round-trip strict-cast form instead of picking a wider brace
-    /// type (docs/guides/filters.md "The round-trip form — the recipe for
-    /// an untrusted value"). Malformed spellings refuse loudly (457 for
-    /// `"-1"`/`"+7"`/`"007"` as `UInt8`, 32 for `""`). A name bound twice
-    /// takes the LAST binding — the server's own `insert_or_assign` rule
-    /// (REACHABLE here: this is a slice of pairs, and the last pair wins).
-    ///
-    /// The compiled handle bakes the values in: identity is per
-    /// (schema, expr, params), so changing a value means compiling a new
-    /// `Filter`. A caller compiling filters from tenant-influenced values
-    /// MUST bound its cache (an LRU keyed on schema generation + expr +
-    /// params-hash) and its compile rate per principal — the key is
-    /// attacker-influencable, so an unbounded cache is a memory DoS and an
-    /// unmetered compile path is a CPU DoS (the C ABI contract §Filters).
-    ///
-    /// # Lifetime
-    ///
-    /// The returned [`Filter`] BORROWS this schema, which is the C layer's
-    /// lifetime rule made structural: a `chs_filter` references its
-    /// `chs_schema` without a refcount, filters must be freed before their
-    /// schema, and here the borrow checker enforces both — a `Schema` cannot
-    /// be dropped (or mutated via `set_engine`/`set_ttl`) while a `Filter`
-    /// on it is alive, and `Filter`'s `Drop` runs first by construction.
-    /// A filter answers for THIS handle: recompile filters when the schema
-    /// is recompiled. Freeing the schema first is not a runtime error — it
-    /// does not compile:
-    ///
-    /// ```compile_fail
-    /// # use chtypes::{Format, Registry, NO_PARAMS, NO_SETTINGS};
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let lib = Registry::from_env_or_default()?.for_version("25.8")?;
-    /// let schema = lib.compile("x UInt8").compile()?;
-    /// let filter = schema.compile_filter("x = 1", NO_PARAMS)?;
-    /// drop(schema); // ERROR: `schema` is borrowed by `filter`
-    /// filter.rows(Format::JsonEachRow, b"{\"x\":1}\n", NO_SETTINGS)?;
-    /// # Ok(()) }
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// §The error split (`docs/reference/bindings.md`):
-    ///
-    /// * [`crate::Error::Schema`] — ClickHouse itself refuses the expression:
-    ///   unknown identifier (47), unknown function, a `NO_COMMON_TYPE` the
-    ///   analyzer raises — and, since revision 4, the server's own parameter
-    ///   refusals: an UNBOUND `{name:Type}` is **456** UNKNOWN_QUERY_PARAMETER
-    ///   ("Substitution `name` is not set"), a value the declared type cannot
-    ///   parse completely is **457** BAD_QUERY_PARAMETER — the server's own
-    ///   code and message, verbatim. A bound name the expression never uses
-    ///   is ignored, as a live server ignores an unused `param_*`.
-    /// * [`crate::Error::Unsupported`] — this build declines: a
-    ///   non-deterministic expression (clock reads — `now() > ts` —, `rand()`,
-    ///   server-constants, stateful functions; the scan runs AFTER
-    ///   substitution, so a parameter value can never smuggle one in).
-    /// * [`crate::Error::PredatesFeature`] — the artifact predates the filter
-    ///   trio; a decline at call time, never a load failure.
-    /// * [`crate::Error::Nul`] — the expression contained an interior NUL.
-    pub fn compile_filter<K: AsRef<str>, V: AsRef<str>>(
-        &self,
-        expr_sql: &str,
-        params: &[(K, V)],
-    ) -> Result<Filter<'_>> {
-        let e = cstring(expr_sql, "filter expression")?;
-        let p = settings_json(params)?;
-        let _guard = self.lib.lock();
-        // SAFETY: our own handle, under the library lock; the returned filter
-        // handle is owned by the Filter below, whose borrow of self keeps the
-        // schema handle alive for its whole life.
-        let handle = unsafe { self.lib.api().filter_compile(self.handle, &e, &p)? };
-        Ok(Filter {
-            schema: self,
-            handle,
-            _not_sync: PhantomData,
-        })
-    }
-
-    /// Parse a body ONCE into a [`Block`] (`chs_block_parse`) — the parse
-    /// half of [`Filter::rows`], exported so K filters can evaluate one
-    /// event with no re-parse ([`Filter::eval`]; the C ABI contract §Blocks).
-    /// Same formats and settings contract as [`Schema::rows`] (`settings` is
-    /// the PARSE-side map: format settings, clock keys; evaluation takes
-    /// none). Volatile DEFAULTs resolve against THIS call's clock instant,
-    /// so `filter.eval(&schema.parse_block(...)?)` ≡ `filter.rows(...)`
-    /// exactly when the clock is pinned ([`SETTING_NOW_EPOCH_NANOS`]) or the
-    /// schema has no volatile DEFAULT.
-    ///
-    /// Per-row parse failures do NOT error — they are recorded IN the block
-    /// and answer [`crate::Verdict::Decline`] from every filter, with the
-    /// recorded error.
-    ///
-    /// # Lifetime
-    ///
-    /// The returned [`Block`] BORROWS this schema exactly as a [`Filter`]
-    /// does: the borrow checker rejects dropping (or mutating) the schema
-    /// while a block on it is alive, and `Block`'s `Drop` runs first by
-    /// construction — the C-required free order, enforced at compile time.
-    ///
-    /// # Errors
-    ///
-    /// A call-level failure — an unknown setting's 115
-    /// ([`crate::Error::Schema`]), an unsplittable body, a binary decode
-    /// fault, the deferred JSONEachRow framing verdict — yields NO block and
-    /// no partial answers. [`crate::Error::PredatesFeature`] when the
-    /// artifact predates the block twin.
-    pub fn parse_block<K: AsRef<str>, V: AsRef<str>>(
-        &self,
-        format: Format,
-        body: &[u8],
-        settings: &[(K, V)],
-    ) -> Result<Block<'_>> {
-        self.parse_block_with_options(
-            format,
-            body,
-            &RowOptions {
-                settings: owned_pairs(settings),
-                columns: None,
-            },
-        )
-    }
-
-    /// [`Schema::parse_block`] with the revision-5 INSERT column list
-    /// exposed, read exactly as [`Schema::row_with_options`]'s — filters
-    /// still compile over the schema's physical columns and evaluate the
-    /// stored tuple, so a listed `EPHEMERAL` column stays unreferenceable in
-    /// a filter (a compile refusal, as today). Same errors as
-    /// [`Schema::parse_block`].
-    pub fn parse_block_with_options(
-        &self,
-        format: Format,
-        body: &[u8],
-        options: &RowOptions,
-    ) -> Result<Block<'_>> {
-        let json = settings_json(&options.settings)?;
-        let cols = columns_json(&options.columns)?;
-        let _guard = self.lib.lock();
-        // SAFETY: our own handle, under the library lock; the returned block
-        // handle is owned by the Block below, whose borrow of self keeps the
-        // schema handle alive for its whole life.
-        let handle = unsafe {
-            self.lib
-                .api()
-                .block_parse(self.handle, format.code(), body, &json, cols.as_deref())?
-        };
-        Ok(Block {
-            schema: self,
-            handle,
-            _not_sync: PhantomData,
-        })
-    }
-}
-
-/// One boolean SQL expression compiled against a [`Schema`]'s columns —
-/// see [`Schema::compile_filter`] for the compile contract and the lifetime
-/// argument (the borrow IS the free-order enforcement).
-///
-/// # Thread-safety
-///
-/// `chtypes.h`, verbatim: *"one chs_filter must not be used from two threads
-/// at once, and a chs_filter call is ALSO a use of its schema handle"* — two
-/// filters over ONE schema must not run concurrently either. The type system
-/// already forbids all of it: `Filter` borrows its `Schema`, and `Schema` is
-/// `!Sync`, so neither the filter nor its schema can be shared across
-/// threads in the first place. Every call additionally takes the library's
-/// own mutex, the crate's standing discipline.
-///
-/// # Enforcement gate
-///
-/// NOTHING may enforce read-side security on this surface until the
-/// WHERE-truth rig gates green (zero over-admit, zero over-hide); until then
-/// it is a shadow/replay surface (the C ABI contract §Filters). In particular:
-/// [`crate::Verdict::Error`] and [`crate::Verdict::Decline`] are NOT
-/// answers, and an enforcing caller MUST fail closed on both.
-pub struct Filter<'s> {
-    schema: &'s Schema,
-    handle: *mut ChsFilter,
-    /// Same statement of intent as [`Schema`]: the raw pointer already makes
-    /// this `!Sync`; the marker keeps it that way if the pointer ever moves.
-    _not_sync: PhantomData<Cell<()>>,
-}
-
-impl Filter<'_> {
-    /// The schema this filter was compiled against.
-    pub fn schema(&self) -> &Schema {
-        self.schema
-    }
-
-    /// Evaluate the filter over a body of rows (`chs_filter_rows`) — same
-    /// formats and settings contract as [`Schema::rows`], one C call. Rows
-    /// are evaluated INDEPENDENTLY (there is no INSERT to abort):
-    /// `input_format_allow_errors_*` does not apply, a bad text row declines
-    /// ([`crate::Verdict::Decline`], itemized) and the tail resyncs so
-    /// verdict indexes keep matching input rows, and volatile DEFAULTs
-    /// resolve against one clock instant per call.
-    ///
-    /// **The verdict is in the `Ok` value, not the `Err`** — the call-level
-    /// verdict is [`FilterResult::outcome`] (an unknown setting name's 115
-    /// answers [`crate::FilterOutcome::Rejected`] with empty verdicts: a
-    /// malformed body yields no partial answers). The `Err` arm is the
-    /// machinery: [`crate::Error::BadDocument`], [`crate::Error::Nul`],
-    /// [`crate::Error::PredatesFeature`].
-    pub fn rows<K: AsRef<str>, V: AsRef<str>>(
-        &self,
-        format: Format,
-        body: &[u8],
-        settings: &[(K, V)],
-    ) -> Result<FilterResult> {
-        let json = settings_json(settings)?;
-        let doc: FilterDoc = {
-            let _guard = self.schema.lib.lock();
-            // SAFETY: our own filter handle; its schema handle is alive for
-            // our whole life (we borrow the Schema); under the library lock.
-            let out = unsafe {
-                self.schema
-                    .lib
-                    .api()
-                    .filter_rows(self.handle, format.code(), body, &json)?
-            };
-            crate::doc::filter_doc(&quote_bare_denormals(&out))?
-        };
-        Ok(filter_result_of(doc))
-    }
-
-    /// Evaluate this filter over an already-parsed [`Block`]
-    /// (`chs_filter_eval`) — the SAME result document [`Filter::rows`]
-    /// returns: same [`FilterResult`] fields, same verdicts, same `errors`
-    /// rule (a row the parse recorded as unparseable answers
-    /// [`crate::Verdict::Decline`] with the recorded error). Evaluation is a
-    /// pure function of (filter, block): no settings, and the block is
-    /// neither consumed nor mutated, so one block can be evaluated by K
-    /// filters sequentially with no re-parse — the live-SSE call shape.
-    ///
-    /// Filter and block MUST come from the SAME schema handle: a mismatched
-    /// pair from two schemas of ONE library answers a REJECTED result (code
-    /// 1002) — the C layer's loud refusal, never undefined behavior. A pair
-    /// from two different LIBRARIES is [`crate::Error::CrossLibrary`]: no
-    /// handle ever crosses a `dlopen`'d image boundary.
-    ///
-    /// # Errors
-    ///
-    /// [`crate::Error::CrossLibrary`], [`crate::Error::BadDocument`],
-    /// [`crate::Error::PredatesFeature`]. The verdict is in the `Ok` value.
-    pub fn eval(&self, block: &Block<'_>) -> Result<FilterResult> {
-        if !Arc::ptr_eq(&self.schema.lib, &block.schema.lib) {
-            return Err(Error::CrossLibrary {
-                filter_version: self.schema.lib.version().to_string(),
-                block_version: block.schema.lib.version().to_string(),
-            });
-        }
-        let doc: FilterDoc = {
-            let _guard = self.schema.lib.lock();
-            // SAFETY: our own filter handle and the block's own handle, both
-            // from this library; both schema handles are alive (each object
-            // borrows its Schema); under the library lock.
-            let out = unsafe {
-                self.schema
-                    .lib
-                    .api()
-                    .filter_eval(self.handle, block.handle)?
-            };
-            crate::doc::filter_doc(&quote_bare_denormals(&out))?
-        };
-        Ok(filter_result_of(doc))
-    }
-}
-
-impl Drop for Filter<'_> {
-    fn drop(&mut self) {
-        let _guard = self.schema.lib.lock();
-        // SAFETY: our own filter handle, released exactly once, under the
-        // library lock; the borrowed schema is still alive by construction.
-        unsafe { self.schema.lib.api().filter_free(self.handle) }
-    }
-}
-
-/// One body, parsed ONCE under one schema handle and one clock instant —
-/// see [`Schema::parse_block`] for the parse contract and [`Filter::eval`]
-/// for the evaluation side. The borrow IS the free-order enforcement,
-/// exactly as for [`Filter`]: a `Block` cannot outlive its `Schema`, and its
-/// `Drop` runs first by construction.
-///
-/// # Thread-safety
-///
-/// `chtypes.h`, verbatim: one `chs_block` *"must not be used from two
-/// threads at once"*, and an eval is a use of BOTH handles. The type system
-/// already forbids all of it — `Block` borrows its `Schema`, which is
-/// `!Sync` — and every call additionally takes the library's own mutex.
-pub struct Block<'s> {
-    schema: &'s Schema,
-    handle: *mut ChsBlock,
-    /// Same statement of intent as [`Schema`]: the raw pointer already makes
-    /// this `!Sync`; the marker keeps it that way if the pointer ever moves.
-    _not_sync: PhantomData<Cell<()>>,
-}
-
-impl Block<'_> {
-    /// The schema this block was parsed under.
-    pub fn schema(&self) -> &Schema {
-        self.schema
-    }
-}
-
-impl Drop for Block<'_> {
-    fn drop(&mut self) {
-        let _guard = self.schema.lib.lock();
-        // SAFETY: our own block handle, released exactly once, under the
-        // library lock; the borrowed schema is still alive by construction.
-        unsafe { self.schema.lib.api().block_free(self.handle) }
-    }
-}
-
-impl std::fmt::Debug for Block<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Block")
-            .field("version", &self.schema.lib.version())
-            .finish()
-    }
-}
-
-impl std::fmt::Debug for Filter<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Filter")
-            .field("version", &self.schema.lib.version())
-            .finish()
-    }
-}
-
-impl Drop for Schema {
-    fn drop(&mut self) {
-        let _guard = self.lib.lock();
-        // SAFETY: our own handle, released exactly once, under the library lock.
-        unsafe { self.lib.api().schema_free(self.handle) }
-    }
+    library: Arc<Library>,
+    handle: Arc<SchemaHandle>,
 }
 
 impl std::fmt::Debug for Schema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Schema")
-            .field("version", &self.lib.version())
-            .field("columns", &self.columns.len())
-            .finish()
+        f.debug_struct("Schema").finish_non_exhaustive()
     }
 }
 
-/// Copy a generic `&[(K, V)]` settings slice into the owned shape
-/// [`RowOptions::settings`] holds, so `row_with_settings`/`rows`/
-/// `rows_export`/`parse_block` can build a `RowOptions` and route through
-/// the `_with_options` twin unchanged — ONE code path, per binding.
-fn owned_pairs<K: AsRef<str>, V: AsRef<str>>(pairs: &[(K, V)]) -> Vec<(String, String)> {
-    pairs
-        .iter()
-        .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string()))
-        .collect()
+/// A compiled boolean expression over a schema's columns. `Clone` shares one
+/// handle.
+#[derive(Clone)]
+pub struct Filter {
+    library: Arc<Library>,
+    handle: Arc<FilterHandle>,
 }
 
-/// Marshal [`RowOptions::columns`] as the `chs_row`/`chs_rows`/
-/// `chs_block_parse` `columns_json` argument: a JSON array of column-name
-/// strings. `None` or an empty list answers `Ok(None)` — the FFI layer turns
-/// that into a NULL pointer — and **never** `Some("[]")`: `INSERT INTO t ()
-/// FORMAT X` is a syntax error (code 62) on every ClickHouse line, so an
-/// empty array rendered into parentheses is not this ABI's "no list"
-/// spelling. No other validation happens here: an unknown, `ALIAS` or
-/// duplicate name is the server's own refusal, surfaced in the result.
-fn columns_json(columns: &Option<Vec<String>>) -> Result<Option<CString>> {
-    match columns {
-        None => Ok(None),
-        Some(cols) if cols.is_empty() => Ok(None),
-        Some(cols) => {
-            let arr = serde_json::Value::Array(
-                cols.iter()
-                    .cloned()
-                    .map(serde_json::Value::String)
-                    .collect(),
-            );
-            Ok(Some(cstring(&arr.to_string(), "columns")?))
+impl std::fmt::Debug for Filter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Filter").finish_non_exhaustive()
+    }
+}
+
+/// A body parsed once, to be evaluated by many filters. `Clone` shares one
+/// handle.
+#[derive(Clone)]
+pub struct Block {
+    handle: Arc<BlockHandle>,
+}
+
+impl std::fmt::Debug for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Block").finish_non_exhaustive()
+    }
+}
+
+impl Schema {
+    pub(crate) fn new(library: Arc<Library>, handle: SchemaHandle) -> Schema {
+        Schema {
+            library,
+            handle: Arc::new(handle),
         }
     }
-}
 
-/// Build the `settings_json` object. **Every value crosses as a JSON string**:
-/// `chtypes_now_epoch_nanos` is a 19-digit nanosecond epoch that does not survive
-/// an IEEE double, and as a JSON number it is silently ignored. Nothing here ever
-/// touches a float.
-pub(crate) fn settings_json<K: AsRef<str>, V: AsRef<str>>(settings: &[(K, V)]) -> Result<CString> {
-    if settings.is_empty() {
-        return cstring("{}", "settings");
+    /// Describe the columns (`chs_schema_describe`).
+    pub fn describe(&self) -> Result<SchemaDescription> {
+        let doc = self.library.call(|api| api.schema_describe(&self.handle))?;
+        decode::schema_description(&doc)
     }
-    let mut map = serde_json::Map::with_capacity(settings.len());
-    for (k, v) in settings {
-        map.insert(
-            k.as_ref().to_string(),
-            serde_json::Value::String(v.as_ref().to_string()),
-        );
+
+    /// Preview one row of `body` as a server's INSERT would take it
+    /// (`chs_preview_row`).
+    pub fn row(&self, format: Format, body: &[u8], options: &RowOptions) -> Result<RowResult> {
+        let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
+        let columns = columns_array(&options.columns)?;
+        let doc = self
+            .library
+            .call(|api| api.preview_row(&self.handle, format.code(), body, &settings, &columns))?;
+        decode::row(&doc)
     }
-    cstring(&serde_json::Value::Object(map).to_string(), "settings")
+
+    /// Preview a whole body (`chs_preview_batch`), with an attached filter, an
+    /// export and the document groups as the options say.
+    pub fn rows(&self, format: Format, body: &[u8], options: &RowsOptions) -> Result<BatchResult> {
+        let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
+        let columns = columns_array(&options.columns)?;
+        let filter = options.filter.as_ref().map(|f| &*f.handle);
+        let export = options.export.map_or(EXPORT_NONE, Format::code);
+        let flags = options.doc_flags.unwrap_or(DocFlags::ALL).bits();
+        let (doc, payload) = self.library.call(|api| {
+            api.preview_batch(
+                &self.handle,
+                format.code(),
+                body,
+                &settings,
+                &columns,
+                filter,
+                export,
+                flags,
+            )
+        })?;
+        decode::batch(&doc, payload)
+    }
+
+    /// Compile a boolean expression over this schema's columns
+    /// (`chs_filter_create`). The filter's zone is fixed here.
+    pub fn compile_filter(
+        &self,
+        expr: impl AsRef<[u8]>,
+        options: &FilterOptions,
+    ) -> Result<Filter> {
+        let params = string_object(&options.params, None, "params")?;
+        let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
+        let handle = self
+            .library
+            .call(|api| api.filter_create(&self.handle, expr.as_ref(), &params, &settings))?;
+        Ok(Filter {
+            library: Arc::clone(&self.library),
+            handle: Arc::new(handle),
+        })
+    }
+
+    /// Parse a body once (`chs_block_create`), to evaluate many filters over it.
+    pub fn parse_block(&self, format: Format, body: &[u8], options: &RowOptions) -> Result<Block> {
+        let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
+        let columns = columns_array(&options.columns)?;
+        let handle = self
+            .library
+            .call(|api| api.block_create(&self.handle, format.code(), body, &settings, &columns))?;
+        Ok(Block {
+            handle: Arc::new(handle),
+        })
+    }
 }
 
-/// Repair ClickHouse's bare denormals — `inf` / `-inf` / `nan` are faithful
-/// ClickHouse output and not valid JSON — and read the document over **bytes**.
-///
-/// There is deliberately no lossy fallback. A result document holding a
-/// non-UTF-8 `String` value is not valid UTF-8, and the previous retry through
-/// `String::from_utf8_lossy` destroyed exactly the bytes the C ABI contract calls
-/// authoritative. `crate::doc` reads bytes, so the repair is unnecessary; a
-/// document it cannot read is [`Error::BadDocument`], never an approximation.
-fn parse_row_doc(bytes: &[u8]) -> Result<RowDoc> {
-    crate::doc::row_doc(&quote_bare_denormals(bytes))
-}
+impl Filter {
+    /// Evaluate over a body (`chs_filter_eval_body`). The options are the
+    /// body's parse settings; the WHERE runs in the zone the filter was
+    /// compiled under.
+    pub fn rows(&self, format: Format, body: &[u8], options: &EvalOptions) -> Result<FilterResult> {
+        let settings = settings_object(&options.settings, options.session_timezone.as_deref())?;
+        let doc = self
+            .library
+            .call(|api| api.filter_eval_body(&self.handle, format.code(), body, &settings))?;
+        decode::filter_result(&doc)
+    }
 
-/// [`parse_row_doc`] for a batch document.
-fn parse_batch_doc(bytes: &[u8]) -> Result<BatchDoc> {
-    crate::doc::batch_doc(&quote_bare_denormals(bytes))
+    /// Evaluate over a parsed block (`chs_filter_eval_block`). It takes no
+    /// settings: the filter brings its zone, and the block brought its parse
+    /// zone when it was parsed. A block from another library is the library's
+    /// to refuse ([`Error::Usage`]).
+    pub fn eval(&self, block: &Block) -> Result<FilterResult> {
+        let doc = self
+            .library
+            .call(|api| api.filter_eval_block(&self.handle, &block.handle))?;
+        decode::filter_result(&doc)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn settings_values_are_always_json_strings() {
-        let json = settings_json(&[(SETTING_NOW_EPOCH_NANOS, "1700000000000000000")]).unwrap();
-        assert_eq!(
-            json.to_str().unwrap(),
-            r#"{"chtypes_now_epoch_nanos":"1700000000000000000"}"#
-        );
-        assert_eq!(settings_json(NO_SETTINGS).unwrap().to_str().unwrap(), "{}");
-        // Owned strings work too, so a caller can build the map at runtime.
-        let owned = vec![("input_format_null_as_default".to_string(), "0".to_string())];
-        assert_eq!(
-            settings_json(&owned).unwrap().to_str().unwrap(),
-            r#"{"input_format_null_as_default":"0"}"#
-        );
+    fn pairs(p: &[(&str, &str)]) -> Vec<(String, String)> {
+        p.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
-    fn a_nanosecond_epoch_survives_verbatim() {
-        // The exact 19 digits must appear; a float round-trip would print
-        // 1.7000000001234568e18 and the setting would be silently ignored.
-        let json = settings_json(&[(SETTING_NOW_EPOCH_NANOS, "1700000000123456789")]).unwrap();
-        assert!(json.to_str().unwrap().contains("1700000000123456789"));
-    }
-
-    #[test]
-    fn no_columns_is_a_null_pointer_never_an_empty_array() {
-        // None and Some(vec![]) both answer None here, which the FFI layer
-        // turns into a NULL pointer — never a JSON "[]" string, which would
-        // render as `INSERT INTO t () FORMAT X`, a syntax error (code 62) on
-        // every ClickHouse line.
-        assert!(columns_json(&None).unwrap().is_none());
-        assert!(columns_json(&Some(Vec::new())).unwrap().is_none());
-    }
-
-    #[test]
-    fn a_column_list_is_a_json_array_of_names() {
-        let json = columns_json(&Some(vec!["id".to_string(), "e".to_string()]))
-            .unwrap()
-            .unwrap();
-        assert_eq!(json.to_str().unwrap(), r#"["id","e"]"#);
-    }
-
-    #[test]
-    fn row_options_defaults_to_no_columns_and_no_settings() {
-        let opts = RowOptions::default();
-        assert!(opts.columns.is_none());
-        assert!(opts.settings.is_empty());
-    }
-
-    #[test]
-    fn documents_with_bare_denormals_still_parse() {
-        let doc = parse_row_doc(
-            br#"{"outcome":"accepted","cols":[{"name":"f","base":"Float64","src":"input","stored":inf}]}"#,
+    fn settings_are_a_json_object_of_strings_never_rewritten() {
+        let bytes = settings_object(
+            &pairs(&[("input_format_allow_errors_num", "5"), ("flag", "true")]),
+            None,
         )
         .unwrap();
-        assert_eq!(doc.cols[0].stored_raw(), "\"inf\"");
+        let v: Json = serde_json::from_slice(&bytes).unwrap();
+        // A boolean-looking value stays the string the caller gave.
+        assert_eq!(v["flag"], Json::String("true".into()));
+        assert_eq!(v["input_format_allow_errors_num"], Json::String("5".into()));
+        assert_eq!(settings_object(&[], None).unwrap(), b"{}");
     }
 
     #[test]
-    fn a_document_holding_non_utf8_bytes_is_read_exactly_not_repaired() {
-        // The one case that used to take the lossy fallback. `x String` fed the
-        // bytes 0xC3 0x28 renders as those bytes inside a JSON string.
-        let mut doc: Vec<u8> =
-            br#"{"outcome":"accepted","cols":[{"name":"x","base":"String","src":"input","stored":""#
-                .to_vec();
-        doc.extend_from_slice(&[0xc3, b'(']);
-        doc.extend_from_slice(br#""}]}"#);
-        let parsed = parse_row_doc(&doc).unwrap();
-        assert_eq!(
-            parsed.cols[0].stored_raw().as_bytes(),
-            [b'"', 0xc3, b'(', b'"']
-        );
+    fn the_zone_option_is_written_verbatim_as_the_settings_key() {
+        let bytes = settings_object(&pairs(&[("a", "1")]), Some("Asia/Tokyo ")).unwrap();
+        let v: Json = serde_json::from_slice(&bytes).unwrap();
+        // Not trimmed, not validated, not canonicalized.
+        assert_eq!(v["session_timezone"], Json::String("Asia/Tokyo ".into()));
+        assert_eq!(v["a"], Json::String("1".into()));
+    }
+
+    #[test]
+    fn the_zone_given_twice_is_misuse_even_when_the_two_agree() {
+        for key_zone in ["UTC", "Asia/Tokyo"] {
+            let err = settings_object(&pairs(&[("session_timezone", key_zone)]), Some("UTC"))
+                .unwrap_err();
+            assert!(matches!(err, Error::Usage(_)), "{err:?}");
+        }
+        // As a key alone, or as the option alone, it is accepted.
+        assert!(settings_object(&pairs(&[("session_timezone", "UTC")]), None).is_ok());
+        assert!(settings_object(&[], Some("UTC")).is_ok());
+    }
+
+    #[test]
+    fn a_key_given_twice_is_misuse_never_silently_resolved() {
+        let err = settings_object(&pairs(&[("a", "1"), ("a", "2")]), None).unwrap_err();
+        assert!(matches!(err, Error::Usage(_)));
+    }
+
+    #[test]
+    fn the_column_list_carries_each_name_as_name_or_name_b64() {
+        assert!(columns_array(&[]).unwrap().is_empty());
+        let bytes = columns_array(&[b"a\0b".to_vec(), vec![0x00, 0xff]]).unwrap();
+        let v: Json = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v[0]["name"], Json::String("a\0b".into()));
+        assert!(v[0].get("name_b64").is_none());
+        assert_eq!(v[1]["name_b64"], Json::String("AP8=".into()));
+        assert!(v[1].get("name").is_none());
+    }
+
+    #[test]
+    fn the_handles_are_clone_send_sync_and_static() {
+        fn shareable<T: Clone + Send + Sync + 'static>() {}
+        shareable::<Schema>();
+        shareable::<Filter>();
+        shareable::<Block>();
     }
 }

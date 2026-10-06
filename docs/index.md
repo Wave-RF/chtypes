@@ -57,7 +57,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 | [`install.md`](install.md)                       | both steps, in all four languages                                                                        |
 | [`quickstart.md`](quickstart.md)                 | the same first program, four times                                                                       |
 | [`../examples/README.md`](../examples/README.md) | a longer runnable tour, section for section in all four — a diff between two of them shows only spelling |
-| [`support.md`](support.md)                       | which languages, platforms and ClickHouse lines — generated, so it cannot drift                          |
+| [`support-v1.md`](support-v1.md)                 | which languages, platforms and ClickHouse lines                                                          |
 
 ### Guides
 
@@ -70,7 +70,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 | [`guides/discovery.md`](guides/discovery.md)             | asking a real server what profile to validate under                   |
 | [`guides/filters.md`](guides/filters.md)                 | boolean expressions over rows, query parameters, the parse-once block |
 | [`guides/multi-version.md`](guides/multi-version.md)     | several ClickHouse versions in one process; thread-safety             |
-| [`guides/fetch.md`](guides/fetch.md)                     | the fetch and verification contract, normatively                      |
+| [`guides/fetch-v1.md`](guides/fetch-v1.md)               | the fetch and verification contract, normatively                      |
 | [`limitations.md`](limitations.md)                       | what chtypes declines to answer, and why                              |
 
 ### Reference
@@ -78,7 +78,7 @@ chtypes derives that report and it is not optional: every accepted row carries a
 |                                                                                                                                                                       |                                                                                                               |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | [`reference/go.md`](reference/go.md) · [`reference/python.md`](reference/python.md) · [`reference/ts.md`](reference/ts.md) · [`reference/rust.md`](reference/rust.md) | every public symbol, the C entry point under it, and what it returns or raises                                |
-| [`reference/bindings.md`](reference/bindings.md)                                                                                                                      | the normative shape every binding implements — read this when porting, or when two bindings seem to disagree  |
+| [`reference/bindings-v1.md`](reference/bindings-v1.md)                                                                                                                | the normative shape every binding implements — read this when porting, or when two bindings seem to disagree  |
 | [`reference/artifact.md`](reference/artifact.md)                                                                                                                      | the artifact and registry contract: file names, `manifest.json`, platform keys, and how a loader verifies one |
 
 The two normative pages are the deep layer. You should not need either to use chtypes; they are where a disagreement is settled, and where the answer is when a per-language reference page says "see the ABI contract".

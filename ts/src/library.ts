@@ -1,382 +1,141 @@
 /**
- * One loaded ClickHouse build. It names itself — `chs_clickhouse_version()` —
- * and nothing is ever inferred from the directory or the file name.
+ * `Library`: one loaded image (`docs/reference/bindings-v1.md` §2, "The
+ * library"). Every method is one ABI call over the generated, typed layer,
+ * decoded without computing anything. There is no `close`: an image is never
+ * unloaded, so nothing is owed. TypeScript runs one isolate, so every method
+ * is trivially safe to call in any order.
  */
 
-import { reconstructDdlWith, type DiscoveredColumn } from './discover.js';
-import { ErrorCodeCache, type ErrorCodeTable } from './error-codes.js';
-import { schemaErrorFor } from './errors.js';
-import type { NativeLibrary } from './ffi.js';
-import { Schema } from './schema.js';
-import { encodeSettings, type Settings } from './settings.js';
+import { type BuildInfo, type Calls, checkUnverifiedAllowed, type LoadedImage, openUnverified as loadUnverified } from './abi1/index.js';
+import {
+  type Discovery,
+  decodeDiscovery,
+  decodeErrorCodes,
+  decodeLiveHandles,
+  type ErrorCodeTable,
+} from './documents.js';
+import type { Resolved } from './ocifetch/index.js';
+import { Schema, type CompileOptions } from './schema.js';
+import { commitSetup, latchSetup, settleFailedOpen, setupGeneration } from './setup.js';
+import { type BytesIn, bytesIn, encodeSettings } from './settings.js';
 
-/**
- * The minor line: the first two dot-separated components of the reported
- * version. `25.10` is a *later* minor than `25.8`, so string comparison of minor
- * lines is meaningless and must not be used for ordering.
- *
- * @param version - an exact patch (`"25.8.28.1-lts"`) or already a minor line.
- * @returns the minor line (`"25.8"`); a string with fewer than two components
- *   is returned unchanged. Never throws.
- */
-export function minorOf(version: string): string {
-  const parts = version.split('.');
-  if (parts.length < 2) return version;
-  return `${parts[0]}.${parts[1]}`;
-}
-
-/**
- * The compile MODE — how the profile handed to `compileDdl` relates to the
- * settings this build compiles under. Numeric values are part of the C ABI
- * (bindings pass an int), exactly like `Format`.
- */
-export const CompileMode = {
-  /**
-   * The only defined mode: every setting the profile names takes the
-   * caller's value, every setting it does not name keeps the library's own
-   * permissive compile base. A partial profile can admit a schema the server
-   * might refuse, but can never fabricate a rejection. Any other value is
-   * refused loudly (an `UnsupportedError`), reserved for a future
-   * COMPLETE-profile mode.
-   */
-  Declared: 0,
-} as const;
-
-export type CompileMode = (typeof CompileMode)[keyof typeof CompileMode];
-
-/**
- * Options for `Library#compileDdl` — the DECLARED settings profile a schema is
- * compiled under (the C ABI contract §Compile-time vs per-call settings;
- * docs/reference/bindings.md "Compile under a declared settings profile").
- */
-export interface CompileOptions {
-  /**
-   * The settings the deployment's server runs, fixed into the compiled schema
-   * exactly as a real CREATE TABLE fixes them into the table. Values are
-   * strings (or bigints), as everywhere on this ABI. Absent or empty is
-   * structurally identical to the plain compile — `chs_schema_compile` takes
-   * "{}" plus mode 0 either way. An unknown setting name fails the compile
-   * with the server's own code 115 (`chtypes_*` per-call keys included), and
-   * nothing is compiled.
-   */
-  readonly settings?: Settings | undefined;
-  /**
-   * `CompileMode.Declared` (0), the default and the only defined mode — see
-   * `CompileMode`.
-   */
-  readonly mode?: CompileMode | undefined;
-}
-
-/**
- * One loaded ClickHouse build — the entry point for compiling schemas and
- * canonicalizing types under that release's exact semantics. Obtained from
- * `Registry#for`; never constructed directly.
- *
- * Thread-safety: every call here is synchronous on the JS thread, so ordinary
- * single-threaded Node code needs no locking. `setDefaultSettings` and
- * `shutdown` mutate per-library process state and refuse loudly if called from
- * inside another chtypes call (a reentrancy guard, not a lock). Two
- * `worker_threads` share one dlopen'd image and one set of C globals, which no
- * per-isolate guard can see — seed settings before starting workers, or
- * serialize the seed yourself (docs/reference/bindings.md §Concurrency).
- */
 export class Library {
-  /** The exact patch this build is, e.g. "25.8.28.1-lts". */
-  readonly version: string;
-  /** The line callers and the rigs ask in, e.g. "25.8". */
-  readonly minor: string;
-  /** The shared library that was loaded. */
-  readonly path: string;
-  /**
-   * The chs_* ABI revision this ARTIFACT was built from, or 0 when it predates
-   * `chs_abi_revision`. A `Library` that exists reports either `ABI_REVISION`
-   * or 0 — a different nonzero revision is refused at load (the C ABI contract
-   * §ABI identity).
-   */
-  readonly abiRevision: number;
+  readonly #image: LoadedImage;
+  readonly #calls: Calls;
+  #errorCodes: ErrorCodeTable | undefined;
 
-  /**
-   * This library's own error-code table, once built (see `errorCodes`). Per
-   * Library and never shared: the table is a property of the build.
-   */
-  private readonly errorCodeCache = new ErrorCodeCache();
+  /** The fetch record this library was opened by; undefined when opened unverified. */
+  readonly resolved: Resolved | undefined;
 
-  /** @internal — obtained from a `Registry`. */
-  constructor(private readonly native: NativeLibrary) {
-    this.version = native.version;
-    this.minor = minorOf(native.version);
-    this.path = native.path;
-    this.abiRevision = native.abiRevision;
+  /** Not for callers: use `Registry.for` or `openUnverified`. */
+  constructor(image: LoadedImage, resolved: Resolved | undefined) {
+    this.#image = image;
+    this.#calls = image.calls;
+    this.resolved = resolved;
   }
 
-  /**
-   * Parse and canonicalize one type expression, e.g. `DECIMAL(18,4)` ->
-   * `Decimal(18, 4)`. The library's spelling is authoritative: pass it through
-   * verbatim and never normalize its whitespace.
-   *
-   * Note that this alone is insufficient for a schema — `x Int64 DEFAULT NULL`
-   * canonicalizes the *column* to `Nullable(Int64)`, which only `compileDdl` sees.
-   *
-   * @param typeExpr - a ClickHouse type expression, e.g. `"Nullable(Decimal(18,4))"`.
-   * @returns the canonical spelling, e.g. `"Nullable(Decimal(18, 4))"`.
-   * @throws {SchemaError} when ClickHouse itself refuses the expression —
-   *   `code` is its own code (`50` `Unknown data type family` for a typo) and
-   *   the message its own text.
-   * @throws {UnsupportedError} when this build declines to construct the type
-   *   (an unsafe family), or the artifact predates `chs_validate_type`.
-   */
-  validateType(typeExpr: string): string {
-    const r = this.native.validateType(typeExpr);
-    if (!r.ok) throw schemaErrorFor(r.code, r.message);
-    return r.canonical;
+  /** What the library is, read once by the loader. */
+  get buildInfo(): BuildInfo {
+    return this.#image.buildInfo;
   }
 
-  /**
-   * Compile a ClickHouse column-declaration list — not a CREATE TABLE:
-   * `"a UInt8, b Nullable(String) DEFAULT 'x', c DateTime MATERIALIZED now()"`.
-   * It is parsed by ClickHouse's own `ParserColumnDeclarationList`, so DEFAULT
-   * expressions are validated as real SQL. Column-level TTL clauses belong here.
-   *
-   * With `options.settings` the schema is compiled under that DECLARED profile,
-   * exactly as a real CREATE TABLE under those settings: `{ flatten_nested: '0' }`
-   * keeps `n Nested(a,b)` ONE column `n` of type `Nested(…)` where the default
-   * flattens it to the `n.a`/`n.b` Array columns, and every downstream shape —
-   * `columns`, JSONEachRow name lookup, positional arity, the RowBinary wire —
-   * follows the compiled shape. The profile is compile-time only and immutable
-   * for the schema's life; per-call settings still govern row parsing, and only
-   * row parsing.
-   *
-   * Absent/empty settings are structurally the plain compile: `chs_schema_compile`
-   * takes settings "{}" and `mode` `CompileMode.Declared` (0) either way. An
-   * unknown setting name fails the compile with the server's own code 115.
-   *
-   * @param ddl - a column-declaration list, e.g. `"x UInt8, s String DEFAULT 'x'"`.
-   * @param options - the declared settings profile and compile mode.
-   * @returns the compiled `Schema`. Release it with `close()` (or `using`).
-   * @throws {SchemaError} when the compile is REFUSED with a positive code: a
-   *   bad type or DEFAULT carries ClickHouse's own code and message; an
-   *   unknown setting name in `options.settings` carries the server's own 115
-   *   (with its did-you-mean hint), and nothing is compiled; a type gate
-   *   declared at a refusing value fails with the server's own 455/44, exactly
-   *   as that server's CREATE; an Enum DEFAULT outside the declared domain
-   *   follows that server's CREATE too — 691 (or 70 for an out-of-range
-   *   literal) where it refuses the table (26.x); on 24.8–25.10 it compiles,
-   *   and a row relying on the default answers `accepted_poisoned`.
-   * @throws {UnsupportedError} when this build DECLINES rather than guesses —
-   *   a `mode` other than `CompileMode.Declared`, or a DEFAULT it refuses to
-   *   evaluate (server-property functions like `hostName()`, `sleep`, an
-   *   admission-budget overrun). Validate cautiously; do not blame the tenant.
-   */
-  compileDdl(ddl: string, options?: CompileOptions): Schema {
-    const settingsJson = encodeSettings(options?.settings);
-    const mode = options?.mode ?? CompileMode.Declared;
-    return new Schema(this.native, this.native.schemaCompile(ddl, settingsJson, mode), ddl);
+  /** `clickhouse_version` from the build info, read rather than derived: four parts, no channel. */
+  get version(): string {
+    return this.#image.buildInfo.clickhouseVersion;
   }
 
-  /**
-   * Does this artifact export the consolidated, settings-aware
-   * `chs_schema_compile`? True on every artifact this repo builds — the
-   * symbol is one of the mandatory four. Kept for a `Registry` that may
-   * someday load a third-party-built artifact that lacks it, in which case
-   * `compileDdl` with a non-empty `settings` and `setEngine` with non-empty
-   * `mergeTreeSettings` throw an `UnsupportedError` instead of
-   * crashing.
-   */
-  hasCompileSettings(): boolean {
-    return this.native.hasCompileSettings();
+  /** `clickhouse_minor` from the build info, read rather than derived. */
+  get minor(): string {
+    return this.#image.buildInfo.clickhouseMinor;
   }
 
-  /**
-   * Seed the settings every later call starts from. ClickHouse gates several type
-   * families at column-creation time (`allow_suspicious_low_cardinality_types`,
-   * `allow_experimental_json_type`, …); those are properties of the server the
-   * table lives on, not of the row, so a gateway sets them once here. Anything a
-   * per-call settings map sets still wins.
-   *
-   * Prefer `compileDdl(ddl, { settings })` for a gate that belongs to a
-   * particular tenant's table: a gate declared in the compile profile binds
-   * where a real server binds it — once, at CREATE — and then outranks the
-   * per-call map for that handle (measured on live 25.10.7.6 and 26.7.3.19;
-   * the C ABI contract, "Server-level type gates"). This process-wide seed stays the
-   * right channel only for gateway-uniform policy.
-   *
-   * @param settings - the seed. An unknown name refuses the WHOLE payload with
-   *   the server's own 115 and nothing is committed — a gateway can never
-   *   believe a default profile is in force when part of it never applied.
-   * @throws {ChtypesError} when the payload is refused (the message carries
-   *   the server's own text, did-you-mean hint included), when a value is a JS
-   *   `number`, or when called from inside another chtypes call — it replaces
-   *   process-global state the row path reads by reference, so it must never
-   *   overlap another call on this library. In a `worker_threads` setup, seed
-   *   BEFORE starting workers; the guard cannot see across isolates.
-   * @throws {UnsupportedError} when the artifact predates
-   *   `chs_set_default_settings`.
-   */
-  setDefaultSettings(settings: Settings): void {
-    this.native.setDefaultSettings(encodeSettings(settings));
+  /** The loaded file's path. */
+  get path(): string {
+    return this.#image.path;
   }
 
-  /**
-   * Diagnostic: the widened reference type this build compares against —
-   * `UInt8` → `Int256`, `DateTime` → `DateTime64(0, 'UTC')`. Not needed to
-   * function (the reference parse is already applied inside `row`/`rows` and
-   * reported per column); it makes transformation findings explainable.
-   *
-   * @param typeExpr - a ClickHouse type expression.
-   * @returns the reference type, or `''` for a type with no wider type to
-   *   compare against (`String`, `Float64`).
-   * @throws {UnsupportedError} when the artifact predates `chs_reference_type`.
-   */
-  referenceType(typeExpr: string): string {
-    return this.native.referenceType(typeExpr);
+  /** ClickHouse's own canonical spelling of a type expression, or its own refusal. */
+  validateType(typeExpr: BytesIn): Buffer {
+    return this.#calls.typeValidate(bytesIn(typeExpr));
   }
 
-  /**
-   * Spell `name` as a back-quoted identifier — ALWAYS quoted, which is the
-   * safe default and the one to reach for without thinking
-   * (`chs_quote_identifier`, the vendored `backQuote`).
-   *
-   * The bytes are this library's own: an embedded back-quote comes back in the
-   * spelling the server's formatter prints, not in a spelling of ours. Reach
-   * for `quoteIdentifierIfNeeded` only when the bare spelling matters to
-   * something downstream.
-   *
-   * @param name - a table, column or alias name.
-   * @returns the quoted identifier.
-   * @throws {UnsupportedError} when the artifact predates
-   *   `chs_quote_identifier`.
-   */
-  quoteIdentifier(name: string): string {
-    return this.quote('chs_quote_identifier', name);
+  /** A name quoted the way ClickHouse's own `backQuote` quotes it: always quoted. */
+  quoteIdentifier(name: BytesIn): Buffer {
+    return this.#calls.backQuote(bytesIn(name));
   }
 
-  /**
-   * Spell `name` bare where THIS library's ClickHouse says a bare spelling is
-   * legal, and back-quote it otherwise (`chs_quote_identifier_if_needed`, the
-   * vendored `backQuoteIfNeed`).
-   *
-   * Which names it leaves bare is a property of the vendored build, not of
-   * this package, and it CHANGES between builds — ask the library you will
-   * compile against rather than caching an answer across versions.
-   *
-   * @param name - a table, column or alias name.
-   * @returns the identifier, bare or quoted.
-   * @throws {UnsupportedError} when the artifact predates
-   *   `chs_quote_identifier_if_needed`.
-   */
-  quoteIdentifierIfNeeded(name: string): string {
-    return this.quote('chs_quote_identifier_if_needed', name);
+  /** A name quoted only where this build says it must be. */
+  quoteIdentifierIfNeeded(name: BytesIn): Buffer {
+    return this.#calls.backQuoteIfNeeded(bytesIn(name));
   }
 
-  /**
-   * Spell `text` as a ClickHouse string literal, quotes and escapes included
-   * (`chs_quote_literal`, the vendored `quoteString`) — the call to reach for
-   * when a value is spliced into DDL, e.g. a DEFAULT expression.
-   *
-   * The input is counted, so a value carrying a NUL byte is quoted correctly;
-   * the answer is escaped and therefore NUL-free.
-   *
-   * @param text - the string value.
-   * @returns the ClickHouse string literal.
-   * @throws {UnsupportedError} when the artifact predates `chs_quote_literal`.
-   */
-  quoteLiteral(text: string): string {
-    return this.quote('chs_quote_literal', text);
+  /** A string literal quoted the way ClickHouse quotes one. */
+  quoteLiteral(text: BytesIn): Buffer {
+    return this.#calls.quoteString(bytesIn(text));
   }
 
-  private quote(
-    symbol: 'chs_quote_identifier' | 'chs_quote_identifier_if_needed' | 'chs_quote_literal',
-    text: string,
-  ): string {
-    const r = this.native.quote(symbol, text);
-    if (!r.ok) throw schemaErrorFor(r.code, r.message || `${symbol} refused the input`);
-    return r.quoted;
-  }
-
-  /**
-   * Turn `QUERY_TABLE_COLUMNS`' rows back into the column-declaration list
-   * `compileDdl` takes.
-   *
-   * It hangs off a Library because the one thing it spells — the column NAME —
-   * is spelled by this library's own `quoteIdentifier`; see `discover.ts` for
-   * what reconstruction does and does not promise.
-   *
-   * @param cols - the discovered columns, e.g. from `parseColumnsResult`.
-   * @returns the column-declaration list for `compileDdl`.
-   * @throws {ChtypesError} when a column is inconsistent, or there are none.
-   * @throws {UnsupportedError} when the artifact predates
-   *   `chs_quote_identifier`.
-   */
-  reconstructDdl(cols: readonly DiscoveredColumn[]): string {
-    return reconstructDdlWith(cols, (name) => this.quoteIdentifier(name));
-  }
-
-  /**
-   * Every type family in this build's own runtime registry (139 entries on
-   * 25.8) — the answer to "does this build track upstream type families?"
-   * without a hand-maintained table. Part of the three-question introspection
-   * surface every SDK exposes (docs/reference/bindings.md §Introspection).
-   *
-   * @returns the family names, one per registry entry.
-   * @throws {UnsupportedError} when the artifact predates
-   *   `chs_registered_families`.
-   */
-  registeredFamilies(): string[] {
-    return this.native.registeredFamilies();
-  }
-
-  /**
-   * THIS library's own error-code table (`chs_error_codes`, revision 6): every
-   * code the vendored ClickHouse names, with the name it gives it — the table
-   * the server's `system.errors` enumerates and the name it prints after
-   * "Code: N." in an exception message.
-   *
-   * The table belongs to the build, not to this package: codes join and leave
-   * between lines, and one number can name different errors on two lines (903
-   * differs between 25.8 and 26.2). Ask the library whose line you are
-   * answering for; there is no package-level table.
-   *
-   * Built on the first call and kept for this library's life — the answer never
-   * changes for a loaded library. Only a table that was actually built is kept.
-   *
-   * @returns the table; `name(code)` / `code(name)` answer `undefined` for
-   *   anything the build's own table does not hold.
-   * @throws {ChtypesError} when the library could not build the document (a
-   *   guarded exception) — nothing is cached, and the next call asks again.
-   * @throws {UnsupportedError} when the artifact predates `chs_error_codes`.
-   */
+  /** This build's error-code table, built on the first call and kept for the library's life on success only. */
   errorCodes(): ErrorCodeTable {
-    return this.errorCodeCache.get(() => this.native.errorCodes());
+    this.#errorCodes ??= decodeErrorCodes(this.#calls.errorCodes());
+    return this.#errorCodes;
   }
 
-  /**
-   * The TSV audit of every registered function's volatility
-   * (`chs_function_flags`), VERBATIM: one function per line, six
-   * tab-separated fields — `name`, `deterministic`, `deterministic_in_query`,
-   * `server_constant`, `stateful`, `resolver_error_code`. ClickHouse's own
-   * answers off this build's own registry, and the input to the statelessness
-   * gate (the build's function-flags generator). Part of the three-question
-   * introspection surface every SDK exposes (docs/reference/bindings.md
-   * §Introspection).
-   *
-   * @returns the audit text, verbatim.
-   * @throws {UnsupportedError} when the artifact predates
-   *   `chs_function_flags`.
-   */
-  functionFlags(): string {
-    return this.native.functionFlags();
+  /** The discovery query, which the caller runs against its server with its own client, binding `{database:String}` and `{table:String}`. */
+  discoverQuery(): Buffer {
+    return this.#calls.discoverQuery();
   }
 
-  /**
-   * Join the DEFAULT evaluator's background threads. `chs_init` registers this
-   * with `atexit`, so an ordinary process needs no call; it is REQUIRED before
-   * an explicit unload, and useful in tests that must not depend on `atexit`.
-   * Idempotent.
-   *
-   * @throws {ChtypesError} when called from inside another chtypes call on
-   *   this library (the same reentrancy guard as `setDefaultSettings`).
-   */
-  shutdown(): void {
-    this.native.shutdown();
+  /** Read a server's `system.columns` answer (`FORMAT JSONEachRow`) into column declarations. */
+  discoverColumns(rows: Uint8Array): Discovery {
+    return decodeDiscovery(this.#calls.discoverColumns(rows));
+  }
+
+  /** Live handle counts per kind in this image: a diagnostic. */
+  liveHandles(): Readonly<Record<string, number>> {
+    return decodeLiveHandles(this.#calls.liveHandles());
+  }
+
+  /** Compile exactly one `CREATE TABLE` statement. */
+  compileTable(createTable: BytesIn, options: CompileOptions = {}): Schema {
+    return new Schema(
+      this.#calls,
+      this.#calls.schemaCreate(bytesIn(createTable), encodeSettings(options.settings, options.sessionTimezone)),
+    );
+  }
+}
+
+const libraries = new Map<LoadedImage, Library>();
+
+/** The one `Library` of an image: two registries, two spellings or a hardlink of one artifact share one image and one object. */
+export function libraryOf(image: LoadedImage, resolved: Resolved | undefined): Library {
+  let lib = libraries.get(image);
+  if (lib === undefined) {
+    lib = new Library(image, resolved);
+    libraries.set(image, lib);
+  }
+  return lib;
+}
+
+/**
+ * Open a local build with no signed statement, such as an unpublished library
+ * under test. It refuses with a `UsageError` unless the caller passes
+ * `{ allow: true }` AND `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1` is set, warns once
+ * per path, skips loader steps 1 and 5, and runs step 7 under the process setup
+ * like any open. It is not reachable through a registry, and its `Library` has
+ * no `resolved`, unless a registry had already opened the same image.
+ */
+export function openUnverified(path: string, options: { readonly allow: boolean }): Library {
+  // The caller's two opt-ins are checked before anything is attempted: misuse, which unlocks nothing.
+  checkUnverifiedAllowed(path, options.allow);
+  const began = setupGeneration();
+  try {
+    const setup = commitSetup();
+    const image = loadUnverified(path, { allow: options.allow, timezone: setup.timezone, defaults: setup.defaults });
+    latchSetup();
+    return libraryOf(image, undefined);
+  } catch (err) {
+    // Like any open: a failed attempt unlocks the setup record while no image has completed step 7.
+    settleFailedOpen(began);
+    throw err;
   }
 }

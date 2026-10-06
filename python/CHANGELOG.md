@@ -8,6 +8,43 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Fixed
 
+- An open that attempted a load and failed now unlocks the setup, whatever failed, while no library has completed load step 7 (#468). After `setup(timezone="Asia/Tokyo")`, an open could fail before step 7: at the fetch, the signature check, an incompatible artifact (`CHTYPES_ARTIFACT_INCOMPATIBLE`) or a missing symbol. That left the setup locked, and a different `setup` was a `UsageError` until the process restarted. 1.0.2 handled only a failure in step 7 itself (#458). Now any failed attempt keeps the recorded setup but makes it replaceable. A plain retry with no new `setup` runs under the recorded zone and defaults, never the empty setup. A different `setup` is accepted and replaces the record, which is then locked again. This holds for `Registry.for_version`, `Registry(preload=…)` and `open_unverified`. The caller's own misuse fails before any load is attempted and unlocks nothing: a refused version spelling, or `open_unverified(path)` without `allow=True`. Two different `setup` calls before any open is attempted are still a `UsageError`, never a silent last-wins. Once a library has completed step 7, a different setup is still a `UsageError`. No name or signature changes. All four bindings run the same cases, `tests/fixtures/abi-v1/setup-cases.json`, and the rule is `docs/reference/bindings-v1.md` section 6.
+
+## [1.0.2] — 2026-10-06
+
+There is no 1.0.1 of this binding: 1.0.1 was a Go-only fix to that module's metadata. From 1.0.2 the four bindings release together again.
+
+### Fixed
+
+- `setup` now latches only once an image completes load step 7 (#458). A zone the library refuses, such as `setup(timezone="Not/AZone")`, used to fix the process setup at the first open: every later open failed with ClickHouse's code 36, and a corrected `setup` was a `UsageError` until the process restarted. Now, if step 7 (`chs_initialize`, then `chs_set_defaults` when there are defaults) fails before any image has completed it, the setup record is cleared. That open still raises the library's own error, a corrected `setup` is accepted, and the next open runs step 7 again with it, on the same image too: a failed step 7 is never remembered (`open_unverified` and `Registry.for_version` alike). Once an image has completed step 7, a different setup is still a `UsageError`. No name or signature changes. All four bindings run the same case, `tests/fixtures/abi-v1/setup-cases.json`, and the rule is `docs/reference/bindings-v1.md` section 6.
+
+## [1.0.0] — 2026-10-04
+
+The Python binding's first v1 release, and a deliberate break from 0.x. The default branch switches to v1 shortly after release. The sections below are the entries written as each part landed; this is what they add up to.
+
+- **A new ABI.** The binding speaks the generated ABI v1 layer, identified by an ABI fingerprint in `include/chtypes.h` rather than a revision number, so every FFI declaration is generated from `spec/abi-v1/abi.json`, not written by hand. The ABI stays provisional until the maintainer confirms it.
+- **Fetch over OCI, with signed statements.** Libraries are fetched from an OCI registry and verified against a signed statement before they are loaded; the default trust is the release key only (`docs/guides/fetch-v1.md`).
+- **The public API is `docs/reference/bindings-v1.md`**, the same four-binding contract with each language's own spelling.
+- **The CLI** is `python -m chtypes` and the `chtypes` console script: `fetch`, `verify`, `list` and `where`.
+- **The v0 surface is removed**; the list, and the reason for each removal, is `docs/reference/bindings-v1.md` section 7.
+- **Known gaps** are listed in [`docs/limitations.md`](../docs/limitations.md#known-gaps-in-10), and support for a line this release does not mention is "support unknown", never "unsupported".
+
+### Changed (v1, breaking)
+
+- **The public API is the one in `docs/reference/bindings-v1.md`, over the generated ABI v1 layer and the OCI fetch layer.** `setup(timezone=, defaults=)` is the one process setup; `Registry(*, fetch=, autofetch=, preload=)` is keyword-only and opens nothing at construction; `Registry.for_version`, `installed()` and `libraries()` replace the directory-scanning registry; `Library.compile_table` (exactly one `CREATE TABLE`) replaces `compile_ddl`; `open_unverified(path, allow=)` replaces `Load`.
+- **Names, SQL, messages and renderings are `bytes`.** Result types are one-to-one decodes of the library's documents (`RowResult.columns` is every entry, `values` the stored subset by the description's own `is_stored` fact), and every vocabulary (`Format`, `Outcome`, `Verdict`, `Reason`, `Source`, `DefaultKind`, `DocFlags`) is generated from the ABI description.
+- **One error family.** `CallError` (under `ChtypesError`) carries `status`, `ch_code`, `ch_name`, `message` and `column`; `SchemaError`, `UnsupportedError`, `UsageError` and `InternalError` are peers. Fetch and loader errors are `ArtifactError` subclasses, one class per code.
+- **Each `Schema`, `Filter` and `Block` has a close guard**: `close` waits for calls already inside the object, and a call after close is a `UsageError` raised before any C call. No lock is taken around a call.
+
+- **`python -m chtypes` and the `chtypes` console script are back, over the v1 fetch layer**: `fetch <spelling>... | --all [--lock FILE] [--frozen] [--offline]`, `verify`, `list [--offline]` and `where`. Exit statuses are the `errors` table of `spec/fetch-v1/constants.json`, usage errors exit 2.
+- **`FetchOptions.system_dirs`** names the read-only directories searched after the cache (`None` keeps the default list, an empty sequence searches none), and `FetchOptions.to_options` is private. `CHTYPES_TRUSTED_KEYS` (comma-separated hex public keys) replaces the default trust list when set, as `docs/guides/fetch-v1.md` §4 says.
+
+### Removed (v1)
+
+- `compile_ddl`, the engine, TTL and partition-key setters, `encode_settings`, the transform classifier, discovery reconstruction, the hand JSON readers, `quote_bare_denormals`, the hand error-code table parser, the manifest and revision machinery, the v0 fetch module and its `python -m chtypes` command line, `ABI_REVISION`, `COMPILE_DECLARED`, `Registry.shutdown`, `Library.close` and the `Registry` context manager.
+
+### Fixed
+
 - **The crash-guard refuse-list is now sourced identically to the other three bindings, and an artifact with neither source refuses rather than loading unguarded.** This binding already fell back to the manifest's `unsafe_families` field when `unsafe_families.txt` was absent, but a manifest predating the field (or one that simply omitted it) was indistinguishable from a present, empty field, so `chs_init` silently ran with no refuse-list. `Manifest.unsafe_families` is now `None` when the field is absent rather than defaulting to `""`, and a directory with neither the file nor the field is refused, naming both, instead of loading unguarded (`docs/reference/artifact.md` step 9).
 - **`ensure`/`fetch` now retry a transient HTTP 5xx, 408 or 429 from the artifacts host, and a connection-level failure (refused, reset, timed out, DNS), within the existing retry budget and schedule** (`docs/guides/fetch.md` §3a: 5 attempts, delays doubling from 4s) — previously `_Source._open`/`download` ran their own separate, shorter retry (3 attempts, incrementing by whole seconds) before giving up, independent of the publish-window budget, and a 408 was never retried at all. A `Retry-After` on a 503 or 429 is honored, in both the delta-seconds and HTTP-date forms, capped so it never makes the total wait exceed the existing budget — one that does not fit fails at once, naming the requested delay. A 404 or 410, and a tarball hash or size mismatch, are still decided on the first attempt, never retried. `SourceUnreachableError` gains `.retryable`/`.retry_after` attributes (closes #365).
 - **`fetch`/`ensure` now send `CHTYPES_DOWNLOAD_TOKEN` as a bearer token** to an HTTP source, matching the other three bindings and `scripts/fetch.sh` — found missing during the #365 audit.

@@ -1,0 +1,700 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://artifacts.wavehouse.dev/spec/goldens/v1/schema.json",
+ "title": "chtypes ABI v1 goldens document",
+ "description": "One document per release (one exact ClickHouse version, one build), attached unchanged as the goldens referrer of each of that release's three platform manifests. Every input is base64 bytes. Every expectation is what the release's own library returned (generated.platform), re-run on every platform in generated.checked_on: the goldens prove that a binding delivers the library's documents faithfully, while the library's equivalence to a server is the rigs' job. A harness runs one process per setup and, per case, the call sequence its `call` names.",
+ "type": "object",
+ "required": [
+  "schema",
+  "by",
+  "abi",
+  "abi_fingerprint",
+  "clickhouse_version",
+  "build",
+  "revision",
+  "generated",
+  "setups"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "schema": {
+   "const": "https://artifacts.wavehouse.dev/spec/goldens/v1"
+  },
+  "by": {
+   "type": "string",
+   "description": "the generator's public name; no path, no private repository"
+  },
+  "abi": {
+   "const": 1
+  },
+  "abi_fingerprint": {
+   "$ref": "#/$defs/digest"
+  },
+  "clickhouse_version": {
+   "type": "string",
+   "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$",
+   "description": "the exact version; equals the platform manifest's config clickhouse_version"
+  },
+  "build": {
+   "type": "string",
+   "pattern": "^[0-9]{8}\\.[0-9]{6}$",
+   "description": "equals the platform manifest's config build"
+  },
+  "revision": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 9007199254740991,
+   "description": "also in the signed predicate. The registry is append-only: a corrected set for the same build is a new referrer with a higher revision, and a reader uses the highest verified revision. One revision never names two different documents."
+  },
+  "generated": {
+   "type": "object",
+   "required": [
+    "platform",
+    "checked_on"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "platform": {
+     "$ref": "#/$defs/platform",
+     "description": "the artifact whose answers are the expectations"
+    },
+    "checked_on": {
+     "type": "array",
+     "minItems": 1,
+     "uniqueItems": true,
+     "items": {
+      "$ref": "#/$defs/platform"
+     },
+     "description": "every platform artifact the document was re-run on before publishing; a case answering differently on one is narrowed (with platforms_reason) or reported, never silently dropped"
+    }
+   }
+  },
+  "setups": {
+   "type": "array",
+   "minItems": 1,
+   "items": {
+    "$ref": "#/$defs/setup"
+   }
+  }
+ },
+ "$defs": {
+  "digest": {
+   "type": "string",
+   "pattern": "^sha256:[0-9a-f]{64}$"
+  },
+  "b64": {
+   "type": "string",
+   "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+  },
+  "id": {
+   "type": "string",
+   "pattern": "^[a-z0-9][a-z0-9.-]{0,95}$"
+  },
+  "platform": {
+   "enum": [
+    "darwin/arm64",
+    "linux/amd64",
+    "linux/arm64"
+   ]
+  },
+  "status": {
+   "enum": [
+    "CHS_OK",
+    "CHS_REJECTED",
+    "CHS_DECLINED",
+    "CHS_INVALID_ARGUMENT",
+    "CHS_INTERNAL"
+   ]
+  },
+  "pointer": {
+   "type": "string",
+   "pattern": "^(/[^/]*)*$",
+   "description": "RFC 6901, each segment escaped ('~' as '~0', '/' as '~1'; standard base64 contains '/'). Two extra segment forms: '@<base64>' selects the ONE array element whose name (name, or name_b64 decoded) equals those bytes, and '*' fans out over an array."
+  },
+  "setup": {
+   "type": "object",
+   "description": "Process-once state: chs_initialize(image_zone) then chs_set_defaults(defaults), once, before the setup's first case. A harness runs each setup in its own process. A per-call zone is the session_timezone key of a case's settings.",
+   "required": [
+    "id",
+    "image_zone_b64",
+    "defaults_b64",
+    "cases"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "id": {
+     "$ref": "#/$defs/id"
+    },
+    "image_zone_b64": {
+     "$ref": "#/$defs/b64",
+     "description": "chs_initialize's timezone bytes; empty means UTC"
+    },
+    "defaults_b64": {
+     "$ref": "#/$defs/b64",
+     "description": "chs_set_defaults's settings bytes (a JSON object of string values)"
+    },
+    "cases": {
+     "type": "array",
+     "minItems": 1,
+     "items": {
+      "$ref": "#/$defs/case"
+     }
+    }
+   }
+  },
+  "schema_in": {
+   "type": "object",
+   "description": "chs_schema_create's create_table and settings",
+   "required": [
+    "create_table_b64",
+    "settings_b64"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "create_table_b64": {
+     "$ref": "#/$defs/b64"
+    },
+    "settings_b64": {
+     "$ref": "#/$defs/b64"
+    }
+   }
+  },
+  "body_in": {
+   "type": "object",
+   "description": "the body call's arguments (chs_preview_row, chs_preview_batch, chs_filter_eval_body)",
+   "required": [
+    "format",
+    "body_b64",
+    "settings_b64"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "format": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 11,
+     "description": "chs_format, passed as the integer"
+    },
+    "body_b64": {
+     "$ref": "#/$defs/b64"
+    },
+    "settings_b64": {
+     "$ref": "#/$defs/b64"
+    },
+    "columns_b64": {
+     "$ref": "#/$defs/b64",
+     "description": "preview calls only: json_array_names; absent means zero bytes (no column list)"
+    },
+    "export_format": {
+     "type": "integer",
+     "minimum": -1,
+     "maximum": 11,
+     "description": "chs_preview_batch only; -1 is CHS_EXPORT_NONE"
+    },
+    "doc_flags": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 7,
+     "description": "chs_preview_batch only"
+    }
+   }
+  },
+  "filter_in": {
+   "type": "object",
+   "description": "chs_filter_create's arguments",
+   "required": [
+    "expr_b64",
+    "query_params_b64",
+    "settings_b64"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "expr_b64": {
+     "$ref": "#/$defs/b64"
+    },
+    "query_params_b64": {
+     "$ref": "#/$defs/b64"
+    },
+    "settings_b64": {
+     "$ref": "#/$defs/b64"
+    }
+   }
+  },
+  "case": {
+   "type": "object",
+   "description": "call: schema_create = chs_schema_create, then chs_schema_describe on CHS_OK; preview_row = chs_schema_create, chs_preview_row; preview_batch = chs_schema_create, chs_preview_batch (filter NULL); filter_eval_body = chs_schema_create, chs_filter_create, chs_filter_eval_body.",
+   "required": [
+    "id",
+    "kind",
+    "call",
+    "platforms",
+    "schema",
+    "expect"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "id": {
+     "$ref": "#/$defs/id",
+     "description": "stable across revisions, lines and platforms; harnesses report by it"
+    },
+    "kind": {
+     "enum": [
+      "schema",
+      "row",
+      "batch",
+      "filter",
+      "wire"
+     ],
+     "description": "the reporting category; wire cases exercise detector 3 (the text-format round trip)"
+    },
+    "call": {
+     "enum": [
+      "schema_create",
+      "preview_row",
+      "preview_batch",
+      "filter_eval_body"
+     ]
+    },
+    "platforms": {
+     "type": "array",
+     "minItems": 1,
+     "uniqueItems": true,
+     "items": {
+      "$ref": "#/$defs/platform"
+     },
+     "description": "explicit; a harness on a platform not listed reports the case as skipped by name, never as passed"
+    },
+    "platforms_reason": {
+     "type": "string",
+     "description": "required when platforms is narrower than generated.checked_on"
+    },
+    "schema": {
+     "$ref": "#/$defs/schema_in"
+    },
+    "body": {
+     "$ref": "#/$defs/body_in"
+    },
+    "filter": {
+     "$ref": "#/$defs/filter_in"
+    },
+    "expect": {
+     "$ref": "#/$defs/expect"
+    }
+   },
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "kind": {
+        "const": "schema"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "call": {
+        "const": "schema_create"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "kind": {
+        "const": "row"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "call": {
+        "const": "preview_row"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "kind": {
+        "const": "batch"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "call": {
+        "const": "preview_batch"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "kind": {
+        "const": "filter"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "call": {
+        "const": "filter_eval_body"
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "kind": {
+        "const": "wire"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "call": {
+        "enum": [
+         "preview_row",
+         "preview_batch"
+        ]
+       },
+       "body": {
+        "properties": {
+         "format": {
+          "enum": [
+           1,
+           2,
+           10,
+           11
+          ]
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "call": {
+        "const": "schema_create"
+       }
+      }
+     },
+     "then": {
+      "not": {
+       "anyOf": [
+        {
+         "required": [
+          "body"
+         ]
+        },
+        {
+         "required": [
+          "filter"
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "call": {
+        "enum": [
+         "preview_row",
+         "preview_batch"
+        ]
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "body"
+      ],
+      "not": {
+       "required": [
+        "filter"
+       ]
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "call": {
+        "const": "preview_batch"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "body": {
+        "required": [
+         "export_format",
+         "doc_flags"
+        ]
+       }
+      }
+     },
+     "else": {
+      "properties": {
+       "body": {
+        "not": {
+         "anyOf": [
+          {
+           "required": [
+            "export_format"
+           ]
+          },
+          {
+           "required": [
+            "doc_flags"
+           ]
+          }
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "call": {
+        "const": "filter_eval_body"
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "body",
+       "filter"
+      ],
+      "properties": {
+       "body": {
+        "not": {
+         "required": [
+          "columns_b64"
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "platforms": {
+        "maxItems": 2
+       }
+      }
+     },
+     "then": {
+      "required": [
+       "platforms_reason"
+      ]
+     }
+    }
+   ]
+  },
+  "expect": {
+   "type": "object",
+   "description": "What the library returned. On CHS_OK exactly one of document (the default: the whole output document) or compare (a narrower check list, for a case whose document is partly run-varying). Comparing a document: decode both the expected and the actual under the byte rule (each F / F_b64 pair is one member whose value is bytes; value_b64 is bytes), drop every member named in run_varying from both, then require deep equality: same members, same values, array order significant, integers exact. Never compare raw JSON text.",
+   "required": [
+    "at",
+    "status",
+    "run_varying"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "at": {
+     "enum": [
+      "schema_create",
+      "filter_create",
+      "call"
+     ],
+     "description": "the step whose status this is; every earlier step must answer CHS_OK"
+    },
+    "status": {
+     "$ref": "#/$defs/status"
+    },
+    "error": {
+     "type": "object",
+     "description": "the chs_error of a status other than CHS_OK: chs_error_ch_code, chs_error_ch_name, chs_error_message and chs_error_column, the last three as base64 bytes",
+     "required": [
+      "ch_code",
+      "ch_name_b64",
+      "message_b64",
+      "column_b64"
+     ],
+     "additionalProperties": false,
+     "properties": {
+      "ch_code": {
+       "type": "integer"
+      },
+      "ch_name_b64": {
+       "$ref": "#/$defs/b64"
+      },
+      "message_b64": {
+       "$ref": "#/$defs/b64"
+      },
+      "column_b64": {
+       "$ref": "#/$defs/b64"
+      }
+     }
+    },
+    "document": {
+     "type": "object",
+     "description": "the call's output document as the library emitted it (call schema_create: chs_schema_describe's)"
+    },
+    "export_b64": {
+     "$ref": "#/$defs/b64",
+     "description": "preview_batch with an export_format other than -1: out_export's bytes"
+    },
+    "compare": {
+     "type": "array",
+     "minItems": 1,
+     "items": {
+      "$ref": "#/$defs/check"
+     }
+    },
+    "run_varying": {
+     "type": "array",
+     "uniqueItems": true,
+     "items": {
+      "$ref": "#/$defs/pointer"
+     },
+     "description": "members that differ between runs and are never compared: on CHS_OK, members of the document (a generated DEFAULT's value); on any other status, members of `error` as /error/<member> (a message quoting a per-run temporary name). A pointer may select through '@' and '*'"
+    }
+   },
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "status": {
+        "const": "CHS_OK"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "at": {
+        "const": "call"
+       }
+      },
+      "oneOf": [
+       {
+        "required": [
+         "document"
+        ]
+       },
+       {
+        "required": [
+         "compare"
+        ]
+       }
+      ],
+      "not": {
+       "required": [
+        "error"
+       ]
+      }
+     },
+     "else": {
+      "required": [
+       "error"
+      ],
+      "not": {
+       "anyOf": [
+        {
+         "required": [
+          "document"
+         ]
+        },
+        {
+         "required": [
+          "compare"
+         ]
+        },
+        {
+         "required": [
+          "export_b64"
+         ]
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "check": {
+   "type": "object",
+   "description": "One narrow check (expect.compare). path is a pointer ($defs.pointer) into the decoded document. A byte-string member F is read as F or F_b64, whichever is present (never both), and decoded to bytes; value_b64 is decoded directly.",
+   "required": [
+    "path"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "path": {
+     "$ref": "#/$defs/pointer"
+    },
+    "bytes_b64": {
+     "$ref": "#/$defs/b64",
+     "description": "the byte-string member decodes to exactly these bytes"
+    },
+    "equals": {
+     "description": "the member equals this JSON value, type-strict (an enum word, a boolean, an integer, a verdict string, an object); never used for a data-derived string"
+    },
+    "length": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "the array has this many elements"
+    },
+    "absent": {
+     "const": true,
+     "description": "neither F nor F_b64 is present"
+    },
+    "set_bytes_b64": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/b64"
+     },
+     "description": "path ends in /*/<member>: the set of that member's decoded bytes across the array equals this set"
+    }
+   },
+   "oneOf": [
+    {
+     "required": [
+      "bytes_b64"
+     ]
+    },
+    {
+     "required": [
+      "equals"
+     ]
+    },
+    {
+     "required": [
+      "length"
+     ]
+    },
+    {
+     "required": [
+      "absent"
+     ]
+    },
+    {
+     "required": [
+      "set_bytes_b64"
+     ]
+    }
+   ]
+  }
+ }
+}

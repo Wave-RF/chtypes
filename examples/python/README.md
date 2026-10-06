@@ -1,6 +1,6 @@
 # examples/python — the Python tour
 
-Sixteen sections over the whole chtypes surface, matching `../go`, `../ts` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** — no Docker, no ClickHouse server, no network.
+Seventeen sections over the whole v1 public surface, matching `../go`, `../ts` and `../rust` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** once an artifact is installed: no Docker, no ClickHouse server, no network.
 
 ## Run it
 
@@ -8,26 +8,26 @@ Sixteen sections over the whole chtypes surface, matching `../go`, `../ts` and `
 uv run demo.py      # or, with prerequisite checks: ../chplay.sh python
 ```
 
-That is the whole command — `uv` resolves `python` as an editable path dependency and there is nothing to build.
+That is the whole command: `uv` resolves `chtypes` as an editable path dependency and there is nothing to build.
 
 ## Prerequisites
 
-- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/`, `<R>` the SDK's ABI revision) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 26.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
-- **uv** (or any Python ≥ 3.11 with `python` installed).
+- **An installed artifact.** Fetch one with the package's own command: `uv run chtypes fetch 26.8` (or `python -m chtypes fetch 26.8`), or set `CHTYPES_AUTOFETCH=1` and let the first open fetch it. The tour opens the newest build installed in the per-user cache; `chtypes where` prints that cache. One build is enough: section 12's cross-version sweep wants two and says so without them.
+- **uv** (or any Python 3.11 or later with `chtypes` installed).
 
 ## Knobs
 
-| variable           | effect                                                                                               |
-| ------------------ | ---------------------------------------------------------------------------------------------------- |
-| `CHTYPES_VERSION`  | which artifact the tour uses (`26.8`, `26.8.15.10-lts`, …). Default: the newest line held            |
-| `CHTYPES_REGISTRY` | the artifact directory. Default: the per-user cache, `~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>` |
+| variable            | effect                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `CHTYPES_VERSION`   | which build the tour opens: a release line (`26.8`), a three-part or a four-part version. Default: the newest installed |
+| `CHTYPES_CACHE`     | the cache directory. Default: the per-user cache, `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1`                              |
+| `CHTYPES_AUTOFETCH` | `1` lets the first open fetch a missing build from the registry                                                         |
 
 ## What is Python-specific here
 
-Everything in the tour is the same _concept_ in all four SDKs; these are the places where the Python spelling is its own.
+Everything in the tour is the same _concept_ in all four SDKs ([`docs/reference/bindings-v1.md`](../../docs/reference/bindings-v1.md)); these are the places where the Python spelling is its own.
 
-- **Keyword-only options.** `compile_ddl(ddl, settings=..., mode=...)` and `set_engine(engine, order_by, merge_tree_settings=...)`.
-- **Context managers.** `with lib.compile_ddl(...) as schema:` frees the handle; `Registry` is a context manager too.
-- **Peer error types.** `UnsupportedError` is a PEER of `SchemaError` (`docs/reference/bindings.md` §The error split; the grandfathered subclass was retired 2026-08-26) — `except SchemaError` never catches a decline, and forgetting the decline arm raises loudly instead of silently converting declines into rejections. Section 10 demonstrates the two-arm idiom.
-- **Convenience predicates.** `RowResult.accepted` / `.poisoned` (section 5).
-- The three introspection functions are complete here too: `Library.reference_type`, `Library.registered_families()`, `Library.function_flags()` (`docs/reference/bindings.md` §Introspection).
+- **Keyword-only options.** `compile_table(ddl, settings=..., session_timezone=...)`, `rows(..., columns=..., row_filter=..., export=..., doc_flags=...)`.
+- **Context managers.** `with lib.compile_table(...) as schema:` frees the handle; so do `Filter` and `Block`. A `Registry` and a `Library` have nothing to close.
+- **Peer error types.** `UnsupportedError` is a PEER of `SchemaError`, not a subclass: `except SchemaError` never catches a decline, and all four call errors share `CallError`. Section 10 demonstrates the idiom.
+- **Bytes everywhere a name or a message is.** The tour decodes them for printing only, through one `show()` helper.

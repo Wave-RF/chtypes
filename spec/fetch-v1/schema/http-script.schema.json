@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chtypes.wave-rf.dev/spec/fetch-v1/schema/http-script.schema.json",
+  "title": "chtypes v1 scripted HTTP response sequence",
+  "description": "A scripted sequence of responses the fixtures/server/parity lane's scripted HTTP server (under scripts/fetch-v1/) serves for one or more paths, for the retry, redirect and auth cases (docs/guides/fetch-v1.md §10, once that lane fills it in). An unscripted path falls through to the named route tree.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "tree", "routes", "second_origin_routes"],
+  "properties": {
+    "schema": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "tree": {"type": "string", "description": "The route tree this script falls through to for any unscripted path."},
+    "routes": {"type": "array", "items": {"$ref": "#/$defs/route"}},
+    "second_origin_routes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/route"},
+      "description": "Routes served on the server's second origin (the port after LISTENING's second number), for cross-origin redirect cases."
+    }
+  },
+  "$defs": {
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "path", "responses"],
+      "properties": {
+        "method": {"type": "string", "enum": ["GET", "HEAD"]},
+        "path": {"type": "string", "pattern": "^/"},
+        "responses": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Consumed in order, one per request to this route; the last entry repeats for any further request past the end of the list.",
+          "items": {"$ref": "#/$defs/response"}
+        }
+      }
+    },
+    "response": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_tree"],
+          "properties": {"from_tree": {"const": true}},
+          "description": "Serve this request from the named route tree instead of a scripted status."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["stall"],
+          "properties": {"stall": {"const": true}},
+          "description": "Hold the connection open past the test-only idle timeout; never resolves."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["close"],
+          "properties": {"close": {"const": true}},
+          "description": "Reset the connection with no response at all."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": {"type": "integer", "minimum": 100, "maximum": 599},
+            "headers": {
+              "type": "object",
+              "additionalProperties": {"type": "string"}
+            },
+            "body_from_tree": {
+              "type": "boolean",
+              "description": "When true, the response body is the named route tree's bytes for this path; otherwise the body is empty."
+            }
+          }
+        }
+      ]
+    }
+  }
+}

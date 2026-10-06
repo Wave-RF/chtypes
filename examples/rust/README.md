@@ -1,6 +1,6 @@
-# examples/rust — the Rust tour
+# examples/rust: the Rust tour
 
-Sixteen sections over the whole chtypes surface, matching `../go`, `../python` and `../ts` section for section. See [`../README.md`](../README.md) for the section list. **Runs entirely offline** — no Docker, no ClickHouse server, no network.
+Seventeen sections over the public surface of the v1 API ([`docs/reference/bindings-v1.md`](../../docs/reference/bindings-v1.md)), matching `../go`, `../python` and `../ts` section for section. See [`../README.md`](../README.md) for the section list. A section whose v0 feature the v1 API deletes (bindings-v1.md section 7) keeps its number and says which deletion removed it.
 
 ## Run it
 
@@ -10,22 +10,22 @@ cargo run           # or, with prerequisite checks: ../chplay.sh rust
 
 ## Prerequisites
 
-- **Artifacts.** The tour reads `$CHTYPES_REGISTRY`, defaulting to the per-user cache (`~/.cache/chtypes/artifacts/abi<R>/<os>-<arch>/`, `<R>` the SDK's ABI revision) or wherever `$CHTYPES_REGISTRY` points. No artifacts? `../../scripts/fetch.sh 26.8`. One version is enough; section 12's cross-version sweeps want several and degrade gracefully without them.
-- Rust 1.85+ (the binding is edition 2024), and a **Unix** host: the loader is `dlopen`, and `rust` has a `compile_error!` for anything else.
+- **A real artifact.** The tour opens a release through the v1 fetch layer. Fetch one first with the crate's own CLI (`cargo run --manifest-path ../../rust/Cargo.toml --bin chtypes -- fetch 26.8`), or set `CHTYPES_AUTOFETCH=1` and let the registry fetch what it lacks. The cache is `~/.cache/chtypes/v1` (`CHTYPES_CACHE` overrides it).
+- Rust 1.87 or newer (the binding is edition 2024), and a **Unix** host: the loader is `dlopen`.
 
 ## Knobs
 
-| variable           | effect                                                                                    |
-| ------------------ | ----------------------------------------------------------------------------------------- |
-| `CHTYPES_VERSION`  | which artifact the tour uses (`26.8`, `26.8.15.10-lts`, …). Default: the newest line held |
-| `CHTYPES_REGISTRY` | the artifact directory. Default: the per-user cache (`Registry::from_env_or_default`)     |
+| variable            | effect                                                             |
+| ------------------- | ------------------------------------------------------------------ |
+| `CHTYPES_VERSION`   | which line the tour opens (`26.8`, `26.8.15`, ...). Default `26.8` |
+| `CHTYPES_AUTOFETCH` | `1` lets the registry fetch a version nothing installed answers    |
+| `CHTYPES_CACHE`     | the cache directory. Default: the per-user cache                   |
 
 ## What is Rust-specific here
 
 Everything in the tour is the same _concept_ in all four SDKs; these are the places where the Rust spelling is its own.
 
-- **A compile builder.** `lib.compile(ddl).settings(...).mode(...).compile()` — Rust has neither named nor optional arguments, and the alternative was `None, CompileMode::Declared` at every call site.
-- **Sibling enum variants.** `Error::Schema` and `Error::Unsupported` are variants of one `#[non_exhaustive]` enum — never a subtype relationship. `err.code()` / `err.is_unsupported()` in section 10.
-- **The invalid compile mode does not typecheck.** `CompileMode` has exactly one variant, so the out-of-range mode the other three tours pass through is not constructible here (section 4d).
-- **The full introspection group.** `validate_type`, `reference_type` (returns `Option`), `registered_families` and `function_flags` (section 2). Rust was the complete column the other three SDKs were brought up to in the 2026-08-26 parity cycle.
-- **Drop frees.** Schema handles free on `Drop`; `Registry::shutdown()` (and `Library::shutdown()`) run `chs_shutdown` explicitly (section 13).
+- **Option structs.** Every call takes an options struct with public fields and `Default` (`RowsOptions { export: Some(Format::JsonCompactEachRow), ..Default::default() }`); settings are `Vec<(String, String)>`.
+- **Sibling enum variants.** `Error::Schema` and `Error::Unsupported` are variants of one `#[non_exhaustive]` enum, never a subtype relationship (section 10).
+- **Bytes out are `RawText`.** The bytes are authoritative and the UTF-8 view is fallible; the tour prints the lossy `Display` form.
+- **Drop frees.** Schema handles free on `Drop`; there is no shutdown (section 13).

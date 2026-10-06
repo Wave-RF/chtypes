@@ -1,26 +1,27 @@
-// Command chtypes is the Go SDK's artifact tool — the one CLI surface every
-// chtypes SDK spells identically (docs/guides/fetch.md §6):
+// Command chtypes is the Go SDK's artifact tool: the one CLI surface every
+// chtypes SDK spells identically (docs/guides/fetch-v1.md, sections 6 and 8):
 //
-//	chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
-//	                        [--tag <t> | --url <base>] [--lock <file>] [--frozen]
-//	                        [--force] [--offline]
-//	chtypes verify [--dest <dir>]        re-hash every installed line against its manifest
-//	chtypes list   [--dest <dir>]        what is installed, and what the release offers
-//	chtypes where                        the registry directory fetch would write to
+//	chtypes fetch <spelling>... | --all [--platform <os-arch>] [--cache <dir>]
+//	                                    [--lock <file>] [--frozen] [--offline] [--update]
+//	chtypes verify [--cache <dir>]      re-verify the installed cache
+//	chtypes list   [--cache <dir>] [--offline]
+//	                                    what is installed, and what is published
+//	chtypes where  [--cache <dir>]      the cache root
 //
 // Run it without installing anything:
 //
-//	go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 25.8
+//	go run github.com/wave-rf/chtypes/go/cmd/chtypes@latest fetch 26.8
 //
-// Progress goes to stderr; `fetch` prints the installed directory alone on
-// stdout, so `dir="$(chtypes fetch 25.8)"` composes. Exit codes: 0 ok ·
-// 1 verification failed · 2 usage · 3 source unreachable · 4 not published
-// for this platform/line.
+// Progress and warnings go to stderr; `fetch` prints the installed directory
+// of each request alone on stdout, so `dir="$(chtypes fetch 26.8)"` composes.
+// Exit statuses: 0 ok, 2 usage, and for a failure the status of its error code
+// in spec/fetch-v1/constants.json (docs/guides/fetch-v1.md section 8), read
+// from the generated table, never hard-coded here.
 //
-// Environment: CHTYPES_ARTIFACTS_URL (the host), CHTYPES_REGISTRY (where
-// to install when --dest is not given), CHTYPES_TRUSTED_KEYS (replaces the
-// embedded release key), CHTYPES_ALLOW_UNSIGNED=1 (skip the signature,
-// loudly), CHTYPES_TARGET (default --platform), CHTYPES_DOWNLOAD_TOKEN.
+// Environment: CHTYPES_ARTIFACTS_URL (the bases, comma separated),
+// CHTYPES_CACHE (the cache root), CHTYPES_TRUSTED_KEYS (replaces the embedded
+// release key), CHTYPES_ALLOW_UNSIGNED=1 (skip verification, loudly),
+// CHTYPES_DOWNLOAD_TOKEN, and CHTYPES_TARGET (the default --platform).
 package main
 
 import (
@@ -31,25 +32,23 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
+	"runtime/debug"
 	"sort"
-	"strconv"
 	"strings"
 
-	"github.com/wave-rf/chtypes/go/chtypes"
-	"github.com/wave-rf/chtypes/go/internal/testhook"
+	"github.com/wave-rf/chtypes/go/internal/ocifetch"
 )
 
 const usageText = `usage:
-  chtypes fetch <line>... [--all] [--platform <os-arch>] [--dest <dir>]
-                          [--tag <t> | --url <base>] [--lock <file>] [--frozen]
-                          [--force] [--offline]
-  chtypes verify [--dest <dir>]        re-hash every installed line against its manifest
-  chtypes list   [--dest <dir>] [--platform <os-arch>] [--tag <t> | --url <base>] [--offline]
-                                       what is installed, and what the release offers
-  chtypes where                        the registry directory fetch would write to
+  chtypes fetch <spelling>... | --all [--platform <os-arch>] [--cache <dir>]
+                                      [--lock <file>] [--frozen] [--offline] [--update]
+  chtypes verify [--cache <dir>]      re-verify the installed cache
+  chtypes list   [--cache <dir>] [--offline]
+                                      what is installed, and what is published
+  chtypes where  [--cache <dir>]      the cache root
+  chtypes --version
 
-exit codes: 0 ok · 1 verification failed · 2 usage · 3 source unreachable · 4 not published
+exit statuses: 0 ok, 2 usage, otherwise the failure's own status (docs/guides/fetch-v1.md section 8)
 `
 
 // usageError is exit 2.
@@ -68,6 +67,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usageText)
 		return 2
 	}
+	// -h and --help print the usage to stdout and exit 0 wherever they appear.
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if a == "-h" || a == "--help" {
+			fmt.Fprint(stdout, usageText)
+			return 0
+		}
+	}
 	var err error
 	switch args[0] {
 	case "fetch":
@@ -78,13 +87,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = cmdList(ctx, args[1:], stdout, stderr)
 	case "where":
 		err = cmdWhere(args[1:], stdout, stderr)
-	case "help", "-h", "--help", "-help":
-		fmt.Fprint(stdout, usageText)
+	case "--version":
+		fmt.Fprintf(stdout, "chtypes %s\n", version())
 		return 0
 	default:
 		err = &usageError{fmt.Sprintf("unknown command %q", args[0])}
 	}
 	if err == nil {
+		return 0
+	}
+	if errors.Is(err, flag.ErrHelp) {
 		return 0
 	}
 	var ue *usageError
@@ -93,15 +105,30 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usageText)
 		return 2
 	}
-	if errors.Is(err, flag.ErrHelp) {
-		return 0
-	}
 	fmt.Fprintf(stderr, "%s\n", err)
-	return chtypes.ExitCode(err)
+	return exitStatus(err)
 }
 
-// newFlagSet is a stdlib FlagSet whose own error output is the usage text
-// on stderr.
+// exitStatus is the process status for a failure: the status of its shared
+// error code, from the generated table; any other failure is a refused
+// request or option, which is a usage error.
+func exitStatus(err error) int {
+	var fe *ocifetch.FetchError
+	if errors.As(err, &fe) {
+		return fe.Code.ExitCode()
+	}
+	return 2
+}
+
+// version is the binding's own version as the build reports it, without the
+// module path's "v"; an untagged or dev build is 0.0.0-dev.
+func version() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return strings.TrimPrefix(bi.Main.Version, "v")
+	}
+	return "0.0.0-dev"
+}
+
 func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -109,9 +136,8 @@ func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
 	return fs
 }
 
-// parseInterleaved parses flags that may come before, between or after
-// positional arguments (`chtypes fetch 25.8 --dest x`), which stdlib flag
-// alone stops at. Returns the positionals in order.
+// parseInterleaved parses flags that may come before, between or after the
+// positional arguments, which the standard flag package alone does not.
 func parseInterleaved(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
 	for {
@@ -133,325 +159,229 @@ func parseInterleaved(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-type sourceFlags struct {
-	platform, dest, tag, url string
-	offline                  bool
+type commonFlags struct {
+	platform, cache string
+	offline         bool
 }
 
-func (s *sourceFlags) bind(fs *flag.FlagSet) {
-	fs.StringVar(&s.platform, "platform", "", "platform key <os>-<arch> (default: this host, or $CHTYPES_TARGET)")
-	fs.StringVar(&s.dest, "dest", "", "registry directory to install into (default: `chtypes where`)")
-	fs.StringVar(&s.tag, "tag", "", "release tag on the artifacts host (default: the rolling `artifacts` release)")
-	fs.StringVar(&s.url, "url", "", "any base: an http(s) mirror, a file:// path, a local directory")
-	fs.BoolVar(&s.offline, "offline", false, "never read the source")
+func (c *commonFlags) bind(fs *flag.FlagSet, withPlatform, withOffline bool) {
+	fs.StringVar(&c.cache, "cache", "", "the cache root (default: $CHTYPES_CACHE, else the per-user cache; `chtypes where`)")
+	if withPlatform {
+		fs.StringVar(&c.platform, "platform", "", "platform key <os>-<arch> (default: this host, or $CHTYPES_TARGET)")
+	}
+	if withOffline {
+		fs.BoolVar(&c.offline, "offline", false, "read the cache only; never the network")
+	}
 }
 
-func (s *sourceFlags) options(stderr io.Writer) (chtypes.FetchOptions, error) {
-	if s.tag != "" && s.url != "" {
-		return chtypes.FetchOptions{}, &usageError{"--url names a full base; --tag selects a release on the artifacts host — pass one"}
+// platformKey is the requested platform, validated, or "" for the host's own.
+func (c *commonFlags) platformKey() (string, error) {
+	p := c.platform
+	if p == "" {
+		p = os.Getenv("CHTYPES_TARGET")
 	}
-	if s.platform != "" && !chtypes.ValidPlatform(s.platform) {
-		return chtypes.FetchOptions{}, &usageError{fmt.Sprintf("not a known platform key: %s ((linux|darwin)-(arm64|amd64))", s.platform)}
+	if p != "" && !knownPlatform(p) {
+		keys := make([]string, 0, len(ocifetch.Platforms))
+		for _, k := range ocifetch.Platforms {
+			keys = append(keys, k.Key)
+		}
+		return "", &usageError{fmt.Sprintf("not a known platform key: %s (one of %s)", p, strings.Join(keys, ", "))}
 	}
-	return chtypes.FetchOptions{
-		Dest: s.dest, Platform: s.platform, Tag: s.tag, URL: s.url, Offline: s.offline,
-		Progress: stderr,
-	}, nil
+	return p, nil
+}
+
+func knownPlatform(key string) bool {
+	for _, p := range ocifetch.Platforms {
+		if p.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newFlagSet("fetch", stderr)
-	var sf sourceFlags
-	sf.bind(fs)
-	var all, frozen, force bool
+	var cf commonFlags
+	cf.bind(fs, true, true)
+	var all, frozen, update bool
 	var lock string
-	fs.BoolVar(&all, "all", false, "every line the release publishes for the platform")
-	fs.StringVar(&lock, "lock", "", "write the installed asset and sha256 to this lock file (with --frozen: the lock to enforce)")
-	fs.BoolVar(&frozen, "frozen", false, "refuse anything the lock file does not pin (default lock: chtypes.lock)")
-	fs.BoolVar(&force, "force", false, "re-download an installed line")
-	lines, err := parseInterleaved(fs, args)
+	fs.BoolVar(&all, "all", false, "every line the registry publishes (or, with --frozen, every request the lock pins)")
+	fs.StringVar(&lock, "lock", "", "write the lock to this file after resolving (with --frozen: the lock to enforce; default chtypes.lock)")
+	fs.BoolVar(&update, "update", false, "re-resolve every locked request and rewrite the lock (requires --lock)")
+	fs.BoolVar(&frozen, "frozen", false, "fetch exactly what the lock pins, by digest, without resolving")
+	spellings, err := parseInterleaved(fs, args)
 	if err != nil {
 		return err
 	}
-	opts, err := sf.options(stderr)
+	platform, err := cf.platformKey()
 	if err != nil {
 		return err
 	}
-	opts.LockFile, opts.Frozen, opts.Force = lock, frozen, force
 	switch {
-	case all && len(lines) > 0:
-		return &usageError{fmt.Sprintf("--all installs every published line; drop the version argument (%s)", strings.Join(lines, " "))}
-	case !all && len(lines) == 0:
+	case update && frozen:
+		return &usageError{"--update re-resolves and --frozen forbids resolving; pass one"}
+	case update && lock == "":
+		return &usageError{"--update requires --lock <file>"}
+	case update && cf.offline:
+		return &usageError{"--update resolves against the registry and --offline forbids the network; pass one"}
+	case all && len(spellings) > 0:
+		return &usageError{fmt.Sprintf("--all fetches every line; drop the version arguments (%s)", strings.Join(spellings, " "))}
+	case !all && !update && len(spellings) == 0:
 		return &usageError{"a ClickHouse version spelling is required (or --all)"}
+	case frozen && cf.offline:
+		return &usageError{"--frozen fetches by digest and --offline forbids the network; pass one"}
 	}
-	if all {
-		installed, err := chtypes.FetchAll(ctx, opts)
-		for _, inst := range installed {
-			fmt.Fprintln(stdout, inst.Dir)
-		}
-		return err
+	opts := &ocifetch.Options{CacheDir: cf.cache, Offline: cf.offline, Frozen: frozen, LockPath: lock}
+	if lock != "" && !frozen {
+		opts.LockWrite = true
 	}
-	for _, line := range lines {
-		inst, err := chtypes.Ensure(ctx, line, opts)
+	opts.Update = update
+	if update {
+		// An update's requests are the lock's own, whatever was named.
+		spellings, err = allSpellings(ctx, opts, true, lock)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(stdout, inst.Dir)
+	} else if all {
+		spellings, err = allSpellings(ctx, opts, frozen, lock)
+		if err != nil {
+			return err
+		}
+	}
+	for _, s := range spellings {
+		res, err := ocifetch.Ensure(ctx, ocifetch.Request{Spelling: s, Platform: platform}, opts)
+		if err != nil {
+			return err
+		}
+		for _, w := range res.Warnings {
+			fmt.Fprintf(stderr, "chtypes: warning: %s\n", w)
+		}
+		fmt.Fprintln(stdout, res.Dir)
 	}
 	return nil
 }
 
+// allSpellings is what --all means: the published lines, or under --frozen
+// the requests the lock pins, which is every request the lock names.
+func allSpellings(ctx context.Context, opts *ocifetch.Options, frozen bool, lock string) ([]string, error) {
+	if frozen {
+		path := lock
+		if path == "" {
+			path = ocifetch.LockDefaultFile
+		}
+		l, err := ocifetch.ReadLock(path)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]string, 0, len(l.Requests))
+		for s := range l.Requests {
+			out = append(out, s)
+		}
+		sort.Strings(out)
+		return out, nil
+	}
+	if opts.Offline {
+		inst, err := ocifetch.ListInstalled(opts)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[string]bool{}
+		var out []string
+		for _, r := range inst {
+			if s := lineOf(r.Version); s != "" && !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+		sort.Strings(out)
+		return out, nil
+	}
+	return ocifetch.ListTags(ctx, opts)
+}
+
+// lineOf is the two-part spelling of a four-part version.
+func lineOf(version string) string {
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0] + "." + parts[1]
+}
+
 func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	fs := newFlagSet("verify", stderr)
-	var dest, platform string
-	fs.StringVar(&dest, "dest", "", "registry directory (default: `chtypes where`)")
-	fs.StringVar(&platform, "platform", "", "platform key, for the default directory")
+	var cf commonFlags
+	cf.bind(fs, false, false)
 	if rest, err := parseInterleaved(fs, args); err != nil {
 		return err
 	} else if len(rest) > 0 {
 		return &usageError{fmt.Sprintf("verify takes no positional arguments (%s)", strings.Join(rest, " "))}
 	}
-	dir, err := registryDir(dest, platform)
+	results, err := ocifetch.VerifyInstalled(&ocifetch.Options{CacheDir: cf.cache})
 	if err != nil {
 		return err
 	}
-	results, err := chtypes.VerifyInstalled(dir)
-	if err != nil {
-		return err
-	}
-	if len(results) == 0 {
-		fmt.Fprintf(stdout, "nothing installed under %s\n", dir)
-		return nil
-	}
+	root, _ := ocifetch.CacheRoot(&ocifetch.Options{CacheDir: cf.cache})
 	bad := 0
 	for _, r := range results {
-		switch {
-		case r.Err != nil:
+		if !r.OK {
 			bad++
-			fmt.Fprintf(stdout, "MISSING  %-6s %-20s %s: %v\n", r.Line, r.Version, r.Dir, r.Err)
-		case r.OK:
-			fmt.Fprintf(stdout, "ok       %-6s %-20s %s/%s sha256 %s\n", r.Line, r.Version, r.Dir, r.Library, r.Got)
-		default:
-			bad++
-			fmt.Fprintf(stdout, "MISMATCH %-6s %-20s %s/%s hashes %s, manifest says %s\n", r.Line, r.Version, r.Dir, r.Library, r.Got, r.LibrarySHA256)
+			fmt.Fprintf(stderr, "MISMATCH %-16s %-14s %s: %s\n", r.Version, r.Platform, r.Dir, r.Detail)
 		}
 	}
-	if g := filepath.Join(dir, "sdk-goldens.json"); fileExists(g) {
-		fmt.Fprintf(stdout, "ok       %-6s %s\n", "golden", g)
-	} else {
-		fmt.Fprintf(stdout, "absent   %-6s %s (fetch installs it; the golden tests skip without it)\n", "golden", g)
-	}
-	fmt.Fprintf(stdout, "%d installed, %d verified, %d bad (%s)\n", len(results), len(results)-bad, bad, dir)
 	if bad > 0 {
-		return &chtypes.ArtifactError{Code: chtypes.CodeArtifactCorrupt, Platform: platform,
-			Msg: fmt.Sprintf("chtypes: %d of %d installed line(s) under %s do not hash what their manifest says [%s]", bad, len(results), dir, chtypes.CodeArtifactCorrupt)}
+		return &ocifetch.FetchError{Code: ocifetch.CodeArtifactCorrupt,
+			Msg: fmt.Sprintf("chtypes: %d of %d installed build(s) under %s do not match what was verified when they were installed [%s]",
+				bad, len(results), root, ocifetch.CodeArtifactCorrupt)}
 	}
 	return nil
 }
 
 func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newFlagSet("list", stderr)
-	var sf sourceFlags
-	sf.bind(fs)
+	var cf commonFlags
+	cf.bind(fs, false, true)
 	if rest, err := parseInterleaved(fs, args); err != nil {
 		return err
 	} else if len(rest) > 0 {
 		return &usageError{fmt.Sprintf("list takes no positional arguments (%s)", strings.Join(rest, " "))}
 	}
-	opts, err := sf.options(stderr)
+	opts := &ocifetch.Options{CacheDir: cf.cache, Offline: cf.offline}
+	installed, err := ocifetch.ListInstalled(opts)
 	if err != nil {
 		return err
 	}
-	dir, err := registryDir(sf.dest, sf.platform)
-	if err != nil {
-		return err
+	for _, r := range installed {
+		fmt.Fprintf(stdout, "installed %s %s %s\n", r.Version, r.Platform, r.Dir)
 	}
-	installed, err := chtypes.ListInstalled(dir)
-	if err != nil {
-		return err
-	}
-	// Per line, EVERY installed patch — since #284 a line can have more than
-	// one (the flat slot plus patches/), and the release comparison below
-	// must recognize any of them, not just whichever happened to be seen
-	// last.
-	have := map[string][]chtypes.Installed{}
-	fmt.Fprintf(stdout, "installed (%s):\n", dir)
-	if len(installed) == 0 {
-		fmt.Fprintln(stdout, "  (nothing)")
-	}
-	for _, inst := range installed {
-		have[inst.Line] = append(have[inst.Line], inst)
-		fmt.Fprintf(stdout, "  %-6s %-20s %s\n", inst.Line, inst.Version, inst.Library)
-	}
-	if sf.offline {
-		fmt.Fprintln(stdout, "release: not read (--offline)")
+	if cf.offline {
 		return nil
 	}
-	index, err := chtypes.ListRelease(ctx, opts)
+	lines, err := ocifetch.ListTags(ctx, opts)
 	if err != nil {
 		return err
 	}
-	platform := sf.platform
-	if platform == "" {
-		platform = os.Getenv("CHTYPES_TARGET")
-	}
-	if platform == "" {
-		platform = chtypes.HostPlatform()
-	}
-	signed := "unsigned"
-	if index.SignedBy != "" {
-		signed = "signed by key " + index.SignedBy
-	}
-	fmt.Fprintf(stdout, "release (%s, %s, %s):\n", index.Source, platform, signed)
-	// Only the rows this SDK can fetch — its own ABI revision
-	// (docs/guides/fetch.md §2) — and one line naming what that hid.
-	rev := listABIRevision()
-	n := 0
-	var hidden []chtypes.ReleaseArtifact
-	for _, a := range index.Artifacts {
-		if a.Platform() != platform {
-			continue
-		}
-		if a.ABIRevision == nil || *a.ABIRevision != rev {
-			hidden = append(hidden, a)
-			continue
-		}
-		n++
-		state := installedState(have[a.ClickHouseMinor], a.ClickHouseVersion)
-		fmt.Fprintf(stdout, "  %-6s %-20s b%-3d %s  %d bytes%s\n", a.ClickHouseMinor, a.ClickHouseVersion, a.BuildNumber(), a.File, a.Bytes, state)
-	}
-	if n == 0 {
-		fmt.Fprintf(stdout, "  (nothing for %s)\n", platform)
-	}
-	if note := notShown(hidden, rev); note != "" {
-		fmt.Fprintf(stdout, "  %s\n", note)
+	// The registry lists lines, not platforms or support: whether a line is
+	// supported is unknown here (the channel statement is out of v1).
+	for _, l := range lines {
+		fmt.Fprintf(stdout, "published %s support unknown\n", l)
 	}
 	return nil
 }
 
-// listABIRevision is the revision `list` shows rows for: the one fetch
-// selects at — the package's ABIRevision, or the fetch-fixture suites'
-// test-only override.
-func listABIRevision() int {
-	if n := testhook.FetchABIRevision; n != 0 {
-		return n
-	}
-	return chtypes.ABIRevision
-}
-
-// installedState is one release row's "  (installed)" annotation, checked
-// against EVERY installed patch of its line (#284: a line can have more
-// than one installed at once — the flat slot plus patches/). "" when the
-// line has nothing installed at all; "(installed)" when this exact row is
-// among them; otherwise the OTHER installed patches of the line, so a
-// caller sees what it would fall back to without fetching this one.
-func installedState(line []chtypes.Installed, version string) string {
-	if len(line) == 0 {
-		return ""
-	}
-	var others []string
-	for _, inst := range line {
-		if inst.Version == version {
-			return "  (installed)"
-		}
-		others = append(others, inst.Version)
-	}
-	return "  (installed: " + strings.Join(others, ", ") + ")"
-}
-
-// notShown is list's one line naming the platform's rows at another ABI
-// revision, which it does not show (docs/guides/fetch.md §6); "" when none
-// were hidden. Rows that carry no abi_revision are named for what they are —
-// built before revisions were recorded — never as a revision called "none".
-func notShown(hidden []chtypes.ReleaseArtifact, rev int) string {
-	if len(hidden) == 0 {
-		return ""
-	}
-	seen := map[int]bool{}
-	var revs []int
-	declared, undeclared := 0, 0
-	for _, a := range hidden {
-		if a.ABIRevision == nil {
-			undeclared++
-			continue
-		}
-		declared++
-		if !seen[*a.ABIRevision] {
-			seen[*a.ABIRevision] = true
-			revs = append(revs, *a.ABIRevision)
-		}
-	}
-	sort.Ints(revs)
-	var parts []string
-	if declared > 0 {
-		list := make([]string, len(revs))
-		for i, r := range revs {
-			list[i] = strconv.Itoa(r)
-		}
-		parts = append(parts, fmt.Sprintf("%d row(s) at ABI revision(s) %s", declared, strings.Join(list, ", ")))
-	}
-	if undeclared > 0 {
-		parts = append(parts, fmt.Sprintf("%d row(s) that record no ABI revision (built before revisions were recorded)", undeclared))
-	}
-	return fmt.Sprintf("%s not shown; this SDK speaks %d", strings.Join(parts, " and "), rev)
-}
-
 func cmdWhere(args []string, stdout, stderr io.Writer) error {
 	fs := newFlagSet("where", stderr)
-	var platform string
-	fs.StringVar(&platform, "platform", "", "platform key (default: this host)")
+	var cf commonFlags
+	cf.bind(fs, false, false)
 	if rest, err := parseInterleaved(fs, args); err != nil {
 		return err
 	} else if len(rest) > 0 {
 		return &usageError{fmt.Sprintf("where takes no positional arguments (%s)", strings.Join(rest, " "))}
 	}
-	dir, err := registryDir("", platform)
+	root, err := ocifetch.CacheRoot(&ocifetch.Options{CacheDir: cf.cache})
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, dir)
-	// The served golden set lives beside the artifacts, and "where is my
-	// registry" is exactly when someone wants to know whether it is there.
-	g := filepath.Join(dir, "sdk-goldens.json")
-	if st, err := os.Stat(g); err == nil {
-		fmt.Fprintf(stdout, "%s  (golden set, %d bytes)\n", g, st.Size())
-	} else {
-		fmt.Fprintf(stdout, "%s  (golden set: not fetched — the golden tests will skip)\n", g)
-	}
+	fmt.Fprintln(stdout, root)
 	return nil
-}
-
-// registryDir resolves --dest the way a fetch does (docs/guides/fetch.md §1):
-// explicit, else $CHTYPES_REGISTRY, else the per-user cache — the cache
-// alone for a platform other than this host's.
-func registryDir(dest, platform string) (string, error) {
-	if dest != "" {
-		return dest, nil
-	}
-	if platform == "" {
-		platform = os.Getenv("CHTYPES_TARGET")
-	}
-	if platform == "" {
-		platform = chtypes.HostPlatform()
-	}
-	if !chtypes.ValidPlatform(platform) {
-		return "", &usageError{fmt.Sprintf("not a known platform key: %s ((linux|darwin)-(arm64|amd64))", platform)}
-	}
-	var dir string
-	if platform == chtypes.HostPlatform() {
-		dir = chtypes.FetchRegistryDir("")
-	} else {
-		dir = chtypes.DefaultRegistryDirFor(platform)
-	}
-	if dir == "" {
-		return "", errors.New("chtypes: cannot determine a registry directory (no home directory); pass --dest or set CHTYPES_REGISTRY")
-	}
-	return dir, nil
-}
-
-// fileExists is the one question `verify` and `where` ask about the served
-// golden set: is it beside the artifacts, or will the golden tests skip?
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

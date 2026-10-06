@@ -8,6 +8,38 @@ The four bindings in this repository are released together and give one answer, 
 
 ### Fixed
 
+- An open that attempted a load and failed now unlocks the setup, whatever failed, while no library has completed load step 7 (#468). After `setup({ timezone: 'Asia/Tokyo' })`, an open could fail before step 7: at the fetch, the signature check, an incompatible artifact (`CHTYPES_ARTIFACT_INCOMPATIBLE`) or a missing symbol. That left the setup locked, and a different `setup` was a `UsageError` until the process restarted. 1.0.2 handled only a failure in step 7 itself (#458). Now any failed attempt keeps the recorded setup but makes it replaceable. A plain retry with no new `setup` runs under the recorded zone and defaults, never the empty setup. A different `setup` is accepted and replaces the record, which is then locked again. This holds for `registry.for`, `Registry.open({ preload })` and `openUnverified`. The caller's own misuse fails before any load is attempted and unlocks nothing: a refused version spelling, or `openUnverified(path, { allow: false })`. Two different `setup` calls before any open is attempted are still a `UsageError`, never a silent last-wins. Once a library has completed step 7, a different setup is still a `UsageError`. No name or signature changes. All four bindings run the same cases, `tests/fixtures/abi-v1/setup-cases.json`, and the rule is `docs/reference/bindings-v1.md` section 6.
+
+## [1.0.2] — 2026-10-06
+
+There is no 1.0.1 of this binding: 1.0.1 was a Go-only fix to that module's metadata. From 1.0.2 the four bindings release together again.
+
+### Fixed
+
+- `setup` now latches only once an image completes load step 7 (#458). A zone the library refuses, such as `setup({ timezone: 'Not/AZone' })`, used to fix the process setup at the first open: every later open failed with ClickHouse's code 36, and a corrected `setup` was a `UsageError` until the process restarted. Now, if step 7 (`chs_initialize`, then `chs_set_defaults` when there are defaults) fails before any image has completed it, the setup record is cleared. That open still raises the library's own error, a corrected `setup` is accepted, and the next open runs step 7 again with it, on the same image too: a failed step 7 is never remembered (`openUnverified` and `registry.for` alike). Once an image has completed step 7, a different setup is still a `UsageError`. No name or signature changes. All four bindings run the same case, `tests/fixtures/abi-v1/setup-cases.json`, and the rule is `docs/reference/bindings-v1.md` section 6.
+
+## [1.0.0] — 2026-10-04
+
+The TypeScript binding's first v1 release, and a deliberate break from 0.x. The default branch switches to v1 shortly after release. The sections below are the entries written as each part landed; this is what they add up to.
+
+- **A new ABI.** The binding speaks the generated ABI v1 layer, identified by an ABI fingerprint in `include/chtypes.h` rather than a revision number, so every FFI declaration is generated from `spec/abi-v1/abi.json`, not written by hand. The ABI stays provisional until the maintainer confirms it.
+- **Fetch over OCI, with signed statements.** Libraries are fetched from an OCI registry and verified against a signed statement before they are loaded; the default trust is the release key only (`docs/guides/fetch-v1.md`).
+- **The public API is `docs/reference/bindings-v1.md`**, the same four-binding contract with each language's own spelling.
+- **The CLI** is the `chtypes` bin (`dist/cli.js`): `fetch`, `verify`, `list` and `where`.
+- **The v0 surface is removed**; the list, and the reason for each removal, is `docs/reference/bindings-v1.md` section 7.
+- **Known gaps** are listed in [`docs/limitations.md`](../docs/limitations.md#known-gaps-in-10), and support for a line this release does not mention is "support unknown", never "unsupported".
+
+### Changed (v1: breaking)
+
+- **The public API is rebuilt over the ABI v1 generated layer** (`docs/reference/bindings-v1.md`). `setup()` replaces the registry timezone option; `Registry.open()`, `for()` and `installed()` are async and resolve through the fetch layer; `compileTable` takes exactly one `CREATE TABLE` statement; every name, SQL text, message and rendered value is a `Buffer`; the four call errors (`SchemaError`, `UnsupportedError`, `UsageError`, `InternalError`) carry the library's five error fields, under the abstract `CallError`; the loader's refusals are `ArtifactIncompatibleError` and `ArtifactCorruptError`, one family with the fetch layer's errors.
+- **The vocabularies are generated from the description** (`Format`, `Status`, `Outcome`, `FilterOutcome`, `Verdict`, `Reason`, `Source`, `DefaultKind`, `DocFlags`), each fact (`Transform.lossy`, `Value.isStored`, `verdictAnswered`) read from it.
+
+### Removed
+
+- The hand FFI table and the presence and per-format probes, the transform classifier and its numeric helpers, the hand JSON reader's denormal repair, discovery reconstruction (`discoverQuery` and `discoverColumns` replace it), the error-code table parsers, the v0 loader halves (search path, manifests, revision gate, checksum re-hash, `Resolve`), `Registry#close`, `Library#shutdown`, `setDefaultSettings`, `InitConflictError`, `ABI_REVISION` and `CODE_UNSUPPORTED` from the public API, and numeric settings values.
+
+### Fixed
+
 - **The tar reader now refuses a symlink, hardlink, device or FIFO entry instead of silently skipping it.** `extractTarGz` treated anything that was not a regular file or directory as "skip, never follow", so an artifact tarball carrying one of those installed everything else around it with no error. It now throws `ArtifactCorruptError`, naming the entry and its type, matching the other three bindings' install refusal for the same shapes.
 - **The crash-guard refuse-list is now sourced identically to the other three bindings, and an artifact with neither source refuses rather than loading unguarded.** This binding already fell back to the manifest's `unsafe_families` field when `unsafe_families.txt` was absent, but a manifest predating the field (or one that simply omitted it) parsed to the same `undefined` as one carrying it empty, so `chs_init` silently ran with no refuse-list either way. A directory with neither the file nor the field is now refused, naming both, instead of loading unguarded (`docs/reference/artifact.md` step 9).
 - **`ensure`/`fetch` now retry a transient HTTP 5xx, 408 or 429 from the artifacts host, and a connection-level failure (refused, reset, timed out, DNS), within the existing retry budget and schedule** (`docs/guides/fetch.md` §3a: 5 attempts, delays doubling from 4s) — previously `HttpSource`'s `request` ran its own separate, shorter retry (3 attempts, 500ms steps) before giving up, independent of the publish-window budget, and a tarball download had no outer retry at all. A `Retry-After` on a 503 or 429 is honored, in both the delta-seconds and HTTP-date forms, capped so it never makes the total wait exceed the existing budget — one that does not fit fails at once, naming the requested delay. A 404 or 410, and a tarball hash or size mismatch, are still decided on the first attempt, never retried; a 410 is now also recognized as "not found" (it used to fall through as an ungrouped refusal, never retried either way, but misclassified). `SourceUnreachableError` gains `.retryable`/`.retryAfterMs` properties (closes #365).

@@ -4,15 +4,15 @@ r"""check-selftests-wired.py — every script under scripts/ that DECLARES a
 (chtypes#268).
 
 WHY THIS EXISTS. A checker nobody has seen fail is not a checker — the house
-rule scripts/check-abi-decls.py, scripts/lint-public.sh and every other
+rule scripts/lint-public.sh, scripts/lint-spelling.sh and every other
 selftest-first gate in this repository already follow. Three scripts kept the
 letter of that rule (each has a `--selftest` mode, each passes it locally) and
-broke its spirit: scripts/check-suite.sh, scripts/lib/provenance.py and
-scripts/published-lines.sh all declared a `--selftest` that no workflow step
-ever ran, so a regression in any of the three would have shipped silently.
-scripts/index-diff.sh was in the identical state until #267 wired it in, and
-the first CI run of it found a latent SIGPIPE race that had never shown
-locally — proof this class of gap is real, not hypothetical.
+broke its spirit: scripts/check-suite.sh, scripts/lib/provenance.py and a
+since-retired v0 channel script all declared a `--selftest` that no workflow
+step ever ran, so a regression in any of the three would have shipped
+silently. Another since-retired v0 script was in the identical state until
+#267 wired it in, and the first CI run of it found a latent SIGPIPE race that
+had never shown locally — proof this class of gap is real, not hypothetical.
 
 This script closes the gap generally rather than for those three scripts by
 name: it finds every script that DECLARES a `--selftest` mode (a real argument
@@ -34,11 +34,10 @@ constantly in comments, docstrings and usage lines that declare nothing. Every
 form below is the exact shape an existing script in this tree uses today
 (confirmed by reading each one; see the PR that added this file):
 
-  .sh   `if [ "${1:-}" = "--selftest" ]; then`   (the majority: abi-channel.sh,
-        check-linked-build.sh, check-standalone.sh, check-suite.sh,
-        lint-cited-paths.sh, lint-public.sh, published-lines.sh)
-        or a `case` arm spelled exactly `--selftest)` (index-diff.sh,
-        lint-spelling.sh)
+  .sh   `if [ "${1:-}" = "--selftest" ]; then`   (the majority:
+        check-standalone.sh, check-suite.sh,
+        lint-cited-paths.sh, lint-public.sh)
+        or a `case` arm spelled exactly `--selftest)` (lint-spelling.sh)
   .py   `argparse`'s `.add_argument("--selftest", ...)` (one-line or spread
         across several, as sweep-public-mentions.py does — matched with `\s`,
         which spans newlines) — or a hand-rolled argv check:
@@ -78,6 +77,15 @@ Known entries today, each confirmed by reading both files:
   scripts/lib/provenance.py         via scripts/check-suite.sh
   scripts/lib/standalone_census.py  via scripts/check-standalone.sh
   scripts/check-reserved-test-names.go via scripts/check-reserved-test-names.sh
+
+INDIRECT DISPATCH. Some workflows never name a script literally: v1-abi.yml
+builds the path in a shell variable and runs it with `--selftest`, one step
+for every script under a directory convention (INDIRECT_DISPATCH below). Such
+a script is wired when the workflow really contains that dispatch step, and
+the check READS the workflow for it: the step must build the convention's
+path, run it with `--selftest`, and (for a per-job check) name this script's
+own `check="<name>"`, or (for a per-binding script) the matrix must list the
+binding. Delete the step and every script of the convention reads UNWIRED.
 
 Prints one line per script that declares a `--selftest` mode — `wired: ci.yml`,
 `wired: via <caller>`, or `UNWIRED` (with the reason) — and exits 1 if any
@@ -127,6 +135,70 @@ CALLED_BY: dict[str, str] = {
     "scripts/lib/standalone_census.py": "scripts/check-standalone.sh",
     "scripts/check-reserved-test-names.go": "scripts/check-reserved-test-names.sh",
 }
+
+# Indirect dispatch: a workflow that builds the script's path in a variable
+# and runs it with --selftest, for every script of a directory convention.
+# Each entry is (kind, repo-relative path regex whose group 1 is the key,
+# workflow, literal text the dispatching step must contain). Verified against
+# the workflow's own text by dispatch_wired() — never trusted on this table's
+# word alone. The path literals are assembled, not written whole, so the
+# path-citation lint does not read them as citations of real files.
+_ABI1 = "scripts" + "/abi-v1/"
+INDIRECT_DISPATCH = [
+    {
+        "kind": "check",
+        "path_re": re.compile(r"^" + re.escape(_ABI1) + r"check-([\w-]+)\.sh$"),
+        "workflow": ".github/workflows/v1-abi.yml",
+        "step_needs": [_ABI1 + "check-${check}.sh", 'bash "$script" --selftest'],
+        "key_needs": 'check="{key}"',
+    },
+    {
+        "kind": "conformance",
+        "path_re": re.compile(r"^" + re.escape(_ABI1) + r"conformance/([\w-]+)\.sh$"),
+        "workflow": ".github/workflows/v1-abi.yml",
+        "step_needs": [_ABI1 + "conformance/${{ matrix.binding }}.sh", 'bash "$script" --selftest'],
+        "key_needs": "binding: {key},",
+    },
+]
+
+
+def _workflow_steps(text: str) -> list[str]:
+    """The workflow's non-comment text split into steps at each `- name:`."""
+    lines = [l for l in text.splitlines() if not l.lstrip().startswith("#")]
+    steps: list[list[str]] = [[]]
+    for l in lines:
+        if re.match(r"^\s*- name:", l):
+            steps.append([])
+        steps[-1].append(l)
+    return ["\n".join(x) for x in steps]
+
+
+def dispatch_wired(root: Path, script: str) -> tuple[bool, str] | None:
+    """None if `script` is not covered by a dispatch convention. Otherwise
+    (ok, reason): ok when the convention's workflow really contains the
+    dispatching `--selftest` step for this script."""
+    for d in INDIRECT_DISPATCH:
+        m = d["path_re"].match(script)
+        if not m:
+            continue
+        wf = root / d["workflow"]
+        if not wf.is_file():
+            return False, f"{d['workflow']} does not exist, so the {d['kind']} dispatch cannot run it"
+        steps = _workflow_steps(wf.read_text(encoding="utf-8"))
+        key_text = d["key_needs"].format(key=m.group(1))
+        for st in steps:
+            if all(n in st for n in d["step_needs"]):
+                if d["kind"] == "check" and key_text not in st:
+                    continue
+                if d["kind"] == "conformance" and key_text not in "\n".join(steps):
+                    continue
+                return True, ""
+        return False, (
+            f"{d['workflow']} has no step dispatching {d['step_needs'][0]} with --selftest"
+            f" for {key_text!r}; the {d['kind']} convention's selftest never runs"
+        )
+    return None
+
 
 # A caller invoking the callee with its arguments forwarded unchanged reaches
 # it with --selftest whenever the CALLER itself was invoked that way — this is
@@ -252,6 +324,14 @@ def run_check(root: Path, called_by: dict[str, str]) -> tuple[list[tuple[str, st
     for script in declared:
         if script in wired_by_ci:
             results.append((script, "wired: ci.yml", ""))
+            continue
+        dw = dispatch_wired(root, script)
+        if dw is not None:
+            if dw[0]:
+                results.append((script, "wired: ci.yml (dispatch)", ""))
+            else:
+                results.append((script, "UNWIRED", dw[1]))
+                any_unwired = True
             continue
         caller = called_by.get(script)
         if caller is not None:
@@ -428,6 +508,53 @@ def selftest() -> int:
             f"{b_py} should be wired via {c_sh}, got {statuses.get(b_py)!r}",
         )
 
+    # 4b. Indirect dispatch, both directions: a dispatch-convention script is
+    #     wired while the workflow carries the dispatching --selftest step,
+    #     and UNWIRED the moment that step is gone (or names another check).
+    with tempfile.TemporaryDirectory() as tmp_s:
+        tmp = Path(tmp_s)
+        d1 = "/".join(("scripts", "abi-v1"))
+        (tmp / d1 / "conformance").mkdir(parents=True)
+        (tmp / ".github" / "workflows").mkdir(parents=True)
+        decl = '#!/usr/bin/env bash\nif [ "${1:-}" = "--selftest" ]; then\n  exit 0\nfi\n'
+        chk, conf = f"{d1}/check-widget.sh", f"{d1}/conformance/go.sh"
+        (tmp / chk).write_text(decl)
+        (tmp / conf).write_text(decl)
+        wf = tmp / ".github" / "workflows" / "v1-abi.yml"
+        good = (
+            "jobs:\n  a:\n    steps:\n"
+            "      - name: selftest\n        run: |\n"
+            '          check="widget"\n'
+            f'          script="{d1}/check-${{check}}.sh"\n'
+            '          bash "$script" --selftest\n'
+            "      - name: conf\n        run: |\n"
+            f'          script="{d1}/conformance/${{{{ matrix.binding }}}}.sh"\n'
+            '          bash "$script" --selftest\n'
+            "  m:\n    matrix:\n      include:\n        - {binding: go, os: x}\n"
+        )
+        wf.write_text(good)
+        results, any_unwired = run_check(tmp, {})
+        st = {s: x for s, x, _ in results}
+        check(not any_unwired, f"dispatched scripts were flagged unwired: {results}")
+        check(st.get(chk) == "wired: ci.yml (dispatch)" and st.get(conf) == "wired: ci.yml (dispatch)",
+              f"dispatched scripts not reported wired: {st}")
+        # the dispatching step deleted
+        wf.write_text("jobs:\n  a:\n    steps:\n      - name: other\n        run: echo hi\n")
+        results, any_unwired = run_check(tmp, {})
+        st = {s: x for s, x, _ in results}
+        check(any_unwired and st.get(chk) == "UNWIRED" and st.get(conf) == "UNWIRED",
+              f"a deleted dispatch step did not turn the scripts UNWIRED: {st}")
+        # dispatch present but for a different check name
+        wf.write_text(good.replace('check="widget"', 'check="other"'))
+        results, _ = run_check(tmp, {})
+        st = {s: x for s, x, _ in results}
+        check(st.get(chk) == "UNWIRED", f"a dispatch for another check name wired {chk}: {st}")
+        # a commented-out dispatch does not count
+        wf.write_text("\n".join("# " + l for l in good.splitlines()))
+        results, _ = run_check(tmp, {})
+        st = {s: x for s, x, _ in results}
+        check(st.get(chk) == "UNWIRED", f"a commented-out dispatch wired {chk}: {st}")
+
     # 5. This script's own real CALLED_BY map, run against the real
     #    repository root, must find every known entry's caller actually
     #    forwarding --selftest to its callee — proving the map is not merely
@@ -444,7 +571,7 @@ def selftest() -> int:
         "check-selftests-wired: selftest ok — an unwired --selftest branch is caught, a comment-only "
         "mention declares nothing in sh/py/go alike, a CALLED_BY entry whose caller does not actually "
         "forward --selftest is rejected with a reason, an all-wired tree (direct plus CALLED_BY) passes, "
-        "and this repository's own CALLED_BY map verifies against today's real files"
+        "an indirect-dispatch script is wired only while the workflow really carries its --selftest step, and this repository's own CALLED_BY map verifies against today's real files"
     )
     return 0
 

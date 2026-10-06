@@ -1,0 +1,558 @@
+//! The ABI v1 loader: plan §3.2's steps 1-7, hand-written (nothing here is
+//! generated; `decls.rs` is the generated layer this calls into).
+//!
+//! # Safety invariants this module owns
+//!
+//! * **Steps run in order, exactly as §3.2**: glibc (Linux only, before
+//!   `dlopen`), `dlopen(RTLD_NOW | RTLD_LOCAL)`, `chs_abi_version`,
+//!   `chs_build_info`'s fingerprint, the nine-field cross-check, then (and
+//!   only then) resolve every remaining symbol.
+//! * **No `dlclose`, ever** (D2). The opened library is moved into
+//!   [`decls::Api`]'s `ManuallyDrop<Library>` field once step 6 succeeds, and
+//!   on any earlier refusal the (unused) `Library` is also never closed —
+//!   `libloading`'s `Library` has no `Drop` impl that calls `dlclose` unless
+//!   its owner is dropped, and this module never drops one; see
+//!   `rust/src/ffi.rs`'s identical v0 rule for why (a leaked `Context`'s
+//!   destructor order).
+//! * **`open_unverified`** is this loader with no signed statement: steps 1
+//!   and 5 are skipped (`LoadInput::predicate` is `None`), and the two-gate
+//!   rule (the caller's `allow` plus `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1`)
+//!   belongs to the public caller, which refuses before reaching here.
+//! * **Step 7 runs once per image**, under the process setup: `chs_initialize`
+//!   with the recorded zone, then `chs_set_defaults` when there are defaults.
+//!   A non-OK status from either is that call's own error ([`RawCallError`]),
+//!   mapped by the D3 status table in the public layer, never a refusal reason.
+//! * **Errors stay abi1-local**: [`Refusal`] carries the same fields
+//!   `sdk.json`'s loader-refusal table promises (`reason`, `path`,
+//!   `want`/`got`); the public layer maps it onto its own `Error`.
+
+// The conformance runner compiles this file a second time through `#[path]` and
+// reaches only `load`; the public layer reaches the rest.
+#![allow(dead_code)]
+
+use std::ffi::CStr;
+use std::path::{Path, PathBuf};
+
+#[cfg(target_os = "linux")]
+use libloading::os::unix::Symbol;
+use libloading::os::unix::{Library as UnixLibrary, RTLD_LOCAL, RTLD_NOW};
+
+use std::sync::Arc;
+
+use super::calls_gen::RawCallError;
+use super::decls::{self, Api, CrossCheckKind, Handshake};
+
+/// One loader refusal: the `sdk.json` reason WORD, EXACTLY (`glibc_floor`,
+/// `no_glibc`, `predicate_malformed`, `dlopen`, `not_v1`, `abi_version`,
+/// `build_info_malformed`, `fingerprint`, `build_info_mismatch:<field>` or
+/// `missing_symbol:<name>` — never a sentence built around one), the library
+/// path, and — where applicable — what was wanted, what was found, and any
+/// free-form detail. `reason` is what a conformance case compares against
+/// `scripts/abi-v1/emit/_stubshared.py`'s variant plan verbatim; it is never
+/// decorated, so that comparison can be a plain string equality.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    /// The `sdk.json` reason word, with `:<symbol>` or `:<field>` appended where
+    /// `sdk.json` gives a suffix.
+    pub reason: String,
+    /// The library the loader was opening.
+    pub path: PathBuf,
+    /// What the check wanted, where the refusal names both sides.
+    pub want: Option<String>,
+    /// What the check found, where the refusal names both sides.
+    pub got: Option<String>,
+    /// Free-form detail, where there is any.
+    pub detail: Option<String>,
+}
+
+impl Refusal {
+    fn new(reason: impl Into<String>, path: &Path) -> Refusal {
+        Refusal {
+            reason: reason.into(),
+            path: path.to_path_buf(),
+            want: None,
+            got: None,
+            detail: None,
+        }
+    }
+
+    fn with_detail(reason: impl Into<String>, path: &Path, detail: impl Into<String>) -> Refusal {
+        Refusal {
+            reason: reason.into(),
+            path: path.to_path_buf(),
+            want: None,
+            got: None,
+            detail: Some(detail.into()),
+        }
+    }
+
+    fn naming(
+        reason: impl Into<String>,
+        path: &Path,
+        want: impl Into<String>,
+        got: impl Into<String>,
+    ) -> Refusal {
+        Refusal {
+            reason: reason.into(),
+            path: path.to_path_buf(),
+            want: Some(want.into()),
+            got: Some(got.into()),
+            detail: None,
+        }
+    }
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path.display(), self.reason)?;
+        if let (Some(want), Some(got)) = (&self.want, &self.got) {
+            write!(f, " (want {want}, got {got})")?;
+        }
+        if let Some(detail) = &self.detail {
+            write!(f, ": {detail}")?;
+        }
+        Ok(())
+    }
+}
+
+/// The loader's input (plan §3.1): decoupled from the fetch module's own
+/// `Resolved` type; the public layer's adapter is three lines.
+pub(crate) struct LoadInput<'a> {
+    pub(crate) library_path: &'a Path,
+    /// The verified predicate, exactly as the fetch layer returned it, never
+    /// re-derived or re-encoded. `None` is an unverified open: steps 1 and 5
+    /// (the signed statement's checks) are skipped.
+    pub(crate) predicate: Option<&'a serde_json::Value>,
+    /// The image zone `chs_initialize` sets at step 7, as bytes: empty means
+    /// UTC.
+    pub(crate) timezone: &'a [u8],
+    /// The default settings `chs_set_defaults` takes at step 7, as a JSON
+    /// object of string values; `None` when the setup has none.
+    pub(crate) defaults: Option<&'a [u8]>,
+}
+
+/// A library that passed every check (steps 1-6) and was set up (step 7).
+pub(crate) struct Loaded {
+    pub(crate) api: Arc<Api>,
+    /// The exact bytes `chs_build_info()` returned.
+    pub(crate) build_info_raw: Vec<u8>,
+    /// Its parsed form (a strict parse: ASCII, no duplicate key).
+    pub(crate) build_info: serde_json::Map<String, serde_json::Value>,
+}
+
+/// What a failed load reports: a step 1-6 refusal (`sdk.json` reasons), or —
+/// step 7 having no refusal reason by design — `chs_initialize`'s or
+/// `chs_set_defaults`'s own call error, mapped by the D3 status table.
+pub(crate) enum LoadError {
+    Refused(Refusal),
+    Call(RawCallError),
+}
+
+/// Run loader steps 1-7 against `input`. Step 7 calls `chs_initialize` once
+/// with the image zone (`process_once`: the same spelling again is OK, a
+/// different one is `CHS_INVALID_ARGUMENT`), then `chs_set_defaults` when
+/// there are defaults; a non-OK status is that call's own error.
+pub(crate) fn load(input: LoadInput<'_>) -> Result<Loaded, LoadError> {
+    let timezone = input.timezone;
+    let defaults = input.defaults;
+    let Checked {
+        api,
+        build_info_raw,
+        build_info,
+    } = load_checked(input).map_err(LoadError::Refused)?;
+    let api = Arc::new(api);
+    api.initialize(timezone).map_err(LoadError::Call)?;
+    if let Some(defaults) = defaults {
+        api.set_defaults(defaults).map_err(LoadError::Call)?;
+    }
+    Ok(Loaded {
+        api,
+        build_info_raw,
+        build_info,
+    })
+}
+
+/// Re-run the signed statement's checks (step 1, the glibc floor, and step 5,
+/// the cross-check) for a request that reaches an image this process already
+/// opened: the image is never loaded twice, but every new statement must still
+/// agree with it.
+pub(crate) fn recheck(
+    build_info: &serde_json::Map<String, serde_json::Value>,
+    predicate: &serde_json::Value,
+    path: &Path,
+) -> Result<(), Refusal> {
+    let predicate = predicate_object(predicate, path)?;
+    #[cfg(target_os = "linux")]
+    check_glibc(predicate, path)?;
+    cross_check(build_info, predicate, path)
+}
+
+fn predicate_object<'p>(
+    predicate: &'p serde_json::Value,
+    path: &Path,
+) -> Result<&'p serde_json::Map<String, serde_json::Value>, Refusal> {
+    predicate.as_object().ok_or_else(|| {
+        Refusal::with_detail(
+            "predicate_malformed",
+            path,
+            "the predicate is not a JSON object",
+        )
+    })
+}
+
+/// Step 5: the nine-field cross-check of `build_info` against the verified
+/// predicate.
+fn cross_check(
+    build_info: &serde_json::Map<String, serde_json::Value>,
+    predicate: &serde_json::Map<String, serde_json::Value>,
+    path: &Path,
+) -> Result<(), Refusal> {
+    for (bi_field, pred_field, kind) in decls::CROSS_CHECK_FIELDS {
+        let bi_value = build_info.get(*bi_field).ok_or_else(|| {
+            Refusal::with_detail("build_info_malformed", path, format!("missing {bi_field}"))
+        })?;
+        let pred_value = predicate.get(*pred_field).ok_or_else(|| {
+            Refusal::with_detail("predicate_malformed", path, format!("missing {pred_field}"))
+        })?;
+        let equal = match kind {
+            CrossCheckKind::Int => {
+                bi_value.as_i64().is_some() && bi_value.as_i64() == pred_value.as_i64()
+            }
+            CrossCheckKind::Bytes => {
+                bi_value.as_str().is_some() && bi_value.as_str() == pred_value.as_str()
+            }
+        };
+        if !equal {
+            return Err(Refusal::naming(
+                format!("build_info_mismatch:{bi_field}"),
+                path,
+                pred_value.to_string(),
+                bi_value.to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// What steps 1-6 produce: the resolved table and `build_info`, raw and parsed.
+struct Checked {
+    api: Api,
+    build_info_raw: Vec<u8>,
+    build_info: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Steps 1-6.
+fn load_checked(input: LoadInput<'_>) -> Result<Checked, Refusal> {
+    let path = input.library_path;
+    let predicate = match input.predicate {
+        Some(p) => Some(predicate_object(p, path)?),
+        None => None,
+    };
+
+    // Step 1: glibc, Linux only, BEFORE dlopen. Skipped with no signed
+    // statement (an unverified open).
+    #[cfg(target_os = "linux")]
+    if let Some(predicate) = predicate {
+        check_glibc(predicate, path)?;
+    }
+
+    // Step 2: dlopen(RTLD_NOW | RTLD_LOCAL).
+    // SAFETY: the artifact is a self-contained chtypes v1 library (exports
+    // only chs_*), the same posture `rust/src/ffi.rs`'s v0 loader documents;
+    // RTLD_NOW is required by D2/D3 (no lazy binding, so an unresolved
+    // reference fails HERE, not on first use — the "unbound" stub variant's
+    // whole point) and RTLD_LOCAL keeps two loaded versions from colliding.
+    let lib = unsafe { UnixLibrary::open(Some(path), RTLD_NOW | RTLD_LOCAL) }
+        .map_err(|e| Refusal::with_detail("dlopen", path, e.to_string()))?;
+
+    // Step 3: chs_abi_version. `Handshake::resolve` also resolves
+    // chs_build_info (step 4 needs it next), so its error names whichever of
+    // the two is missing — and only chs_abi_version's absence means the
+    // library is not an ABI v1+ artifact at all (not_v1). Every OTHER
+    // handshake symbol, chs_build_info included, is refused as
+    // missing_symbol:<name> at the step that first needs it (the PM's
+    // round-2 ruling; sdk.json carries a step-4 missing_symbol row for this).
+    // SAFETY: `lib` was just opened above and is never dlclose'd (this
+    // function either returns it inside `Api` or lets it leak, never drops
+    // it), so a `Handshake` resolved from it stays valid for the process's
+    // life, which is all `Handshake::resolve`'s own contract requires.
+    let handshake: Handshake = unsafe { Handshake::resolve(&lib) }.map_err(|missing| {
+        if missing == "chs_abi_version" {
+            Refusal::new("not_v1", path)
+        } else {
+            Refusal::new(format!("missing_symbol:{missing}"), path)
+        }
+    })?;
+    // SAFETY: chs_abi_version takes no arguments and is documented callable
+    // before any other check (D1.2, the handshake class).
+    let version = unsafe { (handshake.chs_abi_version)() };
+    if version != decls::CHS_ABI_VERSION {
+        return Err(Refusal::naming(
+            "abi_version",
+            path,
+            decls::CHS_ABI_VERSION.to_string(),
+            version.to_string(),
+        ));
+    }
+
+    // Step 4: chs_build_info — parsed strictly, then the fingerprint
+    // byte-compared against the compiled-in constant.
+    // SAFETY: same handshake contract as chs_abi_version above.
+    let raw = unsafe { (handshake.chs_build_info)() };
+    if raw.is_null() {
+        return Err(Refusal::with_detail(
+            "build_info_malformed",
+            path,
+            "chs_build_info returned NULL",
+        ));
+    }
+    // SAFETY: a NULL check was just performed; chs_build_info's documented
+    // contract is a NUL-terminated string valid for the process's life
+    // (never freed by the caller).
+    let bytes = unsafe { CStr::from_ptr(raw) }.to_bytes();
+    let build_info = parse_build_info(bytes, path)?;
+    let schema = build_info.get("schema").and_then(serde_json::Value::as_i64);
+    if schema != Some(1) {
+        return Err(Refusal::with_detail(
+            "build_info_malformed",
+            path,
+            format!("schema is {schema:?}, want 1"),
+        ));
+    }
+    let fingerprint = build_info
+        .get("abi_fingerprint")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            Refusal::with_detail(
+                "build_info_malformed",
+                path,
+                "abi_fingerprint is missing or not a string",
+            )
+        })?;
+    if fingerprint.as_bytes() != decls::CHS_ABI_FINGERPRINT.as_bytes() {
+        return Err(Refusal::naming(
+            "fingerprint",
+            path,
+            decls::CHS_ABI_FINGERPRINT,
+            fingerprint,
+        ));
+    }
+
+    // Step 5: the nine-field cross-check against the verified predicate
+    // (skipped with no signed statement).
+    if let Some(predicate) = predicate {
+        cross_check(&build_info, predicate, path)?;
+    }
+
+    // Step 6: resolve every described symbol (api, tooling, the tombstone),
+    // for presence. Only now does `lib` move into `Api`'s own `ManuallyDrop`.
+    // SAFETY: steps 1-5 passed, and `lib` is never dlclose'd (D2).
+    // `sdk.json`'s step-6 refusal carries the missing name as a SUFFIX on the
+    // reason itself (`missing_symbol:<name>`), the same shape
+    // `_stubshared.py`'s `missing-<sym>` variants are named for — never a
+    // separate want/got pair.
+    let api = unsafe { Api::resolve_all(lib) }
+        .map_err(|name| Refusal::new(format!("missing_symbol:{name}"), path))?;
+
+    Ok(Checked {
+        api,
+        build_info_raw: bytes.to_vec(),
+        build_info,
+    })
+}
+
+/// `chs_build_info()`'s text, parsed strictly (plan §3.2 step 4): ASCII
+/// only, valid JSON, a top-level object, and no duplicate key — each refused
+/// with the single `build_info_malformed` reason `sdk.json` assigns every
+/// step-4 malformation.
+fn parse_build_info(
+    bytes: &[u8],
+    path: &Path,
+) -> Result<serde_json::Map<String, serde_json::Value>, Refusal> {
+    if !bytes.is_ascii() {
+        return Err(Refusal::with_detail(
+            "build_info_malformed",
+            path,
+            "not ASCII",
+        ));
+    }
+    let DupCheckedObject(map) = serde_json::from_slice(bytes)
+        .map_err(|e| Refusal::with_detail("build_info_malformed", path, e.to_string()))?;
+    for name in decls::BUILD_INFO_REQUIRED {
+        if !map.contains_key(*name) {
+            return Err(Refusal::with_detail(
+                "build_info_malformed",
+                path,
+                format!("missing {name}"),
+            ));
+        }
+    }
+    Ok(map)
+}
+
+/// A JSON object, deserialized with an explicit duplicate-key check —
+/// `serde_json`'s ordinary `Map`/`Value` deserialization lets a later key
+/// silently win, which is exactly what `sdk.json`'s `build-info-dup-key`
+/// stub variant exists to catch (plan §3.2 step 4: "duplicate keys
+/// refused").
+struct DupCheckedObject(serde_json::Map<String, serde_json::Value>);
+
+impl<'de> serde::de::Deserialize<'de> for DupCheckedObject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = DupCheckedObject;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a JSON object with no duplicate key")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut out = serde_json::Map::new();
+                while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                    if out.contains_key(&key) {
+                        return Err(serde::de::Error::custom(format!(
+                            "duplicate object key {key:?}"
+                        )));
+                    }
+                    out.insert(key, value);
+                }
+                Ok(DupCheckedObject(out))
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
+/// Loader step 1 (Linux only, before `dlopen`): resolve `gnu_get_libc_version`
+/// dynamically from the PROCESS image (`Library::this()`, never from the
+/// artifact being loaded) and compare it, as dotted integers, against the
+/// predicate's `glibc_floor`. Absent entirely, or resolvable only through
+/// musl's non-GNU libc, refuses `no_glibc`; a predicate with no
+/// `glibc_floor` on Linux refuses `predicate_malformed`.
+#[cfg(target_os = "linux")]
+fn check_glibc(
+    predicate: &serde_json::Map<String, serde_json::Value>,
+    path: &Path,
+) -> Result<(), Refusal> {
+    let floor = predicate
+        .get("glibc_floor")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            Refusal::with_detail(
+                "predicate_malformed",
+                path,
+                "a linux predicate has no glibc_floor",
+            )
+        })?;
+
+    // `Library::this()` is a safe wrapper over the already-loaded process
+    // image (no new library is opened, so D2's dlopen-flag rule does not
+    // apply here). The actual symbol lookup lives in generated, banner-exempt
+    // code (decls::resolve_glibc_version) per the PM's round-2 ruling: every
+    // raw symbol lookup, the glibc probe included, is generated.
+    let this = UnixLibrary::this();
+    // SAFETY: `this` wraps the running process and is never dlclose'd.
+    let version_fn: Symbol<decls::FnGlibcVersion> =
+        match unsafe { decls::resolve_glibc_version(&this) } {
+            Some(f) => f,
+            None => return Err(Refusal::new("no_glibc", path)),
+        };
+    // SAFETY: the symbol above resolved against the documented signature.
+    let version_ptr = unsafe { version_fn() };
+    if version_ptr.is_null() {
+        return Err(Refusal::with_detail(
+            "no_glibc",
+            path,
+            "gnu_get_libc_version returned NULL",
+        ));
+    }
+    // SAFETY: glibc documents a NUL-terminated string valid for the
+    // process's life (a compiled-in constant, never freed by the caller).
+    let version = unsafe { CStr::from_ptr(version_ptr) }
+        .to_string_lossy()
+        .into_owned();
+    if dotted_version_cmp(&version, floor) == std::cmp::Ordering::Less {
+        return Err(Refusal::naming("glibc_floor", path, floor, version));
+    }
+    Ok(())
+}
+
+/// Compare two dotted-integer version strings (`"2.29"` vs `"2.17"`)
+/// component-wise; a missing trailing component reads as `0`, and a
+/// non-numeric component sorts as `0` too (never a panic — a malformed
+/// floor or a libc that spells its version oddly fails the comparison
+/// honestly rather than crashing the loader).
+fn dotted_version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let mut ai = a.split('.').map(|p| p.parse::<u64>().unwrap_or(0));
+    let mut bi = b.split('.').map(|p| p.parse::<u64>().unwrap_or(0));
+    loop {
+        match (ai.next(), bi.next()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (x, y) => {
+                let ord = x.unwrap_or(0).cmp(&y.unwrap_or(0));
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dotted_version_cmp_orders_components_numerically_not_lexically() {
+        assert_eq!(dotted_version_cmp("2.9", "2.17"), std::cmp::Ordering::Less);
+        assert_eq!(
+            dotted_version_cmp("2.29", "2.17"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            dotted_version_cmp("2.17", "2.17"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            dotted_version_cmp("2.17.1", "2.17"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(dotted_version_cmp("2", "2.0.0"), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn parse_build_info_refuses_a_duplicate_key() {
+        let p = Path::new("/dev/null");
+        let err = parse_build_info(br#"{"schema":1,"schema":1}"#, p).unwrap_err();
+        assert_eq!(err.reason, "build_info_malformed");
+        assert!(
+            err.detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("duplicate"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_build_info_refuses_non_ascii() {
+        let p = Path::new("/dev/null");
+        let err = parse_build_info(b"{\"schema\":1,\"x\":\"\xc3\x28\"}", p).unwrap_err();
+        assert_eq!(err.reason, "build_info_malformed");
+        assert_eq!(err.detail.as_deref(), Some("not ASCII"));
+    }
+
+    #[test]
+    fn parse_build_info_refuses_bad_json() {
+        let p = Path::new("/dev/null");
+        let err = parse_build_info(b"{not json", p).unwrap_err();
+        assert_eq!(err.reason, "build_info_malformed");
+    }
+}

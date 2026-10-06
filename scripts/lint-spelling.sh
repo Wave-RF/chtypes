@@ -45,13 +45,10 @@
 #                                       loudly if either one comes back
 #                                       clean on input that should not be
 #
-# SCOPE. Every file `git ls-files` reports, minus:
-#   - anything under a `fixtures/fetch` directory (matches both
-#     spec/fixtures/fetch/ and tests/fixtures/fetch/, whichever this tree
-#     currently has) — generated, ed25519-signed, hash-verified fixtures;
-#     editing one invalidates every signature it carries.
-#   - any file named exactly `LICENSE` — legal text, not this project's
-#     prose to correct.
+# SCOPE. Every file `git ls-files` reports, minus any file named exactly
+# `LICENSE` — legal text, not this project's prose to correct. (The v0 fetch
+# fixtures, generated and ed25519-signed, were excluded too until they were
+# deleted with v0, #431.)
 # No other exception list, by design: every SDK's source (comments and
 # strings scan the same as prose — `-source text`, not `-source go`, so a
 # quoted ClickHouse setting name would also be scanned; none of the words
@@ -133,8 +130,8 @@ ALTERNATION="${typos[*]}"
 unset IFS
 WORD_PATTERN="(^|[^A-Za-z])(${ALTERNATION})([^A-Za-z]|$)"
 
-# Every tracked file except the fixtures (generated + signed) and any
-# LICENSE file, wherever either lives in the current tree.
+# Every tracked file except any LICENSE file, wherever it lives in the
+# current tree.
 list_files() {
   # This script is excluded from itself, and it is the ONLY exclusion of its
   # kind. Its WORDLIST is a table of British->American pairs, and its header
@@ -143,7 +140,7 @@ list_files() {
   # around the problem. Everything else in the tree is checked with no
   # exceptions — see the CHANGELOG entries, which were reworded rather than
   # excused, precisely so this stayed the only one.
-  git ls-files | grep -v '/fixtures/fetch/' | grep -vE '(^|/)LICENSE$' \
+  git ls-files | grep -vE '(^|/)LICENSE$' \
                | grep -v '^scripts/lint-spelling\.sh$'
 }
 

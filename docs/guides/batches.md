@@ -2,7 +2,7 @@
 
 **Call `rows` for everything.** One row is a batch of one. The vendored reader does all the framing internally, so a bare JSON object, NDJSON and a `[...]`-wrapped array are the same `JSONEachRow` body — never split or sniff a payload in your own language.
 
-There is a `row` sugar in every binding for call sites that _semantically_ expect exactly one row: a config check, a test, a single-record webhook. On a multi-row body it returns the first row and ignores the rest, which makes it the wrong call for anything wire-facing.
+There is a `row` call in every binding for call sites that _semantically_ expect exactly one row: a config check, a test, a single-record webhook. It is a separate single-row entry point, which makes it the wrong call for anything wire-facing.
 
 Two more reasons `rows` is the unit rather than a loop over `row`:
 
@@ -21,7 +21,12 @@ These are decided before a single column is parsed, independently of any bad-row
 - **Plain `CSV`/`TSV` skip a leading BOM only when the first column is a type whose text form can contain only valid UTF-8** — `UUID`, `DateTime` and the numeric types. A `String` first column keeps the BOM as data instead: a header line arrives with the raw `EF BB BF` bytes still stuck to the front of the first field, so it no longer reads as plain `id`, and the header-detection setting above will not recognize it as a header. `CSVWithNames`/`TSVWithNames` skip a leading BOM unconditionally, regardless of the first column's type (from the server's reader source, `RowInputFormatWithNamesAndTypes::readPrefix`, not measured).
 - **`\n\r` is ONE line end, not two.** A caller counting lines by counting `\r` or `\n` bytes independently of the reader overcounts by one per line that uses this ending.
 
-**A batch exposes no records-seen count, byte offsets or detected-header information today.** `rows` and `rows_read` describe records the reader parsed, not the bytes or lines it consumed getting there, so none of the three facts above is visible in a `BatchResult` — track the input independently, before the call, if you need to reconcile them. Exposing framing is a candidate for a future ABI revision, not something promised here.
+**A v1 batch reports what the reader decided about the framing.** `rows` and `rows_read` still describe the records the reader parsed, not the bytes or lines it consumed getting there, but the batch now carries two more answers ([`reference/bindings-v1.md` §5](../reference/bindings-v1.md#batchresult-from-the-batch-document-and-the-export-buffer)):
+
+- `unconsumed` lists the byte ranges the reader's error recovery skipped, and each row's `input_span` says which bytes the reader consumed for it.
+- `framing` has `bom_skipped`, `container` (`array`, `stream`, or none) and `header` (whether one was consumed, how many lines, and its names). `bom_skipped` and `header` can be **unknown**, which is never false and never empty: the vendored reader does not expose them for `TSV`, `TSVWithNames` and `Values`, while `CSV` and the two JSON formats fill both. Unknown is a nil pointer in Go, `None` in Python and Rust, and `null` in TypeScript.
+
+A caller that needs a contract over the body's records declines the body when `unconsumed` is non-empty, and never counts records itself.
 
 ## What happens at the first bad row is a policy
 
@@ -38,10 +43,10 @@ Declare `input_format_allow_errors_ratio` (or `..._num`) at compile and it is th
 <details open><summary><b>Go</b></summary>
 
 ```go
-schema, err := lib.CompileDDL("x UInt8", chtypes.WithCompileSettings(map[string]string{
+schema, err := lib.CompileTable("CREATE TABLE t (x UInt8) ENGINE = Memory", chtypes.WithSettings(map[string]string{
 	"input_format_allow_errors_ratio": "1", // skip any number of bad rows
 }))
-batch, err := schema.Rows(chtypes.JSONEachRow, body, nil)
+batch, err := schema.Rows(chtypes.JSONEachRow, body)
 
 fmt.Println(batch.Outcome, batch.RowsRead, batch.RowsSkipped) // accepted 3 1
 for i, r := range batch.Rows {
@@ -54,7 +59,10 @@ for i, r := range batch.Rows {
 <details><summary><b>Python</b></summary>
 
 ```python
-schema = library.compile_ddl("x UInt8", settings={"input_format_allow_errors_ratio": "1"})
+schema = library.compile_table(
+    "CREATE TABLE t (x UInt8) ENGINE = Memory",
+    settings={"input_format_allow_errors_ratio": "1"},
+)
 batch = schema.rows(Format.JSON_EACH_ROW, body)
 
 print(batch.outcome, batch.rows_read, batch.rows_skipped)   # accepted 3 1
@@ -67,7 +75,7 @@ for i, r in enumerate(batch.rows):
 <details><summary><b>TypeScript</b></summary>
 
 ```ts
-const schema = lib.compileDdl('x UInt8', {
+const schema = lib.compileTable('CREATE TABLE t (x UInt8) ENGINE = Memory', {
   settings: { input_format_allow_errors_ratio: '1' },
 });
 const batch = schema.rows(Format.JSONEachRow, body);
@@ -81,15 +89,16 @@ batch.rows.forEach((r, i) => console.log(i, r.outcome, r.errCode));
 <details><summary><b>Rust</b></summary>
 
 ```rust
-let schema = lib
-.compile("x UInt8")
-.settings([("input_format_allow_errors_ratio", "1")])
-.compile()?;
-let batch = schema.rows(Format::JsonEachRow, body, NO_SETTINGS)?;
+let options = CompileOptions {
+    settings: vec![("input_format_allow_errors_ratio".into(), "1".into())],
+    ..Default::default()
+};
+let schema = lib.compile_table("CREATE TABLE t (x UInt8) ENGINE = Memory", &options)?;
+let batch = schema.rows(Format::JsonEachRow, body, &RowsOptions::default())?;
 
-println!("{:?} {} {}", batch.outcome, batch.rows_read, batch.rows_skipped); // Accepted 3 1
+println!("{} {} {}", batch.outcome, batch.rows_read, batch.rows_skipped); // accepted 3 1
 for (i, r) in batch.rows.iter().enumerate() {
-    println!("{i} {:?} {}", r.outcome, r.err_code);
+    println!("{i} {} {}", r.outcome, r.err_code);
 }
 ```
 
@@ -134,7 +143,7 @@ Measured by a downstream consumer on go/v0.5.2, darwin-arm64, against `26.8.15.1
 - **Control — these do NOT swallow a neighboring record:** `IPv4`, `IPv6`, `Date`, `Date32`, `DateTime`, `DateTime64`, `Decimal`, `Int128`, `UInt256`, `Bool`, `Enum`, `FixedString`.
 - **Cause, inferred:** the text `UUID` reader's fixed 36-byte window, not the bytes it actually consumed, is what error recovery resumes from — and how many later records that window swallows depends on how many of their bytes fall inside it, so a run of short records loses more of them than a run of long ones. The three-record, CSV and six-record counts above are consistent with that budget, not with anything specific to the wire format.
 
-A caller can't tell any of this happened from the per-record answers alone — see [Framing: BOM, whitespace and line ends](#framing-bom-whitespace-and-line-ends) for what a batch does and doesn't expose about the input bytes. If a schema takes untrusted `UUID` input under `allow_errors`, verify the record count independently rather than trusting `rows_read`.
+A caller can't tell any of this happened from the per-record answers alone — see [Framing: BOM, whitespace and line ends](#framing-bom-whitespace-and-line-ends) for `unconsumed` and `framing`, the v1 fields that report what the reader skipped. Whether `unconsumed` names the range a UUID window swallows is `unverified`; the 0.x measurements above predate it. If a schema takes untrusted `UUID` input under `allow_errors`, verify the record count independently rather than trusting `rows_read`.
 
 ### CHECK constraints are batch-level, not per-row
 
@@ -142,21 +151,22 @@ A `CHECK` in the compiled DDL is evaluated, and a violation answers ClickHouse's
 
 The violation's message matches the server's in its code, the constraint's name and the constraint's expression. A real server's message also names its own table (database, table and UUID) and the violating row's column values. This library has no table, so that part of the message differs by design. Match a CHECK violation on the code and the constraint name, never on the whole message text.
 
-> **The CHECK expression itself must return `UInt8`, and a real server passes a row only when that value equals `1` exactly.** Today's library instead admits any non-zero `UInt8` value and any result type, which a real server rejects — a `UInt8` result other than `1` with code 469, a non-`UInt8` result with code 1 — so write `CHECK x = 1`, or another comparison, rather than a bare column. A library fix is in progress for the supported lines; retired lines will not be rebuilt with it, so do not rely on a retired line's build to enforce a CHECK. See [`limitations.md` → A CHECK constraint admits any non-zero or non-UInt8 result a real server refuses](../limitations.md#a-check-constraint-admits-any-non-zero-or-non-uint8-result-a-real-server-refuses).
+> **The CHECK expression itself must return `UInt8`, and a real server passes a row only when that value equals `1` exactly.** 1.0 enforces the same rule on every supported line: a `UInt8` result other than `1` rejects the batch with code 469, and a non-`UInt8` result with code 1, as a real server does. Write `CHECK x = 1`, or another comparison, rather than a bare column.
 
 ### Too many partitions: a batch-shape 252
 
-A schema that declared its partition key (revision 6: `SetPartitionBy` in Go, `set_partition_by` in Python and Rust, `setPartitionBy` in TypeScript) answers which partition each stored row lands in (`partition_id`) and how many partitions the batch spans (`partition_count`). A body that would split into more partitions than the call's `max_partitions_per_insert_block` allows — `100` unless a setting says otherwise, `0` meaning unlimited — is refused the way the server refuses it: the batch `outcome` is `rejected` with ClickHouse's own **code 252**, and the rows stay itemized, exactly the shape a `CHECK` violation has. Nothing in any row is wrong; the batch is. The remedy is to split the body by partition, and grouping an accepted batch's export spans by `partition_id` gives exactly those per-partition bodies.
+A schema whose `CREATE TABLE` declares a `PARTITION BY` answers which partition each stored row lands in (`partition_id` on each row) and how many partitions the batch spans (`partition_count`). There is no separate partition setter in 1.0: the key is part of the one statement you compile ([`reference/bindings-v1.md` §7](../reference/bindings-v1.md#7-what-v0-api-is-deleted-and-why)). A body that would split into more partitions than the call's `max_partitions_per_insert_block` allows — `100` unless a setting says otherwise, `0` meaning unlimited — is refused the way the server refuses it: the batch `outcome` is `rejected` with ClickHouse's own **code 252**, and the rows stay itemized, exactly the shape a `CHECK` violation has. Nothing in any row is wrong; the batch is. The remedy is to split the body by partition, and grouping an accepted batch's export spans by `partition_id` gives exactly those per-partition bodies.
 
-**Branch on code 252, never on the message text.** The message is ClickHouse's own wording and moves between lines; the code is the stable part. And the name a code carries is the loaded build's own, so if you want it for a log line, ask the library rather than writing it down: its error-code table (`lib.ErrorCodes()` in Go, `lib.error_codes()` in Python and Rust, `lib.errorCodes()` in TypeScript) answers the name for 252 on that line ([§Error codes](../reference/bindings.md#error-codes--a-binding-never-carries-clickhouses-code-table-revision-6)).
+**Branch on code 252, never on the message text.** The message is ClickHouse's own wording and moves between lines; the code is the stable part. And the name a code carries is the loaded build's own, so if you want it for a log line, ask the library rather than writing it down: its error-code table (`lib.ErrorCodes()` in Go, `lib.error_codes()` in Python and Rust, `lib.errorCodes()` in TypeScript) answers the name for 252 on that line ([`ErrorCodeTable`](../reference/bindings-v1.md#errorcodetable-from-the-error_code_table-document)).
 
 <details open><summary><b>Go</b></summary>
 
 ```go
-if err := schema.SetPartitionBy("toYYYYMM(ts)"); err != nil {
-	return err // *SchemaError: the server refused the key; *UnsupportedError: a decline
+schema, err := lib.CompileTable("CREATE TABLE t (ts DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(ts) ORDER BY ts")
+if err != nil {
+	return err // *SchemaError: the server refused the statement; *UnsupportedError: a decline
 }
-batch, _ := schema.Rows(chtypes.JSONEachRow, body, nil)
+batch, _ := schema.Rows(chtypes.JSONEachRow, body)
 if batch.Outcome == chtypes.Rejected && batch.ErrCode == 252 {
 	// too many partitions for one INSERT — split the body by RowResult.PartitionID
 }
@@ -167,7 +177,9 @@ if batch.Outcome == chtypes.Rejected && batch.ErrCode == 252 {
 <details><summary><b>Python</b></summary>
 
 ```python
-schema.set_partition_by("toYYYYMM(ts)")
+schema = library.compile_table(
+    "CREATE TABLE t (ts DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(ts) ORDER BY ts"
+)
 batch = schema.rows(Format.JSON_EACH_ROW, body)
 if batch.outcome is Outcome.REJECTED and batch.err_code == 252:
     ...  # too many partitions for one INSERT — split the body by row.partition_id
@@ -178,7 +190,9 @@ if batch.outcome is Outcome.REJECTED and batch.err_code == 252:
 <details><summary><b>TypeScript</b></summary>
 
 ```ts
-schema.setPartitionBy('toYYYYMM(ts)');
+const schema = lib.compileTable(
+  'CREATE TABLE t (ts DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(ts) ORDER BY ts',
+);
 const batch = schema.rows(Format.JSONEachRow, body);
 if (batch.outcome === Outcome.Rejected && batch.errCode === 252) {
   // too many partitions for one INSERT — split the body by row.partitionId
@@ -190,8 +204,11 @@ if (batch.outcome === Outcome.Rejected && batch.errCode === 252) {
 <details><summary><b>Rust</b></summary>
 
 ```rust
-schema.set_partition_by("toYYYYMM(ts)")?;
-let batch = schema.rows(Format::JsonEachRow, body, NO_SETTINGS)?;
+let schema = lib.compile_table(
+    "CREATE TABLE t (ts DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(ts) ORDER BY ts",
+    &CompileOptions::default(),
+)?;
+let batch = schema.rows(Format::JsonEachRow, body, &RowsOptions::default())?;
 if batch.outcome == Outcome::Rejected && batch.err_code == 252 {
     // too many partitions for one INSERT — split the body by row.partition_id
 }
@@ -209,11 +226,11 @@ If you validate in one process and INSERT from another, the settings chtypes see
 
 Validate with it at the gate, forward only the accepted rows, and the worker's INSERT needs no error allowance at all. Any row the server would have skipped has already been reported to you, by name, with the reason.
 
-## `engineRows` is the stored truth when it is present
+## `engine_rows` is the stored truth when it is present
 
 `rows` describes the parse. The storage layer can do more: the MergeTree insert-time merge collapses rows under a ReplacingMergeTree or a CollapsingMergeTree, and a table-level TTL can drop them outright.
 
-When the result carries `engineRows` (`engine_rows` in Python and Rust), **it, not `rows`, is what the table would end up holding.** The batch-level `transformed` folds in the storage layer's own verdicts alongside it — `ttl_expired` and `ttl_column_expired` are batch facts, not parse facts.
+When the result carries `engine_rows` (`EngineRows` in Go, `engineRows` in TypeScript), **it, not `rows`, is what the table would end up holding.** The batch-level `transformed` folds in the storage layer's own verdicts alongside it — `ttl_expired` and `ttl_column_expired` are batch facts, not parse facts.
 
 ## Exporting the accepted rows as wire bytes
 
@@ -222,7 +239,7 @@ Sometimes the point of validating a batch is to forward it. The export channel h
 <details open><summary><b>Go</b></summary>
 
 ```go
-batch, err := schema.RowsExport(chtypes.JSONEachRow, body, nil, chtypes.JSONCompactEachRow)
+batch, err := schema.Rows(chtypes.JSONEachRow, body, chtypes.WithExport(chtypes.JSONCompactEachRow))
 // batch.Payload holds the wire bytes; batch.Spans[i] addresses row i inside it
 ```
 
@@ -240,7 +257,7 @@ batch = schema.rows(Format.JSON_EACH_ROW, body, export=Format.JSON_COMPACT_EACH_
 <details><summary><b>TypeScript</b></summary>
 
 ```ts
-const batch = schema.rows(Format.JSONEachRow, body, undefined, {
+const batch = schema.rows(Format.JSONEachRow, body, {
   exportFormat: Format.JSONCompactEachRow,
 });
 // batch.payload, batch.spans, batch.exportDeclined
@@ -251,26 +268,24 @@ const batch = schema.rows(Format.JSONEachRow, body, undefined, {
 <details><summary><b>Rust</b></summary>
 
 ```rust
-let batch = schema.rows_export(
-    Format::JsonEachRow, body, NO_SETTINGS,
-    Some(Format::JsonCompactEachRow), DocFlags::NONE,
-)?;
+let options = RowsOptions { export: Some(Format::JsonCompactEachRow), ..Default::default() };
+let batch = schema.rows(Format::JsonEachRow, body, &options)?;
 // batch.payload, batch.spans, batch.export_declined
 ```
 
 </details>
 
-`JSONCompactEachRow` is the one format this ABI revision serializes; asking for another answers `unsupported` for the whole call rather than silently emitting nothing. `spans` is index-aligned with `rows` and is `{0, 0}` for any row that was not accepted. Slicing a span out of the payload **is** that row's line, its trailing newline included, and concatenating the non-zero spans reproduces the payload exactly.
+Which formats a build can export is in its own `build_info`: `capabilities.export_formats` lists ClickHouse's format names. Read it rather than probing by calling. `rows_export` and its spellings are gone in 1.0; export is the `export` option of the one `rows` call. Each span is a row's place in `payload` as an offset and a length (`off`, `len`). Slicing a span out of the payload **is** that row's line, its trailing newline included, and concatenating the spans reproduces the payload exactly (`measured` on 0.x; unverified on 1.0).
 
 Within a row, `JSONCompactEachRow` separates fields with a comma **and a space** — `", "`, not a bare comma — so anything comparing exported bytes literally, or sizing a buffer from a field count, needs the exact separator.
 
 Three payload states, and they are distinct: absent means no export was requested, or it was declined, with the reason always in `export_declined`; present-but-empty means the export ran and emitted nothing. The bytes are copied out of the C buffer and freed before the call returns, so no ownership crosses the boundary.
 
-`export_declined` is populated for **every** non-accepted batch that requested an export, including a batch with zero rows — a `CSVWithNames` body naming an unknown header column under `input_format_skip_unknown_fields=0`, say, which rejects before a single row is admitted. Before the artifact producer's relink served at `chtypes_build` 1790845279, such a batch left `export_declined` empty even though bytes were withheld; a caller could not tell "no export requested" from "an export was declined but the library did not say why." The relink closed that gap, by design: a non-accepted batch that asked for export always names the reason, rows or no rows.
+`export_declined` is populated for **every** non-accepted batch that requested an export, including a batch with zero rows — a `CSVWithNames` body naming an unknown header column under `input_format_skip_unknown_fields=0`, say, which rejects before a single row is admitted. A non-accepted batch that asked for export always names the reason, rows or no rows. In 0.x, builds from before the artifact producer's relink at `chtypes_build` 1790845279 left it empty there, and v1 artifacts are later builds (`inferred`).
 
-> **This applies only to builds at `chtypes_build` 1790845279 or later, on the supported lines (`26.3`, `26.7`, `26.8`, `26.9` — [`support.md`](../support.md)).** A served, unsupported (retired) line never gets a new build or a new ABI revision ([`support.md` → Served, unsupported ClickHouse lines](../support.md#served-unsupported-clickhouse-lines)), so it keeps the pre-relink behavior permanently — `26.6`'s newest build, `1790767905`, predates this relink and was never republished.
+**An export is also how you insert a DEFAULT the library drew.** If a row carries a `default_generated` column, insert the export's `payload`, never the original body: [`reference/bindings-v1.md` §5, Generated defaults](../reference/bindings-v1.md#generated-defaults-insert-the-librarys-output-not-your-input).
 
-**Document flags** thin the _description_ without ever changing the _verdict_. Passing an export format defaults them to lean — verdicts only — because the usual reason to export is to forward bytes rather than to read a report. Ask for the values, transforms or defaults back explicitly if you want them — `DocValues` / `DocTransforms` / `DocDefaults` in Go, `DOC_VALUES` / `DOC_TRANSFORMS` / `DOC_DEFAULTS` in Python and TypeScript, `DocFlags::VALUES` / `DocFlags::TRANSFORMS` / `DocFlags::DEFAULTS` in Rust. A plain `rows` call is the all-flags spelling and stays byte-identical to what it always returned.
+**Document flags** thin the _description_ without ever changing the _verdict_. In 1.0 an absent flag set means **all** groups, with or without an export: the 0.x rule that an export defaulted to lean is gone. To get the lean, verdicts-only shape when you only want to forward bytes, ask for it: `WithDocFlags` in Go, `doc_flags=` in Python, `docFlags` in TypeScript, `doc_flags` in Rust, built from `DocValues` / `DocTransforms` / `DocDefaults` in Go, `DocFlags.VALUES` / `.TRANSFORMS` / `.DEFAULTS` in Python and TypeScript, `DocFlags::VALUES` / `TRANSFORMS` / `DEFAULTS` in Rust, or `DocAll` for everything.
 
 Attaching a compiled filter to this same call narrows the export further, to the rows the filter admits, from the same one parse: [`filters.md` → Exporting only the rows a filter admits](filters.md#exporting-only-the-rows-a-filter-admits).
 
