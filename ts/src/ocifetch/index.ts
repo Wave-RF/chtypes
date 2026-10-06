@@ -8,8 +8,8 @@
  */
 
 export { keyIdOfRawKey } from './dsse.js';
-export { cacheRoot } from './layout.js';
-export { ensure, fetchSigned, listInstalled, listTags, resolveInstalled, verifyInstalled } from './ensure.js';
+export { cacheRoot, isFilesystemError } from './layout.js';
+export { ensure, fetchSigned, listInstalled, listTags, resolveInstalled, satisfiesRequest, verifyInstalled } from './ensure.js';
 export type { FetchSignedResult } from './ensure.js';
 export {
   ArtifactCorruptError,

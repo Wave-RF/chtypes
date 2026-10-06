@@ -207,6 +207,19 @@ async function verifyPreseededEntries(
   }
 }
 
+/**
+ * Whether a library whose own `clickhouse_version` is `version` answers
+ * `request`: equal to an exact (four-part) request, or within a floating
+ * one. A request that is not a version spelling (an arbitrary tag) names no
+ * version, so it constrains nothing and this returns true. The registry
+ * uses it to refuse a library outside its request, whatever the cache did
+ * (guide §9; public issue #481).
+ */
+export function satisfiesRequest(request: string, version: string): boolean {
+  if (!new RegExp(SPELLING_REGEX).test(request)) return true;
+  return withinRequest(version, request);
+}
+
 function withinRequest(actualVersion: string, requestedSpelling: string): boolean {
   const actual = actualVersion.split('.');
   const requested = requestedSpelling.split('.');
@@ -227,29 +240,38 @@ function compareVersionThenBuild(a: ArtifactPredicate, b: ArtifactPredicate): nu
 }
 
 /**
- * `monotonic-warning`: installing a version/build **lower** than one
- * already installed for the same platform is not an error (requests float
- * to a specific registry answer, and a mirror or a rollback can legitimately
- * offer an older build) — but it is surprising enough to warn about loudly,
- * once, naming nothing more specific than that it happened.
+ * `monotonic-warning`: the registry offering a version/build **lower** than
+ * one already installed WITHIN THE REQUEST is not an error (a mirror or a
+ * rollback can legitimately offer an older build), but the newer install is
+ * kept, with a warning, rather than replaced by an older one it was not
+ * asked to roll back to. Returns the newest such install.
+ *
+ * Scoped to the request (guide §9; public issue #481): an install of
+ * another line never answers a line request, and an exact request is
+ * answered only by that exact version, so for it only a newer BUILD of the
+ * same version counts. A request that is not a version spelling (an
+ * arbitrary tag) names no range, so nothing is kept for it.
  */
 async function checkMonotonic(
   root: string,
   platform: PlatformKey,
+  request: string,
   incoming: ArtifactPredicate,
 ): Promise<{ readonly warning: string; readonly existing: VerifiedRecord; readonly dir: string } | undefined> {
-  const info = platformInfo(platform);
+  if (!new RegExp(SPELLING_REGEX).test(request)) return undefined;
+  let best: { record: VerifiedRecord; dir: string } | undefined;
   for (const { dir, record } of await listVerified(root)) {
-    if (record.predicate.os !== info.os || record.predicate.arch !== info.architecture) continue;
-    if (compareVersionThenBuild(incoming, record.predicate) < 0) {
-      return {
-        warning: 'chtypes: the registry offered a version/build older than one already installed for this platform (monotonic warning); keeping the newer install',
-        existing: record,
-        dir,
-      };
-    }
+    if (record.platform !== platform) continue;
+    if (!withinRequest(record.version, request)) continue;
+    if (compareVersionThenBuild(incoming, record.predicate) >= 0) continue;
+    if (best === undefined || compareVersionThenBuild(best.record.predicate, record.predicate) < 0) best = { record, dir };
   }
-  return undefined;
+  if (best === undefined) return undefined;
+  return {
+    warning: `chtypes: the registry offered ${incoming.clickhouse_version} build ${incoming.build}, older than ${best.record.version} build ${best.record.build} already installed within ${request} (monotonic warning); keeping the newer install`,
+    existing: best.record,
+    dir: best.dir,
+  };
 }
 
 // ------------------------------------------------------------------ listInstalled
@@ -355,7 +377,7 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
       signedBy = trust.signedBy;
     }
 
-    const monotonic = await checkMonotonic(root, platform, predicate);
+    const monotonic = await checkMonotonic(root, platform, request, predicate);
     if (monotonic !== undefined) {
       // The registry is offering something OLDER than what is already
       // installed for this platform (`monotonic-warning`): warn loudly, but
@@ -369,6 +391,7 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
     } else {
       const staging = await freshStagingDir(root);
       const tempLayerPath = path.join(root, `.tmp-layer-${process.pid}-${randomBytes(6).toString('hex')}`);
+      let lostRace = false;
       try {
         const entries = await fetchVerifyAndUnpackLayer(
           [resolveResult.repositoryRoot],
@@ -397,7 +420,8 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
           signedBy: trust === undefined ? null : signedBy,
         });
         await writeVerifiedRecord(staging, newRecord);
-        await commitStaging(staging, finalDir);
+        // True when another process installed this build first: its entry is kept.
+        lostRace = await commitStaging(staging, finalDir);
         record = newRecord;
       } catch (err) {
         await removeStaging(staging);
@@ -412,7 +436,7 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
         { ...manifestDescriptor, size: resolveResult.manifest.bytes.length, annotations: { [`${CACHE_ANNOTATION_PREFIX}request`]: request } },
         options.beforeIndexRename,
       );
-      alreadyInstalled = false;
+      alreadyInstalled = lostRace;
     }
   }
 
@@ -554,8 +578,8 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
       signedBy: verified === undefined ? null : signedBy,
     });
     await writeVerifiedRecord(staging, record);
-    await commitStaging(staging, finalDir);
-    return resolvedFromRecord(record, platform, request, finalDir, bases[0]!, false, warnings);
+    const lostRace = await commitStaging(staging, finalDir);
+    return resolvedFromRecord(record, platform, request, finalDir, bases[0]!, lostRace, warnings);
   } catch (err) {
     await removeStaging(staging);
     throw err;

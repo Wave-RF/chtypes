@@ -31,6 +31,7 @@ from ._ocifetch import _constants as _fetch_constants
 from ._ocifetch._dsse import TrustedKey
 from ._ocifetch._ensure import detect_host_platform
 from ._ocifetch._errors import FetchError
+from ._ocifetch._oci import version_within_request
 from .library import Library, open_image
 
 __all__ = ["FetchOptions", "Registry", "Resolved", "TrustedKey"]
@@ -208,4 +209,32 @@ class Registry:
             raise _wrap(exc) from exc
         # The adapter: the fetch layer's record, passed on exactly as it came.
         # The predicate is the statement the signature covered, never re-encoded.
-        return open_image(str(Path(resolved.library_path)), resolved.predicate, resolved)
+        library = open_image(str(Path(resolved.library_path)), resolved.predicate, resolved)
+        _check_within_request(library, request)
+        return library
+
+
+def _check_within_request(library: Library, request: str) -> None:
+    """The load-time assertion (docs/guides/fetch-v1.md section 9; public
+    issue #481): the library opened for `request` must report, in its own
+    build_info, a clickhouse_version within that request (equal to an exact
+    request, within a line one), whatever the cache answered. Otherwise the
+    open fails as `ArtifactCorruptError` with reason
+    `build_info_mismatch:clickhouse_version`, the code section 4 gives a
+    signed version outside the request. A request that is not a version
+    spelling names no version and is not checked. The image stays loaded for
+    the requests it does answer."""
+    try:
+        ok = version_within_request(library.version, request)
+    except ValueError:
+        ok = False
+    if not ok:
+        raise errors.ArtifactCorruptError(
+            f"chtypes: {library.path} refused: build_info_mismatch:clickhouse_version "
+            f"(want a build within {request!r}, got {library.version!r}): the library "
+            f"opened for ClickHouse {request} reports another version",
+            reason="build_info_mismatch:clickhouse_version",
+            path=str(library.path),
+            want=request,
+            got=library.version,
+        )

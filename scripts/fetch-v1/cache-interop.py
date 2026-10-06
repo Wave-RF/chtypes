@@ -440,7 +440,9 @@ def concurrent_round(h: Harness, members: list[str], cache: Path) -> tuple[int, 
     entries = [p for p in sorted((cache / "unpacked" / "sha256").glob("*")) if HEX64.match(p.name)]
     for i, (binding, proc) in enumerate(results):
         if proc.returncode != 0:
-            failures.append(f"#{i + 1} {binding} exit {proc.returncode}: {proc.stderr.strip()[-160:]}")
+            # The first line names the error; a raw runtime error's stack follows it.
+            first = next((ln.strip() for ln in proc.stderr.splitlines() if ln.strip()), "")
+            failures.append(f"#{i + 1} {binding} exit {proc.returncode}: {first[:240]}")
             continue
         entry = Path(named_dir(proc))
         rec = read_record(entry)

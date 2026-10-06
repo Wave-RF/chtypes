@@ -252,10 +252,11 @@ def write_verified_install(
     """Install an already-unpacked library directory plus its
     `verified.json`, atomically: the caller unpacks into a sibling temp
     directory first (`_unpack.unpack_tar_zst` does), the canonical record is
-    written into it, and the whole directory is renamed into place. A
-    destination that already carries an acceptable record is left alone. One
-    that does not (foreign, torn or older-format) was just re-verified by the
-    caller from the cache's own blobs, so it is moved aside and replaced."""
+    written into it, and the whole directory is renamed into place
+    (`_install_dir`). A destination that already carries an acceptable
+    record is left alone. One that does not (foreign, torn or older-format)
+    was just re-verified by the caller from the cache's own blobs, so it is
+    moved aside and replaced."""
     hex_digest = manifest_digest.split(":", 1)[1]
     dest = unpacked_dir_for(root, hex_digest)
     if read_verified_record(dest) is not None:
@@ -264,34 +265,71 @@ def write_verified_install(
         return dest
     if unpacked_tmp_dir is None:
         raise ValueError("write_verified_install: nothing to install")
-    dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(unpacked_tmp_dir)
-    _atomic_write(
-        tmp / C.CACHE_VERIFIED_RECORD, json.dumps(record.to_json(), sort_keys=True).encode("utf-8")
-    )
-    stale: Path | None = None
-    if dest.exists() or dest.is_symlink():
-        stale = Path(tempfile.mkdtemp(dir=str(dest.parent), prefix=".stale-"))
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(
+            tmp / C.CACHE_VERIFIED_RECORD,
+            json.dumps(record.to_json(), sort_keys=True).encode("utf-8"),
+        )
+        _install_dir(tmp, dest)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return dest
+
+
+# _install_dir's bounded retries: each follows another process changing the
+# destination under it, so a handful is plenty.
+_INSTALL_ATTEMPTS = 8
+
+
+def _install_dir(src: Path, dest: Path) -> bool:
+    """Move `src`, a complete directory carrying its `verified.json`, to
+    `dest` by rename, and never remove an entry another process may be using
+    (public issue #482). Several processes of any binding may install the
+    same build into one cache at once, and each must end up with a usable
+    `dest`; Go, TypeScript and Rust follow the same rule:
+
+    - The rename comes first. It fails while `dest` exists (POSIX refuses to
+      rename a directory onto a non-empty one), so the first installer wins
+      and every later one finds `dest` in place.
+    - A `dest` that holds an acceptable record is kept: the same content is
+      already installed.
+    - Only a `dest` WITHOUT an acceptable record (foreign, torn or older
+      format) is moved aside, into a fresh `.stale-*` directory beside it,
+      and replaced. If what was moved turns out to carry an acceptable record
+      (another installer's rename landed in between), it is put back.
+
+    Returns True when another process's install is the one in place. The
+    caller removes `src` if it is still there."""
+    last: OSError | None = None
+    for _ in range(_INSTALL_ATTEMPTS):
         try:
-            os.replace(dest, stale / "old")
+            os.rename(src, dest)
+            return False
+        except OSError as exc:
+            last = exc
+        if read_verified_record(dest) is not None:
+            return True
+        if not (dest.exists() or dest.is_symlink()):
+            continue  # what stood there went away: try the rename again
+        stale = Path(tempfile.mkdtemp(dir=str(dest.parent), prefix=".stale-"))
+        aside = stale / "old"
+        try:
+            os.rename(dest, aside)
         except OSError:
             shutil.rmtree(stale, ignore_errors=True)
-            if read_verified_record(dest) is not None:
-                shutil.rmtree(tmp, ignore_errors=True)
-                return dest
-            raise
-    try:
-        os.replace(tmp, dest)
-    except OSError:
-        # Another process won between our move and our rename.
-        if read_verified_record(dest) is not None:
-            shutil.rmtree(tmp, ignore_errors=True)
-        else:
-            raise
-    finally:
-        if stale is not None:
-            shutil.rmtree(stale, ignore_errors=True)
-    return dest
+            continue  # another process moved or replaced it: look again
+        if read_verified_record(aside) is not None:
+            try:
+                os.rename(aside, dest)
+                shutil.rmtree(stale, ignore_errors=True)
+                return True
+            except OSError:
+                pass  # re-occupied meanwhile: look again
+        shutil.rmtree(stale, ignore_errors=True)
+    assert last is not None
+    raise last
 
 
 def read_verified_record(dest_dir: Path) -> VerifiedRecord | None:

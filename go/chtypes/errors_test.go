@@ -120,3 +120,29 @@ func TestEverySharedCodeHasASentinel(t *testing.T) {
 		}
 	}
 }
+
+// TestWithinRequestAssertion pins the load-time assertion (public issue #481):
+// a library opened for a request must report, in its own build_info, a
+// clickhouse_version within that request, or the open fails as
+// CHTYPES_ARTIFACT_CORRUPT with reason build_info_mismatch:clickhouse_version.
+func TestWithinRequestAssertion(t *testing.T) {
+	l := &Library{Version: "26.8.5.1", Path: "/cache/unpacked/sha256/x/libchtypes.so"}
+	for _, ok := range []string{"26.8", "26.8.5", "26.8.5.1", "a-literal-tag"} {
+		if err := checkWithinRequest(l, ok, "linux-arm64"); err != nil {
+			t.Errorf("request %q answered by 26.8.5.1: want no error, got %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"26.3", "26.3.4.1", "26.8.5.2", "26.80", "26.8.15"} {
+		err := checkWithinRequest(l, bad, "linux-arm64")
+		var ae *ArtifactError
+		if !errors.As(err, &ae) || !errors.Is(err, ErrArtifactCorrupt) {
+			t.Fatalf("request %q answered by 26.8.5.1: want an *ArtifactError matching ErrArtifactCorrupt, got %T %v", bad, err, err)
+		}
+		if ae.Reason != "build_info_mismatch:clickhouse_version" || ae.Want != bad || ae.Got != "26.8.5.1" || ae.Request != bad {
+			t.Errorf("request %q: refusal fields %+v", bad, ae)
+		}
+		if !strings.Contains(ae.Error(), "CHTYPES_ARTIFACT_CORRUPT") {
+			t.Errorf("request %q: the message names no code: %s", bad, ae.Error())
+		}
+	}
+}

@@ -166,3 +166,26 @@ def test_installed_lists_the_verified_installs_cache_only(tree, tmp_path) -> Non
     )
     shutil.rmtree(tmp_path / "route")  # the network is gone; the listing never needed it
     assert len(Registry(fetch=fetch_options(tree, tmp_path)).installed()) == 1
+
+
+def test_a_library_outside_its_request_is_refused() -> None:
+    """The load-time assertion (public issue #481): a library whose own
+    build_info version is not within the request fails the open as
+    ArtifactCorruptError, reason build_info_mismatch:clickhouse_version."""
+    from types import SimpleNamespace
+
+    from chtypes import errors
+    from chtypes.registry import _check_within_request
+
+    library = SimpleNamespace(version="26.8.5.1", path="/cache/unpacked/sha256/x/libchtypes.so")
+    for request in ("26.8", "26.8.5", "26.8.5.1", "a-literal-tag"):
+        _check_within_request(library, request)  # type: ignore[arg-type]
+    for request in ("26.3", "26.3.4.1", "26.8.5.2", "26.80", "26.8.15"):
+        try:
+            _check_within_request(library, request)  # type: ignore[arg-type]
+        except errors.ArtifactCorruptError as exc:
+            assert exc.code == "CHTYPES_ARTIFACT_CORRUPT"
+            assert exc.reason == "build_info_mismatch:clickhouse_version"
+            assert (exc.want, exc.got) == (request, "26.8.5.1")
+        else:
+            raise AssertionError(f"request {request!r} answered by 26.8.5.1 must be refused")
