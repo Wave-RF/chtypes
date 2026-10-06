@@ -14,10 +14,14 @@
 //!    called, the first open records the empty setup: the empty zone, which
 //!    the library reads as `UTC`, and no defaults. Once an image completes
 //!    step 7 (`chs_initialize`, then `chs_set_defaults` when there are
-//!    defaults), [`setup`] succeeds only with exactly the setup in effect. If
-//!    step 7 fails before any image has completed it, the record is cleared,
-//!    so a corrected [`setup`] is accepted and the next open runs step 7 with
-//!    it. Call [`setup`] first.
+//!    defaults), [`setup`] succeeds only with exactly the setup in effect.
+//!    Until then, an open that attempted a load and failed, whatever failed
+//!    (the fetch, the signature, an incompatible artifact, a missing symbol
+//!    or step 7), keeps the record but makes it replaceable: a retry with no
+//!    new [`setup`] runs under the recorded setup, and a different [`setup`]
+//!    replaces it. A refused version spelling or an unverified open without
+//!    the caller's opt-in fails before any load is attempted, and unlocks
+//!    nothing. Call [`setup`] first.
 //! 3. There is no public setter for defaults during traffic.
 
 use std::sync::Mutex;
@@ -46,18 +50,30 @@ pub(crate) struct Recorded {
     pub(crate) defaults: Option<Vec<u8>>,
 }
 
-/// The setup guard: the record, and whether any image has completed load step
-/// 7 under it. Every open holds the image list's lock from its commit to its
-/// settle (`crate::library::open_image`), so the record a load ran under is the
-/// one it settles.
+/// The setup guard: the record, whether any image has completed load step 7
+/// under it, and whether a failed open has made it replaceable. An open
+/// commits (which locks the record again), loads and latches under the image
+/// list's lock (`crate::library::open_image`), and a failed open unlocks under
+/// it too (`crate::library::settle_failed_open`), so an unlock never lands
+/// between another open's commit and its latch.
 static STATE: Mutex<State> = Mutex::new(State {
     recorded: None,
     latched: false,
+    replaceable: false,
+    generation: 0,
 });
 
 struct State {
     recorded: Option<Recorded>,
     latched: bool,
+    /// An open that attempted a load failed since the record was last set or
+    /// committed, and nothing has latched: a different [`setup`] replaces the
+    /// record instead of being refused.
+    replaceable: bool,
+    /// Counts the records [`setup`] made or replaced. An open reads it when its
+    /// attempt begins, and unlocks the record on failure only if it is
+    /// unchanged: a failed open never unlocks a setup recorded after it began.
+    generation: u64,
 }
 
 fn recorded_of(options: &SetupOptions) -> Result<Recorded> {
@@ -101,23 +117,30 @@ pub fn setup(options: SetupOptions) -> Result<()> {
     let wanted = recorded_of(&options)?;
     let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
     match &state.recorded {
-        None => {
-            state.recorded = Some(wanted);
-            Ok(())
+        Some(current) if *current == wanted => return Ok(()),
+        Some(current) if state.latched || !state.replaceable => {
+            return Err(Error::usage(format!(
+                "setup is process-wide and already in effect with {}; refusing {}",
+                describe(current),
+                describe(&wanted)
+            )));
         }
-        Some(current) if *current == wanted => Ok(()),
-        Some(current) => Err(Error::usage(format!(
-            "setup is process-wide and already in effect with {}; refusing {}",
-            describe(current),
-            describe(&wanted)
-        ))),
+        _ => {}
     }
+    // A first record, or a replacement after a failed open: either way the new
+    // record is locked until the next failed open.
+    state.recorded = Some(wanted);
+    state.replaceable = false;
+    state.generation += 1;
+    Ok(())
 }
 
 /// An open commits the setup in effect before step 7, recording the empty one
-/// when [`setup`] was never called.
+/// when [`setup`] was never called. The load that follows claims the record, so
+/// it is locked again: no [`setup`] replaces it under a load.
 pub(crate) fn commit() -> Recorded {
     let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    state.replaceable = false;
     state
         .recorded
         .get_or_insert_with(|| Recorded {
@@ -127,18 +150,33 @@ pub(crate) fn commit() -> Recorded {
         .clone()
 }
 
-/// How load step 7 ended, under the setup guard. A success latches the setup
-/// in effect. A failure before any image has completed step 7 clears the
-/// record, so [`setup`] accepts a corrected setup; once the setup has latched,
-/// a failure changes nothing (the library's own process-once rule answers a
-/// different zone on an image that already has one).
-pub(crate) fn settle(completed: bool) {
+/// Read when an open's attempt begins, for [`unlock_after_failed_open`].
+pub(crate) fn generation() -> u64 {
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).generation
+}
+
+/// An image completed load step 7: from then on the setup in effect stands.
+/// Called under the image list's lock, right after the load.
+pub(crate) fn latch() {
     let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
-    if completed {
-        state.latched = true;
-    } else if !state.latched {
-        state.recorded = None;
+    state.latched = true;
+    state.replaceable = false;
+}
+
+/// Settle an open that attempted a load and failed, whatever failed. While no
+/// image has completed step 7 it unlocks the record: the record stays, so a
+/// retry runs under it, and a different [`setup`] may replace it. It leaves
+/// alone a setup recorded or replaced after the open began (`began` is
+/// [`generation`] then), and once the setup has latched it changes nothing: the
+/// library's own process-once rule answers a different zone on an image that
+/// already has one. Called only through `crate::library::settle_failed_open`,
+/// which holds the image list's lock.
+pub(crate) fn unlock_after_failed_open(began: u64) {
+    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    if state.latched || state.recorded.is_none() || state.generation != began {
+        return;
     }
+    state.replaceable = true;
 }
 
 #[cfg(test)]

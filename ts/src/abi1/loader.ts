@@ -67,8 +67,6 @@ export interface ImageSetup {
   readonly timezone?: string;
   /** Seeded once with `chs_set_defaults` when there are any. */
   readonly defaults?: Readonly<Record<string, string>>;
-  /** Told how step 7 ended, when given: the public layer's setup guard latches on success and clears its record on a failure before any image has completed step 7 (`../setup.ts`). */
-  readonly settle?: (completed: boolean) => void;
 }
 
 /** The loader's own input, decoupled from the fetch layer's `Resolved` type: the adapter in `../registry.ts` joins them and passes the predicate verbatim. */
@@ -260,19 +258,9 @@ export function openAbi1(input: LoadInput): LoadedImage {
 
 /**
  * Step 7: `chs_initialize(zone)`, then `chs_set_defaults` when there are defaults. A failure is the call's own error, mapped by the status table; the zone asked for is named in the message either way.
- * `setup.settle`, when given, is told how step 7 ended. The caller caches the image only after this returns, so a failure is never remembered and the next open runs step 7 again.
+ * The caller caches the image only after this returns, so a failure is never remembered and the next open runs every step again; the public layer settles the setup with the open's outcome (`../setup.ts`).
  */
 function initializeImage(image: LoadedImage, setup: ImageSetup): void {
-  try {
-    runStep7(image, setup);
-  } catch (err) {
-    setup.settle?.(false);
-    throw err;
-  }
-  setup.settle?.(true);
-}
-
-function runStep7(image: LoadedImage, setup: ImageSetup): void {
   const timezone = setup.timezone ?? '';
   try {
     image.calls.initialize(Buffer.from(timezone, 'utf8'));
@@ -295,6 +283,13 @@ function runStep7(image: LoadedImage, setup: ImageSetup): void {
 
 const UNVERIFIED_ENV = 'CHTYPES_ALLOW_UNVERIFIED_LIBRARY';
 
+/** `openUnverified`'s own gate, alone: a `UsageError` unless BOTH `allow` is true AND `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1` is set. The public layer asks it before an open is attempted, so the caller's misuse is told apart from a failed load. */
+export function checkUnverifiedAllowed(path: string, allow: boolean): void {
+  if (!allow || process.env[UNVERIFIED_ENV] !== '1') {
+    throw usageError(`opening ${path} unverified requires BOTH allow: true and ${UNVERIFIED_ENV}=1`);
+  }
+}
+
 /**
  * Load `path` with NO predicate: skips step 1 (nothing to check a floor
  * against) and step 5 (nothing to cross-check), still runs 2, 3, 4, 6 and 7.
@@ -304,9 +299,7 @@ const UNVERIFIED_ENV = 'CHTYPES_ALLOW_UNVERIFIED_LIBRARY';
  * only caller.
  */
 export function openUnverified(path: string, options: { readonly allow: boolean } & ImageSetup): LoadedImage {
-  if (!options.allow || process.env[UNVERIFIED_ENV] !== '1') {
-    throw usageError(`opening ${path} unverified requires BOTH allow: true and ${UNVERIFIED_ENV}=1`);
-  }
+  checkUnverifiedAllowed(path, options.allow);
   warnUnverifiedOnce(path);
 
   const key = resolveImageKey(path);

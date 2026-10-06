@@ -57,8 +57,9 @@ def open_image(path: str, predicate: object, resolved: object | None) -> Library
     """Open (or find) the image at `path`, verified against `predicate`.
 
     A new image runs loader steps 1 to 7 once, under the setup in effect, and
-    tells the setup guard how step 7 ended (`_setup.settle`). A failed load is
-    never cached, so the next open of the same image runs step 7 again. An
+    latches the setup when step 7 completes (`_setup.latch`). A failed load is
+    never cached, so the next open of the same image runs every step again; the
+    caller settles a failed attempt with `_setup.open_failed`. An
     image already open is still checked against this signed statement (steps 1,
     4 and 5): a mismatch refuses this request and leaves the image open for the
     requests it did match.
@@ -75,8 +76,8 @@ def open_image(path: str, predicate: object, resolved: object | None) -> Library
             predicate,  # type: ignore[arg-type]
             timezone=state.zone_bytes(),
             defaults=state.defaults_json(),
-            settle=_setup.settle,
         )
+        _setup.latch()
         library = Library(load, resolved)
         _IMAGES[key] = library
         return library
@@ -88,24 +89,32 @@ def open_unverified(path: str | os.PathLike[str], *, allow: bool = False) -> Lib
     `allow` is passed AND `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1` is set, warns once
     per path, and skips loader steps 1 and 5. It runs step 7 under the process
     setup like any open. It is not reachable through a registry, and its
-    `Library` has no `resolved`."""
+    `Library` has no `resolved`. Without both opt-ins it is misuse, refused
+    before anything is attempted, and unlocks nothing; like any open, a failed
+    attempt unlocks the setup record while no image has completed step 7
+    (`_setup.open_failed`)."""
     spelled = os.fspath(path)
     _loader.check_unverified_allowed(spelled, allow)
-    with _setup.LOCK:
-        state = _setup.effective()
-        existing = _IMAGES.get(_image_key(spelled))
-        if existing is not None:
-            return existing
-        load = _loader.open_unverified(
-            spelled,
-            allow=allow,
-            timezone=state.zone_bytes(),
-            defaults=state.defaults_json(),
-            settle=_setup.settle,
-        )
-        library = Library(load, None)
-        _IMAGES[_image_key(spelled)] = library
-        return library
+    began = _setup.generation()
+    try:
+        with _setup.LOCK:
+            state = _setup.effective()
+            existing = _IMAGES.get(_image_key(spelled))
+            if existing is not None:
+                return existing
+            load = _loader.open_unverified(
+                spelled,
+                allow=allow,
+                timezone=state.zone_bytes(),
+                defaults=state.defaults_json(),
+            )
+            _setup.latch()
+            library = Library(load, None)
+            _IMAGES[_image_key(spelled)] = library
+            return library
+    except Exception:
+        _setup.open_failed(began)
+        raise
 
 
 @contextlib.contextmanager

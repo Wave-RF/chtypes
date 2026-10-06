@@ -3,10 +3,15 @@
  * `setup` (`docs/reference/bindings-v1.md` §2, §3 and §6). Pure: no library.
  */
 
+import { mkdtempSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { UsageError } from '../src/abi1/errors.js';
+import { ArtifactMissingError } from '../src/ocifetch/errors.js';
+import { Registry } from '../src/registry.js';
 import { bytesIn, encodeColumns, encodeParams, encodeSettings } from '../src/settings.js';
-import { commitSetup, resetSetupForTests, setup } from '../src/setup.js';
+import { commitSetup, latchSetup, resetSetupForTests, settleFailedOpen, setup, setupGeneration } from '../src/setup.js';
 
 describe('settings values are strings, and only strings', () => {
   it('serializes a map of strings with the stock encoder, verbatim', () => {
@@ -91,5 +96,38 @@ describe('setup: the process-once rule', () => {
 
   it('refuses a non-string default as the language type error', () => {
     expect(() => setup({ defaults: { a: 1 as unknown as string } })).toThrow(TypeError);
+  });
+});
+
+describe('setup: a failed open before the first step 7 unlocks the record', () => {
+  beforeEach(() => resetSetupForTests());
+
+  it('a refused spelling unlocks nothing; a failed resolve (nothing installed, autofetch off) keeps the record and lets a different setup replace it', async () => {
+    setup({ timezone: 'Asia/Tokyo' });
+    const cacheDir = mkdtempSync(path.join(os.tmpdir(), 'setup-latch-empty-cache-'));
+    const registry = await Registry.open({ fetch: { cacheDir, systemDirs: [], offline: true }, autofetch: false });
+    await expect(registry.for('v26.8')).rejects.toBeInstanceOf(UsageError);
+    expect(() => setup({ timezone: 'UTC' })).toThrow(UsageError); // misuse unlocked nothing
+    await expect(registry.for('26.8')).rejects.toBeInstanceOf(ArtifactMissingError);
+    expect(commitSetup().timezone).toBe('Asia/Tokyo'); // kept: a retry runs under it, never the empty setup
+  });
+
+  it('after a failed attempt, a different setup replaces the record, and the replacement is locked again', () => {
+    setup({ timezone: 'Asia/Tokyo' });
+    settleFailedOpen(setupGeneration());
+    expect(() => setup({ timezone: 'UTC' })).not.toThrow();
+    expect(commitSetup().timezone).toBe('UTC');
+    expect(() => setup({ timezone: 'Europe/Berlin' })).toThrow(UsageError);
+  });
+
+  it('never unlocks a setup recorded after the open began, nor a latched one', () => {
+    const began = setupGeneration();
+    setup({ timezone: 'Asia/Tokyo' });
+    settleFailedOpen(began); // it began before Asia/Tokyo was recorded
+    expect(() => setup({ timezone: 'UTC' })).toThrow(UsageError);
+    latchSetup();
+    settleFailedOpen(setupGeneration());
+    expect(() => setup({ timezone: 'UTC' })).toThrow(UsageError);
+    expect(() => setup({ timezone: 'Asia/Tokyo' })).not.toThrow();
   });
 });

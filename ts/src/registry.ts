@@ -37,7 +37,7 @@ import {
 } from './ocifetch/index.js';
 import { ENV_AUTOFETCH_NAME, SPELLING_REGEX } from './ocifetch/constants.gen.js';
 import { withEnvironment } from './env.js';
-import { commitSetup, settleSetup } from './setup.js';
+import { commitSetup, latchSetup, settleFailedOpen, setupGeneration } from './setup.js';
 
 /** The fetch layer's options (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, lock path, ...) without its test-only hooks. */
 export type FetchOptions = Omit<FetchV1Options, 'beforeIndexRename' | 'httpLog' | 'clock'>;
@@ -88,7 +88,7 @@ export class Registry {
 
   /** Open a version: the installed build the request names, fetched first when autofetch is on and none is installed. */
   async for(request: string): Promise<Library> {
-    checkSpelling(request);
+    checkSpelling(request); // misuse, refused before anything is attempted: it unlocks nothing
     return this.#memoized(request, this.#autofetch);
   }
 
@@ -105,6 +105,8 @@ export class Registry {
   #memoized(request: string, mayFetch: boolean): Promise<Library> {
     const memo = this.#memo.get(request);
     if (memo !== undefined) return memo;
+    // An open that attempted a load and failed unlocks the setup record while no image has completed load step 7, whatever failed: the resolve, the fetch, the signature or any load step (bindings-v1.md §6, rule 4). The spelling was checked before this, as misuse.
+    const began = setupGeneration();
     const opening = this.#openRequest(request, mayFetch).then(
       (library) => {
         if (!this.#opened.includes(library)) this.#opened.push(library);
@@ -112,6 +114,7 @@ export class Registry {
       },
       (err: unknown) => {
         this.#memo.delete(request); // a failure is never remembered
+        settleFailedOpen(began);
         throw err;
       },
     );
@@ -141,8 +144,8 @@ export class Registry {
       platform: resolved.platform,
       timezone: setup.timezone,
       defaults: setup.defaults,
-      settle: settleSetup,
     });
+    latchSetup();
     return libraryOf(image, resolved);
   }
 }

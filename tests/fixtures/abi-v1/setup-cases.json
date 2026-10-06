@@ -9,7 +9,64 @@
             "ok": true
           },
           "op": "setup",
+          "timezone": "Asia/Tokyo"
+        },
+        {
+          "expect": {
+            "class": "usage"
+          },
+          "op": "setup",
+          "timezone": "Europe/Berlin"
+        },
+        {
+          "expect": {
+            "class": "usage"
+          },
+          "op": "open",
+          "request": "v26.8"
+        },
+        {
+          "expect": {
+            "class": "usage"
+          },
+          "op": "setup",
+          "timezone": "Europe/Berlin"
+        },
+        {
+          "allow": false,
+          "expect": {
+            "class": "usage"
+          },
+          "op": "open"
+        },
+        {
+          "expect": {
+            "class": "usage"
+          },
+          "op": "setup",
+          "timezone": "Europe/Berlin"
+        },
+        {
+          "expect": {
+            "class": "artifact_incompatible",
+            "reason": "fingerprint"
+          },
+          "op": "open",
+          "variant": "fingerprint-other"
+        },
+        {
+          "expect": {
+            "ok": true
+          },
+          "op": "setup",
           "timezone": "Not/AZone"
+        },
+        {
+          "expect": {
+            "class": "usage"
+          },
+          "op": "setup",
+          "timezone": "Europe/Berlin"
         },
         {
           "expect": {
@@ -19,13 +76,6 @@
             "status": "CHS_REJECTED"
           },
           "op": "open"
-        },
-        {
-          "expect": {
-            "ok": true
-          },
-          "op": "setup",
-          "timezone": "Not/AZone"
         },
         {
           "expect": {
@@ -45,6 +95,7 @@
         },
         {
           "expect": {
+            "image_zone": "Europe/Berlin",
             "ok": true
           },
           "op": "open"
@@ -58,7 +109,43 @@
         }
       ],
       "variant": "ok"
+    },
+    {
+      "id": "setup.a_retry_after_a_failed_open_keeps_the_recorded_setup",
+      "steps": [
+        {
+          "expect": {
+            "ok": true
+          },
+          "op": "setup",
+          "timezone": "Asia/Tokyo"
+        },
+        {
+          "expect": {
+            "class": "artifact_incompatible",
+            "reason": "fingerprint"
+          },
+          "op": "open",
+          "variant": "fingerprint-other"
+        },
+        {
+          "expect": {
+            "image_zone": "Asia/Tokyo",
+            "ok": true
+          },
+          "op": "open"
+        },
+        {
+          "expect": {
+            "class": "usage"
+          },
+          "op": "setup",
+          "timezone": "Europe/Berlin"
+        }
+      ],
+      "variant": "ok"
     }
   ],
+  "image_zone_probe": "!Z:",
   "schema": 1
 }

@@ -10,6 +10,9 @@ import pytest
 from chtypes import (
     ArtifactCorruptError,
     ArtifactError,
+    ArtifactMissingError,
+    FetchOptions,
+    Registry,
     SchemaError,
     UsageError,
     _setup,
@@ -155,26 +158,64 @@ def test_open_unverified_needs_both_opt_ins_and_has_no_resolved(stub_copy, monke
     _setup._reset_for_tests()
 
 
-def test_a_defaults_failure_at_step_7_clears_the_record_too(
+def test_a_defaults_failure_at_step_7_unlocks_the_record_too(
     stub_copy, monkeypatch, clean_process
 ) -> None:
-    # The shared setup case (test_public_setup_cases.py) covers a zone the
-    # library refuses; the stub cannot refuse a default, so this forces the
-    # chs_set_defaults half of step 7 to fail. The rule is the same: no image
-    # has completed step 7, so the record is cleared and a corrected setup is
-    # accepted, and the open that follows runs step 7 again under it.
-    path, predicate = stub_copy()
+    # The shared setup cases (test_public_setup_cases.py) cover a refused load
+    # and a zone the library refuses; the stub cannot refuse a default, so this
+    # forces the chs_set_defaults half of step 7 to fail. The rule is the same:
+    # no image has completed step 7, so the failed open unlocks the record, a
+    # corrected setup replaces it, and the open that follows runs step 7 again.
+    path, _ = stub_copy()
+    monkeypatch.setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
 
     def refuse(self, d):
         raise SchemaError(1, 115, "UNKNOWN_SETTING", b"Unknown setting no_such_setting")
 
     monkeypatch.setattr(_decls.Api, "set_defaults", refuse)
     setup(timezone="Asia/Tokyo", defaults={"no_such_setting": "1"})
-    with pytest.raises(SchemaError) as info:
-        library.open_image(path, predicate, None)
+    with pytest.raises(SchemaError) as info, pytest.warns(UserWarning, match="UNVERIFIED"):
+        open_unverified(path, allow=True)
     assert info.value.ch_code == 115
-    setup(timezone="Asia/Tokyo")  # the corrected setup: no longer refused
-    first = library.open_image(path, predicate, None)
+    setup(timezone="Asia/Tokyo")  # the corrected setup replaces the unlocked record
+    first = open_unverified(path, allow=True)
     with pytest.raises(UsageError):
         setup(timezone="Asia/Tokyo", defaults={"no_such_setting": "1"})  # now latched
-    assert library.open_image(path, predicate, None) is first
+    assert open_unverified(path, allow=True) is first
+
+
+def test_a_failed_fetch_unlocks_the_record_and_a_refused_spelling_does_not(
+    tmp_path, clean_process
+) -> None:
+    # A registry open that attempted to resolve and failed (nothing installed,
+    # autofetch off) unlocks the record: a different setup replaces it. A refused
+    # version spelling is misuse, refused before anything is attempted, and
+    # unlocks nothing.
+    setup(timezone="Asia/Tokyo")
+    registry = Registry(
+        fetch=FetchOptions(cache_dir=tmp_path / "cache", system_dirs=[], offline=True),
+        autofetch=False,
+    )
+    with pytest.raises(UsageError):
+        registry.for_version("v26.8")
+    with pytest.raises(UsageError):
+        setup(timezone="UTC")  # the refused spelling unlocked nothing
+    with pytest.raises(ArtifactMissingError):
+        registry.for_version("26.8")
+    assert _setup._state is not None and _setup._state.zone == "Asia/Tokyo"  # kept
+    setup(timezone="UTC")  # replaces the unlocked record
+    with pytest.raises(UsageError):
+        setup(timezone="Europe/Berlin")  # the replacement is locked again
+
+
+def test_a_failed_open_never_unlocks_a_later_or_a_latched_setup(clean_process) -> None:
+    began = _setup.generation()
+    setup(timezone="Asia/Tokyo")
+    _setup.open_failed(began)  # it began before Asia/Tokyo was recorded
+    with pytest.raises(UsageError):
+        setup(timezone="UTC")
+    _setup.latch()
+    _setup.open_failed(_setup.generation())
+    with pytest.raises(UsageError):
+        setup(timezone="UTC")
+    setup(timezone="Asia/Tokyo")  # the latched setup again: a no-op
