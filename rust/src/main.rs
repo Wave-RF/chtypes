@@ -218,6 +218,12 @@ fn no_platform(command: &str, args: &Args) -> Result<(), Usage> {
 }
 
 fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
+    // A dev SDK pins nothing: the refusal comes before anything else, every
+    // other check of the arguments and the network above all
+    // (spec/abi-v2/docs.md, rule r6).
+    if let Some(refusal) = ocifetch::channel::refuse_pinning(&options(args)) {
+        return Err(Usage(refusal));
+    }
     if args.all && !args.spellings.is_empty() {
         return Err(Usage(format!(
             "--all fetches every published line; drop the spelling ({})",
@@ -239,11 +245,6 @@ fn cmd_fetch(args: &Args) -> Result<u8, Usage> {
         return Err(Usage(
             "--frozen fetches what the lock pins; --update rewrites it: pass one".into(),
         ));
-    }
-    // A dev SDK pins nothing: the refusal comes before anything else, the
-    // network above all (spec/abi-v2/docs.md, rule r6).
-    if let Some(refusal) = ocifetch::channel::refuse_pinning(&options(args)) {
-        return Err(Usage(refusal));
     }
     // Every spelling is checked before the first fetch: a typo in the third
     // argument must not cost the first two downloads.
