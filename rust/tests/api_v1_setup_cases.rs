@@ -250,7 +250,9 @@ fn setup_cases() {
         return;
     }
 
+    // Every case runs, and every failure is reported, before the verdict.
     let exe = std::env::current_exe().expect("this test binary's path");
+    let mut failures = Vec::new();
     for case in &cases {
         let id = case["id"].as_str().expect("case id");
         let out = Command::new(&exe)
@@ -260,15 +262,17 @@ fn setup_cases() {
             .expect("re-run this test binary for one case");
         let stdout = String::from_utf8_lossy(&out.stdout);
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            out.status.success(),
-            "setup case {id} failed:\n{stdout}\n{stderr}"
-        );
         let ran = format!("setup case {id}: ran ");
-        assert!(
-            stdout.contains(&ran),
-            "setup case {id}: the child did not run it (no {ran:?} line):\n{stdout}\n{stderr}"
-        );
-        println!("setup case {id}: passed in its own process");
+        if !out.status.success() {
+            eprintln!("setup case {id}: FAILED in its own process");
+            failures.push(format!("setup case {id} failed:\n{stdout}\n{stderr}"));
+        } else if !stdout.contains(&ran) {
+            failures.push(format!(
+                "setup case {id}: the child did not run it (no {ran:?} line):\n{stdout}\n{stderr}"
+            ));
+        } else {
+            println!("setup case {id}: passed in its own process");
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
