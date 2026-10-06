@@ -22,11 +22,13 @@ type setupCaseExpect struct {
 	Status string  `json:"status"`
 	ChCode *int32  `json:"ch_code"`
 	ChName *string `json:"ch_name"`
+	Reason string  `json:"reason"`
 }
 
 type setupCaseStep struct {
 	Op       string          `json:"op"`
 	Timezone string          `json:"timezone"`
+	Variant  string          `json:"variant"`
 	Expect   setupCaseExpect `json:"expect"`
 }
 
@@ -71,6 +73,21 @@ func setupStepOutcome(want setupCaseExpect, err error) string {
 	if err == nil {
 		return fmt.Sprintf("want a %s error, got success", want.Class)
 	}
+	switch want.Class {
+	case "artifact_incompatible", "artifact_corrupt":
+		sentinel := ErrArtifactIncompatible
+		if want.Class == "artifact_corrupt" {
+			sentinel = ErrArtifactCorrupt
+		}
+		var ae *ArtifactError
+		if !errors.Is(err, sentinel) || !errors.As(err, &ae) {
+			return fmt.Sprintf("want a %s error, got %T: %v", want.Class, err, err)
+		}
+		if want.Reason != "" && ae.Reason != want.Reason {
+			return fmt.Sprintf("reason %q, want %q", ae.Reason, want.Reason)
+		}
+		return ""
+	}
 	var matched bool
 	switch want.Class {
 	case "schema":
@@ -107,15 +124,25 @@ func setupStepOutcome(want setupCaseExpect, err error) string {
 	return ""
 }
 
-// TestSetupCases runs every shared setup case: one fresh image per case, no
-// setup recorded at its start, and each step through the public API.
+// TestSetupCases runs every shared setup case: one fresh image per variant the
+// case opens, no setup recorded at its start, and each step through the public
+// API.
 func TestSetupCases(t *testing.T) {
 	stubDir(t) // skips loudly without the stubs
 	for _, c := range loadSetupCases(t) {
 		t.Run(c.ID, func(t *testing.T) {
 			resetSetup(t)
 			t.Setenv("CHTYPES_ALLOW_UNVERIFIED_LIBRARY", "1")
-			image := stubFile(t, c.Variant)
+			images := map[string]string{}
+			image := func(variant string) string {
+				if variant == "" {
+					variant = c.Variant
+				}
+				if images[variant] == "" {
+					images[variant] = stubFile(t, variant)
+				}
+				return images[variant]
+			}
 			if len(c.Steps) == 0 {
 				t.Fatal("a case with no steps")
 			}
@@ -125,12 +152,12 @@ func TestSetupCases(t *testing.T) {
 				case "setup":
 					err = Setup(SetupOptions{Timezone: s.Timezone})
 				case "open":
-					_, err = OpenUnverified(image, true)
+					_, err = OpenUnverified(image(s.Variant), true)
 				default:
 					t.Fatalf("step %d: an op this runner does not know: %q", i, s.Op)
 				}
 				if diff := setupStepOutcome(s.Expect, err); diff != "" {
-					t.Fatalf("step %d (%s %q): %s", i, s.Op, s.Timezone, diff)
+					t.Fatalf("step %d (%s %q %s): %s", i, s.Op, s.Timezone, s.Variant, diff)
 				}
 			}
 		})

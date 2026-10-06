@@ -10,6 +10,7 @@
 //!
 //! `CHTYPES_ABI1_STUBS` unset: this suite skips LOUDLY by name and passes.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -72,6 +73,20 @@ fn outcome(want: &Value, got: &Result<(), Error>) -> Result<(), String> {
         Ok(()) => return Err(format!("want a {class} error, got success")),
         Err(e) => e,
     };
+    // A loader refusal: its class, and the reason word it carries.
+    if class == "artifact_incompatible" || class == "artifact_corrupt" {
+        let refusal = match (class, err) {
+            ("artifact_incompatible", Error::ArtifactIncompatible(r))
+            | ("artifact_corrupt", Error::ArtifactCorrupt(r)) => r,
+            (_, other) => return Err(format!("want a {class} error, got {other:?}")),
+        };
+        if let Some(reason) = want.get("reason").and_then(Value::as_str) {
+            if refusal.reason != reason {
+                return Err(format!("reason {:?}, want {reason:?}", refusal.reason));
+            }
+        }
+        return Ok(());
+    }
     let call = match (class, err) {
         ("schema", Error::Schema(c))
         | ("unsupported", Error::Unsupported(c))
@@ -107,27 +122,37 @@ fn outcome(want: &Value, got: &Result<(), Error>) -> Result<(), String> {
     Ok(())
 }
 
-/// The child: one case, on a fresh copy of its stub, from a process with no
-/// setup recorded.
+/// The child: one case, on a fresh copy of each stub it opens, from a process
+/// with no setup recorded.
 fn run_case(stubs: &Path, case: &Value) {
     let id = case["id"].as_str().expect("case id");
-    let variant = case["variant"].as_str().expect("case variant");
+    let case_variant = case["variant"].as_str().expect("case variant");
     let manifest: Value =
         serde_json::from_slice(&std::fs::read(stubs.join("stubs.json")).expect("read stubs.json"))
             .expect("parse stubs.json");
-    let source = stubs.join(
-        Path::new(
-            manifest["variants"][variant]["path"]
-                .as_str()
-                .expect("variant path"),
-        )
-        .file_name()
-        .expect("file name"),
-    );
     let dir = std::env::temp_dir().join(format!("chtypes_setup_case_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create the case directory");
-    let image = dir.join(format!("{variant}-image.so"));
-    std::fs::copy(&source, &image).expect("copy the stub");
+    // The case's one fresh copy of each variant, made on its first open.
+    let mut images: BTreeMap<String, PathBuf> = BTreeMap::new();
+    let mut image = |variant: &str| -> PathBuf {
+        images
+            .entry(variant.to_string())
+            .or_insert_with(|| {
+                let source = stubs.join(
+                    Path::new(
+                        manifest["variants"][variant]["path"]
+                            .as_str()
+                            .expect("variant path"),
+                    )
+                    .file_name()
+                    .expect("file name"),
+                );
+                let copy = dir.join(format!("{variant}-image.so"));
+                std::fs::copy(&source, &copy).expect("copy the stub");
+                copy
+            })
+            .clone()
+    };
     // SAFETY: the child runs this one test on one thread (--test-threads=1),
     // so nothing reads or writes the environment concurrently.
     unsafe { std::env::set_var(ENV_UNVERIFIED, "1") };
@@ -137,16 +162,20 @@ fn run_case(stubs: &Path, case: &Value) {
     for (i, step) in steps.iter().enumerate() {
         let op = step["op"].as_str().expect("step op");
         let zone = step.get("timezone").and_then(Value::as_str).unwrap_or("");
+        let variant = step
+            .get("variant")
+            .and_then(Value::as_str)
+            .unwrap_or(case_variant);
         let got: Result<(), Error> = match op {
             "setup" => chtypes::setup(SetupOptions {
                 timezone: Some(zone.to_string()),
                 defaults: Vec::new(),
             }),
-            "open" => Library::open_unverified(&image, true).map(|_| ()),
+            "open" => Library::open_unverified(image(variant), true).map(|_| ()),
             other => panic!("case {id} step {i}: an op this runner does not know: {other:?}"),
         };
         if let Err(diff) = outcome(&step["expect"], &got) {
-            panic!("case {id} step {i} ({op} {zone:?}): {diff}");
+            panic!("case {id} step {i} ({op} {zone:?} {variant}): {diff}");
         }
     }
     let _ = std::fs::remove_dir_all(&dir);

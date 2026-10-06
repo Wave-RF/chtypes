@@ -9,6 +9,28 @@
             "ok": true
           },
           "op": "setup",
+          "timezone": "Asia/Tokyo"
+        },
+        {
+          "expect": {
+            "class": "usage"
+          },
+          "op": "setup",
+          "timezone": "Europe/Berlin"
+        },
+        {
+          "expect": {
+            "class": "artifact_incompatible",
+            "reason": "fingerprint"
+          },
+          "op": "open",
+          "variant": "fingerprint-other"
+        },
+        {
+          "expect": {
+            "ok": true
+          },
+          "op": "setup",
           "timezone": "Not/AZone"
         },
         {
