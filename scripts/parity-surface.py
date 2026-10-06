@@ -1215,7 +1215,8 @@ def read_report(text: str) -> tuple[dict[str, str], dict[str, dict[str, str]], d
                     bases[name] = base.group(1)
                 owner, owner_kind = name, kind
                 members.setdefault(name, {})
-        elif depth == 1 and owner:
+        elif depth == 1 and owner and owner_kind not in ("function", "let", "var"):
+            # (a function's inline parameter type, `options: { allow: boolean }`, has no members)
             mods = set()
             while True:
                 mm = TS_MODIFIERS.match(s)
@@ -1440,6 +1441,12 @@ def go_prefix(names: list[str]) -> str:
     return prefix
 
 
+def matches(name: str, pattern: str) -> bool:
+    """An allowlist name: exact, or a glob (`EngineCell.*`). Exact first,
+    because TypeScript's `[Symbol.iterator]` is a glob character class."""
+    return name == pattern or fnmatch.fnmatchcase(name, pattern)
+
+
 def compare(exp: Expected, surfaces: dict[str, dict[str, str]], allow: list[Entry], description: dict) -> Result:
     res = Result()
     claimed: dict[str, set[str]] = {b: set() for b in surfaces}
@@ -1447,7 +1454,7 @@ def compare(exp: Expected, surfaces: dict[str, dict[str, str]], allow: list[Entr
     for e in allow:
         if e.binding in surfaces and e.kind == "extra":
             for pat in e.names:
-                hits = {n for n in surfaces[e.binding] if fnmatch.fnmatchcase(n, pat)}
+                hits = {n for n in surfaces[e.binding] if matches(n, pat)}
                 extras_allowed[e.binding] |= hits
     # Vocabularies: each binding's members, the description's count, and the
     # four bindings' members compared without case or separators.
@@ -1517,15 +1524,15 @@ def compare(exp: Expected, surfaces: dict[str, dict[str, str]], allow: list[Entr
         for kind, names in (("missing", missing), ("extra", extra)):
             for n in list(names):
                 for e in entries:
-                    if e.kind == kind and any(fnmatch.fnmatchcase(n, p) for p in e.names):
-                        e.used.update(p for p in e.names if fnmatch.fnmatchcase(n, p))
+                    if e.kind == kind and any(matches(n, p) for p in e.names):
+                        e.used.update(p for p in e.names if matches(n, p))
                         names.remove(n)
                         allowed[kind] += 1
                         break
         for e in (e for e in entries if e.kind == "extra"):
             for pat in e.names:  # an allowed vocabulary member counts as used
-                if any(fnmatch.fnmatchcase(n, pat) for n in claimed[b] | extras_allowed[b]):
-                    if any(fnmatch.fnmatchcase(n, pat) for n in surface):
+                if any(matches(n, pat) for n in claimed[b] | extras_allowed[b]):
+                    if any(matches(n, pat) for n in surface):
                         e.used.add(pat)
         res.findings += [Finding(b, "missing", n, f"the doc gives it at {expected[n]}") for n in missing]
         res.findings += [Finding(b, "undocumented", n, f"a public {surface[n]} the doc does not give") for n in extra]
@@ -1793,6 +1800,9 @@ def selftest() -> int:
                 "parser read too little"
             )
 
+    inline = parse_api_report("```ts\nexport function f(options: {\n    allow: boolean;\n}): void;\n```\n")
+    if inline != {"f": "function"}:
+        failures.append(f"ts: a function's inline parameter type read as members: {inline}")
     if "Handle" in surfaces["ts"] or "Schema.close" not in surfaces["ts"]:
         failures.append(
             "ts: a forgotten export (Handle) read as a public name, or its members did not reach the "

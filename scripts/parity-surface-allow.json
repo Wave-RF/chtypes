@@ -322,6 +322,142 @@
         "FetchOptions.platform"
       ],
       "reason": "Rust-only: the platform to fetch for, where the other bindings fetch for the host. Principle 2 says this belongs in all four or in none; it is carried here as found, not changed, because removing a published field is a breaking change."
+    },
+    {
+      "binding": "ts",
+      "kind": "spelling",
+      "doc": "Format.chName",
+      "as": "formatChName",
+      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change."
+    },
+    {
+      "binding": "ts",
+      "kind": "spelling",
+      "doc": "Reason.lossy",
+      "as": "reasonLossy",
+      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change."
+    },
+    {
+      "binding": "ts",
+      "kind": "spelling",
+      "doc": "Source.isStored",
+      "as": "sourceIsStored",
+      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change."
+    },
+    {
+      "binding": "ts",
+      "kind": "spelling",
+      "doc": "Verdict.answered",
+      "as": "verdictAnswered",
+      "reason": "§3's vocabularies are const objects in TypeScript (`Format.JSONEachRow` is a number, not an object), which cannot carry a member, so each fact is a free function named for its vocabulary (the 1.0 comparison, #435). Generated from the description by scripts/abi-v1/gen.py; a rename is a breaking change."
+    },
+    {
+      "binding": "ts",
+      "kind": "missing",
+      "names": [
+        "ArtifactError.reason",
+        "ArtifactError.path",
+        "ArtifactError.want",
+        "ArtifactError.got"
+      ],
+      "reason": "TypeScript keeps a loader refusal's fields (§4: reason, path, want, got) on the classes a refusal raises, ArtifactIncompatibleError and LoaderCorruptError (both implement LoaderErrorFields; their own entry), not on the ArtifactError base the fetch layer's errors share, which carries the code. §4 names the carrier for Go (*ArtifactError) and Rust (Refusal) only; the gate reads Go's for TypeScript and Python, and Python's base does carry them."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "ArtifactIncompatibleError.reason",
+        "ArtifactIncompatibleError.path",
+        "ArtifactIncompatibleError.want",
+        "ArtifactIncompatibleError.got",
+        "LoaderCorruptError",
+        "LoaderCorruptError.reason",
+        "LoaderCorruptError.path",
+        "LoaderCorruptError.want",
+        "LoaderCorruptError.got",
+        "LoaderErrorFields",
+        "LoaderErrorFields.reason",
+        "LoaderErrorFields.path",
+        "LoaderErrorFields.want",
+        "LoaderErrorFields.got"
+      ],
+      "reason": "Where TypeScript keeps §4's refusal fields (see its `missing` entry for ArtifactError): LoaderCorruptError is the loader's corrupt refusal, a subclass of ArtifactCorruptError so that catching ArtifactCorruptError still catches both (§4's one family); TypeScript-only, noted in the 1.0 comparison (#435). LoaderErrorFields is the interface both refusal classes implement."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "ArtifactError.code",
+        "ArtifactError.exitStatus"
+      ],
+      "reason": "The fetch code (spec/fetch-v1/constants.json) and its CLI exit status: TypeScript's spelling of Go's ArtifactError.Code and ErrorCode.ExitCode, Python's `.code` and Rust's Error.code (their own entries). §4 gives no TypeScript spelling."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "CallErrorFields",
+        "CallErrorFields.status",
+        "CallErrorFields.chCode",
+        "CallErrorFields.chName",
+        "CallErrorFields.messageBytes",
+        "CallErrorFields.column"
+      ],
+      "reason": "The interface of §4's five call-error fields, which CallError implements and its constructors take: a type-level name for the same fields, so it adds no field. The other bindings spell the fields once, on CallError (Go's struct, Python's class, Rust's struct)."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "BatchOutcome",
+        "BatchOutcome.Accepted",
+        "BatchOutcome.AcceptedPoisoned",
+        "BatchOutcome.Rejected",
+        "BatchOutcome.Unsupported"
+      ],
+      "reason": "The description's batch_outcome vocabulary on its own, generated by scripts/abi-v1/gen.py and exported by TypeScript alone; §3 folds row_outcome and batch_outcome into one Outcome, which TypeScript also exports. TypeScript-only, carried as found: removing an export is a breaking change."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "DiscoverQueryParam",
+        "DiscoverQueryParam.Database",
+        "DiscoverQueryParam.Table"
+      ],
+      "reason": "The description's discover_query_param vocabulary (the discovery query's two parameters, which §5 names in prose), generated by scripts/abi-v1/gen.py and exported by TypeScript alone. TypeScript-only, carried as found: removing an export is a breaking change."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "EXPORT_NONE"
+      ],
+      "reason": "CHS_EXPORT_NONE (-1), the description's export-off constant, as Python spells it (its own entry); Go types it as Format (ExportNone). An absent exportFormat already means no export in TypeScript's RowsOptions."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "ErrorCodeTable.[Symbol.iterator]"
+      ],
+      "reason": "TypeScript's iteration protocol over the table, beside all(): the counterpart of Rust's IntoIterator, which §5 names. The gate counts TypeScript's [Symbol.dispose] as a name because §2 and §3 name it, so this one is listed rather than treated as protocol."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "SourceUnreachableError.retryAfterRefused"
+      ],
+      "reason": "The fetch layer's retry hint on an unreachable source (fetch-v1.md §7, the retry table): the Retry-After the client refused to wait for. Python carries retryable and retry_after instead (its own entry): the two bindings differ here, carried as found."
+    },
+    {
+      "binding": "ts",
+      "kind": "extra",
+      "names": [
+        "isChtypesError"
+      ],
+      "reason": "True for any error the package throws on purpose. TypeScript's ArtifactError (the fetch layer's error class, re-exported) does not extend ChtypesError, so one guard covers the call errors and the artifact errors together; Python's ArtifactError is a ChtypesError, Go has no base and Rust has one Error enum, so none of them needs it. TypeScript-only, carried as found."
     }
   ]
 }
