@@ -425,6 +425,63 @@ jobs:
           path: ~/.cache/chtypes/api-surface
           key: ${{ steps.api-tools.outputs.cache-primary-key }}
 
+  parity-surface:
+    # The v1 public-surface parity gate (public issue #436): every binding's
+    # public names against docs/reference/bindings-v1.md, read by the same
+    # pinned tools api-surface runs (scripts/parity-surface.py imports its
+    # pins from scripts/api-surface.py and its header says how each surface
+    # is read). It fails on a name the doc gives that a binding lacks, a
+    # name spelled differently from the doc's column, a public name the doc
+    # does not give, a vocabulary that differs from the description, and an
+    # allowlist entry that no longer matches anything; every deliberate
+    # difference is an entry in scripts/parity-surface-allow.json with its
+    # written reason. Selftest first, then each tool's fixture proof on
+    # tests/fixtures/parity-surface/, then the real surfaces.
+    #
+    # Non-blocking while it earns trust: making it a required check is the
+    # maintainers' call once it has been green on main. It reads the checked-out
+    # tree only (no base comparison), restores api-surface's tool cache and
+    # never saves it, so the two jobs share one set of installed tools.
+    name: "parity-surface — every binding's public names against docs/reference/bindings-v1.md (report only)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ts/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/chtypes/api-surface
+          key: chtypes-api-surface-tools-${{ hashFiles('scripts/api-surface.py') }}
+          restore-keys: chtypes-api-surface-tools-
+      - name: selftest — planted drift in each binding, in each direction, fails; the green fixtures pass
+        run: scripts/parity-surface.py --selftest
+      - name: each tool's fixture proof, then every binding's real surface against the doc
+        run: scripts/parity-surface.py run --tools "$HOME/.cache/chtypes/api-surface" --save "$RUNNER_TEMP/parity-surface"
+      # The four surfaces as read, for a reviewer checking an allowlist entry.
+      # continue-on-error for the same reason as the go job's upload above.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        continue-on-error: true
+        with:
+          name: parity-surface
+          path: ${{ runner.temp }}/parity-surface
+          if-no-files-found: ignore
+          retention-days: 7
+
   # ── Lint / supply-chain jobs below ─────────────────────────────────
   #
   # All additive: none of the jobs above gained a `needs:` on any of these,

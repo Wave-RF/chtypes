@@ -1,0 +1,92 @@
+pub mod parfix
+#[repr(i32)] pub enum parfix::Format
+pub parfix::Format::Csv = 1
+pub parfix::Format::JsonEachRow = 0
+impl parfix::Format
+pub fn parfix::Format::ch_name(&self) -> &'static str
+impl core::marker::Freeze for parfix::Format
+impl core::marker::Send for parfix::Format
+impl core::marker::Sync for parfix::Format
+impl core::marker::Unpin for parfix::Format
+pub enum parfix::Error
+pub parfix::Error::ArtifactIncompatible(parfix::Refusal)
+pub parfix::Error::ArtifactMissing(parfix::Refusal)
+pub parfix::Error::ArtifactPinned(parfix::Refusal)
+pub parfix::Error::Schema(parfix::CallError)
+impl parfix::Error
+pub fn parfix::Error::is_unsupported(&self) -> bool
+impl core::marker::Send for parfix::Error
+impl core::marker::Sync for parfix::Error
+pub enum parfix::Verdict
+pub parfix::Verdict::False
+pub parfix::Verdict::True
+impl parfix::Verdict
+pub fn parfix::Verdict::answered(&self) -> bool
+impl core::marker::Send for parfix::Verdict
+pub struct parfix::BatchResult
+pub parfix::BatchResult::columns_sql: parfix::RawText
+pub parfix::BatchResult::errors: alloc::vec::Vec<parfix::RowError>
+pub parfix::BatchResult::framing: core::option::Option<parfix::Framing>
+pub parfix::BatchResult::partition_id: core::option::Option<parfix::RawText>
+pub parfix::BatchResult::rows_read: u64
+pub parfix::BatchResult::spans: core::option::Option<alloc::vec::Vec<parfix::Span>>
+impl core::marker::Send for parfix::BatchResult
+pub struct parfix::CallError
+pub parfix::CallError::ch_code: i32
+impl core::marker::Send for parfix::CallError
+pub struct parfix::CompileOptions
+pub parfix::CompileOptions::settings: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+impl core::default::Default for parfix::CompileOptions
+pub fn parfix::CompileOptions::default() -> parfix::CompileOptions
+pub struct parfix::ErrorCodeEntry
+pub parfix::ErrorCodeEntry::code: i32
+pub parfix::ErrorCodeEntry::name: alloc::string::String
+pub struct parfix::ErrorCodeTable
+impl parfix::ErrorCodeTable
+pub fn parfix::ErrorCodeTable::iter(&self) -> core::slice::iter::Iter<'_, parfix::ErrorCodeEntry>
+pub fn parfix::ErrorCodeTable::len(&self) -> usize
+pub fn parfix::ErrorCodeTable::name(&self, code: i32) -> core::option::Option<&str>
+impl<'a> core::iter::traits::collect::IntoIterator for &'a parfix::ErrorCodeTable
+pub type &'a parfix::ErrorCodeTable::IntoIter = core::slice::iter::Iter<'a, parfix::ErrorCodeEntry>
+pub type &'a parfix::ErrorCodeTable::Item = &'a parfix::ErrorCodeEntry
+pub fn &'a parfix::ErrorCodeTable::into_iter(self) -> Self::IntoIter
+pub struct parfix::Framing
+pub parfix::Framing::bom_skipped: core::option::Option<bool>
+pub parfix::Framing::header: core::option::Option<parfix::Header>
+pub struct parfix::Header
+pub parfix::Header::consumed: bool
+pub parfix::Header::lines: usize
+pub struct parfix::Library
+impl parfix::Library
+pub fn parfix::Library::compile_table(self: &alloc::sync::Arc<Self>, create_table: impl core::convert::AsRef<[u8]>, options: &parfix::CompileOptions) -> parfix::Result<parfix::Schema>
+pub fn parfix::Library::validate_type(&self, type_expr: impl core::convert::AsRef<[u8]>) -> parfix::Result<parfix::RawText>
+pub fn parfix::Library::version(&self) -> &str
+pub struct parfix::RawText
+pub struct parfix::Refusal
+pub parfix::Refusal::path: alloc::string::String
+pub parfix::Refusal::reason: alloc::string::String
+pub struct parfix::Registry
+impl parfix::Registry
+pub fn parfix::Registry::for_version(&self, request: &str) -> parfix::Result<alloc::sync::Arc<parfix::Library>>
+pub fn parfix::Registry::installed(&self) -> parfix::Result<alloc::vec::Vec<parfix::Resolved>>
+pub fn parfix::Registry::new() -> parfix::Result<parfix::Registry>
+pub struct parfix::Resolved
+pub parfix::Resolved::library_path: alloc::string::String
+pub parfix::Resolved::warnings: alloc::vec::Vec<alloc::string::String>
+pub struct parfix::RowError
+pub parfix::RowError::msg: parfix::RawText
+pub parfix::RowError::row: usize
+pub struct parfix::Schema
+impl core::clone::Clone for parfix::Schema
+pub fn parfix::Schema::clone(&self) -> parfix::Schema
+impl core::ops::drop::Drop for parfix::Schema
+pub fn parfix::Schema::drop(&mut self)
+pub struct parfix::SetupOptions
+pub parfix::SetupOptions::timezone: core::option::Option<alloc::string::String>
+impl core::default::Default for parfix::SetupOptions
+pub fn parfix::SetupOptions::default() -> parfix::SetupOptions
+pub struct parfix::Span
+pub parfix::Span::len: u64
+pub parfix::Span::off: u64
+pub fn parfix::setup(options: parfix::SetupOptions) -> parfix::Result<()>
+pub type parfix::Result<T> = core::result::Result<T, parfix::Error>

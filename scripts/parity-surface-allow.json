@@ -1,0 +1,106 @@
+{
+  "_comment": [
+    "Every deliberate difference between a binding's public names and docs/reference/bindings-v1.md, each with its written reason. Read by scripts/parity-surface.py (the parity gate, public issue #436); CONTRIBUTING.md's 'Changing a public name' says when an entry belongs here and when the doc or the bindings should change instead.",
+    "kind 'extra': public names the doc does not give (globs allowed, in the binding's own spelling: Owner.member, Owner.method(kw=) for a Python keyword-only parameter). kind 'missing': names the doc gives that the binding lacks (the doc's spelling). kind 'spelling': the doc's name `doc` that the binding spells `as`.",
+    "An entry, or a name in one, that matches nothing fails the gate as stale: remove it with the difference it explained."
+  ],
+  "entries": [
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": ["ExportNone"],
+      "reason": "CHS_EXPORT_NONE (-1), the description's export-off constant, typed Format so that WithExport(ExportNone) type-checks. Python and TypeScript spell it EXPORT_NONE at module level (their own entries), and Rust's `export: Option<Format>` says it with None. Not a format: the vocabulary check counts Format's members without it."
+    },
+    {
+      "binding": "go",
+      "kind": "spelling",
+      "doc": "Format.ChName",
+      "as": "Format.CHName",
+      "reason": "§3 names the fact `ch_name`, which principle 2 spells ChName in Go (as §4 does for CallError.ChName), but the generated Go vocabulary (scripts/abi-v1/emit/go_vocab.py) treats CH as an initialism. Renaming a published method is a breaking change, so the difference is carried here rather than fixed in this gate's pull request."
+    },
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": ["ColumnsOption", "SettingsOption"],
+      "reason": "The named types WithColumns and WithSettings return: one value implements several option interfaces (§2's call options: WithSettings implements CompileOption, RowOption, RowsOption, BlockOption, FilterOption and EvalOption), which Go's functional options can only express with a named type. The other three bindings carry the same options as fields, so they have nothing to name."
+    },
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": ["ArtifactError.Err", "ArtifactError.Msg", "ArtifactError.Platform", "ArtifactError.Request", "ArtifactError.Source"],
+      "reason": "Go has one ArtifactError for the loader's refusals and the fetch layer's errors (§4: 'the fetch layer's and the loader's errors are one family'), so it also carries the fetch error's message, the platform, request and source it was answering, and the wrapped cause (Unwrap). §4 names only the refusal's fields."
+    },
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": ["ErrorCode", "ErrorCode.ExitCode", "ErrorCode.Sentinel", "CodeArtifactCorrupt", "CodeArtifactIncompatible", "CodeArtifactMissing", "CodeArtifactPinned", "CodeArtifactUnpublished", "CodeArtifactUntrusted", "CodeSourceForbidden", "CodeSourceIncompatible", "CodeSourceUnauthorized", "CodeSourceUnreachable"],
+      "reason": "The typed values of ArtifactError.Code, which §4's Go column names (`*ArtifactError` with `Code` CHTYPES_…): one constant per code in spec/fetch-v1/constants.json, re-exported from the fetch layer, with the code's CLI exit status and sentinel. Python keeps the same codes as CODE_* constants (its own entry); §4 gives no spelling for them."
+    },
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": ["FetchOptions.Bases", "FetchOptions.CacheDir", "FetchOptions.SystemDirs", "FetchOptions.TrustedKeys", "FetchOptions.Token", "FetchOptions.AllowUnsigned", "FetchOptions.Offline", "FetchOptions.Frozen", "FetchOptions.LockPath", "FetchOptions.LockWrite", "FetchOptions.Update"],
+      "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. LockWrite and Update are the lock's write and update modes of fetch-v1.md §6."
+    },
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": ["FetchOptions.ConnectTimeout", "FetchOptions.IdleReadTimeout"],
+      "reason": "Go-only: the fetch layer's connect and idle-read timeouts (spec/fetch-v1/constants.json `timeouts`), settable on Go's FetchOptions alone. Principle 2 says this convenience belongs in all four or in none; it is carried here as found, not changed, because removing a published field is a breaking change."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["EXPORT_NONE"],
+      "reason": "CHS_EXPORT_NONE (-1), the description's export-off constant, at module level; Go types it as Format (ExportNone, its own entry). `export=None` already means no export in Python's Schema.rows, so this is a spelling of the constant, not a second way to call."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["Outcome.of", "FilterOutcome.of", "Verdict.of", "DefaultKind.of"],
+      "reason": "Generated from the description by scripts/abi-v1/gen.py: each string vocabulary's decoder from a document's text, with the description's fallback. The decoders use it; §3 names the vocabularies and their facts, not their decoders."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["CODE_ARTIFACT_CORRUPT", "CODE_ARTIFACT_INCOMPATIBLE", "CODE_ARTIFACT_MISSING", "CODE_ARTIFACT_PINNED", "CODE_ARTIFACT_UNPUBLISHED", "CODE_ARTIFACT_UNTRUSTED", "CODE_SOURCE_FORBIDDEN", "CODE_SOURCE_INCOMPATIBLE", "CODE_SOURCE_UNAUTHORIZED", "CODE_SOURCE_UNREACHABLE", "ArtifactError.code", "ArtifactCorruptError.code", "ArtifactIncompatibleError.code", "ArtifactMissingError.code", "ArtifactPinnedError.code", "ArtifactUnpublishedError.code", "ArtifactUntrustedError.code", "SourceForbiddenError.code", "SourceIncompatibleError.code", "SourceUnauthorizedError.code", "SourceUnreachableError.code"],
+      "reason": "The fetch codes of spec/fetch-v1/constants.json, and each artifact class's code: the attribute §4's Go column calls ArtifactError's `Code` (Go's own entry). §4's Python column names the classes only."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["ArtifactError(reason=)", "ArtifactError(path=)", "ArtifactError(want=)", "ArtifactError(got=)", "SourceUnreachableError(retryable=)", "SourceUnreachableError(retry_after=)"],
+      "reason": "Keyword-only constructor parameters of error classes the binding raises: they set §4's refusal fields (reason, path, want, got) and the fetch layer's retry hints. A caller catches these classes and does not construct them."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["SourceUnreachableError.retryable", "SourceUnreachableError.retry_after"],
+      "reason": "The fetch layer's retry hints on an unreachable source (fetch-v1.md §7, the retry table): whether a retry may help, and the server's Retry-After. §4 names the class, not its fields."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["FetchOptions.bases", "FetchOptions.cache_dir", "FetchOptions.system_dirs", "FetchOptions.trusted_keys", "FetchOptions.token", "FetchOptions.allow_unsigned", "FetchOptions.offline", "FetchOptions.frozen", "FetchOptions.lock_path", "FetchOptions.lock_write", "FetchOptions.update"],
+      "reason": "§6: the fetch options carry everything fetch-v1.md configures (bases, cache directory, system directories, trusted keys, token, allow-unsigned, offline, frozen, the lock path) 'under the fetch module's own names', which the doc names in prose and does not spell per language. lock_write and update are the lock's write and update modes of fetch-v1.md §6."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["TrustedKey", "TrustedKey.keyid", "TrustedKey.public_key"],
+      "reason": "Python's trusted keys are TrustedKey records (key id and raw public key) where Go's FetchOptions.TrustedKeys takes hex strings: a shape difference inside §6's 'trusted keys', carried as found. Changing either is a breaking change."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["errors", "library", "registry", "results"],
+      "reason": "The package's implementation modules, public by name. Every public name they hold is re-exported at the top level (measured by this gate: it lists any that is not), and the top level is what the doc describes and the gate compares."
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["errors.internal", "errors.misuse"],
+      "reason": "Found by this gate: the binding's own constructors for InternalError and UsageError, listed in chtypes.errors.__all__ and so public through the submodule, though the package does not re-export them and the doc gives neither. Dropping them from __all__ is a public-API change for its own pull request; carried here until then."
+    }
+  ]
+}
