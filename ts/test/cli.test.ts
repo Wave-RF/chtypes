@@ -5,7 +5,7 @@
  * does not own. Nothing here needs a library: a fetch that would need one is refused earlier.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -93,10 +93,27 @@ describe('commands that touch no network', () => {
   it('verify and list --offline on an empty cache succeed and say nothing is installed', async () => {
     const verify = await run('verify', '--cache', cache);
     expect(verify.code).toBe(EXIT_OK);
-    expect(verify.out + verify.err).toBe('');
+    expect(verify.out).toBe('');
+    // An empty pass must never look like a good one (public issue #486).
+    expect(verify.err).toBe(`chtypes: verified 0 builds under ${path.resolve(cache)}\n`);
     const list = await run('list', '--offline', '--cache', cache);
     expect(list.code).toBe(EXIT_OK);
     expect(list.out).toBe('');
+  });
+
+  it('verify and fetch --offline name a 0.x registry used as the cache, and write nothing into it (public issue #486)', async () => {
+    const zeroX = path.join(tmp, 'zero-x');
+    mkdirSync(path.join(zeroX, '26.1'), { recursive: true });
+    writeFileSync(path.join(zeroX, '26.1', 'manifest.json'), '{}');
+    const hint = `${zeroX} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at `;
+    const verify = await run('verify', '--cache', zeroX);
+    expect(verify.code).toBe(EXIT_OK);
+    expect(verify.err).toContain(`verified 0 builds under ${zeroX}`);
+    expect(verify.err).toContain(hint);
+    const fetch = await run('fetch', '26.1', '--offline', '--platform', 'linux-arm64', '--cache', zeroX);
+    expect(fetch.code).toBe(ERROR_EXIT_CODES['CHTYPES_ARTIFACT_MISSING']);
+    expect(fetch.err).toContain(hint);
+    expect(existsSync(path.join(zeroX, 'oci-layout'))).toBe(false);
   });
 
   it('fetch --offline of something not installed exits with CHTYPES_ARTIFACT_MISSING\'s status', async () => {

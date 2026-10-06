@@ -150,9 +150,11 @@ pub fn configured_bases(options: &Options) -> Vec<String> {
     })
 }
 
+/// One call's shared state. It creates nothing: a lookup is read-only, and
+/// only a fetch makes the layout (`ensure`, past its offline branch;
+/// docs/guides/fetch-v1.md §6, public issue #486).
 fn resources(options: &mut Options) -> Result<Resources> {
     let root = layout::cache_root(options.cache_dir.as_deref())?;
-    layout::ensure_layout(&root)?;
     let platform = options
         .platform
         .clone()
@@ -223,6 +225,8 @@ pub fn ensure(request: &str, mut options: Options) -> Result<Resolved> {
     if options.offline {
         return resolve_offline(&res, &version_request, request, &options, lock.as_ref());
     }
+    // A fetch, from here on: the layout is made now, never by a lookup.
+    layout::ensure_layout(&res.root)?;
 
     if options.frozen {
         let lock = lock.ok_or_else(|| {
@@ -702,10 +706,38 @@ fn resolve_offline(
             &source,
             true,
         )),
-        None => Err(Error::ArtifactMissing(format!(
-            "--offline: nothing installed satisfies {request} for {}",
-            res.platform
+        None => Err(Error::ArtifactMissing(with_notes(
+            &format!(
+                "--offline: nothing installed satisfies {request} for {}",
+                res.platform
+            ),
+            &notes_for(&res.root),
         ))),
+    }
+}
+
+/// What a `CHTYPES_ARTIFACT_MISSING` answer from the cache `options` names
+/// adds to its message, each a complete sentence: the 0.x hint when the cache
+/// is a 0.x registry directory (docs/guides/fetch-v1.md, "Upgrading from 0.x";
+/// public issue #486). The registry's own MISSING adds the same notes as the
+/// offline fetch's.
+pub fn missing_notes(options: &Options) -> Vec<String> {
+    match layout::cache_root(options.cache_dir.as_deref()) {
+        Ok(root) => notes_for(&root),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn notes_for(root: &Path) -> Vec<String> {
+    layout::zero_x_hint(root).into_iter().collect()
+}
+
+/// `message` with `notes`, each a complete sentence, appended.
+pub fn with_notes(message: &str, notes: &[String]) -> String {
+    if notes.is_empty() {
+        message.to_string()
+    } else {
+        format!("{message}. {}", notes.join(" "))
     }
 }
 
@@ -770,12 +802,18 @@ pub fn list_installed(mut options: Options) -> Result<Vec<Resolved>> {
 }
 
 /// `verify_installed(options)`: re-hash every installed library against its
-/// own recorded `library_sha256`, with no network.
+/// own recorded `library_sha256`, with no network: the cache, then the system
+/// directories, the same roots [`list_installed`] reads (public issue #486).
 pub fn verify_installed(mut options: Options) -> Result<Vec<VerifyResult>> {
     let res = resources(&mut options)?;
     let mut out = Vec::new();
     for (dir, record) in layout::list_verified(&res.root)? {
         out.push(verify_one_install(&dir, &record));
+    }
+    for sysdir in &res.system_dirs {
+        for (dir, record) in layout::list_verified(sysdir).unwrap_or_default() {
+            out.push(verify_one_install(&dir, &record));
+        }
     }
     Ok(out)
 }
@@ -1384,5 +1422,283 @@ fn record_to_resolved(
         source: source.to_string(),
         already_installed,
         warnings: Vec::new(),
+    }
+}
+
+/// Public issue #486, the behavior fixes: one root order, read-only lookups
+/// that create nothing, the 0.x hint, and modes that follow the umask. Every
+/// fault is made by a real write, never by a stubbed reader.
+#[cfg(test)]
+mod cache_roots_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn scratch(name: &str) -> PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "ocifetch-486-{name}-{}-{nanos:x}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ))
+    }
+
+    /// One record installed by hand under `root`, as any binding leaves it;
+    /// returns the entry directory.
+    fn write_record(root: &Path, version: &str, build: &str) -> PathBuf {
+        let library = format!("library {version} {build}");
+        let manifest = oci::sha256_hex(format!("{}{version}{build}", root.display()).as_bytes());
+        let record = VerifiedRecord {
+            platform: "linux-arm64".to_string(),
+            version: version.to_string(),
+            build: build.to_string(),
+            channel: None,
+            index_digest: None,
+            manifest_digest: format!("sha256:{manifest}"),
+            layer_digest: format!("sha256:{}", "c".repeat(64)),
+            bundle_digest: None,
+            bundle_manifest_digest: None,
+            signed_by: String::new(),
+            library: "lib.so".to_string(),
+            library_sha256: oci::sha256_hex(library.as_bytes()),
+            library_bytes: library.len() as u64,
+            predicate: serde_json::json!({"clickhouse_version": version, "build": build}),
+        };
+        let entry = root.join(constants::CACHE_UNPACKED_DIR).join(&manifest);
+        layout::write_atomic(&entry.join("lib.so"), library.as_bytes()).unwrap();
+        layout::write_atomic(
+            &entry.join(constants::CACHE_VERIFIED_RECORD),
+            &record.to_json_bytes().unwrap(),
+        )
+        .unwrap();
+        entry
+    }
+
+    fn options(cache: &Path, system_dirs: Vec<PathBuf>) -> Options {
+        Options {
+            platform: Some("linux-arm64".to_string()),
+            cache_dir: Some(cache.to_string_lossy().into_owned()),
+            system_dirs,
+            ..Options::default()
+        }
+    }
+
+    /// The cache and the system dirs are one search: the newest (version,
+    /// build) wins, a tie goes to the earlier root, and `list_installed` and
+    /// `verify_installed` read the same roots.
+    #[test]
+    fn resolve_list_and_verify_read_every_root_newest_first() {
+        for (cache_vb, sys_vb, system_wins) in [
+            (
+                ("26.8.1.1", "20260801.000001"),
+                ("26.8.2.1", "20260802.000001"),
+                true,
+            ),
+            (
+                ("26.8.1.1", "20260801.000001"),
+                ("26.8.1.1", "20260801.000002"),
+                true,
+            ),
+            (
+                ("26.8.2.1", "20260802.000001"),
+                ("26.8.1.1", "20260801.000001"),
+                false,
+            ),
+            (
+                ("26.8.1.1", "20260801.000001"),
+                ("26.8.1.1", "20260801.000001"),
+                false,
+            ),
+        ] {
+            let base = scratch("roots");
+            let (cache, sys) = (base.join("cache"), base.join("system"));
+            let cache_entry = write_record(&cache, cache_vb.0, cache_vb.1);
+            let sys_entry = write_record(&sys, sys_vb.0, sys_vb.1);
+            let got = resolve_installed("26.8", "linux-arm64", options(&cache, vec![sys.clone()]))
+                .unwrap()
+                .expect("a record answers 26.8");
+            let (want_dir, want_source) = if system_wins {
+                (sys_entry.clone(), format!("system:{}", sys.display()))
+            } else {
+                (cache_entry.clone(), "cache".to_string())
+            };
+            assert_eq!((&got.dir, &got.source), (&want_dir, &want_source));
+            let mut offline = options(&cache, vec![sys.clone()]);
+            offline.offline = true;
+            assert_eq!(ensure("26.8", offline).unwrap().dir, want_dir);
+            let listed: Vec<PathBuf> = list_installed(options(&cache, vec![sys.clone()]))
+                .unwrap()
+                .into_iter()
+                .map(|r| r.dir)
+                .collect();
+            assert_eq!(listed, vec![cache_entry.clone(), sys_entry.clone()]);
+            let verified: Vec<(PathBuf, bool)> =
+                verify_installed(options(&cache, vec![sys.clone()]))
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| (r.dir, r.ok))
+                    .collect();
+            assert_eq!(verified, vec![(cache_entry, true), (sys_entry, true)]);
+            let _ = std::fs::remove_dir_all(&base);
+        }
+    }
+
+    /// Every path under `root` with its size, or `None` when `root` is absent.
+    fn tree_of(root: &Path) -> Option<Vec<(PathBuf, u64)>> {
+        fn walk(dir: &Path, out: &mut Vec<(PathBuf, u64)>) {
+            let mut entries: Vec<_> = std::fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            entries.sort();
+            for p in entries {
+                let md = std::fs::symlink_metadata(&p).unwrap();
+                out.push((p.clone(), md.len()));
+                if md.is_dir() {
+                    walk(&p, out);
+                }
+            }
+        }
+        std::fs::symlink_metadata(root).ok()?;
+        let mut out = Vec::new();
+        walk(root, &mut out);
+        Some(out)
+    }
+
+    /// What a 0.x install left behind: `<minor>/manifest.json`, no `oci-layout`.
+    fn zero_x_registry(root: &Path) {
+        for (rel, body) in [
+            ("26.1/manifest.json", "{}"),
+            ("26.1/libchtypes.so", "0.x library"),
+            ("patches/26.1.3.4/manifest.json", "{}"),
+        ] {
+            layout::write_atomic(&root.join(rel), body.as_bytes()).unwrap();
+        }
+    }
+
+    /// `resolve_installed`, `list_installed`, `verify_installed` and an
+    /// offline `ensure` create nothing, whether the cache is missing or holds
+    /// a 0.x registry.
+    #[test]
+    fn read_only_lookups_create_nothing() {
+        let base = scratch("readonly");
+        let zero_x = base.join("zero-x");
+        zero_x_registry(&zero_x);
+        let no_system = base.join("no-such-system-dir");
+        for cache in [base.join("no-such-cache"), zero_x] {
+            let before = tree_of(&cache);
+            let opts = || options(&cache, vec![no_system.clone()]);
+            assert!(
+                resolve_installed("26.1", "linux-arm64", opts())
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(list_installed(opts()).unwrap().is_empty());
+            assert!(verify_installed(opts()).unwrap().is_empty());
+            let mut offline = opts();
+            offline.offline = true;
+            assert!(matches!(
+                ensure("26.1", offline),
+                Err(Error::ArtifactMissing(_))
+            ));
+            assert_eq!(tree_of(&cache), before, "{} changed", cache.display());
+            assert!(tree_of(&no_system).is_none());
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A MISSING answer from a 0.x registry names it and the v1 root; a 1.x
+    /// cache without an `oci-layout` and an empty one carry no hint.
+    #[test]
+    fn missing_carries_the_zero_x_hint() {
+        let base = scratch("hint");
+        let zero_x = base.join("zero-x");
+        zero_x_registry(&zero_x);
+        let hint = format!(
+            "{} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at \
+             ${{XDG_CACHE_HOME:-~/.cache}}/chtypes/v1",
+            zero_x.display()
+        );
+        let mut offline = options(&zero_x, Vec::new());
+        offline.offline = true;
+        match ensure("26.1", offline) {
+            Err(Error::ArtifactMissing(m)) => assert!(m.contains(&hint), "{m}"),
+            other => panic!("want ArtifactMissing, got {other:?}"),
+        }
+        let notes = missing_notes(&options(&zero_x, Vec::new()));
+        assert!(notes.len() == 1 && notes[0].starts_with(&hint), "{notes:?}");
+        let one_x = base.join("one-x");
+        write_record(&one_x, "26.8.1.1", "20260801.000001");
+        let empty = base.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        for cache in [one_x, empty, base.join("absent")] {
+            assert!(missing_notes(&options(&cache, Vec::new())).is_empty());
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Every directory and file an install creates has the mode a plain
+    /// `create_dir` and `fs::write` get in the same place: 0777 and 0666 less
+    /// the process umask, whatever it is (std cannot set the umask, so the
+    /// controls stand in for it). The controls must not be the temp APIs'
+    /// private 0700/0600, or the comparison could not tell the two apart.
+    #[test]
+    fn install_modes_follow_the_umask() {
+        let base = scratch("modes");
+        std::fs::create_dir_all(&base).unwrap();
+        let control_dir = base.join("control-dir");
+        std::fs::create_dir(&control_dir).unwrap();
+        std::fs::write(base.join("control-file"), b"x").unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let (want_dir, want_file) = (mode(&control_dir), mode(&base.join("control-file")));
+        assert!(
+            want_dir != 0o700 && want_file != 0o600,
+            "the umask is 077, so this test cannot discriminate; run it at umask 022"
+        );
+        let root = base.join("cache");
+        layout::ensure_layout(&root).unwrap();
+        let digest = format!("sha256:{}", "a".repeat(64));
+        layout::put_blob(&root, &digest, b"{}").unwrap();
+        layout::record_in_index(
+            &root,
+            &digest,
+            2,
+            constants::MEDIA_TYPE_MANIFEST,
+            None,
+            None,
+        )
+        .unwrap();
+        let entry = layout::install_unpacked(&root, &digest, |tmp| {
+            unpack::unpack_tar(&tar_of("lib.so", b"library"), tmp)?;
+            layout::write_atomic(&tmp.join(constants::CACHE_VERIFIED_RECORD), b"{}")
+        })
+        .unwrap();
+        let mut seen = 0;
+        for (p, _) in tree_of(&root).unwrap() {
+            let md = std::fs::symlink_metadata(&p).unwrap();
+            let want = if md.is_dir() { want_dir } else { want_file };
+            assert_eq!(mode(&p), want, "{}", p.display());
+            seen += 1;
+        }
+        assert!(seen >= 8 && entry.join("lib.so").exists(), "saw {seen}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A one-file tar, as the layer carries the library.
+    fn tar_of(name: &str, body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut out);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o600);
+            header.set_entry_type(tar::EntryType::Regular);
+            builder.append_data(&mut header, name, body).unwrap();
+            builder.finish().unwrap();
+        }
+        out
     }
 }

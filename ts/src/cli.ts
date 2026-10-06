@@ -44,6 +44,7 @@ import {
   isPlatformKey,
   listInstalled,
   listTags,
+  missingNotes,
   type PlatformKey,
   verifyInstalled,
 } from './ocifetch/index.js';
@@ -249,7 +250,13 @@ async function cmdVerify(rest: readonly string[], values: Values, io: CliIo): Pr
   const options = fetchOptions(values, false);
   const root = cacheRoot(options.cacheDir);
   const results = await verifyInstalled(options);
-  if (results.length === 0) return EXIT_OK;
+  if (results.length === 0) {
+    // An empty pass must never look like a good one (public issue #486): say
+    // that nothing was verified, and why when the cache says why.
+    io.stderr(`chtypes: verified 0 builds under ${root}\n`);
+    for (const note of await missingNotes(options)) io.stderr(`chtypes: ${note}\n`);
+    return EXIT_OK;
+  }
   let bad = 0;
   for (const r of results) {
     if (!r.ok) {

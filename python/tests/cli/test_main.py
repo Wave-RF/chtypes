@@ -191,3 +191,26 @@ def test_python_dash_m_runs_the_same_cli(tmp_path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(tmp_path / "c")
+
+
+def _zero_x_registry(root: Path) -> None:
+    for rel, body in {"26.1/manifest.json": "{}", "26.1/libchtypes.so": "0.x"}.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(body)
+
+
+def test_verify_of_nothing_says_so(env, tmp_path, capsys) -> None:
+    """A verify that verified nothing says so on stderr, so an empty pass never
+    looks like a good one, and a 0.x registry used as the cache is named
+    (public issue #486)."""
+    code, out, err = run(capsys, "verify")
+    assert (code, out) == (0, "")
+    assert f"chtypes: verified 0 builds under {tmp_path / 'cache'}\n" in err
+    zero_x = tmp_path / "zero-x"
+    _zero_x_registry(zero_x)
+    hint = f"{zero_x} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at "
+    code, _, err = run(capsys, "verify", "--cache", str(zero_x))
+    assert code == 0 and f"verified 0 builds under {zero_x}" in err and hint in err
+    code, _, err = run(capsys, "fetch", "--offline", "26.1", "--cache", str(zero_x))
+    assert code == C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_MISSING"] and hint in err
+    assert not (zero_x / "oci-layout").exists()

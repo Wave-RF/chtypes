@@ -32,10 +32,12 @@ import {
   hostPlatformKey,
   isFilesystemError,
   listInstalled,
+  missingNotes,
   type PlatformKey,
   type Resolved,
   resolveInstalled,
   satisfiesRequest,
+  withNotes,
 } from './ocifetch/index.js';
 import { ENV_AUTOFETCH_NAME, SPELLING_REGEX } from './ocifetch/constants.gen.js';
 import { withEnvironment } from './env.js';
@@ -138,7 +140,10 @@ export class Registry {
     }
     if (resolved === undefined) {
       throw new ArtifactMissingError(
-        `chtypes: ${request} (${platform}) is not installed. Fetch it first, or turn autofetch on (the autofetch option, or ${ENV_AUTOFETCH_NAME}=1)`,
+        withNotes(
+          `chtypes: ${request} (${platform}) is not installed. Fetch it first, or turn autofetch on (the autofetch option, or ${ENV_AUTOFETCH_NAME}=1)`,
+          await missingNotes(this.#fetch),
+        ),
       );
     }
     const setup = commitSetup();

@@ -348,7 +348,35 @@ func resolveOffline(ro resolvedOptions, req Request, platform Platform) (*Resolv
 		return res, nil
 	}
 	return nil, newError(CodeArtifactMissing, req.Spelling, platform.Key, "", nil,
-		"no installed artifact for %s/%s, and --offline forbids a network fetch", req.Spelling, platform.Key)
+		"%s", WithNotes(fmt.Sprintf("no installed artifact for %s/%s, and --offline forbids a network fetch", req.Spelling, platform.Key), missingNotes(ro)))
+}
+
+// MissingNotes is what a CHTYPES_ARTIFACT_MISSING answer from the cache opts
+// names adds to its message, each a complete sentence: the 0.x hint when the
+// cache is a 0.x registry directory (docs/guides/fetch-v1.md, "Upgrading from
+// 0.x"; public issue #486). The registry's own MISSING adds the same notes as
+// the offline fetch's.
+func MissingNotes(opts *Options) []string {
+	ro, err := resolveOptions(opts)
+	if err != nil {
+		return nil
+	}
+	return missingNotes(ro)
+}
+
+func missingNotes(ro resolvedOptions) []string {
+	if hint := zeroXHint(ro.cacheDir); hint != "" {
+		return []string{hint}
+	}
+	return nil
+}
+
+// WithNotes appends notes, each a complete sentence, to a message.
+func WithNotes(msg string, notes []string) string {
+	if len(notes) == 0 {
+		return msg
+	}
+	return msg + ". " + strings.Join(notes, " ")
 }
 
 // ensureOnline is Ensure's normal (non-frozen, non-offline) path: resolve
@@ -471,7 +499,7 @@ func (s *session) installManifest(l *layout, req Request, platform Platform, man
 	}
 
 	unpackParent := filepath.Join(l.dir, UnpackedDirName())
-	if err := os.MkdirAll(unpackParent, 0o755); err != nil {
+	if err := os.MkdirAll(unpackParent, dirMode); err != nil {
 		return nil, err
 	}
 	up, err := unpackLibrary(layerBody, unpackParent, libraryRelPath)
@@ -696,37 +724,55 @@ func readInstalledRecord(l *layout, manifestDigest Digest) (*verifiedRecord, str
 	return rec, dir, true
 }
 
+// rootSource is Resolved.Source for a record read from the i-th search root:
+// the user cache first, then each read-only system directory.
+func rootSource(i int, dir string) string {
+	if i == 0 {
+		return "cache"
+	}
+	return "system:" + dir
+}
+
 // resolveInstalledInternal implements both ResolveInstalled and the offline
-// branch of Ensure: search the user cache, then each read-only system
-// directory in order, never touching the network.
+// branch of Ensure, never touching the network. It reads the records of the
+// user cache, then of each read-only system directory in order, and answers
+// with the newest (version, build) among every record that satisfies the
+// request; a tie goes to the earlier root (docs/guides/fetch-v1.md §1, one
+// root order; public issue #486). Only when no root holds such a record does
+// it install a pre-seeded index.json entry from local blobs, trying the roots
+// in the same order. Nothing is created unless such an install begins.
 func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey string) (*Resolved, error) {
 	cacheLayout := newLayout(ro.cacheDir, false)
 	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
+	var best *installedEntry
+	var bestSource string
 	for i, dir := range dirs {
-		readOnly := i > 0
-		l := newLayout(dir, readOnly)
 		entries, err := listUnpacked(dir)
 		if err != nil {
 			continue
 		}
-		if best, ok := newestMatching(entries, platformKey, req.Spelling); ok {
-			source := "cache"
-			if readOnly {
-				source = "system:" + dir
-			}
-			return recordToResolved(&best.rec, best.dir, platformKey, req.Spelling, "", true, source, nil), nil
+		cand, ok := newestMatching(entries, platformKey, req.Spelling)
+		if !ok {
+			continue
 		}
+		if best == nil || newerThan(cand.rec.Version, cand.rec.Build, best.rec.Version, best.rec.Build) {
+			best, bestSource = cand, rootSource(i, dir)
+		}
+	}
+	if best != nil {
+		return recordToResolved(&best.rec, best.dir, platformKey, req.Spelling, "", true, bestSource, nil), nil
+	}
+	for i, dir := range dirs {
 		// A pre-seeded index.json entry with no verified.json yet: verify
 		// and unpack it now, entirely from local blobs (§1). A read-only
 		// system directory is only ever read here — the result lands in
 		// the user's own (writable) cache, never back into the system dir.
+		readOnly := i > 0
+		l := newLayout(dir, readOnly)
 		dst := l
 		source := "cache (pre-seeded)"
 		if readOnly {
 			dst = cacheLayout
-			if err := dst.ensureSkeleton(); err != nil {
-				continue
-			}
 			source = "system:" + dir + " (pre-seeded, installed into the cache)"
 		}
 		if res, err := verifyPreseededEntry(l, dst, req, platformKey, ro.trustedKeys, source); err == nil && res != nil {
@@ -865,7 +911,15 @@ func verifyPreseededEntry(srcLayout, dstLayout *layout, req Request, platformKey
 			continue
 		}
 		libraryRelPath, _ := predicateLibraryPath(stmt)
-		if err := os.MkdirAll(filepath.Join(dstLayout.dir, UnpackedDirName()), 0o755); err != nil {
+		// The install begins here, and only here is anything created: a
+		// lookup that finds nothing to install leaves the cache untouched
+		// (docs/guides/fetch-v1.md §6; public issue #486).
+		if dstLayout != srcLayout {
+			if err := dstLayout.ensureSkeleton(); err != nil {
+				continue
+			}
+		}
+		if err := os.MkdirAll(filepath.Join(dstLayout.dir, UnpackedDirName()), dirMode); err != nil {
 			continue
 		}
 		up, err := unpackLibrary(layerBody, filepath.Join(dstLayout.dir, UnpackedDirName()), libraryRelPath)
@@ -949,7 +1003,7 @@ func installPreseededByDigest(l *layout, manifestDigest Digest, trustedKeys []ed
 		return fmt.Errorf("chtypes: no local referrer verifies manifest %s", target.Digest)
 	}
 	libraryRelPath, _ := predicateLibraryPath(stmt)
-	if err := os.MkdirAll(filepath.Join(l.dir, UnpackedDirName()), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(l.dir, UnpackedDirName()), dirMode); err != nil {
 		return err
 	}
 	up, err := unpackLibrary(layerBody, filepath.Join(l.dir, UnpackedDirName()), libraryRelPath)

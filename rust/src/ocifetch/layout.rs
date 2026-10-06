@@ -397,6 +397,51 @@ pub fn list_verified(root: &Path) -> Result<Vec<(PathBuf, VerifiedRecord)>> {
     Ok(out)
 }
 
+/// A 0.x registry directory's per-line entry: two numeric parts, `26.8`.
+fn is_zero_x_minor(name: &str) -> bool {
+    let mut parts = name.split('.');
+    let numeric =
+        |p: Option<&str>| p.is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    numeric(parts.next()) && numeric(parts.next()) && parts.next().is_none()
+}
+
+/// The `<minor>/manifest.json` a 0.x registry directory holds, when `root` has
+/// that shape: no `oci-layout`, no `unpacked/`, and at least one
+/// `<minor>/manifest.json` (the first by name). A missing `oci-layout` alone is
+/// not the shape (a Python-written 1.x cache has none), and a directory that
+/// has `unpacked/` is a 1.x cache whoever wrote it. `None` for anything else,
+/// including a directory that is missing or cannot be read.
+pub fn zero_x_shape(root: &Path) -> Option<String> {
+    for name in ["oci-layout", "unpacked"] {
+        match std::fs::symlink_metadata(root.join(name)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return None,
+        }
+    }
+    let mut names: Vec<String> = std::fs::read_dir(root)
+        .ok()?
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| is_zero_x_minor(n))
+        .collect();
+    names.sort();
+    names.into_iter().find_map(|name| {
+        let dir = std::fs::symlink_metadata(root.join(&name)).ok()?;
+        let manifest = std::fs::symlink_metadata(root.join(&name).join("manifest.json")).ok()?;
+        (dir.is_dir() && manifest.is_file()).then(|| format!("{name}/manifest.json"))
+    })
+}
+
+/// The sentence a `CHTYPES_ARTIFACT_MISSING` answer from a cache with the 0.x
+/// shape carries (docs/guides/fetch-v1.md, "Upgrading from 0.x"), or `None`.
+pub fn zero_x_hint(root: &Path) -> Option<String> {
+    let shape = zero_x_shape(root)?;
+    Some(format!(
+        "{} holds a 0.x registry ({shape}); chtypes 1.x uses an OCI layout at \
+         ${{XDG_CACHE_HOME:-~/.cache}}/chtypes/v1 — point CHTYPES_CACHE at an empty or 1.x directory.",
+        root.display()
+    ))
+}
+
 /// Add a manifest descriptor to `index.json` by a read-check-rename loop:
 /// read the live file, merge the entry, and — immediately before the atomic
 /// rename — re-read it once more; if a concurrent writer changed it in the

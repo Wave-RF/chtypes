@@ -205,6 +205,40 @@ func buildRecordCases(fs *FileSet) []Case {
 	offlinePair("upgrade-0x-unpacked-noblobs", "upgrade-0x-unpacked-noblobs", "26.3", nil)
 	offlinePair("upgrade-0x-unpacked-reverify", "upgrade-0x-unpacked-reverify", "26.3", &artU)
 
+	// --- root-order-*: the cache and the system dirs are one search
+	// (docs/guides/fetch-v1.md §1, one root order; public issue #486). Two
+	// layouts, each holding one canonical record and its library and nothing
+	// else, one build of 26.2 older than the other. Whichever root holds the
+	// newer build, it answers: a binding that stops at the first root with a
+	// match, or never reads a system dir's records, answers with the older.
+	artOlder, seedOlder := newArtifact("26.2.7.1", "20260207.000001", "root-order-older")
+	artNewer, seedNewer := newArtifact("26.2.8.1", "20260208.000001", "root-order-newer")
+	for _, v := range []struct {
+		name string
+		art  PlatformArtifact
+		seed string
+	}{{"root-order-older", artOlder, seedOlder}, {"root-order-newer", artNewer, seedNewer}} {
+		l := NewLayout(v.name)
+		l.AddFile(unpackedPath(v.art, v.art.Predicate.Library), fakeLibraryContent(v.seed))
+		l.AddFile(unpackedPath(v.art, "verified.json"), canonicalJSON(canonicalRecordFor(tree, v.art)))
+		layouts = append(layouts, l)
+	}
+	for _, v := range []struct{ slug, cache, system string }{
+		{"root-order-system-newer", "root-order-older", "root-order-newer"},
+		{"root-order-cache-newer", "root-order-newer", "root-order-older"},
+	} {
+		for _, id := range []string{v.slug + "-offline", "resolve-installed-" + v.slug} {
+			c := newCase(id, "cache-record", "file", "http")
+			c.Request.Spelling = "26.2"
+			c.Request.Offline = true
+			c.Setup.Cache = v.cache
+			c.Setup.SystemDirs = []string{v.system}
+			c.Expect.Requests.Max = intp(0)
+			expectArt(&c, artNewer)
+			cases = append(cases, c)
+		}
+	}
+
 	flushTrees(fs, tree)
 	for _, l := range layouts {
 		l.Flush(fs)

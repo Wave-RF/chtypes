@@ -317,11 +317,21 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	} else if len(rest) > 0 {
 		return &usageError{fmt.Sprintf("verify takes no positional arguments (%s)", strings.Join(rest, " "))}
 	}
-	results, err := ocifetch.VerifyInstalled(&ocifetch.Options{CacheDir: cf.cache})
+	opts := &ocifetch.Options{CacheDir: cf.cache}
+	results, err := ocifetch.VerifyInstalled(opts)
 	if err != nil {
 		return err
 	}
-	root, _ := ocifetch.CacheRoot(&ocifetch.Options{CacheDir: cf.cache})
+	root, _ := ocifetch.CacheRoot(opts)
+	if len(results) == 0 {
+		// An empty pass must never look like a good one (public issue #486):
+		// say that nothing was verified, and why when the cache says why.
+		fmt.Fprintf(stderr, "chtypes: verified 0 builds under %s\n", root)
+		for _, note := range ocifetch.MissingNotes(opts) {
+			fmt.Fprintf(stderr, "chtypes: %s\n", note)
+		}
+		return nil
+	}
 	bad := 0
 	for _, r := range results {
 		if !r.OK {

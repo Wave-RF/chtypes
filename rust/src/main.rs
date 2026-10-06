@@ -264,6 +264,14 @@ fn cmd_verify(args: &Args) -> Result<u8, Usage> {
         Err(e) => return Ok(report(&e)),
     };
     if results.is_empty() {
+        // An empty pass must never look like a good one (public issue #486):
+        // say that nothing was verified, and why when the cache says why.
+        if let Ok(root) = ocifetch::layout::cache_root(args.cache.as_deref()) {
+            eprintln!("chtypes: verified 0 builds under {}", root.display());
+        }
+        for note in ensure::missing_notes(&options(args)) {
+            eprintln!("chtypes: {note}");
+        }
         return Ok(0);
     }
     let mut bad = 0usize;

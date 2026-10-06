@@ -3,6 +3,7 @@ r"""scripts/fetch-v1/cache-interop.py — a cache one binding writes, every bind
 (docs/guides/fetch-v1.md §1, "The verified.json record").
 
     scripts/fetch-v1/cache-interop.py --cli go=<cmd> --cli python=<cmd> --cli ts=<cmd> --cli rust=<cmd>
+                                      [--other-user <name>]
     scripts/fetch-v1/cache-interop.py --selftest
 
 Each `--cli` names a binding's `chtypes` command line (shell-split, so a
@@ -49,9 +50,29 @@ ONLY the four CLIs, never a library call, against it:
      already be using), nothing else is left under `unpacked/sha256/`, and
      every binding's `verify` passes on the final cache.
 
-Prints the 4x4 table, the 0.x rows, one table per line and the concurrency
-sets, writes the same to $GITHUB_STEP_SUMMARY when set, and exits nonzero if
-any cell fails.
+  5. READ-ONLY COMMANDS (public issue #486). For each reader, on a cache
+     path that does not exist and on a 0.x registry directory: `list
+     --offline`, `verify` and `fetch 26.8 --offline`, run as the cache's own
+     owner, so a write would succeed if one were attempted. A cell passes only
+     if the tree is unchanged (no path created, removed or rewritten; a
+     missing root stays missing), `verify` says on stderr that it verified 0
+     builds under the root, and on the 0.x directory both `verify` and the
+     offline fetch name it with the 0.x hint.
+  6. CROSS-UID, WRITER x READER (public issue #486; only with --other-user).
+     Each writer fetches 26.8 into a fresh cache as this user at umask 022;
+     each reader then runs `fetch 26.8 --offline`, `list --offline` and
+     `verify` as the other user (`sudo -n -u <name>`), and must succeed and
+     name the writer's directory. Three controls run first, or every cell is
+     INVALID: the other user's uid differs from this one and is not root, it
+     can read a 0644 file here, and it is refused a 0600 one ("Permission
+     denied"), so the identity switch and the modes are both real. The CLIs
+     must be installed where the other user can run them.
+
+Every process runs at umask 022, set here. Prints the 4x4 table, the 0.x
+rows, one table per line, the concurrency sets, the read-only rows and the
+cross-uid table, writes the same to $GITHUB_STEP_SUMMARY when set, and exits
+nonzero if any cell fails. Without --other-user the cross-uid block is skipped
+LOUDLY, by name.
 """
 
 from __future__ import annotations
@@ -62,6 +83,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -85,6 +107,12 @@ LINE_LOW = "26.3"
 CONCURRENCY = 8
 CONCURRENCY_ROUNDS = 3
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+# Parts 5 and 6: the umask every writer runs at, and the 0.x hint's own words.
+UMASK = 0o022
+ZERO_X_HINT = (
+    "{root} holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at "
+    "${{XDG_CACHE_HOME:-~/.cache}}/chtypes/v1"
+)
 # Run by each concurrent process before it execs its CLI: announce readiness,
 # then wait for the barrier file, so all of them start together.
 BARRIER = (
@@ -107,6 +135,19 @@ def tree_hashes(root: Path) -> dict[str, str]:
     return {str(p.relative_to(root)): sha256_file(p) for p in sorted(root.rglob("*")) if p.is_file()}
 
 
+def tree_state(root: Path) -> dict[str, str] | None:
+    """Every path under `root`, directories included, with a file's sha256 or
+    "dir": None when `root` does not exist. Unlike `tree_hashes`, an empty
+    directory that appeared is a change."""
+    if not os.path.lexists(root):
+        return None
+    out: dict[str, str] = {}
+    for p in sorted(root.rglob("*")):
+        rel = str(p.relative_to(root))
+        out[rel] = "dir" if p.is_dir() and not p.is_symlink() else sha256_file(p)
+    return out
+
+
 def records_equal(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
     """The members in which two parsed records differ (empty when equal)."""
     return sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
@@ -120,6 +161,14 @@ def render_table(title: str, rows: list[str], cols: list[str], cells: dict[tuple
     for r in rows:
         lines.append(r.ljust(width) + " | " + " | ".join(cells.get((r, c), "-").ljust(w) for c, w in zip(cols, colw, strict=True)))
     return "\n".join(lines)
+
+
+def as_user(user: str, env: dict[str, str], argv: list[str]) -> list[str]:
+    """`argv` run as `user` through `sudo -n`, with exactly the CHTYPES_*
+    variables, PATH and HOME of `env` and nothing else (`env -i`), since sudo
+    resets the environment anyway."""
+    keep = {k: v for k, v in env.items() if k.startswith("CHTYPES_") or k in ("PATH", "HOME")}
+    return ["sudo", "-n", "-u", user, "env", "-i", *(f"{k}={v}" for k, v in sorted(keep.items())), *argv]
 
 
 class Harness:
@@ -138,10 +187,13 @@ class Harness:
             return self.env
         return {**self.env, "CHTYPES_ARTIFACTS_URL": base}
 
-    def run(self, binding: str, *args: str, base: str | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [*self.clis[binding], *args], env=self.env_for(base), capture_output=True, text=True, timeout=300, check=False
-        )
+    def run(
+        self, binding: str, *args: str, base: str | None = None, user: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        argv = [*self.clis[binding], *args]
+        if user is not None:
+            argv = as_user(user, self.env_for(base), argv)
+        return subprocess.run(argv, env=self.env_for(base), capture_output=True, text=True, timeout=300, check=False)
 
     def fetch(
         self, binding: str, spelling: str, cache: Path, *, offline: bool, base: str | None = None
@@ -489,7 +541,114 @@ def concurrency_rows(h: Harness, names: list[str]) -> dict[tuple[str, str], str]
     return cells
 
 
-def main_run(clis: dict[str, list[str]]) -> int:
+def read_only_rows(h: Harness, names: list[str], missing_exit: int) -> dict[tuple[str, str], str]:
+    """Part 5: read-only commands create nothing (public issue #486)."""
+    cells: dict[tuple[str, str], str] = {}
+    for reader in names:
+        for label, make in (
+            ("read-only commands: no cache dir", None),
+            ("read-only commands: 0.x registry dir", "upgrade-0x-registry"),
+        ):
+            root = h.work / f"ro-{reader}" / ("zero-x" if make else "absent")
+            root.parent.mkdir(parents=True, exist_ok=True)
+            if make:
+                shutil.copytree(FIXTURES / "layouts" / make, root)
+            before = tree_state(root)
+            listed = h.run(reader, "list", "--offline", "--cache", str(root))
+            verified = h.run(reader, "verify", "--cache", str(root))
+            off = h.fetch(reader, SPELLING, root, offline=True)
+            after = tree_state(root)
+            hint = ZERO_X_HINT.format(root=root)
+            if after != before:
+                created = sorted(set(after or {}) - set(before or {}))
+                changed = sorted(p for p in (before or {}) if (after or {}).get(p) != (before or {})[p])
+                why = f"FAIL the tree changed: created {created[:6]}, changed {changed[:6]}"
+                if before is None:
+                    why = f"FAIL the missing root was created, with {sorted(after or {})[:6]}"
+            elif listed.returncode != 0 or listed.stdout.strip():
+                why = f"FAIL list --offline exit {listed.returncode}, output {listed.stdout.strip()[-120:]!r}"
+            elif verified.returncode != 0 or f"verified 0 builds under {root}" not in verified.stderr:
+                why = f"FAIL verify exit {verified.returncode}, did not say it verified 0 builds: {verified.stderr.strip()[-160:]!r}"
+            elif off.returncode != missing_exit:
+                why = f"FAIL fetch --offline exit {off.returncode}, want {missing_exit}: {off.stderr.strip()[-160:]}"
+            elif make and hint not in off.stderr:
+                why = f"FAIL fetch --offline did not name the 0.x registry: {off.stderr.strip()[-200:]!r}"
+            elif make and hint not in verified.stderr:
+                why = f"FAIL verify did not name the 0.x registry: {verified.stderr.strip()[-200:]!r}"
+            else:
+                why = "ok"
+            cells[(label, reader)] = why
+    return cells
+
+
+def other_user_controls(h: Harness, user: str) -> str:
+    """Part 6's preflight: "ok", or why the cross-uid cells cannot be trusted.
+    The identity switch must be real, and a mode must take effect for it."""
+    probe = subprocess.run(as_user(user, h.env, ["id", "-u"]), capture_output=True, text=True, check=False)
+    if probe.returncode != 0:
+        return f"sudo -n -u {user} id -u exit {probe.returncode}: {probe.stderr.strip()[-160:]}"
+    uid = probe.stdout.strip()
+    if not uid.isdigit() or int(uid) in (0, os.getuid()):
+        return f"{user} is uid {uid!r}, which is root or this user ({os.getuid()})"
+    control = h.work / "xuid-control"
+    control.mkdir()
+    public, private = control / "public", control / "private"
+    public.write_text("readable\n")
+    os.chmod(public, 0o644)
+    fd = os.open(private, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    os.write(fd, b"private\n")
+    os.close(fd)
+    if stat.S_IMODE(os.stat(private).st_mode) != 0o600:
+        return f"{private} is not 0600"
+    read = subprocess.run(as_user(user, h.env, ["cat", str(public)]), capture_output=True, text=True, check=False)
+    if read.returncode != 0 or read.stdout != "readable\n":
+        return f"{user} cannot read a 0644 file here (exit {read.returncode}: {read.stderr.strip()[-160:]}); the work dir is not reachable"
+    denied = subprocess.run(as_user(user, h.env, ["cat", str(private)]), capture_output=True, text=True, check=False)
+    if denied.returncode == 0 or "Permission denied" not in denied.stderr:
+        return f"{user} was not refused a 0600 file (exit {denied.returncode}: {denied.stderr.strip()[-160:]!r})"
+    return "ok"
+
+
+def cross_uid_rows(h: Harness, names: list[str], user: str, expected: dict[str, str]) -> dict[tuple[str, str], str]:
+    """Part 6: a cache one uid writes, another uid reads (public issue #486)."""
+    cells: dict[tuple[str, str], str] = {}
+    control = other_user_controls(h, user)
+    for writer in names:
+        key = f"{writer} writes (as {os.getuid()})"
+        if control != "ok":
+            for reader in names:
+                cells[(key, reader)] = f"INVALID control: {control}"
+            continue
+        cache = h.work / f"xuid-{writer}"
+        done = h.fetch(writer, SPELLING, cache, offline=False)
+        if done.returncode != 0:
+            for reader in names:
+                cells[(key, reader)] = f"FAIL (no cache: {writer} fetch exit {done.returncode}: {done.stderr.strip()[-160:]})"
+            continue
+        entry = Path(named_dir(done))
+        record = entry / "verified.json"
+        before = record.read_bytes()
+        for reader in names:
+            got = h.run(reader, "fetch", SPELLING, "--platform", PLATFORM, "--cache", str(cache), "--offline", user=user)
+            listed = h.run(reader, "list", "--offline", "--cache", str(cache), user=user)
+            verified = h.run(reader, "verify", "--cache", str(cache), user=user)
+            if got.returncode != 0:
+                why = f"FAIL fetch --offline as {user} exit {got.returncode}: {got.stderr.strip()[-200:]}"
+            elif os.path.realpath(named_dir(got)) != os.path.realpath(entry):
+                why = f"FAIL fetch --offline as {user} named {named_dir(got)!r}, not {entry}"
+            elif listed.returncode != 0 or f"installed {expected['version']} {PLATFORM}" not in listed.stdout:
+                why = f"FAIL list --offline as {user} exit {listed.returncode}, output {listed.stdout.strip()[-160:]!r}"
+            elif verified.returncode != 0 or "verified 0 builds" in verified.stderr:
+                why = f"FAIL verify as {user} exit {verified.returncode}: {verified.stderr.strip()[-160:]!r}"
+            elif record.read_bytes() != before:
+                why = "FAIL the record changed"
+            else:
+                why = "ok"
+            cells[(key, reader)] = why
+    return cells
+
+
+def main_run(clis: dict[str, list[str]], other_user: str | None = None) -> int:
     cases = json.loads((FIXTURES / "cases.json").read_text(encoding="utf-8"))["cases"]
     line_ok = next(c for c in cases if c["id"] == CASE)
     expected = {"version": line_ok["expect"]["version"], "build": line_ok["expect"]["build"], "platform": PLATFORM}
@@ -510,7 +669,10 @@ def main_run(clis: dict[str, list[str]]) -> int:
             print(f"cache-interop: the fixture server did not start: {listening}", file=sys.stderr)
             return 1
         base = f"http://127.0.0.1:{listening[1]}/s-{CASE}/chtypes/v1"
+        os.umask(UMASK)
         work = Path(tempfile.mkdtemp(prefix="cache-interop-"))
+        # Traversable by another uid (part 6); everything under it is written at UMASK.
+        os.chmod(work, 0o755)
         h = Harness(clis, base, trusted, work)
 
         cells: dict[tuple[str, str], str] = {}
@@ -538,6 +700,11 @@ def main_run(clis: dict[str, list[str]]) -> int:
         lines_base = f"http://127.0.0.1:{listening[1]}/s-{LINES_CASE}/chtypes/v1"
         cells.update(line_rows(h, names, lines_base))
         cells.update(concurrency_rows(h, names))
+        cells.update(read_only_rows(h, names, missing_exit))
+        if other_user is not None:
+            cells.update(cross_uid_rows(h, names, other_user, expected))
+        else:
+            print("cache-interop: SKIPPED the cross-uid block (part 6): no --other-user given", file=sys.stderr)
 
         row_labels = [f"{w} writes" for w in names]
         table = render_table("writer \\ reader", row_labels, names, cells)
@@ -549,7 +716,14 @@ def main_run(clis: dict[str, list[str]]) -> int:
             line_tables.append(render_table(f"line {line}: writer \\ reader", rows, names, cells))
         conc_rows = [r for (r, c) in cells if c == "result"]
         conc_table = render_table(f"concurrent fetch {SPELLING}, {CONCURRENCY_ROUNDS} rounds", conc_rows, ["result"], cells)
-        out = f"{table}\n\n{up_table}\n\n" + "\n\n".join(line_tables) + f"\n\n{conc_table}\n"
+        ro_rows = sorted({r for (r, _c) in cells if r.startswith("read-only commands: ")})
+        ro_table = render_table("read-only commands \\ reader", ro_rows, names, cells)
+        out = f"{table}\n\n{up_table}\n\n" + "\n\n".join(line_tables) + f"\n\n{conc_table}\n\n{ro_table}\n"
+        if other_user is not None:
+            xuid_rows = [f"{w} writes (as {os.getuid()})" for w in names]
+            out += "\n" + render_table(f"cross-uid: writer \\ reader as {other_user}", xuid_rows, names, cells) + "\n"
+        else:
+            out += "\ncross-uid: SKIPPED (no --other-user)\n"
         print(out)
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
@@ -560,6 +734,7 @@ def main_run(clis: dict[str, list[str]]) -> int:
             print(f"FAILED {r} / {c}: {v}", file=sys.stderr)
         conc_sets = len(names) + (1 if len(names) > 1 else 0)
         expected_cells = len(names) * len(names) + 3 * len(names) + 2 * len(names) * len(names) + conc_sets
+        expected_cells += 2 * len(names) + (len(names) * len(names) if other_user is not None else 0)
         if len(cells) != expected_cells:
             print(f"cache-interop: {len(cells)} cells, expected {expected_cells}", file=sys.stderr)
             return 1
@@ -630,6 +805,22 @@ def selftest() -> None:
         w.scan()
         assert w.events["UNRECORDED"] == 1 and w.events["TORN-RECORD"] == 1, f"unrecorded and torn records: {w.events}"
         assert entry_state(base / ".aside") == "complete"
+    # Part 5's tree comparison must see an empty directory appear, and a
+    # missing root stay None.
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d) / "r"
+        assert tree_state(root) is None
+        root.mkdir()
+        (root / "f").write_text("1")
+        before = tree_state(root)
+        (root / "blobs" / "sha256").mkdir(parents=True)
+        assert tree_state(root) != before and tree_state(root)["blobs/sha256"] == "dir", "a new empty dir is a change"
+    # Part 6's sudo line carries the fetch environment and nothing else.
+    argv = as_user("nobody", {"CHTYPES_CACHE": "/c", "PATH": "/bin", "HOME": "/h", "SECRET": "x"}, ["cli", "verify"])
+    assert argv[:6] == ["sudo", "-n", "-u", "nobody", "env", "-i"], argv
+    assert "SECRET=x" not in argv and "CHTYPES_CACHE=/c" in argv and argv[-2:] == ["cli", "verify"], argv
+    assert ZERO_X_HINT.format(root="/x").startswith("/x holds a 0.x registry (26.1/manifest.json)")
+    assert "${XDG_CACHE_HOME:-~/.cache}/chtypes/v1" in ZERO_X_HINT.format(root="/x")
     print("cache-interop --selftest: OK")
 
 
@@ -639,6 +830,7 @@ def main() -> int:
         selftest()
         return 0
     clis: dict[str, list[str]] = {}
+    other_user: str | None = None
     i = 0
     while i < len(argv):
         if argv[i] == "--cli" and i + 1 < len(argv) and "=" in argv[i + 1]:
@@ -648,13 +840,16 @@ def main() -> int:
                 return 2
             clis[name] = shlex.split(cmd)
             i += 2
+        elif argv[i] == "--other-user" and i + 1 < len(argv):
+            other_user = argv[i + 1]
+            i += 2
         else:
             print(f"cache-interop: unknown argument {argv[i]!r}", file=sys.stderr)
             return 2
     if not clis:
         print("usage: cache-interop.py --cli <binding>=<command> ... | --selftest", file=sys.stderr)
         return 2
-    return main_run(clis)
+    return main_run(clis, other_user)
 
 
 if __name__ == "__main__":

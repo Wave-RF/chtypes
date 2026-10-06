@@ -218,3 +218,47 @@ func mustRead(t *testing.T, p string) []byte {
 	}
 	return b
 }
+
+// writeZeroXRegistry lays out what a 0.x install left behind: a registry
+// directory of <minor>/manifest.json entries, with no oci-layout.
+func writeZeroXRegistry(t *testing.T, root string) {
+	t.Helper()
+	for rel, body := range map[string]string{
+		"26.1/manifest.json":             `{}`,
+		"26.1/libchtypes.so":             "0.x library",
+		"patches/26.1.3.4/manifest.json": `{}`,
+	} {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestVerifyOfNothingSaysSo: a verify that verified nothing says so on stderr,
+// so an empty pass never looks like a good one, and a 0.x registry used as
+// the cache is named (public issue #486).
+func TestVerifyOfNothingSaysSo(t *testing.T) {
+	empty := t.TempDir()
+	code, out, errText := runCLI(t, map[string]string{"CHTYPES_CACHE": empty}, "verify")
+	if code != 0 || out != "" || !strings.Contains(errText, "chtypes: verified 0 builds under "+empty+"\n") {
+		t.Errorf("verify of an empty cache = %d %q %q", code, out, errText)
+	}
+	zeroX := filepath.Join(t.TempDir(), "zero-x")
+	writeZeroXRegistry(t, zeroX)
+	hint := zeroX + " holds a 0.x registry (26.1/manifest.json); chtypes 1.x uses an OCI layout at ${XDG_CACHE_HOME:-~/.cache}/chtypes/v1"
+	code, _, errText = runCLI(t, nil, "verify", "--cache", zeroX)
+	if code != 0 || !strings.Contains(errText, "verified 0 builds under "+zeroX) || !strings.Contains(errText, hint) {
+		t.Errorf("verify of a 0.x registry = %d %q", code, errText)
+	}
+	code, _, errText = runCLI(t, nil, "fetch", "26.1", "--offline", "--platform", "linux-arm64", "--cache", zeroX)
+	if code != 1 || !strings.Contains(errText, "CHTYPES_ARTIFACT_MISSING") || !strings.Contains(errText, hint) {
+		t.Errorf("fetch --offline from a 0.x registry = %d %q", code, errText)
+	}
+	if _, err := os.Lstat(filepath.Join(zeroX, "oci-layout")); err == nil {
+		t.Errorf("a read-only command wrote %s", filepath.Join(zeroX, "oci-layout"))
+	}
+}

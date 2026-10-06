@@ -62,6 +62,7 @@ from chtypes._ocifetch._layout import (
     unpacked_dir_for,
     update_index_json,
     write_verified_install,
+    zero_x_hint,
 )
 from chtypes._ocifetch._lock import Lock, LockPin, load_lock, new_lock, save_lock
 from chtypes._ocifetch._oci import (
@@ -90,8 +91,10 @@ __all__ = [
     "ensure",
     "fetch_signed",
     "list_installed",
+    "missing_notes",
     "resolve_installed",
     "verify_installed",
+    "with_notes",
 ]
 
 
@@ -964,8 +967,11 @@ def ensure(request: Request, options: Options) -> Resolved:
             resolved = resolve_installed(request, platform_key, options)
             if resolved is None:
                 raise ArtifactMissingError(
-                    f"chtypes: no installed artifact for {request.spelling} "
-                    f"({platform_key}); offline"
+                    with_notes(
+                        f"chtypes: no installed artifact for {request.spelling} "
+                        f"({platform_key}); offline",
+                        missing_notes(options),
+                    )
                 )
             return resolved
 
@@ -1119,6 +1125,23 @@ def _verify_preseeded_entries(roots: Sequence[Path], trusted_keys: tuple[Trusted
             )
             if record is not None:
                 already_verified.add(digest)
+
+
+def missing_notes(options: Options) -> list[str]:
+    """What a CHTYPES_ARTIFACT_MISSING answer from the cache `options` names
+    adds to its message, each a complete sentence: the 0.x hint when the cache
+    is a 0.x registry directory (docs/guides/fetch-v1.md, "Upgrading from 0.x";
+    public issue #486). The registry's own MISSING adds the same notes as the
+    offline fetch's."""
+    hint = zero_x_hint(resolve_cache_root(options.cache_dir))
+    return [hint] if hint is not None else []
+
+
+def with_notes(message: str, notes: Sequence[str]) -> str:
+    """`message` with `notes`, each a complete sentence, appended."""
+    if not notes:
+        return message
+    return f"{message}. {' '.join(notes)}"
 
 
 def resolve_installed(request: Request, platform: str, options: Options) -> Resolved | None:

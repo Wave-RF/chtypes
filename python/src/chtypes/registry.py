@@ -29,7 +29,7 @@ from . import _setup, errors
 from ._ocifetch import Options, Request, Resolved, ensure, list_installed, resolve_installed
 from ._ocifetch import _constants as _fetch_constants
 from ._ocifetch._dsse import TrustedKey
-from ._ocifetch._ensure import detect_host_platform
+from ._ocifetch._ensure import detect_host_platform, missing_notes, with_notes
 from ._ocifetch._errors import FetchError
 from ._ocifetch._oci import version_within_request
 from .library import Library, open_image
@@ -201,8 +201,11 @@ class Registry:
             if resolved is None:
                 if not allow_fetch:
                     raise errors.ArtifactMissingError(
-                        f"chtypes: no installed artifact for {request} ({platform}); "
-                        "autofetch is off"
+                        with_notes(
+                            f"chtypes: no installed artifact for {request} ({platform}); "
+                            "autofetch is off",
+                            missing_notes(options),
+                        )
                     )
                 resolved = ensure(fetch_request, options)
         except FetchError as exc:

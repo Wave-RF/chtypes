@@ -394,7 +394,7 @@ export async function listVerified(root: string): Promise<readonly { readonly di
   const base = path.join(root, CACHE_UNPACKED_DIR);
   let names: string[];
   try {
-    names = await readdir(base);
+    names = (await readdir(base)).sort();
   } catch {
     return [];
   }
@@ -410,6 +410,52 @@ export async function listVerified(root: string): Promise<readonly { readonly di
     if (record !== undefined) out.push({ dir, record });
   }
   return out;
+}
+
+/** A 0.x registry directory's per-line entry, `26.8`. */
+const ZERO_X_MINOR = /^[0-9]+\.[0-9]+$/;
+
+async function lstatOrUndefined(p: string): Promise<Awaited<ReturnType<typeof lstat>> | undefined | 'unreadable'> {
+  try {
+    return await lstat(p);
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : 'unreadable';
+  }
+}
+
+/**
+ * The `<minor>/manifest.json` a 0.x registry directory holds, when `root` has
+ * that shape: no `oci-layout`, no `unpacked/`, and at least one
+ * `<minor>/manifest.json` (the first by name). A missing `oci-layout` alone is
+ * not the shape (a Python-written 1.x cache has none), and a directory that
+ * has `unpacked/` is a 1.x cache whoever wrote it. `undefined` for anything
+ * else, including a directory that is missing or cannot be read.
+ */
+export async function zeroXShape(root: string): Promise<string | undefined> {
+  for (const name of ['oci-layout', 'unpacked']) {
+    if ((await lstatOrUndefined(path.join(root, name))) !== undefined) return undefined;
+  }
+  let names: string[];
+  try {
+    names = (await readdir(root)).sort();
+  } catch {
+    return undefined;
+  }
+  for (const name of names) {
+    if (!ZERO_X_MINOR.test(name)) continue;
+    const dir = await lstatOrUndefined(path.join(root, name));
+    if (dir === undefined || dir === 'unreadable' || !dir.isDirectory()) continue;
+    const manifest = await lstatOrUndefined(path.join(root, name, 'manifest.json'));
+    if (manifest !== undefined && manifest !== 'unreadable' && manifest.isFile()) return `${name}/manifest.json`;
+  }
+  return undefined;
+}
+
+/** The sentence a `CHTYPES_ARTIFACT_MISSING` answer from a cache with the 0.x shape carries (guide, "Upgrading from 0.x"). */
+export async function zeroXHint(root: string): Promise<string | undefined> {
+  const shape = await zeroXShape(root);
+  if (shape === undefined) return undefined;
+  return `${root} holds a 0.x registry (${shape}); chtypes 1.x uses an OCI layout at \${XDG_CACHE_HOME:-~/.cache}/chtypes/v1 — point CHTYPES_CACHE at an empty or 1.x directory.`;
 }
 
 /** A fresh, empty staging directory beside `unpacked/`, for temp-then-rename of a whole unpacked tree. */
