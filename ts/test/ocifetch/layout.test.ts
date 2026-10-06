@@ -13,6 +13,14 @@ import {
   writeVerifiedRecord,
 } from '../../src/ocifetch/layout.js';
 import type { ArtifactPredicate } from '../../src/ocifetch/types.js';
+import { useFetchV1ForTests } from '../../src/ocifetch/channel.js';
+
+// This file tests the v1 fetch contract that the ABI v2 dev channel narrows
+// (src/ocifetch/channel.ts): its fixtures name their own registry and key, and
+// write schema-1 records, abi-1 predicates and locks. The dev channel's own
+// rules (spec/abi-v2/docs.md r5, r6) are test/ocifetch/devchannel.test.ts and
+// test/cli-devchannel.test.ts.
+useFetchV1ForTests();
 
 const record: VerifiedRecord = {
   platform: 'linux-arm64',

@@ -9,9 +9,15 @@
  *   CHTYPES_ALLOW_UNSIGNED   `allowUnsigned`: `1`, `true`, `yes` or `on`
  *   CHTYPES_TARGET           `platform`: one of the three platform keys
  *   CHTYPES_REGISTRY         retired: one warning, otherwise ignored
+ *
+ * This is a 2.0.0-dev SDK: its fetch contract (`./ocifetch/channel.ts`, rule
+ * r6) honors no trust or unsigned override, so `CHTYPES_TRUSTED_KEYS` and
+ * `CHTYPES_ALLOW_UNSIGNED` are not read into options here; the fetch layer
+ * names each one it ignores, once and loudly. A test that selected the v1
+ * contract reads them as v1 does.
  */
 
-import { usageError } from './abi1/index.js';
+import { usageError } from './abi2/index.js';
 import {
   ENV_ALLOW_UNSIGNED_NAME,
   ENV_BASES_NAME,
@@ -22,7 +28,7 @@ import {
   ENV_TRUSTED_KEYS_NAME,
   PLATFORMS,
 } from './ocifetch/constants.gen.js';
-import { type FetchV1Options, isPlatformKey, keyIdOfRawKey, type TrustedKey } from './ocifetch/index.js';
+import { activeChannel, type FetchV1Options, isPlatformKey, keyIdOfRawKey, type TrustedKey } from './ocifetch/index.js';
 
 const RAW_KEY = /^[0-9a-fA-F]{64}$/;
 let warnedRetired = false;
@@ -44,9 +50,11 @@ export function withEnvironment<T extends FetchV1Options>(options: T): T {
   }
   const token = process.env[ENV_TOKEN_NAME];
   if (out.token === undefined && token !== undefined && token !== '') out.token = token;
-  if (out.allowUnsigned === undefined && flag(ENV_ALLOW_UNSIGNED_NAME)) out.allowUnsigned = true;
+  // The trust and unsigned overrides: read only where the fetch contract honors them.
+  const overridable = activeChannel().overridable;
+  if (overridable && out.allowUnsigned === undefined && flag(ENV_ALLOW_UNSIGNED_NAME)) out.allowUnsigned = true;
   const keys = process.env[ENV_TRUSTED_KEYS_NAME];
-  if (out.trustedKeys === undefined && keys !== undefined && keys.trim() !== '') {
+  if (overridable && out.trustedKeys === undefined && keys !== undefined && keys.trim() !== '') {
     const list: TrustedKey[] = [];
     for (const k of keys.split(',').map((x) => x.trim()).filter((x) => x !== '')) {
       if (!RAW_KEY.test(k)) {

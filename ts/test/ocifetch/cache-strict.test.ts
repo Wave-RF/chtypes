@@ -11,12 +11,20 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'n
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { isChtypesError } from '../../src/abi1/index.js';
+import { isChtypesError } from '../../src/abi2/index.js';
 import { CacheUnusableError, type FetchV1Options } from '../../src/ocifetch/index.js';
 import { ensure, listInstalled, missingNotes, probeCache, resolveInstalled, verifyInstalled } from '../../src/ocifetch/ensure.js';
 import { encodeRecord, unpackedDir, type VerifiedRecord } from '../../src/ocifetch/layout.js';
 import type { ArtifactPredicate } from '../../src/ocifetch/types.js';
 import { Registry } from '../../src/registry.js';
+import { useFetchV1ForTests } from '../../src/ocifetch/channel.js';
+
+// This file tests the v1 fetch contract that the ABI v2 dev channel narrows
+// (src/ocifetch/channel.ts): its fixtures name their own registry and key, and
+// write schema-1 records, abi-1 predicates and locks. The dev channel's own
+// rules (spec/abi-v2/docs.md r5, r6) are test/ocifetch/devchannel.test.ts and
+// test/cli-devchannel.test.ts.
+useFetchV1ForTests();
 
 const asRoot = typeof process.geteuid === 'function' && process.geteuid() === 0;
 

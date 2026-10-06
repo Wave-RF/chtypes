@@ -6,7 +6,7 @@
  * is trivially safe to call in any order.
  */
 
-import { type BuildInfo, type Calls, checkUnverifiedAllowed, type LoadedImage, openUnverified as loadUnverified } from './abi1/index.js';
+import { type BuildInfo, type Calls, checkUnverifiedAllowed, type LoadedImage, openUnverified as loadUnverified } from './abi2/index.js';
 import {
   type Discovery,
   decodeDiscovery,

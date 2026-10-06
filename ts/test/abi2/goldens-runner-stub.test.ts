@@ -1,7 +1,7 @@
 /**
  * The goldens runner (`../goldens-v1/runner.test.ts`) proved before a release exists: it runs, as a real
  * separate process tree, against the ABI stub library `scripts/abi-v1/build-stubs.sh` builds
- * (`$CHTYPES_ABI1_STUBS`) and a small hand-written goldens document, and then
+ * (`$CHTYPES_ABI2_STUBS`) and a small hand-written goldens document, and then
  * `scripts/goldens-v1/compare.py` judges the report it wrote:
  *
  *   - the honest report PASSES, which proves the runner records the stub's documents and refusals
@@ -10,9 +10,9 @@
  *     comparator is actually comparing this runner's bytes and not passing whatever it is handed.
  *
  * The document's identity (version, build, ABI fingerprint) is read from the stub's own predicate, which
- * `stubs.json` carries beside the library, never typed here. This file lives under `test/abi1/` so it rides
- * the existing `v1-abi-conformance` leg (`scripts/abi-v1/conformance/ts.sh` runs `vitest run test/abi1`),
- * which is where the stubs are available; without `$CHTYPES_ABI1_STUBS` it SKIPS LOUDLY by name.
+ * `stubs.json` carries beside the library, never typed here. This file lives under `test/abi2/` so it rides
+ * the existing `v1-abi-conformance` leg (`scripts/abi-v1/conformance/ts.sh` runs `vitest run test/abi2`),
+ * which is where the stubs are available; without `$CHTYPES_ABI2_STUBS` it SKIPS LOUDLY by name.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
-const STUBS_DIR = process.env['CHTYPES_ABI1_STUBS'];
+const STUBS_DIR = process.env['CHTYPES_ABI2_STUBS'];
 const stubsAvailable = typeof STUBS_DIR === 'string' && STUBS_DIR.length > 0;
 
 const TS_ROOT = path.resolve(import.meta.dirname, '../..');
@@ -31,6 +31,7 @@ const COMPARE = path.join(REPO_ROOT, 'scripts', 'goldens-v1', 'compare.py');
 const FIXTURE = path.join(import.meta.dirname, '..', 'goldens-v1', 'stub-goldens.json');
 
 interface StubPredicate {
+  readonly abi: number;
   readonly os: string;
   readonly arch: string;
   readonly build: string;
@@ -50,7 +51,7 @@ function compare(goldens: string, report: string): { status: number | null; out:
 
 describe('the goldens runner against the ABI stub', () => {
   if (!stubsAvailable) {
-    console.warn('goldens runner stub test: SKIPPED. Set CHTYPES_ABI1_STUBS (scripts/abi-v1/build-stubs.sh --out DIR) to run it.');
+    console.warn('goldens runner stub test: SKIPPED. Set CHTYPES_ABI2_STUBS (scripts/abi-v1/build-stubs.sh --out DIR) to run it.');
   }
 
   it.skipIf(!stubsAvailable)(
@@ -63,8 +64,10 @@ describe('the goldens runner against the ABI stub', () => {
       if (ok === undefined) throw new Error('stubs.json has no "ok" variant');
       const platform = `${ok.predicate.os}-${ok.predicate.arch}`;
 
-      // The hand-written document, with its identity taken from the stub's own predicate.
+      // The hand-written document, with its identity taken from the stub's own predicate (the ABI v2
+      // stub's: an UNSTABLE description's moving fingerprint never needs a hand edit here).
       const doc = JSON.parse(readFileSync(FIXTURE, 'utf8')) as Record<string, unknown>;
+      doc['abi'] = ok.predicate.abi;
       doc['abi_fingerprint'] = ok.predicate.abi_fingerprint;
       doc['clickhouse_version'] = ok.predicate.clickhouse_version;
       doc['build'] = ok.predicate.build;

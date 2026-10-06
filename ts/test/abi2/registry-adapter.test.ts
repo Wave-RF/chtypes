@@ -5,11 +5,20 @@
  * `Resolved -> LoadInput` adapter and loaded. A hand-built `LoadInput` cannot
  * test the adapter, so nothing here builds one.
  *
- * Needs `$CHTYPES_ABI1_STUBS` (the stub libraries); without it every case here
+ * Needs `$CHTYPES_ABI2_STUBS` (the stub libraries); without it every case here
  * SKIPS LOUDLY by name. The layout is built at test time, by the same recipe
  * the fixture generator uses: a one-file tar, zstd-compressed, a manifest, a
  * predicate-carrying in-toto statement signed as a DSSE envelope, and a
  * Sigstore bundle attached as a referrer manifest.
+ *
+ * The fetch layer speaks the ABI v2 dev channel (`src/ocifetch/channel.ts`):
+ * abi-2 predicates, schema-2 records, the v2-dev cache subroot, no pinning,
+ * and no base or trust override. These cases need the test key trusted, so the
+ * file runs under `allowOverridesForTests` (exactly those overrides honored,
+ * nothing else changed), and the layout is written where the fetch layer
+ * itself says it reads an explicit cache: `<cache>/v2-dev` (rule r5). The last
+ * case switches to the dev channel exactly and proves the trust option is
+ * ignored there, with its warning (rule r6).
  */
 
 import { createHash, createPrivateKey, sign } from 'node:crypto';
@@ -19,7 +28,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { zstdCompress } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Predicate } from '../../src/abi1/loader.js';
+import type { Predicate } from '../../src/abi2/loader.js';
 import {
   ArtifactCorruptError,
   ArtifactError,
@@ -40,9 +49,29 @@ import {
   STATEMENT_TYPE,
   TEST_KEYS,
 } from '../../src/ocifetch/constants.gen.js';
+import {
+  allowOverridesForTests,
+  captureIgnoredForTests,
+  DEV_CACHE_DIR,
+  ignoredSettingsWarned,
+  useDevChannelForTests,
+} from '../../src/ocifetch/channel.js';
+import { cacheRoot } from '../../src/ocifetch/layout.js';
 import { resetSetupForTests } from '../../src/setup.js';
 
-const STUBS_DIR = process.env.CHTYPES_ABI1_STUBS;
+// The dev channel, with the test key's trust override honored (see the module comment).
+allowOverridesForTests();
+
+/** Where the fetch layer reads the explicit cache `cache`: its v2-dev subroot (rule r5), asked of the fetch layer rather than spelled here. */
+function layoutRootOf(cache: string): string {
+  const root = cacheRoot(cache);
+  if (root !== path.join(path.resolve(cache), DEV_CACHE_DIR)) {
+    throw new Error(`the fetch layer reads the explicit cache ${cache} at ${root}, not its ${DEV_CACHE_DIR} subroot (rule r5)`);
+  }
+  return root;
+}
+
+const STUBS_DIR = process.env.CHTYPES_ABI2_STUBS;
 const stubsAvailable = typeof STUBS_DIR === 'string' && STUBS_DIR.length > 0;
 
 const KEY_PEM = path.resolve(import.meta.dirname, '../../../tests/fixtures/fetch-v1/test-key/private.pem');
@@ -90,8 +119,9 @@ interface StubsDoc {
   readonly variants: Record<string, { readonly predicate: Predicate }>;
 }
 
-/** Package the stub as a signed OCI layout under `root`, whose predicate carries `patch` on top of the stub's own. */
-async function buildLayout(root: string, patch: Record<string, unknown> = {}): Promise<Built> {
+/** Package the stub as a signed OCI layout in the explicit cache `cache` (at its v2-dev subroot), whose predicate carries `patch` on top of the stub's own. */
+async function buildLayout(cache: string, patch: Record<string, unknown> = {}): Promise<Built> {
+  const root = layoutRootOf(cache);
   const stubs = JSON.parse(readFileSync(path.join(STUBS_DIR as string, 'stubs.json'), 'utf8')) as StubsDoc;
   const variant = stubs.variants.ok;
   if (variant === undefined) throw new Error('stubs.json has no ok variant');
@@ -174,7 +204,7 @@ async function buildLayout(root: string, patch: Record<string, unknown> = {}): P
       manifests: [{ ...manifest, artifactType: ARTIFACT_TYPE, platform: { os: String(variant.predicate.os), architecture: String(variant.predicate.arch) } }],
     }),
   );
-  return { cacheDir: root, predicate };
+  return { cacheDir: cache, predicate };
 }
 
 const trustTest = [{ keyid: TEST_KEY.keyid, ed25519Hex: TEST_KEY.ed25519Hex }];
@@ -256,6 +286,31 @@ describe.skipIf(!stubsAvailable)('the registry over the real fetch derivation, o
     const fresh = await buildLayout(path.join(work, 'untrusted'));
     const registry = await Registry.open({ fetch: { cacheDir: fresh.cacheDir, systemDirs: [] } });
     await expect(registry.for('26.8')).rejects.toBeInstanceOf(ArtifactMissingError);
+  });
+
+  it('honors no trust override on the dev channel exactly: the trustedKeys option is ignored, with its warning, and the layout is not installed (rule r6)', async () => {
+    const fresh = await buildLayout(path.join(work, 'no-override'));
+    const warnings: string[] = [];
+    const restoreWarnings = captureIgnoredForTests((text) => warnings.push(text));
+    const restoreChannel = useDevChannelForTests();
+    try {
+      const registry = await Registry.open({ fetch: { cacheDir: fresh.cacheDir, systemDirs: [], trustedKeys: trustTest } });
+      await expect(registry.for('26.8')).rejects.toBeInstanceOf(ArtifactMissingError);
+      expect(ignoredSettingsWarned()).toContain('the trustedKeys option');
+      expect(warnings.join('').match(/WARNING: the trustedKeys option is set and IGNORED/g)).toHaveLength(1);
+    } finally {
+      restoreChannel();
+      restoreWarnings();
+    }
+  });
+
+  it('refuses a pinning fetch option at construction, as a UsageError, before anything is read (rule r6)', async () => {
+    for (const fetch of [{ frozen: true }, { lockPath: 'chtypes.lock' }, { lockWrite: true }, { update: true }]) {
+      await expect(Registry.open({ fetch: { cacheDir: good.cacheDir, systemDirs: [], ...fetch } })).rejects.toThrow(
+        /refused by a 2\.0\.0-dev SDK/,
+      );
+      await expect(Registry.open({ fetch: { cacheDir: good.cacheDir, systemDirs: [], ...fetch } })).rejects.toBeInstanceOf(UsageError);
+    }
   });
 
   it('turns a signed statement that disagrees with the library into the artifact-corrupt class: one family with the fetch layer', async () => {

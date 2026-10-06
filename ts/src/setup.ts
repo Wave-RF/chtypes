@@ -20,13 +20,13 @@
  *      spelling or an unverified open without the caller's opt-in fails before
  *      any load is attempted, and unlocks nothing.
  *   3. Every image is set up at loader step 7, once, from this record
- *      (`./abi1/loader.ts`); nothing sets either again for that image.
+ *      (`./abi2/loader.ts`); nothing sets either again for that image.
  *
  * This is state of the isolate: every worker thread calls it identically, and
  * a worker whose zone differs is refused by the library at its first open.
  */
 
-import { usageError } from './abi1/index.js';
+import { usageError } from './abi2/index.js';
 import { type Settings, validateDefaults } from './settings.js';
 
 /** What `setup` takes: the image zone (an IANA name) and the default settings every call starts from. */

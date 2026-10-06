@@ -14,7 +14,7 @@
  * `UsageError`, raised before any call and whether or not the two agree.
  */
 
-import { asBuffer, usageError } from './abi1/index.js';
+import { asBuffer, usageError } from './abi2/index.js';
 
 /** Settings and query parameters: names to string values. */
 export type Settings = Readonly<Record<string, string>>;

@@ -26,15 +26,22 @@
  *      the setup and writes its records to a file; the parent merges the files into the report. Setup is
  *      never applied twice in one process.
  *   3. Per case the child makes exactly the `chs_*` sequence the case's `call` names, through the generated
- *      call layer (`src/abi1/calls.gen.ts`), and records `at`, `status`, the error fields as base64, and
+ *      call layer (`src/abi2/calls.gen.ts`), and records `at`, `status`, the error fields as base64, and
  *      for CHS_OK the exact document bytes (`document_b64`, never re-serialized) and `export_b64`.
  *   4. For every CHS_OK document the child runs the binding's decoder for that document type (the same
  *      function the public `Schema` methods call) and records `decoded_ok`.
  *
+ * THE ABI v2 DEV CHANNEL. This is the 2.0.0-dev binding: its fetch layer fetches only from the staging dev
+ * channel under the staging key (`spec/abi-v2/docs.md`, rule r6), whatever `CHTYPES_GOLDENS_REGISTRY_BASE`
+ * names (that base is ignored, with one warning). Its goldens are the v2-dev release's referrers, signed with
+ * the staging key. The first v2-dev builds carry none: when the release is published but has no goldens
+ * referrer, the runner SKIPS BY NAME, printing `SKIPPED: no v2-dev goldens published yet: ...`, which the
+ * workflows read and list as skipped, never as a pass.
+ *
  * To prove the runner before a release exists, point it at a library and a hand-written document with
  * `CHTYPES_GOLDENS_LIBRARY` (a path; opened unverified, which also needs `CHTYPES_ALLOW_UNVERIFIED_LIBRARY=1`)
  * and `CHTYPES_GOLDENS_DOCUMENT_IN` (a path): both bypass the fetch, and `CHTYPES_GOLDENS_PLATFORM` is then
- * optional (default: this host). `test/abi1/goldens-runner-stub.test.ts` does exactly that against the ABI
+ * optional (default: this host). `test/abi2/goldens-runner-stub.test.ts` does exactly that against the ABI
  * stub and runs the comparator over the report.
  */
 
@@ -45,13 +52,21 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { CallError } from '../../src/abi1/errors.js';
-import { type LoadedImage, openAbi1, openUnverified, type Predicate } from '../../src/abi1/loader.js';
-import { Status } from '../../src/abi1/vocab.gen.js';
-import type { FilterHandle, SchemaHandle } from '../../src/abi1/calls.gen.js';
+import { CallError } from '../../src/abi2/errors.js';
+import { type LoadedImage, openAbi2, openUnverified, type Predicate } from '../../src/abi2/loader.js';
+import { Status } from '../../src/abi2/vocab.gen.js';
+import type { FilterHandle, SchemaHandle } from '../../src/abi2/calls.gen.js';
 import { decodeBatch, decodeFilterResult, decodeRow, decodeSchemaDescription } from '../../src/documents.js';
 import { PREDICATE_TYPE_GOLDENS } from '../../src/ocifetch/constants.gen.js';
-import { ensure, fetchSigned, hostPlatformKey, type PlatformKey } from '../../src/ocifetch/index.js';
+import {
+  ArtifactUnpublishedError,
+  channelName,
+  DEV_CHANNEL_BASE,
+  ensure,
+  fetchSigned,
+  hostPlatformKey,
+  type PlatformKey,
+} from '../../src/ocifetch/index.js';
 
 // ------------------------------------------------------------------ the document
 
@@ -266,7 +281,7 @@ function runChild(setupId: string): void {
   const image: LoadedImage =
     handoff.predicate === null
       ? openUnverified(handoff.libraryPath, { allow: true, timezone: zone, defaults })
-      : openAbi1({ libraryPath: handoff.libraryPath, predicate: handoff.predicate, platform: handoff.platform, timezone: zone, defaults });
+      : openAbi2({ libraryPath: handoff.libraryPath, predicate: handoff.predicate, platform: handoff.platform, timezone: zone, defaults });
   // A defaults object with no keys is still the document's `chs_set_defaults` argument: step 7 skips it, so make the call here, once.
   if (defaultsBytes.length > 0 && Object.keys(defaults).length === 0) image.calls.setDefaults(defaultsBytes);
 
@@ -313,18 +328,33 @@ function spawnChild(setupId: string, handoffPath: string, outPath: string): void
   }
 }
 
-/** Fetch mode: the release for the platform, then the goldens of its platform manifest. */
-async function fetchRelease(): Promise<{ libraryPath: string; predicate: Predicate; platform: string; documentBytes: Buffer }> {
+/** Fetch mode: the release for the platform, then the goldens of its platform manifest; or the skip, by name, of a v2-dev release that carries none. */
+async function fetchRelease(): Promise<
+  { libraryPath: string; predicate: Predicate; platform: string; documentBytes: Buffer } | { readonly skipped: string }
+> {
   const base = requiredEnv('CHTYPES_GOLDENS_REGISTRY_BASE');
   const version = requiredEnv('CHTYPES_GOLDENS_VERSION');
   const platform = requiredEnv('CHTYPES_GOLDENS_PLATFORM') as PlatformKey;
-  // The default trust: no `trustedKeys`, no `allowUnsigned`.
+  // The default trust: no `trustedKeys`, no `allowUnsigned`. On the dev channel the base is the channel's own.
   const resolved = await ensure(version, { bases: [base], platform });
-  const goldens = await fetchSigned(base, resolved.digests.manifest, PREDICATE_TYPE_GOLDENS, { bases: [base], platform });
-  return { libraryPath: resolved.libraryPath, predicate: resolved.predicate, platform, documentBytes: readFileSync(goldens.path) };
+  let goldensPath: string;
+  try {
+    goldensPath = (await fetchSigned(base, resolved.digests.manifest, PREDICATE_TYPE_GOLDENS, { bases: [base], platform })).path;
+  } catch (err) {
+    if (err instanceof ArtifactUnpublishedError && channelName() === 'v2-dev') {
+      // The build is published (ensure above succeeded) and carries no goldens
+      // referrer: the first v2-dev builds ship none. A skip BY NAME, never a
+      // pass: the workflows read this line.
+      return {
+        skipped: `SKIPPED: no v2-dev goldens published yet: ${version} ${platform} (${resolved.digests.manifest}) has no goldens referrer on ${DEV_CHANNEL_BASE}; the goldens did not run (${err.message})`,
+      };
+    }
+    throw err;
+  }
+  return { libraryPath: resolved.libraryPath, predicate: resolved.predicate, platform, documentBytes: readFileSync(goldensPath) };
 }
 
-async function runParent(): Promise<void> {
+async function runParent(skip: (note: string) => never): Promise<void> {
   const scratch = mkdtempSync(path.join(tmpdir(), 'goldens-ts-'));
   let libraryPath: string;
   let predicate: Predicate | null;
@@ -336,7 +366,12 @@ async function runParent(): Promise<void> {
     platform = ENV['CHTYPES_GOLDENS_PLATFORM'] || hostPlatformKey(process.platform, process.arch) || '';
     documentBytes = readFileSync(DOCUMENT_IN as string);
   } else {
-    ({ libraryPath, predicate, platform, documentBytes } = await fetchRelease());
+    const fetched = await fetchRelease();
+    if ('skipped' in fetched) {
+      console.log(fetched.skipped);
+      skip(fetched.skipped);
+    }
+    ({ libraryPath, predicate, platform, documentBytes } = fetched);
   }
   expect(platform, 'a platform this binding ships for').not.toBe('');
 
@@ -404,8 +439,8 @@ describe('goldens v1 runner (ts)', () => {
   }
   it.skipIf(!configured)(
     'executes every case of the goldens document, one process per setup, and records what the library returned',
-    async () => {
-      await runParent();
+    async (ctx) => {
+      await runParent((note) => ctx.skip(note));
     },
     FIFTEEN_MINUTES,
   );

@@ -16,7 +16,7 @@ import { usageError } from './errors.js';
 import { freeHandle, type RawApi } from './raw.js';
 
 /** A live handle over one opened image. `close()` is safe to call more than once and safe to never call explicitly (the registry calls it if this object is abandoned). */
-export abstract class Abi1Handle {
+export abstract class Abi2Handle {
   #raw: RawApi;
   #ptr: JsExternal | null;
   readonly kind: string;
@@ -42,21 +42,21 @@ export abstract class Abi1Handle {
   close(): void {
     if (this.#ptr === null) return;
     const freeSymbol = HANDLE_INFO[this.kind]?.free;
-    if (freeSymbol === undefined) throw new Error(`chtypes abi1: ${this.kind} has no HANDLE_INFO entry`);
+    if (freeSymbol === undefined) throw new Error(`chtypes abi2: ${this.kind} has no HANDLE_INFO entry`);
     freeHandle(this.#raw, freeSymbol, this.#ptr);
     this.#ptr = null;
   }
 }
 
-function makeHandleClass(kind: string): new (raw: RawApi, ptr: JsExternal) => Abi1Handle {
+function makeHandleClass(kind: string): new (raw: RawApi, ptr: JsExternal) => Abi2Handle {
   const registry = new FinalizationRegistry<{ raw: RawApi; ptr: JsExternal; freeSymbol: string }>((held) => {
     freeHandle(held.raw, held.freeSymbol, held.ptr);
   });
   const info = HANDLE_INFO[kind];
-  if (info === undefined) throw new Error(`chtypes abi1: no HANDLE_INFO for ${kind}`);
+  if (info === undefined) throw new Error(`chtypes abi2: no HANDLE_INFO for ${kind}`);
   const freeSymbol: string = info.free;
   const className: string = info.className;
-  class Handle extends Abi1Handle {
+  class Handle extends Abi2Handle {
     constructor(raw: RawApi, ptr: JsExternal) {
       super(raw, ptr, kind);
       registry.register(this, { raw, ptr, freeSymbol }, this);
@@ -71,13 +71,13 @@ function makeHandleClass(kind: string): new (raw: RawApi, ptr: JsExternal) => Ab
 }
 
 /** Every described handle kind's wrapper class, keyed by its chs_* name (`HANDLE_INFO`'s own keys — never a literal spelled here). */
-export const HANDLE_CLASSES: Readonly<Record<string, new (raw: RawApi, ptr: JsExternal) => Abi1Handle>> = Object.fromEntries(
+export const HANDLE_CLASSES: Readonly<Record<string, new (raw: RawApi, ptr: JsExternal) => Abi2Handle>> = Object.fromEntries(
   Object.keys(HANDLE_INFO).map((kind) => [kind, makeHandleClass(kind)]),
 );
 
 /** Wrap a freshly minted handle (`RawCallResult`'s `HandleRef`) in its class. */
-export function wrapHandle(raw: RawApi, ref: { readonly kind: string; readonly ptr: JsExternal }): Abi1Handle {
+export function wrapHandle(raw: RawApi, ref: { readonly kind: string; readonly ptr: JsExternal }): Abi2Handle {
   const Class = HANDLE_CLASSES[ref.kind];
-  if (Class === undefined) throw new Error(`chtypes abi1: no handle class for kind ${ref.kind}`);
+  if (Class === undefined) throw new Error(`chtypes abi2: no handle class for kind ${ref.kind}`);
   return new Class(raw, ref.ptr);
 }

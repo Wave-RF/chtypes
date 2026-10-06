@@ -291,7 +291,11 @@ jobs:
                      uv run --offline --python "${{ matrix.toolchain }}" pytest -q -rA "$(dirname "${rel#python/}")/test_devchannel.py"
                    fi)
               ;;
-            ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts) ;;
+            # At ABI v2 the TS binding's dev channel narrows the contract these
+            # cases specify (spec/abi-v2/docs.md r5, r6): its own tests run
+            # here too, in the same no-network sandbox.
+            ts) (cd ts && pnpm exec vitest run test/ocifetch/conformance.test.ts \
+                  && if [ "$(python3 ../scripts/abi-v1/majors.py get ts)" != "1" ]; then pnpm exec vitest run test/ocifetch/devchannel.test.ts; fi) ;;
             rust) (cd rust && cargo test --locked --offline --features fetch-v1 --test ocifetch_conformance) ;;
           esac
           SCRIPT

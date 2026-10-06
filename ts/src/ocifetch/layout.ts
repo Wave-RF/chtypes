@@ -1,6 +1,10 @@
 /**
  * The cache (`docs/guides/fetch-v1.md` §1): a standard OCI image layout
- * rooted at `CHTYPES_CACHE` or `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/`,
+ * rooted at `CHTYPES_CACHE` or `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1/` under
+ * the v1 contract; under the ABI v2 dev channel (`./channel.ts`, rule r5) at
+ * `<CHTYPES_CACHE>/v2-dev` or `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev/`,
+ * with `verified.json` records of schema 2, so no released 1.x reader ever
+ * reads it,
  * `unpacked/sha256/<manifest-hex>/` beside it, each carrying its own
  * `verified.json` — the durable, **immutable once written** proof a
  * directory was verified, which `resolve_installed`/`--offline` trust
@@ -19,25 +23,38 @@ import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { CACHE_UNPACKED_DIR, CACHE_VERIFIED_RECORD, ENV_CACHE_NAME, PLATFORMS, SYSTEM_CACHE_DIRS } from './constants.gen.js';
+import { activeChannel } from './channel.js';
+import { CACHE_UNPACKED_DIR, CACHE_VERIFIED_RECORD, ENV_CACHE_NAME, PLATFORMS } from './constants.gen.js';
 import { ArtifactCorruptError } from './errors.js';
 import type { ArtifactPredicate } from './types.js';
 
 /** An entry under `unpacked/sha256/`: its manifest's digest, 64 lowercase hex. */
 const ENTRY_NAME = /^[0-9a-f]{64}$/;
 
-/** `CHTYPES_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/chtypes/v1` — the layout root itself, not a parent of it. */
+/**
+ * The layout root itself, not a parent of it: an explicit cache (the option,
+ * else `CHTYPES_CACHE`) through the active contract's subroot, else
+ * `${XDG_CACHE_HOME:-~/.cache}/chtypes/<leaf>`. The v1 contract uses an
+ * explicit cache whole and `.../chtypes/v1`; the dev channel uses
+ * `<cache>/v2-dev`, never `<cache>` itself, which a 1.x binding uses as its
+ * whole layout, and `.../chtypes/v2-dev` (rule r5, a MUST).
+ */
 export function cacheRoot(explicitCacheDir?: string): string {
-  if (explicitCacheDir !== undefined && explicitCacheDir !== '') return path.resolve(explicitCacheDir);
+  const channel = activeChannel();
   const env = process.env[ENV_CACHE_NAME];
-  if (env !== undefined && env !== '') return path.resolve(env);
+  const explicit = explicitCacheDir !== undefined && explicitCacheDir !== '' ? explicitCacheDir : env !== undefined && env !== '' ? env : undefined;
+  if (explicit !== undefined) {
+    const root = path.resolve(explicit);
+    return channel.subroot === '' ? root : path.join(root, channel.subroot);
+  }
   const xdg = process.env['XDG_CACHE_HOME'];
   const base = xdg !== undefined && xdg !== '' ? xdg : path.join(os.homedir(), '.cache');
-  return path.join(base, 'chtypes', 'v1');
+  return path.join(base, 'chtypes', channel.rootLeaf);
 }
 
+/** The read-only system directories searched after the cache: the caller's, else the active contract's (`/opt/chtypes/v2-dev` and its sibling on the dev channel: a 1.x system directory is never read). */
 export function systemDirs(override?: readonly string[]): readonly string[] {
-  return override ?? SYSTEM_CACHE_DIRS;
+  return override ?? activeChannel().systemDirs;
 }
 
 export function blobsDir(root: string): string {
@@ -262,10 +279,10 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const VERSION4 = /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/;
 
-/** The canonical `verified.json` text: every member present, `null` where the schema allows it. */
+/** The canonical `verified.json` text: every member present, `null` where the schema allows it, and the active contract's schema (2 on the dev channel, rule r5). */
 export function encodeRecord(record: VerifiedRecord): string {
   return JSON.stringify({
-    schema: 1,
+    schema: activeChannel().recordSchema,
     platform: record.platform,
     version: record.version,
     channel: record.channel,
@@ -295,10 +312,11 @@ function nullableString(v: unknown): string | null | undefined {
 }
 
 /**
- * Accepts exactly the canonical schema-1 record. Anything else (not JSON,
- * another schema, a missing member, a member of the wrong type, a broken
- * rule) is `undefined`, which every caller treats as an ABSENT record —
- * never fatal by itself and never trusted.
+ * Accepts exactly the canonical record of the active contract's schema (1 for
+ * v1; 2 for the dev channel, rule r5, so neither reads the other's). Anything
+ * else (not JSON, another schema, a missing member, a member of the wrong
+ * type, a broken rule) is `undefined`, which every caller treats as an ABSENT
+ * record — never fatal by itself and never trusted.
  */
 export function decodeRecord(raw: string): VerifiedRecord | undefined {
   let doc: unknown;
@@ -316,7 +334,7 @@ export function decodeRecord(raw: string): VerifiedRecord | undefined {
   for (const key of ['index', 'manifest', 'layer', 'bundle', 'bundle_manifest']) {
     if (!(key in digests)) return undefined;
   }
-  if (doc['schema'] !== 1) return undefined;
+  if (doc['schema'] !== activeChannel().recordSchema) return undefined;
   const platform = doc['platform'];
   const version = doc['version'];
   const build = doc['build'];
