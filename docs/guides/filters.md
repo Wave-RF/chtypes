@@ -17,7 +17,7 @@ So never reuse insert-side coercion to fold a `WHERE` constant. The filter surfa
 
 ## Writing a filter's result type
 
-**A filter's top-level result must be `UInt8`/`Bool`, an integer up to 64 bits, `Float32`/`Float64`, or `Nullable`/`LowCardinality` of one of those.** A real server's own rule for what may answer a `WHERE` is narrower than "any type", and it differs by ClickHouse line — see [`limitations.md` → A filter whose result is not a boolean-context type admits rows a real server refuses](../limitations.md#a-filter-whose-result-is-not-a-boolean-context-type-admits-rows-a-real-server-refuses) for the exact boundary per line. Wrap anything else in an explicit comparison instead of filtering on the bare column:
+**A filter's top-level result must be `UInt8`/`Bool`, an integer up to 64 bits, `Float32`/`Float64`, or `Nullable`/`LowCardinality` of one of those.** That is a real server's own rule (`canBeUsedInBooleanContext()` on every supported line), and 1.0 applies it the same way: a filter whose result is any other type is refused at compile with error 59, before any row is read. Wrap anything else in an explicit comparison instead of filtering on the bare column:
 
 ```text
 d != toDate(0)            not: d
@@ -25,9 +25,9 @@ toInt128(x) != 0          not: x            (x Int128)
 e8 = 'a'                  not: e8           (e8 an Enum)
 ```
 
-Today's library does not enforce this: it answers a result of any type with a C-style truthiness — `t` when the value's low 64 bits are non-zero — where a real server refuses the query outright with error 59. That is a known over-admit. A library fix is in progress for the supported lines (`26.3`, `26.7`, `26.8`, `26.9`). **Retired lines will not be rebuilt with it, so their over-admit is permanent: do not use a retired line's build for row-level filtering.** See the limitations entry linked above.
+1.0 enforces this the way a real server does, on every supported line (`26.3`, `26.7`, `26.8`, `26.9`). 0.x answered such a result with a C-style truthiness instead; 0.x is retired, and 1.0 ships only the supported lines.
 
-**A known over-hide travels with the same surface, in the safe direction.** The library's truthiness truncates to an integer, so `0.5` and `-0.5` hide a row a real server's own cast keeps, and `NaN` hides a row on `arm64`. Compare explicitly there too — `x != 0` rather than a bare `x`.
+**Each row is decided with a real server's own truthiness.** `0.5`, `-0.5` and `NaN` keep a row, as a server's `static_cast<bool>` does, and `NULL` does not. Prefer an explicit comparison anyway — `x != 0` rather than a bare `x` — so the intent is visible.
 
 ## Four verdicts, two of which are not answers
 
