@@ -105,7 +105,7 @@ func encodeRecord(rec verifiedRecord) ([]byte, error) {
 		pred = map[string]any{}
 	}
 	return json.Marshal(recordWire{
-		Schema:        1,
+		Schema:        active().recordSchema,
 		Platform:      rec.Platform,
 		Version:       rec.Version,
 		Channel:       nullable(rec.Channel),
@@ -125,7 +125,8 @@ func encodeRecord(rec verifiedRecord) ([]byte, error) {
 	})
 }
 
-// decodeRecord accepts exactly the canonical schema-1 record. Anything else
+// decodeRecord accepts exactly the canonical record of the active contract's
+// schema (1 for v1; 2 for the dev channel, rule r5, so neither reads the other's). Anything else
 // (unparsable, another schema, a missing member, a member of the wrong
 // type, a rule broken) is an error, which every caller treats as an ABSENT
 // record, never as a failure by itself.
@@ -155,8 +156,8 @@ func decodeRecord(b []byte) (*verifiedRecord, error) {
 	if err := json.Unmarshal(b, &w); err != nil {
 		return nil, err
 	}
-	if w.Schema != 1 {
-		return nil, fmt.Errorf("verified.json: schema %d is not 1", w.Schema)
+	if want := active().recordSchema; w.Schema != want {
+		return nil, fmt.Errorf("verified.json: schema %d is not %d", w.Schema, want)
 	}
 	if _, ok := platformByKey(w.Platform); !ok {
 		return nil, fmt.Errorf("verified.json: platform %q is not one of v1's", w.Platform)
@@ -188,7 +189,7 @@ func decodeRecord(b []byte) (*verifiedRecord, error) {
 		return nil, fmt.Errorf("verified.json: digests.manifest and digests.layer must be sha256:<hex>")
 	}
 	return &verifiedRecord{
-		Schema:        1,
+		Schema:        w.Schema,
 		Platform:      w.Platform,
 		Version:       w.Version,
 		Channel:       unnull(w.Channel),

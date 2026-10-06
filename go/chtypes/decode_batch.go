@@ -17,8 +17,9 @@ package chtypes
 //   - a duplicate key, found by the field types below, which refuse a second
 //     value, and by the key set of the top-level object;
 //   - a value of the wrong JSON type, a name carried both ways or neither, a
-//     base64 value outside the standard alphabet, a source outside the
-//     vocabulary, an integer that does not parse, and trailing data.
+//     base64 value outside the standard alphabet, an integer that does not
+//     parse, and trailing data. A vocabulary value outside the description is
+//     not declined: both readers keep it as its unknown(n) (ABI v2 rule r3).
 //
 // One difference stays, and is the stock decoder's: encoding/json matches a
 // struct field's key case-insensitively, so below the top level a key that
@@ -771,10 +772,12 @@ func (d *batchRowDoc) result(slabs *rowSlabs) (RowResult, bool) {
 		cols := d.Cols.v
 		stored := 0
 		for i := range cols {
-			src := Source(cols[i].Src.s)
-			if !src.known() {
+			// An unlisted src is its unknown(n), as in the generic reader (r3);
+			// an absent one is the generic reader's to refuse.
+			if !cols[i].Src.seen || cols[i].Src.null {
 				return res, false
 			}
+			src := Source(cols[i].Src.s)
 			if src.IsStored() {
 				stored++
 			}

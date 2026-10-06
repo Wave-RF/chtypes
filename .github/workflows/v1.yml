@@ -26,6 +26,16 @@
 # lane, against the runner commands plan §3.3 fixes). The shape (job ids,
 # names, the matrix legs, and `v1-parity`'s `needs`/`if: always()`) is frozen
 # now so a later lane fills in steps, never restructures the DAG.
+# MAJORS (public issue #511). spec/binding-majors.json says which ABI major
+# each binding speaks (scripts/abi-v1/majors.py); every binding job here
+# prints "ABI major tested: N" for its binding and asserts it against the
+# identity compiled into the binding's generated layer. The fetch-v1 cases are
+# the v1 fetch contract's specification: a binding at ABI v2 runs them under
+# that contract through a test-only seam (its fixtures name their own
+# registry, key, locks and schema-1 records), and its dev channel's own rules
+# (spec/abi-v2/docs.md r5, r6) run beside them. v1-cache-interop reads and
+# writes only through the bindings at ABI v1, and proves a v2 binding's cache
+# isolation (r5) with its real CLI.
 name: v1
 
 on:
@@ -178,6 +188,11 @@ jobs:
             echo "v1-conformance (${{ matrix.binding }} ${{ matrix.toolchain }}): SKIPPED — $f does not exist on this branch yet (that binding's own lane has not merged)." >&2
           fi
 
+      - name: the ABI major this leg's binding speaks, derived and asserted against its compiled-in layer
+        if: steps.runner_file.outputs.exists == 'true'
+        run: |
+          python3 scripts/abi-v1/majors.py announce "${{ matrix.binding }}" --what "fetch conformance, ${{ matrix.toolchain }}"
+          python3 scripts/abi-v1/majors.py assert-layer "${{ matrix.binding }}"
       - if: steps.runner_file.outputs.exists == 'true' && matrix.binding == 'go'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -253,7 +268,11 @@ jobs:
           cat > "$RUNNER_TEMP/run-conformance.sh" <<'SCRIPT'
           set -e
           case "${{ matrix.binding }}" in
-            go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/) ;;
+            # At ABI v2 the Go binding's dev channel narrows the contract these
+            # cases specify (spec/abi-v2/docs.md r5, r6): its own tests run
+            # here too, in the same no-network sandbox.
+            go) (cd go && go test -count=1 -run '^TestConformanceV1$' ./internal/ocifetch/ \
+                  && if [ "$(python3 ../scripts/abi-v1/majors.py get go)" != "1" ]; then go test -count=1 -v -run '^TestDevChannel' ./internal/ocifetch/; fi) ;;
             python)
               # steps.runner_file's own path (repo-root-relative) with the
               # "python/" prefix stripped at runtime — `cd python` first so
@@ -754,18 +773,65 @@ jobs:
       # /opt/chtypes/v1 is one of the CLIs' default system dirs (spec/fetch-v1/constants.json);
       # the fault rows fill it with a readable build to prove the default mode answers from it
       # and strict mode never falls through to it, and leave it empty again.
+      # The bindings at ABI v1 share one cache contract (docs/guides/fetch-v1.md
+      # §1) and run the interop rows; a binding at ABI v2 (spec/binding-majors.json)
+      # must never read or write a 1.x cache (spec/abi-v2/docs.md r5), so it is
+      # not a participant here: the next step proves that isolation instead.
       - name: "4 x 4: each binding writes a cache, every binding reads it; the 0.x rows; writer x reader x line (#481); concurrent installs (#482); read-only commands, cross-uid reads and writer x reader x fault x mode (#486)"
         env:
           X: /tmp/cli-prefix
         run: |
           sudo install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/chtypes/v1
-          python3 scripts/fetch-v1/cache-interop.py \
-            --cli "go=$X/bin/cli-go" \
-            --cli "python=$X/bin/cli-python" \
-            --cli "ts=$X/bin/cli-ts" \
-            --cli "rust=$X/bin/cli-rust" \
+          clis=()
+          for b in go python ts rust; do
+            python3 scripts/abi-v1/majors.py announce "$b" --what "cache interop"
+            if [ "$(python3 scripts/abi-v1/majors.py get "$b")" = "1" ]; then
+              clis+=(--cli "$b=$X/bin/cli-$b")
+            else
+              echo "v1-cache-interop: $b speaks ABI v$(python3 scripts/abi-v1/majors.py get "$b"): not a 1.x cache participant (r5); its isolation is the next step"
+            fi
+          done
+          python3 scripts/fetch-v1/cache-interop.py "${clis[@]}" \
             --other-user nobody \
             --system-dir /opt/chtypes/v1
+      # r5, with the real CLIs: a cache a 1.x binding wrote (the committed
+      # cache-record-canonical layout) is listed by every 1.x CLI (the
+      # control) and by no ABI v2 CLI, whether CHTYPES_CACHE names it (a v2
+      # CLI reads <CHTYPES_CACHE>/v2-dev) or --cache does; an offline fetch
+      # from it is CHTYPES_ARTIFACT_MISSING (exit 1); and the tree is
+      # byte-for-byte unchanged afterwards.
+      - name: "r5 isolation: no ABI v2 CLI reads a 1.x cache, which every 1.x CLI reads"
+        env:
+          X: /tmp/cli-prefix
+        run: |
+          src=tests/fixtures/fetch-v1/layouts/cache-record-canonical
+          version=$(python3 -c 'import json,glob,sys; print(json.load(open(glob.glob(sys.argv[1] + "/unpacked/sha256/*/verified.json")[0]))["version"])' "$src")
+          v2=0
+          for b in go python ts rust; do
+            major="$(python3 scripts/abi-v1/majors.py get "$b")"
+            cache="$(mktemp -d)"
+            cp -R "$src/." "$cache/"
+            before="$(cd "$cache" && find . -type f -exec shasum -a 256 {} + | sort)"
+            out="$(CHTYPES_CACHE="$cache" "$X/bin/cli-$b" list --offline)"
+            if [ "$major" = "1" ]; then
+              case "$out" in *"installed $version "*) echo "$b (ABI v1): lists $version from the 1.x cache (control)" ;;
+                *) echo "::error::$b (ABI v1) did not list $version from a 1.x cache: $out"; exit 1 ;; esac
+              continue
+            fi
+            v2=$((v2 + 1))
+            [ -z "$out" ] || { echo "::error::$b (ABI v$major) listed a 1.x cache through CHTYPES_CACHE: $out"; exit 1; }
+            out="$("$X/bin/cli-$b" list --offline --cache "$cache")"
+            [ -z "$out" ] || { echo "::error::$b (ABI v$major) listed a 1.x cache through --cache: $out"; exit 1; }
+            rc=0
+            CHTYPES_CACHE="$cache" "$X/bin/cli-$b" fetch "$version" --offline 2> "$RUNNER_TEMP/isolation.err" || rc=$?
+            if [ "$rc" != 1 ] || ! grep -q CHTYPES_ARTIFACT_MISSING "$RUNNER_TEMP/isolation.err"; then
+              echo "::error::$b (ABI v$major): an offline fetch of $version from a 1.x cache exited $rc: $(cat "$RUNNER_TEMP/isolation.err")"; exit 1
+            fi
+            after="$(cd "$cache" && find . -type f -exec shasum -a 256 {} + | sort)"
+            [ "$before" = "$after" ] || { echo "::error::$b (ABI v$major) changed the 1.x cache it must never read"; exit 1; }
+            echo "$b (ABI v$major): lists nothing from the 1.x cache, its offline fetch is CHTYPES_ARTIFACT_MISSING, and the cache is unchanged (r5)"
+          done
+          echo "r5 isolation: $v2 binding(s) at ABI v2 checked" | tee -a "$GITHUB_STEP_SUMMARY"
 
   v1-refcheck:
     name: "v1-refcheck — reference verifiers agree with the fixture verdicts (report only)"

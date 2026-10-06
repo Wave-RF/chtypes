@@ -111,6 +111,8 @@ from model import BUF_HANDLE
 
 from . import Output, banner
 
+BINDING = "ts"  # runs for the major spec/binding-majors.json gives ts (emit/__init__.py)
+
 DECLS_PATH = "ts/src/abi1/decls.gen.ts"
 ERRMAP_PATH = "ts/src/abi1/errmap.gen.ts"
 LIBC_PATH = "ts/src/abi1/libc.gen.ts"

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wave-rf/chtypes/spec/abi-v2/schema/stubs.schema.json",
+  "title": "scripts/abi-v1/build-stubs.sh's stubs.json manifest, format 1",
+  "description": "What build-stubs.sh writes alongside the compiled stub libraries it builds, one row per scripts/abi-v1/emit/_stubshared.py plan() entry. Never committed (a build-time file, like the libraries themselves); a future binding conformance runner reads it to find each library's path, the predicate to load it under, and the loader-refusal reason (spec/abi-v2/sdk.json's vocabulary, or \"accepted\") its own loader test should see.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "variants"],
+  "properties": {
+    "schema": {"const": 1},
+    "variants": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_-]*$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "predicate", "reason"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/]+$",
+            "description": "RELATIVE to the directory holding this stubs.json file (today: just the library's bare file name, since every variant sits next to the manifest, never in a subdirectory) — NEVER absolute. The directory build-stubs.sh writes into (a CI job's own $RUNNER_TEMP) is never the directory a later job downloads the same artifact into, so an absolute path would be stale there; a reader joins this value with dirname(stubs.json)."
+          },
+          "predicate": {
+            "type": "object",
+            "description": "The build_info-shaped predicate this variant should be loaded under: byte-for-byte the 'ok' build's own fields, except ctor-marker (glibc_floor overridden to an impossible value, to prove a loader's step 1 refuses before ever calling dlopen).",
+            "required": ["schema", "abi", "abi_fingerprint", "os", "arch"],
+            "properties": {
+              "schema": {"const": 1},
+              "abi": {"type": "integer"},
+              "abi_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "os": {"type": "string", "pattern": "^[a-z0-9]+$"},
+              "arch": {"type": "string", "pattern": "^[a-z0-9]+$"},
+              "glibc_floor": {"type": "string"}
+            },
+            "additionalProperties": true
+          },
+          "reason": {
+            "type": "string",
+            "description": "\"accepted\", or one of spec/abi-v2/sdk.json's loader.refusals reasons (a missing_symbol:<name> or build_info_mismatch:<field> reason carries its suffix)."
+          }
+        }
+      }
+    }
+  }
+}

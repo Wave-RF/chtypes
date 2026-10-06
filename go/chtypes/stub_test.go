@@ -1,11 +1,11 @@
 package chtypes
 
-// stub_test.go — the public API driven end to end over the ABI v1 test stub
+// stub_test.go — the public API driven end to end over the ABI v2 test stub
 // (scripts/abi-v1/build-stubs.sh): a real tiny implementation of D2's handle
 // rules and D3's status shape that echoes its inputs. It proves the plumbing
 // (one call per operation, bytes both ways, class mapping, close guards,
 // finalizers, concurrency); what ClickHouse says is the artifact's to prove.
-// Without CHTYPES_ABI1_STUBS every test here skips LOUDLY by name.
+// Without CHTYPES_ABI2_STUBS every test here skips LOUDLY by name.
 
 import (
 	"crypto/sha256"
@@ -19,13 +19,15 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
 )
 
 func stubDir(t *testing.T) string {
 	t.Helper()
-	dir := os.Getenv("CHTYPES_ABI1_STUBS")
+	dir := os.Getenv("CHTYPES_ABI2_STUBS")
 	if dir == "" {
-		t.Skip("SKIPPED: CHTYPES_ABI1_STUBS is not set (scripts/abi-v1/build-stubs.sh --out DIR); the stub-driven public API tests did not run")
+		t.Skip("SKIPPED: CHTYPES_ABI2_STUBS is not set (scripts/abi-v1/build-stubs.sh --out DIR); the stub-driven public API tests did not run")
 	}
 	return dir
 }
@@ -82,7 +84,7 @@ func TestStubOpenAndBuildInfo(t *testing.T) {
 	if lib.Version == "" || lib.Version != bi.ClickHouseVersion || lib.Minor != bi.ClickHouseMinor || lib.Path == "" {
 		t.Errorf("library = %+v, build_info = %+v: Version and Minor are build_info's fields, read not derived", lib, bi)
 	}
-	if bi.ABI != 1 || bi.Schema != 1 || string(bi.Raw) == "" || lib.Resolved() != nil {
+	if bi.ABI != abi2.ChsAbiVersion || bi.ABIFingerprint != abi2.ChsAbiFingerprint || bi.Schema != 1 || string(bi.Raw) == "" || lib.Resolved() != nil {
 		t.Errorf("build_info = %+v, resolved = %v", bi, lib.Resolved())
 	}
 }
@@ -432,7 +434,7 @@ func TestStubConcurrentCallsAndClose(t *testing.T) {
 }
 
 // TestStubRealDocuments drives the decoders with the documents the stub itself
-// builds on a `!D:` body (tests/fixtures/abi-v1/cases.json: document.*): not
+// builds on a `!D:` body (tests/fixtures/abi-v2/cases.json: document.*): not
 // the echo, and not a hand-written shape.
 func TestStubRealDocuments(t *testing.T) {
 	lib := openStub(t, "ok")

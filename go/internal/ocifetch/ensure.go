@@ -28,20 +28,22 @@ type Request struct {
 }
 
 // Options configures one call. Every field's zero value falls back to the
-// matching environment variable, then the constants_gen.go default — the
-// same precedence v0 uses (docs/guides/fetch-v1.md §2, §4).
+// matching environment variable, then the active contract's default
+// (channel.go): under the dev channel, the base, trust and unsigned fields
+// and their variables are ignored with one warning each, and the four pinning
+// fields are refused (spec/abi-v2/docs.md, rule r6).
 type Options struct {
-	Bases                 []string // CHTYPES_ARTIFACTS_URL, comma-separated, else DefaultBases
-	CacheDir              string   // CHTYPES_CACHE, else CacheRootTemplate expanded
-	SystemDirs            []string // defaults to SystemCacheDirs
-	TrustedKeys           []string // raw hex ed25519 public keys; CHTYPES_TRUSTED_KEYS, else ReleaseKeys
+	Bases                 []string // CHTYPES_ARTIFACTS_URL, comma-separated; ignored by the dev channel
+	CacheDir              string   // CHTYPES_CACHE; the dev channel uses <dir>/v2-dev (rule r5)
+	SystemDirs            []string // defaults to the contract's system dirs
+	TrustedKeys           []string // raw hex ed25519 public keys; CHTYPES_TRUSTED_KEYS; ignored by the dev channel
 	Token                 string   // CHTYPES_DOWNLOAD_TOKEN
-	AllowUnsigned         bool     // also set by CHTYPES_ALLOW_UNSIGNED=1
+	AllowUnsigned         bool     // also set by CHTYPES_ALLOW_UNSIGNED=1; ignored by the dev channel
 	Offline               bool
-	Frozen                bool
-	LockPath              string // defaults to LockDefaultFile
-	LockWrite             bool
-	Update                bool
+	Frozen                bool                // refused by the dev channel
+	LockPath              string              // defaults to LockDefaultFile; refused by the dev channel
+	LockWrite             bool                // refused by the dev channel
+	Update                bool                // refused by the dev channel
 	StrictCache           *bool               // nil means CHTYPES_CACHE_STRICT ("1" is on); see probeRoots
 	Clock                 *Clock              // nil means DefaultClock()
 	ConnectTimeout        time.Duration       // 0 means ConnectTimeoutSeconds
@@ -88,6 +90,7 @@ type VerifyResult struct {
 }
 
 type resolvedOptions struct {
+	ch                    *channel
 	bases                 []string
 	cacheDir              string
 	systemDirs            []string
@@ -113,17 +116,52 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 		o = &Options{}
 	}
 	var ro resolvedOptions
+	ch := active()
+	ro.ch = ch
 
-	ro.bases = o.Bases
+	// The dev channel refuses every pinning request before anything else,
+	// the network above all (rule r6).
+	if !ch.pinnable {
+		if set := pinningRequested(o); len(set) > 0 {
+			return ro, &PinningError{Requested: set}
+		}
+	}
+
+	if !ch.overridable {
+		// No override (rule r6): each one set is named once, loudly, and
+		// ignored.
+		if len(o.Bases) > 0 {
+			warnIgnored("the Bases option")
+		}
+		if strings.TrimSpace(os.Getenv(EnvBasesName)) != "" {
+			warnIgnored(EnvBasesName)
+		}
+		if len(o.TrustedKeys) > 0 {
+			warnIgnored("the TrustedKeys option")
+		}
+		if strings.TrimSpace(os.Getenv(EnvTrustedKeysName)) != "" {
+			warnIgnored(EnvTrustedKeysName)
+		}
+		if o.AllowUnsigned {
+			warnIgnored("the AllowUnsigned option")
+		}
+		if os.Getenv(EnvAllowUnsignedName) != "" {
+			warnIgnored(EnvAllowUnsignedName)
+		}
+	}
+
+	if ch.overridable {
+		ro.bases = o.Bases
+	}
 	if len(ro.bases) == 0 {
-		if env := strings.TrimSpace(os.Getenv(EnvBasesName)); env != "" {
+		if env := strings.TrimSpace(os.Getenv(EnvBasesName)); ch.overridable && env != "" {
 			for _, b := range strings.Split(env, BaseSeparator) {
 				if b = strings.TrimSpace(b); b != "" {
 					ro.bases = append(ro.bases, b)
 				}
 			}
 		} else {
-			ro.bases = append([]string(nil), DefaultBases...)
+			ro.bases = append([]string(nil), ch.bases...)
 		}
 	}
 	for _, b := range ro.bases {
@@ -132,27 +170,36 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 		}
 	}
 
+	// An explicit cache is used through the contract's subroot: under the
+	// dev channel <cache>/v2-dev, never <cache> itself, which a 1.x binding
+	// uses as its whole layout (rule r5, a MUST).
 	ro.cacheDir = o.CacheDir
 	if ro.cacheDir == "" {
-		if env := os.Getenv(EnvCacheName); env != "" {
-			ro.cacheDir = env
-		} else {
-			dir, err := expandCacheRoot()
-			if err != nil {
-				return ro, err
-			}
-			ro.cacheDir = dir
+		ro.cacheDir = os.Getenv(EnvCacheName)
+	}
+	if ro.cacheDir != "" {
+		if ch.subroot != "" {
+			ro.cacheDir = filepath.Join(ro.cacheDir, ch.subroot)
 		}
+	} else {
+		dir, err := expandCacheRoot(ch.rootLeaf)
+		if err != nil {
+			return ro, err
+		}
+		ro.cacheDir = dir
 	}
 
 	ro.systemDirs = o.SystemDirs
 	if ro.systemDirs == nil {
-		ro.systemDirs = append([]string(nil), SystemCacheDirs...)
+		ro.systemDirs = append([]string(nil), ch.systemDirs...)
 	}
 
-	hexKeys := o.TrustedKeys
+	var hexKeys []string
+	if ch.overridable {
+		hexKeys = o.TrustedKeys
+	}
 	if len(hexKeys) == 0 {
-		if env := strings.TrimSpace(os.Getenv(EnvTrustedKeysName)); env != "" {
+		if env := strings.TrimSpace(os.Getenv(EnvTrustedKeysName)); ch.overridable && env != "" {
 			for _, k := range strings.Split(env, ",") {
 				if k = strings.TrimSpace(k); k != "" {
 					hexKeys = append(hexKeys, k)
@@ -167,7 +214,7 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 		}
 		ro.trustedKeys = keys
 	} else {
-		for _, rk := range ReleaseKeys {
+		for _, rk := range ch.keys {
 			pk, err := hexToPublicKey(rk.Ed25519Hex)
 			if err != nil {
 				return ro, err
@@ -184,7 +231,7 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 		ro.tokenHosts = hostsOf(ro.bases)
 	}
 
-	ro.allowUnsigned = o.AllowUnsigned || os.Getenv(EnvAllowUnsignedName) == "1"
+	ro.allowUnsigned = ch.overridable && (o.AllowUnsigned || os.Getenv(EnvAllowUnsignedName) == "1")
 	ro.offline = o.Offline
 	ro.frozen = o.Frozen
 	ro.lockWrite = o.LockWrite
@@ -228,7 +275,7 @@ func hostsOf(bases []string) []string {
 	return hosts
 }
 
-func expandCacheRoot() (string, error) {
+func expandCacheRoot(leaf string) (string, error) {
 	base := os.Getenv("XDG_CACHE_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -237,7 +284,7 @@ func expandCacheRoot() (string, error) {
 		}
 		base = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(base, "chtypes", "v1"), nil
+	return filepath.Join(base, "chtypes", leaf), nil
 }
 
 func hexToPublicKey(h string) (ed25519.PublicKey, error) {
@@ -560,7 +607,7 @@ func (s *session) installManifest(l *layout, req Request, platform Platform, man
 	}
 
 	rec := verifiedRecord{
-		Schema:        1,
+		Schema:        active().recordSchema,
 		Platform:      platform.Key,
 		Version:       version,
 		Channel:       channel,
@@ -592,7 +639,7 @@ func recordToResolved(rec *verifiedRecord, dir, platform, request string, indexD
 		digests.Index = indexDigest
 	}
 	return &Resolved{
-		ABIGeneration:    ABIGeneration,
+		ABIGeneration:    active().abi,
 		Platform:         platform,
 		Request:          request,
 		Version:          rec.Version,
@@ -961,7 +1008,7 @@ func verifyPreseededEntry(srcLayout, dstLayout *layout, req Request, platformKey
 			continue
 		}
 		rec := verifiedRecord{
-			Schema:        1,
+			Schema:        active().recordSchema,
 			Platform:      platform.Key,
 			Version:       stringPredicate(stmt.Statement.Predicate, "clickhouse_version"),
 			Channel:       stringPredicate(stmt.Statement.Predicate, "channel"),
@@ -1045,7 +1092,7 @@ func installPreseededByDigest(l *layout, manifestDigest Digest, trustedKeys []ed
 		return err
 	}
 	rec := verifiedRecord{
-		Schema:        1,
+		Schema:        active().recordSchema,
 		Platform:      platformKey,
 		Version:       stringPredicate(stmt.Statement.Predicate, "clickhouse_version"),
 		Channel:       stringPredicate(stmt.Statement.Predicate, "channel"),

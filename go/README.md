@@ -1,5 +1,7 @@
 # chtypes — Go SDK
 
+> **2.0.0-dev: UNSTABLE, staging only, not for production.** This is the ABI v2 development binding (public issue #511). It speaks ABI v2's unstable description, pins its dev fingerprint and refuses a library with any other ("update your dev SDK"). It fetches only from the staging dev channel (`https://registry-staging.wavehouse.dev/chtypes/v2-dev`) and trusts only the staging key; `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED` are ignored, each with one warning; `--lock`, `--frozen` and `--update` are refused, because a dev build is replaceable and a superseded one expires after 14 days. Its cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`, or `<CHTYPES_CACHE>/v2-dev` under an explicit cache, which no 1.x SDK reads. The rules are r1 to r6 of [`docs/reference/abi-v2.md`](../docs/reference/abi-v2.md). For production, use the 1.x module, `github.com/wave-rf/chtypes/go`.
+
 **If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native artifact behind the frozen `chs_*` C ABI and reached here through cgo. Nothing semantic is reimplemented, so _"what does ClickHouse do with `256` into a `UInt8`?"_ is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
 
 ## Install
@@ -7,8 +9,10 @@
 Two things: this package, and at least one **artifact**, the per-version native library it `dlopen`s at runtime. The registry fetches, verifies and installs artifacts for you when autofetch is on (`WithAutoFetch(true)` or `CHTYPES_AUTOFETCH=1`); the default build is **dlopen-only**: it compiles with cgo (for `dlfcn`) but links nothing and needs no build tree.
 
 ```sh
-go get github.com/wave-rf/chtypes/go
+go get github.com/wave-rf/chtypes/go/v2@<a 2.0.0-dev pre-release tag>
 ```
+
+`go get github.com/wave-rf/chtypes/go/v2` never selects a pre-release on its own: name the dev version you want.
 
 ## Quickstart
 
@@ -19,7 +23,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/wave-rf/chtypes/go/chtypes"
+	"github.com/wave-rf/chtypes/go/v2/chtypes"
 )
 
 func main() {
@@ -78,11 +82,11 @@ Everything is safe for concurrent use and no call takes a lock. A `Schema`, `Fil
 
 ## Tests
 
-`go test ./...`. Every test that needs the ABI test stub (`CHTYPES_ABI1_STUBS`) skips loudly by name without it.
+`go test ./...`. Every test that needs the ABI v2 test stub (`CHTYPES_ABI2_STUBS`, the `v2/` directory `scripts/abi-v1/build-stubs.sh --out DIR` writes) skips loudly by name without it.
 
 ## Documentation
 
-The public API is specified in [`docs/reference/bindings-v1.md`](../docs/reference/bindings-v1.md); `go doc github.com/wave-rf/chtypes/go/chtypes` is the same surface with the full prose.
+The public API is specified in [`docs/reference/bindings-v1.md`](../docs/reference/bindings-v1.md); `go doc github.com/wave-rf/chtypes/go/v2/chtypes` is the same surface with the full prose.
 
 ## License
 

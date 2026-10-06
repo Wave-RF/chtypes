@@ -34,9 +34,12 @@ time: comment LINES are skipped, so prose may name a code, while a comment that
 TRAILS code on the same line is still scanned.
 
 Also excluded: a file that is one of the paths scripts/abi-v1/gen.py's emitters
-produce (gen.produced_outputs()) AND carries gen.py's generated banner in its
-first 512 bytes (emit/__init__.py's BANNER_RE — the same two-part test
-scripts/abi-v1/check-no-hand-decls.py exempts generated files by). Build and
+produce for some ABI major (gen.produced_outputs(major=N)) AND carries THAT
+major's generated banner in its first 512 bytes (emit/__init__.py's
+banner_re(N): gen.is_generated, the same two-part test
+scripts/abi-v1/check-no-hand-decls.py exempts generated files by). The Go
+layer is read where spec/binding-majors.json puts it (go/internal/abi2 once go
+speaks ABI v2). Build and
 dist directories are walked, not skipped, so a copied banner under one of them
 is not exempt. The
 */abi1/* declaration layers gen.py emits pair D3's five frozen chs_status
@@ -101,13 +104,18 @@ import tokenize
 
 # A generated file (scripts/abi-v1/gen.py's output: the abi1 declaration
 # layers, chs_status name tables among them) is exempt from Rules A and B —
-# see GENERATED_EXEMPTION below. BANNER_RE is the SAME real-fingerprint
-# pattern scripts/abi-v1/check-no-hand-decls.py already exempts generated
-# files by, imported rather than re-derived so the two checks can never
-# disagree about what counts as "really generated".
+# see GENERATED_EXEMPTION below. gen.is_generated (a produced path of some
+# major AND that major's real-fingerprint banner) is the SAME test
+# scripts/abi-v1/check-no-hand-decls.py exempts generated files by, imported
+# rather than re-derived so the checks can never disagree about what counts
+# as "really generated".
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "abi-v1"))
-from emit import BANNER_RE  # noqa: E402
-from gen import produced_outputs  # noqa: E402
+import majors as bmajors  # noqa: E402
+from gen import is_generated, produced_by_major, produced_outputs  # noqa: E402
+
+# The Go layer's directory at the major spec/binding-majors.json gives go
+# (go/internal/abi2 on the `v2` branch; scripts/abi-v1/majors.py).
+GO_LAYER = bmajors.layer_dir("go", bmajors.load().by_binding["go"])
 
 # --------------------------------------------------------------- what is scanned
 
@@ -128,8 +136,8 @@ SKIP_DIRS = {
 # scripts/check-quoting-passthrough.py requires for the quoting trio: a dlsym
 # cast, a direct linked address, a declaration-table row — never a bare mention.
 DECL_SOURCES = (
-    ("go", "go/internal/abi1/abi_gen.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
-    ("go-linked", "go/internal/abi1/linked_gen.go", r"&{sym}\s*;"),
+    ("go", f"{GO_LAYER}/abi_gen.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
+    ("go-linked", f"{GO_LAYER}/linked_gen.go", r"&{sym}\s*;"),
     ("python", "python/src/chtypes/_abi1/_decls.py", r'_add\(\s*"{sym}"'),
     ("ts", "ts/src/abi1/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
     ("rust", "rust/src/abi1/decls.rs", r'concat!\(\s*"{sym}"'),
@@ -463,17 +471,17 @@ def check_declarations(root: str) -> list[str]:
 # ------------------------------------------------------------------- the check
 
 
-def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[str]]:
+def check(root: str, produced: dict[int, frozenset[str]] | None = None) -> tuple[int, list[str]]:
     files = scanned_files(root)
     if produced is None:
-        produced = produced_outputs()
+        produced = produced_by_major()
     findings: list[str] = []
 
     # A scanner that stopped seeing a binding must fail, not report success for
     # what it never read: one anchor per binding, the file its table would
     # most plausibly grow in.
     anchors = (
-        "go/internal/abi1/loader.go",
+        f"{GO_LAYER}/loader.go",
         "python/src/chtypes/_abi1/_loader.py",
         "ts/src/abi1/loader.ts",
         "rust/src/abi1/loader.rs",
@@ -491,7 +499,7 @@ def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[
 
     for rel in files:
         text = open(os.path.join(root, rel), encoding="utf-8").read()
-        if rel in produced and BANNER_RE.search(text[:512]):
+        if is_generated(rel, text, produced):
             continue  # scripts/abi-v1/gen.py's own output: see this module's docstring
         try:
             findings += scan_text(rel, text)
@@ -618,17 +626,17 @@ PLANTS = (
     ),
     (
         "go declaration dropped",
-        "go/internal/abi1/abi_gen.go",
+        f"{GO_LAYER}/abi_gen.go",
         'dlsym(h, "chs_error_codes")',
         'dlsym(h, "chs_absent_symbol")',
-        "go: go/internal/abi1/abi_gen.go does not declare chs_error_codes",
+        f"go: {GO_LAYER}/abi_gen.go does not declare chs_error_codes",
     ),
     (
         "go-linked declaration dropped",
-        "go/internal/abi1/linked_gen.go",
+        f"{GO_LAYER}/linked_gen.go",
         "&chs_error_codes;",
         "&chs_absent_symbol;",
-        "go-linked: go/internal/abi1/linked_gen.go does not declare chs_error_codes",
+        f"go-linked: {GO_LAYER}/linked_gen.go does not declare chs_error_codes",
     ),
     (
         "python declaration dropped",
@@ -728,7 +736,7 @@ def selftest(root: str) -> int:
         # What the emitters produce, standing in for the real set (the real
         # outputs, so a real generated file copied into the tree stays exempt) plus
         # the fabricated file above.
-        produced = produced_outputs() | {GENERATED_RUST_DECLS}
+        produced = {**produced_by_major(), 1: produced_outputs(major=1) | {GENERATED_RUST_DECLS}}
 
         n, lines = check(tmp, produced)
         if n:

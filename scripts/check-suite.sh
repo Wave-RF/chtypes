@@ -123,7 +123,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   [ "${GITHUB_ACTIONS:-}" != "true" ] || echo "::warning title=chtypes artifact provenance::unknown — $WHICH suite (python3 not on PATH; provenance cannot be printed)"
   die "python3 is not on PATH; provenance cannot be printed"
 fi
-python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/include/chtypes.h"
+python3 "$SCRIPTS/lib/provenance.py" --header "$ROOT/$(python3 "$SCRIPTS/abi-v1/majors.py" header "$WHICH")"
 
 LOG_DIR="$ROOT/scratch/check-suite"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$WHICH.log"; PLAIN="$LOG_DIR/$WHICH.plain.log"

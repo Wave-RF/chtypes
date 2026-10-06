@@ -67,6 +67,20 @@ else
   LINE="$(newest_published_line || true)"
   [ -n "$LINE" ] || LINE=26.8
 fi
+# A binding that speaks ABI v2 (spec/binding-majors.json; the 2.0.0-dev
+# bindings) fetches only from the staging dev channel and caches under its own
+# v2-dev root (spec/abi-v2/docs.md, rules r5 and r6): its line, without
+# $CHPLAY_LINE, is the newest that channel publishes, and $LINE when it lists
+# none (so the fetch then fails loudly, naming the line it could not find).
+DEV_BASE="https://registry-staging.wavehouse.dev/chtypes/v2-dev"
+major_of() { python3 "$HERE/../scripts/abi-v1/majors.py" get "$1" 2>/dev/null || echo 1; }
+line_for() {
+  local line=""
+  if [ -z "${CHPLAY_LINE:-}" ] && [ "$(major_of "$1")" != "1" ]; then
+    line="$(CHTYPES_ARTIFACTS_URL="$DEV_BASE" newest_published_line || true)"
+  fi
+  printf '%s\n' "${line:-$LINE}"
+}
 # Every tour prints this many numbered section banners when it ran in full.
 EXPECTED_SECTIONS=17
 ALL_LANGS=(go python ts rust)
@@ -89,13 +103,13 @@ usage() {
 # directory. A failed fetch fails that language's tour; it is never a skip.
 
 # shellcheck disable=SC2086  # CHPLAY_FETCH_ARGS is a word list on purpose
-fetch_go() { (cd "$HERE/../go" && go run ./cmd/chtypes fetch $CHPLAY_FETCH_ARGS "$LINE"); }
+fetch_go() { (cd "$HERE/../go" && go run ./cmd/chtypes fetch $CHPLAY_FETCH_ARGS "$(line_for go)"); }
 # shellcheck disable=SC2086
-fetch_python() { (cd "$HERE/../python" && uv run python -m chtypes fetch $CHPLAY_FETCH_ARGS "$LINE"); }
+fetch_python() { (cd "$HERE/../python" && uv run python -m chtypes fetch $CHPLAY_FETCH_ARGS "$(line_for python)"); }
 # shellcheck disable=SC2086
-fetch_ts() { (cd "$HERE/../ts" && pnpm install --frozen-lockfile --silent && pnpm build >/dev/null && node dist/cli.js fetch $CHPLAY_FETCH_ARGS "$LINE"); }
+fetch_ts() { (cd "$HERE/../ts" && pnpm install --frozen-lockfile --silent && pnpm build >/dev/null && node dist/cli.js fetch $CHPLAY_FETCH_ARGS "$(line_for ts)"); }
 # shellcheck disable=SC2086
-fetch_rust() { (cd "$HERE/../rust" && cargo run --quiet --locked --bin chtypes -- fetch $CHPLAY_FETCH_ARGS "$LINE"); }
+fetch_rust() { (cd "$HERE/../rust" && cargo run --quiet --locked --bin chtypes -- fetch $CHPLAY_FETCH_ARGS "$(line_for rust)"); }
 
 # ---------------------------------------------------------------- languages
 #
@@ -206,10 +220,10 @@ for l in "${langs[@]}"; do
     continue
   fi
   say ""
-  say "$(bold "-- $l: running")  ($HERE/$l)"
+  say "$(bold "-- $l: running")  ($HERE/$l, ABI v$(major_of "$l"), line $(line_for "$l"))"
   log="$logdir/$l.out"
   if ! { "fetch_$l" 2>&1 | tee "$log"; }; then
-    results+=("$l: FAILED — \`$l\` CLI fetch of line $LINE failed")
+    results+=("$l: FAILED — \`$l\` CLI fetch of line $(line_for "$l") failed (ABI v$(major_of "$l"))")
     failed=1
     continue
   fi

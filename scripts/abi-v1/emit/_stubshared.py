@@ -106,6 +106,176 @@ DOC_FUNCTIONS = {
 }
 
 
+# --------------------------------------------------------------------------
+# ABI v2's reader rules, r2 and r3 (spec/abi-v2/docs.md), as stub variants.
+# They exist from generation 2 on only (plan(), below), so ABI v1's stubs and
+# cases are unchanged. Their shape is the measurement public pull request
+# #509 took of the released 1.0.4 bindings.
+#
+# r2, variant "r2-unknown-members" (-DCHS_STUB_R2_MEMBERS): every
+# document-returning call answers the document below for its kind, carrying
+# members no description names at every object level (a scalar, an object,
+# an array, a null, an unknown `_b64` byte member), its build_info carries
+# unknown members at the top level and inside capabilities, and its
+# live_handles one unknown key.
+_UNK = {"x_future": 1}
+_UNK_TOP = {
+    "x_future": 1,
+    "x_future_obj": {"a": [1, {"b": None}], "c": "s"},
+    "x_future_arr": [1, "two", {"three": 3}, [4]],
+    "x_future_null": None,
+    "x_future_b64": "/w==",
+}
+_R2_ROW = {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "input_span": {"off": 0, "len": 3, **_UNK},
+    "cols": [
+        {
+            "name": "s",
+            "type": "String",
+            "src": "input",
+            "null": False,
+            "input": "abc",
+            "stored": "abc",
+            "value_b64": "YWJj",
+            **_UNK,
+            "x_future_obj": {"k": [1]},
+        }
+    ],
+    "computed": [{"name": "m", "kind": "materialized", "stored": "5", **_UNK}],
+    "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "date_clamp", "row": 0, **_UNK}],
+    "unknown_fields": [{"name": "u", **_UNK}],
+    "unsupported_settings": [{"name": "st", **_UNK}],
+    "partition_id": "all",
+    "verdict_code": 0,
+    **_UNK_TOP,
+}
+R2_DOCS = {
+    "row": _R2_ROW,
+    "batch": {
+        "outcome": "accepted",
+        "code": 0,
+        "err": "",
+        "rows_read": 1,
+        "rows_skipped": 0,
+        "rows": [_R2_ROW],
+        "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "date_clamp", "row": 0, **_UNK}],
+        "storage_transforms": [{"row": 0, "column": "s", "stored": "2", "reason": "date_clamp", **_UNK}],
+        "engine_rows": [[{"name": "s", "stored": "abc", "null": False, "value_b64": "YWJj", **_UNK}]],
+        "row_spans": [{"off": 0, "len": 3, **_UNK}],
+        "export_declined": "",
+        "rows_passed": 1,
+        "rows_cut": 0,
+        "partition_count": 1,
+        "unconsumed": [{"off": 3, "len": 0, **_UNK}],
+        "framing": {
+            "bom_skipped": False,
+            "container": "stream",
+            "header": {"consumed": True, "lines": 1, "names": [{"name": "s", **_UNK}], **_UNK},
+            **_UNK,
+        },
+        **_UNK_TOP,
+    },
+    "filter_result": {
+        "outcome": "ok",
+        "code": 0,
+        "err": "",
+        "rows_read": 2,
+        "verdicts": "tf",
+        "errors": [{"row": 1, "code": 53, "err": "x", **_UNK}],
+        "unsupported_settings": [{"name": "st", **_UNK}],
+        **_UNK_TOP,
+    },
+    "schema_description": {
+        "columns": [{"name": "x", "type": "Int32", "default_kind": "", "default_expression": "", **_UNK}],
+        **_UNK_TOP,
+    },
+    "discovery": {
+        "columns": [
+            {
+                "name": "c",
+                "type": "String",
+                "default_kind": "",
+                "default_expression": "",
+                "declaration": "c String",
+                **_UNK,
+            }
+        ],
+        "columns_sql": "c String",
+        **_UNK_TOP,
+    },
+    "error_code_table": [
+        {"code": 0, "name": "OK", **_UNK},
+        {"code": 53, "name": "TYPE_MISMATCH", "x_future": {"a": [1]}},
+    ],
+}
+# The export bytes r2-unknown-members and r3-unknown-values answer when a
+# binding passes an out_export pointer.
+R2_EXPORT = b'{"s":"abc"}\n'
+
+
+def _strip_unknown(v):
+    if isinstance(v, dict):
+        return {k: _strip_unknown(x) for k, x in v.items() if not k.startswith("x_future")}
+    if isinstance(v, list):
+        return [_strip_unknown(x) for x in v]
+    return v
+
+
+# r3, variant "r3-unknown-values" (-DCHS_STUB_R3_VALUES): each document call
+# answers the CLEAN document of its kind (R3_BASE: no unknown member anywhere),
+# or, when the call's first bytes_in parameter is exactly b"!E:" + <id>, that
+# document after one field is set to a value its vocabulary does not list
+# (R3_MUTATIONS: every vocabulary a document carries, and the two schema
+# enums r3 says constrain only the writer). chs_schema_describe has no
+# bytes_in: it answers the mutation the image's last chs_schema_create
+# statement named, when that began "!E:". chs_type_validate("!U:") answers
+# R3_UNKNOWN_STATUS, a status outside the closed set. Variant
+# "r3-unknown-capabilities" (-DCHS_STUB_R3_CAPABILITIES) is the ok build with
+# an unlisted value in every capabilities list of its build_info.
+R3_BASE = {k: _strip_unknown(v) for k, v in R2_DOCS.items() if k != "error_code_table"}
+# id -> (document kind, path, value)
+R3_MUTATIONS = {
+    "row.outcome": ("row", ("outcome",), "x_future_outcome"),
+    "row.cols.src": ("row", ("cols", 0, "src"), "x_future_src"),
+    "row.transformed.reason": ("row", ("transformed", 0, "reason"), "x_future_reason"),
+    "row.verdict": ("row", ("verdict",), "x"),
+    "batch.outcome": ("batch", ("outcome",), "x_future_outcome"),
+    "batch.rows.outcome": ("batch", ("rows", 0, "outcome"), "x_future_outcome"),
+    "batch.rows.cols.src": ("batch", ("rows", 0, "cols", 0, "src"), "x_future_src"),
+    "batch.transformed.reason": ("batch", ("transformed", 0, "reason"), "x_future_reason"),
+    "batch.storage_transforms.reason": ("batch", ("storage_transforms", 0, "reason"), "x_future_reason"),
+    "batch.framing.container": ("batch", ("framing", "container"), "x_future_container"),
+    "filter.outcome": ("filter_result", ("outcome",), "x_future_outcome"),
+    "filter.verdicts": ("filter_result", ("verdicts",), "tx"),
+    "describe.default_kind": ("schema_description", ("columns", 0, "default_kind"), "X_FUTURE"),
+    "discovery.default_kind": ("discovery", ("columns", 0, "default_kind"), "X_FUTURE"),
+}
+R3_UNKNOWN_STATUS = 99
+R3_CAPABILITIES = {
+    "input_formats": ["JSONEachRow", "XFutureFormat"],
+    "export_formats": ["JSONEachRow", "XFutureFormat"],
+    "doc_flags": ["values", "x_future_flag"],
+    "features": ["default_generators", "x_future_feature"],
+}
+
+
+def r3_doc(mutation_id: str):
+    """The document R3_MUTATIONS[mutation_id] names, as a Python value."""
+    import copy
+
+    kind, path, value = R3_MUTATIONS[mutation_id]
+    doc = copy.deepcopy(R3_BASE[kind])
+    cur = doc
+    for step in path[:-1]:
+        cur = cur[step]
+    cur[path[-1]] = value
+    return doc
+
+
+
 def _doc_src(src: tuple, payload: bytes) -> bytes:
     return src[1] if src[0] == "lit" else payload + src[1]
 
@@ -251,11 +421,14 @@ def plan(model) -> list[Variant]:
     "no-abi-version", the only symbol whose absence means not_v1). Every
     other missing symbol, chs_build_info and chs_clickhouse_version
     included, is missing_symbol:<name>."""
+    other = 2 if model.abi == 1 else 1
     out = [
         Variant("ok", (), "accepted"),
         Variant("ok-b", (), "accepted"),  # a second, byte-identical build: proves cross-image handling
         Variant("no-abi-version", ((omit_define(ABI_VERSION_SYMBOL), None),), "not_v1"),
-        Variant("abi-version-2", (("CHS_STUB_ABI_VERSION_OVERRIDE", "2"),), "abi_version"),
+        # A library answering ANOTHER generation: 2 for ABI v1's stubs (the
+        # variant's name and define unchanged since ABI v1), 1 for ABI v2's.
+        Variant(f"abi-version-{other}", (("CHS_STUB_ABI_VERSION_OVERRIDE", str(other)),), "abi_version"),
         Variant("build-info-null", (("CHS_STUB_BUILD_INFO_MODE", "1"),), "build_info_malformed"),
         Variant("build-info-bad-json", (("CHS_STUB_BUILD_INFO_MODE", "2"),), "build_info_malformed"),
         Variant("build-info-dup-key", (("CHS_STUB_BUILD_INFO_MODE", "3"),), "build_info_malformed"),
@@ -269,6 +442,13 @@ def plan(model) -> list[Variant]:
             predicate_overrides=(("glibc_floor", "99.0"),),
         ),
     ]
+    if model.abi >= 2:
+        # The reader rules (r2, r3): see R2_DOCS and R3_MUTATIONS above.
+        out += [
+            Variant("r2-unknown-members", (("CHS_STUB_R2_MEMBERS", "1"),), "accepted"),
+            Variant("r3-unknown-values", (("CHS_STUB_R3_VALUES", "1"),), "accepted"),
+            Variant("r3-unknown-capabilities", (("CHS_STUB_R3_CAPABILITIES", "1"),), "accepted"),
+        ]
     for sym in model.symbols():
         if sym == ABI_VERSION_SYMBOL:
             continue
@@ -291,10 +471,10 @@ def _main(argv: list[str]) -> int:
     sys.path.insert(0, str(SCRIPTS_ABI_V1))
     import model as abimodel  # noqa: PLC0415
 
-    if argv != ["--list-variants"]:
-        print("usage: _stubshared.py --list-variants", file=sys.stderr)
+    if argv[:1] != ["--list-variants"] or argv[1:] not in ([], ["--major", "1"], ["--major", "2"]):
+        print("usage: _stubshared.py --list-variants [--major N]", file=sys.stderr)
         return 2
-    m = abimodel.load(ROOT)
+    m = abimodel.load(ROOT, int(argv[2]) if len(argv) == 3 else 1)
     for v in plan(m):
         defines = ",".join(f"{k}" if val is None else f"{k}={val}" for k, val in v.defines)
         # "|", not a tab: bash's `read` treats a tab as "IFS whitespace" and

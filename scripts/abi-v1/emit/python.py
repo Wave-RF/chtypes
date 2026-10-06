@@ -75,6 +75,8 @@ from model import Function, Model, Param
 
 from . import Output, banner
 
+BINDING = "python"  # runs for the major spec/binding-majors.json gives python (emit/__init__.py)
+
 DECLS_PATH = "python/src/chtypes/_abi1/_decls.py"
 ERRMAP_PATH = "python/src/chtypes/_abi1/_errmap.py"
 VOCAB_PATH = "python/src/chtypes/_abi1/_vocab.py"

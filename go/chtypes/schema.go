@@ -13,7 +13,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/wave-rf/chtypes/go/internal/abi1"
+	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
 )
 
 // guard is the close guard of one handle object.
@@ -50,10 +50,10 @@ func (g *guard) shut(release func()) {
 type Schema struct {
 	g   guard
 	lib *Library
-	h   *abi1.Schema
+	h   *abi2.Schema
 }
 
-func newSchema(l *Library, h *abi1.Schema) *Schema {
+func newSchema(l *Library, h *abi2.Schema) *Schema {
 	s := &Schema{lib: l, h: h}
 	runtime.SetFinalizer(s, func(s *Schema) { _ = s.Close() })
 	return s
@@ -85,7 +85,7 @@ func (s *Schema) Describe() (SchemaDescription, error) {
 		return SchemaDescription{}, err
 	}
 	defer s.g.leave()
-	raw, err := s.lib.document(func() (*abi1.Buf, *abi1.CallError) { return s.lib.tbl.SchemaDescribe(s.h) })
+	raw, err := s.lib.document(func() (*abi2.Buf, *abi2.CallError) { return s.lib.tbl.SchemaDescribe(s.h) })
 	if err != nil {
 		return SchemaDescription{}, err
 	}
@@ -103,7 +103,7 @@ func (s *Schema) Row(format Format, body []byte, opts ...RowOption) (RowResult, 
 		return RowResult{}, err
 	}
 	defer s.g.leave()
-	raw, err := s.lib.document(func() (*abi1.Buf, *abi1.CallError) {
+	raw, err := s.lib.document(func() (*abi2.Buf, *abi2.CallError) {
 		return s.lib.tbl.PreviewRow(s.h, int32(format), body, settings, columns)
 	})
 	if err != nil {
@@ -124,7 +124,7 @@ func (s *Schema) Rows(format Format, body []byte, opts ...RowsOption) (BatchResu
 		return BatchResult{}, err
 	}
 	defer s.g.leave()
-	var fh *abi1.Filter
+	var fh *abi2.Filter
 	if c.filter != nil {
 		if err := c.filter.enter(); err != nil {
 			return BatchResult{}, err
@@ -221,10 +221,10 @@ func callInputs(c *callConfig) (settings, columns []byte, err error) {
 type Filter struct {
 	g   guard
 	lib *Library
-	h   *abi1.Filter
+	h   *abi2.Filter
 }
 
-func newFilter(l *Library, h *abi1.Filter) *Filter {
+func newFilter(l *Library, h *abi2.Filter) *Filter {
 	f := &Filter{lib: l, h: h}
 	runtime.SetFinalizer(f, func(f *Filter) { _ = f.Close() })
 	return f
@@ -262,7 +262,7 @@ func (f *Filter) Rows(format Format, body []byte, opts ...EvalOption) (FilterRes
 		return FilterResult{}, err
 	}
 	defer f.g.leave()
-	raw, err := f.lib.document(func() (*abi1.Buf, *abi1.CallError) {
+	raw, err := f.lib.document(func() (*abi2.Buf, *abi2.CallError) {
 		return f.lib.tbl.FilterEvalBody(f.h, int32(format), body, settings)
 	})
 	if err != nil {
@@ -283,7 +283,7 @@ func (f *Filter) Eval(b *Block) (FilterResult, error) {
 		return FilterResult{}, err
 	}
 	defer b.g.leave()
-	raw, err := f.lib.document(func() (*abi1.Buf, *abi1.CallError) { return f.lib.tbl.FilterEvalBlock(f.h, b.h) })
+	raw, err := f.lib.document(func() (*abi2.Buf, *abi2.CallError) { return f.lib.tbl.FilterEvalBlock(f.h, b.h) })
 	if err != nil {
 		return FilterResult{}, err
 	}
@@ -294,10 +294,10 @@ func (f *Filter) Eval(b *Block) (FilterResult, error) {
 type Block struct {
 	g   guard
 	lib *Library
-	h   *abi1.Block
+	h   *abi2.Block
 }
 
-func newBlock(l *Library, h *abi1.Block) *Block {
+func newBlock(l *Library, h *abi2.Block) *Block {
 	b := &Block{lib: l, h: h}
 	runtime.SetFinalizer(b, func(b *Block) { _ = b.Close() })
 	return b

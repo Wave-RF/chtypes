@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wave-rf/chtypes/spec/abi-v2/schema/report.schema.json",
+  "title": "a v1-abi-conformance report, format 1",
+  "description": "What one (binding, toolchain, os) leg of the v1-abi-conformance job uploads after running every case in tests/fixtures/abi-v2/cases.json through its generated invoke-by-name dispatcher and loader against the stub libraries. scripts/abi-v1/parity.py reads these (never committed; downloaded as CI artifacts) to decide whether every enrolled binding passes every case, with no leg missing, stale, failed or carrying a case the current cases.json does not describe.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "binding", "toolchain", "os", "cases_sha256", "results"],
+  "properties": {
+    "schema": {"const": 1},
+    "binding": {"enum": ["go", "python", "ts", "rust"]},
+    "toolchain": {"type": "string", "minLength": 1},
+    "os": {"type": "string", "pattern": "^[a-z0-9]+-[a-z0-9]+$"},
+    "cases_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of the sorted, compact JSON of cases.json's own \"cases\" array (scripts/abi-v1/parity.py's compute_cases_hash), so a report generated against an older cases.json is detected as STALE rather than silently compared against the wrong set."
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "pass"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "pass": {"type": "boolean"},
+          "detail": {"type": "string"}
+        }
+      }
+    }
+  }
+}

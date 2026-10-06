@@ -105,6 +105,13 @@ func TestConformanceV1(t *testing.T) {
 	if fixturesDir == "" {
 		t.Skip("CHTYPES_V1_CONFORMANCE is not set; skipping the v1 conformance suite (docs/guides/fetch-v1.md §10)")
 	}
+	// This package's tests run under the v1 fetch contract (main_test.go):
+	// the cases are its specification. The ABI v2 dev channel narrows it, and
+	// its own rules (r5, r6) are TestDevChannel* in this package.
+	t.Logf("fetch contract: %s (the fetch-v1 cases' own; the dev channel this binding ships is tested by TestDevChannel*)", ChannelName())
+	if ChannelName() != "v1" {
+		t.Fatalf("the fetch-v1 conformance cases must run under the v1 contract, not %q", ChannelName())
+	}
 	abs, err := filepath.Abs(fixturesDir)
 	if err == nil {
 		fixturesDir = abs

@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wave-rf/chtypes/go/internal/abi1"
-	"github.com/wave-rf/chtypes/go/internal/ocifetch"
+	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
+	"github.com/wave-rf/chtypes/go/v2/internal/ocifetch"
 )
 
 // Resolved is the fetch layer's record of one installed build, re-exported
@@ -165,8 +165,8 @@ func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (_ *
 			return nil, fetchError(err)
 		}
 	}
-	l, err := openImage(imageKey("verified", res.LibraryPath), func(zone, defaults []byte) (*abi1.Table, error) {
-		return abi1.Load(loadInput(res, zone, defaults))
+	l, err := openImage(imageKey("verified", res.LibraryPath), func(zone, defaults []byte) (*abi2.Table, error) {
+		return abi2.Load(loadInput(res, zone, defaults))
 	}, res.LibraryPath, res)
 	if err != nil {
 		return nil, err
@@ -183,8 +183,8 @@ func (r *Registry) open(ctx context.Context, request string, mayFetch bool) (_ *
 // input. It passes the predicate VERBATIM: never re-encoded, because a
 // re-encoding would be a second derivation of the statement the signature
 // covered.
-func loadInput(res *Resolved, zone, defaults []byte) abi1.LoadInput {
-	return abi1.LoadInput{
+func loadInput(res *Resolved, zone, defaults []byte) abi2.LoadInput {
+	return abi2.LoadInput{
 		LibraryPath: res.LibraryPath,
 		Predicate:   res.Predicate,
 		Platform:    res.Platform,

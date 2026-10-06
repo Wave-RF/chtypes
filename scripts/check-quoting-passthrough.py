@@ -97,11 +97,16 @@ import tempfile
 # declaration layer (scripts/abi-v1/gen.py's output). A generated file is
 # exempt from Rule A the same way scripts/check-no-error-code-table.py and
 # scripts/abi-v1/check-no-hand-decls.py exempt one: the path must be one of
-# gen.produced_outputs() AND carry BANNER_RE, both imported rather than
-# re-derived so all three checks agree on what "really generated" means.
+# gen.produced_outputs(major=N) AND carry that major's banner_re(N)
+# (gen.is_generated), imported rather than re-derived so all three checks
+# agree on what "really generated" means, at ABI v1 and ABI v2 alike.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "abi-v1"))
-from emit import BANNER_RE  # noqa: E402
-from gen import produced_outputs  # noqa: E402
+import majors as bmajors  # noqa: E402
+from gen import is_generated, produced_by_major, produced_outputs  # noqa: E402
+
+# The Go layer's directory at the major spec/binding-majors.json gives go
+# (go/internal/abi2 on the `v2` branch; scripts/abi-v1/majors.py).
+GO_LAYER = bmajors.layer_dir("go", bmajors.load().by_binding["go"])
 
 # --------------------------------------------------------------- what is scanned
 #
@@ -121,8 +126,8 @@ SKIP_DIRS = {"node_modules", "target", ".venv", "__pycache__"}
 # too, and a doc comment describing a call is exactly what this must not
 # accept as the call.
 DECL_SOURCES = (
-    ("go", "go/internal/abi1/abi_gen.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
-    ("go-linked", "go/internal/abi1/linked_gen.go", r"&{sym}\s*;"),
+    ("go", f"{GO_LAYER}/abi_gen.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
+    ("go-linked", f"{GO_LAYER}/linked_gen.go", r"&{sym}\s*;"),
     ("python", "python/src/chtypes/_abi1/_decls.py", r'_add\(\s*"{sym}"'),
     ("ts", "ts/src/abi1/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
     ("rust", "rust/src/abi1/decls.rs", r'concat!\(\s*"{sym}"'),
@@ -259,10 +264,10 @@ def check_declarations(root: str) -> list[str]:
 # ------------------------------------------------------------------- the check
 
 
-def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[str]]:
+def check(root: str, produced: dict[int, frozenset[str]] | None = None) -> tuple[int, list[str]]:
     files = scanned_files(root)
     if produced is None:
-        produced = produced_outputs()
+        produced = produced_by_major()
     lines: list[str] = []
     findings: list[str] = []
 
@@ -270,7 +275,7 @@ def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[
     # what it never read. One anchor per binding, the file each one's quoting
     # would most plausibly re-grow in.
     anchors = (
-        "go/internal/abi1/loader.go",
+        f"{GO_LAYER}/loader.go",
         "python/src/chtypes/_abi1/_loader.py",
         "ts/src/abi1/loader.ts",
         "rust/src/abi1/loader.rs",
@@ -284,7 +289,7 @@ def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[
 
     for rel in files:
         text = open(os.path.join(root, rel), encoding="utf-8").read()
-        if rel in produced and BANNER_RE.search(text[:512]):
+        if is_generated(rel, text, produced):
             continue  # scripts/abi-v1/gen.py's own output
         findings += scan_text(rel, text)
     findings += check_declarations(root)
@@ -302,7 +307,7 @@ def check(root: str, produced: frozenset[str] | None = None) -> tuple[int, list[
 # declaration, because a rule that has only ever passed is not known to work.
 
 # A fabricated stand-in for a generated */abi1/* declaration file, proving
-# the generated-file exemption (BANNER_RE, imported above) in both
+# the generated-file exemption (gen.is_generated, imported above) in both
 # directions with the SAME literal, varying only whether a real banner is
 # present. Written directly into the selftest's temp tree (not a real file
 # in this repository today): the baseline check(tmp) call right after it is
@@ -357,17 +362,17 @@ PLANTS = (
     ),
     (
         "go declaration dropped",
-        "go/internal/abi1/abi_gen.go",
+        f"{GO_LAYER}/abi_gen.go",
         'dlsym(h, "chs_quote_string")',
         'dlsym(h, "chs_absent_symbol")',
-        "go: go/internal/abi1/abi_gen.go does not declare chs_quote_string",
+        f"go: {GO_LAYER}/abi_gen.go does not declare chs_quote_string",
     ),
     (
         "go-linked declaration dropped",
-        "go/internal/abi1/linked_gen.go",
+        f"{GO_LAYER}/linked_gen.go",
         "&chs_quote_string;",
         "&chs_absent_symbol;",
-        "go-linked: go/internal/abi1/linked_gen.go does not declare chs_quote_string",
+        f"go-linked: {GO_LAYER}/linked_gen.go does not declare chs_quote_string",
     ),
     (
         "python declaration dropped",
@@ -431,7 +436,7 @@ def selftest(root: str) -> int:
         # What the emitters produce, standing in for the real set (the real
         # outputs, so a real generated file copied into the tree stays exempt) plus
         # the fabricated file above.
-        produced = produced_outputs() | {GENERATED_GO_DECLS}
+        produced = {**produced_by_major(), 1: produced_outputs(major=1) | {GENERATED_GO_DECLS}}
         n, lines = check(tmp, produced)
         if n:
             print("SELFTEST FAILED: the copied tree does not pass\n" + "\n".join(lines), file=sys.stderr)

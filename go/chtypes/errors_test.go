@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wave-rf/chtypes/go/internal/abi1"
+	"github.com/wave-rf/chtypes/go/v2/internal/abi2"
 )
 
 func TestCallErrorClasses(t *testing.T) {
@@ -21,7 +21,7 @@ func TestCallErrorClasses(t *testing.T) {
 		{"CHS_INTERNAL", "*chtypes.InternalError", StatusInternal},
 	}
 	for _, c := range cases {
-		err := callError(&abi1.CallError{Status: c.status, ChCode: 53, ChName: "TYPE_MISMATCH", Message: "m\xff", Column: "c\x00"})
+		err := callError(&abi2.CallError{Status: c.status, ChCode: 53, ChName: "TYPE_MISMATCH", Message: "m\xff", Column: "c\x00"})
 		if got := fmt.Sprintf("%T", err); got != c.want {
 			t.Errorf("%s -> %s, want %s", c.status, got, c.want)
 		}
@@ -41,12 +41,12 @@ func TestCallErrorClasses(t *testing.T) {
 }
 
 func TestRefusalAndDeclineArePeers(t *testing.T) {
-	decline := callError(&abi1.CallError{Status: "CHS_DECLINED", Message: "no"})
+	decline := callError(&abi2.CallError{Status: "CHS_DECLINED", Message: "no"})
 	var se *SchemaError
 	if errors.As(decline, &se) {
 		t.Error("a decline must never satisfy errors.As(*SchemaError)")
 	}
-	refusal := callError(&abi1.CallError{Status: "CHS_REJECTED", Message: "no"})
+	refusal := callError(&abi2.CallError{Status: "CHS_REJECTED", Message: "no"})
 	var ue *UnsupportedError
 	if errors.As(refusal, &ue) {
 		t.Error("a refusal must never satisfy errors.As(*UnsupportedError)")
@@ -54,9 +54,9 @@ func TestRefusalAndDeclineArePeers(t *testing.T) {
 }
 
 func TestUnknownStatusIsInternalNamingItsValue(t *testing.T) {
-	err := callError(&abi1.CallError{Status: "CHS_STATUS_9", Message: "?"})
+	err := callError(&abi2.CallError{Status: "CHS_STATUS_9", Message: "?"})
 	var ie *InternalError
-	if !errors.As(err, &ie) || ie.Status != 9 || !strings.Contains(err.Error(), "CHS_STATUS_9") {
+	if !errors.As(err, &ie) || ie.Status != 9 || ie.Status.Known() || !strings.Contains(err.Error(), "unknown(9)") {
 		t.Errorf("an unknown status = %T %v (status %d), want an *InternalError naming it", err, err, ie.Status)
 	}
 	if callError(nil) != nil {
@@ -77,11 +77,11 @@ func TestBindingDetectedMisuseHasTheInvalidArgumentShape(t *testing.T) {
 }
 
 func TestLoaderRefusalsAreOneFamilyWithFetch(t *testing.T) {
-	corrupt := loadError(&abi1.LoadError{Reason: "build_info_mismatch:core_commit", Path: "/p", Want: "a", Got: "b"})
+	corrupt := loadError(&abi2.LoadError{Reason: "build_info_mismatch:core_commit", Path: "/p", Want: "a", Got: "b"})
 	if !errors.Is(corrupt, ErrArtifactCorrupt) || errors.Is(corrupt, ErrArtifactIncompatible) {
 		t.Errorf("a step 5 refusal = %v: want the corrupt sentinel", corrupt)
 	}
-	incompat := loadError(&abi1.LoadError{Reason: "fingerprint", Path: "/p", Want: "a", Got: "b"})
+	incompat := loadError(&abi2.LoadError{Reason: "fingerprint", Path: "/p", Want: "a", Got: "b"})
 	if !errors.Is(incompat, ErrArtifactIncompatible) || errors.Is(incompat, ErrArtifactCorrupt) {
 		t.Errorf("a fingerprint refusal = %v: want the incompatible sentinel", incompat)
 	}
@@ -90,7 +90,7 @@ func TestLoaderRefusalsAreOneFamilyWithFetch(t *testing.T) {
 		t.Errorf("fields = %+v", ae)
 	}
 	// A step 7 failure is the call's own error, never a refusal reason.
-	step7 := loadError(&abi1.CallError{Status: "CHS_INVALID_ARGUMENT", Message: "zone a vs zone b"})
+	step7 := loadError(&abi2.CallError{Status: "CHS_INVALID_ARGUMENT", Message: "zone a vs zone b"})
 	var ue *UsageError
 	if !errors.As(step7, &ue) {
 		t.Errorf("a chs_initialize INVALID_ARGUMENT = %T, want a *UsageError", step7)
@@ -98,13 +98,13 @@ func TestLoaderRefusalsAreOneFamilyWithFetch(t *testing.T) {
 	if errors.As(step7, &ae) {
 		t.Error("a step 7 failure must not be an ArtifactError")
 	}
-	rej := loadError(&abi1.CallError{Status: "CHS_REJECTED", ChCode: 1, Message: "bad zone"})
+	rej := loadError(&abi2.CallError{Status: "CHS_REJECTED", ChCode: 1, Message: "bad zone"})
 	var se *SchemaError
 	if !errors.As(rej, &se) {
 		t.Errorf("a chs_initialize REJECTED = %T, want a *SchemaError", rej)
 	}
 	// A refused unverified open is misuse.
-	if !errors.As(loadError(&abi1.UnverifiedRefusedError{Path: "/p"}), &ue) {
+	if !errors.As(loadError(&abi2.UnverifiedRefusedError{Path: "/p"}), &ue) {
 		t.Error("an unverified open without both opt-ins is a UsageError")
 	}
 }

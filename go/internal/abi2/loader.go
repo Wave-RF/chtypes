@@ -8,7 +8,7 @@
 //
 // Nothing here is a cgo file: the cgo preamble is the generated one
 // (abi_gen.go's own doc comment), and this is plain Go over it.
-package abi1
+package abi2
 
 import (
 	"bytes"
@@ -46,7 +46,7 @@ type LoadInput struct {
 // LoadError is a step 1-6 refusal. Each one carries sdk.json's own reason
 // vocabulary (loader.refusals), the path, and want/got where either is
 // meaningful. Until wave C wires the public fetch-error mapping (D3/§3.4),
-// this stays abi1-local: waves A and B touch no v0 file.
+// this stays abi2-local: waves A and B touch no v0 file.
 type LoadError struct {
 	Reason string
 	Path   string
@@ -55,14 +55,41 @@ type LoadError struct {
 }
 
 func (e *LoadError) Error() string {
-	if e.Want != "" || e.Got != "" {
-		return fmt.Sprintf("abi1: %s: %s (want %q, got %q)", e.Path, e.Reason, e.Want, e.Got)
+	if msg, ok := devFingerprintMessage(e); ok {
+		return msg
 	}
-	return fmt.Sprintf("abi1: %s: %s", e.Path, e.Reason)
+	if e.Want != "" || e.Got != "" {
+		return fmt.Sprintf("abi2: %s: %s (want %q, got %q)", e.Path, e.Reason, e.Want, e.Got)
+	}
+	return fmt.Sprintf("abi2: %s: %s", e.Path, e.Reason)
+}
+
+// DevFingerprintMessage is rule r6's exact refusal of a library whose
+// fingerprint is not this dev SDK's (spec/abi-v2/docs.md): X is the SDK's own
+// fingerprint and Y the library's, both full "sha256:" spellings.
+func DevFingerprintMessage(sdk, library string) string {
+	return fmt.Sprintf("this SDK speaks dev fingerprint %s; the library has %s — update your dev SDK", sdk, library)
+}
+
+// devFingerprintMessage is the r6 message for a fingerprint refusal while
+// this generation's description is unstable (a dev SDK), and false otherwise.
+func devFingerprintMessage(e *LoadError) (string, bool) {
+	if e.Reason != "fingerprint" || ChsAbiStability != "unstable" {
+		return "", false
+	}
+	return DevFingerprintMessage(e.Want, e.Got), true
+}
+
+// Message is the refusal's complete message: rule r6's exact text for a dev
+// SDK's fingerprint refusal, "" for every other refusal (the public layer then
+// composes its own).
+func (e *LoadError) Message() string {
+	msg, _ := devFingerprintMessage(e)
+	return msg
 }
 
 // Class is the sdk.json errors.loader refusal class this reason maps to
-// (loader.refusals in spec/abi-v1/sdk.json, reproduced here by hand: a step 5
+// (loader.refusals in spec/abi-v2/sdk.json, reproduced here by hand: a step 5
 // or build_info_malformed refusal is "artifact_corrupt" -- the signed
 // statement and the bytes disagree -- every other one is
 // "artifact_incompatible"). Wave C's public mapping reads this to pick
@@ -90,11 +117,11 @@ func warnUnverifiedOnce(path string) {
 	}
 	unverifiedWarned[path] = true
 	fmt.Fprintf(os.Stderr,
-		"chtypes/abi1: loading %s UNVERIFIED (no predicate, no signature) -- never the default; "+
+		"chtypes/abi2: loading %s UNVERIFIED (no predicate, no signature) -- never the default; "+
 			"only for a local build or the linked smoke path\n", path)
 }
 
-// crossCheckFields is spec/abi-v1/sdk.json's cross_check table (step 5):
+// crossCheckFields is spec/abi-v2/sdk.json's cross_check table (step 5):
 // nine build_info fields, each compared byte-for-byte against the SAME name
 // in the predicate. Kept by hand, like the rest of this file -- a Friday
 // confirmation that changes it is a one-line edit here, cited back to the
@@ -135,7 +162,7 @@ type UnverifiedRefusedError struct {
 }
 
 func (e *UnverifiedRefusedError) Error() string {
-	return fmt.Sprintf("abi1: OpenUnverified(%s) refused: pass explicit=true AND set %s=1", e.Path, unverifiedEnv)
+	return fmt.Sprintf("abi2: OpenUnverified(%s) refused: pass explicit=true AND set %s=1", e.Path, unverifiedEnv)
 }
 
 // CheckUnverifiedAllowed is OpenUnverified's own gate, alone: nil only when

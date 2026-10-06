@@ -3,6 +3,14 @@
 // table on this ClickHouse version, what would happen?" comes from
 // ClickHouse's own code, never from a model of it.
 //
+// 2.0.0-dev: UNSTABLE, staging only, not for production. This module,
+// github.com/wave-rf/chtypes/go/v2, is the ABI v2 development binding (public
+// issue #511): it speaks the unstable ABI v2 description, refuses a library
+// with any other fingerprint, and fetches only from the staging dev channel
+// under the staging key, with no override and no lock (docs/reference/abi-v2.md,
+// rules r1 to r6). A value a vocabulary does not list reads as that type's
+// unknown(n): Known reports false for it, and it never fails a document.
+//
 // The surface is docs/reference/bindings-v1.md. A binding is a thin
 // passthrough: every public call makes exactly one ABI call, and no scalar,
 // comparison, coercion, timestamp, zone, quoting or classification rule lives
