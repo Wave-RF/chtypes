@@ -3,7 +3,11 @@ package main
 import (
 	"archive/tar"
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -20,7 +24,23 @@ const fakeLibraryName = "libchtypes.so" // darwin fixtures use libchtypes.dylib;
 // fixtures only exercise the fetch layer (download, verify, unpack), which
 // never dlopens or reads a symbol from what it installs (plan §1.3).
 func fakeLibraryContent(seed string) []byte {
-	return []byte("chtypes v1 conformance fixture library — not a real binary — seed:" + seed + "\n")
+	b := []byte("chtypes v1 conformance fixture library — not a real binary — seed:" + seed + "\n")
+	// PROBE ONLY (do not merge): one seed's library made large, so a
+	// concurrent-install stress has a long unpack. A 1 MiB pseudo-random
+	// block, repeated: about 1 MiB on the wire, PROBE_LARGE_LIBRARY_MIB on disk.
+	if mib, _ := strconv.Atoi(os.Getenv("PROBE_LARGE_LIBRARY_MIB")); mib > 0 && seed == os.Getenv("PROBE_LARGE_LIBRARY_SEED") {
+		block := make([]byte, 0, 1<<20)
+		var ctr [8]byte
+		for i := uint64(0); len(block) < 1<<20; i++ {
+			binary.BigEndian.PutUint64(ctr[:], i)
+			sum := sha256.Sum256(append([]byte(seed), ctr[:]...))
+			block = append(block, sum[:]...)
+		}
+		for i := 0; i < mib; i++ {
+			b = append(b, block...)
+		}
+	}
+	return b
 }
 
 func zstdEncode(data []byte, opts ...zstd.EOption) []byte {

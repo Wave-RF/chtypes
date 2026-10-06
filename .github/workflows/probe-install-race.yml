@@ -1,0 +1,122 @@
+# PROBE (do not merge): a stress run of v1-cache-interop's concurrent-install
+# case, to measure a failure rate per binding at the released 1.0.4 and at
+# the 1.1.0 release commit, small and large layers, plus a positive control.
+name: probe-install-race
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-install-race-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  stress:
+    name: "stress ${{ matrix.name }} ${{ matrix.layer }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "1.0.4", commit: 38ceadc19011b3212b93c0e6052b1452ff48998f, layer: small, rounds: "rust=400,go=50,python=50,ts=50" }
+          - { name: "1.0.4", commit: 38ceadc19011b3212b93c0e6052b1452ff48998f, layer: large, rounds: "rust=150,go=30,python=30,ts=30" }
+          - { name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: small, rounds: "rust=400,go=50,python=50,ts=50" }
+          - { name: "1.1.0", commit: d15083fa6aa7d0ff59b69cc2c216494506e52289, layer: large, rounds: "rust=150,go=30,python=30,ts=30" }
+          - { name: "08cfec9", commit: 08cfec98220137244e0e427c7149113c7e64e1ea, layer: small, rounds: "rust=400,go=0,python=0,ts=0" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.commit }}
+          path: target
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: target/go/go.mod
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.13"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: target/ts/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: target/ts/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+        with:
+          toolchain: stable
+      - name: build the four CLIs from the target commit
+        run: |
+          X="$RUNNER_TEMP/cli"
+          mkdir -p "$X/bin"
+          (cd target/go && go build -o "$X/bin/cli-go" ./cmd/chtypes)
+          uv venv --python 3.13 "$X/py"
+          (cd target/python && UV_PROJECT_ENVIRONMENT="$X/py" uv sync --locked --no-dev --no-editable --link-mode copy)
+          printf '#!/usr/bin/env bash\nexec "%s/py/bin/python" -m chtypes "$@"\n' "$X" > "$X/bin/cli-python"
+          (cd target/ts && pnpm install --frozen-lockfile && pnpm build)
+          printf '#!/usr/bin/env bash\nexec "%s" "%s/target/ts/dist/cli.js" "$@"\n' "$(command -v node)" "$PWD" > "$X/bin/cli-ts"
+          (cd target/rust && cargo build --locked --bin chtypes)
+          cp target/rust/target/debug/chtypes "$X/bin/cli-rust"
+          chmod +x "$X"/bin/cli-*
+          for b in go python ts rust; do "$X/bin/cli-$b" --version; done
+          (cd target && git log -1 --format='target %H %s')
+      - name: the clock the names are made from
+        run: |
+          echo "clocksource: $(cat /sys/devices/system/clocksource/clocksource0/current_clocksource) (available: $(cat /sys/devices/system/clocksource/clocksource0/available_clocksource))"
+          nproc
+          python3 - <<'EOF'
+          import time
+          vals = [time.time_ns() for _ in range(300000)]
+          deltas = sorted({b - a for a, b in zip(vals, vals[1:]) if b != a})
+          print("CLOCK_REALTIME smallest nonzero steps (ns):", deltas[:8])
+          print("distinct readings:", len(set(vals)), "of", len(vals), "consecutive reads")
+          print("distinct last-two-digits:", len({v % 100 for v in vals}))
+          EOF
+      - name: a large library (32 MiB) for the large-layer leg
+        if: matrix.layer == 'large'
+        run: |
+          cd scripts/fetch-v1/genfixtures
+          PROBE_LARGE_LIBRARY_MIB=32 PROBE_LARGE_LIBRARY_SEED=linux-arm64-26.8.15.10-20261001.183455 go run . --write
+          ls -la ../../../tests/fixtures/fetch-v1/trees/basic/v2/chtypes/v1/blobs/
+      - name: stress
+        run: |
+          X="$RUNNER_TEMP/cli"
+          mkdir -p out
+          python3 scripts/fetch-v1/probe-install-race.py \
+            --cli "go=$X/bin/cli-go" --cli "python=$X/bin/cli-python" --cli "ts=$X/bin/cli-ts" --cli "rust=$X/bin/cli-rust" \
+            --rounds "${{ matrix.rounds }}" \
+            --label "${{ matrix.name }} (${{ matrix.commit }}) ${{ matrix.layer }} layer" \
+            --json "out/stress-${{ matrix.name }}-${{ matrix.layer }}.json"
+      - name: "positive control: Rust under a frozen clock (every process picks the same names)"
+        if: matrix.layer == 'small'
+        run: |
+          X="$RUNNER_TEMP/cli"
+          sudo apt-get install -y -qq faketime >/dev/null
+          LIB="$(dpkg -L libfaketime | grep -m1 'libfaketime.so.1$')"
+          echo "libfaketime: $LIB"
+          # The clock really is frozen for a libc caller under these settings.
+          a="$(env LD_PRELOAD="$LIB" FAKETIME='2026-10-06 00:00:00' FAKETIME_DONT_FAKE_MONOTONIC=1 python3 -c 'import time; a = time.time_ns(); time.sleep(0.05); print(a, time.time_ns())')"
+          echo "two readings 50 ms apart under the control: $a"
+          read -r first second <<< "$a"
+          test "$first" = "$second"
+          python3 scripts/fetch-v1/probe-install-race.py --control \
+            --cli "rust=env LD_PRELOAD=$LIB 'FAKETIME=2026-10-06 00:00:00' FAKETIME_DONT_FAKE_MONOTONIC=1 $X/bin/cli-rust" \
+            --rounds "rust=10" \
+            --label "CONTROL ${{ matrix.name }} rust, frozen clock" \
+            --json "out/control-${{ matrix.name }}.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: probe-${{ matrix.name }}-${{ matrix.layer }}
+          path: out/
