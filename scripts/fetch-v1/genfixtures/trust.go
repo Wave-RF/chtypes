@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // trust.go — §4's trust case group: one tree, "trust", with one tag per
 // scenario (docs/guides/fetch-v1.md §4). Each scenario builds its own
@@ -209,6 +212,26 @@ func buildTrustCases(fs *FileSet) []Case {
 	attachSignatureReferrer(tree, art17.ManifestDesc, signBundle(testKey.KeyID, testKey.Private, st17))
 	attachGoldens(tree, art17.ManifestDesc, "trust-goldens-17", C.PredicateTypes.Goldens)
 	cases = append(cases, addCase("referrers-goldens-alongside-signature", art17, "t-goldens-alongside", true, ""))
+
+	// PROBE (do not merge): a signed predicate carrying members no 1.0
+	// reader knows. Expected ok: whether each RELEASED binding accepts it is
+	// what the ABI-additions probe measures (could a feature level ride in
+	// the signed predicate?).
+	art18, _ := mk("18")
+	pred18 := predicateAsMap(art18.Predicate)
+	pred18["abi_level"] = 1
+	st18 := statementFor(art18, C.PredicateTypes.Artifact, pred18)
+	attachSignatureReferrer(tree, art18.ManifestDesc, signBundle(testKey.KeyID, testKey.Private, st18))
+	cases = append(cases, addCase("probe-predicate-unknown-abi-level", art18, "t-probe-pred-level", true, ""))
+
+	art19, _ := mk("19")
+	pred19 := predicateAsMap(art19.Predicate)
+	pred19["abi_level"] = 2
+	pred19["abi_additions"] = []any{map[string]any{"level": 1, "digest": "sha256:" + strings.Repeat("d", 64)}}
+	pred19["x_future"] = map[string]any{"levels": []any{1, 2}, "note": "unknown", "nothing": nil}
+	st19 := statementFor(art19, C.PredicateTypes.Artifact, pred19)
+	attachSignatureReferrer(tree, art19.ManifestDesc, signBundle(testKey.KeyID, testKey.Private, st19))
+	cases = append(cases, addCase("probe-predicate-unknown-members", art19, "t-probe-pred-members", true, ""))
 
 	flushTrees(fs, tree)
 	return cases

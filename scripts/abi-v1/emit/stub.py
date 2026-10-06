@@ -649,8 +649,20 @@ def _build_info_section(model) -> str:
     "\\"capabilities\\":{{\\"input_formats\\":[\\"JSONEachRow\\"],\\"export_formats\\":[\\"JSONEachRow\\"],\\"doc_flags\\":[\\"values\\"]," \\
     "\\"features\\":[\\"default_generators\\"]}}}}"
 
+/* PROBE (do not merge): the same build_info plus members no description names,
+   at the top level and inside capabilities (CHS_STUB_PROBE_X, variant ok-x). */
+#define CHS_STUB_BUILD_INFO_FMT_X \\
+    "{{\\"schema\\":1,\\"abi\\":%d,\\"abi_fingerprint\\":\\"%s\\",\\"clickhouse_version\\":\\"26.8.15.10\\"," \\
+    "\\"channel\\":\\"lts\\",\\"clickhouse_minor\\":\\"26.8\\",\\"clickhouse_commit\\":\\"{"a" * 40}\\"," \\
+    "\\"core_commit\\":\\"{"b" * 40}\\",\\"build\\":\\"20261001.000000\\",\\"inputs_sha256\\":\\"{"c" * 64}\\"," \\
+    "\\"os\\":\\"%s\\",\\"arch\\":\\"%s\\",\\"toolchain\\":{{\\"cc\\":\\"stub\\"}}," \\
+    "\\"capabilities\\":{{\\"input_formats\\":[\\"JSONEachRow\\"],\\"export_formats\\":[\\"JSONEachRow\\"],\\"doc_flags\\":[\\"values\\"]," \\
+    "\\"features\\":[\\"default_generators\\",\\"x_future_feature\\"],\\"x_future\\":1,\\"x_future_obj\\":{{\\"a\\":[1]}}}}," \\
+    "\\"abi_level\\":1,\\"abi_additions\\":[{{\\"level\\":1,\\"digest\\":\\"sha256:{"d" * 64}\\"}}]," \\
+    "\\"x_future\\":1,\\"x_future_obj\\":{{\\"a\\":[1,{{\\"b\\":null}}]}},\\"x_future_null\\":null}}"
+
 {model.function("chs_build_info").prototype().rstrip(";")} {{
-    static char buf[768];
+    static char buf[2048];
     static int ready = 0;
     if (ready) return buf;
 #if defined(CHS_STUB_BUILD_INFO_MODE) && CHS_STUB_BUILD_INFO_MODE == 1
@@ -664,6 +676,8 @@ def _build_info_section(model) -> str:
 #else
 #  if defined(CHS_STUB_FINGERPRINT_OTHER)
     snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT, {model.abi}, {fp_other}, CHS_STUB_OS, CHS_STUB_ARCH);
+#  elif defined(CHS_STUB_PROBE_X)
+    snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT_X, {model.abi}, {fp_ok}, CHS_STUB_OS, CHS_STUB_ARCH);
 #  else
     snprintf(buf, sizeof buf, CHS_STUB_BUILD_INFO_FMT, {model.abi}, {fp_ok}, CHS_STUB_OS, CHS_STUB_ARCH);
 #  endif
@@ -995,6 +1009,56 @@ def _document_mode(model, fn) -> list[str]:
     return lines
 
 
+
+def _probe_x(model, fn) -> list[str]:  # noqa: ARG001
+    """PROBE (do not merge): under CHS_STUB_PROBE_X, a function whose required
+    chs_buf output is a document of a kind in _stubshared.PROBE_X_DOCS answers
+    that document (unknown members at every level) instead of its echo, after
+    the input checks and the status injection. A nullable chs_buf output
+    (chs_preview_batch's out_export) gets PROBE_X_EXPORT when asked for."""
+    import json
+
+    outs = [q for q in fn.params if q.kind == "out_handle" and q.type == BUF_HANDLE]
+    docs = [q for q in outs if q.content and q.content.startswith("document:")]
+    if len(docs) != 1:
+        return []
+    out = docs[0]
+    kind = out.content[len("document:") :]
+    doc = _stubshared.PROBE_X_DOCS.get(kind)
+    if doc is None:
+        return []
+    text = json.dumps(doc, separators=(",", ":"), ensure_ascii=True)
+    lines = [
+        "#if defined(CHS_STUB_PROBE_X)",
+        "    {",
+        f"        static const char probe_doc[] = {_c_str(text)};",
+        f"        if ({out.name} == NULL) {{",
+        *_c_fixed_error("CHS_INVALID_ARGUMENT", f"{out.name}: required", indent="            "),
+        "        }",
+    ]
+    for q in outs:
+        if q is out:
+            continue
+        lines += [
+            f"        if ({q.name} != NULL) {{",
+            f"            static const char probe_export[] = {_c_bytes_lit(_stubshared.PROBE_X_EXPORT)};",
+            "            chs_sb xb; chs_sb_init(&xb);",
+            "            chs_sb_cat(&xb, probe_export);",
+            f"            *{q.name} = chs_stub_finish_buf(&xb);",
+            "        }",
+        ]
+    lines += [
+        "        chs_sb sb; chs_sb_init(&sb);",
+        "        chs_sb_cat(&sb, probe_doc);",
+        f"        *{out.name} = chs_stub_finish_buf(&sb);",
+        "        chs_stub_set_err(err, NULL);",
+        "        return CHS_OK;",
+        "    }",
+        "#endif",
+    ]
+    return lines
+
+
 def _fill_outputs(model, fn) -> list[str]:
     """Fill every out_handle. `p.nullable` here means "the pointer-TO-pointer
     itself may be NULL" (the caller does not want this output); a required
@@ -1079,6 +1143,7 @@ def _gen_generic(model, fn) -> str:
     body += _image_zone(fn)
     body += _zone_probe(fn)
     body += _document_mode(model, fn)
+    body += _probe_x(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)
     if err_param is not None:
@@ -1126,6 +1191,9 @@ def _special(model) -> dict[str, str]:
             '        if (i) chs_sb_cat(&sb, ",");',
             '        chs_sb_fmt(&sb, "\\"%s\\":%lld", CHS_STUB_KIND_NAMES[i], (long long) atomic_load(&chs_stub_live[i]));',
             "    }",
+            "#if defined(CHS_STUB_PROBE_X)",
+            '    chs_sb_cat(&sb, ",\\"x_future\\":0");',
+            "#endif",
             '    chs_sb_cat(&sb, "}");',
             "    *out = chs_stub_finish_buf(&sb);",
             "    chs_stub_set_err(err, NULL);",
@@ -1253,6 +1321,16 @@ def render_stub_c(model) -> str:
             body_by_name[fn.name] = _gen_generic(model, fn)
 
     out = parts
+    out.append(
+        "\n/* PROBE (do not merge): exports no description names (CHS_STUB_EXTRA_EXPORT). */\n"
+        "#if defined(CHS_STUB_EXTRA_EXPORT)\n"
+        f"int32_t {_stubshared.PROBE_EXTRA_EXPORTS[0]}(void);\n"
+        f"CHS_API int32_t {_stubshared.PROBE_EXTRA_EXPORTS[0]}(void) {{ return 1; }}\n"
+        f"const char *{_stubshared.PROBE_EXTRA_EXPORTS[1]}(void);\n"
+        f"CHS_API const char *{_stubshared.PROBE_EXTRA_EXPORTS[1]}(void) {{ "
+        'return "{\\"schema\\":1,\\"base\\":\\"sha256:base\\",\\"levels\\":[{\\"level\\":1}]}"; }\n'
+        "#endif\n"
+    )
     out.append("\n/* ----------------------------------------------------------- functions */\n")
     out.append(
         "/* chs_build_info is defined above (inside its own omit guard, alongside its\n"

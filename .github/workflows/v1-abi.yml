@@ -34,7 +34,8 @@ name: v1-abi
 
 on:
   pull_request:
-    branches: [main]
+    # PROBE (do not merge): also the throwaway base branch at 38ceadc.
+    branches: [main, probe-abi-tolerance-base]
   # The merge queue's candidate combination must run every required context
   # here too, or the queue waits forever: v1 and v1-abi's contexts are required
   # on main once v1 merges (nothing below reads the event's base or head).
@@ -162,6 +163,22 @@ jobs:
         run: scripts/abi-v1/build-stubs.sh --selftest
       - name: build the stub libraries and run the stub's handle-rule self-test
         run: scripts/abi-v1/build-stubs.sh --out "$RUNNER_TEMP/abi-v1-stubs"
+      - name: "PROBE positive control: the extra exports (nm) and every document the probe variants answer"
+        run: |
+          d="$RUNNER_TEMP/abi-v1-stubs"
+          for v in ok ok-x ok-extra-export ok-pred-x ok-future; do
+            echo "=== nm $v.so"
+            nm -g "$d/$v.so" | grep -E 'chs_abi_(version|level|additions)$' || true
+          done
+          cc -std=c11 -I include scripts/abi-v1/probe-control.c -o "$RUNNER_TEMP/probe-control" -ldl
+          for v in ok-x ok-future; do
+            echo "=== documents $v.so"
+            "$RUNNER_TEMP/probe-control" "$d/$v.so"
+          done
+          for v in ok-pred-x ok-future; do
+            echo "=== stubs.json predicate for $v"
+            python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["variants"][sys.argv[2]]["predicate"], sort_keys=True))' "$d/stubs.json" "$v"
+          done
       - name: upload the stub libraries and manifest for v1-abi-conformance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

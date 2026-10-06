@@ -17,6 +17,8 @@
     "t-referrers-empty-ok",
     "t-referrers-empty-no-fallback",
     "t-rotation-two-bundles",
-    "t-goldens-alongside"
+    "t-goldens-alongside",
+    "t-probe-pred-level",
+    "t-probe-pred-members"
   ]
 }

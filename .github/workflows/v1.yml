@@ -30,7 +30,8 @@ name: v1
 
 on:
   pull_request:
-    branches: [main]
+    # PROBE (do not merge): also the throwaway base branch at 38ceadc.
+    branches: [main, probe-abi-tolerance-base]
   # The merge queue's candidate combination must run every required context
   # here too, or the queue waits forever: v1 and v1-abi's contexts are required
   # on main once v1 merges (nothing below reads the event's base or head).

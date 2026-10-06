@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source": {
-    "generator_commit": "af8d648bcc151c4b990bbec0995d119bb55efdb6",
+    "generator_commit": "44721881303da949807d09a9bf6c30b1608b4e40",
     "go_sum_sha256": "e998462ee1660f7d0b42c45fd0e16ddef8c688e81aaa22c466ada3c69565eec9"
   },
   "cases": [
@@ -1302,6 +1302,96 @@
         "build": "20260801.0000170",
         "manifest": "sha256:845f11b48c20f11d6daf627edd9978452b92028157321684e598c5496fcec8d8",
         "library_sha256": "660eb8b80e7f9c27a7aa98bd9809dcc654267c7ef564b5aa9bf94034c957fc95",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null
+      }
+    },
+    {
+      "id": "probe-predicate-unknown-abi-level",
+      "tree": "trust",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "t-probe-pred-level",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ]
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.1.18",
+        "build": "20260801.0000180",
+        "manifest": "sha256:dda137b4cbe20e91f8cda2ed068e9ceca135b351895f2f3e6b12c045d9818bca",
+        "library_sha256": "996b7382f943d8bd0c4c37a0990a06efc6c8e72c9ed081330690c4d37f886801",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": null,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null
+      }
+    },
+    {
+      "id": "probe-predicate-unknown-members",
+      "tree": "trust",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "empty",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "t-probe-pred-members",
+        "platform": "linux-arm64",
+        "offline": false,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ]
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.8.1.19",
+        "build": "20260801.0000190",
+        "manifest": "sha256:179dfc961796c84fe8dd71260988cdc2e4039b7c9ab8f53b668bc6ee95238370",
+        "library_sha256": "b6398f727445dbf312169e5846b54c11f5aca94d2e82efb9dc7b14f6e6a26d30",
         "code": null,
         "sleeps": [],
         "warnings": [],
@@ -3607,6 +3697,96 @@
         "build": "20260203.000004",
         "manifest": null,
         "library_sha256": "33e8e429e8e21586e445d779fc5520cc5d6a254e0f67853f14757f3844b8d5f6",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null
+      }
+    },
+    {
+      "id": "probe-cache-record-leveled-offline",
+      "tree": "cache-record",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "probe-cache-record-leveled",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.4",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ]
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.4.3.4",
+        "build": "20260403.000004",
+        "manifest": null,
+        "library_sha256": "05020cc4e82c7d99cf6fb5cfb7fd1c726f86e01d773c05ab124162b51a921515",
+        "code": null,
+        "sleeps": [],
+        "warnings": [],
+        "requests": {
+          "max": 0,
+          "none_matching": [],
+          "auth_on_second_origin": false
+        },
+        "lock_after": null
+      }
+    },
+    {
+      "id": "resolve-installed-probe-cache-record-leveled",
+      "tree": "cache-record",
+      "transports": [
+        "file",
+        "http"
+      ],
+      "http_script": null,
+      "setup": {
+        "cache": "probe-cache-record-leveled",
+        "system_dirs": [],
+        "lock": null,
+        "before_index_rename_hook": null
+      },
+      "request": {
+        "spelling": "26.4",
+        "platform": "linux-arm64",
+        "offline": true,
+        "frozen": false,
+        "lock_write": false,
+        "update": false,
+        "allow_unsigned": false,
+        "trust": "test",
+        "bases": [
+          "{base}"
+        ]
+      },
+      "env": {},
+      "expect": {
+        "ok": true,
+        "version": "26.4.3.4",
+        "build": "20260403.000004",
+        "manifest": null,
+        "library_sha256": "05020cc4e82c7d99cf6fb5cfb7fd1c726f86e01d773c05ab124162b51a921515",
         "code": null,
         "sleeps": [],
         "warnings": [],

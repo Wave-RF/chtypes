@@ -105,6 +105,123 @@ DOC_FUNCTIONS = {
     "chs_discover_columns": ("rows", "discovery"),
 }
 
+# --------------------------------------------------------------------------
+# PROBE (do not merge): the ABI-additions tolerance probe. A stub built with
+# -DCHS_STUB_PROBE_X (variant "ok-x") answers every document-returning call
+# with the document below for its kind, each carrying members no 1.0
+# description names, at every object level: a scalar, an object, an array, a
+# null, an unknown `_b64` byte member, and the field names the planned v1 ABI
+# additions would add. Its build_info carries unknown members too, and its
+# live_handles carries one unknown key. Nothing else about the stub changes.
+# Variant "ok-extra-export" (-DCHS_STUB_EXTRA_EXPORT) exports two symbols no
+# description names; "ok-pred-x" is the ok build checked against a predicate
+# carrying unknown members; "ok-future" is all three together.
+_UNK = {"x_future": 1}
+_UNK_TOP = {
+    "x_future": 1,
+    "x_future_obj": {"a": [1, {"b": None}], "c": "s"},
+    "x_future_arr": [1, "two", {"three": 3}, [4]],
+    "x_future_null": None,
+    "x_future_b64": "/w==",
+}
+_PROBE_ROW = {
+    "outcome": "accepted",
+    "code": 0,
+    "err": "",
+    "input_span": {"off": 0, "len": 3, **_UNK},
+    "cols": [
+        {
+            "name": "s",
+            "type": "String",
+            "src": "input",
+            "null": False,
+            "input": "abc",
+            "stored": "abc",
+            "value_b64": "YWJj",
+            **_UNK,
+            "x_future_obj": {"k": [1]},
+        }
+    ],
+    "computed": [{"name": "m", "kind": "materialized", "stored": "5", **_UNK}],
+    "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "reformat", "row": 0, **_UNK}],
+    "unknown_fields": [{"name": "u", **_UNK}],
+    "unsupported_settings": [{"name": "st", **_UNK}],
+    "partition_id": "all",
+    "verdict_code": 0,
+    **_UNK_TOP,
+}
+PROBE_X_DOCS = {
+    "row": _PROBE_ROW,
+    "batch": {
+        "outcome": "accepted",
+        "code": 0,
+        "err": "",
+        "rows_read": 1,
+        "rows_skipped": 0,
+        "rows": [_PROBE_ROW],
+        "transformed": [{"column": "s", "input": "1", "stored": "2", "reason": "reformat", "row": 0, **_UNK}],
+        "storage_transforms": [{"row": 0, "column": "s", "stored": "2", **_UNK}],
+        "engine_rows": [[{"name": "s", "stored": "abc", "null": False, "value_b64": "YWJj", **_UNK}]],
+        "row_spans": [{"off": 0, "len": 3, **_UNK}],
+        "export_declined": "",
+        "rows_passed": 1,
+        "rows_cut": 0,
+        "partition_count": 1,
+        "unconsumed": [{"off": 3, "len": 0, **_UNK}],
+        "framing": {
+            "bom_skipped": False,
+            "container": "stream",
+            "header": {"consumed": True, "lines": 1, "names": [{"name": "s", **_UNK}], **_UNK},
+            **_UNK,
+        },
+        "segments": [{"columns": ["s"], "row_start": 0, "row_end": 1, "bytes": 3}],
+        "deferred": [],
+        **_UNK_TOP,
+    },
+    "filter_result": {
+        "outcome": "ok",
+        "code": 0,
+        "err": "",
+        "rows_read": 2,
+        "verdicts": "tf",
+        "errors": [{"row": 1, "code": 53, "err": "x", **_UNK}],
+        "unsupported_settings": [{"name": "st", **_UNK}],
+        **_UNK_TOP,
+    },
+    "schema_description": {
+        "columns": [{"name": "x", "type": "Int32", "default_kind": "", "default_expression": "", **_UNK}],
+        "server_profile": {"timezone": "UTC", "settings": {"date_time_input_format": "best_effort"}},
+        "timezone": "UTC",
+        **_UNK_TOP,
+    },
+    "discovery": {
+        "columns": [
+            {
+                "name": "c",
+                "type": "String",
+                "default_kind": "",
+                "default_expression": "",
+                "declaration": "c String",
+                **_UNK,
+            }
+        ],
+        "columns_sql": "c String",
+        "server_profile": {"timezone": "UTC", "settings": {}},
+        "tables": [{"database": "d", "name": "t", "create_table_query": "CREATE TABLE d.t (x Int32) ENGINE = Memory"}],
+        **_UNK_TOP,
+    },
+    "error_code_table": [
+        {"code": 0, "name": "OK", **_UNK},
+        {"code": 53, "name": "TYPE_MISMATCH", "x_future": {"a": [1]}},
+    ],
+}
+# The export bytes ok-x answers when a binding passes an out_export pointer.
+PROBE_X_EXPORT = b'{"s":"abc"}\n'
+# The symbols ok-extra-export exports beyond the description.
+PROBE_EXTRA_EXPORTS = ("chs_abi_level", "chs_abi_additions")
+# The unknown members ok-pred-x's predicate carries.
+PROBE_PREDICATE_EXTRA = {"abi_level": 1, "x_future": {"levels": [1], "note": "unknown"}}
+
 
 def _doc_src(src: tuple, payload: bytes) -> bytes:
     return src[1] if src[0] == "lit" else payload + src[1]
@@ -268,6 +385,11 @@ def plan(model) -> list[Variant]:
             "glibc_floor",
             predicate_overrides=(("glibc_floor", "99.0"),),
         ),
+        # PROBE (do not merge): see PROBE_X_DOCS above.
+        Variant("ok-x", (("CHS_STUB_PROBE_X", "1"),), "accepted"),
+        Variant("ok-extra-export", (("CHS_STUB_EXTRA_EXPORT", "1"),), "accepted"),
+        Variant("ok-pred-x", (), "accepted"),
+        Variant("ok-future", (("CHS_STUB_PROBE_X", "1"), ("CHS_STUB_EXTRA_EXPORT", "1")), "accepted"),
     ]
     for sym in model.symbols():
         if sym == ABI_VERSION_SYMBOL:

@@ -53,6 +53,8 @@ name: ci
 # not something that workflow enqueues again.
 on:
   pull_request:
+    # PROBE (do not merge): not on the probe PR.
+    branches: [main]
   merge_group:
     types: [checks_requested]
   push:

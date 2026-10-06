@@ -133,6 +133,22 @@ with open(dst, "w") as f:
     json.dump(pred, f, indent=2, sort_keys=True)
     f.write("\n")
 PY
+        elif [ "$name" = "ok-pred-x" ] || [ "$name" = "ok-future" ]; then
+            # PROBE (do not merge): the predicate plus members no 1.0 reader
+            # knows (emit/_stubshared.py PROBE_PREDICATE_EXTRA).
+            pred_file="$OUT/predicate-$name.json"
+            python3 - "$OUT/predicate.json" "$pred_file" "$HERE" <<'PY'
+import json, sys
+src, dst, here = sys.argv[1:4]
+sys.path.insert(0, here + "/emit")
+import _stubshared
+with open(src) as f:
+    pred = json.load(f)
+pred.update(_stubshared.PROBE_PREDICATE_EXTRA)
+with open(dst, "w") as f:
+    json.dump(pred, f, indent=2, sort_keys=True)
+    f.write("\n")
+PY
         else
             pred_file="$OUT/predicate.json"
         fi

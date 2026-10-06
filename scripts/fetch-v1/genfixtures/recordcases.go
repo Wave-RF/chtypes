@@ -129,6 +129,28 @@ func buildRecordCases(fs *FileSet) []Case {
 	layouts = append(layouts, layoutCanon)
 	offlinePair("cache-record-canonical", "cache-record-canonical", "26.2", &artCanon)
 
+	// --- PROBE (do not merge): a record an ADOPTING binding might write: the
+	// canonical record plus a top-level member no 1.0 reader knows, and the
+	// same member inside the verbatim predicate. No blobs and no index.json,
+	// exactly as cache-record-canonical: the case passes only if a released
+	// reader reads and trusts the record despite the unknown members.
+	artLevel, seedLevel := newArtifact("26.4.3.4", "20260403.000004", "probe-record-leveled")
+	levelRecord := map[string]any{}
+	if err := unmarshalJSON(canonicalJSON(canonicalRecordFor(tree, artLevel)), &levelRecord); err != nil {
+		panic(err)
+	}
+	levelRecord["abi_level"] = 1
+	levelPred, ok := levelRecord["predicate"].(map[string]any)
+	if !ok {
+		panic("genfixtures: the canonical record's predicate is not an object")
+	}
+	levelPred["abi_level"] = 1
+	layoutLevel := NewLayout("probe-cache-record-leveled")
+	layoutLevel.AddFile(unpackedPath(artLevel, artLevel.Predicate.Library), fakeLibraryContent(seedLevel))
+	layoutLevel.AddFile(unpackedPath(artLevel, "verified.json"), canonicalJSON(levelRecord))
+	layouts = append(layouts, layoutLevel)
+	offlinePair("probe-cache-record-leveled", "probe-cache-record-leveled", "26.4", &artLevel)
+
 	// --- cache-record-foreign-*: three kinds of record no binding may trust ---
 	artForeign, seedForeign := newArtifact("26.2.5.6", "20260205.000006", "record-foreign")
 	canon := canonicalRecordFor(tree, artForeign)

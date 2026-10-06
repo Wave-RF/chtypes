@@ -3305,6 +3305,38 @@
     },
     {
       "expect": {
+        "reason": "accepted"
+      },
+      "id": "loader.ok-x",
+      "kind": "loader",
+      "variant": "ok-x"
+    },
+    {
+      "expect": {
+        "reason": "accepted"
+      },
+      "id": "loader.ok-extra-export",
+      "kind": "loader",
+      "variant": "ok-extra-export"
+    },
+    {
+      "expect": {
+        "reason": "accepted"
+      },
+      "id": "loader.ok-pred-x",
+      "kind": "loader",
+      "variant": "ok-pred-x"
+    },
+    {
+      "expect": {
+        "reason": "accepted"
+      },
+      "id": "loader.ok-future",
+      "kind": "loader",
+      "variant": "ok-future"
+    },
+    {
+      "expect": {
         "reason": "missing_symbol:chs_abi_revision"
       },
       "id": "loader.missing-chs_abi_revision",

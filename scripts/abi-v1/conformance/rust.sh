@@ -53,7 +53,7 @@ cd "$ROOT/rust"
 OUT="$(mktemp "${TMPDIR:-/tmp}/rust-stub-census.XXXXXX")"
 trap 'rm -f "$OUT"' EXIT
 rc=0
-cargo test --locked --features abi-v1 --test abi1_conformance --test api_v1 --test api_v1_setup --test api_v1_setup_cases --test api_v1_registry --test goldens_v1_runner -- --nocapture >"$OUT" 2>&1 || rc=$?
+cargo test --locked --features abi-v1 --test abi1_conformance --test api_v1 --test api_v1_setup --test api_v1_setup_cases --test api_v1_registry --test goldens_v1_runner --test probe_unknown_fields -- --nocapture >"$OUT" 2>&1 || rc=$?
 cat "$OUT"
 echo "rust.sh: stub census"
 census_rc=0
