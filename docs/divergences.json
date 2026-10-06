@@ -1,5 +1,60 @@
 {
   "schema": 1,
   "//": "The machine-checkable half of docs/limitations.md's '## Known divergences' section (chtypes#185). The prose is authored there; this file carries only what the retired v0 checker could drive against loaded artifacts. Every '###' heading under that section must have exactly one entry here (by 'heading', matched verbatim, prefix stripped) and every entry here must match a heading — the retired v0 checker's coverage rule required either side to exist only with the other. Each check's 'settings' are a compile-time profile (a type gate binds at compile, docs/guides/settings.md 'The one exception'); 'err_code' and 'err_msg' are asserted only where docs/limitations.md itself states them — a code without a quoted message means the page named the code alone. 'stored' asserts THIS LIBRARY's current answer for a row's stored text (BatchResult.rows[i].values[column].text) — it is expected to start FAILING the day a relink makes the library match the server, which is the retirement signal for that entry, not a regression. 'stored_same' asserts that several named rows all store IDENTICAL text for a column, with no fixed text of its own — the shape a value computed once (rather than per row or per insert) produces, for a value (a random DEFAULT's exact bytes) that is not reproducible across processes. A check's top-level 'batches' (default 1) drives its payload through its compiled schema that many times, concatenating rows across calls in order, to reproduce separate INSERTs rather than one larger one. A check naming a top-level 'filter' (a boolean SQL expression) is driven down a DIFFERENT call tree: the schema compiles, the filter compiles over it, then Filter.rows(format, payload) answers one Verdict per row ('t'/'f'/'e'/'d') rather than an Outcome — its 'expect' still names 'outcome' (the call-level FilterOutcome, 'ok' unless the call itself was refused) and may also name 'verdicts' (the per-row list, index-aligned with the payload's rows, asserting THIS LIBRARY's current per-row answer exactly as 'stored' asserts a stored value — expected to start FAILING the day a relink makes the library refuse the query instead, the retirement signal for that entry). A check's 'lines' may be narrower than every served line a divergence is measured on: it names the lines THIS CHECK drives, which — like the demangle entry above — is the set where a library fix is expected to land and retire the entry; docs/limitations.md states the full measured scope in prose.",
-  "entries": []
+  "entries": [
+    {
+      "id": "skip-index-projection-expression-over-accept",
+      "heading": "A row on which a skip index's or a projection's expression throws is accepted, where a real server refuses it",
+      "checks": [
+        {
+          "id": "skip-index-expression-throws",
+          "note": "the row's only failure is in a minmax skip index's expression, which this library never evaluates, so it is accepted here; a real server evaluates it during the INSERT and refuses with 153 (ILLEGAL_DIVISION). Measured by the artifact producer on the production 1.0 builds (20261004.052404) on all four supported lines; expected to start failing on the 1.0.x release whose library evaluates it, which retires this entry",
+          "lines": [
+            "26.3",
+            "26.7",
+            "26.8",
+            "26.9"
+          ],
+          "schema": "x UInt8, INDEX i intDiv(100, x) TYPE minmax",
+          "format": "JSONEachRow",
+          "payload": "{\"x\":0}\n",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "id": "projection-expression-throws",
+          "note": "the row's only failure is in a projection's ORDER BY expression, which this library never evaluates, so it is accepted here; a real server evaluates it during the INSERT and refuses with 153 (ILLEGAL_DIVISION). Measured by the artifact producer on the production 1.0 builds (20261004.052404) on all four supported lines; expected to start failing on the 1.0.x release whose library evaluates it, which retires this entry",
+          "lines": [
+            "26.3",
+            "26.7",
+            "26.8",
+            "26.9"
+          ],
+          "schema": "x UInt8, PROJECTION p (SELECT x, intDiv(100, x) AS d ORDER BY d)",
+          "format": "JSONEachRow",
+          "payload": "{\"x\":0}\n",
+          "expect": {
+            "outcome": "accepted"
+          }
+        },
+        {
+          "id": "projection-aggregate-throws",
+          "note": "the row's only failure is in an aggregating projection's expression, which this library never evaluates, so it is accepted here; a real server evaluates it during the INSERT and refuses with 153 (ILLEGAL_DIVISION). Measured by the artifact producer on the production 1.0 builds (20261004.052404) on all four supported lines; expected to start failing on the 1.0.x release whose library evaluates it, which retires this entry",
+          "lines": [
+            "26.3",
+            "26.7",
+            "26.8",
+            "26.9"
+          ],
+          "schema": "x UInt8, PROJECTION p (SELECT x, sum(intDiv(100, x)) AS s GROUP BY x)",
+          "format": "JSONEachRow",
+          "payload": "{\"x\":0}\n",
+          "expect": {
+            "outcome": "accepted"
+          }
+        }
+      ]
+    }
+  ]
 }

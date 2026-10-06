@@ -152,7 +152,9 @@ class BatchResult:
     """The `batch` document and the export buffer.
 
     A caller that needs a contract over the body's records declines the body
-    when `unconsumed` is non-empty, and never counts records itself.
+    when any row is skipped or `unconsumed` is non-empty, and never counts
+    records itself: a skipped row's `input_span` can cover more than one input
+    record, so `unconsumed` alone does not account for every record.
     """
 
     outcome: Outcome

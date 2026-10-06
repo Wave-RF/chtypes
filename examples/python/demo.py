@@ -415,7 +415,8 @@ def section5(lib: chtypes.Library) -> None:
         note("never stored: forward only the survivors")
         kv("  unconsumed", f"{len(batch.unconsumed)} byte range(s) the reader's recovery skipped")
         note("a caller that needs a contract over the body's records declines it when")
-        note("unconsumed is non-empty, and never counts records itself")
+        note("any row is skipped or unconsumed is non-empty (a skipped row's span can")
+        note("cover several records), and never counts records itself")
 
 
 # ---------------------------------------------------------------------------
