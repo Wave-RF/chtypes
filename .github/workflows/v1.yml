@@ -5,7 +5,7 @@
 # trigger carries no branch filter, so every pull request into `v1` already
 # runs ci.yml's full required set unchanged — proof that v1 work leaves v0's
 # code paths green on the branch until the switch (plan §2.4). This file adds
-# exactly the v1-specific checks on top of that, triggered on pull requests into `v1` and `main`, and in the merge queue (its required contexts are required on `main` once v1 merges).
+# exactly the v1-specific checks on top of that, triggered on pull requests into `main` and `v2` (the `v1` branch is merged and gone), and in the merge queue (its required contexts are required on `main` once v1 merges).
 #
 # Job names below are the check CONTEXTS branch protection on `v1` names
 # (plan §2.2's table) — renaming one here is a protected-surface change, not
@@ -29,15 +29,17 @@
 name: v1
 
 on:
+  # `v2` is the ABI v2 development branch (public issue #511): pull requests
+  # into it run the same jobs as pull requests into main.
   pull_request:
-    branches: [main]
+    branches: [main, v2]
   # The merge queue's candidate combination must run every required context
   # here too, or the queue waits forever: v1 and v1-abi's contexts are required
   # on main once v1 merges (nothing below reads the event's base or head).
   merge_group:
     types: [checks_requested]
   push:
-    branches: [main]
+    branches: [main, v2]
   workflow_dispatch:
     inputs:
       registry_base:

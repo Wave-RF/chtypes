@@ -1,6 +1,7 @@
 """model.py: the typed ABI model every emitter consumes.
 
-`load(root)` reads the four inputs under spec/abi-v1/:
+`load(root, major)` reads one ABI major's four inputs, under spec/abi-v<major>/
+(spec/abi-v1/ by default; `spec(major)` names every path):
 
   abi.json          the ABI itself, and the ONLY fingerprinted input
   sdk.json          SDK-side policy: error classes, loader refusals, the
@@ -26,6 +27,14 @@ Validation happens in three layers, each refusing rather than guessing:
      per symbol, and (while sdk.json says reuse_v0_names is false) no v0 name
      is reused with a different signature.
 
+From generation 2 on, load() also checks the generation's own rules
+(`generation_rule_problems`, below): the description says its stability, a
+result document's schema never closes an object to new fields (r2), no enum
+value takes the name readers reserve for unknown(n) (r3), every status and
+error code generation 1 published keeps its name and number (r4), and docs.md
+carries the `## Rules` section naming each rule. Every major checks that the
+description's `abi` is the major it is generated as.
+
 Emitters receive the `Model` and never read the JSON themselves. Everything an
 emitter needs about a parameter's C shape is precomputed here (`Param.c`,
 `Return.c_type`, `Function.prototype()`), so the header and all four bindings
@@ -42,12 +51,70 @@ from typing import Any
 
 import jcs
 
-ABI_JSON = "spec/abi-v1/abi.json"
-ABI_SCHEMA = "spec/abi-v1/schema/abi.schema.json"
-SDK_JSON = "spec/abi-v1/sdk.json"
-SDK_SCHEMA = "spec/abi-v1/schema/sdk.schema.json"
-DOCS_MD = "spec/abi-v1/docs.md"
-V0_JSON = "spec/abi-v1/v0-symbols.json"
+# The ABI majors this generator knows. Each has its own description directory
+# and its own outputs; generating one never reads or writes another's outputs
+# (generation 2's r4 check reads generation 1's description, never its outputs).
+MAJORS = (1, 2)
+
+
+@dataclass(frozen=True)
+class Spec:
+    """Where one ABI major's inputs live: spec/abi-v<major>/."""
+
+    major: int
+
+    @property
+    def dir(self) -> str:
+        return f"spec/abi-v{self.major}"
+
+    @property
+    def abi_json(self) -> str:
+        return f"{self.dir}/abi.json"
+
+    @property
+    def abi_schema(self) -> str:
+        return f"{self.dir}/schema/abi.schema.json"
+
+    @property
+    def sdk_json(self) -> str:
+        return f"{self.dir}/sdk.json"
+
+    @property
+    def sdk_schema(self) -> str:
+        return f"{self.dir}/schema/sdk.schema.json"
+
+    @property
+    def docs_md(self) -> str:
+        return f"{self.dir}/docs.md"
+
+    @property
+    def v0_json(self) -> str:
+        return f"{self.dir}/v0-symbols.json"
+
+
+def spec(major: int) -> Spec:
+    if major not in MAJORS:
+        raise ValueError(f"ABI v{major} is not one of the majors this generator knows ({MAJORS})")
+    return Spec(major)
+
+
+# ABI v1's paths, as every caller that predates the major parameter names them.
+ABI_JSON = spec(1).abi_json
+ABI_SCHEMA = spec(1).abi_schema
+SDK_JSON = spec(1).sdk_json
+SDK_SCHEMA = spec(1).sdk_schema
+DOCS_MD = spec(1).docs_md
+V0_JSON = spec(1).v0_json
+
+# The stabilities a generation-2+ description declares in its top-level
+# `stability` (generation 1 predates the field and is locked by definition).
+STABILITIES = ("unstable", "locked")
+# The rules every generation-2+ docs.md states in its `## Rules` section, by
+# label; load() refuses a Rules section that drops one.
+GENERATION_RULES = ("r1", "r2", "r3", "r4", "r5", "r6")
+# The spelling readers reserve for the member an unlisted enum value maps to
+# (r3): no described value may take it.
+UNKNOWN = "unknown"
 
 # The closed vocabularies. Every emitter must be total over each of them; a
 # new entry here is an emitter change in every lane, which is why the schema
@@ -588,6 +655,7 @@ class Docs:
     title: str
     preamble: str
     sections: dict[str, str]
+    rules: str = ""  # the `## Rules` section: generation 2 on; generation 1's docs.md has none
 
 
 @dataclass(frozen=True)
@@ -611,6 +679,16 @@ class Model:
     sdk: dict[str, Any]
     docs: Docs
     v0: dict[str, list[dict[str, Any]]]
+    major: int = 1
+    stability: str | None = None  # generation 2 on: "unstable" until the lock, then "locked"
+
+    @property
+    def spec(self) -> Spec:
+        return spec(self.major)
+
+    @property
+    def unstable(self) -> bool:
+        return self.stability == "unstable"
 
     def function(self, name: str) -> Function:
         for f in self.functions:
@@ -642,14 +720,16 @@ class Model:
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 
 
-def parse_docs(text: str) -> tuple[Docs, list[str]]:
-    """docs.md: `# title`, a `## Preamble` section, and `### <symbol>`
-    sections (the symbol in backticks or bare). Headings inside fenced code
-    are text. A symbol section runs to the next heading of any level, so a
-    section cannot smuggle in a heading of its own."""
+def parse_docs(text: str, docs_md: str = DOCS_MD) -> tuple[Docs, list[str]]:
+    """docs.md: `# title`, a `## Preamble` section, optionally a `## Rules`
+    section (generation 2 on), and `### <symbol>` sections (the symbol in
+    backticks or bare). Headings inside fenced code are text. A symbol section
+    runs to the next heading of any level, so a section cannot smuggle in a
+    heading of its own; the Rules section therefore holds no heading either."""
     problems: list[str] = []
     title = ""
     preamble: list[str] = []
+    rules: list[str] = []
     sections: dict[str, list[str]] = {}
     current: list[str] | None = None
     in_fence = False
@@ -663,30 +743,35 @@ def parse_docs(text: str) -> tuple[Docs, list[str]]:
                 title = heading
                 current = None
             elif level == 2:
-                current = preamble if heading == "Preamble" else None
+                current = {"Preamble": preamble, "Rules": rules}.get(heading)
             elif level == 3:
                 if heading in sections:
-                    problems.append(f"{DOCS_MD}:{n}: a second section for {heading!r}")
+                    problems.append(f"{docs_md}:{n}: a second section for {heading!r}")
                 sections[heading] = []
                 current = sections[heading]
             else:
-                problems.append(f"{DOCS_MD}:{n}: heading level {level} inside a symbol section; use prose")
+                problems.append(f"{docs_md}:{n}: heading level {level} inside a symbol section; use prose")
                 current = None
             continue
         if current is not None:
             current.append(line)
     if in_fence:
-        problems.append(f"{DOCS_MD}: an unterminated code fence")
+        problems.append(f"{docs_md}: an unterminated code fence")
 
     def body(lines: list[str]) -> str:
         return "\n".join(lines).strip("\n")
 
-    docs = Docs(title=title, preamble=body(preamble), sections={k: body(v) for k, v in sections.items()})
+    docs = Docs(
+        title=title,
+        preamble=body(preamble),
+        sections={k: body(v) for k, v in sections.items()},
+        rules=body(rules),
+    )
     if not docs.preamble:
-        problems.append(f"{DOCS_MD}: no `## Preamble` section (the header's opening comment comes from it)")
+        problems.append(f"{docs_md}: no `## Preamble` section (the header's opening comment comes from it)")
     for name, prose in docs.sections.items():
         if not prose.strip():
-            problems.append(f"{DOCS_MD}: the section for {name!r} is empty")
+            problems.append(f"{docs_md}: the section for {name!r} is empty")
     return docs, problems
 
 
@@ -775,41 +860,152 @@ def _expand_return(r: dict[str, Any]) -> Return:
     )
 
 
-def load(root: Path) -> Model:
+# ------------------------------------------------------- generation 2's rules
+#
+# The rules every generation from 2 on is written under are normative in its
+# docs.md `## Rules` section. These are the parts a description can be checked
+# against. (r1), a growable function's options document, waits for the first
+# growable function, which brings the description's way of marking one; (r5)
+# and (r6), the cache and the dev channel, are binding behavior.
+
+
+def _closed_objects(node: Any, where: str) -> list[str]:
+    """Every place in a JSON Schema that closes an object to new fields."""
+    out: list[str] = []
+    if isinstance(node, dict):
+        if node.get("additionalProperties") is False:
+            out.append(where)
+        for k, v in node.items():
+            out += _closed_objects(v, f"{where}/{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            out += _closed_objects(v, f"{where}/{i}")
+    return out
+
+
+def _reserved_unknown(spelling: Any) -> bool:
+    """True when an enum value's spelling is the readers' unknown(n) member:
+    a vocabulary value `unknown`, or a C name `CHS_UNKNOWN` or `CHS_<..>_UNKNOWN`."""
+    if not isinstance(spelling, str):
+        return False
+    up = spelling.upper()
+    return up == UNKNOWN.upper() or up.endswith("_" + UNKNOWN.upper())
+
+
+def generation_rule_problems(root: Path, sp: Spec, raw: dict[str, Any], sdk: dict[str, Any], docs: Docs) -> list[str]:
+    problems: list[str] = []
+
+    # Stability: generation 2 on says whether its fingerprint may still move.
+    stability = raw.get("stability")
+    if stability not in STABILITIES:
+        problems.append(
+            f"{sp.abi_json}: from generation 2 on the description declares `stability`, one of "
+            f"{list(STABILITIES)} ('unstable' until the lock); found {stability!r}"
+        )
+
+    # The rules themselves are stated, every one of them.
+    if not docs.rules.strip():
+        problems.append(
+            f"{sp.docs_md}: no `## Rules` section; generation {sp.major}'s rules "
+            f"({', '.join(GENERATION_RULES)}) are normative there"
+        )
+    else:
+        for label in GENERATION_RULES:
+            if f"({label})" not in docs.rules:
+                problems.append(f"{sp.docs_md}: the `## Rules` section does not state ({label})")
+
+    # (r2) readers ignore unknown fields, so no result schema refuses one.
+    schemas = [(f"documents.{n}.schema", d.get("schema")) for n, d in raw["documents"].items()]
+    schemas.append(("build_info.schema", raw["build_info"]["schema"]))
+    for at, schema in schemas:
+        for where in _closed_objects(schema, at):
+            problems.append(
+                f"{sp.abi_json}: {where} closes an object (additionalProperties: false), but (r2) a result "
+                "document's readers ignore unknown fields: a field added later must be one an older reader skips"
+            )
+
+    # (r3) every enum's readers map an unlisted value to unknown(n), so no
+    # described value may take that name.
+    for name, e in raw["enums"].items():
+        for v in e["values"]:
+            spelled = v.get("name") if e["repr"] == "int32" else v["value"]
+            if _reserved_unknown(spelled):
+                problems.append(
+                    f"{sp.abi_json}: enum {name}: the value {spelled!r} takes the name (r3) reserves for the "
+                    "member an unlisted value is read as, unknown(n)"
+                )
+
+    # (r4) a published error code keeps its name and number. Generation 1's
+    # codes are the published ones this generator can see.
+    v1 = spec(1)
+    read: list[str] = []
+    old_abi = _read_json(root, v1.abi_json, read)
+    old_sdk = _read_json(root, v1.sdk_json, read)
+    if old_abi is None or old_sdk is None:
+        problems += [f"(r4) compares against generation 1's published codes, which cannot be read: {p}" for p in read]
+        return problems
+    now = {v.get("name"): v["value"] for v in raw["enums"].get(STATUS_ENUM, {}).get("values", [])}
+    for v in old_abi["enums"][STATUS_ENUM]["values"]:
+        found = now.get(v["name"])
+        if found != v["value"]:
+            what = "is missing" if v["name"] not in now else f"is {found}"
+            problems.append(
+                f"{sp.abi_json}: {STATUS_ENUM} {v['name']} = {v['value']} is published (generation 1), and (r4) "
+                f"keeps its name and number; here it {what}"
+            )
+    codes = sdk["errors"]["codes"]
+    published = old_sdk["errors"]["codes"]
+    for key, code in published.items():
+        if codes.get(key) != code:
+            what = "is missing" if key not in codes else f"is {codes[key]!r}"
+            problems.append(
+                f"{sp.sdk_json}: errors.codes {key} = {code!r} is published (generation 1), and (r4) keeps it; "
+                f"here it {what}"
+            )
+    for key, code in codes.items():
+        if key not in published and code in published.values():
+            problems.append(
+                f"{sp.sdk_json}: errors.codes {key} reuses the published code {code!r} for another meaning (r4)"
+            )
+    return problems
+
+
+def load(root: Path, major: int = 1) -> Model:
     root = Path(root)
+    sp = spec(major)
     problems: list[str] = []
 
     abi_bytes = b""
     try:
-        abi_bytes = (root / ABI_JSON).read_bytes()
+        abi_bytes = (root / sp.abi_json).read_bytes()
     except OSError as e:
-        raise ModelError([f"{ABI_JSON}: unreadable ({e.strerror})"]) from None
+        raise ModelError([f"{sp.abi_json}: unreadable ({e.strerror})"]) from None
     if not abi_bytes.isascii():
-        problems.append(f"{ABI_JSON}: the file is not ASCII")
-    raw = _read_json(root, ABI_JSON, problems)
-    sdk = _read_json(root, SDK_JSON, problems)
-    v0raw = _read_json(root, V0_JSON, problems)
+        problems.append(f"{sp.abi_json}: the file is not ASCII")
+    raw = _read_json(root, sp.abi_json, problems)
+    sdk = _read_json(root, sp.sdk_json, problems)
+    v0raw = _read_json(root, sp.v0_json, problems)
     try:
-        docs_text = (root / DOCS_MD).read_text(encoding="utf-8")
+        docs_text = (root / sp.docs_md).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        problems.append(f"{DOCS_MD}: unreadable ({e})")
+        problems.append(f"{sp.docs_md}: unreadable ({e})")
         docs_text = ""
     if raw is None or sdk is None:
         raise ModelError(problems)
 
-    abi_ok = _schema_check(root, raw, ABI_SCHEMA, ABI_JSON, problems)
-    sdk_ok = _schema_check(root, sdk, SDK_SCHEMA, SDK_JSON, problems)
+    abi_ok = _schema_check(root, raw, sp.abi_schema, sp.abi_json, problems)
+    sdk_ok = _schema_check(root, sdk, sp.sdk_schema, sp.sdk_json, problems)
     if not (abi_ok and sdk_ok):
         raise ModelError(problems)
 
-    docs, doc_problems = parse_docs(docs_text)
+    docs, doc_problems = parse_docs(docs_text, sp.docs_md)
     problems += doc_problems
     markers: dict[str, str] = sdk["provisional_markers"]
 
     def marker_check(where: str, entry: dict[str, Any]) -> None:
         for m in _markers(entry):
             if m not in markers:
-                problems.append(f"{where}: provisional marker {m!r} has no entry in {SDK_JSON} provisional_markers")
+                problems.append(f"{where}: provisional marker {m!r} has no entry in {sp.sdk_json} provisional_markers")
 
     def doc(name: str) -> str:
         return docs.sections.get(name, "")
@@ -939,11 +1135,11 @@ def load(root: Path) -> Model:
         )
 
     # ---- the thread vocabulary, which the schema pins too
-    schema_threads = (_read_json(root, ABI_SCHEMA, problems) or {}).get("$defs", {}).get("function", {})
+    schema_threads = (_read_json(root, sp.abi_schema, problems) or {}).get("$defs", {}).get("function", {})
     schema_threads = schema_threads.get("properties", {}).get("thread", {}).get("enum", [])
     if set(schema_threads) != set(THREADS):
         problems.append(
-            f"{ABI_SCHEMA}: the thread enum {sorted(schema_threads)} differs from the classes model.py "
+            f"{sp.abi_schema}: the thread enum {sorted(schema_threads)} differs from the classes model.py "
             f"describes {sorted(THREADS)}"
         )
 
@@ -1115,27 +1311,27 @@ def load(root: Path) -> Model:
     optional = set(constants) | {f"document:{d}" for d in documents}
     for name in sorted(required):
         if name not in docs.sections:
-            problems.append(f"{DOCS_MD}: no `### {name}` section; every handle, enum and function has one")
+            problems.append(f"{sp.docs_md}: no `### {name}` section; every handle, enum and function has one")
     for name in sorted(docs.sections):
         if name not in required | optional:
-            problems.append(f"{DOCS_MD}: a section for {name!r}, which the description does not define")
+            problems.append(f"{sp.docs_md}: a section for {name!r}, which the description does not define")
 
     # ---- sdk.json cross-references
     for field in sdk["cross_check"]:
         if field["build_info"] not in bi_props:
-            problems.append(f"{SDK_JSON} cross_check: {field['build_info']!r} is not a build_info property")
+            problems.append(f"{sp.sdk_json} cross_check: {field['build_info']!r} is not a build_info property")
     status_map = sdk["errors"]["status"]
     for s in sorted(status_names):
         if s not in status_map:
-            problems.append(f"{SDK_JSON} errors.status: no entry for {s}")
+            problems.append(f"{sp.sdk_json} errors.status: no entry for {s}")
     for s, cls in status_map.items():
         if s != "unknown" and s not in status_names:
-            problems.append(f"{SDK_JSON} errors.status: {s} is not a {STATUS_ENUM} value")
+            problems.append(f"{sp.sdk_json} errors.status: {s} is not a {STATUS_ENUM} value")
         if cls is not None and cls not in sdk["errors"]["classes"]:
-            problems.append(f"{SDK_JSON} errors.status.{s}: unknown class {cls!r}")
+            problems.append(f"{sp.sdk_json} errors.status.{s}: unknown class {cls!r}")
     for r in sdk["loader"]["refusals"]:
         if r["error"] not in sdk["errors"]["classes"]:
-            problems.append(f"{SDK_JSON} loader refusal {r['reason']}: unknown class {r['error']!r}")
+            problems.append(f"{sp.sdk_json} loader refusal {r['reason']}: unknown class {r['error']!r}")
 
     # ---- the v0 tombstone (D1.2), and why D1.3 depends on it.
     #
@@ -1198,10 +1394,19 @@ def load(root: Path) -> Model:
                     want = f"{mine[0]} ({', '.join(mine[1]) or 'void'})"
                     was = "; ".join(f"{s['returns']} ({', '.join(s['params']) or 'void'})" for s in bad)
                     problems.append(
-                        f"function {fn.name}: reuses a v0 name with a different signature (v1: {want}; v0: {was}). "
-                        f"{SDK_JSON} reuse_v0_names is false until the tombstone sweep of the released bindings "
-                        f"passes (D1.3): rename it in {ABI_JSON}"
+                        f"function {fn.name}: reuses a v0 name with a different signature (v{major}: {want}; v0: {was}). "
+                        f"{sp.sdk_json} reuse_v0_names is false until the tombstone sweep of the released bindings "
+                        f"passes (D1.3): rename it in {sp.abi_json}"
                     )
+
+    # ---- the generation: a description states the major it is generated as.
+    if raw["abi"] != major:
+        problems.append(
+            f"{sp.abi_json}: abi is {raw['abi']}, but this is the description of ABI v{major}; the generation "
+            "(CHS_ABI_VERSION) and the major are one number"
+        )
+    if major >= 2:
+        problems += generation_rule_problems(root, sp, raw, sdk, docs)
 
     if problems:
         raise ModelError(problems)
@@ -1226,4 +1431,6 @@ def load(root: Path) -> Model:
         sdk=sdk,
         docs=docs,
         v0=v0,
+        major=major,
+        stability=raw.get("stability"),
     )
