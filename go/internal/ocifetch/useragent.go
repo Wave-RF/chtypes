@@ -6,7 +6,7 @@ import "regexp"
 // from (the release tag is the version), so a release bumps this constant
 // with the other three bindings' manifests (RELEASING.md, step 1). It is
 // never empty: an unknown version would be spelled userAgentDevVersion.
-const bindingVersion = "1.0.2"
+const bindingVersion = "1.0.3"
 
 // userAgentDevVersion stands in when no version is available. The header is
 // never omitted (docs/guides/fetch-v1.md §2).
