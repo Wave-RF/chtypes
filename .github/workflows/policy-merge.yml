@@ -148,8 +148,10 @@
 #     write, the two permissions the mutation was measured with; whether it
 #     needs contents: write is unverified.
 #
-# TRIGGER. `workflow_run` on `ci` completing, for PULL_REQUEST runs of `ci`
-# only (see THIS WORKFLOW IGNORES `merge_group` RUNS OF `ci`, above): a run
+# TRIGGER. `workflow_run` on `ci`, `v1` or `v1-abi` completing: branch
+# protection requires contexts from all three, so the last of them to finish
+# is the run that finds every required check green, and the earlier ones
+# refuse quietly (`checks`). For PULL_REQUEST runs only (see THIS WORKFLOW IGNORES `merge_group` RUNS OF `ci`, above): a run
 # on main has no pull request to judge, and a `merge_group` run is the
 # queue's own business. `workflow_dispatch` re-checks one pull request by
 # number; with dry_run it does everything except the enqueue call and says
@@ -163,7 +165,7 @@ name: policy-merge
 
 on:
   workflow_run:
-    workflows: [ci]
+    workflows: [ci, v1, v1-abi]
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -181,8 +183,9 @@ on:
 permissions: {}
 
 # One judgment per head commit at a time, never canceled mid-enqueue: a
-# second `ci` completion for the same commit (a re-run) waits, then finds the
-# pull request already enqueued and refuses quietly.
+# second completion for the same commit (another of the three workflows, or a
+# re-run) waits, then finds the pull request already enqueued and refuses
+# quietly.
 concurrency:
   group: policy-merge-${{ github.event.workflow_run.head_sha || format('pr-{0}', inputs.pr) }}
   cancel-in-progress: false
