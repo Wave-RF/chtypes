@@ -37,6 +37,18 @@
       "heading": "A projection with no ORDER BY is accepted at schema creation; a real server refuses the CREATE",
       "note": "no machine check is expressible in this register's schema: the case is decided at schema creation, and a check asserts the outcome of a payload driven through a schema that compiled, not the schema-create call's own verdict. The v1 replacement of the checker must add an expectation on that verdict before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
       "checks": []
+    },
+    {
+      "id": "row-preview-skips-ttl-step",
+      "heading": "The row preview skips the TTL step: a row whose TTL expression throws is accepted, where a real server refuses it",
+      "note": "no machine check is expressible in this register's schema: a check drives one call tree (compile a schema, then a payload through the batch, or a filter through Filter.rows) and asserts that call's own outcome, so it cannot express the differential here, which is the row preview accepting a row that the batch preview refuses with 38. The schema has no field that selects the row preview (chs_preview_row) rather than the batch preview, and no 'expect' that contrasts two calls' outcomes. The v1 replacement of the checker must add both before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
+    },
+    {
+      "id": "batch-preview-code-10-materialized-engine-column",
+      "heading": "The batch preview refuses a row with code 10 when an engine column is MATERIALIZED",
+      "note": "no machine check is in this entry yet: the over-reject is the batch preview's own verdict (code 10) on a payload a real server accepts, which this register's schema could express, but the retired v0 checker that drove such checks is not replaced, so a check written now would not run. The v1 replacement of the checker should add one for this case. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
     }
   ]
 }

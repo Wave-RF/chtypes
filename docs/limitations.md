@@ -113,7 +113,7 @@ The batch preview (`chs_preview_batch`) of the same row answers correctly, with 
 
 **Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64; the server half against the server's single-row INSERT. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
-Until then, use the batch preview, even for one row, on `CollapsingMergeTree`, `VersionedCollapsingMergeTree` and `ReplacingMergeTree` with an `is_deleted` column.
+Until then, use the batch preview, even for one row, on `CollapsingMergeTree`, `VersionedCollapsingMergeTree` and `ReplacingMergeTree` with an `is_deleted` column, **unless the table's sign, version or `is_deleted` column is `MATERIALIZED`**. On such a table the batch preview can refuse a valid row (see [the batch preview refuses with code 10 when an engine column is MATERIALIZED](#the-batch-preview-refuses-a-row-with-code-10-when-an-engine-column-is-materialized)), so neither preview is a complete answer there.
 
 ### Creating a schema accepts MergeTree-family CREATE statements that a real server refuses
 
@@ -177,6 +177,34 @@ Until then, do not trust `computed` clock values from a batch preview unless at 
 **Measured**: by the artifact producer, against the production library build `20261006.170903` and its predecessor `20261004.052404`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
 
 Until then, do not treat a successful schema creation as proof that the server will accept a CREATE whose projections have no `ORDER BY`.
+
+### The row preview skips the TTL step: a row whose TTL expression throws is accepted, where a real server refuses it
+
+**Over-accept, on every supported line, through the row preview only.** `chs_preview_row` (the row preview) does not evaluate a table's `TTL` expressions. A real server evaluates them during the INSERT, and one that throws on a row refuses the INSERT. For example, with `TTL toDate(s) + INTERVAL 100 YEAR` and a row where `s = 'abc'`:
+
+|                           |                                      |
+| ------------------------- | ------------------------------------ |
+| this library, row preview | accepts the row                      |
+| a real server             | refuses the INSERT with error **38** |
+
+The batch preview (`chs_preview_batch`) of the same row answers correctly, with 38.
+
+**Measured**: by the artifact producer, against the production library builds `20261004.052404` and `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, use the batch preview, even for one row, on a table with a `TTL`.
+
+### The batch preview refuses a row with code 10 when an engine column is MATERIALIZED
+
+**Over-reject, on every supported line, through the batch preview.** On a table without a `PARTITION BY` whose sign, version, `is_deleted` or sorting-key column is `MATERIALIZED`, `chs_preview_batch` (the batch preview) refuses the row with code **10**. A real server accepts it, or refuses it with **117** where the engine's own check applies. On a `SummingMergeTree` table of this kind, the batch document can also report `engine_rows: []` where the server stores the row.
+
+|                             |                                                           |
+| --------------------------- | --------------------------------------------------------- |
+| this library, batch preview | refuses the row with code **10**                          |
+| a real server               | accepts the row (or refuses it with **117**, by the data) |
+
+**Measured**: by the artifact producer, against the production library builds `20261004.052404` and `20261006.170903` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, on such a table, do not read a batch preview's refusal with code 10 as the server's answer. The row preview accepts these rows, but it does not run the engine's merge step (see [the entry above](#the-row-preview-skips-the-engines-insert-time-merge-step-on-collapsing-and-replacing-with-is_deleted-tables)), so it cannot catch an out-of-range sign or `is_deleted` either.
 
 ## Known gaps in 1.0
 
