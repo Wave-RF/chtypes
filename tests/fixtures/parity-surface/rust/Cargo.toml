@@ -1,0 +1,8 @@
+[package]
+name = "parfix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Its own workspace: never part of one found above it.
+[workspace]

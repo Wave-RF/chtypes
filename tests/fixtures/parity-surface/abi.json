@@ -1,0 +1,18 @@
+{
+  "enums": {
+    "chs_format": {
+      "repr": "int32",
+      "values": [
+        { "name": "CHS_JSON_EACH_ROW", "value": 0, "ch_name": "JSONEachRow" },
+        { "name": "CHS_CSV", "value": 1, "ch_name": "CSV" }
+      ]
+    },
+    "filter_verdict": {
+      "repr": "string",
+      "values": [
+        { "value": "t", "answered": true },
+        { "value": "f", "answered": true }
+      ]
+    }
+  }
+}
