@@ -31,7 +31,7 @@ print("OPENED")
 def _run(*, import_pytest: bool, current_test: bool) -> str:
     env = {k: v for k, v in os.environ.items() if k != "PYTEST_CURRENT_TEST"}
     if current_test:
-        env["PYTEST_CURRENT_TEST"] = "tests/x.py::test_x (call)"
+        env["PYTEST_CURRENT_TEST"] = "probe::case (call)"
     code = _PROBE.format(imports="import _pytest" if import_pytest else "")
     out = subprocess.run(
         [sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True
