@@ -6,6 +6,12 @@ The four bindings in this repository are released together and give one answer, 
 
 ## [Unreleased]
 
+## [1.0.2] — unreleased
+
+### Changed
+
+- `Schema.Rows` decodes its result with far fewer allocations, so it scales across goroutines (#456). It reads the batch document in one streaming pass into typed values, with no generic tree and no per-row path string, and falls back to the strict generic reader for any document it will not judge itself (an unknown key, a duplicate key, a value of the wrong type), so every refusal and its message are unchanged. On a real 100-row document the decode went from 4,476 to 173 allocations at `doc_flags` 0 and from 56,822 to 2,641 at `doc_flags` 7. The decoded values are identical, and no exported name changes.
+
 ## [1.0.1] — 2026-10-04
 
 ### Fixed

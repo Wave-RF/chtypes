@@ -23,8 +23,7 @@ func captureBody() []byte {
 			note = fmt.Sprintf(`"note %d with \"quotes\" and é"`, i)
 		}
 		small := fmt.Sprintf("%d", i%100)
-		switch {
-		case i%17 == 5:
+		if i%17 == 5 {
 			small = "300" // out of range for Int8
 		}
 		label := ""
