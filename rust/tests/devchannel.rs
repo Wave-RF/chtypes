@@ -34,6 +34,9 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// One pinning request's options, made for a lock path.
+type MakeOptions = fn(&Path) -> Options;
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -105,7 +108,7 @@ fn the_dev_channel_ignores_every_override_option_loudly_once() {
             vec![DEV_CHANNEL_BASE.to_string()],
             "a base override was honored"
         );
-        let trust = dsse::trusted_keys(Some(&[test_key.clone()])).unwrap();
+        let trust = dsse::trusted_keys(Some(std::slice::from_ref(&test_key))).unwrap();
         assert_eq!(
             trust.iter().map(|k| hex(&k.key)).collect::<Vec<_>>(),
             vec![DEV_KEY_HEX.to_string()],
@@ -158,7 +161,7 @@ fn the_dev_channel_refuses_pinning_before_any_request() {
     let lock = dir.join("chtypes.lock");
     std::fs::write(&lock, b"not a lock").unwrap();
     let cache = dir.join("cache");
-    let cases: [(&str, fn(&Path) -> Options); 5] = [
+    let cases: [(&str, MakeOptions); 5] = [
         ("frozen", |_| Options {
             frozen: true,
             ..Options::default()

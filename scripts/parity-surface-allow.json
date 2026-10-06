@@ -540,6 +540,39 @@
       ],
       "issue": 511,
       "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member, an unlisted value kept per field, which Go spells as the raw value plus Known() false; discover_query_param is an enum like every other, so it gains its type. docs/reference/bindings-v1.md is the 1.x surface and names neither; the v2 surface document lands with the other three dev bindings (public issue #511), and this entry goes with it."
+    },
+    {
+      "binding": "rust",
+      "kind": "extra",
+      "names": [
+        "Format.Unknown",
+        "Format.code",
+        "Format.from_code",
+        "Format.is_known",
+        "Outcome.Unknown",
+        "Outcome.from_wire",
+        "Outcome.is_known",
+        "FilterOutcome.Unknown",
+        "FilterOutcome.from_wire",
+        "FilterOutcome.is_known",
+        "Verdict.Unknown",
+        "Verdict.from_wire",
+        "Verdict.is_known",
+        "DefaultKind.Unknown",
+        "DefaultKind.from_wire",
+        "DefaultKind.is_known",
+        "Status",
+        "Status.*",
+        "Reason",
+        "Reason.*",
+        "Source",
+        "Source.*",
+        "DiscoverQueryParam",
+        "DiscoverQueryParam.*",
+        "Refusal.dev_message"
+      ],
+      "issue": 511,
+      "reason": "The ABI v2 dev binding's rule r3 (spec/abi-v2/docs.md): every vocabulary has an explicit unknown(n) member, an unlisted value kept per field, which Rust spells as an Unknown variant carrying the raw value, with is_known() false and from_wire/from_code to read one; the call status, the transform reasons and the value sources gain types of their own (Status, Reason, Source; the 1.x status, reason and source modules stay beside them), and discover_query_param gains DiscoverQueryParam. Refusal.dev_message is rule r6's exact fingerprint message. docs/reference/bindings-v1.md is the 1.x surface and names none of them; the v2 surface document lands with the other dev bindings (public issue #511), and this entry goes with it."
     }
   ]
 }

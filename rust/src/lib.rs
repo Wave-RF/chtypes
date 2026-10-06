@@ -112,7 +112,7 @@ mod setup;
 
 pub use abi2::vocab_gen::{
     DefaultKind, DiscoverQueryParam, DocFlags, FilterOutcome, Format, Outcome, Reason, Source,
-    Status, Verdict, status,
+    Status, Verdict, reason, source, status,
 };
 pub use error::{CacheFault, CallError, Error, Refusal, Result};
 pub use library::Library;

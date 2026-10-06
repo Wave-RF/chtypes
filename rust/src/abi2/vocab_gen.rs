@@ -643,6 +643,66 @@ impl std::fmt::Display for Reason {
     }
 }
 
+/// The `transform_reason` wire spellings, as `Reason::as_str` gives them, and
+/// the `lossy` fact by spelling: the 1.x surface (docs/reference/bindings-v1.md),
+/// kept beside the `Reason` type that `Transform::reason` carries.
+pub mod reason {
+    /// `overflow_wrap`.
+    pub const OVERFLOW_WRAP: &str = "overflow_wrap";
+    /// `null_to_default`.
+    pub const NULL_TO_DEFAULT: &str = "null_to_default";
+    /// `null_loss`.
+    pub const NULL_LOSS: &str = "null_loss";
+    /// `decimal_truncate`.
+    pub const DECIMAL_TRUNCATE: &str = "decimal_truncate";
+    /// `date_clamp`.
+    pub const DATE_CLAMP: &str = "date_clamp";
+    /// `datetime_wrap`.
+    pub const DATETIME_WRAP: &str = "datetime_wrap";
+    /// `date_shift`.
+    pub const DATE_SHIFT: &str = "date_shift";
+    /// `uuid_mangle`.
+    pub const UUID_MANGLE: &str = "uuid_mangle";
+    /// `ip_mangle`.
+    pub const IP_MANGLE: &str = "ip_mangle";
+    /// `float_precision`.
+    pub const FLOAT_PRECISION: &str = "float_precision";
+    /// `lossy_numeric`.
+    pub const LOSSY_NUMERIC: &str = "lossy_numeric";
+    /// `fixedstring_pad`.
+    pub const FIXEDSTRING_PAD: &str = "fixedstring_pad";
+    /// `emptied`.
+    pub const EMPTIED: &str = "emptied";
+    /// `element_changed`.
+    pub const ELEMENT_CHANGED: &str = "element_changed";
+    /// `enum_coerce`.
+    pub const ENUM_COERCE: &str = "enum_coerce";
+    /// `value_changed`.
+    pub const VALUE_CHANGED: &str = "value_changed";
+    /// `poisoned`.
+    pub const POISONED: &str = "poisoned";
+    /// `duplicate_key_dropped`.
+    pub const DUPLICATE_KEY_DROPPED: &str = "duplicate_key_dropped";
+    /// `reformat`.
+    pub const REFORMAT: &str = "reformat";
+    /// `default_filled`.
+    pub const DEFAULT_FILLED: &str = "default_filled";
+    /// `zero_filled`.
+    pub const ZERO_FILLED: &str = "zero_filled";
+    /// `default_materialized`.
+    pub const DEFAULT_MATERIALIZED: &str = "default_materialized";
+    /// `ttl_expired`.
+    pub const TTL_EXPIRED: &str = "ttl_expired";
+    /// `ttl_column_expired`.
+    pub const TTL_COLUMN_EXPIRED: &str = "ttl_column_expired";
+
+    /// The description's `lossy` fact for a reason spelling; one the description
+    /// does not list is `Reason::Unknown`, which reports the fallback's (rule r3).
+    pub fn is_lossy(reason: &str) -> bool {
+        super::Reason::from_wire(reason).lossy()
+    }
+}
+
 /// The `value_src` vocabulary: where a column's value came from, and whether the description says it is
 /// stored. A source the description does not list is `Unknown`; the description does not yet say what
 /// its `is_stored` reports (rule r3, "Facts without a fallback"), and until it does, `false`.
@@ -743,6 +803,41 @@ impl Source {
 impl std::fmt::Display for Source {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.pad(self.as_str())
+    }
+}
+
+/// The `value_src` wire spellings, as `Source::as_str` gives them, and the
+/// `is_stored` fact by spelling: the 1.x surface (docs/reference/bindings-v1.md),
+/// kept beside the `Source` type that `Value::source` carries.
+pub mod source {
+    /// `input`.
+    pub const INPUT: &str = "input";
+    /// `default`.
+    pub const DEFAULT: &str = "default";
+    /// `default_substituted`.
+    pub const DEFAULT_SUBSTITUTED: &str = "default_substituted";
+    /// `default_generated`.
+    pub const DEFAULT_GENERATED: &str = "default_generated";
+    /// `absent`.
+    pub const ABSENT: &str = "absent";
+    /// `materialized_input`.
+    pub const MATERIALIZED_INPUT: &str = "materialized_input";
+    /// `skipped`.
+    pub const SKIPPED: &str = "skipped";
+    /// `ephemeral_input`.
+    pub const EPHEMERAL_INPUT: &str = "ephemeral_input";
+    /// `default_expr_unsupported`.
+    pub const DEFAULT_EXPR_UNSUPPORTED: &str = "default_expr_unsupported";
+    /// `default_volatile_unresolved`.
+    pub const DEFAULT_VOLATILE_UNRESOLVED: &str = "default_volatile_unresolved";
+    /// `default_pending`.
+    pub const DEFAULT_PENDING: &str = "default_pending";
+
+    /// The description's `is_stored` fact for a source spelling; one the
+    /// description does not list is `Source::Unknown`, `false` until the
+    /// description says otherwise (rule r3).
+    pub fn is_stored(src: &str) -> bool {
+        super::Source::from_wire(src).is_stored()
     }
 }
 

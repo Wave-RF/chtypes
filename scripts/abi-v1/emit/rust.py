@@ -1761,6 +1761,25 @@ def render_vocab_v2(model) -> str:
         ],
     )
 
+    out += [
+        "/// The `transform_reason` wire spellings, as `Reason::as_str` gives them, and",
+        "/// the `lossy` fact by spelling: the 1.x surface (docs/reference/bindings-v1.md),",
+        "/// kept beside the `Reason` type that `Transform::reason` carries.",
+        "pub mod reason {",
+    ]
+    for v in reason.values:
+        out += [f"    /// `{v.value}`.", f"    pub const {_upper_snake(v.value)}: &str = {_rust_str_any(v.value)};"]
+    out += [
+        "",
+        "    /// The description's `lossy` fact for a reason spelling; one the description",
+        "    /// does not list is `Reason::Unknown`, which reports the fallback's (rule r3).",
+        "    pub fn is_lossy(reason: &str) -> bool {",
+        "        super::Reason::from_wire(reason).lossy()",
+        "    }",
+        "}",
+        "",
+    ]
+
     out += _string_enum_v2(
         model,
         "value_src",
@@ -1780,6 +1799,27 @@ def render_vocab_v2(model) -> str:
             )
         ],
     )
+
+    src = model.enums["value_src"]
+    out += [
+        "/// The `value_src` wire spellings, as `Source::as_str` gives them, and the",
+        "/// `is_stored` fact by spelling: the 1.x surface (docs/reference/bindings-v1.md),",
+        "/// kept beside the `Source` type that `Value::source` carries.",
+        "pub mod source {",
+    ]
+    for v in src.values:
+        out += [f"    /// `{v.value}`.", f"    pub const {_upper_snake(v.value)}: &str = {_rust_str_any(v.value)};"]
+    out += [
+        "",
+        "    /// The description's `is_stored` fact for a source spelling; one the",
+        "    /// description does not list is `Source::Unknown`, `false` until the",
+        "    /// description says otherwise (rule r3).",
+        "    pub fn is_stored(src: &str) -> bool {",
+        "        super::Source::from_wire(src).is_stored()",
+        "    }",
+        "}",
+        "",
+    ]
 
     dqp = model.enums["discover_query_param"]
     out += _string_enum_v2(
