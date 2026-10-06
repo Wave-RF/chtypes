@@ -197,6 +197,14 @@ jobs:
       # --platform that list accepts) must be caught.
       - name: selftest — the CLI parity check passes a conforming CLI and catches each planted mismatch
         run: scripts/check-cli-parity.sh --selftest
+      # The release channel (#511) and the release workflows' post-publish
+      # check: the release workflows run both selftests too, but only on a
+      # dispatch or a tag, so a pull request that broke a refusal would
+      # otherwise merge green. Both run on planted input, with no network.
+      - name: selftest — the release channel refuses every tag it does not release, and every never-by-default assertion fires
+        run: scripts/release-channel.sh --selftest
+      - name: selftest — release-verify's list parser and each of its six channel checks refuse a planted failure
+        run: scripts/release-verify.sh --selftest
       # scripts/check-selftests-wired.py is the static check that catches the
       # NEXT unwired selftest before it repeats the three above: every script
       # under scripts/ that declares a --selftest mode must be invoked with it
@@ -269,6 +277,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      # The release workflow's PEP 440 mapping (python/v2.0.0-dev.N is
+      # 2.0.0.devN), here so a pull request runs it; it needs `packaging`, so
+      # it runs where uv is, not in `checks`.
+      - name: selftest — the release's PEP 440 mapping refuses each planted mismatch
+        run: uv run --no-project --with packaging==26.3 python3 scripts/release-pep440.py --selftest
       - name: ruff, and the package imports
         # ONE COMMAND PER LINE, deliberately. These were a single `&&` chain
         # followed by a second line, and `bash -e` does NOT exit when a command

@@ -2,6 +2,16 @@
 # tag names a module that builds, and that the tag is the subdirectory form
 # `go/v*` the module path (github.com/wave-rf/chtypes/go) requires. pkg.go.dev
 # and proxy.golang.org pick the tag up on first fetch.
+#
+# On this branch the only releasable tags are the channel's
+# (scripts/release-channel.sh; until the v2 lock, go/v2.0.0-dev.N), and Go
+# serves a v2 version only under a module path ending in /v2
+# (github.com/wave-rf/chtypes/go/v2), so a plain `go get
+# github.com/wave-rf/chtypes/go` keeps resolving the 1.x (#511). The first
+# step refuses anything else before the toolchain is even installed, and the
+# `never-default` job asserts it against the proxy itself after the tag, and
+# its twin does in a dry run. A Go module publishes by the tag existing: this
+# workflow cannot stop a pushed tag, which is why the order puts Go last.
 name: release-go
 on:
   push:
@@ -41,19 +51,27 @@ jobs:
   verify:
     if: github.event_name != 'workflow_dispatch' || !inputs.verify_only
     runs-on: ubuntu-latest
+    outputs:
+      default: ${{ steps.record.outputs.default }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Before anything else: the channel's own selftest, the tag must be a
+      # release of this branch's channel, and go/go.mod must declare the
+      # channel's module path, ending in /v2. Until the Go dev binding renames
+      # the module, this refuses every Go dry run, on purpose.
+      - name: "the tag is a release of this branch's channel, and go/go.mod declares its /v2 module path (scripts/release-channel.sh, #511)"
+        run: |
+          scripts/release-channel.sh --selftest
+          scripts/release-channel.sh tag go "$TAG"
+          scripts/release-channel.sh go-module go/go.mod
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version-file: go/go.mod }
       - run: cd go && go build ./... && go vet ./...
-      - name: the tag name is the subdirectory form, and names this module
+      - name: the toolchain reads the same module path, and the module verifies
         run: |
-          case "$TAG" in
-            go/v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "tag $TAG is not go/vMAJOR.MINOR.PATCH" >&2; exit 1 ;;
-          esac
           mod="$(cd go && go list -m)"
-          [ "$mod" = "github.com/wave-rf/chtypes/go" ] || { echo "module is $mod" >&2; exit 1; }
+          want="$(scripts/release-channel.sh get GO_MODULE)"
+          [ "$mod" = "$want" ] || { echo "::error::go list -m says $mod, the channel releases $want" >&2; exit 1; }
           (cd go && go mod verify)
       # The User-Agent assertion. The fetch layer's `User-Agent` is
       # `chtypes-go/<bindingVersion>`, and Go has no manifest to cross-check
@@ -86,15 +104,52 @@ jobs:
           printf '%s\n' "$out"
           grep -q -- '--- PASS: TestReleaseUserAgentMatchesTag' <<<"$out" || { echo "::error::the User-Agent assertion did not run and pass"; exit 1; }
           rm go/internal/ocifetch/zz_release_useragent_test.go
+      # The record the never-default job compares against: what a plain
+      # `go get github.com/wave-rf/chtypes/go` resolves right now (@latest).
+      # It must be a stable 1.x. A tag on a /v2 module path cannot move it,
+      # and that is exactly what the never-default job asserts.
+      - name: record what a plain go get resolves (a stable 1.x)
+        id: record
+        run: |
+          default="$(scripts/release-channel.sh default go)"
+          echo "@latest of the default module path: $default"
+          echo "default=$default" >> "$GITHUB_OUTPUT"
+  # "Never installed by default", asserted against the Go proxy itself. After
+  # the tag: `go list -m github.com/wave-rf/chtypes/go@latest` is still the
+  # 1.x the verify job recorded, on every read, and
+  # github.com/wave-rf/chtypes/go/v2@v2.0.0-dev.N resolves (polled for the
+  # proxy, up to 20 minutes). A dry run runs the same assertions against the
+  # proxy as it is now, the twin: @latest is the recorded 1.x, the /v2 module
+  # does not list the version yet, and the same listing finds the recorded
+  # version under the default path (its positive control). The twin reads the
+  # version LIST, not the version itself, so a dry run never asks the proxy for
+  # a tag that does not exist yet. scripts/release-channel.sh holds both, and
+  # its selftest plants every refusal.
+  never-default:
+    needs: verify
+    if: ${{ !failure() && needs.verify.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go/go.mod }
+      - name: a plain go get still resolves the recorded 1.x, and the /v2 module serves this version (a dry run asserts it against the proxy as it is)
+        env:
+          RECORDED: ${{ needs.verify.outputs.default }}
+          PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'twin' || 'after' }}
+        run: |
+          version="$(scripts/release-channel.sh tag go "$TAG")"
+          scripts/release-channel.sh never-default go "$version" "$RECORDED" "$PHASE"
   # A tag exiting green does not mean anyone can install the package: the Go
   # proxy serves a new tag some minutes after it is pushed. scripts/release-verify.sh
-  # installs the PUBLISHED module from the public proxy in a clean module, with no
-  # credentials, retrying for proxy lag, and proves: the binding's ABI fingerprint
-  # constant is the header's; the command lists the production registry, parses
-  # the newest line, and fetches it; and the public API loads it and reports the
-  # same fingerprint. None of it reads an ABI revision (v1 has none). A dry run
-  # runs the same script against the local module, so the list parser is proven
-  # before the tag exists.
+  # installs the PUBLISHED module (the channel's /v2 path) from the public proxy
+  # in a clean module, with no credentials, retrying for proxy lag, and proves:
+  # the binding's generation-2 fingerprint constant is include/v2/chtypes.h's;
+  # the command lists, fetches and loads from the channel's registry (staging
+  # chtypes/v2-dev) and no other; and the loaded library reports abi 2 and that
+  # fingerprint. A dry run runs the same script against the local module, so
+  # every check is proven before the tag exists.
   post-publish:
     needs: verify
     if: ${{ !failure() && (needs.verify.result == 'success' || (needs.verify.result == 'skipped' && inputs.verify_only)) }}
@@ -103,9 +158,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with: { go-version-file: go/go.mod }
-      - name: the verify script's own selftest (the list parser)
+      - name: the verify script's own selftest (the list parser and every channel check)
         run: scripts/release-verify.sh --selftest
-      - name: the module installs, speaks the header's ABI fingerprint, lists, fetches a line and loads it
+      - name: the module installs, speaks include/v2/chtypes.h's fingerprint, and lists, fetches and loads from the channel's registry only
         env:
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'local' || 'registry' }}
         run: |

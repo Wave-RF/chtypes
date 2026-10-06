@@ -1,6 +1,12 @@
 # release-rust — publish rust/ to crates.io on a `rust/v*` tag, via crates.io
 # Trusted Publishing (OIDC): configure the publisher once on crates.io for the
 # `chtypes` crate (repo Wave-RF/chtypes, workflow release-rust.yml).
+#
+# On this branch the only releasable tags are the channel's
+# (scripts/release-channel.sh; until the v2 lock, rust/v2.0.0-dev.N): a semver
+# pre-release, which Cargo never resolves for a requirement that does not name
+# one (#511). The `never-default` job asserts that against crates.io and Cargo
+# themselves after the publish, and its twin does in a dry run.
 name: release-rust
 on:
   push:
@@ -40,8 +46,18 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    outputs:
+      default: ${{ steps.record.outputs.default }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Before anything is installed or built: the channel's own selftest, then
+      # the tag must be a release of this branch's channel.
+      - name: "the tag is a release of this branch's channel (scripts/release-channel.sh, #511)"
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          scripts/release-channel.sh --selftest
+          scripts/release-channel.sh tag rust "$TAG_NAME"
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
       - name: the tag and the crate agree on the version
         env:
@@ -68,6 +84,15 @@ jobs:
           got="$(cd rust && cargo run --locked --quiet --bin chtypes -- --version)"
           echo "binary: $got"
           [ "$got" = "chtypes $tag" ] || { echo "::error::the built binary reports '$got', the tag says chtypes $tag"; exit 1; }
+      # The record the never-default job compares against: crates.io's
+      # max_stable_version right now. It must already be a stable 1.x, or
+      # nothing is published over it.
+      - name: record what crates.io installs by default before the publish (a stable 1.x)
+        id: record
+        run: |
+          default="$(scripts/release-channel.sh default rust)"
+          echo "max_stable_version before the publish: $default"
+          echo "default=$default" >> "$GITHUB_OUTPUT"
       - name: dry run, the publish rehearsal
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
         run: cd rust && cargo publish --dry-run --locked
@@ -78,6 +103,34 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+  # "Never installed by default", asserted against crates.io and Cargo
+  # themselves, never left to a comment. After a publish: crates.io's
+  # max_stable_version is still the 1.x the publish job recorded, on every
+  # read, and a plain `cargo add chtypes` (no version) in a clean project still
+  # locks that 1.x, while the crate's own version page serves 2.0.0-dev.N
+  # (polled for lag, up to 15 minutes). A dry run runs the same assertions
+  # against crates.io as it is now, the twin: the default is the recorded 1.x,
+  # the version is not published yet, and the same presence check finds the
+  # recorded version (its positive control). scripts/release-channel.sh holds
+  # both, and its selftest plants every refusal.
+  never-default:
+    needs: publish
+    if: ${{ !failure() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
+      - name: crates.io and a plain cargo add still pick the recorded 1.x, and 2.0.0-dev.N is served (a dry run asserts it against crates.io as it is)
+        env:
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          RECORDED: ${{ needs.publish.outputs.default }}
+          PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'twin' || 'after' }}
+        run: |
+          version="$(scripts/release-channel.sh tag rust "$TAG_NAME")"
+          scripts/release-channel.sh never-default rust "$version" "$RECORDED" "$PHASE"
   # A publish step exiting 0 does not mean anyone can install the package.
   # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before
   # npm served the tarball, and for ~2 of those minutes `latest` resolved to
@@ -89,15 +142,14 @@ jobs:
   # version that already exists. No `environment` and no `id-token: write`
   # here: this job only reads public registries anonymously.
   #
-  # What it proves, in order (on the tag path each one a fact about the
-  # PUBLISHED crate, none read from this checkout's source tree):
-  #   1. the crate installs (the registry-lag retry loop, 15 minutes);
-  #   2. the ABI fingerprint constant in the published source equals
-  #      CHS_ABI_FINGERPRINT in include/chtypes.h (v1 has no revision number);
-  #   3. the published `chtypes` binary lists the production registry's lines
-  #      and fetches one of them;
-  #   4. the public API opens that line, and the loaded library's own
-  #      build_info reports the same fingerprint.
+  # What it proves (on the tag path each one a fact about the PUBLISHED
+  # crate, none read from this checkout's source tree): the crate installs
+  # (the registry-lag retry loop, 15 minutes); its generation-2 fingerprint
+  # constant equals CHS_ABI_FINGERPRINT in include/v2/chtypes.h; the published
+  # `chtypes` binary lists, fetches and loads from the channel's registry
+  # (staging chtypes/v2-dev) and no other; and the loaded library reports abi
+  # 2 and that fingerprint. The six checks are scripts/release-verify.sh's
+  # header.
   # The steps are scripts/release-verify.sh, shared by every path:
   #   - a tag push: publish, then verify the registry's copy;
   #   - a dry run (dry_run=true): no publish; the same steps against the crate
@@ -116,9 +168,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch
-      - name: the verify script's own selftest (the list parser)
+      - name: the verify script's own selftest (the list parser and every channel check)
         run: scripts/release-verify.sh --selftest
-      - name: the crate installs, speaks the header's ABI fingerprint, lists, fetches a line and loads it
+      - name: the crate installs, speaks include/v2/chtypes.h's fingerprint, and lists, fetches and loads from the channel's registry only
         env:
           TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'local' || 'registry' }}
