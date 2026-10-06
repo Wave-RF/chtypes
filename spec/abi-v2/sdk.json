@@ -1,0 +1,62 @@
+{
+  "sdk_schema": 1,
+  "reuse_v0_names": true,
+  "provisional_markers": {},
+  "errors": {
+    "fields": ["status", "ch_code", "ch_name", "message", "column"],
+    "codes": {
+      "artifact_incompatible": "CHTYPES_ARTIFACT_INCOMPATIBLE",
+      "artifact_corrupt": "CHTYPES_ARTIFACT_CORRUPT"
+    },
+    "classes": {
+      "schema": {"go": "*SchemaError", "python": "SchemaError", "ts": "SchemaError", "rust": "Error::Schema", "new": false},
+      "unsupported": {"go": "*UnsupportedError", "python": "UnsupportedError", "ts": "UnsupportedError", "rust": "Error::Unsupported", "new": false},
+      "usage": {"go": "*UsageError", "python": "UsageError", "ts": "UsageError", "rust": "Error::Usage", "new": true},
+      "internal": {"go": "*InternalError", "python": "InternalError", "ts": "InternalError", "rust": "Error::Internal", "new": true},
+      "artifact_incompatible": {"go": "*ArtifactError", "python": "ArtifactIncompatibleError", "ts": "ArtifactIncompatibleError", "rust": "Error::ArtifactIncompatible", "new": true},
+      "artifact_corrupt": {"go": "*ArtifactError", "python": "ArtifactCorruptError", "ts": "ArtifactCorruptError", "rust": "Error::ArtifactCorrupt", "new": false}
+    },
+    "status": {
+      "CHS_OK": null,
+      "CHS_REJECTED": "schema",
+      "CHS_DECLINED": "unsupported",
+      "CHS_INVALID_ARGUMENT": "usage",
+      "CHS_INTERNAL": "internal",
+      "unknown": "internal"
+    }
+  },
+  "loader": {
+    "dlopen_flags": ["RTLD_NOW", "RTLD_LOCAL"],
+    "unverified_env": "CHTYPES_ALLOW_UNVERIFIED_LIBRARY",
+    "refusals": [
+      {"step": 1, "reason": "glibc_floor", "error": "artifact_incompatible"},
+      {"step": 1, "reason": "no_glibc", "error": "artifact_incompatible"},
+      {"step": 1, "reason": "predicate_malformed", "error": "artifact_incompatible"},
+      {"step": 2, "reason": "dlopen", "error": "artifact_incompatible"},
+      {"step": 3, "reason": "not_v1", "error": "artifact_incompatible"},
+      {"step": 3, "reason": "abi_version", "error": "artifact_incompatible"},
+      {"step": 4, "reason": "build_info_malformed", "error": "artifact_corrupt"},
+      {"step": 4, "reason": "fingerprint", "error": "artifact_incompatible"},
+      {"step": 4, "reason": "missing_symbol", "suffix": "symbol", "error": "artifact_incompatible"},
+      {"step": 5, "reason": "build_info_mismatch", "suffix": "field", "error": "artifact_corrupt"},
+      {"step": 6, "reason": "missing_symbol", "suffix": "symbol", "error": "artifact_incompatible"}
+    ]
+  },
+  "cross_check": [
+    {"build_info": "abi", "predicate": "abi", "compare": "int"},
+    {"build_info": "abi_fingerprint", "predicate": "abi_fingerprint", "compare": "bytes"},
+    {"build_info": "clickhouse_version", "predicate": "clickhouse_version", "compare": "bytes"},
+    {"build_info": "channel", "predicate": "channel", "compare": "bytes"},
+    {"build_info": "build", "predicate": "build", "compare": "bytes"},
+    {"build_info": "os", "predicate": "os", "compare": "bytes"},
+    {"build_info": "arch", "predicate": "arch", "compare": "bytes"},
+    {"build_info": "core_commit", "predicate": "core_commit", "compare": "bytes"},
+    {"build_info": "inputs_sha256", "predicate": "inputs_sha256", "compare": "bytes"}
+  ],
+  "naming": {
+    "go": {},
+    "python": {},
+    "ts": {},
+    "rust": {}
+  }
+}

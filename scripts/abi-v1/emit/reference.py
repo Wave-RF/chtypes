@@ -7,6 +7,13 @@ thread class, statuses, ownership facts and docs.md prose. The hand-written
 part of the page (the rules, the loader sequence, how to regenerate) sits
 outside the markers and is never touched.
 
+Generated for every major (MAJORS): ABI v1 into docs/reference/abi-v1.md,
+ABI v2 into docs/reference/abi-v2.md, block abi-v2 (a later major N the
+same, with vN). A description
+that declares its stability gets a row for it in Identity, and a docs.md
+`## Rules` section is copied in as the block's Rules, so the rules are
+written once, in the spec.
+
 The block must pass the repository's markdownlint and dprint as emitted, so
 tables are written the way dprint formats them: every cell padded to its
 column's width, the delimiter row as wide as the column. Table cells are
@@ -21,8 +28,18 @@ from model import CONTENTS, THREADS
 
 from . import Output, banner, marker_key
 
+MAJORS = (1, 2)
 PATH = "docs/reference/abi-v1.md"
 BLOCK = "abi-v1"
+
+
+def path(major: int) -> str:
+    return PATH if major == 1 else f"docs/reference/abi-v{major}.md"
+
+
+def block(major: int) -> str:
+    return BLOCK if major == 1 else f"abi-v{major}"
+
 
 PARAM_KINDS = [
     ("scalar", "`int32_t`, `uint32_t`, `int64_t`, `uint64_t` or `size_t`", "passed by value"),
@@ -80,6 +97,12 @@ def _code(s: str) -> str:
     return f"`{s}`"
 
 
+def _stability(model) -> str:
+    if model.unstable:
+        return "UNSTABLE: the fingerprint moves with every change to the description until the lock"
+    return "locked: the fingerprint is fixed"
+
+
 def render(model) -> str:
     out: list[str] = [f"<!-- {banner(model)} -->", ""]
     firm = [f for f in model.functions if f.is_firm]
@@ -99,8 +122,11 @@ def render(model) -> str:
             ["FIRM functions", str(len(firm))],
             ["provisional functions", str(len(prov))],
             ["`reuse_v0_names`", "true" if model.sdk["reuse_v0_names"] else "false"],
+            *([["stability", _stability(model)]] if model.stability else []),
         ],
     )
+    if model.docs.rules:
+        out += ["", "### Rules", "", model.docs.rules]
 
     used: dict[str, list[str]] = {}
 
@@ -320,4 +346,4 @@ def render(model) -> str:
 
 
 def outputs(model) -> list[Output]:
-    return [Output(PATH, block=BLOCK, body=render(model))]
+    return [Output(path(model.major), block=block(model.major), body=render(model))]

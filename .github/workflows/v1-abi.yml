@@ -1,6 +1,7 @@
 name: v1-abi
 
-# ABI v1's generated FFI layer, on pull requests into v1 and main and in the merge queue (docs/reference/abi-v1.md).
+# ABI v1's generated FFI layer, on pull requests into main and v2 and in the merge queue (docs/reference/abi-v1.md).
+# On v2 its v1-abi-gen job also checks ABI v2 (UNSTABLE), the same way (docs/reference/abi-v2.md).
 #
 # spec/abi-v1/abi.json describes the whole ABI and scripts/abi-v1/gen.py
 # generates every file that states it: the C header, the export list, the
@@ -33,15 +34,17 @@ name: v1-abi
 # Hosted runners, no secrets. Network is used only to install pinned tools.
 
 on:
+  # `v2` is the ABI v2 development branch (public issue #511): pull requests
+  # into it run the same jobs as pull requests into main.
   pull_request:
-    branches: [main]
+    branches: [main, v2]
   # The merge queue's candidate combination must run every required context
   # here too, or the queue waits forever: v1 and v1-abi's contexts are required
   # on main once v1 merges (nothing below reads the event's base or head).
   merge_group:
     types: [checks_requested]
   push:
-    branches: [main]
+    branches: [main, v2]
   workflow_dispatch:
 
 permissions:
@@ -141,6 +144,67 @@ jobs:
             "$cxx" -std=c++20 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c++ include/chtypes.h
           done
           echo "include/chtypes.h: C11 and C++20, gcc and clang, -Wall -Wextra -Werror -pedantic"
+      # ABI v2 (UNSTABLE, docs/reference/abi-v2.md): the same generator, run
+      # with --major 2, checks spec/abi-v2/ and its own outputs. ABI v1's steps
+      # above never read them, and these never read ABI v1's outputs.
+      - name: every ABI v2 generated file matches spec/abi-v2/ (gen.py --major 2 --check)
+        run: uv run --no-project --python 3.11 scripts/abi-v1/gen.py --major 2 --check
+      - name: ABI v2's fingerprint and canonical forms, recomputed by an independent RFC 8785 implementation
+        run: |
+          ours="$(uv run --no-project --python 3.11 scripts/abi-v1/gen.py --major 2 --fingerprint)"
+          uv run --no-project --python 3.12 --with 'rfc8785==0.1.4' python - "$ours" <<'PY'
+          import hashlib, json, sys
+          import rfc8785
+          sys.path.insert(0, "scripts/abi-v1")
+          import jcs
+          ours = sys.argv[1]
+          bad = 0
+          with open("spec/abi-v2/abi.json", "rb") as f:
+              theirs = "sha256:" + hashlib.sha256(rfc8785.dumps(json.load(f))).hexdigest()
+          print(f"jcs.py: {ours}\nrfc8785: {theirs}")
+          if ours != theirs:
+              print("::error::ABI v2's CHS_ABI_FINGERPRINT differs between scripts/abi-v1/jcs.py and rfc8785")
+              bad += 1
+          for path in ("spec/abi-v2/abi.json", "spec/abi-v2/sdk.json", "spec/abi-v2/v0-symbols.json",
+                       "spec/abi-v2/schema/abi.schema.json", "spec/abi-v2/schema/sdk.schema.json"):
+              with open(path, "rb") as f:
+                  data = f.read()
+              if jcs.canonicalize(jcs.loads(data)) != rfc8785.dumps(json.loads(data)):
+                  print(f"::error file={path}::canonical form differs between jcs.py and rfc8785")
+                  bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+          {
+            echo "### ABI v2 (UNSTABLE)"
+            echo
+            echo "\`CHS_ABI_FINGERPRINT\` = \`$ours\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: ABI v2's description validates under an independent JSON Schema validator, which also refuses a description without its stability
+        run: |
+          cj=(uvx --from 'check-jsonschema==0.33.3' check-jsonschema)
+          "${cj[@]}" --check-metaschema spec/abi-v2/schema/abi.schema.json spec/abi-v2/schema/sdk.schema.json
+          "${cj[@]}" --schemafile spec/abi-v2/schema/abi.schema.json spec/abi-v2/abi.json
+          "${cj[@]}" --schemafile spec/abi-v2/schema/sdk.schema.json spec/abi-v2/sdk.json
+          python3 -c 'import json,sys; d=json.load(open("spec/abi-v2/abi.json")); d.pop("stability"); json.dump(d, open(sys.argv[1], "w"))' "$RUNNER_TEMP/planted-v2.json"
+          if "${cj[@]}" --schemafile spec/abi-v2/schema/abi.schema.json "$RUNNER_TEMP/planted-v2.json"; then
+            echo "::error::the v2 schema accepted a description without its stability"
+            exit 1
+          fi
+      - name: the ABI v2 header compiles as C11 and as C++20 (gcc and clang), and refuses to follow ABI v1's header
+        run: |
+          for c in gcc clang; do
+            "$c" -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c include/v2/chtypes.h
+          done
+          for cxx in g++ clang++; do
+            "$cxx" -std=c++20 -Wall -Wextra -Werror -pedantic -fsyntax-only -x c++ include/v2/chtypes.h
+          done
+          printf '#include "include/chtypes.h"\n#include "include/v2/chtypes.h"\n' > "$RUNNER_TEMP/mixed.c"
+          if gcc -std=c11 -fsyntax-only -I. "$RUNNER_TEMP/mixed.c" 2> "$RUNNER_TEMP/mixed.err"; then
+            echo "::error::a translation unit including both ABI headers compiled"
+            exit 1
+          fi
+          command grep -F 'declare the same chs_* names' "$RUNNER_TEMP/mixed.err"
+          echo "include/v2/chtypes.h: C11 and C++20, gcc and clang, -Wall -Wextra -Werror -pedantic; refuses to follow include/chtypes.h"
 
   v1-abi-stubs:
     name: "v1-abi-stubs (${{ matrix.platform }})"

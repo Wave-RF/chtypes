@@ -14,31 +14,46 @@ typedef name in C++.
 spec/abi-v1/generated/exports.txt is every exported symbol, one per line,
 sorted, after a `#` banner line: what a loader resolves at step 6, and what an
 export list (a linker version script or exported-symbols file) names.
+
+Generated for every major (MAJORS). ABI v1 keeps the paths above; ABI v2
+writes include/v2/chtypes.h and spec/abi-v2/generated/exports.txt (a later
+major N the same, with vN), with its own include guard and an #error if ABI v1's header is already in the
+translation unit (the two declare the same chs_* names). An UNSTABLE
+description says so beside CHS_ABI_FINGERPRINT.
 """
 
 from __future__ import annotations
 
 import textwrap
 
-from model import CONTENTS, THREADS
+from model import CONTENTS, DOCS_MD, THREADS
 
 from . import Output, banner, marker_key
 
+MAJORS = (1, 2)
 HEADER = "include/chtypes.h"
 EXPORTS = "spec/abi-v1/generated/exports.txt"
 WIDTH = 100
+
+
+def header_path(major: int) -> str:
+    return HEADER if major == 1 else f"include/v{major}/chtypes.h"
+
+
+def exports_path(major: int) -> str:
+    return EXPORTS if major == 1 else f"spec/abi-v{major}/generated/exports.txt"
 
 
 class ProseError(ValueError):
     pass
 
 
-def _check_prose(where: str, text: str) -> None:
+def _check_prose(where: str, text: str, docs_md: str = DOCS_MD) -> None:
     for bad in ("/*", "*/", "??"):
         if bad in text:
             raise ProseError(
                 f"{where}: the prose contains {bad!r}, which cannot sit inside a C comment "
-                "(a nested comment, an early close, or a trigraph); rephrase it in spec/abi-v1/docs.md"
+                f"(a nested comment, an early close, or a trigraph); rephrase it in {docs_md}"
             )
 
 
@@ -79,8 +94,8 @@ def comment_lines(text: str, prefix: str = " * ") -> list[str]:
     return [line.rstrip() for line in out]
 
 
-def block_comment(text: str, where: str) -> list[str]:
-    _check_prose(where, text)
+def block_comment(text: str, where: str, docs_md: str = DOCS_MD) -> list[str]:
+    _check_prose(where, text, docs_md)
     return ["/*", *comment_lines(text), " */"]
 
 
@@ -159,14 +174,24 @@ def prototype_lines(fn) -> list[str]:
 
 
 def render_header(model) -> str:
+    def comment(text: str, where: str) -> list[str]:
+        return block_comment(text, where, model.spec.docs_md)
+
+    guard = "CHTYPES_H" if model.major == 1 else f"CHTYPES_V{model.major}_H"
     out: list[str] = [f"/* {banner(model)} */"]
-    out += block_comment(
+    out += comment(
         f"chtypes.h: the chtypes C ABI, generation {model.abi}.\n\n{model.docs.preamble}", "docs.md preamble"
     )
+    out += [f"#ifndef {guard}", f"#define {guard}", ""]
+    if model.major != 1:
+        out += [
+            "#ifdef CHTYPES_H",
+            f'#error "include/chtypes.h (ABI v1) and {header_path(model.major)} (ABI v{model.major}) declare the same '
+            'chs_* names: include one per translation unit"',
+            "#endif",
+            "",
+        ]
     out += [
-        "#ifndef CHTYPES_H",
-        "#define CHTYPES_H",
-        "",
         "#include <stddef.h>",
         "#include <stdint.h>",
         "",
@@ -181,18 +206,26 @@ def render_header(model) -> str:
     ]
 
     out += _section("identity")
-    out += block_comment(
+    out += comment(
         "The ABI generation: what chs_abi_version() returns. A loader refuses a library whose answer differs.",
         "identity",
     )
     out.append(f"#define CHS_ABI_VERSION {model.abi}")
-    out += [""] + block_comment(
+    out += [""] + comment(
         "`sha256:` and 64 lowercase hex digits: sha256 over the RFC 8785 canonical form of "
-        "spec/abi-v1/abi.json. chs_build_info()'s `abi_fingerprint` is this macro, copied; a loader compares "
+        f"{model.spec.abi_json}. chs_build_info()'s `abi_fingerprint` is this macro, copied; a loader compares "
         "the two byte for byte and refuses any difference.",
         "identity",
     )
     out.append(f'#define CHS_ABI_FINGERPRINT "{model.fingerprint}"')
+    if model.unstable:
+        out += [""] + comment(
+            f"UNSTABLE: {model.spec.abi_json} declares `stability` \"unstable\". Generation {model.abi} is still "
+            "being designed, so CHS_ABI_FINGERPRINT moves with every change to the description until the lock. "
+            "A library and a binding work together only when both were built from the same fingerprint; nothing "
+            "built from an unstable description is a release.",
+            "identity",
+        )
 
     used = sorted(
         {m for f in model.functions for m in f.provisional}
@@ -206,14 +239,14 @@ def render_header(model) -> str:
     if used:
         out += _section("provisional markers")
         legend = "\n".join(f"- {m}: {model.markers[m]}" for m in used)
-        out += block_comment(
+        out += comment(
             "A declaration marked PROVISIONAL is in its proposed form and may change before the ABI is "
             "confirmed; one with no marker is FIRM. The markers:\n\n" + legend,
             "markers",
         )
 
     out += _section("thread classes")
-    out += block_comment(
+    out += comment(
         "Every function below names its thread class: what a caller may run at the same time as it.\n\n"
         + "\n".join(f"- {k}: {v}." for k, v in THREADS.items()),
         "thread classes",
@@ -225,7 +258,7 @@ def render_header(model) -> str:
     for d in model.documents.values():
         if d.byte_fields:
             lines.append(f"- {d.name}: " + ", ".join(d.byte_fields) + ".")
-    out += block_comment(
+    out += comment(
         "Every data-derived string a JSON document carries (a column name, a value's rendering, a type, SQL "
         f"text, a message) is a byte string, so one rule carries them all. The member F is a JSON string when "
         f"the bytes are valid UTF-8 (a NUL written as the JSON escape for U+0000), and otherwise the member "
@@ -246,7 +279,7 @@ def render_header(model) -> str:
             text += " Holds a reference to its " + ", ".join(h.holds) + ", so any free order is safe."
         if h.provisional:
             text += f"\n\nPROVISIONAL ({_markers(model, h.provisional)})."
-        out += block_comment(f"{h.name}: {text}", f"handle {h.name}")
+        out += comment(f"{h.name}: {text}", f"handle {h.name}")
         out.append(f"typedef struct {h.name} {h.name};")
         out.append("")
     out.pop()
@@ -268,7 +301,7 @@ def render_header(model) -> str:
             )
         if e.provisional:
             text += f"\n\nPROVISIONAL ({_markers(model, e.provisional)})."
-        out += block_comment(f"{e.name}: {text}", f"enum {e.name}")
+        out += comment(f"{e.name}: {text}", f"enum {e.name}")
         out.append(f"typedef int32_t {e.name};")
         width = max(len(v.name) for v in e.values)
         vwidth = max(len(_int_literal("int32", v.value)) for v in e.values)
@@ -284,7 +317,7 @@ def render_header(model) -> str:
         text = c.doc or c.name
         if c.provisional:
             text += f"\n\nPROVISIONAL ({_markers(model, c.provisional)})."
-        out += block_comment(f"{c.name}: {text}", f"constant {c.name}")
+        out += comment(f"{c.name}: {text}", f"constant {c.name}")
         out.append(f"#define {c.name} {_int_literal(c.type, c.value)}")
         out.append("")
     out.pop()
@@ -292,7 +325,7 @@ def render_header(model) -> str:
     out += _section("functions")
     for fn in model.functions:
         text = f"{fn.name}: {fn.doc}\n\n{_function_facts(model, fn)}"
-        out += block_comment(text, f"function {fn.name}")
+        out += comment(text, f"function {fn.name}")
         out += prototype_lines(fn)
         out.append("")
     out.pop()
@@ -303,7 +336,7 @@ def render_header(model) -> str:
         "}",
         "#endif",
         "",
-        "#endif /* CHTYPES_H */",
+        f"#endif /* {guard} */",
         "",
     ]
     return "\n".join(out)
@@ -312,7 +345,7 @@ def render_header(model) -> str:
 def render_exports(model) -> str:
     lines = [
         f"# {banner(model)}",
-        "# Every symbol a v1 library exports, one per line, sorted. Nothing else is exported.",
+        f"# Every symbol a v{model.major} library exports, one per line, sorted. Nothing else is exported.",
         *model.symbols(),
         "",
     ]
@@ -321,6 +354,6 @@ def render_exports(model) -> str:
 
 def outputs(model) -> list[Output]:
     return [
-        Output(HEADER, content=render_header(model)),
-        Output(EXPORTS, content=render_exports(model)),
+        Output(header_path(model.major), content=render_header(model)),
+        Output(exports_path(model.major), content=render_exports(model)),
     ]

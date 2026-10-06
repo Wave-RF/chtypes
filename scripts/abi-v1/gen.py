@@ -7,6 +7,22 @@
     scripts/abi-v1/gen.py --extract-v0    rewrite spec/abi-v1/v0-symbols.json from the released tags
     scripts/abi-v1/gen.py --selftest      prove every refusal fires, on temporary copies of the tree
 
+    scripts/abi-v1/gen.py --major 2 --write|--check|--fingerprint
+                                          the same, for ABI v2 (UNSTABLE): spec/abi-v2/ and its own outputs
+
+MAJORS. Without --major, everything here is ABI v1 and behaves exactly as it
+did before ABI v2 existed: the same inputs, outputs, banners and messages.
+`--major N` reads spec/abi-vN/ instead and runs only the emitters that
+generate for N (emit/__init__.py, MAJORS), into N's own paths: for ABI v2,
+include/v2/chtypes.h, spec/abi-v2/generated/exports.txt and the block of
+docs/reference/abi-v2.md. Each major's banner names its own command and
+description, so one major's stale-file scan never sees, flags or deletes
+another's outputs. From generation 2 on, the description is also held to its
+generation's rules (model.py, generation_rule_problems). The generator keeps
+its path under scripts/abi-v1/ because ABI v1's banner, which every v1 output
+carries, names that path: moving it would change every v1 output. --selftest
+proves both majors whatever --major says, so it refuses --major.
+
 WHAT IT DOES. spec/abi-v1/abi.json is the ABI: types, enums, constants,
 functions, the build_info shape, the document vocabularies. The SDK owns it
 (decision D1.5) and its fingerprint, `sha256:` + the sha256 of its RFC 8785
@@ -39,7 +55,9 @@ first differing line:
 --selftest proves each of those fires, by planting it in a temporary copy of
 the inputs and running --check there, and proves --write is deterministic
 (two runs, identical bytes) and leaves hand-written text outside a generated
-block alone. It never touches the real tree.
+block alone. It then does the same for ABI v2 beside ABI v1 in one copy:
+neither major's --write or --check touches the other's outputs, and each
+generation-2 rule refuses a planted violation. It never touches the real tree.
 """
 
 from __future__ import annotations
@@ -76,11 +94,16 @@ SKIP_DIRS = frozenset(
 # ------------------------------------------------------------------- outputs
 
 
-def build(root: Path) -> tuple[abimodel.Model, list[emit.Output]]:
-    model = abimodel.load(root)
+def command(major: int) -> str:
+    """How to run this generator for one major, as its messages print it."""
+    return "scripts/abi-v1/gen.py" if major == 1 else f"scripts/abi-v1/gen.py --major {major}"
+
+
+def build(root: Path, major: int = 1) -> tuple[abimodel.Model, list[emit.Output]]:
+    model = abimodel.load(root, major)
     outs: list[emit.Output] = []
     seen: dict[str, str] = {}
-    for mod in emit.discover():
+    for mod in emit.discover(major):
         for o in mod.outputs(model):
             key = f"{o.path}#{o.block}" if o.block else o.path
             if key in seen:
@@ -106,12 +129,13 @@ def splice(path: str, existing: str, name: str, body: str) -> str:
     return "\n".join(lines[: b[0] + 1] + body.rstrip("\n").split("\n") + [""] + lines[e[0] :])
 
 
-def expected_files(root: Path, outs: list[emit.Output]) -> dict[str, str]:
+def expected_files(root: Path, outs: list[emit.Output], major: int = 1) -> dict[str, str]:
     """path -> the complete text the tree should hold."""
+    banner_re = emit.banner_re(major)
     want: dict[str, str] = {}
     for o in outs:
         if o.content is not None:
-            if not emit.BANNER_RE.search(o.content[:512]):
+            if not banner_re.search(o.content[:512]):
                 raise abimodel.ModelError([f"{o.path}: the emitter's output has no banner in its first 512 bytes"])
             want[o.path] = o.content
             continue
@@ -127,17 +151,19 @@ def expected_files(root: Path, outs: list[emit.Output]) -> dict[str, str]:
     return want
 
 
-def produced_outputs(root: Path = ROOT) -> frozenset[str]:
-    """The paths the emitters produce whole (the files that carry a banner), as repository-relative POSIX paths.
+def produced_outputs(root: Path = ROOT, major: int = 1) -> frozenset[str]:
+    """The paths one major's emitters produce whole (the files that carry a banner), as repository-relative POSIX paths; ABI v1's by default.
 
     The three source checks that exempt generated files (check-no-hand-decls.py, check-no-error-code-table.py, check-quoting-passthrough.py) exempt a file only if it is in this set AND carries the banner. Membership, not the banner alone, because the stale-banner scan in check() skips SKIP_DIRS, so a hand-written file with a copied banner under such a directory would pass both. The set comes from the repository this script lives in, so a check run over a planted tree still names real output paths.
     """
-    _, outs = build(root)
+    _, outs = build(root, major)
     return frozenset(o.path for o in outs if o.content is not None)
 
 
-def banner_files(root: Path) -> list[str]:
-    """Every file whose first 512 bytes carry a real generated banner."""
+def banner_files(root: Path, major: int = 1) -> list[str]:
+    """Every file whose first 512 bytes carry a real generated banner of this
+    major's (another major's banner never matches: emit.banner_prefix)."""
+    banner_re = emit.banner_re(major)
     found = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
@@ -148,7 +174,7 @@ def banner_files(root: Path) -> list[str]:
                     head = f.read(512)
             except OSError:
                 continue
-            if emit.BANNER_RE.search(head.decode("utf-8", "replace")):
+            if banner_re.search(head.decode("utf-8", "replace")):
                 found.append(path.relative_to(root).as_posix())
     return found
 
@@ -197,10 +223,10 @@ def first_difference(want: str, have: str) -> str:
     return f"line {i}: " + ("the tree's copy ends early" if len(a) > len(b) else "the tree's copy has extra lines")
 
 
-def check(root: Path) -> list[str]:
+def check(root: Path, major: int = 1) -> list[str]:
     try:
-        _, outs = build(root)
-        want = expected_files(root, outs)
+        _, outs = build(root, major)
+        want = expected_files(root, outs, major)
     except abimodel.ModelError as e:
         return e.problems
     except ProseError as e:
@@ -210,15 +236,15 @@ def check(root: Path) -> list[str]:
         try:
             have = (root / path).read_text(encoding="utf-8")
         except OSError:
-            problems.append(f"{path}: missing; run scripts/abi-v1/gen.py --write")
+            problems.append(f"{path}: missing; run {command(major)} --write")
             continue
         if have != text:
             problems.append(
                 f"{path}: differs from the generator's output ({first_difference(text, have)}); "
-                "edit spec/abi-v1/ and run scripts/abi-v1/gen.py --write, never the output"
+                f"edit {abimodel.spec(major).dir}/ and run {command(major)} --write, never the output"
             )
     produced = set(want)
-    for path in banner_files(root):
+    for path in banner_files(root, major):
         if path not in produced:
             problems.append(
                 f"{path}: stale; it carries the generated banner but no emitter produces it (--write deletes it)"
@@ -230,29 +256,31 @@ def check(root: Path) -> list[str]:
     return problems
 
 
-def write(root: Path) -> list[str]:
-    _, outs = build(root)
-    want = expected_files(root, outs)
+def write(root: Path, major: int = 1) -> list[str]:
+    _, outs = build(root, major)
+    want = expected_files(root, outs, major)
     for path, text in want.items():
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists() or target.read_text(encoding="utf-8") != text:
             target.write_text(text, encoding="utf-8")
     removed = []
-    for path in banner_files(root):
+    for path in banner_files(root, major):
         if path not in want:
             (root / path).unlink()
             removed.append(path)
     return removed
 
 
-def render(root: Path, emitter: str, out: Path) -> list[str]:
+def render(root: Path, emitter: str, out: Path, major: int = 1) -> list[str]:
     """Write one emitter's build-time files under `out`; return their paths."""
     if not re.fullmatch(r"[a-z][a-z0-9_]*", emitter):
         raise ValueError(f"{emitter!r} is not an emitter module name")
-    model = abimodel.load(root)
-    mod = {m.__name__.rsplit(".", 1)[-1]: m for m in emit.discover()}.get(emitter)
+    model = abimodel.load(root, major)
+    mod = {m.__name__.rsplit(".", 1)[-1]: m for m in emit.discover(major)}.get(emitter)
     if mod is None:
+        if major != 1 and (HERE / "emit" / f"{emitter}.py").is_file():
+            raise ValueError(f"emit/{emitter}.py does not generate for ABI v{major} (its MAJORS)")
         raise ValueError(f"no emitter scripts/abi-v1/emit/{emitter}.py")
     fn = getattr(mod, "render_files", None)
     if not callable(fn):
@@ -319,7 +347,7 @@ def _dump(obj, indent: int = 0) -> str:
     return json.dumps(obj)
 
 
-def extract_v0(root: Path) -> None:
+def extract_v0(root: Path, major: int = 1) -> None:
     tags = sorted((t for t in _git(root, "tag", "-l", "*/v0.*").split() if t), key=_version_key)
     if not tags:
         raise SystemExit("--extract-v0: no */v0.* tags; fetch them (git fetch --tags)")
@@ -340,8 +368,9 @@ def extract_v0(root: Path) -> None:
     }
     text = _dump(doc) + "\n"
     jcs.loads(text)  # the model reads it strictly: prove it can
-    (root / abimodel.V0_JSON).write_text(text, encoding="utf-8")
-    print(f"--extract-v0: {len(sigs)} symbols across {len(tags)} tags -> {abimodel.V0_JSON}")
+    v0_json = abimodel.spec(major).v0_json
+    (root / v0_json).write_text(text, encoding="utf-8")
+    print(f"--extract-v0: {len(sigs)} symbols across {len(tags)} tags -> {v0_json}")
 
 
 # ------------------------------------------------------------------ selftest
@@ -513,8 +542,8 @@ def _selftest_byte_strings(model: abimodel.Model) -> list[str]:
     return fails
 
 
-def _copy_inputs(src: Path, dst: Path, outs: list[emit.Output]) -> None:
-    paths = {"spec/abi-v1", "scripts/abi-v1", PMC} | {o.path for o in outs}
+def _copy_inputs(src: Path, dst: Path, outs: list[emit.Output], extra: tuple[str, ...] = ()) -> None:
+    paths = {"spec/abi-v1", "scripts/abi-v1", PMC, *extra} | {o.path for o in outs}
     for rel in sorted(paths):
         s, d = src / rel, dst / rel
         if s.is_dir():
@@ -827,6 +856,176 @@ def _selftest_tree() -> list[str]:
     return fails
 
 
+def _selftest_v2() -> list[str]:
+    """ABI v2 beside ABI v1 in one tree: neither major's --write or --check
+    reads, flags or deletes the other's outputs, and every generation-2 rule
+    gen.py enforces refuses a planted violation."""
+    fails: list[str] = []
+    _, outs1 = build(ROOT, 1)
+    _, outs2 = build(ROOT, 2)
+    v1_paths = sorted({o.path for o in outs1})
+    v2_paths = sorted({o.path for o in outs2})
+    v2 = abimodel.spec(2)
+    abi, schema, sdk, docs = v2.abi_json, v2.abi_schema, v2.sdk_json, v2.docs_md
+    with tempfile.TemporaryDirectory(prefix="abi-v2-selftest-") as tmp:
+        pristine = Path(tmp) / "pristine"
+        _copy_inputs(ROOT, pristine, outs1 + outs2, extra=(v2.dir,))
+
+        # The two majors share one tree and never touch each other's outputs.
+        v1_before = _tree_digest(pristine, v1_paths)
+        rc, log = _run(pristine, "--major", "2", "--write")
+        if rc:
+            return [f"--major 2 --write failed on a copy of the tree:\n{log}"]
+        if _tree_digest(pristine, v1_paths) != v1_before:
+            fails.append("--major 2 --write changed an ABI v1 output")
+        v2_first = _tree_digest(pristine, v2_paths)
+        rc, log = _run(pristine, "--major", "2", "--write")
+        if rc or _tree_digest(pristine, v2_paths) != v2_first:
+            fails.append("--major 2 --write run twice did not produce byte-identical outputs")
+        rc, log = _run(pristine, "--check")
+        if rc:
+            fails.append(f"ABI v1's --check refused a tree that also holds ABI v2's outputs:\n{log}")
+        rc, log = _run(pristine, "--write")
+        if rc or not all((pristine / p).is_file() for p in v2_paths) or _tree_digest(pristine, v2_paths) != v2_first:
+            fails.append(f"ABI v1's --write removed or changed an ABI v2 output:\n{log}")
+        rc, log = _run(pristine, "--major", "2", "--check")
+        if rc:
+            return fails + [f"--major 2 --check refused what --major 2 --write had just written:\n{log}"]
+
+        n = 0
+
+        def plant(what: str, mutate, expect: str | None, runs=(("--major", "2", "--check"),)) -> None:
+            nonlocal n
+            n += 1
+            work = Path(tmp) / f"plant-{n}"
+            shutil.copytree(pristine, work)
+            try:
+                mutate(work)
+            except AssertionError as e:
+                fails.append(f"v2 plant {n} ({what}): could not be planted: {e}")
+                return
+            rc, log = (0, "")
+            for argv in runs:
+                rc, log = _run(work, *argv)
+            if expect is None:
+                if rc != 0:
+                    fails.append(f"v2 plant {n} ({what}): expected a pass, it failed:\n{log}")
+            elif rc == 0:
+                fails.append(f"v2 plant {n} ({what}): passed; it must refuse")
+            elif expect not in log:
+                fails.append(f"v2 plant {n} ({what}): refused, but not for {expect!r}:\n{log}")
+
+        plant(
+            "a hand edit to the v2 header",
+            lambda w: _edit(w / "include/v2/chtypes.h", "\n", "\n/* hand */\n"),
+            "include/v2/chtypes.h",
+        )
+
+        def stale(major: int):
+            def mutate(w: Path) -> None:
+                fp = jcs.fingerprint((w / abimodel.spec(major).abi_json).read_bytes())
+                (w / f"stale-v{major}.txt").write_text(
+                    f"# {emit.banner_prefix(major)} (CHS_ABI_FINGERPRINT {fp}) — DO NOT EDIT\n"
+                )
+
+            return mutate
+
+        plant("a stale ABI v2 output", stale(2), "stale")
+        plant("a stale ABI v2 output is not ABI v1's business", stale(2), None, (("--check",),))
+        plant("a stale ABI v1 output is not ABI v2's business", stale(1), None)
+
+        # The description says it is generation 2, in its schema and in the model.
+        plant("abi 1 in the v2 description", lambda w: _json_edit(w / abi, lambda d: d.update(abi=1)), "abi.schema.json")
+
+        def abi_one_unpinned(w: Path) -> None:
+            _json_edit(w / abi, lambda d: d.update(abi=1))
+            _json_edit(w / schema, lambda d: d["properties"].update(abi={"type": "integer", "minimum": 1}))
+
+        plant("abi 1, with the schema no longer pinning it", abi_one_unpinned, "this is the description of ABI v2")
+
+        def no_stability(w: Path) -> None:
+            _json_edit(w / abi, lambda d: d.pop("stability"))
+            _json_edit(w / schema, lambda d: d["required"].remove("stability"))
+
+        plant("no stability, with the schema no longer requiring it", no_stability, "declares `stability`")
+
+        # The rules are stated, every one.
+        plant("no ## Rules section", lambda w: _edit(w / docs, "## Rules\n", ""), "no `## Rules` section")
+        plant("a rule dropped", lambda w: _edit(w / docs, "(r4)", "(rX)", count=99), "does not state (r4)")
+
+        # (r2) no result schema closes an object.
+        plant(
+            "(r2) a document schema closed to new fields",
+            lambda w: _json_edit(w / abi, lambda d: d["documents"]["row"]["schema"].update(additionalProperties=False)),
+            "documents.row.schema closes an object",
+        )
+        plant(
+            "(r2) build_info closed to new fields",
+            lambda w: _json_edit(
+                w / abi,
+                lambda d: d["build_info"]["schema"]["properties"]["capabilities"].update(additionalProperties=False),
+            ),
+            "build_info.schema/properties/capabilities closes an object",
+        )
+
+        # (r3) no described value takes the unknown(n) member's name.
+        plant(
+            "(r3) a vocabulary value spelled unknown",
+            lambda w: _json_edit(w / abi, lambda d: d["enums"]["default_kind"]["values"].append({"value": "unknown"})),
+            "enum default_kind: the value 'unknown' takes the name (r3) reserves",
+        )
+        plant(
+            "(r3) an int32 value named *_UNKNOWN",
+            lambda w: _json_edit(
+                w / abi,
+                lambda d: d["enums"]["chs_format"]["values"].append(
+                    {"name": "CHS_FORMAT_UNKNOWN", "value": 99, "ch_name": "Unknown"}
+                ),
+            ),
+            "enum chs_format: the value 'CHS_FORMAT_UNKNOWN' takes the name (r3) reserves",
+        )
+
+        # (r4) generation 1's published codes keep their names and numbers.
+        def renumber(d: dict) -> None:
+            for v in d["enums"]["chs_status"]["values"]:
+                if v["name"] == "CHS_INTERNAL":
+                    v["value"] = 5
+
+        plant("(r4) a published status renumbered", lambda w: _json_edit(w / abi, renumber), "CHS_INTERNAL = 4 is published")
+        plant(
+            "(r4) a published error code dropped",
+            lambda w: _json_edit(w / sdk, lambda d: d["errors"]["codes"].pop("artifact_corrupt")),
+            "errors.codes artifact_corrupt = 'CHTYPES_ARTIFACT_CORRUPT' is published",
+        )
+        plant(
+            "(r4) a published error code reused",
+            lambda w: _json_edit(w / sdk, lambda d: d["errors"]["codes"].update(later="CHTYPES_ARTIFACT_CORRUPT")),
+            "reuses the published code 'CHTYPES_ARTIFACT_CORRUPT'",
+        )
+        plant(
+            "(r4) generation 1's description unreadable",
+            lambda w: (w / abimodel.spec(1).abi_json).unlink(),
+            "(r4) compares against generation 1's published codes",
+        )
+
+        # Locking drops the UNSTABLE notes, and the outputs follow the description.
+        def lock(w: Path) -> None:
+            _json_edit(w / abi, lambda d: d.update(stability="locked"))
+
+        plant("a locked description generates and checks", lock, None, (("--major", "2", "--write"), ("--major", "2", "--check")))
+        work = Path(tmp) / "locked"
+        shutil.copytree(pristine, work)
+        lock(work)
+        rc, log = _run(work, "--major", "2", "--write")
+        header = (work / "include/v2/chtypes.h").read_text(encoding="utf-8")
+        page = (work / "docs/reference/abi-v2.md").read_text(encoding="utf-8")
+        if rc or " * UNSTABLE: " in header or "| stability             | locked" not in page:
+            fails.append(f"a locked description still generated the UNSTABLE notes, or no `locked` row:\n{log}")
+        if " * UNSTABLE: " not in (pristine / "include/v2/chtypes.h").read_text(encoding="utf-8"):
+            fails.append("the unstable description's header carries no UNSTABLE note")
+    return fails
+
+
 def selftest() -> int:
     fails = _selftest_jcs() + _selftest_validator()
     if not fails:
@@ -838,6 +1037,8 @@ def selftest() -> int:
             fails += [f"the tree's own description does not load: {p}" for p in e.problems]
     if not fails:
         fails += _selftest_tree()
+    if not fails:
+        fails += _selftest_v2()
     for f in fails:
         print(f"gen.py --selftest: FAIL {f}", file=sys.stderr)
     if fails:
@@ -845,7 +1046,8 @@ def selftest() -> int:
     print(
         "gen.py --selftest: ok: RFC 8785 vectors and refusals, the schema validator, --write deterministic, "
         "the byte_strings rule, and every planted drift, schema, JCS, D1.3, tombstone, docs, prose, marker, thread-class, "
-        "byte-field, needle and stale case refused"
+        "byte-field, needle and stale case refused; and ABI v2 beside it: neither major touches the other's outputs, "
+        "and every generation-2 rule (abi == major, stability, the Rules section, r2, r3, r4) refused"
     )
     return 0
 
@@ -861,23 +1063,37 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--write", action="store_true", help="regenerate every output")
     mode.add_argument("--check", action="store_true", help="fail on any drift (CI)")
     mode.add_argument("--fingerprint", action="store_true", help="print CHS_ABI_FINGERPRINT")
-    mode.add_argument("--extract-v0", action="store_true", help="rewrite spec/abi-v1/v0-symbols.json from git tags")
-    mode.add_argument("--selftest", action="store_true", help="prove every refusal fires")
+    mode.add_argument(
+        "--extract-v0",
+        action="store_true",
+        help="rewrite the major's v0-symbols.json (spec/abi-v1/v0-symbols.json by default) from git tags",
+    )
+    mode.add_argument("--selftest", action="store_true", help="prove every refusal fires, for every major")
     mode.add_argument(
         "--render",
         metavar="EMITTER",
         help="write emit/EMITTER.py's build-time (never committed) files under --out, e.g. the test stub's source",
     )
     ap.add_argument("--out", type=Path, help="the directory --render writes into")
+    ap.add_argument(
+        "--major",
+        type=int,
+        choices=abimodel.MAJORS,
+        help="the ABI major to generate: its description under spec/abi-vN/ and its own outputs (default 1)",
+    )
     args = ap.parse_args(argv)
 
     if args.selftest:
+        if args.major is not None:
+            ap.error("--selftest proves every major at once; drop --major")
         return selftest()
+    major = args.major or 1
+    sp = abimodel.spec(major)
     if args.render:
         if args.out is None:
             ap.error("--render needs --out DIR")
         try:
-            written = render(ROOT, args.render, args.out)
+            written = render(ROOT, args.render, args.out, major)
         except (abimodel.ModelError, ProseError, ValueError) as e:
             for p in getattr(e, "problems", [str(e)]):
                 print(f"gen.py --render: {p}", file=sys.stderr)
@@ -886,18 +1102,18 @@ def main(argv: list[str]) -> int:
             print(p)
         return 0
     if args.extract_v0:
-        extract_v0(ROOT)
+        extract_v0(ROOT, major)
         return 0
     if args.fingerprint:
         try:
-            print(jcs.fingerprint((ROOT / abimodel.ABI_JSON).read_bytes()))
-        except jcs.JCSError as e:
-            print(f"gen.py: {abimodel.ABI_JSON}: {e}", file=sys.stderr)
+            print(jcs.fingerprint((ROOT / sp.abi_json).read_bytes()))
+        except (OSError, jcs.JCSError) as e:
+            print(f"gen.py: {sp.abi_json}: {e}", file=sys.stderr)
             return 1
         return 0
     if args.write:
         try:
-            removed = write(ROOT)
+            removed = write(ROOT, major)
         except abimodel.ModelError as e:
             for p in e.problems:
                 print(f"gen.py --write: {p}", file=sys.stderr)
@@ -907,22 +1123,20 @@ def main(argv: list[str]) -> int:
             return 1
         for p in removed:
             print(f"gen.py --write: removed stale {p}")
-        problems = check(ROOT)
+        problems = check(ROOT, major)
         for p in problems:
             print(f"gen.py --write: {p}", file=sys.stderr)
         if problems:
             return 1
-        print(f"gen.py --write: ok ({jcs.fingerprint((ROOT / abimodel.ABI_JSON).read_bytes())})")
+        print(f"gen.py --write: ok ({jcs.fingerprint((ROOT / sp.abi_json).read_bytes())})")
         return 0
-    problems = check(ROOT)
+    problems = check(ROOT, major)
     for p in problems:
         print(f"gen.py --check: {p}", file=sys.stderr)
     if problems:
         print(f"gen.py --check: {len(problems)} problem(s)", file=sys.stderr)
         return 1
-    print(
-        f"gen.py --check: ok: every output matches spec/abi-v1/ ({jcs.fingerprint((ROOT / abimodel.ABI_JSON).read_bytes())})"
-    )
+    print(f"gen.py --check: ok: every output matches {sp.dir}/ ({jcs.fingerprint((ROOT / sp.abi_json).read_bytes())})")
     return 0
 
 

@@ -1,0 +1,365 @@
+# chtypes ABI v2 (UNSTABLE): the prose for the description
+
+This file holds the prose for `spec/abi-v2/abi.json`, one `###` section per handle, enum, function and (optionally) constant or document. `scripts/abi-v1/gen.py --major 2` copies each section into the comment above its declaration in `include/v2/chtypes.h` and into the generated block of `docs/reference/abi-v2.md`, and `gen.py --major 2 --check` fails when a symbol has no section or a section names no symbol. The `## Rules` section below is copied into that block too.
+
+Prose is deliberately outside the fingerprint: editing this file never changes `CHS_ABI_FINGERPRINT`, so it never invalidates a built library. The rule that follows is that anything a binding or the artifact producer must act on is structured in `abi.json` (a nullability, an ownership, a status a call may return, a thread class, a vocabulary), never only stated here.
+
+Each section is copied into a C comment, so it may not contain a comment opener or closer, or two question marks in a row.
+
+**UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2, with nothing added; the additions land one pull request at a time. What generation 2 adds, and what the lock needs, are in public issue #511.
+
+## Rules
+
+These rules bind generation 2 from its first draft: the library, every binding and the artifact producer. They are normative; `MUST`, `MUST NOT` and `SHOULD` are RFC 2119. `scripts/abi-v1/gen.py --major 2 --check` enforces the part of each rule that a description can be checked against, as each rule says. Rules (r5) and (r6) are binding behavior, which the dev bindings implement in their own pull requests.
+
+**(r1) A growable function takes an options document.** A function that may gain inputs after it first ships MUST take them in one options document, a `bytes_in` JSON object, never as more positional parameters. The library MUST validate that document and MUST refuse a key it does not know with `CHS_INVALID_ARGUMENT`, naming the key; it never ignores one. So a caller that sets an option the library does not implement is told so, instead of silently getting the old behavior. A binding passes the caller's options through and never drops or rewrites a key. Checked by `gen.py`: not yet. The description has no way to mark a function growable until the first such function lands, and that pull request brings the check.
+
+**(r2) Readers ignore unknown fields.** Every reader of a result document (each `document:<name>` output, and `chs_build_info()`) MUST ignore a member it does not know, at every object level, `_b64` members included, and decode the rest as if it were absent. Checked by `gen.py`: no document schema and no `build_info` schema in the description closes an object (`additionalProperties: false`). The released 1.x readers already behave this way: measured on the 1.0.4 bindings, all four on 12 CI legs, for every result document at every object level ([`v1-abi` run 37504999630](https://github.com/Wave-RF/chtypes/actions/runs/37504999630), the conformance legs of the unmerged probe, public pull request #509).
+
+**(r3) Every enum has an `unknown(n)` member.** Every enum the description defines, an `int32` enum and a string vocabulary alike (`chs_status`, `chs_format`, `value_src`, `default_kind`, the three outcomes, `filter_verdict`, `transform_reason`, every one), MUST have in every binding an explicit member `unknown(n)` carrying the raw value `n`: the integer of an `int32` enum, the exact string of a vocabulary. A reader MUST map a value its description does not list to that member, for that field alone, and go on decoding. An unlisted value never fails the document, the row or the batch that carries it. Checked by `gen.py`: no described value is spelled `unknown`, `CHS_UNKNOWN` or `CHS_<name>_UNKNOWN`, the name readers reserve for that member.
+
+- **A `fallback` changes meaning.** It no longer names the value an unlisted one is read as: the reader keeps `unknown(n)`. It names whose per-value facts `unknown(n)` reports (`lossy` for `transform_reason`, `answered` for `filter_verdict`) and how a question about the value is answered, so the fail-closed reading stays: an unknown outcome is never accepted, and an unknown verdict is never answered.
+- **Facts without a fallback.** An enum whose values carry facts and which names no `fallback` MUST say what `unknown(n)` reports before the description is locked. Today that is `value_src`, whose `is_stored` has no answer for an unknown source.
+- **A call status.** A status outside the closed set reads as `unknown(n)` too. The call still fails, as an internal error naming `n` (the `unknown` entry of `errors.status` in `spec/abi-v2/sdk.json`), because a status a binding cannot read is never a success.
+- **Schemas constrain the writer.** An `enum` inside a document schema (`default_kind` in `schema_description`, `framing.container` in `batch`) constrains what the library writes, never what a reader accepts.
+- **Why.** Measured on the released 1.0.4 bindings, all four on 12 CI legs ([`v1-abi` run 37506595472](https://github.com/Wave-RF/chtypes/actions/runs/37506595472), the conformance legs of public pull request #509): a reader survives an unlisted value only where its vocabulary has a fallback (an outcome reads as `unsupported`, a verdict as `d`, a transform reason stays raw and reads as lossy), and an unknown call status is an internal error. An unlisted `value_src` fails the WHOLE document with an internal error, so one row's unknown source loses the entire batch; an unlisted `default_kind` fails `schema_description` the same way.
+
+**(r4) Error codes are stable once published.** An error code a caller can match on keeps its name and its number from the first release that carries it, a `2.0.0-dev.N` pre-release included, in every later release of every generation, and is never reused for another meaning. That covers the `chs_status` values, the `CHTYPES_*` codes (`errors.codes` in `sdk.json`, and the fetch layer's table in `docs/guides/fetch-v1.md` §8) and the exit status each code maps to. A new failure gets a new code. Checked by `gen.py`: every `chs_status` value generation 1 published keeps its name and number, and every `errors.codes` entry of `spec/abi-v1/sdk.json` is kept and none is reused under another key. The fetch layer's table is checked once a generation-2 fetch specification exists.
+
+**(r5) The cache.** A generation-2 binding's cache MUST be one no released 1.x reader ever reads.
+
+- **Record schema 2.** Its `verified.json` records are `schema: 2`. Released 1.x readers accept exactly `schema: 1` and treat any other record as absent (`docs/guides/fetch-v1.md` §1; the `cache-record-foreign-schema2` conformance cases hold every 1.x binding to it).
+- **The default root.** It is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev/` while the description is unstable, and `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2/` after the lock. Generation 1's is `.../chtypes/v1/`, so the two never share a default root.
+- **An explicit cache.** Under `CHTYPES_CACHE`, a generation-2 binding uses the subroot `<CHTYPES_CACHE>/v2-dev/` (`<CHTYPES_CACHE>/v2/` after the lock), never `<CHTYPES_CACHE>` itself, which a 1.x binding uses as its whole layout. The subroot is a MUST, not a SHOULD. A 1.x reader that met a record it cannot read inside its own layout treats it as absent and then re-verifies that entry from the cache's blobs (`docs/guides/fetch-v1.md` §1). A build that only the staging key signed fails that check, as an error, not a miss (`inferred` from that guide, not measured). In its own subroot, a generation-2 build is never in a 1.x reader's path.
+- **The result.** A released 1.x reader never picks a v2 build, in the default cache or a shared one, and no 1.x change is needed for that (`inferred` from the record rule and the layout above; the decision is recorded on public issue #508).
+
+**(r6) The dev channel.** While the description is unstable, generation 2 ships only as pre-release SDKs, `2.0.0-dev.N`, which a package manager never installs by default: npm's `dev` dist-tag, PyPI `2.0.0.devN`, crates.io `2.0.0-dev.N`, and Go `go/v2.0.0-dev.N` under the module path `github.com/wave-rf/chtypes/go/v2`. Each one:
+
+- **fetches** ONLY from `https://registry-staging.wavehouse.dev/chtypes/v2-dev`;
+- **trusts** ONLY the staging key, the ed25519 public key `5cd30c53c65a1ebc2d85836a41deb06661bb0ae7b658adb9eb116ec2db8e9b1c`, key id `824345f9bcf8e5bf` (`sha256-first16hex`, the algorithm the release key's id uses in `docs/guides/fetch-v1.md`). The delivery side trusts that key only for the `chtypes/v<N>-dev` repositories and never in production, and the release key is not in a dev SDK's trust list;
+- **has no override:** neither a base nor a trust list comes from the caller or the environment. `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS`, `CHTYPES_ALLOW_UNSIGNED` and the API options that set a base or a trust list are not honored, and a dev SDK says so, once and loudly, when one is set;
+- **refuses `--lock` and `--frozen`,** and their API equivalents, before any network call: a dev build is replaceable and a superseded one expires, so nothing may pin one;
+- **pins its dev fingerprint** and refuses a library with any other, as `CHTYPES_ARTIFACT_INCOMPATIBLE`, with exactly this message, where X and Y are the two full `sha256:` fingerprints: `this SDK speaks dev fingerprint X; the library has Y — update your dev SDK`.
+
+At the lock (public issue #511 says when), the description's `stability` becomes `locked`. That moves the fingerprint one last time, so a released 2.0.0 SDK never accepts a dev build and a dev SDK never accepts a 2.0.0 library. SDK 2.0.0 then ships from the production `chtypes/v2` repository, signed with the release key.
+
+## Preamble
+
+This header is generated from `spec/abi-v2/abi.json` by `scripts/abi-v1/gen.py --major 2`. Edit the description and regenerate; never edit this file. `docs/reference/abi-v2.md` is the normative reference, and the rules generation 2 is written under (r1 to r6) are in it.
+
+Stability. Generation 2 is UNSTABLE: its description is still being designed, so `CHS_ABI_FINGERPRINT` moves with every change until the description is locked. Nothing built from an unstable description is a release. Only pre-release SDKs (`2.0.0-dev.N`) speak it, each pinned to one fingerprint, and they fetch only from the staging dev channel. ABI v1 (`include/chtypes.h`) is frozen and unaffected.
+
+Identity. `CHS_ABI_VERSION` is the generation and `CHS_ABI_FINGERPRINT` is sha256 over the canonical form of the description. A loader opens a library with `RTLD_NOW | RTLD_LOCAL`, calls only the handshake set (`chs_abi_version`, `chs_build_info`, `chs_clickhouse_version`) before its checks pass, and refuses any library whose generation or fingerprint differs from the ones it was compiled with. Nothing degrades: every described symbol is mandatory.
+
+Ownership. Every input string, statement, document and body is counted bytes, `(const uint8_t *p, size_t n)`: length 0 is none and the pointer may then be NULL, and a NULL pointer with a nonzero length is `CHS_INVALID_ARGUMENT`. Every output is an owned, opaque `chs_buf`, read with `chs_buf_data` and `chs_buf_len` and released with `chs_buf_free`. Bytes pass through unmodified, NUL and invalid UTF-8 included: a column name may contain either (measured on live servers), so no name, statement or message is ever a C string. The only static strings are the handshake's. Handles are opaque, reference-counted and tagged with their kind and the image that made them; every entry point checks both, a child holds a strong reference to what it needs, and each free drops only the caller's reference, so any free order is safe and freeing NULL does nothing.
+
+Errors. A fallible call returns a `chs_status` and, through an optional last `chs_error **err`, an owned error carrying the status, ClickHouse's own code and name, the message and the column. The status alone carries the verdict, so `err` may be NULL.
+
+Threads. Every function has a thread class, listed in the reference. A handle is immutable once made, so every call that only reads handles is `shared`: any number of threads may call it at once, on the same handles too. The one thing a caller must never overlap with a call is a free of a handle that call uses. Process setup (`chs_initialize`, then `chs_set_defaults`) runs before the traffic it configures.
+
+Time zones. A library image has one server zone, set once by `chs_initialize`. A type compiled into a schema binds that image zone, as a server's table does after a restart. Each call can also carry a zone of its own: the `session_timezone` key in the call's settings, which ClickHouse applies through its own query context. That zone governs parsing a zone-less `DateTime` or `DateTime64`, rendering and export, DEFAULT evaluation and a filter's literals; the image zone governs `timezoneOf` over a column, MATERIALIZED expressions, PARTITION BY and TTL. Every zone name is validated by ClickHouse's own `DateLUT` on every platform. On darwin the file system is case-insensitive, so `DateLUT` there accepts a spelling such as `utc` that a Linux server refuses; that difference is documented, not patched.
+
+Settings. Every settings input is a JSON object whose values are JSON strings, and a binding never rewrites one. A call's settings layer over the defaults set by `chs_set_defaults`, which layer over the build's own. No call reads a server's version or its changed settings: that discovery is a recorded gap in this generation, so a caller that wants a server's settings passes them explicitly, through `chs_set_defaults` or each call's settings.
+
+Documents. Every output document is valid JSON that a stock parser reads: every ClickHouse rendering (a stored value, an input value, an engine's row) is a JSON string, a number written bare is within plus or minus 2^53 (anything larger is a string), and there is never a bare `inf`, `-inf` or `nan`. Every column entry of a row carries `null`, the library's verdict that the stored value is NULL, poisoned cells included.
+
+Byte strings in JSON. Every data-derived string a JSON document carries is a byte string: a column name, a value's rendering, a type (an Enum label or a named Tuple element comes from the caller's DDL), SQL text, and a message (ClickHouse's messages quote input bytes). One rule carries them all, names included, in every output document and in the input column list. The member `F` is a JSON string when the bytes are valid UTF-8, a NUL written as the escape `\u0000` as RFC 8259 allows. Otherwise the member `F_b64` holds the raw bytes in standard base64, padded. The two are never both present, and a member that names an entry (a column name) is always present in one of its two forms. So every document is valid UTF-8 JSON that a strict parser reads, and no byte is lost or replaced. Where a list or a map would hold a bare data-derived string, it holds an object instead, so the rule applies to that object's members: a list of names is a list of `{name}` or `{name_b64}` objects, and an engine's row is a list of cells. Each document lists its data-derived fields (`byte_fields` in the reference); a binding decodes each one to bytes and never assumes UTF-8. A server accepts every kind of name (measured on every supported line). The byte-returning accessors (`chs_error_message`, `chs_error_column`, `chs_error_ch_name`) and the export bytes are raw buffers, not JSON, and are not affected.
+
+String values. Every entry that reports a stored value (a row's `cols`, `computed`, an engine row's cells, `storage_transforms`) carries `stored` or `stored_b64`, which is always ClickHouse's rendering of the value. For a scalar `String` or `FixedString` value, including one inside `Nullable` or `LowCardinality`, the entry also carries `value_b64`, the value's raw bytes in standard base64, whenever the value is not NULL, whether or not the bytes are valid UTF-8. A value nested in another type (`Array(String)`, `Map`, `Tuple`, and the like) carries no `value_b64`: that is a recorded gap in this generation, and its rendering is the only form.
+
+Input values. A JSON input (`settings`, `query_params`) cannot carry a value that is not valid UTF-8 in this generation. The workaround is to inline the value in the SQL as `unhex('<hex>')`, built from hex digits only, which keeps it injection-safe because hex digits cannot break out of the quoted literal. A later version would add an object form, `{"<key>": {"b64": ...}}`, never a `<key>_b64` member, which could collide with a real key.
+
+Teardown. `chs_shutdown` stops what `chs_initialize` started. A loader never unloads a library: unloading or initializing an image again in one process is unsupported.
+
+### chs_buf
+
+An owned, immutable byte buffer: every output of the library. Read it with `chs_buf_data` and `chs_buf_len`; the bytes are exactly what the library produced, with no terminator and no encoding promise beyond what the producing parameter's content says.
+
+### chs_error
+
+The error a fallible call reports when its status is not `CHS_OK`: the status, ClickHouse's own error code and name, a message and the column concerned. Created only by the library, through a call's `err` out-parameter.
+
+### chs_schema
+
+A compiled table: the columns, engine, keys, TTL, settings and constraints of exactly one `CREATE TABLE` statement, immutable once created, so any number of threads may use it at once.
+
+### chs_filter
+
+A compiled boolean SQL expression over a schema's columns, with its query parameters bound. It holds a counted reference to its schema, so the schema stays alive for as long as the filter does, whatever order the caller frees them in.
+
+### chs_block
+
+A body parsed once under a schema, for evaluating many filters without parsing again. Like a filter, it holds a counted reference to its schema.
+
+### chs_status
+
+The verdict of every fallible call, in five values whose numbering is frozen.
+
+- `CHS_OK`: the call succeeded and its outputs are set.
+- `CHS_REJECTED`: ClickHouse's own refusal, with its own code, name and message, which a server would also give.
+- `CHS_DECLINED`: this build will not answer; a server might accept. Never scored as agreement.
+- `CHS_INVALID_ARGUMENT`: caller misuse, such as a NULL pointer with a nonzero length, a wrong-kind, freed or cross-library handle, or a NULL required out-parameter.
+- `CHS_INTERNAL`: a guarded exception inside the library, which is a library bug.
+
+The set is closed within this generation: any new condition maps onto one of these five. A binding maps each status to one error class (`spec/abi-v2/sdk.json`), and treats a value outside the set as an internal error naming it, whose status is that value's `unknown(n)` (rule r3).
+
+### chs_format
+
+The input and export formats, numbered as they have been since the first release; the numbers are frozen and a binding passes the integer. `ch_name` is ClickHouse's own name for the format, which is how `chs_build_info` lists the formats a build supports. Being in this enum never proves a build supports a format: the build says so in its `capabilities`.
+
+### transform_reason
+
+The reason a stored value differs from the supplied one, as the library reports it per column. `lossy` says whether information was lost; exactly four reasons are lossless (a representation change, a value filled from a DEFAULT or the type's zero, and a DEFAULT the library resolved from its own clock), and they are still reported because a preview must show what the table will hold. A binding reads `lossy` from here and never keeps a list of its own.
+
+### default_kind
+
+A column's default kind, as ClickHouse names it: `DEFAULT`, `MATERIALIZED`, `ALIAS` or `EPHEMERAL`, or the empty string for a column with none. The schema description carries one per column.
+
+### discover_query_param
+
+The query parameters in the SQL `chs_discover_query` returns, each with its ClickHouse type. The caller binds them when it runs the query (over HTTP, as `param_database` and `param_table`), so no binding builds SQL.
+
+### value_src
+
+Where a column's value came from. `is_stored` says whether the row as stored carries a value for the column: a column the input named but the table never stores (an EPHEMERAL column, a skipped MATERIALIZED or ALIAS column) and a DEFAULT the library could not resolve carry none.
+
+`default_generated` marks a DEFAULT column whose expression calls a random or ID generator the build admits; a build that does this lists `default_generators` in `chs_build_info`'s `capabilities.features`. The label means: generated by chtypes, and it becomes the stored value when you insert this output. The library drew the value itself, with ClickHouse's own vendored function. So insert the library's output (the export of `chs_preview_batch`, or the stored values its documents report), not your original input: a server evaluates a DEFAULT only for a column the INSERT does not supply, and the original input, which omits the column, would make the server draw a different value. Generators are admitted only in DEFAULT expressions: a MATERIALIZED column is always computed by the server, and an EPHEMERAL column is not stored. No binding logic is involved; a binding reports the source as it reads it.
+
+### row_outcome
+
+The verdict on one row: accepted, accepted but unreadable afterwards (the insert succeeds and every later read fails), rejected, skipped under the server's error allowance with the batch continuing, or declined by this build.
+
+### batch_outcome
+
+The verdict on a whole body. A batch is never skipped; its rows carry their own outcomes.
+
+### filter_outcome
+
+Whether a filter evaluation completed at all. Per-row failures are verdicts, not outcomes.
+
+### filter_verdict
+
+One character per row of a filter evaluation. `t` and `f` are answers (true; false or NULL); `e` (the predicate raised an error on this row) and `d` (this build declines the row) are not, and a caller enforcing visibility must fail closed on both.
+
+### CHS_ABI_REVISION_TOMBSTONE
+
+What `chs_abi_revision` always returns: 1001, outside every revision a released v0 binding speaks.
+
+### CHS_EXPORT_NONE
+
+The `export_format` of a batch preview that exports nothing.
+
+### CHS_DOC_VALUES
+
+A `doc_flags` bit: the per-row documents carry each column's stored value and provenance.
+
+### CHS_DOC_TRANSFORMS
+
+A `doc_flags` bit: the per-row documents carry the transformations the library detected.
+
+### CHS_DOC_DEFAULTS
+
+A `doc_flags` bit: the per-row documents carry the values the library computed from DEFAULT and MATERIALIZED expressions.
+
+### CHS_DOC_ALL
+
+Every `doc_flags` bit. A bit outside it is refused.
+
+### document:live_handles
+
+A JSON object with one key per handle kind (its type name, such as `chs_schema`) and the number of live handles of that kind in this image, counted before the document's own buffer exists.
+
+### document:error_code_table
+
+ClickHouse's own error-code table for this build: a JSON array of `{"code": int, "name": string}`, one entry per code the vendored table names, in ascending code order. A passthrough over the vendored table, never a copy.
+
+### document:schema_description
+
+A schema's columns, in declared order, with each column's canonical type, its `default_kind` (a value of the `default_kind` vocabulary) and default expression, and the facts a caller needs to build a row. The document is `{"columns": [...]}`, and each entry carries `name`, `type`, `default_kind` (a value of the `default_kind` vocabulary), `default_expression` (empty when there is none) and `default_is_literal`; the name, the type and the expression follow the rule for byte strings in JSON.
+
+### document:row
+
+One row's verdict and, as the flags ask, its columns' stored values, provenance and transformations. Every entry of `cols` carries its name, `null` (whether the stored value is NULL, poisoned cells included), its renderings (`input`, `stored`, `ref`, `wire`) and its types (`type`, `base`, `ref_type`), all by the rule for byte strings in JSON, and `value_b64` for a String or FixedString value. `unknown_fields` and `unsupported_settings` are lists of name objects; `computed` entries carry a name, a kind and a stored value; `err`, `verdict_err` and `partition_id` follow the rule too. The transformations come from the library, never from a binding: each is the `transformed` entry the SDK's parity fixtures pin, with its `reason` from `transform_reason`. `input_span` is `{off, len}`, the bytes of the input body the reader consumed for this record, read from the vendored reader's own position.
+
+### document:batch
+
+A body's verdict, counts and per-row documents (each a row document, with its own `input_span`), and, when an export was asked for, where each accepted row sits in the export bytes. `engine_rows`, present when the table's engine merges rows at insert, is a list of rows, each a list of cells: `{name, stored, null}`, plus `value_b64` for a String or FixedString value. `storage_transforms` entries carry `row`, `column`, `reason` and `stored`, plus `value_b64`; `transformed` entries carry `row`, `column`, `input`, `stored`, `reason` and `lossy`. Every name, rendering, `err` and `export_declined` follows the rule for byte strings in JSON. Two further fields come from the vendored reader's own state, never from a tokenizer of the library's:
+
+- `unconsumed`: the byte ranges `{off, len}` of the input that the reader's error recovery skipped. It does not account for every record: a **skipped** row's `input_span` can cover more than one input record, when recovery resumed past the end of the record that failed, so the verdicts can be fewer than the body's records while `unconsumed` is empty (measured: one skipped row spanning a three-record body). A record can also be lost while the number of verdicts still equals the number of records, so comparing the verdict count with an independent count of the body's records can be fooled (measured in every format, for example with a multi-line quoted CSV field or a JSON object). In every masked body measured, `unconsumed` was non-empty. Until a batch-level signal from the reader's own framing exists (#478), a caller that needs every record accounted for declines a body that has any skipped row or any `unconsumed` range.
+- `framing`: `bom_skipped` (whether the reader skipped a leading byte-order mark), `container` (`array` or `stream` for JSONEachRow, `null` for every other format), and `header` (`{consumed, lines, names}`, `names` as name objects). `bom_skipped` and `header` are `null` where the vendored reader does not expose the decision, and there `null` means not observable, never "no header": the TSV, TSVWithNames and Values readers keep both private (measured by the artifact producer in the source at every supported line). CSV, JSONEachRow and JSONCompactEachRow fill both from the reader's own hooks.
+
+### document:filter_result
+
+A filter evaluation: the call's outcome, one verdict character per row (`filter_verdict`), and each error or declined row itemized as `{row, code, err}`. `err`, at the top level and per row, follows the rule for byte strings in JSON, and `unsupported_settings` is a list of name objects.
+
+### document:discovery
+
+The column declarations reconstructed from a server's `system.columns` rows, formatted by ClickHouse's own formatter: `{"columns": [...], "columns_sql"}`, where each entry carries `name`, `type`, `default_kind` and `default_expression` as the server spelled them and `declaration`, the formatted declaration, and `columns_sql` joins the declarations for a `CREATE TABLE`. Every one of these is server or DDL text, so each follows the rule for byte strings in JSON.
+
+### chs_abi_version
+
+The ABI generation this library implements: always 2 for this header. A loader resolves and calls it right after opening the library. A library without the symbol is not a chtypes ABI artifact of generation 1 or later, and any other value is refused, naming both values. An absent handshake symbol other than this one is refused as `missing_symbol:<name>` instead, at whichever step first resolves it — only this symbol's absence means the library is not such an artifact at all.
+
+### chs_build_info
+
+What this library is, as static, NUL-terminated, ASCII-only JSON in the image's read-only data: never NULL, never freed, the same bytes on every call, and callable straight after opening the library. Its fields are listed under `build_info` in the reference, and `abi_fingerprint` is `CHS_ABI_FINGERPRINT` as the library was built, copied, never recomputed.
+
+`capabilities` is read from the build itself, never from a version number: `input_formats` and `export_formats` by ClickHouse's own format names from the build's FormatFactory, `doc_flags` as the document groups it honors, and `features`, an open list of build-level features, where a new feature is a new value and never a new field. `default_generators` in `features` means the library fills admitted generator DEFAULTs and the caller inserts the library's output (`default_generated` under `value_src`).
+
+A loader parses it (ASCII only, duplicate keys refused, `schema` equal to 1, every required field of its type), refuses when `abi_fingerprint` differs from its own compiled-in `CHS_ABI_FINGERPRINT` byte for byte, and then compares the fields listed in `spec/abi-v2/sdk.json` (`cross_check`) with the verified signed statement it fetched the library under, refusing on the first mismatch and naming the field. That comparison is mandatory. The file's own size, digest and glibc floor are not in it, because the file cannot carry facts measured on itself; they are in the signed statement.
+
+### chs_clickhouse_version
+
+The ClickHouse release this library was built from, spelled as every v0 library spelled it (for example `26.8.15.10-lts`): static, never freed. It keeps its v0 signature and spelling so a v0 binding reaches its own refusal. A binding of generation 1 or later reads `clickhouse_version` from `chs_build_info` instead.
+
+### chs_abi_revision
+
+The v0 tombstone. It always returns `CHS_ABI_REVISION_TOMBSTONE` (1001). It must never be removed, and its name must never be given another meaning.
+
+A sweep of every released binding (every minor from 0.1 to 0.5, in all four languages; [the CI run](https://github.com/Wave-RF/chtypes/actions/runs/36939764841)) measured why: each one calls this symbol whenever it exists and refuses cleanly, naming both numbers, when it returns a revision other than its own, but treats a MISSING symbol as "revision 0, predates the probe" and goes on to call `chs_init`. So this tombstone is what turns every v0 binding away before it can reach any other symbol, and `gen.py --check` refuses a description that reuses a v0 name without it. A binding of generation 1 or later never calls it; the loader resolves it only to prove it is present.
+
+### chs_buf_data
+
+The buffer's bytes. The pointer may be NULL when `chs_buf_len` is 0, and a binding never dereferences it then. A NULL, freed, wrong-kind or cross-library buffer gives NULL.
+
+### chs_buf_len
+
+The buffer's length in bytes. A NULL, freed, wrong-kind or cross-library buffer gives 0.
+
+### chs_buf_free
+
+Releases the caller's reference to a buffer. Freeing NULL does nothing.
+
+### chs_error_status
+
+The error's status, never `CHS_OK` for an error a call set. A NULL, freed, wrong-kind or cross-library error gives `CHS_INVALID_ARGUMENT`.
+
+### chs_error_ch_code
+
+ClickHouse's own error code, nonzero only when the status is `CHS_REJECTED`, and 0 otherwise or for an invalid error.
+
+### chs_error_ch_name
+
+A new buffer holding the name this build's vendored error table gives the code, the name a server prints after the code; empty when the build has none or the status is not `CHS_REJECTED`. Like the other two text accessors, it returns NULL only for a NULL or invalid error.
+
+### chs_error_message
+
+A new buffer holding the message: ClickHouse's own text, verbatim, for `CHS_REJECTED`, and the library's explanation otherwise. A message may quote input bytes, so it is a byte string, not text.
+
+### chs_error_column
+
+A new buffer holding the name of the column the error concerns, as raw bytes, empty when there is none. A column name is a byte string: NUL and invalid UTF-8 are legal in a name.
+
+### chs_error_free
+
+Releases the caller's reference to an error. Freeing NULL does nothing.
+
+### chs_live_handles
+
+A JSON document counting the live handles of each kind this image has made, taken before the document's own buffer exists. A test abandons handles, lets its runtime collect them and then asserts every count is zero, which is how all four bindings prove their finalizers release everything.
+
+### chs_error_codes
+
+ClickHouse's own error-code table for this build, as a JSON array of `{"code", "name"}` in ascending code order: a passthrough over the vendored table, never a copy. The table belongs to the build, and one number can name different errors on two ClickHouse lines, so a caller that needs several lines asks each library. The name is v0's, with the v1 call shape; the tombstone keeps every v0 binding from reaching it.
+
+### chs_registered_families
+
+Every type family in this build's own type registry, one per line. A tooling export for the artifact producer's build gates: no binding wraps it, and a loader resolves it only for presence.
+
+### chs_function_flags
+
+A tab-separated audit of every registered function's volatility flags, one function per line, read off this build's own registry. A tooling export for the artifact producer's build gates, which derive the statelessness evidence from it; no binding wraps it.
+
+### chs_reference_type
+
+The widened reference type this build pairs with a type expression. A tooling export; no binding wraps it.
+
+### chs_initialize
+
+Sets this image's server zone, once per process: the zone every compiled type binds, and the zone a call without its own `session_timezone` runs in. `timezone` is counted bytes, and length 0 means `UTC`. The name is validated by ClickHouse's own `DateLUT`, so a name it cannot load is `CHS_REJECTED` with `DateLUT`'s own code and message. A second call with the same spelling is a no-op that answers `CHS_OK`; a different spelling is `CHS_INVALID_ARGUMENT`, naming both. The spelling is compared byte for byte and never canonicalized, because it is observable: `timezoneOf` over a column reports the image zone exactly as spelled.
+
+The zone is process state, not a per-call parameter, because ClickHouse's own MergeTree code reads the server zone directly (`DateLUT::serverTimezoneInstance`). A per-call zone is the `session_timezone` setting instead. A loader calls this once, after the handshake checks and before any other call; the list of type families the build must refuse is embedded when the library is built, so nothing else is passed in.
+
+### chs_set_defaults
+
+Seeds the settings every later call starts from, as a JSON object whose values are JSON strings (a binding never rewrites a value, a boolean included). Each successful call replaces the previous defaults whole. A setting name the server would refuse is refused here, with ClickHouse's own code and message, and nothing is committed. `session_timezone` here is the default zone for later calls; it does not change the image zone that compiled types bind.
+
+Setup only. The defaults are immutable once this image has created its first `chs_schema` (a filter or a block needs one): from then on the call changes nothing and answers `CHS_INVALID_ARGUMENT`. No call ever reads defaults that change under it, so no binding needs a lock around them.
+
+### chs_shutdown
+
+Stops what `chs_initialize` started (its background threads) and joins them. It is idempotent and safe before `chs_initialize`. After it, no call is valid except `chs_shutdown` again. Unloading the library, or initializing it again in the same process, is unsupported: a loader never unloads a library.
+
+### chs_type_validate
+
+Parses one type expression with ClickHouse's own parser and returns its canonical spelling, or ClickHouse's own refusal.
+
+### chs_back_quote
+
+A name quoted the way ClickHouse's own `backQuote` quotes it: always quoted, every special byte escaped. A passthrough over the vendored function, and named after it; the name is a byte string.
+
+### chs_back_quote_if_needed
+
+A name quoted only where this build's own `backQuoteIfNeed` says it must be. Which names stay bare is a property of the ClickHouse release, so a caller that needs one answer for several releases asks each library.
+
+### chs_quote_string
+
+A byte string spelled as a ClickHouse string literal by the vendored `quoteString`. The input may contain NUL; the answer escapes it.
+
+### chs_schema_create
+
+Compiles exactly one `CREATE TABLE` statement (columns, engine, keys, TTL, settings and constraints) with ClickHouse's own parser and the checks a server's CREATE runs, under a profile of settings given as a JSON object of string values. A trailing semicolon is allowed. A second statement is refused the way ClickHouse's own parser refuses one in a single query (`CHS_REJECTED`, with its code and message), and a statement of any other kind is `CHS_INVALID_ARGUMENT`.
+
+The result is immutable: nothing changes a schema after this call, so it replaces v0's column-list compile and its engine, TTL and partition-key setters, and any number of threads may use it at once. Its types bind the image zone set by `chs_initialize`, never the profile's `session_timezone`, which governs only this call's own evaluation.
+
+### chs_schema_free
+
+Releases the caller's reference to a schema. Filters and blocks made from it keep it alive. Freeing NULL does nothing.
+
+### chs_schema_describe
+
+A JSON document describing the schema's columns, owned by the caller; it replaces v0's borrowed column accessors.
+
+### chs_preview_row
+
+Validates and coerces one row of `body` under the schema, as a server's INSERT would, and returns the row's document. `columns` is the INSERT column list, a JSON array of name objects (`{name}` or `{name_b64}`), and empty for none. `session_timezone` in `settings` is this call's zone.
+
+An INSERT whose input block has no column at all (every insertable column EPHEMERAL, and no column list) is declined: a server answers it (code 90, EMPTY_LIST_OF_COLUMNS_PASSED) from a statement inside its INSERT interpreter that the library cannot call, and a decline is never a wrong answer.
+
+### chs_preview_batch
+
+Validates and coerces a whole body, which may hold many rows, and returns the batch document, with the same declines as `chs_preview_row`. Row separation and the server's error allowance are ClickHouse's own, and the document's `unconsumed` and `framing` say what the reader skipped and how it framed the body. `filter`, when given, is evaluated over each stored row in the same parse. `export_format` is `CHS_EXPORT_NONE` or a `chs_format` the build can write; with an export, `out_export` receives the accepted rows serialized once, and it may be NULL when no export is asked for. `doc_flags` chooses which groups the per-row documents carry.
+
+### chs_filter_create
+
+Compiles a boolean SQL expression over the schema's columns, binding its query parameters (a JSON object of string values) by ClickHouse's own substitution, so a value is never SQL text. `settings` is the profile the expression is compiled under, so `session_timezone` there is the zone of its literals. Non-deterministic expressions are declined.
+
+A filter under a per-call `session_timezone` answers as the artifact producer has measured against live servers, including how the zone in an evaluation's settings combines with the zone the filter was compiled under. Until a path is measured to match a server it declines, which is never a wrong answer. The filter holds a counted reference to the schema.
+
+### chs_filter_free
+
+Releases the caller's reference to a filter. Freeing NULL does nothing.
+
+### chs_filter_eval_body
+
+Evaluates the filter over every row of a body, returning one verdict per row. `settings` governs parsing the body, and `session_timezone` there is this call's zone.
+
+### chs_block_create
+
+Parses a body once under the schema, for evaluating many filters over it. `settings` governs the parse, `session_timezone` there included, and `columns` is read as `chs_preview_row` reads it. The block holds a counted reference to the schema.
+
+### chs_block_free
+
+Releases the caller's reference to a block. Freeing NULL does nothing.
+
+### chs_filter_eval_block
+
+Evaluates the filter over a parsed block, with the same answers `chs_filter_eval_body` gives for the same body. It takes no settings: the filter brings the settings it was compiled under and the block those it was parsed under. The filter and the block must come from the same schema; a pair from two schemas is `CHS_INVALID_ARGUMENT`.
+
+### chs_discover_query
+
+The query a caller runs against a server to read a table's `system.columns` rows, so that no binding holds SQL of its own. It is the connect-time way to rebuild a table's columns from a server; whether a server's `SHOW CREATE TABLE` output compiles under `chs_schema_create` instead is not yet measured. It takes no input. The SQL names the table through the query parameters in `discover_query_param` (`{database:String}` and `{table:String}`), which the caller binds when it runs the query; it selects exactly the `system.columns` fields `chs_discover_columns` reads, `FORMAT JSONEachRow`.
+
+### chs_discover_columns
+
+Reads a server's `system.columns` rows (the JSONEachRow answer to `chs_discover_query`'s query) with ClickHouse's own reader and returns the column declarations, formatted by ClickHouse's own formatter.
