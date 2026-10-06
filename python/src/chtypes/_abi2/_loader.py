@@ -1,4 +1,4 @@
-"""The ABI v1 loader, Python half (plan PLAN-sdk-v1-ffi section 3.2/3.3).
+"""The ABI v2 loader, Python half (plan PLAN-sdk-v1-ffi section 3.2/3.3).
 
 Decoupled from the fetch PRs on purpose (plan section 3.1): `open()` takes a
 small, loader-owned `predicate` mapping rather than the fetch module's
@@ -8,13 +8,13 @@ wired up; `predicate` is passed through exactly as that seam promises.
 
 Every `chs_*` spelling in this module is forbidden by
 scripts/abi-v1/check-no-hand-decls.py (it is not a generated file), so this
-calls ONLY python/src/chtypes/_abi1/_decls.py's non-`chs_`-prefixed surface:
+calls ONLY python/src/chtypes/_abi2/_decls.py's non-`chs_`-prefixed surface:
 `resolve_abi_version()`, `resolve_all()`, and the `Api` object they return.
 
 Steps 1-6 run in the order plan section 3.2 gives (with step 6's full
 resolve-all sweep run right after step 3, BEFORE step 4's
 `chs_build_info()` call -- step 4 needs that symbol already resolved, and
-`tests/fixtures/abi-v1/cases.json`'s `missing-chs_build_info` and
+`tests/fixtures/abi-v2/cases.json`'s `missing-chs_build_info` and
 `missing-chs_clickhouse_version` stub variants both expect the step 6
 `missing_symbol:<name>` reason, not a step 4 one, which is only possible if
 the full symbol sweep happens before chs_build_info is ever called). Step 7
@@ -52,6 +52,25 @@ class LoadResult:
 def _refuse(reason: str, path: str, want: object = None, got: object = None) -> None:
     cls = _errmap.loader_error_class(reason)
     raise cls(reason=reason, path=path, want=want, got=got)
+
+
+def dev_fingerprint_message(sdk: str, library: str) -> str:
+    """Rule r6's exact refusal of a library whose fingerprint is not this dev
+    SDK's (spec/abi-v2/docs.md): `sdk` is the SDK's own fingerprint and
+    `library` the library's, both full "sha256:" spellings."""
+    return f"this SDK speaks dev fingerprint {sdk}; the library has {library} — update your dev SDK"
+
+
+def _refuse_fingerprint(path: str, got: object) -> None:
+    """Loader step 4's fingerprint refusal: CHTYPES_ARTIFACT_INCOMPATIBLE.
+    While this generation's description is unstable (a 2.0.0-dev SDK), its
+    message is exactly rule r6's; after the lock it is the ordinary refusal."""
+    want = _decls.CHS_ABI_FINGERPRINT
+    cls = _errmap.loader_error_class("fingerprint")
+    if _decls.CHS_ABI_STABILITY == "unstable":
+        message = dev_fingerprint_message(want, str(got))
+        raise cls(message, reason="fingerprint", path=path, want=want, got=got)
+    raise cls(reason="fingerprint", path=path, want=want, got=got)
 
 
 def _glibc_version() -> tuple[int, int] | None:
@@ -193,9 +212,7 @@ def _open(
     info = _parse_build_info(raw, path)
 
     if info["abi_fingerprint"] != _decls.CHS_ABI_FINGERPRINT:
-        _refuse(
-            "fingerprint", path, want=_decls.CHS_ABI_FINGERPRINT, got=info.get("abi_fingerprint")
-        )
+        _refuse_fingerprint(path, info.get("abi_fingerprint"))
 
     if not skip_step5:
         _cross_check(info, predicate, path)
@@ -231,7 +248,7 @@ def open(
     timezone: bytes = b"",
     defaults: bytes = b"",
 ) -> LoadResult:
-    """Load and verify a v1 artifact at `path` against its (already verified
+    """Load and verify an ABI v2 artifact at `path` against its (already verified
     elsewhere) signed `predicate`, then set the image zone (`timezone`, empty
     = UTC) and the default settings (`defaults`, a JSON object of string
     values, empty for none): step 7. Raises an artifact error naming the exact

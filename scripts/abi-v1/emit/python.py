@@ -75,11 +75,76 @@ from model import Function, Model, Param
 
 from . import Output, banner
 
-BINDING = "python"  # runs for the major spec/binding-majors.json gives python (emit/__init__.py)
+BINDING = "python"  # runs for the ONE major spec/binding-majors.json gives python (emit/__init__.py)
+MAJORS = (1, 2)
 
 DECLS_PATH = "python/src/chtypes/_abi1/_decls.py"
 ERRMAP_PATH = "python/src/chtypes/_abi1/_errmap.py"
 VOCAB_PATH = "python/src/chtypes/_abi1/_vocab.py"
+
+
+# ABI v2 (`MAJORS`, run for the one major spec/binding-majors.json gives
+# python): the same three files, under python/src/chtypes/_abi2. The decls and
+# errmap texts are ABI v1's respelled by `_MAJOR_SPELLINGS`, each of which
+# must occur, so a renamed spelling fails generation instead of leaking a v1
+# name into v2. Three things are v2's own: _decls.py carries CHS_ABI_STABILITY
+# (the description's `stability`; the loader's fingerprint message depends on
+# it, rule r6) and names an unlisted call status unknown(n) (rule r3), and
+# _vocab.py is rendered for rule r3 (render_vocab, `model.major >= 2`): every
+# vocabulary keeps an unlisted value as its unknown(n) member, discover_query_param
+# gains its type, and DESCRIBED_VOCABULARIES maps every enum the description
+# defines to its Python type. ABI v1's outputs are produced by the untouched
+# v1 path, byte for byte as before.
+def paths(major: int) -> tuple[str, str, str]:
+    """(decls, errmap, vocab) for one major."""
+    v1 = (DECLS_PATH, ERRMAP_PATH, VOCAB_PATH)
+    if major == 1:
+        return v1
+    return tuple(_respell(p, major) for p in v1)  # type: ignore[return-value]
+
+
+# Every spelling of ABI v1's Python layer that names its major, in the order
+# they are applied. Each must occur in the v1 texts at least once.
+_MAJOR_SPELLINGS = (
+    ("python/src/chtypes/_abi1", "python/src/chtypes/_abi{n}"),
+    ("spec/abi-v1/", "spec/abi-v{n}/"),
+    ("tests/fixtures/abi-v1/", "tests/fixtures/abi-v{n}/"),
+    ("generated ABI v1 layer", "generated ABI v{n} layer"),
+)
+
+
+def _respell(text: str, major: int) -> str:
+    for old, new in _MAJOR_SPELLINGS:
+        text = text.replace(old, new.replace("{n}", str(major)))
+    return text
+
+
+def _respell_all(texts: list[str], major: int) -> list[str]:
+    joined = "\0".join(texts)
+    missing = [old for old, _ in _MAJOR_SPELLINGS if old not in joined]
+    if missing:
+        raise ValueError(f"emit/python.py: ABI v1's Python layer no longer spells {missing}; update _MAJOR_SPELLINGS")
+    return [_respell(x, major) for x in texts]
+
+
+def _v2_decls(major: int, stability: str | None, decls: str) -> str:
+    """What ABI v2's _decls.py carries beyond the respelled v1 text."""
+    anchor = "CHS_ABI_FINGERPRINT = "
+    i = decls.index(anchor)
+    j = decls.index("\n", i) + 1
+    stability_const = (
+        "\n# The description's stability: \"unstable\" while this generation is being\n"
+        "# designed, so CHS_ABI_FINGERPRINT moves with every change, and \"locked\" after\n"
+        f"# (spec/abi-v{major}/docs.md, rule r6). A dev SDK refuses any other fingerprint with\n"
+        "# the dev message (_loader.py).\n"
+        f"CHS_ABI_STABILITY = {_lit(stability or '')}\n"
+    )
+    decls = decls[:j] + stability_const + decls[j:]
+    old = 'message = f"status {status} is outside the closed chs_status set".encode() + ('
+    new = 'message = f"call status unknown({status}) is outside the closed set".encode() + ('
+    if old not in decls:
+        raise ValueError("emit/python.py: ABI v1's Api._check no longer spells its unknown-status message")
+    return decls.replace(old, new)
 
 # model.py's SCALARS gives the C spelling; this gives the matching ctypes
 # constructor's SOURCE TEXT (this is code generation: these are strings that
@@ -821,6 +886,8 @@ def _str_enum(model: Model, cls: str, vocab: str, doc: str, extra: str = "") -> 
 
 
 def render_vocab(model: Model) -> str:
+    if model.major >= 2:
+        return render_vocab_v2(model)
     # Outcome is the row vocabulary, which holds every batch value too: one
     # Python type for both, as the spec's vocabulary table has it.
     row = {v.value for v in model.enums["row_outcome"].values}
@@ -992,6 +1059,352 @@ def render_vocab(model: Model) -> str:
     return "\n".join(parts) + "\n"
 
 
+# ABI v2 (rule r3): each described enum's Python type, and how a raw spelling
+# becomes one, for DESCRIBED_VOCABULARIES. A described enum missing here fails
+# generation (never silently skipped).
+_PY_VOCAB = {
+    "chs_status": "Status",
+    "chs_format": "Format",
+    "transform_reason": "Reason",
+    "value_src": "Source",
+    "row_outcome": "Outcome",
+    "batch_outcome": "Outcome",
+    "filter_outcome": "FilterOutcome",
+    "filter_verdict": "Verdict",
+    "discover_query_param": "DiscoverQueryParam",
+    "default_kind": "DefaultKind",
+}
+
+_KNOWN_PROPERTY = (
+    "    @property\n"
+    "    def known(self) -> bool:\n"
+    '        """Whether the description lists this value: False for exactly the unknown(n)\n'
+    '        member an unlisted value reads as (rule r3)."""\n'
+    "        return type(self)._value2member_map_.get(self._value_) is self"
+)
+
+
+def _missing_method(cls: str, kind: str) -> str:
+    return (
+        "    @classmethod\n"
+        f"    def _missing_(cls, value: object) -> {cls} | None:\n"
+        f"        return _unknown_{kind}(cls, value)"
+    )
+
+
+def _str_enum_v2(model: Model, cls: str, vocab: str, doc: str, extra: str = "") -> str:
+    members = _str_members(model, vocab)
+    fb = _fallback_member(model, vocab)
+    lines = [f"class {cls}(StrEnum):", f'    """{doc}"""', ""]
+    for name, value, _ in members:
+        lines.append(f"    {name} = {_dq(value)}")
+    lines.append("")
+    lines.append(_missing_method(cls, "str"))
+    lines.append("")
+    lines.append(_KNOWN_PROPERTY)
+    lines.append("")
+    lines.append("    @classmethod")
+    lines.append(f"    def of(cls, text: str) -> {cls}:")
+    if fb is None:
+        lines.append('        """Map a document\'s spelling. One the description does not list is kept as')
+        lines.append('        this vocabulary\'s unknown(n) member, carrying it (rule r3)."""')
+    else:
+        lines.append('        """Map a document\'s spelling. One the description does not list is kept as')
+        lines.append("        this vocabulary's unknown(n) member, carrying it (rule r3); the fallback,")
+        lines.append(f'        `{cls}.{fb}`, only names whose facts it reports, never what it reads as."""')
+    lines.append("        return cls(text)")
+    if extra:
+        lines.append("")
+        lines.append(extra)
+    return "\n".join(lines)
+
+
+def _int_enum_v2(model: Model, cls: str, vocab: str, doc: str, extra: str = "") -> str:
+    lines = [f"class {cls}(IntEnum):", f'    """{doc}"""', ""]
+    for n, v in _int_members(model.enums[vocab]):
+        lines.append(f"    {n} = {v}")
+    lines.append("")
+    lines.append(_missing_method(cls, "int"))
+    lines.append("")
+    lines.append(_KNOWN_PROPERTY)
+    if extra:
+        lines.append("")
+        lines.append(extra)
+    return "\n".join(lines)
+
+
+def render_vocab_v2(model: Model) -> str:
+    """ABI v2's _vocab.py (rule r3): the vocabularies of ABI v1's file, each with
+    its unknown(n) member, plus discover_query_param's type and the map of
+    every enum the description defines."""
+    missing = [n for n in model.enums if n not in _PY_VOCAB]
+    if missing:
+        raise ValueError(f"python.py: enum(s) {missing} have no Python type; teach emit/python.py about them")
+    row = {v.value for v in model.enums["row_outcome"].values}
+    batch = {v.value for v in model.enums["batch_outcome"].values}
+    if not batch <= row:
+        raise ValueError("python.py: batch_outcome has a value row_outcome lacks")
+    if model.enums["row_outcome"].fallback != model.enums["batch_outcome"].fallback:
+        raise ValueError("python.py: row_outcome and batch_outcome disagree on their fallback")
+
+    fmt_members = _int_members(model.enums["chs_format"])
+    fmt_names = {
+        _dq(name): _dq(v.fields["ch_name"])
+        for (name, _), v in zip(fmt_members, model.enums["chs_format"].values, strict=True)
+    }
+    verdict = model.enums["filter_verdict"]
+    verdict_answered = {_member("filter_verdict", v.value): v.fields["answered"] for v in verdict.values}
+    if sum(verdict_answered.values()) < 2:
+        raise ValueError("python.py: expected at least two answered verdicts")
+    answered_names = ", ".join(f"Verdict.{n}" for n, a in verdict_answered.items() if a)
+    if verdict.fallback is None:
+        raise ValueError("python.py: filter_verdict has no fallback; Verdict.answered needs its fact")
+    fb_answered = next(v.fields["answered"] for v in verdict.values if v.value == verdict.fallback)
+
+    reasons = _str_members(model, "transform_reason")
+    sources = _str_members(model, "value_src")
+    reason_fb = model.enums["transform_reason"].fallback
+    reason_lossy = {v.value: v.fields["lossy"] for v in model.enums["transform_reason"].values}
+    fb_lossy = reason_lossy[reason_fb]
+
+    c = model.constants
+    for need in ("CHS_DOC_VALUES", "CHS_DOC_TRANSFORMS", "CHS_DOC_DEFAULTS", "CHS_DOC_ALL"):
+        if need not in c:
+            raise ValueError(f"python.py: the description has no constant {need}")
+
+    parts: list[str] = []
+    parts.append(f"# {banner(model)}  # noqa: E501")
+    parts.append(
+        f'"""The Python binding\'s generated vocabularies, from spec/abi-v{model.major}/abi.json: the C\n'
+        "enums (`Format`, `Status`), the document vocabularies (`Outcome`, `FilterOutcome`,\n"
+        "`Verdict`, `DefaultKind`, `Reason`, `Source`, `DiscoverQueryParam`) with the facts the\n"
+        "description attaches to each value (`Format.ch_name`, `Reason` lossy, `Source`\n"
+        "is_stored, `Verdict.answered`), and the `DocFlags` groups. No other file in this\n"
+        "package keeps a copy of any of it.\n"
+        "\n"
+        f"Rule r3 (spec/abi-v{model.major}/docs.md): every vocabulary has an unknown(n) member, and a\n"
+        "value the description does not list reads as it, carrying the raw value, for that\n"
+        "field alone: a reader keeps it and decodes on. In an enum class it is the member\n"
+        "`Outcome(\"x\")` returns, named `unknown(x)`, whose `known` is False; `Reason` and\n"
+        "`Source` are plain strings, so there it is the raw string itself, which their\n"
+        "`known()` reports unlisted. A fallback no longer replaces the value: it names whose\n"
+        "facts unknown(n) reports, so an unknown verdict is never answered.\n"
+        '"""\n'
+    )
+    parts.append("from __future__ import annotations\n")
+    parts.append("from enum import IntEnum, IntFlag, StrEnum")
+    parts.append("from typing import Final")
+    parts.append("")
+    parts.append("")
+    parts.append("def _unknown_int(cls: type[IntEnum], value: object) -> IntEnum | None:")
+    parts.append('    """The int enum `cls`\'s unknown(n) member for an unlisted `value` (rule r3)."""')
+    parts.append("    if isinstance(value, bool) or not isinstance(value, int):")
+    parts.append("        return None")
+    parts.append("    member = int.__new__(cls, value)")
+    parts.append('    member._name_ = f"unknown({value})"')
+    parts.append("    member._value_ = value")
+    parts.append("    return member")
+    parts.append("")
+    parts.append("")
+    parts.append("def _unknown_str(cls: type[StrEnum], value: object) -> StrEnum | None:")
+    parts.append('    """The string enum `cls`\'s unknown(n) member for an unlisted `value` (rule r3)."""')
+    parts.append("    if not isinstance(value, str):")
+    parts.append("        return None")
+    parts.append("    member = str.__new__(cls, value)")
+    parts.append('    member._name_ = f"unknown({value})"')
+    parts.append("    member._value_ = value")
+    parts.append("    return member")
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _int_enum_v2(
+            model,
+            "Format",
+            "chs_format",
+            "The `chs_format` codes. The numbers are part of the ABI.",
+            extra=(
+                "    @property\n"
+                "    def ch_name(self) -> str:\n"
+                '        """ClickHouse\'s own name for this format, as `capabilities` lists it; empty\n'
+                '        for an unknown(n) code, which the description names nothing for."""\n'
+                '        return _FORMAT_CH_NAME.get(self.name, "")'
+            ),
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(f"_FORMAT_CH_NAME: Final[dict[str, str]] = {_dict_block(list(fmt_names.items()))}")
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _int_enum_v2(
+            model,
+            "Status",
+            "chs_status",
+            "The `chs_status` values (D3: five, closed, frozen). A status outside the set is\n"
+            "    its unknown(n), and the call that returned it still fails, as an internal error.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "Outcome",
+            "row_outcome",
+            "The verdict on a row or a batch, in the document's own vocabulary.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "FilterOutcome",
+            "filter_outcome",
+            "The call-level verdict of a filter evaluation.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "Verdict",
+            "filter_verdict",
+            "One row's answer from a filter, in the document's own characters.",
+            extra=(
+                "    @property\n"
+                "    def answered(self) -> bool:\n"
+                '        """The description\'s own fact: whether this verdict is an ANSWER (true or\n'
+                "        false) rather than an error or a decline. A caller enforcing visibility\n"
+                "        fails closed on every verdict for which this is False. An unknown(n)\n"
+                f'        verdict reports its fallback\'s fact (`{verdict.fallback}`): never an answer."""\n'
+                "        if not self.known:\n"
+                f"            return {_lit(fb_answered)}\n"
+                f"        return self in ({answered_names})"
+            ),
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "DefaultKind",
+            "default_kind",
+            "A column's default kind, `\"\"` meaning none.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append(
+        _str_enum_v2(
+            model,
+            "DiscoverQueryParam",
+            "discover_query_param",
+            "A query parameter of the SQL `discover_query` returns, which the caller binds\n"
+            "    when it runs the query.",
+        )
+    )
+    parts.append("")
+    parts.append("")
+    parts.append("class Reason:")
+    parts.append('    """The `transform_reason` values, kept as plain strings: a reason the description')
+    parts.append("    does not list is its unknown(n), the spelling kept as it came (rule r3), and takes")
+    parts.append('    the fallback\'s lossy fact."""\n')
+    for n, v, _ in reasons:
+        parts.append(f"    {n}: Final = {_dq(v)}")
+    parts.append("")
+    parts.append("    @staticmethod")
+    parts.append("    def known(reason: str) -> bool:")
+    parts.append('        """Whether the description lists `reason`; False for an unknown(n) (rule r3)."""')
+    parts.append("        return reason in _REASON_LOSSY")
+    parts.append("")
+    parts.append("    @staticmethod")
+    parts.append("    def lossy(reason: str) -> bool:")
+    parts.append('        """The description\'s `lossy` fact for `reason`; an unlisted reason reports')
+    parts.append(f'        the fallback `{reason_fb}`\'s."""')
+    parts.append(f"        return _REASON_LOSSY.get(reason, {fb_lossy})")
+    parts.append("")
+    parts.append("")
+    parts.append(
+        "_REASON_LOSSY: Final[dict[str, bool]] = "
+        + _dict_block([(_dq(v), _lit(f["lossy"])) for _, v, f in reasons])
+    )
+    parts.append("")
+    parts.append("")
+    parts.append("class Source:")
+    parts.append('    """The `value_src` values, kept as plain strings: a source the description does')
+    parts.append("    not list is its unknown(n), the spelling kept as it came (rule r3); a reader keeps")
+    parts.append('    it and decodes on."""\n')
+    for n, v, _ in sources:
+        parts.append(f"    {n}: Final = {_dq(v)}")
+    parts.append("")
+    parts.append("    @staticmethod")
+    parts.append("    def known(source: str) -> bool:")
+    parts.append('        """Whether the description lists `source`; False for an unknown(n) (rule r3)."""')
+    parts.append("        return source in _SOURCE_IS_STORED")
+    parts.append("")
+    parts.append("    @staticmethod")
+    parts.append("    def is_stored(source: str) -> bool:")
+    parts.append('        """The description\'s `is_stored` fact for `source`. The description does not yet')
+    parts.append('        say what an unknown(n) source reports (rule r3, "Facts without a fallback");')
+    parts.append('        until it does, an unlisted source is not stored."""')
+    parts.append("        return _SOURCE_IS_STORED.get(source, False)")
+    parts.append("")
+    parts.append("")
+    parts.append(
+        "_SOURCE_IS_STORED: Final[dict[str, bool]] = "
+        + _dict_block([(_dq(v), _lit(f["is_stored"])) for _, v, f in sources])
+    )
+    parts.append("")
+    parts.append("")
+    parts.append("class DocFlags(IntFlag):")
+    parts.append('    """The document groups a `rows` call asks for (`CHS_DOC_*`)."""\n')
+    parts.append(f"    VALUES = {c['CHS_DOC_VALUES'].value}")
+    parts.append(f"    TRANSFORMS = {c['CHS_DOC_TRANSFORMS'].value}")
+    parts.append(f"    DEFAULTS = {c['CHS_DOC_DEFAULTS'].value}")
+    parts.append(f"    ALL = {c['CHS_DOC_ALL'].value}")
+    parts.append("")
+    parts.append("")
+    parts.append(
+        f"# `chs_preview_batch`'s `export_format` for no export (`CHS_EXPORT_NONE`).\nEXPORT_NONE: Final = {c['CHS_EXPORT_NONE'].value}"
+    )
+    parts.append("")
+    parts.append("# Every enum the description defines, by its own name, and the Python type that")
+    parts.append("# spells it: rule r3's tests reach every one from here, so a new enum is covered")
+    parts.append("# without a hand-kept list.")
+    parts.append(
+        "DESCRIBED_VOCABULARIES: Final[dict[str, type]] = "
+        + _dict_block([(_dq(n), _PY_VOCAB[n]) for n in model.enums])
+    )
+    parts.append("")
+    parts.append("")
+    parts.append("def described_vocabulary(name: str, raw: str) -> tuple[bool, str] | None:")
+    parts.append('    """The value of the described enum `name` whose raw spelling is `raw` (an')
+    parts.append("    integer's decimal spelling for an int32 enum): whether the description lists it,")
+    parts.append("    and its raw spelling read back. None for a name the description does not define,")
+    parts.append('    or a spelling that is not an int32 enum\'s raw value."""')
+    parts.append("    cls = DESCRIBED_VOCABULARIES.get(name)")
+    parts.append("    if cls is None:")
+    parts.append("        return None")
+    parts.append("    if issubclass(cls, IntEnum):")
+    parts.append("        try:")
+    parts.append("            number = int(raw, 10)")
+    parts.append("        except ValueError:")
+    parts.append("            return None")
+    parts.append("        if not -(2**31) <= number < 2**31:")
+    parts.append("            return None")
+    parts.append("        value = cls(number)")
+    parts.append("        return value.known, str(int(value))")
+    parts.append("    if issubclass(cls, StrEnum):")
+    parts.append("        member = cls(raw)")
+    parts.append("        return member.known, str(member)")
+    parts.append("    return cls.known(raw), raw")
+    return "\n".join(parts) + "\n"
+
+
 def render_errmap(model: Model) -> str:
     sdk = model.sdk
     status_pairs = [
@@ -1059,8 +1472,12 @@ def loader_error_class(reason: str) -> type[_errors.ChtypesError]:
 
 
 def outputs(model: Model) -> list[Output]:
-    return [
-        Output(DECLS_PATH, content=render_decls(model)),
-        Output(ERRMAP_PATH, content=render_errmap(model)),
-        Output(VOCAB_PATH, content=render_vocab(model)),
-    ]
+    decls, errmap = render_decls(model), render_errmap(model)
+    if model.major != 1:
+        # The banner (the first line of each) is the model's own and already
+        # names the major; respelling never touches it (it carries none of
+        # _MAJOR_SPELLINGS' v1 spellings: "scripts/abi-v1/gen.py --major 2").
+        decls, errmap = _respell_all([decls, errmap], model.major)
+        decls = _v2_decls(model.major, model.stability, decls)
+    texts = [decls, errmap, render_vocab(model)]
+    return [Output(path, content=text) for path, text in zip(paths(model.major), texts, strict=True)]

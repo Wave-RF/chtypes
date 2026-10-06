@@ -1042,9 +1042,13 @@ def _selftest_v2() -> list[str]:
 
         # spec/binding-majors.json decides which major a binding's emitter runs
         # for, and --check agrees with it in both directions.
+        # Each plant moves only the bindings it names: the rest keep the map
+        # this commit carries, whichever bindings have converted.
+        real_map = dict(binding_majors(ROOT).by_binding)
+
         def set_map(**over):
             def mutate(w: Path) -> None:
-                doc = {"go": 2, "python": 1, "ts": 1, "rust": 1}
+                doc = dict(real_map)
                 doc.update(over)
                 (w / bmajors.MAP).write_text(json.dumps({k: v for k, v in doc.items() if v is not None}) + "\n")
 
@@ -1069,9 +1073,16 @@ def _selftest_v2() -> list[str]:
             None,
             (("--write",), ("--major", "2", "--write"), ("--check",), ("--major", "2", "--check")),
         )
+        # An emitter that generates only for ABI v1, given ABI v2 by the map: the
+        # plant strips python's emitter back to ABI v1 in the copy, so it holds
+        # whichever bindings have converted at this commit.
+        def python_v1_only(w: Path) -> None:
+            _edit(w / "scripts/abi-v1/emit/python.py", "\nMAJORS = (1, 2)\n", "\nMAJORS = (1,)\n")
+            set_map(python=2)(w)
+
         plant(
             "the map gives python a major its emitter does not generate for",
-            set_map(python=2),
+            python_v1_only,
             "spec/binding-majors.json says python speaks ABI v2, but emit/python.py generates only for",
         )
         plant("the map leaves a binding out", set_map(rust=None), "missing binding 'rust'")
