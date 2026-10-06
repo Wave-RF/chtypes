@@ -1,0 +1,250 @@
+[
+ {
+  "name": "ArtifactError",
+  "kind": "class"
+ },
+ {
+  "name": "ArtifactError.path",
+  "kind": "attribute"
+ },
+ {
+  "name": "ArtifactError.reason",
+  "kind": "attribute"
+ },
+ {
+  "name": "ArtifactIncompatibleError",
+  "kind": "class"
+ },
+ {
+  "name": "ArtifactMissingError",
+  "kind": "class"
+ },
+ {
+  "name": "ArtifactPinnedError",
+  "kind": "class"
+ },
+ {
+  "name": "BatchResult",
+  "kind": "class"
+ },
+ {
+  "name": "BatchResult.columns_sql",
+  "kind": "attribute"
+ },
+ {
+  "name": "BatchResult.errors",
+  "kind": "attribute"
+ },
+ {
+  "name": "BatchResult.framing",
+  "kind": "attribute"
+ },
+ {
+  "name": "BatchResult.partition_id",
+  "kind": "attribute"
+ },
+ {
+  "name": "BatchResult.rows_read",
+  "kind": "attribute"
+ },
+ {
+  "name": "BatchResult.spans",
+  "kind": "attribute"
+ },
+ {
+  "name": "BytesIn",
+  "kind": "attribute"
+ },
+ {
+  "name": "CallError",
+  "kind": "class"
+ },
+ {
+  "name": "CallError.ch_code",
+  "kind": "attribute"
+ },
+ {
+  "name": "ChtypesError",
+  "kind": "class"
+ },
+ {
+  "name": "ErrorCodeEntry",
+  "kind": "class"
+ },
+ {
+  "name": "ErrorCodeEntry.code",
+  "kind": "attribute"
+ },
+ {
+  "name": "ErrorCodeEntry.name",
+  "kind": "attribute"
+ },
+ {
+  "name": "ErrorCodeTable",
+  "kind": "class"
+ },
+ {
+  "name": "ErrorCodeTable.all",
+  "kind": "function"
+ },
+ {
+  "name": "ErrorCodeTable.name",
+  "kind": "function"
+ },
+ {
+  "name": "Format",
+  "kind": "class"
+ },
+ {
+  "name": "Format.CSV",
+  "kind": "value"
+ },
+ {
+  "name": "Format.JSON_EACH_ROW",
+  "kind": "value"
+ },
+ {
+  "name": "Format.ch_name",
+  "kind": "property"
+ },
+ {
+  "name": "Framing",
+  "kind": "class"
+ },
+ {
+  "name": "Framing.bom_skipped",
+  "kind": "attribute"
+ },
+ {
+  "name": "Framing.header",
+  "kind": "attribute"
+ },
+ {
+  "name": "Header",
+  "kind": "class"
+ },
+ {
+  "name": "Header.consumed",
+  "kind": "attribute"
+ },
+ {
+  "name": "Header.lines",
+  "kind": "attribute"
+ },
+ {
+  "name": "Library",
+  "kind": "class"
+ },
+ {
+  "name": "Library.compile_table",
+  "kind": "function"
+ },
+ {
+  "name": "Library.compile_table(settings=)",
+  "kind": "kw"
+ },
+ {
+  "name": "Library.validate_type",
+  "kind": "function"
+ },
+ {
+  "name": "Library.version",
+  "kind": "property"
+ },
+ {
+  "name": "Registry",
+  "kind": "class"
+ },
+ {
+  "name": "Registry(autofetch=)",
+  "kind": "kw"
+ },
+ {
+  "name": "Registry.for_version",
+  "kind": "function"
+ },
+ {
+  "name": "Registry.installed",
+  "kind": "function"
+ },
+ {
+  "name": "Resolved",
+  "kind": "class"
+ },
+ {
+  "name": "Resolved.library_path",
+  "kind": "attribute"
+ },
+ {
+  "name": "Resolved.warnings",
+  "kind": "attribute"
+ },
+ {
+  "name": "RowError",
+  "kind": "class"
+ },
+ {
+  "name": "RowError.msg",
+  "kind": "attribute"
+ },
+ {
+  "name": "RowError.row",
+  "kind": "attribute"
+ },
+ {
+  "name": "Schema",
+  "kind": "class"
+ },
+ {
+  "name": "Schema.close",
+  "kind": "function"
+ },
+ {
+  "name": "SchemaError",
+  "kind": "class"
+ },
+ {
+  "name": "Settings",
+  "kind": "attribute"
+ },
+ {
+  "name": "Span",
+  "kind": "class"
+ },
+ {
+  "name": "Span.len",
+  "kind": "attribute"
+ },
+ {
+  "name": "Span.off",
+  "kind": "attribute"
+ },
+ {
+  "name": "Verdict",
+  "kind": "class"
+ },
+ {
+  "name": "Verdict.FALSE",
+  "kind": "value"
+ },
+ {
+  "name": "Verdict.TRUE",
+  "kind": "value"
+ },
+ {
+  "name": "Verdict.answered",
+  "kind": "property"
+ },
+ {
+  "name": "Verdict.of",
+  "kind": "function"
+ },
+ {
+  "name": "setup",
+  "kind": "function"
+ },
+ {
+  "name": "setup(timezone=)",
+  "kind": "kw"
+ }
+]

@@ -1,0 +1,284 @@
+{
+ "default": [
+  {
+   "name": "ArtifactError",
+   "kind": "type"
+  },
+  {
+   "name": "ArtifactError.Code",
+   "kind": "field"
+  },
+  {
+   "name": "ArtifactError.Error",
+   "kind": "method"
+  },
+  {
+   "name": "ArtifactError.Path",
+   "kind": "field"
+  },
+  {
+   "name": "ArtifactError.Reason",
+   "kind": "field"
+  },
+  {
+   "name": "AsCallError",
+   "kind": "func"
+  },
+  {
+   "name": "BatchResult",
+   "kind": "type"
+  },
+  {
+   "name": "BatchResult.ColumnsSQL",
+   "kind": "field"
+  },
+  {
+   "name": "BatchResult.Errors",
+   "kind": "field"
+  },
+  {
+   "name": "BatchResult.Framing",
+   "kind": "field"
+  },
+  {
+   "name": "BatchResult.PartitionID",
+   "kind": "field"
+  },
+  {
+   "name": "BatchResult.RowsRead",
+   "kind": "field"
+  },
+  {
+   "name": "BatchResult.Spans",
+   "kind": "field"
+  },
+  {
+   "name": "CSV",
+   "kind": "const",
+   "type": "Format"
+  },
+  {
+   "name": "CallError",
+   "kind": "type"
+  },
+  {
+   "name": "CallError.ChCode",
+   "kind": "field"
+  },
+  {
+   "name": "CallError.Error",
+   "kind": "method"
+  },
+  {
+   "name": "CompileOption",
+   "kind": "type"
+  },
+  {
+   "name": "ErrArtifactIncompatible",
+   "kind": "var",
+   "type": "error"
+  },
+  {
+   "name": "ErrArtifactMissing",
+   "kind": "var",
+   "type": "error"
+  },
+  {
+   "name": "ErrArtifactPinned",
+   "kind": "var",
+   "type": "error"
+  },
+  {
+   "name": "ErrorCodeEntry",
+   "kind": "type"
+  },
+  {
+   "name": "ErrorCodeEntry.Code",
+   "kind": "field"
+  },
+  {
+   "name": "ErrorCodeEntry.Name",
+   "kind": "field"
+  },
+  {
+   "name": "ErrorCodeTable",
+   "kind": "type"
+  },
+  {
+   "name": "ErrorCodeTable.All",
+   "kind": "method"
+  },
+  {
+   "name": "ErrorCodeTable.Name",
+   "kind": "method"
+  },
+  {
+   "name": "ExportNone",
+   "kind": "const",
+   "type": "Format"
+  },
+  {
+   "name": "Format",
+   "kind": "type"
+  },
+  {
+   "name": "Format.ChName",
+   "kind": "method"
+  },
+  {
+   "name": "Framing",
+   "kind": "type"
+  },
+  {
+   "name": "Framing.BomSkipped",
+   "kind": "field"
+  },
+  {
+   "name": "Framing.Header",
+   "kind": "field"
+  },
+  {
+   "name": "Header",
+   "kind": "type"
+  },
+  {
+   "name": "Header.Consumed",
+   "kind": "field"
+  },
+  {
+   "name": "Header.Lines",
+   "kind": "field"
+  },
+  {
+   "name": "JSONEachRow",
+   "kind": "const",
+   "type": "Format"
+  },
+  {
+   "name": "Library",
+   "kind": "type"
+  },
+  {
+   "name": "Library.CompileTable",
+   "kind": "method"
+  },
+  {
+   "name": "Library.ValidateType",
+   "kind": "method"
+  },
+  {
+   "name": "Library.Version",
+   "kind": "field"
+  },
+  {
+   "name": "NewRegistry",
+   "kind": "func"
+  },
+  {
+   "name": "OpenLinked",
+   "kind": "func"
+  },
+  {
+   "name": "Registry",
+   "kind": "type"
+  },
+  {
+   "name": "Registry.For",
+   "kind": "method"
+  },
+  {
+   "name": "Registry.Installed",
+   "kind": "method"
+  },
+  {
+   "name": "Resolved",
+   "kind": "type"
+  },
+  {
+   "name": "Resolved.LibraryPath",
+   "kind": "field"
+  },
+  {
+   "name": "Resolved.Warnings",
+   "kind": "field"
+  },
+  {
+   "name": "RowError",
+   "kind": "type"
+  },
+  {
+   "name": "RowError.Msg",
+   "kind": "field"
+  },
+  {
+   "name": "RowError.Row",
+   "kind": "field"
+  },
+  {
+   "name": "Schema",
+   "kind": "type"
+  },
+  {
+   "name": "Schema.Close",
+   "kind": "method"
+  },
+  {
+   "name": "SchemaError",
+   "kind": "type"
+  },
+  {
+   "name": "SchemaError.CallError",
+   "kind": "field"
+  },
+  {
+   "name": "SchemaError.Error",
+   "kind": "method"
+  },
+  {
+   "name": "Setup",
+   "kind": "func"
+  },
+  {
+   "name": "SetupOptions",
+   "kind": "type"
+  },
+  {
+   "name": "SetupOptions.Timezone",
+   "kind": "field"
+  },
+  {
+   "name": "Span",
+   "kind": "type"
+  },
+  {
+   "name": "Span.Len",
+   "kind": "field"
+  },
+  {
+   "name": "Span.Off",
+   "kind": "field"
+  },
+  {
+   "name": "Verdict",
+   "kind": "type"
+  },
+  {
+   "name": "Verdict.Answered",
+   "kind": "method"
+  },
+  {
+   "name": "VerdictFalse",
+   "kind": "const",
+   "type": "Verdict"
+  },
+  {
+   "name": "VerdictTrue",
+   "kind": "const",
+   "type": "Verdict"
+  },
+  {
+   "name": "WithSettings",
+   "kind": "func"
+  }
+ ]
+}

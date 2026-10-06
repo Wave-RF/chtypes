@@ -55,6 +55,12 @@
           }
         }
       ]
+    },
+    {
+      "id": "date-ttl-follows-call-session-timezone",
+      "heading": "A Date-valued TTL follows the call's session_timezone; a real server uses its own zone",
+      "note": "no machine check is expressible in this register's schema: the case needs a per-call session_timezone and the storage transforms' ttl_expired/ttl_column_expired, neither of which the retired v0 checker could drive. The v1 replacement of the checker must add both before this entry can carry a check. Retirement: on the artifact producer's measured re-run of this differential against the production build that ships the fix, never on CI.",
+      "checks": []
     }
   ]
 }

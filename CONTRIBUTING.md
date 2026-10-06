@@ -25,6 +25,22 @@ This repository is public, and two more jobs block on that being true. `scripts/
 
 Run any of these locally with the same command CI uses; each job's step name in `.github/workflows/ci.yml` names the exact invocation.
 
+## Changing a public name
+
+`docs/reference/bindings-v1.md` is the one list of every binding's public names, and CI's `parity-surface` job (`scripts/parity-surface.py`, public issue #436) holds all four bindings to it. The job reads the doc's tables (§2's operations and call options, §3's types, objects and vocabularies, §4's errors, §5's documents) and each binding's real exported surface, read by the same pinned tools as `api-surface`. It fails on three things:
+
+- a name the doc gives that a binding lacks;
+- a name a binding spells differently from the doc's column for that language;
+- a public name in a binding that the doc does not give. Principle 2: a convenience that exists in one binding exists in all four or in none.
+
+So a public name changes in this order:
+
+1. **The doc first.** Add, rename or remove the name in `bindings-v1.md`, in every language column, in the same pull request as the code. §5's fields are canonical `snake_case`, spelled per language by principle 2's rule, including its list of Go initialisms.
+2. **Then all four bindings, in the same pull request.** The job compares every binding, so a name added to one binding alone fails.
+3. **Or an allowlist entry, with a reason.** A deliberate difference goes in `scripts/parity-surface-allow.json` as an `extra`, `missing` or `spelling` entry, with a reason a reviewer can check against the code. Go's `ColumnsOption` is one example: Go's functional options need a named type, and the other bindings have a field. An entry that no longer matches anything fails the job as stale, so remove it with the difference it explained. An entry that hides a real gap, not a deliberate difference, also cites the public issue the fix waits on (`"issue": 500`), and `--check-issues` flags it once that issue is closed.
+
+A vocabulary's members come from the description (`spec/abi-v1/abi.json`, through `scripts/abi-v1/gen.py`). The job checks that each binding has exactly the description's members and that the four agree, so a vocabulary changes in the description, never in one binding. A language's own protocol is not a name: Python's dunder methods, Rust's trait implementations, TypeScript's constructors and Go's `Error`/`String`/`Unwrap`/`Is` methods. Python's keyword-only parameters are names, because the doc's Python signatures are where its call options live. `scripts/parity-surface.py expected` prints the names the doc gives each binding. `--selftest` plants a missing name, a different spelling and an undocumented name in each binding and requires each one to fail. The job is report-only for now; making it a required check is the maintainers' call once it has been green on main.
+
 ## Changelog entries
 
 Most CHANGELOG bullets describe themselves. One has a fixed shape, because its criterion lives elsewhere and must not drift into a second, competing description: an **enforcement-gate lift** on the filter surface (`docs/limitations.md` → [Filters are for comparison, not enforcement, for now](docs/limitations.md#filters-are-for-comparison-not-enforcement-for-now)).

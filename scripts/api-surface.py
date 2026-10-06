@@ -336,7 +336,8 @@ _UNFOLLOWED = re.compile(r'Unable to follow symbol for "([A-Za-z_$][\w$]*)"')
 _MAX_SHIMS = 40
 
 
-def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str], label: str) -> list[str]:
+def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str], label: str,
+                         include_forgotten: bool = True) -> list[str]:
     out_dir, tmp_dir = ctx.scratch("ts", label, "report"), ctx.scratch("ts", label, "temp")
     # Every generated file sits beside the project's package.json: api-extractor
     # finds that from the config file's own folder (measured: from anywhere
@@ -358,7 +359,11 @@ def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str],
                 "files": [str(entry), str(shim_path)],
             }},
             "apiReport": {"enabled": True, "reportFileName": "api", "reportFolder": str(out_dir),
-                          "reportTempFolder": str(tmp_dir), "includeForgottenExports": True},
+                          "reportTempFolder": str(tmp_dir),
+                          # Off only for scripts/parity-surface.py, which needs
+                          # the entry point's own export list: a forgotten
+                          # export is printed exactly like an exported one.
+                          "includeForgottenExports": include_forgotten},
             "docModel": {"enabled": False},
             "dtsRollup": {"enabled": False},
             "tsdocMetadata": {"enabled": False},

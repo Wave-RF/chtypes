@@ -1,0 +1,37 @@
+{
+  "_comment": "Test data for scripts/parity-surface.py --selftest: one allowlisted difference of each kind, in each binding.",
+  "entries": [
+    {
+      "binding": "go",
+      "kind": "extra",
+      "names": ["ExportNone"],
+      "reason": "the export-off constant, typed Format so a call can take it; the fixture's planted vocabulary extra"
+    },
+    {
+      "binding": "python",
+      "kind": "extra",
+      "names": ["Verdict.of"],
+      "reason": "a generated decoder from the document's string; the fixture's Python-only convenience"
+    },
+    {
+      "binding": "ts",
+      "kind": "spelling",
+      "doc": "Format.chName",
+      "as": "formatChName",
+      "reason": "a const object cannot carry a method, so the fact is a free function; the fixture's spelling difference"
+    },
+    {
+      "binding": "ts",
+      "kind": "spelling",
+      "doc": "Verdict.answered",
+      "as": "verdictAnswered",
+      "reason": "a const object cannot carry a method, so the fact is a free function; the fixture's spelling difference"
+    },
+    {
+      "binding": "rust",
+      "kind": "extra",
+      "names": ["ErrorCodeTable.len"],
+      "reason": "clippy's len_without_is_empty idiom; the fixture's Rust-only name (is_empty is left out on purpose)"
+    }
+  ]
+}
