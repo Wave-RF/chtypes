@@ -40,6 +40,7 @@
         "ArtifactError.Request",
         "ArtifactError.Source"
       ],
+      "issue": 500,
       "reason": "Go has one ArtifactError for the loader's refusals and the fetch layer's errors (§4: 'the fetch layer's and the loader's errors are one family'), so it also carries the fetch error's message, the platform, request and source it was answering, and the wrapped cause (Unwrap). §4 names only the refusal's fields."
     },
     {
@@ -60,6 +61,7 @@
         "CodeSourceUnauthorized",
         "CodeSourceUnreachable"
       ],
+      "issue": 500,
       "reason": "The typed values of ArtifactError.Code, which §4's Go column names (`*ArtifactError` with `Code` CHTYPES_…): one constant per code in spec/fetch-v1/constants.json, re-exported from the fetch layer, with the code's CLI exit status and sentinel. Python keeps the same codes as CODE_* constants (its own entry); §4 gives no spelling for them."
     },
     {
@@ -135,6 +137,7 @@
         "SourceUnauthorizedError.code",
         "SourceUnreachableError.code"
       ],
+      "issue": 500,
       "reason": "The fetch codes of spec/fetch-v1/constants.json, and each artifact class's code: the attribute §4's Go column calls ArtifactError's `Code` (Go's own entry). §4's Python column names the classes only."
     },
     {
@@ -270,6 +273,7 @@
       "names": [
         "Error.code"
       ],
+      "issue": 500,
       "reason": "The fetch code of an artifact variant (spec/fetch-v1/constants.json): the Rust spelling of Go's ArtifactError.Code and Python's `.code` (their own entries). §4 gives no Rust spelling."
     },
     {
@@ -301,6 +305,7 @@
       "names": [
         "Refusal.detail"
       ],
+      "issue": 500,
       "reason": "Rust's loader refusal carries a free-text detail beside §4's reason, path, want and got (noted in the 1.0 comparison, #435). It is Rust-only, carried as found: removing a published field is a breaking change."
     },
     {
@@ -403,6 +408,7 @@
         "ArtifactError.code",
         "ArtifactError.exitStatus"
       ],
+      "issue": 500,
       "reason": "The fetch code (spec/fetch-v1/constants.json) and its CLI exit status: TypeScript's spelling of Go's ArtifactError.Code and ErrorCode.ExitCode, Python's `.code` and Rust's Error.code (their own entries). §4 gives no TypeScript spelling."
     },
     {
