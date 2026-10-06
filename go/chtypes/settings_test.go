@@ -93,11 +93,11 @@ func TestOptionsApply(t *testing.T) {
 func resetSetup(t *testing.T) {
 	t.Helper()
 	setup.mu.Lock()
-	setup.recorded, setup.opts = false, SetupOptions{}
+	setup.recorded, setup.latched, setup.opts = false, false, SetupOptions{}
 	setup.mu.Unlock()
 	t.Cleanup(func() {
 		setup.mu.Lock()
-		setup.recorded, setup.opts = false, SetupOptions{}
+		setup.recorded, setup.latched, setup.opts = false, false, SetupOptions{}
 		setup.mu.Unlock()
 	})
 }

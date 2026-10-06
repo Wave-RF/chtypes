@@ -10,10 +10,14 @@
 //!    different zone or different defaults is [`Error::Usage`] naming both; the
 //!    first setup stands. This is the library's own process-once rule for
 //!    `chs_initialize`, applied here while there is no image yet to ask.
-//! 2. The first open commits it. If [`setup`] was never called, the first open
-//!    records the empty setup: the empty zone, which the library reads as
-//!    `UTC`, and no defaults. From then on [`setup`] succeeds only with exactly
-//!    the setup in effect. Call [`setup`] first.
+//! 2. It latches on the first successful load step 7. If [`setup`] was never
+//!    called, the first open records the empty setup: the empty zone, which
+//!    the library reads as `UTC`, and no defaults. Once an image completes
+//!    step 7 (`chs_initialize`, then `chs_set_defaults` when there are
+//!    defaults), [`setup`] succeeds only with exactly the setup in effect. If
+//!    step 7 fails before any image has completed it, the record is cleared,
+//!    so a corrected [`setup`] is accepted and the next open runs step 7 with
+//!    it. Call [`setup`] first.
 //! 3. There is no public setter for defaults during traffic.
 
 use std::sync::Mutex;
@@ -42,7 +46,19 @@ pub(crate) struct Recorded {
     pub(crate) defaults: Option<Vec<u8>>,
 }
 
-static STATE: Mutex<Option<Recorded>> = Mutex::new(None);
+/// The setup guard: the record, and whether any image has completed load step
+/// 7 under it. Every open holds the image list's lock from its commit to its
+/// settle (`crate::library::open_image`), so the record a load ran under is the
+/// one it settles.
+static STATE: Mutex<State> = Mutex::new(State {
+    recorded: None,
+    latched: false,
+});
+
+struct State {
+    recorded: Option<Recorded>,
+    latched: bool,
+}
 
 fn recorded_of(options: &SetupOptions) -> Result<Recorded> {
     let timezone = options.timezone.clone().unwrap_or_default().into_bytes();
@@ -84,9 +100,9 @@ fn describe(r: &Recorded) -> String {
 pub fn setup(options: SetupOptions) -> Result<()> {
     let wanted = recorded_of(&options)?;
     let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
-    match &*state {
+    match &state.recorded {
         None => {
-            *state = Some(wanted);
+            state.recorded = Some(wanted);
             Ok(())
         }
         Some(current) if *current == wanted => Ok(()),
@@ -98,16 +114,31 @@ pub fn setup(options: SetupOptions) -> Result<()> {
     }
 }
 
-/// The first open commits the setup in effect, recording the empty one when
-/// [`setup`] was never called.
+/// An open commits the setup in effect before step 7, recording the empty one
+/// when [`setup`] was never called.
 pub(crate) fn commit() -> Recorded {
     let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
     state
+        .recorded
         .get_or_insert_with(|| Recorded {
             timezone: Vec::new(),
             defaults: None,
         })
         .clone()
+}
+
+/// How load step 7 ended, under the setup guard. A success latches the setup
+/// in effect. A failure before any image has completed step 7 clears the
+/// record, so [`setup`] accepts a corrected setup; once the setup has latched,
+/// a failure changes nothing (the library's own process-once rule answers a
+/// different zone on an image that already has one).
+pub(crate) fn settle(completed: bool) {
+    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    if completed {
+        state.latched = true;
+    } else if !state.latched {
+        state.recorded = None;
+    }
 }
 
 #[cfg(test)]

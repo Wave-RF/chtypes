@@ -12,6 +12,10 @@ The four bindings in this repository are released together and give one answer, 
 
 - `Schema.Rows` decodes its result with far fewer allocations, so it scales across goroutines (#456). It reads the batch document in one streaming pass into typed values, with no generic tree and no per-row path string, and falls back to the strict generic reader for any document it will not judge itself (an unknown key, a duplicate key, a value of the wrong type), so every refusal and its message are unchanged. On a real 100-row document the decode went from 4,476 to 173 allocations at `doc_flags` 0 and from 56,822 to 2,641 at `doc_flags` 7. The decoded values are identical, and no exported name changes.
 
+### Fixed
+
+- `Setup` now latches only once an image completes load step 7 (#458). A zone the library refuses, such as `Setup(SetupOptions{Timezone: "Not/AZone"})`, used to fix the process setup at the first open: every later open failed with ClickHouse's code 36, and a corrected `Setup` was a `*UsageError` until the process restarted. Now, if step 7 (`chs_initialize`, then `chs_set_defaults` when there are defaults) fails before any image has completed it, the setup record is cleared. That open still returns the library's own error, a corrected `Setup` is accepted, and the next open runs step 7 again with it, on the same image too: a failed step 7 is never remembered (`OpenUnverified` and `Registry.For` alike). Once an image has completed step 7, a different setup is still a `*UsageError`. No name or signature changes. All four bindings run the same case, `tests/fixtures/abi-v1/setup-cases.json`, and the rule is `docs/reference/bindings-v1.md` section 6.
+
 ## [1.0.1] — 2026-10-04
 
 ### Fixed

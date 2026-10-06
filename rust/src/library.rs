@@ -99,14 +99,24 @@ pub(crate) fn open_image(
         return Ok(Arc::clone(&image.library));
     }
 
+    // The image list's lock is held from the commit to the settle, so the
+    // record this load runs under is the one it settles, and `setup` cannot
+    // change it in between (it refuses a different setup while one is
+    // recorded). Only a step 7 failure (`LoadError::Call`) clears the record,
+    // and a failed load is never pushed, so the next open runs step 7 again.
     let setup = setup::commit();
     let loaded = loader::load(LoadInput {
         library_path: &canonical,
         predicate,
         timezone: &setup.timezone,
         defaults: setup.defaults.as_deref(),
-    })
-    .map_err(|e| match e {
+    });
+    match &loaded {
+        Ok(_) => setup::settle(true),
+        Err(LoadError::Call(_)) => setup::settle(false),
+        Err(LoadError::Refused(_)) => {}
+    }
+    let loaded = loaded.map_err(|e| match e {
         LoadError::Refused(r) => Error::from_refusal(r),
         LoadError::Call(c) => Error::from_call(c),
     })?;

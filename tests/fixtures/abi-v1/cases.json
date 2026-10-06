@@ -186,7 +186,7 @@
     {
       "args": [
         {
-          "bytes_hex": "6100ff7a"
+          "bytes_hex": ""
         }
       ],
       "expect": {
@@ -2347,15 +2347,40 @@
     {
       "args": [
         {
+          "bytes_hex": "4e6f742f415a6f6e65"
+        }
+      ],
+      "expect": {
+        "error": {
+          "ch_code": 36,
+          "ch_name": "BAD_ARGUMENTS",
+          "column": "",
+          "message": "Cannot load time zone Not/AZone"
+        },
+        "status": "CHS_REJECTED"
+      },
+      "fn": "chs_initialize",
+      "id": "image_zone.bad_zone_refused",
+      "kind": "status"
+    },
+    {
+      "args": [
+        {
           "bytes_hex": "4575726f70652f4265726c696e"
         }
       ],
       "expect": {
-        "status": "CHS_OK"
+        "error": {
+          "ch_code": 0,
+          "ch_name": "",
+          "column": "",
+          "message": "the image zone is already set, to a different spelling"
+        },
+        "status": "CHS_INVALID_ARGUMENT"
       },
       "fn": "chs_initialize",
-      "id": "image_zone.initialize",
-      "kind": "echo"
+      "id": "image_zone.different_spelling_refused",
+      "kind": "status"
     },
     {
       "args": [

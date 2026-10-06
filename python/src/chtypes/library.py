@@ -56,7 +56,9 @@ def _image_key(path: str) -> tuple[int, int]:
 def open_image(path: str, predicate: object, resolved: object | None) -> Library:
     """Open (or find) the image at `path`, verified against `predicate`.
 
-    A new image runs loader steps 1 to 7 once, under the setup in effect. An
+    A new image runs loader steps 1 to 7 once, under the setup in effect, and
+    tells the setup guard how step 7 ended (`_setup.settle`). A failed load is
+    never cached, so the next open of the same image runs step 7 again. An
     image already open is still checked against this signed statement (steps 1,
     4 and 5): a mismatch refuses this request and leaves the image open for the
     requests it did match.
@@ -73,6 +75,7 @@ def open_image(path: str, predicate: object, resolved: object | None) -> Library
             predicate,  # type: ignore[arg-type]
             timezone=state.zone_bytes(),
             defaults=state.defaults_json(),
+            settle=_setup.settle,
         )
         library = Library(load, resolved)
         _IMAGES[key] = library
@@ -98,6 +101,7 @@ def open_unverified(path: str | os.PathLike[str], *, allow: bool = False) -> Lib
             allow=allow,
             timezone=state.zone_bytes(),
             defaults=state.defaults_json(),
+            settle=_setup.settle,
         )
         library = Library(load, None)
         _IMAGES[_image_key(spelled)] = library

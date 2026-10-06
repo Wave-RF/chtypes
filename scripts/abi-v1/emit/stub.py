@@ -58,6 +58,11 @@ exercised against real memory).
     instead gets a freshly minted handle of that kind, holding whichever
     const handle input parameters match its `holds` list (by kind; today
     that is always exactly one, enforced at generation time).
+  * THE IMAGE ZONE. `chs_initialize` keeps the library's process-once rule
+    for real (_stubshared.IMAGE_ZONE): one sentinel bad zone is refused with
+    CHS_REJECTED and commits nothing, the first other spelling is committed,
+    and after that the same spelling is CHS_OK and a different one is
+    CHS_INVALID_ARGUMENT, per image (each dlopen'd copy has its own state).
   * `chs_live_handles` reports this image's own live count per handle kind
     from five atomic counters (incremented on mint, decremented the instant
     a handle's refcount reaches zero), never by walking a registry.
@@ -811,6 +816,53 @@ def _one_create(fn) -> list[str]:
     ]
 
 
+def _image_zone(fn) -> list[str]:
+    """The stub's stand-in for the image zone's process-once rule
+    (_stubshared.IMAGE_ZONE): after the input checks and any status
+    injection, the sentinel bad zone is refused and commits nothing; the
+    first other spelling is committed; after that, the same spelling is
+    accepted and a different one is refused. Only the function the rule names
+    gets it."""
+    rule = _stubshared.IMAGE_ZONE
+    if fn.name != rule["fn"]:
+        return []
+    p = rule["param"]
+    if not any(q.name == p and q.kind == "bytes_in" for q in fn.params):
+        raise ValueError(f"{fn.name}: _stubshared.IMAGE_ZONE names {p!r}, which is not one of its bytes_in parameters")
+    return [
+        "    {",
+        "        /* the image zone's process-once rule: see scripts/abi-v1/emit/_stubshared.py IMAGE_ZONE */",
+        "        static atomic_flag held_lock = ATOMIC_FLAG_INIT;",
+        "        static uint8_t *held = NULL;",
+        "        static size_t held_len = 0;",
+        "        static int held_set = 0;",
+        f"        static const char bad[] = {_c_str(rule['bad_zone'])};",
+        f"        if ({p}_len == sizeof(bad) - 1 && memcmp({p}, bad, sizeof(bad) - 1) == 0) {{",
+        f"            static const char name[] = {_c_str(rule['ch_name'])};",
+        f"            static const char msg[] = {_c_str(rule['message'])};",
+        f"            chs_stub_set_err(err, chs_stub_make_error({rule['status']}, {rule['ch_code']}, name, sizeof(name) - 1, msg, sizeof(msg) - 1));",
+        f"            return {rule['status']};",
+        "        }",
+        "        int conflict = 0;",
+        "        while (atomic_flag_test_and_set(&held_lock)) { /* spin: the critical section is a few instructions */ }",
+        "        if (!held_set) {",
+        f"            held = {p}_len ? (uint8_t *) malloc({p}_len) : NULL;",
+        f"            if (held) memcpy(held, {p}, {p}_len);",
+        f"            held_len = {p}_len;",
+        "            held_set = 1;",
+        f"        }} else if (held_len != {p}_len || ({p}_len > 0 && memcmp(held, {p}, {p}_len) != 0)) {{",
+        "            conflict = 1;",
+        "        }",
+        "        atomic_flag_clear(&held_lock);",
+        "        if (conflict) {",
+        f"            static const char msg[] = {_c_str(rule['conflict_message'])};",
+        f"            chs_stub_set_err(err, chs_stub_make_error({rule['conflict_status']}, 0, \"\", 0, msg, sizeof(msg) - 1));",
+        f"            return {rule['conflict_status']};",
+        "        }",
+        "    }",
+    ]
+
+
 def _c_bytes_lit(data: bytes) -> str:
     """A C string literal for arbitrary bytes, every byte octal-escaped."""
     return '"' + "".join(f"\\{b:03o}" for b in data) + '"'
@@ -969,6 +1021,7 @@ def _gen_generic(model, fn) -> str:
     body += _input_checks(model, fn)
     body += _status_injection(fn)
     body += _one_create(fn)
+    body += _image_zone(fn)
     body += _document_mode(model, fn)
     body += _fill_outputs(model, fn)
     err_param = next((p for p in fn.params if p.kind == "out_error"), None)

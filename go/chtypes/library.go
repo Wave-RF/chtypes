@@ -5,6 +5,7 @@ package chtypes
 // exactly one ABI call and takes no lock.
 
 import (
+	"errors"
 	"path/filepath"
 	"sync"
 
@@ -46,18 +47,29 @@ func imageKey(kind, path string) string {
 
 // openImage loads (or returns the already loaded) image for key. Every image is
 // set up at load step 7, once, under the process setup, which the first open
-// commits.
+// records. images.mu is held from the commit to the settle, so every open
+// loads under the record it settles, and Setup cannot change that record in
+// between (it refuses a different setup while one is recorded). A step 7
+// failure is the loader's *abi1.CallError, and only that clears the record;
+// a failed load is never cached, so the next open runs step 7 again.
 func openImage(key string, load func(zone, defaults []byte) (*abi1.Table, error), path string, resolved *Resolved) (*Library, error) {
+	images.mu.Lock()
+	defer images.mu.Unlock()
 	zone, defaults, err := commitSetup()
 	if err != nil {
 		return nil, err
 	}
-	images.mu.Lock()
-	defer images.mu.Unlock()
 	if l := images.m[key]; l != nil {
 		return l, nil
 	}
 	tbl, err := load(zone, defaults)
+	var step7 *abi1.CallError
+	switch {
+	case err == nil:
+		settleSetup(true)
+	case errors.As(err, &step7):
+		settleSetup(false)
+	}
 	if err != nil {
 		return nil, loadError(err)
 	}

@@ -68,8 +68,12 @@ added beyond the per-function shapes:
     (a "status" case), a trailing semicolon accepted (an "echo" case); the
     stub's stand-in and this case both read `_stubshared.ONE_CREATE`;
   * the per-call zone: echo cases whose settings carry `session_timezone`,
-    proving the bytes reach the library unmodified, and chs_initialize with
-    a zone name;
+    proving the bytes reach the library unmodified;
+  * the image zone's process-once rule (`_stubshared.IMAGE_ZONE`): the
+    sentinel bad zone refused with ClickHouse's code, and a different
+    spelling refused as CHS_INVALID_ARGUMENT, on the image the runner's own
+    loader set up under the empty zone (LOADED_ZONE, which is also what the
+    chs_initialize echo case passes);
   * "lifecycle" cases: ordered `steps` (`let` a handle from a call, `free`
     a bound handle, `call` with an `expect`, `live_delta` over
     chs_live_handles against the counts read when the case began), proving
@@ -233,8 +237,22 @@ def _buf_out_params(fn) -> list:
     return [p for p in fn.params if p.kind == "out_handle" and p.type == BUF_HANDLE]
 
 
+# The image zone every runner's call-level cases meet: each runner loads the
+# "ok" stub through its own loader under the empty setup before it runs a
+# call case, so step 7 has already committed the empty spelling on that image
+# (_stubshared.IMAGE_ZONE: after that, the same spelling is accepted and any
+# other is refused). The echo case of the function the rule names therefore
+# passes this spelling, not ADVERSARIAL_BYTES, which the rule would refuse.
+LOADED_ZONE = b""
+
+
 def _echo_case(fn) -> dict:
     args, echo_args = _build_args(fn)
+    zone = _stubshared.IMAGE_ZONE
+    if fn.name == zone["fn"]:
+        i = next(k for k, p in enumerate([p for p in fn.params if not p.is_out]) if p.name == zone["param"])
+        args[i] = {"bytes_hex": LOADED_ZONE.hex()}
+        echo_args[i] = _stubshared.echo_bytes_field(LOADED_ZONE)
     outputs = {}
     for p in _buf_out_params(fn):
         outputs[p.name] = {"fn": fn.name, "out": p.name, "args": echo_args}
@@ -338,12 +356,52 @@ def _decision_cases(model) -> list[dict]:
             "chs_filter_eval_body",
             {"body": ZONE_BODY, "settings": ZONE_SETTINGS},
         ),
-        _overridden_echo_case(model, "image_zone.initialize", "chs_initialize", {"timezone": b"Europe/Berlin"}),
+        *_image_zone_cases(model),
     ]
     cases += _document_cases(model)
     cases += _lifecycle_cases(model)
     cases += _concurrent_cases(model)
     return cases
+
+
+def _image_zone_cases(model) -> list[dict]:
+    """The image zone's process-once rule at call level (_stubshared.IMAGE_ZONE),
+    on the image every runner already set up under the empty zone (LOADED_ZONE):
+    the sentinel bad zone is ClickHouse's refusal with every field intact, and a
+    different good spelling is CHS_INVALID_ARGUMENT. Neither commits anything,
+    so neither depends on the order the cases run in. That a refusal leaves a
+    FRESH image free to take a good zone is the public-API setup case's to
+    prove (emit/setup_cases.py), since only a fresh image can show it."""
+    rule = _stubshared.IMAGE_ZONE
+    fn = model.function(rule["fn"])
+    inputs = [p for p in fn.params if not p.is_out]
+    if [p.name for p in inputs] != [rule["param"]]:
+        raise ValueError(f"{fn.name}: _image_zone_cases expects exactly one input, {rule['param']!r}")
+    for status in (rule["status"], rule["conflict_status"]):
+        if status not in fn.may_return:
+            raise ValueError(f"{fn.name}: {status} is not in its may_return")
+    return [
+        {
+            "id": "image_zone.bad_zone_refused",
+            "kind": "status",
+            "fn": fn.name,
+            "args": [{"bytes_hex": rule["bad_zone"].encode().hex()}],
+            "expect": {
+                "status": rule["status"],
+                "error": {"ch_code": rule["ch_code"], "ch_name": rule["ch_name"], "message": rule["message"], "column": ""},
+            },
+        },
+        {
+            "id": "image_zone.different_spelling_refused",
+            "kind": "status",
+            "fn": fn.name,
+            "args": [{"bytes_hex": b"Europe/Berlin".hex()}],
+            "expect": {
+                "status": rule["conflict_status"],
+                "error": {"ch_code": 0, "ch_name": "", "message": rule["conflict_message"], "column": ""},
+            },
+        },
+    ]
 
 
 # The byte_strings cases (document mode, _stubshared.DOC_TEMPLATES): each
