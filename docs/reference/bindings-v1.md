@@ -1,6 +1,6 @@
 # The v1 binding API: one shape in four languages
 
-> **Status: in progress, on the `v1` branch only.** `main` still ships 0.5.x against the 0.x binding contract, which stays the contract for that line and is kept in its release history. This page is the public API every binding builds over the ABI v1 C layer ([`abi-v1.md`](abi-v1.md)) and the v1 fetch layer ([`fetch-v1.md`](../guides/fetch-v1.md)). It is the build list for the four binding lanes that replace the v0 public API on this branch, and it replaces the 0.x binding contract at the switch.
+This page is the public API every 1.x binding builds over the ABI v1 C layer ([`abi-v1.md`](abi-v1.md)) and the v1 fetch layer ([`fetch-v1.md`](../guides/fetch-v1.md)). It replaced the 0.x binding contract, which is kept in the 0.x release history.
 
 ## 1. Scope and principles
 

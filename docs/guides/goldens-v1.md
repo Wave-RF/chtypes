@@ -1,6 +1,6 @@
 # The v1 goldens — one document per release, one comparator, four thin runners
 
-> **Status: in progress, on the `v1` branch only.** The per-binding runners are separate lanes and may not have landed; `.github/workflows/v1-goldens.yml` fails a leg whose runner is missing rather than skipping it.
+> **Status: live.** Every binding's runner has landed; `.github/workflows/v1-goldens.yml` fails a leg whose runner is missing rather than skipping it.
 
 A goldens document is what the release's own library returned for a fixed set of inputs, published by the artifact producer once per release (one exact ClickHouse version, one build) and attached unchanged as an OCI referrer of each platform manifest (artifactType `application/vnd.wavehouse.chtypes.goldens.v1`). It proves one thing: that a binding **delivers the library's documents faithfully**. Whether the library matches a ClickHouse server is the producer's rigs' job, not this page's.
 
