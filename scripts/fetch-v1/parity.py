@@ -47,7 +47,7 @@ WHAT "PASS" MEANS, for every enrolled binding:
      "registry" (the v1-network job's own report).
 
 The base ref must be readable (a missing base FAILS, it is never skipped). The enrolled set may only grow between any two runs this script is told
-to compare (`--base-ref`, default "origin/v1"): a binding disappearing
+to compare (`--base-ref`, default "origin/main"): a binding disappearing
 from spec/fetch-v1/enrolled/ is refused outright, never silently treated
 as "that binding opted out". With zero bindings enrolled, this script
 still parses cases.json and validates its own internal consistency, prints
@@ -395,7 +395,7 @@ def main() -> int:
     ap.add_argument("--cases", type=Path, default=DEFAULT_CASES)
     ap.add_argument("--enrolled-dir", type=Path, default=DEFAULT_ENROLLED_DIR)
     ap.add_argument("--reports-dir", type=Path)
-    ap.add_argument("--base-ref", default="origin/v1")
+    ap.add_argument("--base-ref", default="origin/main")
     ap.add_argument("--no-base-ref", action="store_true", help="skip the enrolled-shrink check entirely")
     args = ap.parse_args()
 

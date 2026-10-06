@@ -30,14 +30,14 @@ name: v1
 
 on:
   pull_request:
-    branches: [main, v1]
+    branches: [main]
   # The merge queue's candidate combination must run every required context
   # here too, or the queue waits forever: v1 and v1-abi's contexts are required
   # on main once v1 merges (nothing below reads the event's base or head).
   merge_group:
     types: [checks_requested]
   push:
-    branches: [main, v1]
+    branches: [main]
   workflow_dispatch:
     inputs:
       registry_base:
@@ -647,14 +647,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The enrolled-shrink check reads origin/v1, and a pull request's
+      # The enrolled-shrink check compares against the base branch: a pull
+      # request's own base, or main for a merge-queue group or a push (main
+      # is the release branch since v1 merged into it). A pull request's
       # checkout carries only its own merge commit, so the base is fetched
       # here. Measured on the first integration pull request: without this the
       # check printed "could not read origin/v1 (skipped)" and never ran.
       # parity.py now FAILS when the base cannot be read, so a fetch that
       # fails (or a branch that is gone) turns this job red rather than quiet.
       - name: fetch the base ref the enrolled-shrink check compares against
-        run: git fetch --no-tags --depth=1 origin v1:refs/remotes/origin/v1
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: git fetch --no-tags --depth=1 origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
       # `if: always()` is deliberate and permanent, not a placeholder
       # artifact: the parity gate (lane 0B) must run even when v1-conformance
       # or v1-network failed, because reporting that failure — "0 enrolled",
@@ -670,9 +674,11 @@ jobs:
           path: ${{ runner.temp }}/reports
           merge-multiple: true
       - name: "v1-parity: every enrolled binding passes every case (expected: 0 enrolled today)"
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
           mkdir -p "${{ runner.temp }}/reports"
-          python3 scripts/fetch-v1/parity.py --reports-dir "${{ runner.temp }}/reports" --base-ref "origin/v1"
+          python3 scripts/fetch-v1/parity.py --reports-dir "${{ runner.temp }}/reports" --base-ref "origin/$BASE_REF"
 
   v1-cache-interop:
     name: "v1-cache-interop — a cache one binding writes, every binding reads"
