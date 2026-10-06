@@ -11,6 +11,8 @@ Four packages, one repository, one tag convention: **the directory prefix is the
 
 Each workflow refuses a tag whose version does not equal the manifest's, builds, and publishes with provenance where the registry supports it. No long-lived token is stored for PyPI or crates.io.
 
+**This copy is the `v2` branch's.** Its four workflows release only the ABI v2 pre-releases, `2.0.0-dev.N`, and refuse every other tag before anything is built: see [Dev pre-releases](#dev-pre-releases-200-devn) below. 1.x is released from `main`, by `main`'s copy of each workflow and of `scripts/release-verify.sh`, which is what the next three paragraphs and [The 1.x releases](#the-1x-releases) describe.
+
 **And each one then installs what it just published.** The `verify` job of every release workflow runs `scripts/release-verify.sh <binding> registry <version>`: a clean-room install of the PUBLISHED package from its public registry, anonymous, retrying for registry lag. Then, in a clean directory with a clean cache, it checks four things. The binding's ABI fingerprint must equal `CHS_ABI_FINGERPRINT` in `include/chtypes.h`. Its CLI must list the production registry and fetch the newest line. And its public API must load that line, whose own `build_info` reports the same fingerprint. A dry run runs the same script in `local` mode against the package it just built (see the 1.x releases section below).
 
 This is here because a publish step exiting 0 does not mean anyone can install the package. On `ts/v0.1.1` the job went green about seven minutes before npm served the tarball, and for two of those minutes `dist-tags.latest` resolved to a version that 404'd — a clean `npm install` failed while CI showed a green release (issue #10). A publish that never completes looks identical. Presence is not the test: the check installs and runs, so it also catches an artifact that resolves but does not work, and one whose ABI disagrees with the header.
@@ -51,6 +53,52 @@ gh workflow run release-rust.yml --ref main -f tag=rust/v1.0.3 -f verify_only=tr
 | `release-rust.yml`   | the unit test pinning `user_agent()` to `CARGO_PKG_VERSION` (it must report one pass), and the built binary's `--version` |
 
 A stale Go `bindingVersion` therefore fails the dry run, not a user. There is no ancestry check in any of the four workflows: they check that the tag name and the manifest agree, and nothing about which branch the tag sits on.
+
+## Dev pre-releases (2.0.0-dev.N)
+
+Until ABI v2 locks, the `v2` branch releases the four bindings only as pre-releases, `2.0.0-dev.N`, which no package manager installs by default (public issue #511 has the plan and the lock conditions). Each one speaks the UNSTABLE generation-2 fingerprint in `include/v2/chtypes.h`, fetches only from the staging dev repository `https://registry-staging.wavehouse.dev/chtypes/v2-dev`, and trusts only the staging key (key id `824345f9bcf8e5bf`), never production and never the release key: rule r6 of `spec/abi-v2/docs.md`. Nothing on this branch publishes a 1.x, and nothing here publishes to production.
+
+**One definition.** [`scripts/release-channel.sh`](scripts/release-channel.sh) is the only place the channel is written down: the version rule, the npm dist-tag, the registry, the key, the cache subroot, the header and the Go module path. Every release workflow on this branch runs its selftest and then `scripts/release-channel.sh tag <binding> <tag>` as its first step, before any toolchain is installed, and refuses any tag that is not `<binding>/v2.0.0-dev.N` with a message naming the rule and #511. `scripts/release-verify.sh` reads the same file. The Python release's PEP 440 mapping is [`scripts/release-pep440.py`](scripts/release-pep440.py).
+
+**The tags, and the order.** The same order as 1.x, for the same reasons, one at a time, each workflow green before the next tag, and every dry run green first. The tags sit on a `v2` commit:
+
+> **`rust/v2.0.0-dev.N` → `ts/v2.0.0-dev.N` → `python/v2.0.0-dev.N` → `go/v2.0.0-dev.N`**
+
+```sh
+for x in rust ts python go; do
+  gh workflow run "release-$x.yml" --ref v2 -f "tag=$x/v2.0.0-dev.N" -f dry_run=true
+done
+```
+
+Before the tags, the version is bumped as [below](#before-the-first-tag-of-each-package), with one difference: `python/pyproject.toml` spells it the PEP 440 way, `2.0.0.devN`, and the other three `2.0.0-dev.N` (Go's `bindingVersion` included).
+
+**What each registry does with a pre-release.**
+
+| registry  | the version                                                  | what a plain install gets                                                                                                         | how a user asks for the dev build                          |
+| --------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| npm       | `2.0.0-dev.N`, published with `--tag dev`                    | `latest`, which a publish under another dist-tag never moves: the 1.x                                                             | `npm install @wavehouse/chtypes@dev`, or the exact version |
+| PyPI      | `2.0.0.devN`, a PEP 440 pre-release                          | pip and uv skip a pre-release unless given `--pre` or an exact pin: the 1.x                                                       | `pip install chtypes==2.0.0.devN`                          |
+| crates.io | `2.0.0-dev.N`, a semver pre-release                          | Cargo never resolves a pre-release for a requirement that does not name one, and `cargo add` picks the newest stable: the 1.x     | `cargo add chtypes@2.0.0-dev.N`                            |
+| Go        | `go/v2.0.0-dev.N`, module `github.com/wave-rf/chtypes/go/v2` | a v2 version exists only under the `/v2` module path, a different module: `go get github.com/wave-rf/chtypes/go` stays on the 1.x | `go get github.com/wave-rf/chtypes/go/v2@v2.0.0-dev.N`     |
+
+The `/v2` module has no stable release, so `go get github.com/wave-rf/chtypes/go/v2@latest` resolves the newest dev build; that asks for the v2 module by name, which is the point of the path.
+
+**"Never installed by default" is asserted, never assumed.** Each workflow records what its registry installs by default just before the publish (it must be a stable 1.x, or nothing is published), and a `never-default` job asserts it again after the publish, on every read while it polls for the registry's lag. A dry run runs the same job against the registry as it is now, as the assertions' twin. `scripts/release-channel.sh --selftest` plants every refusal.
+
+| workflow             | before the publish                                                                                                                                                                             | after the publish                                                                                                                          | the dry run's twin                                                                                                 |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `release-ts.yml`     | the publish is `pnpm publish --tag dev` (the dry run `pnpm publish --dry-run --tag dev`); `dist-tags.latest` is recorded                                                                       | `dist-tags.latest` is still the recorded 1.x, and `dist-tags.dev` is the version                                                           | `latest` is the recorded 1.x; the version is not published; the same check finds the recorded version              |
+| `release-python.yml` | `packaging.version` maps the tag to the manifest (`2.0.0-dev.N` is `2.0.0.devN`), which must be canonical and a pre-release; the distributions carry that name; a plain resolution is recorded | a plain, unpinned `uv pip compile chtypes` (no `--pre`) still picks the recorded 1.x, and `chtypes==2.0.0.devN` resolves                   | the plain resolution is the recorded 1.x; `==2.0.0.devN` does not resolve; `==<recorded>` does                     |
+| `release-rust.yml`   | `max_stable_version` is recorded                                                                                                                                                               | `max_stable_version` is unchanged, a plain `cargo add chtypes` in a clean project locks the recorded 1.x, and the version's page is served | the same two reads give the recorded 1.x; the version is not published; the recorded version's page is served      |
+| `release-go.yml`     | the first step refuses unless `go/go.mod` declares `github.com/wave-rf/chtypes/go/v2`; `go list -m github.com/wave-rf/chtypes/go@latest` is recorded                                           | `@latest` of the default module path is still the recorded 1.x, and `github.com/wave-rf/chtypes/go/v2@v2.0.0-dev.N` resolves               | `@latest` is the recorded 1.x; the `/v2` module does not list the version; the default path lists the recorded one |
+
+The Go twin reads the version list rather than the version, so a dry run never asks the proxy for a tag that does not exist yet.
+
+**The post-publish verify, on the dev channel.** `scripts/release-verify.sh` (the `verify` job, and a dry run's local install) runs six checks and reports each as PASS, FAIL or NOT RUN, failing unless all six pass: the binding's generation-2 fingerprint constant equals `include/v2/chtypes.h`'s; `chtypes where` names the `v2-dev` cache subroot (rule r5); every line `chtypes list` prints is a tag the staging dev repository serves, read independently from that repository's own `tags/list`; the platform manifest `chtypes fetch` installed (its cache directory is named by that manifest's digest) is the one the staging dev repository serves for that line; the install's `verified.json` is record schema 2, signed by the staging key, for abi 2 and the dev fingerprint; and the public API loads the line, whose own `build_info` reports abi 2 and the dev fingerprint. A verify that ran against the production v1 registry and "passed" is the failure this exists to refuse, so checks 3 to 6 assert the registry from outside the binding, and nothing is fetched when check 3 fails. A binding with no dev build yet, or a staging repository with no dev build in it, is red here by design: read which checks failed, never the run's color.
+
+**Staging and the dev key are the only targets.** No dev binding takes a registry or a trust list from its caller or the environment (rule r6), and the verify unsets every override before it runs. These workflows publish only to the four package registries above; the libraries the dev bindings fetch reach the staging dev repository from the artifact producer, never from these workflows.
+
+**The lock.** When #511's conditions hold, one block flips: THE CHANNEL in `scripts/release-channel.sh`, from `CHANNEL="v2-dev"` to `CHANNEL="v2"`. The pull request that does it writes the `v2` arm there: versions `2.N.N` (not pre-releases), the production repository `https://registry.wavehouse.dev/chtypes/v2`, the release key (`deb275922dbff76e`), the cache subroot `v2`, npm's `latest` dist-tag. In the same pull request the `never-default` jobs are replaced by their opposite, because the 2.x then IS the default. Until that pull request, any other value of `CHANNEL` refuses everything. SDK `2.0.0` then ships from production, signed with the release key.
 
 ## Before the first tag of each package
 
