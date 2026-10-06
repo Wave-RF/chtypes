@@ -11,7 +11,7 @@
    argument/return types only need to match in REPRESENTATION to call through it
    correctly (every target here: identical pointer representation and calling
    convention for `void *` and a struct pointer), which is the same rule
-   go/chtypes/multiversion.go already relies on for its own dlopen path. */
+   the v0 Go loader relied on for its own dlopen path. */
 
 typedef int32_t (*chtypes_abi1_fn_chs_abi_version)(void);
 typedef const char * (*chtypes_abi1_fn_chs_build_info)(void);

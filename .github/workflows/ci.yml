@@ -19,8 +19,11 @@
 # What used to be here and is gone: the `abi` job (header and bindings agree on
 # a revision NUMBER, v0's hand-written declarations checked against the
 # header), the `abi-fixtures` job (the wrong-revision refusal against a
-# generated fixture), and the `artifacts` job (two published lines fetched by
-# scripts/fetch.sh, every suite run against the served golden set). ABI v1 has
+# generated fixture), the `artifacts` job (two published lines fetched by the
+# v0 shell fetcher, every suite run against the served golden set), and the
+# `docs` job (the v0 support page's generated table against the old download
+# host's live index), with every selftest of the v0 channel tooling those jobs
+# and the v0 read-back workflows ran (retired with v0, #431). ABI v1 has
 # no revision number, its declarations are generated from one description, and
 # its libraries are fetched over OCI and verified before they load; v1-abi.yml
 # and v1.yml prove those properties against a generated stub and a registry
@@ -122,21 +125,14 @@ jobs:
         run: scripts/check-reserved-test-names.sh --selftest
       - name: go/chtypes never declares an identifier in the artifact producer's reserved Truth range
         run: scripts/check-reserved-test-names.sh
-      # scripts/abi-channel.sh decided which channel the retired `artifacts`
-      # job read. The script and its selftest stay until the v0 release line
-      # stops (the revision-channel tooling belongs to the switch lane); its
-      # selftest needs no network and no artifact — every case is driven from
-      # a fixture index.json and a temp header the script writes itself.
-      - name: selftest — abi-channel.sh's channel derivation (equal, ahead, behind, disagreeing, missing, explicit override)
-        run: scripts/abi-channel.sh --selftest
       # .github/workflows/policy-merge.yml enqueues a pull request to merge
       # itself once every condition holds, and scripts/policy-merge-check.py
       # is its whole decision (chtypes#280 generalized this from the old
-      # regen-automerge, which only handled a docs/support.md regeneration — see that script's
-      # own header for the six conditions and PROTECTED_GLOBS). Selftest
-      # first: each refusal (every PROTECTED_GLOBS family, a docs/support.md
-      # byte mismatch or non-modification, a missing, failing or pending
-      # required check, a fork, a stale head) must fire and an all-good input
+      # regen-automerge, which only handled a regeneration of the v0 support
+      # page — see that script's own header for the conditions and
+      # PROTECTED_GLOBS). Selftest first: each refusal (every PROTECTED_GLOBS
+      # family, a missing, failing or pending required check, a fork, a stale
+      # head) must fire and an all-good input
       # must pass. Then its pinned REQUIRED_CHECKS must name exactly the jobs
       # in THIS file that carry no job-level `continue-on-error: true`,
       # derived from this file's text: the built-in token cannot read branch
@@ -163,24 +159,20 @@ jobs:
       # carve-out behind. No network, no artifact.
       - name: the security carve-out covers every binding file that holds verification code, and no entry has gone stale
         run: scripts/policy-merge-check.py --check-carve-out
-      # scripts/check-suite.sh, scripts/lib/provenance.py (called from inside
-      # check-suite.sh's own --selftest) and scripts/published-lines.sh each
-      # had a --selftest mode that no workflow step ever invoked (chtypes#268)
-      # — the exact gap scripts/index-diff.sh was in until #267 wired it here,
-      # whose first CI run then found a latent SIGPIPE race that had never
-      # shown locally. Both pass locally today; that is not the same claim as
-      # "CI has seen them fail," which is the whole reason this repository
-      # runs a selftest before trusting the check it guards. Neither needs an
-      # artifact or the network: check-suite.sh's selftest drives its
-      # census matchers against fabricated logs (and, inside itself,
-      # provenance.py's own selftest against rewritten temp headers);
-      # published-lines.sh's selftest drives its newest-build selection
-      # against a planted index.json fixture, never a curled one. Both need
-      # only python3, already on this runner.
+      # scripts/check-suite.sh and scripts/lib/provenance.py (called from
+      # inside check-suite.sh's own --selftest) each had a --selftest mode
+      # that no workflow step ever invoked (chtypes#268) — the exact gap a
+      # since-retired v0 script was in until #267 wired it here, whose first
+      # CI run then found a latent SIGPIPE race that had never shown locally.
+      # It passes locally today; that is not the same claim as "CI has seen
+      # it fail," which is the whole reason this repository runs a selftest
+      # before trusting the check it guards. It needs no artifact and no
+      # network: check-suite.sh's selftest drives its census matchers against
+      # fabricated logs (and, inside itself, provenance.py's own selftest
+      # against rewritten temp headers), with only python3, already on this
+      # runner.
       - name: "selftest — check-suite.sh's census matchers (and, inside it, provenance.py's own selftest)"
         run: scripts/check-suite.sh --selftest
-      - name: "selftest — published-lines.sh picks the newest BUILD in a line, not list order, not a lexical sort"
-        run: scripts/published-lines.sh --selftest
       # scripts/lib/gha_annotate.py (chtypes#320) turns a provenance line
       # into a GitHub Actions check-run ANNOTATION, readable anonymously by
       # a machine that cannot read this job's log (measured 2026-09-30: the
@@ -211,41 +203,6 @@ jobs:
         run: scripts/check-selftests-wired.py --selftest
       - name: every scripts/* --selftest mode is actually invoked by CI, directly or through a verified caller
         run: scripts/check-selftests-wired.py
-
-  docs:
-    name: "docs — the support matrix still matches what the release serves"
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # NON-BLOCKING, on purpose, and deliberately not a required check. The
-    # matrix names the ClickHouse lines the release publishes, and core adds a
-    # line whenever it certifies one — a cross-repo event this repository
-    # cannot fix by itself. Blocking here would redden main on somebody else's
-    # commit, which is the trade core already refused for fetch-fixtures-check.
-    # A warning is the right volume: the docs are stale, nothing is broken.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # full history AND all tags — the SDK-version -> ABI-revision half of
-          # the support matrix reads include/chtypes.h at each binding's own
-          # release tag (git show <tag>:include/chtypes.h), and the default
-          # single-commit checkout carries neither.
-          fetch-depth: 0
-      - name: docs/support.md matches the manifests and the live index
-        run: |
-          if ! scripts/support-matrix.sh --check; then
-            {
-              echo "### docs/support.md is stale"
-              echo
-              echo "The release publishes something \`docs/support.md\` does not name."
-              echo "Regenerate and commit:"
-              echo
-              echo '```sh'
-              echo 'scripts/support-matrix.sh'
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
 
   go:
     name: "go — build, vet, standalone check (no artifacts)"
@@ -545,8 +502,7 @@ jobs:
     timeout-minutes: 10
     # Covers every tracked file (all four SDKs' source, docs, examples,
     # scripts, include/chtypes.h, the root governance files) except
-    # `**/fixtures/fetch/**` (generated + ed25519-signed; editing it
-    # invalidates every signature) and `LICENSE`. Two independent checks —
+    # `LICENSE`. Two independent checks —
     # `misspell -locale US` and a from-scratch grep pass — because misspell's
     # own dictionary matcher has been shown to silently miss specific words
     # even when they're present in its built-in list; see the long comment
@@ -588,31 +544,6 @@ jobs:
       # package. Selftest first, same reason.
       - run: scripts/lint-cited-paths.sh --selftest
       - run: scripts/lint-cited-paths.sh
-      # scripts/index-diff.sh (the read-back of the served artifacts index,
-      # .github/workflows/artifacts-readback.yml) has no other CI coverage,
-      # and its own elision selftest reads a live needle from THIS job's own
-      # `scripts/lint-public.sh --print-rules` — never a hand-copied one, the
-      # same discipline that script's header already argues for at length —
-      # so its selftest belongs here rather than in a fifth job. Needs no
-      # network and no artifact: every fixture channel it compares is one it
-      # builds itself, including the --keep-current case.
-      - run: scripts/index-diff.sh --selftest
-      # scripts/readback-decide.sh (the same workflow's post-or-skip /
-      # advance-or-not decision, chtypes#270) is a pure function of an exit
-      # code and two small text files — no network, no artifact — so it
-      # belongs beside index-diff.sh's own selftest above rather than in a
-      # fifth job.
-      - run: scripts/readback-decide.sh --selftest
-      # scripts/support-matrix.sh's Support column (chtypes#281) has its own
-      # selftest too, and it belongs here rather than in `docs`: `docs` is
-      # NON-BLOCKING (see its own header) because the matrix names whatever
-      # ClickHouse lines the release happens to publish, a cross-repo event
-      # this repository cannot fix by itself — but a REGRESSION in the
-      # GENERATOR itself is exactly this repository's own fault, and
-      # `continue-on-error` would let one merge silently. Needs no network
-      # and no served index: it builds a throwaway fixture repo and a
-      # file://-served index itself, against this very script.
-      - run: scripts/support-matrix.sh --selftest
 
   prose:
     # BLOCKING. It was report-only while the tree was still hard-wrapped, which
@@ -620,7 +551,7 @@ jobs:
     # has since run over all 40 files, markdownlint's config now scopes MD010 to
     # prose (tabs are correct inside Go code blocks) and cedes table style to
     # dprint, and the 35 genuine findings are fixed. Both checks pass, so both
-    # gate. Unlike `docs` and `security`, this check is a pure function of the
+    # gate. Unlike `security`, this check is a pure function of the
     # diff: nothing outside the repository can turn it red.
     name: "prose — markdownlint + no-hard-wrap (dprint textWrap never)"
     runs-on: ubuntu-latest

@@ -17,6 +17,7 @@ Those artifacts are NOT covered by this repository's license: each artifact
 release carries its own LICENSE file and is distributed under the Elastic
 License 2.0. See docs/guides/artifacts.md.
 
-tests/fixtures/fetch/test-key/ contains an ed25519 key pair, both halves, that
-signs the fetch test fixtures and nothing else. It is derived from a public
-seed and is deliberately not secret; it is never the artifact release key.
+tests/fixtures/fetch-v1/test-key/ and tests/fixtures/fetch-v1/other-key/ each
+contain an ed25519 key pair, both halves, that signs the v1 fetch conformance
+fixtures and nothing else. Both are deliberately not secret; neither is ever
+the artifact release key.

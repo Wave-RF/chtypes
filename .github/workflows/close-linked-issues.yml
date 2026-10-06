@@ -103,9 +103,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             # Validated with a strict regex before it reaches gh api at all —
             # the same discipline every other attacker-controlled workflow
-            # input in this repository is held to (see
-            # artifacts-readback.yml's identical treatment of its own two
-            # dispatch inputs).
+            # input in this repository is held to.
             if ! [[ "$DISPATCH_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
               echo "::error::close-linked-issues: --sha input '$DISPATCH_SHA' is not a 40-character hex commit sha"
               exit 1

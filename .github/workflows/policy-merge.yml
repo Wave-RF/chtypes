@@ -1,11 +1,13 @@
 # policy-merge — a pull request enqueues itself to merge once every
 # condition holds. Generalized by chtypes#280 from the old regen-automerge,
-# which only handled a pull request that regenerated docs/support.md; every
-# condition and the decision itself live in scripts/policy-merge-check.py
-# (read its header); this file is the wiring. It does not open pull
-# requests: support-matrix-refresh.yml's header says why nothing here may.
+# which only handled a pull request that regenerated the v0 support page;
+# every condition and the decision itself live in
+# scripts/policy-merge-check.py (read its header); this file is the wiring.
+# It does not open pull requests: see WHAT IT RESPECTS, below, for why
+# nothing here may.
 #
-# THE SEVEN CONDITIONS. A pull request enqueues only when ALL of these hold:
+# THE CONDITIONS. A pull request enqueues only when ALL of these hold (the
+# numbers are the checker's own names for them; 6 is retired):
 #   1. the head is a branch of THIS repository, never a fork;
 #   2. every required check on the head is completed and successful — read
 #      BY NAME from the head's check runs, because the `ci` run's overall
@@ -23,17 +25,10 @@
 #      api-surface job that did not complete with success, counts as
 #      changed. The security carve-out (signature and checksum verification
 #      code, the trust policy, the release key) stays protected whatever the
-#      verdict says. A touch of tests/fixtures/fetch/** (chtypes#344) is
-#      excused only when the head's tree there is byte-identical to the
-#      served sdk-fetch-fixtures.tar.gz, fetched by main's own
-#      scripts/fetch.sh and verified under the release key; any failure in
-#      that chain leaves it protected;
-#   6. ONLY when docs/support.md is part of the diff: it was MODIFIED, and
-#      scripts/support-matrix.sh, run against the live served index over a
-#      scratch copy SEEDED WITH THE HEAD'S OWN BYTES — never main's checked-
-#      out copy (chtypes#316: main's hand-written prose used to collide with
-#      every prose-only edit on the head) — reproduces the pull request
-#      head's copy byte for byte;
+#      verdict says;
+#   6. retired with v0 (#431): a byte-for-byte regeneration of the v0
+#      support page, which no longer exists. The number is kept so that 7
+#      names the same condition everywhere it is cited;
 #   7. ONLY when the pull request touches a test or fixture path
 #      (chtypes#285 §1b): no suite's executed-test count, and no
 #      golden-case count, fell below main's last green `ci` push run — read
@@ -112,31 +107,30 @@
 # every head-controlled string (a SHA, a repository name, a node id) into a
 # `run:` block only through `env:`, as quoted data, never by expanding it into
 # the script text. The checkout below is main, and main's scripts are the
-# only code that runs. The head's docs/support.md — read only when it is part
-# of the diff — is read as DATA, through the contents API at the head SHA,
-# written to a scratch file as the regenerator's input text, and only
-# compared byte for byte with what that regenerator — main's own script,
-# never anything of the head — produces from it. Condition 7
-# (chtypes#285 §1b) reads more of this shape, never a new kind of risk: up to
-# five job LOGS per side, through the Actions API, matched against a fixed
-# regex for two integers — never executed, sourced or parsed as code. The
-# jobs read are provably main's own, because `protected` (evaluated before
-# both `checks` and `test-counts`) already refuses a pull request that edited
+# only code that runs. Condition 7 (chtypes#285 §1b) reads up to five job
+# LOGS per side, through the Actions API, matched against a fixed regex for
+# two integers — never executed, sourced or parsed as code. The jobs read
+# are provably main's own, because `protected` (evaluated before both
+# `checks` and `test-counts`) already refuses a pull request that edited
 # `.github/**` or `scripts/**`. Condition 5's binding-source half
 # (chtypes#285 §1) reads one more log the same way, the `api-surface` job's,
 # after that same refusal: one fixed-regex verdict line per binding, anchored
 # to the start of a log line and naming the judged head's own sha. Its
-# served-fixture half (chtypes#344) reads only the head's tree LISTING
-# (paths, modes and blob ids through the git trees API, never a file's
-# bytes) and runs main's own scripts/fetch.sh, with constant arguments, no
-# CHTYPES_* variable and its own default source, on the served release.
+# dependabot half (chtypes#285 §2) reads a commit and two revisions of one
+# manifest through the API, as data.
 # The `enqueue` job checks out one file of main and reads nothing of the head
 # at all. One step that executed head code here would hand every fork a write
 # token to this repository.
 #
 # WHAT IT RESPECTS, AND THE ONE CREDENTIAL IT HOLDS.
-#   - "Allow GitHub Actions to create and approve pull requests" stays OFF;
-#     support-matrix-refresh.yml's header explains why at length.
+#   - "Allow GitHub Actions to create and approve pull requests" stays OFF
+#     (measured off on 2026-09-18). That toggle is not split into "create"
+#     and "approve": enabling it so a workflow could open a pull request
+#     would also let any Actions run in this repository approve one,
+#     repository-wide and permanently. On a public repository whose merges
+#     rest on required checks, that is a large widening of the trust surface
+#     for a convenience nothing here needs. Do not flip it, and do not add a
+#     bot token to route around it.
 #   - Repository auto-merge (the per-pull-request toggle) stays off; it is a
 #     different mechanism from the merge queue this enqueues into.
 #   - Branch protection still decides, exactly as for a human (enforce_admins
@@ -232,14 +226,13 @@ jobs:
       node_id: ${{ steps.judge.outputs.node_id }}
       head_sha: ${{ steps.judge.outputs.head_sha }}
     steps:
-      # MAIN, never the head: see the pwn-request rule above. fetch-depth: 0
-      # for the reason support-matrix-refresh.yml gives: support-matrix.sh
-      # reads include/chtypes.h at every binding's release tag. No
+      # MAIN, never the head: see the pwn-request rule above. A single-commit
+      # checkout is enough: nothing here reads history (the full history was
+      # for the v0 support-page regeneration, retired with v0, #431). No
       # credentials are left in .git/config, because nothing here pushes.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
-          fetch-depth: 0
           persist-credentials: false
       # Selftest first, the house rule for every checker: a refusal nobody has
       # seen fire is not known to work. Then the pinned required-check list
@@ -256,7 +249,7 @@ jobs:
           scripts/policy-merge-check.py --check-mint-scope
           scripts/policy-merge-check.py --check-guide
           scripts/policy-merge-check.py --check-carve-out
-      - name: gate — every condition except the docs/support.md byte comparison, from API reads alone
+      - name: gate — every condition, from API reads alone
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -272,20 +265,9 @@ jobs:
             scripts/policy-merge-check.py gate --repo "$REPO" \
               --run-head-sha "$RUN_HEAD_SHA" --run-head-repo "$RUN_HEAD_REPO"
           fi
-      # The byte comparison (condition 6) regenerates unconditionally once the
-      # gate passes, whether or not this pull request touches docs/support.md
-      # — it is cheap, and `decide()`'s own bytes condition only USES it when
-      # the diff actually touches that file. chtypes#316: the regeneration
-      # seeds a scratch copy with the HEAD's OWN docs/support.md — read as
-      # DATA through the contents API, never main's checked-out copy, whose
-      # hand-written prose used to collide with every prose-only edit on the
-      # head — and runs main's own scripts/support-matrix.sh over that SAME
-      # scratch path, against the live served index. The script rewrites
-      # only the generated block in place and leaves the head's own prose
-      # untouched; this is all inside policy-merge-check.py's
-      # regenerate_guarded_file now, so there is no separate workflow step
-      # for it any more, and the checkout is left untouched either way.
-      - name: the docs/support.md byte comparison (against the head's own regeneration) and every other condition again, then the hand-off
+      # Every condition again, read fresh, immediately before the hand-off:
+      # a head that moved since the gate is `stale` here, never enqueued.
+      - name: every condition again, fresh, then the hand-off
         id: judge
         if: steps.gate.outputs.candidate == '1'
         env:

@@ -68,7 +68,7 @@ function findSignatureBundle(tree, subjectDigest) {
   throw new Error(`no ${BUNDLE_ARTIFACT_TYPE} referrer found for ${subjectDigest}`);
 }
 
-// keyID mirrors go/chtypes/fetch_sign.go's KeyID (the first 16 hex
+// keyID mirrors go/internal/ocifetch/dsse.go's keyIDFor (the first 16 hex
 // characters of sha256 over the raw public key) — see genfixtures' sign.go
 // for why that is this bundle format's `hint` value.
 function keyID(pubRawBytes) {

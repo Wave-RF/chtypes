@@ -130,8 +130,8 @@ jobs:
           fi
       - name: selftest — a hand-written chs_ declaration is caught in all four bindings, and generated files are exempt
         run: uv run --no-project --python 3.11 scripts/abi-v1/check-no-hand-decls.py --selftest
-      - name: no hand-written chs_ declaration or lookup in the v1 directories
-        run: uv run --no-project --python 3.11 scripts/abi-v1/check-no-hand-decls.py --scope v1
+      - name: no hand-written chs_ declaration or lookup anywhere in the tree
+        run: uv run --no-project --python 3.11 scripts/abi-v1/check-no-hand-decls.py --scope all
       - name: the header compiles as C11 and as C++20 (gcc and clang)
         run: |
           for c in gcc clang; do
@@ -250,9 +250,8 @@ jobs:
       - name: the MSRV from rust/Cargo.toml (so a future bump needs no workflow edit)
         if: matrix.binding == 'rust' && matrix.toolchain == 'msrv'
         id: msrv
-        # The same pattern scripts/support-matrix.sh already reads
-        # rust/Cargo.toml with, restated here rather than shared, since a
-        # workflow step cannot import that script's Python helper.
+        # A fixed pattern over rust/Cargo.toml's own `rust-version` line; a
+        # missing or reshaped line fails the step rather than guessing.
         run: |
           v="$(grep -oE '^rust-version[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+"' rust/Cargo.toml | grep -oE '[0-9]+\.[0-9]+')"
           if [ -z "$v" ]; then

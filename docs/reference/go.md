@@ -4,7 +4,7 @@
 import "github.com/wave-rf/chtypes/go/chtypes"
 ```
 
-Module path `github.com/wave-rf/chtypes/go`: lowercase, the Go norm, frozen since the first tag; what freezes for the function signatures is in [`support.md`](../support.md#pre-10). `go doc github.com/wave-rf/chtypes/go/chtypes` is the same surface with the full prose; every exported symbol carries its contract.
+Module path `github.com/wave-rf/chtypes/go`: lowercase, the Go norm, frozen since the first tag; what stays provisional until 1.0 is in [`support-v1.md`](../support-v1.md#pre-10). `go doc github.com/wave-rf/chtypes/go/chtypes` is the same surface with the full prose; every exported symbol carries its contract.
 
 This page lists only what is Go's own: the spellings, the options and the error types. The operations, the document shapes, the vocabularies and the error classes are the same in all four bindings and are specified once, in [`bindings-v1.md`](bindings-v1.md); the fetch wire contract is [`fetch-v1.md`](../guides/fetch-v1.md). Known limits of 1.0 are in [Known gaps in 1.0](../limitations.md#known-gaps-in-10).
 
