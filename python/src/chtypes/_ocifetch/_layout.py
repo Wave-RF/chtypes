@@ -386,15 +386,30 @@ def list_verified_records(
     out: list[tuple[Path, VerifiedRecord]] = []
     for root in roots:
         unpacked_root = root / C.CACHE_UNPACKED_DIR
-        if not unpacked_root.is_dir():
+        # One answer on every Python: a root that cannot be listed reads as
+        # absent here (`Path.is_dir()` re-raised EACCES before 3.14 and hid it
+        # from 3.14), and the probe in `_faults` warns or, in strict mode,
+        # raises (public issue #486).
+        try:
+            with os.scandir(unpacked_root) as it:
+                names = sorted(e.name for e in it if _is_dir_entry(e))
+        except OSError:
             continue
-        for entry in sorted(unpacked_root.iterdir()):
-            if not entry.is_dir() or not _HEX64.match(entry.name):
+        for name in names:
+            if not _HEX64.match(name):
                 continue
+            entry = unpacked_root / name
             record = read_verified_record(entry)
             if record is not None:
                 out.append((entry, record))
     return out
+
+
+def _is_dir_entry(entry: os.DirEntry[str]) -> bool:
+    try:
+        return entry.is_dir(follow_symlinks=False)
+    except OSError:
+        return False
 
 
 _ZERO_X_MINOR = re.compile(r"^[0-9]+\.[0-9]+$")

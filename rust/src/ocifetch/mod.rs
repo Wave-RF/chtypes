@@ -35,6 +35,7 @@ pub mod constants;
 pub mod dsse;
 pub mod ensure;
 pub mod error;
+pub mod faults;
 pub mod goldens;
 pub mod http;
 pub mod layout;

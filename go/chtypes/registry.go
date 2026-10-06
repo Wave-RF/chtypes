@@ -40,13 +40,18 @@ type FetchOptions struct {
 	Update          bool
 	ConnectTimeout  time.Duration
 	IdleReadTimeout time.Duration
+	// StrictCache makes every fault of the cache and of an existing system
+	// dir a CodeCacheUnusable naming the path, never "not installed" and
+	// never a fall-through to a system dir. nil means CHTYPES_CACHE_STRICT
+	// ("1" is on), else off.
+	StrictCache *bool
 }
 
 func (o FetchOptions) internal() *ocifetch.Options {
 	return &ocifetch.Options{
 		Bases: o.Bases, CacheDir: o.CacheDir, SystemDirs: o.SystemDirs, TrustedKeys: o.TrustedKeys,
 		Token: o.Token, AllowUnsigned: o.AllowUnsigned, Offline: o.Offline, Frozen: o.Frozen,
-		LockPath: o.LockPath, LockWrite: o.LockWrite, Update: o.Update,
+		LockPath: o.LockPath, LockWrite: o.LockWrite, Update: o.Update, StrictCache: o.StrictCache,
 		ConnectTimeout: o.ConnectTimeout, IdleReadTimeout: o.IdleReadTimeout,
 	}
 }

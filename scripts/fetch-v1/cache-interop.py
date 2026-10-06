@@ -3,7 +3,7 @@ r"""scripts/fetch-v1/cache-interop.py — a cache one binding writes, every bind
 (docs/guides/fetch-v1.md §1, "The verified.json record").
 
     scripts/fetch-v1/cache-interop.py --cli go=<cmd> --cli python=<cmd> --cli ts=<cmd> --cli rust=<cmd>
-                                      [--other-user <name>]
+                                      [--other-user <name>] [--system-dir <a default system dir>] [--faults-as-self]
     scripts/fetch-v1/cache-interop.py --selftest
 
 Each `--cli` names a binding's `chtypes` command line (shell-split, so a
@@ -67,6 +67,22 @@ ONLY the four CLIs, never a library call, against it:
      can read a 0644 file here, and it is refused a 0600 one ("Permission
      denied"), so the identity switch and the modes are both real. The CLIs
      must be installed where the other user can run them.
+
+  7. WRITER x READER x FAULT x MODE (public issue #486; only with
+     --other-user). Each writer's cache is faulted by this user: none,
+     root-000, unpacked-000, entry-000, record-000, record-garbage-noblobs
+     (the record overwritten, blobs/ removed) and layout-0x (a fresh 0.x
+     registry dir in place of the cache). Each reader then runs `fetch 26.8
+     --offline`, `list --offline` and `verify` as the other user, in the
+     default mode and with --strict, and, with --system-dir, once more with
+     that default system dir holding a readable unpacked 26.8. A positive
+     control first proves the other user is refused the faulted path
+     (`Permission denied`), or the row is INVALID. Every reader must give the
+     SAME answer, read from its exit status and output: the default mode
+     answers "not installed" with a warning naming the path (or from the
+     system dir, with the warning), and strict mode exits 9 with
+     CHTYPES_CACHE_UNUSABLE naming the path and the reason, never falling
+     through to the system dir.
 
 Every process runs at umask 022, set here. Prints the 4x4 table, the 0.x
 rows, one table per line, the concurrency sets, the read-only rows and the
@@ -648,7 +664,195 @@ def cross_uid_rows(h: Harness, names: list[str], user: str, expected: dict[str, 
     return cells
 
 
-def main_run(clis: dict[str, list[str]], other_user: str | None = None) -> int:
+FAULTS = ("none", "root-000", "unpacked-000", "entry-000", "record-000", "record-garbage-noblobs", "layout-0x")
+# The reason strict mode gives each fault, and whether the default mode warns.
+FAULT_REASON = {
+    "root-000": ("unreadable_root", True),
+    "unpacked-000": ("unreadable_root", True),
+    "entry-000": ("unreadable_entry", True),
+    "record-000": ("unreadable_entry", True),
+    "record-garbage-noblobs": ("unacceptable_record", False),
+    "layout-0x": ("layout_0x", False),
+}
+UNUSABLE = re.compile(r"(\S+) is unusable as a cache: ([a-z_0-9]+)")
+# Every shared code (spec/fetch-v1/constants.json), so an answer with another
+# code reads as that code, never as none.
+ERROR_CODES = tuple(json.loads((ROOT / "spec" / "fetch-v1" / "constants.json").read_text(encoding="utf-8"))["errors"])
+WARNED = re.compile(r"(\S+) could not be read \(([A-Z0-9 ]*)\)")
+
+
+def observe(cmd: str, proc: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+    """What one command answered, read from its exit status and output only:
+    the same shape for every binding, so readers can be compared."""
+    m = UNUSABLE.search(proc.stderr)
+    out: dict[str, Any] = {
+        "exit": proc.returncode,
+        "code": min(
+            (c for c in ERROR_CODES if re.search(rf"\b{c}\b", proc.stderr)), key=proc.stderr.index, default=""
+        ),
+        "unusable": (m.group(1), m.group(2)) if m else None,
+        "warned": sorted({w.group(1) for w in WARNED.finditer(proc.stderr)}),
+    }
+    if cmd == "fetch":
+        out["answer"] = os.path.realpath(named_dir(proc)) if proc.returncode == 0 else ""
+    elif cmd == "list":
+        out["listed"] = sorted(os.path.realpath(ln.split()[-1]) for ln in proc.stdout.splitlines() if ln.startswith("installed "))
+    else:
+        out["verified_none"] = "verified 0 builds under" in proc.stderr
+    return out
+
+
+def expected_answer(
+    cmd: str, fault: str, strict: bool, entry: Path, sys_entry: Path | None, faulted: Path | None
+) -> dict[str, Any]:
+    """What every reader must answer (docs/guides/fetch-v1.md §1, the cache
+    faults): `faulted` is the path a fault names, `sys_entry` the system dir's
+    copy of the build when one is configured."""
+    reason, warns = FAULT_REASON.get(fault, ("", False))
+    if fault != "none" and strict:
+        base: dict[str, Any] = {"exit": 9, "code": "CHTYPES_CACHE_UNUSABLE", "unusable": (str(faulted), reason), "warned": []}
+        return {**base, **({"answer": ""} if cmd == "fetch" else {"listed": []} if cmd == "list" else {"verified_none": False})}
+    warned = [str(faulted)] if fault != "none" and warns else []
+    cache_ok = fault == "none"
+    answer = entry if cache_ok else sys_entry
+    if cmd == "fetch":
+        if answer is None:
+            return {"exit": 1, "code": "CHTYPES_ARTIFACT_MISSING", "unusable": None, "warned": warned, "answer": ""}
+        return {"exit": 0, "code": "", "unusable": None, "warned": warned, "answer": os.path.realpath(answer)}
+    listed = sorted(os.path.realpath(p) for p in ([entry] if cache_ok else []) + ([sys_entry] if sys_entry else []))
+    if cmd == "list":
+        return {"exit": 0, "code": "", "unusable": None, "warned": warned, "listed": listed}
+    return {"exit": 0, "code": "", "unusable": None, "warned": warned, "verified_none": not listed}
+
+
+def apply_fault(fault: str, cache: Path, entry: Path) -> Path | None:
+    """Faults a copy of a writer's cache, as this user. Returns the path the
+    error and the warning must name (None for no fault)."""
+    if fault == "none":
+        return None
+    if fault == "root-000":
+        os.chmod(cache, 0)
+        return cache
+    if fault == "unpacked-000":
+        target = cache / "unpacked" / "sha256"
+        os.chmod(target, 0)
+        return target
+    if fault == "entry-000":
+        os.chmod(entry, 0)
+        return entry
+    if fault == "record-000":
+        os.chmod(entry / "verified.json", 0)
+        return entry / "verified.json"
+    if fault == "record-garbage-noblobs":
+        (entry / "verified.json").write_text("not json {")
+        shutil.rmtree(cache / "blobs", ignore_errors=True)
+        return entry / "verified.json"
+    if fault == "layout-0x":
+        shutil.rmtree(cache)
+        shutil.copytree(FIXTURES / "layouts" / "upgrade-0x-registry", cache)
+        return cache
+    raise ValueError(fault)
+
+
+def unfault(path: Path) -> None:
+    """Undoes the chmods under `path`, so its tree can be read again: the
+    mode is restored before a directory is listed."""
+    try:
+        is_dir = path.is_dir() and not path.is_symlink()
+        os.chmod(path, 0o755 if is_dir else 0o644)
+    except OSError:
+        return
+    if is_dir:
+        for child in path.iterdir():
+            unfault(child)
+
+
+def fault_control(h: Harness, user: str | None, fault: str, faulted: Path | None) -> str:
+    """The positive control: the other user is refused the faulted path, so
+    the fault is real for the reader. "ok", or why the row is INVALID."""
+    if faulted is None or fault in ("record-garbage-noblobs", "layout-0x"):
+        return "ok"
+    probe = ["ls", str(faulted)] if fault != "record-000" else ["cat", str(faulted)]
+    argv = probe if user is None else as_user(user, h.env, probe)
+    got = subprocess.run(argv, capture_output=True, text=True, check=False)
+    if got.returncode == 0 or "Permission denied" not in got.stderr:
+        who = user or "this user"
+        return f"{who} was not refused {faulted} (exit {got.returncode}: {got.stderr.strip()[-120:]!r})"
+    return "ok"
+
+
+def fault_rows(
+    h: Harness, names: list[str], user: str | None, system_dir: Path | None
+) -> tuple[dict[tuple[str, str], str], list[str]]:
+    """Part 7: writer x reader x fault x mode, read as the other user (or, with
+    --faults-as-self, a local development run, as this one: a mode denies the
+    owner too). Returns the cells and one table title per (mode, system dir)
+    block."""
+    cells: dict[tuple[str, str], str] = {}
+    blocks: list[str] = []
+    for writer in names:
+        pristine = h.work / f"nxn-{writer}"
+        done = h.fetch(writer, SPELLING, pristine, offline=False)
+        if done.returncode != 0:
+            for fault in FAULTS:
+                for mode in ("default", "strict"):
+                    for with_sys in ((False, True) if system_dir else (False,)):
+                        label = f"{mode}{' +system dir' if with_sys else ''}: {writer} writes, {fault}"
+                        for reader in names:
+                            cells[(label, reader)] = f"FAIL (no cache: {done.stderr.strip()[-120:]})"
+            continue
+        hexname = Path(named_dir(done)).name
+        for fault in FAULTS:
+            cache = h.work / f"nxn-{writer}-{fault}"
+            shutil.copytree(pristine, cache)
+            entry = cache / "unpacked" / "sha256" / hexname
+            faulted = apply_fault(fault, cache, entry)
+            control = fault_control(h, user, fault, faulted)
+            for with_sys in ((False, True) if system_dir else (False,)):
+                sys_entry = None
+                if with_sys:
+                    assert system_dir is not None
+                    shutil.copytree(pristine / "unpacked", system_dir / "unpacked")
+                    sys_entry = system_dir / "unpacked" / "sha256" / hexname
+                for mode in ("default", "strict"):
+                    label = f"{mode}{' +system dir' if with_sys else ''}: {writer} writes, {fault}"
+                    title = f"{mode}{', with a system dir' if with_sys else ''}"
+                    if title not in blocks:
+                        blocks.append(title)
+                    flag = ["--strict"] if mode == "strict" else []
+                    answers: dict[str, list[dict[str, Any]]] = {}
+                    for reader in names:
+                        if control != "ok":
+                            cells[(label, reader)] = f"INVALID control: {control}"
+                            continue
+                        runs = [
+                            ("fetch", h.run(reader, "fetch", SPELLING, "--platform", PLATFORM, "--cache", str(cache), "--offline", *flag, user=user)),
+                            ("list", h.run(reader, "list", "--offline", "--cache", str(cache), *flag, user=user)),
+                            ("verify", h.run(reader, "verify", "--cache", str(cache), *flag, user=user)),
+                        ]
+                        got = [observe(cmd, proc) for cmd, proc in runs]
+                        answers[reader] = got
+                        want = [expected_answer(cmd, fault, mode == "strict", entry, sys_entry, faulted) for cmd, _ in runs]
+                        bad = [f"{cmd}: got {g}, want {w}" for (cmd, _), g, w in zip(runs, got, want, strict=True) if g != w]
+                        cells[(label, reader)] = "ok" if not bad else "FAIL " + "; ".join(bad)[:600]
+                    # One answer: every reader's observation is the same.
+                    if len({json.dumps(a, sort_keys=True) for a in answers.values()}) > 1:
+                        for reader in answers:
+                            if cells[(label, reader)] == "ok":
+                                cells[(label, reader)] = "FAIL the readers disagree"
+                if with_sys:
+                    assert system_dir is not None
+                    shutil.rmtree(system_dir / "unpacked")
+            unfault(cache)
+    return cells, blocks
+
+
+def main_run(
+    clis: dict[str, list[str]],
+    other_user: str | None = None,
+    system_dir: Path | None = None,
+    faults_as_self: bool = False,
+) -> int:
     cases = json.loads((FIXTURES / "cases.json").read_text(encoding="utf-8"))["cases"]
     line_ok = next(c for c in cases if c["id"] == CASE)
     expected = {"version": line_ok["expect"]["version"], "build": line_ok["expect"]["build"], "platform": PLATFORM}
@@ -701,6 +905,10 @@ def main_run(clis: dict[str, list[str]], other_user: str | None = None) -> int:
         cells.update(line_rows(h, names, lines_base))
         cells.update(concurrency_rows(h, names))
         cells.update(read_only_rows(h, names, missing_exit))
+        fault_blocks: list[str] = []
+        if other_user is not None or faults_as_self:
+            fault_cells, fault_blocks = fault_rows(h, names, other_user, system_dir)
+            cells.update(fault_cells)
         if other_user is not None:
             cells.update(cross_uid_rows(h, names, other_user, expected))
         else:
@@ -724,6 +932,11 @@ def main_run(clis: dict[str, list[str]], other_user: str | None = None) -> int:
             out += "\n" + render_table(f"cross-uid: writer \\ reader as {other_user}", xuid_rows, names, cells) + "\n"
         else:
             out += "\ncross-uid: SKIPPED (no --other-user)\n"
+        for title in fault_blocks:
+            prefix = title.replace(", with a system dir", " +system dir") + ": "
+            rows = [r for r in dict.fromkeys(r for (r, _c) in cells) if r.startswith(prefix)]
+            who = other_user or "this user"
+            out += "\n" + render_table(f"faults, {title} (as {who}): writer, fault \\ reader", rows, names, cells) + "\n"
         print(out)
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
@@ -735,6 +948,8 @@ def main_run(clis: dict[str, list[str]], other_user: str | None = None) -> int:
         conc_sets = len(names) + (1 if len(names) > 1 else 0)
         expected_cells = len(names) * len(names) + 3 * len(names) + 2 * len(names) * len(names) + conc_sets
         expected_cells += 2 * len(names) + (len(names) * len(names) if other_user is not None else 0)
+        if other_user is not None or faults_as_self:
+            expected_cells += len(names) * len(FAULTS) * 2 * (2 if system_dir else 1) * len(names)
         if len(cells) != expected_cells:
             print(f"cache-interop: {len(cells)} cells, expected {expected_cells}", file=sys.stderr)
             return 1
@@ -821,6 +1036,24 @@ def selftest() -> None:
     assert "SECRET=x" not in argv and "CHTYPES_CACHE=/c" in argv and argv[-2:] == ["cli", "verify"], argv
     assert ZERO_X_HINT.format(root="/x").startswith("/x holds a 0.x registry (26.1/manifest.json)")
     assert "${XDG_CACHE_HOME:-~/.cache}/chtypes/v1" in ZERO_X_HINT.format(root="/x")
+    # Part 7 reads every binding's answer the same way, and expects one answer.
+    cp = subprocess.CompletedProcess
+    strict_err = cp([], 9, "", "chtypes: CHTYPES_CACHE_UNUSABLE: /c/unpacked/sha256 is unusable as a cache: unreadable_root (EACCES)\n")
+    got = observe("fetch", strict_err)
+    assert got == expected_answer("fetch", "unpacked-000", True, Path("/c/e"), None, Path("/c/unpacked/sha256")), got
+    missing = cp([], 1, "", "chtypes: no installed artifact for 26.8. /c could not be read (EACCES); treated as not installed. Set CHTYPES_CACHE_STRICT=1 to make this an error. [CHTYPES_ARTIFACT_MISSING]\n")
+    got = observe("fetch", missing)
+    assert got == expected_answer("fetch", "root-000", False, Path("/c/e"), None, Path("/c")), got
+    assert got != expected_answer("fetch", "entry-000", False, Path("/c/e"), None, Path("/c/e")), "another path is another answer"
+    corrupt = cp([], 1, "", "chtypes: CHTYPES_ARTIFACT_CORRUPT: JSON: missing field\n")
+    assert observe("fetch", corrupt)["code"] == "CHTYPES_ARTIFACT_CORRUPT", "another code reads as that code"
+    hint = cp([], 1, "", "x holds a 0.x registry; point CHTYPES_CACHE at an empty dir. Set CHTYPES_CACHE_STRICT=1 [CHTYPES_ARTIFACT_MISSING]\n")
+    assert observe("fetch", hint)["code"] == "CHTYPES_ARTIFACT_MISSING", "an environment variable is not a code"
+    with tempfile.TemporaryDirectory() as d:
+        listed = cp([], 0, f"installed 26.8.15.10 linux-arm64 {d}\n", "")
+        assert observe("list", listed) == expected_answer("list", "none", False, Path(d), None, None)
+        silent = cp([], 0, "", "")
+        assert observe("verify", silent) != expected_answer("verify", "root-000", False, Path(d), None, Path(d)), "a silent verify is not the answer"
     print("cache-interop --selftest: OK")
 
 
@@ -831,6 +1064,8 @@ def main() -> int:
         return 0
     clis: dict[str, list[str]] = {}
     other_user: str | None = None
+    system_dir: Path | None = None
+    faults_as_self = False
     i = 0
     while i < len(argv):
         if argv[i] == "--cli" and i + 1 < len(argv) and "=" in argv[i + 1]:
@@ -843,13 +1078,27 @@ def main() -> int:
         elif argv[i] == "--other-user" and i + 1 < len(argv):
             other_user = argv[i + 1]
             i += 2
+        elif argv[i] == "--system-dir" and i + 1 < len(argv):
+            system_dir = Path(argv[i + 1])
+            i += 2
+        elif argv[i] == "--faults-as-self":
+            faults_as_self = True
+            i += 1
         else:
             print(f"cache-interop: unknown argument {argv[i]!r}", file=sys.stderr)
             return 2
     if not clis:
         print("usage: cache-interop.py --cli <binding>=<command> ... | --selftest", file=sys.stderr)
         return 2
-    return main_run(clis, other_user)
+    if system_dir is not None:
+        constants = json.loads((ROOT / "spec" / "fetch-v1" / "constants.json").read_text(encoding="utf-8"))
+        if str(system_dir) not in constants["cache"]["system_dirs"]:
+            print(f"cache-interop: --system-dir must be one of the default system dirs {constants['cache']['system_dirs']}", file=sys.stderr)
+            return 2
+        if not system_dir.is_dir() or any(system_dir.iterdir()) or not os.access(system_dir, os.W_OK):
+            print(f"cache-interop: --system-dir {system_dir} must exist, be empty and be writable by this user", file=sys.stderr)
+            return 2
+    return main_run(clis, other_user, system_dir, faults_as_self)
 
 
 if __name__ == "__main__":

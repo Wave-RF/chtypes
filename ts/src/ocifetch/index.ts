@@ -15,6 +15,7 @@ export {
   listInstalled,
   listTags,
   missingNotes,
+  probeCache,
   resolveInstalled,
   satisfiesRequest,
   verifyInstalled,
@@ -27,13 +28,14 @@ export {
   ArtifactPinnedError,
   ArtifactUnpublishedError,
   ArtifactUntrustedError,
+  CacheUnusableError,
   FetchV1Error,
   SourceForbiddenError,
   SourceIncompatibleError,
   SourceUnauthorizedError,
   SourceUnreachableError,
 } from './errors.js';
-export type { FetchV1ErrorCode } from './errors.js';
+export type { CacheFault, FetchV1ErrorCode } from './errors.js';
 export type {
   ArtifactPredicate,
   Clock,

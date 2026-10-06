@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use super::constants;
-use super::error::{Error, Result};
+use super::error::{Error, Result, unwritable};
 
 /// One verified, unpacked install — the durable record this module reads
 /// back for `resolve_installed`/`list_installed`/`--offline`, and what
@@ -220,8 +220,12 @@ pub fn cache_root(cache_env_override: Option<&str>) -> Result<PathBuf> {
 /// Create the OCI image-layout skeleton (`oci-layout`, an empty `index.json`,
 /// `blobs/sha256/`) if it does not already exist. Idempotent.
 pub fn ensure_layout(root: &Path) -> Result<()> {
-    std::fs::create_dir_all(root.join("blobs").join("sha256"))?;
-    std::fs::create_dir_all(root.join(constants::CACHE_UNPACKED_DIR))?;
+    for dir in [
+        root.join("blobs").join("sha256"),
+        root.join(constants::CACHE_UNPACKED_DIR),
+    ] {
+        std::fs::create_dir_all(&dir).map_err(unwritable(&dir))?;
+    }
     let oci_layout = root.join("oci-layout");
     if !oci_layout.exists() {
         write_atomic(&oci_layout, br#"{"imageLayoutVersion":"1.0.0"}"#)?;
@@ -268,15 +272,15 @@ pub fn unpacked_dir(root: &Path, manifest_digest: &str) -> Result<PathBuf> {
 }
 
 /// Read back an existing `unpacked/sha256/<hex>/verified.json`. A record
-/// that is missing, unparsable, of another schema or breaks a rule is
-/// ABSENT (`Ok(None)`), never an error and never trusted.
+/// that is missing, unreadable, unparsable, of another schema or breaks a
+/// rule is ABSENT (`Ok(None)`), never an error and never trusted, as in every
+/// binding: what could not be read is the cache-fault probe's to warn about,
+/// or in strict mode to refuse (public issue #486).
 pub fn read_verified(dir: &Path) -> Result<Option<VerifiedRecord>> {
     let path = dir.join(constants::CACHE_VERIFIED_RECORD);
     match std::fs::read(&path) {
         Ok(bytes) => Ok(VerifiedRecord::from_json_bytes(&bytes).ok()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => Ok(None),
-        Err(e) => Err(e.into()),
+        Err(_) => Ok(None),
     }
 }
 
@@ -301,9 +305,9 @@ pub fn install_unpacked(
     let parent = final_dir
         .parent()
         .ok_or_else(|| Error::InvalidInput("unpacked dir has no parent".to_string()))?;
-    std::fs::create_dir_all(parent)?;
+    std::fs::create_dir_all(parent).map_err(unwritable(parent))?;
     let tmp = parent.join(format!(".tmp-{}", unique_suffix()));
-    std::fs::create_dir_all(&tmp)?;
+    std::fs::create_dir_all(&tmp).map_err(unwritable(&tmp))?;
     let result = build(&tmp).and_then(|()| install_dir(&tmp, &final_dir));
     // Gone already after a successful rename; removed here otherwise.
     let _ = std::fs::remove_dir_all(&tmp);
@@ -357,7 +361,7 @@ fn install_dir(src: &Path, dest: &Path) -> Result<bool> {
         let _ = std::fs::remove_dir_all(&aside);
     }
     Err(match last {
-        Some(e) => e.into(),
+        Some(e) => unwritable(dest)(e),
         None => Error::InvalidInput(format!("could not install {}", dest.display())),
     })
 }
@@ -377,21 +381,26 @@ fn is_entry_name(name: &std::ffi::OsStr) -> bool {
 /// List every verified record under `root`'s `unpacked/` tree (used by
 /// `list_installed`/`resolve_installed`/the monotonicity check). A read-only
 /// system directory is scanned the same way, by the caller passing its root.
+///
+/// A root or an entry that cannot be read is ABSENT here, as in every binding
+/// (public issue #486): the cache-fault probe warns about it, or in strict
+/// mode refuses it, before any listing is trusted.
 pub fn list_verified(root: &Path) -> Result<Vec<(PathBuf, VerifiedRecord)>> {
     let dir = root.join(constants::CACHE_UNPACKED_DIR);
     let mut out = Vec::new();
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-        Err(e) => return Err(e.into()),
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(out);
     };
-    for entry in entries {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() || !is_entry_name(&entry.file_name()) {
-            continue;
-        }
-        if let Some(record) = read_verified(&entry.path())? {
-            out.push((entry.path(), record));
+    let mut names: Vec<std::ffi::OsString> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && is_entry_name(&e.file_name()))
+        .map(|e| e.file_name())
+        .collect();
+    names.sort();
+    for name in names {
+        let entry = dir.join(name);
+        if let Some(record) = read_verified(&entry)? {
+            out.push((entry, record));
         }
     }
     Ok(out)
@@ -511,20 +520,36 @@ fn add_entry(
 }
 
 /// Write `bytes` to `path` by writing a sibling temp file and renaming it
-/// into place, so a reader never observes a partial write.
+/// into place, so a reader never observes a partial write. A failure is the
+/// cache's: `CHTYPES_CACHE_UNUSABLE` with reason `unwritable`, naming the path
+/// that failed (public issue #486).
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().ok_or_else(|| {
         Error::InvalidInput(format!("{} has no parent directory", path.display()))
     })?;
-    std::fs::create_dir_all(parent)?;
-    let tmp = parent.join(format!(
+    std::fs::create_dir_all(parent).map_err(unwritable(parent))?;
+    let tmp = temp_sibling(path);
+    std::fs::write(&tmp, bytes).map_err(unwritable(&tmp))?;
+    std::fs::rename(&tmp, path).map_err(unwritable(path))
+}
+
+/// [`write_atomic`] for a file outside the cache (the lock), whose I/O
+/// failure is the caller's to class.
+pub fn write_atomic_io(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = temp_sibling(path);
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
+}
+
+fn temp_sibling(path: &Path) -> PathBuf {
+    path.with_file_name(format!(
         ".tmp-{}-{}",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("x"),
         unique_suffix()
-    ));
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    ))
 }
 
 fn unique_suffix() -> String {

@@ -58,6 +58,7 @@ import {
 } from './layout.js';
 import { type GoldensCandidate, selectGoldens, statementRevision } from './goldens.js';
 import { discoverSignatureCandidates } from './referrers.js';
+import { probeRoots, strictMode, unwritable } from './faults.js';
 import { verifyAndInstallFromLocalBlobs } from './localverify.js';
 import { type Descriptor, fetchBlobBytesByDigest, fetchManifestByDigest, resolveTag } from './oci.js';
 import { emptyLock, getPin, type LockFile, readLock, withPin, writeLock } from './lock.js';
@@ -156,6 +157,10 @@ export async function resolveInstalled(
   options: FetchV1Options = {},
 ): Promise<Resolved | undefined> {
   const root = cacheRoot(options.cacheDir);
+  const warnings = await probeRoots(
+    searchRoots(options).map((r) => r.root),
+    strictMode(options.strictCache),
+  );
   const trustedKeys = defaultTrustedKeys(options);
   await verifyPreseededEntries(root, root, platform, trustedKeys);
   for (const sysDir of systemDirs(options.systemDirs)) {
@@ -177,7 +182,7 @@ export async function resolveInstalled(
   if (candidates.length === 0) return undefined;
   candidates.sort((a, b) => compareRecords(b.record, a.record) || a.rank - b.rank);
   const best = candidates[0]!;
-  return resolvedFromRecord(best.record, platform, request, best.dir, best.source, true, []);
+  return resolvedFromRecord(best.record, platform, request, best.dir, best.source, true, warnings);
 }
 
 /** The cache, then every system directory in order: the one search order every lookup uses. */
@@ -203,8 +208,20 @@ function compareRecords(a: VerifiedRecord, b: VerifiedRecord): number {
  * registry's own MISSING adds the same notes as the offline fetch's.
  */
 export async function missingNotes(options: FetchV1Options = {}): Promise<readonly string[]> {
+  const notes = await probeRoots(
+    searchRoots(options).map((r) => r.root),
+    false,
+  );
   const hint = await zeroXHint(cacheRoot(options.cacheDir));
-  return hint === undefined ? [] : [hint];
+  return hint === undefined ? notes : [...notes, hint];
+}
+
+/** Checks the cache and its system dirs by the mode `options` asks for: the default mode's warnings, or strict mode's `CacheUnusableError`. `chtypes where --strict` is this check. */
+export async function probeCache(options: FetchV1Options = {}): Promise<readonly string[]> {
+  return probeRoots(
+    searchRoots(options).map((r) => r.root),
+    strictMode(options.strictCache),
+  );
 }
 
 /** `message` with `notes`, each a complete sentence, appended. */
@@ -316,11 +333,12 @@ async function checkMonotonic(
 // ------------------------------------------------------------------ listInstalled
 
 export async function listInstalled(options: FetchV1Options = {}): Promise<readonly Resolved[]> {
+  const warnings = await probeCache(options);
   const out: Resolved[] = [];
   for (const r of searchRoots(options)) {
     for (const { dir, record } of await listVerified(r.root)) {
       const platform = record.platform as PlatformKey;
-      out.push(resolvedFromRecord(record, platform, record.version, dir, r.source, true, []));
+      out.push(resolvedFromRecord(record, platform, record.version, dir, r.source, true, warnings));
     }
   }
   return out;
@@ -330,6 +348,7 @@ export async function listInstalled(options: FetchV1Options = {}): Promise<reado
 
 /** Re-checks every installed library's bytes against its own `verified.json` record (guide §9). */
 export async function verifyInstalled(options: FetchV1Options = {}): Promise<readonly VerifyResult[]> {
+  await probeCache(options);
   const out: VerifyResult[] = [];
   for (const r of searchRoots(options)) {
     for (const { dir, record } of await listVerified(r.root)) {
@@ -353,6 +372,16 @@ export async function verifyInstalled(options: FetchV1Options = {}): Promise<rea
  * a lock entry. See `docs/guides/fetch-v1.md` §9 for the full contract.
  */
 export async function ensure(request: string, options: FetchV1Options = {}): Promise<Resolved> {
+  try {
+    return await ensureIn(request, options);
+  } catch (err) {
+    // A write the fetch layer needed that failed, under the cache: one class
+    // in every mode, never a raw Node error (public issue #486).
+    throw await unwritable(err, cacheRoot(options.cacheDir));
+  }
+}
+
+async function ensureIn(request: string, options: FetchV1Options): Promise<Resolved> {
   const platform = resolvePlatformOption(options.platform, os.platform(), os.arch());
   const root = cacheRoot(options.cacheDir);
 
@@ -366,6 +395,10 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
       );
     }
     return hit;
+  }
+  if (strictMode(options.strictCache)) {
+    // Strict: the cache is checked before anything is fetched into it.
+    await probeCache(options);
   }
   await ensureLayout(root);
 

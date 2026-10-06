@@ -16,6 +16,7 @@ fn run(args: &[&str]) -> (i32, String, String) {
         .args(args)
         .env_remove("CHTYPES_CACHE")
         .env_remove("CHTYPES_ARTIFACTS_URL")
+        .env_remove("CHTYPES_CACHE_STRICT")
         .output()
         .expect("run the chtypes binary");
     (
@@ -70,5 +71,59 @@ fn verify_of_nothing_says_so_and_names_a_zero_x_registry() {
         !zero_x.join("oci-layout").exists() && !zero_x.join("index.json").exists(),
         "a read-only command wrote into the 0.x registry"
     );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// `--strict` (or `CHTYPES_CACHE_STRICT=1`) turns every command's cache fault
+/// into `CHTYPES_CACHE_UNUSABLE` (exit 9) naming the path and the reason, and a
+/// verify of nothing into `CHTYPES_ARTIFACT_MISSING` (exit 1) (public issue
+/// #486).
+#[test]
+fn strict_flag() {
+    let base = scratch("strict");
+    let empty = base.join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let e = empty.to_str().unwrap();
+    let (code, _, err) = run(&["verify", "--strict", "--cache", e]);
+    assert!(
+        code == 1 && err.contains("CHTYPES_ARTIFACT_MISSING"),
+        "{code} {err}"
+    );
+    let out = Command::new(env!("CARGO_BIN_EXE_chtypes"))
+        .args(["verify", "--cache", e])
+        .env("CHTYPES_CACHE_STRICT", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let (code, out, _) = run(&["where", "--strict", "--cache", e]);
+    assert_eq!((code, out.trim()), (0, e));
+    let zero_x = base.join("zero-x");
+    zero_x_registry(&zero_x);
+    let z = zero_x.to_str().unwrap();
+    let want = format!("{z} is unusable as a cache: layout_0x");
+    for argv in [
+        vec!["where", "--strict"],
+        vec!["list", "--offline", "--strict"],
+        vec!["verify", "--strict"],
+        vec![
+            "fetch",
+            "26.1",
+            "--offline",
+            "--platform",
+            "linux-arm64",
+            "--strict",
+        ],
+    ] {
+        let mut args = argv.clone();
+        args.extend(["--cache", z]);
+        let (code, out, err) = run(&args);
+        assert!(
+            code == 9
+                && out.is_empty()
+                && err.contains(&want)
+                && err.contains("CHTYPES_CACHE_UNUSABLE"),
+            "{argv:?}: {code} {out:?} {err}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&base);
 }
