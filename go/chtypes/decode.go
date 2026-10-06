@@ -459,7 +459,10 @@ func (r *reader) header(v any, path string) *Header {
 	return h
 }
 
-func decodeBatch(raw []byte, payload []byte) (BatchResult, error) {
+// decodeBatchGeneric is the strict generic reader of a batch document: the
+// whole document as a tree, read field by field. decodeBatch (decode_batch.go)
+// answers first and falls back here for any document it will not judge.
+func decodeBatchGeneric(raw []byte, payload []byte) (BatchResult, error) {
 	v, err := parseDocument("batch", raw)
 	if err != nil {
 		return BatchResult{}, err
