@@ -2,6 +2,13 @@
 # Trusted Publishing (OIDC): no token is stored anywhere. Configure the
 # publisher once on PyPI (project `chtypes`, owner Wave-RF, repo chtypes,
 # workflow release-python.yml, environment pypi).
+#
+# On this branch the only releasable tags are the channel's
+# (scripts/release-channel.sh; until the v2 lock, python/v2.0.0-dev.N), and the
+# package's version is that tag's PEP 440 spelling, 2.0.0.devN: a pre-release,
+# which pip and uv never pick without --pre or an exact pin (#511). The
+# `never-default` job asserts that against PyPI itself after the publish, and
+# its twin does in a dry run.
 name: release-python
 on:
   push:
@@ -37,34 +44,79 @@ jobs:
   build:
     if: github.event_name != 'workflow_dispatch' || !inputs.verify_only
     runs-on: ubuntu-latest
+    outputs:
+      pep440: ${{ steps.version.outputs.pep440 }}
+      default: ${{ steps.record.outputs.default }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - name: the tag and the package agree on the version
+      # Before anything is installed or built: the channel's own selftest, then
+      # the tag must be a release of this branch's channel.
+      - name: the tag is a release of this branch's channel (scripts/release-channel.sh, #511)
         env:
           TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
-          tag="${TAG_NAME#python/v}"
+          scripts/release-channel.sh --selftest
+          scripts/release-channel.sh tag python "$TAG_NAME"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      # The tag spells the channel's version (2.0.0-dev.N) and PyPI the PEP 440
+      # one (2.0.0.devN): the same version, compared through packaging.version
+      # as every installer reads it, never as strings. pyproject.toml must spell
+      # it canonically, and while the channel is a pre-release channel it must
+      # be a PEP 440 pre-release (scripts/release-pep440.py).
+      - name: the tag and the package agree on the version, by PEP 440
+        id: version
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+        run: |
+          tag="$(scripts/release-channel.sh tag python "$TAG_NAME")"
           ver="$(cd python && uv run --no-project python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
-          [ "$tag" = "$ver" ] || { echo "::error::tag python/v$tag but pyproject says $ver"; exit 1; }
+          uv run --no-project --with packaging==26.3 python3 scripts/release-pep440.py --selftest
+          if [ "$(scripts/release-channel.sh get PRERELEASE)" = 1 ]; then
+            pep440="$(uv run --no-project --with packaging==26.3 python3 scripts/release-pep440.py map "$tag" "$ver" --prerelease)"
+          else
+            pep440="$(uv run --no-project --with packaging==26.3 python3 scripts/release-pep440.py map "$tag" "$ver")"
+          fi
+          echo "tag python/v$tag is PEP 440 $pep440, as pyproject.toml says"
+          echo "pep440=$pep440" >> "$GITHUB_OUTPUT"
       - name: build sdist + wheel
         run: cd python && uv build
       - name: the distributions pass twine check
         run: uvx twine check python/dist/*
+      - name: the distributions are named for the PEP 440 version, and nothing else is uploaded
+        env:
+          PEP440: ${{ steps.version.outputs.pep440 }}
+        run: |
+          cd python/dist
+          set -- *
+          echo "python/dist: $*"
+          if [ "$#" != 2 ] || [ ! -f "chtypes-$PEP440-py3-none-any.whl" ] || [ ! -f "chtypes-$PEP440.tar.gz" ]; then
+            echo "::error::python/dist holds '$*', wanted exactly chtypes-$PEP440-py3-none-any.whl and chtypes-$PEP440.tar.gz"
+            exit 1
+          fi
       # The User-Agent assertion: install the BUILT wheel (not the source tree)
       # into a clean venv and read the constant the fetch layer sends. It runs
-      # on the tag path too, before anything is published.
+      # on the tag path too, before anything is published. The installed
+      # metadata carries the PEP 440 spelling, so that is what the User-Agent
+      # says (chtypes-python/2.0.0.devN).
       - name: the User-Agent version is the version being tagged
         env:
-          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+          PEP440: ${{ steps.version.outputs.pep440 }}
         run: |
-          tag="${TAG_NAME#python/v}"
           venv="$RUNNER_TEMP/ua-venv"
           uv venv --quiet --python 3.13 "$venv"
           uv pip install --quiet --python "$venv/bin/python" python/dist/*.whl
           got="$(cd "$RUNNER_TEMP" && "$venv/bin/python" -c 'from chtypes._ocifetch._http import USER_AGENT; print(USER_AGENT)')"
           echo "User-Agent: $got"
-          [ "$got" = "chtypes-python/$tag" ] || { echo "::error::the wheel's User-Agent is '$got', the tag says chtypes-python/$tag"; exit 1; }
+          [ "$got" = "chtypes-python/$PEP440" ] || { echo "::error::the wheel's User-Agent is '$got', the tag says chtypes-python/$PEP440"; exit 1; }
+      # The record the never-default job compares against: what a plain,
+      # unpinned resolution picks right now. It must already be a stable 1.x,
+      # or nothing is published over it.
+      - name: record what a plain install resolves before the publish (a stable 1.x)
+        id: record
+        run: |
+          default="$(scripts/release-channel.sh default python)"
+          echo "a plain resolution before the publish: $default"
+          echo "default=$default" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with: { name: python-dist, path: python/dist/ }
   publish:
@@ -78,6 +130,30 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: { name: python-dist, path: dist/ }
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+  # "Never installed by default", asserted against PyPI itself, never left to a
+  # comment. After a publish: a plain, unpinned resolution of chtypes (no
+  # --pre) still picks the 1.x the build job recorded, on every read, and
+  # ==2.0.0.devN resolves (polled for PyPI's lag, up to 15 minutes). A dry run
+  # runs the same assertions against PyPI as it is now, the twin: the plain
+  # resolution is the recorded 1.x, ==2.0.0.devN does not resolve yet, and the
+  # same pinned resolution finds the recorded version (its positive control).
+  # scripts/release-channel.sh holds both, and its selftest plants every refusal.
+  never-default:
+    needs: [build, publish]
+    if: ${{ !failure() && needs.build.result == 'success' && (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && github.event_name == 'workflow_dispatch' && inputs.dry_run)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: a plain resolution still picks the recorded 1.x, and ==2.0.0.devN resolves (a dry run asserts it against PyPI as it is)
+        env:
+          PEP440: ${{ needs.build.outputs.pep440 }}
+          RECORDED: ${{ needs.build.outputs.default }}
+          PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'twin' || 'after' }}
+        run: scripts/release-channel.sh never-default python "$PEP440" "$RECORDED" "$PHASE"
   # A publish step exiting 0 does not mean anyone can install the package.
   # Measured on ts/v0.1.1 (issue #10): the job went green ~7 minutes before the
   # registry served the artifact, and for ~2 of those minutes the version
@@ -85,13 +161,11 @@ jobs:
   # an artifact into its workspace rather than checking the repository out.
   #
   # The check installs the PUBLISHED package into a clean environment, with no
-  # credentials, the way a consumer does, and then makes it speak:
-  #   1. the binding's ABI fingerprint constant equals the one in include/chtypes.h
-  #      (read from the header, never hard-coded, and no revision number anywhere);
-  #   2. the published CLI fetches one published release line from the production
-  #      registry (`chtypes list`, then `chtypes fetch <line>`);
-  #   3. the public API opens that line and the loaded library reports the same
-  #      fingerprint.
+  # credentials, the way a consumer does, and then makes it speak the channel:
+  # its generation-2 fingerprint constant equals the one in include/v2/chtypes.h,
+  # its CLI lists, fetches and loads from the channel's registry (staging
+  # chtypes/v2-dev) and no other, and the loaded library reports abi 2 and that
+  # fingerprint. The six checks are scripts/release-verify.sh's header.
   # The retry loop is for registry lag: an install that cannot resolve the version
   # yet is retried for up to 15 minutes, and every other failure fails at once.
   # The steps are scripts/release-verify.sh, shared by every path: a tag push
@@ -107,12 +181,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - name: the verify script's own selftest (the list parser)
+      - name: the verify script's own selftest (the list parser and every channel check)
         run: scripts/release-verify.sh --selftest
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only
         with: { name: python-dist, path: "${{ runner.temp }}/python-dist/" }
-      - name: it installs, speaks the header's ABI fingerprint, lists, fetches a line and opens it
+      - name: it installs, speaks include/v2/chtypes.h's fingerprint, and lists, fetches and opens from the channel's registry only
         env:
           TAG_NAME: ${{ inputs.tag || github.ref_name }}
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && !inputs.verify_only && 'local' || 'registry' }}
