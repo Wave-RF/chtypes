@@ -15,6 +15,7 @@
     "allow_unsigned": "CHTYPES_ALLOW_UNSIGNED",
     "autofetch": "CHTYPES_AUTOFETCH",
     "target": "CHTYPES_TARGET",
+    "strict_cache": "CHTYPES_CACHE_STRICT",
     "retired": ["CHTYPES_REGISTRY"]
   },
   "spelling": {
@@ -113,6 +114,7 @@
     "CHTYPES_SOURCE_UNAUTHORIZED": 5,
     "CHTYPES_SOURCE_FORBIDDEN": 6,
     "CHTYPES_SOURCE_INCOMPATIBLE": 7,
-    "CHTYPES_ARTIFACT_INCOMPATIBLE": 8
+    "CHTYPES_ARTIFACT_INCOMPATIBLE": 8,
+    "CHTYPES_CACHE_UNUSABLE": 9
   }
 }

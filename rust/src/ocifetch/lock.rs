@@ -104,7 +104,9 @@ pub fn read(path: &Path) -> Result<Option<Lock>> {
 /// Write a lock file by atomic rename.
 pub fn write(path: &Path, lock: &Lock) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(lock)?;
-    layout::write_atomic(path, &bytes)
+    // The lock is the caller's file, not the cache: its I/O failure keeps the
+    // class it always had.
+    layout::write_atomic_io(path, &bytes).map_err(Error::from)
 }
 
 #[cfg(test)]

@@ -8,6 +8,7 @@ with the fetch layer's own environment (`CHTYPES_ARTIFACTS_URL`,
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -160,6 +161,8 @@ def test_every_code_in_the_table_maps_to_its_status(code_name, monkeypatch, caps
     """The exit status of each error code is the table's, never a number held here."""
     if code_name == "CHTYPES_ARTIFACT_INCOMPATIBLE":
         error: Exception = ArtifactIncompatibleError("boom", reason="x")
+    elif code_name == "CHTYPES_CACHE_UNUSABLE":
+        error = fetch_errors.CacheUnusableError("boom", path="/x", reason="unwritable")
     else:
         cls = {c.code: c for c in vars(fetch_errors).values() if _is_error(c)}[code_name]
         error = cls("boom")
@@ -214,3 +217,49 @@ def test_verify_of_nothing_says_so(env, tmp_path, capsys) -> None:
     code, _, err = run(capsys, "fetch", "--offline", "26.1", "--cache", str(zero_x))
     assert code == C.ERROR_EXIT_CODES["CHTYPES_ARTIFACT_MISSING"] and hint in err
     assert not (zero_x / "oci-layout").exists()
+
+
+def test_strict_flag(env, tmp_path, monkeypatch, capsys) -> None:
+    """--strict (or CHTYPES_CACHE_STRICT=1) turns every command's cache fault
+    into CHTYPES_CACHE_UNUSABLE (exit 9) naming the path and the reason, and a
+    verify of nothing into CHTYPES_ARTIFACT_MISSING (exit 1); the default mode
+    lists nothing, exits 0 and warns (public issue #486)."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    code, _, err = run(capsys, "verify", "--strict", "--cache", str(empty))
+    assert code == 1 and "CHTYPES_ARTIFACT_MISSING" in err
+    monkeypatch.setenv("CHTYPES_CACHE_STRICT", "1")
+    assert run(capsys, "verify", "--cache", str(empty))[0] == 1
+    monkeypatch.delenv("CHTYPES_CACHE_STRICT")
+    code, out, _ = run(capsys, "where", "--strict", "--cache", str(empty))
+    assert (code, out.strip()) == (0, str(empty))
+    zero_x = tmp_path / "zero-x"
+    _zero_x_registry(zero_x)
+    want = f"{zero_x} is unusable as a cache: layout_0x"
+    for argv in (
+        ["where", "--strict"],
+        ["list", "--offline", "--strict"],
+        ["verify", "--strict"],
+        ["fetch", "--offline", "26.1", "--strict"],
+    ):
+        code, out, err = run(capsys, *argv, "--cache", str(zero_x))
+        assert (code, out) == (9, ""), (argv, err)
+        assert want in err and "CHTYPES_CACHE_UNUSABLE" in err, (argv, err)
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("running as root, which a mode cannot deny")
+    locked = tmp_path / "locked"
+    (locked / "unpacked" / "sha256").mkdir(parents=True)
+    os.chmod(locked, 0)
+    try:
+        with pytest.raises(PermissionError):
+            os.listdir(locked)
+        code, out, err = run(capsys, "list", "--offline", "--cache", str(locked))
+        assert (code, out) == (0, "")
+        assert (
+            f"{locked} could not be read (EACCES); treated as not installed. "
+            "Set CHTYPES_CACHE_STRICT=1 to make this an error." in err
+        )
+        code, _, err = run(capsys, "list", "--offline", "--strict", "--cache", str(locked))
+        assert code == 9 and f"{locked} is unusable as a cache: unreadable_root (EACCES)" in err
+    finally:
+        os.chmod(locked, 0o755)

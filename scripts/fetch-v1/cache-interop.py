@@ -675,6 +675,9 @@ FAULT_REASON = {
     "layout-0x": ("layout_0x", False),
 }
 UNUSABLE = re.compile(r"(\S+) is unusable as a cache: ([a-z_0-9]+)")
+# Every shared code (spec/fetch-v1/constants.json), so an answer with another
+# code reads as that code, never as none.
+ERROR_CODES = tuple(json.loads((ROOT / "spec" / "fetch-v1" / "constants.json").read_text(encoding="utf-8"))["errors"])
 WARNED = re.compile(r"(\S+) could not be read \(([A-Z0-9 ]*)\)")
 
 
@@ -684,7 +687,9 @@ def observe(cmd: str, proc: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     m = UNUSABLE.search(proc.stderr)
     out: dict[str, Any] = {
         "exit": proc.returncode,
-        "code": next((c for c in ("CHTYPES_CACHE_UNUSABLE", "CHTYPES_ARTIFACT_MISSING") if c in proc.stderr), ""),
+        "code": min(
+            (c for c in ERROR_CODES if re.search(rf"\b{c}\b", proc.stderr)), key=proc.stderr.index, default=""
+        ),
         "unusable": (m.group(1), m.group(2)) if m else None,
         "warned": sorted({w.group(1) for w in WARNED.finditer(proc.stderr)}),
     }
@@ -1040,6 +1045,10 @@ def selftest() -> None:
     got = observe("fetch", missing)
     assert got == expected_answer("fetch", "root-000", False, Path("/c/e"), None, Path("/c")), got
     assert got != expected_answer("fetch", "entry-000", False, Path("/c/e"), None, Path("/c/e")), "another path is another answer"
+    corrupt = cp([], 1, "", "chtypes: CHTYPES_ARTIFACT_CORRUPT: JSON: missing field\n")
+    assert observe("fetch", corrupt)["code"] == "CHTYPES_ARTIFACT_CORRUPT", "another code reads as that code"
+    hint = cp([], 1, "", "x holds a 0.x registry; point CHTYPES_CACHE at an empty dir. Set CHTYPES_CACHE_STRICT=1 [CHTYPES_ARTIFACT_MISSING]\n")
+    assert observe("fetch", hint)["code"] == "CHTYPES_ARTIFACT_MISSING", "an environment variable is not a code"
     with tempfile.TemporaryDirectory() as d:
         listed = cp([], 0, f"installed 26.8.15.10 linux-arm64 {d}\n", "")
         assert observe("list", listed) == expected_answer("list", "none", False, Path(d), None, None)

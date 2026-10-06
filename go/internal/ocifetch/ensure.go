@@ -42,6 +42,7 @@ type Options struct {
 	LockPath              string // defaults to LockDefaultFile
 	LockWrite             bool
 	Update                bool
+	StrictCache           *bool               // nil means CHTYPES_CACHE_STRICT ("1" is on); see probeRoots
 	Clock                 *Clock              // nil means DefaultClock()
 	ConnectTimeout        time.Duration       // 0 means ConnectTimeoutSeconds
 	IdleReadTimeout       time.Duration       // 0 means IdleReadTimeoutSeconds
@@ -99,6 +100,7 @@ type resolvedOptions struct {
 	lockPath              string
 	lockWrite             bool
 	update                bool
+	strict                bool
 	clock                 Clock
 	connectTimeout        time.Duration
 	idleReadTimeout       time.Duration
@@ -187,6 +189,11 @@ func resolveOptions(o *Options) (resolvedOptions, error) {
 	ro.frozen = o.Frozen
 	ro.lockWrite = o.LockWrite
 	ro.update = o.Update
+	if o.StrictCache != nil {
+		ro.strict = *o.StrictCache
+	} else {
+		ro.strict = os.Getenv(EnvCacheStrictName) == "1"
+	}
 	ro.lockPath = o.LockPath
 	if ro.lockPath == "" {
 		ro.lockPath = LockDefaultFile
@@ -291,6 +298,11 @@ func Ensure(ctx context.Context, req Request, opts *Options) (*Resolved, error) 
 	if err != nil {
 		return nil, err
 	}
+	res, err := ensure(ctx, ro, req)
+	return res, cacheIOError(err, ro.cacheDir)
+}
+
+func ensure(ctx context.Context, ro resolvedOptions, req Request) (*Resolved, error) {
 	platformKey := req.Platform
 	if platformKey == "" {
 		var ok bool
@@ -309,6 +321,12 @@ func Ensure(ctx context.Context, req Request, opts *Options) (*Resolved, error) 
 
 	if ro.offline {
 		return resolveOffline(ro, req, platform)
+	}
+	if ro.strict {
+		// Strict: the cache is checked before anything is fetched into it.
+		if _, err := probeRoots(ro); err != nil {
+			return nil, err
+		}
 	}
 
 	s := newSession(ro)
@@ -352,10 +370,12 @@ func resolveOffline(ro resolvedOptions, req Request, platform Platform) (*Resolv
 }
 
 // MissingNotes is what a CHTYPES_ARTIFACT_MISSING answer from the cache opts
-// names adds to its message, each a complete sentence: the 0.x hint when the
-// cache is a 0.x registry directory (docs/guides/fetch-v1.md, "Upgrading from
-// 0.x"; public issue #486). The registry's own MISSING adds the same notes as
-// the offline fetch's.
+// names adds to its message, each a complete sentence: the default mode's
+// warning for every unusable root or unreadable entry, then the 0.x hint when
+// the cache is a 0.x registry directory (docs/guides/fetch-v1.md §1 and
+// "Upgrading from 0.x"; public issue #486). The registry's own MISSING adds
+// the same notes as the offline fetch's, and the CLI's list and verify print
+// them.
 func MissingNotes(opts *Options) []string {
 	ro, err := resolveOptions(opts)
 	if err != nil {
@@ -365,10 +385,12 @@ func MissingNotes(opts *Options) []string {
 }
 
 func missingNotes(ro resolvedOptions) []string {
+	ro.strict = false
+	notes, _ := probeRoots(ro)
 	if hint := zeroXHint(ro.cacheDir); hint != "" {
-		return []string{hint}
+		notes = append(notes, hint)
 	}
-	return nil
+	return notes
 }
 
 // WithNotes appends notes, each a complete sentence, to a message.
@@ -742,6 +764,10 @@ func rootSource(i int, dir string) string {
 // it install a pre-seeded index.json entry from local blobs, trying the roots
 // in the same order. Nothing is created unless such an install begins.
 func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey string) (*Resolved, error) {
+	warnings, err := probeRoots(ro)
+	if err != nil {
+		return nil, err
+	}
 	cacheLayout := newLayout(ro.cacheDir, false)
 	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
 	var best *installedEntry
@@ -760,7 +786,7 @@ func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey strin
 		}
 	}
 	if best != nil {
-		return recordToResolved(&best.rec, best.dir, platformKey, req.Spelling, "", true, bestSource, nil), nil
+		return recordToResolved(&best.rec, best.dir, platformKey, req.Spelling, "", true, bestSource, warnings), nil
 	}
 	for i, dir := range dirs {
 		// A pre-seeded index.json entry with no verified.json yet: verify
@@ -776,6 +802,7 @@ func resolveInstalledInternal(ro resolvedOptions, req Request, platformKey strin
 			source = "system:" + dir + " (pre-seeded, installed into the cache)"
 		}
 		if res, err := verifyPreseededEntry(l, dst, req, platformKey, ro.trustedKeys, source); err == nil && res != nil {
+			res.Warnings = append(warnings, res.Warnings...)
 			return res, nil
 		}
 	}
@@ -808,6 +835,10 @@ func ListInstalled(opts *Options) ([]Resolved, error) {
 	if err != nil {
 		return nil, err
 	}
+	warnings, err := probeRoots(ro)
+	if err != nil {
+		return nil, err
+	}
 	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)
 	var out []Resolved
 	for i, dir := range dirs {
@@ -821,7 +852,7 @@ func ListInstalled(opts *Options) ([]Resolved, error) {
 			source = "system:" + dir
 		}
 		for _, e := range entries {
-			out = append(out, *recordToResolved(&e.rec, e.dir, e.rec.Platform, e.rec.Version, "", true, source, nil))
+			out = append(out, *recordToResolved(&e.rec, e.dir, e.rec.Platform, e.rec.Version, "", true, source, warnings))
 		}
 	}
 	return out, nil
@@ -832,6 +863,9 @@ func ListInstalled(opts *Options) ([]Resolved, error) {
 func VerifyInstalled(opts *Options) ([]VerifyResult, error) {
 	ro, err := resolveOptions(opts)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := probeRoots(ro); err != nil {
 		return nil, err
 	}
 	dirs := append([]string{ro.cacheDir}, ro.systemDirs...)

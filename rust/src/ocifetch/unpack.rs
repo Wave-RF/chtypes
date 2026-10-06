@@ -8,7 +8,7 @@ use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
 
 use super::constants;
-use super::error::{Error, Result};
+use super::error::{Error, Result, unwritable};
 
 /// Decompress a (possibly multi-frame) zstd stream, enforcing
 /// `constants::ZSTD_WINDOW_LOG_MAX` on every frame and
@@ -73,15 +73,16 @@ pub fn unpack_tar(data: &[u8], dest: &Path) -> Result<()> {
         }
         let header = entry.header().clone();
         if header.entry_type().is_dir() {
-            std::fs::create_dir_all(dest.join(&rel))?;
+            let dir = dest.join(&rel);
+            std::fs::create_dir_all(&dir).map_err(unwritable(&dir))?;
             continue;
         }
         if header.entry_type().is_file() {
             let out_path = dest.join(&rel);
             if let Some(parent) = out_path.parent() {
-                std::fs::create_dir_all(parent)?;
+                std::fs::create_dir_all(parent).map_err(unwritable(parent))?;
             }
-            let mut out_file = std::fs::File::create(&out_path)?;
+            let mut out_file = std::fs::File::create(&out_path).map_err(unwritable(&out_path))?;
             std::io::copy(&mut entry, &mut out_file)
                 .map_err(|e| Error::ArtifactCorrupt(format!("writing {}: {e}", rel.display())))?;
             continue;

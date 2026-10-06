@@ -177,6 +177,13 @@ export interface FetchV1Options {
   readonly update?: boolean;
   /** Overrides the host platform (tests, and a cross-platform lock write). */
   readonly platform?: PlatformKey;
+  /**
+   * Strict mode (public issue #486): every fault of the cache and of an
+   * existing system dir is a `CacheUnusableError` naming the path, never "not
+   * installed", and never a fall-through to a system dir. Unset reads
+   * `CHTYPES_CACHE_STRICT` (`1` is on), else off.
+   */
+  readonly strictCache?: boolean;
   readonly clock?: Clock;
   /** Test-only: runs after the index's temp-write, before its atomic rename. */
   readonly beforeIndexRename?: () => Promise<void> | void;

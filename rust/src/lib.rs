@@ -93,7 +93,7 @@ mod setup;
 pub use abi1::vocab_gen::{
     DefaultKind, DocFlags, FilterOutcome, Format, Outcome, Verdict, reason, source, status,
 };
-pub use error::{CallError, Error, Refusal, Result};
+pub use error::{CacheFault, CallError, Error, Refusal, Result};
 pub use library::Library;
 pub use ocifetch::ensure::Resolved;
 pub use raw::RawText;

@@ -70,6 +70,11 @@ pub struct FetchOptions {
     pub trusted_keys: Option<Vec<String>>,
     /// An access token; `None` is `$CHTYPES_DOWNLOAD_TOKEN`.
     pub token: Option<String>,
+    /// Strict mode: every fault of the cache and of an existing system dir is
+    /// [`Error::CacheUnusable`] naming the path, never "not installed", and
+    /// never a fall-through to a system dir. `None` reads
+    /// `CHTYPES_CACHE_STRICT` (`1` is on), else off.
+    pub strict_cache: Option<bool>,
 }
 
 impl FetchOptions {
@@ -86,6 +91,7 @@ impl FetchOptions {
             lock_write: self.lock_write,
             update: self.update,
             allow_unsigned: self.allow_unsigned,
+            strict_cache: self.strict_cache,
             trusted_keys: self.trusted_keys.clone(),
             token: self.token.clone(),
             clock: None,
@@ -364,6 +370,43 @@ mod tests {
             !dir.join("oci-layout").exists(),
             "a lookup wrote into the 0.x registry"
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// With `strict_cache`, a 0.x registry is `Error::CacheUnusable` naming
+    /// the path and the reason, from `for_version` and `installed` alike
+    /// (public issue #486).
+    #[test]
+    fn a_strict_registry_refuses_a_zero_x_registry_as_cache_unusable() {
+        let dir = std::env::temp_dir().join(format!(
+            "chtypes_registry_strict_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(dir.join("26.1")).unwrap();
+        std::fs::write(dir.join("26.1").join("manifest.json"), b"{}").unwrap();
+        let r = Registry::new(RegistryOptions {
+            fetch: FetchOptions {
+                platform: Some("linux-amd64".to_string()),
+                cache_dir: Some(dir.to_string_lossy().into_owned()),
+                system_dirs: Some(Vec::new()),
+                strict_cache: Some(true),
+                ..Default::default()
+            },
+            autofetch: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        let err = r.for_version("26.1").unwrap_err();
+        let Error::CacheUnusable(f) = &err else {
+            panic!("want CacheUnusable, got {err:?}")
+        };
+        assert_eq!(
+            (f.path.as_path(), f.reason.as_str(), f.os_error.as_deref()),
+            (dir.as_path(), "layout_0x", None)
+        );
+        assert_eq!(err.code(), Some("CHTYPES_CACHE_UNUSABLE"));
+        assert!(matches!(r.installed(), Err(Error::CacheUnusable(_))));
         let _ = std::fs::remove_dir_all(dir);
     }
 

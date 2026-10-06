@@ -2,11 +2,13 @@
 // chtypes SDK spells identically (docs/guides/fetch-v1.md, sections 6 and 8):
 //
 //	chtypes fetch <spelling>... | --all [--platform <os-arch>] [--cache <dir>]
-//	                                    [--lock <file>] [--frozen] [--offline] [--update]
-//	chtypes verify [--cache <dir>]      re-verify the installed cache
-//	chtypes list   [--cache <dir>] [--offline]
+//	                                    [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+//	chtypes verify [--cache <dir>] [--strict]
+//	                                    re-verify the installed cache
+//	chtypes list   [--cache <dir>] [--offline] [--strict]
 //	                                    what is installed, and what is published
-//	chtypes where  [--cache <dir>]      the cache root
+//	chtypes where  [--cache <dir>] [--strict]
+//	                                    the cache root
 //
 // Run it without installing anything:
 //
@@ -21,7 +23,8 @@
 // Environment: CHTYPES_ARTIFACTS_URL (the bases, comma separated),
 // CHTYPES_CACHE (the cache root), CHTYPES_TRUSTED_KEYS (replaces the embedded
 // release key), CHTYPES_ALLOW_UNSIGNED=1 (skip verification, loudly),
-// CHTYPES_DOWNLOAD_TOKEN, and CHTYPES_TARGET (the default --platform).
+// CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TARGET (the default --platform) and
+// CHTYPES_CACHE_STRICT=1 (--strict).
 package main
 
 import (
@@ -41,13 +44,16 @@ import (
 
 const usageText = `usage:
   chtypes fetch <spelling>... | --all [--platform <os-arch>] [--cache <dir>]
-                                      [--lock <file>] [--frozen] [--offline] [--update]
-  chtypes verify [--cache <dir>]      re-verify the installed cache
-  chtypes list   [--cache <dir>] [--offline]
+                                      [--lock <file>] [--frozen] [--offline] [--update] [--strict]
+  chtypes verify [--cache <dir>] [--strict]
+                                      re-verify the installed cache
+  chtypes list   [--cache <dir>] [--offline] [--strict]
                                       what is installed, and what is published
-  chtypes where  [--cache <dir>]      the cache root
+  chtypes where  [--cache <dir>] [--strict]
+                                      the cache root
   chtypes --version
 
+--strict (or CHTYPES_CACHE_STRICT=1): a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never "not installed"
 exit statuses: 0 ok, 2 usage, otherwise the failure's own status (docs/guides/fetch-v1.md section 8)
 `
 
@@ -161,16 +167,41 @@ func parseInterleaved(fs *flag.FlagSet, args []string) ([]string, error) {
 
 type commonFlags struct {
 	platform, cache string
-	offline         bool
+	offline, strict bool
 }
 
 func (c *commonFlags) bind(fs *flag.FlagSet, withPlatform, withOffline bool) {
 	fs.StringVar(&c.cache, "cache", "", "the cache root (default: $CHTYPES_CACHE, else the per-user cache; `chtypes where`)")
+	fs.BoolVar(&c.strict, "strict", false, "a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never not-installed (default: $CHTYPES_CACHE_STRICT=1)")
 	if withPlatform {
 		fs.StringVar(&c.platform, "platform", "", "platform key <os>-<arch> (default: this host, or $CHTYPES_TARGET)")
 	}
 	if withOffline {
 		fs.BoolVar(&c.offline, "offline", false, "read the cache only; never the network")
+	}
+}
+
+// options are the fetch options every command shares: the cache, and strict
+// mode when --strict asks for it (else CHTYPES_CACHE_STRICT decides).
+func (c *commonFlags) options() *ocifetch.Options {
+	opts := &ocifetch.Options{CacheDir: c.cache, Offline: c.offline}
+	if c.strict {
+		strict := true
+		opts.StrictCache = &strict
+	}
+	return opts
+}
+
+// strictMode is whether strict mode is on: --strict, else CHTYPES_CACHE_STRICT=1.
+func (c *commonFlags) strictMode() bool {
+	return c.strict || os.Getenv(ocifetch.EnvCacheStrictName) == "1"
+}
+
+// printNotes prints what the cache says about itself in the default mode: a
+// warning per root or entry it could not read, and the 0.x hint.
+func printNotes(stderr io.Writer, opts *ocifetch.Options) {
+	for _, note := range ocifetch.MissingNotes(opts) {
+		fmt.Fprintf(stderr, "chtypes: %s\n", note)
 	}
 }
 
@@ -231,7 +262,8 @@ func cmdFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	case frozen && cf.offline:
 		return &usageError{"--frozen fetches by digest and --offline forbids the network; pass one"}
 	}
-	opts := &ocifetch.Options{CacheDir: cf.cache, Offline: cf.offline, Frozen: frozen, LockPath: lock}
+	opts := cf.options()
+	opts.Frozen, opts.LockPath = frozen, lock
 	if lock != "" && !frozen {
 		opts.LockWrite = true
 	}
@@ -317,7 +349,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	} else if len(rest) > 0 {
 		return &usageError{fmt.Sprintf("verify takes no positional arguments (%s)", strings.Join(rest, " "))}
 	}
-	opts := &ocifetch.Options{CacheDir: cf.cache}
+	opts := cf.options()
 	results, err := ocifetch.VerifyInstalled(opts)
 	if err != nil {
 		return err
@@ -325,13 +357,17 @@ func cmdVerify(args []string, stdout, stderr io.Writer) error {
 	root, _ := ocifetch.CacheRoot(opts)
 	if len(results) == 0 {
 		// An empty pass must never look like a good one (public issue #486):
-		// say that nothing was verified, and why when the cache says why.
+		// say that nothing was verified, and why when the cache says why. In
+		// strict mode it is a failure, so a mounted cache can be health-checked.
 		fmt.Fprintf(stderr, "chtypes: verified 0 builds under %s\n", root)
-		for _, note := range ocifetch.MissingNotes(opts) {
-			fmt.Fprintf(stderr, "chtypes: %s\n", note)
+		printNotes(stderr, opts)
+		if cf.strictMode() {
+			return &ocifetch.FetchError{Code: ocifetch.CodeArtifactMissing,
+				Msg: fmt.Sprintf("chtypes: no build is installed under %s, and strict mode needs one [%s]", root, ocifetch.CodeArtifactMissing)}
 		}
 		return nil
 	}
+	printNotes(stderr, opts)
 	bad := 0
 	for _, r := range results {
 		if !r.OK {
@@ -356,7 +392,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	} else if len(rest) > 0 {
 		return &usageError{fmt.Sprintf("list takes no positional arguments (%s)", strings.Join(rest, " "))}
 	}
-	opts := &ocifetch.Options{CacheDir: cf.cache, Offline: cf.offline}
+	opts := cf.options()
 	installed, err := ocifetch.ListInstalled(opts)
 	if err != nil {
 		return err
@@ -364,6 +400,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	for _, r := range installed {
 		fmt.Fprintf(stdout, "installed %s %s %s\n", r.Version, r.Platform, r.Dir)
 	}
+	printNotes(stderr, opts)
 	if cf.offline {
 		return nil
 	}
@@ -388,9 +425,16 @@ func cmdWhere(args []string, stdout, stderr io.Writer) error {
 	} else if len(rest) > 0 {
 		return &usageError{fmt.Sprintf("where takes no positional arguments (%s)", strings.Join(rest, " "))}
 	}
-	root, err := ocifetch.CacheRoot(&ocifetch.Options{CacheDir: cf.cache})
+	opts := cf.options()
+	root, err := ocifetch.CacheRoot(opts)
 	if err != nil {
 		return err
+	}
+	if cf.strictMode() {
+		// Strict mode checks the root before naming it.
+		if _, err := ocifetch.ProbeCache(opts); err != nil {
+			return err
+		}
 	}
 	fmt.Fprintln(stdout, root)
 	return nil

@@ -1,7 +1,7 @@
 package ocifetch
 
 // errors.go — the v1 shared error vocabulary (docs/guides/fetch-v1.md §8),
-// ten codes instead of v0's six. CHTYPES_ARTIFACT_INCOMPATIBLE is reserved
+// eleven codes instead of v0's six. CHTYPES_ARTIFACT_INCOMPATIBLE is reserved
 // for the FFI/loader layer (constants_gen.go's comment on ErrorExitCodes);
 // this package's own code never constructs it.
 
@@ -29,6 +29,11 @@ const (
 	// ExitCode's table is complete for a caller that merges both layers'
 	// errors.
 	CodeArtifactIncompatible ErrorCode = "CHTYPES_ARTIFACT_INCOMPATIBLE"
+	// CodeCacheUnusable is a cache directory or entry the fetch layer could
+	// not read or write, or one strict mode refuses (§1, the cache faults;
+	// public issue #486). Its FetchError names the Path, the Reason and the
+	// OSError.
+	CodeCacheUnusable ErrorCode = "CHTYPES_CACHE_UNUSABLE"
 )
 
 // Sentinel errors. errors.Is(err, ocifetch.ErrArtifactCorrupt) is true for
@@ -43,6 +48,7 @@ var (
 	ErrSourceUnauthorized  = errors.New(string(CodeSourceUnauthorized))
 	ErrSourceForbidden     = errors.New(string(CodeSourceForbidden))
 	ErrSourceIncompatible  = errors.New(string(CodeSourceIncompatible))
+	ErrCacheUnusable       = errors.New(string(CodeCacheUnusable))
 )
 
 // Sentinel returns the errors.Is target for this code, or nil for a code
@@ -67,6 +73,8 @@ func (c ErrorCode) Sentinel() error {
 		return ErrSourceForbidden
 	case CodeSourceIncompatible:
 		return ErrSourceIncompatible
+	case CodeCacheUnusable:
+		return ErrCacheUnusable
 	}
 	return nil
 }
@@ -92,8 +100,14 @@ type FetchError struct {
 	Request  string // the spelling as requested: "26.8", "26.8.15.10", …
 	Platform string // "<os>-<arch>"
 	Source   string // the base URL or path being read; "" for a cache-only lookup
-	Msg      string // the complete message, already prefixed "chtypes: "
-	Err      error  // the underlying cause, when there is one
+	// Path, Reason and OSError describe a CHTYPES_CACHE_UNUSABLE: the exact
+	// path that failed, one of the Reason* values, and the errno name
+	// ("EACCES") when there is one. They are empty for every other code.
+	Path    string
+	Reason  string
+	OSError string
+	Msg     string // the complete message, already prefixed "chtypes: "
+	Err     error  // the underlying cause, when there is one
 }
 
 func (e *FetchError) Error() string { return e.Msg }

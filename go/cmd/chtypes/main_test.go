@@ -13,7 +13,7 @@ import (
 
 func runCLI(t *testing.T, env map[string]string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	for _, k := range []string{"CHTYPES_ARTIFACTS_URL", "CHTYPES_CACHE", "CHTYPES_TRUSTED_KEYS", "CHTYPES_ALLOW_UNSIGNED", "CHTYPES_TARGET"} {
+	for _, k := range []string{"CHTYPES_ARTIFACTS_URL", "CHTYPES_CACHE", "CHTYPES_TRUSTED_KEYS", "CHTYPES_ALLOW_UNSIGNED", "CHTYPES_TARGET", "CHTYPES_CACHE_STRICT"} {
 		t.Setenv(k, "")
 	}
 	for k, v := range env {
@@ -69,7 +69,7 @@ func TestExitStatusIsTheGeneratedTable(t *testing.T) {
 		ocifetch.CodeArtifactMissing: 1, ocifetch.CodeArtifactUntrusted: 1, ocifetch.CodeArtifactCorrupt: 1,
 		ocifetch.CodeArtifactPinned: 1, ocifetch.CodeArtifactUnpublished: 4, ocifetch.CodeSourceUnreachable: 3,
 		ocifetch.CodeSourceUnauthorized: 5, ocifetch.CodeSourceForbidden: 6, ocifetch.CodeSourceIncompatible: 7,
-		ocifetch.CodeArtifactIncompatible: 8,
+		ocifetch.CodeArtifactIncompatible: 8, ocifetch.CodeCacheUnusable: 9,
 	}
 	if len(want) != len(ocifetch.ErrorExitCodes) {
 		t.Fatalf("the generated table has %d codes, this test %d", len(ocifetch.ErrorExitCodes), len(want))
@@ -260,5 +260,56 @@ func TestVerifyOfNothingSaysSo(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(zeroX, "oci-layout")); err == nil {
 		t.Errorf("a read-only command wrote %s", filepath.Join(zeroX, "oci-layout"))
+	}
+}
+
+// TestStrictFlag: --strict (or CHTYPES_CACHE_STRICT=1) turns every command's
+// cache fault into CHTYPES_CACHE_UNUSABLE (exit 9) naming the path and the
+// reason, and a verify of nothing into CHTYPES_ARTIFACT_MISSING (exit 1); the
+// default mode lists nothing, exits 0 and warns (public issue #486).
+func TestStrictFlag(t *testing.T) {
+	empty := t.TempDir()
+	if code, _, errText := runCLI(t, nil, "verify", "--strict", "--cache", empty); code != 1 || !strings.Contains(errText, "CHTYPES_ARTIFACT_MISSING") {
+		t.Errorf("verify --strict of an empty cache = %d %q", code, errText)
+	}
+	if code, _, errText := runCLI(t, map[string]string{"CHTYPES_CACHE_STRICT": "1"}, "verify", "--cache", empty); code != 1 {
+		t.Errorf("verify with CHTYPES_CACHE_STRICT=1 = %d %q", code, errText)
+	}
+	if code, out, _ := runCLI(t, nil, "where", "--strict", "--cache", empty); code != 0 || strings.TrimSpace(out) != empty {
+		t.Errorf("where --strict of a good cache = %d %q", code, out)
+	}
+	zeroX := filepath.Join(t.TempDir(), "zero-x")
+	writeZeroXRegistry(t, zeroX)
+	want := zeroX + " is unusable as a cache: layout_0x"
+	for _, args := range [][]string{
+		{"where", "--strict"}, {"list", "--offline", "--strict"}, {"verify", "--strict"},
+		{"fetch", "26.1", "--offline", "--platform", "linux-arm64", "--strict"},
+	} {
+		code, out, errText := runCLI(t, nil, append(args, "--cache", zeroX)...)
+		if code != 9 || out != "" || !strings.Contains(errText, want) || !strings.Contains(errText, "CHTYPES_CACHE_UNUSABLE") {
+			t.Errorf("%v on a 0.x registry = %d %q %q", args, code, out, errText)
+		}
+	}
+	// Default mode: an unreadable cache is not installed, with a warning naming it.
+	if os.Geteuid() == 0 {
+		t.Skip("SKIPPED: running as root, which a mode cannot deny")
+	}
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.MkdirAll(filepath.Join(locked, "unpacked", "sha256"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Fatal("positive control: a 000 directory could be listed")
+	}
+	code, out, errText := runCLI(t, nil, "list", "--offline", "--cache", locked)
+	if code != 0 || out != "" || !strings.Contains(errText, locked+" could not be read (EACCES); treated as not installed. Set CHTYPES_CACHE_STRICT=1 to make this an error.") {
+		t.Errorf("list --offline of an unreadable cache = %d %q %q", code, out, errText)
+	}
+	if code, _, errText = runCLI(t, nil, "list", "--offline", "--strict", "--cache", locked); code != 9 || !strings.Contains(errText, locked+" is unusable as a cache: unreadable_root (EACCES)") {
+		t.Errorf("list --offline --strict of an unreadable cache = %d %q", code, errText)
 	}
 }

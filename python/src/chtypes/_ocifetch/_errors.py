@@ -5,7 +5,7 @@ Scoped to `chtypes._ocifetch`: the stable, public exception types live in
 imports from or edits. A future switch lane decides how (or whether) these
 become public types; until then every name here is private.
 
-Every exception carries a `.code` string from one of the ten codes
+Every exception carries a `.code` string from one of the eleven codes
 `spec/fetch-v1/constants.json`'s `errors` map assigns an exit status to
 (the generated `ERROR_EXIT_CODES` table), so a CLI added later needs no
 second mapping — it is the same lookup v0's `__main__.py` does today.
@@ -27,6 +27,7 @@ __all__ = [
     "CODE_ARTIFACT_PINNED",
     "CODE_ARTIFACT_UNPUBLISHED",
     "CODE_ARTIFACT_UNTRUSTED",
+    "CODE_CACHE_UNUSABLE",
     "CODE_SOURCE_FORBIDDEN",
     "CODE_SOURCE_INCOMPATIBLE",
     "CODE_SOURCE_UNAUTHORIZED",
@@ -36,6 +37,7 @@ __all__ = [
     "ArtifactPinnedError",
     "ArtifactUnpublishedError",
     "ArtifactUntrustedError",
+    "CacheUnusableError",
     "FetchError",
     "SourceForbiddenError",
     "SourceIncompatibleError",
@@ -52,6 +54,7 @@ CODE_SOURCE_UNREACHABLE = "CHTYPES_SOURCE_UNREACHABLE"
 CODE_SOURCE_UNAUTHORIZED = "CHTYPES_SOURCE_UNAUTHORIZED"
 CODE_SOURCE_FORBIDDEN = "CHTYPES_SOURCE_FORBIDDEN"
 CODE_SOURCE_INCOMPATIBLE = "CHTYPES_SOURCE_INCOMPATIBLE"
+CODE_CACHE_UNUSABLE = "CHTYPES_CACHE_UNUSABLE"
 
 _CODES_USED_HERE = (
     CODE_ARTIFACT_MISSING,
@@ -63,6 +66,7 @@ _CODES_USED_HERE = (
     CODE_SOURCE_UNAUTHORIZED,
     CODE_SOURCE_FORBIDDEN,
     CODE_SOURCE_INCOMPATIBLE,
+    CODE_CACHE_UNUSABLE,
 )
 
 # A drift guard, cheaper than a test: every code this module raises must be
@@ -160,3 +164,26 @@ class SourceIncompatibleError(FetchError):
     an index or manifest `mediaType` outside the generated constants."""
 
     code = CODE_SOURCE_INCOMPATIBLE
+
+
+class CacheUnusableError(FetchError):
+    """A cache directory or entry the fetch layer could not read or write, or
+    one strict mode refuses (docs/guides/fetch-v1.md §1, the cache faults;
+    public issue #486).
+
+    Attributes:
+        path: the exact path that failed.
+        reason: `unreadable_root`, `not_a_directory`, `unreadable_entry`,
+            `unacceptable_record`, `layout_0x` or `unwritable`.
+        os_error: the errno name (`"EACCES"`), or `None` when there is none.
+    """
+
+    code = CODE_CACHE_UNUSABLE
+
+    def __init__(
+        self, message: str, *, path: str, reason: str, os_error: str | None = None
+    ) -> None:
+        super().__init__(message)
+        self.path = path
+        self.reason = reason
+        self.os_error = os_error

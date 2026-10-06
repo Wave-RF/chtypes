@@ -21,6 +21,30 @@ use crate::raw::RawText;
 
 pub use crate::abi1::loader::Refusal;
 
+/// What a [`Error::CacheUnusable`] names: a cache directory or entry the
+/// fetch layer could not read or write, or one strict mode refuses
+/// (`docs/guides/fetch-v1.md` §1, the cache faults).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CacheFault {
+    /// The exact path that failed.
+    pub path: PathBuf,
+    /// `unreadable_root`, `not_a_directory`, `unreadable_entry`,
+    /// `unacceptable_record`, `layout_0x` or `unwritable`.
+    pub reason: String,
+    /// The errno name (`EACCES`), or `None` when there is none.
+    pub os_error: Option<String>,
+    message: String,
+}
+
+/// `<path> is unusable as a cache: <reason> (<errno>)`, the sentence every
+/// binding prints.
+impl fmt::Display for CacheFault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
 /// The five fields of one `chs_error`, verbatim, and nothing synthesized.
 ///
 /// A misuse the binding detects itself carries the same shape: `status`
@@ -134,6 +158,11 @@ pub enum Error {
     SourceForbidden(String),
     /// `CHTYPES_SOURCE_INCOMPATIBLE`: the source is unusable as configured.
     SourceIncompatible(String),
+    /// `CHTYPES_CACHE_UNUSABLE`: a cache directory or entry the fetch layer
+    /// could not read or write, or one strict mode
+    /// ([`crate::FetchOptions::strict_cache`]) refuses. Never "not
+    /// installed", never the network's [`Error::SourceUnreachable`].
+    CacheUnusable(CacheFault),
 }
 
 /// A `Result` whose error is this crate's [`Error`].
@@ -171,6 +200,7 @@ impl Error {
             Error::SourceUnauthorized(_) => "CHTYPES_SOURCE_UNAUTHORIZED",
             Error::SourceForbidden(_) => "CHTYPES_SOURCE_FORBIDDEN",
             Error::SourceIncompatible(_) => "CHTYPES_SOURCE_INCOMPATIBLE",
+            Error::CacheUnusable(_) => "CHTYPES_CACHE_UNUSABLE",
             _ => return None,
         })
     }
@@ -242,6 +272,7 @@ impl fmt::Display for Error {
             | Error::SourceIncompatible(m) => {
                 write!(f, "{}: {m}", self.code().unwrap_or_default())
             }
+            Error::CacheUnusable(c) => write!(f, "{}: {c}", self.code().unwrap_or_default()),
         }
     }
 }
@@ -270,6 +301,12 @@ impl From<crate::ocifetch::error::Error> for Error {
             // A refused version spelling, an unreadable cache or lock file:
             // misuse, which carries no fetch code of its own.
             F::InvalidInput(m) => Error::usage(m),
+            F::CacheUnusable(f) => Error::CacheUnusable(CacheFault {
+                path: f.path,
+                reason: f.reason,
+                os_error: f.os_error,
+                message: f.message,
+            }),
         }
     }
 }

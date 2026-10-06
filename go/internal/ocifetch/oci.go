@@ -102,7 +102,7 @@ var (
 // SpellingError is returned when a requested version spelling fails
 // spelling.regex, or matches refuse_hint_regex (a `v`-prefix or a
 // `-lts`/`-stable` channel suffix) — checked before any network call
-// (docs/guides/fetch-v1.md §3). It is distinct from the ten shared
+// (docs/guides/fetch-v1.md §3). It is distinct from the shared
 // CHTYPES_* codes: a bad request never reaches the point of talking to a
 // source.
 type SpellingError struct {
