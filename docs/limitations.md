@@ -148,6 +148,49 @@ The batch preview (`chs_preview_batch`) of the same row answers correctly, with 
 
 Until then, use the batch preview, even for one row, on `CollapsingMergeTree`, `VersionedCollapsingMergeTree` and `ReplacingMergeTree` with an `is_deleted` column.
 
+### Creating a schema accepts MergeTree-family CREATE statements that a real server refuses
+
+**Over-accept, on every supported line, at schema creation.** `chs_schema_create` (the schema-create call) accepts some MergeTree-family `CREATE TABLE` statements that a real server refuses at the CREATE. The cases measured:
+
+- wrong engine arguments: `SummingMergeTree(a, b)`, `AggregatingMergeTree(x)`, `MergeTree(k)`;
+- a `String` version column, or a `UInt8` sign column;
+- a missing sign, version or columns-to-sum column;
+- `ReplacingMergeTree(ver)` with no `ORDER BY`;
+- the deprecated engine syntax;
+- `ReplacingMergeTree` with a projection (the server refuses with error **344**);
+- from 26.7, an `AggregatingMergeTree` dimension outside the keys (the server refuses with error **36**).
+
+For every other case in the list, the server refuses the CREATE.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 and linux-arm64. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not treat a successful schema creation on these engines as proof that the server will accept the CREATE.
+
+### A DEFAULT that throws on a row which supplies the column can fail the server's INSERT while this library accepts it
+
+**Over-accept, measured on line 26.3 only, linux-amd64 only.** The other lines are not yet measured. A server evaluates a column's `DEFAULT` expression over the whole INSERT block, including the rows that supply the column, whenever some other row of the block omits it. This library accepts every row. For example, with `b Int32 DEFAULT intDiv(10, a)`, a batch in which some rows omit `b` and one row is `{"a":0,"b":5}`:
+
+|               |                                                                             |
+| ------------- | --------------------------------------------------------------------------- |
+| this library  | accepts every row                                                           |
+| a real server | refuses the INSERT, with error **153**, **395** or **70** by the expression |
+
+Which of the three depends on the expression. Seen in `JSONEachRow`, and in CSV with `input_format_defaults_for_omitted_fields=1`. A batch in which every row supplies the column, and a single row, agree with the server.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on line `26.3` only, on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not trust an accepted batch that mixes rows omitting and rows supplying a DEFAULT column whose expression can throw.
+
+### A Nullable sorting key is accepted
+
+**Over-accept, on every supported line, at schema creation, linux-amd64 only.** `ORDER BY k` (also `ORDER BY (k, v)`, or `PRIMARY KEY k`) over a `Nullable` column, without `allow_nullable_key`, is accepted by `chs_schema_create`. A real server refuses the CREATE with error **44**.
+
+`allow_nullable_key = 1`, and `ifNull` or `assumeNotNull` keys, are declined (`unsupported`) rather than accepted: an over-decline, not an entry here.
+
+**Measured**: by the artifact producer, against the production library build `20261004.052404` and its successor `20261006.170903`, on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), on linux-amd64 only. A library fix is in progress. This entry has no machine check (see its register twin), so it retires on the artifact producer's measured re-run against the production library build that ships the fix, never on a CI result.
+
+Until then, do not treat a successful schema creation with a Nullable sorting key as proof that the server will accept the CREATE.
+
 ## Known gaps in 1.0
 
 Each item is a place where 1.0 does less than you might expect, or answers differently from a server. None of them returns a wrong answer without saying so, and every one is planned. Each entry says what happens, what to do today, and that a fix is planned.

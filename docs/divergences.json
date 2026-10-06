@@ -67,6 +67,24 @@
       "heading": "The row preview skips the engine's insert-time merge step on Collapsing and Replacing-with-`is_deleted` tables",
       "note": "no machine check is expressible in this register's schema: a check drives one call tree (compile a schema, then a payload through the batch, or a filter through Filter.rows) and asserts that call's own outcome, so it cannot express the differential here, which is the row preview accepting a row that the batch preview refuses with 117. The schema has no field that selects the row preview (chs_preview_row) rather than the batch preview, and no 'expect' that contrasts two calls' outcomes. The v1 replacement of the checker must add both before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
       "checks": []
+    },
+    {
+      "id": "schema-create-accepts-invalid-mergetree-family",
+      "heading": "Creating a schema accepts MergeTree-family CREATE statements that a real server refuses",
+      "note": "no machine check is expressible in this register's schema: a check drives a payload through a schema that compiled, and asserts that call's outcome, while these cases are decided at schema creation, which a check cannot assert is refused or accepted as the differential. The v1 replacement of the checker must add an expectation on the schema-create call's own outcome before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
+    },
+    {
+      "id": "default-throws-on-supplied-row-mixed-batch",
+      "heading": "A DEFAULT that throws on a row which supplies the column can fail the server's INSERT while this library accepts it",
+      "note": "no machine check is expressible in this register's schema: the case needs a batch that mixes rows omitting and rows supplying a DEFAULT column, and a check's single payload could carry it, but the entry is measured on one line and one platform only (26.3, linux-amd64) and this register has no way to scope a check to a platform; the retirement signal must come from the artifact producer's re-run on every line. The v1 replacement of the checker must add that scoping before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
+    },
+    {
+      "id": "nullable-sorting-key-over-accept",
+      "heading": "A Nullable sorting key is accepted",
+      "note": "no machine check is expressible in this register's schema: the case is decided at schema creation, and a check asserts the outcome of a payload driven through a schema that compiled, not the schema-create call's own verdict. The v1 replacement of the checker must add an expectation on that verdict before this entry can carry a check. Retirement: on the artifact producer's measured re-run against the production library build that ships the fix, never on CI.",
+      "checks": []
     }
   ]
 }
