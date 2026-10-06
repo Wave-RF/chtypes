@@ -26,7 +26,7 @@ This module is the one place that:
     line could not be emitted" always reads as unknown, never as a quiet pass
     (chtypes#320, point 3).
 
-Used from two places, deliberately not from a third:
+Used from one place, with a CLI for a second:
 
   - `scripts/lib/provenance.py` imports this directly (same directory,
     import-by-sibling — see that file) and calls `notice()` at the single
@@ -36,14 +36,12 @@ Used from two places, deliberately not from a third:
     risks hiding a real exit code behind the filter (see check-suite.sh's own
     `set -o pipefail` discipline) and duplicates a pattern a second file would
     have to keep in sync with every new line this one grows.
-  - `.github/workflows/ci.yml`'s `artifacts` job calls this file's CLI
-    directly, for the two facts that are not an existing `print()` call to
-    extend: which CHANNEL this run tested (scripts/abi-channel.sh's own
-    stdout is captured into `$GITHUB_OUTPUT` and must not carry a stray
-    `::notice` line into that file), and the `unknown` case for a suite or
-    the channel that did not run at all (a workflow-level fact, not
-    something any Python process on that path can observe from inside
-    itself).
+  - a workflow step can call this file's CLI directly, for a fact that is
+    not an existing `print()` call to extend: the `unknown` case for a suite
+    that did not run at all is a workflow-level fact, not something any
+    Python process on that path can observe from inside itself. The v0
+    `artifacts` job did exactly that, and also annotated which channel it
+    tested; both it and the v0 channel tooling were retired with v0 (#431).
 
     python3 scripts/lib/gha_annotate.py notice "<message>"
     python3 scripts/lib/gha_annotate.py warning "<message>"
@@ -225,10 +223,10 @@ def selftest() -> int:
 
     # -- unknown(): the one fixed shape, point 3 of chtypes#320 -------------
     buf = io.StringIO()
-    unknown("the channel (scripts/abi-channel.sh did not complete)", file=buf, enabled=True)
+    unknown("the go suite (its step did not complete)", file=buf, enabled=True)
     check(
         buf.getvalue()
-        == "::warning title=chtypes artifact provenance::unknown — the channel (scripts/abi-channel.sh did not complete)\n",
+        == "::warning title=chtypes artifact provenance::unknown — the go suite (its step did not complete)\n",
         f"unknown() did not print the fixed 'unknown — <which>' shape: {buf.getvalue()!r}",
     )
     # unknown() must escape its `which` the same as any other message —

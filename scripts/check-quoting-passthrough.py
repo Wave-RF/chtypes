@@ -48,7 +48,7 @@ RULE A — no quoting atom in a string or character literal.
 
   What it deliberately does NOT flag: a back-quote inside prose. Error
   messages, notes and doc text in these trees mention `version`, `unlisted.go`
-  and `scripts/fetch.sh` constantly — 179 literals in the tree contain a
+  and script names constantly — 179 literals in the tree contain a
   back-quote — and banning those would make the rule unusable, which is the
   same as not having it. A1/A2/A3 hold at zero findings across the whole tree.
 

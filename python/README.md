@@ -57,7 +57,7 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 | [Transformations](https://github.com/wave-rf/chtypes/blob/main/docs/guides/transformations.md)                                                                              | the silent-change report, and the DEFAULTs you must echo back                |
 | [Settings](https://github.com/wave-rf/chtypes/blob/main/docs/guides/settings.md) · [Discovery](https://github.com/wave-rf/chtypes/blob/main/docs/guides/discovery.md)       | the four channels; asking a real server what profile to validate under       |
 | [Filters](https://github.com/wave-rf/chtypes/blob/main/docs/guides/filters.md) · [Multi-version](https://github.com/wave-rf/chtypes/blob/main/docs/guides/multi-version.md) | boolean expressions over rows; several ClickHouse versions in one process    |
-| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                            |
+| [Support matrix](https://github.com/wave-rf/chtypes/blob/main/docs/support-v1.md) · [Limitations](https://github.com/wave-rf/chtypes/blob/main/docs/limitations.md)            | what works where; what chtypes declines to answer                            |
 
 ## Fetching from the command line
 
@@ -75,7 +75,7 @@ A bad **row** is a verdict, not an exception: `outcome` becomes `Outcome.REJECTE
 
 ## Tests
 
-`uv run pytest -q`. Tests that need an artifact **skip loudly by name** without a registry on the search path, and a suite that ran nothing fails. The fetch suite runs offline against the miniature releases in `tests/fixtures/fetch/` through `file://` sources and the test key.
+`uv run pytest -q`. Tests that need an artifact **skip loudly by name** without a registry on the search path, and a suite that ran nothing fails. The fetch conformance suite runs offline against the repository's `tests/fixtures/fetch-v1/` cases, served by a loopback registry the suite starts itself, under the fixture test key (`docs/guides/fetch-v1.md` §10).
 
 ## License
 

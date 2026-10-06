@@ -60,7 +60,7 @@ A stale Go `bindingVersion` therefore fails the dry run, not a user. There is no
 4. Run that package's suite against a registry, and `scripts/check-standalone.sh` for Go.
 5. Tag: `git tag go/v0.1.0 && git push origin go/v0.1.0`, etc.
 
-The first tag freezes the Go module path; what freezes for the `chs_*` signatures is in [`docs/support.md`](docs/support.md#pre-10).
+The first tag freezes the Go module path; what stays provisional for the `chs_*` signatures until 1.0 is in [`docs/support-v1.md`](docs/support-v1.md#pre-10).
 
 ## Every release after the first: the order, and why Go is last
 
