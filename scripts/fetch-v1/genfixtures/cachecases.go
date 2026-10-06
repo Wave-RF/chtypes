@@ -329,7 +329,11 @@ func buildCacheCases(fs *FileSet) []Case {
 	layoutNewerInLine := NewLayout("request-scope-newer-in-line")
 	copyArtifactIntoLayout(layoutNewerInLine, scopeTree, artLowNewer, "26.3")
 	layoutNewerInLine.SetInstalled(artLowNewer.ManifestDesc.Digest)
-	extraLayouts = append(extraLayouts, layoutHigherLine, layoutNewerInLine)
+	layoutBothInLine := NewLayout("request-scope-both-in-line")
+	copyArtifactIntoLayout(layoutBothInLine, scopeTree, artLow, "26.3.4.1")
+	copyArtifactIntoLayout(layoutBothInLine, scopeTree, artLowNewer, "26.3.9.1")
+	layoutBothInLine.SetInstalled(artLow.ManifestDesc.Digest, artLowNewer.ManifestDesc.Digest)
+	extraLayouts = append(extraLayouts, layoutHigherLine, layoutNewerInLine, layoutBothInLine)
 
 	for _, r := range []struct {
 		id, cache, spelling string
@@ -346,6 +350,11 @@ func buildCacheCases(fs *FileSet) []Case {
 		// still answered by exactly that version.
 		{"request-scope-newer-in-line", "request-scope-newer-in-line", "26.3", artLowNewer, "monotonic"},
 		{"request-scope-exact-in-line", "request-scope-newer-in-line", "26.3.4.1", artLow, ""},
+		// The offered build is installed too, beside a newer one of the same
+		// line: the line request is still answered by the newer one, and the
+		// exact request by exactly the offered one.
+		{"request-scope-newer-beside-offered", "request-scope-both-in-line", "26.3", artLowNewer, "monotonic"},
+		{"request-scope-exact-beside-newer", "request-scope-both-in-line", "26.3.4.1", artLow, ""},
 	} {
 		c := newCase(r.id, "request-scope", "file", "http")
 		c.Request.Spelling = r.spelling

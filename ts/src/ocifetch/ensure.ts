@@ -345,6 +345,18 @@ export async function ensure(request: string, options: FetchV1Options = {}): Pro
   if (existing !== undefined) {
     record = existing;
     alreadyInstalled = true;
+    // A NEWER build within the request, installed beside it, is still the
+    // answer (`monotonic-warning`, guide §9).
+    const monotonic = await checkMonotonic(root, platform, request, {
+      ...existing.predicate,
+      clickhouse_version: existing.version,
+      build: existing.build,
+    });
+    if (monotonic !== undefined) {
+      record = monotonic.existing;
+      recordDir = monotonic.dir;
+      warnings = [...warnings, monotonic.warning];
+    }
   } else {
     const info = platformInfo(platform);
     const trust = await verifyAnyReferrerBundle(

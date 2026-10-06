@@ -662,13 +662,32 @@ def _ensure_floating(
     existing_dir = unpacked_dir_for(cache_root_path, manifest_hex)
     existing_record = read_verified_record(existing_dir)
     if existing_record is not None and existing_record.platform == platform_key:
-        resolved = _record_to_resolved(
-            existing_dir,
-            existing_record,
-            request_spelling=request.spelling,
-            already_installed=True,
-            source="cache",
+        # A NEWER build within the request, installed beside it, is still the
+        # answer ("monotonic-warning", docs/guides/fetch-v1.md §9).
+        newer = _newer_installed(
+            roots,
+            platform_key,
+            {"clickhouse_version": existing_record.version, "build": existing_record.build},
+            request.spelling,
         )
+        if newer is not None:
+            newer_dir, newer_record, warning = newer
+            resolved = _record_to_resolved(
+                newer_dir,
+                newer_record,
+                request_spelling=request.spelling,
+                already_installed=True,
+                source="cache",
+            )
+            resolved = replace(resolved, warnings=(*resolved.warnings, warning))
+        else:
+            resolved = _record_to_resolved(
+                existing_dir,
+                existing_record,
+                request_spelling=request.spelling,
+                already_installed=True,
+                source="cache",
+            )
         _maybe_write_lock(
             options,
             lock,
