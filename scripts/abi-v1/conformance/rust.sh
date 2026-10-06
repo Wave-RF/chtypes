@@ -26,7 +26,22 @@
 # CHTYPES_ABI1_STUBS set it runs the hand-written stub goldens through the
 # goldens runner, then scripts/goldens-v1/compare.py, which must pass the
 # runner's report and must refuse the same report with one planted wrong byte.
+#
+# Every stub-backed test binary is named below (public issue #463 added
+# api_v1_setup_cases, which was in no CI job); measured: these are all the rust test files
+# that read CHTYPES_ABI1_STUBS. The run is read back through the stub census
+# (scripts/abi-v1/stub_census.py): libtest's own result lines must show tests
+# passed and no loud SKIP line may name CHTYPES_ABI1_STUBS (these suites skip by
+# early return, so the line is the evidence).
+#
+#     scripts/abi-v1/conformance/rust.sh --selftest   prove the census on synthetic output
 set -euo pipefail
+
+if [ "${1:-}" = "--selftest" ]; then
+    command -v python3 >/dev/null 2>&1 || { echo "rust.sh: python3 is not on PATH; the selftest cannot run" >&2; exit 1; }
+    python3 "$(dirname "${BASH_SOURCE[0]}")/../stub_census.py" --selftest
+    exit 0
+fi
 
 : "${CHTYPES_ABI1_STUBS:?CHTYPES_ABI1_STUBS must be set, to the v1-abi-stubs artifact directory}"
 : "${CHTYPES_ABI1_REPORT:?CHTYPES_ABI1_REPORT must be set, to the path this leg writes its report to}"

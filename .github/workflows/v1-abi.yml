@@ -69,6 +69,8 @@ jobs:
       # only: running on 3.11 with no project and no dependencies proves both.
       - name: selftest — every refusal fires on planted copies of the tree, and --write is deterministic
         run: uv run --no-project --python 3.11 scripts/abi-v1/gen.py --selftest
+      - name: selftest — the stub census refuses a stub-skip with the stubs set, a missing required test, a zero-run and a skipped-whole-file
+        run: python3 scripts/abi-v1/stub_census.py --selftest
       - name: every generated file matches spec/abi-v1/ (gen.py --check)
         run: uv run --no-project --python 3.11 scripts/abi-v1/gen.py --check
       # The fingerprint is computed in exactly one place, scripts/abi-v1/jcs.py.
