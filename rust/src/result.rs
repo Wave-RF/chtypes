@@ -196,9 +196,12 @@ pub struct BatchResult {
     pub rows_cut: u64,
     /// How many distinct partitions the batch touched.
     pub partition_count: Option<u64>,
-    /// The byte ranges the reader's error recovery skipped. A caller that needs
-    /// a contract over the body's records declines the body when this is
-    /// non-empty, and never counts records itself.
+    /// The byte ranges the reader's error recovery skipped. It does not account
+    /// for every record: a skipped row's `input_span` can cover more than one
+    /// input record, so verdicts can be fewer than records while this is empty.
+    /// A caller that needs every record accounted for declines a body with any
+    /// skipped row or any `unconsumed` range, or compares the verdict count with
+    /// its own count of the body's records (`docs/guides/batches.md`).
     pub unconsumed: Vec<Span>,
     /// What the reader decided about the body's framing.
     pub framing: Option<Framing>,

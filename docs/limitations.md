@@ -37,8 +37,7 @@ Each of these is `unsupported` — an `UnsupportedError`, `Error::Unsupported`, 
 - **TTL forms** that are not a plain rows TTL: `WHERE` and `GROUP BY` TTLs, `TO DISK` and `TO VOLUME` moves, `RECOMPRESS`, and any clock-reading TTL expression.
 - **MergeTree settings declared at a non-default value.** An unknown _name_ is the server's own 115, a rejection; a known name at a value this build does not model is a decline, never a silent ignore.
 - **Server- and session-property DEFAULTs** — `hostName()`, `currentUser()` and the rest. Their value is a property of the server, and there is no server here.
-- **Blocking DEFAULTs**, such as anything calling `sleep`.
-- **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md).
+- **DEFAULT expressions past the admission budgets** — 256 MiB and one second by default, both adjustable through the process-wide settings in [`guides/settings.md`](guides/settings.md). This is what bounds a blocking DEFAULT: `sleep` and `sleepEachRow` are not declined by name, so `DEFAULT sleep(0)` is admitted, while `DEFAULT sleep(1.5)` exceeds the one-second budget and is declined when the schema compiles.
 
 ## Constants are not payloads
 
@@ -72,7 +71,7 @@ Over-accepts and over-rejects have **no budget** in the differential proof the a
 
 **No budget is a rule about process, not a claim about state.** A non-zero count, in either direction, on any binding against any ClickHouse line, is refused unless a person has named that case and recorded why, with a tracking reference attached. Nothing non-zero passes quietly, and no threshold waves anything through.
 
-**So it does not mean there are none.** What is true today is narrower, and worth stating exactly: **no case is currently known in 1.0 in which this library and a real server disagree about whether a row gets through.** The three that were registered for 0.x (a DEFAULT over `demangle`, a CHECK constraint, and a filter whose result is not a boolean-context type) are fixed in every 1.0 build: this repository measured the `demangle` refusal (446) through the published Go binding on all four supported lines, and the artifact producer measured the filter and CHECK cases on production. Both directions are at zero across every line the artifacts are proved against — `measured` by the differential proof those artifacts are built from, and a state rather than a promise: it is what the rule has produced so far, not something the rule guarantees will hold tomorrow.
+**So it does not mean there are none.** What is true today is narrower, and worth stating exactly: **one case is currently known in 1.0 in which this library and a real server disagree about whether a row gets through: a row on which a skip index's or a projection's expression throws, listed under [Known divergences](#known-divergences) below.** The three that were registered for 0.x (a DEFAULT over `demangle`, a CHECK constraint, and a filter whose result is not a boolean-context type) are fixed in every 1.0 build: this repository measured the `demangle` refusal (446) through the published Go binding on all four supported lines, and the artifact producer measured the filter and CHECK cases on production. Both directions are at zero across every line the artifacts are proved against — `measured` by the differential proof those artifacts are built from, and a state rather than a promise: it is what the rule has produced so far, not something the rule guarantees will hold tomorrow.
 
 ⚠️ **Zero in both directions is a statement about the verdict, not about the value or the error.** There are two other ways to disagree: both sides accept a row and **store different values**, or both refuse it and **report different codes**. Neither is an accept-or-reject disagreement, so the no-budget rule above does not cover them.
 
@@ -98,7 +97,20 @@ Every entry here has a machine-checkable twin in [`docs/divergences.json`](diver
 
 **What gets an entry here, and when.** A divergence that changes the verdict or the stored value at default settings (an over-accept, an over-reject, or a row both sides accept but store differently) is listed as soon as the server's answer has been measured on each line it affects, and not before, because a wrong entry is worse than a late one. A divergence that is only a different error code, or that needs a non-default setting to reach, is listed if a published build still shows it seven days after it was found. Until then it's tracked with the artifact producer, whose comparison against real servers keeps finding such cases, and it's usually fixed in the next relink. Every entry is removed on the relink that fixes it.
 
-No divergence is currently registered for 1.0.
+### A row on which a skip index's or a projection's expression throws is accepted, where a real server refuses it
+
+**Over-accept, on every supported line.** This library does not evaluate a table's skip-index (`INDEX … TYPE …`) or `PROJECTION` expressions when it previews a row. A real server evaluates them during the INSERT, and one that throws on a row refuses the whole INSERT. For example, with `x UInt8` and a row where `x = 0`, for each of `INDEX i intDiv(100, x) TYPE minmax`, `PROJECTION p (SELECT x, intDiv(100, x) AS d ORDER BY d)` and `PROJECTION p (SELECT x, sum(intDiv(100, x)) AS s GROUP BY x)`:
+
+|               |                                                            |
+| ------------- | ---------------------------------------------------------- |
+| this library  | accepts the row                                            |
+| a real server | refuses the INSERT with error **153** (`ILLEGAL_DIVISION`) |
+
+A `CHECK` or a `PARTITION BY` over the same expression is refused with 153 here too, as a server refuses it, and a row with `x = 5` is accepted on both sides. An `ORDER BY` over such an expression is declined (`unsupported`) rather than accepted: an over-decline, not an entry here.
+
+**Measured**: by the artifact producer, against the production 1.0 builds (`20261004.052404`) on all four supported lines (`26.3`, `26.7`, `26.8`, `26.9`), through both the row and the batch preview; the server half against stock servers pinned to each line. A library fix is in progress; this entry is removed on the 1.0.x release that ships it.
+
+Until then, do not rely on this library to refuse a row whose only failure is a skip index's or a projection's expression: the server can still refuse that INSERT.
 
 ## Known gaps in 1.0
 

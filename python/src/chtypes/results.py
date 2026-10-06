@@ -151,8 +151,12 @@ class Framing:
 class BatchResult:
     """The `batch` document and the export buffer.
 
-    A caller that needs a contract over the body's records declines the body
-    when `unconsumed` is non-empty, and never counts records itself.
+    `unconsumed` does not account for every record: a skipped row's
+    `input_span` can cover more than one input record, so verdicts can be fewer
+    than records while `unconsumed` is empty. A caller that needs every record
+    accounted for declines a body with any skipped row or any `unconsumed`
+    range, or compares the verdict count with its own count of the body's
+    records (docs/guides/batches.md).
     """
 
     outcome: Outcome
