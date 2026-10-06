@@ -59,12 +59,13 @@ fi
 # goldens runner and scripts/goldens-v1/compare.py (it must pass the runner's
 # report and refuse the same report with one planted wrong byte); TestSetupCases
 # runs the shared process-setup cases over a fresh copy of a stub; TestStub* and
-# TestRegistry* are the public API and the registry adapter over the stubs.
+# TestRegistry* are the public API and the registry adapter over the stubs. -race: the
+# concurrent stub tests (pooled buffers filled from C memory) run under the race detector.
 LOG="$(mktemp "${TMPDIR:-/tmp}/go-stub-census.XXXXXX")"
 trap 'rm -f "$LOG"' EXIT
-echo "go.sh: go test ./... -count=1 -json (CHTYPES_ABI1_STUBS=$CHTYPES_ABI1_STUBS)"
+echo "go.sh: go test -race ./... -count=1 -json (CHTYPES_ABI1_STUBS=$CHTYPES_ABI1_STUBS)"
 rc=0
-go test ./... -count=1 -json >"$LOG" 2>&1 || rc=$?
+go test -race ./... -count=1 -json >"$LOG" 2>&1 || rc=$?
 
 echo "go.sh: stub census"
 census_rc=0
