@@ -414,9 +414,9 @@ def section5(lib: chtypes.Library) -> None:
         note("one rows() call answers per input record, IN ORDER. A SKIPPED row is")
         note("never stored: forward only the survivors")
         kv("  unconsumed", f"{len(batch.unconsumed)} byte range(s) the reader's recovery skipped")
-        note("a caller that needs a contract over the body's records declines it when")
-        note("any row is skipped or unconsumed is non-empty (a skipped row's span can")
-        note("cover several records), and never counts records itself")
+        note("a skipped row's span can cover several records, so verdicts can be fewer")
+        note("than records with unconsumed empty: decline on any skipped row or")
+        note("unconsumed range, or compare the verdict count with your own record count")
 
 
 # ---------------------------------------------------------------------------
