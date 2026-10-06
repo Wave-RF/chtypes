@@ -6,7 +6,7 @@ Prose is deliberately outside the fingerprint: editing this file never changes `
 
 Each section is copied into a C comment, so it may not contain a comment opener or closer, or two question marks in a row.
 
-**UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2, with nothing added; the additions land one pull request at a time (public issue #511).
+**UNSTABLE.** `spec/abi-v2/abi.json` declares `stability` `unstable`: generation 2 is being designed, and its fingerprint moves with every change to the description until the lock. It was seeded as generation 1's surface at generation 2, with nothing added; the additions land one pull request at a time. What generation 2 adds, and what the lock needs, are in public issue #511.
 
 ## Rules
 
@@ -41,7 +41,7 @@ These rules bind generation 2 from its first draft: the library, every binding a
 - **refuses `--lock` and `--frozen`,** and their API equivalents, before any network call: a dev build is replaceable and a superseded one expires, so nothing may pin one;
 - **pins its dev fingerprint** and refuses a library with any other, as `CHTYPES_ARTIFACT_INCOMPATIBLE`, with exactly this message, where X and Y are the two full `sha256:` fingerprints: `this SDK speaks dev fingerprint X; the library has Y — update your dev SDK`.
 
-At the lock, the description's `stability` becomes `locked`. That moves the fingerprint one last time, so a released 2.0.0 SDK never accepts a dev build and a dev SDK never accepts a 2.0.0 library. SDK 2.0.0 then ships from the production `chtypes/v2` repository, signed with the release key.
+At the lock (public issue #511 says when), the description's `stability` becomes `locked`. That moves the fingerprint one last time, so a released 2.0.0 SDK never accepts a dev build and a dev SDK never accepts a 2.0.0 library. SDK 2.0.0 then ships from the production `chtypes/v2` repository, signed with the release key.
 
 ## Preamble
 

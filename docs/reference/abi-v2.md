@@ -2,7 +2,7 @@
 
 **ABI v2 is UNSTABLE.** It is where every interface change goes now that ABI v1 is frozen (public issue #511). Its description, `spec/abi-v2/abi.json`, declares `stability` `unstable`, so `CHS_ABI_FINGERPRINT` moves with every change to it until the lock. Nothing built from it is a release: only pre-release SDKs, `2.0.0-dev.N`, speak it, each pinned to one dev fingerprint and fetching only from the staging dev channel (rule r6). Nothing on this page changes ABI v1: [`abi-v1.md`](abi-v1.md), `spec/abi-v1/` and `include/chtypes.h` stay as they are.
 
-It was seeded as ABI v1's surface at generation 2, with no new export and no new document field. The additions land one pull request at a time, each moving the fingerprint.
+It was seeded as ABI v1's surface at generation 2, with no new export and no new document field. The additions land one pull request at a time, each moving the fingerprint. What is in scope, and what the lock needs, are in public issue #511.
 
 ## The rules
 
@@ -85,7 +85,7 @@ These rules bind generation 2 from its first draft: the library, every binding a
 - **refuses `--lock` and `--frozen`,** and their API equivalents, before any network call: a dev build is replaceable and a superseded one expires, so nothing may pin one;
 - **pins its dev fingerprint** and refuses a library with any other, as `CHTYPES_ARTIFACT_INCOMPATIBLE`, with exactly this message, where X and Y are the two full `sha256:` fingerprints: `this SDK speaks dev fingerprint X; the library has Y — update your dev SDK`.
 
-At the lock, the description's `stability` becomes `locked`. That moves the fingerprint one last time, so a released 2.0.0 SDK never accepts a dev build and a dev SDK never accepts a 2.0.0 library. SDK 2.0.0 then ships from the production `chtypes/v2` repository, signed with the release key.
+At the lock (public issue #511 says when), the description's `stability` becomes `locked`. That moves the fingerprint one last time, so a released 2.0.0 SDK never accepts a dev build and a dev SDK never accepts a 2.0.0 library. SDK 2.0.0 then ships from the production `chtypes/v2` repository, signed with the release key.
 
 ### Provisional markers
 
