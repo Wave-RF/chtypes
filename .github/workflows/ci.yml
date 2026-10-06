@@ -329,10 +329,24 @@ jobs:
           cache-dependency-path: ts/pnpm-lock.yaml
       - name: build and typecheck
         run: cd ts && pnpm install --frozen-lockfile && pnpm build && pnpm typecheck
-      - name: the ABI major this job tests, derived and asserted against the ts binding's compiled-in layer
+      # Asserted twice, never against the map's own value: the identity in the
+      # generated source layer (assert-layer), and the identity the BUILT
+      # package carries, read by importing dist/abi<N>/decls.gen.js (the file
+      # scripts/release-verify.sh reads after a publish) and printed as the
+      # binding's own identity line (assert-identity).
+      - name: the ABI major this job tests, derived and asserted against the ts binding's compiled-in layer and its built package
         run: |
           python3 scripts/abi-v1/majors.py announce ts --what "suite, no artifacts"
           python3 scripts/abi-v1/majors.py assert-layer ts
+          dir="$(python3 scripts/abi-v1/majors.py layer-dir ts)"
+          built="ts/dist/${dir#ts/src/}/decls.gen.js"
+          node --input-type=module -e "
+            import { pathToFileURL } from 'node:url';
+            const m = await import(pathToFileURL(process.argv[1]).href);
+            console.log('chtypes_abi_identity binding=ts abi=' + m.ABI_VERSION + ' fingerprint=' + m.ABI_FINGERPRINT);
+          " "$built" > "$RUNNER_TEMP/abi-identity.log"
+          cat "$RUNNER_TEMP/abi-identity.log"
+          python3 scripts/abi-v1/majors.py assert-identity ts "$RUNNER_TEMP/abi-identity.log"
       - name: suite — the artifact tests skip by name, the rest runs
         run: scripts/check-suite.sh --no-artifacts ts
       - name: CLI parity — this binding's chtypes command line matches the shared expectation
@@ -602,6 +616,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+      - name: the ABI major this job lints, derived and asserted against the ts binding's compiled-in layer
+        run: |
+          python3 scripts/abi-v1/majors.py announce ts --what "biome"
+          python3 scripts/abi-v1/majors.py assert-layer ts
       - name: biome lint
         run: cd ts && pnpm dlx @biomejs/biome@2.5.13 lint .
 

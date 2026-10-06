@@ -7,6 +7,18 @@
  * lands.
  */
 
+export {
+  activeChannel,
+  type Channel,
+  channelName,
+  DEV_CACHE_DIR,
+  DEV_CHANNEL_BASE,
+  DEV_KEY_ID,
+  PINNING_REFUSED,
+  PinningRefusedError,
+  pinningRequested,
+  refusePinning,
+} from './channel.js';
 export { keyIdOfRawKey } from './dsse.js';
 export { cacheRoot, isFilesystemError } from './layout.js';
 export {

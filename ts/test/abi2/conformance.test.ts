@@ -1,12 +1,12 @@
 /**
  * The TS leg of `v1-abi-conformance`: every case in
- * `tests/fixtures/abi-v1/cases.json`, run through `../../src/abi1/loader.ts`
- * and `../../src/abi1/raw.ts`'s generic `rawCall` dispatcher against the
+ * `tests/fixtures/abi-v2/cases.json`, run through `../../src/abi2/loader.ts`
+ * and `../../src/abi2/raw.ts`'s generic `rawCall` dispatcher against the
  * stub libraries `scripts/abi-v1/build-stubs.sh` builds
- * (`$CHTYPES_ABI1_STUBS`), with the result written to
- * `$CHTYPES_ABI1_REPORT` (`spec/abi-v1/schema/report.schema.json`).
+ * (`$CHTYPES_ABI2_STUBS`), with the result written to
+ * `$CHTYPES_ABI2_REPORT` (`spec/abi-v2/schema/report.schema.json`).
  *
- * Without `$CHTYPES_ABI1_STUBS` (every v0 CI leg, and a developer running
+ * Without `$CHTYPES_ABI2_STUBS` (every v0 CI leg, and a developer running
  * `pnpm test` locally with no stubs built), every case SKIPS LOUDLY by name
  * — it never passes silently and never fails (the rule every other
  * no-registry test in this repository already follows).
@@ -20,17 +20,17 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { JsExternal } from 'ffi-rs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HANDLE_INFO, SYMBOL } from '../../src/abi1/decls.gen.js';
-import { ArtifactIncompatibleError, LoaderCorruptError } from '../../src/abi1/errors.js';
-import { LoadedImage, type LoadInput, openAbi1, type Predicate } from '../../src/abi1/loader.js';
-import { freeHandle, type HandleRef, NULL_EXTERNAL, type RawApi, type RawCallResult, rawCall } from '../../src/abi1/raw.js';
+import { HANDLE_INFO, SYMBOL } from '../../src/abi2/decls.gen.js';
+import { ArtifactIncompatibleError, LoaderCorruptError } from '../../src/abi2/errors.js';
+import { LoadedImage, type LoadInput, openAbi2, type Predicate } from '../../src/abi2/loader.js';
+import { freeHandle, type HandleRef, NULL_EXTERNAL, type RawApi, type RawCallResult, rawCall } from '../../src/abi2/raw.js';
 
-const STUBS_DIR = process.env.CHTYPES_ABI1_STUBS;
-const REPORT_PATH = process.env.CHTYPES_ABI1_REPORT;
-const TOOLCHAIN = process.env.CHTYPES_ABI1_TOOLCHAIN ?? 'unknown';
+const STUBS_DIR = process.env.CHTYPES_ABI2_STUBS;
+const REPORT_PATH = process.env.CHTYPES_ABI2_REPORT;
+const TOOLCHAIN = process.env.CHTYPES_ABI2_TOOLCHAIN ?? 'unknown';
 const stubsAvailable = typeof STUBS_DIR === 'string' && STUBS_DIR.length > 0;
 
-const CASES_PATH = path.resolve(import.meta.dirname, '../../../tests/fixtures/abi-v1/cases.json');
+const CASES_PATH = path.resolve(import.meta.dirname, '../../../tests/fixtures/abi-v2/cases.json');
 
 // ----------------------------------------------------------------- cases.json
 
@@ -233,7 +233,7 @@ function record(id: string, run: () => string | undefined): void {
   }
 }
 
-describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
+describe.skipIf(!stubsAvailable)('abi v2 conformance (ts)', () => {
   let okRaw: RawApi;
   let okPredicate: Predicate;
 
@@ -244,7 +244,7 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
     okPredicate = ok.predicate;
     const okPath = path.join(STUBS_DIR as string, 'ok.so');
     const input: LoadInput = { libraryPath: okPath, predicate: okPredicate, platform: platformOf(okPredicate) };
-    okRaw = openAbi1(input).raw;
+    okRaw = openAbi2(input).raw;
   });
 
   afterAll(() => {
@@ -427,13 +427,13 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
         const input: LoadInput = { libraryPath: soPath, predicate: variant.predicate, platform: platformOf(variant.predicate) };
         const expectedReason = c.expect?.reason as string;
         if (expectedReason === 'accepted') {
-          const lib = openAbi1(input);
+          const lib = openAbi2(input);
           expect(lib).toBeInstanceOf(LoadedImage);
           return;
         }
         let caught: unknown;
         try {
-          openAbi1(input);
+          openAbi2(input);
         } catch (err) {
           caught = err;
         }
@@ -462,7 +462,7 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
       };
       let caught: unknown;
       try {
-        openAbi1(input);
+        openAbi2(input);
       } catch (err) {
         caught = err;
       }
@@ -473,8 +473,8 @@ describe.skipIf(!stubsAvailable)('abi v1 conformance (ts)', () => {
 });
 
 if (!stubsAvailable) {
-  describe('abi v1 conformance (ts)', () => {
-    it.skip('CHTYPES_ABI1_STUBS is not set — skipping loudly (build-stubs.sh was not run for this leg)', () => {
+  describe('abi v2 conformance (ts)', () => {
+    it.skip('CHTYPES_ABI2_STUBS is not set — skipping loudly (build-stubs.sh was not run for this leg)', () => {
       // Intentionally empty: the test name itself is the skip's reason, and
       // `it.skip` reports as SKIPPED, never as a silent pass.
     });

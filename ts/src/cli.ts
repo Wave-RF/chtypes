@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 /**
  * `chtypes`: the one CLI every SDK carries, over the v1 fetch layer
- * (`docs/guides/fetch-v1.md`), spelled identically in all four:
+ * (`docs/guides/fetch-v1.md`), spelled identically in all four. This is the
+ * 2.0.0-dev CLI: it speaks the ABI v2 dev channel (`./ocifetch/channel.ts`;
+ * `spec/abi-v2/docs.md`, rules r5 and r6), so it fetches only from the staging
+ * dev channel under the staging key, ignores every base and trust override
+ * with one warning each, refuses `--frozen`, `--lock` and `--update` with the
+ * usage status before anything else, and keeps its cache under `v2-dev`:
  *
  *   chtypes fetch <version>... | --all  [--frozen] [--offline] [--lock <file>] [--update] [--strict]
  *   chtypes verify                      re-hash every installed library against its verified record
@@ -30,14 +35,18 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { isChtypesError, UsageError } from './abi1/index.js';
+import { isChtypesError, UsageError } from './abi2/index.js';
 import { withEnvironment } from './env.js';
 import { ERROR_EXIT_CODES } from './ocifetch/constants.gen.js';
 import { strictMode } from './ocifetch/faults.js';
 import {
+  activeChannel,
   ArtifactMissingError,
   ArtifactUnpublishedError,
   cacheRoot,
+  DEV_CACHE_DIR,
+  DEV_CHANNEL_BASE,
+  DEV_KEY_ID,
   ensure,
   FetchV1Error,
   type FetchV1Options,
@@ -47,7 +56,9 @@ import {
   listInstalled,
   listTags,
   missingNotes,
+  PinningRefusedError,
   type PlatformKey,
+  pinningRequested,
   probeCache,
   verifyInstalled,
 } from './ocifetch/index.js';
@@ -80,11 +91,14 @@ const USAGE = `usage: chtypes <command> [options]
   --lock      record what was installed into this lock file
   --update    re-resolve every request the lock holds and rewrite it (requires --lock; not with --frozen or --offline)
   --platform  <os>-<arch>: linux-amd64, linux-arm64 or darwin-arm64 (default: this host, or CHTYPES_TARGET)
-  --cache     the cache root (default: CHTYPES_CACHE, else \${XDG_CACHE_HOME:-~/.cache}/chtypes/v1)
+  --cache     a cache, used through its ${DEV_CACHE_DIR} subroot (default: CHTYPES_CACHE/${DEV_CACHE_DIR}, else \${XDG_CACHE_HOME:-~/.cache}/chtypes/${DEV_CACHE_DIR})
   --strict    a cache that cannot be read is CHTYPES_CACHE_UNUSABLE, never not-installed (default: CHTYPES_CACHE_STRICT=1)
   -h, --help  this text;  --version  "chtypes <version>"
 
-the registry base comes only from CHTYPES_ARTIFACTS_URL (default: the public registry)
+this is a 2.0.0-dev CLI (UNSTABLE, staging only, not for production): it fetches only from
+${DEV_CHANNEL_BASE} and trusts only the staging key ${DEV_KEY_ID};
+CHTYPES_ARTIFACTS_URL, CHTYPES_TRUSTED_KEYS and CHTYPES_ALLOW_UNSIGNED are ignored with a warning,
+and --frozen, --lock and --update are refused (a dev build is replaceable, so nothing may pin one)
 
 exit status: 0 ok, 2 usage; a fetch error exits with its code's status in spec/fetch-v1/constants.json
 environment: CHTYPES_ARTIFACTS_URL, CHTYPES_CACHE, CHTYPES_DOWNLOAD_TOKEN, CHTYPES_TRUSTED_KEYS,
@@ -175,6 +189,15 @@ export async function runCli(argv: readonly string[], io: CliIo = defaultIo): Pr
 }
 
 function fetchOptions(values: Values, forFetch: boolean): FetchV1Options {
+  // A 2.0.0-dev CLI refuses every pinning flag before anything else, the network above all (rule r6).
+  if (!activeChannel().pinnable) {
+    const requested = pinningRequested({
+      frozen: values.frozen === true,
+      update: values.update === true,
+      ...(values.lock !== undefined ? { lockPath: values.lock } : {}),
+    });
+    if (requested.length > 0) throw new PinningRefusedError(requested);
+  }
   if (!forFetch && values.platform !== undefined) throw new CliUsageError('--platform applies to fetch only');
   if (values.platform !== undefined && !isPlatformKey(values.platform)) {
     throw new CliUsageError(`--platform ${JSON.stringify(values.platform)} is not a platform: use linux-amd64, linux-arm64 or darwin-arm64`);
@@ -312,6 +335,11 @@ function noArguments(command: string, rest: readonly string[]): void {
 function report(err: unknown, io: CliIo): number {
   if (err instanceof CliUsageError) {
     io.stderr(`chtypes: ${err.message}\n${USAGE}`);
+    return EXIT_USAGE;
+  }
+  if (err instanceof PinningRefusedError) {
+    // The caller's misuse, never an artifact failure: the usage status.
+    io.stderr(`${err.message}\n`);
     return EXIT_USAGE;
   }
   if (err instanceof FetchV1Error) {

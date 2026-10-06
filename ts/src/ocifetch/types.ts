@@ -93,7 +93,8 @@ export interface VerifiedBundle {
 
 /** What a fetch returns on success (`docs/guides/fetch-v1.md` §9). */
 export interface Resolved {
-  readonly abiGeneration: 1;
+  /** The ABI generation the fetch contract speaks: 2 for this 2.0.0-dev SDK (`./channel.ts`). */
+  readonly abiGeneration: number;
   readonly platform: PlatformKey;
   readonly request: VersionRequest;
   readonly version: string;

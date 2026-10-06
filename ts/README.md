@@ -1,5 +1,7 @@
 # chtypes — TypeScript SDK
 
+> **2.0.0-dev: UNSTABLE, staging only, not for production.** This is the ABI v2 development binding (public issue #511). It speaks ABI v2's unstable description, pins its dev fingerprint and refuses a library with any other ("update your dev SDK"). It fetches only from the staging dev channel (`https://registry-staging.wavehouse.dev/chtypes/v2-dev`) and trusts only the staging key; `CHTYPES_ARTIFACTS_URL`, `CHTYPES_TRUSTED_KEYS` and `CHTYPES_ALLOW_UNSIGNED` are ignored, each with one warning; `--lock`, `--frozen` and `--update` (and the `frozen`, `lockPath`, `lockWrite` and `update` options) are refused, because a dev build is replaceable and a superseded one expires after 14 days. Its cache is `${XDG_CACHE_HOME:-~/.cache}/chtypes/v2-dev`, or `<CHTYPES_CACHE>/v2-dev` under an explicit cache, which no 1.x SDK reads. Every vocabulary has rule r3's `unknown(n)` member: an unlisted value is kept as it came, and its `*Known` function (`outcomeKnown`, `verdictKnown`, ...) is false for it. The rules are r1 to r6 of [`docs/reference/abi-v2.md`](../docs/reference/abi-v2.md). For production, use the 1.x package, `@wavehouse/chtypes@latest`.
+
 **If this row were inserted into this table on this ClickHouse version, what would happen?** chtypes answers with ClickHouse's own code: the real C++ type machinery, vendored per release into a native library behind the frozen `chs_*` C ABI and reached here through `ffi-rs`. Nothing semantic is reimplemented, so _"what does ClickHouse do with `256` into a `UInt8`?"_ is answered by ClickHouse rather than by a model of it. One peer binding among `{go, python, ts, rust}` — no language is privileged, and all four give one answer.
 
 Node ≥ 22, ESM only. `ffi-rs` ships prebuilt for darwin arm64/x64 and linux arm64/x64 (gnu and musl), so there is **no build step**.
@@ -9,8 +11,10 @@ Node ≥ 22, ESM only. `ffi-rs` ships prebuilt for darwin arm64/x64 and linux ar
 Two things: this package, and at least one **artifact**, the per-version native library it `dlopen`s at runtime. The fetch layer (`src/ocifetch`) resolves a version request to a signed artifact in its cache, verifies the signature and the library's digest, and hands the result to the loader; a `Registry` turns on fetching with `autofetch` (or `CHTYPES_AUTOFETCH=1`).
 
 ```sh
-pnpm add @wavehouse/chtypes
+pnpm add @wavehouse/chtypes@dev
 ```
+
+The dev builds are published under npm's `dev` dist-tag, so a plain `pnpm add @wavehouse/chtypes` never installs one: name the tag, or the exact `2.0.0-dev.N` version you want.
 
 ## Quickstart
 
@@ -67,7 +71,7 @@ The four are **peers**: a decline never satisfies `instanceof SchemaError`. Load
 
 ## Tests
 
-`pnpm test`. The stub-backed suites under `test/abi1` need `$CHTYPES_ABI1_STUBS` and skip loudly by name without it; the decoder, settings and setup suites need nothing.
+`pnpm test`. The stub-backed suites under `test/abi2` need `$CHTYPES_ABI2_STUBS` (the `v2/` directory `scripts/abi-v1/build-stubs.sh --out DIR` writes) and skip loudly by name without it; the decoder, settings, setup and dev-channel suites need nothing.
 
 Working against a checkout: build `dist/` first (`pnpm install && pnpm build`), which is what `package.json#exports` serves.
 

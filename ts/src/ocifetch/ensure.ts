@@ -11,18 +11,16 @@ import { unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { asString, field, items, parseJsonValue } from '../json.js';
+import { activeChannel, allowUnsigned, noteIgnoredOverrides, refusePinning, warnIgnored } from './channel.js';
 import {
-  ABI_GENERATION,
   BASE_SEPARATOR,
   CACHE_ANNOTATION_PREFIX,
-  DEFAULT_BASES,
   ENV_BASES_NAME,
   GOLDENS_ARTIFACT_TYPE,
   MEDIA_TYPE_BUNDLE,
   MEDIA_TYPE_MANIFEST,
   PREDICATE_TYPE_ARTIFACT,
   PREDICATE_TYPE_GOLDENS,
-  RELEASE_KEYS,
   SPELLING_REGEX,
   TAGS_LIST_MAX_BYTES,
 } from './constants.gen.js';
@@ -66,12 +64,17 @@ import { digestOfHex, endpointUrl, hexOfDigest, platformInfo, realClock, resolve
 import type { ArtifactPredicate, FetchV1Options, PlatformKey, Resolved, TrustedKey, VerifyResult } from './types.js';
 import { fetchVerifyAndUnpackLayer, measureLibrary, verifyInstalledLibrary } from './unpack.js';
 
+/** The trust list: the caller's when the active contract honors one, else the contract's own (the staging key alone on the dev channel, rule r6). */
 function defaultTrustedKeys(options: FetchV1Options): readonly TrustedKey[] {
-  if (options.trustedKeys !== undefined) return options.trustedKeys;
-  return RELEASE_KEYS.map((k) => ({ keyid: k.keyid, ed25519Hex: k.ed25519Hex }));
+  const channel = activeChannel();
+  if (channel.overridable && options.trustedKeys !== undefined) return options.trustedKeys;
+  return channel.keys;
 }
 
+/** The bases: the caller's or `CHTYPES_ARTIFACTS_URL` when the active contract honors them, else the contract's own (the staging dev channel alone, rule r6). */
 function resolveBases(options: FetchV1Options): readonly string[] {
+  const channel = activeChannel();
+  if (!channel.overridable) return channel.bases;
   if (options.bases !== undefined && options.bases.length > 0) return options.bases;
   const env = process.env[ENV_BASES_NAME];
   if (env !== undefined && env !== '') {
@@ -80,7 +83,21 @@ function resolveBases(options: FetchV1Options): readonly string[] {
       .map((b) => b.trim())
       .filter((b) => b !== '');
   }
-  return DEFAULT_BASES;
+  return channel.bases;
+}
+
+/**
+ * The bases, the trust list and the unsigned decision a call with `options`
+ * reads under the active contract: exactly what `ensure`, `fetchSigned` and
+ * `listTags` use. Not part of the package's entry point; the dev channel's
+ * rule r6 tests read it, so they test the derivation rather than restate it.
+ */
+export function effectiveFetchOptions(options: FetchV1Options): {
+  readonly bases: readonly string[];
+  readonly trustedKeys: readonly TrustedKey[];
+  readonly allowUnsigned: boolean;
+} {
+  return { bases: resolveBases(options), trustedKeys: defaultTrustedKeys(options), allowUnsigned: allowUnsigned(options) };
 }
 
 function tokenHostsFor(bases: readonly string[]): readonly string[] {
@@ -115,7 +132,7 @@ function resolvedFromRecord(
   warnings: readonly string[],
 ): Resolved {
   return {
-    abiGeneration: ABI_GENERATION,
+    abiGeneration: activeChannel().abi,
     platform,
     request,
     version: record.version,
@@ -156,6 +173,7 @@ export async function resolveInstalled(
   platform: PlatformKey,
   options: FetchV1Options = {},
 ): Promise<Resolved | undefined> {
+  noteIgnoredOverrides(options);
   const root = cacheRoot(options.cacheDir);
   const warnings = await probeRoots(
     searchRoots(options).map((r) => r.root),
@@ -333,6 +351,7 @@ async function checkMonotonic(
 // ------------------------------------------------------------------ listInstalled
 
 export async function listInstalled(options: FetchV1Options = {}): Promise<readonly Resolved[]> {
+  noteIgnoredOverrides(options);
   const warnings = await probeCache(options);
   const out: Resolved[] = [];
   for (const r of searchRoots(options)) {
@@ -348,6 +367,7 @@ export async function listInstalled(options: FetchV1Options = {}): Promise<reado
 
 /** Re-checks every installed library's bytes against its own `verified.json` record (guide §9). */
 export async function verifyInstalled(options: FetchV1Options = {}): Promise<readonly VerifyResult[]> {
+  noteIgnoredOverrides(options);
   await probeCache(options);
   const out: VerifyResult[] = [];
   for (const r of searchRoots(options)) {
@@ -369,9 +389,14 @@ export async function verifyInstalled(options: FetchV1Options = {}): Promise<rea
 /**
  * `ensure(request, options)`: resolve unless `frozen` or `offline`, verify
  * trust, download and unpack bytes, install into the cache, optionally write
- * a lock entry. See `docs/guides/fetch-v1.md` §9 for the full contract.
+ * a lock entry. See `docs/guides/fetch-v1.md` §9 for the full contract. On the
+ * dev channel (`./channel.ts`) every pinning option is refused first, before
+ * any request, and every base, trust or unsigned override is ignored with one
+ * warning (spec/abi-v2/docs.md, rule r6).
  */
 export async function ensure(request: string, options: FetchV1Options = {}): Promise<Resolved> {
+  refusePinning(options);
+  noteIgnoredOverrides(options);
   try {
     return await ensureIn(request, options);
   } catch (err) {
@@ -454,9 +479,11 @@ async function ensureIn(request: string, options: FetchV1Options): Promise<Resol
     let predicate: ArtifactPredicate;
     let signedBy: string;
     if (trust === undefined) {
-      if (options.allowUnsigned !== true) {
+      if (!allowUnsigned(options)) {
         throw new ArtifactUntrustedError(
-          `chtypes: no referrer of ${resolveResult.manifest.digest} verified under a trusted key (CHTYPES_ALLOW_UNSIGNED=1 to proceed anyway)`,
+          activeChannel().overridable
+            ? `chtypes: no referrer of ${resolveResult.manifest.digest} verified under a trusted key (CHTYPES_ALLOW_UNSIGNED=1 to proceed anyway)`
+            : `chtypes: no referrer of ${resolveResult.manifest.digest} verified under the staging key ${activeChannel().keys.map((k) => k.keyid).join(', ')}`,
         );
       }
       predicate = await unsignedPredicateFallback(resolveResult.repositoryRoot, resolveResult.manifest, request, info, baseReqOptions);
@@ -561,7 +588,7 @@ async function unsignedPredicateFallback(
 ): Promise<ArtifactPredicate> {
   const fallbackLibrary = info.os === 'darwin' ? 'libchtypes.dylib' : 'libchtypes.so';
   const fallback: ArtifactPredicate = {
-    abi: ABI_GENERATION,
+    abi: activeChannel().abi,
     abi_fingerprint: '',
     clickhouse_version: request,
     channel: '',
@@ -631,7 +658,7 @@ async function ensureFrozen(request: string, platform: PlatformKey, options: Fet
   let signedBy: string;
   let warnings: string[] = [];
   if (verified === undefined) {
-    if (options.allowUnsigned !== true) {
+    if (!allowUnsigned(options)) {
       throw new ArtifactUntrustedError(`chtypes: the locked bundle ${pin.bundle} does not verify under a trusted key`);
     }
     predicate = await unsignedPredicateFallback(bases[0]!, manifest, request, info, baseReqOptions);
@@ -821,18 +848,20 @@ export interface FetchSignedResult {
  * highest-`revision` verified one (`goldens.ts`, guide §9).
  */
 export async function fetchSigned(
-  repository: string,
+  callerRepository: string,
   ref: string,
   predicateType: string,
   options: FetchV1Options = {},
 ): Promise<FetchSignedResult> {
+  noteIgnoredOverrides(options);
+  const repository = channelRepository(callerRepository);
   const root = cacheRoot(options.cacheDir);
   await ensureLayout(root);
   const baseReqOptions = requestOptionsFor(options, [repository]);
   const trustedKeys = defaultTrustedKeys(options);
 
   if (predicateType === PREDICATE_TYPE_GOLDENS) {
-    return fetchGoldens(repository, ref, root, trustedKeys, options.allowUnsigned === true, { ...baseReqOptions, maxBytes: 0 });
+    return fetchGoldens(repository, ref, root, trustedKeys, allowUnsigned(options), { ...baseReqOptions, maxBytes: 0 });
   }
 
   const manifest = await fetchManifestByDigest([repository], ref, { ...baseReqOptions, maxBytes: 0 });
@@ -846,7 +875,7 @@ export async function fetchSigned(
     (statement) => checkGenericStatement(statement, predicateType, manifest.layer.digest),
     { ...baseReqOptions, maxBytes: 0 },
   );
-  if (trust === undefined && options.allowUnsigned !== true) {
+  if (trust === undefined && !allowUnsigned(options)) {
     throw new ArtifactUntrustedError(`chtypes: no referrer of ${manifest.digest} verified under a trusted key`);
   }
 
@@ -856,6 +885,20 @@ export async function fetchSigned(
     statement: trust?.statement,
     digests: { manifest: manifest.digest, layer: manifest.layer.digest },
   };
+}
+
+/**
+ * The repository `fetchSigned` reads: the caller's when the active contract
+ * honors a base, else the contract's own, with one warning when the caller
+ * named another (the dev channel's goldens are its own release's referrers,
+ * signed with the staging key; rule r6).
+ */
+function channelRepository(callerRepository: string): string {
+  const channel = activeChannel();
+  if (channel.overridable) return callerRepository;
+  const own = channel.bases[0] as string;
+  if (callerRepository !== '' && callerRepository !== own) warnIgnored("fetchSigned's repository argument");
+  return own;
 }
 
 /**
@@ -989,6 +1032,7 @@ function compareSpellings(a: string, b: string): number {
  * resolve reads. A next page is followed through the `Link` header.
  */
 export async function listTags(options: FetchV1Options = {}): Promise<readonly string[]> {
+  noteIgnoredOverrides(options);
   const bases = resolveBases(options);
   const reqOptions = { ...requestOptionsFor(options, bases), maxBytes: TAGS_LIST_MAX_BYTES };
   const spelling = new RegExp(SPELLING_REGEX);

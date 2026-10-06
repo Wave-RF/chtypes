@@ -18,7 +18,8 @@
 
 import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { items, type Json, parseJsonValue } from '../json.js';
-import { ABI_GENERATION, DSSE_MAX_SIGNATURES, DSSE_PAYLOAD_TYPE, SPELLING_REGEX } from './constants.gen.js';
+import { activeChannel } from './channel.js';
+import { DSSE_MAX_SIGNATURES, DSSE_PAYLOAD_TYPE, SPELLING_REGEX } from './constants.gen.js';
 import { ArtifactCorruptError } from './errors.js';
 import { fetchBlobBytesByDigest, fetchManifestByDigest, type ManifestInfo } from './oci.js';
 import type { RequestOptions } from './http.js';
@@ -284,8 +285,11 @@ export function checkArtifactStatement(
     );
   }
   const p = statement.predicate;
-  if (p['abi'] !== ABI_GENERATION) {
-    throw new ArtifactCorruptError(`chtypes: statement predicate.abi is ${JSON.stringify(p['abi'])}, not ${ABI_GENERATION}`);
+  // The active contract's generation: 2 on the ABI v2 dev channel (rule r6),
+  // so a 1.x build's abi-1 predicate is refused there.
+  const abi = activeChannel().abi;
+  if (p['abi'] !== abi) {
+    throw new ArtifactCorruptError(`chtypes: statement predicate.abi is ${JSON.stringify(p['abi'])}, not ${abi}`);
   }
   if (p['os'] !== check.os || p['arch'] !== check.arch) {
     throw new ArtifactCorruptError(

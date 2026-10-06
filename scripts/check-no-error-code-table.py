@@ -118,6 +118,8 @@ from gen import is_generated, produced_by_major, produced_outputs  # noqa: E402
 GO_LAYER = bmajors.layer_dir("go", bmajors.load().by_binding["go"])
 # The Python layer's, likewise (python/src/chtypes/_abi2 once python speaks ABI v2).
 PY_LAYER = bmajors.layer_dir("python", bmajors.load().by_binding["python"])
+# The TS layer's directory at the major the map gives ts (ts/src/abi2 on `v2`).
+TS_LAYER = bmajors.layer_dir("ts", bmajors.load().by_binding["ts"])
 
 # --------------------------------------------------------------- what is scanned
 
@@ -141,7 +143,7 @@ DECL_SOURCES = (
     ("go", f"{GO_LAYER}/abi_gen.go", r'dlsym\(\s*h\s*,\s*"{sym}"\s*\)'),
     ("go-linked", f"{GO_LAYER}/linked_gen.go", r"&{sym}\s*;"),
     ("python", f"{PY_LAYER}/_decls.py", r'_add\(\s*"{sym}"'),
-    ("ts", "ts/src/abi1/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
+    ("ts", f"{TS_LAYER}/decls.gen.ts", r'"{sym}"\s*:\s*\{{'),
     ("rust", "rust/src/abi1/decls.rs", r'concat!\(\s*"{sym}"'),
 )
 DECL_SYMBOLS = ("chs_error_codes",)
@@ -485,7 +487,7 @@ def check(root: str, produced: dict[int, frozenset[str]] | None = None) -> tuple
     anchors = (
         f"{GO_LAYER}/loader.go",
         f"{PY_LAYER}/_loader.py",
-        "ts/src/abi1/loader.ts",
+        f"{TS_LAYER}/loader.ts",
         "rust/src/abi1/loader.rs",
     )
     for anchor in anchors:
@@ -649,10 +651,10 @@ PLANTS = (
     ),
     (
         "ts declaration dropped",
-        "ts/src/abi1/decls.gen.ts",
+        f"{TS_LAYER}/decls.gen.ts",
         '"chs_error_codes": {',
         '"chs_absent_symbol": {',
-        "ts: ts/src/abi1/decls.gen.ts does not declare chs_error_codes",
+        f"ts: {TS_LAYER}/decls.gen.ts does not declare chs_error_codes",
     ),
     (
         "rust declaration dropped",

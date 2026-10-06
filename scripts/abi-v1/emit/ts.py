@@ -100,6 +100,31 @@ chs_status -> one of SchemaError/UnsupportedError/UsageError/InternalError)
 and `loaderErrorClassFor` (a loader refusal's reason -> artifact_incompatible
 or artifact_corrupt), both over the hand-written error classes in
 ts/src/abi1/errors.ts.
+
+ABI v2 (`MAJORS`, run for the ONE major spec/binding-majors.json gives ts).
+The same five files under ts/src/abi2: ABI v1's text with every spelling that
+names its major moved by `_MAJOR_SPELLINGS` (the directory, the description
+paths, the libc key, the handle base class, the error prefixes), each of which
+must occur, so a renamed spelling fails generation instead of leaking a v1
+name into v2. What is v2's own:
+
+  * decls.gen.ts carries ABI_STABILITY, the description's `stability`: the
+    loader's fingerprint refusal is rule r6's exact dev message while it is
+    "unstable" (spec/abi-v2/docs.md);
+  * vocab.gen.ts follows rule r3: every vocabulary's type is its listed
+    values OR its unknown(n) member, the raw integer or the exact string,
+    which `<vocabulary>Of` keeps instead of replacing it with a fallback, and
+    `<vocabulary>Known` is false for exactly those values. A fallback only
+    names whose facts unknown(n) reports, so an unknown outcome is never
+    accepted and an unknown verdict is never answered; a boolean fact with no
+    fallback (value_src's is_stored) reads false for unknown(n), as every
+    dev binding reads it, until the description says otherwise.
+    `statusName` spells an unlisted status `unknown(<n>)`, and
+    DESCRIBED_VOCABULARIES lists every enum the description defines, so the
+    r3 tests reach each one without a hand-kept list;
+  * errmap.gen.ts's unlisted status is an InternalError naming unknown(n).
+
+ABI v1's outputs are produced by the untouched v1 path, byte for byte.
 """
 
 from __future__ import annotations
@@ -111,13 +136,53 @@ from model import BUF_HANDLE
 
 from . import Output, banner
 
-BINDING = "ts"  # runs for the major spec/binding-majors.json gives ts (emit/__init__.py)
+BINDING = "ts"  # runs for the ONE major spec/binding-majors.json gives ts (emit/__init__.py)
+MAJORS = (1, 2)
 
 DECLS_PATH = "ts/src/abi1/decls.gen.ts"
 ERRMAP_PATH = "ts/src/abi1/errmap.gen.ts"
 LIBC_PATH = "ts/src/abi1/libc.gen.ts"
 VOCAB_PATH = "ts/src/abi1/vocab.gen.ts"
 CALLS_PATH = "ts/src/abi1/calls.gen.ts"
+
+
+def paths(major: int) -> tuple[str, str, str, str, str]:
+    """(decls, errmap, libc, vocab, calls) for one major: ts/src/abi<major>/."""
+    v1 = (DECLS_PATH, ERRMAP_PATH, LIBC_PATH, VOCAB_PATH, CALLS_PATH)
+    if major == 1:
+        return v1
+    return tuple(p.replace("ts/src/abi1/", f"ts/src/abi{major}/") for p in v1)  # type: ignore[return-value]
+
+
+# Every spelling of ABI v1's TS layer that names its major, in the order they
+# are applied. Each must occur in the rendered text at least once (a spelling
+# that moved in the v1 path would otherwise silently stop being moved). The
+# banner (each file's first line) is the model's own and already names the
+# major; none of these touches it ("scripts/abi-v1/gen.py --major 2" carries
+# no "spec/abi-v1/").
+_MAJOR_SPELLINGS = (
+    ("ts/src/abi1/", "ts/src/abi{n}/"),
+    ("spec/abi-v1/", "spec/abi-v{n}/"),
+    ("chtypes_abi1_", "chtypes_abi{n}_"),
+    ("chtypes abi1:", "chtypes abi{n}:"),
+    ("are v1 platforms", "are ABI v{n} platforms"),
+    ("Abi1Handle", "Abi{n}Handle"),
+)
+
+
+def _respell(text: str, major: int) -> str:
+    for old, new in _MAJOR_SPELLINGS:
+        text = text.replace(old, new.replace("{n}", str(major)))
+    return text
+
+
+def _respell_all(texts: list[str], major: int) -> list[str]:
+    joined = "\0".join(texts)
+    missing = [old for old, _ in _MAJOR_SPELLINGS if old not in joined]
+    if missing:
+        raise ValueError(f"emit/ts.py: ABI v1's TS layer no longer spells {missing}; update _MAJOR_SPELLINGS")
+    return [_respell(x, major) for x in texts]
+
 
 _WORD = re.compile(r"[A-Za-z0-9]+")
 
@@ -329,6 +394,18 @@ def render_decls(model) -> str:
         " */",
         f"export const ABI_VERSION = {json.dumps(model.abi)};",
         f"export const ABI_FINGERPRINT = {json.dumps(model.fingerprint)};",
+        *(
+            [
+                "/**",
+                " * The description's stability: \"unstable\" while this generation is being designed, so",
+                " * ABI_FINGERPRINT moves with every change, and \"locked\" after (spec/abi-v1/docs.md, rule",
+                " * r6). A dev SDK refuses any other fingerprint with the dev message.",
+                " */",
+                f"export const ABI_STABILITY: string = {json.dumps(model.stability or '')};",
+            ]
+            if model.major >= 2
+            else []
+        ),
         "",
         "export interface CrossCheckField {",
         "  readonly buildInfo: string;",
@@ -390,12 +467,19 @@ def render_errmap(model) -> str:
             continue
         lines.append(f"    case {status_values[status]}: // {status}")
         lines.append(f"      return new {ts_class_of[cls]}(fields);")
+    if model.major >= 2:
+        # Rule r3: a status outside the closed set is its unknown(n), and the
+        # call still fails, as an internal error naming n (sdk.json's
+        # errors.status "unknown" entry).
+        unknown_message = "`chtypes: call status unknown(${status}) is outside the closed set: ${fields.messageBytes.toString('utf8')}`,"
+    else:
+        unknown_message = "`chtypes: unrecognized call status ${status}: ${fields.messageBytes.toString('utf8')}`,"
     lines += [
         "    default:",
         "      return new InternalError({",
         "        ...fields,",
         "        messageBytes: Buffer.from(",
-        "          `chtypes: unrecognized call status ${status}: ${fields.messageBytes.toString('utf8')}`,",
+        f"          {unknown_message}",
         "          'utf8',",
         "        ),",
         "      });",
@@ -668,7 +752,150 @@ def _render_string_vocab(enum) -> list[str]:
     return out
 
 
+def _render_int_enum_v2(enum, type_name: str) -> list[str]:
+    """ABI v2 (rule r3): the listed numbers, plus unknown(n), any other integer."""
+    out = _render_int_enum(enum, type_name)
+    fn = _lower_first(type_name)
+    upper = re.sub(r"(?<!^)(?=[A-Z])", "_", type_name).upper()
+    values = [int(v.value) for v in enum.values]
+    # The v1 type line names the listed values only; v2's adds unknown(n).
+    old = f"export type {type_name} = (typeof {type_name})[keyof typeof {type_name}];"
+    new = (
+        f"/** {enum.name}: a listed value, or its unknown(n) member, any other integer (rule r3); `{fn}Known` tells them apart. */\n"
+        f"export type {type_name} = (typeof {type_name})[keyof typeof {type_name}] | Unknown<number>;"
+    )
+    if old not in out:
+        raise ValueError(f"emit/ts.py: {enum.name}: the type line moved; update _render_int_enum_v2")
+    out[out.index(old)] = new
+    out += [
+        f"const {upper}_LISTED: ReadonlySet<number> = new Set([{', '.join(str(v) for v in values)}]);",
+        "",
+        "/** Whether the description lists `value`: false for exactly the vocabulary's unknown(n) members (rule r3). */",
+        f"export function {fn}Known(value: number): boolean {{",
+        f"  return {upper}_LISTED.has(value);",
+        "}",
+        "",
+        "/** The value as this vocabulary's: a listed value, or its unknown(n) member carrying the raw integer (rule r3). */",
+        f"export function {fn}Of(value: number): {type_name} {{",
+        "  return value;",
+        "}",
+        "",
+    ]
+    if enum.name == "chs_status":
+        names = {int(v.value): v.name for v in enum.values}
+        out += [
+            "const STATUS_NAME: Readonly<Record<number, string>> = {",
+            *[f"  {n}: {_ts_str(s)}," for n, s in names.items()],
+            "};",
+            "",
+            "/** The chs_status constant's own name (CHS_REJECTED, ...), or `unknown(<n>)` for a value the description does not list (rule r3). */",
+            "export function statusName(value: number): string {",
+            "  return STATUS_NAME[value] ?? `unknown(${value})`;",
+            "}",
+            "",
+        ]
+    return out
+
+
+def _render_string_vocab_v2(enum) -> list[str]:
+    """ABI v2 (rule r3): the listed spellings, plus unknown(n), any other
+    string, kept verbatim; a fallback names only whose facts it reports."""
+    type_name = ts_vocab_type(enum.name)
+    upper = re.sub(r"(?<!^)(?=[A-Z])", "_", type_name).upper()
+    fn = _lower_first(type_name)
+    entries = {}
+    names: dict[str, str] = {}
+    for v in enum.values:
+        key = ts_value_name(enum.name, v.value)
+        if key in names:
+            raise ValueError(f"emit/ts.py: {enum.name}: {v.value!r} and {names[key]!r} both spell {key}")
+        names[key] = v.value
+        entries[v.value] = dict(v.fields)
+    out = [
+        f"/** {enum.name}: the description's own values. */",
+        f"export const {type_name} = {{",
+        *[f"  {k}: {_ts_str(v)}," for k, v in names.items()],
+        "} as const;",
+        f"/** {enum.name}: a listed value, or its unknown(n) member, any other string, kept verbatim (rule r3); `{fn}Known` tells them apart. */",
+        f"export type {type_name} = (typeof {type_name})[keyof typeof {type_name}] | Unknown<string>;",
+        "",
+        f"const {upper}_ENTRIES: Readonly<Record<string, Readonly<Record<string, boolean | string>>>> = {{",
+        *[f"  {_ts_str(v)}: {json.dumps(f, sort_keys=True)}," for v, f in entries.items()],
+        "};",
+        "/** Whose per-value facts an unknown(n) value reports (rule r3), or null when the description names none. Never the value an unlisted one is read as. */",
+        f"export const {upper}_FALLBACK: {type_name} | null = {_ts_str(enum.fallback) if enum.fallback is not None else 'null'};",
+        "",
+        "/** Whether the description lists `value`: false for exactly the vocabulary's unknown(n) members (rule r3). */",
+        f"export function {fn}Known(value: string): boolean {{",
+        f"  return Object.hasOwn({upper}_ENTRIES, value);",
+        "}",
+        "",
+        "/** The value as this vocabulary's: a listed value, or its unknown(n) member carrying the raw string (rule r3). Never a substitute. */",
+        f"export function {fn}Of(value: string): {type_name} {{",
+        "  return value;",
+        "}",
+        "",
+    ]
+    for field, kind in enum.fields.items():
+        fact = f"{fn}{_pascal_words(field)}"
+        if kind == "boolean":
+            if enum.fallback is not None:
+                unknown = f"an unknown(n) value reports the fallback's ({_ts_str(enum.fallback)})"
+            else:
+                unknown = "an unknown(n) value reads false: the description names no fallback, and every dev binding reads it so until it does (rule r3)"
+            out += [
+                f"/** The `{field}` fact for a value, read from the description; {unknown}. */",
+                f"export function {fact}(value: string): boolean {{",
+                f"  const key = Object.hasOwn({upper}_ENTRIES, value) ? value : {upper}_FALLBACK;",
+                "  if (key === null) return false;",
+                f"  return {upper}_ENTRIES[key]?.[{_ts_str(field)}] === true;",
+                "}",
+                "",
+            ]
+        else:
+            out += [
+                f"/** The `{field}` fact for a value, read from the description; an unknown(n) value reports the fallback's, or undefined when there is none (rule r3). */",
+                f"export function {fact}(value: string): string | undefined {{",
+                f"  const key = Object.hasOwn({upper}_ENTRIES, value) ? value : {upper}_FALLBACK;",
+                "  if (key === null) return undefined;",
+                f"  return {upper}_ENTRIES[key]?.[{_ts_str(field)}] as string | undefined;",
+                "}",
+                "",
+            ]
+    return out
+
+
+def _render_described(model) -> list[str]:
+    """ABI v2: every enum the description defines, for the r3 tests."""
+    rows = []
+    for enum in model.enums.values():
+        type_name = ts_vocab_type(enum.name)
+        fn = _lower_first(type_name)
+        if enum.repr == "int32":
+            listed = ", ".join(str(int(v.value)) for v in enum.values)
+            rows.append(f"  {_ts_str(enum.name)}: {{ repr: 'int32', listed: [{listed}], known: {fn}Known, of: {fn}Of }},")
+        elif enum.repr == "string":
+            listed = ", ".join(_ts_str(v.value) for v in enum.values)
+            rows.append(f"  {_ts_str(enum.name)}: {{ repr: 'string', listed: [{listed}], known: {fn}Known, of: {fn}Of }},")
+        else:
+            raise ValueError(f"emit/ts.py: {enum.name}: no TS shape for repr {enum.repr!r}")
+    return [
+        "/** One described enum, as the rule r3 tests reach it: its listed values, `known` and `of`. */",
+        "export type DescribedVocabulary =",
+        "  | { readonly repr: 'int32'; readonly listed: readonly number[]; readonly known: (value: number) => boolean; readonly of: (value: number) => number }",
+        "  | { readonly repr: 'string'; readonly listed: readonly string[]; readonly known: (value: string) => boolean; readonly of: (value: string) => string };",
+        "",
+        "/** Every enum the description defines, keyed by its own name, generated so no list is kept by hand. */",
+        "export const DESCRIBED_VOCABULARIES: Readonly<Record<string, DescribedVocabulary>> = {",
+        *rows,
+        "};",
+        "",
+    ]
+
+
 def render_vocab(model) -> str:
+    if model.major >= 2:
+        return render_vocab_v2(model)
     lines = [
         f"/* {banner(model)} */",
         "/*",
@@ -699,6 +926,52 @@ def render_vocab(model) -> str:
             f"export const EXPORT_NONE = {export_none.value};",
             "",
         ]
+    return "\n".join(lines)
+
+
+def render_vocab_v2(model) -> str:
+    """ABI v2's vocab.gen.ts: rule r3 (this module's docstring)."""
+    lines = [
+        f"/* {banner(model)} */",
+        "/*",
+        " * Every vocabulary the description defines, with its numbers, spellings, facts and",
+        " * fallbacks. A fact (a reason's `lossy`, a source's `isStored`, a verdict's `answered`)",
+        " * is read by the generated function keyed by the value a document carries; no binding",
+        " * keeps a list of its own.",
+        " *",
+        " * Rule r3 (spec/abi-v2/docs.md): every vocabulary has an unknown(n) member. A value the",
+        " * description does not list IS that member, the raw integer or the exact string, kept for",
+        " * that field alone: `<vocabulary>Of` never replaces it, and `<vocabulary>Known` is false for",
+        " * it. A reader never fails a document, a row or a batch over one. A fallback names only",
+        " * whose facts unknown(n) reports, so an unknown outcome is never accepted and an unknown",
+        " * verdict is never answered.",
+        " */",
+        "",
+        "/** Rule r3's unknown(n) member of a vocabulary: a raw value the description does not list, carried verbatim. */",
+        "export type Unknown<T extends number | string> = T & Record<never, never>;",
+        "",
+    ]
+    for enum in model.int_enums:
+        lines += _render_int_enum_v2(enum, ts_vocab_type(enum.name))
+    for enum in model.vocabularies:
+        lines += _render_string_vocab_v2(enum)
+    docs = {k: c for k, c in model.constants.items() if k.startswith(DOC_PREFIX)}
+    lines += [
+        "/** The document groups a batch call asks for (`CHS_DOC_*`), as bit flags. */",
+        "export const DocFlags = {",
+        *[f"  {_pascal_words(k.removeprefix(DOC_PREFIX))}: {c.value}," for k, c in docs.items()],
+        "} as const;",
+        "export type DocFlags = number;",
+        "",
+    ]
+    export_none = model.constants.get("CHS_EXPORT_NONE")
+    if export_none is not None:
+        lines += [
+            "/** The `export_format` of a batch preview that exports nothing. */",
+            f"export const EXPORT_NONE = {export_none.value};",
+            "",
+        ]
+    lines += _render_described(model)
     return "\n".join(lines)
 
 
@@ -806,10 +1079,13 @@ def render_calls(model) -> str:
 
 
 def outputs(model) -> list[Output]:
-    return [
-        Output(DECLS_PATH, content=render_decls(model)),
-        Output(ERRMAP_PATH, content=render_errmap(model)),
-        Output(LIBC_PATH, content=render_libc(model)),
-        Output(VOCAB_PATH, content=render_vocab(model)),
-        Output(CALLS_PATH, content=render_calls(model)),
+    texts = [
+        render_decls(model),
+        render_errmap(model),
+        render_libc(model),
+        render_vocab(model),
+        render_calls(model),
     ]
+    if model.major != 1:
+        texts = _respell_all(texts, model.major)
+    return [Output(path, content=text) for path, text in zip(paths(model.major), texts, strict=True)]
