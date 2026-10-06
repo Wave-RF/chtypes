@@ -1189,21 +1189,15 @@ TS_MODIFIERS = re.compile(r"^(?:(readonly|static|get|set|public|protected|privat
 TS_MEMBER = re.compile(r"^(\[[^\]]+\]|[A-Za-z_$][\w$]*|\"[^\"]+\"|'[^']+')\s*(\?)?\s*([(<:;=,]|$)")
 
 
-def parse_api_report(text: str) -> dict[str, str]:
-    """An api-extractor report: every exported declaration, and the public
-    members of each (a class's, an interface's, a const object's, an enum's).
-    A "forgotten export" (a declaration an export refers to but the entry
-    point does not export) is printed like an exported one; the
-    ae-forgotten-export warning ts_report asks api-extractor to keep in the
-    report names it, so it is not a name. A class extending one also lists
-    that base's members, which is how a caller sees them."""
-    forgotten = set(re.findall(r'\(ae-forgotten-export\) The symbol "([^"]+)"', text))
-    body = text
-    if "```ts" in text:
-        body = text.split("```ts", 1)[1].rsplit("```", 1)[0]
-    out: dict[str, str] = {}
+EXPORTED_ONLY = "<!-- parity-surface: the same report, without forgotten exports -->"
+
+
+def read_report(text: str) -> tuple[dict[str, str], dict[str, dict[str, str]], dict[str, str]]:
+    """One api-extractor report: its top-level declarations (name to kind),
+    each one's public members, and each class's base."""
+    body = text.split("```ts", 1)[1].rsplit("```", 1)[0] if "```ts" in text else text
+    decls: dict[str, str] = {}
     members: dict[str, dict[str, str]] = {}
-    exported: dict[str, bool] = {}
     bases: dict[str, str] = {}
     depth, owner, owner_kind = 0, None, ""
     for raw in body.splitlines():
@@ -1214,10 +1208,8 @@ def parse_api_report(text: str) -> dict[str, str]:
             m = TS_DECL.match(s)
             if m:
                 kind, name, rest = m.group(2), m.group(3), m.group(4)
-                is_exported = bool(m.group(1)) and name not in forgotten
-                exported[name] = exported.get(name, False) or is_exported
-                if is_exported and (name not in out or out[name] == "type"):
-                    out[name] = kind
+                if name not in decls or decls[name] == "type":
+                    decls[name] = kind
                 base = re.search(r"\bextends\s+([\w$.]+)", rest)
                 if base and kind == "class":
                     bases[name] = base.group(1)
@@ -1232,34 +1224,49 @@ def parse_api_report(text: str) -> dict[str, str]:
                 mods.add(mm.group(1))
                 s = s[mm.end() :]
             if s.startswith("export "):
-                s = s[len("export ") :]
-                d = TS_DECL.match(s)
+                d = TS_DECL.match(s[len("export ") :])
                 if d:
                     members[owner][d.group(3)] = d.group(2)
             elif not mods & {"private", "protected"} and not s.startswith("constructor"):
                 mm = TS_MEMBER.match(s)
                 if mm:
-                    name = mm.group(1).strip("\"'")
                     if owner_kind in ("const", "enum"):
                         kind = "value"
                     elif mm.group(3) in ("(", "<") and not mods & {"get", "set"}:
                         kind = "method"
                     else:
                         kind = "property"
-                    members[owner].setdefault(name, kind)
+                    members[owner].setdefault(mm.group(1).strip("\"'"), kind)
         depth = max(0, depth + s.count("{") - s.count("}"))
         if depth == 0:
             owner = None
+    return decls, members, bases
+
+
+def parse_api_report(text: str) -> dict[str, str]:
+    """ts_report's two api-extractor reports: every declaration the entry point
+    exports, and the public members of each (a class's, an interface's, a
+    const object's, an enum's). The first report includes forgotten exports
+    (declarations an export refers to but the entry point does not export),
+    which api-extractor prints exactly like exported ones, so the export list
+    is read from the second, which leaves them out. A class extending a
+    forgotten one also lists that base's members, which is how a caller sees
+    them."""
+    full, _, exported_only = text.partition(EXPORTED_ONLY)
+    decls, members, bases = read_report(full)
+    names = set(read_report(exported_only)[0]) if exported_only else set(decls)
 
     def all_members(cls: str, seen: frozenset = frozenset()) -> dict[str, str]:
         found = dict(members.get(cls, {}))
         base = bases.get(cls)
-        if base and base not in seen and not exported.get(base, False):
+        if base and base not in seen and base not in names:
             for n, k in all_members(base, seen | {cls}).items():
                 found.setdefault(n, k)
         return found
 
-    for name in list(out):
+    out: dict[str, str] = {}
+    for name in sorted(names):
+        out[name] = decls.get(name, "unread")
         for mname, kind in all_members(name).items():
             out[f"{name}.{mname}"] = kind
     return out
@@ -1611,7 +1618,9 @@ def python_listing(ctx, search_path: Path, package: str) -> list[dict]:
 
 
 def ts_report(ctx, ts_dir: Path, *, fixture: bool) -> str:
-    """api-extractor's report. The fixture is declarations already; the real
+    """api-extractor's report, twice: with forgotten exports (for the members
+    an exported class inherits from one) and without (for the export list;
+    see parse_api_report). The fixture is declarations already; the real
     package is copied to scratch, installed from its own lockfile and built
     with its own TypeScript, as api-surface builds a base tree."""
     copy = ctx.scratch("ts-" + ("fixture" if fixture else "real"))
@@ -1619,14 +1628,14 @@ def ts_report(ctx, ts_dir: Path, *, fixture: bool) -> str:
         ts_dir, copy, dirs_exist_ok=True, ignore=shutil.ignore_patterns("node_modules", "dist", "api-extractor.*")
     )
     if fixture:
-        lines = AS.api_extractor_report(ctx, copy, copy / "index.d.ts", [], "parity-fixture", mark_forgotten=True)
+        entry, types, label = copy / "index.d.ts", [], "parity-fixture"
     else:
         AS.run(["pnpm", "install", "--frozen-lockfile", "--ignore-scripts"], cwd=copy)
         AS.ts_build(ctx, copy, copy)
-        lines = AS.api_extractor_report(
-            ctx, copy, copy / "dist" / "index.d.ts", ["node"], "parity", mark_forgotten=True
-        )
-    return "\n".join(lines) + "\n"
+        entry, types, label = copy / "dist" / "index.d.ts", ["node"], "parity"
+    full = AS.api_extractor_report(ctx, copy, entry, types, label)
+    exported = AS.api_extractor_report(ctx, copy, entry, types, f"{label}-exported", include_forgotten=False)
+    return "\n".join(full + ["", EXPORTED_ONLY, ""] + exported) + "\n"
 
 
 def rust_listing(ctx, manifest: Path) -> str:

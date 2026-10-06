@@ -337,7 +337,7 @@ _MAX_SHIMS = 40
 
 
 def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str], label: str,
-                         mark_forgotten: bool = False) -> list[str]:
+                         include_forgotten: bool = True) -> list[str]:
     out_dir, tmp_dir = ctx.scratch("ts", label, "report"), ctx.scratch("ts", label, "temp")
     # Every generated file sits beside the project's package.json: api-extractor
     # finds that from the config file's own folder (measured: from anywhere
@@ -359,21 +359,17 @@ def api_extractor_report(ctx: Ctx, project: Path, entry: Path, types: list[str],
                 "files": [str(entry), str(shim_path)],
             }},
             "apiReport": {"enabled": True, "reportFileName": "api", "reportFolder": str(out_dir),
-                          "reportTempFolder": str(tmp_dir), "includeForgottenExports": True},
+                          "reportTempFolder": str(tmp_dir),
+                          # Off only for scripts/parity-surface.py, which needs
+                          # the entry point's own export list: a forgotten
+                          # export is printed exactly like an exported one.
+                          "includeForgottenExports": include_forgotten},
             "docModel": {"enabled": False},
             "dtsRollup": {"enabled": False},
             "tsdocMetadata": {"enabled": False},
             "messages": {
                 "compilerMessageReporting": {"default": {"logLevel": "warning"}},
-                "extractorMessageReporting": {
-                    "default": {"logLevel": "none", "addToApiReportFile": False},
-                    # scripts/parity-surface.py only: a forgotten export is
-                    # printed like an exported one, and this warning line is
-                    # what tells the two apart. Off here, so this job's
-                    # reports are unchanged.
-                    **({"ae-forgotten-export": {"logLevel": "none", "addToApiReportFile": True}}
-                       if mark_forgotten else {}),
-                },
+                "extractorMessageReporting": {"default": {"logLevel": "none", "addToApiReportFile": False}},
                 "tsdocMessageReporting": {"default": {"logLevel": "none"}},
             },
         }
